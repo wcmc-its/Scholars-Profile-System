@@ -1,12 +1,14 @@
 /**
- * POST /api/edit/coi-gap/[id]/restore — the scholar UNDOES a "Not relevant"
- * dismissal on the self-only "From your publications" panel, bringing the
- * suggestion back to their advisory view (`SELF_EDIT_COI_GAP_HINT`, dormant).
+ * POST /api/edit/coi-gap/[id]/restore — the scholar UNDOES recorded feedback on
+ * the self-only "From your publications" panel, bringing the suggestion back to
+ * their advisory view (`SELF_EDIT_COI_GAP_HINT`, dormant). It reverses BOTH
+ * terminal feedback states — a "Not relevant" (`dismissed`) and an "I intend to
+ * update" (`acknowledged`) — back to `new` and CLEARS the recorded reason.
  *
- * This is the exact inverse of the dismiss route and shares its posture: a
- * SELF-ONLY, suggestion-side toggle of the scholar's OWN review status
- * (`status` back to 'new'), never a verdict and never a compliance event. A B03
- * audit row records the scholar's own action, self-scoped like the dismiss.
+ * This is the inverse of the feedback route and shares its posture: a SELF-ONLY,
+ * suggestion-side toggle of the scholar's OWN review status (`status` back to
+ * 'new', `feedbackReason` cleared), never a verdict and never a compliance
+ * event. A B03 audit row records the scholar's own action, self-scoped.
  *
  * Authorization, identical to dismiss (operator decision, #836 follow-on):
  * genuine self OR a genuine (non-impersonating) superuser. A superuser
@@ -39,7 +41,7 @@ export async function POST(
 
   const candidate = await db.read.coiGapCandidate.findUnique({
     where: { id },
-    select: { id: true, cwid: true, status: true },
+    select: { id: true, cwid: true, status: true, feedbackReason: true },
   });
   if (!candidate) return editError(404, "not_found");
 
@@ -60,19 +62,21 @@ export async function POST(
   // --- dormant unless enabled: 503 after authz, before any write. ---
   if (!isCoiGapHintEnabled()) return editError(503, "coi_gap_disabled");
 
-  // --- only a dismissed candidate can be restored; anything else is already
+  // --- only an ACTED candidate can be undone — a "Not relevant" (dismissed) OR
+  //     an "I intend to update" (acknowledged) feedback. Anything else is already
   //     active, so return ok idempotently without a write. ---
-  if (candidate.status !== "dismissed") {
+  if (candidate.status !== "dismissed" && candidate.status !== "acknowledged") {
     return editOk({ status: candidate.status, alreadyActive: true });
   }
 
-  // --- write: status back to 'new' + B03 audit row, one tx ---
+  // --- write: status back to 'new', CLEAR the recorded feedback reason, + B03
+  //     audit row, one tx. ---
   const now = new Date();
   try {
     await db.write.$transaction(async (tx) => {
       await tx.coiGapCandidate.update({
         where: { id: candidate.id },
-        data: { status: "new", reviewedAt: now },
+        data: { status: "new", feedbackReason: null, reviewedAt: now },
       });
       await appendAuditRow(tx, {
         actorCwid: realCwid,
@@ -80,9 +84,9 @@ export async function POST(
         targetEntityType: "coi_gap_candidate",
         targetEntityId: candidate.id,
         action: "coi_gap_restore",
-        fieldsChanged: ["status"],
-        beforeValues: { status: candidate.status },
-        afterValues: { status: "new" },
+        fieldsChanged: ["status", "feedbackReason"],
+        beforeValues: { status: candidate.status, feedbackReason: candidate.feedbackReason },
+        afterValues: { status: "new", feedbackReason: null },
         ts: now,
         requestId,
       });

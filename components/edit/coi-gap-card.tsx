@@ -53,6 +53,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { EditContextCoiGapCandidate } from "@/lib/api/edit-context";
+import { FEEDBACK_REASONS, type FeedbackReason } from "@/lib/coi-gap/feedback";
 
 export type CoiGapCardProps = {
   cwid: string;
@@ -66,6 +67,26 @@ export type CoiGapCardProps = {
 };
 
 const PUBMED_URL = (pmid: string) => `https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(pmid)}/`;
+
+/**
+ * The scholar's three responses (operator decision — verbatim copy). Order
+ * matches `FEEDBACK_REASONS`. Presented as EQUAL, neutral choices (no option
+ * emphasized) so the response isn't nudged — `historical` vs `invalid` is an
+ * honest precision signal only if the scholar isn't steered. None of the
+ * forbidden accusatory words appear.
+ */
+const CHOICE_LABEL: Record<FeedbackReason, string> = {
+  will_disclose: "I intend to update my COI statement",
+  historical: "Historically true but not currently valid",
+  invalid: "Not a valid suggestion",
+};
+/** The shorter recorded form shown once a response is filed (and in the superuser
+ *  nag), phrased to read in either voice. */
+const ACTED_LABEL: Record<FeedbackReason, string> = {
+  will_disclose: "Will update COI statement",
+  historical: "Historically true, not currently valid",
+  invalid: "Not a valid suggestion",
+};
 
 /**
  * The three sort modes (operator decision — locked). Default = "newest +
@@ -113,18 +134,22 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
   const su = mode === "superuser";
   // The back-link returns to the COI panel on the actor's own surface.
   const backHref = su ? `/edit/scholar/${cwid}?attr=coi` : "/edit?attr=coi";
-  // The "nag" (operator decision): a superuser confirms before any dismiss /
-  // restore, since these are the scholar's private suggestions. Null when closed.
-  const [confirm, setConfirm] = React.useState<{ key: string; action: "dismiss" | "restore" } | null>(
-    null,
-  );
+  // The "nag" (operator decision): a superuser confirms before recording any
+  // response (or undoing one), since these are the scholar's private suggestions.
+  // `target` is the chosen reason, or null for an undo. Null when closed.
+  const [confirm, setConfirm] = React.useState<{
+    key: string;
+    target: FeedbackReason | null;
+  } | null>(null);
   const [sortMode, setSortMode] = React.useState<SortMode>("newest-confidence");
-  // All rows always render; a "Not relevant" row flips IN PLACE to a "marked not
-  // relevant — Undo" line. State is keyed by the relationship GROUP key (the
-  // normalized entity), not a per-paper id, since a row now spans many papers.
-  // The DB is the source of truth on reload — a committed dismissal drops those
-  // sources, and an entity whose every source is dismissed is gone next load.
-  const [dismissed, setDismissed] = React.useState<Set<string>>(new Set());
+  // All rows always render; once the scholar records a response the row flips IN
+  // PLACE to a "<reason> — Undo" line. State is keyed by the relationship GROUP
+  // key (the normalized entity), not a per-paper id, since a row spans many
+  // papers; the value is the chosen reason. The DB is the source of truth on
+  // reload — a recorded response drops those sources from the panel (it surfaces
+  // `status='new'` only), and an entity whose every source is acted is gone next
+  // load.
+  const [acted, setActed] = React.useState<Map<string, FeedbackReason>>(new Map());
   const [pending, setPending] = React.useState<Set<string>>(new Set());
   const [errors, setErrors] = React.useState<Map<string, string>>(new Map());
 
@@ -136,50 +161,52 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
       return next;
     });
   }
-  function setDismissedFlag(key: string, on: boolean) {
-    setDismissed((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(key);
-      else next.delete(key);
+  function setActedReason(key: string, reason: FeedbackReason | null) {
+    setActed((prev) => {
+      const next = new Map(prev);
+      if (reason === null) next.delete(key);
+      else next.set(key, reason);
       return next;
     });
   }
 
-  // `dismiss` and its inverse `restore` (Undo) act on the WHOLE relationship:
-  // flip the local flag, then POST to the per-id route for EVERY source. Both
-  // routes are idempotent + genuine-self-or-superuser-guarded server-side, so a
-  // retry after a partial failure converges. On any failure we roll the row back
-  // to active and surface a retry; the rows we did flip will reconcile on reload.
-  function mutate(key: string, action: "dismiss" | "restore") {
+  // Recording a response — and its inverse Undo (`target === null`) — acts on the
+  // WHOLE relationship: flip the local state, then POST to the per-id route for
+  // EVERY source (a reason → /feedback, an undo → /restore). Both routes are
+  // idempotent + genuine-self-or-superuser-guarded server-side, so a retry after a
+  // partial failure converges. On any failure we roll the row back to its previous
+  // state and surface a retry; the rows we did flip reconcile on reload.
+  function mutate(key: string, target: FeedbackReason | null) {
     const group = candidates.find((c) => c.key === key);
     if (!group) return;
-    const dismiss = action === "dismiss";
+    const previous = acted.get(key) ?? null;
     setError(key, null);
-    setPending((prev) => new Set(prev).add(key));
-    setDismissedFlag(key, dismiss); // optimistic
+    setPending((p) => new Set(p).add(key));
+    setActedReason(key, target); // optimistic (null = undo)
     void (async () => {
       try {
         const results = await Promise.all(
           group.sources.map(async (s) => {
-            const res = await fetch(`/api/edit/coi-gap/${encodeURIComponent(s.id)}/${action}`, {
+            const base = `/api/edit/coi-gap/${encodeURIComponent(s.id)}`;
+            const res = await fetch(target === null ? `${base}/restore` : `${base}/feedback`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: "{}",
+              body: target === null ? "{}" : JSON.stringify({ reason: target }),
             });
             const data = (await res.json().catch(() => ({}))) as { ok?: boolean };
             return res.ok && data.ok === true;
           }),
         );
         if (!results.every(Boolean)) {
-          setDismissedFlag(key, !dismiss); // roll back
+          setActedReason(key, previous); // roll back to the prior state
           setError(key, "We couldn't update this just now. Please try again.");
         }
       } catch {
-        setDismissedFlag(key, !dismiss);
+        setActedReason(key, previous);
         setError(key, "We couldn't update this just now. Please try again.");
       } finally {
-        setPending((prev) => {
-          const next = new Set(prev);
+        setPending((p) => {
+          const next = new Set(p);
           next.delete(key);
           return next;
         });
@@ -187,15 +214,15 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
     })();
   }
 
-  // A superuser routes every action through the confirm "nag" first; a scholar
-  // acts directly on their own suggestions.
-  function requestMutate(key: string, action: "dismiss" | "restore") {
-    if (su) setConfirm({ key, action });
-    else mutate(key, action);
+  // A superuser routes every response through the confirm "nag" first; a scholar
+  // records directly on their own suggestions.
+  function requestMutate(key: string, target: FeedbackReason | null) {
+    if (su) setConfirm({ key, target });
+    else mutate(key, target);
   }
 
   const ordered = sortCandidates(candidates, sortMode);
-  const active = ordered.filter((c) => !dismissed.has(c.key));
+  const active = ordered.filter((c) => !acted.has(c.key));
   const reviewing = active.filter((c) => c.tier === "High").length;
   const covered = active.filter((c) => c.tier === "Medium").length;
   const summaryParts: string[] = [];
@@ -260,7 +287,7 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
 
         <ul data-slot="coi-gap-panel-list">
           {ordered.map((c) => {
-            const isDismissed = dismissed.has(c.key);
+            const actedReason = acted.get(c.key) ?? null;
             const isPending = pending.has(c.key);
             const error = errors.get(c.key) ?? null;
             return (
@@ -269,18 +296,18 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
                 className="border-apollo-border border-t py-4 first:border-t-0"
                 data-testid={`coi-gap-row-${c.key}`}
               >
-                {isDismissed ? (
+                {actedReason !== null ? (
                   <div className="flex items-center justify-between gap-3 opacity-80">
                     <span className="text-muted-foreground text-sm">
-                      <span className="text-foreground font-semibold">{c.entity}</span> — marked not
-                      relevant
+                      <span className="text-foreground font-semibold">{c.entity}</span> —{" "}
+                      <span data-testid={`coi-gap-acted-${c.key}`}>{ACTED_LABEL[actedReason]}</span>
                     </span>
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       disabled={isPending}
-                      onClick={() => requestMutate(c.key, "restore")}
+                      onClick={() => requestMutate(c.key, null)}
                       data-testid={`coi-gap-undo-${c.key}`}
                     >
                       Undo
@@ -327,6 +354,28 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
                           </li>
                         ))}
                       </ul>
+                      {/* The scholar's 3-way response — equal, neutral choices (no
+                          default emphasis) so the precision split stays honest.
+                          "Review in Gateway" stays in the rail: it routes to WRG,
+                          the system of record, never an in-app COI edit. */}
+                      <div
+                        className="mt-3 flex flex-wrap gap-2"
+                        data-testid={`coi-gap-choices-${c.key}`}
+                      >
+                        {FEEDBACK_REASONS.map((r) => (
+                          <Button
+                            key={r}
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={isPending}
+                            onClick={() => requestMutate(c.key, r)}
+                            data-testid={`coi-gap-choice-${r}-${c.key}`}
+                          >
+                            {CHOICE_LABEL[r]}
+                          </Button>
+                        ))}
+                      </div>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-2.5">
                       <RequestAChangeDialog
@@ -345,15 +394,6 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
                           </button>
                         )}
                       />
-                      <button
-                        type="button"
-                        disabled={isPending}
-                        onClick={() => requestMutate(c.key, "dismiss")}
-                        className="text-muted-foreground hover:text-foreground text-[0.8rem] disabled:opacity-50"
-                        data-testid={`coi-gap-dismiss-${c.key}`}
-                      >
-                        Not relevant
-                      </button>
                     </div>
                   </div>
                 )}
@@ -382,9 +422,9 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
           // to disclose / missing / violation / gap) must NOT appear here either.
           `These are ${confirmName}’s private suggestions worth reviewing, surfaced from their own ` +
           `publications — visible to administrators and ${confirmName}, never a compliance judgement. ` +
-          (confirm?.action === "restore"
-            ? `Restoring brings this suggestion back to ${confirmName}’s review. `
-            : `Marking it not relevant hides this suggestion from ${confirmName}’s review. `) +
+          (confirm && confirm.target !== null
+            ? `Recording “${ACTED_LABEL[confirm.target]}” files ${confirmName}’s response and removes it from their review. `
+            : `Undoing brings this suggestion back to ${confirmName}’s review. `) +
           `Continue only if you have a legitimate reason to act on their behalf.`
         }
         reasonMode="none"
@@ -393,7 +433,7 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
         onConfirm={() => {
           const c = confirm;
           setConfirm(null);
-          if (c) mutate(c.key, c.action);
+          if (c) mutate(c.key, c.target);
         }}
       />
     </>

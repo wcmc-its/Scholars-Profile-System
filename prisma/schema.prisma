@@ -1231,8 +1231,15 @@ model CoiGapCandidate {
   status           String    @default("new") @db.VarChar(16)
   firstSeenAt      DateTime  @default(now()) @map("first_seen_at")
   lastSeenAt       DateTime  @default(now()) @map("last_seen_at")
-  /// When the scholar acted (dismissed/acknowledged). Null until reviewed.
+  /// When the scholar acted (feedback recorded). Null until reviewed.
   reviewedAt       DateTime? @map("reviewed_at")
+  /// Research-grade reason captured with a terminal feedback action (PURE SIGNAL —
+  /// records intent + stops the nag, no workflow/hand-off). will_disclose → status
+  /// `acknowledged`; historical | invalid → status `dismissed`. Null for system
+  /// states (new/resolved) and until the scholar responds. Splitting historical
+  /// vs invalid is what makes the data usable for a suggestion-quality paper —
+  /// see `docs/coi-gap-feedback-spec.md` and `lib/coi-gap/feedback.ts`.
+  feedbackReason   String?   @map("feedback_reason") @db.VarChar(24)
 
   @@unique([cwid, pmid, normalizedEntity], name: "cwid_pmid_entity")
   @@index([cwid, status])
