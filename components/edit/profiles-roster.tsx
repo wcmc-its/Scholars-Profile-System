@@ -54,6 +54,12 @@ export type ProfilesRosterProps = {
   canImpersonate: boolean;
   /** The viewer's own cwid — the "View as" button is hidden on their own row. */
   viewerCwid: string;
+  /** Forwarded to the sub-nav: show the superuser-only surfaces (URL requests /
+   *  Slug registry / Administrators). `false` for a comms_steward viewer. */
+  superuserSurfaces?: boolean;
+  /** Forwarded to the sub-nav: show the "Profiles" tab independently of
+   *  `superuserSurfaces` (a comms_steward is a global profile editor). */
+  profilesTab?: boolean;
 };
 
 const BASE = "/edit/scholars";
@@ -91,6 +97,8 @@ export function ProfilesRoster({
   selfEditHref,
   canImpersonate,
   viewerCwid,
+  superuserSurfaces = true,
+  profilesTab = false,
 }: ProfilesRosterProps) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, total);
@@ -116,6 +124,8 @@ export function ProfilesRoster({
         administratorsTab={administratorsTab}
         methodsTab={methodsTab}
         selfEditHref={selfEditHref}
+        superuserSurfaces={superuserSurfaces}
+        profilesTab={profilesTab}
       />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">

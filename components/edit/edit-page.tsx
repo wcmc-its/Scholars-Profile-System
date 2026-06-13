@@ -119,6 +119,7 @@ const DEFAULT_ATTR: Record<EditMode, AttrKey> = {
   superuser: "home",
   proxy: "home",
   "unit-admin": "home",
+  comms_steward: "home",
 };
 
 /** The actor surfaces. `proxy` (#779) is a scholar-assigned designee, and
@@ -126,14 +127,26 @@ const DEFAULT_ATTR: Record<EditMode, AttrKey> = {
  *  belongs to: both reuse the SELF editable surface (overview + publication
  *  hiding) on the scholar's route, minus the self-only Profile URL request and
  *  the "From your publications" advisory, and neither can manage the proxy list.
- *  Visual/interaction polish is a UI-SPEC deliverable. */
-type EditMode = "self" | "superuser" | "proxy" | "unit-admin";
+ *  `comms_steward` (comms-steward-profile-editing-spec.md §3b) edits any scholar
+ *  at SUPERUSER parity MINUS slug + proxy delegation. Visual/interaction polish
+ *  is a UI-SPEC deliverable. */
+type EditMode = "self" | "superuser" | "proxy" | "unit-admin" | "comms_steward";
+
+/** Whether a mode renders with SUPERUSER editability (overview editable,
+ *  publications hideable, generate enabled): the superuser surface itself, and
+ *  the `comms_steward` profile editor, which is superuser parity minus slug +
+ *  proxy-editors. The child cards collapse to this (`childMode` below). */
+function isSuperuserLike(mode: EditMode): boolean {
+  return mode === "superuser" || mode === "comms_steward";
+}
 
 /** The attribute set visible for a mode, before flag/candidate filtering.
  *  `proxy` and `unit-admin` mirror `self` minus `profile-url` (slug is
  *  self/superuser-only — neither can request a slug for the scholar), `coi-gap`
  *  (self-only advisory; the loader returns no candidates for them anyway), and
- *  `proxy-editors` (only the scholar/superuser manages designees — CD-2). */
+ *  `proxy-editors` (only the scholar/superuser manages designees — CD-2).
+ *  `comms_steward` mirrors `superuser` minus `profile-url` (slug is out of scope,
+ *  §3b) and `proxy-editors` (delegation = "adding/removing users", out of scope). */
 function attrsForMode(mode: EditMode): AttrDef[] {
   if (mode === "proxy" || mode === "unit-admin") {
     return ATTRIBUTES.filter(
@@ -142,6 +155,14 @@ function attrsForMode(mode: EditMode): AttrDef[] {
         a.key !== "profile-url" &&
         a.key !== "coi-gap" &&
         a.key !== "proxy-editors", // a proxy / unit admin can never manage the proxy list (CD-2)
+    );
+  }
+  if (mode === "comms_steward") {
+    return ATTRIBUTES.filter(
+      (a) =>
+        a.modes.includes("superuser") &&
+        a.key !== "profile-url" && // slug — out of the steward's scope (§3b)
+        a.key !== "proxy-editors", // delegation — out of the steward's scope (§3b)
     );
   }
   return ATTRIBUTES.filter((a) => a.modes.includes(mode));
@@ -322,14 +343,14 @@ export function EditPage({
   // revisit (Reviewed). A Medium-only group does NOT surface the item — it lives
   // inside the High panel's lower-confidence expander, never as its own entry.
   const hasCoiGap =
-    (mode === "self" || mode === "superuser") &&
+    (mode === "self" || isSuperuserLike(mode)) &&
     (ctx.unmatchedPubmedCoi.length > 0 || ctx.unmatchedPubmedCoiReviewed.length > 0);
   // #836 — Highlights is present only when the loader populated `ctx.highlights`
   // (flag on + self or superuser). The loader (per surface) enforces who may load
   // it — self on `/edit`, self or superuser on `/edit/scholar/[cwid]`, never a
   // proxy / unit-admin — so a non-null value here already implies an allowed actor.
   const hasHighlights =
-    (mode === "self" || mode === "superuser") && ctx.highlights !== null;
+    (mode === "self" || isSuperuserLike(mode)) && ctx.highlights !== null;
   const visible = attrsForMode(mode)
     .filter((a) => a.key !== "coi-gap" || hasCoiGap)
     .filter((a) => a.key !== "highlights" || hasHighlights);
@@ -407,7 +428,11 @@ export function EditPage({
 
   return (
     <EditShell
-      mode={mode}
+      // The shell chrome (breadcrumb back to Profiles + the "editing … as an
+      // administrator" banner) is the same a superuser sees — a comms_steward
+      // reaches this editor from the same roster and edits in an administrative
+      // capacity, so reuse it rather than add bespoke chrome.
+      mode={mode === "comms_steward" ? "superuser" : mode}
       scholarName={scholarName}
       railItems={railItems}
       activeAttr={active.key}
@@ -451,7 +476,7 @@ function renderPanel(
   // (overview editable, publications hide); the proxy-specific affordance gates
   // (no generate, no preview link, no slug request) are derived from the REAL
   // `mode` at each call site below, never from `childMode`.
-  const childMode: "self" | "superuser" = mode === "superuser" ? "superuser" : "self";
+  const childMode: "self" | "superuser" = isSuperuserLike(mode) ? "superuser" : "self";
   const detailBase = mode === "self" ? "/edit" : `/edit/scholar/${cwid}`;
   switch (key) {
     case "home": {
@@ -546,7 +571,7 @@ function renderPanel(
           // surfaces agree). NOT widened to proxy / unit-admin — that's a
           // separate governance call. Still gated behind the feature flag.
           generateEnabled={
-            (mode === "self" || mode === "superuser") && isOverviewGenerateEnabled()
+            (mode === "self" || isSuperuserLike(mode)) && isOverviewGenerateEnabled()
           }
         />
       );

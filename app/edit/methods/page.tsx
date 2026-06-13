@@ -104,6 +104,10 @@ export default async function MethodFamiliesPage() {
         methodsTab={isMethodsTabVisible(session) ? 0 : null}
         selfEditHref={selfEditHref}
         superuserSurfaces={superuserSurfaces}
+        // A comms_steward is a global profile editor (comms-steward-profile-
+        // editing-spec.md §4d), so surface the Profiles tab here even though the
+        // other superuser surfaces stay hidden for them.
+        profilesTab={session.isCommsSteward || session.isSuperuser}
       />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
