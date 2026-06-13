@@ -160,10 +160,14 @@ export async function GET(): Promise<NextResponse> {
       // role-aware-navigation-entry-points-spec.md). Surface it anyway so the
       // amber banner AND its "Return to my view" exit still render — otherwise a
       // superuser viewing as a steward would be stuck with no visible way out.
-      // Name falls back to the CWID; a steward administers no unit.
+      // Name comes from the ED-name bridge (`steward_directory`,
+      // comms-steward-profile-editing-spec.md §5) when present, else the CWID.
+      const stewardName = await db.read.stewardDirectory
+        .findUnique({ where: { cwid: targetCwid }, select: { displayName: true } })
+        .catch(() => null);
       impersonating = {
         targetCwid,
-        targetName: targetCwid,
+        targetName: stewardName?.displayName ?? targetCwid,
         role: "comms_steward",
         unitKind: null,
         unit: null,
