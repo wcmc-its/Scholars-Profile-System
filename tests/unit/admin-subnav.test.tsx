@@ -122,4 +122,48 @@ describe("AdminSubnav", () => {
     expect(screen.queryByTestId("admin-tab-slug-requests")).toBeNull();
     expect(screen.queryByTestId("admin-tab-administrators")).toBeNull();
   });
+
+  // role-aware-navigation-entry-points-spec.md — the strip now also renders on the
+  // self-edit surface (active="self"), where "My Profile" is the active tab.
+  it('active="self" renders "My Profile" as the active tab (not a back-link)', () => {
+    render(<AdminSubnav active="self" pendingSlugRequests={null} methodsTab={0} />);
+    const self = screen.getByTestId("admin-subnav-self-edit");
+    expect(self.tagName.toLowerCase()).toBe("span"); // active = span, not a link
+    expect(self.getAttribute("aria-current")).toBe("page");
+    expect(self.getAttribute("href")).toBeNull();
+    expect(self.textContent).toBe("My Profile");
+  });
+
+  it('active="self" for a superuser shows the full tab strip + My Profile active', () => {
+    render(
+      <AdminSubnav active="self" pendingSlugRequests={0} administratorsTab={0} methodsTab={0} />,
+    );
+    // All admin tabs are present and are links (none active — we're on self).
+    for (const id of ["profiles", "slugs", "administrators", "methods"]) {
+      const tab = screen.getByTestId(`admin-tab-${id}`);
+      expect(tab.getAttribute("aria-current")).toBeNull();
+    }
+    expect(screen.getByTestId("admin-subnav-self-edit").getAttribute("aria-current")).toBe("page");
+  });
+
+  it('active="self" for a steward-only viewer shows only Method Families + My Profile', () => {
+    render(
+      <AdminSubnav
+        active="self"
+        pendingSlugRequests={null}
+        methodsTab={0}
+        superuserSurfaces={false}
+      />,
+    );
+    expect(screen.getByTestId("admin-tab-methods")).toBeTruthy();
+    expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
+    expect(screen.getByTestId("admin-subnav-self-edit").getAttribute("aria-current")).toBe("page");
+  });
+
+  it("renders the My-Profile back-link (a real link) when selfEditHref is set and not on self", () => {
+    render(<AdminSubnav active="methods" pendingSlugRequests={null} methodsTab={0} selfEditHref="/edit" />);
+    const self = screen.getByTestId("admin-subnav-self-edit");
+    expect(self.tagName.toLowerCase()).toBe("a");
+    expect(self.getAttribute("href")).toBe("/edit");
+  });
 });

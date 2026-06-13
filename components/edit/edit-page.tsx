@@ -250,6 +250,11 @@ export type EditPageProps = {
   /** Self mode only: the viewer is a superuser, so the shell shows a link
    *  across to the Profiles roster. Forwarded to `EditShell`. */
   canBrowseProfiles?: boolean;
+  /** Self mode only: a pre-built console tab strip (the shared `AdminSubnav`)
+   *  for a superuser / comms_steward, rendered by `EditShell` in place of the
+   *  minimal self-edit sub-nav. Built by the `/edit` page (which holds the
+   *  session + role verdicts) and forwarded opaquely. */
+  consoleNav?: React.ReactNode;
   /** Self mode only: org units the viewer may also curate (#753), surfaced on
    *  the Home panel. Empty for most scholars. */
   manageableUnits?: ManageableUnit[];
@@ -302,6 +307,7 @@ export function EditPage({
   slugRequestEnabled = false,
   latestSlugRequest = null,
   canBrowseProfiles = false,
+  consoleNav,
   manageableUnits = [],
   proxyEditors = null,
   unitAdminEditors = null,
@@ -395,6 +401,7 @@ export function EditPage({
       previewHref={profilePath(ctx.scholar.slug)}
       account={mode === "self" ? { slug: ctx.scholar.slug, preferredName: scholarName } : undefined}
       canBrowseProfiles={canBrowseProfiles}
+      consoleNav={consoleNav}
       unitAdmin={unitAdminBanner ?? undefined}
     >
       {renderPanel(
