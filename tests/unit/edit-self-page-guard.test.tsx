@@ -117,6 +117,11 @@ function fakeCtx(cwid: string, roleCategory: string | null) {
     },
     publications: [],
     unmatchedPubmedCoi: [],
+    // #953/#954 split the COI-gap context into active-High / active-Medium /
+    // settled buckets; EditSelfPage's attr-gate reads `.length` on the Reviewed
+    // bucket (page.tsx), so the fake context must carry all three arrays.
+    unmatchedPubmedCoiLower: [],
+    unmatchedPubmedCoiReviewed: [],
     highlights: null,
   };
 }
