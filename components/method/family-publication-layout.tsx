@@ -53,12 +53,22 @@ export function FamilyPublicationLayout({
 // Supercategory page (type B) — family rail + ?family= right panel.
 // ---------------------------------------------------------------------------
 
+/** familyId → right-panel metadata: the label + canonical URL segment (for the
+ *  feed/scholars hrefs + the "View full method page" link), plus the #879
+ *  generated definition. `definition` is null whenever the definitions flag is
+ *  off — `getSupercategoryRollup` populates it under the same gate as `getFamily`. */
+type FamilyPanelMeta = {
+  familyLabel: string;
+  familySegment: string;
+  definition: string | null;
+  definitionSource: string | null;
+};
+
 export function SupercategoryFamilyLayout(props: {
   supercategorySlug: string;
   supercategoryLabel: string;
   families: FamilyRailItem[];
-  /** familyId → { label, familySegment } for building the feed/scholars hrefs. */
-  familyMeta: Record<string, { familyLabel: string; familySegment: string }>;
+  familyMeta: Record<string, FamilyPanelMeta>;
   /** Representative recent publications across all families — the default
    *  "All work" panel shown until a family is selected (§A2). */
   allWorkPubs: MethodPublicationHit[];
@@ -82,7 +92,7 @@ function SupercategoryFamilyLayoutInner({
   supercategorySlug: string;
   supercategoryLabel: string;
   families: FamilyRailItem[];
-  familyMeta: Record<string, { familyLabel: string; familySegment: string }>;
+  familyMeta: Record<string, FamilyPanelMeta>;
   allWorkPubs: MethodPublicationHit[];
 }) {
   const searchParams = useSearchParams();
@@ -115,6 +125,11 @@ function SupercategoryFamilyLayoutInner({
   const activeSegment =
     activeMeta?.familySegment ??
     (activeLabel && activeFamilyId ? familySegmentFor(activeLabel, activeFamilyId) : null);
+  // #879 — the generated capability gloss, mirroring the standalone family page.
+  // Null (nothing rendered) when the definitions flag is off or the rollup never
+  // populated it — the panel stays a clean preview rather than guessing copy.
+  const activeDefinition = activeMeta?.definition ?? null;
+  const activeDefinitionSource = activeMeta?.definitionSource ?? null;
 
   return (
     <div className="mt-16">
@@ -142,6 +157,22 @@ function SupercategoryFamilyLayoutInner({
             <>
               <header className="mb-4">
                 <h2 className="text-xl font-semibold leading-tight">{activeLabel}</h2>
+                {/* #879 — generated capability gloss, mirroring the standalone
+                    family page so the panel is self-explanatory rather than a
+                    bare list of scholars + papers. Em-dashes render verbatim
+                    (house style). */}
+                {activeDefinition && (
+                  <div className="mt-2 max-w-prose">
+                    <p className="text-sm leading-relaxed text-muted-foreground">
+                      {activeDefinition}
+                    </p>
+                    {activeDefinitionSource === "generated" && (
+                      <p className="mt-1 text-xs italic text-muted-foreground/80">
+                        AI-generated definition
+                      </p>
+                    )}
+                  </div>
+                )}
                 {activeSegment && (
                   // The supercategory panel and the standalone family page show the
                   // same family. The rail click is an in-page deep-link (`?family=`),

@@ -43,14 +43,23 @@ const families = [
     exemplarTools: [],
   },
 ];
-const familyMeta = {
+const DEFINITION = "Immortalized cell lines derived from tumors, used as in vitro cancer models.";
+type PanelMeta = {
+  familyLabel: string;
+  familySegment: string;
+  definition: string | null;
+  definitionSource: string | null;
+};
+const baseMeta: Record<string, PanelMeta> = {
   fam_0007: {
     familyLabel: "Cancer cell lines",
     familySegment: "cancer-cell-lines-fam_0007",
+    definition: DEFINITION,
+    definitionSource: "generated",
   },
 };
 
-function renderLayout() {
+function renderLayout(familyMeta: Record<string, PanelMeta> = baseMeta) {
   return render(
     <SupercategoryFamilyLayout
       supercategorySlug="animal-cell-models"
@@ -81,5 +90,33 @@ describe("SupercategoryFamilyLayout — canonical family-page signpost", () => {
     renderLayout();
     expect(screen.getByTestId("all-work")).toBeTruthy();
     expect(screen.queryByText(/View full .* method page/)).toBeNull();
+    // The definition belongs to the selected-family panel, not the all-work view.
+    expect(screen.queryByText(DEFINITION)).toBeNull();
+  });
+
+  it("renders the selected family's generated definition with the AI caption", () => {
+    mockGet.mockReturnValue("fam_0007");
+    renderLayout();
+    expect(screen.getByText(DEFINITION)).toBeTruthy();
+    expect(screen.getByText("AI-generated definition")).toBeTruthy();
+  });
+
+  it("shows the gloss but no AI caption when the source is not 'generated'", () => {
+    mockGet.mockReturnValue("fam_0007");
+    renderLayout({
+      fam_0007: { ...baseMeta.fam_0007, definitionSource: null },
+    });
+    expect(screen.getByText(DEFINITION)).toBeTruthy();
+    expect(screen.queryByText("AI-generated definition")).toBeNull();
+  });
+
+  it("renders no definition block when the family has no gloss (flag off / unpopulated)", () => {
+    mockGet.mockReturnValue("fam_0007");
+    renderLayout({
+      fam_0007: { ...baseMeta.fam_0007, definition: null, definitionSource: null },
+    });
+    // The "View full" signpost still renders; only the gloss is absent.
+    expect(screen.getByText(/View full Cancer cell lines method page/)).toBeTruthy();
+    expect(screen.queryByText(DEFINITION)).toBeNull();
   });
 });
