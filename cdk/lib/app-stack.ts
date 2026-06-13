@@ -1206,9 +1206,11 @@ export class AppStack extends Stack {
         //     payload omits it until this flips. Go-live: migrate + run
         //     etl:scholar-tool (backfill) -> flip staging-on here + cdk deploy
         //     Sps-App-staging to soak -> External Affairs sign-off -> prod on.
+        //     STAGING-ON (soak phase): the generated copy renders on staging for
+        //     review; PROD stays dark until External Affairs signs off.
         //     RENDER-ONLY: never re-fed into any LLM/embedding/retrieval. Wire in
         //     BOTH .env.local AND here per the flag-parity rule.
-        METHODS_LENS_FAMILY_DEFINITIONS: "off",
+        METHODS_LENS_FAMILY_DEFINITIONS: env === "staging" ? "on" : "off",
         // Scholar-profile facet-filter redesign (PR-2). A BIG visual change to
         // the Topics/Methods facets + a unified filter bar, fully gated. ON in
         // staging to soak the real-data behavior (method rows + cross-facet
