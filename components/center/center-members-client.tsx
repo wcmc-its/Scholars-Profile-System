@@ -255,6 +255,9 @@ function GroupedRoster({
               selected={selMethods}
               onToggle={makeToggle(selMethods, setSelMethods)}
               collapseAfter={8}
+              searchable
+              searchPlaceholder="Search methods…"
+              noMatchLabel="No methods match"
             />
           )}
           <RosterFacet
