@@ -70,9 +70,22 @@ export default async function SupercategoryPage({
     pubCount: f.pubCount ?? 0,
     exemplarTools: f.exemplarTools,
   }));
-  const familyMeta: Record<string, { familyLabel: string; familySegment: string }> = {};
+  const familyMeta: Record<
+    string,
+    {
+      familyLabel: string;
+      familySegment: string;
+      definition: string | null;
+      definitionSource: string | null;
+    }
+  > = {};
   for (const f of families) {
-    familyMeta[f.familyId] = { familyLabel: f.familyLabel, familySegment: f.familySlug };
+    familyMeta[f.familyId] = {
+      familyLabel: f.familyLabel,
+      familySegment: f.familySlug,
+      definition: f.definition,
+      definitionSource: f.definitionSource,
+    };
   }
 
   const jsonLd = buildDefinedTermJsonLd({
