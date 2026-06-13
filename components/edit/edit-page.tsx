@@ -525,9 +525,15 @@ function renderPanel(
           cwid={cwid}
           initialHtml={ctx.scholar.overview}
           previewHref={profilePath(ctx.scholar.slug)}
-          // The generator stays an owner-self beta (#742) — a superuser editing
-          // another scholar's bio gets the plain manual editor, no Generate tab.
-          generateEnabled={mode === "self" && isOverviewGenerateEnabled()}
+          // The generator (#742) is offered to the same actors who may WRITE the
+          // bio here: the scholar (self) AND a superuser editing on their behalf
+          // (#844 made the superuser Overview editable, and the generate route +
+          // `authorizeOverviewWrite` already authorize a superuser, so the two
+          // surfaces agree). NOT widened to proxy / unit-admin — that's a
+          // separate governance call. Still gated behind the feature flag.
+          generateEnabled={
+            (mode === "self" || mode === "superuser") && isOverviewGenerateEnabled()
+          }
         />
       );
     case "highlights":
