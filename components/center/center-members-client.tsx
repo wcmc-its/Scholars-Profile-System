@@ -64,7 +64,7 @@ const NO_DEPT = "—";
 
 /**
  * Programmed center: a left facet sidebar (Program / Membership type /
- * Organizational unit) over program-grouped member sections, plus the existing
+ * Methods & tools / Organizational unit) over program-grouped member sections, plus the existing
  * Appointment (role) chip row. All active members are on one page (#552 §6.2),
  * so faceting is client-side. Facets multi-select (OR within a facet, AND
  * across facets); counts reflect the other active facets. Empty program
@@ -216,7 +216,7 @@ function GroupedRoster({
   return (
     <div className="mt-6 flex flex-col gap-8 md:flex-row">
       <aside className="md:w-[200px] md:shrink-0">
-        <div className="md:sticky md:top-[76px]">
+        <div className="md:sticky md:top-[76px] md:max-h-[calc(100vh-76px)] md:overflow-y-auto">
           <div className="mb-3 flex items-center justify-between">
             <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               Filter
@@ -245,15 +245,9 @@ function GroupedRoster({
             selected={selTypes}
             onToggle={makeToggle(selTypes, setSelTypes)}
           />
-          <RosterFacet
-            title="Organizational unit"
-            options={deptOptions}
-            selected={selDepts}
-            onToggle={makeToggle(selDepts, setSelDepts)}
-            collapseAfter={8}
-          />
-          {/* #962 — vanishes when no member carries a public family (flag off or
-              no data), since `methodOptions` is then empty. */}
+          {/* #962 — Methods & tools ranks above Organizational unit. Vanishes when
+              no member carries a public family (flag off or no data), since
+              `methodOptions` is then empty. */}
           {methodOptions.length > 0 && (
             <RosterFacet
               title="Methods & tools"
@@ -263,6 +257,13 @@ function GroupedRoster({
               collapseAfter={8}
             />
           )}
+          <RosterFacet
+            title="Organizational unit"
+            options={deptOptions}
+            selected={selDepts}
+            onToggle={makeToggle(selDepts, setSelDepts)}
+            collapseAfter={8}
+          />
         </div>
       </aside>
 
