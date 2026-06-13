@@ -585,6 +585,55 @@ describe("EditPage router — superuser mode", () => {
     expect(document.querySelector('[data-slot="overview-readonly"]')).toBeNull();
   });
 
+  // The Overview Generator (#742) is offered to a superuser editing another
+  // scholar too — `authorizeOverviewWrite` + the generate route already authorize
+  // a superuser, so the UI guard agrees (self OR superuser, gated by the flag).
+  it("?attr=overview exposes the Generate affordance for a superuser when the flag is on", () => {
+    // The flag is read at render time via isOverviewGenerateEnabled() (process.env
+    // SELF_EDIT_OVERVIEW_GENERATE). Turn it on for this case and restore after.
+    const prev = process.env.SELF_EDIT_OVERVIEW_GENERATE;
+    process.env.SELF_EDIT_OVERVIEW_GENERATE = "on";
+    // generateEnabled mounts history + source-options fetches — keep them inert.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, generations: [], provenance: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    // The Draft-with-AI block opens (and the Generate button mounts) when the bio
+    // is empty — the real use case here: a superuser drafting a bio for an
+    // uncovered scholar. With a non-empty overview the block starts collapsed.
+    const noBio: EditContext = {
+      ...superuserCtx,
+      scholar: { ...superuserCtx.scholar, overview: "" },
+    };
+    try {
+      render(<EditPage ctx={noBio} mode="superuser" attr="overview" />);
+      // generateEnabled=true ⇒ the Draft-with-AI block + Generate button render.
+      expect(screen.getByTestId("overview-generate")).toBeTruthy();
+      expect(screen.getByTestId("overview-draft-block")).toBeTruthy();
+    } finally {
+      fetchSpy.mockRestore();
+      if (prev === undefined) delete process.env.SELF_EDIT_OVERVIEW_GENERATE;
+      else process.env.SELF_EDIT_OVERVIEW_GENERATE = prev;
+    }
+  });
+
+  // Flag gating still holds: with the flag off, the superuser surface shows the
+  // plain manual editor (no Generate), exactly as before this widening.
+  it("?attr=overview hides the Generate affordance for a superuser when the flag is off", () => {
+    const prev = process.env.SELF_EDIT_OVERVIEW_GENERATE;
+    delete process.env.SELF_EDIT_OVERVIEW_GENERATE;
+    try {
+      render(<EditPage ctx={superuserCtx} mode="superuser" attr="overview" />);
+      expect(screen.getByTestId("mock-editor")).toBeTruthy();
+      expect(screen.queryByTestId("overview-generate")).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.SELF_EDIT_OVERVIEW_GENERATE;
+      else process.env.SELF_EDIT_OVERVIEW_GENERATE = prev;
+    }
+  });
+
   it("?attr=profile-url renders the SlugCard pre-filled with the override", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" attr="profile-url" />);
     expect((screen.getByTestId("slug-card-input") as HTMLInputElement).value).toBe("custom-handle");

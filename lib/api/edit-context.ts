@@ -457,31 +457,164 @@ export async function loadEditContext(
 
   const effectiveOverview = await getEffectiveOverview(cwid, scholar.overview, client);
 
-  // Phase 7 — the slug-card baseline. `null` = no override; superuser slug card
-  // shows the "no override" state. The self surface does not surface this field
-  // (slug edits are superuser-only, `self-edit-spec.md` § Authorization).
-  const slugOverrideRow = await client.fieldOverride.findUnique({
-    where: {
-      entityType_entityId_fieldName: {
+  // #836 — only the manual-Highlights editor needs the ranking fields on the
+  // authorship read (computed up here so the batched read below can widen its
+  // `publication` select on the gated path; the common /edit load stays lean).
+  const includeHighlights = opts?.includeHighlights === true;
+
+  // --- Finding #4: batch the cwid-only, mutually-independent reads ---
+  // Everything below depends ONLY on `cwid` / `now` / `includeHighlights` (all
+  // already in scope) and NOT on any sibling's result, so they run concurrently
+  // in one `Promise.all` instead of strictly sequentially. The reads that DO
+  // consume a sibling stay staged AFTER this batch and remain sequential:
+  //   - `effectiveOverview` already ran above (needs `scholar.overview`);
+  //   - the entity-suppression scan keys on appointment/education/grant rows;
+  //   - the mentee-suppression scan keys on `menteeRows`;
+  //   - the COI-gap pub-date join keys on the gap rows' pmids;
+  //   - `pubSuppressions` / `confirmedAuthors` / `buildHighlightsContext` key on
+  //     the authorship pmid set.
+  // `loadMentees` is the reporting-DB seam and BEST-EFFORT: its rejection is
+  // caught inside the batch (warn + empty list) so a Promise.all rejection can
+  // never 500 the page — preserving the existing try/catch contract. The
+  // null/soft-deleted guard stays ABOVE the batch so a missing scholar still
+  // returns `null` with zero follow-on queries.
+  const [
+    slugOverrideRow,
+    scholarSuppressions,
+    appointmentRows,
+    educationRows,
+    grantRows,
+    coiRows,
+    chairedDept,
+    authorships,
+    menteeRows,
+  ] = await Promise.all([
+    // Phase 7 — the slug-card baseline. `null` = no override; superuser slug card
+    // shows the "no override" state. The self surface does not surface this field
+    // (slug edits are superuser-only, `self-edit-spec.md` § Authorization).
+    client.fieldOverride.findUnique({
+      where: {
+        entityType_entityId_fieldName: {
+          entityType: "scholar",
+          entityId: cwid,
+          fieldName: "slug",
+        },
+      },
+      select: { value: true },
+    }),
+    client.suppression.findMany({
+      where: {
         entityType: "scholar",
         entityId: cwid,
-        fieldName: "slug",
+        contributorCwid: null,
+        revokedAt: null,
       },
-    },
-    select: { value: true },
-  });
+      select: { id: true, reason: true, createdBy: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+    }),
+    // --- #160 UI follow-up: the three whole-entity attributes ---
+    // Each panel lists exactly what the public profile renders, keyed on the
+    // stable `externalId` (#352). Active appointments only — mirrors the profile
+    // sidebar's default set (`endDate` null or in the future). The interim-drop /
+    // single-visible-primary collapse the profile also applies are a display
+    // refinement deferred here: a hidden interim row is a no-op against the
+    // read-path anyway. Education and grants render in full on the profile.
+    client.appointment.findMany({
+      where: { cwid, OR: [{ endDate: null }, { endDate: { gt: now } }] },
+      select: {
+        externalId: true,
+        title: true,
+        organization: true,
+        startDate: true,
+        endDate: true,
+        isPrimary: true,
+      },
+      orderBy: [{ isPrimary: "desc" }, { startDate: "desc" }],
+    }),
+    client.education.findMany({
+      where: { cwid },
+      select: { externalId: true, degree: true, institution: true, field: true, year: true },
+      orderBy: [{ year: "desc" }],
+    }),
+    client.grant.findMany({
+      where: { cwid },
+      select: {
+        externalId: true,
+        title: true,
+        role: true,
+        funder: true,
+        primeSponsor: true,
+        primeSponsorRaw: true,
+        startDate: true,
+        endDate: true,
+      },
+      orderBy: [{ endDate: "desc" }, { startDate: "desc" }],
+    }),
+    // Conflicts of interest — read-only (the Weill Research Gateway is the SOR).
+    // Same select shape + ordering the public profile uses (`lib/api/profile.ts`
+    // `coiActivities`) so the /edit panel groups identically.
+    client.coiActivity.findMany({
+      where: { cwid },
+      select: { entity: true, activityGroup: true },
+      orderBy: [{ activityGroup: "asc" }, { entity: "asc" }],
+    }),
+    // Chair lock — a current chair appointment is not hideable (the route refuses
+    // it 409 before authz, for the chair AND a superuser). Mirror that exact
+    // predicate: the dept the scholar chairs (0–1 rows) + a per-appointment title
+    // match (`isChairTitleFor`) — NOT a bare `chairCwid` existence check, which
+    // would over-lock the chair's other (suppressible) appointments. Keep in
+    // lockstep with `validators.isChairAppointment`.
+    client.department.findFirst({
+      where: { chairCwid: cwid },
+      select: { name: true },
+    }),
+    // #836 — widen the `publication` select with the ranking fields
+    // (publicationType / dateAddedToEntrez / impactScore / per-scholar score)
+    // only when the Highlights editor is requested.
+    client.publicationAuthor.findMany({
+      where: { cwid, isConfirmed: true },
+      select: {
+        isFirst: true,
+        isLast: true,
+        isPenultimate: true,
+        isConfirmed: true,
+        publication: {
+          select: {
+            pmid: true,
+            title: true,
+            journal: true,
+            year: true,
+            ...(includeHighlights
+              ? {
+                  publicationType: true,
+                  dateAddedToEntrez: true,
+                  impactScore: true,
+                  publicationScores: { where: { cwid }, select: { score: true } },
+                }
+              : {}),
+          },
+        },
+      },
+    }),
+    // Mentees — suppressible, derived from training records (reporting DB) via the
+    // injected `loadMentees` seam. BEST-EFFORT: a thrown error (reporting DB
+    // unreachable) yields zero mentees rather than 500-ing the page, so the
+    // rejection is caught HERE — inside the batch — to keep the surrounding
+    // Promise.all from rejecting.
+    loadMentees(cwid).catch((err) => {
+      console.warn(
+        JSON.stringify({
+          event: "edit_context_mentees_unavailable",
+          cwid,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      return [] as EditContextMenteeSource[];
+    }),
+  ]);
+
   const slugOverride = slugOverrideRow?.value ?? null;
 
-  const scholarSuppressions = await client.suppression.findMany({
-    where: {
-      entityType: "scholar",
-      entityId: cwid,
-      contributorCwid: null,
-      revokedAt: null,
-    },
-    select: { id: true, reason: true, createdBy: true, createdAt: true },
-    orderBy: { createdAt: "desc" },
-  });
   // Defensive: multiple un-revoked rows of either kind shouldn't occur (the
   // suppress endpoint is idempotent — edge case 19), but a superuser row +
   // a self row coexisting is the documented edge case 4. Take the most recent
@@ -489,53 +622,6 @@ export async function loadEditContext(
   const ownRow = scholarSuppressions.find((r) => r.createdBy === cwid) ?? null;
   const adminRow = scholarSuppressions.find((r) => r.createdBy !== cwid) ?? null;
 
-  // --- #160 UI follow-up: the three whole-entity attributes ---
-  // Each panel lists exactly what the public profile renders, keyed on the
-  // stable `externalId` (#352). Active appointments only — mirrors the profile
-  // sidebar's default set (`endDate` null or in the future). The interim-drop /
-  // single-visible-primary collapse the profile also applies are a display
-  // refinement deferred here: a hidden interim row is a no-op against the
-  // read-path anyway. Education and grants render in full on the profile.
-  const appointmentRows = await client.appointment.findMany({
-    where: { cwid, OR: [{ endDate: null }, { endDate: { gt: now } }] },
-    select: {
-      externalId: true,
-      title: true,
-      organization: true,
-      startDate: true,
-      endDate: true,
-      isPrimary: true,
-    },
-    orderBy: [{ isPrimary: "desc" }, { startDate: "desc" }],
-  });
-  const educationRows = await client.education.findMany({
-    where: { cwid },
-    select: { externalId: true, degree: true, institution: true, field: true, year: true },
-    orderBy: [{ year: "desc" }],
-  });
-  const grantRows = await client.grant.findMany({
-    where: { cwid },
-    select: {
-      externalId: true,
-      title: true,
-      role: true,
-      funder: true,
-      primeSponsor: true,
-      primeSponsorRaw: true,
-      startDate: true,
-      endDate: true,
-    },
-    orderBy: [{ endDate: "desc" }, { startDate: "desc" }],
-  });
-
-  // Conflicts of interest — read-only (the Weill Research Gateway is the SOR).
-  // Same select shape + ordering the public profile uses (`lib/api/profile.ts`
-  // `coiActivities`) so the /edit panel groups identically.
-  const coiRows = await client.coiActivity.findMany({
-    where: { cwid },
-    select: { entity: true, activityGroup: true },
-    orderBy: [{ activityGroup: "asc" }, { entity: "asc" }],
-  });
   const coiDisclosures: EditContextCoiDisclosure[] = coiRows.map((c) => ({
     entity: c.entity,
     activityGroup: c.activityGroup,
@@ -752,25 +838,11 @@ export async function loadEditContext(
   }
 
   // Mentees — suppressible, derived from training records (reporting DB). The
-  // source is queried through the injected `loadMentees` seam and is BEST-
-  // EFFORT: if the reporting DB is unreachable we render zero mentees rather
-  // than 500 the page. Each mentee's `externalId` is `{cwid}:{menteeCwid}`,
+  // raw `menteeRows` were fetched best-effort in the batch above (any failure
+  // already degraded to `[]`). Each mentee's `externalId` is `{cwid}:{menteeCwid}`,
   // which is also the suppress entityId (owner = this mentor). The four-state
   // annotation reuses the same per-request suppression lookup pattern the
   // whole-entity panels use (`contributorCwid IS NULL`, `revokedAt IS NULL`).
-  let menteeRows: EditContextMenteeSource[] = [];
-  try {
-    menteeRows = await loadMentees(cwid);
-  } catch (err) {
-    console.warn(
-      JSON.stringify({
-        event: "edit_context_mentees_unavailable",
-        cwid,
-        error: err instanceof Error ? err.message : String(err),
-      }),
-    );
-    menteeRows = [];
-  }
   const menteeExternalIds = menteeRows.map((m) => `${cwid}:${m.cwid}`);
   // `{cwid}:{menteeCwid}` → the active mentee hide. Absent key = "shown".
   const menteeHide = new Map<
@@ -846,17 +918,10 @@ export async function loadEditContext(
     }
   }
 
-  // Chair lock — a current chair appointment is not hideable (the route refuses
-  // it 409 before authz, for the chair AND a superuser). Mirror that exact
-  // predicate: the dept the scholar chairs (0–1 rows) + a per-appointment title
-  // match (`isChairTitleFor`) — NOT a bare `chairCwid` existence check, which
-  // would over-lock the chair's other (suppressible) appointments. Keep in
-  // lockstep with `validators.isChairAppointment`.
-  const chairedDept = await client.department.findFirst({
-    where: { chairCwid: cwid },
-    select: { name: true },
-  });
-
+  // Chair lock — `chairedDept` (the dept the scholar chairs, 0–1 rows) was
+  // fetched in the batch above; combine it with a per-appointment title match
+  // (`isChairTitleFor`) to lock ONLY a current chair appointment, in lockstep
+  // with the route's 409 guard / `validators.isChairAppointment`.
   const appointments: EditContextAppointment[] = appointmentRows.map((a) => {
     const locked = chairedDept !== null && isChairTitleFor(a.title, chairedDept.name);
     const hide = entityHide.get(`appointment:${a.externalId}`);
@@ -902,36 +967,10 @@ export async function loadEditContext(
     };
   });
 
-  // #836 — only the manual-Highlights editor needs the ranking fields
-  // (publicationType / dateAddedToEntrez / impactScore / per-scholar score) to
-  // compute the AI default. Pull them only when that surface is requested so the
-  // common /edit load stays lean.
-  const includeHighlights = opts?.includeHighlights === true;
-  const authorships = await client.publicationAuthor.findMany({
-    where: { cwid, isConfirmed: true },
-    select: {
-      isFirst: true,
-      isLast: true,
-      isPenultimate: true,
-      isConfirmed: true,
-      publication: {
-        select: {
-          pmid: true,
-          title: true,
-          journal: true,
-          year: true,
-          ...(includeHighlights
-            ? {
-                publicationType: true,
-                dateAddedToEntrez: true,
-                impactScore: true,
-                publicationScores: { where: { cwid }, select: { score: true } },
-              }
-            : {}),
-        },
-      },
-    },
-  });
+  // #836 — `authorships` (widened with the ranking fields on the gated path) and
+  // `includeHighlights` were both resolved above; derive the confirmed pmid set
+  // here, which the per-author suppression / displayed-author / Highlights stages
+  // below all key on.
   const pmids = authorships.map((a) => a.publication.pmid);
 
   const publications: EditContextPublication[] = [];

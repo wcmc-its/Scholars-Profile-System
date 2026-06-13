@@ -1,7 +1,8 @@
 /**
  * The Profiles roster table for `/edit/scholars` (#160 UI follow-up,
  * `self-edit-launch-spec.md` § The Profiles roster). The admin entry point: a
- * searchable scholar index with a per-row Edit link. Server-rendered with a
+ * searchable scholar index whose per-row name links to that scholar's editor.
+ * Server-rendered with a
  * plain GET form (search + status filter + pagination all via query params),
  * so it needs no client JS — consistent with the rest of the server-rendered
  * `/edit/*` surface. The Apollo "Profiles" tab chrome wraps it.
@@ -236,7 +237,13 @@ export function ProfilesRoster({
                 entries.map((e) => (
                   <tr key={e.cwid} data-testid={`roster-row-${e.cwid}`}>
                     <td className="px-3 py-2">
-                      <span className="font-medium">{e.name}</span>{" "}
+                      <Link
+                        href={`/edit/scholar/${encodeURIComponent(e.cwid)}`}
+                        className="text-apollo-slate font-medium hover:underline"
+                        data-testid={`roster-name-${e.cwid}`}
+                      >
+                        {e.name}
+                      </Link>{" "}
                       <span className="text-muted-foreground">({e.cwid})</span>
                     </td>
                     <td className="text-muted-foreground px-3 py-2">{e.title ?? "—"}</td>
@@ -257,13 +264,6 @@ export function ProfilesRoster({
                         {canImpersonate && e.cwid !== viewerCwid && (
                           <ViewAsButton targetCwid={e.cwid} targetName={e.name} />
                         )}
-                        <Link
-                          href={`/edit/scholar/${e.cwid}`}
-                          className="text-apollo-maroon hover:underline"
-                          data-testid={`roster-edit-${e.cwid}`}
-                        >
-                          Edit
-                        </Link>
                       </div>
                     </td>
                   </tr>
