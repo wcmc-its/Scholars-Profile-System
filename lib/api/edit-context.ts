@@ -37,6 +37,7 @@ import { isFundingActive } from "@/lib/funding-active";
 import { isChairTitleFor } from "@/lib/leadership";
 import { formatProgramLabel } from "@/lib/mentoring-labels";
 import { isRejectReason } from "@/lib/edit/reject-reason";
+import type { FeedbackReason } from "@/lib/coi-gap/feedback";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 
 /** The Prisma surface `loadEditContext` needs — a client or tx satisfies it. */
@@ -250,6 +251,37 @@ export type EditContextCoiGapCandidate = {
 };
 
 /**
+ * One relationship on the "Reviewed" (current-state) view: a group where EVERY
+ * source has been acted on (no `new` source remains), so it is settled history,
+ * not a nag. It still cites every source publication (verbatim `sourceSentence`
+ * always rendered) and supports change-of-mind + undo, which is why the
+ * scholar's own recorded `reason` and `reviewedAt` (their action date) cross to
+ * the client — the ONLY two formerly-starved fields that do, and ONLY for
+ * Reviewed rows. The numeric `entityScore`, `attribution`, `category`, and the
+ * raw lifecycle `status` still NEVER reach the client.
+ */
+export type EditContextCoiGapReviewed = {
+  /** Group key — the normalized entity (same opaque key the active rows use). */
+  key: string;
+  /** Display label — the raw `entity` of the newest source. */
+  entity: string;
+  /** Highest qualitative tier across the grouped sources (display only). */
+  tier: "High" | "Medium";
+  /** Every source publication naming this relationship, newest first. */
+  sources: ReadonlyArray<EditContextCoiGapSource>;
+  /** The recorded feedback reason of the newest acted source — drives the
+   *  settled label and the change-of-mind preselect. */
+  reason: FeedbackReason;
+  /** The scholar's own action date (newest `reviewed_at` across sources), as an
+   *  ISO `YYYY-MM-DD` string — governance-allowed because it is the scholar's
+   *  own action, not a model verdict. */
+  reviewedAt: string;
+  /** Sort key: the newest source's publication date as epoch ms. NEVER
+   *  displayed — it only orders the list. */
+  newestTs: number;
+};
+
+/**
  * One mentee on the suppressible Mentees panel. Mentees are derived (no FK; the
  * reporting DB is truncate-rebuilt nightly), so they have no #352 stable DB key
  * — instead `externalId` is the composite `"{mentorCwid}:{menteeCwid}"`, which
@@ -313,8 +345,27 @@ export type EditContext = {
    * `loadEditContext` is called with `opts.includeCoiGap === true`; an empty
    * array for every other caller (and when the scholar has no candidates). This
    * is a suggestion surface, never a verdict — see `EditContextCoiGapCandidate`.
+   *
+   * HIGH-tier ACTIVE groups only (a group with any `new` source whose tier is
+   * High). Pure-`Medium` active groups go to `unmatchedPubmedCoiLower`; fully
+   * acted groups go to `unmatchedPubmedCoiReviewed`.
    */
   unmatchedPubmedCoi: ReadonlyArray<EditContextCoiGapCandidate>;
+  /**
+   * Pure-`Medium` ACTIVE COI-gap groups (any `new` source, but no `new` source
+   * is High) — the lower-confidence bucket the card renders in a collapsed
+   * expander. Same starved client shape as `unmatchedPubmedCoi`. Empty for every
+   * non-self caller and when `includeCoiGap` is absent.
+   */
+  unmatchedPubmedCoiLower: ReadonlyArray<EditContextCoiGapCandidate>;
+  /**
+   * COI-gap groups where EVERY source has been acted on (no `new` source) —
+   * settled history the card renders in a collapsed "Reviewed" section with
+   * change-of-mind + undo. The scholar's own `reason` + `reviewedAt` cross here
+   * (and ONLY here); score/status/attribution/category stay starved. Empty for
+   * every non-self caller and when `includeCoiGap` is absent.
+   */
+  unmatchedPubmedCoiReviewed: ReadonlyArray<EditContextCoiGapReviewed>;
   /**
    * The manual-Highlights editor state (#836), or `null` when the surface is not
    * available (flag off, or a non-self caller). Populated only when
@@ -494,35 +545,46 @@ export async function loadEditContext(
   // ONLY, and the opt-in IS the self guard: only the self page passes
   // `includeCoiGap: true`, and only for a genuine (non-impersonating) self
   // viewer with the flag on. Every other caller leaves `opts` unset, so the
-  // query never runs and the array is empty — the candidates are never read for
-  // a non-self viewer. Surface only actionable lifecycle states (`new` +
-  // `acknowledged`); `dismissed`/`resolved` are intentionally excluded so a
-  // disavowed nudge never reappears.
+  // query never runs and the arrays are empty — the candidates are never read
+  // for a non-self viewer.
   //
-  // HIGH TIER ONLY. The rendered surface is restricted to `High` candidates —
-  // scholar-attributed (the scholar's own name/initials in the clause) AND a
-  // strong entity. `Medium` is excluded on purpose: it is the "plausible but
-  // soft attribution or weak entity" bucket, which in practice is dominated by
-  // co-author disclosures that leak onto a shared paper's other authors (a
-  // diagnostic recompute found ~92% of surfaced candidates are `unattributed`,
-  // and a typical scholar's `Medium` set is entirely co-author leakage with zero
-  // genuine matches). Showing that to a scholar reads as a wall of false
-  // accusations, so the bar is raised to the credible bucket. The `Medium` rows
-  // stay in the table for diagnostics; they are simply never rendered. (This also
-  // matches the long-stated go-live gate — see `lib/edit/coi-gap-hint.ts`: a
-  // measured HIGH-tier precision number, not Medium.)
+  // THREE SURFACES, ONE QUERY. The query widens to the three reviewable
+  // lifecycle states (`new`, `acknowledged`, `dismissed`; `resolved` excluded —
+  // the gap closed itself once the disclosure appeared), and each normalized-
+  // entity group is partitioned by whether it still has a `new` source:
+  //   • ACTIVE (any `new` source) → `unmatchedPubmedCoi` when its active tier is
+  //     High, else `unmatchedPubmedCoiLower` (pure-Medium). A group with a `new`
+  //     source is ALWAYS active and NEVER appears in Reviewed, even if some of
+  //     its other sources were already acted on — its acted sources are simply
+  //     not shown again, so a relationship is never in two lists at once.
+  //   • REVIEWED (every source acted) → `unmatchedPubmedCoiReviewed`: settled
+  //     history the card renders read-only with change-of-mind + undo.
+  //
+  // HIGH TIER is still the only thing that NAGS. The active High bucket
+  // (`unmatchedPubmedCoi`) drives the rail badge; `Medium` active rows are the
+  // dominated-by-co-author-leakage bucket (a diagnostic recompute found ~92% of
+  // surfaced candidates `unattributed`) and surface only in a collapsed,
+  // muted, opt-in expander — never as a nag, never in the badge count.
   //
   // Mapped to the STARVED client shape — `normalizedEntity`, `attribution`,
-  // `entityScore`, `category`, and `status` never cross to the client.
-  let unmatchedPubmedCoi: EditContextCoiGapCandidate[] = [];
+  // `entityScore`, `category`, and the raw lifecycle `status` never cross to the
+  // client. Two formerly-starved fields cross ONLY into Reviewed rows: the
+  // scholar's own `feedbackReason` (as `reviewed.reason`, enabling the settled
+  // label + change-of-mind) and `reviewedAt` (as `reviewed.reviewedAt`, the
+  // scholar's own action date — governance-allowed because it is the scholar's
+  // action, not a model verdict). They never reach an active row.
+  const unmatchedPubmedCoi: EditContextCoiGapCandidate[] = [];
+  const unmatchedPubmedCoiLower: EditContextCoiGapCandidate[] = [];
+  const unmatchedPubmedCoiReviewed: EditContextCoiGapReviewed[] = [];
   if (opts?.includeCoiGap === true) {
     const gapRows = await client.coiGapCandidate.findMany({
-      // Surface only `new`. Once the scholar records ANY feedback the row stops
-      // nagging: `acknowledged` (will disclose) and `dismissed` (historical /
-      // invalid) both drop off this panel, while staying in the table for the
-      // ETL/reconcile and for suggestion-quality research (the feedback split).
-      where: { cwid, status: "new", tier: "High" },
-      // `normalizedEntity` is the group (dedupe) key; it never reaches the client.
+      // The three reviewable states. `resolved` is excluded (the gap closed
+      // itself once the disclosure appeared — nothing left to review). Per-group
+      // partitioning below decides active (any `new`) vs reviewed (all acted).
+      where: { cwid, status: { in: ["new", "acknowledged", "dismissed"] } },
+      // `normalizedEntity` is the group (dedupe) key; it never reaches the
+      // client. `status`, `feedbackReason`, `reviewedAt` are read server-side to
+      // partition + (for Reviewed only) derive `reason`/`reviewedAt`.
       select: {
         id: true,
         pmid: true,
@@ -530,6 +592,9 @@ export async function loadEditContext(
         normalizedEntity: true,
         tier: true,
         sourceSentence: true,
+        status: true,
+        feedbackReason: true,
+        reviewedAt: true,
       },
       orderBy: [{ entity: "asc" }],
     });
@@ -562,8 +627,10 @@ export async function loadEditContext(
     );
 
     // Collapse the per-(pmid, entity) rows into ONE row per normalized entity,
-    // citing every source publication. Tier is the highest across sources; the
-    // display label is the raw entity of the newest source.
+    // citing every source publication. Each source carries its own lifecycle
+    // (`status`) and the scholar's recorded `feedbackReason`/`reviewedAt`, used
+    // server-side to partition the group (active vs reviewed) and — for Reviewed
+    // groups only — to derive the crossing `reason`/`reviewedAt`.
     type GapSrc = {
       id: string;
       pmid: string;
@@ -571,11 +638,12 @@ export async function loadEditContext(
       year: number | null;
       ts: number;
       entity: string;
+      tier: "High" | "Medium";
+      status: string;
+      feedbackReason: string | null;
+      reviewedAt: Date | null;
     };
-    const groups = new Map<
-      string,
-      { key: string; tier: "High" | "Medium"; newestTs: number; sources: GapSrc[] }
-    >();
+    const groups = new Map<string, { key: string; sources: GapSrc[] }>();
     for (const g of gapRows) {
       // The DB column is a free `VarChar(16)`; narrow to the rendered union and
       // treat any unexpected value as the more conservative "Medium" tier.
@@ -588,49 +656,99 @@ export async function loadEditContext(
         year: d.year,
         ts: d.ts,
         entity: g.entity,
+        tier,
+        status: g.status,
+        feedbackReason: g.feedbackReason,
+        reviewedAt: g.reviewedAt,
       };
       const existing = groups.get(g.normalizedEntity);
       if (existing) {
         existing.sources.push(src);
-        if (tier === "High") existing.tier = "High";
-        if (d.ts > existing.newestTs) existing.newestTs = d.ts;
       } else {
-        groups.set(g.normalizedEntity, {
-          key: g.normalizedEntity,
-          tier,
-          newestTs: d.ts,
-          sources: [src],
-        });
+        groups.set(g.normalizedEntity, { key: g.normalizedEntity, sources: [src] });
       }
     }
 
-    unmatchedPubmedCoi = [...groups.values()]
-      .map((grp) => {
-        // Sources newest first (pmid desc as a stable tiebreak); the newest
-        // source's raw entity is the group's display label.
-        const sorted = [...grp.sources].sort((a, b) => b.ts - a.ts || b.pmid.localeCompare(a.pmid));
-        return {
-          key: grp.key,
-          entity: sorted[0].entity,
-          tier: grp.tier,
-          sources: sorted.map((s) => ({
-            id: s.id,
-            pmid: s.pmid,
-            sourceSentence: s.sourceSentence,
-            year: s.year,
-          })),
-          newestTs: grp.newestTs,
-        };
-      })
-      // Default SSR order = "Newest + confidence": High tier first, newest within
-      // tier (entity asc as a final tiebreak). The card re-sorts on the chosen
-      // mode, but this matches the default control so SSR and hydration agree.
-      .sort(
-        (a, b) =>
-          (a.tier === b.tier ? 0 : a.tier === "High" ? -1 : 1) ||
-          b.newestTs - a.newestTs ||
-          a.entity.localeCompare(b.entity),
+    // Newest-first source comparator (pmid desc as a stable tiebreak) — shared by
+    // every partition so SSR + the card's default sort agree.
+    const newestFirst = (a: GapSrc, b: GapSrc) => b.ts - a.ts || b.pmid.localeCompare(a.pmid);
+    const newestTsOf = (sources: GapSrc[]) => sources.reduce((m, s) => Math.max(m, s.ts), 0);
+    // A row's derivable feedback reason: the explicit `feedbackReason`, else
+    // `will_disclose` inferred from an `acknowledged` status (legacy rows recorded
+    // intent before the reason column). `new`/null → undefined (no reason).
+    const reasonOf = (s: GapSrc): FeedbackReason | undefined =>
+      (s.feedbackReason as FeedbackReason | null) ??
+      (s.status === "acknowledged" ? "will_disclose" : undefined);
+
+    const toCandidate = (key: string, sources: GapSrc[]): EditContextCoiGapCandidate => {
+      const sorted = [...sources].sort(newestFirst);
+      return {
+        key,
+        entity: sorted[0].entity,
+        tier: sorted.some((s) => s.tier === "High") ? "High" : "Medium",
+        sources: sorted.map((s) => ({
+          id: s.id,
+          pmid: s.pmid,
+          sourceSentence: s.sourceSentence,
+          year: s.year,
+        })),
+        newestTs: newestTsOf(sorted),
+      };
+    };
+
+    for (const grp of groups.values()) {
+      const newSources = grp.sources.filter((s) => s.status === "new");
+      if (newSources.length > 0) {
+        // ACTIVE — show ONLY the still-`new` sources (acted siblings are not
+        // re-shown). High active tier nags; pure-Medium drops to the expander.
+        const candidate = toCandidate(grp.key, newSources);
+        if (candidate.tier === "High") unmatchedPubmedCoi.push(candidate);
+        else unmatchedPubmedCoiLower.push(candidate);
+        continue;
+      }
+      // REVIEWED — every source acted; settled history. Reason = newest source
+      // with a derivable reason; reviewedAt = newest non-null action date.
+      const sorted = [...grp.sources].sort(newestFirst);
+      const reason = sorted.map(reasonOf).find((r): r is FeedbackReason => r !== undefined);
+      if (reason === undefined) continue; // legacy /dismiss rows with null reason — none while dark.
+      const reviewedMs = grp.sources.reduce(
+        (m, s) => (s.reviewedAt ? Math.max(m, s.reviewedAt.getTime()) : m),
+        0,
       );
+      if (reviewedMs === 0) continue; // all reviewedAt null (shouldn't happen for acted rows).
+      unmatchedPubmedCoiReviewed.push({
+        key: grp.key,
+        entity: sorted[0].entity,
+        tier: sorted.some((s) => s.tier === "High") ? "High" : "Medium",
+        sources: sorted.map((s) => ({
+          id: s.id,
+          pmid: s.pmid,
+          sourceSentence: s.sourceSentence,
+          year: s.year,
+        })),
+        reason,
+        reviewedAt: new Date(reviewedMs).toISOString().slice(0, 10),
+        newestTs: newestTsOf(sorted),
+      });
+    }
+
+    // Default SSR order for active lists = "Newest + confidence": High tier
+    // first, newest within tier (entity asc as a final tiebreak). The card
+    // re-sorts on the chosen mode, but this matches the default control so SSR
+    // and hydration agree. The Lower list shares the comparator.
+    const activeSort = (a: EditContextCoiGapCandidate, b: EditContextCoiGapCandidate) =>
+      (a.tier === b.tier ? 0 : a.tier === "High" ? -1 : 1) ||
+      b.newestTs - a.newestTs ||
+      a.entity.localeCompare(b.entity);
+    unmatchedPubmedCoi.sort(activeSort);
+    unmatchedPubmedCoiLower.sort(activeSort);
+    // Reviewed = most recently reviewed first (then newest source, then entity).
+    unmatchedPubmedCoiReviewed.sort(
+      (a, b) =>
+        b.reviewedAt.localeCompare(a.reviewedAt) ||
+        b.newestTs - a.newestTs ||
+        a.entity.localeCompare(b.entity),
+    );
   }
 
   // Mentees — suppressible, derived from training records (reporting DB). The
@@ -848,6 +966,8 @@ export async function loadEditContext(
       coiDisclosures,
       mentees,
       unmatchedPubmedCoi,
+      unmatchedPubmedCoiLower,
+      unmatchedPubmedCoiReviewed,
       // No confirmed publications → nothing to pick or rank. Surface an empty
       // editor state (still reading any stored override) when requested.
       highlights: includeHighlights
@@ -1006,6 +1126,8 @@ export async function loadEditContext(
     coiDisclosures,
     mentees,
     unmatchedPubmedCoi,
+    unmatchedPubmedCoiLower,
+    unmatchedPubmedCoiReviewed,
     highlights,
   };
 }

@@ -114,7 +114,10 @@ export default async function EditSelfPage({
   const validAttrs: readonly string[] = visibleAttrKeys(
     "self",
     slugRequestEnabled,
-    ctx.unmatchedPubmedCoi.length > 0,
+    // The COI-gap attr is valid when there is High-active work OR settled history
+    // to revisit (Reviewed) — mirroring the rail-gating rule in EditPage. A
+    // Medium-only group does not surface the item, so it is excluded here too.
+    ctx.unmatchedPubmedCoi.length > 0 || ctx.unmatchedPubmedCoiReviewed.length > 0,
     ctx.highlights !== null,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {

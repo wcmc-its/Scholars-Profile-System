@@ -312,8 +312,12 @@ export function EditPage({
   // load them + the flag, so a non-empty array here already implies an allowed
   // actor). Drop it from the visible set otherwise so it appears in neither the
   // rail nor the valid-attr set — an empty panel is never surfaced.
+  // The rail item surfaces when there is High-active work OR settled history to
+  // revisit (Reviewed). A Medium-only group does NOT surface the item — it lives
+  // inside the High panel's lower-confidence expander, never as its own entry.
   const hasCoiGap =
-    (mode === "self" || mode === "superuser") && ctx.unmatchedPubmedCoi.length > 0;
+    (mode === "self" || mode === "superuser") &&
+    (ctx.unmatchedPubmedCoi.length > 0 || ctx.unmatchedPubmedCoiReviewed.length > 0);
   // #836 — Highlights is present only when the loader populated `ctx.highlights`
   // (flag on + self or superuser). The loader (per surface) enforces who may load
   // it — self on `/edit`, self or superuser on `/edit/scholar/[cwid]`, never a
@@ -354,9 +358,14 @@ export function EditPage({
               // immediately follows "coi" in SELF_RAIL_ORDER) rather than reading
               // as a flat sibling — it is a sub-view of COI, not its own SOR.
               child: a.key === "coi-gap",
-              // A quiet count of High-tier relationships to review (the item only
-              // appears when this is > 0, see `hasCoiGap`).
-              count: a.key === "coi-gap" ? ctx.unmatchedPubmedCoi.length : undefined,
+              // A quiet count of High-tier relationships still worth reviewing.
+              // The badge is the High-active count ONLY — Medium and Reviewed are
+              // excluded — and 0 coerces to undefined so the item can appear for a
+              // Reviewed-only history without showing a "0" badge.
+              count:
+                a.key === "coi-gap"
+                  ? ctx.unmatchedPubmedCoi.length || undefined
+                  : undefined,
             },
           ];
         })
@@ -376,7 +385,12 @@ export function EditPage({
               label,
               readonly: a.readonly,
               child: a.key === "coi-gap",
-              count: a.key === "coi-gap" ? ctx.unmatchedPubmedCoi.length : undefined,
+              // High-active count ONLY (Medium + Reviewed excluded); 0 → undefined
+              // so a Reviewed-only history shows the item without a "0" badge.
+              count:
+                a.key === "coi-gap"
+                  ? ctx.unmatchedPubmedCoi.length || undefined
+                  : undefined,
             },
           ];
         });
@@ -601,6 +615,8 @@ function renderPanel(
           mode={childMode}
           scholarName={scholarName}
           candidates={ctx.unmatchedPubmedCoi}
+          lowerCandidates={ctx.unmatchedPubmedCoiLower}
+          reviewed={ctx.unmatchedPubmedCoiReviewed}
         />
       );
     case "profile-url":

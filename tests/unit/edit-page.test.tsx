@@ -101,6 +101,10 @@ const ctx: EditContext = {
   // flag is on AND the viewer is genuine self); a dedicated describe block below
   // exercises the populated case.
   unmatchedPubmedCoi: [],
+  // Medium-tier active (lower-confidence) and fully-reviewed (history) groups —
+  // empty by default; populated only when the flag is on for a genuine viewer.
+  unmatchedPubmedCoiLower: [],
+  unmatchedPubmedCoiReviewed: [],
   // #836 — null unless SELF_EDIT_MANUAL_HIGHLIGHTS is on AND the viewer is self.
   highlights: null,
 };

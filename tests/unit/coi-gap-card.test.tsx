@@ -12,14 +12,17 @@
  * underlying source, never a silent destructive action.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
 }));
 
 import { CoiGapCard } from "@/components/edit/coi-gap-card";
-import type { EditContextCoiGapCandidate } from "@/lib/api/edit-context";
+import type {
+  EditContextCoiGapCandidate,
+  EditContextCoiGapReviewed,
+} from "@/lib/api/edit-context";
 
 // Two deduped relationships. "procept" is High and cites TWO papers; "neotract"
 // is Medium but its single paper is NEWER (2023) — so tier-order and date-order
@@ -52,6 +55,49 @@ const CANDIDATES: EditContextCoiGapCandidate[] = [
     newestTs: Date.UTC(2023, 5, 1),
     sources: [
       { id: "gap-2", pmid: "30000001", sourceSentence: "Consultant for Neotract Urolift.", year: 2023 },
+    ],
+  },
+];
+
+// Pure-Medium ACTIVE relationships — the "lower-confidence" expander payload.
+// Partitioned upstream into its OWN array (never the High `candidates` list), so
+// the surface must tuck it behind a collapsed <details> rather than fronting it.
+const LOWER: EditContextCoiGapCandidate[] = [
+  {
+    key: "boston scientific",
+    entity: "Boston Scientific Corp",
+    tier: "Medium",
+    newestTs: Date.UTC(2021, 2, 15),
+    sources: [
+      {
+        id: "lo-1",
+        pmid: "29000001",
+        sourceSentence: "Co-author reports a consulting relationship with Boston Scientific.",
+        year: 2021,
+      },
+    ],
+  },
+];
+
+// Fully-acted relationships — the settled "Reviewed" history. The scholar's own
+// recorded `reason` + action `reviewedAt` are the ONLY formerly-starved fields
+// allowed to cross to the client, and ONLY here (score/status/attribution/
+// category still never do).
+const REVIEWED: EditContextCoiGapReviewed[] = [
+  {
+    key: "medtronic",
+    entity: "Medtronic Inc",
+    tier: "High",
+    newestTs: Date.UTC(2020, 7, 3),
+    reason: "historical",
+    reviewedAt: "2026-05-20",
+    sources: [
+      {
+        id: "rv-1",
+        pmid: "27000001",
+        sourceSentence: "Former advisory board member, Medtronic.",
+        year: 2020,
+      },
     ],
   },
 ];
@@ -116,11 +162,13 @@ describe("CoiGapCard", () => {
     expect(document.body.textContent ?? "").not.toContain("Locked — managed at its source");
   });
 
-  it("summarizes the active set by qualitative tier (one row per relationship)", () => {
+  it("summarizes ONLY the High active list (Medium/Reviewed counts live in their own labels)", () => {
+    // One High ("procept") + one Medium ("neotract") row in the active list; the
+    // top summary tracks the High worth-reviewing count only — it does NOT fold in
+    // the Medium "likely covered" tally (that now lives in the lower-confidence
+    // expander, not this line).
     render(<CoiGapCard cwid="self01" candidates={CANDIDATES} />);
-    expect(screen.getByTestId("coi-gap-summary").textContent).toBe(
-      "1 worth reviewing · 1 likely already covered",
-    );
+    expect(screen.getByTestId("coi-gap-summary").textContent).toBe("1 worth reviewing");
   });
 
   it("offers a Gateway review affordance and the neutral 3-way response per relationship", () => {
@@ -202,8 +250,10 @@ describe("CoiGapCard", () => {
           expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "invalid" }) }),
         );
       }
-      // Summary recomputed: the only High relationship is gone.
-      expect(screen.getByTestId("coi-gap-summary").textContent).toBe("1 likely already covered");
+      // Summary recomputed: the only High relationship is gone, and the line
+      // tracks the High worth-reviewing count only (the Medium row never figured
+      // into it), so it falls back to the calm empty state.
+      expect(screen.getByTestId("coi-gap-summary").textContent).toBe("Nothing left to review");
 
       // Undo restores the row + calls /restore for both sources.
       fireEvent.click(screen.getByTestId("coi-gap-undo-procept biorobotics"));
@@ -214,9 +264,7 @@ describe("CoiGapCard", () => {
           expect.objectContaining({ method: "POST" }),
         );
       }
-      expect(screen.getByTestId("coi-gap-summary").textContent).toBe(
-        "1 worth reviewing · 1 likely already covered",
-      );
+      expect(screen.getByTestId("coi-gap-summary").textContent).toBe("1 worth reviewing");
     });
 
     it("'I intend to update my COI statement' (will_disclose) POSTs /feedback{reason:will_disclose} and shows the recorded label", async () => {
@@ -295,6 +343,257 @@ describe("CoiGapCard", () => {
           `/api/edit/coi-gap/${id}/feedback`,
           expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "invalid" }) }),
         );
+      }
+    });
+  });
+
+  // ── NEW SURFACE 1 ─ the lower-confidence (pure-Medium active) expander ──────
+  describe("lower-confidence expander (Medium-tier active, collapsed by default)", () => {
+    beforeEach(() => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }),
+      );
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("does not render the expander when there are no lower-confidence matches", () => {
+      render(<CoiGapCard cwid="self01" candidates={CANDIDATES} />);
+      expect(screen.queryByTestId("coi-gap-lower")).toBeNull();
+    });
+
+    it("renders a NATIVE collapsed <details> labelled with the count and the muted caveat", () => {
+      render(<CoiGapCard cwid="self01" candidates={[CANDIDATES[0]]} lowerCandidates={LOWER} />);
+      const lower = screen.getByTestId("coi-gap-lower");
+      // It is a native disclosure widget, collapsed by default (no `open` attr).
+      expect(lower.tagName).toBe("DETAILS");
+      expect((lower as HTMLDetailsElement).open).toBe(false);
+      // Summary advertises the count with correct (singular) pluralization.
+      expect(lower.querySelector("summary")?.textContent).toContain("Show 1 lower-confidence match");
+      // The one muted caveat line frames these as weaker / a co-author's disclosure.
+      expect(lower.textContent).toContain(
+        "These are weaker matches — often a co-author’s disclosure rather than your own.",
+      );
+    });
+
+    it("pluralizes the summary for multiple lower-confidence matches", () => {
+      const twoLower: EditContextCoiGapCandidate[] = [
+        LOWER[0],
+        { ...LOWER[0], key: "abbott", entity: "Abbott Labs" },
+      ];
+      render(<CoiGapCard cwid="self01" candidates={[CANDIDATES[0]]} lowerCandidates={twoLower} />);
+      expect(screen.getByTestId("coi-gap-lower").querySelector("summary")?.textContent).toContain(
+        "Show 2 lower-confidence matches",
+      );
+    });
+
+    it("shows the SAME active-row markup inside: verbatim sentence, choices, Gateway review", () => {
+      render(<CoiGapCard cwid="self01" candidates={[CANDIDATES[0]]} lowerCandidates={LOWER} />);
+      const lower = screen.getByTestId("coi-gap-lower");
+      // The verbatim source sentence is rendered (governance — always shown).
+      expect(screen.getByTestId("coi-gap-source-lo-1").textContent).toContain(
+        "Co-author reports a consulting relationship with Boston Scientific.",
+      );
+      // The Medium chip reads the green "Likely covered", never a percentage.
+      expect(within(lower).getByTestId("coi-gap-tier-Medium").textContent).toBe("Likely covered");
+      // All three neutral responses are offered for the Medium row, by verbatim label.
+      expect(within(lower).getByTestId("coi-gap-choices-boston scientific")).toBeTruthy();
+      expect(
+        within(lower).getByTestId("coi-gap-choice-will_disclose-boston scientific").textContent,
+      ).toBe("I intend to update my COI statement");
+      expect(
+        within(lower).getByTestId("coi-gap-choice-historical-boston scientific").textContent,
+      ).toBe("Historically true but not currently valid");
+      expect(within(lower).getByTestId("coi-gap-choice-invalid-boston scientific").textContent).toBe(
+        "Not a valid suggestion",
+      );
+      // And it carries its own Gateway-review affordance (routes to WRG, not an
+      // in-app COI edit). The custom trigger renders by name, not a testid.
+      expect(within(lower).getByRole("button", { name: /review in gateway/i })).toBeTruthy();
+    });
+
+    it("acting on a Medium row POSTs /feedback for its source(s) and flips the row in place", async () => {
+      render(<CoiGapCard cwid="self01" candidates={[CANDIDATES[0]]} lowerCandidates={LOWER} />);
+      fireEvent.click(screen.getByTestId("coi-gap-choice-historical-boston scientific"));
+      await screen.findByTestId("coi-gap-undo-boston scientific");
+      expect(screen.getByTestId("coi-gap-acted-boston scientific").textContent).toBe(
+        "Historically true, not currently valid",
+      );
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/edit/coi-gap/lo-1/feedback",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ reason: "historical" }),
+        }),
+      );
+    });
+  });
+
+  // ── NEW SURFACE 2 ─ the settled "Reviewed" (current-state) section ──────────
+  describe("Reviewed section (settled history — change-of-mind + undo, never a nag)", () => {
+    beforeEach(() => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }),
+      );
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("does not render the section when nothing has been reviewed", () => {
+      render(<CoiGapCard cwid="self01" candidates={CANDIDATES} />);
+      expect(screen.queryByTestId("coi-gap-reviewed")).toBeNull();
+    });
+
+    it("renders a collapsed <details> with the count, the recorded reason label and the date", () => {
+      render(<CoiGapCard cwid="self01" candidates={CANDIDATES} reviewed={REVIEWED} />);
+      const section = screen.getByTestId("coi-gap-reviewed");
+      expect(section.tagName).toBe("DETAILS");
+      expect((section as HTMLDetailsElement).open).toBe(false);
+      expect(section.querySelector("summary")?.textContent).toBe("Reviewed (1)");
+      // The recorded response (its settled ACTED label) and the action date show.
+      expect(screen.getByTestId("coi-gap-reviewed-reason-medtronic").textContent).toBe(
+        "Historically true, not currently valid",
+      );
+      expect(screen.getByTestId("coi-gap-reviewed-date-medtronic").textContent).toContain(
+        "2026-05-20",
+      );
+      // It is SETTLED history — no amber "worth reviewing" nag in this section.
+      expect(section.textContent).not.toContain("Worth reviewing");
+    });
+
+    it("'Change response' reveals the three choices and re-picking POSTs /feedback with the NEW reason", async () => {
+      render(<CoiGapCard cwid="self01" candidates={CANDIDATES} reviewed={REVIEWED} />);
+      // Choices are hidden until "Change response" is clicked.
+      expect(screen.queryByTestId("coi-gap-reviewed-choice-invalid-medtronic")).toBeNull();
+      fireEvent.click(screen.getByTestId("coi-gap-reviewed-change-medtronic"));
+      const repick = await screen.findByTestId("coi-gap-reviewed-choice-invalid-medtronic");
+      fireEvent.click(repick);
+      // Re-pick files the NEW reason via /feedback for the source.
+      await screen.findByText(/^Not a valid suggestion$/, {
+        selector: '[data-testid="coi-gap-reviewed-reason-medtronic"]',
+      });
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/edit/coi-gap/rv-1/feedback",
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "invalid" }) }),
+      );
+      // The change-of-mind keeps the row in Reviewed, with the updated label in place.
+      expect(screen.getByTestId("coi-gap-reviewed-reason-medtronic").textContent).toBe(
+        "Not a valid suggestion",
+      );
+      expect(screen.getByTestId("coi-gap-reviewed-row-medtronic")).toBeTruthy();
+    });
+
+    it("'Undo' POSTs /restore and replaces the row body with a 'moved back' confirmation", async () => {
+      render(<CoiGapCard cwid="self01" candidates={CANDIDATES} reviewed={REVIEWED} />);
+      fireEvent.click(screen.getByTestId("coi-gap-reviewed-undo-medtronic"));
+      await screen.findByText("Moved back to your review.");
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/edit/coi-gap/rv-1/restore",
+        expect.objectContaining({ method: "POST" }),
+      );
+      // The settled reason label is gone — the row now reads as moved back.
+      expect(screen.queryByTestId("coi-gap-reviewed-reason-medtronic")).toBeNull();
+    });
+  });
+
+  // ── superuser nag also gates BOTH new surfaces' change-of-mind + undo ────────
+  describe("superuser mode — the nag gates Reviewed change-of-mind AND undo", () => {
+    beforeEach(() => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }),
+      );
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("a reviewed change-of-mind opens the confirm and does NOT write until confirmed", async () => {
+      render(
+        <CoiGapCard
+          cwid="self01"
+          mode="superuser"
+          scholarName="Dr. Other"
+          candidates={CANDIDATES}
+          reviewed={REVIEWED}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("coi-gap-reviewed-change-medtronic"));
+      fireEvent.click(screen.getByTestId("coi-gap-reviewed-choice-invalid-medtronic"));
+      const continueBtn = await screen.findByRole("button", { name: "Continue" });
+      // The nag holds the write back.
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+      // Governance holds inside the nag — no forbidden accusatory vocabulary.
+      const nagText = document.body.textContent ?? "";
+      for (const re of FORBIDDEN) {
+        expect(nagText, `forbidden word matched: ${re}`).not.toMatch(re);
+      }
+      // Confirming fires the new reason for the source.
+      fireEvent.click(continueBtn);
+      await waitFor(() =>
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          "/api/edit/coi-gap/rv-1/feedback",
+          expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "invalid" }) }),
+        ),
+      );
+    });
+
+    it("a reviewed Undo opens the confirm and only restores after confirmation", async () => {
+      render(
+        <CoiGapCard
+          cwid="self01"
+          mode="superuser"
+          scholarName="Dr. Other"
+          candidates={CANDIDATES}
+          reviewed={REVIEWED}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("coi-gap-reviewed-undo-medtronic"));
+      const continueBtn = await screen.findByRole("button", { name: "Continue" });
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+      fireEvent.click(continueBtn);
+      await screen.findByText("Moved back to your review.");
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/edit/coi-gap/rv-1/restore",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+  });
+
+  // ── GOVERNANCE across the two NEW surfaces ──────────────────────────────────
+  describe("governance holds across the lower-confidence + Reviewed surfaces", () => {
+    it("always renders the verbatim source sentence for an expanded Medium row", () => {
+      render(<CoiGapCard cwid="self01" candidates={[CANDIDATES[0]]} lowerCandidates={LOWER} />);
+      expect(screen.getByTestId("coi-gap-source-lo-1").textContent).toContain(
+        "Co-author reports a consulting relationship with Boston Scientific.",
+      );
+    });
+
+    it("never surfaces a numeric/percentage score on the new surfaces", () => {
+      render(
+        <CoiGapCard
+          cwid="self01"
+          candidates={[CANDIDATES[0]]}
+          lowerCandidates={LOWER}
+          reviewed={REVIEWED}
+        />,
+      );
+      const text = document.body.textContent ?? "";
+      expect(text).not.toMatch(/%/);
+      // No bare 0.NN style relevance score crosses to the client.
+      expect(text).not.toMatch(/\b0\.\d/);
+    });
+
+    it("contains NONE of the forbidden accusatory words with both new surfaces present", () => {
+      render(
+        <CoiGapCard
+          cwid="self01"
+          candidates={[CANDIDATES[0]]}
+          lowerCandidates={LOWER}
+          reviewed={REVIEWED}
+        />,
+      );
+      const text = document.body.textContent ?? "";
+      for (const re of FORBIDDEN) {
+        expect(text, `forbidden word matched: ${re}`).not.toMatch(re);
       }
     });
   });

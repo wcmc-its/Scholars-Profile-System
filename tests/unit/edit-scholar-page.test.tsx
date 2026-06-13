@@ -111,6 +111,8 @@ const fakeCtx = (cwid: string) => ({
   // The real loader always returns these (array + nullable); the page reads them
   // to derive the valid `?attr` set (#836 highlights + COI-gap visibility).
   unmatchedPubmedCoi: [],
+  unmatchedPubmedCoiLower: [],
+  unmatchedPubmedCoiReviewed: [],
   highlights: null,
 });
 
