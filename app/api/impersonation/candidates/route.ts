@@ -252,14 +252,25 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const stewardCwids = listCommsStewardCwids().filter((c) => !emitted.has(c));
     if (stewardCwids.length > 0) {
       // Resolve a display name/slug from a Scholar row when one exists; a steward
-      // without a profile (the common case) shows their CWID as the label.
-      const profiles = await db.read.scholar
-        .findMany({
-          where: { cwid: { in: stewardCwids }, deletedAt: null },
-          select: { cwid: true, preferredName: true, slug: true },
-        })
-        .catch(() => [] as Array<{ cwid: string; preferredName: string; slug: string }>);
+      // without a profile (the common case) takes their name from the ED-name
+      // bridge (`steward_directory`, comms-steward-profile-editing-spec.md §5),
+      // and shows the bare CWID only when neither has it.
+      const [profiles, stewardNames] = await Promise.all([
+        db.read.scholar
+          .findMany({
+            where: { cwid: { in: stewardCwids }, deletedAt: null },
+            select: { cwid: true, preferredName: true, slug: true },
+          })
+          .catch(() => [] as Array<{ cwid: string; preferredName: string; slug: string }>),
+        db.read.stewardDirectory
+          .findMany({
+            where: { cwid: { in: stewardCwids } },
+            select: { cwid: true, displayName: true },
+          })
+          .catch(() => [] as Array<{ cwid: string; displayName: string }>),
+      ]);
       const profileByCwid = new Map(profiles.map((p) => [p.cwid.toLowerCase(), p]));
+      const nameByCwid = new Map(stewardNames.map((n) => [n.cwid.toLowerCase(), n.displayName]));
       // R2 — exclude any steward who is themselves a superuser, same fail-closed
       // (error ⇒ exclude) rule as the scholar pass.
       const stewardSuperuserFlags = await Promise.all(
@@ -269,7 +280,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       stewardCwids.forEach((cwid, i) => {
         if (stewardSuperuserFlags[i]) return; // R2 — not assumable
         const profile = profileByCwid.get(cwid);
-        const preferredName = profile?.preferredName ?? cwid;
+        const preferredName = profile?.preferredName ?? nameByCwid.get(cwid) ?? cwid;
         // `q` matches the CWID or the resolved name (the scholar pass already
         // applied `q` server-side; mirror it for the steward set in memory).
         if (qLower && !cwid.includes(qLower) && !preferredName.toLowerCase().includes(qLower)) {

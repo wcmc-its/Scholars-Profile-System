@@ -1272,6 +1272,19 @@ model SlugHistory {
 
 /// ETL run log (Q5'). Tracks per-source success/failure for monitoring.
 /// CloudWatch alarm trigger in production: max(completed_at) per source < now - 26h.
+/// ED-sourced display names for `comms_steward` CWIDs that have no `Scholar`
+/// row of their own (e.g. external-affairs staff like dwd2001). Populated by the
+/// steward-name bridge (`etl:ed:import-steward-names`, fed by the WCM-side
+/// export), read by the "View as" banner + candidate list so a steward shows a
+/// name instead of a bare CWID. comms-steward-profile-editing-spec.md §5.
+model StewardDirectory {
+  cwid        String   @id @db.VarChar(32)
+  displayName String   @map("display_name") @db.VarChar(255)
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("steward_directory")
+}
+
 model EtlRun {
   id                      String    @id @default(uuid()) @db.VarChar(64)
   source                  String    @db.VarChar(64) // ED | ASMS | InfoEd | ReCiter | COI | PubMedRetractions | ReCiterAI-projection | OpenSearch-index | MeSH | MeshAnchor | MeshAlias
