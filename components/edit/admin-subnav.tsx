@@ -1,9 +1,17 @@
 /**
- * The shared admin sub-nav for the superuser `/edit` list surfaces (#497 PR-3c,
- * `slug-personalization-ui-spec.md` § 3.1). The maroon-underlined tab strip
- * under the black Apollo bar, linking the Profiles roster (`/edit/scholars`) and
- * the Profile-URL request queue (`/edit/slug-requests`). A pending-count pill
- * sits on the "URL requests" tab.
+ * The shared admin sub-nav across ALL `/edit` console surfaces (#497 PR-3c,
+ * `slug-personalization-ui-spec.md` § 3.1; unified onto the self-edit surface in
+ * `role-aware-navigation-entry-points-spec.md`). The maroon-underlined tab strip
+ * under the black Apollo bar, linking the Profiles roster (`/edit/scholars`), the
+ * Profile-URL request queue (`/edit/slug-requests`), the Slug registry,
+ * Administrators, and Method Families. A pending-count pill sits on the "URL
+ * requests" tab; "My Profile" anchors the right end.
+ *
+ * Originally only the superuser list pages rendered this. It now also renders on
+ * the `/edit` self-edit surface for a superuser or comms_steward (via
+ * `active="self"`), so the full role-gated option set is visible from anywhere in
+ * the console — not just after drilling into the roster. A plain scholar's
+ * self-edit page keeps its minimal "My Profile" strip and never mounts this.
  *
  * `pendingSlugRequests === null` hides the URL-requests tab entirely — the
  * slug-request feature is flag-gated (`SELF_EDIT_SLUG_REQUEST`), so a surface
@@ -17,7 +25,10 @@ export type AdminSubnavActive =
   | "slug-requests"
   | "slugs"
   | "administrators"
-  | "methods";
+  | "methods"
+  /** The viewer's own self-edit surface (`/edit`), shown as the active right-end
+   *  tab when a superuser / comms_steward is on their own profile. */
+  | "self";
 
 export function AdminSubnav({
   active,
@@ -39,7 +50,8 @@ export function AdminSubnav({
   methodsTab?: number | null;
   /** Link back to the viewer's own self-edit surface (`/edit`), right-aligned.
    *  `null`/omitted when the viewer has no profile of their own (a staff
-   *  superuser), so the link never lands on a 404. */
+   *  superuser), so the link never lands on a 404. Ignored when `active="self"`
+   *  — the viewer is already there, so "My Profile" renders as the active tab. */
   selfEditHref?: string | null;
   /** Whether to show the superuser list surfaces (Profiles / URL requests /
    *  Slug registry / Administrators). Default `true`. A comms_steward who is NOT
@@ -88,7 +100,15 @@ export function AdminSubnav({
             active={active === "methods"}
           />
         )}
-        {selfEditHref ? (
+        {active === "self" ? (
+          <span
+            className="border-apollo-maroon ml-auto inline-block border-b-2 py-3 text-sm font-medium"
+            aria-current="page"
+            data-testid="admin-subnav-self-edit"
+          >
+            My Profile
+          </span>
+        ) : selfEditHref ? (
           <Link
             href={selfEditHref}
             className="text-muted-foreground hover:text-foreground ml-auto inline-flex items-center gap-1 py-3 text-sm"

@@ -11,10 +11,12 @@
 import { redirect, notFound } from "next/navigation";
 
 import { EditPage, visibleAttrKeys } from "@/components/edit/edit-page";
+import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { ProxyLanding } from "@/components/edit/proxy-landing";
 import { getSession } from "@/lib/auth/session-server";
 import { getEffectiveCwid } from "@/lib/auth/effective-identity";
 import { isSuperuser } from "@/lib/auth/superuser";
+import { isCommsSteward, isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
 import { scholarsServedByProxy, type ProxyListLookup } from "@/lib/edit/proxy-authz";
@@ -22,9 +24,14 @@ import {
   listUnitAdminEditorsForScholar,
   type UnitAdminEditorsLookup,
 } from "@/lib/edit/unit-scholar-authz";
+import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
-import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
+import {
+  countPendingSlugRequests,
+  isSlugRequestEnabled,
+  loadLatestSlugRequest,
+} from "@/lib/edit/slug-request";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
 
 // /edit reads suppression-OFF + writes via /api/edit/*; the page must never
@@ -148,6 +155,11 @@ export default async function EditSelfPage({
     // Keyed on the effective editing identity (their own profile); a display
     // listing only — never an authorization decision.
     unitAdminEditorRows,
+    // Whether the EFFECTIVE viewer is a comms_steward — gates the "Method Families"
+    // tab in the unified console nav below. Effective (mirrors `canBrowseProfiles`)
+    // so the tab hides while down-scoped under "View as". Flag-gated short-circuit
+    // (no LDAP when `COMMS_STEWARD_ENABLED` is off), fail-closed.
+    commsSteward,
   ] = await Promise.all([
     isSuperuser(editCwid).catch(() => false),
     slugRequestEnabled ? loadLatestSlugRequest(editCwid, db.read) : Promise.resolve(null),
@@ -158,6 +170,7 @@ export default async function EditSelfPage({
       orderBy: { createdAt: "asc" },
     }),
     listUnitAdminEditorsForScholar(editCwid, db.read as unknown as UnitAdminEditorsLookup),
+    isCommsSteward(editCwid).catch(() => false),
   ]);
 
   const manageableUnits = [...units.departments, ...units.divisions, ...units.centers];
@@ -172,6 +185,17 @@ export default async function EditSelfPage({
     conferringUnitName: u.conferringUnitName,
   }));
 
+  // Unified console nav (role-aware-navigation-entry-points-spec.md): a superuser
+  // or comms_steward sees the full role-gated `AdminSubnav` on this self-edit
+  // surface (active="self"), so every admin option is reachable from here rather
+  // than only after drilling into the roster. A plain scholar gets `undefined` and
+  // EditShell falls back to the minimal "My Profile" strip. The pending-request
+  // count drives the superuser "URL requests" badge only — skip the query for a
+  // steward-only viewer.
+  const showConsoleNav = canBrowseProfiles || commsSteward;
+  const pendingSlugRequests =
+    canBrowseProfiles && slugRequestEnabled ? await countPendingSlugRequests(db.read) : null;
+
   return (
     <EditPage
       ctx={ctx}
@@ -180,6 +204,24 @@ export default async function EditSelfPage({
       slugRequestEnabled={slugRequestEnabled}
       latestSlugRequest={latestSlugRequest}
       canBrowseProfiles={canBrowseProfiles}
+      consoleNav={
+        showConsoleNav ? (
+          <AdminSubnav
+            active="self"
+            superuserSurfaces={canBrowseProfiles}
+            pendingSlugRequests={pendingSlugRequests}
+            administratorsTab={canBrowseProfiles && isAdministratorsTabEnabled() ? 0 : null}
+            methodsTab={
+              isMethodsTabVisible({
+                isSuperuser: canBrowseProfiles,
+                isCommsSteward: commsSteward,
+              })
+                ? 0
+                : null
+            }
+          />
+        ) : undefined
+      }
       manageableUnits={manageableUnits}
       proxyEditors={proxyEditors}
       unitAdminEditors={unitAdminEditors}
