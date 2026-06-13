@@ -30,6 +30,8 @@ const {
   aocMenteeFindMany,
   aocMenteeFindFirst,
   menteeCopubPubFindMany,
+  suppressionFindMany,
+  publicationAuthorFindMany,
 } = vi.hoisted(() => ({
   phdFindMany: vi.fn(async () => [] as unknown[]),
   postdocFindMany: vi.fn(async () => [] as unknown[]),
@@ -41,6 +43,9 @@ const {
   aocMenteeFindMany: vi.fn(async () => [] as unknown[]),
   aocMenteeFindFirst: vi.fn(async () => null as unknown),
   menteeCopubPubFindMany: vi.fn(async () => [] as unknown[]),
+  // Issue #443/#185 — dark-pmid suppression of the badge count + chip preview.
+  suppressionFindMany: vi.fn(async () => [] as unknown[]),
+  publicationAuthorFindMany: vi.fn(async () => [] as unknown[]),
 }));
 
 vi.mock("@/lib/sources/reciterdb", () => ({ withReciterConnection }));
@@ -53,6 +58,8 @@ vi.mock("@/lib/db", () => ({
     menteeCopublication: { findMany: menteeCopubFindMany, findFirst: menteeCopubFindFirst },
     aocMentee: { findMany: aocMenteeFindMany, findFirst: aocMenteeFindFirst },
     menteeCopublicationPub: { findMany: menteeCopubPubFindMany },
+    suppression: { findMany: suppressionFindMany },
+    publicationAuthor: { findMany: publicationAuthorFindMany },
   },
 }));
 
@@ -74,6 +81,10 @@ beforeEach(() => {
   postdocFindMany.mockResolvedValue([]);
   studentPhdProgramFindMany.mockResolvedValue([]);
   scholarFindMany.mockResolvedValue([]);
+  // No publication suppressions by default — the dark-pmid pass is a no-op
+  // (loadPublicationSuppressions early-returns on zero rows).
+  suppressionFindMany.mockResolvedValue([]);
+  publicationAuthorFindMany.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -254,5 +265,38 @@ describe("getMenteesForMentor — MENTORING_COPUB_BRIDGE (issue #443)", () => {
     const { copubSourceAvailable } = await getMenteesForMentor("mentor01");
 
     expect(copubSourceAvailable).toBe(false);
+  });
+
+  it("drops a #356-dark co-pub from the preview and decrements the badge count (#443/#185)", async () => {
+    // Bridge snapshotted a count of 3 with pmid 111 in the preview. 111 has
+    // since been taken down (#356 whole-publication suppression). The dark-pmid
+    // pass must drop 111 from the preview (no title/journal/year leak) and
+    // decrement the count to 2; the non-dark 222 stays.
+    menteeCopubFindMany.mockResolvedValue([
+      {
+        menteeCwid: "m1",
+        count: 3,
+        preview: [
+          { pmid: 111, title: "Taken-down paper", journal: "J. Dark", year: 2023 },
+          { pmid: 222, title: "Kept paper", journal: "J. Open", year: 2022 },
+        ],
+      },
+    ]);
+    // Whole-publication takedown of 111 (contributorCwid null ⇒ darkPmid).
+    suppressionFindMany.mockResolvedValue([
+      { entityId: "111", contributorCwid: null },
+    ]);
+
+    const { mentees } = await getMenteesForMentor("mentor01");
+
+    expect(mentees).toHaveLength(1);
+    expect(mentees[0].copublicationCount).toBe(2); // 3 − 1 dropped
+    expect(mentees[0].copublicationPreview).toEqual([
+      { pmid: 222, title: "Kept paper", journal: "J. Open", year: 2022 },
+    ]);
+    // The taken-down pmid's metadata never reaches the caller.
+    expect(
+      mentees[0].copublicationPreview.some((p) => p.pmid === 111),
+    ).toBe(false);
   });
 });

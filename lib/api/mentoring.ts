@@ -505,6 +505,39 @@ export async function getMenteesForMentor(
     });
   }
 
+  // Issue #443/#185 — dark-pmid suppression of the badge count + chip preview.
+  // Neither co-pub source (#356) applies publication suppression: the bridge
+  // snapshots count+preview at export time, and the live query joins ReciterDB
+  // (which doesn't know SPS take-downs). So a publication taken down AFTER the
+  // last export (whole-pub #356, or derived-dark = every confirmed WCM author
+  // hidden) would still leak its title/journal/year into the popover preview and
+  // inflate the badge until the next re-import. Re-apply local suppression at
+  // request time over the preview pmids: drop dark pmids from each preview and
+  // decrement that mentee's count by the number dropped. This fully closes the
+  // title/journal/year LEAK (the security-sensitive part); a dark pmid that sits
+  // OUTSIDE the ≤3-most-recent preview can still inflate a bridge-sourced count
+  // by one until re-import (the full pmid list isn't carried on this lightweight
+  // path — getCoPublications, which has it, suppresses exactly).
+  const previewPmids = [
+    ...new Set(
+      [...copubPreviewByCwid.values()].flat().map((p) => String(p.pmid)),
+    ),
+  ];
+  if (previewPmids.length > 0) {
+    const suppressions = await loadPublicationSuppressions(previewPmids, prisma);
+    const darkPmids = await resolveDarkPmids(previewPmids, suppressions, prisma);
+    if (darkPmids.size > 0) {
+      for (const [menteeCwid, preview] of copubPreviewByCwid) {
+        const kept = preview.filter((p) => !darkPmids.has(String(p.pmid)));
+        const dropped = preview.length - kept.length;
+        if (dropped === 0) continue;
+        copubPreviewByCwid.set(menteeCwid, kept);
+        const count = copubCountByCwid.get(menteeCwid) ?? 0;
+        copubCountByCwid.set(menteeCwid, Math.max(0, count - dropped));
+      }
+    }
+  }
+
   // Scholar-table presence — drives linkability. Non-deleted, active rows only.
   // Only `status='active'` rows can be linked. Suppressed scholars (alumni
   // mentees ingested for pub attribution but with no public profile per spec)
