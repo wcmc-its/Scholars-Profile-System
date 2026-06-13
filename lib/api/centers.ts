@@ -34,6 +34,12 @@ import {
   resolveActiveGrantSuppression,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
+import {
+  familyOverlayKey,
+  isFamilyPubliclyVisible,
+  loadFamilyOverlayGate,
+} from "@/lib/api/methods-overlay";
+import { isCenterMethodsFacetEnabled } from "@/lib/profile/methods-lens-flags";
 
 /**
  * #552 § 3.3 — the load-bearing membership active predicate. A membership is
@@ -112,10 +118,32 @@ export type CenterDetail = {
  *  rows and on members of centers without a program taxonomy. */
 export type CenterMembershipType = "research" | "clinical";
 
+/**
+ * #962 — a PUBLIC (overlay-gated) method family attached to a center member, for
+ * the "Methods & tools" facet + per-row chips. `value` is the stable
+ * `supercategory::familyLabel` overlay key (the facet's stable value, aligned 1:1
+ * with the #800/#801 overlay gate); `familyLabel` is the display label;
+ * `pmidCount` drives top-N ordering; `exemplarTools` feed the chip tooltip.
+ */
+export type CenterMemberFamily = {
+  value: string;
+  supercategory: string;
+  familyLabel: string;
+  pmidCount: number;
+  exemplarTools: string[];
+};
+
 /** A center member — a department faculty hit plus the center-specific
  *  classification (#552) the facet sidebar + per-row badge consume. */
 export type CenterMemberHit = DepartmentFacultyHit & {
   membershipType: CenterMembershipType | null;
+  /** #962 — ALL public method families for this member, pmidCount desc. Facet
+   *  membership reads this set. Present only when CENTER_METHODS_FACET is on AND
+   *  the member has ≥1 public family; undefined otherwise (so the OFF-path payload
+   *  carries nothing — no SEO leak). */
+  methodFamilies?: CenterMemberFamily[];
+  /** #962 — top-N (≤3) of `methodFamilies` for the compact per-row chips. */
+  topMethods?: CenterMemberFamily[];
 };
 
 /** A program section on the public roster (#552 § 6.2). */
@@ -218,6 +246,68 @@ type CenterScholarRow = {
   division: { name: string } | null;
 };
 
+/** #962 — per-row chip cap; the facet's `methodFamilies` keeps all public ones. */
+const CENTER_ROW_METHODS_CAP = 3;
+
+/**
+ * #962 — PUBLIC method families for every center member, in ONE
+ * `scholarFamily.findMany` (+ ONE overlay-gate load). Mirrors
+ * `partitionScholarFamilies` / `getScholarMethodFamilies`' gate (#800 suppression
+ * always; #801 sensitivity only when METHODS_LENS_SENSITIVE_GATE is on) so the
+ * center page surfaces PUBLIC families ONLY — suppressed/sensitive families are
+ * excluded entirely, keeping the CloudFront-cacheable page free of any
+ * per-viewer call. Returns Map<cwid, families[]> (pmidCount desc). Empty map AND
+ * no query when CENTER_METHODS_FACET (or METHODS_LENS_ENABLED) is off, or when
+ * there are no cwids.
+ *
+ * @internal exported for the #962 unit test.
+ */
+export async function loadPublicFamiliesForMembers(
+  cwids: string[],
+): Promise<Map<string, CenterMemberFamily[]>> {
+  const out = new Map<string, CenterMemberFamily[]>();
+  if (!isCenterMethodsFacetEnabled() || cwids.length === 0) return out;
+
+  const gate = await loadFamilyOverlayGate();
+  const rows = (await prisma.scholarFamily.findMany({
+    // Mirror getScholarMethodFamilies (methods.ts): exclude soft-deleted/dormant
+    // scholars at the query level too — defense-in-depth for this public surface,
+    // even though callers today pass only active-filtered cwids.
+    where: { cwid: { in: cwids }, scholar: { deletedAt: null, status: "active" } },
+    orderBy: [{ pmidCount: "desc" }, { familyId: "asc" }],
+    select: {
+      cwid: true,
+      supercategory: true,
+      familyLabel: true,
+      pmidCount: true,
+      exemplarTools: true,
+    },
+  })) as Array<{
+    cwid: string;
+    supercategory: string;
+    familyLabel: string;
+    pmidCount: number;
+    exemplarTools: unknown;
+  }>;
+
+  // Rows arrive pmidCount-desc, so each cwid's list is pre-sorted; drop a row
+  // BEFORE it enters a member's list when it fails the SAME public gate.
+  for (const r of rows) {
+    if (!isFamilyPubliclyVisible(r.supercategory, r.familyLabel, gate)) continue;
+    const fam: CenterMemberFamily = {
+      value: familyOverlayKey(r.supercategory, r.familyLabel),
+      supercategory: r.supercategory,
+      familyLabel: r.familyLabel,
+      pmidCount: r.pmidCount,
+      exemplarTools: Array.isArray(r.exemplarTools) ? (r.exemplarTools as string[]) : [],
+    };
+    const list = out.get(r.cwid);
+    if (list) list.push(fam);
+    else out.set(r.cwid, [fam]);
+  }
+  return out;
+}
+
 /** Hydrate scholar rows into `DepartmentFacultyHit`s with pub/grant counts. */
 async function buildCenterMemberHits(
   rows: CenterScholarRow[],
@@ -316,6 +406,24 @@ export async function getCenterMembers(
       membershipType: membershipTypeByCwid.get(h.cwid) ?? null,
     }));
 
+  // #962 — layer PUBLIC method families onto already-built hits (GROUPED path
+  // only). Self-gates on the flag inside `loadPublicFamiliesForMembers`: when off
+  // the fetch is a no-op (empty map) and the hits pass through byte-identical to
+  // today, so no `if (flag)` branch is needed at the call site.
+  const attachMethods = async (hits: CenterMemberHit[]): Promise<CenterMemberHit[]> => {
+    const famByCwid = await loadPublicFamiliesForMembers(hits.map((h) => h.cwid));
+    if (famByCwid.size === 0) return hits; // flag off OR no public families
+    return hits.map((h) => {
+      const families = famByCwid.get(h.cwid);
+      if (!families || families.length === 0) return h;
+      return {
+        ...h,
+        methodFamilies: families,
+        topMethods: families.slice(0, CENTER_ROW_METHODS_CAP),
+      };
+    });
+  };
+
   // edge 10 — drop dormant / soft-deleted scholars from the public roster.
   const scholars = (await prisma.scholar.findMany({
     where: { cwid: { in: activeCwids }, deletedAt: null, status: "active" },
@@ -373,7 +481,9 @@ export async function getCenterMembers(
   // order; anything not placed in a program (null program, or a stale code)
   // falls into an "Other" group rendered last, header only if non-empty
   // (edge 8).
-  const hits = attachType(await buildCenterMemberHits(scholars));
+  // #962 — GROUPED path only: attach public method families for the facet +
+  // chips. (The flat path above is left untouched, scope constraint C.)
+  const hits = await attachMethods(attachType(await buildCenterMemberHits(scholars)));
   const hitByCwid = new Map(hits.map((h) => [h.cwid, h]));
   const placed = new Set<string>();
   const groups: CenterMemberGroup[] = [];

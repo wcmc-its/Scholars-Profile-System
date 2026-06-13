@@ -1211,6 +1211,19 @@ export class AppStack extends Stack {
         //     RENDER-ONLY: never re-fed into any LLM/embedding/retrieval. Wire in
         //     BOTH .env.local AND here per the flag-parity rule.
         METHODS_LENS_FAMILY_DEFINITIONS: env === "staging" ? "on" : "off",
+        //   CENTER_METHODS_FACET -- #962. The center-roster "Methods & tools"
+        //     multi-select facet + per-member tool chips on the GROUPED center
+        //     roster. ADDITIONALLY gated on METHODS_LENS_ENABLED in code (the
+        //     scholar_family substrate): when the lens is off this is off, so a
+        //     center page never queries scholar_family and the payload carries no
+        //     family data (no SEO/JSON side channel). PUBLIC families only (same
+        //     #800/#801 overlay gate as the lens), so the CloudFront-cacheable
+        //     center page stays cacheable -- no per-request/per-viewer call. When
+        //     off the grouped roster is byte-identical to today. STAGING-ON (the
+        //     lens substrate is staging-on); PROD OFF until the methods-lens
+        //     go-live. Wire in BOTH .env.local AND here per the flag-parity rule;
+        //     manual cdk deploy Sps-App-<env> required (CD only re-rolls image).
+        CENTER_METHODS_FACET: env === "staging" ? "on" : "off",
         // Scholar-profile facet-filter redesign (PR-2). A BIG visual change to
         // the Topics/Methods facets + a unified filter bar, fully gated. ON in
         // staging to soak the real-data behavior (method rows + cross-facet

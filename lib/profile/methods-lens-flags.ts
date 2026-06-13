@@ -93,3 +93,18 @@ export function isMethodsFamilyRosterFallbackOn(): boolean {
 export function isMethodsFamilyDefinitionsOn(): boolean {
   return process.env.METHODS_LENS_FAMILY_DEFINITIONS === "on";
 }
+
+/**
+ * #962 — the center-roster "Methods & tools" multi-select facet + per-member
+ * tool chips on the GROUPED center roster. ADDITIONALLY gated on
+ * METHODS_LENS_ENABLED (the `scholar_family` substrate): if the methods lens is
+ * off, this is off, so a center page never queries `scholar_family` and the
+ * server payload carries no family data (no SEO/JSON side channel). When off: no
+ * extra query, no facet, no chips. Surfaces PUBLIC families only (same #800/#801
+ * overlay gate as the lens), so the CloudFront-cacheable center page stays
+ * cacheable — no per-request/per-viewer call. Wire in BOTH `.env.local` AND the
+ * per-env `environment:` block in cdk/lib/app-stack.ts per the flag-parity rule.
+ */
+export function isCenterMethodsFacetEnabled(): boolean {
+  return isMethodsLensEnabled() && process.env.CENTER_METHODS_FACET === "on";
+}

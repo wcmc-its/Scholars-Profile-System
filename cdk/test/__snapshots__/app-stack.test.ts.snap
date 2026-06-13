@@ -456,6 +456,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "CENTER_METHODS_FACET",
+                "Value": "off",
+              },
+              {
                 "Name": "PROFILE_FACET_REDESIGN",
                 "Value": "off",
               },
@@ -3529,6 +3533,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "METHODS_LENS_FAMILY_DEFINITIONS",
+                "Value": "on",
+              },
+              {
+                "Name": "CENTER_METHODS_FACET",
                 "Value": "on",
               },
               {
