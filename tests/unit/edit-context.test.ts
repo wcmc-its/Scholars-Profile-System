@@ -900,11 +900,15 @@ describe("loadEditContext — COI-gap candidates (gate + dedup + date join)", ()
       includeCoiGap: true,
     });
 
-    // Only `new`, and HIGH tier only. Once the scholar records ANY feedback the
-    // row stops nagging (acknowledged / dismissed both drop off this panel — the
-    // feedback split); Medium, dominated by co-author leakage, is never fetched.
+    // The query now widens to the three reviewable lifecycle states
+    // (`resolved` excluded) and fetches ALL tiers — the active/lower/reviewed
+    // partition happens in-loader, not in the `where`. (High-active drives the
+    // nag; Medium-active drops to the lower expander; acted rows to Reviewed.)
     const whereArg = c.coiGapCandidate.findMany.mock.calls[0][0].where;
-    expect(whereArg).toEqual({ cwid: SELF, status: "new", tier: "High" });
+    expect(whereArg).toEqual({
+      cwid: SELF,
+      status: { in: ["new", "acknowledged", "dismissed"] },
+    });
     // The date join is scoped to the gap pmids (deduped).
     const pubWhere = c.publication.findMany.mock.calls[0][0].where;
     expect(pubWhere.pmid.in.sort()).toEqual(["30000001", "31508198", "34963501"]);
@@ -944,7 +948,7 @@ describe("loadEditContext — COI-gap candidates (gate + dedup + date join)", ()
     }
   });
 
-  it("narrows an unexpected tier value to the conservative Medium", async () => {
+  it("narrows an unexpected tier value to the conservative Medium (→ lower bucket)", async () => {
     const c = fakeClient();
     c.scholar.findUnique.mockResolvedValue(scholarRow());
     c.coiGapCandidate.findMany.mockResolvedValue([
@@ -953,7 +957,11 @@ describe("loadEditContext — COI-gap candidates (gate + dedup + date join)", ()
     const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => [], {
       includeCoiGap: true,
     });
-    expect(ctx!.unmatchedPubmedCoi[0].tier).toBe("Medium");
+    // A pure-Medium ACTIVE group never nags — it lands in the lower-confidence
+    // expander, not the High active list.
+    expect(ctx!.unmatchedPubmedCoi).toHaveLength(0);
+    expect(ctx!.unmatchedPubmedCoiLower).toHaveLength(1);
+    expect(ctx!.unmatchedPubmedCoiLower[0].tier).toBe("Medium");
   });
 
   it("falls back to a null year when the joined publication is missing", async () => {
@@ -966,6 +974,268 @@ describe("loadEditContext — COI-gap candidates (gate + dedup + date join)", ()
     });
     expect(ctx!.unmatchedPubmedCoi[0].sources[0].year).toBeNull();
     expect(ctx!.unmatchedPubmedCoi[0].newestTs).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// COI-gap "surface hidden + reviewed" — the three-surface partition
+// (active-High `unmatchedPubmedCoi` / active-Medium `unmatchedPubmedCoiLower` /
+// fully-acted `unmatchedPubmedCoiReviewed`). The query widens to
+// status ∈ {new, acknowledged, dismissed} (resolved excluded) and each
+// normalized-entity group is partitioned in-loader by whether a `new` source
+// still remains. GOVERNANCE: score/status/attribution/category never cross;
+// feedbackReason + reviewedAt cross ONLY into Reviewed rows.
+// ---------------------------------------------------------------------------
+
+describe("loadEditContext — COI-gap surface hidden + reviewed (active / lower / reviewed)", () => {
+  // A canonical persisted row. Every fixture carries the four forbidden internals
+  // (normalizedEntity is the group key; attribution/entityScore/category/status
+  // must never reach the client) so the governance assertions are meaningful.
+  const row = (over: Record<string, unknown>) => ({
+    id: "gap-x",
+    pmid: "40000001",
+    entity: "Acme Therapeutics",
+    tier: "High",
+    sourceSentence: "Consultant for Acme Therapeutics.",
+    normalizedEntity: "acme therapeutics",
+    attribution: "scholar",
+    entityScore: 0.9,
+    category: "personal",
+    status: "new",
+    feedbackReason: null,
+    reviewedAt: null,
+    ...over,
+  });
+
+  // One publication row per pmid the fixtures cite, so the date join resolves a
+  // year + sort ts (mirrors the existing block's PUB_ROWS shape).
+  const PUBS = [
+    { pmid: "40000001", year: 2024, dateAddedToEntrez: new Date("2024-02-01T00:00:00Z") },
+    { pmid: "40000002", year: 2023, dateAddedToEntrez: new Date("2023-02-01T00:00:00Z") },
+    { pmid: "40000003", year: 2022, dateAddedToEntrez: new Date("2022-02-01T00:00:00Z") },
+  ];
+
+  function loadGap(gapRows: unknown[]) {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.coiGapCandidate.findMany.mockResolvedValue(gapRows);
+    c.publication.findMany.mockResolvedValue(PUBS);
+    return loadEditContext(SELF, asClient(c), undefined, async () => [], { includeCoiGap: true });
+  }
+
+  it("(1) a pure-Medium ACTIVE relationship surfaces in the lower bucket, not the High active list", async () => {
+    const ctx = await loadGap([
+      row({ id: "g-med", normalizedEntity: "beta labs", entity: "Beta Labs", tier: "Medium" }),
+    ]);
+    expect(ctx!.unmatchedPubmedCoi).toHaveLength(0);
+    expect(ctx!.unmatchedPubmedCoiLower).toHaveLength(1);
+    expect(ctx!.unmatchedPubmedCoiLower[0]).toMatchObject({ key: "beta labs", tier: "Medium" });
+    expect(ctx!.unmatchedPubmedCoiReviewed).toHaveLength(0);
+  });
+
+  it("(2) a mixed High+Medium NEW relationship appears once in the High active list (promoted), absent from lower", async () => {
+    const ctx = await loadGap([
+      // Same normalized entity, two new papers — one High, one Medium → collapses
+      // to ONE active group whose tier is the highest (High).
+      row({ id: "g-hi", pmid: "40000001", tier: "High" }),
+      row({ id: "g-md", pmid: "40000002", tier: "Medium" }),
+    ]);
+    expect(ctx!.unmatchedPubmedCoi).toHaveLength(1);
+    expect(ctx!.unmatchedPubmedCoi[0]).toMatchObject({ key: "acme therapeutics", tier: "High" });
+    // Both new sources cited under the one promoted group.
+    expect(ctx!.unmatchedPubmedCoi[0].sources.map((s) => s.id).sort()).toEqual(["g-hi", "g-md"]);
+    expect(ctx!.unmatchedPubmedCoiLower).toHaveLength(0);
+    expect(ctx!.unmatchedPubmedCoiReviewed).toHaveLength(0);
+  });
+
+  it("(3a) an acknowledged relationship surfaces in Reviewed with reason=will_disclose + a reviewedAt ISO date, absent from both active lists", async () => {
+    const ctx = await loadGap([
+      row({
+        id: "g-ack",
+        normalizedEntity: "globex pharma",
+        entity: "Globex Pharma",
+        status: "acknowledged",
+        feedbackReason: "will_disclose",
+        reviewedAt: new Date("2026-03-15T09:30:00Z"),
+      }),
+    ]);
+    expect(ctx!.unmatchedPubmedCoi).toHaveLength(0);
+    expect(ctx!.unmatchedPubmedCoiLower).toHaveLength(0);
+    expect(ctx!.unmatchedPubmedCoiReviewed).toHaveLength(1);
+    expect(ctx!.unmatchedPubmedCoiReviewed[0]).toMatchObject({
+      key: "globex pharma",
+      entity: "Globex Pharma",
+      reason: "will_disclose",
+      reviewedAt: "2026-03-15",
+    });
+  });
+
+  it("(3b) infers will_disclose from an acknowledged status when feedbackReason is null (legacy row)", async () => {
+    const ctx = await loadGap([
+      row({
+        id: "g-ack-legacy",
+        normalizedEntity: "legacy co",
+        entity: "Legacy Co",
+        status: "acknowledged",
+        feedbackReason: null, // legacy — intent recorded before the reason column
+        reviewedAt: new Date("2026-04-01T00:00:00Z"),
+      }),
+    ]);
+    expect(ctx!.unmatchedPubmedCoiReviewed[0]).toMatchObject({
+      reason: "will_disclose",
+      reviewedAt: "2026-04-01",
+    });
+  });
+
+  it("(3c) a dismissed/historical and a dismissed/invalid relationship each surface in Reviewed with the recorded reason", async () => {
+    const ctx = await loadGap([
+      row({
+        id: "g-hist",
+        normalizedEntity: "hist org",
+        entity: "Hist Org",
+        status: "dismissed",
+        feedbackReason: "historical",
+        reviewedAt: new Date("2026-02-10T00:00:00Z"),
+      }),
+      row({
+        id: "g-inv",
+        normalizedEntity: "false pos",
+        entity: "False Pos",
+        status: "dismissed",
+        feedbackReason: "invalid",
+        reviewedAt: new Date("2026-02-20T00:00:00Z"),
+      }),
+    ]);
+    expect(ctx!.unmatchedPubmedCoi).toHaveLength(0);
+    expect(ctx!.unmatchedPubmedCoiLower).toHaveLength(0);
+    const byKey = new Map(ctx!.unmatchedPubmedCoiReviewed.map((r) => [r.key, r]));
+    expect(byKey.get("hist org")).toMatchObject({ reason: "historical", reviewedAt: "2026-02-10" });
+    expect(byKey.get("false pos")).toMatchObject({ reason: "invalid", reviewedAt: "2026-02-20" });
+  });
+
+  it("(3d) Reviewed is ordered most-recently-reviewed first (reviewedAt desc)", async () => {
+    const ctx = await loadGap([
+      row({
+        id: "g-old",
+        normalizedEntity: "older co",
+        entity: "Older Co",
+        status: "dismissed",
+        feedbackReason: "invalid",
+        reviewedAt: new Date("2026-01-05T00:00:00Z"),
+      }),
+      row({
+        id: "g-new",
+        normalizedEntity: "newer co",
+        entity: "Newer Co",
+        status: "dismissed",
+        feedbackReason: "historical",
+        reviewedAt: new Date("2026-05-05T00:00:00Z"),
+      }),
+    ]);
+    expect(ctx!.unmatchedPubmedCoiReviewed.map((r) => r.key)).toEqual(["newer co", "older co"]);
+  });
+
+  it("(4) a relationship with one 'new' source AND acted sources is ACTIVE only — never in Reviewed, and its acted source is not re-shown", async () => {
+    const ctx = await loadGap([
+      // Same normalized entity: one still-new High paper + one already-acted paper.
+      row({ id: "g-still-new", pmid: "40000001", status: "new", tier: "High" }),
+      row({
+        id: "g-acted",
+        pmid: "40000002",
+        status: "dismissed",
+        feedbackReason: "invalid",
+        reviewedAt: new Date("2026-03-01T00:00:00Z"),
+        tier: "High",
+      }),
+    ]);
+    // ACTIVE only — appears once in the High list, never in Reviewed.
+    expect(ctx!.unmatchedPubmedCoi).toHaveLength(1);
+    expect(ctx!.unmatchedPubmedCoi[0].key).toBe("acme therapeutics");
+    expect(ctx!.unmatchedPubmedCoiReviewed).toHaveLength(0);
+    expect(ctx!.unmatchedPubmedCoiLower).toHaveLength(0);
+    // The acted sibling is NOT re-shown — only the still-`new` source is cited.
+    expect(ctx!.unmatchedPubmedCoi[0].sources.map((s) => s.id)).toEqual(["g-still-new"]);
+  });
+
+  it("(5) status='resolved' rows are excluded at the query — the gap closed itself, nothing to review", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    // A real `resolved` row never reaches the loader: the where filters it out at
+    // the DB. Mock the DB returning only the three reviewable statuses (as the
+    // real query would), then assert the query's where excludes `resolved`.
+    c.coiGapCandidate.findMany.mockResolvedValue([
+      row({ id: "g-new", status: "new", tier: "High" }),
+      row({
+        id: "g-rev",
+        pmid: "40000002",
+        normalizedEntity: "rev co",
+        entity: "Rev Co",
+        status: "dismissed",
+        feedbackReason: "invalid",
+        reviewedAt: new Date("2026-03-01T00:00:00Z"),
+      }),
+    ]);
+    c.publication.findMany.mockResolvedValue(PUBS);
+    const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => [], {
+      includeCoiGap: true,
+    });
+    // The query asked the DB for exactly the three reviewable states; `resolved`
+    // is never fetched (so a closed gap can't reappear in any surface).
+    const whereArg = c.coiGapCandidate.findMany.mock.calls[0][0].where;
+    expect(whereArg.status.in.sort()).toEqual(["acknowledged", "dismissed", "new"]);
+    expect(whereArg.status.in).not.toContain("resolved");
+    // Sanity: the fetched rows still partition correctly (active-High + reviewed).
+    expect(ctx!.unmatchedPubmedCoi).toHaveLength(1);
+    expect(ctx!.unmatchedPubmedCoiReviewed).toHaveLength(1);
+  });
+
+  it("(6) GOVERNANCE: no list exposes entityScore/status/attribution/category/normalizedEntity; reviewed exposes reason+reviewedAt only", async () => {
+    const ctx = await loadGap([
+      // One active-High, one active-Medium, one reviewed — every list populated.
+      row({ id: "g-active-hi", normalizedEntity: "high co", entity: "High Co", tier: "High" }),
+      row({
+        id: "g-active-md",
+        pmid: "40000002",
+        normalizedEntity: "med co",
+        entity: "Med Co",
+        tier: "Medium",
+      }),
+      row({
+        id: "g-reviewed",
+        pmid: "40000003",
+        normalizedEntity: "rev co",
+        entity: "Rev Co",
+        status: "dismissed",
+        feedbackReason: "historical",
+        reviewedAt: new Date("2026-03-01T00:00:00Z"),
+      }),
+    ]);
+    const FORBIDDEN = ["entityScore", "status", "attribution", "category", "normalizedEntity"];
+    const SOURCE_FORBIDDEN = [...FORBIDDEN, "tier", "feedbackReason", "reviewedAt"];
+
+    // Active (High + lower) rows carry NONE of the forbidden internals, and no
+    // reason/reviewedAt (those are Reviewed-only).
+    for (const g of [...ctx!.unmatchedPubmedCoi, ...ctx!.unmatchedPubmedCoiLower]) {
+      for (const f of [...FORBIDDEN, "reason", "reviewedAt", "feedbackReason"]) {
+        expect(g).not.toHaveProperty(f);
+      }
+      // The only entity-derived field that crosses is the opaque `key`.
+      expect(g.key).toBe(g.key.toLowerCase());
+      for (const s of g.sources) {
+        for (const f of SOURCE_FORBIDDEN) expect(s).not.toHaveProperty(f);
+        // Source carries exactly the four rendered fields.
+        expect(Object.keys(s).sort()).toEqual(["id", "pmid", "sourceSentence", "year"]);
+      }
+    }
+
+    // Reviewed rows expose reason + reviewedAt (governance-allowed: the scholar's
+    // own action), but still NONE of the four forbidden internals.
+    const rev = ctx!.unmatchedPubmedCoiReviewed[0];
+    expect(rev).toMatchObject({ reason: "historical", reviewedAt: "2026-03-01" });
+    for (const f of FORBIDDEN) expect(rev).not.toHaveProperty(f);
+    for (const s of rev.sources) {
+      for (const f of SOURCE_FORBIDDEN) expect(s).not.toHaveProperty(f);
+    }
   });
 });
 

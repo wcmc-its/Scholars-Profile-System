@@ -75,11 +75,13 @@ model CoiGapCandidate {
 - **ETL preservation:** the daily `etl:coi-gap` upsert already excludes
   `feedbackReason` from its `update` payload (it lists explicit columns + `status`), so a
   recorded reason survives reruns — no ETL change needed.
-- **Panel surfacing (changed):** `lib/api/edit-context.ts` now surfaces only
-  `status='new'` (was `new` + `acknowledged`). Any recorded feedback — `acknowledged`
-  (will disclose) *or* `dismissed` — therefore stops nagging by dropping off the panel,
-  while the row stays in the table for the ETL/reconcile and research. No current effect:
-  nothing set `acknowledged` before this change.
+- **Panel surfacing (changed):** `lib/api/edit-context.ts` partitions acted vs.
+  unacted relationships rather than dropping every acted row. An active suggestion
+  (any `status='new'` source) keeps nagging; a fully-acted relationship moves to a
+  settled **Reviewed** view instead of vanishing (see §5a). The active list still
+  never nags on an acted row, and every row stays in the table for the
+  ETL/reconcile and research. No current effect: nothing set `acknowledged` before
+  this change.
 - **Audit (changed):** the `action` ENUM gains `coi_gap_feedback` — TS `AuditAction`
   (`lib/edit/audit.ts`) **and** the MySQL ENUM in `scripts/sql/audit-log.sql`, appended
   LAST to preserve ordinals. The operator applies the idempotent `MODIFY COLUMN` before
@@ -123,13 +125,98 @@ scholar isn't steered. Keep "Review in Gateway" in the rail.
 - **Active card:** verbatim `sourceSentence` blockquote stays *always visible* (the
   non-negotiable "human adjudicates, not the score" rule), tier chip, PMID link, then the
   three choice buttons (below the sources) + "Review in Gateway" (in the rail).
-- **After a choice:** the row collapses to "<entity> — <recorded reason>" (e.g.
-  "Historically true, not currently valid") + **"Undo"**. Undo → `/restore`, clears the
-  reason, re-expands the three choices.
+- **After a choice:** the active row stops nagging; the relationship reappears, settled,
+  in the **Reviewed** view (§5a) as "<entity> — <recorded reason>" (e.g. "Historically
+  true, not currently valid") with **"Undo"** and **"Change response"**. Undo →
+  `/restore`, clears the reason; the relationship returns to the active list on the next
+  load (and shows a "Moved back to your review." confirmation in place until then).
 - **Superuser mode:** unchanged "nag" confirmation before the write; audit records the
   real admin.
 - **Governance chips:** unchanged — and note "I intend to update my COI statement" is
   phrased as the scholar's *intent*, never a compliance commitment the system tracks.
+
+## 5a. Two added surfaces — lower-confidence matches & Reviewed
+
+The original panel showed exactly one list: active **High**-tier suggestions, with every
+acted row dropping off. That left two things invisible — the weaker **Medium**-tier
+matches the model also found, and the scholar's own prior decisions — so a scholar who
+acted on a suggestion could never see, revisit, or change it. Two surfaces close that,
+both still **dark** behind `SELF_EDIT_COI_GAP_HINT`.
+
+### The active / lower / reviewed partition
+
+`lib/api/edit-context.ts` now reads `status ∈ {new, acknowledged, dismissed}` (still
+excluding `resolved`) and groups each relationship by normalized entity, then classifies
+the **whole group** by whether it still has any unacted source:
+
+| Group has… | Goes to | Surface |
+|---|---|---|
+| ≥1 `new` source, ≥1 High | `unmatchedPubmedCoi` | active **High** list (unchanged) |
+| ≥1 `new` source, all Medium | `unmatchedPubmedCoiLower` | lower-confidence expander |
+| no `new` source (every source acted) | `unmatchedPubmedCoiReviewed` | **Reviewed** view |
+
+**Partition rule (the invariant):** *any `new` source ⇒ the relationship is **active**,
+never in Reviewed.* A relationship that has both a fresh source and earlier acted sources
+shows once, in the active list, on its new sources only — its acted sources are not
+re-shown. This guarantees a relationship is never in two lists at once, and that acting
+on the last unacted source is what moves it to Reviewed.
+
+### Lower-confidence matches (Medium tier)
+
+Medium-tier matches are now shown — but deliberately demoted. Below the High list, a
+**native, collapsed** `<details>` expander labelled "Show *n* lower-confidence match(es)"
+holds the active Medium groups, with one muted caveat: *"These are weaker matches —
+often a co-author's disclosure rather than your own."* Inside, each row uses the **same**
+active-row markup as the High list (tier chip — the green "Likely covered" — verbatim
+source sentence(s), PMID, the same three choice buttons, Undo, "Review in Gateway"), so a
+scholar can adjudicate a Medium match exactly as a High one. Medium is opt-in by being
+collapsed and never auto-expanded; it does not nag.
+
+### Reviewed (current-state, change-of-mind)
+
+Below the Medium expander, a **collapsed** `<details>` labelled "Reviewed (*n*)" shows
+every fully-acted relationship, presented as **settled history** — no amber, no "worth
+reviewing", nothing that nags. Each row shows the entity (verbatim), the recorded reason
+label, and the action date (`reviewedAt`), plus two affordances:
+
+- **Change response** — re-opens the three choice buttons inline; picking a different one
+  re-records via `/feedback` and updates the label in place (the relationship stays in
+  Reviewed).
+- **Undo** — `/restore`, which clears the reason and returns the relationship to the
+  active list on the next load; the row shows "Moved back to your review." in place until
+  then.
+
+Both affordances route through the **same superuser "nag" confirmation** as the active
+list (IS-1 authz is unchanged: genuine self or genuine non-impersonating superuser).
+
+### Rail gating
+
+- **Item visibility:** the COI-gap rail item appears when **High-active > 0 OR
+  reviewed > 0**. A scholar with only reviewed history (no live suggestions) still gets
+  the item, so they can find and revisit past decisions. A relationship that is
+  **Medium-only** (lower-confidence, nothing High-active, nothing reviewed) does **not**
+  surface the item — weak matches never demand attention.
+- **Badge count:** the numeric badge counts **High-active only** (`unmatchedPubmedCoi`),
+  coerced so a count of 0 shows no badge. Medium and Reviewed counts live in their own
+  expander/section labels, not the badge — the badge means "things actively worth a look".
+
+### Governance — what crosses to the client
+
+The Reviewed view is the **only** new place server-derived fields reach the browser, and
+the surface is tightly bounded:
+
+- **`feedbackReason` crosses only** mapped into a Reviewed row's `reason` (the
+  scholar's *own* recorded choice — `will_disclose` is derived for an `acknowledged`
+  row that predates the reason column), rendered as the existing human label.
+- **`reviewedAt` crosses only** into a Reviewed row's `reviewedAt` (the scholar's own
+  action date, governance-allowed). It is also used server-side to order the list; the
+  ordering key (`newestTs`) is never displayed.
+- **Still starved (never cross):** the numeric entity score, `attribution`, `category`,
+  and lifecycle `status`. The active and lower lists carry no reason and no date at all.
+- The verbatim `sourceSentence` of every source is **always** rendered (active, lower,
+  and Reviewed alike), and confidence is shown only as the qualitative tier chip — never
+  a number or percentage. None of the added copy uses the forbidden accusatory vocabulary
+  ("undisclosed", "failed to disclose", "missing", "violation", "gap").
 
 ## 6. Research export
 
@@ -166,7 +253,10 @@ chips (§5) are unchanged. The export (§6) stays an internal operator query.
 | `/feedback` route | each valid reason → correct `(status, reason)` + `reviewedAt`; missing/garbage reason → `400 invalid_reason`; absent flag → `503` after authz; non-self non-superuser → `403`; impersonating superuser → `403`; missing id → `404`; idempotent same reason → `unchanged:true`; change-of-mind overwrites + single audit row |
 | `/restore` | clears `feedbackReason` to null and status to `new`; audit row |
 | lifecycle | `reconcileCandidates` unchanged; **ETL upsert preserves `feedback_reason`** on an existing acted row (regression guard) |
-| UI | three labelled choices render in `self` and `superuser` modes; chosen-state names the reason; Undo re-expands; source sentence always present |
+| UI | three labelled choices render in `self` and `superuser` modes; source sentence always present; acting moves the relationship to **Reviewed** (named reason + date), Undo returns it ("Moved back to your review."), Change-response re-records in place |
+| surfaces | Medium-only active groups appear only in the collapsed lower-confidence expander; a relationship with any `new` source is **active, never in Reviewed** (partition invariant); a fully-acted group renders in Reviewed with its newest derivable reason + `reviewedAt` |
+| rail | item visible when High-active>0 OR reviewed>0; Medium-only does **not** surface the item; badge counts High-active only and shows nothing at 0 |
+| governance | active/lower lists carry no reason/date; only Reviewed rows carry `reason` + `reviewedAt`; score/status/attribution/category never reach the client; no forbidden vocabulary in added copy |
 | audit | `coi_gap_feedback` row carries both fields in before/after |
 
 ## 9. Rollout
