@@ -231,3 +231,23 @@ ED-person mirror.
    nav capability set + the ED-name bridge (smaller, no new write authority), then
    (B) the profile-edit authz expansion (the security-sensitive core), each its
    own review.
+
+---
+
+## 10. Addendum — org-unit editing (scope correction, 2026-06-13)
+
+Operator feedback after PR B shipped: a steward saw no org-unit editing. The
+original build excluded **all** unit editing; "minus adding/remove org units"
+actually means exclude only unit **create/delete** (+ grants) — editing
+*existing* units is in scope under "superuser parity." Corrected (PR C):
+
+- A comms_steward edits any **existing** department / division / center's content
+  (description, leadership, roster) at **curator parity** — `canEditUnit` admits
+  the steward, and `loadUnitEditContext` maps a grant-less steward's `actorRole`
+  to `curator` (so `canManageAccess` stays Owner/Superuser-only → **no grant UI**).
+- **Excluded** (unchanged): create/delete a unit (`/edit/unit/new` + the
+  "Create a unit" affordance stay superuser-only), and admin/unit-admin grants
+  (`canManageAccess` / `canGrant`). Retired units stay superuser-only.
+- **Nav:** a "Units" tab (`AdminSubnav` `unitsTab` capability) → `/edit/units`,
+  whose finder is opened to the steward (`canFindAnyUnit`), so they can jump to
+  any unit. Shown to steward + superuser on the roster + Method-Families surfaces.

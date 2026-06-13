@@ -60,6 +60,8 @@ export type ProfilesRosterProps = {
   /** Forwarded to the sub-nav: show the "Profiles" tab independently of
    *  `superuserSurfaces` (a comms_steward is a global profile editor). */
   profilesTab?: boolean;
+  /** Forwarded to the sub-nav: show the "Units" tab (the `/edit/units` finder). */
+  unitsTab?: boolean;
 };
 
 const BASE = "/edit/scholars";
@@ -99,6 +101,7 @@ export function ProfilesRoster({
   viewerCwid,
   superuserSurfaces = true,
   profilesTab = false,
+  unitsTab = false,
 }: ProfilesRosterProps) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, total);
@@ -126,6 +129,7 @@ export function ProfilesRoster({
         selfEditHref={selfEditHref}
         superuserSurfaces={superuserSurfaces}
         profilesTab={profilesTab}
+        unitsTab={unitsTab}
       />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">

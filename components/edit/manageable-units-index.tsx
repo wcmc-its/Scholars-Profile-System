@@ -28,20 +28,26 @@ import {
 export type ManageableUnitsIndexProps = {
   units: ManageableUnits;
   isSuperuser: boolean;
-  /** Every unit, for the superuser finder; empty for non-superusers. */
+  /** Show the "jump to any unit" finder — a superuser, or a comms_steward who
+   *  edits any existing unit's content (comms-steward-profile-editing-spec.md
+   *  §3b). Defaults to `isSuperuser`. The "Create a unit" affordance stays
+   *  `isSuperuser`-only (a steward edits but never creates/deletes units). */
+  canFindAnyUnit?: boolean;
+  /** Every unit, for the finder; empty when `canFindAnyUnit` is false. */
   finderUnits: ReadonlyArray<UnitFinderEntry>;
 };
 
 export function ManageableUnitsIndex({
   units,
   isSuperuser,
+  canFindAnyUnit = isSuperuser,
   finderUnits,
 }: ManageableUnitsIndexProps) {
   const hasGrants = units.total > 0;
 
   return (
     <div className="flex flex-col gap-8" data-slot="manageable-units-index">
-      {isSuperuser && (
+      {canFindAnyUnit && (
         <section
           className="border-apollo-border bg-apollo-surface flex flex-col gap-3 rounded-xl border p-5"
           data-testid="units-superuser-tools"
@@ -50,15 +56,21 @@ export function ManageableUnitsIndex({
             <div>
               <h2 className="text-[15px] font-semibold">Jump to any unit</h2>
               <p className="text-muted-foreground text-sm">
-                As a superuser you can edit every department, division, and center.
+                {isSuperuser
+                  ? "As a superuser you can edit every department, division, and center."
+                  : "You can edit any department, division, or center."}
               </p>
             </div>
-            <Button asChild variant="apollo" size="sm">
-              <Link href="/edit/unit/new" data-testid="units-create">
-                <Plus className="size-4" aria-hidden />
-                Create a unit
-              </Link>
-            </Button>
+            {/* Create a unit is superuser-only — a comms_steward edits existing
+                units but never creates (or deletes) them (§3b). */}
+            {isSuperuser && (
+              <Button asChild variant="apollo" size="sm">
+                <Link href="/edit/unit/new" data-testid="units-create">
+                  <Plus className="size-4" aria-hidden />
+                  Create a unit
+                </Link>
+              </Button>
+            )}
           </div>
           <UnitFinder units={finderUnits} />
         </section>
@@ -71,7 +83,7 @@ export function ManageableUnitsIndex({
           <UnitGroup title="Centers" units={units.centers} showAddCenter={false} />
         </>
       ) : (
-        !isSuperuser && <EmptyState />
+        !canFindAnyUnit && <EmptyState />
       )}
     </div>
   );

@@ -166,4 +166,21 @@ describe("AdminSubnav", () => {
     expect(self.tagName.toLowerCase()).toBe("a");
     expect(self.getAttribute("href")).toBe("/edit");
   });
+
+  // comms-steward-profile-editing-spec.md §3b — a steward edits org units, so
+  // the Units tab is shown via the `unitsTab` capability.
+  it("shows the Units tab (linking /edit/units) when unitsTab is true", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} profilesTab unitsTab />);
+    expect(screen.getByTestId("admin-tab-units").getAttribute("href")).toBe("/edit/units");
+  });
+
+  it("hides the Units tab when unitsTab is false/omitted", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} superuserSurfaces />);
+    expect(screen.queryByTestId("admin-tab-units")).toBeNull();
+  });
+
+  it('marks the Units tab active with aria-current when active="units"', () => {
+    render(<AdminSubnav active="units" pendingSlugRequests={null} unitsTab />);
+    expect(screen.getByTestId("admin-tab-units").getAttribute("aria-current")).toBe("page");
+  });
 });

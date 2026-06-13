@@ -522,12 +522,12 @@ describe("comms_steward — page access", () => {
   });
 });
 
-describe("comms_steward — governance boundary (NOT granted)", () => {
-  it("cannot edit org units (not a unit owner/curator/superuser)", () => {
-    expect(canEditUnit(STEWARD, "none").ok).toBe(false);
+describe("comms_steward — org-unit editing (content, not governance)", () => {
+  it("CAN edit any existing unit's content even with no grant (curator parity, §3b)", () => {
+    expect(canEditUnit(STEWARD, "none")).toEqual({ ok: true });
   });
 
-  it("cannot manage unit access / grant roles ('adding/removing users')", () => {
+  it("CANNOT manage unit access / grant roles ('adding/removing users')", () => {
     expect(canManageAccess(STEWARD, "none").ok).toBe(false);
     expect(canGrant(STEWARD, "none", "curator").ok).toBe(false);
   });

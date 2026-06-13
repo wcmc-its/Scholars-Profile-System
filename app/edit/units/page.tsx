@@ -34,7 +34,11 @@ export default async function EditUnitsPage() {
   }
 
   const units = await loadManageableUnits(session.cwid, db.read);
-  const finderUnits = session.isSuperuser ? await loadAllUnitsForFinder(db.read) : [];
+  // A superuser AND a comms_steward (a global unit-content editor, comms-steward-
+  // profile-editing-spec.md §3b) both get the all-units finder — they may edit
+  // any existing unit, not only ones they hold a grant on.
+  const finderUnits =
+    session.isSuperuser || session.isCommsSteward ? await loadAllUnitsForFinder(db.read) : [];
 
   // Back-link to the actor's own self-edit surface — only when they have a
   // (non-deleted) profile, so a staff superuser without one never hits a 404.
@@ -77,6 +81,7 @@ export default async function EditUnitsPage() {
         <ManageableUnitsIndex
           units={units}
           isSuperuser={session.isSuperuser}
+          canFindAnyUnit={session.isSuperuser || session.isCommsSteward}
           finderUnits={finderUnits}
         />
       </main>
