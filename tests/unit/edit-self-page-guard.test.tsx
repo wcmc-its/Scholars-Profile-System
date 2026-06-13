@@ -100,7 +100,8 @@ import EditSelfPage from "@/app/edit/page";
 
 /**
  * A minimal edit-context with a controllable `roleCategory`. The route reads
- * `ctx.scholar.roleCategory` for the #536 guard and `ctx.unmatchedPubmedCoi` /
+ * `ctx.scholar.roleCategory` for the #536 guard, the COI-gap rail counts
+ * (`ctx.unmatchedPubmedCoi` / `ctx.unmatchedPubmedCoiReviewed`, #953), and
  * `ctx.highlights` for the valid-`?attr` set; everything else is shell wiring.
  */
 function fakeCtx(cwid: string, roleCategory: string | null) {
@@ -117,6 +118,7 @@ function fakeCtx(cwid: string, roleCategory: string | null) {
     },
     publications: [],
     unmatchedPubmedCoi: [],
+    unmatchedPubmedCoiReviewed: [],
     highlights: null,
   };
 }
