@@ -51,10 +51,11 @@ const RETURN_BUTTON_STYLE = {
   "--tw-ring-offset-color": "#7a4f01",
 } as CSSProperties;
 
-const ROLE_LABEL: Record<"owner" | "curator" | "scholar", string> = {
+const ROLE_LABEL: Record<"owner" | "curator" | "scholar" | "comms_steward", string> = {
   owner: "Owner",
   curator: "Curator",
   scholar: "Scholar",
+  comms_steward: "Communications Steward",
 };
 
 /** Compact unit-kind suffix for the banner's subject line. */
@@ -70,11 +71,13 @@ const KIND_SHORT: Record<"department" | "division" | "center", string> = {
  * Amendment 1 role × unit-kind, #540).
  */
 function subjectDescriptor(im: {
-  role: "owner" | "curator" | "scholar";
+  role: "owner" | "curator" | "scholar" | "comms_steward";
   unitKind: "department" | "division" | "center" | null;
   unit: string | null;
 }): string {
-  if (im.role === "scholar") return ROLE_LABEL.scholar;
+  // A scholar and a comms_steward both carry no administered unit — the role
+  // label stands alone.
+  if (im.role === "scholar" || im.role === "comms_steward") return ROLE_LABEL[im.role];
   const unit = im.unit ? ` · ${im.unit}` : "";
   const kind = im.unitKind ? ` (${KIND_SHORT[im.unitKind]})` : "";
   return `${ROLE_LABEL[im.role]}${unit}${kind}`;

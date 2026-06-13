@@ -38,7 +38,7 @@ import { Button } from "@/components/ui/button";
  * dropped into the account-menu popover without threading state through it.
  */
 
-type CandidateRole = "owner" | "curator" | "scholar";
+type CandidateRole = "owner" | "curator" | "scholar" | "comms_steward";
 type UnitKind = "department" | "division" | "center";
 
 /** A row from `/api/impersonation/candidates` (§7). */
@@ -64,6 +64,7 @@ const ROLE_LABEL: Record<CandidateRole, string> = {
   owner: "Owner",
   curator: "Curator",
   scholar: "Scholar",
+  comms_steward: "Communications Steward",
 };
 
 const KIND_SHORT: Record<UnitKind, string> = {
@@ -72,9 +73,10 @@ const KIND_SHORT: Record<UnitKind, string> = {
   center: "Center",
 };
 
-/** `Owner · Cardiology (Dept)` for a unit role, or plain `Scholar`. */
+/** `Owner · Cardiology (Dept)` for a unit role; plain `Scholar` or
+ *  `Communications Steward` for the unit-less roles. */
 function describe(c: Candidate): string {
-  if (c.role === "scholar") return ROLE_LABEL.scholar;
+  if (c.role === "scholar" || c.role === "comms_steward") return ROLE_LABEL[c.role];
   const unit = c.unit ? ` · ${c.unit}` : "";
   const kind = c.unitKind ? ` (${KIND_SHORT[c.unitKind]})` : "";
   return `${ROLE_LABEL[c.role]}${unit}${kind}`;

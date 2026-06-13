@@ -35,6 +35,7 @@ import {
   type SerializedSessionCookie,
 } from "@/lib/auth/session";
 import { assertImpersonable, canImpersonate } from "@/lib/auth/effective-identity";
+import { isCommsSteward } from "@/lib/auth/comms-steward";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { verifyRequestOrigin } from "@/lib/edit/authz";
@@ -68,7 +69,7 @@ function noContentWithCookie(cookie: SerializedSessionCookie): NextResponse {
  *   2. no session              → 401
  *   3. cross-origin / non-JSON → 403 / 415 (R4, CSRF)
  *   4. real cwid not superuser → 403 `not_superuser` (R1 — REAL cwid, never effective)
- *   5. target not a scholar    → 404 `target_not_found`
+ *   5. target not a scholar or comms_steward → 404 `target_not_found`
  *   6. target IS a superuser   → 403 `target_is_superuser` (R2, down-only)
  * On success: re-seal with the overlay, audit `impersonation_start`, 204.
  */
@@ -107,12 +108,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       : "";
   if (!targetCwid) return editError(400, "invalid_target", "targetCwid");
 
-  // Target must be a real, non-departed scholar (spec §7 — "target not a real
-  // scholar" ⇒ 404). Read-side check; soft-deleted scholars are not assumable.
+  // Target must be a real, non-departed scholar OR a comms_steward
+  // (role-aware-navigation-entry-points-spec.md broadens spec §7's
+  // scholar-only rule). A steward is a global Method-Family role and may have no
+  // Scholar row of its own (dwd2001), so a superuser previewing the steward view
+  // needs them assumable too. This grants NO new capability: a superuser is a
+  // superset of comms_steward, so "view as a steward" is a narrower preview, not
+  // an escalation — and R2 below still rejects a target who is a superuser. The
+  // steward check is flag-gated (`isCommsSteward` ⇒ false when COMMS_STEWARD is
+  // off), so the broadening is inert on a dark deployment. Read-side; soft-
+  // deleted scholars are not assumable.
   const target = await db.read.scholar
     .findFirst({ where: { cwid: targetCwid, deletedAt: null }, select: { cwid: true } })
     .catch(() => null);
-  if (!target) return editError(404, "target_not_found", "targetCwid");
+  const targetIsSteward = target ? false : await isCommsSteward(targetCwid).catch(() => false);
+  if (!target && !targetIsSteward) return editError(404, "target_not_found", "targetCwid");
 
   // R2 — down-only escalation guard. Rejects a target who is themselves a
   // superuser (no lateral admin→admin). Stable reason for the UI / log triage.

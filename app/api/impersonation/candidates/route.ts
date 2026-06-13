@@ -33,6 +33,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSession } from "@/lib/auth/session-server";
 import { canImpersonate } from "@/lib/auth/effective-identity";
 import { isSuperuser } from "@/lib/auth/superuser";
+import { listCommsStewardCwids } from "@/lib/auth/comms-steward";
 import { pickDisplayGrant, type ImpersonationUnitKind } from "@/lib/edit/impersonation-display";
 import { db } from "@/lib/db";
 
@@ -48,10 +49,12 @@ type KindFilter = ImpersonationUnitKind | "scholar" | "all";
 interface Candidate {
   cwid: string;
   preferredName: string;
-  slug: string;
-  /** Most-privileged `UnitAdmin` role (owner > curator), else `scholar`. */
-  role: "owner" | "curator" | "scholar";
-  /** The administered unit's kind, or `null` for a plain scholar. */
+  /** `null` for a comms_steward with no Scholar profile of their own (dwd2001). */
+  slug: string | null;
+  /** Most-privileged `UnitAdmin` role (owner > curator), else `scholar`; or
+   *  `comms_steward` for a Method-Family steward with no scholar/unit role. */
+  role: "owner" | "curator" | "scholar" | "comms_steward";
+  /** The administered unit's kind, or `null` for a plain scholar / steward. */
   unitKind: ImpersonationUnitKind | null;
   /** Administered unit display name (owner/curator) or home unit (scholar). */
   unit: string | null;
@@ -237,5 +240,54 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     candidates.push({ cwid: r.cwid, preferredName: r.preferredName, slug: r.slug, role, unitKind, unit });
   });
 
-  return NextResponse.json(candidates, { headers: { "cache-control": "no-store" } });
+  // comms_steward candidates (role-aware-navigation-entry-points-spec.md): a
+  // steward (e.g. dwd2001) is a global Method-Family role, NOT a scholar — they
+  // may have no `Scholar` row at all — so the query above never surfaces them.
+  // Append the enumerable stewards (the allowlist; see `listCommsStewardCwids`)
+  // here. Only under the `all` view — a steward is not a department/division/
+  // center/scholar, so the unit-kind chips correctly exclude them. Each still
+  // passes the R2 down-only guard (superusers dropped) and the `q` filter.
+  if (kindFilter === "all") {
+    const emitted = new Set(candidates.map((c) => c.cwid.toLowerCase()));
+    const stewardCwids = listCommsStewardCwids().filter((c) => !emitted.has(c));
+    if (stewardCwids.length > 0) {
+      // Resolve a display name/slug from a Scholar row when one exists; a steward
+      // without a profile (the common case) shows their CWID as the label.
+      const profiles = await db.read.scholar
+        .findMany({
+          where: { cwid: { in: stewardCwids }, deletedAt: null },
+          select: { cwid: true, preferredName: true, slug: true },
+        })
+        .catch(() => [] as Array<{ cwid: string; preferredName: string; slug: string }>);
+      const profileByCwid = new Map(profiles.map((p) => [p.cwid.toLowerCase(), p]));
+      // R2 — exclude any steward who is themselves a superuser, same fail-closed
+      // (error ⇒ exclude) rule as the scholar pass.
+      const stewardSuperuserFlags = await Promise.all(
+        stewardCwids.map((c) => isSuperuser(c).catch(() => true)),
+      );
+      const qLower = q.toLowerCase();
+      stewardCwids.forEach((cwid, i) => {
+        if (stewardSuperuserFlags[i]) return; // R2 — not assumable
+        const profile = profileByCwid.get(cwid);
+        const preferredName = profile?.preferredName ?? cwid;
+        // `q` matches the CWID or the resolved name (the scholar pass already
+        // applied `q` server-side; mirror it for the steward set in memory).
+        if (qLower && !cwid.includes(qLower) && !preferredName.toLowerCase().includes(qLower)) {
+          return;
+        }
+        candidates.push({
+          cwid: profile?.cwid ?? cwid,
+          preferredName,
+          slug: profile?.slug ?? null,
+          role: "comms_steward",
+          unitKind: null,
+          unit: null,
+        });
+      });
+    }
+  }
+
+  return NextResponse.json(candidates.slice(0, CANDIDATE_LIMIT), {
+    headers: { "cache-control": "no-store" },
+  });
 }
