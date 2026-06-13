@@ -95,6 +95,10 @@ export type UnitEditContext = {
     name: string;
     title: string | null;
     role: "owner" | "curator";
+    /** `"manual"` for an in-app grant; `"ED:*"` for an Enterprise-Directory
+     *  sync. ED-sourced rows are not removable here (#955) — the route's
+     *  `ed_locked` gate is the backstop; the card disables Remove for them. */
+    source: string;
     grantedBy: string | null;
     grantedAt: Date;
   }> | null;
@@ -288,7 +292,7 @@ export async function loadUnitEditContext(
   const accessRows = canManageAccess
     ? await client.unitAdmin.findMany({
         where: { entityType: unitType, entityId: code },
-        select: { cwid: true, role: true, grantedBy: true, createdAt: true },
+        select: { cwid: true, role: true, source: true, grantedBy: true, createdAt: true },
         orderBy: { createdAt: "asc" },
       })
     : [];
@@ -362,6 +366,7 @@ export async function loadUnitEditContext(
         name: nameMap.get(r.cwid)?.name ?? r.cwid,
         title: nameMap.get(r.cwid)?.title ?? null,
         role: r.role,
+        source: r.source,
         grantedBy: r.grantedBy,
         grantedAt: r.createdAt,
       }))
