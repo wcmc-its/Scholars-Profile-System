@@ -107,8 +107,11 @@ export; they never reach the scholar-facing card.
    organizations (`Leon Levy`, `Karl Storz`, `Grace Bio-Labs`, `Ludwig Cancer`,
    `Henry Schein`, `Royalty Pharma`). There is no regex that separates
    `John Leonard` (a co-author) from `Leon Levy` (a funder), so suppressing the
-   class would *hide real conflicts*. Co-author full names are therefore **sized
-   in the diagnostic, never suppressed in production.**
+   class **on shape alone** would *hide real conflicts*. The later **author-roster
+   cross-check** (see "the dominant residual" below) reclaims only the safe slice:
+   it drops **initial-form** co-author names (`C Lehman`) confirmed on the byline,
+   never the bare `Given Surname` shape — so `Leon Levy` / `John Leonard` stay
+   surfaced — and never on a scholar-attributed clause.
 3. **#909 — render `High` tier only.** Staging data showed the rendered surface
    was dominated by `Medium` co-author leakage (see below). The bar was raised to
    `High` (scholar-attributed + strong entity). This matches the long-stated
@@ -179,17 +182,37 @@ crowd) is where the "9+" cap earns its keep.
 - **Recall-biased by design:** when attribution is uncertain, the pipeline
   suppresses rather than surfaces. We accept missing some real gaps to avoid false
   accusations.
-- **The remaining residual — the real next lever:** the dominant surviving noise
-  is a co-author who discloses **without an honorific** in
-  `FirstInitial Surname …` form — *"A.Ashworth is a cofounder of …"*,
-  *"C Lehman is a co-founder of …"*. Attribution only recognizes `Dr Surname` and
-  `First Last` author subjects, so these statements read as *single-author
-  unattributed* and the disclosing co-author's orgs leak onto every co-author.
-  This **escapes #903** (the statement isn't detected as multi-author) and is the
-  highest-value next fix: teach attribution to recognize the initial-surname
-  author form (→ attribute as `other` / multi-author → suppressed), or cross-check
-  against the paper's actual author roster. It is also what would let `Medium` be
-  shown safely in future.
+- **The dominant residual — now fixed by the author-roster cross-check:** the
+  dominant surviving noise was a co-author who discloses **without an honorific** in
+  `FirstInitial Surname …` form — *"A.Ashworth is a cofounder of Tango Therapeutics"*,
+  *"C Lehman is a co-founder of Clairity"*. Attribution recognized only `Dr Surname`
+  and `First Last` author subjects, so these read as *single-author unattributed* and
+  the disclosing co-author's org leaked onto every co-author (this **escaped #903** —
+  the statement wasn't detected as multi-author). The fix threads the paper's author
+  **byline** (`Publication.fullAuthorsString`, parsed by `buildAuthorRoster` to
+  surname → first-initials) into the matcher and applies it two ways:
+  - **attribution** (`initialSurnameRefs` + `attribute`): a no-honorific
+    first-initial-surname subject **confirmed on the byline** as a co-author
+    (surname + first initial, surname ≠ the scholar) marks the clause as another
+    author's → `other` → suppressed. This is what drops the leaked *org* (Tango,
+    Clairity) in the Tamimi case.
+  - **entity** (`matchesCoAuthor` in `analyzeStatement`): an **initial-form** entity
+    (`C Lehman`, `Lehman C`) that is itself a confirmed co-author is dropped — the
+    safe version of the person-name suppression #907 rejected on shape alone.
+
+  The match **requires the first initial to agree** (`C Lehman` is not dropped
+  against an unrelated `Lehman R`), and with no byline the cross-check is skipped
+  (unchanged behaviour). **Founder-org safety (the precision direction):** the bare
+  `Given Surname` shape (`Leon Levy`, `Karl Storz`, `Carl Zeiss`) is **never**
+  entity-matched — it is structurally an eponymous org, so matching it on a
+  coincidental same-surname co-author would wrongly drop a real funder. Initial-form
+  org names (`B. Braun`, `C. R. Bard`) *can* still collide, so the entity cross-check
+  is **never applied to a scholar-attributed clause** — the scholar's own disclosed
+  tie is never second-guessed by the byline. The only accepted residual is an
+  initial-form org named in an *unattributed* clause whose surname+initial happens to
+  match a co-author (rare; surfaces at Medium, never wrong-drops a scholar-attributed
+  High tie). This is also what lets `Medium` be shown more safely now that #953
+  surfaces it (opt-in expander).
 - **Entity-dedup residual:** one relationship can surface as several entities when
   the source spells it multiple ways (e.g. `Genentech` / `Roche` /
   `Genentech Roche`). Cosmetic; inflates a heavy discloser's count slightly.
@@ -255,3 +278,5 @@ crowd) is where the "9+" cap earns its keep.
 | #907 | junk-word suppression + co-author-name sizing (two-word suppression rejected as unsafe) |
 | #909 | render **High tier only** (hide Medium co-author leakage) |
 | #910 | quiet "to review" count chip on the rail |
+| #944 / #953 | 3-way feedback (will-disclose / historical / invalid); Medium opt-in expander + Reviewed history |
+| _(this change)_ | author-roster cross-check (`buildAuthorRoster`): roster-confirmed first-initial-surname author attribution (`other` → suppress the leaked org) + person-shaped co-author entity drop — the safe form of #907's rejected suppression |

@@ -74,6 +74,7 @@ async function main() {
       scholar: inputs.scholar,
       disclosed: inputs.disclosed,
       statements: inputs.statements,
+      rosters: inputs.rosters,
       nearDisclosedThreshold: THRESHOLD,
     });
     for (const row of r) out.write(`${JSON.stringify(row)}\n`);

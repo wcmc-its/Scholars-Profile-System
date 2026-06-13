@@ -12,18 +12,21 @@ import { describe, expect, it } from "vitest";
 import {
   analyzeStatement,
   attribute,
+  buildAuthorRoster,
   countAuthorMentions,
   deriveScholar,
   extractEntities,
   fuzzyScore,
   isCommonGivenName,
   isMultiAuthorStatement,
+  initialSurnameRefs,
   isPureNegation,
   isStructured,
   looksLikeGrantId,
   looksLikeInitialsName,
   looksLikeJunkEntity,
   looksLikePersonName,
+  matchesCoAuthor,
   normalizeEntity,
   scholarSlice,
 } from "@/lib/coi-gap/pipeline";
@@ -450,5 +453,245 @@ describe("analyzeStatement — extraction-junk suppression", () => {
     expect(various!.tier).toBe("Low");
     expect(various!.failureModeGuess).toBe("junk-token");
     expect(various!.tierReason).toMatch(/junk/i);
+  });
+});
+
+describe("buildAuthorRoster", () => {
+  it("parses a comma-separated surname-first byline into surname → first-initials", () => {
+    const roster = buildAuthorRoster("Ashworth A, Lehman C, Druker BJ, van der Berg KL");
+    expect(roster.get("ashworth")?.has("A")).toBe(true);
+    expect(roster.get("lehman")?.has("C")).toBe(true);
+    expect(roster.get("druker")?.has("B")).toBe(true); // first initial of "BJ"
+    expect(roster.get("vanderberg")?.has("K")).toBe(true); // multi-token surname collapses
+  });
+
+  it("accumulates multiple initials for a shared surname", () => {
+    const roster = buildAuthorRoster("Smith J, Smith R");
+    expect(roster.get("smith")).toEqual(new Set(["J", "R"]));
+  });
+
+  it("skips group/consortium and malformed entries; null/empty ⇒ empty roster", () => {
+    expect(buildAuthorRoster(null).size).toBe(0);
+    expect(buildAuthorRoster("").size).toBe(0);
+    // "The XYZ Consortium" has no trailing initials group → skipped.
+    const roster = buildAuthorRoster("The XYZ Consortium, Lehman C");
+    expect(roster.has("lehman")).toBe(true);
+    expect(roster.size).toBe(1);
+  });
+
+  it("accepts a pre-split list of entries", () => {
+    const roster = buildAuthorRoster(["Lehman C", "Ashworth A"]);
+    expect(roster.get("lehman")?.has("C")).toBe(true);
+    expect(roster.get("ashworth")?.has("A")).toBe(true);
+  });
+});
+
+describe("matchesCoAuthor", () => {
+  const roster = buildAuthorRoster("Lehman C, Ashworth A, Druker B");
+
+  it("matches the escaping INITIAL + surname forms (both token orders)", () => {
+    expect(matchesCoAuthor("C Lehman", roster)).toBe(true); // initial-first (the documented leak)
+    expect(matchesCoAuthor("Lehman C", roster)).toBe(true); // surname-first
+    expect(matchesCoAuthor("A. Ashworth", roster)).toBe(true); // dotted initial
+    expect(matchesCoAuthor("A Ashworth", roster)).toBe(true); // de-dotted (prose path)
+  });
+
+  it("DELIBERATELY ignores the bare 'Given Surname' shape, even on a colliding byline", () => {
+    // A bare given+surname is structurally an eponymous org; matching it would drop a
+    // real funder that happens to share a co-author's surname + first-initial. So it is
+    // NEVER matched on shape — the founder-org regression the adversarial review caught.
+    expect(matchesCoAuthor("John Leonard", buildAuthorRoster("Leonard J"))).toBe(false);
+    expect(matchesCoAuthor("Carl Zeiss", buildAuthorRoster("Zeiss C"))).toBe(false);
+    expect(matchesCoAuthor("Leon Levy", buildAuthorRoster("Levy L"))).toBe(false);
+    expect(matchesCoAuthor("Karl Storz", buildAuthorRoster("Storz K"))).toBe(false);
+  });
+
+  it("requires the first initial to AGREE (precision guard)", () => {
+    expect(matchesCoAuthor("R Lehman", roster)).toBe(false); // surname on byline, wrong initial
+  });
+
+  it("never matches an org-shaped phrase, even with a surname collision", () => {
+    expect(matchesCoAuthor("Lehman Brothers", roster)).toBe(false); // "Brothers" not a byline form
+    expect(matchesCoAuthor("Ashworth Therapeutics", roster)).toBe(false); // corporate word
+    expect(matchesCoAuthor("Lehman Capital Partners", roster)).toBe(false); // ≥4 / org words
+  });
+
+  it("never matches a single token or a surname absent from the byline", () => {
+    expect(matchesCoAuthor("Lehman", roster)).toBe(false); // single token — too ambiguous
+    expect(matchesCoAuthor("C Levy", roster)).toBe(false); // Levy not on this byline
+  });
+
+  it("DOES still match an INITIAL-form org name on a collision (gated at the clause level)", () => {
+    // "B. Braun" / "C. R. Bard" are initial-form orgs that DO match a colliding byline;
+    // analyzeStatement protects them by never cross-checking a scholar-attributed clause.
+    expect(matchesCoAuthor("B Braun", buildAuthorRoster("Braun B"))).toBe(true);
+  });
+
+  it("returns false for an empty roster", () => {
+    expect(matchesCoAuthor("C Lehman", buildAuthorRoster(null))).toBe(false);
+  });
+});
+
+describe("analyzeStatement — author-roster co-author cross-check", () => {
+  const smith = () => deriveScholar("John", "Smith");
+
+  it("drops an INITIAL-form co-author name in an unattributed clause, keeping the real org", () => {
+    const stmt = "Consulting fees were received from C Lehman and Acme Robotics.";
+    const roster = buildAuthorRoster("Smith J, Lehman C");
+
+    // Without a roster (back-compat): the co-author name still surfaces.
+    const noRoster = analyzeStatement(stmt, smith(), []);
+    expect(noRoster.candidates.map((c) => c.entity)).toContain("C Lehman");
+    expect(noRoster.suppressed.coauthorRoster).toBe(0);
+
+    // With the byline: the co-author is dropped, the real org kept.
+    const withRoster = analyzeStatement(stmt, smith(), [], { roster });
+    const entities = withRoster.candidates.map((c) => c.entity);
+    expect(entities).not.toContain("C Lehman");
+    expect(entities).toContain("Acme Robotics");
+    expect(withRoster.suppressed.coauthorRoster).toBeGreaterThan(0);
+  });
+
+  it("NEVER cross-checks a SCHOLAR-attributed clause — the scholar's own tie always surfaces", () => {
+    // The catastrophe direction (confirmed by adversarial review): a real,
+    // scholar-attributed eponymous / initial-form org must NOT be dropped just because
+    // a same-surname + first-initial co-author is on the byline.
+    const collisions: Array<[string, string]> = [
+      ["Dr. Smith is a consultant for Karl Storz.", "Smith J, Storz K"], // given-form org
+      ["Dr. Smith holds equity in Leon Levy.", "Smith J, Levy L"],
+      ["Dr. Smith is a consultant for Carl Zeiss.", "Smith J, Zeiss C"],
+      ["Dr. Smith is a consultant for B. Braun.", "Smith J, Braun B"], // INITIAL-form org — gate is what saves it
+    ];
+    for (const [stmt, byline] of collisions) {
+      const r = analyzeStatement(stmt, smith(), [], { roster: buildAuthorRoster(byline) });
+      expect(r.candidates.length, `${stmt} must surface the scholar's tie`).toBeGreaterThan(0);
+      expect(r.suppressed.coauthorRoster, `${stmt} must not roster-suppress`).toBe(0);
+    }
+  });
+
+  it("does NOT drop a founder-named org absent from the byline", () => {
+    const roster = buildAuthorRoster("Smith J, Kasner S");
+    const r = analyzeStatement("Dr. Smith holds equity in Leon Levy.", smith(), [], { roster });
+    expect(r.candidates.map((c) => c.entity)).toContain("Leon Levy");
+    expect(r.suppressed.coauthorRoster).toBe(0);
+  });
+
+  it("does NOT drop a co-author whose initial disagrees with the byline", () => {
+    const roster = buildAuthorRoster("Smith J, Lehman R"); // a DIFFERENT Lehman
+    const r = analyzeStatement("Consulting fees were received from C Lehman.", smith(), [], { roster });
+    expect(r.candidates.map((c) => c.entity)).toContain("C Lehman");
+    expect(r.suppressed.coauthorRoster).toBe(0);
+  });
+
+  it("never drops a gazetteer org even on a colliding byline", () => {
+    const roster = buildAuthorRoster("Smith J, Lilly E");
+    const r = analyzeStatement("Consulting fees were received from Eli Lilly.", smith(), [], { roster });
+    expect(r.candidates.map((c) => c.entity)).toContain("Eli Lilly");
+    expect(r.suppressed.coauthorRoster).toBe(0);
+  });
+
+  it("returns the roster-suppressed co-author as a Low row only under includeSuppressed", () => {
+    const stmt = "Consulting fees were received from C Lehman.";
+    const roster = buildAuthorRoster("Smith J, Lehman C");
+
+    const prod = analyzeStatement(stmt, smith(), [], { roster });
+    expect(prod.candidates.map((c) => c.entity)).not.toContain("C Lehman");
+
+    const diag = analyzeStatement(stmt, smith(), [], { roster, includeSuppressed: true });
+    const row = diag.candidates.find((c) => c.entity === "C Lehman");
+    expect(row).toBeDefined();
+    expect(row!.tier).toBe("Low");
+    expect(row!.failureModeGuess).toBe("co-author");
+    expect(row!.tierReason).toMatch(/roster cross-check/i);
+  });
+
+  it("parses a WCM ((...))-marked authorsString fallback byline (markers stripped)", () => {
+    // On pubs with a null fullAuthorsString, the authorsString fallback wraps WCM
+    // authors in ((...)); the surname must still enter the roster (finding #2).
+    const roster = buildAuthorRoster("Brown R, ((Lehman C)), Ashworth A");
+    expect(roster.get("lehman")?.has("C")).toBe(true);
+    const r = analyzeStatement("Consulting fees were received from C Lehman.", smith(), [], { roster });
+    expect(r.candidates.map((c) => c.entity)).not.toContain("C Lehman");
+    expect(r.suppressed.coauthorRoster).toBeGreaterThan(0);
+  });
+});
+
+describe("initialSurnameRefs", () => {
+  it("extracts the no-honorific first-initial + surname author subject", () => {
+    expect(initialSurnameRefs("A.Ashworth is a cofounder of Tango Therapeutics")).toEqual([
+      { initial: "A", surname: "Ashworth" },
+    ]);
+    expect(initialSurnameRefs("C Lehman is a co-founder of Clairity")).toEqual([
+      { initial: "C", surname: "Lehman" },
+    ]);
+    // segment() de-dots "A. Ashworth" → "A Ashworth"; still recognized.
+    expect(initialSurnameRefs("A Ashworth has received fees from Merck")).toEqual([
+      { initial: "A", surname: "Ashworth" },
+    ]);
+  });
+
+  it("does not mistake an honorific name or an org for an initial-surname subject", () => {
+    expect(initialSurnameRefs("Dr Smith is a consultant for Pfizer")).toEqual([]);
+    expect(initialSurnameRefs("Boston Scientific provided fees to the authors")).toEqual([]);
+    expect(initialSurnameRefs("The authors declare no competing interests")).toEqual([]);
+  });
+});
+
+describe("attribute — roster-confirmed first-initial-surname author subject (the dominant leak)", () => {
+  const tamimi = () => deriveScholar("Rulla", "Tamimi");
+  const byline = () => buildAuthorRoster("Tamimi R, Ashworth A, Lehman C");
+
+  it("attributes a confirmed co-author's no-honorific clause to OTHER", () => {
+    expect(attribute("A.Ashworth is a cofounder of Tango Therapeutics", tamimi(), byline()).level).toBe("other");
+    expect(attribute("C Lehman is a co-founder of Clairity", tamimi(), byline()).level).toBe("other");
+  });
+
+  it("leaves the clause unattributed without a roster (unchanged behaviour)", () => {
+    expect(attribute("A.Ashworth is a cofounder of Tango Therapeutics", tamimi()).level).toBe("unattributed");
+  });
+
+  it("does not treat a company initial-name that is NOT on the byline as an author", () => {
+    const r = buildAuthorRoster("Smith J, Jones A");
+    expect(attribute("B Braun is a manufacturer of devices", deriveScholar("John", "Smith"), r).level).toBe(
+      "unattributed",
+    );
+  });
+
+  it("requires the initial to agree before attributing to a co-author", () => {
+    // Byline has Ashworth A; "R Ashworth" is a different person → not attributed.
+    expect(attribute("R Ashworth is a cofounder of Tango Therapeutics", tamimi(), byline()).level).toBe(
+      "unattributed",
+    );
+  });
+
+  it("still attributes the scholar's OWN no-honorific clause to the scholar", () => {
+    // "R Tamimi" — the scholar's surname is caught by surnameHit regardless.
+    expect(attribute("R Tamimi reports fees from Merck", tamimi(), byline()).level).toBe("scholar");
+  });
+});
+
+describe("analyzeStatement — Tamimi-style co-author org leakage (end to end)", () => {
+  it("suppresses co-authors' leaked orgs while surfacing the scholar's genuine tie", () => {
+    const tamimi = deriveScholar("Rulla", "Tamimi");
+    const roster = buildAuthorRoster("Tamimi R, Ashworth A, Lehman C");
+    const stmt =
+      "A.Ashworth is a cofounder of Tango Therapeutics. C Lehman is a co-founder of Clairity. " +
+      "Dr. Tamimi is a consultant for Merck.";
+
+    const withRoster = analyzeStatement(stmt, tamimi, [], { roster });
+    const entities = withRoster.candidates.map((c) => c.entity);
+    // The co-authors' orgs (and the co-author name itself) are gone…
+    expect(entities).not.toContain("Tango Therapeutics");
+    expect(entities).not.toContain("Clairity");
+    expect(entities).not.toContain("C Lehman");
+    // …and only the scholar's genuine, scholar-attributed tie remains, as High.
+    expect(entities).toEqual(["Merck"]);
+    expect(withRoster.candidates[0].tier).toBe("High");
+
+    // Without the byline, the three leaked rows still surface (back-compat).
+    const noRoster = analyzeStatement(stmt, tamimi, []);
+    expect(noRoster.candidates.map((c) => c.entity).sort()).toEqual(
+      ["C Lehman", "Clairity", "Merck", "Tango Therapeutics"].sort(),
+    );
   });
 });
