@@ -849,7 +849,7 @@ describe("loadEditContext — COI-gap candidates (gate + dedup + date join)", ()
       attribution: "scholar",
       entityScore: 0.8,
       category: "personal",
-      status: "acknowledged",
+      status: "new",
     },
     {
       // A second distinct relationship. (All rows here are `High`: the loader now
@@ -864,7 +864,7 @@ describe("loadEditContext — COI-gap candidates (gate + dedup + date join)", ()
       attribution: "scholar",
       entityScore: 0.9,
       category: "personal",
-      status: "acknowledged",
+      status: "new",
     },
   ];
   const PUB_ROWS = [
@@ -900,10 +900,11 @@ describe("loadEditContext — COI-gap candidates (gate + dedup + date join)", ()
       includeCoiGap: true,
     });
 
-    // Only new + acknowledged, and HIGH tier only (the raised bar — Medium, which
-    // is dominated by co-author leakage, is never fetched for the rendered surface).
+    // Only `new`, and HIGH tier only. Once the scholar records ANY feedback the
+    // row stops nagging (acknowledged / dismissed both drop off this panel — the
+    // feedback split); Medium, dominated by co-author leakage, is never fetched.
     const whereArg = c.coiGapCandidate.findMany.mock.calls[0][0].where;
-    expect(whereArg).toEqual({ cwid: SELF, status: { in: ["new", "acknowledged"] }, tier: "High" });
+    expect(whereArg).toEqual({ cwid: SELF, status: "new", tier: "High" });
     // The date join is scoped to the gap pmids (deduped).
     const pubWhere = c.publication.findMany.mock.calls[0][0].where;
     expect(pubWhere.pmid.in.sort()).toEqual(["30000001", "31508198", "34963501"]);

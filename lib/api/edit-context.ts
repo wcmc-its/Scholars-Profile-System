@@ -517,7 +517,11 @@ export async function loadEditContext(
   let unmatchedPubmedCoi: EditContextCoiGapCandidate[] = [];
   if (opts?.includeCoiGap === true) {
     const gapRows = await client.coiGapCandidate.findMany({
-      where: { cwid, status: { in: ["new", "acknowledged"] }, tier: "High" },
+      // Surface only `new`. Once the scholar records ANY feedback the row stops
+      // nagging: `acknowledged` (will disclose) and `dismissed` (historical /
+      // invalid) both drop off this panel, while staying in the table for the
+      // ETL/reconcile and for suggestion-quality research (the feedback split).
+      where: { cwid, status: "new", tier: "High" },
       // `normalizedEntity` is the group (dedupe) key; it never reaches the client.
       select: {
         id: true,

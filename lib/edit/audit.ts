@@ -59,10 +59,18 @@ export type AuditAction =
    *  before/after carry the status transition. Self-scoped, never a
    *  compliance trail — the only thing logged is the scholar's own action. */
   | "coi_gap_dismiss"
-  /** a scholar UNDID a COI-gap dismissal ("Undo") — the inverse of
-   *  `coi_gap_dismiss`, restoring the suggestion to their advisory view. Same
-   *  self-scoped, non-compliance posture. */
+  /** a scholar UNDID COI-gap feedback ("Undo") — the inverse of
+   *  `coi_gap_feedback`/`coi_gap_dismiss`, restoring the suggestion to their
+   *  advisory view and clearing the recorded reason. Same self-scoped,
+   *  non-compliance posture. */
   | "coi_gap_restore"
+  /** a scholar (or a superuser on their behalf) recorded a 3-way response on a
+   *  publication-derived COI-gap suggestion — `will_disclose` (→ status
+   *  acknowledged) | `historical` | `invalid` (→ dismissed). Supersedes the
+   *  binary `coi_gap_dismiss`; `targetEntityId` is the candidate id, before/after
+   *  carry the status+feedbackReason transition. Self-scoped, never a compliance
+   *  trail — see `docs/coi-gap-feedback-spec.md`. */
+  | "coi_gap_feedback"
   /** a scholar (or a superuser on their behalf) assigned a proxy editor
    *  (scholar-proxy-spec.md / #779). `targetEntityType='scholar'`,
    *  `targetEntityId` is the granted scholar's cwid; `afterValues` carries the

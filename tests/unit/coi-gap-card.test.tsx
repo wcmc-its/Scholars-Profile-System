@@ -123,12 +123,22 @@ describe("CoiGapCard", () => {
     );
   });
 
-  it("offers a Gateway review affordance and a dismiss control per relationship", () => {
+  it("offers a Gateway review affordance and the neutral 3-way response per relationship", () => {
     render(<CoiGapCard cwid="self01" candidates={CANDIDATES} />);
-    // One review + one dismiss PER RELATIONSHIP (not per paper).
+    // One review affordance PER RELATIONSHIP (not per paper).
     expect(screen.getAllByRole("button", { name: /review in gateway/i })).toHaveLength(2);
-    expect(screen.getByTestId("coi-gap-dismiss-procept biorobotics")).toBeTruthy();
-    expect(screen.getByTestId("coi-gap-dismiss-neotract")).toBeTruthy();
+    // Each relationship offers all three responses, by their verbatim labels.
+    expect(screen.getByTestId("coi-gap-choices-procept biorobotics")).toBeTruthy();
+    expect(screen.getByTestId("coi-gap-choice-will_disclose-procept biorobotics").textContent).toBe(
+      "I intend to update my COI statement",
+    );
+    expect(screen.getByTestId("coi-gap-choice-historical-procept biorobotics").textContent).toBe(
+      "Historically true but not currently valid",
+    );
+    expect(screen.getByTestId("coi-gap-choice-invalid-procept biorobotics").textContent).toBe(
+      "Not a valid suggestion",
+    );
+    expect(screen.getByTestId("coi-gap-choices-neotract")).toBeTruthy();
   });
 
   it("contains NONE of the forbidden accusatory words", () => {
@@ -167,7 +177,7 @@ describe("CoiGapCard", () => {
     });
   });
 
-  describe('"Not relevant" fans out across every source and is reversible', () => {
+  describe("the 3-way response fans out across every source and is reversible", () => {
     beforeEach(() => {
       vi.stubGlobal(
         "fetch",
@@ -176,37 +186,52 @@ describe("CoiGapCard", () => {
     });
     afterEach(() => vi.unstubAllGlobals());
 
-    it("dismissing the multi-paper relationship POSTs dismiss for BOTH sources, flips the row, updates the summary, then undo restores both", async () => {
+    it("recording 'Not relevant' (invalid) POSTs /feedback{reason:invalid} for BOTH sources, flips the row, updates the summary, then undo restores both", async () => {
       render(<CoiGapCard cwid="self01" candidates={CANDIDATES} />);
-      fireEvent.click(screen.getByTestId("coi-gap-dismiss-procept biorobotics"));
+      fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-procept biorobotics"));
 
       await screen.findByTestId("coi-gap-undo-procept biorobotics");
-      expect(screen.getByText(/marked not relevant/i)).toBeTruthy();
-      // Fans out to EVERY underlying candidate id.
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        "/api/edit/coi-gap/gap-1b/dismiss",
-        expect.objectContaining({ method: "POST" }),
+      // The recorded reason is shown in place.
+      expect(screen.getByTestId("coi-gap-acted-procept biorobotics").textContent).toBe(
+        "Not a valid suggestion",
       );
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        "/api/edit/coi-gap/gap-1a/dismiss",
-        expect.objectContaining({ method: "POST" }),
-      );
+      // Fans out to EVERY underlying candidate id with the chosen reason.
+      for (const id of ["gap-1b", "gap-1a"]) {
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          `/api/edit/coi-gap/${id}/feedback`,
+          expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "invalid" }) }),
+        );
+      }
       // Summary recomputed: the only High relationship is gone.
       expect(screen.getByTestId("coi-gap-summary").textContent).toBe("1 likely already covered");
 
-      // Undo restores the row + calls restore for both sources.
+      // Undo restores the row + calls /restore for both sources.
       fireEvent.click(screen.getByTestId("coi-gap-undo-procept biorobotics"));
-      await screen.findByTestId("coi-gap-dismiss-procept biorobotics");
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        "/api/edit/coi-gap/gap-1b/restore",
-        expect.objectContaining({ method: "POST" }),
-      );
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        "/api/edit/coi-gap/gap-1a/restore",
-        expect.objectContaining({ method: "POST" }),
-      );
+      await screen.findByTestId("coi-gap-choices-procept biorobotics");
+      for (const id of ["gap-1b", "gap-1a"]) {
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          `/api/edit/coi-gap/${id}/restore`,
+          expect.objectContaining({ method: "POST" }),
+        );
+      }
       expect(screen.getByTestId("coi-gap-summary").textContent).toBe(
         "1 worth reviewing · 1 likely already covered",
+      );
+    });
+
+    it("'I intend to update my COI statement' (will_disclose) POSTs /feedback{reason:will_disclose} and shows the recorded label", async () => {
+      render(<CoiGapCard cwid="self01" candidates={CANDIDATES} />);
+      fireEvent.click(screen.getByTestId("coi-gap-choice-will_disclose-neotract"));
+      await screen.findByTestId("coi-gap-undo-neotract");
+      expect(screen.getByTestId("coi-gap-acted-neotract").textContent).toBe(
+        "Will update COI statement",
+      );
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/edit/coi-gap/gap-2/feedback",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ reason: "will_disclose" }),
+        }),
       );
     });
 
@@ -220,10 +245,12 @@ describe("CoiGapCard", () => {
           .mockResolvedValueOnce({ ok: false, json: async () => ({ ok: false }) }),
       );
       render(<CoiGapCard cwid="self01" candidates={CANDIDATES} />);
-      fireEvent.click(screen.getByTestId("coi-gap-dismiss-procept biorobotics"));
-      // Rolls back to the active dismiss control + surfaces a retry.
-      await screen.findByTestId("coi-gap-dismiss-procept biorobotics");
-      expect(screen.getByText(/couldn’t update this just now|couldn't update this just now/i)).toBeTruthy();
+      fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-procept biorobotics"));
+      // Rolls back to the active choices + surfaces a retry.
+      await screen.findByTestId("coi-gap-choices-procept biorobotics");
+      expect(
+        screen.getByText(/couldn’t update this just now|couldn't update this just now/i),
+      ).toBeTruthy();
     });
   });
 
@@ -248,11 +275,11 @@ describe("CoiGapCard", () => {
       );
     });
 
-    it("nags before any action — 'Not relevant' opens a confirm and does NOT write until confirmed, then fans out", async () => {
+    it("nags before any response — choosing a reason opens a confirm and does NOT write until confirmed, then fans out", async () => {
       render(
         <CoiGapCard cwid="self01" mode="superuser" scholarName="Dr. Other" candidates={CANDIDATES} />,
       );
-      fireEvent.click(screen.getByTestId("coi-gap-dismiss-procept biorobotics"));
+      fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-procept biorobotics"));
       const continueBtn = await screen.findByRole("button", { name: "Continue" });
       expect(globalThis.fetch).not.toHaveBeenCalled();
       // Governance holds inside the nag too — no forbidden accusatory vocabulary.
@@ -260,17 +287,15 @@ describe("CoiGapCard", () => {
       for (const re of FORBIDDEN) {
         expect(text, `forbidden word matched: ${re}`).not.toMatch(re);
       }
-      // Confirming fires the dismiss write for every source.
+      // Confirming fires the feedback write for every source.
       fireEvent.click(continueBtn);
       await screen.findByTestId("coi-gap-undo-procept biorobotics");
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        "/api/edit/coi-gap/gap-1b/dismiss",
-        expect.objectContaining({ method: "POST" }),
-      );
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        "/api/edit/coi-gap/gap-1a/dismiss",
-        expect.objectContaining({ method: "POST" }),
-      );
+      for (const id of ["gap-1b", "gap-1a"]) {
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          `/api/edit/coi-gap/${id}/feedback`,
+          expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "invalid" }) }),
+        );
+      }
     });
   });
 });

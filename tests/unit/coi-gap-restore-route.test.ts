@@ -92,8 +92,13 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   asGenuine(SELF);
   mockIsCoiGapEnabled.mockReturnValue(true);
-  // Default: a currently-dismissed candidate owned by SELF.
-  mockCandidateFindUnique.mockResolvedValue({ id: "gap-1", cwid: SELF, status: "dismissed" });
+  // Default: a currently-dismissed candidate owned by SELF, carrying a reason.
+  mockCandidateFindUnique.mockResolvedValue({
+    id: "gap-1",
+    cwid: SELF,
+    status: "dismissed",
+    feedbackReason: "invalid",
+  });
   mockCandidateUpdate.mockResolvedValue({ id: "gap-1" });
   mockAppendAuditRow.mockResolvedValue(undefined);
   mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
@@ -150,7 +155,7 @@ describe("POST /api/edit/coi-gap/[id]/restore", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
-  it("commits status=new + a coi_gap_restore audit row (dismissed→new) in one tx", async () => {
+  it("commits status=new, clears feedbackReason, + a coi_gap_restore audit row (dismissed→new) in one tx", async () => {
     const res = await POST(post("gap-1"), ctx("gap-1"));
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, status: "new" });
@@ -158,6 +163,7 @@ describe("POST /api/edit/coi-gap/[id]/restore", () => {
     const update = mockCandidateUpdate.mock.calls[0][0];
     expect(update.where).toEqual({ id: "gap-1" });
     expect(update.data.status).toBe("new");
+    expect(update.data.feedbackReason).toBeNull();
 
     const row = mockAppendAuditRow.mock.calls[0][1];
     expect(row.action).toBe("coi_gap_restore");
@@ -165,8 +171,28 @@ describe("POST /api/edit/coi-gap/[id]/restore", () => {
     expect(row.targetEntityId).toBe("gap-1");
     expect(row.actorCwid).toBe(SELF);
     expect(row.impersonatedCwid).toBeNull();
-    expect(row.beforeValues).toEqual({ status: "dismissed" });
-    expect(row.afterValues).toEqual({ status: "new" });
+    expect(row.beforeValues).toEqual({ status: "dismissed", feedbackReason: "invalid" });
+    expect(row.afterValues).toEqual({ status: "new", feedbackReason: null });
+  });
+
+  it("also undoes an 'I intend to update' (acknowledged) feedback back to new + clears the reason", async () => {
+    mockCandidateFindUnique.mockResolvedValue({
+      id: "gap-1",
+      cwid: SELF,
+      status: "acknowledged",
+      feedbackReason: "will_disclose",
+    });
+    const res = await POST(post("gap-1"), ctx("gap-1"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, status: "new" });
+
+    const update = mockCandidateUpdate.mock.calls[0][0];
+    expect(update.data.status).toBe("new");
+    expect(update.data.feedbackReason).toBeNull();
+
+    const row = mockAppendAuditRow.mock.calls[0][1];
+    expect(row.beforeValues).toEqual({ status: "acknowledged", feedbackReason: "will_disclose" });
+    expect(row.afterValues).toEqual({ status: "new", feedbackReason: null });
   });
 
   it("500 write_failed when the transaction throws", async () => {
