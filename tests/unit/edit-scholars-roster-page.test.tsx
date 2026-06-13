@@ -5,6 +5,7 @@
  * mirroring the `/edit/scholar/[cwid]` page test.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { render, screen } from "@testing-library/react";
 
 const {
   mockGetEditSession,
@@ -35,6 +36,22 @@ vi.mock("@/lib/api/edit-roster", () => ({
 }));
 vi.mock("@/components/edit/profiles-roster", () => ({ ProfilesRoster: mockRoster }));
 vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: mockForbidden }));
+// For the component-render test below: render `next/link` as a plain anchor and
+// stub the roster's child components so the real ProfilesRoster renders without
+// pulling client-only machinery.
+vi.mock("next/link", () => ({
+  default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  ),
+}));
+vi.mock("@/components/edit/admin-subnav", () => ({ AdminSubnav: () => null }));
+vi.mock("@/components/edit/view-as-button", () => ({
+  ViewAsButton: ({ targetCwid }: { targetCwid: string }) => (
+    <button data-testid={`view-as-${targetCwid}`}>View as</button>
+  ),
+}));
 vi.mock("@/lib/db", () => ({
   db: { read: { scholar: { findUnique: vi.fn().mockResolvedValue(null) } }, write: {} },
 }));
@@ -105,5 +122,75 @@ describe("/edit/scholars — query parsing", () => {
     const [opts] = mockLoadEditRoster.mock.calls[0];
     expect(opts.status).toBe("all");
     expect(opts.offset).toBe(0);
+  });
+});
+
+// Render the real ProfilesRoster (the page tests above mock it). The per-row
+// name is the link into the editor; there is no separate "Edit" link.
+describe("ProfilesRoster — row name links to the editor", () => {
+  // The module-level vi.mock replaces ProfilesRoster with a spy for the page
+  // tests, so reach for the real implementation here.
+  async function renderRoster(
+    overrides: Partial<React.ComponentProps<typeof import("@/components/edit/profiles-roster").ProfilesRoster>> = {},
+  ) {
+    const { ProfilesRoster } = await vi.importActual<
+      typeof import("@/components/edit/profiles-roster")
+    >("@/components/edit/profiles-roster");
+    render(
+      <ProfilesRoster
+        entries={[
+          {
+            cwid: "abc1001",
+            slug: "abc",
+            name: "Ada Lovelace",
+            title: null,
+            unit: null,
+            roleCategory: null,
+            isVisible: true,
+          },
+        ]}
+        total={1}
+        query=""
+        status="all"
+        unit=""
+        roleCategory=""
+        facets={{ departments: [], divisions: [], centers: [], roleCategories: [] }}
+        page={0}
+        pageSize={50}
+        pendingSlugRequests={null}
+        canImpersonate={false}
+        viewerCwid="adm001"
+        {...overrides}
+      />,
+    );
+  }
+
+  it("renders the scholar name as a link to /edit/scholar/<cwid> (the name is the link text)", async () => {
+    await renderRoster();
+    const link = screen.getByTestId("roster-name-abc1001");
+    expect(link.tagName.toLowerCase()).toBe("a");
+    expect(link.getAttribute("href")).toBe("/edit/scholar/abc1001");
+    // Accessibility: the link's accessible name is the scholar's name.
+    expect(link.textContent).toBe("Ada Lovelace");
+  });
+
+  it("no longer renders a separate Edit link", async () => {
+    await renderRoster();
+    expect(screen.queryByTestId("roster-edit-abc1001")).toBeNull();
+  });
+
+  it("renders the View-as button when impersonation is allowed (not the viewer's own row)", async () => {
+    await renderRoster({ canImpersonate: true, viewerCwid: "adm001" });
+    expect(screen.getByTestId("view-as-abc1001")).toBeTruthy();
+  });
+
+  it("hides the View-as button on the viewer's own row", async () => {
+    await renderRoster({ canImpersonate: true, viewerCwid: "abc1001" });
+    expect(screen.queryByTestId("view-as-abc1001")).toBeNull();
+  });
+
+  it("hides the View-as button when impersonation is not allowed", async () => {
+    await renderRoster({ canImpersonate: false });
+    expect(screen.queryByTestId("view-as-abc1001")).toBeNull();
   });
 });
