@@ -28,7 +28,7 @@ import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { MethodFamiliesRoster } from "@/components/edit/method-families-roster";
 import { buildFamilyRoster } from "@/lib/api/methods-families";
 import { isCommsStewardEnabled, isMethodsTabVisible } from "@/lib/auth/comms-steward";
-import { getEditSession } from "@/lib/auth/superuser";
+import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
@@ -46,7 +46,15 @@ export default async function MethodFamiliesPage() {
   // so an unauthenticated hit to a dark surface never round-trips through SAML.
   if (!isCommsStewardEnabled()) notFound();
 
-  const session = await getEditSession();
+  // Resolve the EFFECTIVE identity (mirrors the sibling console pages
+  // `/edit/scholars` + `/edit/administrators`), so a "View as" overlay scopes
+  // this surface to the impersonated viewer. Without this the page authorized +
+  // rendered its tabs from the REAL superuser, so a superuser viewing as a
+  // steward saw superuser tabs that the target can't open
+  // (role-aware-navigation-entry-points-spec.md §2a / comms-steward-profile-
+  // editing-spec.md). Writes from this surface are still attributed to the real
+  // actor in the API routes (R3) — unchanged.
+  const session = await getEffectiveEditSession();
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/methods");
   }
