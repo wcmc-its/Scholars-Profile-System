@@ -1072,6 +1072,13 @@ export class AppStack extends Stack {
         //   SEARCH_PUB_MATCH_PROVENANCE  -> Publications-tab match provenance.
         // All three are query-time/render-only (no reindex prereq).
         SEARCH_PEOPLE_MATCH_EXPLAIN: "on",
+        // #967 -- surface a representative matching publication inside the
+        // People reason line (`... tagged HIV -- incl. "<title>" (2024)`). Adds a
+        // `top_hits` sub-agg to the SAME bounded reason-count publications agg
+        // (no people-index field, no reindex); inert unless MATCH_EXPLAIN is on.
+        // resolvePeopleSnippetRepresentativePub reads === "on". STAGING-FIRST:
+        // soak on staging before prod parity.
+        SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB: env === "staging" ? "on" : "off",
         SEARCH_PUB_HIGHLIGHT: "on",
         SEARCH_PUB_MATCH_PROVENANCE: "on",
         // #837 -- Publications-tab Department facet. Unlike the three above this

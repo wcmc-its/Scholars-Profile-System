@@ -206,9 +206,103 @@ export type PeopleHit = {
    * Present only when a concept resolved and `SEARCH_PEOPLE_MATCH_EXPLAIN` is on.
    * Supersedes the prior pub-highlight / match-provenance / matched-on-fields
    * card surfaces (#688 / #702), now removed.
+   *
+   * Issue #967 — on a pub-evidence reason (tagged / mention), `pub` carries a
+   * representative publication behind the count when
+   * `SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB` is on. Absent on the concept
+   * fallback and whenever the flag is off.
    */
-  matchReason?: { icon: "publications" | "concept" | "area"; text: string };
+  matchReason?: {
+    icon: "publications" | "concept" | "area";
+    text: string;
+    pub?: RepresentativePub;
+  };
 };
+
+/**
+ * Issue #967 — a single representative publication surfaced inside a People
+ * reason line. Drawn from a `top_hits` sub-agg on the publications index (the
+ * same aggregation that computes the reason count), so there is no people-index
+ * field and no reindex. `titleHtml` is the title with the literal query wrapped
+ * in `<mark>` when it appears there (the card renders it via `HighlightedSnippet`);
+ * it is absent on a descriptor-tagged match whose title carries no literal term,
+ * in which case the card renders the plain `title`.
+ */
+export type RepresentativePub = {
+  pmid: string;
+  title: string;
+  titleHtml?: string;
+  year?: number | null;
+};
+
+/** The shape of a reason filter's optional `top` (top_hits) sub-agg. */
+type ReasonTopHitsAgg = {
+  top?: {
+    hits?: {
+      hits?: Array<{
+        _source?: { pmid?: string | number; title?: string; year?: number | null };
+        highlight?: { title?: string[] };
+      }>;
+    };
+  };
+};
+
+/**
+ * Issue #967 — pull the single representative publication out of a reason
+ * filter's `top` (top_hits) sub-agg. Returns undefined when the sub-agg is
+ * absent (flag off), the filter matched no pub, or the hit lacks a pmid/title.
+ * `titleHtml` is set only when the literal query produced a `<mark>` fragment
+ * in the title.
+ */
+export function parseReasonTopHit(
+  agg: ReasonTopHitsAgg | undefined,
+): RepresentativePub | undefined {
+  const hit = agg?.top?.hits?.hits?.[0];
+  const src = hit?._source;
+  if (!src || src.pmid == null || !src.title) return undefined;
+  const titleHtml = hit?.highlight?.title?.[0];
+  return {
+    pmid: String(src.pmid),
+    title: src.title,
+    ...(titleHtml ? { titleHtml } : {}),
+    ...(src.year != null ? { year: src.year } : {}),
+  };
+}
+
+/**
+ * PLAN R4 / #967 — the per-scholar reason line. Strongest signal first:
+ * pub-evidence count (tagged → mention) then the resolved-concept fallback.
+ * When `rep` carries a representative pub for the firing pub-evidence branch
+ * (`SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB`), it rides along as `pub`. The
+ * concept fallback never carries a pub. Pure — extracted so the precedence and
+ * the count cap (`Math.min(count, pubCount)`) are unit-testable without a live
+ * cluster.
+ */
+export function composeMatchReason(args: {
+  counts: { tagged: number; mention: number } | undefined;
+  rep: { tagged?: RepresentativePub; mention?: RepresentativePub } | undefined;
+  pubCount: number;
+  hasProvenance: boolean;
+  provenanceParent: string;
+  contentQuery: string;
+}): PeopleHit["matchReason"] {
+  const { counts: c, rep, pubCount, hasProvenance, provenanceParent, contentQuery } = args;
+  if (c && c.tagged > 0)
+    return {
+      icon: "publications",
+      text: `${Math.min(c.tagged, pubCount)} of ${pubCount} publications tagged ${provenanceParent}`,
+      ...(rep?.tagged ? { pub: rep.tagged } : {}),
+    };
+  if (c && c.mention > 0)
+    return {
+      icon: "publications",
+      text: `${Math.min(c.mention, pubCount)} of ${pubCount} publications mention “${contentQuery}”`,
+      ...(rep?.mention ? { pub: rep.mention } : {}),
+    };
+  if (hasProvenance)
+    return { icon: "concept", text: `via related concept ${provenanceParent}` };
+  return undefined;
+}
 
 export type PublicationHit = {
   pmid: string;
@@ -559,6 +653,13 @@ export async function searchPeople(opts: {
    */
   matchExplain?: boolean;
   /**
+   * Issue #967 — when true (and `matchExplain` is on), the `reasonCounts`
+   * aggregation also fetches a representative publication per page cwid via a
+   * `top_hits` sub-agg, surfaced as `matchReason.pub`. Pure presentation; no
+   * effect on ranking or the result set. Headless callers default to `false`.
+   */
+  representativePub?: boolean;
+  /**
    * Issue #688 — the resolved descriptor's display name (the term the user
    * effectively searched), passed alongside `meshDescendantUis` so the
    * provenance string can read "… narrower term of {name}". Absent when the
@@ -620,6 +721,7 @@ export async function searchPeople(opts: {
   // card can derive a "Matched on …" chip. Default-off ⇒ the highlight block and
   // hit emission below are byte-identical to the pre-#702 shape.
   const matchExplain = opts.matchExplain === true;
+  const representativePub = opts.representativePub === true;
 
   // Issue #259 §1.1 — the people-index query restructure (cross_fields + msm
   // over high-evidence fields, abstracts in a scoring-only should). It was a
@@ -1595,6 +1697,13 @@ export async function searchPeople(opts: {
   // exceed the scholar's total. No reindex. Skipped on the count-only badge path
   // (returned above) and under `exact` scope (empty `meshDescendantUis`).
   const reasonCounts = new Map<string, { tagged: number; mention: number }>();
+  // Issue #967 — representative pub per cwid, keyed by which reason branch it
+  // belongs to (tagged vs mention). Populated only under `representativePub`;
+  // empty otherwise, so `composeMatchReason` attaches no `pub`.
+  const reasonReps = new Map<
+    string,
+    { tagged?: RepresentativePub; mention?: RepresentativePub }
+  >();
   const pageCwids = r.hits.hits.map((h) => h._source.cwid);
   if (
     matchExplain &&
@@ -1603,6 +1712,30 @@ export async function searchPeople(opts: {
     provenanceParent.length > 0 &&
     pageCwids.length > 0
   ) {
+    // Issue #967 — fetch the strongest representative pub within a reason filter:
+    // most recent, then most cited. Highlight is keyed to the LITERAL query (not
+    // the filter), so the title shows the matched term when it appears; a
+    // descriptor-tagged title with no literal term highlights nothing and the
+    // card renders plain text. Added to each filter only when the flag is on, so
+    // the flag-off agg body is byte-identical to the pre-#967 shape.
+    const repPubTopHits = {
+      top_hits: {
+        size: 1,
+        sort: [
+          { year: { order: "desc", missing: "_last" } },
+          { citationCount: { order: "desc", missing: "_last" } },
+        ],
+        _source: ["pmid", "title", "year"],
+        highlight: {
+          fields: { title: {} },
+          highlight_query: {
+            multi_match: { query: contentQuery, fields: ["title"], operator: "or" },
+          },
+          pre_tags: ["<mark>"],
+          post_tags: ["</mark>"],
+        },
+      },
+    };
     const aggResp = await searchClient().search({
       index: PUBLICATIONS_INDEX,
       body: {
@@ -1614,7 +1747,10 @@ export async function searchPeople(opts: {
             aggs: {
               tagged: {
                 filter: { terms: { meshDescriptorUi: meshDescendantUis } },
-                aggs: { d: { cardinality: { field: "pmid" } } },
+                aggs: {
+                  d: { cardinality: { field: "pmid" } },
+                  ...(representativePub ? { top: repPubTopHits } : {}),
+                },
               },
               mention: {
                 filter: {
@@ -1624,7 +1760,10 @@ export async function searchPeople(opts: {
                     operator: "and",
                   },
                 },
-                aggs: { d: { cardinality: { field: "pmid" } } },
+                aggs: {
+                  d: { cardinality: { field: "pmid" } },
+                  ...(representativePub ? { top: repPubTopHits } : {}),
+                },
               },
             },
           },
@@ -1638,8 +1777,8 @@ export async function searchPeople(opts: {
             byAuthor?: {
               buckets?: Array<{
                 key: string;
-                tagged?: { d?: { value?: number } };
-                mention?: { d?: { value?: number } };
+                tagged?: { d?: { value?: number } } & ReasonTopHitsAgg;
+                mention?: { d?: { value?: number } } & ReasonTopHitsAgg;
               }>;
             };
           };
@@ -1650,32 +1789,31 @@ export async function searchPeople(opts: {
         tagged: b.tagged?.d?.value ?? 0,
         mention: b.mention?.d?.value ?? 0,
       });
+      if (representativePub) {
+        reasonReps.set(b.key, {
+          tagged: parseReasonTopHit(b.tagged),
+          mention: parseReasonTopHit(b.mention),
+        });
+      }
     }
   }
 
   // Strongest-signal reason: pub-evidence count (document) → concept fallback
-  // (sparkle). Y = the scholar's `publicationCount` (the badge number); X is
-  // capped at Y so the phrasing stays coherent under any index drift.
+  // (sparkle). Delegates to the pure `composeMatchReason` (count cap +
+  // precedence + #967 representative-pub attach).
   const buildMatchReason = (
     cwid: string,
     pubCount: number,
     hasProvenance: boolean,
-  ): PeopleHit["matchReason"] => {
-    const c = reasonCounts.get(cwid);
-    if (c && c.tagged > 0)
-      return {
-        icon: "publications",
-        text: `${Math.min(c.tagged, pubCount)} of ${pubCount} publications tagged ${provenanceParent}`,
-      };
-    if (c && c.mention > 0)
-      return {
-        icon: "publications",
-        text: `${Math.min(c.mention, pubCount)} of ${pubCount} publications mention “${contentQuery}”`,
-      };
-    if (hasProvenance)
-      return { icon: "concept", text: `via related concept ${provenanceParent}` };
-    return undefined;
-  };
+  ): PeopleHit["matchReason"] =>
+    composeMatchReason({
+      counts: reasonCounts.get(cwid),
+      rep: reasonReps.get(cwid),
+      pubCount,
+      hasProvenance,
+      provenanceParent,
+      contentQuery,
+    });
 
   return {
     hits: r.hits.hits.map((h) => {

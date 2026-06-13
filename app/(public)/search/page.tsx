@@ -33,6 +33,7 @@ import {
   resolveGenericTermMode,
   resolvePeopleMatchProvenance,
   resolvePeopleMatchExplain,
+  resolvePeopleSnippetRepresentativePub,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
@@ -387,6 +388,8 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           matchProvenance: resolvePeopleMatchProvenance(),
           meshDescriptorName: taxonomyMatch.meshResolution?.name,
           matchExplain: resolvePeopleMatchExplain(),
+          // Issue #967 — representative matching publication in the reason line.
+          representativePub: resolvePeopleSnippetRepresentativePub(),
         })
       : null;
   const activePubsPromise =

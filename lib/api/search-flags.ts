@@ -253,6 +253,22 @@ export function resolvePeopleMatchExplain(): boolean {
   return process.env.SEARCH_PEOPLE_MATCH_EXPLAIN !== "off";
 }
 
+/**
+ * Issue #967 — surface a representative matching publication inside the People
+ * reason line (e.g. `… tagged HIV — incl. "Broadly neutralizing antibodies…"
+ * (2024)`), so the count gets concrete proof of the work behind it and rows stop
+ * reading identically on a topic query. The pub is drawn from a `top_hits`
+ * sub-agg on the SAME publications-index aggregation that already computes the
+ * count (`reasonCounts`) — no people-index field, no reindex.
+ *
+ * Pure presentation metadata: no effect on the query predicate, scoring, or
+ * result set. Layered on top of `SEARCH_PEOPLE_MATCH_EXPLAIN` (inert when that is
+ * off — there is no reason line to enrich). Default OFF; `=on` to enable.
+ */
+export function resolvePeopleSnippetRepresentativePub(): boolean {
+  return process.env.SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB === "on";
+}
+
 export type GenericTermMode = "off" | "resolve" | "on";
 
 /**

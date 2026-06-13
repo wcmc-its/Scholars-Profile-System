@@ -26,6 +26,7 @@ import {
   resolvePeopleRelevanceMode,
   resolvePeopleMatchProvenance,
   resolvePeopleMatchExplain,
+  resolvePeopleSnippetRepresentativePub,
   resolveGenericTermMode,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
@@ -481,6 +482,9 @@ async function handleSearch(request: NextRequest) {
     // Issue #702 — env-gated pub-evidence highlighting + "Matched on" chip so a
     // publication-only match isn't left bare. Pure presentation metadata.
     matchExplain: resolvePeopleMatchExplain(),
+    // Issue #967 — surface a representative matching publication inside the
+    // reason line. Inert unless matchExplain is also on.
+    representativePub: resolvePeopleSnippetRepresentativePub(),
     // Issue #692 — generic-term demotion (mode `on`). Topic/hybrid bodies score
     // and highlight on the content query (full query discounted); inert
     // otherwise and never applied to name/department shapes.

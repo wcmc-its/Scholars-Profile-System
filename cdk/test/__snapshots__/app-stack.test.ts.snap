@@ -396,6 +396,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PUB_HIGHLIGHT",
                 "Value": "on",
               },
@@ -3473,6 +3477,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_MATCH_EXPLAIN",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB",
                 "Value": "on",
               },
               {
