@@ -191,9 +191,13 @@ describe("PublicationModal — content sections", { retry: 2 }, () => {
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    expect(
-      screen.getByText(/Journal of Widgets · 2024 · 10\(2\) · 100-110/),
-    ).toBeDefined();
+    // #946: the journal now renders in its own sanitized <span> (PubJournal)
+    // with year/volume/pages as sibling text nodes, so assert on the citation
+    // paragraph's combined textContent rather than a single text node.
+    const journalEl = screen.getByText("Journal of Widgets");
+    expect(journalEl.parentElement?.textContent).toBe(
+      "Journal of Widgets · 2024 · 10(2) · 100-110",
+    );
   });
 
   it("renders the abstract with whitespace-pre-line so newlines survive", async () => {

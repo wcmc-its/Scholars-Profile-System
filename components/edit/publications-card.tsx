@@ -22,6 +22,7 @@ import { EditPanel } from "@/components/edit/edit-panel";
 import { FirstHideNoticeDialog } from "@/components/edit/first-hide-notice-dialog";
 import { RejectNoticeDialog } from "@/components/edit/reject-notice-dialog";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
+import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -451,17 +452,18 @@ function PublicationRow({
     <li className="flex flex-col gap-2 px-1 py-4" data-testid={`pub-row-${pub.pmid}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <p
+          <PubTitle
+            as="p"
             className={cn(
               "text-foreground font-medium",
               (pub.state === "hidden_by_self" || pub.state === "rejected") &&
                 "decoration-muted-foreground text-muted-foreground line-through",
             )}
-          >
-            {pub.title}
-          </p>
+            value={pub.title}
+          />
           <p className="text-sm text-muted-foreground">
-            {pub.journal ?? "Unknown journal"} · {pub.year ?? "Year unknown"}
+            <PubJournal as="span" value={pub.journal ?? "Unknown journal"} /> ·{" "}
+            {pub.year ?? "Year unknown"}
             {pub.state === "hidden_by_self" && (
               <>
                 {" · "}
