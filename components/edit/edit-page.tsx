@@ -634,11 +634,14 @@ function renderPanel(
           mode={childMode}
           scholarName={scholarName}
           disclosures={ctx.coiDisclosures}
-          // The bridge to "From your publications" only appears for a genuine
-          // self viewer with suggestions — `unmatchedPubmedCoi` is [] for the
-          // superuser/impersonation paths, so the count is naturally 0 there.
+          // The bridge to "From your publications" appears for a self viewer OR a
+          // superuser with suggestions (#836 populates `unmatchedPubmedCoi` for a
+          // superuser too; a comms_steward is excluded at the loader, so it stays
+          // 0 for them). The href targets the ACTIVE surface — `/edit` for self,
+          // `/edit/scholar/{cwid}` for a superuser viewing another scholar (#986) —
+          // and `childMode` reframes the copy from first-person to the scholar's name.
           suggestionCount={ctx.unmatchedPubmedCoi.length}
-          suggestionsHref="/edit?attr=coi-gap"
+          suggestionsHref={`${detailBase}?attr=coi-gap`}
         />
       );
     case "coi-gap":

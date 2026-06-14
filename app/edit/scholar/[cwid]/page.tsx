@@ -152,19 +152,23 @@ export default async function EditScholarPage({
     }
   }
 
-  // #836 — the manual-Highlights editor and the COI-gap advisory both load for
-  // the scholar themselves OR a (non-impersonating) superuser. A superuser is
+  // #836 — the manual-Highlights editor and the COI-gap advisory load for the
+  // scholar themselves OR a (non-impersonating) superuser. A superuser is
   // unrestricted on the edit surface (operator decision); COI-gap was originally
   // a privacy carve-out but is now superuser-visible too, with a UI nag before any
   // action and the dismiss/restore routes re-authorizing genuine-self-or-superuser.
   // Neither is surfaced to a proxy / unit-admin editor, and the loader populates
   // them only when requested + the flag is on, so they stay dark otherwise.
-  // A comms_steward edits Highlights at superuser parity (§3b), and sees the
-  // COI-gap advisory like a superuser does; both still load only behind their
-  // flags and re-authorize at the write route.
+  //
+  // A comms_steward edits Highlights at superuser parity (§3b). COI-gap is the
+  // ONE carve-out (#986): a steward must NOT see it. The dismiss/feedback/restore
+  // routes deny a steward AT THE ROUTE (comms-steward spec §6/§7: "denied at the
+  // route, not just hidden in the UI"), so surfacing the interactive card would
+  // make every action 403 — a broken surface. Hence Highlights includes a steward
+  // (`selfOrSuperuser`), but COI-gap is gated self-or-genuine-superuser only.
   const selfOrSuperuser = isSelf || session.isSuperuser || session.isCommsSteward;
   const includeHighlights = isManualHighlightsEnabled() && selfOrSuperuser;
-  const includeCoiGap = isCoiGapHintEnabled() && selfOrSuperuser;
+  const includeCoiGap = isCoiGapHintEnabled() && (isSelf || session.isSuperuser);
   const ctx = await loadEditContext(targetCwid, db.read, new Date(), undefined, {
     includeHighlights,
     includeCoiGap,

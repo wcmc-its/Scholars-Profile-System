@@ -30,14 +30,15 @@ export type CoiCardProps = {
   disclosures: ReadonlyArray<EditContextCoiDisclosure>;
   /**
    * Count of publication-derived suggestions on the nested "From your
-   * publications" sub-view. When > 0, an amber bridge invites the scholar over
+   * publications" sub-view. When > 0, an amber bridge invites the viewer over
    * so the suggestions are discoverable from the COI page (otherwise a scholar
    * with no disclosures lands on a dead "nothing on file" and never finds them).
-   * Always 0 for the superuser/impersonation paths (the loader returns no
-   * candidates there), so the bridge is inherently self-only.
+   * Populated for a self viewer OR a superuser (#836); a comms_steward is
+   * excluded at the loader, so it is 0 for them. The bridge copy reframes by
+   * `mode` (first-person for self, the scholar's name for a superuser).
    */
   suggestionCount?: number;
-  /** Href of the nested suggestions sub-view (self mode). */
+  /** Href of the nested suggestions sub-view — the ACTIVE surface for `mode`. */
   suggestionsHref?: string;
 };
 
@@ -90,12 +91,16 @@ export function CoiCard({
           <div className="min-w-0">
             <p className="text-foreground flex items-center gap-2 text-sm font-semibold">
               <span className="bg-apollo-amber size-[7px] shrink-0 rounded-full" aria-hidden />
-              {suggestionCount} {suggestionCount === 1 ? "relationship" : "relationships"} from your
-              publications worth a look
+              {suggestionCount} {suggestionCount === 1 ? "relationship" : "relationships"} from{" "}
+              {possessive} publications worth a look
             </p>
             <p className="text-muted-foreground mt-1 max-w-prose text-[0.8rem] leading-relaxed">
-              Some papers you authored name relationships in their competing-interests statements that
-              don&rsquo;t match a current Gateway disclosure. Visible only to you.
+              Some papers {mode === "superuser" ? `${scholarName} authored` : "you authored"} name
+              relationships in their competing-interests statements that don&rsquo;t match a current
+              Gateway disclosure.{" "}
+              {mode === "superuser"
+                ? `Visible only to ${scholarName} and administrators.`
+                : "Visible only to you."}
             </p>
           </div>
           <Button asChild variant="outline" size="sm">

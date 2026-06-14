@@ -80,6 +80,10 @@ export default async function EditUnitsPage() {
       <AdminSubnav
         active="units"
         superuserSurfaces={session.isSuperuser}
+        // #986 — a comms_steward is a global profile editor, so it gets the
+        // Profiles tab here too (a plain unit owner/curator does not). A superuser
+        // already has it via `superuserSurfaces`.
+        profilesTab={session.isCommsSteward}
         unitsTab
         pendingSlugRequests={pendingSlugRequests}
         administratorsTab={session.isSuperuser && isAdministratorsTabEnabled() ? 0 : null}
