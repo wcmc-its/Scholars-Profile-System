@@ -59,6 +59,7 @@ import {
   PEOPLE_PROMINENCE_FACULTY_WEIGHT,
   PEOPLE_PROMINENCE_GRANT_WEIGHT,
   PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
+  FUNDING_INDEX,
   PEOPLE_RESTRUCTURED_MSM,
   PEOPLE_TOPIC_ABSTRACTS_BOOST,
   PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS,
@@ -76,6 +77,8 @@ import {
 } from "@/lib/api/match-provenance";
 import {
   resolveConceptMode,
+  resolveFundingMeshGateField,
+  resolvePeopleConceptGrantAxis,
   resolvePeopleConceptPrecount,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
@@ -576,6 +579,39 @@ function demoteScoringClause(opts: {
   };
 }
 
+/**
+ * #921 — concept-scope grant axis. The People index carries no grant MeSH, so
+ * to include scholars FUNDED on a concept (not only those who PUBLISHED on it)
+ * we ask the Funding index which WCM investigators hold a grant whose concept
+ * gate field (`SEARCH_FUNDING_MESH_GATE` via {@link resolveFundingMeshGateField})
+ * intersects the resolved descendant set, then union those cwids into the People
+ * query. Size-capped: a concept broader than the cap undercounts the union,
+ * acceptable for a dark count-oriented feature (no silent ranking change).
+ */
+const GRANT_AXIS_CWID_CAP = 5000;
+
+async function collectGrantMatchedCwids(descendantUis: string[]): Promise<string[]> {
+  if (descendantUis.length === 0) return [];
+  const meshGateField = resolveFundingMeshGateField();
+  const resp = await searchClient().search({
+    index: FUNDING_INDEX,
+    body: {
+      size: 0,
+      query: { bool: { filter: [{ terms: { [meshGateField]: descendantUis } }] } },
+      aggs: {
+        cwids: { terms: { field: "wcmInvestigatorCwids", size: GRANT_AXIS_CWID_CAP } },
+      },
+    } as object,
+  });
+  const buckets =
+    (
+      resp.body as unknown as {
+        aggregations?: { cwids?: { buckets?: Array<{ key: string }> } };
+      }
+    ).aggregations?.cwids?.buckets ?? [];
+  return buckets.map((b) => b.key);
+}
+
 export async function searchPeople(opts: {
   q: string;
   page?: number;
@@ -1013,17 +1049,40 @@ export async function searchPeople(opts: {
         },
       };
 
+  // #921 — concept-scope grant axis. When ON (dark by default), collect the
+  // cwids of WCM investigators funded on the resolved concept so the People set
+  // / facets / count can union them with the publication-tagged scholars below.
+  // Flag-off (or non-concept scope / no descriptors) → no Funding round-trip and
+  // an empty set, so the query bodies stay byte-identical to today.
+  const grantAxisOn =
+    opts.scope === "concept" &&
+    meshDescendantUis.length > 0 &&
+    resolvePeopleConceptGrantAxis();
+  const grantMatchedCwids = grantAxisOn
+    ? await collectGrantMatchedCwids(meshDescendantUis)
+    : [];
+  const grantAxisActive = grantMatchedCwids.length > 0;
+
   const must: Record<string, unknown>[] = [];
   if (trimmed.length > 0) {
+    const conceptScopeShould: Record<string, unknown>[] = [
+      // CWIDs are stored lowercase as a `keyword` field; an exact term
+      // match wins over the multi_match by a wide boost so a pasted
+      // CWID resolves to its scholar at the top of the result list.
+      { term: { cwid: { value: trimmed.toLowerCase(), boost: 100 } } },
+      queryBranch,
+    ];
+    // #921 — admit grant-funded-on-concept scholars into the scoring gate so a
+    // scholar funded on the concept but WITHOUT a concept-tagged publication
+    // still satisfies `must`. The low constant boost keeps these grant-only
+    // matches below publication BM25 evidence (acceptance #3); the always-on
+    // filter gate below admits them to the result SET.
+    if (grantAxisActive) {
+      conceptScopeShould.push({ terms: { cwid: grantMatchedCwids, boost: 0.1 } });
+    }
     must.push({
       bool: {
-        should: [
-          // CWIDs are stored lowercase as a `keyword` field; an exact term
-          // match wins over the multi_match by a wide boost so a pasted
-          // CWID resolves to its scholar at the top of the result list.
-          { term: { cwid: { value: trimmed.toLowerCase(), boost: 100 } } },
-          queryBranch,
-        ],
+        should: conceptScopeShould,
         minimum_should_match: 1,
       },
     });
@@ -1098,7 +1157,23 @@ export async function searchPeople(opts: {
   // query body stays byte-identical to today; `exact` rides the empty-set path
   // (`meshDescendantUis = []` ⇒ the guard is skipped, boost-drop only).
   if (opts.scope === "concept" && meshDescendantUis.length > 0) {
-    queryFilter.push({ terms: { publicationMeshUi: meshDescendantUis } });
+    // #921 — when the grant axis is active, the set gate admits scholars tagged
+    // with the concept in a publication OR funded on it (a should over the two
+    // cwid/mesh predicates); de-dup is automatic. Flag-off keeps the original
+    // single `terms` gate, so the body is byte-identical to today.
+    queryFilter.push(
+      grantAxisActive
+        ? {
+            bool: {
+              should: [
+                { terms: { publicationMeshUi: meshDescendantUis } },
+                { terms: { cwid: grantMatchedCwids } },
+              ],
+              minimum_should_match: 1,
+            },
+          }
+        : { terms: { publicationMeshUi: meshDescendantUis } },
+    );
   }
 
   // Issue #726 — match-type tier (set by the caller from the resolved

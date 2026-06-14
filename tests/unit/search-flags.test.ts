@@ -12,6 +12,7 @@ import {
   resolveDeptLeadershipBoost,
   resolveFundingConceptEnabled,
   resolveFundingMeshGateField,
+  resolvePeopleConceptGrantAxis,
   resolvePeopleConceptPrecount,
   resolveSearchShellStreaming,
 } from "@/lib/api/search-flags";
@@ -134,6 +135,36 @@ describe("resolveFundingConceptEnabled (#295)", () => {
     expect(resolveFundingConceptEnabled()).toBe(true);
     process.env.SEARCH_FUNDING_TAB_CONCEPT = "true";
     expect(resolveFundingConceptEnabled()).toBe(true);
+  });
+});
+
+describe("resolvePeopleConceptGrantAxis (#921)", () => {
+  const original = process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS;
+
+  beforeEach(() => {
+    delete process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS;
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS;
+    else process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS = original;
+  });
+
+  it("defaults to false (dark) when the env is unset", () => {
+    expect(resolvePeopleConceptGrantAxis()).toBe(false);
+  });
+
+  it("is on only for exactly 'on'", () => {
+    process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS = "on";
+    expect(resolvePeopleConceptGrantAxis()).toBe(true);
+  });
+
+  it("stays off for any other value (opt-in semantics)", () => {
+    process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS = "ON";
+    expect(resolvePeopleConceptGrantAxis()).toBe(false);
+    process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS = "true";
+    expect(resolvePeopleConceptGrantAxis()).toBe(false);
+    process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS = "";
+    expect(resolvePeopleConceptGrantAxis()).toBe(false);
   });
 });
 
