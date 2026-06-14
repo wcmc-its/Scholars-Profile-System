@@ -540,3 +540,19 @@ export function resolveSearchShellStreaming(): boolean {
 export function resolvePeopleConceptPrecount(): boolean {
   return process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT !== "off";
 }
+
+/**
+ * #921 — concept-scope grant axis. When ON, the Scholars tab under
+ * `?match=concept` admits scholars who are FUNDED on the resolved concept (a
+ * grant whose `SEARCH_FUNDING_MESH_GATE` field intersects the descendant set),
+ * not only those with a concept-tagged publication. The People list, facets,
+ * and the count badge all widen together (the union rides the always-on filter
+ * + the scoring `must`), and grant-only matches sort below publication evidence.
+ *
+ * Default OFF (an `=== "on"` opt-in, opposite the default-on precount lever) so
+ * the feature ships dark: flag-off skips the extra Funding round-trip entirely
+ * and leaves every concept-People query body byte-identical to today.
+ */
+export function resolvePeopleConceptGrantAxis(): boolean {
+  return process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS === "on";
+}
