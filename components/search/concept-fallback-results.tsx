@@ -48,6 +48,22 @@ export function ConceptFallbackResults({
 
   return (
     <section className="mt-8" aria-label="Broader results">
+      {/* #298 §10 — concise screen-reader announcement so SR users learn the
+          broad-text co-render appeared. The block streams in after the search
+          page's loading status region, so a polite live region is read out on
+          the result swap. Visually hidden; the divider band below carries the
+          same information for sighted users. Copy is trigger-agnostic to match
+          §4.3 (the user needs the broad-mention count, not which arm fired). */}
+      <p
+        role="status"
+        aria-live="polite"
+        className="sr-only"
+        data-testid="concept-fallback-announcement"
+      >
+        {`Showing ${total.toLocaleString()} broader ${
+          total === 1 ? "result" : "results"
+        } mentioning ${query} below.`}
+      </p>
       {/* §4.3 — divider band. Identical copy across zero / sparse triggers. */}
       <div className="mb-4 flex items-center gap-3">
         <div className="h-px flex-1 bg-[#e2e0d8]" />
