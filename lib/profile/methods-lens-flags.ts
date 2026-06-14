@@ -108,3 +108,18 @@ export function isMethodsFamilyDefinitionsOn(): boolean {
 export function isCenterMethodsFacetEnabled(): boolean {
   return isMethodsLensEnabled() && process.env.CENTER_METHODS_FACET === "on";
 }
+
+/**
+ * #974 — per-member "method chips" (top-3 public method families) on the
+ * DEPARTMENT and DIVISION roster rows. ADDITIONALLY gated on METHODS_LENS_ENABLED
+ * (the `scholar_family` substrate): off → no extra query, no chips, no family data
+ * in the payload (no SEO/JSON side channel). PUBLIC families only (same #800/#801
+ * overlay gate as the lens), so the CloudFront-cacheable roster page stays
+ * cacheable — a plain DB read keyed on the page's ≤20 CWIDs, no per-viewer call.
+ * Phase 1 is CHIPS ONLY (no facet, no whole-dataset aggregation — that's Phase 2).
+ * Wire in BOTH `.env.local` AND the per-env block in cdk/lib/app-stack.ts per the
+ * flag-parity rule.
+ */
+export function isOrgUnitMethodsChipsEnabled(): boolean {
+  return isMethodsLensEnabled() && process.env.ORG_UNIT_METHODS_CHIPS === "on";
+}

@@ -106,7 +106,7 @@ export function DepartmentFacultyClient({
       </div>
       <div className="flex flex-col">
         {filtered.map((hit) => (
-          <PersonRow key={hit.cwid} hit={hit} />
+          <PersonRow key={hit.cwid} hit={hit} methodChips={hit.topMethods} />
         ))}
       </div>
       <div className="mt-8">

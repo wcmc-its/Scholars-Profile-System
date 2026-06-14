@@ -37,6 +37,12 @@ import {
   resolveActiveGrantSuppression,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
+import {
+  loadPublicFamiliesForMembers,
+  ROSTER_ROW_METHODS_CAP,
+  type MemberMethodFamily,
+} from "@/lib/api/methods-roster";
+import { isOrgUnitMethodsChipsEnabled } from "@/lib/profile/methods-lens-flags";
 
 const FACULTY_PAGE_SIZE = 20;
 const PUB_PAGE_SIZE = 20;
@@ -320,6 +326,10 @@ export type DivisionFacultyResult = {
     overview: string | null;
     pubCount: number;
     grantCount: number;
+    /** #974 — top ≤3 PUBLIC method families for the per-row chips. Present only
+     *  when ORG_UNIT_METHODS_CHIPS (+ METHODS_LENS_ENABLED) is on AND the member
+     *  has ≥1 public family; undefined otherwise. */
+    topMethods?: MemberMethodFamily[];
   }>;
   total: number;
   /** Whole-scope role-category counts for the role-chip-row. (#17) */
@@ -450,7 +460,25 @@ export async function getDivisionFaculty(
     grantCount: grantByCwid.get(r.cwid) ?? 0,
   }));
 
-  return { hits, total, roleCategoryCounts, page, pageSize: FACULTY_PAGE_SIZE };
+  // #974 — attach top-≤3 PUBLIC method families for the per-row chips, keyed on
+  // the visible page's ≤20 CWIDs (no whole-dataset aggregation — that's Phase 2).
+  // The loader self-gates on the flag, so off → empty map → hits pass through
+  // byte-identical, and the page stays CloudFront-cacheable (a plain DB read,
+  // no per-viewer call).
+  const famByCwid = await loadPublicFamiliesForMembers(cwids, {
+    enabled: isOrgUnitMethodsChipsEnabled(),
+  });
+  const finalHits =
+    famByCwid.size === 0
+      ? hits
+      : hits.map((h) => {
+          const fams = famByCwid.get(h.cwid);
+          return fams && fams.length > 0
+            ? { ...h, topMethods: fams.slice(0, ROSTER_ROW_METHODS_CAP) }
+            : h;
+        });
+
+  return { hits: finalHits, total, roleCategoryCounts, page, pageSize: FACULTY_PAGE_SIZE };
 }
 
 /**
