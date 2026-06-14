@@ -58,7 +58,7 @@ export type BackfillDb = {
     }): Promise<Array<{ code: string }>>;
     upsert(args: unknown): Promise<unknown>;
     updateMany(args: {
-      where: { source: string };
+      where: { source?: string; code?: { in: string[] } };
       data: { source: string };
     }): Promise<{ count: number }>;
   };
@@ -182,8 +182,9 @@ export async function fixtureLoadCenters(
  * Step 2 — migrate centers `source='seed'` -> `source='manual'`. WHERE-guarded,
  * so rows already `manual` are skipped and a repeat run is a no-op.
  *
- * `--limit` is honored by collecting the candidate codes first and updating one
- * by one (Prisma `updateMany` has no `take`).
+ * `--limit` is honored by collecting the candidate codes first and scoping the
+ * `updateMany` to exactly those codes (Prisma `updateMany` has no `take`, so the
+ * cap is applied via the `code: { in }` filter — #991).
  */
 export async function migrateCenterSource(
   db: BackfillDb,
@@ -202,10 +203,12 @@ export async function migrateCenterSource(
     return 0;
   }
 
-  // updateMany is bounded by the candidate set's source predicate; with --limit
-  // we still constrain to exactly the sampled codes by re-asserting source.
+  // Scope the update to exactly the sampled codes (the `--limit`-capped candidate
+  // set), re-asserting `source='seed'` so an already-`manual` row is never touched
+  // and a repeat run stays a no-op. #991 — the prior `where: { source }` alone
+  // IGNORED `--limit` and updated every seed center, contradicting the docstring.
   const { count } = await db.center.updateMany({
-    where: { source: "seed" },
+    where: { code: { in: candidates.map((c) => c.code) }, source: "seed" },
     data: { source: "manual" },
   });
   log(`  migrated ${count} center(s) source='seed' -> 'manual'.`);

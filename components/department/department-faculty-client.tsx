@@ -79,7 +79,14 @@ export function DepartmentFacultyClient({
     const params = new URLSearchParams(window.location.search);
     const valid = new Set(methodFacet!.map((o) => o.value));
     const seeded = params.getAll("method").filter((m) => valid.has(m));
-    if (seeded.length > 0) setSelMethods(new Set(seeded));
+    if (seeded.length > 0) {
+      setSelMethods(new Set(seeded));
+      // #991 — restore the shared `?page=` too, so a filtered+paged deep-link
+      // (e.g. ?method=X&page=3) opens on the intended page rather than silently
+      // loading page 1 (which the replaceState effect would then rewrite back).
+      const pageParam = Number.parseInt(params.get("page") ?? "1", 10);
+      if (Number.isFinite(pageParam) && pageParam > 1) setFetchPage(pageParam);
+    }
     // mount-only; methodFacet/hasFacet are stable for a given render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
