@@ -18,7 +18,10 @@ vi.mock("@/components/publication/publication-meta", () => ({
   PublicationMeta: () => <div data-testid="meta" />,
 }));
 
-import { ConceptFallbackResults } from "@/components/search/concept-fallback-results";
+import {
+  ConceptFallbackResults,
+  ConceptFallbackAnnouncement,
+} from "@/components/search/concept-fallback-results";
 import type { PublicationHit } from "@/lib/api/search";
 
 function makeHit(pmid: string): PublicationHit {
@@ -90,7 +93,10 @@ describe("ConceptFallbackResults (§4/§5)", () => {
     expect(link.getAttribute("href")).toBe(VIEW_ALL);
   });
 
-  it("announces the broader-results fallback to screen readers (#298 §10)", () => {
+  it("does NOT render the SR announcement itself — that is the page's persistent region (#991 #11)", () => {
+    // The live region was moved out of this component so it can be mounted
+    // unconditionally by the page; a region that appears together with its text
+    // is not reliably announced.
     render(
       <ConceptFallbackResults
         query="health economics"
@@ -99,22 +105,7 @@ describe("ConceptFallbackResults (§4/§5)", () => {
         viewAllHref={VIEW_ALL}
       />,
     );
-    const status = screen.getByTestId("concept-fallback-announcement");
-    expect(status.getAttribute("role")).toBe("status");
-    expect(status.getAttribute("aria-live")).toBe("polite");
-    expect(status.className).toContain("sr-only");
-    expect(status.textContent).toBe(
-      "Showing 124 broader results mentioning health economics below.",
-    );
-  });
-
-  it("singularizes the SR announcement for a single broad result", () => {
-    render(
-      <ConceptFallbackResults query="x" hits={[makeHit("1")]} total={1} viewAllHref={VIEW_ALL} />,
-    );
-    expect(screen.getByTestId("concept-fallback-announcement").textContent).toBe(
-      "Showing 1 broader result mentioning x below.",
-    );
+    expect(screen.queryByTestId("concept-fallback-announcement")).toBeNull();
   });
 
   it("renders nothing when there are no hits to preview", () => {
@@ -138,5 +129,38 @@ describe("ConceptFallbackResults (§4/§5)", () => {
     expect(
       screen.getByRole("link", { name: /View all 1 broad result(?!s)/ }),
     ).toBeTruthy();
+  });
+});
+
+describe("ConceptFallbackAnnouncement (#298 §10 / #991 #11 — persistent SR region)", () => {
+  it("is a polite, screen-reader-only status region", () => {
+    render(<ConceptFallbackAnnouncement query="health economics" total={124} />);
+    const status = screen.getByTestId("concept-fallback-announcement");
+    expect(status.getAttribute("role")).toBe("status");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.className).toContain("sr-only");
+  });
+
+  it("writes the broad-result count when a co-render is shown", () => {
+    render(<ConceptFallbackAnnouncement query="health economics" total={124} />);
+    expect(screen.getByTestId("concept-fallback-announcement").textContent).toBe(
+      "Showing 124 broader results mentioning health economics below.",
+    );
+  });
+
+  it("singularizes for a single broad result", () => {
+    render(<ConceptFallbackAnnouncement query="x" total={1} />);
+    expect(screen.getByTestId("concept-fallback-announcement").textContent).toBe(
+      "Showing 1 broader result mentioning x below.",
+    );
+  });
+
+  it("stays present but EMPTY when no co-render is shown (total=null) — the persistence guarantee", () => {
+    // The region must exist in the DOM before any count write, so it can never
+    // be conditionally unmounted; an empty string keeps it silent until then.
+    render(<ConceptFallbackAnnouncement query="x" total={null} />);
+    const status = screen.getByTestId("concept-fallback-announcement");
+    expect(status).toBeTruthy();
+    expect(status.textContent).toBe("");
   });
 });

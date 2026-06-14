@@ -24,6 +24,51 @@ import Link from "next/link";
 import { PublicationResultRow } from "@/components/search/publication-result-row";
 import type { PublicationHit } from "@/lib/api/search";
 
+/**
+ * Issue #298 §10 / #991 #11 — persistent screen-reader announcement for the
+ * broad-text co-render.
+ *
+ * A polite `aria-live` region only reliably announces content that mutates
+ * *after* the region already exists in the DOM. The previous version mounted the
+ * region together with its text inside `ConceptFallbackResults`, so on the
+ * result swap the region and its text appeared simultaneously and many
+ * SR/browser pairs stayed silent. The fix is to render this region
+ * **unconditionally** (the page always mounts it, even with no fallback), so when
+ * a query produces a broad-text co-render the count is *written into* an existing
+ * live region and is announced.
+ *
+ * `total === null` ⇒ no co-render is shown; the region stays present but empty.
+ *
+ * NOTE: a true verification of the announcement still requires a real screen
+ * reader (VoiceOver + NVDA) on a live result swap; this is the structurally
+ * correct shape, not an automated SR-verified one.
+ */
+export function ConceptFallbackAnnouncement({
+  query,
+  total,
+}: {
+  /** Original query string, echoed verbatim in the announcement. */
+  query: string;
+  /** Broad-text total when a co-render is shown; `null` when none — keeps the
+   *  region mounted-but-empty so a later count write is announced. */
+  total: number | null;
+}) {
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      className="sr-only"
+      data-testid="concept-fallback-announcement"
+    >
+      {total !== null
+        ? `Showing ${total.toLocaleString()} broader ${
+            total === 1 ? "result" : "results"
+          } mentioning ${query} below.`
+        : ""}
+    </p>
+  );
+}
+
 export function ConceptFallbackResults({
   query,
   hits,
@@ -48,23 +93,11 @@ export function ConceptFallbackResults({
 
   return (
     <section className="mt-8" aria-label="Broader results">
-      {/* #298 §10 — concise screen-reader announcement so SR users learn the
-          broad-text co-render appeared. The block streams in after the search
-          page's loading status region, so a polite live region is read out on
-          the result swap. Visually hidden; the divider band below carries the
-          same information for sighted users. Copy is trigger-agnostic to match
-          §4.3 (the user needs the broad-mention count, not which arm fired). */}
-      <p
-        role="status"
-        aria-live="polite"
-        className="sr-only"
-        data-testid="concept-fallback-announcement"
-      >
-        {`Showing ${total.toLocaleString()} broader ${
-          total === 1 ? "result" : "results"
-        } mentioning ${query} below.`}
-      </p>
-      {/* §4.3 — divider band. Identical copy across zero / sparse triggers. */}
+      {/* §4.3 — divider band. Identical copy across zero / sparse triggers.
+          The screen-reader announcement is NOT here — it lives in the persistent
+          <ConceptFallbackAnnouncement> the page renders unconditionally, so the
+          count is written into a live region that already exists in the DOM and
+          is therefore reliably announced on the result swap (#991 #11). */}
       <div className="mb-4 flex items-center gap-3">
         <div className="h-px flex-1 bg-[#e2e0d8]" />
         <div className="text-[13px] font-semibold text-[#4a4a4a]">
