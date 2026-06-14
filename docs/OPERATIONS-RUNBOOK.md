@@ -4,6 +4,74 @@
 > authoritative deep docs for detail. Where this doc and a linked doc disagree, **the linked doc wins** — and the
 > CDK code (`cdk/lib/*`) wins over any doc.
 
+## Start here: triage decision tree
+
+> **Golden rule first:** almost all displayed data is a *derived snapshot* from a scheduled ETL. An upstream outage
+> makes data **stale**, not the site **down**. If the page *renders* (even with old/missing data), it's a freshness
+> problem (ETL/cache), **not** an availability incident — don't roll back or scale for it.
+
+Find your symptom, do the first step, then jump to the cited section.
+
+```
+What's the problem?
+│
+├─ SITE IS DOWN  — 5xx, "Something went wrong", blank pages, no healthy hosts
+│    ├─ Started right after a deploy?  ── YES → roll back app to prev task-def ......... §2 "Roll back"
+│    └─ Else → check Aurora / CloudFront, decide rollback vs fix-forward .............. §4 #6
+│         (need to take it offline now? kill switch = scale to 0; prod = P0) .......... §2 "Kill switch"
+│
+├─ SITE IS UP but DATA IS STALE / WRONG  (page renders, content old or missing)
+│    ├─ A whole profile section is old/missing → that ETL source stalled ............. §4 #2, #3
+│    ├─ Stale only after an edit / reindex / ETL run → bust the edge cache ............ §4 #1
+│    │     (surgical = POST /api/revalidate, NOT cloudfront create-invalidation)
+│    ├─ Retracted paper still showing ............................................... §4 #5
+│    └─ Home "Selected research" empty / wrong authors / bad links .................. §4 #10
+│
+├─ SEARCH IS WRONG  — no results, too few, or stale after a data/mapping change
+│    ├─ Recall problem (e.g. covid19→9 but covid-19→1,425; tylenol→0) .............. §4 #4
+│    └─ Stale/missing after a load or analyzer/mapping change → reindex .............. §4 #9
+│
+├─ AN ALARM FIRED / a Teams card arrived
+│    ├─ Card names an ETL alarm (sps-etl-*-status/-cadence/-heartbeat) .............. §4 #3
+│    ├─ 5xx / latency / unhealthy-hosts / task-shortfall ........................... §4 #6
+│    ├─ Alarm fired but NO Teams card within 5 min (paging path broken) ............. §4 #8
+│    └─ Any other alarm → map it via "Quick alarm → entry index" ............ end of §4
+│
+├─ STAFF CAN'T LOG IN to /edit  (SAML/SSO: idp_status_error, no_cwid, Responder…)
+│    └─ SAML IdP / Enterprise Directory issue ...................................... §4 #7
+│         ⚠️ Hard cert deadline 2026-08-19 — both certs must be trusted ............. §5 deadlines
+│
+├─ DB DATA LOSS / CORRUPTION  (data wrong at the source, not an app bug)
+│    └─ Aurora PITR or DR-vault restore (RPO ≤ 24 h, RTO ≤ 4 h) ..................... §4 #11
+│
+├─ /api/revalidate RETURNS 401 / 500  (cache-bust webhook failing)
+│    └─ Token unset / wrong / mid-rotation ......................................... §4 #12
+│
+└─ PLANNED OPERATION  — I need to deploy, scale, roll back, or bust cache on purpose
+     ├─ Deploy code vs infra/flag vs CloudFront (know which mechanism!) ............. §2 "deploy split"
+     ├─ Scale / start / stop / restart the service ................................. §2 "Scale"
+     ├─ Roll back an app deploy ..................................................... §2 "Roll back"
+     └─ Revalidate / cache-bust .................................................... §2 "Revalidate"
+```
+
+**Routing table (same map, for fast lookup):**
+
+| You're seeing… | Go to |
+|---|---|
+| Site down — 5xx, blank, no healthy hosts | §4 #6 → roll back (§2) / kill switch (§2) |
+| Page renders but a section is stale/missing | §4 #2, §4 #3 (ETL) |
+| Stale only after edit/reindex/ETL | §4 #1 (edge cache → `POST /api/revalidate`) |
+| Retracted paper showing | §4 #5 |
+| "Selected research" / spotlight wrong | §4 #10 |
+| Search returns nothing / too few | §4 #4 |
+| Search stale after a load/mapping change | §4 #9 (reindex) |
+| ETL alarm / Teams card | §4 #3 |
+| Alarm fired, no Teams card | §4 #8 |
+| Can't log in to `/edit` (SAML) | §4 #7 (⚠️ cert deadline §5) |
+| DB data loss / corruption | §4 #11 (PITR / DR) |
+| `/api/revalidate` 401/500 | §4 #12 |
+| Deploy / scale / roll back / revalidate (planned) | §2 |
+
 ## What this is
 
 The **Scholars Profile System (SPS)** is a read-mostly **Next.js 15 (App Router)** app that renders ~9,000 public WCM
@@ -25,8 +93,6 @@ outage makes data *stale*, not the site *down*. All infrastructure is **AWS CDK 
 >    is a documented **single-account deviation**: both envs share account **`665083158573`** in `us-east-1`, isolated
 >    by env-prefix. Confirm the live topology with `aws sts get-caller-identity` per env before assuming separate accounts.
 > 2. **Stack count.** ADR-008 says "six stacks"; `cdk/bin/sps-infra.ts` instantiates **nine**. Trust the bin file (table in §2).
-
----
 
 ## 1. Services used
 
@@ -85,8 +151,6 @@ Nine stacks, each `Sps-{X}-${env}` (e.g. `Sps-App-prod`). Selected via `-c env=s
 **ETL-path** (outage = stale data, site stays up): Enterprise Directory LDAPS (nightly → Scholar/Appointment/org units), ReciterDB MariaDB (nightly → Publications/MeSH/citations, heavy ~5 min), InfoEd MS SQL (nightly → Grant), COI Portal MySQL (nightly → CoiActivity), ASMS MS SQL (nightly → Education), Jenzabar MS SQL (weekly → PhD mentoring), ReciterAI DynamoDB+S3 (Topic/Score/Spotlight/tools), NIH RePORTER + NSF (weekly), NLM MeSH (annual). WCM-internal reachability depends on **TGW + WCM firewall owned by Central Services account `091981818184`, not SPS**.
 
 Method/tool taxonomy and spotlight data are published by ReciterAI as **JSON on S3** (`s3://wcmc-reciterai-artifacts/tools/latest/...`, `.../spotlight/latest/spotlight.json`), **not** DynamoDB; SPS ETL ingests into Aurora.
-
----
 
 ## 2. Starting & stopping the app
 
@@ -204,8 +268,6 @@ ETL (local, reads prod sources over VPN): `npm run etl:daily` (chain head `etl:e
 
 > Deeper: [`./DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md), [`./rollback-runbook.md`](./rollback-runbook.md), [`./staging-cutover.md`](./staging-cutover.md), [`./revalidate-token-rotation.md`](./revalidate-token-rotation.md), [`../README.md`](../README.md).
 
----
-
 ## 3. What to monitor
 
 ### SLOs (measured at the public ALB, 28-day rolling)
@@ -295,8 +357,6 @@ Key structured events to search: `profile_view` (`duration_ms`), `search_degrade
 
 > Deeper: [`./SLOs.md`](./SLOs.md), [`./oncall.md`](./oncall.md), [`./etl-monitoring.md`](./etl-monitoring.md), [`./logging-reference.md`](./logging-reference.md), [`./tracing.md`](./tracing.md), [`./performance-baseline.md`](./performance-baseline.md).
 
----
-
 ## 4. Common error messages & fixes
 
 `${env}` / `$ENV` = `staging` or `prod`. This is the section operators use most.
@@ -317,8 +377,6 @@ Key structured events to search: `profile_view` (`duration_ms`), `search_degrade
 | 12 | `POST /api/revalidate` returns 401 / 500 | 401 = no/wrong token or non-Bearer scheme; 500 `server misconfigured` = `SCHOLARS_REVALIDATE_TOKEN` unset; mid-rotation 401 = old process cached old token | During rotation stage **both** `SCHOLARS_REVALIDATE_TOKEN` (new) + `SCHOLARS_REVALIDATE_TOKEN_PREVIOUS` (old) in `scholars/revalidate-token`, redeploy app to re-read, roll ETL callers, verify both 200, drop previous after ≥24 h + redeploy. → [`./revalidate-token-rotation.md`](./revalidate-token-rotation.md) |
 
 **Quick alarm → entry index:** 5xx-rate / unhealthy-hosts / ecs-task-shortfall → #6; latency-p99 → #1/#6; aurora-cpu / aurora-connections → #2/#6; opensearch-red / jvm-pressure → #4/#9; etl-*-status/-cadence/-heartbeat → #3; oncall-relay-errors → #8; budget/anomaly (notify, email) = cost guardrail, not a service incident.
-
----
 
 ## 5. Host, contacts & access
 
@@ -371,8 +429,6 @@ Properties: **fail-closed** (a directory error denies; an ED outage blocks all e
 
 **Governance gaps:** no formal access-recertification cadence (superuser group / `unit_admin`); no standing emergency-superuser account (elevation depends on ED reachability); post-launch operations ownership unresolved.
 
----
-
 ## 6. Where to find more (doc index)
 
 [`./DOCUMENTATION-REGISTRY.md`](./DOCUMENTATION-REGISTRY.md) is the **master index**, keyed by the question an operator would ask. The highest-value docs:
@@ -393,7 +449,5 @@ Properties: **fail-closed** (a directory error denies; an ED outage blocks all e
 | VPC / network / WAF | [`./network-security-topology.md`](./network-security-topology.md) |
 | Architecture overview | [`./architecture-overview.md`](./architecture-overview.md) |
 | **Master index** (the "where do I find X" doc) | [`./DOCUMENTATION-REGISTRY.md`](./DOCUMENTATION-REGISTRY.md) |
-
----
 
 *Last reviewed: 2026-06-14 (consolidated from existing runbooks).*
