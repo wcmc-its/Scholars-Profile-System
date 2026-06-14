@@ -7,12 +7,14 @@
  * the selected public method families (OR within the facet), paginated, with the
  * same `DepartmentFacultyHit[]` shape (incl. Phase-1 `topMethods` chips).
  *
- * Uncacheable by ORIGIN headers, not a dedicated edge behavior: `dynamic =
- * "force-dynamic"` makes Next emit `Cache-Control: private, no-store` so CloudFront
- * never caches it (mirrors `/api/methods/[supercategory]/families/[familyId]/
- * scholars`, which is also uncacheable purely via origin no-store). The roster PAGE
- * is unaffected — it never reads `?method` (stripped at the edge anyway) and adds
- * no per-viewer call. Do NOT add an edge-stack.ts behavior for this route.
+ * Uncacheable via `dynamic = "force-dynamic"` (Next emits `Cache-Control: private,
+ * no-store`, so CloudFront never caches it). It ALSO needs an explicit edge behavior:
+ * `/api/units/*/*/members` is in the uncacheable ALL_VIEWER list in
+ * cdk/lib/edge-stack.ts, because the cacheable default behavior's query allow-list
+ * omits `method`, so without AllViewer the `?method=` filter would be stripped before
+ * the origin (the #490/#624 EdgeStack guard enforces a forwarding behavior for any
+ * query-reading route). The roster PAGE is unaffected — it never reads `?method`
+ * server-side and adds no per-viewer call.
  *
  * Security: same allowlist-regex posture as the methods scholars endpoint — code +
  * each `method` key validated against a strict charset, no request/param logging.
