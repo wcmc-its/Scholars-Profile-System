@@ -210,10 +210,14 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
         ? // External leader (not a WCM scholar, e.g. Joel Stein / Rehab Med):
           // the scholar lookup misses, so fall back to the curated name so the
           // chair still shows on browse. Rendered as plain text (no link), so
-          // no slug is needed — chairSlug stays null below.
+          // no slug is needed — chairSlug stays null below. #991 — gate the
+          // fallback on the external leader's cwid MATCHING the current chairCwid
+          // (mirroring departments.ts), so a stale EXTERNAL_LEADERS entry can't
+          // surface the wrong name if the chair changes to another unresolved cwid.
           (chairMap.get(d.chairCwid)?.preferredName ??
-          EXTERNAL_LEADERS[d.code]?.name ??
-          null)
+          (EXTERNAL_LEADERS[d.code]?.cwid === d.chairCwid
+            ? (EXTERNAL_LEADERS[d.code]?.name ?? null)
+            : null))
         : null,
       chairSlug: d.chairCwid
         ? (chairMap.get(d.chairCwid)?.slug ?? null)

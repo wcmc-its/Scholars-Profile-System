@@ -1045,15 +1045,23 @@ export async function getAllMentorCoPublications(
     .map(([programLabel, entries]) => ({ programLabel, entries }))
     .sort((a, b) => a.programLabel.localeCompare(b.programLabel));
 
-  // Distinct counts.
+  // Distinct counts — derived from the POST-suppression entries, NOT the
+  // pre-suppression copublicationCount. #991 — a mentee whose every co-pub is
+  // dark contributes 0 entries (the bridge count can outrun the suppressed list
+  // by the documented ≤1), so `menteesWithCopubs.length` would overstate the
+  // "N publications across M mentees" subtitle. Count mentees actually rendered.
   const distinctCopubIds = new Set<string>();
+  const distinctMenteeCwids = new Set<string>();
   for (const g of groups) {
-    for (const e of g.entries) distinctCopubIds.add(copubId(e.publication));
+    for (const e of g.entries) {
+      distinctCopubIds.add(copubId(e.publication));
+      distinctMenteeCwids.add(e.mentee.cwid);
+    }
   }
 
   return {
     groups,
     publicationCount: distinctCopubIds.size,
-    menteeCount: menteesWithCopubs.length,
+    menteeCount: distinctMenteeCwids.size,
   };
 }

@@ -548,6 +548,9 @@ describe("EdgeStack", () => {
           "/api/methods/*/*/publications",
           // #866 internal-viewer reveal -- GET-only read.
           "/api/profile/*",
+          // #974 Phase 2 org-unit method-facet members feed (plain allViewer,
+          // GET-only) -- #991 locks its method set the same way as the siblings.
+          "/api/units/*/*/members",
           "/about/feedback",
           "/scholars/*/co-pubs/export",
           "/scholars/*/co-pubs/*/export",

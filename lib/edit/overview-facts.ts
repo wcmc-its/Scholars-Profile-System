@@ -320,11 +320,13 @@ async function loadActiveFunding(cwid: string): Promise<
  * `exemplarTools` for grounding. `maxConfidence` is a constant `1` — families
  * carry no per-tool confidence; it only orders ties within the bucket.
  *
- * Owner-facing (the self-edit generator), so unlike the public panel it reads
- * ALL the scholar's own families, regardless of:
- *   - the #801 SENSITIVITY gate — that is a public-viewer protection; the owner
- *     already sees their own sensitive families via the reveal route, and is the
- *     one authoring their own bio; and
+ * Reads ALL the scholar's own families — unlike the public panel it does NOT apply:
+ *   - the #801 SENSITIVITY gate — that is a public-viewer protection. The reader
+ *     is the scholar themselves OR a superuser / comms_steward authoring the bio
+ *     on their behalf (#844 widened the generator to admins — so this is NOT an
+ *     owner-only path). All are trusted internal viewers already entitled to see
+ *     the scholar's sensitive families under #866, so omitting the gate stays
+ *     within that trust boundary; and
  *   - the `METHODS_LENS_ENABLED` public-render master flag — the generator needs
  *     the DATA, which exists independent of the public lens rollout.
  *

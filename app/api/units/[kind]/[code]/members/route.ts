@@ -32,9 +32,14 @@ export const dynamic = "force-dynamic";
 // Dept/division codes are ED org codes (e.g. "N1140"): uppercase alnum, plus a
 // minimal `_`/`-` allowance. Strict — a bad code is a 400, never logged/queried.
 const CODE_RE = /^[A-Za-z0-9_-]+$/;
-// `sc::label` overlay key — supercategory is snake_case lower-alnum; the label is
-// free-text (any non-empty remainder). The loader re-gates each pair publicly.
-const METHOD_KEY_RE = /^[a-z0-9_]+::.+$/;
+// `sc::label` overlay key. The label is free-text (any non-empty remainder); the
+// supercategory column is an OPEN set (VarChar(128), "guard, don't hard-enum" — it
+// has already drifted 13→14), so match any non-`:` prefix rather than re-asserting
+// lowercase snake_case stricter than the data layer guarantees (#991) — a future
+// non-lowercase supercategory would otherwise 400 a facet key the sidebar offered.
+// This only rejects obviously-malformed input; the loader re-gates each pair
+// against the public #800/#801 overlay (the real security boundary).
+const METHOD_KEY_RE = /^[^:]+::.+$/;
 
 export async function GET(
   request: NextRequest,

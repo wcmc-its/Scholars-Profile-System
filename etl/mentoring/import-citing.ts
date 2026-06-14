@@ -116,10 +116,18 @@ async function main() {
       // instead of one-per-row upsert round-trips — the latter blow Prisma's 5 s
       // interactive-transaction timeout (P2028) on a table this size, since the
       // cost here is round-trip count, not row size (the citing list is small,
-      // article-metadata-limited). The read path is flag-gated, so the brief
-      // empty window between delete and reload is never observed (and would
-      // degrade honestly if it were); the empty-export guard above protects the
-      // table from a corrupt/empty S3 object.
+      // article-metadata-limited).
+      //
+      // NON-transactional by design: a single interactive $transaction over ~170K
+      // rows would blow the P2028 timeout, so the delete + chunked reload run
+      // outside a transaction. On the FIRST import (flag off) the empty window is
+      // never observed. On a STEADY-STATE re-import (PUBLICATION_CITING_BRIDGE
+      // already on), once the first chunk commits the existence probe sees rows,
+      // so a cited pmid not-yet-reinserted briefly renders "cited by 0" rather
+      // than "temporarily unavailable" (#991) — it self-heals within the seconds
+      // the reload takes. To avoid the window entirely, flip the bridge flag OFF
+      // before a steady-state re-import and back on when it completes. The
+      // empty-export guard above protects the table from a corrupt/empty object.
       await db.write.publicationCiting.deleteMany({});
       for (const batch of chunks(rows, INSERT_BATCH)) {
         await db.write.publicationCiting.createMany({
