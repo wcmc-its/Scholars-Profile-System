@@ -9,7 +9,7 @@
  *
  * Uncacheable via `dynamic = "force-dynamic"` (Next emits `Cache-Control: private,
  * no-store`, so CloudFront never caches it). It ALSO needs an explicit edge behavior:
- * `/api/units/*/*/members` is in the uncacheable ALL_VIEWER list in
+ * this route is in the uncacheable ALL_VIEWER list in
  * cdk/lib/edge-stack.ts, because the cacheable default behavior's query allow-list
  * omits `method`, so without AllViewer the `?method=` filter would be stripped before
  * the origin (the #490/#624 EdgeStack guard enforces a forwarding behavior for any
