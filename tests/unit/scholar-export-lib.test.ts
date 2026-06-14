@@ -158,6 +158,8 @@ describe("buildScholarExport — method-family scope", () => {
     // In-range cohort exports complete (all 50 rows).
     expect(body.length).toBe(SCHOLAR_EXPORT_CAP);
     expect(body.length).toBeLessThanOrEqual(50);
+    // (#991 #9) rowCount is the authoritative data-row count, == the CSV body.
+    expect(result!.rowCount).toBe(body.length);
 
     // rank + profile_url present and correctly shaped on the first row.
     const rankIdx = header.indexOf("rank");

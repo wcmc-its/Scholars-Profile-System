@@ -131,9 +131,10 @@ export async function POST(
   // Contact-data audit (#866 UC-B): emit ONE structured record whenever the
   // email column is included. For an anonymous on-network viewer the source IP
   // is the only identifier, so capture it (parsed from the CloudFront viewer
-  // address header). `row_count` = data rows = total CSV lines minus the header.
+  // address header). `row_count` = data rows reported by the builder — NOT
+  // derived by splitting the CSV string, which an RFC-4180 quoted cell with an
+  // embedded newline would over-count.
   if (includeEmail) {
-    const csvLines = result.csv.trim().length === 0 ? 0 : result.csv.trim().split("\r\n").length;
     console.info(
       JSON.stringify({
         event: "scholar_export_email",
@@ -142,7 +143,7 @@ export async function POST(
           request.headers.get("cloudfront-viewer-address"),
         ),
         scope,
-        row_count: Math.max(0, csvLines - 1),
+        row_count: result.rowCount,
         ts: new Date().toISOString(),
       }),
     );

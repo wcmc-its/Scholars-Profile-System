@@ -154,7 +154,14 @@ type ExportRosterRow = ScholarIdentity & {
   total?: number;
 };
 
-export type ScholarExport = { filename: string; csv: string };
+export type ScholarExport = {
+  filename: string;
+  csv: string;
+  /** Number of data rows (scholars) in the export — the authoritative count for
+   *  audit logging. Taken from the roster, NOT by splitting `csv`, since an
+   *  RFC-4180 quoted cell with an embedded newline would over-count CSV lines. */
+  rowCount: number;
+};
 
 function todayStamp(): string {
   return new Date().toISOString().slice(0, 10);
@@ -496,5 +503,5 @@ export async function buildScholarExport(
   const headers = headersFor(scope, includeEmail);
   const csv = toCsv(headers, projectRows(scope, roster, includeEmail));
   const filename = `${SCOPE_REPORT_NAME[scope]}-Scholars-${todayStamp()}.csv`;
-  return { filename, csv };
+  return { filename, csv, rowCount: roster.length };
 }

@@ -16,7 +16,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AZDirectory } from "@/components/browse/az-directory";
 import { ResearchAreasRow } from "@/components/search/research-areas-row";
 import { ConceptEmptyState } from "@/components/search/concept-empty-state";
-import { ConceptFallbackResults } from "@/components/search/concept-fallback-results";
+import {
+  ConceptFallbackResults,
+  ConceptFallbackAnnouncement,
+} from "@/components/search/concept-fallback-results";
 import {
   ScopeControl,
   ScopeNote,
@@ -1514,6 +1517,12 @@ async function PublicationsResults({
         clearAllHref={clearAllHref}
       />
       <section>
+        {/* #298 §10 / #991 #11 — persistent SR live region. Rendered
+            unconditionally (not inside the {conceptFallback ? …} branch below)
+            so the broad-text count is written into a region that already exists
+            in the DOM and is announced on the result swap. Empty when no
+            co-render is shown. */}
+        <ConceptFallbackAnnouncement query={q} total={conceptFallback?.total ?? null} />
         {scopeRow}
         {chips.length > 0 ? <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} /> : null}
         <ResultsToolbar
