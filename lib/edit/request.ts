@@ -96,6 +96,36 @@ function impersonationReadonly(): boolean {
   return process.env.IMPERSONATION_READONLY === "true";
 }
 
+/** The dual edit identity every `/api/edit/*` handler authorizes against. */
+export interface EditIdentity {
+  /** The EFFECTIVE session — the "View as" target while an overlay is live, else the real user. */
+  session: EditSession;
+  /** The REAL signed-in CWID — the accountable human (audit `actor_cwid`). */
+  realCwid: string;
+  /** The impersonation target CWID when an overlay is live, else `null`. */
+  impersonatedCwid: string | null;
+}
+
+/**
+ * Resolve the effective edit identity for a READ (GET) route — the effective
+ * session + the real CWID + the live impersonation target. No origin / body
+ * checks (those guard state-changing writes); returns `null` when
+ * unauthenticated, which the caller maps to `401`. Factored out of
+ * {@link readEditRequest} so a GET route that authorizes a FOREIGN read (e.g.
+ * the Overview Sources drawer / version history on `/edit/scholar/[cwid]`)
+ * shares the EXACT identity resolution the write path uses, and the two can't
+ * drift (#637 §3 / #986).
+ */
+export async function resolveEditIdentity(): Promise<EditIdentity | null> {
+  const effective = await getEffectiveEditSession();
+  const real = await getSession();
+  if (!effective || !real) return null;
+  const impersonatedCwid = impersonationActive(real, nowSeconds())
+    ? (real.impersonating?.targetCwid ?? null)
+    : null;
+  return { session: effective, realCwid: real.cwid, impersonatedCwid };
+}
+
 /**
  * The shared `/api/edit/*` preamble. Returns the request context, or a ready
  * error response — `415` (non-JSON), `403` (cross-origin), `401` (no session,
@@ -118,21 +148,17 @@ export async function readEditRequest(request: NextRequest): Promise<EditRequest
     return { ok: false, response: editError(status, origin.reason) };
   }
 
-  // The authoritative session check — the middleware's 401 is only a coarse
-  // gate. `getEffectiveEditSession()` resolves the live `isSuperuser` verdict of
-  // the EFFECTIVE cwid; the raw session gives the REAL cwid for attribution and
-  // the live-overlay check. Both read the same cookie, decoded once each.
-  const effective = await getEffectiveEditSession();
-  const real = await getSession();
-  if (!effective || !real) {
+  // The authoritative identity check — the middleware's 401 is only a coarse
+  // gate. Shared with the GET read routes via `resolveEditIdentity` so the
+  // effective / real / impersonated resolution can't drift between read and write
+  // (#637 §3). `session`/`effective` carry the live `isSuperuser` verdict of the
+  // EFFECTIVE cwid; `realCwid` is the human for attribution; `impersonatedCwid`
+  // is the overlay target (or `null`).
+  const id = await resolveEditIdentity();
+  if (!id) {
     return { ok: false, response: new NextResponse(null, { status: 401 }) };
   }
-  const realCwid = real.cwid;
-  // The overlay target this write happens on behalf of — `null` when not
-  // impersonating (or the feature/flag is off, or the overlay has expired).
-  const impersonatedCwid = impersonationActive(real, nowSeconds())
-    ? (real.impersonating?.targetCwid ?? null)
-    : null;
+  const { session: effective, realCwid, impersonatedCwid } = id;
 
   // R3 optional view-only mode: while impersonating, refuse the write up front
   // (the default is edit-enabled — see #637 §3). Placed before the body read so

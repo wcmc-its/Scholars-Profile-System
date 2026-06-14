@@ -243,6 +243,10 @@ export default async function EditSelfPage({
           <AdminSubnav
             active="self"
             superuserSurfaces={canBrowseProfiles}
+            // #986 — a comms_steward is a global profile editor, so it gets the
+            // Profiles tab on EVERY console surface (matching /edit/scholars +
+            // /edit/methods). A superuser already has it via `superuserSurfaces`.
+            profilesTab={commsSteward}
             unitsTab={canBrowseProfiles || commsSteward || hasUnitGrants}
             pendingSlugRequests={pendingSlugRequests}
             administratorsTab={canBrowseProfiles && isAdministratorsTabEnabled() ? 0 : null}

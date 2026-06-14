@@ -247,7 +247,13 @@ function OverviewEditorCard({
   const refreshGenerations = React.useCallback(async () => {
     if (!generateEnabled) return;
     try {
-      const res = await fetch("/api/edit/overview/generations", { method: "GET" });
+      // #986 — key the history to the scholar being edited (`cwid`), not the
+      // viewer. On `/edit/scholar/X` for a superuser, `cwid` is X; the route
+      // authorizes the foreign read with the same predicate as the generate write.
+      const res = await fetch(
+        `/api/edit/overview/generations?cwid=${encodeURIComponent(cwid)}`,
+        { method: "GET" },
+      );
       if (!res.ok) return;
       const data = (await res.json()) as OverviewGenerationsResponse;
       setGenerations(Array.isArray(data.generations) ? data.generations : []);
@@ -255,7 +261,7 @@ function OverviewEditorCard({
     } catch {
       // Swallow — the history panel is non-essential and must never disrupt the editor.
     }
-  }, [generateEnabled]);
+  }, [generateEnabled, cwid]);
 
   React.useEffect(() => {
     void refreshGenerations();
@@ -492,7 +498,13 @@ function OverviewGeneratorArm({
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/api/edit/overview/source-options", { method: "GET" });
+        // #986 — candidate sources for the scholar being edited (`cwid`), not the
+        // viewer. The route authorizes a foreign `?cwid` with the generate-write
+        // predicate, so a superuser on `/edit/scholar/X` drafts from X's corpus.
+        const res = await fetch(
+          `/api/edit/overview/source-options?cwid=${encodeURIComponent(cwid)}`,
+          { method: "GET" },
+        );
         if (!res.ok) return;
         const data = (await res.json()) as { ok: true } & OverviewSourceOptions;
         if (cancelled) return;
@@ -510,7 +522,7 @@ function OverviewGeneratorArm({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [cwid]);
 
   const busy = isGenerating || editor.isSaving;
   const reviewDraft = reviewHistory[reviewIndex] ?? null;

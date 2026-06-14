@@ -291,14 +291,16 @@ function generationsResponse(
 function isGenerationsGet(input: RequestInfo | URL, init?: RequestInit): boolean {
   const url = typeof input === "string" ? input : input.toString();
   const method = (init?.method ?? "GET").toUpperCase();
-  return url === "/api/edit/overview/generations" && method === "GET";
+  // #986 — the card now keys the read to the edited scholar (`?cwid=...`).
+  return url.startsWith("/api/edit/overview/generations") && method === "GET";
 }
 
 /** Is this the #742 v3.1 Sources mount GET (source-options)? */
 function isSourceOptionsGet(input: RequestInfo | URL, init?: RequestInit): boolean {
   const url = typeof input === "string" ? input : input.toString();
   const method = (init?.method ?? "GET").toUpperCase();
-  return url === "/api/edit/overview/source-options" && method === "GET";
+  // #986 — the card now keys the read to the edited scholar (`?cwid=...`).
+  return url.startsWith("/api/edit/overview/source-options") && method === "GET";
 }
 
 /**
@@ -739,7 +741,7 @@ describe("OverviewCard — version history (Phase B)", () => {
     // exists in the pool. Restoring must narrow the selection AND drop the stale id.
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url === "/api/edit/overview/source-options") {
+      if (url.startsWith("/api/edit/overview/source-options")) {
         return jsonResponse({
           ok: true,
           publications: [1, 2, 3].map((n) => ({
@@ -764,7 +766,7 @@ describe("OverviewCard — version history (Phase B)", () => {
           tools: [],
         });
       }
-      if (url === "/api/edit/overview/generations") {
+      if (url.startsWith("/api/edit/overview/generations")) {
         return generationsResponse(
           [
             {
@@ -872,7 +874,7 @@ describe("OverviewCard — editor empty-state", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       async (input: RequestInfo | URL) => {
         const url = typeof input === "string" ? input : input.toString();
-        if (url === "/api/edit/overview/source-options") {
+        if (url.startsWith("/api/edit/overview/source-options")) {
           return jsonResponse({
             ok: true,
             publications: [
@@ -911,7 +913,7 @@ describe("OverviewCard — editor empty-state", () => {
             tools: [],
           });
         }
-        if (url === "/api/edit/overview/generations") return generationsResponse([], null);
+        if (url.startsWith("/api/edit/overview/generations")) return generationsResponse([], null);
         return jsonResponse({ ok: true });
       },
     );
@@ -960,7 +962,7 @@ describe("OverviewCard — conditional hints", () => {
     return vi.spyOn(globalThis, "fetch").mockImplementation(
       async (input: RequestInfo | URL) => {
         const url = typeof input === "string" ? input : input.toString();
-        if (url === "/api/edit/overview/source-options") {
+        if (url.startsWith("/api/edit/overview/source-options")) {
           return jsonResponse({
             ok: true,
             publications: Array.from({ length: opts.pubs }, (_, i) => ({
@@ -987,7 +989,7 @@ describe("OverviewCard — conditional hints", () => {
             tools: [],
           });
         }
-        if (url === "/api/edit/overview/generations") return generationsResponse([], null);
+        if (url.startsWith("/api/edit/overview/generations")) return generationsResponse([], null);
         return jsonResponse({ ok: true });
       },
     );
