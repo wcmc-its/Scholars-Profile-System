@@ -522,6 +522,12 @@ export class EdgeStack extends Stack {
       // Method (cross-scholar family) publication feed -- reads `sort`/`filter`/
       // `page` (#824). Same shape as `/api/topics/*/publications`.
       ["/api/methods/*/*/publications", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // Org-unit (dept/division) method-facet roster -- `force-dynamic`,
+      // `no-store`, reads repeatable `?method=` (+ `?page=`) for the #974 Phase 2
+      // facet. Unlisted it falls to the cacheable default, whose query allow-list
+      // omits `method`, so the filter would be stripped before the origin. AllViewer
+      // forwards it. GET-only (a read).
+      ["/api/units/*/*/members", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // `/api/profile/*` -- the #866 internal-viewer reveal endpoint. MUST have an
       // explicit uncacheable behavior: an unlisted `/api/profile/*` path falls to
       // the cacheable default, which would cache one viewer's reveal (incl. the

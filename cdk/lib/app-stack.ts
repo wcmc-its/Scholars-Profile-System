@@ -1245,6 +1245,23 @@ export class AppStack extends Stack {
         //     .env.local AND here per the flag-parity rule; manual cdk deploy
         //     Sps-App-<env> required (CD only re-rolls the image).
         ORG_UNIT_METHODS_CHIPS: env === "staging" ? "on" : "off",
+        //   ORG_UNIT_METHODS_FACET -- #974 Phase 2. The DEPARTMENT + DIVISION
+        //     roster "Methods & tools" multi-select FACET (server-aggregated
+        //     buckets rendered with the cacheable page + a client-fetch to the
+        //     uncacheable /api/units/[kind]/[code]/members route for the filtered
+        //     roster). ADDITIONALLY gated on METHODS_LENS_ENABLED in code (the
+        //     scholar_family substrate): when the lens is off this is off, so no
+        //     aggregation runs and the payload carries no facet data (no SEO/JSON
+        //     side channel). PUBLIC families only (same #800/#801 overlay gate) --
+        //     buckets, selectable families, AND returned chips. The buckets are
+        //     viewer-independent, so the roster page stays CloudFront-cacheable;
+        //     only the force-dynamic API route filters per request. Independent of
+        //     ORG_UNIT_METHODS_CHIPS (Phase 1) so the facet can flip separately.
+        //     STAGING-ON (the lens substrate is staging-on); PROD OFF until the
+        //     methods-lens go-live. Wire in BOTH .env.local AND here per the
+        //     flag-parity rule; manual cdk deploy Sps-App-<env> required (CD only
+        //     re-rolls the image).
+        ORG_UNIT_METHODS_FACET: env === "staging" ? "on" : "off",
         // Scholar-profile facet-filter redesign (PR-2). A BIG visual change to
         // the Topics/Methods facets + a unified filter bar, fully gated. ON in
         // staging to soak the real-data behavior (method rows + cross-facet

@@ -38,11 +38,16 @@ import {
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
 import {
+  aggregatePublicFamiliesForUnit,
   loadPublicFamiliesForMembers,
   ROSTER_ROW_METHODS_CAP,
   type MemberMethodFamily,
 } from "@/lib/api/methods-roster";
-import { isOrgUnitMethodsChipsEnabled } from "@/lib/profile/methods-lens-flags";
+import type { FacetOption } from "@/components/center/center-roster-facets";
+import {
+  isOrgUnitMethodsChipsEnabled,
+  isOrgUnitMethodsFacetEnabled,
+} from "@/lib/profile/methods-lens-flags";
 
 const FACULTY_PAGE_SIZE = 20;
 const PUB_PAGE_SIZE = 20;
@@ -59,7 +64,7 @@ const GRANT_PAGE_SIZE = 20;
  * `opts.source` is an optional shortcut for callers that already loaded the
  * division row; passing it elides one point lookup.
  */
-async function loadDivisionMemberCwids(
+export async function loadDivisionMemberCwids(
   divCode: string,
   opts: { source?: string } = {},
 ): Promise<string[]> {
@@ -336,6 +341,10 @@ export type DivisionFacultyResult = {
   roleCategoryCounts: Record<string, number>;
   page: number;
   pageSize: number;
+  /** #974 Phase 2 — unit-wide PUBLIC method-family facet buckets (count-desc).
+   *  Present (possibly empty) only when ORG_UNIT_METHODS_FACET (+
+   *  METHODS_LENS_ENABLED) is on; undefined otherwise. */
+  methodFacet?: FacetOption[];
 };
 
 export async function getDivisionFaculty(
@@ -454,7 +463,11 @@ export async function getDivisionFaculty(
     divisionName: r.division?.name ?? null,
     departmentName: r.department?.name ?? "",
     identityImageEndpoint: identityImageEndpoint(r.cwid),
-    roleCategory: r.roleCategory,
+    // #974 Phase 2 — normalize to the display label (mirrors departments.ts L480 +
+    // the filtered API in unit-members.ts) so the Role chip actually matches on the
+    // division SSR view, not just after a method is selected. (roleCategoryCounts at
+    // L386 already normalizes; the hit was the lone raw outlier.)
+    roleCategory: formatRoleCategory(r.roleCategory),
     overview: r.overview ? r.overview.slice(0, 120) : null,
     pubCount: pubByCwid.get(r.cwid) ?? 0,
     grantCount: grantByCwid.get(r.cwid) ?? 0,
@@ -478,7 +491,23 @@ export async function getDivisionFaculty(
             : h;
         });
 
-  return { hits: finalHits, total, roleCategoryCounts, page, pageSize: FACULTY_PAGE_SIZE };
+  // #974 Phase 2 — unit-wide "Methods & tools" facet buckets over the FULL active
+  // member set. `memberCwids` is already in hand (loaded above for the roster), so
+  // this path is cheaper than the dept path — no extra cwid query. Flag-gated:
+  // off → `aggregatePublicFamiliesForUnit` short-circuits, `methodFacet` undefined
+  // → off-path payload byte-identical, page stays CloudFront-cacheable.
+  const methodFacet = isOrgUnitMethodsFacetEnabled()
+    ? await aggregatePublicFamiliesForUnit(memberCwids, { enabled: true })
+    : undefined;
+
+  return {
+    hits: finalHits,
+    total,
+    roleCategoryCounts,
+    page,
+    pageSize: FACULTY_PAGE_SIZE,
+    methodFacet,
+  };
 }
 
 /**

@@ -244,6 +244,9 @@ export async function DepartmentPage({
               pageSize={faculty.pageSize}
               deptSlug={detail.dept.slug}
               divisionSlug={null}
+              methodFacet={faculty.methodFacet}
+              unitKind="department"
+              unitCode={detail.dept.code}
             />
           </div>
         )}

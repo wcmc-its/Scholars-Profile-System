@@ -123,3 +123,21 @@ export function isCenterMethodsFacetEnabled(): boolean {
 export function isOrgUnitMethodsChipsEnabled(): boolean {
   return isMethodsLensEnabled() && process.env.ORG_UNIT_METHODS_CHIPS === "on";
 }
+
+/**
+ * #974 Phase 2 — the DEPARTMENT/DIVISION roster "Methods & tools" multi-select
+ * FACET (server-aggregated buckets rendered with the cacheable page + a
+ * client-fetch to the uncacheable `/api/units/[kind]/[code]/members` route for the
+ * filtered roster). ADDITIONALLY gated on METHODS_LENS_ENABLED (the
+ * `scholar_family` substrate): off → no aggregation, no sidebar, no API data, no
+ * payload (the off-path roster response is byte-identical to today). Independent of
+ * ORG_UNIT_METHODS_CHIPS (Phase 1) so the facet can ship/flip separately. PUBLIC
+ * families only (same #800/#801 overlay gate) — the buckets, the selectable
+ * families, AND the returned chips. The buckets are viewer-independent, so the page
+ * stays CloudFront-cacheable; only the `force-dynamic` API route filters per
+ * request. Wire in BOTH `.env.local` AND the per-env block in
+ * cdk/lib/app-stack.ts per the flag-parity rule.
+ */
+export function isOrgUnitMethodsFacetEnabled(): boolean {
+  return isMethodsLensEnabled() && process.env.ORG_UNIT_METHODS_FACET === "on";
+}

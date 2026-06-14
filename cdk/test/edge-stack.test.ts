@@ -278,8 +278,9 @@ describe("EdgeStack", () => {
         expect(defaultBehavior).toBeDefined();
         // 24 prior behaviors + the `/_next/static/*` long-cache behavior + the
         // two #824 method routes (/api/methods/*/*/publications, /methods/*/*/scholars)
-        // + the #866 `/api/profile/*` internal-viewer reveal behavior.
-        expect(cacheBehaviors).toHaveLength(28);
+        // + the #866 `/api/profile/*` internal-viewer reveal behavior
+        // + the #974 Phase 2 `/api/units/*/*/members` method-facet route.
+        expect(cacheBehaviors).toHaveLength(29);
       });
 
       it("evaluates additional behaviors in the spec-defined order (static first, then uncacheable, then #634 query-keyed)", () => {
@@ -318,6 +319,9 @@ describe("EdgeStack", () => {
           "/api/scholars/*/popover-context",
           "/api/topics/*/publications",
           "/api/methods/*/*/publications",
+          // #974 Phase 2 dept/division method-facet roster -- reads `?method=`;
+          // AllViewer forwards it past the cacheable default's allow-list.
+          "/api/units/*/*/members",
           // #866 internal-viewer reveal -- uncacheable so a sensitive-family
           // reveal is never cached + served to another viewer.
           "/api/profile/*",
