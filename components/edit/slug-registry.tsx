@@ -59,6 +59,8 @@ export type SlugRegistryProps = {
   methodsTab?: number | null;
   /** Link back to the viewer's own self-edit surface; `null` when none. */
   selfEditHref?: string | null;
+  /** Forwarded to the sub-nav: show the "Units" tab (true for a superuser). */
+  unitsTab?: boolean;
 };
 
 function segHref(opts: { segment: SlugRegistrySegment; query: string; page: number }): string {
@@ -82,6 +84,7 @@ export function SlugRegistry({
   administratorsTab,
   methodsTab,
   selfEditHref,
+  unitsTab,
 }: SlugRegistryProps) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, total);
@@ -113,6 +116,7 @@ export function SlugRegistry({
 
       <AdminSubnav
         active="slugs"
+        unitsTab={unitsTab}
         pendingSlugRequests={pendingSlugRequests}
         administratorsTab={administratorsTab}
         methodsTab={methodsTab}

@@ -73,6 +73,7 @@ export default async function SlugRequestsPage() {
 
       <AdminSubnav
         active="slug-requests"
+        unitsTab={session.isSuperuser}
         pendingSlugRequests={requests.length}
         administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
         methodsTab={isMethodsTabVisible(session) ? 0 : null}
