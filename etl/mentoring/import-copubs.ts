@@ -5,7 +5,10 @@
  * WCM-side by `etl:mentoring:export-copubs`) instead of from the live ReciterDB
  * query, which the in-VPC app can't reach. Run in-VPC as a normal `run-task`.
  * Idempotent / safe to re-run. Full refresh: rows absent from this import (a
- * pair that dropped to zero co-pubs, or a removed mentee) are deleted.
+ * pair that dropped to zero co-pubs, or a removed mentee) are deleted. A 0-row
+ * parse is REFUSED (it would delete-stale every row) unless `--allow-empty` is
+ * passed — matching the sibling importers (import-aoc / import-copub-list /
+ * import-citing), so a corrupt / wrong-key S3 object can't wipe a populated table.
  *
  * Once the table is populated, the read layer uses it when
  * `MENTORING_COPUB_BRIDGE=on` (import-then-flip). No FK to publication/scholar,
@@ -24,7 +27,8 @@
  * Usage:
  *   npm run etl:mentoring:import-copubs
  *   npm run etl:mentoring:import-copubs -- --key mentoring/copubs.ndjson
- *   npm run etl:mentoring:import-copubs -- --dry-run   # parse only
+ *   npm run etl:mentoring:import-copubs -- --dry-run      # parse only
+ *   npm run etl:mentoring:import-copubs -- --allow-empty  # permit a 0-row clear
  */
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { db } from "../../lib/db";
@@ -38,6 +42,7 @@ const REGION = process.env.AWS_DEFAULT_REGION ?? "us-east-1";
 const UPSERT_BATCH = 500;
 
 const dryRun = process.argv.includes("--dry-run");
+const allowEmpty = process.argv.includes("--allow-empty");
 
 function resolveKey(): string {
   const i = process.argv.indexOf("--key");
@@ -95,6 +100,19 @@ async function main() {
     const { rows, skipped } = parseNdjson(text);
     console.log(`Parsed ${rows.length} co-pub pairs (${skipped} lines skipped).`);
 
+    // Full-refresh safety floor: a 0-row parse (corrupt / partial / wrong-key S3
+    // object, or an empty export because ReciterDB was unreachable WCM-side)
+    // would delete-stale EVERY existing row below — wiping every mentor's co-pub
+    // badge for live readers. Refuse unless --allow-empty, mirroring the sibling
+    // importers (import-aoc / import-copub-list / import-citing). Thrown inside
+    // the try so the etlRun is marked failed and the prior contents survive.
+    if (!dryRun && rows.length === 0 && !allowEmpty) {
+      throw new Error(
+        "0 co-pub pairs parsed — refusing to delete-stale every mentee_copublication " +
+          "row. Verify the NDJSON key and that the export ran; pass --allow-empty to clear intentionally.",
+      );
+    }
+
     let written = 0;
     if (!dryRun) {
       for (const batch of chunks(rows, UPSERT_BATCH)) {
@@ -142,8 +160,9 @@ async function main() {
         `(${rows.length} parsed, ${skipped} skipped).`,
     );
     if (!dryRun && rows.length === 0) {
+      // Only reachable with --allow-empty (the floor guard above throws otherwise).
       console.warn(
-        "WARNING: 0 co-pub pairs parsed — verify the NDJSON key and that the export ran.",
+        "WARNING: 0 co-pub pairs parsed with --allow-empty — mentee_copublication was cleared.",
       );
     }
   } catch (err) {
