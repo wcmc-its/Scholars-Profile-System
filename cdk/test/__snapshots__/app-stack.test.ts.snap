@@ -468,6 +468,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "ORG_UNIT_METHODS_FACET",
+                "Value": "off",
+              },
+              {
                 "Name": "PROFILE_FACET_REDESIGN",
                 "Value": "off",
               },
@@ -3553,6 +3557,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "ORG_UNIT_METHODS_CHIPS",
+                "Value": "on",
+              },
+              {
+                "Name": "ORG_UNIT_METHODS_FACET",
                 "Value": "on",
               },
               {

@@ -244,6 +244,9 @@ export async function DivisionPage({
             pageSize={faculty.pageSize}
             deptSlug={detail.parentDept.slug}
             divisionSlug={detail.division.slug}
+            methodFacet={faculty.methodFacet}
+            unitKind="division"
+            unitCode={detail.division.code}
           />
         )}
         {tab === "publications" && pubsList && (

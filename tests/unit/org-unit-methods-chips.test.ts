@@ -78,6 +78,9 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/profile/methods-lens-flags", () => ({
   isOrgUnitMethodsChipsEnabled: () => mockChipsEnabled(),
   isMethodsLensSensitiveGateOn: () => mockSensitiveGateOn(),
+  // #974 Phase 2 — the facet gate is OFF for the Phase-1 chips suite, so the new
+  // aggregation never runs and these chip cases stay byte-identical.
+  isOrgUnitMethodsFacetEnabled: () => false,
 }));
 
 import { getDepartmentFaculty } from "@/lib/api/departments";

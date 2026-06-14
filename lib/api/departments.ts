@@ -30,11 +30,16 @@ import {
   resolveActiveGrantSuppression,
 } from "@/lib/api/manual-layer";
 import {
+  aggregatePublicFamiliesForUnit,
   loadPublicFamiliesForMembers,
   ROSTER_ROW_METHODS_CAP,
   type MemberMethodFamily,
 } from "@/lib/api/methods-roster";
-import { isOrgUnitMethodsChipsEnabled } from "@/lib/profile/methods-lens-flags";
+import type { FacetOption } from "@/components/center/center-roster-facets";
+import {
+  isOrgUnitMethodsChipsEnabled,
+  isOrgUnitMethodsFacetEnabled,
+} from "@/lib/profile/methods-lens-flags";
 
 export type DepartmentChair = {
   cwid: string;
@@ -328,6 +333,11 @@ export type DepartmentFacultyResult = {
   roleCategoryCounts: Record<string, number>;
   page: number;
   pageSize: number;
+  /** #974 Phase 2 — unit-wide PUBLIC method-family facet buckets (count-desc).
+   *  Present (possibly empty) only when ORG_UNIT_METHODS_FACET (+
+   *  METHODS_LENS_ENABLED) is on; undefined otherwise so the off-path payload is
+   *  byte-identical. Viewer-independent → the page stays CloudFront-cacheable. */
+  methodFacet?: FacetOption[];
 };
 
 const FACULTY_PAGE_SIZE = 20;
@@ -491,5 +501,26 @@ export async function getDepartmentFaculty(
             : h;
         });
 
-  return { hits: finalHits, total, roleCategoryCounts, page, pageSize: FACULTY_PAGE_SIZE };
+  // #974 Phase 2 — unit-wide "Methods & tools" facet buckets. Cheap `select cwid`
+  // of the FULL active member set (the paginated page above is only ≤20 rows),
+  // aggregated into PUBLIC family buckets. Flag-gated: when off, no extra query
+  // runs and `methodFacet` is undefined → omitted from JSON → off-path payload is
+  // byte-identical. Viewer-independent → the page stays CloudFront-cacheable.
+  const methodFacet = isOrgUnitMethodsFacetEnabled()
+    ? await aggregatePublicFamiliesForUnit(
+        (
+          await prisma.scholar.findMany({ where: baseWhere, select: { cwid: true } })
+        ).map((r) => r.cwid),
+        { enabled: true },
+      )
+    : undefined;
+
+  return {
+    hits: finalHits,
+    total,
+    roleCategoryCounts,
+    page,
+    pageSize: FACULTY_PAGE_SIZE,
+    methodFacet,
+  };
 }
