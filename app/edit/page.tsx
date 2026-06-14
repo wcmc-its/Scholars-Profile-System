@@ -221,7 +221,12 @@ export default async function EditSelfPage({
   // EditShell falls back to the minimal "My Profile" strip. The pending-request
   // count drives the superuser "URL requests" badge only — skip the query for a
   // steward-only viewer.
-  const showConsoleNav = canBrowseProfiles || commsSteward;
+  // Anyone who can edit an org unit also gets the console tab strip — a superuser,
+  // a comms_steward, OR a unit Owner/Curator (≥1 grant) — so the "Units" tab (and
+  // any other role-available tab) is reachable from every self-edit tab, not only
+  // via the Home-panel link. A plain scholar still falls back to the minimal strip.
+  const hasUnitGrants = manageableUnits.length > 0;
+  const showConsoleNav = canBrowseProfiles || commsSteward || hasUnitGrants;
   const pendingSlugRequests =
     canBrowseProfiles && slugRequestEnabled ? await countPendingSlugRequests(db.read) : null;
 
@@ -238,6 +243,7 @@ export default async function EditSelfPage({
           <AdminSubnav
             active="self"
             superuserSurfaces={canBrowseProfiles}
+            unitsTab={canBrowseProfiles || commsSteward || hasUnitGrants}
             pendingSlugRequests={pendingSlugRequests}
             administratorsTab={canBrowseProfiles && isAdministratorsTabEnabled() ? 0 : null}
             methodsTab={

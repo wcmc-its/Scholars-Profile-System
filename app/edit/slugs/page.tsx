@@ -104,6 +104,7 @@ export default async function EditSlugsPage({
       administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
       methodsTab={isMethodsTabVisible(session) ? 0 : null}
       selfEditHref={selfEditHref}
+      unitsTab={session.isSuperuser}
     />
   );
 }
