@@ -110,6 +110,17 @@ export type BuildScholarFamilyS3Result = {
    * index is the alarm. 0 is expected on a pre-v3 artifact (no familyDefById).
    */
   definitionJoinHits: number;
+  /**
+   * #989 — per-scholar family entries collapsed because two distinct `family_id`s
+   * shared the same STABLE `(supercategory, familyLabel)` identity. The mapper
+   * keeps the strongest by `pmidCount` so the table holds ≤1 row per
+   * `(cwid, supercategory, familyLabel)` — the basis the distinct-member
+   * aggregations (`_count.cwid` over `groupBy([sc,label])`) and the per-row chips
+   * rely on. A non-zero count is an upstream-taxonomy alarm (the loader logs it),
+   * not a failure: counts stay correct precisely because the duplicate was
+   * collapsed rather than written as a second row.
+   */
+  duplicateFamilyLabel: number;
 };
 
 type Accum = {
@@ -208,6 +219,7 @@ export function buildScholarFamilyWritesFromS3(
   let unknownSupercategory = 0;
   let pmidCountMismatch = 0;
   let definitionJoinHits = 0;
+  let duplicateFamilyLabel = 0;
 
   for (const [cwid, rollup] of Object.entries(artifact.faculty ?? {})) {
     if (!cwid || !opts.ourCwidSet.has(cwid)) {
@@ -250,9 +262,28 @@ export function buildScholarFamilyWritesFromS3(
       }
     }
 
-    const ranked = [...byFamilyId.entries()]
-      .map(([familyId, v]) => ({ familyId, ...v }))
-      .sort((a, b) => b.pmidCount - a.pmidCount || a.familyId.localeCompare(b.familyId));
+    // #989 — collapse entries sharing the STABLE (supercategory, familyLabel)
+    // identity but differing in family_id. family_id is re-minted on every A2
+    // rebuild; (supercategory, label) is the permalink + #800/#801 overlay
+    // identity. The table's unique key is (cwid, family_id), so two such entries
+    // would BOTH insert — double-counting `_count.cwid` over groupBy([sc,label])
+    // and duplicating the per-row chips. Keep the strongest by pmidCount; the
+    // dropped duplicates feed the duplicateFamilyLabel data-health counter.
+    const byStableKey = new Map<string, { familyId: string } & Accum>();
+    for (const [familyId, v] of byFamilyId) {
+      const key = `${v.supercategory}::${v.familyLabel}`;
+      const prev = byStableKey.get(key);
+      if (!prev) {
+        byStableKey.set(key, { familyId, ...v });
+      } else {
+        duplicateFamilyLabel += 1;
+        if (v.pmidCount > prev.pmidCount) byStableKey.set(key, { familyId, ...v });
+      }
+    }
+
+    const ranked = [...byStableKey.values()].sort(
+      (a, b) => b.pmidCount - a.pmidCount || a.familyId.localeCompare(b.familyId),
+    );
 
     for (const e of ranked.slice(0, topN)) {
       // Invariant alarm only among populated rows: a pre-#175 artifact has no
@@ -282,5 +313,6 @@ export function buildScholarFamilyWritesFromS3(
     unknownSupercategory,
     pmidCountMismatch,
     definitionJoinHits,
+    duplicateFamilyLabel,
   };
 }

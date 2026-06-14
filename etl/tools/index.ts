@@ -363,6 +363,11 @@ async function main(): Promise<void> {
     // `with_definition` in the family_definitions_indexed log above: a near-zero
     // hit rate against a populated index signals a silent family_id join-key drift.
     definition_join_hits: familyResult.definitionJoinHits,
+    // #989 — per-scholar families collapsed because two family_ids shared one
+    // (supercategory, familyLabel). Should be 0; non-zero means the upstream
+    // taxonomy emitted duplicate ids for a stable family — the mapper collapsed
+    // them (so counts/chips stay correct) but the operator should reconcile A2.
+    duplicate_family_label: familyResult.duplicateFamilyLabel,
   });
 
   // Dry-run: diff against the live table and stop — never write, never record.

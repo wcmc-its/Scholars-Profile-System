@@ -99,8 +99,15 @@ export async function loadPublicFamiliesForMembers(
       exemplarTools: Array.isArray(r.exemplarTools) ? (r.exemplarTools as string[]) : [],
     };
     const list = out.get(r.cwid);
-    if (list) list.push(fam);
-    else out.set(r.cwid, [fam]);
+    if (!list) {
+      out.set(r.cwid, [fam]);
+    } else if (!list.some((f) => f.value === fam.value)) {
+      // #989 — defense-in-depth: dedup by the stable (sc,label) overlay `value`.
+      // The ETL mapper now collapses duplicate-(sc,label) family_ids per scholar,
+      // but if a row ever slips through, skip it so the per-row chips can't render
+      // the same family twice. Rows are pmidCount-desc, so the kept one is strongest.
+      list.push(fam);
+    }
   }
   return out;
 }
@@ -113,11 +120,14 @@ export async function loadPublicFamiliesForMembers(
  * (label tie-break, matching the center `methodOptions` / `buildFamilyRoster`
  * ordering).
  *
- * `count` == distinct members by the `@@unique([cwid, familyId])` schema invariant:
- * within one A2 load each `(supercategory, familyLabel)` maps to exactly one
- * `familyId`, so a member has at most one row per bucket — `_count.cwid` is
- * therefore the distinct-member count (the SAME basis as `methods-families.ts`
- * `buildFamilyRoster`, which uses `_count.cwid` as `scholarCount`).
+ * `count` == distinct members because the ETL mapper enforces ≤1 row per
+ * `(cwid, supercategory, familyLabel)`: `@@unique([cwid, familyId])` alone would
+ * NOT guarantee this (two A2 `family_id`s sharing one `(sc,label)` would each
+ * insert), so `scholar-family-mapper-s3.ts` collapses such duplicates per scholar
+ * (#989) and alarms via the `duplicateFamilyLabel` counter. With that invariant a
+ * member has at most one row per bucket, so `_count.cwid` is the distinct-member
+ * count (the SAME basis as `methods-families.ts` `buildFamilyRoster`, which uses
+ * `_count.cwid` as `scholarCount`).
  *
  * PUBLIC families ONLY — each bucket is run through the SAME #800/#801 overlay gate
  * as the per-row chips before it is emitted, so suppressed/sensitive families never
