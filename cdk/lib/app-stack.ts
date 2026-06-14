@@ -1128,6 +1128,26 @@ export class AppStack extends Stack {
         // re-rolls the image only, so an env-flag change needs the explicit cdk
         // deploy) -- the flag-parity rule.
         SEARCH_PEOPLE_CONCEPT_PRECOUNT: "off",
+        // #921 -- concept-scope grant axis. When ON, the Scholars tab under
+        // `?match=concept` admits scholars who are FUNDED on the resolved
+        // concept (a grant whose SEARCH_FUNDING_MESH_GATE field -- fundedPubMeshUi
+        // -- intersects the descendant set), not only those with a concept-tagged
+        // publication. The People list, facets, and count badge all widen
+        // together (the union rides the always-on filter gate + the scoring
+        // `must`), and grant-only matches sort BELOW publication evidence (a 0.1
+        // cwid-admission boost, well under pub BM25). resolvePeopleConceptGrant-
+        // Axis reads `=== "on"`, default OFF -- so flag-off skips the extra
+        // Funding round-trip entirely and leaves every concept-People query body
+        // byte-identical to today (the feature ships dark). NO reindex prereq: it
+        // reuses the already-live Funding gate field (SEARCH_FUNDING_MESH_GATE ==
+        // "fundedPubMeshUi", on in both envs), so activation is a pure flag flip.
+        // STAGING-FIRST: on in staging to soak + evaluate (grant-only matches
+        // surface count-only for now -- a distinguishing "funded in X" badge,
+        // ranking-weight tuning past 0.1, and agg sizing past the 5000-cwid cap
+        // are open design follow-ups, NOT activation blockers); prod stays off
+        // until that eval. Flip is env-only via `cdk deploy --exclusively
+        // Sps-App-<env>` (CD re-rolls the image only) -- the flag-parity rule.
+        SEARCH_PEOPLE_CONCEPT_GRANT_AXIS: env === "staging" ? "on" : "off",
         // #637 "View as" impersonation -- the global feature gate. The code
         // checks `=== "true"` exactly (lib/auth/effective-identity.ts,
         // middleware.ts, the /api/impersonation* routes, the /api/auth/session

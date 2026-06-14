@@ -428,6 +428,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_PEOPLE_CONCEPT_GRANT_AXIS",
+                "Value": "off",
+              },
+              {
                 "Name": "IMPERSONATION_ENABLED",
                 "Value": "true",
               },
@@ -3518,6 +3522,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_PEOPLE_CONCEPT_PRECOUNT",
                 "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_CONCEPT_GRANT_AXIS",
+                "Value": "on",
               },
               {
                 "Name": "IMPERSONATION_ENABLED",
