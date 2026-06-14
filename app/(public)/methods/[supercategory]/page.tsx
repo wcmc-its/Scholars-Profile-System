@@ -22,8 +22,12 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 
-export const revalidate = 21600;
-export const dynamicParams = true;
+// #985 — force-dynamic: the #800/#801 family-visibility overlay gate is
+// per-request, but ISR (revalidate=21600) cached the rendered shell for up to
+// 6h, leaving a steward-suppressed/sensitive family publicly reachable until the
+// next revalidate. The data layer is already overlay-gated; force-dynamic makes
+// the page honor it. (Restoring ISR + purge-on-edit for perf is the #985 follow-up.)
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
   params,
