@@ -90,6 +90,33 @@ describe("ConceptFallbackResults (§4/§5)", () => {
     expect(link.getAttribute("href")).toBe(VIEW_ALL);
   });
 
+  it("announces the broader-results fallback to screen readers (#298 §10)", () => {
+    render(
+      <ConceptFallbackResults
+        query="health economics"
+        hits={[makeHit("1")]}
+        total={124}
+        viewAllHref={VIEW_ALL}
+      />,
+    );
+    const status = screen.getByTestId("concept-fallback-announcement");
+    expect(status.getAttribute("role")).toBe("status");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.className).toContain("sr-only");
+    expect(status.textContent).toBe(
+      "Showing 124 broader results mentioning health economics below.",
+    );
+  });
+
+  it("singularizes the SR announcement for a single broad result", () => {
+    render(
+      <ConceptFallbackResults query="x" hits={[makeHit("1")]} total={1} viewAllHref={VIEW_ALL} />,
+    );
+    expect(screen.getByTestId("concept-fallback-announcement").textContent).toBe(
+      "Showing 1 broader result mentioning x below.",
+    );
+  });
+
   it("renders nothing when there are no hits to preview", () => {
     const { container } = render(
       <ConceptFallbackResults query="x" hits={[]} total={0} viewAllHref={VIEW_ALL} />,
