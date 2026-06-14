@@ -30,6 +30,7 @@ in **§10**.
 
 | The question | Go to |
 |---|---|
+| **How do I run / manage the app day-to-day?** (start, stop, deploy, monitor, common fixes) | [`OPERATIONS-RUNBOOK.md`](./OPERATIONS-RUNBOOK.md) — the single consolidated operator runbook; links out to the deep docs below |
 | Show me how this hangs together (the diagram) | [`architecture/`](./architecture/index.html) — 5 visual diagrams; or [`architecture-overview.md`](./architecture-overview.md) (prose + mermaid) |
 | What is this system, end to end? | [`architecture-overview.md`](./architecture-overview.md) → [`PRODUCTION.md`](./PRODUCTION.md) → [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md) |
 | Why is a page slow? / What's cached where? | [`performance-baseline.md`](./performance-baseline.md), [`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md), [`ADR-001`](./ADR-001-runtime-dal-vs-etl-transform.md) |
@@ -94,6 +95,7 @@ in **§10**.
 
 | Doc | Answers |
 |---|---|
+| [`OPERATIONS-RUNBOOK.md`](./OPERATIONS-RUNBOOK.md) | **The consolidated operator entry point** — services used, start/stop/deploy/rollback, what to monitor, a Symptom→Cause→Fix troubleshooting table, and host/contacts/access, all in one place. Pulls the essentials from the docs below and links out for detail. Start here, then drill down. |
 | [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md) | How to ship a build to staging or prod; pairs with `.github/workflows/deploy.yml`. |
 | [`rollback-runbook.md`](./rollback-runbook.md) | How to roll the prod ECS service back to the previous task-definition revision. |
 | [`restore-drill-runbook.md`](./restore-drill-runbook.md) | How to verify the Aurora cluster can actually be restored from backup. |
