@@ -16,14 +16,21 @@
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
-import { OVERVIEW_ELEMENTS, type OverviewParams } from "@/lib/edit/overview-params";
+import {
+  OVERVIEW_ELEMENTS,
+  type OverviewParams,
+  type OverviewSelection,
+} from "@/lib/edit/overview-params";
 
 /** One history row, shaped to match the GET /api/edit/overview/generations
- *  contract (`createdAt` is the ISO string the route serializes). */
+ *  contract (`createdAt` is the ISO string the route serializes). The generate
+ *  route persists the source `selection` (v3.1) inside the same `params` JSON
+ *  column, so it is surfaced here as an optional field for "Use these settings"
+ *  to restore (#765). */
 export type OverviewGenerationItem = {
   id: string;
   model: string;
-  params: OverviewParams;
+  params: OverviewParams & { selection?: OverviewSelection };
   createdAt: string;
   text: string;
 };

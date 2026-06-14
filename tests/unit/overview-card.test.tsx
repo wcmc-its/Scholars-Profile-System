@@ -731,6 +731,84 @@ describe("OverviewCard — version history (Phase B)", () => {
       expect(screen.getByTestId("overview-voice-first").getAttribute("aria-checked")).toBe("true"),
     );
   });
+
+  it("Use these settings restores the source selection, clamped to the current pool (#765)", async () => {
+    // Source pool: 3 pubs + 2 awards, all default-selected → default selection
+    // is everything. The saved draft was generated from a NARROWER selection
+    // (pmid 1 + award g1), and also references a stale pmid (999) that no longer
+    // exists in the pool. Restoring must narrow the selection AND drop the stale id.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/edit/overview/source-options") {
+        return jsonResponse({
+          ok: true,
+          publications: [1, 2, 3].map((n) => ({
+            pmid: String(n),
+            title: `p${n}`,
+            venue: null,
+            year: null,
+            impact: null,
+            isFirstOrLast: true,
+            authorPosition: "first",
+            defaultSelected: true,
+          })),
+          funding: [1, 2].map((n) => ({
+            id: `g${n}`,
+            role: "PI",
+            funder: "NIH",
+            title: `award ${n}`,
+            award: null,
+            endYear: 2027,
+            defaultSelected: true,
+          })),
+          tools: [],
+        });
+      }
+      if (url === "/api/edit/overview/generations") {
+        return generationsResponse(
+          [
+            {
+              id: "gen-1",
+              model: "openai/gpt",
+              params: {
+                voice: "third",
+                tone: "formal",
+                length: "standard",
+                elements: ["research_focus"],
+                instructions: "",
+                // v3.1 persists the source selection inside params. "999" is stale.
+                selection: { pmids: ["1", "999"], grantIds: ["g1"], toolNames: [] },
+              },
+              createdAt: "2026-06-01T12:00:00.000Z",
+              text: "<p>An earlier draft.</p>",
+            },
+          ],
+          null,
+        );
+      }
+      return jsonResponse({ ok: true });
+    });
+
+    render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    // Default selection (all default-selected) → 3 publications + 2 awards.
+    expect(
+      await screen.findByText(
+        "No overview yet. Generate a draft from your 3 publications and 2 awards above, or start writing here.",
+      ),
+    ).toBeTruthy();
+
+    fireEvent.click(await screen.findByTestId("overview-version-use-settings-gen-1"));
+
+    // Restored = saved selection minus the stale pmid 999 and the un-saved
+    // award g2 → 1 publication + 1 award.
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "No overview yet. Generate a draft from your 1 publication and 1 award above, or start writing here.",
+        ),
+      ).toBeTruthy(),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
