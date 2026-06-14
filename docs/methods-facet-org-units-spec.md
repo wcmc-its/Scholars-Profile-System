@@ -1,6 +1,6 @@
 # Methods & tools facet on department/division rosters — #974 Phase 2
 
-Status: **DRAFT for sign-off.** Phase 1 (per-row chips) shipped in #976. Phase 2 adds the multi-select **facet**.
+Status: **Implemented** — Phase 1 (per-row chips) shipped in #976; Phase 2 (the multi-select facet) shipped in #983. Dark behind `ORG_UNIT_METHODS_FACET` (+`METHODS_LENS_ENABLED`). (Spec reconciled to shipped code 2026-06-14, #990.)
 
 ## Problem
 
@@ -18,14 +18,16 @@ Department/division rosters (`/departments/[slug]`, `/departments/[slug]/divisio
 
 ### B. Filtered members (interaction — uncacheable API)
 - New route `app/api/units/[kind]/[code]/members/route.ts` (`kind` = `department|division`), `export const dynamic = "force-dynamic"` (mirrors `app/api/methods/[supercategory]/families/[familyId]/scholars/route.ts`; lands in CloudFront #634 Group A `CachingDisabled`/`AllViewer`).
-  - Input: validated `code`, repeatable `method` (sc::label keys), `page`. Path/param sanitized (regex, no logging), like the existing methods route.
-  - Logic: unit active members → members having ≥1 selected family (**OR** within facet) via `scholarFamily.findMany({ where: { supercategory/familyLabel OR-set, cwid: { in: members }, scholar: { deletedAt: null, status: "active" } } })` → paginate that filtered set → return the same `DepartmentFacultyHit[]` shape (incl. `topMethods` chips) + `total`.
+  - **The route file only sanitizes input and delegates** — flag-gate (404 when off), validate `kind`/`code`/`method` keys/`page` (regex, no logging, like the existing methods route), then call `getUnitMembersByMethods` and JSON-return its result. No DB query or filtering lives inline in the route.
+  - Input: validated `code`, repeatable `method` (sc::label keys), `page`.
+  - Logic (in `lib/api/unit-members.ts` `getUnitMembersByMethods`, **not** the route): unit active members → members having ≥1 selected family (**OR** within facet) via `scholarFamily.findMany({ where: { supercategory/familyLabel OR-set, cwid: { in: members }, scholar: { deletedAt: null, status: "active" } } })` → paginate that filtered set → return the same `DepartmentFacultyHit[]` shape (incl. `topMethods` chips) + `total`.
 - Public-only overlay gate applied to the selectable families AND the returned chips (never surface suppressed/sensitive).
 
 ### C. Client wiring
 - Add a facet sidebar to `components/department/department-faculty-client.tsx` (aside + main, mirroring the center grouped layout), shown only when the flag is on AND `methodFacet` is non-empty.
 - Reuse the #972 `RosterFacet` with `searchable` (the typeahead is needed — dept facets run 69–542 families).
 - Selection is **client state**; on change, fetch `/api/units/[kind]/[code]/members?method=…&page=1` and replace the rendered member list + `total` + pagination. No selection → the server-rendered page-0 roster (unchanged).
+- **Deselect / clear-all UX** (as shipped — confirm against the roster client `components/department/department-faculty-client.tsx`): a single chip toggles in/out of the selection — clicking a selected `RosterFacet` option removes just that method (the `onToggle`/`makeToggle` Set toggle); a separate **"Clear"** button (rendered only when ≥1 method is selected) empties the whole selection. Either action resets to the first filtered page; clearing all empties the selection so the SSR roster re-renders.
 - **URL reflection (optional, deep-linkable):** reflect selection in `?method=` via `history.replaceState`; on mount read `window.location` and apply. The page HTML stays the cached unfiltered shell (the edge strips the param for the origin); the client reapplies the filter. So shared links work **without** a CDN change.
 
 ### D. Composition with the Role chip + sort

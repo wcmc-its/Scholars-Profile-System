@@ -1,7 +1,6 @@
 # Comms Steward — profile editing + ED-name bridge (plan)
 
-**Status:** Plan, awaiting approval. No code written. Implementation begins only
-after the §3 field-scope decision is confirmed.
+**Status:** Implemented — shipped #963 (profile-edit parity), #964 (org-unit curator parity), #959 (ED-name bridge), #958 (/edit/methods effective identity); parity asymmetries reconciled in #994. Dark in prod behind `COMMS_STEWARD_ENABLED` (armed #968). The §3 field-scope decision was confirmed as **full superuser parity minus slug/governance, including publication suppression** (§3b; #987 closed GRANT). (Spec reconciled to shipped code 2026-06-14, #990.)
 **Driver:** Operator feedback (2026-06-13) while viewing as dwd2001 — (1) the
 "View as" banner shows the CWID, not a name; (2) the console offers tabs a
 steward can't use, and "comms_steward should be able to see and edit profiles."
@@ -13,8 +12,9 @@ which this deliberately broadens) and `role-aware-navigation-entry-points-spec.m
 ## 1. Decisions taken (from this round)
 
 - **Expand `comms_steward` to edit profiles** — a deliberate authz scope increase
-  beyond the methods-only spec. Scoped per §3 (least-privilege recommendation
-  below; this is the one decision still open).
+  beyond the methods-only spec. Scope resolved per §3b: full superuser parity minus
+  slug/governance, **including publication suppression** (#987 closed GRANT). The
+  least-privilege table in §3 is the rejected alternative.
 - **Resolve the steward name from ED** via an ED→S3 bridge (§5), since live LDAP
   from the SPS VPC times out (#443) and there is no in-VPC person source today.
 
@@ -72,9 +72,9 @@ users, adding/remove org units"):
   stay read-only.
 - ✅ **Tabs:** Profiles + Method Families only.
 
-> ⚠️ Open confirm before PR B: "superuser parity" as written **includes
-> publication suppression/takedown** — the highest-power, compliance-adjacent
-> profile field. Carve out only if the operator says so.
+> ✅ RESOLVED 2026-06-14 (#987, closed GRANT): confirmed — the steward DOES hold
+> publication suppression/takedown parity. The least-privilege table in §3 below
+> was the rejected alternative.
 
 Implementation note: because this is near-superuser parity (minus slug + the two
 governance surfaces), the per-scholar editor reuses the **superuser** editor path
@@ -88,7 +88,7 @@ The editable attrs today are `overview`, `highlights`, `visibility`,
 (`name-title`, `email`, `photo`, `funding`, `appointments`, `education`,
 `mentees`, `coi`) is WCM-sourced / read-only.
 
-**Recommended (least-privilege — "the communications narrative"):**
+**Rejected alternative (NOT shipped) — least-privilege "the communications narrative":**
 
 | Field | Steward edits? | Why |
 |---|---|---|
@@ -105,26 +105,31 @@ not compliance (COI), identity/namespace (slug), the academic record (sourced),
 or RBAC (admin grants). Least-privilege keeps the blast radius of a comms account
 to presentational fields + auditable.
 
-**Named alternative — full superuser parity (rejected as default):** give the
-steward the entire superuser profile editor (incl. publication takedowns + slug).
-Simpler to implement (reuse the superuser path) but over-grants — it folds
-compliance and namespace authority into a comms role and widens the blast radius.
-Offered only if you explicitly want comms to be a profile super-editor.
+**What shipped — full superuser parity minus slug/governance:** the steward gets
+the superuser profile editor (incl. publication suppression/takedown) with only
+slug and the two governance surfaces (admin/unit-admin grants, unit create/delete)
+gated out. Simpler to implement (reuse the superuser path) and the decision the
+operator confirmed (#987 closed GRANT): comms is a profile super-editor for every
+presentational and publication field, stopping short only of namespace authority
+and RBAC.
 
-> **This is the decision that gates implementation.** Default below assumes the
-> recommended subset (overview + highlights, visibility optional).
+> **This decision is made (#987 GRANT).** The design below reflects what shipped:
+> full superuser parity minus slug/governance. The least-privilege subset above is
+> the rejected alternative.
 
 ---
 
-## 4. Design (assuming the recommended subset)
+## 4. Design (as shipped: superuser parity minus slug/governance)
 
 ### 4a. A new `comms_steward` EditMode
 
 `EditMode` becomes `self | superuser | proxy | unit-admin | comms_steward`.
-`attrsForMode("comms_steward")` exposes only the comms-editable attrs (overview,
-highlights, [visibility]) + the read-only context attrs (name/title, photo) for
-orientation. The per-scholar editor (`/edit/scholar/[cwid]`) renders in this mode
-when the viewer is a steward (and not a superuser/self).
+The per-scholar editor REUSES the superuser editor path: `comms_steward` mode
+exposes full superuser profile-field parity (overview, highlights, visibility,
+publications incl. suppression) + the read-only context attrs (name/title, photo)
+for orientation, with slug and governance (admin grants, unit create/delete) gated
+OUT. The per-scholar editor (`/edit/scholar/[cwid]`) renders in this mode when the
+viewer is a steward (and not a superuser/self).
 
 ### 4b. Page guards
 
@@ -137,11 +142,12 @@ when the viewer is a steward (and not a superuser/self).
 
 ### 4c. Field-write authz
 
-`authorizeFieldEdit(session, target)` — allow a `comms_steward` to write the
-in-scope fields (`overview`, `selectedHighlightPmids`, [visibility]) on **any**
-scholar; deny every out-of-scope field (slug, suppression, …) with a stable
-reason (`not_comms_scope`). The route handlers (`/api/edit/*`) enforce the same —
-the page mode is UX, the route is the boundary. Writes are attributed to the real
+`authorizeFieldEdit(session, target)` — allow a `comms_steward` to write the full
+superuser profile-field set (`overview`, `selectedHighlightPmids`, visibility,
+publication suppression) on **any** scholar; deny only the out-of-scope governance
+fields (slug, admin/unit-admin grants, unit create/delete) with a stable reason
+(`not_comms_scope`). The route handlers (`/api/edit/*`) enforce the same — the
+page mode is UX, the route is the boundary. Writes are attributed to the real
 actor and audited (existing `manual_edit_audit`), exactly as superuser edits are.
 
 ### 4d. Nav capability set (replaces `superuserSurfaces`)
@@ -176,12 +182,14 @@ ED-person mirror.
 
 ## 6. Threat model / security notes (for review)
 
-- **New capability:** a comms account can edit overview/highlights on any
-  profile. Mitigations: least-privilege field set (no COI/takedown/slug/RBAC);
-  every write attributed to the real actor + audited; flag-gated + allowlist-
-  gated (a tightly-held operator set); the role is still *not* a superuser
-  (`isSuperuser` stays the higher authority for everything out of scope).
-- **Out of scope (explicit):** publication suppression, slug minting, unit-admin
+- **New capability:** a comms account can edit overview/highlights/visibility and
+  suppress publications on any profile. Mitigations: field set is full superuser
+  parity minus governance (no COI/slug/RBAC; publication suppression IS in scope
+  per the confirmed decision); every write attributed to the real actor + audited;
+  flag-gated + allowlist-gated (a tightly-held operator set); the role is still
+  *not* a superuser (`isSuperuser` stays the higher authority for everything out
+  of scope).
+- **Out of scope (explicit):** slug minting, unit create/delete, unit-admin
   grants, COI — a steward must be denied these at the route, not just hidden in
   the UI.
 - **Impersonation:** unchanged invariants (R1/R2/R3 + audit). A superuser viewing
@@ -195,7 +203,7 @@ ED-person mirror.
 ## 7. Test plan
 
 - Field authz: a steward may write overview/highlights on any scholar; is denied
-  slug/suppression/COI (route-level, not just UI).
+  slug/admin-grants/COI (route-level); MAY suppress publications (parity).
 - Mode: `attrsForMode("comms_steward")` exposes only the in-scope rail items.
 - Nav: a steward sees Profiles + Method Families, not URL requests / Slug registry
   / Administrators; computed from the effective identity (View-as fidelity).
@@ -206,7 +214,7 @@ ED-person mirror.
 
 ---
 
-## 8. Files (scoping; not yet changed)
+## 8. Files (shipped)
 
 - `lib/auth/comms-steward.ts` — (name lookup helper if not in a new module).
 - `lib/edit/authz.ts` — `authorizeFieldEdit`, `canAccessScholarEditPage`, the
@@ -223,6 +231,11 @@ ED-person mirror.
 ---
 
 ## 9. Open decisions for you
+
+> ✅ RESOLVED 2026-06-14: field scope = full superuser parity incl. publication
+> suppression (confirmed, #987 closed GRANT); profiles = all non-deleted scholars
+> (confirmed); sequencing = shipped as the ED-name bridge (#959) + profile-edit
+> (#963) + org-unit (#964). The questions below are retained for the record.
 
 1. **Field scope (§3b)** — recommended subset (overview + highlights), or add
    visibility, or full superuser parity? *(Gates implementation.)*
