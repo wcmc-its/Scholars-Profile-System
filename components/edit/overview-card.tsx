@@ -100,6 +100,24 @@ function selectionFromOptions(options: OverviewSourceOptions): OverviewSelection
   };
 }
 
+/** Restore a persisted selection (#765 — "Use these settings") against the
+ *  CURRENT candidate pool: drop any pmids / grantIds / toolNames the scholar's
+ *  corpus no longer offers (a draft can predate a corpus change), mirroring the
+ *  server-side ownership filter so stale ids never re-enter selection state. */
+function clampSelectionToOptions(
+  selection: OverviewSelection,
+  options: OverviewSourceOptions,
+): OverviewSelection {
+  const pmids = new Set(options.publications.map((p) => p.pmid));
+  const grantIds = new Set(options.funding.map((f) => f.id));
+  const toolNames = new Set(options.tools.map((t) => t.toolName));
+  return {
+    pmids: selection.pmids.filter((p) => pmids.has(p)),
+    grantIds: selection.grantIds.filter((g) => grantIds.has(g)),
+    toolNames: selection.toolNames.filter((t) => toolNames.has(t)),
+  };
+}
+
 /** The provenance line shape the GET /api/edit/overview/generations route
  *  serializes (`updatedAt` as an ISO string) — drives {@link OverviewProvenanceNote}. */
 type OverviewProvenanceLine = {
@@ -772,7 +790,20 @@ function OverviewDraftBlock({
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => setParams(gen.params)}
+                        onClick={() => {
+                          // Restore the steering params AND the source selection
+                          // the draft was generated with (#765). The persisted
+                          // selection rides inside gen.params (v3.1); split it out
+                          // so it never leaks into params state, and clamp it to
+                          // the current candidate pool in case the corpus changed.
+                          const { selection: savedSelection, ...steering } = gen.params;
+                          setParams(steering);
+                          if (savedSelection && sourceOptions) {
+                            setSelection(
+                              clampSelectionToOptions(savedSelection, sourceOptions),
+                            );
+                          }
+                        }}
                         disabled={busy}
                         data-testid={`overview-version-use-settings-${gen.id}`}
                       >
