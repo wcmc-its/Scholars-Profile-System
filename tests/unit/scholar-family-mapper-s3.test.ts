@@ -217,6 +217,42 @@ describe("buildScholarFamilyWritesFromS3 — ranking, cap, dedup", () => {
       exemplarTools: ["Hi Tool"],
     });
   });
+
+  it("collapses two family_ids sharing one (supercategory, label), keeping the max pub_count + counting it (#989)", () => {
+    const res = buildScholarFamilyWritesFromS3(
+      artifact({
+        aog: [
+          { family_id: "fam_old", label: "CRISPR screens", supercategory: "genomics", pub_count: 3 },
+          { family_id: "fam_new", label: "CRISPR screens", supercategory: "genomics", pub_count: 9 },
+        ],
+      }),
+      { ourCwidSet: new Set(["aog"]) },
+    );
+    // One row for the stable (sc,label) identity — NOT two — so groupBy([sc,label])
+    // `_count.cwid` counts this member once and the per-row chips can't duplicate.
+    expect(res.writes).toHaveLength(1);
+    expect(res.writes[0]).toMatchObject({
+      familyId: "fam_new", // the stronger pub_count wins
+      familyLabel: "CRISPR screens",
+      supercategory: "genomics",
+      pmidCount: 9,
+    });
+    expect(res.duplicateFamilyLabel).toBe(1);
+  });
+
+  it("does NOT collapse the same label under a different supercategory (distinct stable identities)", () => {
+    const res = buildScholarFamilyWritesFromS3(
+      artifact({
+        aog: [
+          { family_id: "fam_1", label: "Models", supercategory: "imaging", pub_count: 2 },
+          { family_id: "fam_2", label: "Models", supercategory: "omics", pub_count: 2 },
+        ],
+      }),
+      { ourCwidSet: new Set(["aog"]) },
+    );
+    expect(res.writes).toHaveLength(2);
+    expect(res.duplicateFamilyLabel).toBe(0);
+  });
 });
 
 describe("buildScholarFamilyWritesFromS3 — open-set supercategory guard", () => {
