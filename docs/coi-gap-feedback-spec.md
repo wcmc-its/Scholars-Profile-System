@@ -1,6 +1,6 @@
 # COI-gap suggestion feedback — research-grade 3-way capture
 
-**Status:** DRAFT — awaiting approval. No code written.
+**Status:** Implemented — shipped #944 (3-way feedback) + #953 (Medium expander + Reviewed history with change-of-mind + tier partitioning). Dark behind `SELF_EDIT_COI_GAP_HINT`. This spec already reflects the #953 surface (§5a) and the superseded-but-retained `/dismiss` route (§4). (Spec reconciled to shipped code 2026-06-14, #990.)
 **Scope decision (locked):** *pure signal* — feedback is recorded and stops the
 nag; it triggers no workflow, reminders, or Weill Research Gateway hand-off.
 **Flag:** ships behind the existing `SELF_EDIT_COI_GAP_HINT` (still **dark**). The
@@ -237,6 +237,8 @@ SELECT
 FROM coi_gap_candidate
 WHERE feedback_reason IS NOT NULL OR status='acknowledged';
 ```
+
+Dialect: MariaDB/MySQL (the `SUM(<predicate>)` boolean idiom). The `OR status='acknowledged'` in the WHERE is intentional, not redundant — it also catches `acknowledged` rows written before the `feedback_reason` column existed (NULL reason).
 
 Stratify by `tier` / `attribution` / `entity_score` for the model-quality breakdown.
 

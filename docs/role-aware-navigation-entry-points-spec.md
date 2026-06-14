@@ -1,6 +1,6 @@
 # Role-aware navigation entry points — recommendation
 
-**Status:** Recommendation, awaiting approval. No code changed.
+**Status:** Implemented — shipped #941 (role-aware console entry points in the account menu). Shipped code **exceeds** §4c (see note there). (Spec reconciled to shipped code 2026-06-14, #990.)
 **Trigger:** dwd2001 (external comms, `comms_steward`) logged in on staging and
 could not navigate to the Method-Family management page.
 **Scope:** What the **login dropdown** (`AccountMenu`) and the **top horizontal
@@ -191,6 +191,12 @@ With 4a they never need to: the dropdown links straight to `/edit/methods`. A
 later, optional refinement is to redirect a steward-only / unit-admin-only viewer
 from `/edit` to their single console surface. **Out of scope** for this fix; flag
 as a follow-up so the bare-URL path isn't a silent 404 forever.
+
+**Note (reconciled):** the deferred redirect ("redirect a steward-only /
+unit-admin-only viewer … to `/edit/methods`") is **already shipped (#941)** — a
+profile-less comms_steward landing on `/edit` is redirected to `/edit/methods`
+instead of 404ing (`app/edit/page.tsx`; see §9b). This section is retained as
+historical context.
 
 ---
 

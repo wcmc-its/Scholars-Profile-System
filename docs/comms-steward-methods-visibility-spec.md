@@ -1,6 +1,6 @@
 # Communications Steward — Method-Family Visibility (SPEC, draft for review)
 
-**Status:** Draft — awaiting approval before implementation.
+**Status:** Implemented — shipped #889 (role + dark surface), #893/#900 (staging enable + fold into /edit console), #951 (View-as targets stewards), #958 (effective-identity scoping). Dark in prod behind `COMMS_STEWARD_ENABLED`. (Spec reconciled to shipped code 2026-06-14, #990.)
 **Scope:** Deliverable #1 only — the new `comms_steward` role + a global Method-Family
 visibility surface. Org-unit statements and overview generation are documented as
 follow-ons (§11), not built here.

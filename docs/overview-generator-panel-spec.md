@@ -2,9 +2,11 @@
 
 **Surface:** Scholars Profile Console → My Profile → Overview
 **Component:** AI bio generator ("Generator" tab, currently Beta)
-**Status:** Proposed
+**Status:** Implemented — shipped #875/#885 (single editor + draft-review safety net) on the #742 overview generator. (Spec reconciled to shipped code 2026-06-14, #990.)
 **Last updated:** 2026-06-11
 **Revision:** +§7 source-ranking & enrichment boundary (the "confidence layer"). Flow, draft-review card, editor model, footer, and states table are unchanged — confidence is carried entirely by per-source rule statements (text in headers we were already editing) plus the already-specced frictionless override.
+
+> **Terminology note:** This spec uses "bio" throughout, but shipped UI copy says "overview" (e.g. the section header, the "Save overview" action). Read "bio" as "overview" wherever it appears below.
 
 ---
 
@@ -188,7 +190,7 @@ A single confidence statement cannot be honest about both: it would have to adop
 
 ## 9. Open questions
 
-1. Draft history persistence — session-only, or stored across visits? Session-only is simpler and probably sufficient.
+1. Draft history persistence — session-only, or stored across visits? Session-only is simpler and probably sufficient. RESOLVED: shipped **persisted across visits** (overview version history, #759) — not session-only.
 2. Does "Insert below" need cursor-aware placement, or is append-to-end fine for v1? (Append is fine.)
 3. Should the collapsed generator summary be clickable per-setting (deep-link to expand on that control), or expand-all only? Expand-all for v1.
 4. Does the publication impact *number* (§7.2) need a scale/legend, or is it self-evidently a sort key? Lean **no legend** — it's a relative sort signal, not an absolute metric, and a legend would re-import the "what does this number mean" relitigation that §7.3 is built to avoid.
