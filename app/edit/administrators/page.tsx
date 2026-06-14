@@ -104,6 +104,7 @@ export default async function AdministratorsPage() {
 
       <AdminSubnav
         active="administrators"
+        unitsTab={session.isSuperuser}
         pendingSlugRequests={pendingSlugRequests}
         administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
         methodsTab={isMethodsTabVisible(session) ? 0 : null}
