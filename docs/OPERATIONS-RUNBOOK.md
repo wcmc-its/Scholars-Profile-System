@@ -94,6 +94,65 @@ outage makes data *stale*, not the site *down*. All infrastructure is **AWS CDK 
 >    by env-prefix. Confirm the live topology with `aws sts get-caller-identity` per env before assuming separate accounts.
 > 2. **Stack count.** ADR-008 says "six stacks"; `cdk/bin/sps-infra.ts` instantiates **nine**. Trust the bin file (table in §2).
 
+## Service profile
+
+> Maps SPS onto WCM's ServiceNow **"RUNBOOK"** template (cf. `KB0012671`, BigFix). Italic _TBD_ fields are facts only
+> Operations holds — **fill these before publishing to WCM Internal KB.** Everything else is sourced from this runbook / the repo.
+
+| Field (WCM template) | Value |
+|---|---|
+| **Application name** | Scholars Profile System (SPS) |
+| **Brief description** | Read-mostly Next.js 15 app rendering ~9,000 public WCM scholar profiles (see [What this is](#what-this-is)) |
+| **Mission critical?** | _TBD — Ops to classify._ Working assumption: **No** — public, read-mostly; an outage is reputational / SEO, not patient-care or safety |
+| **Locations / URLs** | Prod `scholars.weill.cornell.edu` · staging `scholars-staging.weill.cornell.edu`; AWS `us-east-1` (DR `us-west-2`) |
+| **Normal operating hours** | 24×7, public internet-facing |
+| **Scheduled maintenance window** | None required — rolling zero-downtime deploys (§2). Aurora / OpenSearch managed maintenance windows: _TBD — confirm in console / `cdk/lib/data-stack.ts`_ |
+| **IT support / assignment group** | _TBD — Ops to assign (ServiceNow group)_ |
+| **Service Owner (emergency IT contact)** | Today: `paa2013@med.cornell.edu` / GitHub `paulalbert1`; mobile _TBD_. **Post-launch owner TBD (likely ITS management)** — see §5 |
+| **Emergency business contacts** | _TBD — business stakeholders to supply_ |
+| **Emergency comms to users** | _TBD_ — recommend **ITS Alert** (`its.weill.cornell.edu`) + email. Internal paging today = Teams relay (§3) |
+| **Dependencies — inputs from** | Enterprise Directory, ReciterDB, InfoEd, COI Portal, ASMS, Jenzabar, ReciterAI, NIH RePORTER / NSF / NLM MeSH (§1) |
+| **Dependencies — outputs to** | Public web (profiles, search, sitemaps) + search-engine crawlers. **SPS is a data sink** — no downstream WCM system consumes its data |
+| **Secondary / backup system** | Prod multi-AZ: Aurora writer + reader, 2× OpenSearch, ≥2 ECS tasks. AWS Backup daily + cross-region copy to `us-west-2` (§1, §4 #11) |
+| **Hosting / vendor** | Self-managed on **AWS** (Vendor Hosted: No — not SaaS). Account `665083158573` (confirm live, §5). AWS Support tier & Sev-1 case path: _TBD — confirm_ |
+| **Standard OLA / SLA** | _TBD — formal OLA._ Internal SLOs today: 99.5% availability, p99 < 1.5 s (§3) |
+| **Change management** | Prod deploy gated by GitHub Environment approval (§2). ServiceNow Change Request linkage: _TBD — define CR process_ |
+| **CMDB CI** | _TBD — register CI + link_ |
+| **KB article number** | _TBD — assign on publish to WCM Internal KB_ |
+
+**Maintenance & patch windows**
+- **App image / deps** — re-rolled on every deploy (§2); runtime = Node 22 on Fargate, patched by redeploying an updated image.
+- **Aurora MySQL / OpenSearch** — AWS-managed minor-version windows; _TBD: confirm the configured windows in `cdk/lib/data-stack.ts` / console_.
+- **Release management** — continuous: merge to `master` ships staging automatically; prod is manual, approval-gated, **fix-forward** (no scheduled release train).
+
+**Failover guide**
+- **Within-region (automatic)** — multi-AZ Aurora + ≥2 ECS tasks across 2 AZs + ECS circuit-breaker rollback (§2). No operator action for a single-AZ loss.
+- **Regional (manual)** — **no automated `us-east-1` → `us-west-2` failover.** DR = restore from the `us-west-2` DR vault / Aurora PITR (§4 #11), targeting **RPO ≤ 24 h, RTO ≤ 4 h**. A full regional-failover procedure is _TBD — not yet drilled end-to-end beyond restore_ ([`./restore-drill-runbook.md`](./restore-drill-runbook.md)).
+
+## Architecture diagram
+
+The full set lives in **[`./architecture/`](./architecture/)** — open **[`index.html`](./architecture/index.html)** for the
+interactive gallery (zoomable SVG, ⌘P → "Save as PDF" for slides). The single most useful operator view is the **system
+context** — every page is a *derived snapshot*, which is the [golden rule](#start-here-triage-decision-tree) in one picture:
+
+![SPS system context — WCM source systems → Step Functions ETL → Aurora (canonical) + OpenSearch (search) → Next.js app → public profiles and SAML-gated /edit](./architecture/system-context.svg)
+
+| Diagram | What it shows | Reach for it when… | Files |
+|---|---|---|---|
+| **System context** | Source systems → ETL → stores → app → audiences | Onboarding; "where does this data come from / who consumes it" | [svg](./architecture/system-context.svg) |
+| **Application & AWS topology** | ECS / ALB / Aurora / OpenSearch / CloudFront wiring across the stacks | A 5xx / latency incident — tracing the live request path (§4 #6) | [svg](./architecture/app-aws-topology.svg) |
+| **Internal components** | Next.js app internals + libraries (read / merge-at-read / `/edit` write) | A render bug or an `/edit` write/authz issue | [svg](./architecture/app-internals.svg) |
+| **Network topology** | VPC, subnets, SGs, NAT, VPC endpoints, WCM reachability | Connectivity / DNS / SG diagnosis; building an in-VPC `run-task` (§4 #9) | [svg](./architecture/network-topology.svg) |
+| **Edge-topology decision** | The EdgeStack fork (CloudFront / WAF / cert / alias) and why | **Before any `cdk deploy Sps-Edge-*`** — the WAF-strip footgun (§2) | [svg](./architecture/edge-topology-fork.svg) |
+
+The **request-path** and **ETL** flows as inline Mermaid (renders on GitHub) live in the one-page narrative companion
+[`./architecture-overview.md`](./architecture-overview.md).
+
+> **Provenance & freshness.** Diagrams are generated from the repo's infra sources by `scripts/diagrams/build.mjs` —
+> regenerate with **`npm run diagrams`** after any topology change (new stack, ETL source, or edge change), then commit
+> the updated SVGs + `index.html` (the generated PNGs are gitignored). They reflect the deployed shape as of **2026-05-30**; where a diagram and
+> `cdk/lib/*` disagree, **the CDK wins** (mind the account-model and stack-count caveats in the two cross-doc facts above).
+
 ## 1. Services used
 
 ### AWS service inventory (per env; sizes from `../cdk/lib/config.ts`)
