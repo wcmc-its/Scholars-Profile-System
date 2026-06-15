@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 
 import type { EntityKind } from "@/lib/api/search";
 import { EntityBadge } from "@/components/ui/entity-badge";
+import { reportNavWatchdog, type NavWatchdogSurface } from "@/lib/analytics/nav-watchdog";
 import { formatRoleCategory } from "@/lib/role-display";
 
 type Suggestion = {
@@ -63,7 +64,7 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
   isPendingRef.current = isPending;
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const armNavWatchdog = (href: string) => {
+  const armNavWatchdog = (href: string, surface: NavWatchdogSurface) => {
     if (watchdogRef.current) clearTimeout(watchdogRef.current);
     const startHref = window.location.href;
     watchdogRef.current = setTimeout(() => {
@@ -71,6 +72,9 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
       // Still pending and the URL never moved → the soft-nav hung mid
       // deploy-cutover; force a hard navigation to the intended href.
       if (isPendingRef.current && window.location.href === startHref) {
+        // Observe-only telemetry (never blocks the recovery nav) so the firing
+        // rate can be tuned — #1017.
+        reportNavWatchdog(surface, NAV_WATCHDOG_MS);
         window.location.assign(href);
       }
     }, NAV_WATCHDOG_MS);
@@ -170,7 +174,7 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
     startTransition(() => {
       router.push(href);
     });
-    armNavWatchdog(href); // #1017
+    armNavWatchdog(href, "autocomplete_submit"); // #1017
   };
 
   const containerClass = isHero
@@ -212,7 +216,7 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
                 startTransition(() => {
                   router.push(suggestionHref);
                 });
-                armNavWatchdog(suggestionHref); // #1017
+                armNavWatchdog(suggestionHref, "autocomplete_suggestion"); // #1017
               } else {
                 submit();
               }
