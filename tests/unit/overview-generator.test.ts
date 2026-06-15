@@ -6,12 +6,17 @@
  * delimited untrusted block (never in the system prompt), and that the system
  * prompt carries the injection-guard override. No DB, no network.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  buildGroundingReference,
   buildOverviewUserPrompt,
   hasSparseResearchSignal,
+  isOverviewFaithfulnessPassEnabled,
+  OVERVIEW_REVISE_SYSTEM_PROMPT,
   OVERVIEW_SYSTEM_PROMPT,
+  OVERVIEW_VERIFY_SYSTEM_PROMPT,
+  parseUngrounded,
 } from "@/lib/edit/overview-generator";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import { DEFAULT_OVERVIEW_PARAMS, type OverviewParams } from "@/lib/edit/overview-params";
@@ -334,5 +339,117 @@ describe("buildOverviewUserPrompt — no-representative-publications directive (
     const prompt = buildOverviewUserPrompt(SPARSE_FACTS, params());
     expect(prompt).toContain("little structured research signal");
     expect(prompt).not.toContain("FACTS contains NO representative publications");
+  });
+});
+
+// #742 post-generation faithfulness pass. Pure-function + prompt structure tests
+// (the gateway is never called). The verify→revise orchestration is exercised
+// empirically by the validation run; here we lock the building blocks.
+
+/** A rich facts fixture exercising every grounding source the reference renders. */
+const RICH_FACTS: OverviewFacts = {
+  ...FACTS,
+  methods: [{ name: "AAV gene-therapy vectors", category: "vector", examples: ["AAVrh.10", "AAV9"] }],
+  representativePublications: [
+    {
+      pmid: "1",
+      title: "Twenty-Year Survival of CLN2 Gene Therapy",
+      venue: "Human gene therapy",
+      year: 2025,
+      impact: 47,
+      synopsis: "AAV vectors in CSF show 60-90% systemic distribution.",
+      impactJustification: null,
+      topicRationale: null,
+      authorPosition: "last",
+    },
+  ],
+  activeGrants: [
+    { role: "PI", funderLabel: "NHLBI", title: "Gene Therapy for Alpha 1-Antitrypsin Deficiency", mechanism: "R01" },
+  ],
+  facultyMetrics: { firstAuthorCount: 27, lastAuthorCount: 545, scoredPubCount: 36, hIndex: 155 },
+};
+
+describe("parseUngrounded (#742 verifier output)", () => {
+  it("parses a clean object", () => {
+    const out = parseUngrounded('{"ungrounded":[{"span":"STORK-A","category":"named-entity","reason":"x"}]}');
+    expect(out).toEqual([{ span: "STORK-A", category: "named-entity", reason: "x" }]);
+  });
+  it("tolerates prose around the JSON", () => {
+    const out = parseUngrounded('Here you go:\n{"ungrounded":[{"span":"5%","category":"number","reason":"y"}]}\nDone.');
+    expect(out).toHaveLength(1);
+    expect(out[0].span).toBe("5%");
+  });
+  it("returns [] for the empty-ungrounded case", () => {
+    expect(parseUngrounded('{"ungrounded":[]}')).toEqual([]);
+  });
+  it("returns [] on malformed / non-JSON output (fail-open, never throws)", () => {
+    expect(parseUngrounded("not json at all")).toEqual([]);
+    expect(parseUngrounded('{"ungrounded": "oops"}')).toEqual([]);
+    expect(parseUngrounded("")).toEqual([]);
+  });
+  it("drops entries with an empty or missing span", () => {
+    const out = parseUngrounded('{"ungrounded":[{"span":"","category":"x"},{"span":"keep","category":"y"}]}');
+    expect(out).toEqual([{ span: "keep", category: "y", reason: "" }]);
+  });
+});
+
+describe("buildGroundingReference (#742 fact-checker reference)", () => {
+  it("renders every grounding source as an explicit list", () => {
+    const ref = buildGroundingReference(RICH_FACTS);
+    // method names + their examples
+    expect(ref).toContain("AAV gene-therapy vectors");
+    expect(ref).toContain("AAVrh.10");
+    // publication title + its distilled finding (the synopsis-blindness fix)
+    expect(ref).toContain("Twenty-Year Survival of CLN2 Gene Therapy");
+    expect(ref).toContain("60-90% systemic distribution");
+    // grant title (the grant-title-blindness fix)
+    expect(ref).toContain("Gene Therapy for Alpha 1-Antitrypsin Deficiency");
+    // allowed numbers
+    expect(ref).toContain("h-index: 155");
+    // the institution is declared always-valid so WCM is never flagged
+    expect(ref).toContain("Weill Cornell Medicine");
+    expect(ref).toMatch(/never flag/i);
+  });
+  it("states when there are NO method families (so any named tool is a violation)", () => {
+    const ref = buildGroundingReference(FACTS); // FACTS.methods === []
+    expect(ref).toContain("ALLOWED METHOD / TOOL NAMES: (none)");
+  });
+  it("flags absence of an h-index rather than inviting one", () => {
+    const ref = buildGroundingReference(FACTS); // facultyMetrics null
+    expect(ref).toContain("must not state an h-index");
+  });
+});
+
+describe("OVERVIEW_VERIFY / REVISE system prompts (#742)", () => {
+  it("verify prompt fences the leak categories + the WCM exception + loose matching", () => {
+    const flat = OVERVIEW_VERIFY_SYSTEM_PROMPT.replace(/\s+/g, " ");
+    expect(flat).toContain("ALLOWED NUMBERS");
+    expect(flat).toContain("single most important thing to catch");
+    expect(flat).toContain("'Weill Cornell Medicine' is ALWAYS correct");
+    expect(flat).toContain("Match LOOSELY");
+    expect(flat).toContain('"ungrounded"');
+  });
+  it("revise prompt removes flagged spans and adds nothing", () => {
+    const flat = OVERVIEW_REVISE_SYSTEM_PROMPT.replace(/\s+/g, " ");
+    expect(flat).toContain("every ungrounded span is removed");
+    expect(flat).toContain("NEVER add any new fact");
+  });
+});
+
+describe("isOverviewFaithfulnessPassEnabled (#742)", () => {
+  const prev = process.env.OVERVIEW_FAITHFULNESS_PASS;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.OVERVIEW_FAITHFULNESS_PASS;
+    else process.env.OVERVIEW_FAITHFULNESS_PASS = prev;
+  });
+  it("is off by default / when unset", () => {
+    delete process.env.OVERVIEW_FAITHFULNESS_PASS;
+    expect(isOverviewFaithfulnessPassEnabled()).toBe(false);
+  });
+  it('is on only for exactly "on"', () => {
+    process.env.OVERVIEW_FAITHFULNESS_PASS = "on";
+    expect(isOverviewFaithfulnessPassEnabled()).toBe(true);
+    process.env.OVERVIEW_FAITHFULNESS_PASS = "true";
+    expect(isOverviewFaithfulnessPassEnabled()).toBe(false);
   });
 });

@@ -304,28 +304,306 @@ function escapeHtml(text: string): string {
 export async function generateOverviewDraft(
   facts: OverviewFacts,
   params: OverviewParams,
-  opts?: { model?: string; temperature?: number },
-): Promise<{ draft: string; model: string }> {
+  opts?: { model?: string; temperature?: number; faithfulnessPass?: boolean },
+): Promise<{ draft: string; model: string; removed: UngroundedSpan[] }> {
   const modelId = opts?.model ?? process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_MODEL;
   const temperature =
     opts?.temperature ?? (Number(process.env.OVERVIEW_GENERATE_TEMPERATURE) || DEFAULT_TEMPERATURE);
 
-  // Amazon Bedrock via the AWS SDK credential chain — the ECS task role in
-  // deployment (TaskRoleBedrockPolicy grants bedrock:InvokeModel), the operator's
-  // shell creds locally. No API key is read or passed; billing is the AWS account.
-  const bedrock = createAmazonBedrock({
-    region: process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1",
-    credentialProvider: fromNodeProviderChain(),
-  });
-
   const result = await generateText({
-    model: bedrock(modelId),
+    model: overviewBedrock()(modelId),
     system: OVERVIEW_SYSTEM_PROMPT,
     prompt: buildOverviewUserPrompt(facts, params),
     temperature,
   });
 
-  return { draft: sanitizeOverviewHtml(proseToParagraphHtml(result.text)), model: modelId };
+  // #742 post-generation faithfulness pass (off by default — `OVERVIEW_FAITHFULNESS_PASS`).
+  // The validation gate showed the prompt already grounds drafts on the FACTS (incl. the
+  // ReciterAI distilled signals); this is defense-in-depth for the bulk rollout — it strips
+  // any specific a draft adds beyond ALL fact fields. `removed` is surfaced for transparency.
+  let prose = result.text;
+  let removed: UngroundedSpan[] = [];
+  if (opts?.faithfulnessPass ?? isOverviewFaithfulnessPassEnabled()) {
+    const grounded = await groundOverviewDraft(facts, prose, { model: modelId });
+    prose = grounded.prose;
+    removed = grounded.removed;
+  }
+
+  return { draft: sanitizeOverviewHtml(proseToParagraphHtml(prose)), model: modelId, removed };
+}
+
+// ---------------------------------------------------------------------------
+// #742 post-generation faithfulness pass.
+//
+// The staging gate proved prompt-only hardening is INSUFFICIENT: for high-recall
+// (famous) faculty the model overrides "only from FACTS" with parametric memory —
+// naming real-but-ungrounded tools ("STORK-A", "BELA") and, worse, inventing
+// quantitative figures ("60–90% of vectors distribute off-target"). A first-pass
+// author cannot reliably self-police this; a second-pass CRITIC can — the same
+// asymmetry the adversarial validation audit exploited. So every draft is run
+// through verify → revise: a strict fact-checker lists each specific not present
+// in FACTS, then an editor removes exactly those spans (without adding anything),
+// and we re-verify once. Best-effort and additive — a checker failure never blocks
+// generation (it returns the draft unchanged), and the only mutation is removal.
+// ---------------------------------------------------------------------------
+
+/** The fact-checker system prompt — lists every draft specific NOT in FACTS, by
+ *  the same leak-vector categories the #742 naming rules fence. Output is a strict
+ *  JSON object of verbatim offending spans so the reviser can excise them. */
+export const OVERVIEW_VERIFY_SYSTEM_PROMPT = [
+  "You are a strict fact-checker for an AI-written faculty bio. You are given a REFERENCE",
+  "of ALLOWED FACTS (the ONLY permitted source) and a DRAFT. List every SPECIFIC claim in",
+  "the draft that is NOT supported by the reference — i.e. recalled from outside knowledge",
+  "rather than present in it. A claim that is plausibly TRUE but absent from the reference",
+  "is still UNSUPPORTED and must be listed. Before flagging, scan the WHOLE reference — a",
+  "detail may be inside a PUBLICATION TITLE or a GRANT TITLE; if it appears there it is",
+  "grounded, do not flag it. Categories:",
+  "- named-entity: a PROPER NAME or acronym of a specific tool, model, software, dataset,",
+  '  instrument, or algorithm (e.g. "STORK-A", "FEMI", "AI-biopsy", "Blackbird") not found',
+  "  in ALLOWED METHOD / TOOL NAMES (a name or one of its examples) and not inside a",
+  '  PUBLICATION TITLE. Do NOT flag generic, UN-named descriptions ("deep learning",',
+  '  "enzyme kinetics", "time-lapse imaging", "claims-based analysis") — only proper',
+  "  names / acronyms.",
+  "- number: any figure — h-index, a count, a year, a percentage, a statistic — not present",
+  '  in ALLOWED NUMBERS. Invented quantitative findings (e.g. a "60-90%" result) are the',
+  "  single most important thing to catch.",
+  "- disease-target: a named disease, condition, syndrome, gene, organism, or biological",
+  "  target not appearing in a PUBLICATION TITLE, a GRANT TITLE, or a TOPIC AREA. A funder's",
+  "  name is not a disease; the indication a therapy 'treats' is NOT grounded unless that",
+  "  disease is itself named in the reference.",
+  "- grant-aim: a specific described grant aim / project / goal not stated in a GRANT TITLE.",
+  "- identity: a title / department / education string embellished beyond the reference (an",
+  "  added eponym, institute, or invented degree field). The INSTITUTION 'Weill Cornell",
+  "  Medicine' is ALWAYS correct — never flag it.",
+  "",
+  "Match LOOSELY when checking a title or grant title: ignore differences of hyphenation,",
+  "spacing, capitalization, and singular/plural (so \"alpha-1-antitrypsin\" matches \"Alpha",
+  '1-Antitrypsin"). Paraphrasing or summarizing the SUBJECT of a listed publication or grant',
+  "is grounded — flag only a specific NAME, NUMBER, DISEASE, or distinct AIM that is absent",
+  "from the reference, not a general restatement of what a listed paper or grant is about.",
+  "",
+  "For each unsupported claim, output the EXACT substring as it appears in the draft",
+  "(verbatim, so it can be located and removed), its category, and a one-line reason.",
+  'Output ONLY a JSON object: {"ungrounded":[{"span":"...","category":"...","reason":"..."}]}.',
+  'If every specific is supported, output {"ungrounded":[]}. No prose outside the JSON.',
+].join("\n");
+
+/**
+ * Flatten `facts` into an explicit, labelled "ALLOWED FACTS" reference for the
+ * fact-checker. Raw nested JSON made the verifier both miss real leaks and
+ * false-flag grounded details buried in `activeGrants[].title` / `methods[].examples`;
+ * the flattened lists (the same shape that made the validation audit reliable) let
+ * it actually cross-reference. The institution is stated as always-valid so "Weill
+ * Cornell Medicine" is never flagged.
+ */
+export function buildGroundingReference(facts: OverviewFacts): string {
+  const lines: string[] = [];
+  lines.push(
+    'INSTITUTION: Weill Cornell Medicine — the scholar\'s institution, ALWAYS correct; never flag "Weill Cornell Medicine".',
+  );
+  lines.push(`NAME: ${facts.name}`);
+  lines.push(`TITLE: ${facts.title ?? "(none)"}`);
+  lines.push(
+    `DEPARTMENT: ${facts.department ?? "(none)"} — use this department string exactly; flag any added eponym / institute / center.`,
+  );
+  if (facts.methods.length > 0) {
+    lines.push(
+      "ALLOWED METHOD / TOOL NAMES (these names and their listed examples are the ONLY named tools/methods/datasets/models/algorithms that may appear in the draft):",
+    );
+    for (const m of facts.methods) {
+      const ex = m.examples && m.examples.length > 0 ? ` — examples: ${m.examples.join("; ")}` : "";
+      lines.push(`- ${m.name}${m.category ? ` [${m.category}]` : ""}${ex}`);
+    }
+  } else {
+    lines.push(
+      "ALLOWED METHOD / TOOL NAMES: (none) — the draft must NOT name any specific tool, method, software, model, dataset, or algorithm.",
+    );
+  }
+  if (facts.representativePublications.length > 0) {
+    lines.push(
+      "PUBLICATIONS — the title AND the distilled findings under each are GROUNDED (a specific, a result, or a finding stated in either may appear in the draft):",
+    );
+    for (const p of facts.representativePublications) {
+      lines.push(`- TITLE: ${p.title.replace(/<[^>]+>/g, "")}${p.year ? ` (${p.year})` : ""}`);
+      for (const d of [p.synopsis, p.impactJustification, p.topicRationale]) {
+        if (d) lines.push(`    finding: ${d}`);
+      }
+    }
+  } else {
+    lines.push(
+      "PUBLICATION TITLES: (none) — there is NO per-paper grounding; the draft must not describe any specific finding, result, or named contribution.",
+    );
+  }
+  if (facts.activeGrants.length > 0) {
+    lines.push("GRANT TITLES (a grant aim or a disease named inside one of these titles is grounded):");
+    for (const g of facts.activeGrants) {
+      lines.push(`- ${g.title ?? "(no title — funder only)"}  [funder: ${g.funderLabel}; role: ${g.role}]`);
+    }
+    lines.push(
+      "A grant's FUNDER identifies the sponsor only — it does NOT license naming the disease the grant studies unless that disease is in the grant TITLE.",
+    );
+  } else {
+    lines.push("GRANT TITLES: (none).");
+  }
+  const m = facts.facultyMetrics;
+  const pubYears = facts.representativePublications.map((p) => p.year).filter(Boolean);
+  const eduYears = facts.education.map((e) => e.year).filter(Boolean);
+  lines.push(
+    "ALLOWED NUMBERS (the ONLY figures that may appear — any other number, especially a percentage or a result statistic, is a fabrication):",
+  );
+  lines.push(`- h-index: ${m?.hIndex ?? "(not available — the draft must not state an h-index)"}`);
+  lines.push(`- total publications: ${facts.publicationCount}`);
+  lines.push(`- active years: ${facts.yearsActive.first ?? "?"} to ${facts.yearsActive.last ?? "?"}`);
+  if (m) {
+    lines.push(
+      `- first-author count: ${m.firstAuthorCount ?? "?"}; last-author count: ${m.lastAuthorCount ?? "?"}; scored publications: ${m.scoredPubCount ?? "?"}`,
+    );
+  }
+  lines.push(`- publication years: ${pubYears.length ? pubYears.join(", ") : "(none)"}`);
+  lines.push(`- education years: ${eduYears.length ? eduYears.join(", ") : "(none)"}`);
+  lines.push(
+    `TOPIC AREAS (broad areas, allowed as general descriptors only): ${facts.topics.map((t) => t.label).join("; ") || "(none)"}`,
+  );
+  if (facts.education.length > 0) {
+    lines.push("EDUCATION:");
+    for (const e of facts.education) {
+      lines.push(
+        `- ${e.degree}${e.field ? `, ${e.field}` : ""} — ${e.institution}${e.year ? ` (${e.year})` : ""}`,
+      );
+    }
+  }
+  return lines.join("\n");
+}
+
+/** The reviser system prompt — removes the flagged spans, adds nothing. */
+export const OVERVIEW_REVISE_SYSTEM_PROMPT = [
+  "You are editing an AI-written faculty bio to remove unsupported claims flagged by",
+  "a fact-checker. You are given the DRAFT and a list of UNGROUNDED SPANS (verbatim",
+  "substrings that are not supported by the source facts and must not appear).",
+  "Rewrite the bio so that:",
+  "- every ungrounded span is removed — delete the unsupported claim, or narrow the",
+  "  sentence to only its supported part;",
+  "- you NEVER reintroduce a removed specific and NEVER add any new fact, name,",
+  "  number, disease, or claim of your own;",
+  "- all remaining grounded content is preserved and the prose stays fluent;",
+  "- voice, person, register, and overall structure are unchanged.",
+  "Output ONLY the corrected bio prose — plain text, paragraphs separated by a blank",
+  "line, no markdown, no preamble.",
+].join("\n");
+
+/** A single ungrounded specific the fact-checker found in a draft. */
+export type UngroundedSpan = { span: string; category: string; reason: string };
+
+/** Lazily build a Bedrock client from the AWS credential chain (ECS task role in
+ *  deployment, shell creds locally) — shared by generate / verify / revise. */
+function overviewBedrock() {
+  return createAmazonBedrock({
+    region: process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1",
+    credentialProvider: fromNodeProviderChain(),
+  });
+}
+
+/** Parse the verifier's JSON, tolerantly. Returns [] on any malformed output so a
+ *  checker glitch degrades to "no changes" rather than crashing the generate.
+ *  Exported for unit tests. */
+export function parseUngrounded(text: string): UngroundedSpan[] {
+  try {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end <= start) return [];
+    const parsed = JSON.parse(text.slice(start, end + 1)) as { ungrounded?: unknown };
+    if (!Array.isArray(parsed.ungrounded)) return [];
+    return parsed.ungrounded
+      .filter((u): u is UngroundedSpan => Boolean(u) && typeof (u as UngroundedSpan).span === "string")
+      .map((u) => ({
+        span: u.span,
+        category: typeof u.category === "string" ? u.category : "unknown",
+        reason: typeof u.reason === "string" ? u.reason : "",
+      }))
+      // A span the reviser can't locate in the prose is useless; drop empties.
+      .filter((u) => u.span.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/** Fact-check `prose` against `facts`: returns the list of specifics not grounded
+ *  in FACTS. One gateway call; temperature 0 (a checker should be deterministic). */
+export async function verifyDraftGrounding(
+  facts: OverviewFacts,
+  prose: string,
+  opts?: { model?: string },
+): Promise<UngroundedSpan[]> {
+  const modelId = opts?.model ?? process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_MODEL;
+  const userTurn = [
+    "Here is the REFERENCE of ALLOWED FACTS. It is the only permitted source.",
+    "",
+    "<ALLOWED_FACTS>",
+    buildGroundingReference(facts),
+    "</ALLOWED_FACTS>",
+    "",
+    "Here is the DRAFT to fact-check:",
+    "",
+    "<DRAFT>",
+    prose,
+    "</DRAFT>",
+  ].join("\n");
+  const result = await generateText({
+    model: overviewBedrock()(modelId),
+    system: OVERVIEW_VERIFY_SYSTEM_PROMPT,
+    prompt: userTurn,
+    temperature: 0,
+  });
+  return parseUngrounded(result.text);
+}
+
+/** Rewrite `prose` removing the `ungrounded` spans, adding nothing. One gateway
+ *  call. Returns the original prose unchanged when there is nothing to remove. */
+export async function reviseDraftForGrounding(
+  prose: string,
+  ungrounded: UngroundedSpan[],
+  opts?: { model?: string; temperature?: number },
+): Promise<string> {
+  if (ungrounded.length === 0) return prose;
+  const modelId = opts?.model ?? process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_MODEL;
+  const userTurn = [
+    "DRAFT:",
+    "",
+    prose,
+    "",
+    "UNGROUNDED SPANS to remove (verbatim substrings — none may remain):",
+    ...ungrounded.map((u) => `- ${JSON.stringify(u.span)} (${u.category})`),
+  ].join("\n");
+  const result = await generateText({
+    model: overviewBedrock()(modelId),
+    system: OVERVIEW_REVISE_SYSTEM_PROMPT,
+    prompt: userTurn,
+    temperature: opts?.temperature ?? 0.2,
+  });
+  return result.text.trim();
+}
+
+/**
+ * The faithfulness pass: verify → revise → re-verify (one corrective revise). Returns
+ * the grounded prose plus the spans that were removed (for transparency / audit /
+ * a "we trimmed N unverifiable details" note). Best-effort: a verifier that finds
+ * nothing (or fails to parse) returns `prose` untouched.
+ */
+export async function groundOverviewDraft(
+  facts: OverviewFacts,
+  prose: string,
+  opts?: { model?: string; maxRevisions?: number },
+): Promise<{ prose: string; removed: UngroundedSpan[] }> {
+  const maxRevisions = opts?.maxRevisions ?? 2;
+  const removed: UngroundedSpan[] = [];
+  let current = prose;
+  for (let i = 0; i < maxRevisions; i++) {
+    const ungrounded = await verifyDraftGrounding(facts, current, opts);
+    if (ungrounded.length === 0) break;
+    removed.push(...ungrounded);
+    current = await reviseDraftForGrounding(current, ungrounded, opts);
+  }
+  return { prose: current, removed };
 }
 
 /**
@@ -335,4 +613,14 @@ export async function generateOverviewDraft(
  */
 export function isOverviewGenerateEnabled(): boolean {
   return process.env.SELF_EDIT_OVERVIEW_GENERATE === "on";
+}
+
+/**
+ * Whether the post-generation faithfulness pass runs (#742). OFF by default — the
+ * generator already grounds drafts on FACTS, so this is defense-in-depth for the
+ * bulk rollout, at the cost of one or two extra Bedrock calls per generate. Flip
+ * via `OVERVIEW_FAITHFULNESS_PASS=on` (wired per-env in cdk app-stack).
+ */
+export function isOverviewFaithfulnessPassEnabled(): boolean {
+  return process.env.OVERVIEW_FAITHFULNESS_PASS === "on";
 }

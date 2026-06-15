@@ -133,17 +133,27 @@ function renderFactsSummary(facts: OverviewFacts): string {
       const venue = [p.venue, p.year].filter(Boolean).join(" ");
       const impact = p.impact != null ? ` · impact ${p.impact}` : "";
       lines.push(`  - ${p.title}${venue ? ` (${venue})` : ""}${impact}`);
+      // #742 — the ReciterAI distilled signals (synopsis / impact justification /
+      // topic rationale) the generator is DESIGNED to ground on. Rendering them is
+      // load-bearing for the faithfulness verdict: a draft specific that traces to a
+      // synopsis is GROUNDED, and omitting them made the validation read grounded
+      // findings (e.g. "60-90% systemic distribution", "STORK-A") as fabrications.
+      for (const d of [p.synopsis, p.impactJustification, p.topicRationale]) {
+        if (d) lines.push(`    - _grounding:_ ${d}`);
+      }
     }
   } else {
     lines.push(`- **Representative publications:** (none)`);
   }
   if (facts.activeGrants.length > 0) {
-    lines.push(
-      `- **Active grants:** ` +
-        facts.activeGrants
-          .map((g) => `${g.role} · ${g.funderLabel}${g.mechanism ? ` (${g.mechanism})` : ""}`)
-          .join("; "),
-    );
+    lines.push(`- **Active grants:**`);
+    for (const g of facts.activeGrants) {
+      // The grant TITLE is a grounding source (a draft may name the disease/aim it
+      // states); funder-only rendering hid it and read grounded diseases as invented.
+      lines.push(
+        `  - ${g.role} · ${g.funderLabel}${g.title ? ` — "${g.title}"` : " (no title)"}${g.mechanism ? ` [${g.mechanism}]` : ""}`,
+      );
+    }
   } else {
     lines.push(`- **Active grants:** (none)`);
   }
