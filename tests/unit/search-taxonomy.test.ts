@@ -3,7 +3,7 @@
  *
  * Mocks Prisma per the project's vi.hoisted + vi.mock("@/lib/db") pattern.
  */
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 
 const {
   mockTopicFindMany,
@@ -46,6 +46,7 @@ import {
   matchQueryToTaxonomy,
   normalizeForMatch,
   resolveMeshDescriptor,
+  suggestMeshConcepts,
 } from "@/lib/api/search-taxonomy";
 
 beforeEach(() => {
@@ -1300,5 +1301,81 @@ describe("resolveMeshDescriptor — curated aliases (#642)", () => {
     const r = await resolveMeshDescriptor("Plastic and Reconstructive Surgery");
     expect(r?.descriptorUi).toBe("D013518");
     expect(r?.confidence).toBe("entry-term");
+  });
+});
+
+describe("suggestMeshConcepts (#878)", () => {
+  const D_EHR = {
+    descriptorUi: "D057286",
+    name: "Electronic Health Records",
+    entryTerms: ["EHR", "Electronic Medical Records"],
+    scopeNote: "Media for storing electronic versions of individuals' medical records.",
+    dateRevised: new Date("2024-06-01"),
+    localPubCoverage: null as number | null,
+    treeNumbers: ["L01.700.508"],
+  };
+
+  afterEach(() => {
+    delete process.env.SEARCH_SUGGEST_MESH_CONCEPT;
+  });
+
+  it("flag off → [] and never touches the MeSH map", async () => {
+    delete process.env.SEARCH_SUGGEST_MESH_CONCEPT;
+    mockMeshFindMany.mockResolvedValue([D_EHR]);
+    const out = await suggestMeshConcepts("Electronic Health Records", 5);
+    expect(out).toEqual([]);
+    expect(mockMeshFindMany).not.toHaveBeenCalled();
+  });
+
+  it("exact name match → one candidate, confidence exact", async () => {
+    process.env.SEARCH_SUGGEST_MESH_CONCEPT = "on";
+    mockMeshFindMany.mockResolvedValue([D_EHR]);
+    const out = await suggestMeshConcepts("Electronic Health Records", 5);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      descriptorUi: "D057286",
+      name: "Electronic Health Records",
+      confidence: "exact",
+      matchedForm: "Electronic Health Records",
+    });
+  });
+
+  it("entry-term/synonym match carries the verbatim matchedForm (the FACS case)", async () => {
+    process.env.SEARCH_SUGGEST_MESH_CONCEPT = "on";
+    mockMeshFindMany.mockResolvedValue([D_EHR]);
+    // "EHR" is an entry term of "Electronic Health Records" — the descriptor
+    // NAME doesn't start with the query, yet it must resolve (cf. FACS → Flow
+    // Cytometry), with the matched synonym preserved for the subtitle.
+    const out = await suggestMeshConcepts("EHR", 5);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      descriptorUi: "D057286",
+      name: "Electronic Health Records",
+      confidence: "entry-term",
+      matchedForm: "EHR",
+    });
+  });
+
+  it("query shorter than the 3-char minimum → [] without touching the map", async () => {
+    process.env.SEARCH_SUGGEST_MESH_CONCEPT = "on";
+    mockMeshFindMany.mockResolvedValue([D_EHR]);
+    const out = await suggestMeshConcepts("eh", 5);
+    expect(out).toEqual([]);
+    expect(mockMeshFindMany).not.toHaveBeenCalled();
+  });
+
+  it("a cold/failed MeSH map load contributes [] (never throws)", async () => {
+    process.env.SEARCH_SUGGEST_MESH_CONCEPT = "on";
+    mockMeshFindMany.mockRejectedValue(new Error("db down"));
+    await expect(
+      suggestMeshConcepts("Electronic Health Records", 5),
+    ).resolves.toEqual([]);
+  });
+
+  it("no descriptor matches the normalized query → []", async () => {
+    process.env.SEARCH_SUGGEST_MESH_CONCEPT = "on";
+    mockMeshFindMany.mockResolvedValue([D_EHR]);
+    const out = await suggestMeshConcepts("nonexistent concept xyz", 5);
+    expect(out).toEqual([]);
   });
 });

@@ -41,6 +41,7 @@
 import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { normalizeForMatch } from "@/lib/api/normalize";
+import { resolveSearchSuggestMeshConcept } from "@/lib/api/search-flags";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import {
   loadFamilyOverlayGate,
@@ -1032,49 +1033,35 @@ async function getMeshMap(): Promise<MeshMap> {
   return meshMapInFlight;
 }
 
-/**
- * Resolve a free-text query to a single MeSH descriptor, or null.
- *
- * Algorithm (§1.5):
- *   1. Normalize query (lowercase, strip non-alphanumeric) — same as
- *      curated-callout matching above so "Cardio-Oncology" ↔ "cardio oncology"
- *      ↔ "cardiooncology" all collapse.
- *   2. Lookup against an in-memory map of (normalized name | normalized
- *      entry-term) → descriptorUi[].
- *   3. Per candidate: exact-name confidence iff query == normalized(name);
- *      otherwise entry-term.
- *   4. Tiebreak: exact > entry-term, then anchor-exists > no-anchor (§1.4),
- *      then higher localPubCoverage (§1.7; NULL sorts last), then
- *      dateRevised desc, then descriptorUi asc.
- *
- * Fails closed: any prisma error from the cache load is logged and `null` is
- * returned, so the curated-callout path keeps working.
- */
-export async function resolveMeshDescriptor(
-  query: string,
-): Promise<MeshResolution | null> {
-  const normalized = normalizeForMatch(query);
-  if (normalized.length < MIN_QUERY_LEN) return null;
-  let map: MeshMap;
-  try {
-    map = await getMeshMap();
-  } catch (err) {
-    console.warn(
-      JSON.stringify({
-        event: "mesh_map_load_failed",
-        message: err instanceof Error ? err.message : String(err),
-      }),
-    );
-    return null;
-  }
-  const hits = map.byForm.get(normalized);
-  if (!hits || hits.length === 0) return null;
+type RankedDescriptorCandidate = {
+  row: DescriptorRow;
+  confidence: "exact" | "entry-term";
+  matchedForm: string;
+};
 
-  // matchedForm note: when multiple entry terms on the same descriptor
-  // normalize to the same key, array order wins. Intentional — both forms
-  // point to the same descriptor; only the display string differs.
-  // The `?? r.name` fallback is unreachable under the ETL contract.
-  const candidates = hits
+/**
+ * #259 / #878 — rank the descriptor candidates for an already-normalized query
+ * key against the in-memory MeSH map. Shared by `resolveMeshDescriptor` (which
+ * takes the winner) and `suggestMeshConcepts` (which lists them), so the two
+ * never drift on the §1.5 tiebreak.
+ *
+ * matchedForm note: when multiple entry terms on the same descriptor normalize
+ * to the same key, array order wins — both point to the same descriptor; only
+ * the display string differs. The `?? r.name` fallback is unreachable under the
+ * ETL contract.
+ *
+ * Tiebreak: exact-name > entry-term, then anchor-exists > none (§1.4), then
+ * higher `localPubCoverage` (NULL last, §1.7), then `dateRevised` desc, then
+ * descriptorUi asc. Returns `[]` when the key resolves to nothing.
+ */
+function rankedDescriptorCandidates(
+  map: MeshMap,
+  normalized: string,
+): RankedDescriptorCandidate[] {
+  const hits = map.byForm.get(normalized);
+  if (!hits || hits.length === 0) return [];
+
+  const candidates: RankedDescriptorCandidate[] = hits
     .map((ui) => map.byUi.get(ui))
     .filter((r): r is DescriptorRow => r !== undefined)
     .map((r) => {
@@ -1111,6 +1098,47 @@ export async function resolveMeshDescriptor(
     return a.row.descriptorUi.localeCompare(b.row.descriptorUi);
   });
 
+  return candidates;
+}
+
+/**
+ * Resolve a free-text query to a single MeSH descriptor, or null.
+ *
+ * Algorithm (§1.5):
+ *   1. Normalize query (lowercase, strip non-alphanumeric) — same as
+ *      curated-callout matching above so "Cardio-Oncology" ↔ "cardio oncology"
+ *      ↔ "cardiooncology" all collapse.
+ *   2. Lookup against an in-memory map of (normalized name | normalized
+ *      entry-term) → descriptorUi[].
+ *   3. Per candidate: exact-name confidence iff query == normalized(name);
+ *      otherwise entry-term.
+ *   4. Tiebreak: exact > entry-term, then anchor-exists > no-anchor (§1.4),
+ *      then higher localPubCoverage (§1.7; NULL sorts last), then
+ *      dateRevised desc, then descriptorUi asc.
+ *
+ * Fails closed: any prisma error from the cache load is logged and `null` is
+ * returned, so the curated-callout path keeps working.
+ */
+export async function resolveMeshDescriptor(
+  query: string,
+): Promise<MeshResolution | null> {
+  const normalized = normalizeForMatch(query);
+  if (normalized.length < MIN_QUERY_LEN) return null;
+  let map: MeshMap;
+  try {
+    map = await getMeshMap();
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "mesh_map_load_failed",
+        message: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return null;
+  }
+  const candidates = rankedDescriptorCandidates(map, normalized);
+  if (candidates.length === 0) return null;
+
   const winner = candidates[0];
   return {
     descriptorUi: winner.row.descriptorUi,
@@ -1127,6 +1155,69 @@ export async function resolveMeshDescriptor(
     // #726 — more than one candidate descriptor normalized to this query key.
     ambiguous: candidates.length > 1,
   };
+}
+
+/**
+ * #878 — a resolved MeSH-concept autocomplete candidate. Carries the descriptor
+ * UI + canonical name plus how the typed query matched (`exact` name vs an
+ * `entry-term`/alias synonym, and the verbatim `matchedForm` for the subtitle).
+ */
+export type MeshConceptCandidate = {
+  descriptorUi: string;
+  name: string;
+  confidence: "exact" | "entry-term";
+  matchedForm: string;
+};
+
+/**
+ * #878 — MeSH-concept autocomplete candidates. Returns `[]` UNLESS
+ * `SEARCH_SUGGEST_MESH_CONCEPT=on`, so when off this contributes NOTHING — no
+ * candidates, no `"concept"` plausibility hit, no badge.
+ *
+ * Exact-form resolution: the trimmed query, normalized, is looked up against
+ * the SAME `byForm` index `resolveMeshDescriptor` uses (descriptor names + NLM
+ * entry terms + #642 curated aliases), so `flow cytometry` and the acronym
+ * `FACS` both resolve to D005434. Reuses the module-cached MeSH map, so the
+ * warm path is an O(1) map lookup with no extra DB work; fails closed (`[]`) on
+ * a cold/failed load so the `allSettled` dropdown contributes zero rows rather
+ * than blocking or 500-ing. Candidates ride the shared §1.5 tiebreak and are
+ * deduped by descriptorUi (a normalized key usually resolves to a single
+ * concept; collisions are capped at `fetchN`).
+ */
+export async function suggestMeshConcepts(
+  trimmed: string,
+  fetchN: number,
+): Promise<MeshConceptCandidate[]> {
+  if (!resolveSearchSuggestMeshConcept()) return [];
+  const normalized = normalizeForMatch(trimmed);
+  if (normalized.length < MIN_QUERY_LEN) return [];
+  let map: MeshMap;
+  try {
+    map = await getMeshMap();
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "mesh_map_load_failed",
+        message: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const out: MeshConceptCandidate[] = [];
+  for (const c of rankedDescriptorCandidates(map, normalized)) {
+    if (seen.has(c.row.descriptorUi)) continue;
+    seen.add(c.row.descriptorUi);
+    out.push({
+      descriptorUi: c.row.descriptorUi,
+      name: c.row.name,
+      confidence: c.confidence,
+      matchedForm: c.matchedForm,
+    });
+    if (out.length >= fetchN) break;
+  }
+  return out;
 }
 
 /**

@@ -424,6 +424,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_SUGGEST_MESH_CONCEPT",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_CONCEPT_PRECOUNT",
                 "Value": "off",
               },
@@ -3518,6 +3522,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_SHELL_STREAMING",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_SUGGEST_MESH_CONCEPT",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_PEOPLE_CONCEPT_PRECOUNT",

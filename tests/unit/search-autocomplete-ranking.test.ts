@@ -468,3 +468,74 @@ describe("#824 method-family routing", () => {
     expect(order).toContain("person");
   });
 });
+
+describe("#878 mesh-concept routing", () => {
+  it("absent concept source contributes no 'concept' hit", () => {
+    const s = emptySources();
+    s.topic.push({ id: "t1", label: "Flow Cytometry" });
+    // No `concept` source present (flag-off shape) → no concept hit.
+    expect(plausibilityHits("flow", s).has("concept")).toBe(false);
+  });
+
+  it("empty concept source contributes no 'concept' hit and no ordering slot", () => {
+    const s = emptySources();
+    s.concept = [];
+    const hits = plausibilityHits("flow", s);
+    expect(hits.has("concept")).toBe(false);
+    // concept must never appear in the order when it has no hit (no empty slot).
+    expect(chooseKindOrder("topic-like", hits)).not.toContain("concept");
+  });
+
+  it("a resolved concept is a presence-based hit, even when the name doesn't start with the query (FACS synonym)", () => {
+    const s = emptySources();
+    // `FACS` resolves to "Flow Cytometry" via an entry term; the descriptor NAME
+    // does NOT start with "facs", yet the resolved concept must still hit.
+    s.concept = [{ name: "Flow Cytometry" }];
+    expect(plausibilityHits("facs", s).has("concept")).toBe(true);
+    // And a non-resolving query (empty source) does not hit — see the test above.
+  });
+
+  it("concept leads a topic-like query when only the concept source hits", () => {
+    const s = emptySources();
+    s.concept = [{ name: "Flow Cytometry" }];
+    const shape = classifyQueryShape("flow cytometry");
+    const hits = plausibilityHits("flow cytometry", s);
+    expect(hits.has("concept")).toBe(true);
+    // Sole hit → concept leads.
+    expect(chooseKindOrder(shape, hits)[0]).toBe("concept");
+  });
+
+  it("topic outranks concept as lead when both hit; concept still placed before person", () => {
+    const s = emptySources();
+    s.topic.push({ id: "t1", label: "Flow Cytometry" });
+    s.concept = [{ name: "Flow Cytometry" }];
+    const shape = classifyQueryShape("flow cytometry");
+    const hits = plausibilityHits("flow cytometry", s);
+    expect(hits.has("topic") && hits.has("concept")).toBe(true);
+    const order = chooseKindOrder(shape, hits);
+    expect(order[0]).toBe("topic");
+    expect(order).toContain("concept");
+    expect(order.indexOf("concept")).toBeLessThan(order.indexOf("person"));
+  });
+
+  it("method outranks concept as lead when both hit a topic-like query", () => {
+    const s = emptySources();
+    // Single-token query: `cytometry` tokenwise-hits the family label (method is
+    // tokenwise, not label-startsWith), and the resolved concept hits by presence.
+    s.method = [{ familyLabel: "Flow cytometry assays" }];
+    s.concept = [{ name: "Flow Cytometry" }];
+    const shape = classifyQueryShape("cytometry");
+    const hits = plausibilityHits("cytometry", s);
+    expect(hits.has("method") && hits.has("concept")).toBe(true);
+    const order = chooseKindOrder(shape, hits);
+    expect(order.indexOf("method")).toBeLessThan(order.indexOf("concept"));
+  });
+
+  it("concept is appended to the order when it co-hits but isn't the lead", () => {
+    // Ambiguous multi-hit (person + concept): person leads in default order, and
+    // concept is still placed (so its row isn't dropped by cap fill).
+    const order = chooseKindOrder("ambiguous", new Set(["person", "concept"]));
+    expect(order).toContain("concept");
+    expect(order).toContain("person");
+  });
+});

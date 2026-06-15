@@ -510,6 +510,28 @@ export function resolveSearchShellStreaming(): boolean {
 }
 
 /**
+ * Issue #878 — MeSH-concept rows in the autocomplete dropdown. The search
+ * RESULTS page already resolves MeSH (`resolveMeshDescriptor`), but the
+ * `suggestEntities` dropdown is pure `contains` matching and never sees the
+ * MeSH layer — so `flow cytometry` and the acronym `FACS` both return `[]`
+ * while Enter→results is descriptor-rich (D005434). When on, `suggestEntities`
+ * adds a flag-gated `"concept"` suggestion kind that reuses the SAME
+ * `getMeshMap().byForm` index (descriptor names + NLM entry terms + #642
+ * curated aliases) to surface a "Flow Cytometry — MeSH concept" row linking to
+ * the existing concept search.
+ *
+ * Default OFF (`SEARCH_SUGGEST_MESH_CONCEPT=on` enables) — a `=== "on"`
+ * opt-in gate, shipping dark for a staging soak first. No reindex and no new
+ * data (reuse-only); the flip is env-only via `cdk deploy Sps-App-<env>`. A
+ * separate lever from `METHODS_LENS_PAGES` (MeSH is orthogonal to the methods
+ * lens) and from the other `SEARCH_*` flags, with an independent rollback
+ * trigger.
+ */
+export function resolveSearchSuggestMeshConcept(): boolean {
+  return process.env.SEARCH_SUGGEST_MESH_CONCEPT === "on";
+}
+
+/**
  * Issue #726 follow-up (Section B / B2) — drop the dedicated concept-escalation
  * pre-count on the People tab. The escalate-on-sparse recall floor (#726) admits
  * concept-tagged scholars when a TRUSTWORTHY descriptor resolved AND the lexical

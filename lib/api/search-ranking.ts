@@ -33,6 +33,10 @@ export type NamedRanking = { name: string };
 /** #824 — a method-family candidate for the autocomplete "Method" badge. Ranked
  *  on `familyLabel`, the same tokenwise/startsWith signal as the named entities. */
 export type MethodRanking = { familyLabel: string };
+/** #878 — a MeSH-concept candidate for the autocomplete "Concept" badge. Ranked
+ *  on the descriptor `name` with a label `startsWith` (like topics — descriptor
+ *  names are single research phrases, not multi-token org-unit names). */
+export type ConceptRanking = { name: string };
 
 export type RankingSources = {
   person: PersonRanking[];
@@ -45,6 +49,10 @@ export type RankingSources = {
    *  candidates, no `"method"` plausibility hit, no ordering slot). Kept optional
    *  so the six-base-kind callers/tests are unaffected. */
   method?: MethodRanking[];
+  /** #878 — OPTIONAL: present only when `SEARCH_SUGGEST_MESH_CONCEPT` is on
+   *  (off ⇒ no candidates, no `"concept"` plausibility hit, no ordering slot).
+   *  Kept optional so existing callers/tests are unaffected. */
+  concept?: ConceptRanking[];
 };
 
 /** Default fallback order when shape doesn't pin a lead. EXCLUDES `method`: the
@@ -60,19 +68,20 @@ const DEFAULT_KIND_ORDER: EntityKind[] = [
   "person",
 ];
 
-/** Placement order used for the hits-guarded passes (#824). Identical to
- *  {@link DEFAULT_KIND_ORDER} with `method` slotted just after `subtopic` — a
- *  method family is a research-concept-grade entity, so it ranks alongside
- *  topics/subtopics and ahead of `person` when both co-hit. Only ever consulted
- *  with `hits.has(k)` guards, so `method` appears only when the flag-gated source
- *  produced a hit. */
-const KIND_ORDER_WITH_METHOD: EntityKind[] = [
+/** Placement order used for the hits-guarded passes (#824/#878). Identical to
+ *  {@link DEFAULT_KIND_ORDER} with `method` then `concept` slotted just after
+ *  `subtopic` — a method family and a MeSH concept are research-concept-grade
+ *  entities, so they rank alongside topics/subtopics and ahead of `person` when
+ *  they co-hit. Only ever consulted with `hits.has(k)` guards, so `method` /
+ *  `concept` appear only when their flag-gated sources produced a hit. */
+const KIND_ORDER_WITH_CONCEPT: EntityKind[] = [
   "department",
   "division",
   "center",
   "topic",
   "subtopic",
   "method",
+  "concept",
   "person",
 ];
 
@@ -194,6 +203,17 @@ export function plausibilityHits(
     hits.add("method");
   }
 
+  // #878 Concept — the concept source is a PRECISE resolution (the normalized
+  // query equals a descriptor name, an NLM entry term, or a #642 curated alias),
+  // not a fuzzy `contains` like the sources above — so any resolved concept is a
+  // strong hit by construction. Presence-based, NOT name-`startsWith`: a synonym
+  // query like `FACS` resolves to "Flow Cytometry" whose NAME doesn't start with
+  // the query, yet it must still claim a slot. Only present when
+  // `SEARCH_SUGGEST_MESH_CONCEPT` is on, so an off flag contributes no hit.
+  if ((sources.concept ?? []).length > 0) {
+    hits.add("concept");
+  }
+
   return hits;
 }
 
@@ -234,9 +254,12 @@ export function chooseKindOrder(
     // #824 — a method-family query is topic-like in shape; once topics/subtopics
     // are exhausted as leads, prefer the Method family over named org units.
     else if (shape === "topic-like" && hits.has("method")) lead = "method";
+    // #878 — a MeSH-concept query is topic-like in shape; once topics/subtopics
+    // and method are exhausted as leads, prefer the concept over named org units.
+    else if (shape === "topic-like" && hits.has("concept")) lead = "concept";
     else {
       // Ambiguous / fallthrough: first plausibility hit in placement order.
-      for (const k of KIND_ORDER_WITH_METHOD) if (hits.has(k)) { lead = k; break; }
+      for (const k of KIND_ORDER_WITH_CONCEPT) if (hits.has(k)) { lead = k; break; }
     }
   } else {
     // Zero hits.
@@ -247,10 +270,11 @@ export function chooseKindOrder(
 
   if (lead) push(lead);
 
-  // Strong-hit kinds next (not yet placed), in placement order. `method` is only
-  // ever in `hits` when the Method pages flag is on, so it is appended only then;
-  // it is never a default filler (it is absent from the no-hit tail pass below).
-  for (const k of KIND_ORDER_WITH_METHOD) if (hits.has(k)) push(k);
+  // Strong-hit kinds next (not yet placed), in placement order. `method` /
+  // `concept` are only ever in `hits` when their flag-gated source produced one,
+  // so they are appended only then; neither is a default filler (both are absent
+  // from the no-hit tail pass below).
+  for (const k of KIND_ORDER_WITH_CONCEPT) if (hits.has(k)) push(k);
 
   // Then the rest in default order (the six base kinds — `method` excluded so an
   // empty method source never claims an ordering slot or breaks the
