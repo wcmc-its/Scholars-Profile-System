@@ -59,6 +59,9 @@ seed-output/
 # Exception: #801 curated audience-gated family seed — checked in so the
 # External-Affairs-approved subset flows through PR review (etl:family-sensitivity).
 !etl/family-sensitivity/curated.csv
+# Exception: #800 curated non-distinctive family suppression seed — checked in so
+# the data-steward-approved hard-hide list flows through PR review (etl:family-suppression).
+!etl/family-suppression/curated.csv
 # Exception: VIVO pageview baseline raw New Relic exports (issue #595) — checked
 # in so the baseline isn't a secondary analysis. Public URLs only (no PII).
 !docs/data/vivo-pageview-baseline/*.csv
