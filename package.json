@@ -97,6 +97,7 @@
     "seo:llm-rank": "tsx scripts/seo/llm-rank.ts",
     "seo:llm-mention": "tsx scripts/seo/llm-mention.ts",
     "seo:cohort": "tsx scripts/seo/cohort-report.ts",
+    "seo:profile-urls": "tsx scripts/seo/export-profile-urls.ts",
     "edit:overview-validate": "tsx scripts/edit/overview-validation.ts"
   },
   "dependencies": {
