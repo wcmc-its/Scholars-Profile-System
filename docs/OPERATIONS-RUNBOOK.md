@@ -33,7 +33,8 @@ What's the problem?
 │
 ├─ AN ALARM FIRED / a Teams card arrived
 │    ├─ Card names an ETL alarm (sps-etl-*-status/-cadence/-heartbeat) .............. §4 #3
-│    ├─ 5xx / latency / unhealthy-hosts / task-shortfall ........................... §4 #6
+│    ├─ P1 serving cascade: sps-app-unavailable / latency-p99 / cluster-red ........ §4 #6
+│    ├─ P2 "warn"-channel card (Aurora/OpenSearch pressure, edit-403s) — review .... §4 #6
 │    ├─ Alarm fired but NO Teams card within 5 min (paging path broken) ............. §4 #8
 │    └─ Any other alarm → map it via "Quick alarm → entry index" ............ end of §4
 │
@@ -173,7 +174,7 @@ The **request-path** and **ETL** flows as inline Mermaid (renders on GitHub) liv
 | **EventBridge** | Cron rules firing the state machines | `sps-etl-{nightly,weekly,annual}-${env}` | `false` on first deploy (operator-driven) | `true` |
 | **Secrets Manager** | DB/OpenSearch/SAML/ETL/edge/revalidate creds; injected via exec role only (~11/env) | `scholars/...` (see §6) | ~11 | ~11 |
 | **ECR** | Image registry (app + ETL repos, #454) | `scholars-app-${env}`, `scholars-etl-${env}` | app + ETL | same |
-| **SNS** | Alarm fan-out (page) + cost/notify | page `sps-alarms-${env}`, notify `sps-notify-${env}`, ETL `etl-failures-${env}` | — | — |
+| **SNS** | Alarm fan-out (page P1 / warn P2) + cost/notify | page `sps-alarms-${env}`, warn `sps-warn-${env}`, notify `sps-notify-${env}`, ETL `etl-failures-${env}` | — | — |
 | **Lambda** | (1) on-call Teams relay; (2) Aurora rotation; (3) nightly CloudFront usage-rollup | `sps-oncall-relay-${env}` (nodejs22.x, 256 MB) + RDS rotation + analytics rollup | — | — |
 | **DynamoDB** | **Upstream input only** (legacy ReciterAI `reciterai` table); SPS provisions **no** table | external `reciterai` | — | — |
 | **S3** | CloudFront access logs (90-day lifecycle); `.next/static` assets; Glue/Athena analytics; Backup; reads ReciterAI artifacts | logs `sps-edge-${env}-logsbucket…` | — | — |
@@ -182,7 +183,7 @@ The **request-path** and **ETL** flows as inline Mermaid (renders on GitHub) liv
 | **VPC Endpoints** | Keep AWS traffic off NAT | Secrets Manager (interface) + S3 (gateway); OpenSearch intentionally NOT an endpoint | — | — |
 | **X-Ray** | Tracing from OTel sidecar (5% + 100% errors/slow) | — | — | — |
 | **Amazon SES** | "Request a change" / slug-request mailer (low volume, flagged) | — | — | — |
-| **CloudWatch** | Alarms + logs + reliability dashboard | log groups `/aws/ecs/sps-app-${env}` etc.; 9 platform alarms | logs 3 mo | logs 1 mo |
+| **CloudWatch** | Alarms + logs + reliability dashboard | log groups `/aws/ecs/sps-app-${env}` etc.; 9 platform alarms + `sps-app-unavailable` composite (P1/P2 tiered) | logs 3 mo | logs 1 mo |
 | **AWS Budgets / Cost Anomaly** | Account-wide cost guardrails (**prod only**) | `sps-monthly-budget` ($600/mo), `sps-anomaly-monitor` ($50/day) → notify | yes | none |
 
 ### The CDK stacks (`../cdk/bin/sps-infra.ts`)
@@ -197,7 +198,7 @@ Nine stacks, each `Sps-{X}-${env}` (e.g. `Sps-App-prod`). Selected via `-c env=s
 | **SecretsStack** | Secrets Manager secret *definitions* (empty) + RDS rotation Lambda |
 | **AppStack** | ECR (app + ETL), ECS cluster/service/tasks, public + internal ALBs, VPC endpoints, migration + db-bootstrap tasks, deploy/OIDC IAM roles |
 | **EtlStack** | Step Functions (nightly/weekly/annual), EventBridge schedules, ETL Fargate family, `etl-failures-${env}` SNS, cadence/status alarms |
-| **ObservabilityStack** | 9 platform alarms, `sps-alarms`/`sps-notify` SNS, on-call relay Lambda, reliability dashboard, **prod-only** budget + cost-anomaly |
+| **ObservabilityStack** | 9 platform alarms + `sps-app-unavailable` composite, `sps-alarms` (page/P1) / `sps-warn` (P2) / `sps-notify` SNS, on-call relay Lambda, reliability dashboard, **prod-only** budget + cost-anomaly |
 | **EdgeStack** | CloudFront fronting the public ALB, WAF, `sps-security-headers-${env}` policy, legacy-VIVO 301 redirects, access-log bucket |
 | **AnalyticsStack** | Glue + Athena over CloudFront logs + nightly usage-rollup Lambda → durable `daily_usage` table |
 
@@ -338,21 +339,25 @@ ETL (local, reads prod sources over VPN): `npm run etl:daily` (chain head `etl:e
 
 **Error-budget policy** (policy, *not* enforced): if > 50% of the 28-day budget burns in any rolling 7-day sub-window, prod deploys pause. Non-SLO "normal" brackets: CloudFront cache hit > 85% healthy / < 50% incident signal; Aurora connections alarm at 80.
 
-### Alarm catalog — 9 alarms/env → **page** topic `sps-alarms-${env}` (`../cdk/lib/observability-stack.ts`)
+### Alarm catalog — 9 alarms/env (P1/P2 tiered) + 1 composite (`../cdk/lib/observability-stack.ts`)
 
-| Alarm | Threshold | Eval | Catches |
-|---|---|---|---|
-| `sps-alb-5xx-rate-${env}` | > 1% (gated by ≥ 5 absolute 5xx first) | 5m, 2/2 | Availability SLO burn |
-| `sps-alb-unhealthy-hosts-${env}` | `UnHealthyHostCount` > 0 | 1m, 5/5 | Zero healthy targets |
-| `sps-alb-latency-p99-${env}` | p99 > 1.5 s | 5m, 3/3 | Latency SLO burn |
-| `sps-ecs-task-shortfall-${env}` | desired − running > 0 | 1m, 5/5 | Tasks died, not replaced |
-| `sps-aurora-cpu-${env}` | > 80% | 5m, 3/3 | Hot query loop |
-| `sps-aurora-connections-${env}` | > 80 | 5m, 3/3 | Connection-pool exhaustion |
-| `sps-opensearch-jvm-pressure-${env}` | > 85% | 5m, 3/3 | GC pressure → query latency |
-| `sps-opensearch-cluster-red-${env}` | `ClusterStatus.red` > 0 | 1m, 1/1 | Shards unassigned |
-| `sps-edit-authz-denied-${env}` | `edit_authz_denied` > 10 | 5m, 2/2 | Edit-surface 403 burst / probing |
+P1 → **page** topic `sps-alarms-${env}` (on-call Teams channel); P2 → **warn** topic `sps-warn-${env}` (separate "warn" channel, falls back to page until provisioned). Full detail: `SLOs.md § Alarm catalog` + `oncall.md § Severity tiers`.
 
-> **Count note:** `SLOs.md` says "eight"; the 9th (`sps-edit-authz-denied`, B02 #101) is real in code. **Code is authoritative — 9 alarms.**
+| Alarm | Tier | Threshold | Eval | Catches |
+|---|---|---|---|---|
+| `sps-alb-5xx-rate-${env}` | P1† | > 1% (gated by ≥ 5 absolute 5xx first) | 5m, 2/2 | Availability SLO burn |
+| `sps-alb-unhealthy-hosts-${env}` | P1† | `UnHealthyHostCount` > 0 | 1m, 5/5 | Zero healthy targets |
+| `sps-alb-latency-p99-${env}` | P1 | p99 > 1.5 s | 5m, 3/3 | Latency SLO burn |
+| `sps-ecs-task-shortfall-${env}` | P1† | desired − running > 0 | 1m, 5/5 | Tasks died, not replaced |
+| `sps-aurora-cpu-${env}` | P2 | > 80% | 5m, 3/3 | Hot query loop |
+| `sps-aurora-connections-${env}` | P2 | > 80 | 5m, 3/3 | Connection-pool exhaustion |
+| `sps-opensearch-jvm-pressure-${env}` | P2 | > 85% | 5m, 3/3 | GC pressure → query latency |
+| `sps-opensearch-cluster-red-${env}` | P1 | `ClusterStatus.red` > 0 | 1m, 1/1 | Shards unassigned |
+| `sps-edit-authz-denied-${env}` | P2 | `edit_authz_denied` > 10 | 5m, 2/2 | Edit-surface 403 burst / probing |
+| `sps-app-unavailable-${env}` | P1 | composite: `ALARM(5xx) OR ALARM(unhealthy) OR ALARM(task-shortfall)` | — | The serving cascade — one page for the three †-marked symptoms |
+
+> **† No direct action** — these three feed the `sps-app-unavailable` composite (the single P1 page for a serving cascade); they still evaluate, so the dashboard and the composite rule see them. All ETL/reconciler alarms (`etl-failures-${env}`) are P2.
+> **Count note:** `SLOs.md` says "eight"; the 9th (`sps-edit-authz-denied`, B02 #101) is real in code. **Code is authoritative — 9 alarms + 1 composite.**
 
 A separate **relay watchdog** `sps-oncall-relay-errors-${env}` (Lambda `Errors` ≥ 1/min, 1m 1/1) routes to the **notify** topic (email), not page — because the page topic flows through the relay Lambda itself.
 
@@ -360,10 +365,11 @@ A separate **relay watchdog** `sps-oncall-relay-errors-${env}` (Lambda `Errors` 
 
 | Topic | AWS name | Subscriber | What publishes |
 |---|---|---|---|
-| **Page** | `sps-alarms-${env}` | `sps-oncall-relay-${env}` Lambda → Teams | The 9 CloudWatch alarms |
+| **Page** (P1) | `sps-alarms-${env}` | `sps-oncall-relay-${env}` Lambda → primary Teams channel | P1: `sps-app-unavailable` composite, latency-p99, cluster-red |
+| **Warn** (P2) | `sps-warn-${env}` | same relay Lambda → "warn" Teams channel (falls back to page until provisioned) | P2: Aurora CPU/connections, OpenSearch JVM, edit-403s + all ETL/reconciler (`etl-failures-${env}`) |
 | **Notify** | `sps-notify-${env}` | `paa2013@med.cornell.edu` (email) + relay-errors alarm | budget thresholds + cost-anomaly (prod) + relay-Lambda failure |
 
-The **B27 relay Lambda** (nodejs22.x, 256 MB) reads the Teams workflow URL from `scholars/${env}/oncall/teams-webhook-url` at cold start and POSTs an **Adaptive Card as `application/json`** — because Power Automate **rejects** SNS's direct `x-www-form-urlencoded` delivery with HTTP 400. **Never** `aws sns subscribe --protocol https` against the workflow URL — it's a permanent trap. **Off-hours gap (accepted):** Teams + email only — no SMS, no phone, no ack-tracking.
+The **B27 relay Lambda** (nodejs22.x, 256 MB) reads the Teams workflow URL from `scholars/${env}/oncall/teams-webhook-url` at cold start and POSTs an **Adaptive Card as `application/json`** — because Power Automate **rejects** SNS's direct `x-www-form-urlencoded` delivery with HTTP 400. **Never** `aws sns subscribe --protocol https` against the workflow URL — it's a permanent trap. **Off-hours gap (accepted):** Teams + email only — no SMS, no phone, no ack-tracking. The relay assigns **severity** by originating topic (`:sps-warn-` / `:etl-failures-` → P2) and posts P2 to a separate "warn" Teams channel via an **optional** `scholars/${env}/oncall/teams-webhook-url-warn` secret; until that secret exists, P2 falls back to the page channel (logged `"channel":"page"`). Activate it with **no redeploy** per `oncall.md § Severity tiers`.
 
 **Cost guardrails (prod-only, account-wide):** `sps-monthly-budget` $600/mo (notify at 50%/80% forecast, 100% actual); `sps-anomaly-monitor` $50/day → notify.
 
