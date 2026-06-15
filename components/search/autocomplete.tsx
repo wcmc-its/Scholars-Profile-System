@@ -21,6 +21,19 @@ type Suggestion = {
 type Variant = "header" | "hero";
 
 /**
+ * #1017 deploy-cutover skew watchdog. During the ~1-minute window when a new
+ * deployment is cutting over, a soft-nav (router.push inside useTransition) can
+ * receive an RSC 200 the client neither applies nor hard-reloads: isPending
+ * stays true and the URL never moves (the search box spins forever). #931's
+ * deployment-skew hard-reload fallback doesn't fire in this window. The
+ * watchdog arms a timer on every soft-nav; if, after this delay, we're still
+ * pending AND the URL hasn't moved from where the nav started, it forces a hard
+ * navigation to the intended href. A successful soft-nav changes the URL (and
+ * clears isPending), so the watchdog no-ops — no spurious reload.
+ */
+const NAV_WATCHDOG_MS = 7000;
+
+/**
  * Search input with entity-aware autocomplete (spec line 184: fires on 2 chars).
  * Submitting routes to /search?q=<query>; clicking a suggestion routes to the
  * entity's canonical page.
@@ -41,6 +54,42 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
   const abortRef = useRef<AbortController | null>(null);
   const skipSuggestRef = useRef(false);
   const [isPending, startTransition] = useTransition();
+
+  // #1017 watchdog plumbing. Read the latest isPending from a ref inside the
+  // async timer (a captured closure would see a stale value), keep the timer id
+  // in a ref so a rapid re-submit clears the prior one, and clear it as soon as
+  // the transition resolves so a fast success leaves no lingering timer.
+  const isPendingRef = useRef(isPending);
+  isPendingRef.current = isPending;
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const armNavWatchdog = (href: string) => {
+    if (watchdogRef.current) clearTimeout(watchdogRef.current);
+    const startHref = window.location.href;
+    watchdogRef.current = setTimeout(() => {
+      watchdogRef.current = null;
+      // Still pending and the URL never moved → the soft-nav hung mid
+      // deploy-cutover; force a hard navigation to the intended href.
+      if (isPendingRef.current && window.location.href === startHref) {
+        window.location.assign(href);
+      }
+    }, NAV_WATCHDOG_MS);
+  };
+
+  // Clear an armed watchdog the moment the transition resolves (fast success),
+  // and on unmount, so no timer fires after the nav already committed.
+  useEffect(() => {
+    if (!isPending && watchdogRef.current) {
+      clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
+  }, [isPending]);
+
+  useEffect(() => {
+    return () => {
+      if (watchdogRef.current) clearTimeout(watchdogRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     // Skip the suggestion fetch for a programmatic value change (the on-/search
@@ -121,6 +170,7 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
     startTransition(() => {
       router.push(href);
     });
+    armNavWatchdog(href); // #1017
   };
 
   const containerClass = isHero
@@ -158,9 +208,11 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
                 abortRef.current?.abort();
                 setSuggestions([]);
                 setOpen(false);
+                const suggestionHref = suggestions[activeIndex].href;
                 startTransition(() => {
-                  router.push(suggestions[activeIndex].href);
+                  router.push(suggestionHref);
                 });
+                armNavWatchdog(suggestionHref); // #1017
               } else {
                 submit();
               }

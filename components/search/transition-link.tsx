@@ -3,7 +3,9 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useTransition,
   type ComponentProps,
   type MouseEvent,
@@ -12,6 +14,18 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+
+/**
+ * #1017 deploy-cutover skew watchdog (mirrors components/search/autocomplete.tsx).
+ * During the ~1-minute deployment cutover a facet/tab/sort/pagination soft-nav
+ * can get an RSC 200 the client never commits: isPending stays true and the URL
+ * never moves. #931's deployment-skew hard-reload fallback doesn't fire here.
+ * The watchdog arms a timer on every navigate(); if it's still pending and the
+ * URL hasn't moved when it fires, it forces a hard navigation to the intended
+ * href. A successful soft-nav moves the URL (and clears isPending), so the
+ * watchdog no-ops.
+ */
+const NAV_WATCHDOG_MS = 7000;
 
 /**
  * Shared stale-while-revalidate navigation for /search (issue #294 follow-up
@@ -41,6 +55,27 @@ export function SearchTransitionProvider({ children }: { children: ReactNode }) 
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
+  // #1017 watchdog plumbing. Read the latest isPending from a ref inside the
+  // timer (a captured closure would be stale), keep the timer id in a ref so a
+  // rapid re-navigate clears the prior one, and clear it once the transition
+  // resolves / on unmount so a fast success leaves no lingering timer.
+  const isPendingRef = useRef(isPending);
+  isPendingRef.current = isPending;
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!isPending && watchdogRef.current) {
+      clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
+  }, [isPending]);
+
+  useEffect(() => {
+    return () => {
+      if (watchdogRef.current) clearTimeout(watchdogRef.current);
+    };
+  }, []);
+
   const value = useMemo<SearchTransitionValue>(
     () => ({
       isPending,
@@ -48,6 +83,15 @@ export function SearchTransitionProvider({ children }: { children: ReactNode }) 
         startTransition(() => {
           router.push(href, options);
         });
+        // #1017: arm a hard-navigation fallback for a hung deploy-cutover soft-nav.
+        if (watchdogRef.current) clearTimeout(watchdogRef.current);
+        const startHref = window.location.href;
+        watchdogRef.current = setTimeout(() => {
+          watchdogRef.current = null;
+          if (isPendingRef.current && window.location.href === startHref) {
+            window.location.assign(href);
+          }
+        }, NAV_WATCHDOG_MS);
       },
     }),
     [isPending, router],
