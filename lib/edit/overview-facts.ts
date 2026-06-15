@@ -46,7 +46,9 @@ export type OverviewAuthorPosition = "first" | "last" | "middle";
  * input.
  *
  * NOTE: there is deliberately NO `abstractExcerpt` (v3.1 decision 4 — distilled
- * signals replace the raw abstract) and NO `methods`-from-`TOOL#` until C3.
+ * signals replace the raw abstract). `methods` are LIVE from the `scholar_family`
+ * rollup (#886) and `facultyMetrics` is populated from the `FACULTY#` scale ETL —
+ * both reach the model, so the #742 grounding rules treat them as nameable FACTS.
  */
 export type OverviewFacts = {
   // --- identity (authoritative, from ED — NEVER taken from a source bio) ---
