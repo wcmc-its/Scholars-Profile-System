@@ -199,29 +199,6 @@ describe("buildAdaptiveCard", () => {
     );
   });
 
-  it("includes a per-alarm Next step course of action, with a default fallback", () => {
-    const cpu = content(
-      buildAdaptiveCard(
-        {
-          AlarmName: "sps-aurora-cpu-prod",
-          NewStateValue: "ALARM",
-          Region: "us-east-1",
-        },
-        "warn",
-      ),
-    );
-    expect(fact(cpu, "Next step")).toContain("hot query loop");
-
-    const unknown = content(
-      buildAdaptiveCard({
-        AlarmName: "some-external-alarm",
-        NewStateValue: "ALARM",
-        Region: "us-east-1",
-      }),
-    );
-    expect(fact(unknown, "Next step")).toContain("reliability dashboard");
-  });
-
   it("omits the dashboard action when the env is not derivable from the alarm name", () => {
     const c = content(
       buildAdaptiveCard({

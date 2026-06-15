@@ -975,7 +975,7 @@ export class EtlStack extends Stack {
       });
       const statusAlarm = new cloudwatch.Alarm(this, `${c.id}StatusAlarm`, {
         alarmName: `sps-etl-${c.cadenceLabel}-status-${env}`,
-        alarmDescription: `SPS ETL ${c.cadenceLabel} (${env}) -- execution failed.`,
+        alarmDescription: `SPS ETL ${c.cadenceLabel} (${env}) -- execution failed. Next: check the Step Functions execution and the failing step's logs; data freshness lags until it reruns.`,
         metric: failedMetric,
         evaluationPeriods: 1,
         threshold: 0,
@@ -994,7 +994,7 @@ export class EtlStack extends Stack {
         });
         const cadenceAlarm = new cloudwatch.Alarm(this, `${c.id}CadenceAlarm`, {
           alarmName: `sps-etl-${c.cadenceLabel}-cadence-${env}`,
-          alarmDescription: `SPS ETL ${c.cadenceLabel} (${env}) -- cadence missed (no execution started in period).`,
+          alarmDescription: `SPS ETL ${c.cadenceLabel} (${env}) -- cadence missed (no execution started in period). Next: confirm the EventBridge schedule is enabled and the state-machine IAM is intact; the job never started.`,
           metric: startedMetric,
           evaluationPeriods: 1,
           threshold: 1,
@@ -1249,7 +1249,7 @@ export class EtlStack extends Stack {
       "ReconcileStatusAlarm",
       {
         alarmName: `sps-reconcile-status-${env}`,
-        alarmDescription: `SPS reconciler (${env}) -- run failed (>=1 suppression row could not be reflected into the index).`,
+        alarmDescription: `SPS reconciler (${env}) -- run failed (>=1 suppression row could not be reflected into the index). Next: check the Step Functions execution for the failing row; it self-heals once the underlying write succeeds.`,
         metric: new cloudwatch.Metric({
           namespace: "AWS/States",
           metricName: "ExecutionsFailed",
@@ -1280,7 +1280,7 @@ export class EtlStack extends Stack {
       "ReconcileCadenceAlarm",
       {
         alarmName: `sps-reconcile-cadence-${env}`,
-        alarmDescription: `SPS reconciler (${env}) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires).`,
+        alarmDescription: `SPS reconciler (${env}) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.`,
         metric: new cloudwatch.Metric({
           namespace: "AWS/States",
           metricName: "ExecutionsStarted",
@@ -1551,7 +1551,7 @@ export class EtlStack extends Stack {
       "CdnReconcileStatusAlarm",
       {
         alarmName: `sps-cdn-reconcile-status-${env}`,
-        alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- run failed (>=1 pending edge purge could not be replayed).`,
+        alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- run failed (>=1 pending edge purge could not be replayed). Next: check the Step Functions execution for the failing purge; it replays on the next run once CloudFront accepts it.`,
         metric: new cloudwatch.Metric({
           namespace: "AWS/States",
           metricName: "ExecutionsFailed",
@@ -1581,7 +1581,7 @@ export class EtlStack extends Stack {
       "CdnReconcileCadenceAlarm",
       {
         alarmName: `sps-cdn-reconcile-cadence-${env}`,
-        alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires).`,
+        alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.`,
         metric: new cloudwatch.Metric({
           namespace: "AWS/States",
           metricName: "ExecutionsStarted",

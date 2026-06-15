@@ -83,7 +83,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "Ref": "AlarmTopicD01E77F9",
           },
         ],
-        "AlarmDescription": "Public serving is degraded or down (prod): one or more of 5xx-rate / zero-healthy-hosts / task-shortfall is in ALARM. Single P1 page for the serving cascade. See docs/SLOs.md.",
+        "AlarmDescription": "Public serving is degraded or down (prod): one or more of 5xx-rate / zero-healthy-hosts / task-shortfall is in ALARM. Single P1 page for the serving cascade. See docs/SLOs.md. Next: open the reliability dashboard; if Aurora CPU/connections are also high, suspect DB connection-pool exhaustion; if it tracks the last deploy, roll back (DEPLOY-RUNBOOK.md).",
         "AlarmName": "sps-app-unavailable-prod",
         "AlarmRule": {
           "Fn::Join": [
@@ -124,7 +124,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "Ref": "WarnTopicFEEED862",
           },
         ],
-        "AlarmDescription": "Aurora active connection count > 80 sustained over 5m (prod). Symptom of connection-pool exhaustion or unintended app fan-out.",
+        "AlarmDescription": "Aurora active connection count > 80 sustained over 5m (prod). Symptom of connection-pool exhaustion or unintended app fan-out. Next: look for leaked or idle connections; recycle the app tasks if the count will not drain.",
         "AlarmName": "sps-aurora-connections-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 3,
@@ -153,7 +153,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "Ref": "WarnTopicFEEED862",
           },
         ],
-        "AlarmDescription": "Aurora cluster CPU > 80% sustained for 10m (prod). Likely a hot query loop or runaway analytic.",
+        "AlarmDescription": "Aurora cluster CPU > 80% sustained for 10m (prod). Likely a hot query loop or runaway analytic. Next: check Performance Insights or the slow-query log; scale ACUs only if the load is legitimate.",
         "AlarmName": "sps-aurora-cpu-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 3,
@@ -177,7 +177,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
     },
     "EcsTaskShortfallAlarm951444EC": {
       "Properties": {
-        "AlarmDescription": "ECS service running task count is below desired for 5 consecutive minutes (prod). Tasks died and are not being replaced.",
+        "AlarmDescription": "ECS service running task count is below desired for 5 consecutive minutes (prod). Tasks died and are not being replaced. Next: check ECS service events for image-pull, capacity, or IAM failures and the recent deploy.",
         "AlarmName": "sps-ecs-task-shortfall-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 5,
@@ -254,7 +254,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "Ref": "WarnTopicFEEED862",
           },
         ],
-        "AlarmDescription": "Edit-surface 403 (edit_authz_denied) count > 10 in any 5m window for 2 consecutive windows (prod). Sustained rate -- predicate bug or active probing. See docs/SLOs.md.",
+        "AlarmDescription": "Edit-surface 403 (edit_authz_denied) count > 10 in any 5m window for 2 consecutive windows (prod). Sustained rate -- predicate bug or active probing. See docs/SLOs.md. Next: check for an authz-predicate regression in the last deploy, or active probing; review the edit_authz_denied logs for the actor and path.",
         "AlarmName": "sps-edit-authz-denied-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 2,
@@ -456,7 +456,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "e1bee27b9475dc88e54d8e9713f1dab3df6037a665f7c8b4e6a0843e6848fce0.zip",
+          "S3Key": "f2da56d01dc025287ece443f0ff3ddea69eb095baf25605ecc79f3e3a28adb8a.zip",
         },
         "Environment": {
           "Variables": {
@@ -684,7 +684,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "Ref": "AlarmTopicD01E77F9",
           },
         ],
-        "AlarmDescription": "OpenSearch cluster status is RED (prod). Shards unassigned -- searches affected.",
+        "AlarmDescription": "OpenSearch cluster status is RED (prod). Shards unassigned -- searches affected. Next: check OpenSearch _cluster/health; reallocate or restore the affected index from snapshot.",
         "AlarmName": "sps-opensearch-cluster-red-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 1,
@@ -717,7 +717,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "Ref": "WarnTopicFEEED862",
           },
         ],
-        "AlarmDescription": "OpenSearch JVM memory pressure > 85% for 15m (prod). GC pressure will cascade into query latency.",
+        "AlarmDescription": "OpenSearch JVM memory pressure > 85% for 15m (prod). GC pressure will cascade into query latency. Next: check shard count and query load on the dashboard; throttle heavy queries or scale the domain.",
         "AlarmName": "sps-opensearch-jvm-pressure-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 3,
@@ -745,7 +745,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
     },
     "PublicAlb5xxRateAlarmC7D5139D": {
       "Properties": {
-        "AlarmDescription": "Public ALB target 5xx rate exceeds 1% over 5m (prod). Burns the 99.5% availability SLO budget. See docs/SLOs.md.",
+        "AlarmDescription": "Public ALB target 5xx rate exceeds 1% over 5m (prod). Burns the 99.5% availability SLO budget. See docs/SLOs.md. Next: check the ALB 5xx panel and the most recent deploy; roll back if the spike tracks a release, else pull app logs for the failing route.",
         "AlarmName": "sps-alb-5xx-rate-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 2,
@@ -810,7 +810,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "Ref": "AlarmTopicD01E77F9",
           },
         ],
-        "AlarmDescription": "Public ALB target response time p99 > 1500ms over 5m (prod). Burns the latency SLO budget. See docs/SLOs.md.",
+        "AlarmDescription": "Public ALB target response time p99 > 1500ms over 5m (prod). Burns the latency SLO budget. See docs/SLOs.md. Next: open the reliability dashboard latency and Aurora SelectLatency panels; look for a slow query, a cold cache, or an undersized task.",
         "AlarmName": "sps-alb-latency-p99-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 3,
@@ -834,7 +834,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
     },
     "PublicAlbUnhealthyHostsAlarm114335BE": {
       "Properties": {
-        "AlarmDescription": "Public ALB has zero healthy targets for 5 consecutive minutes (prod). Circuit-breaker did not catch it -- real outage.",
+        "AlarmDescription": "Public ALB has zero healthy targets for 5 consecutive minutes (prod). Circuit-breaker did not catch it -- real outage. Next: check ECS task health, the in-flight deploy, and the target-group health-check path.",
         "AlarmName": "sps-alb-unhealthy-hosts-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 5,
@@ -1124,7 +1124,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
             "Ref": "AlarmTopicD01E77F9",
           },
         ],
-        "AlarmDescription": "Public serving is degraded or down (staging): one or more of 5xx-rate / zero-healthy-hosts / task-shortfall is in ALARM. Single P1 page for the serving cascade. See docs/SLOs.md.",
+        "AlarmDescription": "Public serving is degraded or down (staging): one or more of 5xx-rate / zero-healthy-hosts / task-shortfall is in ALARM. Single P1 page for the serving cascade. See docs/SLOs.md. Next: open the reliability dashboard; if Aurora CPU/connections are also high, suspect DB connection-pool exhaustion; if it tracks the last deploy, roll back (DEPLOY-RUNBOOK.md).",
         "AlarmName": "sps-app-unavailable-staging",
         "AlarmRule": {
           "Fn::Join": [
@@ -1165,7 +1165,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
             "Ref": "WarnTopicFEEED862",
           },
         ],
-        "AlarmDescription": "Aurora active connection count > 80 sustained over 5m (staging). Symptom of connection-pool exhaustion or unintended app fan-out.",
+        "AlarmDescription": "Aurora active connection count > 80 sustained over 5m (staging). Symptom of connection-pool exhaustion or unintended app fan-out. Next: look for leaked or idle connections; recycle the app tasks if the count will not drain.",
         "AlarmName": "sps-aurora-connections-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 3,
@@ -1194,7 +1194,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
             "Ref": "WarnTopicFEEED862",
           },
         ],
-        "AlarmDescription": "Aurora cluster CPU > 80% sustained for 10m (staging). Likely a hot query loop or runaway analytic.",
+        "AlarmDescription": "Aurora cluster CPU > 80% sustained for 10m (staging). Likely a hot query loop or runaway analytic. Next: check Performance Insights or the slow-query log; scale ACUs only if the load is legitimate.",
         "AlarmName": "sps-aurora-cpu-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 3,
@@ -1218,7 +1218,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
     },
     "EcsTaskShortfallAlarm951444EC": {
       "Properties": {
-        "AlarmDescription": "ECS service running task count is below desired for 5 consecutive minutes (staging). Tasks died and are not being replaced.",
+        "AlarmDescription": "ECS service running task count is below desired for 5 consecutive minutes (staging). Tasks died and are not being replaced. Next: check ECS service events for image-pull, capacity, or IAM failures and the recent deploy.",
         "AlarmName": "sps-ecs-task-shortfall-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 5,
@@ -1295,7 +1295,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
             "Ref": "WarnTopicFEEED862",
           },
         ],
-        "AlarmDescription": "Edit-surface 403 (edit_authz_denied) count > 10 in any 5m window for 2 consecutive windows (staging). Sustained rate -- predicate bug or active probing. See docs/SLOs.md.",
+        "AlarmDescription": "Edit-surface 403 (edit_authz_denied) count > 10 in any 5m window for 2 consecutive windows (staging). Sustained rate -- predicate bug or active probing. See docs/SLOs.md. Next: check for an authz-predicate regression in the last deploy, or active probing; review the edit_authz_denied logs for the actor and path.",
         "AlarmName": "sps-edit-authz-denied-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 2,
@@ -1396,7 +1396,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "e1bee27b9475dc88e54d8e9713f1dab3df6037a665f7c8b4e6a0843e6848fce0.zip",
+          "S3Key": "f2da56d01dc025287ece443f0ff3ddea69eb095baf25605ecc79f3e3a28adb8a.zip",
         },
         "Environment": {
           "Variables": {
@@ -1624,7 +1624,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
             "Ref": "AlarmTopicD01E77F9",
           },
         ],
-        "AlarmDescription": "OpenSearch cluster status is RED (staging). Shards unassigned -- searches affected.",
+        "AlarmDescription": "OpenSearch cluster status is RED (staging). Shards unassigned -- searches affected. Next: check OpenSearch _cluster/health; reallocate or restore the affected index from snapshot.",
         "AlarmName": "sps-opensearch-cluster-red-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 1,
@@ -1657,7 +1657,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
             "Ref": "WarnTopicFEEED862",
           },
         ],
-        "AlarmDescription": "OpenSearch JVM memory pressure > 85% for 15m (staging). GC pressure will cascade into query latency.",
+        "AlarmDescription": "OpenSearch JVM memory pressure > 85% for 15m (staging). GC pressure will cascade into query latency. Next: check shard count and query load on the dashboard; throttle heavy queries or scale the domain.",
         "AlarmName": "sps-opensearch-jvm-pressure-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 3,
@@ -1685,7 +1685,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
     },
     "PublicAlb5xxRateAlarmC7D5139D": {
       "Properties": {
-        "AlarmDescription": "Public ALB target 5xx rate exceeds 1% over 5m (staging). Burns the 99.5% availability SLO budget. See docs/SLOs.md.",
+        "AlarmDescription": "Public ALB target 5xx rate exceeds 1% over 5m (staging). Burns the 99.5% availability SLO budget. See docs/SLOs.md. Next: check the ALB 5xx panel and the most recent deploy; roll back if the spike tracks a release, else pull app logs for the failing route.",
         "AlarmName": "sps-alb-5xx-rate-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 2,
@@ -1750,7 +1750,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
             "Ref": "AlarmTopicD01E77F9",
           },
         ],
-        "AlarmDescription": "Public ALB target response time p99 > 1500ms over 5m (staging). Burns the latency SLO budget. See docs/SLOs.md.",
+        "AlarmDescription": "Public ALB target response time p99 > 1500ms over 5m (staging). Burns the latency SLO budget. See docs/SLOs.md. Next: open the reliability dashboard latency and Aurora SelectLatency panels; look for a slow query, a cold cache, or an undersized task.",
         "AlarmName": "sps-alb-latency-p99-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 3,
@@ -1774,7 +1774,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
     },
     "PublicAlbUnhealthyHostsAlarm114335BE": {
       "Properties": {
-        "AlarmDescription": "Public ALB has zero healthy targets for 5 consecutive minutes (staging). Circuit-breaker did not catch it -- real outage.",
+        "AlarmDescription": "Public ALB has zero healthy targets for 5 consecutive minutes (staging). Circuit-breaker did not catch it -- real outage. Next: check ECS task health, the in-flight deploy, and the target-group health-check path.",
         "AlarmName": "sps-alb-unhealthy-hosts-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 5,
