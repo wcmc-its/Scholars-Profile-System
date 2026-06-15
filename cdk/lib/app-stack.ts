@@ -1158,6 +1158,18 @@ export class AppStack extends Stack {
         // until that eval. Flip is env-only via `cdk deploy --exclusively
         // Sps-App-<env>` (CD re-rolls the image only) -- the flag-parity rule.
         SEARCH_PEOPLE_CONCEPT_GRANT_AXIS: env === "staging" ? "on" : "off",
+        // #1026 -- surface soft-deleted doctoral-student co-authors as NON-LINKED
+        // chips (name + headshot, no profile link, never faceted/searchable) on
+        // publication chip surfaces site-wide (search, topic feeds, methods pages,
+        // home spotlight). FERPA carve (docs/student-profile-visibility.md): the
+        // constraint is on the link/searchability, not the public PubMed name. The
+        // code checks `=== "on"`; the non-linked rendering itself is enforced by the
+        // prefix-hardened isPubliclyDisplayed regardless of this flag. Flag-off is
+        // byte-identical (every hidden-class scholar is soft-deleted, so the relaxed
+        // hydration matches no one new). STAGING-FIRST: on in staging to soak pending
+        // the WCGS sign-off (docs/outreach/wave3-doctoral-students.md Q2); prod stays
+        // off until then. Env-only flip via `cdk deploy --exclusively Sps-App-<env>`.
+        COAUTHOR_HIDDEN_STUDENT_CHIPS: env === "staging" ? "on" : "off",
         // #637 "View as" impersonation -- the global feature gate. The code
         // checks `=== "true"` exactly (lib/auth/effective-identity.ts,
         // middleware.ts, the /api/impersonation* routes, the /api/auth/session

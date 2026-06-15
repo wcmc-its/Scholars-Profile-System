@@ -436,6 +436,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "COAUTHOR_HIDDEN_STUDENT_CHIPS",
+                "Value": "off",
+              },
+              {
                 "Name": "IMPERSONATION_ENABLED",
                 "Value": "true",
               },
@@ -3533,6 +3537,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_CONCEPT_GRANT_AXIS",
+                "Value": "on",
+              },
+              {
+                "Name": "COAUTHOR_HIDDEN_STUDENT_CHIPS",
                 "Value": "on",
               },
               {
