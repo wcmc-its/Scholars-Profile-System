@@ -1740,7 +1740,7 @@ model FamilySuppressionOverlay {
   familyLabel   String   @map("family_label") @db.VarChar(255)
   sourceNote    String?  @map("source_note") @db.Text
   refreshedAt   DateTime @default(now()) @map("refreshed_at")
-  /// Provenance so the seed reseed (`etl/family-sensitivity`) never clobbers a
+  /// Provenance so the seed reseed (`etl/family-suppression`) never clobbers a
   /// comms-steward edit: 'seed' = curated CSV bootstrap, 'steward' = a tier set
   /// from the /edit/methods surface. The reseed upserts only `source='seed'`.
   source        String   @default("seed") @db.VarChar(16)
