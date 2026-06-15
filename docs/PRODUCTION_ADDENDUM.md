@@ -411,9 +411,9 @@ The alarms and cost guardrails. Provisioned by `cdk/lib/observability-stack.ts` 
 
 The full policy half (SLO targets, error-budget burn policy, alarm threshold rationale, log retention convention, review cadence) lives in [`docs/SLOs.md`](./SLOs.md). This section is the operator-facing resource catalog.
 
-### Eight CloudWatch alarms per env
+### Nine CloudWatch alarms + an app-unavailable composite per env
 
-Every alarm publishes to `sps-alarms-${env}` SNS topic. As of B23 (#122) the page topic is HTTPS-subscribed to a Microsoft Teams channel webhook (out-of-band, per `docs/oncall.md`); the operator email moved to the sibling `sps-notify-${env}` topic. Names + thresholds: see `docs/SLOs.md § Alarm catalog`. Surface coverage: public ALB x3 (5xx rate, unhealthy hosts, latency p99), ECS service x1 (task shortfall vs desired), Aurora x2 (CPU, connections), OpenSearch x2 (JVM memory pressure, cluster red).
+Alarms split across two on-call tiers (alert-fatigue fix, #1007/#1008 -- see the "Severity tiering" subsection below and `docs/oncall.md § Severity tiers`): **P1** publishes to the page topic `sps-alarms-${env}` (on-call Teams channel via the B27 relay Lambda); **P2** to the warn topic `sps-warn-${env}` (separate "warn" channel, falls back to page until provisioned). Names + thresholds + tiers: see `docs/SLOs.md § Alarm catalog`. Surface coverage: public ALB x3 (5xx rate, unhealthy hosts, latency p99), ECS service x1 (task shortfall vs desired), Aurora x2 (CPU, connections), OpenSearch x2 (JVM memory pressure, cluster red), edit-surface x1 (`edit_authz_denied`, B02). The `sps-app-unavailable-${env}` composite ORs the 5xx-rate / unhealthy-hosts / task-shortfall symptoms into one P1 page (those three children carry no direct action). The operator email rides the sibling `sps-notify-${env}` topic.
 
 The 5xx-rate alarm uses a CloudWatch math expression (`(5xx / IF(reqs > 0, reqs, 1)) * 100`) rather than a raw count so a zero-RPS quiet period does not false-fire on a single error response. The unhealthy-hosts alarm uses 5-of-5 consecutive 1-minute datapoints to absorb the natural ECS rolling-replace window (a new task is briefly unhealthy while the load balancer attaches it) without paging.
 
@@ -442,7 +442,8 @@ ObservabilityStack reads the public-ALB target group via `appStack.publicTargetG
 
 | Output | Consumer | What it carries |
 |---|---|---|
-| `AlarmTopicArn` | Operator (Teams webhook HTTPS subscribe) | Page topic ARN -- alarm fan-out endpoint |
+| `AlarmTopicArn` | Operator / B27 relay (CDK-subscribed) | Page topic (P1) ARN -- alarm fan-out endpoint |
+| `WarnTopicArn` | Operator / B27 relay (CDK-subscribed) | Warn topic (P2) ARN -- leading-indicator + ETL/reconciler fan-out |
 | `NotifyTopicArn` | Operator (audit / future fan-out) | Notify topic ARN -- cost guardrails + email |
 
 ### ObservabilityStack -- page/notify split (B23)
@@ -466,6 +467,21 @@ Implementation notes:
 - Unlike a PagerDuty CloudWatch integration, Teams Workflows do **not** auto-confirm the SNS HTTPS subscription. The first message that lands in the Teams channel after `aws sns subscribe` is the SNS `SubscriptionConfirmation` JSON; the operator GETs the embedded `SubscribeURL` once per topic per env. Captured in `docs/oncall.md § Gotchas`.
 
 Snapshot diff per env: +1 `AWS::SNS::Topic` (notify), +1 `AWS::SNS::Subscription` (email on notify), -1 `AWS::SNS::Subscription` (email previously on page), `AWS::SNS::TopicPolicy` re-targeted at the notify topic, four `Subscribers[*].Address` Refs (three budget + one anomaly) move from `AlarmTopic` -> `NotifyTopic`. Reviewable in one sitting.
+
+### Severity tiering (P1 page / P2 warn) + app-unavailable composite (#1007/#1008)
+
+The B23 split above kept every alarm on one page channel. #1007/#1008 add a third topic and a composite to fix on-call alert fatigue ("fast and furious, means very little") -- the page channel now carries only customer-facing P1.
+
+| Topic | Logical id | Name | Subscriber | What publishes here |
+|---|---|---|---|---|
+| Page (P1) | `AlarmTopic` | `sps-alarms-${env}` | B27 relay Lambda (CDK `SnsEventSource`) -> primary Teams channel | `sps-app-unavailable` composite, latency-p99, cluster-red |
+| Warn (P2) | `WarnTopic` | `sps-warn-${env}` | same relay Lambda -> "warn" Teams channel (fallback to page) | Aurora CPU/connections, OpenSearch JVM, `edit_authz_denied`; + all `etl-failures-${env}` ETL/reconciler alarms |
+
+- **Routing** lives in the relay (`lambda/oncall-relay/index.ts` `severityForRecord`), by originating topic-ARN substring (`:sps-warn-` / `:etl-failures-` -> P2; else P1). The relay subscribes to `sps-alarms`, `sps-warn`, and the cross-stack `etl-failures`.
+- **Warn channel is optional.** The relay reads `scholars/${env}/oncall/teams-webhook-url-warn`; if absent it posts P2 to the page channel (logged `"channel":"page"`), so demoting an alarm never drops it and the stack ships before the second Teams channel exists. Activation = create the secret; no redeploy (cold-start pickup). The relay IAM role already grants read on that secret name via `fromSecretNameV2`.
+- **Composite** `sps-app-unavailable-${env}` (`AWS::CloudWatch::CompositeAlarm`) ORs the three serving-failure symptoms (5xx-rate, unhealthy-hosts, task-shortfall) into one P1 page; those children lose their direct `addAlarmAction` (still evaluate -> feed the composite + dashboard). Latency and cluster-red stay independent P1.
+- **Card content** (`lambda/oncall-relay/adaptive-card.ts`): P2/warn ALARM cards lead with a warning glyph (vs the alarm glyph on P1); cards carry a Severity fact and the alarm Description -- which now ends with a `Next:` first-response hint authored in each alarm's `alarmDescription` (observability-stack.ts / etl-stack.ts), single-sourced and reaching Teams verbatim (no parallel hint table in the relay).
+- **Snapshot delta vs the B23 split:** +1 `AWS::SNS::Topic` (`sps-warn`), +1 `AWS::SNS::Subscription` (relay on warn), +1 `AWS::CloudWatch::CompositeAlarm`, +1 `WarnTopicArn` output; the three composite-child alarms lose their `AlarmActions`; four P2 alarms re-point `AlarmActions` to the warn topic.
 
 See `docs/oncall.md` for the full on-call topology, rollout runbook, diagnostics, and the ServiceNow follow-on direction.
 
