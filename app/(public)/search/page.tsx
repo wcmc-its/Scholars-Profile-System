@@ -1994,7 +1994,12 @@ function FacetSidebarFunding({
       ) : null}
 
       {facets.departments.length > 0 ? (
-        <FacetGroup label="Department" collapseAfter={6}>
+        // #837 — label matches the Scholars-tab org-unit facet for UI
+        // consistency. Deliberate consistency choice, NOT a data-accurate
+        // description: these buckets key on `wcmAuthorDepartments`, which is
+        // department-only (unlike the Scholars tab's `deptDivKey`, which also
+        // folds in divisions + centers). Keep the labels identical anyway.
+        <FacetGroup label="Department / division / center" collapseAfter={6}>
           {sortActiveFirst(facets.departments, (d) => activeDepartment.includes(d.value)).map(
             (d) => (
               <FacetCheckbox
