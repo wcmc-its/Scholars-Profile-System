@@ -1549,6 +1549,8 @@ async function PublicationsResults({
                 wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
                 wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
                 department: department.length > 0 ? department : undefined,
+                mentoringPrograms:
+                  mentoringProgram.length > 0 ? mentoringProgram : undefined,
               }}
               sort={sort}
               total={result.total}

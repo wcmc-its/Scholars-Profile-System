@@ -38,6 +38,7 @@ import type {
   PublicationsSort,
   WcmAuthorRole,
 } from "@/lib/api/search";
+import type { MentoringProgramKey } from "@/lib/api/mentoring-pmids";
 import { toCsv, type CsvCell } from "@/lib/csv";
 
 export const dynamic = "force-dynamic";
@@ -61,6 +62,13 @@ const ROLE_ALLOWLIST: ReadonlySet<WcmAuthorRole> = new Set([
   "first",
   "senior",
   "middle",
+]);
+const MENTORING_PROGRAM_ALLOWLIST: ReadonlySet<MentoringProgramKey> = new Set([
+  "md",
+  "mdphd",
+  "phd",
+  "postdoc",
+  "ecr",
 ]);
 
 function isStringArray(v: unknown): v is string[] {
@@ -96,6 +104,15 @@ function parseBody(body: unknown): ExportRequest | null {
   // department clause on `SEARCH_PUB_DEPARTMENT_FILTER`, so passing these
   // through is inert when the flag is off.
   if (isStringArray(f.department)) filters.department = f.department;
+  // Issue #1025 — Mentoring-activity program keys. `searchPublications`
+  // resolves these to a pmid union (or `match_none` when the union is empty),
+  // so the export must pass the same allowlisted set through.
+  if (isStringArray(f.mentoringPrograms)) {
+    const progs = f.mentoringPrograms.filter((p): p is MentoringProgramKey =>
+      MENTORING_PROGRAM_ALLOWLIST.has(p as MentoringProgramKey),
+    );
+    if (progs.length > 0) filters.mentoringPrograms = progs;
+  }
 
   // limit clamp happens per-granularity inside the fetcher (CSVs cap at
   // 5,000; Word at 1,000). Pass the raw user value through; the fetcher
