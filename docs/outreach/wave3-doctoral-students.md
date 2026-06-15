@@ -43,4 +43,4 @@ Questions? Contact [WCGS / Scholars team contact].
 ## Open questions before sending
 
 1. Send at T-minus 1 week, or fold into the T-zero Wave 4 window? It carries no pre-launch action, so either works — confirm with WCGS comms cadence.
-2. Is there a student-specific privacy concern about the plain-text mentee / co-author mentions that WCGS wants addressed explicitly? (Names are visible but non-linked and non-searchable.)
+2. Is there a student-specific privacy concern about the plain-text mentee / co-author mentions that WCGS wants addressed explicitly? (Names are visible but non-linked and non-searchable.) **#1026** broadens one such mention: it surfaces soft-deleted student co-authors as **non-linked chips** (name + headshot, no link, not searchable) on publication chip surfaces site-wide (search, topic feeds, methods pages, home spotlight). The code is merged but gated behind `COAUTHOR_HIDDEN_STUDENT_CHIPS`, **default-off**, and is enabled per-environment **only after this question is answered**. (Until then, a mentee's name shows only in the publication's full byline (detail modal) and on the mentor's co-pubs page.)

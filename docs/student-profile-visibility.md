@@ -49,7 +49,7 @@ to a whole population at the data layer.
 | People search + autocomplete | Students must not be indexed or suggested. |
 | `/browse`, algorithmic home, Top-scholars chip row | Students must not be surfaced or ranked. |
 | Internal-only scholar-list CSV export | Doctoral-student `profile_url` is blanked (`#847`). |
-| Relational mentions (PI's PhD-mentee list, co-author chips) | Name may render as **plain text only** — never a clickable/searchable profile link. |
+| Relational mentions (PI's PhD-mentee list, co-author chips, the **Mentoring-activity** search facet) | Name may render as **plain text only** — never a clickable/searchable profile link. See [The Mentoring-activity facet](#the-mentoring-activity-facet-search). |
 | Suppression of an *already-public* scholar later flagged FERPA/HIPAA | Sub-cycle removal from search + CDN invalidation (ADR-005, self-edit-spec). |
 
 > Open compliance question carried in `docs/outreach/wave3-doctoral-students.md` (Q2): whether
@@ -81,23 +81,25 @@ site where a profile link could be generated, because each site filters on `dele
    classes. **See the caveat below — for live data this check is effectively inert; the
    `deleted_at` soft-delete above is what actually does the work.**
 
-### Caveat: the role-name carve does not match the live data
+### The role-name carve now prefix-matches the live data (hardened in #1026)
 
-`HIDDEN_DISPLAY_ROLES` in `lib/eligibility.ts` contains the bare values `doctoral_student` and
-`affiliate_alumni`. But the ED ETL writes **suffixed** role categories — the live staging data
-is `doctoral_student_md`, `doctoral_student_phd`, `doctoral_student_mdphd` (the
-`role_category` column is a free `VarChar(32)`). Those suffixed values are **not** in
-`HIDDEN_DISPLAY_ROLES`, so `isPubliclyDisplayed("doctoral_student_md")` returns **`true`**.
+`HIDDEN_DISPLAY_ROLES` in `lib/eligibility.ts` holds the bare values `doctoral_student` and
+`affiliate_alumni`, but the ED ETL writes **suffixed** role categories — the live data is
+`doctoral_student_md`, `doctoral_student_phd`, `doctoral_student_mdphd` (the `role_category`
+column is a free `VarChar(32)`). Those suffixed values were **not** in `HIDDEN_DISPLAY_ROLES`, so
+`isPubliclyDisplayed("doctoral_student_md")` historically returned **`true`** (fail-open).
 
-Consequences:
+**Fixed in #1026:** `isPubliclyDisplayed` now treats any `doctoral_student*` role as hidden by
+prefix, so the suffixed students correctly resolve non-displayable. This was a prerequisite for
+the non-linked co-author chips (below) — without it a surfaced student chip would have linked to
+a 404 profile — and it incidentally closes the same fail-open in the `#847` export `profile_url`
+blanking. Notes:
 
-- The role-based carve is **not** what hides students today. The **`deleted_at` soft-delete is
-  the sole load-bearing guarantee** — and it holds, because every student row has it set.
-- **Latent fragility:** if a student's `deleted_at` were ever cleared while keeping a suffixed
-  `doctoral_student_*` role, the role guard would *not* catch them and the profile would
-  render. The safe invariant to preserve is "every hidden-role scholar stays soft-deleted,"
-  which the ED ETL maintains. (A hardening option is to match `doctoral_student*` by prefix in
-  `isPubliclyDisplayed`; not done here — flagged for awareness.)
+- `deleted_at` remains the **primary** load-bearing gate (every student row has it set); the
+  role-prefix check is now a correct belt-and-suspenders rather than a fail-open. The safe
+  invariant is still "every hidden-role scholar stays soft-deleted," which the ED ETL maintains.
+- `affiliate_alumni` stays exact-match — alumni are soft-deleted by the ED ETL, so the
+  `deleted_at` gate already covers them; no suffixed alumni roles are written.
 
 ---
 
@@ -120,6 +122,35 @@ The lever for that is `SEARCH_REQUIRE_DISPLAYABLE_AUTHOR`
 
 So: *student profiles* are hidden unconditionally (data + hardcoded filters); *student
 publications* are governed by a flag that is currently off.
+
+### The Mentoring-activity facet (search)
+
+The Publications tab carries a **Mentoring activity** facet
+(`?mentoringProgram=md|mdphd|phd|postdoc|ecr`) that narrows the result set to publications
+co-authored by a known WCM mentor and one of their mentees (`lib/api/mentoring-pmids.ts`, applied
+as a `post_filter` in `searchPublications`). The mentees are the same enrolled-student population
+hidden everywhere else:
+
+- **#1026 surfaces the mentee as a non-linked chip.** Historically `fetchWcmAuthorsForPmids`
+  filtered `scholar: { deletedAt: null, status: "active" }` (`lib/api/topics.ts`), dropping the
+  soft-deleted mentee from the chip row — so under "MD mentee" a co-pub looked like an ordinary
+  mentor publication and the facet appeared not to work. **#1026** includes soft-deleted *active*
+  doctoral students in that hydration and renders them via the existing `#536` non-linked chip
+  path (name + headshot, **no profile link, no navigating popover, never faceted/searchable** —
+  enforced by the prefix-hardened `isPubliclyDisplayed` above). Site-wide (search, topic feeds,
+  methods pages, home spotlight). Gated behind `COAUTHOR_HIDDEN_STUDENT_CHIPS`, **default-off**,
+  enabled per-environment only after the WCGS question in
+  `docs/outreach/wave3-doctoral-students.md` (Q2). With the flag off, behavior is byte-identical
+  (every hidden-class scholar has `deleted_at` set, so the relaxed hydration matches no one new).
+- **The mentee's name also appears as plain text elsewhere**, consistent with the
+  relational-mention carve above: in the publication detail modal's full PubMed byline
+  (`fullAuthorsString`) and on the mentor's co-pubs page
+  (`/scholars/<slug>/co-pubs/<menteeCwid>`, rendered as a `<span>`, never a link).
+
+The **export** of this facet was a separate bug (**#1025**): the CSV / Word export silently
+dropped the mentoring (and department) filter and returned the full corpus. It now matches the
+live result set; its authorship rows still exclude soft-deleted mentees via the same
+`deletedAt: null` cohort as the byline.
 
 ---
 
@@ -167,4 +198,4 @@ every tested student route 404s. No flag flip changes this.
 - `docs/kb/01-scholars.md` — user-facing FAQ ("I'm a doctoral student — where's my profile?").
 - `docs/outreach/wave3-doctoral-students.md` — the "hidden at launch" comms note + open WCGS privacy question.
 - `ADR-005-manual-override-layer.md`, `docs/self-edit-spec.md` — suppression as the urgent (sub-cycle) form of the same FERPA/HIPAA carve.
-- Issues: **#536** (the hide policy), **#718** (author-less publication rows), **#847** (export blanks student `profile_url`).
+- Issues: **#536** (the hide policy), **#718** (author-less publication rows), **#847** (export blanks student `profile_url`), **#1025** (publications export now honors the Mentoring-activity + Department filters), **#1026** (surface the mentee as plain text on Mentoring-activity search rows).
