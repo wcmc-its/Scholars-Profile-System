@@ -15,6 +15,12 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "Ref": "CdnReconcileStateMachine10F988AB",
       },
     },
+    "CurationBackupBucketName": {
+      "Description": "SPS curated-tables logical-backup bucket (backup:curated uploads here).",
+      "Value": {
+        "Ref": "CurationBackupBucketE5A802A9",
+      },
+    },
     "EtlFailureTopicArn": {
       "Description": "SPS ETL failure SNS topic ARN (B23 subscribes PagerDuty).",
       "Value": {
@@ -1191,6 +1197,92 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::IAM::Policy",
     },
+    "CurationBackupBucketE5A802A9": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "AbortIncompleteMultipartUpload": {
+                "DaysAfterInitiation": 7,
+              },
+              "Id": "expire-noncurrent-versions",
+              "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 90,
+              },
+              "Status": "Enabled",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+        "VersioningConfiguration": {
+          "Status": "Enabled",
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "CurationBackupBucketPolicy19EFE981": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "CurationBackupBucketE5A802A9",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "CurationBackupBucketE5A802A9",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "CurationBackupBucketE5A802A9",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
+    },
     "EtlFailureTopic8361D0D0": {
       "Properties": {
         "DisplayName": "SPS ETL failures (prod)",
@@ -1309,6 +1401,12 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Name": "RECITER_REJECT_SEND",
                 "Value": "off",
+              },
+              {
+                "Name": "CURATION_BACKUP_BUCKET",
+                "Value": {
+                  "Ref": "CurationBackupBucketE5A802A9",
+                },
               },
             ],
             "Essential": true,
@@ -2299,6 +2397,47 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "RoleName": "sps-etl-task-prod",
       },
       "Type": "AWS::IAM::Role",
+    },
+    "EtlTaskRoleDefaultPolicyB7A1E2B1": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "CurationBackupBucketE5A802A9",
+                        "Arn",
+                      ],
+                    },
+                    "/*",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EtlTaskRoleDefaultPolicyB7A1E2B1",
+        "Roles": [
+          {
+            "Ref": "EtlTaskRoleD514E3A1",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "EtlTaskRoleReciterAiPolicy94DB4024": {
       "Properties": {
@@ -5044,6 +5183,12 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "Ref": "CdnReconcileStateMachine10F988AB",
       },
     },
+    "CurationBackupBucketName": {
+      "Description": "SPS curated-tables logical-backup bucket (backup:curated uploads here).",
+      "Value": {
+        "Ref": "CurationBackupBucketE5A802A9",
+      },
+    },
     "EtlFailureTopicArn": {
       "Description": "SPS ETL failure SNS topic ARN (B23 subscribes PagerDuty).",
       "Value": {
@@ -6220,6 +6365,92 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::IAM::Policy",
     },
+    "CurationBackupBucketE5A802A9": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "AbortIncompleteMultipartUpload": {
+                "DaysAfterInitiation": 7,
+              },
+              "Id": "expire-noncurrent-versions",
+              "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 90,
+              },
+              "Status": "Enabled",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+        "VersioningConfiguration": {
+          "Status": "Enabled",
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "CurationBackupBucketPolicy19EFE981": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "CurationBackupBucketE5A802A9",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "CurationBackupBucketE5A802A9",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "CurationBackupBucketE5A802A9",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
+    },
     "EtlFailureTopic8361D0D0": {
       "Properties": {
         "DisplayName": "SPS ETL failures (staging)",
@@ -6338,6 +6569,12 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "RECITER_REJECT_SEND",
                 "Value": "on",
+              },
+              {
+                "Name": "CURATION_BACKUP_BUCKET",
+                "Value": {
+                  "Ref": "CurationBackupBucketE5A802A9",
+                },
               },
             ],
             "Essential": true,
@@ -7328,6 +7565,47 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "RoleName": "sps-etl-task-staging",
       },
       "Type": "AWS::IAM::Role",
+    },
+    "EtlTaskRoleDefaultPolicyB7A1E2B1": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "CurationBackupBucketE5A802A9",
+                        "Arn",
+                      ],
+                    },
+                    "/*",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EtlTaskRoleDefaultPolicyB7A1E2B1",
+        "Roles": [
+          {
+            "Ref": "EtlTaskRoleD514E3A1",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "EtlTaskRoleReciterAiPolicy94DB4024": {
       "Properties": {
