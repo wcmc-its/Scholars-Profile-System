@@ -140,7 +140,7 @@ export function DirectoryPeopleTypeahead({
   if (value) {
     return (
       <div
-        className="border-apollo-border-strong flex items-center justify-between gap-2 rounded-md border px-3 py-2"
+        className="border-apollo-border bg-apollo-surface-2 flex items-center justify-between gap-2 rounded-md border px-3 py-2"
         data-slot="directory-typeahead-selected"
       >
         <span className="min-w-0 truncate text-sm">
