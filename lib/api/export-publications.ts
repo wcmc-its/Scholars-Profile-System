@@ -164,6 +164,24 @@ async function fetchExportPmids(req: ExportRequest): Promise<string[]> {
   if (filters.wcmAuthor && filters.wcmAuthor.length > 0) {
     filter.push({ terms: { wcmAuthorCwids: filters.wcmAuthor } });
   }
+  // Issue #1025 — WCM-author department filter. The client only sends
+  // `department` when SEARCH_PUB_DEPARTMENT_FILTER is on, so no flag check is
+  // needed here; mirror the live `searchPublications` clause exactly.
+  if (filters.department && filters.department.length > 0) {
+    filter.push({ terms: { wcmAuthorDepartments: filters.department } });
+  }
+  // Issue #1025 — Mentoring-activity facet. Resolve the selected program
+  // buckets to a pmid union exactly as `searchPublications` does; an empty
+  // union collapses to `match_none` so the export returns zero rows rather
+  // than the whole corpus.
+  if (filters.mentoringPrograms && filters.mentoringPrograms.length > 0) {
+    const { getMentoringPmidBuckets } = await import("@/lib/api/mentoring-pmids");
+    const buckets = await getMentoringPmidBuckets();
+    const pmids = Array.from(
+      new Set(filters.mentoringPrograms.flatMap((p) => buckets.byProgram[p] ?? [])),
+    );
+    filter.push(pmids.length > 0 ? { terms: { pmid: pmids } } : { match_none: {} });
+  }
 
   const sortClause: Record<string, "asc" | "desc">[] = [];
   if (sort === "year") sortClause.push({ year: "desc" });
