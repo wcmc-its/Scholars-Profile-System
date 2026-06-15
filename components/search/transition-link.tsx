@@ -13,6 +13,7 @@ import {
 } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { reportNavWatchdog } from "@/lib/analytics/nav-watchdog";
 import { cn } from "@/lib/utils";
 
 /**
@@ -89,6 +90,9 @@ export function SearchTransitionProvider({ children }: { children: ReactNode }) 
         watchdogRef.current = setTimeout(() => {
           watchdogRef.current = null;
           if (isPendingRef.current && window.location.href === startHref) {
+            // Observe-only telemetry (never blocks the recovery nav) so the
+            // firing rate can be tuned — #1017.
+            reportNavWatchdog("search_results", NAV_WATCHDOG_MS);
             window.location.assign(href);
           }
         }, NAV_WATCHDOG_MS);

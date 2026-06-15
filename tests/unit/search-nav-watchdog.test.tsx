@@ -82,6 +82,27 @@ function stubLocation(
   return { assign, reload };
 }
 
+// jsdom does not implement navigator.sendBeacon; capture whatever is there at
+// module load so afterEach can restore it and a spy can't leak into siblings.
+const ORIGINAL_SEND_BEACON = navigator.sendBeacon;
+
+/** Install a spyable navigator.sendBeacon and return the spy. */
+function spyBeacon() {
+  const sendBeacon = vi.fn().mockReturnValue(true);
+  Object.defineProperty(navigator, "sendBeacon", {
+    configurable: true,
+    writable: true,
+    value: sendBeacon,
+  });
+  return sendBeacon;
+}
+
+/** Parse the JSON body of the first sendBeacon call (the payload is a Blob). */
+async function beaconPayload(sendBeacon: ReturnType<typeof vi.fn>) {
+  const [, blob] = sendBeacon.mock.calls[0] as [string, Blob];
+  return JSON.parse(await blob.text());
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   h.pending = false;
@@ -106,6 +127,11 @@ afterEach(() => {
   });
   vi.useRealTimers();
   vi.restoreAllMocks();
+  Object.defineProperty(navigator, "sendBeacon", {
+    configurable: true,
+    writable: true,
+    value: ORIGINAL_SEND_BEACON,
+  });
 });
 
 describe("#1017 navigation watchdog — autocomplete submit()", () => {
@@ -471,5 +497,119 @@ describe("#1017 navigation watchdog — SearchTransitionProvider.navigate()", ()
 
     await settle(7500);
     expect(assign).toHaveBeenCalledTimes(0);
+  });
+});
+
+describe("#1017 navigation watchdog — telemetry beacon", () => {
+  // This environment's Blob has no .text(); reportNavWatchdog builds the beacon
+  // body with `new Blob([...], { type: "application/json" })` (the repo idiom),
+  // so stub a capturing Blob to read the payload back without touching prod code.
+  class CapturingBlob {
+    parts: string[];
+    type: string;
+    constructor(parts: string[], opts?: { type?: string }) {
+      this.parts = parts;
+      this.type = opts?.type ?? "";
+    }
+    text() {
+      return Promise.resolve(this.parts.join(""));
+    }
+  }
+  beforeEach(() => {
+    vi.stubGlobal("Blob", CapturingBlob);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("submit() hang fires a search_nav_watchdog beacon (surface=autocomplete_submit) before the hard nav", async () => {
+    h.start = (cb: () => void) => cb();
+    h.pending = true;
+    const { assign } = stubLocation("https://scholars-staging.weill.cornell.edu/", "/", "");
+    const sendBeacon = spyBeacon();
+
+    render(<SearchAutocomplete />);
+    const input = screen.getByLabelText("Search scholars");
+    fireEvent.change(input, { target: { value: "cancer" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await settle(7100);
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(sendBeacon).toHaveBeenCalledTimes(1);
+    expect(sendBeacon.mock.calls[0][0]).toBe("/api/analytics");
+    const body = await beaconPayload(sendBeacon);
+    expect(body.event).toBe("search_nav_watchdog");
+    expect(body.surface).toBe("autocomplete_submit");
+    expect(body.n).toBe(7000);
+  });
+
+  it("Enter-on-suggestion hang reports surface=autocomplete_suggestion", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          suggestions: [{ kind: "person", title: "Jane Cancer", href: "/scholars/jane-cancer" }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    h.start = (cb: () => void) => cb();
+    h.pending = true;
+    stubLocation("https://scholars-staging.weill.cornell.edu/", "/", "");
+    const sendBeacon = spyBeacon();
+
+    render(<SearchAutocomplete />);
+    const input = screen.getByLabelText("Search scholars");
+    fireEvent.change(input, { target: { value: "cancer" } });
+    await settle(300);
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await settle(7100);
+    expect(sendBeacon).toHaveBeenCalledTimes(1);
+    const body = await beaconPayload(sendBeacon);
+    expect(body.surface).toBe("autocomplete_suggestion");
+  });
+
+  it("provider navigate() hang reports surface=search_results", async () => {
+    h.start = (cb: () => void) => cb();
+    h.pending = true;
+    stubLocation(
+      "https://scholars-staging.weill.cornell.edu/search?q=cancer",
+      "/search",
+      "?q=cancer",
+    );
+    const sendBeacon = spyBeacon();
+
+    const { SearchTransitionProvider, TransitionLink } = await import(
+      "@/components/search/transition-link"
+    );
+
+    render(
+      <SearchTransitionProvider>
+        <TransitionLink href="/search?q=cancer&type=publications">Publications</TransitionLink>
+      </SearchTransitionProvider>,
+    );
+
+    fireEvent.click(screen.getByText("Publications"));
+    await settle(7100);
+    expect(sendBeacon).toHaveBeenCalledTimes(1);
+    const body = await beaconPayload(sendBeacon);
+    expect(body.event).toBe("search_nav_watchdog");
+    expect(body.surface).toBe("search_results");
+  });
+
+  it("no beacon when the nav resolves (no false-positive telemetry)", async () => {
+    h.start = (cb: () => void) => cb();
+    h.pending = false;
+    stubLocation("https://scholars-staging.weill.cornell.edu/", "/", "");
+    const sendBeacon = spyBeacon();
+
+    render(<SearchAutocomplete />);
+    const input = screen.getByLabelText("Search scholars");
+    fireEvent.change(input, { target: { value: "cancer" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await settle(10_000);
+    expect(sendBeacon).not.toHaveBeenCalled();
   });
 });

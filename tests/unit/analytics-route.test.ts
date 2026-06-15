@@ -152,7 +152,50 @@ describe("VALID_EVENTS allow-list", () => {
     expect(VALID_EVENTS.has("home_methods_stat_click")).toBe(true);
     expect(VALID_EVENTS.has("home_method_category_click")).toBe(true);
     expect(VALID_EVENTS.has("home_methods_explore_all_click")).toBe(true);
-    expect(VALID_EVENTS.size).toBe(10);
+    expect(VALID_EVENTS.has("search_nav_watchdog")).toBe(true);
+    expect(VALID_EVENTS.size).toBe(11);
+  });
+});
+
+describe("handleAnalyticsBeacon search_nav_watchdog (#1017)", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("logs surface + n on a valid payload", () => {
+    handleAnalyticsBeacon({
+      event: "search_nav_watchdog",
+      surface: "autocomplete_submit",
+      n: 7000,
+      ts: 1700000006000,
+    });
+    expect(console.log).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(
+      (console.log as ReturnType<typeof vi.fn>).mock.calls[0][0] as string,
+    );
+    expect(logged.event).toBe("search_nav_watchdog");
+    expect(logged.surface).toBe("autocomplete_submit");
+    expect(logged.n).toBe(7000);
+    expect(logged.ts).toBe(1700000006000);
+  });
+
+  it("nulls out a wrong-typed surface / n (T-06-02-01)", () => {
+    handleAnalyticsBeacon({
+      event: "search_nav_watchdog",
+      surface: 42,
+      n: "soon",
+      ts: 1700000007000,
+    });
+    expect(console.log).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(
+      (console.log as ReturnType<typeof vi.fn>).mock.calls[0][0] as string,
+    );
+    expect(logged.surface).toBeNull();
+    expect(logged.n).toBeNull();
   });
 });
 
