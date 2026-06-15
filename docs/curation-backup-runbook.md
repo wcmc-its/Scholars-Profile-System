@@ -132,33 +132,58 @@ mariadb "$DATABASE_URL" -e \
 This was validated end-to-end on the local dev DB: dump → gunzip → replay into a
 scratch schema → row counts matched source exactly.
 
-## 5. (Optional) Put it on a small schedule
+## 5. Automatic schedule
 
-Left as an opt-in so we don't run recurring infra without intent. A standalone
-weekly EventBridge Scheduler → ECS RunTask is the lightest option. Add to
-`cdk/lib/etl-stack.ts` (sketch):
+The backup runs **daily at 06:00 UTC** (ahead of the 07:00 nightly ETL, so the
+snapshot reflects the curated state as last hand-edited). It's wired in
+`cdk/lib/etl-stack.ts` as a small Step Functions state machine
+(`scholars-curation-backup-<env>`) fired by an EventBridge rule
+(`sps-curation-backup-<env>`), gated on the `curationBackupScheduleEnabled`
+config flag:
 
-```ts
-new scheduler.CfnSchedule(this, "CurationBackupSchedule", {
-  scheduleExpression: "cron(0 6 ? * MON *)",   // Mondays 06:00 UTC
-  flexibleTimeWindow: { mode: "OFF" },
-  target: {
-    arn: `arn:aws:ecs:${this.region}:${this.account}:cluster/${ecsCluster.clusterName}`,
-    roleArn: /* a role allowed to ecs:RunTask + iam:PassRole the task roles */,
-    ecsParameters: {
-      taskDefinitionArn: this.etlTaskDefinition.taskDefinitionArn,
-      launchType: "FARGATE",
-      networkConfiguration: { /* private subnets + ETL SG */ },
-    },
-    input: JSON.stringify({
-      containerOverrides: [{ name: "etl", command: ["npm", "run", "backup:curated"] }],
-    }),
-  },
-});
-```
+- **staging:** flag `true` — **live** (runs daily).
+- **prod:** flag `false` — **no schedule is created** until prod is activated
+  (see § Prod). Unlike the ETL cadences (which ship present-but-disabled), this
+  block is gated on creation because the prod bucket/grant/env don't exist until
+  the first prod deploy and the first run must be verified by hand.
 
-Alternatively, add `backup:curated` as a step in the existing nightly Step
-Functions cadence — at the cost of coupling backup success to the ETL run.
+Observability: a failed run **Catches to the ETL failure topic**
+(`etl-failures-<env>` → Teams), and a **cadence alarm**
+(`sps-curation-backup-cadence-<env>`) fires if no run starts for ~2 days
+(silent schedule death — the failure mode that hurts a backup most). Spot-check
+freshness anytime via the `latest` manifest's `generatedAt` (§ 3).
+
+To change the cadence, edit the `events.Schedule.cron(...)` in the
+`CurationBackupScheduleRule` block (e.g. `{ minute: "0", hour: "6", weekDay:
+"MON" }` for weekly). Changing it needs a `cdk deploy Sps-Etl-<env>`.
+
+## Prod activation (TODO — not yet done)
+
+The curated-tables backup is **live on staging only**. To activate prod, in
+order:
+
+1. **Deploy the stack** (creates the prod bucket + IAM grant + task-def env;
+   also brings any other pending `Sps-Etl-prod` changes — review the full diff):
+   ```bash
+   cd cdk
+   npx cdk diff   Sps-Etl-prod --exclusively -c env=prod -c prodAccount=665083158573
+   npx cdk deploy Sps-Etl-prod --exclusively -c env=prod -c prodAccount=665083158573
+   ```
+   (Run from a checkout on master, with prod deploy creds. The ETL image must
+   also include the script — a push to master rebuilds it via `deploy.yml`.)
+2. **Verify a manual run** before trusting a schedule:
+   ```bash
+   aws ecs run-task --cluster sps-cluster-prod --task-definition sps-etl-prod \
+     --launch-type FARGATE --network-configuration '<app-service netcfg>' \
+     --overrides '{"containerOverrides":[{"name":"etl","command":["npm","run","backup:curated"]}]}'
+   ```
+   Confirm exit 0 and the objects under `sps-curation-backups/prod/`.
+3. **Flip the schedule on:** set `curationBackupScheduleEnabled: true` in the
+   prod block of `cdk/lib/config.ts`, then `cdk deploy Sps-Etl-prod` again. This
+   creates the daily rule + state machine + cadence alarm on prod.
+
+Prod's backup bucket inherits the same versioned/retained config as staging
+(retention is per-stack, no extra step).
 
 ## Local / dev usage
 

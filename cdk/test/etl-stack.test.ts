@@ -175,6 +175,22 @@ describe("EtlStack", () => {
         expect(rule.Properties?.CidrIp).toBeUndefined();
         expect(rule.Properties?.SourceSecurityGroupId).toBeDefined();
       });
+
+      it("prod does NOT create the curated-tables backup schedule (curationBackupScheduleEnabled=false until prod is activated; #1032)", () => {
+        const rules = template.findResources("AWS::Events::Rule");
+        expect(
+          Object.values(rules).some(
+            (r) => r.Properties?.Name === "sps-curation-backup-prod",
+          ),
+        ).toBe(false);
+        const sms = template.findResources("AWS::StepFunctions::StateMachine");
+        expect(
+          Object.values(sms).some(
+            (s) =>
+              s.Properties?.StateMachineName === "scholars-curation-backup-prod",
+          ),
+        ).toBe(false);
+      });
     });
 
     describe("State machines (D2 -- Choice on $.startFrom)", () => {
@@ -1227,15 +1243,42 @@ describe("EtlStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled + cdnReconcileScheduleEnabled all true)", () => {
+    it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled + cdnReconcileScheduleEnabled + curationBackupScheduleEnabled all true)", () => {
       const rules = template.findResources("AWS::Events::Rule");
       // 3 cadence rules + the #595 heartbeat rule + the #393 reconciler rule +
-      // the #353 cdn reconciler rule; all enabled in staging.
-      expect(Object.keys(rules)).toHaveLength(6);
+      // the #353 cdn reconciler rule + the #1032 curated-tables backup rule; all
+      // enabled in staging.
+      expect(Object.keys(rules)).toHaveLength(7);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });
       }
+    });
+
+    it("staging schedules the daily curated-tables backup (#1032): daily rule → state machine running backup:curated on the ETL task def", () => {
+      // The rule fires daily at 06:00 UTC and is enabled in staging.
+      template.hasResourceProperties("AWS::Events::Rule", {
+        Name: "sps-curation-backup-staging",
+        ScheduleExpression: "cron(0 6 * * ? *)",
+        State: "ENABLED",
+      });
+      // Its own state machine exists (Catch → SNS failure notification).
+      template.hasResourceProperties("AWS::StepFunctions::StateMachine", {
+        StateMachineName: "scholars-curation-backup-staging",
+      });
+      // The step overrides the ETL container to run the backup script.
+      const sms = template.findResources("AWS::StepFunctions::StateMachine");
+      const backupSm = Object.values(sms).find(
+        (s) =>
+          s.Properties?.StateMachineName === "scholars-curation-backup-staging",
+      );
+      expect(backupSm).toBeDefined();
+      const def = JSON.stringify(backupSm?.Properties?.DefinitionString ?? "");
+      expect(def).toMatch(/backup:curated/);
+      // A cadence alarm guards against silent schedule death.
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: "sps-curation-backup-cadence-staging",
+      });
     });
 
     it("staging ETL task definition uses 2048 cpu / 8192 MiB (#485 search:index OOM)", () => {

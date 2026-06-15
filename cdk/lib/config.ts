@@ -194,6 +194,20 @@ export interface SpsEnvConfig {
    */
   readonly cdnReconcileScheduleEnabled: boolean;
   /**
+   * Whether the EventBridge rule that fires the daily curated-tables logical
+   * backup (`backup:curated`, #1032 — a read-only mysqldump-equivalent of the
+   * hand-curated org-unit + methods/tools-overlay tables to the curation backup
+   * S3 bucket) is enabled at deploy time. A DEDICATED flag, decoupled from
+   * {@link etlSchedulesEnabled} on purpose: the backup cadence must be
+   * independently controllable, so flipping the heavy nightly/weekly/annual ETL
+   * cadences on or off never touches the backup, and vice versa. `true` in
+   * staging so it runs from the first deploy after activation; `false` in prod
+   * until the prod curated-tables backup is activated (`cdk deploy Sps-Etl-prod`
+   * creates the bucket + grant + env, then flip this flag) — see
+   * docs/curation-backup-runbook.md § Prod.
+   */
+  readonly curationBackupScheduleEnabled: boolean;
+  /**
    * Fargate CPU units for the ETL task family. Tunable per-step via
    * `Overrides.ContainerOverrides[].Cpu`; this is the base allocation.
    */
@@ -294,6 +308,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // #353 -- continuous CloudFront-invalidation reconciler backstop; enabled
     // both envs (empty-queue-safe pre-launch). See flag JSDoc.
     cdnReconcileScheduleEnabled: true,
+    // #1032 — daily curated-tables logical backup; enabled in staging (the
+    // backup is live + verified here). Read-only + tiny, so safe from launch.
+    curationBackupScheduleEnabled: true,
     // #485 — search:index OOM-killed at 2048 MiB building the full corpus
     // (178k+ pubs). 8 GB + the NODE_OPTIONS heap cap (EtlStack) clears it;
     // 2 vCPU also speeds the build, easing throttle pressure on the node.
@@ -360,6 +377,12 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // launch too (empty-queue-safe; no-ops until SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID
     // is set). See flag JSDoc.
     cdnReconcileScheduleEnabled: true,
+    // #1032 — curated-tables backup NOT YET ACTIVATED on prod. Ships disabled:
+    // the prod bucket/grant/env don't exist until `cdk deploy Sps-Etl-prod`, so
+    // the rule would target a task def without CURATION_BACKUP_BUCKET. Activate
+    // prod (deploy + first verify run) then flip this to true. See
+    // docs/curation-backup-runbook.md § Prod.
+    curationBackupScheduleEnabled: false,
     // #485 — match staging's 8 GB headroom for the search:index corpus build
     // (paired with the NODE_OPTIONS heap cap in EtlStack). Prod's 2-node
     // m6g.large.search domain already handles the bulk write rate.
