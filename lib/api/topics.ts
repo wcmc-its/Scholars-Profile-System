@@ -42,6 +42,7 @@ import {
   loadPublicationSuppressions,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
+import { resolveHiddenStudentCoauthorChips } from "@/lib/api/search-flags";
 
 // Sparse-state floors and target counts (sourced from 02-UI-SPEC.md §States table
 // + plan acceptance criteria). Top scholars: 7 chips, hide if <3.
@@ -514,7 +515,9 @@ export type TopicPublicationHit = {
   authors: Array<{
     name: string;
     cwid: string;
-    slug: string;
+    /** Nullable: a soft-deleted doctoral-student co-author (#1026) may have no
+     *  slug, forcing a NON-LINKED chip (the FERPA-required rendering). */
+    slug: string | null;
     identityImageEndpoint: string;
     isFirst: boolean;
     isLast: boolean;
@@ -901,7 +904,10 @@ function mapToTopicPublicationHit(
 export type WcmAuthorChip = {
   name: string;
   cwid: string;
-  slug: string;
+  /** Nullable: a soft-deleted doctoral student (#1026) may have no slug. A
+   *  null slug forces a NON-LINKED chip (no profile route to point at), which
+   *  is exactly the FERPA-required rendering for these relational mentions. */
+  slug: string | null;
   identityImageEndpoint: string;
   isFirst: boolean;
   isLast: boolean;
@@ -925,13 +931,28 @@ export async function fetchWcmAuthorsForPmids(
   pmids: string[],
 ): Promise<Map<string, WcmAuthorChip[]>> {
   if (pmids.length === 0) return new Map();
+  // #1026 — when on, also include soft-deleted (deletedAt != null) doctoral
+  // students whose status is still "active", so a mentor↔mentee co-pub keeps
+  // the student in the chip row (rendered NON-LINKED downstream via
+  // isPubliclyDisplayed). Still EXCLUDES status:"suppressed" students and other
+  // soft-deleted classes (alumni, departed faculty). Default off → identical to
+  // the prior { deletedAt: null, status: "active" } filter.
+  const includeHiddenStudents = resolveHiddenStudentCoauthorChips();
   const [rows, suppressions] = await Promise.all([
     prisma.publicationAuthor.findMany({
       where: {
         pmid: { in: pmids },
         isConfirmed: true,
         cwid: { not: null },
-        scholar: { deletedAt: null, status: "active" },
+        scholar: includeHiddenStudents
+          ? {
+              status: "active",
+              OR: [
+                { deletedAt: null },
+                { roleCategory: { startsWith: "doctoral_student" } },
+              ],
+            }
+          : { deletedAt: null, status: "active" },
       },
       // Standard citation order: first → middle → last, by listed position. (#18)
       orderBy: [{ position: "asc" }],

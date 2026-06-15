@@ -76,6 +76,15 @@ export function isPubliclyDisplayed(
   role: RoleCategory | string | null | undefined,
 ): boolean {
   if (role == null) return true;
+  // #1026 / docs/student-profile-visibility.md ("Caveat: the role-name carve
+  // does not match the live data") — the ED ETL writes SUFFIXED student roles
+  // (doctoral_student_md / _phd / _mdphd) which are NOT in HIDDEN_DISPLAY_ROLES,
+  // so a bare exact-match check failed OPEN (returned true = linkable) for live
+  // students. Treat ANY `doctoral_student*` role as hidden by prefix. This only
+  // ever TIGHTENS the carve and incidentally fixes the #847 export profile_url
+  // fail-open for suffixed students. `affiliate_alumni` stays exact-match.
+  const r = String(role);
+  if (r.startsWith("doctoral_student")) return false;
   return !HIDDEN_DISPLAY_ROLES.has(role as RoleCategory);
 }
 

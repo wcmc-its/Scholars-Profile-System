@@ -488,6 +488,32 @@ export function resolvePublicationDepartmentFilter(): boolean {
 }
 
 /**
+ * Issue #1026 — surface soft-deleted active doctoral-student co-authors as
+ * NON-LINKED author chips (name + headshot only) on publication chip surfaces
+ * (search results, topic feeds, methods pages, home spotlight). Without this,
+ * a mentor↔mentee co-pub drops the soft-deleted student from the chip row, so
+ * the publication looks like an ordinary mentor pub and the "MD mentee" facet
+ * appears not to work.
+ *
+ * This is a FERPA carve (see docs/student-profile-visibility.md, "Relational
+ * mentions"): the constraint is on the LINK/searchability/profile, NOT the name
+ * — a co-author name is part of the public PubMed record. When this flag is on,
+ * these students are hydrated into the chip row but render as PLAIN TEXT only —
+ * never a clickable profile link, never a navigating popover, never searchable
+ * or faceted. The non-linked rendering is enforced downstream by
+ * `isPubliclyDisplayed(roleCategory)` (the existing #536 chip path); this flag
+ * only governs whether they are pulled into the hydration at all.
+ *
+ * Default OFF (`COAUTHOR_HIDDEN_STUDENT_CHIPS=on` enables). When OFF, the chip
+ * hydration filter and every renderable-chip predicate behave byte-identically
+ * to today (no hidden-class student is in the hydration, so the relaxed
+ * predicates never match anyone).
+ */
+export function resolveHiddenStudentCoauthorChips(): boolean {
+  return process.env.COAUTHOR_HIDDEN_STUDENT_CHIPS === "on";
+}
+
+/**
  * Issue #861 — stream the /search shell ahead of the taxonomy + badge-count
  * work. On a cold `force-dynamic` SSR the page blocked its first byte on the
  * taxonomy/MeSH resolver (the eager `getMeshMap` descendant precompute) AND the
