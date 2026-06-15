@@ -42,6 +42,13 @@ model Scholar {
   // Nullable so the additive migration applies cleanly to existing rows;
   // ED ETL backfills on next refresh.
   roleCategory           String?   @map("role_category") @db.VarChar(32)
+  // #1034 — professorial rank derived from the ASMS-authoritative ED person-type
+  // leaf (academic-faculty-assistant|associate|fullprofessor; probe #1036), one of
+  // 'Assistant Professor' | 'Associate Professor' | 'Professor'. NULL for
+  // instructor/lecturer/non-faculty. Persisted here by the ED ETL and read by the
+  // Jenzabar GS import to tie Grad-School appointment titles to ASMS rank (Rule B).
+  // Nullable so the additive migration applies cleanly; backfilled on next ED ETL run.
+  professorialRank       String?   @map("professorial_rank") @db.VarChar(32)
   // Phase 3: org-unit FKs from ED LDAP. Nullable so additive migration applies cleanly;
   // backfilled on next ED ETL run. Joins on codes only per LOCKED constraint.
   deptCode               String?   @map("dept_code") @db.VarChar(64)
