@@ -51,6 +51,7 @@ export function JournalFacet({ items }: { items: JournalFacetItem[] }) {
           <li key={j.value} className="py-1 leading-[1.4]">
             <Link
               href={j.toggleHref}
+              scroll={false}
               className="flex items-start gap-2 text-[#1a1a1a] no-underline hover:no-underline"
             >
               {/* Top-align so input + count sit on the first line of a

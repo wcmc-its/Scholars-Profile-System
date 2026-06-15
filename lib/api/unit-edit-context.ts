@@ -56,6 +56,9 @@ export type UnitEditContext = {
     name: string;
     /** override-merged (dept/div); the in-row value for a center. */
     description: string | null;
+    /** #1021 — outbound website URL; override-merged (dept/div) or in-row
+     *  (center), same as description. null/empty = no link. */
+    url: string | null;
     /** The live public slug — the column value (dept/div is NOT runtime-merged;
      *  the ETL consults the override before re-deriving). */
     slug: string;
@@ -179,6 +182,7 @@ export async function loadUnitEditContext(
   // 1. Load the unit row (+ parent dept for a division).
   let name: string;
   let description: string | null;
+  let url: string | null;
   let slug: string;
   let deptCode: string | null = null;
   let deptName: string | null = null;
@@ -191,11 +195,12 @@ export async function loadUnitEditContext(
   if (unitType === "department") {
     const row = await client.department.findUnique({
       where: { code },
-      select: { code: true, name: true, description: true, slug: true, chairCwid: true, source: true },
+      select: { code: true, name: true, description: true, url: true, slug: true, chairCwid: true, source: true },
     });
     if (!row) return null;
     name = row.name;
     description = row.description;
+    url = row.url;
     slug = row.slug;
     source = row.source === "manual" ? "manual" : "ED";
     rowLeaderCwid = row.chairCwid;
@@ -206,6 +211,7 @@ export async function loadUnitEditContext(
         code: true,
         name: true,
         description: true,
+        url: true,
         slug: true,
         chiefCwid: true,
         source: true,
@@ -216,6 +222,7 @@ export async function loadUnitEditContext(
     if (!row) return null;
     name = row.name;
     description = row.description;
+    url = row.url;
     slug = row.slug;
     source = row.source === "manual" ? "manual" : "ED";
     deptCode = row.deptCode;
@@ -229,6 +236,7 @@ export async function loadUnitEditContext(
         code: true,
         name: true,
         description: true,
+        url: true,
         slug: true,
         directorCwid: true,
         centerType: true,
@@ -238,6 +246,7 @@ export async function loadUnitEditContext(
     if (!row) return null;
     name = row.name;
     description = row.description;
+    url = row.url;
     slug = row.slug;
     // A center is always manually owned — the SPEC treats its source as
     // "manual" regardless of the seed/import provenance on the row.
@@ -287,7 +296,7 @@ export async function loadUnitEditContext(
   // 3. Override-merge the curator-editable fields (centers return {}).
   const overrides = await loadUnitFieldOverrides(unitType, code, client);
   const merged = mergeUnitFields(
-    { description, leaderCwid: rowLeaderCwid, leaderInterim: rowLeaderInterim },
+    { description, url, leaderCwid: rowLeaderCwid, leaderInterim: rowLeaderInterim },
     overrides,
   );
 
@@ -413,6 +422,7 @@ export async function loadUnitEditContext(
       code,
       name,
       description: merged.description,
+      url: merged.url,
       slug,
       slugOverride: unitType === "center" ? null : (overrides.slug ?? null),
       deptCode,

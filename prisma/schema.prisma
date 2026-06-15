@@ -881,6 +881,12 @@ model Department {
   name         String   @db.VarChar(255)
   slug         String   @unique @db.VarChar(255)
   description  String?  @db.Text
+  /// Curated outbound website URL (#1021). Optional; null = nothing rendered.
+  /// https-only, ≤ 512 chars (validateUnitUrl). Surfaced as a small inline
+  /// external-link arrow beside the department NAME on the public page. Edited
+  /// via the dept/div `field_override(url)` row (ED-preserving), merged at read
+  /// time alongside `description`.
+  url          String?  @db.VarChar(512)
   /// Curated full / ceremonial display name (e.g. ED `name` "Library" ->
   /// "Samuel J. Wood Library"). NULL = use `name`. Seeded on CREATE from
   /// lib/department-names.ts; the ED ETL NEVER writes it on UPDATE, so renames
@@ -920,6 +926,10 @@ model Division {
   name         String     @db.VarChar(255)
   slug         String     @db.VarChar(255)
   description  String?    @db.Text
+  /// Curated outbound website URL (#1021). Same contract as Department.url —
+  /// https-only, ≤ 512 chars, edited via the `field_override(url)` row and
+  /// merged at read time; null = nothing rendered beside the division NAME.
+  url          String?    @db.VarChar(512)
   chiefCwid    String?    @map("chief_cwid") @db.VarChar(32)
   scholarCount Int        @default(0) @map("scholar_count")
   source       String     @default("ED") @db.VarChar(32)
@@ -945,6 +955,11 @@ model Center {
   name          String   @db.VarChar(255)
   slug          String   @unique @db.VarChar(255)
   description   String?  @db.Text
+  /// Curated outbound website URL (#1021). Same contract as Department.url —
+  /// https-only, ≤ 512 chars; null = nothing rendered beside the center NAME.
+  /// A center has no `field_override`; this column is edited in-row via
+  /// `/api/edit/unit` op:"update" alongside `description`.
+  url           String?  @db.VarChar(512)
   /// Curated names, symmetric with Department (lib/org-unit-names.ts). A center
   /// is manually-owned — no ETL fights its `name` — so `name` already serves as
   /// the official name and `officialName` is typically NULL (resolver falls back

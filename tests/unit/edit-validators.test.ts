@@ -5,9 +5,12 @@ import {
   findSuppressibleEntityOwner,
   isChairAppointment,
   isEditableField,
+  isEditableUnitField,
   publicationAuthorshipExists,
   sanitizeOverview,
   validateSlugFormat,
+  validateUnitFieldValue,
+  validateUnitUrl,
 } from "@/lib/edit/validators";
 
 // ---------------------------------------------------------------------------
@@ -376,5 +379,63 @@ describe("isChairAppointment (#160 D-leader)", () => {
     expect(
       await isChairAppointment("abc", "Vice-Chair of Medicine", chairClient({ name: "Medicine" })),
     ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateUnitUrl (#1021)
+// ---------------------------------------------------------------------------
+
+describe("validateUnitUrl", () => {
+  it("accepts a well-formed https URL and trims whitespace", () => {
+    expect(validateUnitUrl("  https://medicine.weill.cornell.edu/lab  ")).toEqual({
+      ok: true,
+      value: "https://medicine.weill.cornell.edu/lab",
+    });
+  });
+
+  it("accepts an empty string — the curator clears the link", () => {
+    expect(validateUnitUrl("")).toEqual({ ok: true, value: "" });
+    expect(validateUnitUrl("   ")).toEqual({ ok: true, value: "" });
+  });
+
+  it("rejects http:// (https-only, mirrors clinicalProfileUrl)", () => {
+    expect(validateUnitUrl("http://example.org")).toEqual({ ok: false, error: "invalid_url" });
+  });
+
+  it("rejects non-web schemes", () => {
+    expect(validateUnitUrl("mailto:dept@cornell.edu")).toEqual({ ok: false, error: "invalid_url" });
+    expect(validateUnitUrl("javascript:alert(1)")).toEqual({ ok: false, error: "invalid_url" });
+  });
+
+  it("rejects garbage that does not parse as a URL", () => {
+    expect(validateUnitUrl("not a url")).toEqual({ ok: false, error: "invalid_url" });
+    expect(validateUnitUrl("example.org")).toEqual({ ok: false, error: "invalid_url" });
+  });
+
+  it("rejects a value over 512 chars", () => {
+    const tooLong = "https://example.org/" + "a".repeat(520);
+    expect(validateUnitUrl(tooLong)).toEqual({ ok: false, error: "url_too_long" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EDITABLE_UNIT_FIELDS / validateUnitFieldValue dispatch (#1021)
+// ---------------------------------------------------------------------------
+
+describe("unit field allowlist + dispatch", () => {
+  it("`url` is an editable unit field", () => {
+    expect(isEditableUnitField("url")).toBe(true);
+  });
+
+  it("validateUnitFieldValue dispatches `url` to validateUnitUrl", () => {
+    expect(validateUnitFieldValue("url", "https://example.org")).toEqual({
+      ok: true,
+      value: "https://example.org",
+    });
+    expect(validateUnitFieldValue("url", "http://example.org")).toEqual({
+      ok: false,
+      error: "invalid_url",
+    });
   });
 });

@@ -100,6 +100,8 @@ export type CenterDetail = {
   name: string;
   slug: string;
   description: string | null;
+  /** #1021 — curated outbound website URL, or null. Rendered beside the name. */
+  url: string | null;
   director: {
     cwid: string;
     preferredName: string;
@@ -171,6 +173,7 @@ type CenterRow = {
   name: string;
   slug: string;
   description: string | null;
+  url: string | null;
   directorCwid: string | null;
   leaderInterim: boolean;
 };
@@ -183,6 +186,7 @@ export async function getCenter(slug: string): Promise<CenterDetail | null> {
       name: true,
       slug: true,
       description: true,
+      url: true,
       directorCwid: true,
       leaderInterim: true,
     },
@@ -221,6 +225,7 @@ export async function getCenter(slug: string): Promise<CenterDetail | null> {
     name: center.name,
     slug: center.slug,
     description: center.description,
+    url: center.url,
     director,
     scholarCount,
   };

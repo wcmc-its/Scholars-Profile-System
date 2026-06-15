@@ -168,6 +168,84 @@ describe("/api/edit/field — unit-curation widening (#540 Phase 5a)", () => {
     );
   });
 
+  it("Curator can set a dept url (#1021)", async () => {
+    const res = await POST(
+      post({
+        entityType: "department",
+        entityId: "MED",
+        fieldName: "url",
+        value: "https://medicine.weill.cornell.edu",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockFieldOverrideUpsert).toHaveBeenCalledOnce();
+    const upsertCall = mockFieldOverrideUpsert.mock.calls[0][0];
+    expect(upsertCall.create.value).toBe("https://medicine.weill.cornell.edu");
+    expect(mockReflectUnitChange).toHaveBeenCalledWith(
+      expect.objectContaining({ unitKind: "department", unitSlug: "medicine" }),
+    );
+  });
+
+  it("Curator-on-dept cascades to a division url (#1021)", async () => {
+    const res = await POST(
+      post({
+        entityType: "division",
+        entityId: "CARDIO",
+        fieldName: "url",
+        value: "https://cardiology.weill.cornell.edu",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockReflectUnitChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        unitKind: "division",
+        unitSlug: "cardiology",
+        parentDeptSlug: "medicine",
+      }),
+    );
+  });
+
+  it("url rejects a non-https value → 400 invalid_url (#1021)", async () => {
+    const res = await POST(
+      post({
+        entityType: "department",
+        entityId: "MED",
+        fieldName: "url",
+        value: "http://medicine.weill.cornell.edu",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_url" });
+    expect(mockFieldOverrideUpsert).not.toHaveBeenCalled();
+  });
+
+  it("url rejects a garbage value → 400 invalid_url (#1021)", async () => {
+    const res = await POST(
+      post({
+        entityType: "department",
+        entityId: "MED",
+        fieldName: "url",
+        value: "not a url at all",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_url" });
+  });
+
+  it("url value=\"\" is accepted — clears the link (#1021)", async () => {
+    const res = await POST(
+      post({
+        entityType: "department",
+        entityId: "MED",
+        fieldName: "url",
+        value: "",
+      }),
+    );
+    expect(res.status).toBe(200);
+    const upsertCall = mockFieldOverrideUpsert.mock.calls[0][0];
+    expect(upsertCall.create.value).toBe("");
+  });
+
   it("Non-admin gets 403 not_curator (audit not consulted)", async () => {
     mockGetEditSession.mockResolvedValue(NONADMIN);
     mockUnitAdminFindMany.mockResolvedValue([]);

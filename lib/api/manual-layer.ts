@@ -430,8 +430,8 @@ export async function resolveDarkPmids(
 //
 // Two read shapes for organizational units:
 //
-//  1. `field_override` rows on Department / Division — `description`, `slug`,
-//     `leaderCwid`, `leaderInterim`. Merged at read time by the unit page.
+//  1. `field_override` rows on Department / Division — `description`, `url`,
+//     `slug`, `leaderCwid`, `leaderInterim`. Merged at read time by the unit page.
 //     **Centers do not use `field_override`** — a center row is manually-owned
 //     (no ETL writes the `center` table), so its fields are edited in-row
 //     and the in-row values are authoritative.
@@ -449,12 +449,13 @@ export async function resolveDarkPmids(
 export type UnitEntityType = "department" | "division" | "center";
 
 /**
- * The full set of unit `field_override` field names. Dept / div use all four;
+ * The full set of unit `field_override` field names. Dept / div use all five;
  * a `field_override` row for a center is rejected at write time
  * (centers edit in-row), so a center read never observes one — but the type
  * is shared because the merged-shape consumers do not branch on unit kind.
  *
  * - `description` — plain-text prose blurb (≤ 4,000 chars).
+ * - `url` — outbound website URL (#1021); https-only, ≤ 512 chars.
  * - `slug` — URL segment; ETL consults it before re-deriving on `etl/ed`.
  * - `leaderCwid` — Chair / Chief / Director CWID, or `""` for "no leader".
  * - `leaderInterim` — `"true"` / `"false"`; renders the interim qualifier.
@@ -464,6 +465,7 @@ export type UnitEntityType = "department" | "division" | "center";
  */
 export type UnitFieldOverrideName =
   | "description"
+  | "url"
   | "slug"
   | "leaderCwid"
   | "leaderInterim";
@@ -473,6 +475,7 @@ export type UnitFieldOverrides = Partial<Record<UnitFieldOverrideName, string>>;
 
 const UNIT_FIELD_OVERRIDE_NAMES: readonly UnitFieldOverrideName[] = [
   "description",
+  "url",
   "slug",
   "leaderCwid",
   "leaderInterim",
@@ -526,6 +529,7 @@ export async function loadUnitFieldOverrides(
  * | Field           | Override wins on               | Read fallback             |
  * |-----------------|--------------------------------|---------------------------|
  * | `description`   | a non-undefined override row   | the column                |
+ * | `url`           | a non-undefined override row   | the column                |
  * | `slug`          | (consumed by `etl/ed` write)   | the column (do not merge) |
  * | `leaderCwid`    | a non-undefined override row,  | the column                |
  * |                 | including `""` = no leader     |                           |
@@ -547,6 +551,8 @@ export async function loadUnitFieldOverrides(
  */
 export type UnitRowFieldsForMerge = {
   description: string | null;
+  /** #1021 — outbound website URL; same override-or-column precedence as description. */
+  url?: string | null;
   leaderCwid: string | null;
   /** For Center this is the in-row `leader_interim`; for dept/div there is no column. */
   leaderInterim?: boolean;
@@ -554,6 +560,8 @@ export type UnitRowFieldsForMerge = {
 
 export type MergedUnitFields = {
   description: string | null;
+  /** #1021 — outbound website URL; `""`/`null` both mean "render nothing". */
+  url: string | null;
   /** `""` = explicitly cleared by curator (different from `null` = no row / no override). */
   leaderCwid: string | null;
   leaderInterim: boolean;
@@ -564,12 +572,13 @@ export function mergeUnitFields(
   overrides: UnitFieldOverrides,
 ): MergedUnitFields {
   const description = overrides.description !== undefined ? overrides.description : row.description;
+  const url = overrides.url !== undefined ? overrides.url : (row.url ?? null);
   const leaderCwid = overrides.leaderCwid !== undefined ? overrides.leaderCwid : row.leaderCwid;
   let leaderInterim: boolean;
   if (overrides.leaderInterim === "true") leaderInterim = true;
   else if (overrides.leaderInterim === "false") leaderInterim = false;
   else leaderInterim = row.leaderInterim ?? false;
-  return { description, leaderCwid, leaderInterim };
+  return { description, url, leaderCwid, leaderInterim };
 }
 
 /**

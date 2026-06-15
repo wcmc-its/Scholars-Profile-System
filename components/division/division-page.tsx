@@ -18,6 +18,7 @@ import { LeaderCard } from "@/components/scholar/leader-card";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { DepartmentFacultyClient } from "@/components/department/department-faculty-client";
 import { Spotlight } from "@/components/shared/spotlight";
+import { UnitWebsiteLink } from "@/components/shared/unit-website-link";
 import { DeptTabs } from "@/components/department/dept-tabs";
 import { DeptPublicationsList } from "@/components/department/dept-publications-list";
 import { DeptGrantsList } from "@/components/department/dept-grants-list";
@@ -125,6 +126,7 @@ export async function DivisionPage({
         </div>
         <h1 className="page-title mb-[18px] text-[40px] font-medium leading-none tracking-[-0.01em]">
           {detail.division.name}
+          <UnitWebsiteLink url={detail.division.url} unitName={detail.division.name} />
         </h1>
         {detail.division.description && (
           <p className="mb-[22px] max-w-prose text-[15px] leading-[1.65] text-muted-foreground">

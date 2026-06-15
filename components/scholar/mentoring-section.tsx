@@ -14,7 +14,7 @@ import {
   MENTORING_GROUPED_THRESHOLD,
   MENTORING_TRUNCATE_THRESHOLD,
   MENTORING_TRUNCATE_LIMIT,
-  formatProgramLabel,
+  menteeProgramLabel,
   menteeTerminalYear,
   partitionMenteesByBucket,
   truncateGroupedMentees,
@@ -382,7 +382,9 @@ function MenteeChipCard({
   // Issue #195 — prefer the human-readable program name (ED authoritative,
   // Jenzabar fallback) over the degree-bucket label. When neither source
   // has a record, fall back to "PhD" / "MD-PhD" / "MD mentee" etc.
-  const programLabel = mentee.programName ?? formatProgramLabel(mentee.programType);
+  // Issue #1019 — when programName is the source, append the degree it omits
+  // (e.g. "Biochemistry & Structural Biology (PhD)") so the degree isn't lost.
+  const programLabel = menteeProgramLabel(mentee.programName, mentee.programType);
   // "Class of N" for AOC/PhD mentees; "YYYY–YYYY" or "since YYYY" for
   // postdocs (issue #183). Postdocs don't graduate, so forcing them into
   // the "Class of" string was misleading; the appointmentRange field

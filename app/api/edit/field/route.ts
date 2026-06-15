@@ -12,10 +12,10 @@
  *    in-transaction (#497 §5.1, Option B).
  *
  *  - **Department / Division** (#540 Phase 5, ADR-005 Amendment 1 § A1.1) —
- *    `entityType: "department" | "division"`, fields `description` / `slug` /
- *    `leaderCwid` / `leaderInterim`. Curator or Owner of the unit (cascade
- *    via `getEffectiveUnitRole`) for the curator-editable trio; Superuser
- *    only for `slug` (structural; SPEC § Authorization). An optional
+ *    `entityType: "department" | "division"`, fields `description` / `url`
+ *    (#1021) / `slug` / `leaderCwid` / `leaderInterim`. Curator or Owner of the
+ *    unit (cascade via `getEffectiveUnitRole`) for the curator-editable fields;
+ *    Superuser only for `slug` (structural; SPEC § Authorization). An optional
  *    `op: "set" | "clear"` (default `"set"`) toggles between upsert and
  *    delete-if-exists; SPEC § 1 — the three leadership states ("detect", "no
  *    leader", "this person") are expressed as `op:"clear"`, `value:""`, and

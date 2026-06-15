@@ -14,6 +14,9 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/components/edit/unit-description-card", () => ({
   UnitDescriptionCard: () => <div data-testid="panel-description" />,
 }));
+vi.mock("@/components/edit/unit-url-card", () => ({
+  UnitUrlCard: () => <div data-testid="panel-url" />,
+}));
 vi.mock("@/components/edit/unit-leader-card", () => ({
   UnitLeaderCard: () => <div data-testid="panel-leader" />,
 }));
@@ -54,6 +57,7 @@ function ctx(over: {
       code: "N1280",
       name: "Medicine",
       description: "blurb",
+      url: null,
       slug: "medicine",
       slugOverride: null,
       deptCode: unitType === "division" ? "N1000" : null,
@@ -83,19 +87,19 @@ function railKeys(): string[] {
 }
 
 describe("UnitEditPage — rail filtering", () => {
-  it("a Curator on a department sees only description + leader", () => {
+  it("a Curator on a department sees only description + url + leader", () => {
     render(<UnitEditPage ctx={ctx({ actorRole: "curator" })} />);
-    expect(railKeys()).toEqual(["description", "leader"]);
+    expect(railKeys()).toEqual(["description", "url", "leader"]);
   });
 
   it("an Owner on a department adds access", () => {
     render(<UnitEditPage ctx={ctx({ actorRole: "owner", access: [] })} />);
-    expect(railKeys()).toEqual(["description", "leader", "access"]);
+    expect(railKeys()).toEqual(["description", "url", "leader", "access"]);
   });
 
   it("a Superuser on a department adds slug + retire (but not center-type)", () => {
     render(<UnitEditPage ctx={ctx({ actorRole: "superuser", access: [] })} />);
-    expect(railKeys()).toEqual(["description", "leader", "access", "slug", "retire"]);
+    expect(railKeys()).toEqual(["description", "url", "leader", "access", "slug", "retire"]);
   });
 
   it("a Superuser on a center sees roster + center-type", () => {
@@ -119,6 +123,11 @@ describe("UnitEditPage — active panel selection", () => {
   it("defaults to the description panel", () => {
     render(<UnitEditPage ctx={ctx({})} />);
     expect(screen.getByTestId("panel-description")).toBeTruthy();
+  });
+
+  it("honors ?attr=url (#1021)", () => {
+    render(<UnitEditPage ctx={ctx({})} attr="url" />);
+    expect(screen.getByTestId("panel-url")).toBeTruthy();
   });
 
   it("honors ?attr=leader", () => {

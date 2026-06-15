@@ -133,6 +133,7 @@ function FunderRow({ item, via }: { item: FunderFacetItem; via?: boolean }) {
     <li className="py-1 leading-[1.4]">
       <Link
         href={item.href}
+        scroll={false}
         className="flex w-full items-start gap-2 text-[#1a1a1a] no-underline hover:no-underline"
       >
         <input

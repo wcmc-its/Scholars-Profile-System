@@ -137,6 +137,8 @@ export type DivisionDetail = {
     name: string;
     slug: string;
     description: string | null;
+    /** #1021 — curated outbound website URL, or null. Rendered beside the name. */
+    url: string | null;
   };
   parentDept: { code: string; name: string; slug: string };
   chief: DivisionChief | null;
@@ -165,7 +167,7 @@ export async function getDivision(
   // `etl/ed`, not merged here.
   const overrides = await loadUnitFieldOverrides("division", division.code, prisma);
   const merged = mergeUnitFields(
-    { description: division.description, leaderCwid: division.chiefCwid },
+    { description: division.description, url: division.url, leaderCwid: division.chiefCwid },
     overrides,
   );
 
@@ -263,6 +265,8 @@ export async function getDivision(
       name: division.name,
       slug: division.slug,
       description: merged.description,
+      // #1021 — empty-string override (curator cleared the link) reads as null.
+      url: merged.url && merged.url !== "" ? merged.url : null,
     },
     parentDept: { code: dept.code, name: dept.name, slug: dept.slug },
     chief,

@@ -11,6 +11,7 @@ import { CenterMembersClient } from "@/components/center/center-members-client";
 import { CenterTabs } from "@/components/center/center-tabs";
 import { DeptPublicationsList } from "@/components/department/dept-publications-list";
 import { Spotlight } from "@/components/shared/spotlight";
+import { UnitWebsiteLink } from "@/components/shared/unit-website-link";
 import { LeaderCard } from "@/components/scholar/leader-card";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import type { PubSort } from "@/lib/api/dept-lists";
@@ -115,6 +116,7 @@ export async function CenterPage({
         </div>
         <h1 className="page-title mb-[18px] text-[40px] font-medium leading-none tracking-[-0.01em]">
           {detail.name}
+          <UnitWebsiteLink url={detail.url} unitName={detail.name} />
         </h1>
         {detail.description && (
           <p className="mb-[22px] max-w-prose text-[15px] leading-[1.65] text-muted-foreground">

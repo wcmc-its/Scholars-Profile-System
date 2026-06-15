@@ -69,6 +69,7 @@ const DEPT = {
   code: "N1280",
   name: "Medicine",
   description: "ETL blurb",
+  url: null,
   slug: "medicine",
   chairCwid: "chr001",
   source: "ED",
@@ -129,6 +130,7 @@ describe("loadUnitEditContext — department", () => {
           roleRows: [{ entityType: "department", entityId: "N1280", role: "curator" }],
           overrides: [
             { fieldName: "description", value: "Curated blurb" },
+            { fieldName: "url", value: "https://medicine.weill.cornell.edu" },
             { fieldName: "slug", value: "internal-med" },
           ],
           siblings: [{ code: "N2856", name: "Cardiology", slug: "cardiology" }],
@@ -137,6 +139,9 @@ describe("loadUnitEditContext — department", () => {
     );
     expect(ctx!.unit.description).toBe("Curated blurb");
     expect(ctx!.unit.overriddenFields).toContain("description");
+    // #1021 — the url override merges through and is listed as overridden.
+    expect(ctx!.unit.url).toBe("https://medicine.weill.cornell.edu");
+    expect(ctx!.unit.overriddenFields).toContain("url");
     // slug override is surfaced separately (and excluded from overriddenFields —
     // it is not runtime-merged into the live slug; the ETL consults it).
     expect(ctx!.unit.slug).toBe("medicine");
@@ -261,6 +266,7 @@ describe("loadUnitEditContext — center", () => {
       code: "man-abc12345",
       name: "Precision Institute",
       description: "Institute blurb",
+      url: "https://precision.weill.cornell.edu",
       slug: "precision-institute",
       directorCwid: "dir001",
       centerType: "institute",
@@ -293,6 +299,7 @@ describe("loadUnitEditContext — center", () => {
       ),
     );
     expect(ctx!.unit.source).toBe("manual");
+    expect(ctx!.unit.url).toBe("https://precision.weill.cornell.edu"); // #1021 in-row
     expect(ctx!.unit.centerType).toBe("institute");
     expect(ctx!.unit.leader).toMatchObject({ cwid: "dir001", interim: true });
     expect(ctx!.unit.overriddenFields).toEqual([]); // centers never carry field_override

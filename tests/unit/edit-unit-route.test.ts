@@ -136,6 +136,7 @@ beforeEach(() => {
   mockTxCenterFindUnique.mockResolvedValue({
     slug: "old-slug",
     description: "old",
+    url: null,
     directorCwid: null,
     leaderInterim: false,
     centerType: "center",
@@ -415,6 +416,70 @@ describe("/api/edit/unit op:'update' — center in-row", () => {
     expect(mockReflectUnitChange).toHaveBeenCalledWith(
       expect.objectContaining({ unitKind: "center", unitSlug: "meyer" }),
     );
+  });
+
+  it("Curator updates the center url (#1021)", async () => {
+    const res = await POST(
+      post({
+        op: "update",
+        entityType: "center",
+        entityId: "MEYER",
+        fieldName: "url",
+        value: "https://meyer.weill.cornell.edu",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxCenterUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { code: "MEYER" },
+        data: { url: "https://meyer.weill.cornell.edu" },
+      }),
+    );
+    expect(mockReflectUnitChange).toHaveBeenCalledWith(
+      expect.objectContaining({ unitKind: "center", unitSlug: "meyer" }),
+    );
+  });
+
+  it("center url='' clears the link → null on the column (#1021)", async () => {
+    const res = await POST(
+      post({
+        op: "update",
+        entityType: "center",
+        entityId: "MEYER",
+        fieldName: "url",
+        value: "",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxCenterUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { url: null } }),
+    );
+  });
+
+  it("center url rejects a non-https / garbage value → 400 invalid_url (#1021)", async () => {
+    const http = await POST(
+      post({
+        op: "update",
+        entityType: "center",
+        entityId: "MEYER",
+        fieldName: "url",
+        value: "http://meyer.weill.cornell.edu",
+      }),
+    );
+    expect(http.status).toBe(400);
+    expect(await http.json()).toMatchObject({ ok: false, error: "invalid_url" });
+
+    const garbage = await POST(
+      post({
+        op: "update",
+        entityType: "center",
+        entityId: "MEYER",
+        fieldName: "url",
+        value: "not a url",
+      }),
+    );
+    expect(garbage.status).toBe(400);
+    expect(await garbage.json()).toMatchObject({ ok: false, error: "invalid_url" });
   });
 
   it("slug + centerType are Superuser-only — Curator gets 403 not_superuser", async () => {

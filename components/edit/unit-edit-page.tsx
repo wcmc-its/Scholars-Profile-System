@@ -27,6 +27,7 @@ import { EditShell } from "@/components/edit/edit-shell";
 import { SiblingDivisionsRail } from "@/components/edit/sibling-divisions-rail";
 import { UnitAccessCard } from "@/components/edit/unit-access-card";
 import { UnitDescriptionCard } from "@/components/edit/unit-description-card";
+import { UnitUrlCard } from "@/components/edit/unit-url-card";
 import { UnitLeaderCard } from "@/components/edit/unit-leader-card";
 import { UnitRetireCard } from "@/components/edit/unit-retire-card";
 import { UnitRosterCard } from "@/components/edit/unit-roster-card";
@@ -36,6 +37,7 @@ import type { UnitActorRole, UnitEditContext } from "@/lib/api/unit-edit-context
 
 type AttrKey =
   | "description"
+  | "url"
   | "leader"
   | "roster"
   | "access"
@@ -59,6 +61,8 @@ const hasRoster = (ctx: UnitEditContext) =>
 /** The full attribute set; `visible` encodes the SPEC § attribute table. */
 const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   { key: "description", label: "Description", visible: () => true },
+  // #1021 — same visibility as Description (curators / owners / superuser).
+  { key: "url", label: "Website", visible: () => true },
   { key: "leader", label: "Leadership", visible: () => true },
   { key: "roster", label: "Members", visible: (ctx) => hasRoster(ctx) },
   { key: "access", label: "Access", visible: (ctx) => isOwnerPlus(ctx.actorRole) },
@@ -133,6 +137,17 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
           // Centers edit in-row (no field_override), so there is nothing to clear.
           canClear={ctx.unit.unitType !== "center"}
           hasOverride={ctx.unit.overriddenFields.includes("description")}
+        />
+      );
+    case "url":
+      return (
+        <UnitUrlCard
+          entityType={ctx.unit.unitType}
+          entityId={ctx.unit.code}
+          url={ctx.unit.url}
+          // Centers edit in-row (no field_override), so there is nothing to clear.
+          canClear={ctx.unit.unitType !== "center"}
+          hasOverride={ctx.unit.overriddenFields.includes("url")}
         />
       );
     case "leader":

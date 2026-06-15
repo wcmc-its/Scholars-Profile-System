@@ -95,6 +95,8 @@ export type DepartmentDetail = {
     compactName: string | null;
     slug: string;
     description: string | null;
+    /** #1021 — curated outbound website URL, or null. Rendered beside the name. */
+    url: string | null;
   };
   chair: DepartmentChair | null;
   topResearchAreas: DepartmentTopicArea[];
@@ -114,7 +116,7 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
   // `slug` is consumed by `etl/ed`, not merged here.
   const overrides = await loadUnitFieldOverrides("department", dept.code, prisma);
   const merged = mergeUnitFields(
-    { description: dept.description, leaderCwid: dept.chairCwid },
+    { description: dept.description, url: dept.url, leaderCwid: dept.chairCwid },
     overrides,
   );
 
@@ -288,6 +290,8 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
       compactName: dept.compactName,
       slug: dept.slug,
       description: merged.description,
+      // #1021 — empty-string override (curator cleared the link) reads as null.
+      url: merged.url && merged.url !== "" ? merged.url : null,
     },
     chair,
     topResearchAreas,

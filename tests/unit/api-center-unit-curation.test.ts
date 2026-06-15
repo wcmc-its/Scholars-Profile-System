@@ -45,6 +45,7 @@ const CENTER = {
   name: "Meyer Cancer Center",
   slug: "meyer-cancer-center",
   description: "Cancer research center.",
+  url: null,
   directorCwid: "dir0001",
   leaderInterim: false,
   scholarCount: 42,
