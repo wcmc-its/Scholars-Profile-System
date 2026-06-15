@@ -1895,7 +1895,11 @@ function FacetSidebarFunding({
           Filters
         </span>
         {hasActiveFilters ? (
-          <Link href={clearAllHref} className="text-xs font-medium text-[#2c4f6e] hover:underline">
+          <Link
+            href={clearAllHref}
+            scroll={false}
+            className="text-xs font-medium text-[#2c4f6e] hover:underline"
+          >
             Clear all
           </Link>
         ) : null}
@@ -2093,6 +2097,7 @@ function ActiveFilterChips({
           <Link
             key={`${aria}-${c.removeHref}-${i}`}
             href={c.removeHref}
+            scroll={false}
             aria-label={`Remove filter: ${aria}`}
             className="inline-flex h-7 items-center gap-1 rounded-full border border-[#c5d3df] bg-[#eaf0f5] py-0 pr-1.5 pl-3 text-xs font-medium text-[#2c4f6e] no-underline transition-colors hover:border-[#9fb6c9] hover:bg-[#dde7f0] hover:no-underline"
           >
@@ -2106,7 +2111,11 @@ function ActiveFilterChips({
           </Link>
         );
       })}
-      <Link href={clearAllHref} className="ml-1 text-xs text-muted-foreground hover:text-[#2c4f6e]">
+      <Link
+        href={clearAllHref}
+        scroll={false}
+        className="ml-1 text-xs text-muted-foreground hover:text-[#2c4f6e]"
+      >
         Clear all
       </Link>
     </div>
@@ -2261,7 +2270,11 @@ function FacetSidebar({
           Filters
         </span>
         {hasActiveFilters ? (
-          <Link href={clearAllHref} className="text-xs font-medium text-[#2c4f6e] hover:underline">
+          <Link
+            href={clearAllHref}
+            scroll={false}
+            className="text-xs font-medium text-[#2c4f6e] hover:underline"
+          >
             Clear all
           </Link>
         ) : null}
@@ -2466,7 +2479,11 @@ function FacetSidebarPubs({
           Filters
         </span>
         {hasActiveFilters ? (
-          <Link href={clearAllHref} className="text-xs font-medium text-[#2c4f6e] hover:underline">
+          <Link
+            href={clearAllHref}
+            scroll={false}
+            className="text-xs font-medium text-[#2c4f6e] hover:underline"
+          >
             Clear all
           </Link>
         ) : null}
@@ -2720,6 +2737,7 @@ function FacetCheckbox({
         {wrapInTooltip(
           <Link
             href={href}
+            scroll={false}
             title={tooltip ? undefined : fallbackTitle}
             className="flex items-start gap-2 text-[#1a1a1a] no-underline hover:no-underline"
           >
@@ -2747,6 +2765,7 @@ function FacetCheckbox({
       {wrapInTooltip(
         <Link
           href={href}
+          scroll={false}
           title={tooltip ? undefined : fallbackTitle}
           className="flex flex-1 items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
         >

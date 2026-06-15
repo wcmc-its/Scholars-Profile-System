@@ -168,6 +168,7 @@ function AuthorRow({ author }: { author: AuthorFacetItem }) {
       >
         <Link
           href={author.toggleHref}
+          scroll={false}
           className="flex items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
         >
           <input
