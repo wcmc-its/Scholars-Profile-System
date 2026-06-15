@@ -15,6 +15,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import type {
   PublicationTakedownContext,
   TakedownAuthor,
@@ -29,9 +30,15 @@ export function PublicationSummaryCard({ publication, authors }: PublicationSumm
   return (
     <Card data-slot="publication-summary-card">
       <CardHeader>
-        <CardTitle>{publication.title}</CardTitle>
+        <CardTitle>
+          <PubTitle as="span" value={publication.title} />
+        </CardTitle>
         <CardDescription>
-          {publication.journal ?? "Unknown journal"}
+          {publication.journal ? (
+            <PubJournal as="span" value={publication.journal} />
+          ) : (
+            "Unknown journal"
+          )}
           {publication.year !== null ? ` · ${publication.year}` : ""}
         </CardDescription>
       </CardHeader>

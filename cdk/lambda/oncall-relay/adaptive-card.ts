@@ -21,6 +21,15 @@ export interface CloudWatchAlarmPayload {
 }
 
 /**
+ * Severity tier assigned by the relay from the originating SNS topic. P1
+ * ("page") posts to the primary on-call Teams channel; P2 ("warn") posts to a
+ * separate, quieter channel (data-freshness, reconciler, and resource-pressure
+ * signals). Rendered as a card fact so the tier is visible even if a P2 alert
+ * falls back to the primary channel.
+ */
+export type AlertSeverity = "page" | "warn";
+
+/**
  * Schema of the custom JSON the EtlStack Step Functions publish to the
  * `etl-failures-<env>` topic — the per-step failure Catch (`NotifyEd` etc.)
  * and the annual approval gate. Distinct from {@link CloudWatchAlarmPayload}:
@@ -64,6 +73,13 @@ const STATE_EMOJI: Readonly<Record<string, string>> = {
 /** Fallback emoji for any future state CloudWatch might invent. */
 const UNKNOWN_STATE_EMOJI = "\u{2753}";
 
+/**
+ * Lead glyph for the P2/warn tier (warning sign). Distinguishes warn cards at
+ * a glance from the page tier's alarm glyph -- useful even if a warn card
+ * falls back to the page channel before the warn webhook is provisioned.
+ */
+const WARN_EMOJI = "\u{26A0}\u{FE0F}";
+
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, max - 1) + "\u{2026}";
@@ -81,12 +97,178 @@ function cloudwatchConsoleUrl(alarmName: string, region: string): string {
   return `https://${region}.console.aws.amazon.com/cloudwatch/home?region=${region}#alarmsV2:alarm/${encoded}`;
 }
 
+/**
+ * Console deep-link to the reliability dashboard for the alarm's env, derived
+ * from the `-prod` / `-staging` suffix on the alarm name (every SPS alarm
+ * carries the env literal -- Footgun #4). Returns `undefined` when the env is
+ * not recognisable, so the action is omitted rather than guessed. The first
+ * thing an operator wants after the alarm name is the at-a-glance board, not
+ * the single-metric alarm page.
+ */
+function reliabilityDashboardUrl(
+  alarmName: string,
+  region: string,
+): string | undefined {
+  const env = alarmName.endsWith("-prod")
+    ? "prod"
+    : alarmName.endsWith("-staging")
+      ? "staging"
+      : undefined;
+  if (env === undefined) return undefined;
+  return `https://${region}.console.aws.amazon.com/cloudwatch/home?region=${region}#dashboards:name=sps-reliability-${env}`;
+}
+
+/** Human-readable severity label for the card fact. */
+function severityLabel(severity: AlertSeverity): string {
+  return severity === "warn" ? "P2 (warn)" : "P1 (page)";
+}
+
+/**
+ * First-response hint per alarm, keyed by a stable substring of the alarm name
+ * (env-agnostic; first match wins). A deliberately short pointer -- the
+ * Description fact and the runbooks carry the detail. The default covers any
+ * alarm not listed (e.g. a future one) so the card always offers a starting
+ * point. Keep these as plain text (no markdown) for the same injection-safe
+ * reason as the rest of the card.
+ */
+const COURSE_OF_ACTION: ReadonlyArray<{ match: string; action: string }> = [
+  {
+    match: "app-unavailable",
+    action:
+      "Open the reliability dashboard. If Aurora CPU/connections are also high, suspect DB connection-pool exhaustion; if it tracks the last deploy, roll back (DEPLOY-RUNBOOK.md).",
+  },
+  {
+    match: "5xx-rate",
+    action:
+      "Check the ALB 5xx panel + the most recent deploy. Roll back if the spike tracks a release; otherwise pull app logs for the failing route.",
+  },
+  {
+    match: "unhealthy-hosts",
+    action:
+      "Zero healthy targets and the circuit-breaker missed it. Check ECS task health, the in-flight deploy, and the target-group health-check path.",
+  },
+  {
+    match: "latency",
+    action:
+      "Open the dashboard latency + Aurora SelectLatency panels. Look for a slow query, a cold cache, or an undersized task.",
+  },
+  {
+    match: "task-shortfall",
+    action:
+      "Tasks are not being replaced. Check ECS service events for image-pull / capacity / IAM failures and the recent deploy.",
+  },
+  {
+    match: "aurora-cpu",
+    action:
+      "Suspect a hot query loop or runaway analytic. Check Performance Insights / the slow-query log; scale ACUs only if the load is legitimate.",
+  },
+  {
+    match: "aurora-connections",
+    action:
+      "Connection-pool exhaustion or app fan-out. Look for leaked/idle connections; recycle the app tasks if the count will not drain.",
+  },
+  {
+    match: "jvm-pressure",
+    action:
+      "OpenSearch GC pressure. Check shard count + query load on the dashboard; throttle heavy queries or scale the domain.",
+  },
+  {
+    match: "cluster-red",
+    action:
+      "Unassigned shards. Check OpenSearch _cluster/health; reallocate or restore the affected index from snapshot.",
+  },
+  {
+    match: "edit-authz-denied",
+    action:
+      "Sustained edit 403s: check for an authz-predicate regression in the last deploy, or active probing. Review the edit_authz_denied logs for the actor + path.",
+  },
+  {
+    match: "reconcile",
+    action:
+      "A reconciler has been failing ~30 min. Check the Step Functions execution for the failing row; it self-heals once the underlying write succeeds.",
+  },
+  {
+    match: "relay-errors",
+    action:
+      "The on-call relay Lambda is erroring -- paging delivery is at risk. Check its CloudWatch logs and the Teams webhook secret.",
+  },
+  {
+    match: "sps-etl-",
+    action:
+      "An ETL run failed or its cadence slipped. Check the Step Functions execution + the failing step's logs; data freshness lags until it reruns.",
+  },
+];
+
+const DEFAULT_COURSE_OF_ACTION =
+  "Open the reliability dashboard and the runbook (docs/SLOs.md, docs/oncall.md); if several alarms fired together, look for one shared root cause.";
+
+/** First-response hint for an alarm, by name. Always returns a value. */
+function courseOfAction(alarmName: string): string {
+  for (const c of COURSE_OF_ACTION) {
+    if (alarmName.includes(c.match)) return c.action;
+  }
+  return DEFAULT_COURSE_OF_ACTION;
+}
+
 export function buildAdaptiveCard(
   alarm: CloudWatchAlarmPayload,
+  severity?: AlertSeverity,
 ): AdaptiveCardEnvelope {
   const region = alarm.Region ?? "us-east-1";
-  const emoji = STATE_EMOJI[alarm.NewStateValue] ?? UNKNOWN_STATE_EMOJI;
+  const stateEmoji = STATE_EMOJI[alarm.NewStateValue] ?? UNKNOWN_STATE_EMOJI;
+  // P2/warn ALARM cards lead with the warning glyph so the lower tier reads at
+  // a glance (and stays distinguishable if a warn card falls back to the page
+  // channel). The alarm glyph stays the P1 lead; OK/INSUFFICIENT keep their
+  // state glyph (those transitions aren't wired today, but render correctly).
+  const leadEmoji =
+    severity === "warn" && alarm.NewStateValue === "ALARM"
+      ? WARN_EMOJI
+      : stateEmoji;
   const when = alarm.StateChangeTime ?? "(unknown)";
+
+  // Facts are looked up by title (order-independent) on the receiving side.
+  // State first, then severity + description (the actionable context, incl.
+  // the runbook pointer baked into AlarmDescription), then the raw reason.
+  const facts: Array<{ title: string; value: string }> = [
+    { title: "State", value: alarm.NewStateValue },
+  ];
+  if (severity !== undefined) {
+    facts.push({ title: "Severity", value: severityLabel(severity) });
+  }
+  if (
+    alarm.AlarmDescription !== undefined &&
+    alarm.AlarmDescription.length > 0
+  ) {
+    facts.push({
+      title: "Description",
+      value: truncate(alarm.AlarmDescription, REASON_MAX_CHARS),
+    });
+  }
+  facts.push({
+    title: "Next step",
+    value: courseOfAction(alarm.AlarmName),
+  });
+  facts.push({ title: "Reason", value: reasonFact(alarm.NewStateReason) });
+  facts.push({ title: "Region", value: region });
+  facts.push({ title: "When", value: when });
+
+  // CloudWatch alarm page stays first (actions[0]); the reliability dashboard
+  // is the natural second click and is added only when the env is known.
+  const actions: Array<{ type: string; title: string; url: string }> = [
+    {
+      type: "Action.OpenUrl",
+      title: "View in CloudWatch",
+      url: cloudwatchConsoleUrl(alarm.AlarmName, region),
+    },
+  ];
+  const dashboardUrl = reliabilityDashboardUrl(alarm.AlarmName, region);
+  if (dashboardUrl !== undefined) {
+    actions.push({
+      type: "Action.OpenUrl",
+      title: "View reliability dashboard",
+      url: dashboardUrl,
+    });
+  }
 
   return {
     type: "message",
@@ -100,28 +282,17 @@ export function buildAdaptiveCard(
           body: [
             {
               type: "TextBlock",
-              text: `${emoji} ${alarm.AlarmName}`,
+              text: `${leadEmoji} ${alarm.AlarmName}`,
               weight: "Bolder",
               size: "Medium",
               wrap: true,
             },
             {
               type: "FactSet",
-              facts: [
-                { title: "State", value: alarm.NewStateValue },
-                { title: "Reason", value: reasonFact(alarm.NewStateReason) },
-                { title: "Region", value: region },
-                { title: "When", value: when },
-              ],
+              facts,
             },
           ],
-          actions: [
-            {
-              type: "Action.OpenUrl",
-              title: "View in CloudWatch",
-              url: cloudwatchConsoleUrl(alarm.AlarmName, region),
-            },
-          ],
+          actions,
         },
       },
     ],

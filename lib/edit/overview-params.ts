@@ -62,12 +62,18 @@ export const OVERVIEW_INSTRUCTIONS_MAX = 500;
 
 /** The defaults a fresh Generate panel opens with — and the fallback every
  *  unknown enum normalizes to. Mirrors the v1 fixed prompt (third person,
- *  formal, ~120–180 words) with a sensible starter set of emphasized themes. */
+ *  formal, ~120–180 words) with a sensible starter set of emphasized themes.
+ *  Methods is default-on (#886): the generator's method source is now the live
+ *  `scholar_family` rollup — the SAME data the public Methods & tools panel
+ *  shows — so the emphasis can be grounded. The #765 §2 pmid_count >= 2 floor
+ *  governs the default family selection, and `buildOverviewUserPrompt` drops the
+ *  Methods emphasis when a scholar has no families, so default-on is honest even
+ *  before/without the rollup. */
 export const DEFAULT_OVERVIEW_PARAMS: OverviewParams = {
   voice: "third",
   tone: "formal",
   length: "standard",
-  elements: ["research_focus", "key_findings", "recent_work"],
+  elements: ["research_focus", "key_findings", "methods", "recent_work"],
   instructions: "",
 };
 
@@ -135,8 +141,8 @@ export function normalizeOverviewParams(raw: unknown): OverviewParams {
 // ---------------------------------------------------------------------------
 
 /** Which sources the scholar picked in the drawer. `pmids` key publications,
- *  `grantIds` key funding awards, `toolNames` key methods (canonical names —
- *  the Tools bucket ships dark until C3, so this is normally `[]` in C2). */
+ *  `grantIds` key funding awards, `toolNames` key methods — the scholar's #799
+ *  method-family labels (#886), `[]` when the scholar has no families. */
 export type OverviewSelection = {
   pmids: string[];
   grantIds: string[];
@@ -148,6 +154,15 @@ export const OVERVIEW_SELECTION_MAX_ITEMS = 25;
 /** Tools carry their own smaller ceiling so a dozen tool names can't crowd out
  *  the papers, which are the heavy grounding (decision 3 / §3.5). */
 export const OVERVIEW_SELECTION_MAX_TOOLS = 10;
+
+/** The #765 §2 / §7.4 honesty floor: a method family is only default-selected
+ *  when it appears in ≥ 2 publications. Most families have `pmid_count = 1`; a
+ *  top-N-by-count default that surfaced single-paper long-tail families would
+ *  contradict the Methods rule line ("ranked by how often each appears"). The
+ *  client "Top N by score" Methods quick action applies the same floor. Lives
+ *  here (not `overview-facts.ts`) so the client picker can import it without
+ *  pulling the Prisma/`lib/db` server module into the browser bundle. */
+export const OVERVIEW_METHOD_PMID_FLOOR = 2;
 
 /** Coerce an untrusted value to a de-duped, trimmed, non-empty string array.
  *  A non-array, or any non-string member, yields a clean (possibly empty) list. */

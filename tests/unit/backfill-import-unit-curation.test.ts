@@ -48,7 +48,14 @@ function makeCenterDb(
       upsert: vi.fn(async () => ({})),
       updateMany: vi.fn(async (args) => {
         updateManyArgs.push(args);
-        const n = centers.filter((c) => c.source === args.where.source).length;
+        // Honor BOTH the source predicate AND the #991 `code: { in }` cap so the
+        // fake reflects the real scoped update, not an unconstrained source-only one.
+        const inCodes = args.where.code?.in;
+        const n = centers.filter(
+          (c) =>
+            (args.where.source == null || c.source === args.where.source) &&
+            (inCodes == null || inCodes.includes(c.code)),
+        ).length;
         return { count: n };
       }),
       ...overrides,
@@ -80,9 +87,9 @@ describe("migrateCenterSource", () => {
     ]);
     const n = await migrateCenterSource(db, RUN);
     expect(n).toBe(1);
-    // updateMany re-asserts the source='seed' predicate (WHERE-guarded).
+    // updateMany is scoped to the sampled codes AND re-asserts source='seed'.
     expect(db.center.updateMany).toHaveBeenCalledWith({
-      where: { source: "seed" },
+      where: { code: { in: ["meyer_cancer_center"] }, source: "seed" },
       data: { source: "manual" },
     });
   });
@@ -114,6 +121,21 @@ describe("migrateCenterSource", () => {
     expect(db.center.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { source: "seed" }, take: 2 }),
     );
+  });
+
+  it("--limit caps the REAL update to exactly the sampled codes, not all seed centers (#991)", async () => {
+    const { db } = makeCenterDb([
+      { code: "a", source: "seed" },
+      { code: "b", source: "seed" },
+      { code: "c", source: "seed" },
+    ]);
+    const n = await migrateCenterSource(db, { dryRun: false, limit: 1 });
+    // Only the one sampled code is migrated — NOT all three seed centers.
+    expect(n).toBe(1);
+    expect(db.center.updateMany).toHaveBeenCalledWith({
+      where: { code: { in: ["a"] }, source: "seed" },
+      data: { source: "manual" },
+    });
   });
 });
 
@@ -157,14 +179,17 @@ describe("fixtureLoadCenters", () => {
     expect(db.center.upsert).not.toHaveBeenCalled();
   });
 
-  it("creates the 8 centers + Meyer programs as source='manual' on an empty DB", async () => {
+  it("creates the 11 centers + Meyer programs as source='manual' on an empty DB", async () => {
     const { db } = makeCenterDb([]);
     const res = await fixtureLoadCenters(db, RUN);
-    expect(res.centersCreated).toBe(8);
+    // 11 centers post comms 2026-06-12 (was 8: -Computational Biomedicine,
+    // -Iris Cantor, +Drukier, +Weill Metabolic, +Global Health, +Appel,
+    // +Friedman). Tracks prisma/center-seed-data.ts CENTERS.
+    expect(res.centersCreated).toBe(11);
     expect(res.programsUpserted).toBe(5);
     // every created row carries source='manual'
     const upsertCalls = (db.center.upsert as ReturnType<typeof vi.fn>).mock.calls;
-    expect(upsertCalls).toHaveLength(8);
+    expect(upsertCalls).toHaveLength(11);
     for (const [arg] of upsertCalls) {
       expect((arg as { create: { source: string } }).create.source).toBe("manual");
     }

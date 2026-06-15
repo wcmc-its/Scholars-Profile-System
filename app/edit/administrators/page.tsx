@@ -19,6 +19,7 @@ import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { AdministratorsRoster } from "@/components/edit/administrators-roster";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { loadUnitAdministratorRoster } from "@/lib/api/administrators-roster";
+import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession, impersonationEnabled } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import {
@@ -103,8 +104,10 @@ export default async function AdministratorsPage() {
 
       <AdminSubnav
         active="administrators"
+        unitsTab={session.isSuperuser}
         pendingSlugRequests={pendingSlugRequests}
         administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
+        methodsTab={isMethodsTabVisible(session) ? 0 : null}
         selfEditHref={selfEditHref}
       />
 

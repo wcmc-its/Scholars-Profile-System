@@ -8,6 +8,7 @@ import {
 } from "@/lib/api/methods";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import { isScholarListExportEnabled } from "@/lib/export/scholar-export-flags";
+import { isSupercategoryExportInRange } from "@/lib/api/export-scholars";
 import { ScholarListExportButton } from "@/components/scholar-export/scholar-list-export-button";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
 import { SupercategoryFamilyLayout } from "@/components/method/family-publication-layout";
@@ -21,8 +22,12 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 
-export const revalidate = 21600;
-export const dynamicParams = true;
+// #985 — force-dynamic: the #800/#801 family-visibility overlay gate is
+// per-request, but ISR (revalidate=21600) cached the rendered shell for up to
+// 6h, leaving a steward-suppressed/sensitive family publicly reachable until the
+// next revalidate. The data layer is already overlay-gated; force-dynamic makes
+// the page honor it. (Restoring ISR + purge-on-edit for perf is the #985 follow-up.)
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
   params,
@@ -69,9 +74,22 @@ export default async function SupercategoryPage({
     pubCount: f.pubCount ?? 0,
     exemplarTools: f.exemplarTools,
   }));
-  const familyMeta: Record<string, { familyLabel: string; familySegment: string }> = {};
+  const familyMeta: Record<
+    string,
+    {
+      familyLabel: string;
+      familySegment: string;
+      definition: string | null;
+      definitionSource: string | null;
+    }
+  > = {};
   for (const f of families) {
-    familyMeta[f.familyId] = { familyLabel: f.familyLabel, familySegment: f.familySlug };
+    familyMeta[f.familyId] = {
+      familyLabel: f.familyLabel,
+      familySegment: f.familySlug,
+      definition: f.definition,
+      definitionSource: f.definitionSource,
+    };
   }
 
   const jsonLd = buildDefinedTermJsonLd({
@@ -79,6 +97,12 @@ export default async function SupercategoryPage({
     label: sc.label,
     description: sc.description,
   });
+
+  // SPEC §B.3 HARD cap: offer the export ONLY when the distinct displayable
+  // cohort is <= 50. Only run the (extra) count query when export is enabled, so
+  // the flag-dark path stays cheap. The route refuses > 50 regardless.
+  const exportEligible =
+    isScholarListExportEnabled() && (await isSupercategoryExportInRange(sc.id));
 
   return (
     <main className="mx-auto max-w-[1100px] px-6 py-12">
@@ -135,7 +159,7 @@ export default async function SupercategoryPage({
             {families.length.toLocaleString()} method{" "}
             {families.length === 1 ? "family" : "families"}
           </div>
-          {isScholarListExportEnabled() ? (
+          {exportEligible ? (
             <ScholarListExportButton scope="supercategory" params={{ supercategory: sc.slug }} />
           ) : null}
         </div>

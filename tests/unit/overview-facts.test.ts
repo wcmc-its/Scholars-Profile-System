@@ -17,7 +17,8 @@ const {
   mockTopicFindMany,
   mockGrantFindMany,
   mockEducationFindMany,
-  mockScholarToolFindMany,
+  mockScholarFamilyFindMany,
+  mockFamilySuppressionFindMany,
 } = vi.hoisted(() => ({
   mockScholarFindUnique: vi.fn(),
   mockPubAuthorFindMany: vi.fn(),
@@ -27,7 +28,8 @@ const {
   mockTopicFindMany: vi.fn(),
   mockGrantFindMany: vi.fn(),
   mockEducationFindMany: vi.fn(),
-  mockScholarToolFindMany: vi.fn(),
+  mockScholarFamilyFindMany: vi.fn(),
+  mockFamilySuppressionFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -40,7 +42,10 @@ vi.mock("@/lib/db", () => ({
       topic: { findMany: mockTopicFindMany },
       grant: { findMany: mockGrantFindMany },
       education: { findMany: mockEducationFindMany },
-      scholarTool: { findMany: mockScholarToolFindMany },
+      // #886 — the generator's Methods bucket reads the live `scholar_family`
+      // rollup (#799), #800-suppression applied.
+      scholarFamily: { findMany: mockScholarFamilyFindMany },
+      familySuppressionOverlay: { findMany: mockFamilySuppressionFindMany },
     },
   },
 }));
@@ -129,8 +134,25 @@ beforeEach(() => {
   mockTopicFindMany.mockResolvedValue([]);
   mockGrantFindMany.mockResolvedValue([]);
   mockEducationFindMany.mockResolvedValue([]);
-  mockScholarToolFindMany.mockResolvedValue([]);
+  mockScholarFamilyFindMany.mockResolvedValue([]);
+  mockFamilySuppressionFindMany.mockResolvedValue([]);
 });
+
+/** A `scholar_family.findMany` row, as the #799 rollup returns it. */
+function familyRow(
+  familyLabel: string,
+  supercategory: string,
+  pmidCount: number,
+  exemplarTools: string[] = [],
+) {
+  return {
+    familyId: `fam_${familyLabel.replace(/\s+/g, "_")}`,
+    familyLabel,
+    supercategory,
+    pmidCount,
+    exemplarTools,
+  };
+}
 
 describe("assembleOverviewFacts — identity & corpus", () => {
   it("returns null when the scholar row is missing", async () => {
@@ -402,34 +424,53 @@ describe("loadOverviewSourceOptions", () => {
   });
 });
 
-describe("assembleOverviewFacts — methods & faculty metrics (C3)", () => {
-  const TOOLS = [
-    {
-      toolName: "AAV vectors",
-      category: "vector platform",
-      pmidCount: 28,
-      maxConfidence: decimal(0.9),
-    },
-    { toolName: "PET imaging", category: "imaging", pmidCount: 12, maxConfidence: decimal(0.8) },
+describe("assembleOverviewFacts — methods (scholar_family) & faculty metrics", () => {
+  // #886 — methods are the scholar's #799 `scholar_family` rollup, mapped into
+  // the tool-bucket shape: familyLabel → toolName, supercategory → category,
+  // exemplarTools → examples, and a constant maxConfidence of 1.
+  const FAMILIES = [
+    familyRow("AAV vectors", "vector platform", 28, ["AAV2", "AAV9"]),
+    familyRow("PET imaging", "imaging", 12, ["[18F]FDG"]),
   ];
 
-  it("defaults to the scholar's top tools, shaped methods as {name, category}", async () => {
-    mockScholarToolFindMany.mockResolvedValue(TOOLS);
+  it("defaults to the scholar's top families, shaped methods as {name, category, examples}", async () => {
+    mockScholarFamilyFindMany.mockResolvedValue(FAMILIES);
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.methods).toEqual([
-      { name: "AAV vectors", category: "vector platform" },
-      { name: "PET imaging", category: "imaging" },
+      { name: "AAV vectors", category: "vector platform", examples: ["AAV2", "AAV9"] },
+      { name: "PET imaging", category: "imaging", examples: ["[18F]FDG"] },
     ]);
   });
 
-  it("features only explicitly-selected tools; drops a foreign tool name", async () => {
-    mockScholarToolFindMany.mockResolvedValue(TOOLS);
+  it("features only explicitly-selected families; drops a foreign family label", async () => {
+    mockScholarFamilyFindMany.mockResolvedValue(FAMILIES);
     const facts = await assembleOverviewFacts("self01", {
       pmids: [],
       grantIds: [],
       toolNames: ["PET imaging", "evil-tool"],
     });
-    expect(facts?.methods).toEqual([{ name: "PET imaging", category: "imaging" }]);
+    expect(facts?.methods).toEqual([
+      { name: "PET imaging", category: "imaging", examples: ["[18F]FDG"] },
+    ]);
+  });
+
+  // #800 — a curator-suppressed (generic) family is excluded from the generator
+  // grounding too, just as the public Methods & tools panel hides it. The overlay
+  // keys on the stable (supercategory, family_label).
+  it("excludes a #800-suppressed family from both methods and source-options", async () => {
+    mockScholarFamilyFindMany.mockResolvedValue([
+      familyRow("AAV vectors", "vector platform", 28, ["AAV2"]),
+      familyRow("generic technique", "lab methods", 9),
+    ]);
+    mockFamilySuppressionFindMany.mockResolvedValue([
+      { supercategory: "lab methods", familyLabel: "generic technique" },
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.methods).toEqual([
+      { name: "AAV vectors", category: "vector platform", examples: ["AAV2"] },
+    ]);
+    const opts = await loadOverviewSourceOptions("self01");
+    expect(opts.tools.map((t) => t.toolName)).toEqual(["AAV vectors"]);
   });
 
   it("maps facultyMetrics from the scholar row", async () => {
@@ -450,24 +491,65 @@ describe("assembleOverviewFacts — methods & faculty metrics (C3)", () => {
     expect(facts?.facultyMetrics).toBeNull();
   });
 
-  it("source-options returns tools with defaultSelected (top tools pre-checked)", async () => {
-    mockScholarToolFindMany.mockResolvedValue(TOOLS);
+  it("source-options returns families as tools (maxConfidence 1) with defaultSelected", async () => {
+    mockScholarFamilyFindMany.mockResolvedValue(FAMILIES);
     const opts = await loadOverviewSourceOptions("self01");
     expect(opts.tools).toEqual([
       {
         toolName: "AAV vectors",
         category: "vector platform",
         pmidCount: 28,
-        maxConfidence: 0.9,
+        maxConfidence: 1,
         defaultSelected: true,
       },
       {
         toolName: "PET imaging",
         category: "imaging",
         pmidCount: 12,
-        maxConfidence: 0.8,
+        maxConfidence: 1,
         defaultSelected: true,
       },
+    ]);
+  });
+
+  // #765 §2 / §7.4 — the pmid_count >= 2 default floor keeps the Methods rule
+  // line ("ranked by how often each appears") honest. Single-paper long-tail
+  // families are CANDIDATES (still selectable) but never default-selected.
+  it("does NOT default-select a single-paper (pmid_count = 1) method family", async () => {
+    mockScholarFamilyFindMany.mockResolvedValue([familyRow("long-tail method", "method", 1)]);
+    const opts = await loadOverviewSourceOptions("self01");
+    expect(opts.tools).toEqual([
+      {
+        toolName: "long-tail method",
+        category: "method",
+        pmidCount: 1,
+        maxConfidence: 1,
+        defaultSelected: false,
+      },
+    ]);
+  });
+
+  it("default-selects only the >=2-paper families, skipping the pmid_count = 1 ones", async () => {
+    mockScholarFamilyFindMany.mockResolvedValue([
+      familyRow("frequent", "method", 5),
+      familyRow("rare", "method", 1),
+    ]);
+    const opts = await loadOverviewSourceOptions("self01");
+    expect(opts.tools.map((t) => [t.toolName, t.defaultSelected])).toEqual([
+      ["frequent", true],
+      ["rare", false],
+    ]);
+  });
+
+  it("the empty-selection assembler path also honors the pmid_count floor", async () => {
+    mockScholarFamilyFindMany.mockResolvedValue([
+      familyRow("frequent", "method", 5, ["tool-a"]),
+      familyRow("rare", "method", 1),
+    ]);
+    // No explicit selection → default path → only the >=2 family flows to methods.
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.methods).toEqual([
+      { name: "frequent", category: "method", examples: ["tool-a"] },
     ]);
   });
 });

@@ -156,7 +156,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
  * a clear with no override returns `200 { cleared: false }`.
  */
 async function clearSelectedHighlights(params: {
-  session: { cwid: string; isSuperuser: boolean };
+  session: { cwid: string; isSuperuser: boolean; isCommsSteward: boolean };
   realCwid: string;
   impersonatedCwid: string | null;
   requestId: string | null;
@@ -222,7 +222,7 @@ async function clearSelectedHighlights(params: {
   // revalidate it (unlike the slug clear, which only flips on the next etl/ed).
   if (cleared) {
     const [profile] = await resolveAffectedProfiles("scholar", entityId, null);
-    if (profile) reflectOverviewEdit(profile.slug);
+    if (profile) await reflectOverviewEdit(profile.slug);
   }
 
   return editOk({ fieldName: "selectedHighlightPmids", cleared });

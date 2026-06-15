@@ -17,13 +17,17 @@
  * work (the ReciterAI-POC `pipeline_person_synopsis` quality gate). The scholar
  * can override the default through the Sources drawer (`selection`).
  *
- * `methods` (tools) and `facultyMetrics` arrive in C3 (the ETL that lands the
- * DynamoDB `TOOL#` / `FACULTY#` signal); until then they degrade to `[]` / null.
+ * `methods` are the scholar's #799 method families — the live `scholar_family`
+ * rollup, the SAME data the public Methods & tools panel shows (#886) — degrading
+ * to `[]` when the scholar has none. `facultyMetrics` arrives in C3 (the ETL that
+ * lands the DynamoDB `FACULTY#` signal); until then it is null.
  *
  * Read-only — this module performs NO write. Node-runtime only (Prisma).
  */
 import { db } from "@/lib/db";
+import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import {
+  OVERVIEW_METHOD_PMID_FLOOR,
   OVERVIEW_SELECTION_MAX_ITEMS,
   OVERVIEW_SELECTION_MAX_TOOLS,
   type OverviewSelection,
@@ -86,8 +90,12 @@ export type OverviewFacts = {
   }[];
   education: { degree: string; institution: string; field: string | null; year: number | null }[];
 
-  // --- tools / methods (C3 — `[]` until the TOOL# ETL lands) ---
-  methods: { name: string; category: string | null }[];
+  // --- methods (the scholar's #799 method families; `[]` when none) ---
+  /** The selected method families — `name` is the family label, `category` its
+   *  supercategory, and `examples` up to a few exemplar member-tool names the
+   *  model can ground concrete prose on (#886). Sourced from the live
+   *  `scholar_family` rollup, the same data the public Methods & tools panel shows. */
+  methods: { name: string; category: string | null; examples: string[] }[];
   /** Faculty-scale framing from ReciterAI `FACULTY#` (C3 — null until ingested). */
   facultyMetrics: {
     firstAuthorCount: number | null;
@@ -125,17 +133,23 @@ export type OverviewSourceFunding = {
   defaultSelected: boolean;
 };
 
-/** The `GET /api/edit/overview/source-options` payload (v3.1 §4). `tools` is
- *  empty until C3, so the drawer's Methods section stays hidden. */
+/** The `GET /api/edit/overview/source-options` payload (v3.1 §4). `tools` carries
+ *  the scholar's #799 method families (#886) — `[]` when the scholar has none, so
+ *  the drawer's Methods section stays hidden then. The shape is unchanged from the
+ *  C2 `scholar_tool` bucket so the drawer / selection / route are untouched. */
 export type OverviewSourceOptions = {
   publications: OverviewSourcePublication[];
   funding: OverviewSourceFunding[];
   tools: {
+    /** The method-family label — also the selection key (`selection.toolNames`). */
     toolName: string;
+    /** The family supercategory. */
     category: string | null;
     pmidCount: number;
+    /** Constant `1` for families (they carry no per-tool confidence); only orders
+     *  ties within the tool bucket. */
     maxConfidence: number;
-    /** Whether this tool is pre-checked when the drawer opens. */
+    /** Whether this family is pre-checked when the drawer opens (the #765 §2 floor). */
     defaultSelected: boolean;
   }[];
 };
@@ -164,17 +178,19 @@ function isLeadRole(role: string): boolean {
   return /^(pi\b|pi-subaward|co-pi)/i.test(role.trim());
 }
 
+
 /**
  * The default pre-check rule (shared by the assembler's empty-selection path and
  * the Sources drawer so the UI and the server agree). Lead-role active funding
  * is small + high-value, so it's kept first; first/last-author scored
  * publications (impact desc) fill the rest of the combined budget. Tools take
- * the top of their own separate budget. Pure.
+ * the top of their own separate budget, gated by the #765 §2 pmid_count floor.
+ * Pure.
  */
 function pickDefaultSelection(
   pubs: { pmid: string; isFirstOrLast: boolean }[],
   funding: { id: string; isLead: boolean }[],
-  tools: { toolName: string }[] = [],
+  tools: { toolName: string; pmidCount: number }[] = [],
   maxItems = REPRESENTATIVE_LIMIT,
   maxTools = OVERVIEW_SELECTION_MAX_TOOLS,
 ): { pmids: string[]; grantIds: string[]; toolNames: string[] } {
@@ -187,8 +203,12 @@ function pickDefaultSelection(
     .filter((p) => p.isFirstOrLast)
     .map((p) => p.pmid)
     .slice(0, remaining);
-  // Tools arrive pre-sorted (pmidCount desc); take the top of their own budget.
-  const toolNames = tools.map((t) => t.toolName).slice(0, maxTools);
+  // Tools arrive pre-sorted (pmidCount desc); take the top of their own budget,
+  // but only families above the #765 §2 honesty floor (≥ 2 publications).
+  const toolNames = tools
+    .filter((t) => t.pmidCount >= OVERVIEW_METHOD_PMID_FLOOR)
+    .map((t) => t.toolName)
+    .slice(0, maxTools);
   return { pmids, grantIds, toolNames };
 }
 
@@ -290,24 +310,74 @@ async function loadActiveFunding(cwid: string): Promise<
   }));
 }
 
-/** The scholar's tool/method rollup (ReciterAI `TOOL#` → `scholar_tool`),
- *  most-used first. Empty until C3's ETL has populated the table. */
-async function loadScholarTools(
-  cwid: string,
-): Promise<
-  { toolName: string; category: string | null; pmidCount: number; maxConfidence: number }[]
+/**
+ * The scholar's #799 method-family rollup (`scholar_family`), most-used first,
+ * mapped into the generator's tool-bucket shape so the drawer / selection /
+ * assembler pipeline is unchanged (#886). This is the SAME live data the public
+ * Methods & tools panel renders — `familyLabel` → `toolName` (the selection
+ * key), `supercategory` → `category`, the per-scholar publication count →
+ * `pmidCount` (which drives ranking and the #765 §2 ≥2 default floor), and a few
+ * `exemplarTools` for grounding. `maxConfidence` is a constant `1` — families
+ * carry no per-tool confidence; it only orders ties within the bucket.
+ *
+ * Reads ALL the scholar's own families — unlike the public panel it does NOT apply:
+ *   - the #801 SENSITIVITY gate — that is a public-viewer protection. The reader
+ *     is the scholar themselves OR a superuser / comms_steward authoring the bio
+ *     on their behalf (#844 widened the generator to admins — so this is NOT an
+ *     owner-only path). All are trusted internal viewers already entitled to see
+ *     the scholar's sensitive families under #866, so omitting the gate stays
+ *     within that trust boundary; and
+ *   - the `METHODS_LENS_ENABLED` public-render master flag — the generator needs
+ *     the DATA, which exists independent of the public lens rollout.
+ *
+ * The #800 SUPPRESSION overlay IS applied: a family the curators marked generic
+ * is non-distinctive grounding, and the public panel hides it too — grounding a
+ * bio on it would contradict the profile.
+ */
+async function loadScholarMethodFamilies(cwid: string): Promise<
+  {
+    toolName: string;
+    category: string | null;
+    pmidCount: number;
+    maxConfidence: number;
+    examples: string[];
+  }[]
 > {
-  const rows = await db.read.scholarTool.findMany({
+  const rows = await db.read.scholarFamily.findMany({
     where: { cwid },
-    orderBy: [{ pmidCount: "desc" }, { maxConfidence: "desc" }],
-    select: { toolName: true, category: true, pmidCount: true, maxConfidence: true },
+    orderBy: [{ pmidCount: "desc" }, { familyId: "asc" }],
+    // #879 D-19 LOCKED — do NOT add `definition` to this select. The generated
+    // family definition is RENDER-ONLY and must never enter the overview/bio
+    // generator's grounding (an LLM prompt). Family identity + counts only here.
+    select: {
+      familyId: true,
+      familyLabel: true,
+      supercategory: true,
+      pmidCount: true,
+      exemplarTools: true,
+    },
   });
-  return rows.map((r) => ({
-    toolName: r.toolName,
-    category: r.category,
-    pmidCount: r.pmidCount,
-    maxConfidence: decimalToNumber(r.maxConfidence) ?? 0,
-  }));
+  if (rows.length === 0) return [];
+
+  // #800 — drop curator-suppressed (generic) families: the public panel hides
+  // them, so they are not honest grounding for the bio either. Keyed on the
+  // stable (supercategory, family_label), the same overlay the lens applies.
+  const suppression = await db.read.familySuppressionOverlay.findMany({
+    select: { supercategory: true, familyLabel: true },
+  });
+  const suppressed = new Set(
+    suppression.map((o) => familyOverlayKey(o.supercategory, o.familyLabel)),
+  );
+
+  return rows
+    .filter((r) => !suppressed.has(familyOverlayKey(r.supercategory, r.familyLabel)))
+    .map((r) => ({
+      toolName: r.familyLabel,
+      category: r.supercategory,
+      pmidCount: r.pmidCount,
+      maxConfidence: 1,
+      examples: Array.isArray(r.exemplarTools) ? (r.exemplarTools as unknown[]).map(String) : [],
+    }));
 }
 
 /** Highest-score topic rationale per pmid for `cwid` ("why this work maps here"). */
@@ -357,23 +427,30 @@ export async function assembleOverviewFacts(
   });
   if (!scholar) return null;
 
-  const [candidatePubs, funding, scholarTools, publicationCount, yearsActive, topics, education] =
-    await Promise.all([
-      loadScoredCandidatePublications(cwid),
-      loadActiveFunding(cwid),
-      loadScholarTools(cwid),
-      countConfirmedPublications(cwid),
-      assembleYearsActive(cwid),
-      assembleTopics(cwid),
-      assembleEducation(cwid),
-    ]);
+  const [
+    candidatePubs,
+    funding,
+    methodFamilies,
+    publicationCount,
+    yearsActive,
+    topics,
+    education,
+  ] = await Promise.all([
+    loadScoredCandidatePublications(cwid),
+    loadActiveFunding(cwid),
+    loadScholarMethodFamilies(cwid),
+    countConfirmedPublications(cwid),
+    assembleYearsActive(cwid),
+    assembleTopics(cwid),
+    assembleEducation(cwid),
+  ]);
 
   // Resolve the effective selection. Explicit picks are ownership-filtered to the
   // candidate pools (validity + IDOR safety); an empty selection falls back to the
   // shared default rule so there is no dead-end empty state.
   const candidatePmidSet = new Set(candidatePubs.map((p) => p.pmid));
   const candidateGrantSet = new Set(funding.map((f) => f.id));
-  const candidateToolSet = new Set(scholarTools.map((t) => t.toolName));
+  const candidateToolSet = new Set(methodFamilies.map((t) => t.toolName));
 
   let selectedPmids: string[];
   let selectedGrantIds: string[];
@@ -386,7 +463,7 @@ export async function assembleOverviewFacts(
     selectedGrantIds = selection!.grantIds.filter((g) => candidateGrantSet.has(g));
     selectedToolNames = selection!.toolNames.filter((t) => candidateToolSet.has(t));
   } else {
-    const def = pickDefaultSelection(candidatePubs, funding, scholarTools);
+    const def = pickDefaultSelection(candidatePubs, funding, methodFamilies);
     selectedPmids = def.pmids;
     selectedGrantIds = def.grantIds;
     selectedToolNames = def.toolNames;
@@ -430,11 +507,12 @@ export async function assembleOverviewFacts(
       mechanism: f.mechanism,
     }));
 
-  // The selected tools (ReciterAI methods/instruments); empty when the ETL hasn't
-  // run or the scholar deselected them all.
-  const methods = scholarTools
+  // The selected method families (#799 `scholar_family`, #886); empty when the
+  // scholar has none or deselected them all. `examples` carry exemplar member-tool
+  // names so the model can ground concrete prose, not just the family label.
+  const methods = methodFamilies
     .filter((t) => selectedToolSet.has(t.toolName))
-    .map((t) => ({ name: t.toolName, category: t.category }));
+    .map((t) => ({ name: t.toolName, category: t.category, examples: t.examples }));
 
   const hasMetrics =
     scholar.hIndex !== null ||
@@ -470,18 +548,19 @@ export async function assembleOverviewFacts(
 
 /**
  * The Sources drawer candidate lists for `cwid` (v3.1 §4) — every scored pub,
- * every active award, and every tool, each flagged `defaultSelected` per the
- * shared default rule so the drawer's pre-checks match the server's
- * empty-selection behavior. `tools` is empty until C3's ETL has run.
+ * every active award, and every method family, each flagged `defaultSelected`
+ * per the shared default rule so the drawer's pre-checks match the server's
+ * empty-selection behavior. `tools` is empty when the scholar has no #799
+ * families, so the drawer's Methods section stays hidden then.
  */
 export async function loadOverviewSourceOptions(cwid: string): Promise<OverviewSourceOptions> {
-  const [candidatePubs, funding, scholarTools] = await Promise.all([
+  const [candidatePubs, funding, methodFamilies] = await Promise.all([
     loadScoredCandidatePublications(cwid),
     loadActiveFunding(cwid),
-    loadScholarTools(cwid),
+    loadScholarMethodFamilies(cwid),
   ]);
 
-  const def = pickDefaultSelection(candidatePubs, funding, scholarTools);
+  const def = pickDefaultSelection(candidatePubs, funding, methodFamilies);
   const defaultPmids = new Set(def.pmids);
   const defaultGrants = new Set(def.grantIds);
   const defaultTools = new Set(def.toolNames);
@@ -506,7 +585,9 @@ export async function loadOverviewSourceOptions(cwid: string): Promise<OverviewS
       endYear: f.endYear,
       defaultSelected: defaultGrants.has(f.id),
     })),
-    tools: scholarTools.map((t) => ({
+    // The drawer `tools[]` shape is unchanged (#886) — `examples` ride only in
+    // the FACTS grounding, not here, so the picker / route are untouched.
+    tools: methodFamilies.map((t) => ({
       toolName: t.toolName,
       category: t.category,
       pmidCount: t.pmidCount,

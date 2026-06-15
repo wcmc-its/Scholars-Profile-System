@@ -11,14 +11,17 @@
  *
  * No caching: `force-dynamic` + `noindex`, matching the rest of `/edit/*`.
  */
-import Link from "next/link";
-import { ChevronLeftIcon } from "lucide-react";
 import { redirect } from "next/navigation";
 
+import { AdminSubnav } from "@/components/edit/admin-subnav";
+import { AllUnitsDirectory } from "@/components/edit/all-units-directory";
 import { ManageableUnitsIndex } from "@/components/edit/manageable-units-index";
+import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { loadAllUnitsForFinder, loadManageableUnits } from "@/lib/edit/manageable-units";
+import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
+import { loadAllUnitsDirectory, loadManageableUnits } from "@/lib/edit/manageable-units";
+import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +37,15 @@ export default async function EditUnitsPage() {
   }
 
   const units = await loadManageableUnits(session.cwid, db.read);
-  const finderUnits = session.isSuperuser ? await loadAllUnitsForFinder(db.read) : [];
+  // A superuser AND a comms_steward (a global unit-content editor, comms-steward-
+  // profile-editing-spec.md §3b) both get the complete org-unit directory (#971)
+  // — they may edit any existing unit, not only ones they hold a grant on.
+  // Retired units stay superuser-only (the directory's includeRetired below),
+  // matching the retired gate in unit-edit-context.ts.
+  const canSeeAllUnitsDirectory = session.isSuperuser || session.isCommsSteward;
+  const directoryUnits = canSeeAllUnitsDirectory
+    ? await loadAllUnitsDirectory(db.read, { includeRetired: session.isSuperuser })
+    : [];
 
   // Back-link to the actor's own self-edit surface — only when they have a
   // (non-deleted) profile, so a staff superuser without one never hits a 404.
@@ -43,6 +54,14 @@ export default async function EditUnitsPage() {
     select: { deletedAt: true },
   });
   const selfEditHref = self && self.deletedAt === null ? "/edit" : null;
+  // The shared console tab strip (role-aware-navigation-entry-points-spec.md): the
+  // "Units" tab is active here, and every other surface the viewer can open is a
+  // peer tab — so `/edit/units` is no longer a navigational dead end. A superuser
+  // sees the full strip; a comms_steward sees Units + Method Families; a unit
+  // Owner/Curator sees Units + their My-Profile back-link (`superuserSurfaces`
+  // off). The pending-request count drives the superuser "URL requests" badge.
+  const pendingSlugRequests =
+    session.isSuperuser && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
 
   return (
     <div className="min-h-screen bg-[var(--background)]" data-slot="units-index-page">
@@ -55,18 +74,22 @@ export default async function EditUnitsPage() {
             WCM
           </span>
           <span className="font-semibold">Scholars Profile Console</span>
-          {selfEditHref ? (
-            <Link
-              href={selfEditHref}
-              className="ml-auto inline-flex items-center gap-1 text-sm text-white/80 hover:text-white"
-              data-testid="units-self-edit"
-            >
-              <ChevronLeftIcon className="size-3.5" aria-hidden />
-              My profile
-            </Link>
-          ) : null}
         </div>
       </header>
+
+      <AdminSubnav
+        active="units"
+        superuserSurfaces={session.isSuperuser}
+        // #986 — a comms_steward is a global profile editor, so it gets the
+        // Profiles tab here too (a plain unit owner/curator does not). A superuser
+        // already has it via `superuserSurfaces`.
+        profilesTab={session.isCommsSteward}
+        unitsTab
+        pendingSlugRequests={pendingSlugRequests}
+        administratorsTab={session.isSuperuser && isAdministratorsTabEnabled() ? 0 : null}
+        methodsTab={isMethodsTabVisible(session) ? 0 : null}
+        selfEditHref={selfEditHref}
+      />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
         <h1 className="mb-1 text-xl font-semibold">Units you manage</h1>
@@ -77,8 +100,13 @@ export default async function EditUnitsPage() {
         <ManageableUnitsIndex
           units={units}
           isSuperuser={session.isSuperuser}
-          finderUnits={finderUnits}
+          canFindAnyUnit={canSeeAllUnitsDirectory}
         />
+        {canSeeAllUnitsDirectory && (
+          <section className="mt-10">
+            <AllUnitsDirectory units={directoryUnits} isSuperuser={session.isSuperuser} />
+          </section>
+        )}
       </main>
     </div>
   );

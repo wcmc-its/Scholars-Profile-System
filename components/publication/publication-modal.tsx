@@ -14,9 +14,11 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { HelpCircle } from "lucide-react";
 import { CopyButton } from "@/components/publication/copy-button";
+import { PubJournal } from "@/components/publication/pub-html";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { methodologyHref } from "@/lib/methodology-anchors";
 import type {
+  PublicationDetailMethodFamily,
   PublicationDetailPayload,
   PublicationDetailTopic,
 } from "@/lib/api/publication-detail";
@@ -317,7 +319,8 @@ function ModalContent({
   titleId: string;
 }) {
   const { pub, topics, citingPubs, citingPubsTotal } = payload;
-  const citationContext = formatCitationContext(pub);
+  const { journal: citationJournal, tail: citationTail } =
+    formatCitationContext(pub);
   return (
     <>
       <header className="border-border relative shrink-0 border-b p-6 pr-12">
@@ -326,8 +329,12 @@ function ModalContent({
           className="text-lg font-semibold leading-snug"
           dangerouslySetInnerHTML={{ __html: sanitizePubTitle(pub.title) }}
         />
-        {citationContext ? (
-          <p className="text-muted-foreground mt-1 text-sm">{citationContext}</p>
+        {citationJournal || citationTail ? (
+          <p className="text-muted-foreground mt-1 text-sm">
+            <PubJournal as="span" value={citationJournal} />
+            {citationJournal && citationTail ? " · " : ""}
+            {citationTail}
+          </p>
         ) : null}
         <IdentifiersLine
           pmid={pub.pmid}
@@ -349,6 +356,7 @@ function ModalContent({
           />
           <TopicsSection topics={topics} currentTopicSlug={currentTopicSlug} />
           <MeshSection meshTerms={pub.meshTerms} />
+          <MethodsSection families={payload.methodFamilies} />
           <CitingPubsSection
             pmid={pub.pmid}
             citationCount={pub.citationCount}
@@ -361,7 +369,10 @@ function ModalContent({
   );
 }
 
-function formatCitationContext(pub: PublicationDetailPayload["pub"]): string {
+function formatCitationContext(pub: PublicationDetailPayload["pub"]): {
+  journal: string | null;
+  tail: string;
+} {
   const journal = pub.journal ? pub.journal : null;
   const tail: string[] = [];
   if (pub.year !== null && pub.year !== undefined) tail.push(String(pub.year));
@@ -370,10 +381,7 @@ function formatCitationContext(pub: PublicationDetailPayload["pub"]): string {
     tail.push(vi);
   }
   if (pub.pages) tail.push(pub.pages);
-  if (!journal && tail.length === 0) return "";
-  if (!journal) return tail.join(" · ");
-  if (tail.length === 0) return journal;
-  return `${journal} · ${tail.join(" · ")}`;
+  return { journal, tail: tail.join(" · ") };
 }
 
 const AUTHORS_TRUNCATE = 8;
@@ -616,6 +624,47 @@ function MeshSection({
   );
 }
 
+/**
+ * #917 — method families (#799/#819) attributed to this pmid, aggregated across
+ * the paper's WCM authors and already #800/#801-gated server-side. Labels link to
+ * the cross-scholar Method pages when those are enabled (`href` set), else render
+ * as plain text. Sparse like the synopsis: the whole section is omitted when the
+ * paper has no surfaced family (or the Methods lens is off → empty array).
+ */
+function MethodsSection({
+  families,
+}: {
+  families: PublicationDetailMethodFamily[];
+}) {
+  if (families.length === 0) return null;
+  return (
+    <section>
+      <SectionHeading>Methods</SectionHeading>
+      <ul className="mt-2 flex flex-wrap gap-1.5">
+        {families.map((f) =>
+          f.href ? (
+            <li key={`${f.supercategory}::${f.familyLabel}`}>
+              <Link
+                href={f.href}
+                className="bg-muted rounded px-2 py-0.5 text-xs text-[var(--color-accent-slate)] hover:underline"
+              >
+                {f.familyLabel}
+              </Link>
+            </li>
+          ) : (
+            <li
+              key={`${f.supercategory}::${f.familyLabel}`}
+              className="bg-muted text-foreground/80 rounded px-2 py-0.5 text-xs"
+            >
+              {f.familyLabel}
+            </li>
+          ),
+        )}
+      </ul>
+    </section>
+  );
+}
+
 function IdentifiersLine({
   pmid,
   pmcid,
@@ -823,9 +872,7 @@ function CitingPubsSection({
                   dangerouslySetInnerHTML={{ __html: sanitizePubTitle(c.title) }}
                 />
                 <div className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
-                  {c.journal ? (
-                    <em className="not-italic">{c.journal}</em>
-                  ) : null}
+                  <PubJournal value={c.journal} className="not-italic" />
                   {c.journal && c.year ? (
                     <span aria-hidden="true">·</span>
                   ) : null}

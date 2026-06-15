@@ -12,6 +12,8 @@ import {
   resolveDeptLeadershipBoost,
   resolveFundingConceptEnabled,
   resolveFundingMeshGateField,
+  resolvePeopleConceptGrantAxis,
+  resolvePeopleConceptPrecount,
   resolveSearchShellStreaming,
 } from "@/lib/api/search-flags";
 
@@ -136,6 +138,36 @@ describe("resolveFundingConceptEnabled (#295)", () => {
   });
 });
 
+describe("resolvePeopleConceptGrantAxis (#921)", () => {
+  const original = process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS;
+
+  beforeEach(() => {
+    delete process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS;
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS;
+    else process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS = original;
+  });
+
+  it("defaults to false (dark) when the env is unset", () => {
+    expect(resolvePeopleConceptGrantAxis()).toBe(false);
+  });
+
+  it("is on only for exactly 'on'", () => {
+    process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS = "on";
+    expect(resolvePeopleConceptGrantAxis()).toBe(true);
+  });
+
+  it("stays off for any other value (opt-in semantics)", () => {
+    process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS = "ON";
+    expect(resolvePeopleConceptGrantAxis()).toBe(false);
+    process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS = "true";
+    expect(resolvePeopleConceptGrantAxis()).toBe(false);
+    process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS = "";
+    expect(resolvePeopleConceptGrantAxis()).toBe(false);
+  });
+});
+
 describe("resolveDeptLeadershipBoost (#532)", () => {
   const original = process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST;
 
@@ -229,5 +261,36 @@ describe("resolveSearchShellStreaming (#861)", () => {
     expect(resolveSearchShellStreaming()).toBe(false);
     process.env.SEARCH_SHELL_STREAMING = "";
     expect(resolveSearchShellStreaming()).toBe(false);
+  });
+});
+
+describe("resolvePeopleConceptPrecount (B2)", () => {
+  const original = process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT;
+  beforeEach(() => {
+    delete process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT;
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT;
+    else process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT = original;
+  });
+
+  it("defaults to true when unset (ships dark — today's dedicated pre-count path)", () => {
+    expect(resolvePeopleConceptPrecount()).toBe(true);
+  });
+
+  it("is false only for exactly 'off' (enables the reordered no-pre-count path)", () => {
+    process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT = "off";
+    expect(resolvePeopleConceptPrecount()).toBe(false);
+  });
+
+  it("is true for any value that is not 'off' (default-on `!== \"off\"` lever)", () => {
+    // Mirrors the other default-on presentation/perf flags: only the literal
+    // 'off' flips it; everything else (incl. casing variants) keeps it on.
+    process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT = "on";
+    expect(resolvePeopleConceptPrecount()).toBe(true);
+    process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT = "OFF";
+    expect(resolvePeopleConceptPrecount()).toBe(true);
+    process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT = "";
+    expect(resolvePeopleConceptPrecount()).toBe(true);
   });
 });

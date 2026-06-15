@@ -1,13 +1,16 @@
 /**
  * OverviewSourceDrawer — the "Sources" trigger row + the slide-out drawer that
- * holds the source picker (#742 v3.1 §3). The trigger reads as a sentence about
- * what will ground the bio ("5 publications · 6 awards"); clicking it opens a
- * right-hand sheet with the pickable checklists ({@link OverviewIncludePicker}).
+ * holds the source picker (#742 v3.1 §3 / #875 §5). The trigger reads as a
+ * sentence about what will ground the bio ("5 publications · 6 awards");
+ * clicking it opens a right-hand sheet with the pickable checklists
+ * ({@link OverviewIncludePicker}).
  *
- * Owns only the open/closed state and the count summary; the selection itself
- * lives in the Generator tab (lifted to the card parent), so the choice persists
- * across drawer open/close and rides along into the next Generate. **Done just
- * closes** — nothing regenerates (v3.1 §3.4).
+ * #875 §5 — the drawer is now **buffered**. It holds a LOCAL copy of the
+ * selection while open; **Done commits** it to the parent (calls
+ * `onSelectionChange`); **Cancel / X / Escape / click-outside DISCARD** (close
+ * without committing). This is a behavior change from the prior live-lifted
+ * selection — the parent selection only updates on Done. The in-drawer live
+ * budget counter reads the LOCAL buffer.
  */
 "use client";
 
@@ -25,7 +28,11 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import type { OverviewSourceOptions } from "@/lib/edit/overview-facts";
-import { OVERVIEW_SELECTION_MAX_ITEMS, type OverviewSelection } from "@/lib/edit/overview-params";
+import {
+  OVERVIEW_SELECTION_MAX_ITEMS,
+  OVERVIEW_SELECTION_MAX_TOOLS,
+  type OverviewSelection,
+} from "@/lib/edit/overview-params";
 
 type OverviewSourceDrawerProps = {
   /** The candidate lists; `null` until the source-options fetch resolves. */
@@ -39,7 +46,7 @@ function plural(n: number, singular: string): string {
   return `${n} ${singular}${n === 1 ? "" : "s"}`;
 }
 
-/** The trigger's one-line summary of the current selection. */
+/** The trigger's one-line summary of the current (committed) selection. */
 function summarize(selection: OverviewSelection, showTools: boolean): string {
   const parts = [
     plural(selection.pmids.length, "publication"),
@@ -49,6 +56,17 @@ function summarize(selection: OverviewSelection, showTools: boolean): string {
   return parts.join(" · ");
 }
 
+/** The combined live budget counter (§5): "14 of 25 papers + awards · 9 of 10
+ *  methods", the methods band shown only when tools exist. */
+function budgetLabel(selection: OverviewSelection, showTools: boolean): string {
+  const items = selection.pmids.length + selection.grantIds.length;
+  let label = `${items} of ${OVERVIEW_SELECTION_MAX_ITEMS} papers + awards`;
+  if (showTools) {
+    label += ` · ${selection.toolNames.length} of ${OVERVIEW_SELECTION_MAX_TOOLS} methods`;
+  }
+  return label;
+}
+
 export function OverviewSourceDrawer({
   options,
   selection,
@@ -56,16 +74,28 @@ export function OverviewSourceDrawer({
   disabled = false,
 }: OverviewSourceDrawerProps) {
   const [open, setOpen] = React.useState(false);
+  // The buffered local copy edited while the drawer is open; seeded from the
+  // committed selection each time the drawer opens, committed only on Done.
+  const [draft, setDraft] = React.useState<OverviewSelection>(selection);
 
   const loaded = options !== null;
   const showTools = (options?.tools.length ?? 0) > 0;
-  const itemsSelected = selection.pmids.length + selection.grantIds.length;
+
+  function openDrawer() {
+    setDraft(selection); // seed the buffer from the committed selection
+    setOpen(true);
+  }
+
+  function commit() {
+    onSelectionChange(draft);
+    setOpen(false);
+  }
 
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={openDrawer}
         disabled={disabled || !loaded}
         className="border-apollo-border bg-apollo-surface hover:bg-apollo-surface-2 flex w-full items-center justify-between gap-3 rounded-lg border px-4 py-3 text-left transition-colors disabled:opacity-60"
         data-testid="overview-sources-trigger"
@@ -85,41 +115,47 @@ export function OverviewSourceDrawer({
         </span>
       </button>
 
-      <Sheet open={open} onOpenChange={setOpen}>
+      {/* `onOpenChange(false)` fires from X / Escape / click-outside — all of
+          which DISCARD (just close, the buffer is dropped). Only Done commits. */}
+      <Sheet open={open} onOpenChange={(next) => setOpen(next)}>
         <SheetContent side="right" className="sm:max-w-md" data-testid="overview-source-drawer">
           <SheetHeader className="flex-row items-center justify-between pr-12">
-            <SheetTitle>Sources for your bio</SheetTitle>
+            <SheetTitle>Sources for your overview</SheetTitle>
             <span
               className="bg-apollo-maroon/10 text-apollo-maroon rounded-md px-2.5 py-1 text-xs font-medium"
               data-testid="overview-sources-counter"
             >
-              {itemsSelected} / {OVERVIEW_SELECTION_MAX_ITEMS} selected
+              {budgetLabel(draft, showTools)}
             </span>
           </SheetHeader>
           <SheetDescription className="sr-only">
-            Pick which publications, funding awards, and methods ground your generated bio.
+            Pick which publications, funding awards, and methods ground your generated overview.
           </SheetDescription>
 
           <div className="flex-1 overflow-y-auto p-4">
             {options && (
               <OverviewIncludePicker
                 options={options}
-                selection={selection}
-                onChange={onSelectionChange}
+                selection={draft}
+                onChange={setDraft}
                 disabled={disabled}
               />
             )}
           </div>
 
           <SheetFooter className="flex-row items-center justify-between">
-            <span className="text-muted-foreground max-w-[270px] text-xs">
-              Up to {OVERVIEW_SELECTION_MAX_ITEMS} papers + awards{showTools ? ", 10 methods" : ""}.
-              A focused set produces a sharper bio.
-            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setOpen(false)}
+              data-testid="overview-sources-cancel"
+            >
+              Cancel
+            </Button>
             <Button
               type="button"
               variant="apollo"
-              onClick={() => setOpen(false)}
+              onClick={commit}
               data-testid="overview-sources-done"
             >
               Done

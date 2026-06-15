@@ -77,6 +77,25 @@ describe("getDepartmentsList", () => {
     });
   });
 
+  it("falls back to the external-leader name when the chair is not a WCM scholar", async () => {
+    // N1540 (Rehabilitation Medicine) is in lib/external-leaders.ts -> Joel
+    // Stein (jos7021), who has no scholar row (Columbia primary appointment).
+    // Browse must still show the chair (rendered as plain text, no link).
+    mockDepartmentFindMany.mockResolvedValue([
+      {
+        code: "N1540",
+        name: "Rehabilitation Medicine",
+        slug: "rehabilitation-medicine",
+        scholarCount: 123,
+        chairCwid: "jos7021",
+      },
+    ]);
+    mockScholarFindMany.mockResolvedValue([]); // jos7021 is not a scholar
+    const result = await getDepartmentsList();
+    expect(result[0].chairName).toBe("Joel Stein");
+    expect(result[0].chairSlug).toBeNull();
+  });
+
   it("returns chairName: null when chairCwid is null (absence-as-default)", async () => {
     mockDepartmentFindMany.mockResolvedValue([
       { code: "PED", name: "Pediatrics", slug: "pediatrics", scholarCount: 80, chairCwid: null },

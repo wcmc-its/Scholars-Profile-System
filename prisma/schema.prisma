@@ -27,6 +27,11 @@ model Scholar {
   primaryTitle           String?   @map("primary_title") @db.VarChar(255)
   primaryDepartment      String?   @map("primary_department") @db.VarChar(255)
   email                  String?   @db.VarChar(255)
+  /// Effective email release audience derived from the multi-valued Web Directory
+  /// attribute `weillCornellEduReleaseCode;mail` (most-permissive-wins, fail-closed).
+  /// 'public' | 'institution' | 'none'. NULL until the first ED ETL backfill; treated
+  /// as 'none' (fail-closed) by the display/export gate.
+  emailVisibility        String?   @map("email_visibility") @db.VarChar(16)
   headshotUrl            String?   @map("headshot_url") @db.VarChar(512)
   overview               String?   @db.Text
   overviewUpdatedAt      DateTime? @map("overview_updated_at")
@@ -233,6 +238,115 @@ model PostdocMentorRelationship {
   @@index([mentorCwid])
   @@index([menteeCwid])
   @@map("postdoc_mentor_relationship")
+}
+
+/// Issue #443 — Pre-computed per-(mentor, mentee) co-publication counts, bridged
+/// from WCM ReciterDB via S3 because the SPS VPC can't reach ReciterDB to run the
+/// live co-pub query at request time (`getMenteesForMentor`). The export step
+/// (`etl:mentoring:export-copubs`, run WCM-side) computes the count + a 3-pub
+/// preview from `analysis_summary_author`/`_article` and writes NDJSON to S3; the
+/// import step (`etl:mentoring:import-copubs`, run in-VPC) upserts this table.
+/// The read layer reads this instead of the live query when
+/// `MENTORING_COPUB_BRIDGE=on` (import-then-flip).
+///
+/// No FK to Scholar — mentees are frequently unlinked alumni with no local
+/// Scholar row (~75% of co-pub-bearing mentees, GH #181), identical to how the
+/// mentor-relationship tables are handled. Composite PK (mentor, mentee); the
+/// read query filters mentor= + mentee IN(), served by the PK's leading column.
+model MenteeCopublication {
+  mentorCwid  String   @map("mentor_cwid") @db.VarChar(32)
+  menteeCwid  String   @map("mentee_cwid") @db.VarChar(32)
+  /// Number of publications co-authored by the mentor and this mentee.
+  count       Int      @map("copub_count")
+  /// Up to 3 most-recent shared publications for the inline chip expansion
+  /// (#185), shape `[{ pmid, title, journal, year }]` (matches `CoPublication`).
+  preview     Json
+  refreshedAt DateTime @default(now()) @map("refreshed_at")
+
+  @@id([mentorCwid, menteeCwid])
+  @@map("mentee_copublication")
+}
+
+/// Issue #928 — AOC / med-student mentee bridge. Mirrors ReciterDB
+/// `reporting_students_mentors` rows into Aurora so the in-VPC app can render
+/// AOC mentee chips without the request-time ReciterDB query that
+/// `getMenteesForMentor` / `getMentorMenteePair` otherwise run (the SPS VPC
+/// can't reach ReciterDB, so that query silently drops AOC chips in-VPC).
+/// Exported WCM-side (`etl:mentoring:export-copubs` → `mentoring/aoc-mentees.ndjson`)
+/// and loaded in-VPC by `etl:mentoring:import-aoc`; read when
+/// `MENTORING_COPUB_BRIDGE=on` (import-then-flip).
+///
+/// Raw mirror: a (mentor, mentee) pair can appear under several programs
+/// (e.g. AOC + AOC-2025), so rows are NOT collapsed here — the read path
+/// collapses per-CWID exactly as it does for the live query. No natural
+/// per-pair key, so a surrogate `id` PK plus a full truncate-and-load import.
+/// No FK to Scholar — AOC students are frequently unlinked alumni (GH #181).
+model AocMentee {
+  id             Int      @id @default(autoincrement())
+  mentorCwid     String   @map("mentor_cwid") @db.VarChar(32)
+  menteeCwid     String   @map("mentee_cwid") @db.VarChar(32)
+  firstName      String?  @map("first_name") @db.VarChar(255)
+  lastName       String?  @map("last_name") @db.VarChar(255)
+  graduationYear Int?     @map("graduation_year")
+  programType    String?  @map("program_type") @db.VarChar(64)
+  refreshedAt    DateTime @default(now()) @map("refreshed_at")
+
+  @@index([mentorCwid], map: "aoc_mentee_mentor_cwid_idx")
+  @@index([mentorCwid, menteeCwid], map: "aoc_mentee_mentor_mentee_idx")
+  @@map("aoc_mentee")
+}
+
+/// Issue #928 — full mentor↔mentee co-publication list bridge. One row per
+/// (mentor, mentee, pmid); `pub` holds the raw `CoPublicationFull` JSON
+/// (title/journal/year/doi/pmcid/citation count/abstract + the full author
+/// list). Stored PRE-suppression — the read path re-applies local publication
+/// suppression (`loadPublicationSuppressions`/`resolveDarkPmids`/`isAuthorHidden`)
+/// since suppression is env-specific and changes independently of this bridge.
+/// Exported WCM-side (`etl:mentoring:export-copubs` → `mentoring/copub-list.ndjson`)
+/// and loaded in-VPC by `etl:mentoring:import-copub-list`; read by
+/// `getCoPublications` when `MENTORING_COPUB_BRIDGE=on`. `pubYear` is
+/// denormalized for DB-side ordering (year desc, pmid desc — matches the live
+/// query). No FK to Scholar/Publication (alumni mentees, GH #181).
+model MenteeCopublicationPub {
+  mentorCwid  String   @map("mentor_cwid") @db.VarChar(32)
+  menteeCwid  String   @map("mentee_cwid") @db.VarChar(32)
+  pmid        Int
+  pubYear     Int?     @map("pub_year")
+  pub         Json
+  refreshedAt DateTime @default(now()) @map("refreshed_at")
+
+  @@id([mentorCwid, menteeCwid, pmid])
+  @@index([mentorCwid, menteeCwid], map: "mentee_copublication_pub_pair_idx")
+  @@map("mentee_copublication_pub")
+}
+
+/// Issue #928 — publication-modal cited-by BRIDGE. The modal's "Cited by" list +
+/// total are a LIVE WCM ReciterDB query (`analysis_nih_cites` joined to
+/// `analysis_summary_article`, `lib/api/publication-detail.ts`) the in-VPC app
+/// can't reach, so they degrade to "temporarily unavailable" in staging/prod
+/// (#443). This pre-computes ONE row per CITED pmid: the full NIH-cite `total`
+/// plus the same ≤500-most-recent citing-pub list the modal renders, stored as
+/// JSON — NOT the full `(cited, citing)` edge list (tens of millions of rows).
+/// Exported WCM-side (`etl:mentoring:export-citing` → `citations/citing.ndjson`)
+/// and loaded in-VPC by `etl:mentoring:import-citing`; read by
+/// `getPublicationDetail`/`getCitingPublicationsForCsv` when
+/// `PUBLICATION_CITING_BRIDGE=on`. An empty table degrades honestly back to
+/// "temporarily unavailable" (the read does one cheap global existence probe),
+/// so a flag flipped before the import never shows fake zeros. No FK to
+/// Publication: `citingPubs` are citer pmids that need not be WCM publications.
+model PublicationCiting {
+  /// The CITED pmid (matches `Publication.pmid` numerically; int form of the
+  /// reciterdb `analysis_nih_cites.cited_pmid` column).
+  pmid        Int      @id
+  /// Full count of rows in `analysis_nih_cites` for this `cited_pmid` (may exceed
+  /// the ≤500 stored in `citingPubs` — drives the "N total" subhead).
+  total       Int
+  /// Up to 500 most-recent citing pubs `[{ pmid, title, journal, year }]`,
+  /// publicationDate desc — the exact shape `PublicationDetailCitingPub` renders.
+  citingPubs  Json     @map("citing_pubs")
+  refreshedAt DateTime @default(now()) @map("refreshed_at")
+
+  @@map("publication_citing")
 }
 
 /// Issue #195 — Per-CWID PhD program record sourced from ED's
@@ -767,6 +881,14 @@ model Department {
   name         String   @db.VarChar(255)
   slug         String   @unique @db.VarChar(255)
   description  String?  @db.Text
+  /// Curated full / ceremonial display name (e.g. ED `name` "Library" ->
+  /// "Samuel J. Wood Library"). NULL = use `name`. Seeded on CREATE from
+  /// lib/department-names.ts; the ED ETL NEVER writes it on UPDATE, so renames
+  /// survive every refresh. Resolved via lib/org-unit-names.ts:officialUnitName.
+  officialName String?  @map("official_name") @db.VarChar(255)
+  /// Curated short / common display name for facet chips (e.g. "Medicine").
+  /// NULL = use `name`. Same ED-preserving contract as officialName.
+  compactName  String?  @map("compact_name") @db.VarChar(255)
   /// Browse-page grouping bucket. Hand-curated via lib/department-categories.ts;
   /// the ED ETL preserves existing values rather than overwriting, so manual
   /// reclassification sticks across refreshes. Display label mapping ("mixed"
@@ -823,6 +945,13 @@ model Center {
   name          String   @db.VarChar(255)
   slug          String   @unique @db.VarChar(255)
   description   String?  @db.Text
+  /// Curated names, symmetric with Department (lib/org-unit-names.ts). A center
+  /// is manually-owned — no ETL fights its `name` — so `name` already serves as
+  /// the official name and `officialName` is typically NULL (resolver falls back
+  /// to `name`). `compactName` carries the short facet label (e.g. "Precision
+  /// Medicine" for "Englander Institute for Precision Medicine").
+  officialName  String?  @map("official_name") @db.VarChar(255)
+  compactName   String?  @map("compact_name") @db.VarChar(255)
   /// Presentation kind: "center" (default) or "institute". Drives the badge
   /// color in autocomplete and search results — institutes (typically NCI/NIH-
   /// designated, larger, more endowed) get their own teal badge; centers get
@@ -1102,8 +1231,15 @@ model CoiGapCandidate {
   status           String    @default("new") @db.VarChar(16)
   firstSeenAt      DateTime  @default(now()) @map("first_seen_at")
   lastSeenAt       DateTime  @default(now()) @map("last_seen_at")
-  /// When the scholar acted (dismissed/acknowledged). Null until reviewed.
+  /// When the scholar acted (feedback recorded). Null until reviewed.
   reviewedAt       DateTime? @map("reviewed_at")
+  /// Research-grade reason captured with a terminal feedback action (PURE SIGNAL —
+  /// records intent + stops the nag, no workflow/hand-off). will_disclose → status
+  /// `acknowledged`; historical | invalid → status `dismissed`. Null for system
+  /// states (new/resolved) and until the scholar responds. Splitting historical
+  /// vs invalid is what makes the data usable for a suggestion-quality paper —
+  /// see `docs/coi-gap-feedback-spec.md` and `lib/coi-gap/feedback.ts`.
+  feedbackReason   String?   @map("feedback_reason") @db.VarChar(24)
 
   @@unique([cwid, pmid, normalizedEntity], name: "cwid_pmid_entity")
   @@index([cwid, status])
@@ -1136,6 +1272,19 @@ model SlugHistory {
 
 /// ETL run log (Q5'). Tracks per-source success/failure for monitoring.
 /// CloudWatch alarm trigger in production: max(completed_at) per source < now - 26h.
+/// ED-sourced display names for `comms_steward` CWIDs that have no `Scholar`
+/// row of their own (e.g. external-affairs staff like dwd2001). Populated by the
+/// steward-name bridge (`etl:ed:import-steward-names`, fed by the WCM-side
+/// export), read by the "View as" banner + candidate list so a steward shows a
+/// name instead of a bare CWID. comms-steward-profile-editing-spec.md §5.
+model StewardDirectory {
+  cwid        String   @id @db.VarChar(32)
+  displayName String   @map("display_name") @db.VarChar(255)
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("steward_directory")
+}
+
 model EtlRun {
   id                      String    @id @default(uuid()) @db.VarChar(64)
   source                  String    @db.VarChar(64) // ED | ASMS | InfoEd | ReCiter | COI | PubMedRetractions | ReCiterAI-projection | OpenSearch-index | MeSH | MeshAnchor | MeshAlias
@@ -1528,6 +1677,19 @@ model ScholarFamily {
   /// The `manifest.sha256` of the artifact this row was loaded from — lets a
   /// family-id renumber be detected per refresh (no semantic taxonomy_version).
   sourceArtifactSha String?  @map("source_artifact_sha") @db.VarChar(64)
+  /// #879 — generated 1–2 sentence capability gloss for the family, passthrough
+  /// from the A2 taxonomy `families[].definition` (schema tools-a2-v3, ReciterAI).
+  /// Family-level (identical across a family's scholar rows); denormalized here the
+  /// same way `family_label`/`exemplar_tools` are, joined by `family_id` at ETL
+  /// time. RENDER-ONLY — never re-fed into any LLM/embedding/retrieval (the #886
+  /// overview generator reads a projection without it). Nullable: a pre-v3 artifact
+  /// or a family with no generated gloss leaves it null; the next full-replace
+  /// ETL backfills it.
+  definition        String?  @db.Text
+  /// #879 — provenance for `definition`: "generated" when ReciterAI produced one,
+  /// else null. The render layer gates the "AI-generated" disclaimer on
+  /// `definition_source === "generated"`; stored raw (not coerced) like a tier.
+  definitionSource  String?  @map("definition_source") @db.VarChar(32)
   refreshedAt       DateTime @default(now()) @map("refreshed_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
@@ -1556,6 +1718,10 @@ model FamilySuppressionOverlay {
   familyLabel   String   @map("family_label") @db.VarChar(255)
   sourceNote    String?  @map("source_note") @db.Text
   refreshedAt   DateTime @default(now()) @map("refreshed_at")
+  /// Provenance so the seed reseed (`etl/family-sensitivity`) never clobbers a
+  /// comms-steward edit: 'seed' = curated CSV bootstrap, 'steward' = a tier set
+  /// from the /edit/methods surface. The reseed upserts only `source='seed'`.
+  source        String   @default("seed") @db.VarChar(16)
 
   @@id([supercategory, familyLabel])
   @@map("family_suppression_overlay")
@@ -1573,9 +1739,35 @@ model FamilySensitivityOverlay {
   familyLabel   String   @map("family_label") @db.VarChar(255)
   sourceNote    String?  @map("source_note") @db.Text
   refreshedAt   DateTime @default(now()) @map("refreshed_at")
+  /// Provenance so the seed reseed never clobbers a comms-steward edit:
+  /// 'seed' = curated CSV bootstrap, 'steward' = a tier set from /edit/methods.
+  /// The reseed upserts only `source='seed'` rows.
+  source        String   @default("seed") @db.VarChar(16)
 
   @@id([supercategory, familyLabel])
   @@map("family_sensitivity_overlay")
+}
+
+/// Comms-steward Method-Family surfacing ledger
+/// (`docs/comms-steward-methods-visibility-spec.md` §5/§6). A deterministic,
+/// allow-by-default review queue: the surfacing pass decorates every distinct
+/// `(supercategory, family_label)` in `scholar_family` with a structural or
+/// lexical animal-model signal so a steward can review it. Keyed on the STABLE
+/// family identity, independent of overlay membership — a family can be flagged
+/// yet still public. NEVER changes a tier and NEVER hides anything; it only
+/// records the signal, when it was first/last seen, and whether a steward has
+/// cleared the nag (`reviewedAt`, which leaves the tier untouched).
+model FamilyReviewFlag {
+  supercategory  String    @db.VarChar(128)
+  familyLabel    String    @map("family_label") @db.VarChar(255)
+  reason         String    @db.VarChar(64) // e.g. 'supercategory:animal_cell_models', 'term:mouse'
+  firstSeenAt    DateTime  @map("first_seen_at") // for the "new" signal
+  lastSeenAt     DateTime  @map("last_seen_at")
+  reviewedAt     DateTime? @map("reviewed_at") // steward cleared the nag (tier may stay public)
+  reviewedByCwid String?   @map("reviewed_by_cwid") @db.VarChar(32)
+
+  @@id([supercategory, familyLabel])
+  @@map("family_review_flag")
 }
 
 /// A scholar's request for a personalized profile slug (#497 PR-3,

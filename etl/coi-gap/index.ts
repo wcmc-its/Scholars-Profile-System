@@ -74,6 +74,22 @@ async function affectedCwids(watermark: Date | null): Promise<string[]> {
   });
   for (const l of linkChanged) if (l.cwid) set.add(l.cwid);
 
+  // Scholars with an ACTIVE persisted candidate (new/acknowledged) — reprocess
+  // them every incremental run so a gap whose underlying confirmed authorship or
+  // conflict statement was DELETED gets reconciled to "resolved". A deletion
+  // leaves no `lastRefreshedAt > watermark` trail (the row is simply gone — the
+  // reciter ETL is delete-and-reinsert, and a deleted statement disappears), so
+  // the three change-scans above can't detect a shrunk input set; the stale High
+  // gap would keep nagging until a `--full` run, of which none is scheduled
+  // (#988). The active set is small (only surfaced gaps), and `reconcileCandidates`
+  // is a no-op when the recompute is unchanged, so this is cheap.
+  const withActive = await db.write.coiGapCandidate.findMany({
+    where: { status: { in: ["new", "acknowledged"] } },
+    distinct: ["cwid"],
+    select: { cwid: true },
+  });
+  for (const c of withActive) set.add(c.cwid);
+
   return [...set];
 }
 
@@ -97,7 +113,17 @@ async function main() {
     let processed = 0;
     let upserted = 0;
     let resolved = 0;
-    for (const cwid of cwids) {
+
+    // Each scholar's compute → reconcile → write is independent, and the wall
+    // clock is dominated by per-scholar Aurora round-trips (most scholars have no
+    // gaps but still pay the read latency). Running a bounded pool of scholars in
+    // parallel cuts wall-clock ~CONCURRENCY×. The cap stays below the mariadb pool
+    // (connectionLimit 15, lib/db-url.ts) so workers don't starve each other on
+    // connections. The shared counters mutate only synchronously between awaits
+    // (JS is single-threaded), so there is no data race.
+    const CONCURRENCY = 10;
+
+    async function processScholar(cwid: string): Promise<void> {
       const fresh = await computeScholarGaps(cwid);
       const existingRows = await db.write.coiGapCandidate.findMany({
         where: { cwid },
@@ -134,6 +160,12 @@ async function main() {
             sourceSentence: u.sourceSentence,
             status: u.status,
             lastSeenAt: new Date(),
+            // #988 — a reopened (resolved → new) gap must shed the prior review's
+            // feedbackReason/reviewedAt so an active "new" row never carries a stale
+            // reason (the audit `beforeValues` would otherwise report one). Only
+            // "new" clears; an acknowledged/dismissed row keeps its reason. A row
+            // already "new" has null here, so this is a no-op for the common case.
+            ...(u.status === "new" ? { feedbackReason: null, reviewedAt: null } : {}),
           },
         });
       }
@@ -152,7 +184,11 @@ async function main() {
       processed++;
       upserted += upserts.length;
       resolved += resolve.length;
-      if (processed % 200 === 0) console.log(`  ...${processed}/${cwids.length}`);
+      if (processed % 500 === 0) console.log(`  ...${processed}/${cwids.length}`);
+    }
+
+    for (const batch of chunks(cwids, CONCURRENCY)) {
+      await Promise.all(batch.map((cwid) => processScholar(cwid)));
     }
 
     await db.write.etlRun.update({

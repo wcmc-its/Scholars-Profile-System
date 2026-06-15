@@ -898,6 +898,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "AlarmDescription": "SPS CloudFront-invalidation reconciler (prod) -- run failed (>=1 pending edge purge could not be replayed).",
         "AlarmName": "sps-cdn-reconcile-status-prod",
         "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 2,
         "Dimensions": [
           {
             "Name": "StateMachineArn",
@@ -906,7 +907,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             },
           },
         ],
-        "EvaluationPeriods": 1,
+        "EvaluationPeriods": 2,
         "MetricName": "ExecutionsFailed",
         "Namespace": "AWS/States",
         "Period": 900,
@@ -2310,6 +2311,9 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               "Resource": [
                 "arn:aws:s3:::wcmc-reciterai-artifacts/spotlight/*",
                 "arn:aws:s3:::wcmc-reciterai-artifacts/tools/*",
+                "arn:aws:s3:::wcmc-reciterai-artifacts/ed/*",
+                "arn:aws:s3:::wcmc-reciterai-artifacts/mentoring/*",
+                "arn:aws:s3:::wcmc-reciterai-artifacts/citations/*",
                 "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
               ],
             },
@@ -3957,6 +3961,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "AlarmDescription": "SPS reconciler (prod) -- run failed (>=1 suppression row could not be reflected into the index).",
         "AlarmName": "sps-reconcile-status-prod",
         "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 2,
         "Dimensions": [
           {
             "Name": "StateMachineArn",
@@ -3965,7 +3970,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             },
           },
         ],
-        "EvaluationPeriods": 1,
+        "EvaluationPeriods": 2,
         "MetricName": "ExecutionsFailed",
         "Namespace": "AWS/States",
         "Period": 900,
@@ -5887,6 +5892,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "AlarmDescription": "SPS CloudFront-invalidation reconciler (staging) -- run failed (>=1 pending edge purge could not be replayed).",
         "AlarmName": "sps-cdn-reconcile-status-staging",
         "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 2,
         "Dimensions": [
           {
             "Name": "StateMachineArn",
@@ -5895,7 +5901,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             },
           },
         ],
-        "EvaluationPeriods": 1,
+        "EvaluationPeriods": 2,
         "MetricName": "ExecutionsFailed",
         "Namespace": "AWS/States",
         "Period": 900,
@@ -7299,6 +7305,9 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               "Resource": [
                 "arn:aws:s3:::wcmc-reciterai-artifacts/spotlight/*",
                 "arn:aws:s3:::wcmc-reciterai-artifacts/tools/*",
+                "arn:aws:s3:::wcmc-reciterai-artifacts/ed/*",
+                "arn:aws:s3:::wcmc-reciterai-artifacts/mentoring/*",
+                "arn:aws:s3:::wcmc-reciterai-artifacts/citations/*",
                 "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
               ],
             },
@@ -8946,6 +8955,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "AlarmDescription": "SPS reconciler (staging) -- run failed (>=1 suppression row could not be reflected into the index).",
         "AlarmName": "sps-reconcile-status-staging",
         "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 2,
         "Dimensions": [
           {
             "Name": "StateMachineArn",
@@ -8954,7 +8964,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             },
           },
         ],
-        "EvaluationPeriods": 1,
+        "EvaluationPeriods": 2,
         "MetricName": "ExecutionsFailed",
         "Namespace": "AWS/States",
         "Period": 900,

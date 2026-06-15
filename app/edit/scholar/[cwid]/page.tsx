@@ -132,7 +132,12 @@ export default async function EditScholarPage({
     }
   }
 
-  if (!isSelf && !isProxy && !isUnitAdmin) {
+  // A comms_steward is a global profile editor (comms-steward-profile-editing-
+  // spec.md §4b) — superuser parity on the profile MINUS slug + admin/unit
+  // governance, enforced field-by-field at the write routes. So a steward
+  // reaches any scholar's edit surface like a superuser does; the editor renders
+  // in the restricted `comms_steward` mode below.
+  if (!isSelf && !isProxy && !isUnitAdmin && !session.isCommsSteward) {
     // GET-time superuser re-check — emits one `edit_authz_denied` line with
     // reason="not_superuser_get" when the actor is not a superuser. The
     // helper guarantees the two routes (this one and /edit/publication/[pmid])
@@ -147,16 +152,23 @@ export default async function EditScholarPage({
     }
   }
 
-  // #836 — the manual-Highlights editor and the COI-gap advisory both load for
-  // the scholar themselves OR a (non-impersonating) superuser. A superuser is
+  // #836 — the manual-Highlights editor and the COI-gap advisory load for the
+  // scholar themselves OR a (non-impersonating) superuser. A superuser is
   // unrestricted on the edit surface (operator decision); COI-gap was originally
   // a privacy carve-out but is now superuser-visible too, with a UI nag before any
   // action and the dismiss/restore routes re-authorizing genuine-self-or-superuser.
   // Neither is surfaced to a proxy / unit-admin editor, and the loader populates
   // them only when requested + the flag is on, so they stay dark otherwise.
-  const selfOrSuperuser = isSelf || session.isSuperuser;
+  //
+  // A comms_steward edits Highlights at superuser parity (§3b). COI-gap is the
+  // ONE carve-out (#986): a steward must NOT see it. The dismiss/feedback/restore
+  // routes deny a steward AT THE ROUTE (comms-steward spec §6/§7: "denied at the
+  // route, not just hidden in the UI"), so surfacing the interactive card would
+  // make every action 403 — a broken surface. Hence Highlights includes a steward
+  // (`selfOrSuperuser`), but COI-gap is gated self-or-genuine-superuser only.
+  const selfOrSuperuser = isSelf || session.isSuperuser || session.isCommsSteward;
   const includeHighlights = isManualHighlightsEnabled() && selfOrSuperuser;
-  const includeCoiGap = isCoiGapHintEnabled() && selfOrSuperuser;
+  const includeCoiGap = isCoiGapHintEnabled() && (isSelf || session.isSuperuser);
   const ctx = await loadEditContext(targetCwid, db.read, new Date(), undefined, {
     includeHighlights,
     includeCoiGap,
@@ -181,7 +193,18 @@ export default async function EditScholarPage({
   // request, so it matches /edit exactly. The superuser direct-set card is
   // unaffected (it has no flag).
   const slugRequestEnabled = isSelf && isSlugRequestEnabled();
-  const mode = isSelf ? "self" : isProxy ? "proxy" : isUnitAdmin ? "unit-admin" : "superuser";
+  // Superuser is checked before comms_steward so a viewer who is both gets the
+  // full superuser surface; a steward-only viewer gets the restricted
+  // `comms_steward` mode (superuser rail minus slug + proxy-editors).
+  const mode = isSelf
+    ? "self"
+    : isProxy
+      ? "proxy"
+      : isUnitAdmin
+        ? "unit-admin"
+        : session.isSuperuser
+          ? "superuser"
+          : "comms_steward";
 
   // Canonicalize a present-but-invalid `?attr` (T1.13): redirect to the bare
   // route rather than render the default panel behind a stale URL. The valid set
@@ -191,7 +214,10 @@ export default async function EditScholarPage({
   const validAttrs: readonly string[] = visibleAttrKeys(
     mode,
     slugRequestEnabled,
-    ctx.unmatchedPubmedCoi.length > 0,
+    // The COI-gap attr is valid when there is High-active work OR settled history
+    // to revisit (Reviewed) — mirroring the rail-gating rule in EditPage. A
+    // Medium-only group does not surface the item, so it is excluded here too.
+    ctx.unmatchedPubmedCoi.length > 0 || ctx.unmatchedPubmedCoiReviewed.length > 0,
     ctx.highlights !== null,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {

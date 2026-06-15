@@ -44,7 +44,10 @@ export type AuthzDenialReason =
   | "proxy_conflict"
   // ─── #728 § 2.2 #3 / § 5 MUST-7 ED-locked grant ───
   /** a grant/revoke against a `unit_admin` row whose `source` LIKE 'ED:%' by a non-superuser */
-  | "ed_locked";
+  | "ed_locked"
+  // ─── comms_steward Method-Family surface (comms-steward-methods-visibility-spec.md §3/§7) ───
+  /** a Method-Family steward action by an actor who is neither comms_steward nor superuser */
+  | "not_comms_steward";
 
 export type AuthzResult = { ok: true } | { ok: false; reason: AuthzDenialReason };
 
@@ -68,11 +71,17 @@ export function authorizeFieldEdit(
   target: { entityId: string; fieldName: "overview" | "slug" | "selectedHighlightPmids" },
 ): AuthzResult {
   if (target.fieldName === "overview" || target.fieldName === "selectedHighlightPmids") {
-    // Self OR superuser — scoped to these two fields (the deferred broad-admin
-    // widening must not leak to other fields via this branch).
-    if (session.cwid === target.entityId || session.isSuperuser) return ALLOW;
+    // Self OR superuser OR comms_steward — scoped to these two fields. A
+    // comms_steward edits any scholar's narrative (superuser profile parity,
+    // comms-steward-profile-editing-spec.md §3b); the deferred broad-admin
+    // widening must still not leak to other fields via this branch.
+    if (session.cwid === target.entityId || session.isSuperuser || session.isCommsSteward) {
+      return ALLOW;
+    }
     return { ok: false, reason: "not_self" };
   }
+  // `slug` — superuser only. A comms_steward is explicitly NOT a slug editor
+  // ("superuser parity MINUS slug review", §3b), so it is not added here.
   return session.isSuperuser ? ALLOW : { ok: false, reason: "not_superuser" };
 }
 
@@ -102,7 +111,12 @@ export function authorizeSuppress(
     ownerCwid?: string | null;
   },
 ): AuthzResult {
-  if (session.isSuperuser) return ALLOW;
+  // Superuser, and a comms_steward at superuser profile parity (incl. the
+  // whole-publication takedown + section/entity visibility this route drives —
+  // kept in scope per comms-steward-profile-editing-spec.md §3b). Slug + admin /
+  // unit governance are NOT routed through here, so this parity does not widen
+  // those.
+  if (session.isSuperuser || session.isCommsSteward) return ALLOW;
 
   if (target.entityType === "scholar") {
     return session.cwid === target.entityId ? ALLOW : { ok: false, reason: "not_self" };
@@ -141,10 +155,27 @@ export function authorizeRevoke(
   session: EditSession,
   suppression: { createdBy: string },
 ): AuthzResult {
-  if (session.isSuperuser) return ALLOW;
+  // Superuser, and a comms_steward at superuser profile parity (§3b) — a steward
+  // may lift any suppression, the mirror of their suppress parity above.
+  if (session.isSuperuser || session.isCommsSteward) return ALLOW;
   return session.cwid === suppression.createdBy
     ? ALLOW
     : { ok: false, reason: "not_owner" };
+}
+
+/**
+ * The Method-Family steward gate (comms-steward-methods-visibility-spec.md
+ * §3/§7) — every `/api/edit/methods/*` action. The `comms_steward` role unlocks
+ * the global Method-Family surface; a superuser is a strict superset (passes
+ * every steward guard) per §3's privilege boundary. There is no `cwid`/owner
+ * dimension: the role is global, so this predicate turns only on the actor's
+ * tier, not on the family being acted upon. Pure and synchronous like its
+ * siblings — the `comms_steward` verdict was resolved live into `EditSession`
+ * by `getEditSession()`.
+ */
+export function authorizeCommsStewardAction(session: EditSession): AuthzResult {
+  if (session.isCommsSteward || session.isSuperuser) return ALLOW;
+  return { ok: false, reason: "not_comms_steward" };
 }
 
 // ---------------------------------------------------------------------------
@@ -161,10 +192,12 @@ export function canAccessScholarEditPage(
   session: EditSession,
   targetCwid: string,
 ): boolean {
-  return session.cwid === targetCwid || session.isSuperuser;
+  return session.cwid === targetCwid || session.isSuperuser || session.isCommsSteward;
 }
 
-/** `GET /edit/publication/[pmid]`: superuser only. */
+/** `GET /edit/publication/[pmid]`: superuser only. (A comms_steward reaches
+ *  publication suppression through the per-scholar editor's Publications panel,
+ *  not this standalone takedown surface — kept superuser-only to bound scope.) */
 export function canAccessPublicationEditPage(session: EditSession): boolean {
   return session.isSuperuser;
 }
@@ -339,7 +372,12 @@ export function canEditUnit(
   session: EditSession,
   effectiveRole: EffectiveUnitRole,
 ): AuthzResult {
-  if (session.isSuperuser) return ALLOW;
+  // A comms_steward edits any EXISTING unit's content at curator parity
+  // (description / leadership / roster) — comms-steward-profile-editing-spec.md
+  // §3b "minus adding/remove org units" excludes only create/delete + grants,
+  // not editing existing units. Grants stay Owner/Superuser (`canManageAccess`)
+  // and unit create/delete is not widened — so this confers content editing only.
+  if (session.isSuperuser || session.isCommsSteward) return ALLOW;
   if (effectiveRole === "owner" || effectiveRole === "curator") return ALLOW;
   return { ok: false, reason: "not_curator" };
 }

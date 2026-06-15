@@ -1,9 +1,17 @@
 /**
- * The shared admin sub-nav for the superuser `/edit` list surfaces (#497 PR-3c,
- * `slug-personalization-ui-spec.md` § 3.1). The maroon-underlined tab strip
- * under the black Apollo bar, linking the Profiles roster (`/edit/scholars`) and
- * the Profile-URL request queue (`/edit/slug-requests`). A pending-count pill
- * sits on the "URL requests" tab.
+ * The shared admin sub-nav across ALL `/edit` console surfaces (#497 PR-3c,
+ * `slug-personalization-ui-spec.md` § 3.1; unified onto the self-edit surface in
+ * `role-aware-navigation-entry-points-spec.md`). The maroon-underlined tab strip
+ * under the black Apollo bar, linking the Profiles roster (`/edit/scholars`), the
+ * Profile-URL request queue (`/edit/slug-requests`), the Slug registry,
+ * Administrators, and Method Families. A pending-count pill sits on the "URL
+ * requests" tab; "My Profile" anchors the right end.
+ *
+ * Originally only the superuser list pages rendered this. It now also renders on
+ * the `/edit` self-edit surface for a superuser or comms_steward (via
+ * `active="self"`), so the full role-gated option set is visible from anywhere in
+ * the console — not just after drilling into the roster. A plain scholar's
+ * self-edit page keeps its minimal "My Profile" strip and never mounts this.
  *
  * `pendingSlugRequests === null` hides the URL-requests tab entirely — the
  * slug-request feature is flag-gated (`SELF_EDIT_SLUG_REQUEST`), so a surface
@@ -12,13 +20,26 @@
 import Link from "next/link";
 import { ChevronLeftIcon } from "lucide-react";
 
-export type AdminSubnavActive = "profiles" | "slug-requests" | "slugs" | "administrators";
+export type AdminSubnavActive =
+  | "profiles"
+  | "units"
+  | "slug-requests"
+  | "slugs"
+  | "administrators"
+  | "methods"
+  /** The viewer's own self-edit surface (`/edit`), shown as the active right-end
+   *  tab when a superuser / comms_steward is on their own profile. */
+  | "self";
 
 export function AdminSubnav({
   active,
   pendingSlugRequests,
   administratorsTab,
+  methodsTab,
   selfEditHref,
+  superuserSurfaces = true,
+  profilesTab = false,
+  unitsTab = false,
 }: {
   active: AdminSubnavActive;
   pendingSlugRequests: number | null;
@@ -26,16 +47,39 @@ export function AdminSubnav({
    *  (`SELF_EDIT_ADMINISTRATORS_TAB`), mirroring the `pendingSlugRequests`
    *  hide pattern. A number shows the tab (Phase B passes `0` — no badge). */
   administratorsTab?: number | null;
+  /** `null`/omitted hides the "Method Families" tab — the comms_steward surface
+   *  is flag-gated + role-gated (`isMethodsTabVisible`). A number shows it
+   *  (passed `0` — no badge), mirroring `administratorsTab`. */
+  methodsTab?: number | null;
   /** Link back to the viewer's own self-edit surface (`/edit`), right-aligned.
    *  `null`/omitted when the viewer has no profile of their own (a staff
-   *  superuser), so the link never lands on a 404. */
+   *  superuser), so the link never lands on a 404. Ignored when `active="self"`
+   *  — the viewer is already there, so "My Profile" renders as the active tab. */
   selfEditHref?: string | null;
+  /** Whether to show the superuser list surfaces (URL requests / Slug registry /
+   *  Administrators — and Profiles, unless `profilesTab` separately enables it).
+   *  Default `true`. A comms_steward who is NOT a superuser passes `false` so
+   *  those superuser-only surfaces stay hidden. */
+  superuserSurfaces?: boolean;
+  /** Show the "Profiles" tab independently of `superuserSurfaces`. A
+   *  comms_steward is a global profile editor (comms-steward-profile-editing-
+   *  spec.md §4d), so they get Profiles (+ Method Families) without the other
+   *  superuser surfaces. A superuser already gets Profiles via `superuserSurfaces`. */
+  profilesTab?: boolean;
+  /** Show the "Units" tab (the `/edit/units` finder). A comms_steward edits any
+   *  existing org unit's content (§3b), and a superuser jumps to any unit too. */
+  unitsTab?: boolean;
 }) {
   return (
     <div className="border-border border-b" data-slot="admin-subnav">
       <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
-        <AdminTab href="/edit/scholars" id="profiles" label="Profiles" active={active === "profiles"} />
-        {pendingSlugRequests !== null && (
+        {(superuserSurfaces || profilesTab) && (
+          <AdminTab href="/edit/scholars" id="profiles" label="Profiles" active={active === "profiles"} />
+        )}
+        {unitsTab && (
+          <AdminTab href="/edit/units" id="units" label="Units" active={active === "units"} />
+        )}
+        {superuserSurfaces && pendingSlugRequests !== null && (
           <AdminTab
             href="/edit/slug-requests"
             id="slug-requests"
@@ -46,13 +90,15 @@ export function AdminSubnav({
         )}
         {/* Always visible to superusers — the slug namespace (active / historical
             / override / reserved) exists regardless of the slug-request flag. */}
-        <AdminTab
-          href="/edit/slugs"
-          id="slugs"
-          label="Slug registry"
-          active={active === "slugs"}
-        />
-        {administratorsTab !== null && administratorsTab !== undefined && (
+        {superuserSurfaces && (
+          <AdminTab
+            href="/edit/slugs"
+            id="slugs"
+            label="Slug registry"
+            active={active === "slugs"}
+          />
+        )}
+        {superuserSurfaces && administratorsTab !== null && administratorsTab !== undefined && (
           <AdminTab
             href="/edit/administrators"
             id="administrators"
@@ -60,7 +106,23 @@ export function AdminSubnav({
             active={active === "administrators"}
           />
         )}
-        {selfEditHref ? (
+        {methodsTab !== null && methodsTab !== undefined && (
+          <AdminTab
+            href="/edit/methods"
+            id="methods"
+            label="Method Families"
+            active={active === "methods"}
+          />
+        )}
+        {active === "self" ? (
+          <span
+            className="border-apollo-maroon ml-auto inline-block border-b-2 py-3 text-sm font-medium"
+            aria-current="page"
+            data-testid="admin-subnav-self-edit"
+          >
+            My Profile
+          </span>
+        ) : selfEditHref ? (
           <Link
             href={selfEditHref}
             className="text-muted-foreground hover:text-foreground ml-auto inline-flex items-center gap-1 py-3 text-sm"

@@ -2,8 +2,9 @@
  * UX feedback B5/B6 — the `/methods` hub grid.
  *
  * Verifies the hub now exposes the families under each supercategory and that each
- * family link deep-links to that family on the supercategory page via
- * `?family={familyId}` (which scrolls the panel into view). Pure render test.
+ * family link deep-links to that family on the supercategory page via the STABLE
+ * family slug `?family={labelSlug}-{familyId}` (#940 — not the bare re-minted id),
+ * which scrolls the panel into view. Pure render test.
  */
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -32,15 +33,17 @@ describe("MethodsHubGrid", () => {
     expect(screen.getByText("MRI biomarkers")).toBeTruthy();
   });
 
-  it("deep-links each family to ?family={familyId} on the supercategory page (B6)", () => {
+  it("deep-links each family to ?family={stable-slug} on the supercategory page (B6, #940)", () => {
     render(<MethodsHubGrid items={items} />);
+    // The deep-link carries the stable label-slug + id so a cached link self-heals
+    // across A2 rebuilds that re-mint the bare `fam_NNNN` id.
     const fam1 = screen.getByText("Deep learning segmentation").closest("a");
     expect(fam1?.getAttribute("href")).toBe(
-      "/methods/imaging-image-analysis?family=fam_0001",
+      "/methods/imaging-image-analysis?family=deep-learning-segmentation-fam_0001",
     );
     const fam2 = screen.getByText("MRI biomarkers").closest("a");
     expect(fam2?.getAttribute("href")).toBe(
-      "/methods/imaging-image-analysis?family=fam_0002",
+      "/methods/imaging-image-analysis?family=mri-biomarkers-fam_0002",
     );
   });
 

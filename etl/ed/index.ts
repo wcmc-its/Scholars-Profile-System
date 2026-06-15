@@ -31,6 +31,7 @@ import {
   resolveUnitSlugForETL,
 } from "./unit-overrides";
 import { DEPARTMENT_CATEGORIES } from "@/lib/department-categories";
+import { DEPARTMENT_NAMES } from "@/lib/department-names";
 import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug, reconcileScholarSlug } from "@/lib/slug";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
@@ -695,6 +696,7 @@ async function main() {
       if (fromOverride) deptSlugOverridesApplied += 1;
       usedDeptSlugs.add(slug);
       const seedCategory = DEPARTMENT_CATEGORIES[dept.code] ?? "clinical";
+      const seedNames = DEPARTMENT_NAMES[dept.code];
       await db.write.department.upsert({
         where: { code: dept.code },
         create: {
@@ -702,13 +704,17 @@ async function main() {
           name: dept.name,
           slug,
           category: seedCategory,
+          officialName: seedNames?.officialName ?? null,
+          compactName: seedNames?.compactName ?? null,
           source: "ED",
           refreshedAt: new Date(),
         },
         update: {
-          // INTENTIONALLY does NOT update `category` — manual reclassification
-          // (UPDATE department SET category = '...' WHERE code = '...') sticks
-          // across ETL refreshes. The seed map only seeds new rows on CREATE.
+          // INTENTIONALLY does NOT update `category`, `officialName`, or
+          // `compactName` — manual reclassification and curated display names
+          // (lib/department-names.ts; existing rows aligned by the 2026-06-12
+          // comms backfill) stick across ETL refreshes. The seed maps only
+          // seed NEW rows on CREATE.
           name: dept.name,
           slug,
           refreshedAt: new Date(),
@@ -787,6 +793,7 @@ async function main() {
             primaryTitle: f.primaryTitle,
             primaryDepartment: primaryDepartmentDisplay,
             email: f.email,
+            emailVisibility: f.emailVisibility,
             roleCategory,
             ...(wasDeleted ? { deletedAt: null } : {}),
             // Phase 3 — D-01 / probe 2026-05-06: dept + div sourced from
@@ -831,6 +838,7 @@ async function main() {
             primaryTitle: f.primaryTitle,
             primaryDepartment: primaryDepartmentDisplay,
             email: f.email,
+            emailVisibility: f.emailVisibility,
             slug,
             roleCategory,
             // Phase 3 — D-01 / probe 2026-05-06: dept + div sourced from SOR.

@@ -140,8 +140,10 @@ describe("summarizeParams", () => {
   });
 
   it("renders the default params", () => {
+    // #886 — Methods is default-on now that its source is the live scholar_family
+    // rollup; the default set is the four core themes (methods sorts before recent).
     expect(summarizeParams(DEFAULT_OVERVIEW_PARAMS)).toBe(
-      "Third · Formal · Standard · Research focus, Key findings & significance, Recent work",
+      "Third · Formal · Standard · Research focus, Key findings & significance, Methods, Recent work",
     );
   });
 });

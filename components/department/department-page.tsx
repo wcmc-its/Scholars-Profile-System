@@ -8,6 +8,7 @@ import {
   type PubSort,
   type GrantSort,
 } from "@/lib/api/dept-lists";
+import { officialUnitName } from "@/lib/org-unit-names";
 import { LeaderCard } from "@/components/scholar/leader-card";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { DepartmentFacultyClient } from "@/components/department/department-faculty-client";
@@ -43,6 +44,10 @@ export async function DepartmentPage({
   // Single base path for tab links. Division navigation is handled by
   // the chip-row in the hero, which links to first-class division pages.
   const basePath = `/departments/${detail.dept.slug}`;
+
+  // Official / ceremonial department name (e.g. ED "Library" → "Samuel J. Wood
+  // Library"). `dept.name` stays the raw ED name; display surfaces use this.
+  const deptDisplayName = officialUnitName(detail.dept);
 
   // §16: Spotlight surface above the tabs. Returns null when the dept
   // has no qualifying publications under the Highlight selection filters.
@@ -80,7 +85,7 @@ export async function DepartmentPage({
   const jsonLd = buildOrganizationJsonLd({
     slug: detail.dept.slug,
     route: "departments",
-    name: detail.dept.name,
+    name: deptDisplayName,
     description: detail.dept.description,
   });
 
@@ -106,7 +111,7 @@ export async function DepartmentPage({
           </BreadcrumbItem>
           <BreadcrumbSeparator>›</BreadcrumbSeparator>
           <BreadcrumbItem>
-            <BreadcrumbPage>{detail.dept.name}</BreadcrumbPage>
+            <BreadcrumbPage>{deptDisplayName}</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
@@ -120,7 +125,7 @@ export async function DepartmentPage({
           Department
         </div>
         <h1 className="page-title mb-[18px] text-[40px] font-medium leading-none tracking-[-0.01em]">
-          {detail.dept.name}
+          {deptDisplayName}
         </h1>
         {detail.dept.description && (
           <p className="mb-[22px] max-w-prose text-[15px] leading-[1.65] text-muted-foreground">
@@ -239,6 +244,9 @@ export async function DepartmentPage({
               pageSize={faculty.pageSize}
               deptSlug={detail.dept.slug}
               divisionSlug={null}
+              methodFacet={faculty.methodFacet}
+              unitKind="department"
+              unitCode={detail.dept.code}
             />
           </div>
         )}

@@ -16,6 +16,7 @@ import {
   getHomeMethodCategories,
 } from "@/lib/api/home";
 import { SpotlightSection } from "@/components/home/spotlight-section";
+import { PublicationModalProvider } from "@/components/publication/publication-modal";
 import { BrowseAllResearchAreasGrid } from "@/components/home/browse-all-research-areas-grid";
 import { BrowseByMethodSection } from "@/components/home/browse-by-method-section";
 import { MethodBeaconLink } from "@/components/home/method-beacon-link";
@@ -101,7 +102,17 @@ export default async function HomePage() {
         ) : null}
 
         <div className="mx-auto max-w-[1100px] px-6 py-12">
-          {spotlights ? <SpotlightSection items={spotlights} /> : null}
+          {spotlights ? (
+            // Home lives outside the (public) route group, so the modal
+            // provider mounted in app/(public)/layout.tsx is not in scope.
+            // Wrap just the spotlight — the only home surface with pub-title
+            // triggers — so its representative-paper titles open the shared
+            // publication modal (#947). Modal portals to <body>, so scope here
+            // is purely about context availability.
+            <PublicationModalProvider>
+              <SpotlightSection items={spotlights} />
+            </PublicationModalProvider>
+          ) : null}
           <div id="browse-all-research-areas" tabIndex={-1} className="scroll-mt-16 outline-none">
             <BrowseAllResearchAreasGrid items={browse ?? []} />
           </div>

@@ -10,6 +10,7 @@
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { formatRoleCategory } from "@/lib/role-display";
+import { extractLastNameSort } from "@/lib/name-sort";
 import type {
   DepartmentFacultyHit,
   DepartmentTopicArea,
@@ -33,6 +34,12 @@ import {
   resolveActiveGrantSuppression,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
+import {
+  loadPublicFamiliesForMembers,
+  ROSTER_ROW_METHODS_CAP,
+  type MemberMethodFamily,
+} from "@/lib/api/methods-roster";
+import { isCenterMethodsFacetEnabled } from "@/lib/profile/methods-lens-flags";
 
 /**
  * #552 § 3.3 — the load-bearing membership active predicate. A membership is
@@ -107,10 +114,34 @@ export type CenterDetail = {
   scholarCount: number;
 };
 
+/** Research vs clinical membership flavor (#552). Null on legacy/unclassified
+ *  rows and on members of centers without a program taxonomy. */
+export type CenterMembershipType = "research" | "clinical";
+
+/**
+ * @deprecated #962 alias — the type was hoisted to `lib/api/methods-roster` as
+ * `MemberMethodFamily` (#974, now shared with the dept/division rosters). Kept as
+ * a re-export so existing `@/lib/api/centers` importers keep resolving.
+ */
+export type CenterMemberFamily = MemberMethodFamily;
+
+/** A center member — a department faculty hit plus the center-specific
+ *  classification (#552) the facet sidebar + per-row badge consume. */
+export type CenterMemberHit = DepartmentFacultyHit & {
+  membershipType: CenterMembershipType | null;
+  /** #962 — ALL public method families for this member, pmidCount desc. Facet
+   *  membership reads this set. Present only when CENTER_METHODS_FACET is on AND
+   *  the member has ≥1 public family; undefined otherwise (so the OFF-path payload
+   *  carries nothing — no SEO leak). */
+  methodFamilies?: CenterMemberFamily[];
+  /** #962 — top-N (≤3) of `methodFamilies` for the compact per-row chips. */
+  topMethods?: CenterMemberFamily[];
+};
+
 /** A program section on the public roster (#552 § 6.2). */
 export type CenterMemberGroup = {
   label: string;
-  members: DepartmentFacultyHit[];
+  members: CenterMemberHit[];
 };
 
 /**
@@ -122,7 +153,7 @@ export type CenterMemberGroup = {
 export type CenterMembersResult =
   | {
       mode: "flat";
-      hits: DepartmentFacultyHit[];
+      hits: CenterMemberHit[];
       total: number;
       page: number;
       pageSize: number;
@@ -263,19 +294,26 @@ export async function getCenterMembers(
   const today = todayIso();
   const emptyFlat = {
     mode: "flat" as const,
-    hits: [] as DepartmentFacultyHit[],
+    hits: [] as CenterMemberHit[],
     total: 0,
     page,
     pageSize: MEMBERS_PAGE_SIZE,
   };
 
   // §3.3 active filter — read every membership, keep the active ones, and
-  // remember each one's program for grouping.
+  // remember each one's program (grouping) + membership type (facet/badge).
   const memberships = (await prisma.centerMembership.findMany({
     where: { centerCode },
-    select: { cwid: true, programCode: true, startDate: true, endDate: true },
+    select: {
+      cwid: true,
+      membershipType: true,
+      programCode: true,
+      startDate: true,
+      endDate: true,
+    },
   })) as Array<{
     cwid: string;
+    membershipType: CenterMembershipType | null;
     programCode: string | null;
     startDate: Date | null;
     endDate: Date | null;
@@ -285,6 +323,38 @@ export async function getCenterMembers(
   );
   const activeCwids = activeMemberships.map((m) => m.cwid);
   if (activeCwids.length === 0) return emptyFlat;
+
+  // Per-cwid membership type, attached to each hit so the facet sidebar +
+  // row badge don't need a second query.
+  const membershipTypeByCwid = new Map<string, CenterMembershipType | null>();
+  for (const m of activeMemberships) {
+    membershipTypeByCwid.set(m.cwid, m.membershipType);
+  }
+  const attachType = (hs: DepartmentFacultyHit[]): CenterMemberHit[] =>
+    hs.map((h) => ({
+      ...h,
+      membershipType: membershipTypeByCwid.get(h.cwid) ?? null,
+    }));
+
+  // #962 — layer PUBLIC method families onto already-built hits (GROUPED path
+  // only). The surface flag is passed to the (hoisted) loader: when off the fetch
+  // is a no-op (empty map) and the hits pass through byte-identical to today, so
+  // no `if (flag)` branch is needed at the call site.
+  const attachMethods = async (hits: CenterMemberHit[]): Promise<CenterMemberHit[]> => {
+    const famByCwid = await loadPublicFamiliesForMembers(hits.map((h) => h.cwid), {
+      enabled: isCenterMethodsFacetEnabled(),
+    });
+    if (famByCwid.size === 0) return hits; // flag off OR no public families
+    return hits.map((h) => {
+      const families = famByCwid.get(h.cwid);
+      if (!families || families.length === 0) return h;
+      return {
+        ...h,
+        methodFamilies: families,
+        topMethods: families.slice(0, ROSTER_ROW_METHODS_CAP),
+      };
+    });
+  };
 
   // edge 10 — drop dormant / soft-deleted scholars from the public roster.
   const scholars = (await prisma.scholar.findMany({
@@ -302,6 +372,15 @@ export async function getCenterMembers(
       division: { select: { name: true } },
     },
   })) as CenterScholarRow[];
+  // Order by surname, then full name (last-name-first), matching the People
+  // search "Last name (A–Z)" sort. `preferredName` is "Given … Last", so the
+  // DB's name sort would order by first name; re-sort by the extracted surname.
+  scholars.sort(
+    (a, b) =>
+      extractLastNameSort(a.preferredName).localeCompare(
+        extractLastNameSort(b.preferredName),
+      ) || a.preferredName.localeCompare(b.preferredName),
+  );
   const total = scholars.length;
   if (total === 0) return emptyFlat;
 
@@ -325,7 +404,7 @@ export async function getCenterMembers(
       page * MEMBERS_PAGE_SIZE,
       (page + 1) * MEMBERS_PAGE_SIZE,
     );
-    const hits = await buildCenterMemberHits(pageRows);
+    const hits = attachType(await buildCenterMemberHits(pageRows));
     return { mode: "flat", hits, total, page, pageSize: MEMBERS_PAGE_SIZE };
   }
 
@@ -334,7 +413,9 @@ export async function getCenterMembers(
   // order; anything not placed in a program (null program, or a stale code)
   // falls into an "Other" group rendered last, header only if non-empty
   // (edge 8).
-  const hits = await buildCenterMemberHits(scholars);
+  // #962 — GROUPED path only: attach public method families for the facet +
+  // chips. (The flat path above is left untouched, scope constraint C.)
+  const hits = await attachMethods(attachType(await buildCenterMemberHits(scholars)));
   const hitByCwid = new Map(hits.map((h) => [h.cwid, h]));
   const placed = new Set<string>();
   const groups: CenterMemberGroup[] = [];
@@ -342,7 +423,7 @@ export async function getCenterMembers(
     const members = scholars
       .filter((s) => programByCwid.get(s.cwid) === p.code)
       .map((s) => hitByCwid.get(s.cwid))
-      .filter((h): h is DepartmentFacultyHit => Boolean(h));
+      .filter((h): h is CenterMemberHit => Boolean(h));
     if (members.length > 0) {
       members.forEach((h) => placed.add(h.cwid));
       groups.push({ label: p.label, members });

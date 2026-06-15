@@ -11,6 +11,7 @@
  */
 import { ShieldAlert } from "lucide-react";
 
+import { PubTitle } from "@/components/publication/pub-html";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export type SuperuserBannerProps = {
@@ -43,7 +44,8 @@ export function SuperuserBanner({ targetLabel, targetKind = "profile" }: Superus
             </>
           ) : (
             <>
-              You are managing the publication <strong>{targetLabel}</strong> as an administrator.
+              You are managing the publication <PubTitle as="strong" value={targetLabel} /> as an
+              administrator.
             </>
           )}
         </p>

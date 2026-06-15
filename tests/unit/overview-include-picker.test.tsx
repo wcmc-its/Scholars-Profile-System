@@ -93,10 +93,13 @@ describe("OverviewIncludePicker — rendering & selection", () => {
     );
   });
 
-  it("shows the first/last-author marker but not for middle authors", () => {
+  it("shows the §7.2 per-item signals — authorship role · year · impact number", () => {
     render(<OverviewIncludePicker options={options()} selection={sel()} onChange={() => {}} />);
-    expect(screen.getByText("first author")).toBeTruthy();
-    expect(screen.getByText("last author")).toBeTruthy();
+    // Whitelist signals render (year + impact number + role); no model prose.
+    expect(screen.getByText(/first author/)).toBeTruthy();
+    expect(screen.getByText(/last author/)).toBeTruthy();
+    expect(screen.getByText(/impact 92/)).toBeTruthy();
+    expect(screen.getByText(/2024/)).toBeTruthy();
   });
 
   it("links the PMID out to PubMed", () => {
@@ -167,7 +170,7 @@ describe("OverviewIncludePicker — caps", () => {
   });
 });
 
-describe("OverviewIncludePicker — Methods section (dark until C3)", () => {
+describe("OverviewIncludePicker — Methods section (hidden when no families)", () => {
   it("is hidden entirely when there are no tools", () => {
     render(
       <OverviewIncludePicker
@@ -228,5 +231,132 @@ describe("OverviewIncludePicker — Methods section (dark until C3)", () => {
     );
     expect(screen.getByTestId("overview-source-tool-tool10").hasAttribute("disabled")).toBe(true);
     expect(screen.getByTestId("overview-source-tool-tool0").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("shows the method's publication count only — never model prose (§7.2)", () => {
+    render(
+      <OverviewIncludePicker
+        options={options({
+          tools: [
+            {
+              toolName: "AAV vectors",
+              category: "vector platform",
+              pmidCount: 16,
+              maxConfidence: 0.9,
+              defaultSelected: true,
+            },
+          ],
+        })}
+        selection={sel()}
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getByText("16 publications")).toBeTruthy();
+  });
+});
+
+describe("OverviewIncludePicker — §7.1 rule lines + §5 sort control", () => {
+  it("renders each section's verbatim rule line", () => {
+    render(
+      <OverviewIncludePicker
+        options={options({
+          tools: [
+            { toolName: "AAV", category: "v", pmidCount: 5, maxConfidence: 0.9, defaultSelected: true },
+          ],
+        })}
+        selection={sel()}
+        onChange={() => {}}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "Ranked by citation impact and recency, weighted toward senior-author work.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("Ranked by your role and recency.")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Inferred from methods named in your publications · ranked by how often each appears.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("offers a publications sort control (impact / year) that coexists with the rule line", () => {
+    render(<OverviewIncludePicker options={options()} selection={sel()} onChange={() => {}} />);
+    const sortControl = screen.getByTestId("overview-source-pub-sort");
+    expect(sortControl).toBeTruthy();
+    // Both the rule line AND the sort control are present in the same section.
+    expect(
+      screen.getByText(
+        "Ranked by citation impact and recency, weighted toward senior-author work.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("never renders model prose (synopsis / impactJustification / sampleContext) next to an item", () => {
+    const { container } = render(
+      <OverviewIncludePicker options={options()} selection={sel({ pmids: ["11"] })} onChange={() => {}} />,
+    );
+    const text = container.textContent ?? "";
+    expect(text).not.toMatch(/synopsis|justification|impactJustification|sampleContext|context:/i);
+  });
+});
+
+describe("OverviewIncludePicker — selected-first ordering", () => {
+  it("pins checked publications to the top of the list", () => {
+    render(
+      <OverviewIncludePicker
+        options={options()}
+        selection={sel({ pmids: ["33"] })}
+        onChange={() => {}}
+      />,
+    );
+    // Only the per-row checkboxes (the sort control is `overview-source-pub-sort`).
+    const boxes = screen.getAllByTestId(/^overview-source-pub-\d+$/);
+    // pmid 33 is the lowest-impact / middle author but it is selected → top.
+    expect(boxes[0].getAttribute("data-testid")).toBe("overview-source-pub-33");
+  });
+});
+
+describe("OverviewIncludePicker — quick actions", () => {
+  it("None clears the publications selection", () => {
+    const onChange = vi.fn();
+    render(
+      <OverviewIncludePicker
+        options={options()}
+        selection={sel({ pmids: ["11", "22"] })}
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("overview-source-none-pub"));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ pmids: [] }));
+  });
+
+  it("All selects every publication within the combined cap", () => {
+    const onChange = vi.fn();
+    render(<OverviewIncludePicker options={options()} selection={sel()} onChange={onChange} />);
+    fireEvent.click(screen.getByTestId("overview-source-all-pub"));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ pmids: ["11", "22", "33"] }),
+    );
+  });
+
+  it("Top 10 by score for Methods honors the pmid_count >= 2 floor", () => {
+    const onChange = vi.fn();
+    render(
+      <OverviewIncludePicker
+        options={options({
+          tools: [
+            { toolName: "frequent", category: "m", pmidCount: 8, maxConfidence: 0.9, defaultSelected: true },
+            { toolName: "rare", category: "m", pmidCount: 1, maxConfidence: 0.8, defaultSelected: false },
+          ],
+        })}
+        selection={sel()}
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("overview-source-topn-tool"));
+    // The single-paper "rare" family is excluded by the floor.
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ toolNames: ["frequent"] }));
   });
 });

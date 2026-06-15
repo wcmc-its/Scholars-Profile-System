@@ -22,6 +22,8 @@
  * a bind failure, or a search error all resolve to "not a superuser". A
  * directory problem can never *grant* the admin tier.
  */
+import { cache } from "react";
+import { isCommsSteward } from "@/lib/auth/comms-steward";
 import { getSuperuserAllowlist, getSuperuserConfig } from "@/lib/auth/config";
 import { getSession } from "@/lib/auth/session-server";
 import { DEFAULT_SEARCH_BASE, openLdap } from "@/lib/sources/ldap";
@@ -29,10 +31,17 @@ import { DEFAULT_SEARCH_BASE, openLdap } from "@/lib/sources/ldap";
 /** The Enterprise Directory container holding group objects. */
 const GROUPS_BASE = "ou=Groups,dc=weill,dc=cornell,dc=edu";
 
-/** B01 identity (`cwid`) paired with the live B02 superuser verdict. */
+/**
+ * B01 identity (`cwid`) paired with the live authorization verdicts:
+ * the B02 superuser tier and the `comms_steward` Method-Family role
+ * (`comms-steward-methods-visibility-spec.md` §3). Both are resolved fresh on
+ * every `getEditSession()`, never cached for the session.
+ */
 export interface EditSession {
   cwid: string;
   isSuperuser: boolean;
+  /** Live `comms_steward` verdict (§3); a superuser is a superset of this. */
+  isCommsSteward: boolean;
 }
 
 /**
@@ -68,8 +77,18 @@ function logCheckFailed(cwid: string, reason: string): void {
  * Whether `cwid` is a member of the superuser group, by a live LDAPS search of
  * the group's `member` attribute. Never throws — every failure mode resolves
  * to `false`.
+ *
+ * Wrapped in React `cache()`, keyed on `cwid`, so a given CWID is resolved at
+ * most once per server request/render — the LDAPS bind/search is deduped when
+ * the same CWID is checked repeatedly within one request (e.g. via
+ * `getEditSession`, `getEffectiveEditSession`, and per-route re-checks). This is
+ * request-scoped only: it does NOT cache across requests or for the session, so
+ * the spec invariant holds — `isSuperuser` is re-evaluated live on every `/edit`
+ * GET and every `/api/edit` POST (`self-edit-spec.md` § Authorization). Distinct
+ * CWIDs (e.g. a proxy's own vs. the effective/target CWID) key independently and
+ * each evaluate on their own.
  */
-export async function isSuperuser(cwid: string): Promise<boolean> {
+export const isSuperuser = cache(async (cwid: string): Promise<boolean> => {
   if (!cwid) return false;
   // Interim allowlist (#443) — confers superuser WITHOUT LDAP, checked before
   // any directory work. The SPS VPC has no route to the WCM directory yet, so
@@ -111,16 +130,20 @@ export async function isSuperuser(cwid: string): Promise<boolean> {
   } finally {
     await client.unbind().catch(() => {});
   }
-}
+});
 
 /**
- * The current edit session: B01's identity plus the live `isSuperuser` verdict.
- * `null` when unauthenticated — the caller's gate (B01 middleware, and the
- * per-route check) handles the 401 / redirect. Resolved fresh on every call;
- * the group claim is never cached for the session.
+ * The current edit session: B01's identity plus the live `isSuperuser` and
+ * `isCommsSteward` verdicts. `null` when unauthenticated — the caller's gate
+ * (B01 middleware, and the per-route check) handles the 401 / redirect.
+ * Resolved fresh on every call; neither group claim is cached for the session.
  */
 export async function getEditSession(): Promise<EditSession | null> {
   const session = await getSession();
   if (!session) return null;
-  return { cwid: session.cwid, isSuperuser: await isSuperuser(session.cwid) };
+  return {
+    cwid: session.cwid,
+    isSuperuser: await isSuperuser(session.cwid),
+    isCommsSteward: await isCommsSteward(session.cwid),
+  };
 }

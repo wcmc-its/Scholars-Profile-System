@@ -16,14 +16,21 @@
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
-import { OVERVIEW_ELEMENTS, type OverviewParams } from "@/lib/edit/overview-params";
+import {
+  OVERVIEW_ELEMENTS,
+  type OverviewParams,
+  type OverviewSelection,
+} from "@/lib/edit/overview-params";
 
 /** One history row, shaped to match the GET /api/edit/overview/generations
- *  contract (`createdAt` is the ISO string the route serializes). */
+ *  contract (`createdAt` is the ISO string the route serializes). The generate
+ *  route persists the source `selection` (v3.1) inside the same `params` JSON
+ *  column, so it is surfaced here as an optional field for "Use these settings"
+ *  to restore (#765). */
 export type OverviewGenerationItem = {
   id: string;
   model: string;
-  params: OverviewParams;
+  params: OverviewParams & { selection?: OverviewSelection };
   createdAt: string;
   text: string;
 };
@@ -124,4 +131,17 @@ export function summarizeParams(params: OverviewParams): string {
     .map((key) => OVERVIEW_ELEMENTS.find((e) => e.key === key)?.label)
     .filter((label): label is string => Boolean(label));
   return labels.length > 0 ? `${head} · ${labels.join(", ")}` : head;
+}
+
+/**
+ * A compact summary for the collapsed Draft-with-AI bar (#875 §3): voice (full
+ * phrase) · tone · length · the COUNT of emphasized themes — not the labels,
+ * which overflow a single-line bar. E.g. "Third person · Formal · Standard ·
+ * 3 emphases". The element segment is omitted when nothing is emphasized.
+ */
+export function summarizeParamsCompact(params: OverviewParams): string {
+  const voice = params.voice === "third" ? "Third person" : "First person";
+  const head = [voice, capitalize(params.tone), capitalize(params.length)].join(" · ");
+  const n = params.elements.length;
+  return n > 0 ? `${head} · ${n} ${n === 1 ? "emphasis" : "emphases"}` : head;
 }

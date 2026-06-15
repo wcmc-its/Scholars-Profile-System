@@ -77,3 +77,67 @@ export function isMethodsLensFamilyFilterOn(): boolean {
 export function isMethodsFamilyRosterFallbackOn(): boolean {
   return process.env.METHODS_LENS_FAMILY_ROSTER_FALLBACK === "on";
 }
+
+/**
+ * #879 — renders ReciterAI's generated per-family `definition` (tools-a2-v3
+ * passthrough) on the family page + the profile methods hover, with an
+ * "AI-generated" disclaimer gated on `definition_source === "generated"`. Default
+ * OFF: the column is populated by the ETL unconditionally, but nothing renders —
+ * and the family page does not even READ the definition (no DefinedTerm JSON-LD /
+ * SEO side channel) — until this flips, so the generated copy ships dark pending
+ * External Affairs sign-off, independent of the methods-lens / Method-pages
+ * rollout. RENDER-ONLY: the definition is never fed back into any LLM/embedding/
+ * retrieval. Wire in BOTH `.env.local` AND the per-env `environment:` block in
+ * cdk/lib/app-stack.ts per the flag-parity rule.
+ */
+export function isMethodsFamilyDefinitionsOn(): boolean {
+  return process.env.METHODS_LENS_FAMILY_DEFINITIONS === "on";
+}
+
+/**
+ * #962 — the center-roster "Methods & tools" multi-select facet + per-member
+ * tool chips on the GROUPED center roster. ADDITIONALLY gated on
+ * METHODS_LENS_ENABLED (the `scholar_family` substrate): if the methods lens is
+ * off, this is off, so a center page never queries `scholar_family` and the
+ * server payload carries no family data (no SEO/JSON side channel). When off: no
+ * extra query, no facet, no chips. Surfaces PUBLIC families only (same #800/#801
+ * overlay gate as the lens), so the CloudFront-cacheable center page stays
+ * cacheable — no per-request/per-viewer call. Wire in BOTH `.env.local` AND the
+ * per-env `environment:` block in cdk/lib/app-stack.ts per the flag-parity rule.
+ */
+export function isCenterMethodsFacetEnabled(): boolean {
+  return isMethodsLensEnabled() && process.env.CENTER_METHODS_FACET === "on";
+}
+
+/**
+ * #974 — per-member "method chips" (top-3 public method families) on the
+ * DEPARTMENT and DIVISION roster rows. ADDITIONALLY gated on METHODS_LENS_ENABLED
+ * (the `scholar_family` substrate): off → no extra query, no chips, no family data
+ * in the payload (no SEO/JSON side channel). PUBLIC families only (same #800/#801
+ * overlay gate as the lens), so the CloudFront-cacheable roster page stays
+ * cacheable — a plain DB read keyed on the page's ≤20 CWIDs, no per-viewer call.
+ * Phase 1 is CHIPS ONLY (no facet, no whole-dataset aggregation — that's Phase 2).
+ * Wire in BOTH `.env.local` AND the per-env block in cdk/lib/app-stack.ts per the
+ * flag-parity rule.
+ */
+export function isOrgUnitMethodsChipsEnabled(): boolean {
+  return isMethodsLensEnabled() && process.env.ORG_UNIT_METHODS_CHIPS === "on";
+}
+
+/**
+ * #974 Phase 2 — the DEPARTMENT/DIVISION roster "Methods & tools" multi-select
+ * FACET (server-aggregated buckets rendered with the cacheable page + a
+ * client-fetch to the uncacheable `/api/units/[kind]/[code]/members` route for the
+ * filtered roster). ADDITIONALLY gated on METHODS_LENS_ENABLED (the
+ * `scholar_family` substrate): off → no aggregation, no sidebar, no API data, no
+ * payload (the off-path roster response is byte-identical to today). Independent of
+ * ORG_UNIT_METHODS_CHIPS (Phase 1) so the facet can ship/flip separately. PUBLIC
+ * families only (same #800/#801 overlay gate) — the buckets, the selectable
+ * families, AND the returned chips. The buckets are viewer-independent, so the page
+ * stays CloudFront-cacheable; only the `force-dynamic` API route filters per
+ * request. Wire in BOTH `.env.local` AND the per-env block in
+ * cdk/lib/app-stack.ts per the flag-parity rule.
+ */
+export function isOrgUnitMethodsFacetEnabled(): boolean {
+  return isMethodsLensEnabled() && process.env.ORG_UNIT_METHODS_FACET === "on";
+}

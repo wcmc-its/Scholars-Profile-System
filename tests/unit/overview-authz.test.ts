@@ -32,7 +32,7 @@ const UNIT_DB = {} as unknown as UnitScholarLookup;
 
 function call(over: Partial<Parameters<typeof authorizeOverviewWrite>[0]> = {}) {
   return authorizeOverviewWrite({
-    session: { cwid: SELF, isSuperuser: false },
+    session: { cwid: SELF, isSuperuser: false, isCommsSteward: false },
     realCwid: SELF,
     impersonatedCwid: null,
     entityId: SELF,
@@ -58,7 +58,7 @@ describe("authorizeOverviewWrite", () => {
 
   it("allows a superuser editing another scholar — no proxy / unit lookup", async () => {
     const r = await call({
-      session: { cwid: "adm001", isSuperuser: true },
+      session: { cwid: "adm001", isSuperuser: true, isCommsSteward: false },
       realCwid: "adm001",
       entityId: OTHER,
     });
@@ -68,7 +68,7 @@ describe("authorizeOverviewWrite", () => {
 
   it("denies not_self when impersonating — the delegated legs are skipped (IS-1)", async () => {
     const r = await call({
-      session: { cwid: "ovl", isSuperuser: false },
+      session: { cwid: "ovl", isSuperuser: false, isCommsSteward: false },
       realCwid: "real1",
       entityId: OTHER,
       impersonatedCwid: "ovl",
@@ -81,7 +81,7 @@ describe("authorizeOverviewWrite", () => {
   it("allows a granted proxy whose conflict re-check passes — short-circuits unit leg", async () => {
     mockIsGrantedProxy.mockResolvedValue(true);
     const r = await call({
-      session: { cwid: "px", isSuperuser: false },
+      session: { cwid: "px", isSuperuser: false, isCommsSteward: false },
       realCwid: "px",
       entityId: OTHER,
     });
@@ -94,7 +94,7 @@ describe("authorizeOverviewWrite", () => {
     mockIsGrantedProxy.mockResolvedValue(true);
     mockCheckConflict.mockResolvedValue({ ok: false, reason: "proxy_is_superuser" });
     const r = await call({
-      session: { cwid: "px", isSuperuser: false },
+      session: { cwid: "px", isSuperuser: false, isCommsSteward: false },
       realCwid: "px",
       entityId: OTHER,
     });
@@ -105,7 +105,7 @@ describe("authorizeOverviewWrite", () => {
   it("falls through to the unit-admin leg and returns the resolved unit on allow", async () => {
     mockResolveUnit.mockResolvedValue({ kind: "department", code: "MED" });
     const r = await call({
-      session: { cwid: "ua", isSuperuser: false },
+      session: { cwid: "ua", isSuperuser: false, isCommsSteward: false },
       realCwid: "ua",
       entityId: OTHER,
     });
@@ -115,7 +115,7 @@ describe("authorizeOverviewWrite", () => {
 
   it("denies not_self when the actor is neither proxy nor unit-admin", async () => {
     const r = await call({
-      session: { cwid: "nobody", isSuperuser: false },
+      session: { cwid: "nobody", isSuperuser: false, isCommsSteward: false },
       realCwid: "nobody",
       entityId: OTHER,
     });

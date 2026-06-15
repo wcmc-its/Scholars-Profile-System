@@ -59,10 +59,18 @@ export type AuditAction =
    *  before/after carry the status transition. Self-scoped, never a
    *  compliance trail — the only thing logged is the scholar's own action. */
   | "coi_gap_dismiss"
-  /** a scholar UNDID a COI-gap dismissal ("Undo") — the inverse of
-   *  `coi_gap_dismiss`, restoring the suggestion to their advisory view. Same
-   *  self-scoped, non-compliance posture. */
+  /** a scholar UNDID COI-gap feedback ("Undo") — the inverse of
+   *  `coi_gap_feedback`/`coi_gap_dismiss`, restoring the suggestion to their
+   *  advisory view and clearing the recorded reason. Same self-scoped,
+   *  non-compliance posture. */
   | "coi_gap_restore"
+  /** a scholar (or a superuser on their behalf) recorded a 3-way response on a
+   *  publication-derived COI-gap suggestion — `will_disclose` (→ status
+   *  acknowledged) | `historical` | `invalid` (→ dismissed). Supersedes the
+   *  binary `coi_gap_dismiss`; `targetEntityId` is the candidate id, before/after
+   *  carry the status+feedbackReason transition. Self-scoped, never a compliance
+   *  trail — see `docs/coi-gap-feedback-spec.md`. */
+  | "coi_gap_feedback"
   /** a scholar (or a superuser on their behalf) assigned a proxy editor
    *  (scholar-proxy-spec.md / #779). `targetEntityType='scholar'`,
    *  `targetEntityId` is the granted scholar's cwid; `afterValues` carries the
@@ -73,7 +81,16 @@ export type AuditAction =
   /** a scholar (or a superuser on their behalf) revoked a proxy editor
    *  (scholar-proxy-spec.md / #779). `beforeValues` carries the revoked grant's
    *  `{ proxy_cwid, granted_by }`. */
-  | "proxy_revoke";
+  | "proxy_revoke"
+  /** a comms-steward set a Method-Family's tier (public/suppressed/sensitive)
+   *  via the /edit/methods surface (`docs/comms-steward-methods-visibility-spec.md`
+   *  §5/§7). `targetEntityType='method_family'`, `targetEntityId` is the
+   *  `supercategory:familyLabel` pair; before/after carry the tier transition. */
+  | "family_tier_set"
+  /** a comms-steward cleared a Method-Family's review nag without changing its
+   *  tier (sets `reviewedAt`/`reviewedByCwid` on `family_review_flag`).
+   *  `targetEntityType='method_family'`. */
+  | "family_review";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -91,7 +108,11 @@ export type AuditEntityType =
   | "mentee"
   /** a publication-derived COI-gap candidate the scholar dismissed
    *  (`SELF_EDIT_COI_GAP_HINT`); `targetEntityId` is the `coi_gap_candidate.id` */
-  | "coi_gap_candidate";
+  | "coi_gap_candidate"
+  /** a method family targeted by a comms-steward tier/review action
+   *  (`COMMS_STEWARD_ENABLED`); `targetEntityId` is the
+   *  `supercategory:familyLabel` pair. */
+  | "method_family";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

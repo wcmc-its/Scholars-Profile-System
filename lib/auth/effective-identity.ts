@@ -23,16 +23,20 @@
  * bundle — middleware reads the overlay via `getEffectiveCwid` on a decoded
  * `SessionData`, which needs neither `next/headers` nor LDAP.
  */
+import { isCommsSteward } from "@/lib/auth/comms-steward";
 import { getSession } from "@/lib/auth/session-server";
 import { type SessionData, nowSeconds } from "@/lib/auth/session";
 import { type EditSession, isSuperuser } from "@/lib/auth/superuser";
 
 /**
  * Read-time impersonation TTL, seconds (#637). Default 30 min; the hard cap
- * remains the 8h cookie `exp`. Read at call time, not module load, so tests and
- * deployments can vary it without re-import.
+ * remains the 8h cookie `exp`. Read at CALL TIME (not module load) so tests and
+ * deployments can vary it without re-import — mirroring `impersonationEnabled()`.
+ * (#991: the prior module-load `const` froze the value and contradicted this.)
  */
-const TTL = Number(process.env.IMPERSONATION_TTL_SECONDS ?? 1800);
+function impersonationTtlSeconds(): number {
+  return Number(process.env.IMPERSONATION_TTL_SECONDS ?? 1800);
+}
 
 /** Whether the impersonation feature is enabled at all (default off). */
 export function impersonationEnabled(): boolean {
@@ -50,7 +54,7 @@ export function impersonationActive(s: SessionData, now: number): boolean {
   return (
     impersonationEnabled() &&
     !!s.impersonating &&
-    s.impersonating.startedAt + TTL > now
+    s.impersonating.startedAt + impersonationTtlSeconds() > now
   );
 }
 
@@ -64,18 +68,23 @@ export function getEffectiveCwid(s: SessionData, now = nowSeconds()): string {
 }
 
 /**
- * The effective edit session: `{ cwid, isSuperuser }` resolved for the EFFECTIVE
- * CWID (spec §3 — "you can do exactly what they can"). `null` when there is no
- * session. The `isSuperuser` verdict is the EFFECTIVE cwid's, computed live —
- * so impersonating a non-superuser strips the admin tier for the duration, as
- * intended. Initiator gating (R1) and the escalation guard (R2) read the REAL
- * cwid elsewhere; this function is deliberately about the effective identity.
+ * The effective edit session: `{ cwid, isSuperuser, isCommsSteward }` resolved
+ * for the EFFECTIVE CWID (spec §3 — "you can do exactly what they can"). `null`
+ * when there is no session. Both verdicts are the EFFECTIVE cwid's, computed
+ * live — so impersonating a non-superuser / non-steward strips that tier for the
+ * duration, as intended. Initiator gating (R1) and the escalation guard (R2)
+ * read the REAL cwid elsewhere; this function is deliberately about the
+ * effective identity.
  */
 export async function getEffectiveEditSession(): Promise<EditSession | null> {
   const session = await getSession();
   if (!session) return null;
   const cwid = getEffectiveCwid(session);
-  return { cwid, isSuperuser: await isSuperuser(cwid) };
+  return {
+    cwid,
+    isSuperuser: await isSuperuser(cwid),
+    isCommsSteward: await isCommsSteward(cwid),
+  };
 }
 
 /**

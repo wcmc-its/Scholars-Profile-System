@@ -11,10 +11,13 @@
 import { redirect, notFound } from "next/navigation";
 
 import { EditPage, visibleAttrKeys } from "@/components/edit/edit-page";
+import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { ProxyLanding } from "@/components/edit/proxy-landing";
 import { getSession } from "@/lib/auth/session-server";
 import { getEffectiveCwid } from "@/lib/auth/effective-identity";
 import { isSuperuser } from "@/lib/auth/superuser";
+import { isCommsSteward, isMethodsTabVisible } from "@/lib/auth/comms-steward";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
 import { scholarsServedByProxy, type ProxyListLookup } from "@/lib/edit/proxy-authz";
@@ -22,9 +25,14 @@ import {
   listUnitAdminEditorsForScholar,
   type UnitAdminEditorsLookup,
 } from "@/lib/edit/unit-scholar-authz";
+import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
-import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
+import {
+  countPendingSlugRequests,
+  isSlugRequestEnabled,
+  loadLatestSlugRequest,
+} from "@/lib/edit/slug-request";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
 
 // /edit reads suppression-OFF + writes via /api/edit/*; the page must never
@@ -74,6 +82,16 @@ export default async function EditSelfPage({
     includeHighlights,
   });
   if (!ctx) {
+    // A comms_steward with no Scholar row of their own has no self-profile to
+    // edit — their home is the global Method-Family surface, so send them there
+    // instead of 404ing (role-aware-navigation-entry-points-spec.md). This is
+    // also the landing when a superuser is *viewing as* a profile-less steward
+    // (e.g. dwd2001) and the reload hits /edit. Keyed on the effective cwid, so
+    // it reflects the impersonated identity. Flag-gated (false when COMMS_STEWARD
+    // is off), so it's inert on a dark deployment.
+    if (await isCommsSteward(editCwid)) {
+      redirect("/edit/methods");
+    }
     // A signed-in user with no Scholar row may still be a scholar-assigned proxy
     // editor (#779) — pure administrative staff (Beth Chunn) editing on a
     // scholar's behalf. Route them to whom they serve: one grant → straight to
@@ -99,6 +117,21 @@ export default async function EditSelfPage({
     }
     notFound();
   }
+
+  // #536 — a hidden identity class (doctoral student / alumnus) has no public
+  // profile, so its self-edit surface is reachable only by a superuser. This
+  // mirrors the sibling `/edit/scholar/[cwid]` guard. A genuine non-superuser
+  // scholar whose role is not publicly displayed 404s; the real signed-in
+  // superuser is allowed through even while impersonating via `getEffectiveCwid`
+  // (the `View as` overlay points `editCwid` at the hidden target T, so the live
+  // verdict is keyed on `session.cwid` — the actual human — not `editCwid`).
+  if (
+    !isPubliclyDisplayed(ctx.scholar.roleCategory) &&
+    !(await isSuperuser(session.cwid))
+  ) {
+    notFound();
+  }
+
   const { attr } = (await searchParams) ?? {};
 
   // The "Profile URL" request card (#497 PR-3) is flag-gated. When on, seed it
@@ -114,7 +147,10 @@ export default async function EditSelfPage({
   const validAttrs: readonly string[] = visibleAttrKeys(
     "self",
     slugRequestEnabled,
-    ctx.unmatchedPubmedCoi.length > 0,
+    // The COI-gap attr is valid when there is High-active work OR settled history
+    // to revisit (Reviewed) — mirroring the rail-gating rule in EditPage. A
+    // Medium-only group does not surface the item, so it is excluded here too.
+    ctx.unmatchedPubmedCoi.length > 0 || ctx.unmatchedPubmedCoiReviewed.length > 0,
     ctx.highlights !== null,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
@@ -148,6 +184,11 @@ export default async function EditSelfPage({
     // Keyed on the effective editing identity (their own profile); a display
     // listing only — never an authorization decision.
     unitAdminEditorRows,
+    // Whether the EFFECTIVE viewer is a comms_steward — gates the "Method Families"
+    // tab in the unified console nav below. Effective (mirrors `canBrowseProfiles`)
+    // so the tab hides while down-scoped under "View as". Flag-gated short-circuit
+    // (no LDAP when `COMMS_STEWARD_ENABLED` is off), fail-closed.
+    commsSteward,
   ] = await Promise.all([
     isSuperuser(editCwid).catch(() => false),
     slugRequestEnabled ? loadLatestSlugRequest(editCwid, db.read) : Promise.resolve(null),
@@ -158,6 +199,7 @@ export default async function EditSelfPage({
       orderBy: { createdAt: "asc" },
     }),
     listUnitAdminEditorsForScholar(editCwid, db.read as unknown as UnitAdminEditorsLookup),
+    isCommsSteward(editCwid).catch(() => false),
   ]);
 
   const manageableUnits = [...units.departments, ...units.divisions, ...units.centers];
@@ -172,6 +214,22 @@ export default async function EditSelfPage({
     conferringUnitName: u.conferringUnitName,
   }));
 
+  // Unified console nav (role-aware-navigation-entry-points-spec.md): a superuser
+  // or comms_steward sees the full role-gated `AdminSubnav` on this self-edit
+  // surface (active="self"), so every admin option is reachable from here rather
+  // than only after drilling into the roster. A plain scholar gets `undefined` and
+  // EditShell falls back to the minimal "My Profile" strip. The pending-request
+  // count drives the superuser "URL requests" badge only — skip the query for a
+  // steward-only viewer.
+  // Anyone who can edit an org unit also gets the console tab strip — a superuser,
+  // a comms_steward, OR a unit Owner/Curator (≥1 grant) — so the "Units" tab (and
+  // any other role-available tab) is reachable from every self-edit tab, not only
+  // via the Home-panel link. A plain scholar still falls back to the minimal strip.
+  const hasUnitGrants = manageableUnits.length > 0;
+  const showConsoleNav = canBrowseProfiles || commsSteward || hasUnitGrants;
+  const pendingSlugRequests =
+    canBrowseProfiles && slugRequestEnabled ? await countPendingSlugRequests(db.read) : null;
+
   return (
     <EditPage
       ctx={ctx}
@@ -180,6 +238,29 @@ export default async function EditSelfPage({
       slugRequestEnabled={slugRequestEnabled}
       latestSlugRequest={latestSlugRequest}
       canBrowseProfiles={canBrowseProfiles}
+      consoleNav={
+        showConsoleNav ? (
+          <AdminSubnav
+            active="self"
+            superuserSurfaces={canBrowseProfiles}
+            // #986 — a comms_steward is a global profile editor, so it gets the
+            // Profiles tab on EVERY console surface (matching /edit/scholars +
+            // /edit/methods). A superuser already has it via `superuserSurfaces`.
+            profilesTab={commsSteward}
+            unitsTab={canBrowseProfiles || commsSteward || hasUnitGrants}
+            pendingSlugRequests={pendingSlugRequests}
+            administratorsTab={canBrowseProfiles && isAdministratorsTabEnabled() ? 0 : null}
+            methodsTab={
+              isMethodsTabVisible({
+                isSuperuser: canBrowseProfiles,
+                isCommsSteward: commsSteward,
+              })
+                ? 0
+                : null
+            }
+          />
+        ) : undefined
+      }
       manageableUnits={manageableUnits}
       proxyEditors={proxyEditors}
       unitAdminEditors={unitAdminEditors}

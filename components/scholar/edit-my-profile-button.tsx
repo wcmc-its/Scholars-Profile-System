@@ -16,13 +16,28 @@
  * So we probe `/api/auth/session` client-side (one of the few cookie-
  * forwarding CloudFront behaviors) and render the button only when the
  * signed-in scholar's slug matches this profile. Mirrors `HeaderAuthSlot`.
+ *
+ * #955 item 2 — a superuser (one who may impersonate, R1) viewing ANY public
+ * profile gets a deep-link straight into that scholar's admin surface
+ * (`/edit/scholar/<cwid>`). The same probe already reports `canImpersonate`, so
+ * no extra request is needed. The owner link wins when the viewer is looking at
+ * their own profile (a superuser on their own page edits via the plain `/edit`
+ * self surface); a non-superuser never sees the deep-link, since the probe fails
+ * closed to `canImpersonate: false` while in flight, on error, or off-flag.
  */
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
-export function EditMyProfileButton({ profileSlug }: { profileSlug: string }) {
+export function EditMyProfileButton({
+  profileSlug,
+  profileCwid,
+}: {
+  profileSlug: string;
+  profileCwid: string;
+}) {
   const [isOwner, setIsOwner] = useState(false);
+  const [canImpersonate, setCanImpersonate] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -30,11 +45,18 @@ export function EditMyProfileButton({ profileSlug }: { profileSlug: string }) {
       .then((r) => (r.ok ? r.json() : null))
       .then(
         (
-          data: { authenticated?: boolean; scholar?: { slug?: string } | null } | null,
+          data: {
+            authenticated?: boolean;
+            scholar?: { slug?: string } | null;
+            canImpersonate?: boolean;
+          } | null,
         ) => {
           if (!active) return;
           if (data?.authenticated && data.scholar?.slug === profileSlug) {
             setIsOwner(true);
+          }
+          if (data?.canImpersonate) {
+            setCanImpersonate(true);
           }
         },
       )
@@ -46,15 +68,34 @@ export function EditMyProfileButton({ profileSlug }: { profileSlug: string }) {
     };
   }, [profileSlug]);
 
-  if (!isOwner) return null;
+  // Owner wins: a superuser on their own profile edits via the self surface.
+  if (isOwner) {
+    return (
+      <div className="mt-4 flex justify-center">
+        <Button asChild variant="outline" size="sm">
+          <Link href="/edit" data-testid="edit-my-profile">
+            Edit my profile
+          </Link>
+        </Button>
+      </div>
+    );
+  }
 
-  return (
-    <div className="mt-4 flex justify-center">
-      <Button asChild variant="outline" size="sm">
-        <Link href="/edit" data-testid="edit-my-profile">
-          Edit my profile
-        </Link>
-      </Button>
-    </div>
-  );
+  // #955 item 2 — superuser deep-link into this scholar's admin surface.
+  if (canImpersonate) {
+    return (
+      <div className="mt-4 flex justify-center">
+        <Button asChild variant="outline" size="sm">
+          <Link
+            href={`/edit/scholar/${encodeURIComponent(profileCwid)}`}
+            data-testid="edit-profile-superuser"
+          >
+            Edit profile
+          </Link>
+        </Button>
+      </div>
+    );
+  }
+
+  return null;
 }

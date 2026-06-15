@@ -11,6 +11,7 @@
  * Local dev: docker container at OPENSEARCH_NODE.
  */
 import { Client, type ClientOptions } from "@opensearch-project/opensearch";
+import { recordOsRoundTrip } from "@/lib/api/os-round-trips";
 
 let _client: Client | null = null;
 
@@ -41,7 +42,19 @@ export function searchClientOptions(
 
 export function searchClient(): Client {
   if (_client) return _client;
-  _client = new Client(searchClientOptions());
+  const client = new Client(searchClientOptions());
+  // D3 SLI — wrap `.search` ONCE at construction so every request-path
+  // OpenSearch round-trip increments the active per-request counter
+  // (lib/api/os-round-trips.ts). `recordOsRoundTrip` is inert outside a
+  // `runWithOsRoundTripCounter` scope, so ETL / index-build calls through the
+  // same singleton are unaffected. Behavior-neutral: we delegate to the
+  // original `.search` and return its result untouched.
+  const originalSearch = client.search.bind(client);
+  client.search = function (...args: Parameters<typeof originalSearch>) {
+    recordOsRoundTrip();
+    return originalSearch(...args);
+  } as typeof client.search;
+  _client = client;
   return _client;
 }
 

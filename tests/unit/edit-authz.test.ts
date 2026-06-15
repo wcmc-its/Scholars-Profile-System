@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  authorizeCommsStewardAction,
   authorizeFieldEdit,
   authorizeRevoke,
   authorizeSuppress,
@@ -15,8 +16,10 @@ import {
 } from "@/lib/edit/authz";
 import type { EditSession } from "@/lib/auth/superuser";
 
-const SELF: EditSession = { cwid: "self01", isSuperuser: false };
-const ADMIN: EditSession = { cwid: "adm001", isSuperuser: true };
+const SELF: EditSession = { cwid: "self01", isSuperuser: false, isCommsSteward: false };
+const ADMIN: EditSession = { cwid: "adm001", isSuperuser: true, isCommsSteward: false };
+/** A pure comms_steward: the role bit set, NOT a superuser. */
+const STEWARD: EditSession = { cwid: "stw001", isSuperuser: false, isCommsSteward: true };
 
 // ---------------------------------------------------------------------------
 // authorizeFieldEdit  (self-edit-spec.md § Authorization, edge case 2)
@@ -217,6 +220,39 @@ describe("authorizeRevoke", () => {
 });
 
 // ---------------------------------------------------------------------------
+// authorizeCommsStewardAction  (comms-steward-methods-visibility-spec.md §3/§7,
+// test matrix §13 "Authenticated non-steward non-superuser → 403 (API write)")
+//
+// The Method-Family steward gate: the role is global (no cwid/owner dimension),
+// so the verdict turns only on the actor's tier — steward OR superuser allow,
+// neither denies with `not_comms_steward`.
+// ---------------------------------------------------------------------------
+
+describe("authorizeCommsStewardAction", () => {
+  it("allows a comms_steward", () => {
+    expect(authorizeCommsStewardAction(STEWARD)).toEqual({ ok: true });
+  });
+
+  it("allows a superuser (strict superset — passes every steward guard, §3)", () => {
+    // ADMIN is a superuser whose isCommsSteward bit is false, so the allow comes
+    // from the isSuperuser arm — exactly the superset property §3 asserts.
+    expect(authorizeCommsStewardAction(ADMIN)).toEqual({ ok: true });
+  });
+
+  it("allows an actor who is BOTH steward and superuser", () => {
+    const both: EditSession = { cwid: "x", isSuperuser: true, isCommsSteward: true };
+    expect(authorizeCommsStewardAction(both)).toEqual({ ok: true });
+  });
+
+  it("denies an authenticated non-steward non-superuser with not_comms_steward (§13)", () => {
+    expect(authorizeCommsStewardAction(SELF)).toEqual({
+      ok: false,
+      reason: "not_comms_steward",
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // page-access predicates  (the GET-time re-check, edge case 15)
 // ---------------------------------------------------------------------------
 
@@ -411,6 +447,10 @@ describe("INVARIANT: a superuser is allowed by every edit authorization predicat
     expect(authorizeRevoke(ADMIN, { createdBy: TARGET })).toEqual({ ok: true });
   });
 
+  it("authorizeCommsStewardAction — allows a superuser even with isCommsSteward false (§3 superset)", () => {
+    expect(authorizeCommsStewardAction(ADMIN)).toEqual({ ok: true });
+  });
+
   it("unit-curation predicates — allow a superuser even with no UnitAdmin role (effectiveRole 'none')", () => {
     expect(canEditUnit(ADMIN, "none")).toEqual({ ok: true });
     expect(canManageAccess(ADMIN, "none")).toEqual({ ok: true });
@@ -424,5 +464,71 @@ describe("INVARIANT: a superuser is allowed by every edit authorization predicat
     expect(
       requireSuperuserGet({ session: ADMIN, path: "/edit/scholar/someoneElse", targetId: TARGET }),
     ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// comms_steward profile editing  (comms-steward-profile-editing-spec.md §3b/§4)
+//   superuser PROFILE parity across all scholars, MINUS slug + admin/unit
+//   governance.
+// ---------------------------------------------------------------------------
+
+describe("comms_steward — profile-field parity (overview / highlights, any scholar)", () => {
+  it("allows a steward editing any scholar's overview", () => {
+    expect(authorizeFieldEdit(STEWARD, { entityId: "other9", fieldName: "overview" })).toEqual({
+      ok: true,
+    });
+  });
+
+  it("allows a steward editing any scholar's selectedHighlightPmids", () => {
+    expect(
+      authorizeFieldEdit(STEWARD, { entityId: "other9", fieldName: "selectedHighlightPmids" }),
+    ).toEqual({ ok: true });
+  });
+
+  it("DENIES a steward setting a slug — slug is out of scope (superuser only)", () => {
+    expect(authorizeFieldEdit(STEWARD, { entityId: "other9", fieldName: "slug" })).toEqual({
+      ok: false,
+      reason: "not_superuser",
+    });
+  });
+});
+
+describe("comms_steward — suppression parity (incl. publication takedown)", () => {
+  it("allows a steward to take down a whole publication on any profile", () => {
+    expect(
+      authorizeSuppress(STEWARD, { entityType: "publication", entityId: "12345", contributorCwid: null }),
+    ).toEqual({ ok: true });
+  });
+
+  it("allows a steward to suppress any scholar's grant", () => {
+    expect(
+      authorizeSuppress(STEWARD, { entityType: "grant", entityId: "g1", ownerCwid: "other9" }),
+    ).toEqual({ ok: true });
+  });
+
+  it("allows a steward to revoke any suppression (mirror of suppress parity)", () => {
+    expect(authorizeRevoke(STEWARD, { createdBy: "other9" })).toEqual({ ok: true });
+  });
+});
+
+describe("comms_steward — page access", () => {
+  it("may open any scholar's edit page", () => {
+    expect(canAccessScholarEditPage(STEWARD, "other9")).toBe(true);
+  });
+
+  it("does NOT get the superuser-only publication takedown PAGE", () => {
+    expect(canAccessPublicationEditPage(STEWARD)).toBe(false);
+  });
+});
+
+describe("comms_steward — org-unit editing (content, not governance)", () => {
+  it("CAN edit any existing unit's content even with no grant (curator parity, §3b)", () => {
+    expect(canEditUnit(STEWARD, "none")).toEqual({ ok: true });
+  });
+
+  it("CANNOT manage unit access / grant roles ('adding/removing users')", () => {
+    expect(canManageAccess(STEWARD, "none").ok).toBe(false);
+    expect(canGrant(STEWARD, "none", "curator").ok).toBe(false);
   });
 });

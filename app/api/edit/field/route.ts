@@ -41,6 +41,7 @@ import {
   type UnitRef,
 } from "@/lib/edit/authz";
 import { computeOverviewOrigin } from "@/lib/edit/overview-provenance";
+import { containsProfanity } from "@/lib/edit/profanity";
 import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import {
@@ -134,7 +135,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 // ---------------------------------------------------------------------------
 
 async function handleScholarFieldEdit(params: {
-  session: { cwid: string; isSuperuser: boolean };
+  session: { cwid: string; isSuperuser: boolean; isCommsSteward: boolean };
   realCwid: string;
   impersonatedCwid: string | null;
   requestId: string | null;
@@ -232,6 +233,11 @@ async function handleScholarFieldEdit(params: {
   } else {
     const format = validateSlugFormat(value as string);
     if (!format.ok) return editError(400, format.error, "value");
+    // #955 item 4 — apply the same best-effort profanity screen the self-serve
+    // slug-request path enforces (`validateRequestedSlug`), so a superuser/owner
+    // override can't bypass the gate the request route blocks on. Token-exact,
+    // name-safe (`containsProfanity`); block with the matching `profanity` code.
+    if (containsProfanity(format.value)) return editError(400, "profanity", "value");
     const collision = await checkSlugCollision(format.value, entityId, db.read);
     if (!collision.ok) return editError(400, collision.error, "value");
     storedValue = format.value;
@@ -367,7 +373,7 @@ async function handleScholarFieldEdit(params: {
   // URL until the next etl/ed run, so they need no revalidation here.
   if (fieldName === "overview" || fieldName === "selectedHighlightPmids") {
     const [profile] = await resolveAffectedProfiles("scholar", entityId, null);
-    if (profile) reflectOverviewEdit(profile.slug);
+    if (profile) await reflectOverviewEdit(profile.slug);
   }
 
   return editOk({ fieldName, value: storedValue });
@@ -378,7 +384,7 @@ async function handleScholarFieldEdit(params: {
 // ---------------------------------------------------------------------------
 
 async function handleUnitFieldEdit(params: {
-  session: { cwid: string; isSuperuser: boolean };
+  session: { cwid: string; isSuperuser: boolean; isCommsSteward: boolean };
   realCwid: string;
   impersonatedCwid: string | null;
   requestId: string | null;
@@ -536,7 +542,7 @@ async function handleUnitFieldEdit(params: {
   // does not flip until the next `etl/ed` run.
   if (fieldName !== "slug") {
     const unitKind: UnitKind = entityType;
-    reflectUnitChange({
+    await reflectUnitChange({
       unitKind,
       unitSlug: unit.slug,
       parentDeptSlug:

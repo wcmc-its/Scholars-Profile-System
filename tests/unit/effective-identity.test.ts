@@ -300,6 +300,7 @@ describe("getEffectiveEditSession", () => {
     expect(await getEffectiveEditSession()).toEqual({
       cwid: ROLE_FIXTURES.scholar,
       isSuperuser: false,
+      isCommsSteward: false,
     });
   });
 
@@ -314,6 +315,7 @@ describe("getEffectiveEditSession", () => {
     expect(await getEffectiveEditSession()).toEqual({
       cwid: SUPERUSER_FIXTURE,
       isSuperuser: true,
+      isCommsSteward: false,
     });
   });
 });
@@ -336,7 +338,7 @@ describe("getEffectiveEditSession", () => {
  * targets are R2-rejected before any session is minted.
  */
 function effectiveSessionFor(role: RoleFixtureLabel): EditSession {
-  return { cwid: ROLE_FIXTURES[role], isSuperuser: false };
+  return { cwid: ROLE_FIXTURES[role], isSuperuser: false, isCommsSteward: false };
 }
 
 describe("role × route matrix — overview edit authorization on the effective identity", () => {
@@ -365,7 +367,7 @@ describe("role × route matrix — overview edit authorization on the effective 
   it("E3 — a superuser impersonating a scholar CAN edit that scholar's overview", () => {
     // The unlock: the effective session is the scholar's (self), so the `overview`
     // predicate ALLOWS it via the self branch — the edit is made AS the scholar.
-    const effective: EditSession = { cwid: ROLE_FIXTURES.scholar, isSuperuser: false };
+    const effective: EditSession = { cwid: ROLE_FIXTURES.scholar, isSuperuser: false, isCommsSteward: false };
     expect(
       authorizeFieldEdit(effective, {
         entityId: ROLE_FIXTURES.scholar,
@@ -380,7 +382,7 @@ describe("role × route matrix — overview edit authorization on the effective 
     // superuser (no impersonated_cwid). Impersonation (E3 above) is no longer the
     // ONLY path; its distinct effect is attributing the edit to the scholar's
     // identity rather than the admin's.
-    const real: EditSession = { cwid: SUPERUSER_FIXTURE, isSuperuser: true };
+    const real: EditSession = { cwid: SUPERUSER_FIXTURE, isSuperuser: true, isCommsSteward: false };
     expect(
       authorizeFieldEdit(real, { entityId: ROLE_FIXTURES.scholar, fieldName: "overview" }),
     ).toEqual({ ok: true });

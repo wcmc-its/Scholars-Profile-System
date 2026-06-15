@@ -30,6 +30,7 @@ const ctx: EditContext = {
     postnominal: "MD, MPH",
     primaryDepartment: "Medicine",
     email: "self01@med.cornell.edu",
+    emailVisibility: "public",
     orcid: null,
     roleCategory: "full_time_faculty",
     overview: "<p>Hi.</p>",
@@ -100,6 +101,10 @@ const ctx: EditContext = {
   // flag is on AND the viewer is genuine self); a dedicated describe block below
   // exercises the populated case.
   unmatchedPubmedCoi: [],
+  // Medium-tier active (lower-confidence) and fully-reviewed (history) groups —
+  // empty by default; populated only when the flag is on for a genuine viewer.
+  unmatchedPubmedCoiLower: [],
+  unmatchedPubmedCoiReviewed: [],
   // #836 — null unless SELF_EDIT_MANUAL_HIGHLIGHTS is on AND the viewer is self.
   highlights: null,
 };
@@ -277,6 +282,59 @@ describe("EditPage router — the Apollo shell + rail", () => {
     render(<EditPage ctx={ctx} mode="self" attr="name-title" />);
     expect(screen.getByText("This section is not editable.")).toBeTruthy();
     expect(screen.getByTestId("request-a-change-toggle")).toBeTruthy();
+    // Email moved to its own tab — the Name & Title panel no longer echoes it.
+    expect(screen.queryByText("self01@med.cornell.edu")).toBeNull();
+  });
+
+  it("?attr=email renders the read-only Email tab: email, visibility label + explainer, Web Directory link", () => {
+    render(<EditPage ctx={ctx} mode="self" attr="email" />);
+    expect(document.querySelector('[data-slot="email-panel"]')).not.toBeNull();
+    expect(screen.getByText("self01@med.cornell.edu")).toBeTruthy();
+    // 'public' → "Public" label per SPEC table A.
+    expect(screen.getByTestId("email-visibility-label").textContent).toBe("Public");
+    expect(screen.getByTestId("email-visibility-explainer")).toBeTruthy();
+    // #919 — usage line, first-person for self.
+    expect(screen.getByTestId("email-usage-note").textContent).toBe(
+      "This is the contact email shown on your public profile.",
+    );
+    // #919 — download / on-network policy note (general; no numeric cap surfaced).
+    const policy = screen.getByTestId("email-download-policy");
+    expect(policy.textContent).toMatch(/signed in or on the campus network/i);
+    expect(policy.textContent).toMatch(/internal directory export/i);
+    expect(policy.textContent).toMatch(/that access is logged/i);
+    expect(policy.textContent).toMatch(/excluded from the export/i);
+    expect(policy.textContent).toMatch(/bulk download of large groups is not supported/i);
+    expect(policy.textContent).not.toMatch(/50/);
+    expect(screen.getByText("This section is not editable.")).toBeTruthy();
+    // Read-only: no control that writes the release code, just the SOR link.
+    const link = screen.getByTestId("email-web-directory-link");
+    expect(link.getAttribute("href")).toBe(
+      "https://directory.weill.cornell.edu/update/profile/index",
+    );
+  });
+
+  it("Email tab reframes the usage line + policy note to the scholar's name for a superuser (#919)", () => {
+    render(<EditPage ctx={superuserCtx} mode="superuser" attr="email" />);
+    // possessive → "{ScholarName}'s" (preferredName), matching the explainer's framing.
+    expect(screen.getByTestId("email-usage-note").textContent).toBe(
+      "This is the contact email shown on Alex Other's public profile.",
+    );
+    const policy = screen.getByTestId("email-download-policy");
+    expect(policy.textContent).toMatch(/download Alex Other's email/i);
+    expect(policy.textContent).not.toMatch(/\byour\b/i);
+    expect(policy.textContent).toMatch(/bulk download of large groups is not supported/i);
+  });
+
+  it("Email tab labels 'institution' as Institution only", () => {
+    const instCtx = { ...ctx, scholar: { ...ctx.scholar, emailVisibility: "institution" } };
+    render(<EditPage ctx={instCtx} mode="self" attr="email" />);
+    expect(screen.getByTestId("email-visibility-label").textContent).toBe("Institution only");
+  });
+
+  it("Email tab fails closed: NULL / unrecognized visibility → Not released", () => {
+    const noneCtx = { ...ctx, scholar: { ...ctx.scholar, emailVisibility: null } };
+    render(<EditPage ctx={noneCtx} mode="self" attr="email" />);
+    expect(screen.getByTestId("email-visibility-label").textContent).toBe("Not released");
   });
 
   it("shows the Mentees and Conflicts of Interest rail items in self mode", () => {
@@ -313,12 +371,19 @@ describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)",
     ...ctx,
     unmatchedPubmedCoi: [
       {
-        id: "gap-1",
-        pmid: "31508198",
+        key: "procept biorobotics",
         entity: "Procept BioRobotics",
         tier: "High",
-        sourceSentence:
-          "Clinical Research investigator for Procept Aquablation and Neotract Urolift.",
+        newestTs: Date.UTC(2019, 0, 1),
+        sources: [
+          {
+            id: "gap-1",
+            pmid: "31508198",
+            sourceSentence:
+              "Clinical Research investigator for Procept Aquablation and Neotract Urolift.",
+            year: 2019,
+          },
+        ],
       },
     ],
   };
@@ -341,6 +406,30 @@ describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)",
     expect(screen.getByTestId("rail-coi-gap")).toBeTruthy();
   });
 
+  it("renders a quiet count chip = number of relationships to review", () => {
+    render(<EditPage ctx={gapCtx} mode="self" />);
+    const item = screen.getByTestId("rail-coi-gap");
+    // The count is exposed by an accessible "to review" label (a cue, not a
+    // digit-only alert badge), and the visible text is the count.
+    expect(item.querySelector('[aria-label="1 to review"]')?.textContent).toBe("1");
+  });
+
+  it("caps the count chip display at 9+ (keeping the true count in the a11y label)", () => {
+    const many: EditContext = {
+      ...ctx,
+      unmatchedPubmedCoi: Array.from({ length: 12 }, (_, i) => ({
+        key: `e${i}`,
+        entity: `Entity ${i}`,
+        tier: "High" as const,
+        newestTs: 0,
+        sources: [{ id: `s${i}`, pmid: `p${i}`, sourceSentence: "x", year: null }],
+      })),
+    };
+    render(<EditPage ctx={many} mode="self" />);
+    const item = screen.getByTestId("rail-coi-gap");
+    expect(item.querySelector('[aria-label="12 to review"]')?.textContent).toBe("9+");
+  });
+
   it("?attr=coi-gap renders the panel with the verbatim source sentence + tier chip", () => {
     render(<EditPage ctx={gapCtx} mode="self" attr="coi-gap" />);
     expect(document.querySelector('[data-slot="coi-gap-panel"]')).not.toBeNull();
@@ -357,6 +446,9 @@ describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)",
     expect(rail).toBeTruthy();
     // Reframed for the superuser — not the first-person "From your publications".
     expect(rail.textContent).toContain("From the scholar");
+    // Nested UNDER Conflicts of Interest (like the self rail) — a sub-view, not a
+    // flat sibling. The child marker is the indentation class.
+    expect(rail.className).toContain("pl-9");
   });
 
   it("does NOT surface coi-gap in superuser mode when there are no candidates", () => {
@@ -493,6 +585,55 @@ describe("EditPage router — superuser mode", () => {
     expect(document.querySelector('[data-slot="overview-readonly"]')).toBeNull();
   });
 
+  // The Overview Generator (#742) is offered to a superuser editing another
+  // scholar too — `authorizeOverviewWrite` + the generate route already authorize
+  // a superuser, so the UI guard agrees (self OR superuser, gated by the flag).
+  it("?attr=overview exposes the Generate affordance for a superuser when the flag is on", () => {
+    // The flag is read at render time via isOverviewGenerateEnabled() (process.env
+    // SELF_EDIT_OVERVIEW_GENERATE). Turn it on for this case and restore after.
+    const prev = process.env.SELF_EDIT_OVERVIEW_GENERATE;
+    process.env.SELF_EDIT_OVERVIEW_GENERATE = "on";
+    // generateEnabled mounts history + source-options fetches — keep them inert.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, generations: [], provenance: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    // The Draft-with-AI block opens (and the Generate button mounts) when the bio
+    // is empty — the real use case here: a superuser drafting a bio for an
+    // uncovered scholar. With a non-empty overview the block starts collapsed.
+    const noBio: EditContext = {
+      ...superuserCtx,
+      scholar: { ...superuserCtx.scholar, overview: "" },
+    };
+    try {
+      render(<EditPage ctx={noBio} mode="superuser" attr="overview" />);
+      // generateEnabled=true ⇒ the Draft-with-AI block + Generate button render.
+      expect(screen.getByTestId("overview-generate")).toBeTruthy();
+      expect(screen.getByTestId("overview-draft-block")).toBeTruthy();
+    } finally {
+      fetchSpy.mockRestore();
+      if (prev === undefined) delete process.env.SELF_EDIT_OVERVIEW_GENERATE;
+      else process.env.SELF_EDIT_OVERVIEW_GENERATE = prev;
+    }
+  });
+
+  // Flag gating still holds: with the flag off, the superuser surface shows the
+  // plain manual editor (no Generate), exactly as before this widening.
+  it("?attr=overview hides the Generate affordance for a superuser when the flag is off", () => {
+    const prev = process.env.SELF_EDIT_OVERVIEW_GENERATE;
+    delete process.env.SELF_EDIT_OVERVIEW_GENERATE;
+    try {
+      render(<EditPage ctx={superuserCtx} mode="superuser" attr="overview" />);
+      expect(screen.getByTestId("mock-editor")).toBeTruthy();
+      expect(screen.queryByTestId("overview-generate")).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.SELF_EDIT_OVERVIEW_GENERATE;
+      else process.env.SELF_EDIT_OVERVIEW_GENERATE = prev;
+    }
+  });
+
   it("?attr=profile-url renders the SlugCard pre-filled with the override", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" attr="profile-url" />);
     expect((screen.getByTestId("slug-card-input") as HTMLInputElement).value).toBe("custom-handle");
@@ -515,17 +656,20 @@ describe("EditPage router — superuser mode", () => {
         manualPmids: [],
         aiPmids: ["100"],
         pickable: [
-          { pmid: "100", title: "A landmark study", journal: "Cell", year: 2024 },
-          { pmid: "200", title: "A follow-up", journal: "Nature", year: 2025 },
+          { pmid: "100", title: "A landmark study", journal: "Cell", year: 2024, impact: 90, publicationType: "Academic Article" },
+          { pmid: "200", title: "A follow-up", journal: "Nature", year: 2025, impact: 70, publicationType: "Review" },
         ],
       },
     };
     render(<EditPage ctx={withHighlights} mode="superuser" attr="highlights" />);
     const rail = screen.getByTestId("rail-highlights") as HTMLAnchorElement;
     expect(rail.getAttribute("href")).toBe("/edit/scholar/other7?attr=highlights");
-    // Reframed to a third-person action — not the first-person self label.
-    expect(screen.getByTestId("highlights-opt-in").textContent).toBe("Choose highlights manually");
-    expect(screen.queryByText("Choose my highlights manually")).toBeNull();
+    // The mode-switch button is mode-neutral copy; the reframing to a third-person
+    // action lives in the panel description (not the first-person self copy).
+    expect(screen.getByTestId("highlights-opt-in").textContent).toBe("Choose manually");
+    const panel = document.querySelector('[data-slot="highlights-card"]');
+    expect(panel?.textContent).toContain("on their behalf");
+    expect(panel?.textContent).not.toContain("yourself");
   });
 
   it("drops the Highlights rail item in superuser mode when the loader left it null (flag off / not loaded)", () => {

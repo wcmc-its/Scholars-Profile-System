@@ -80,7 +80,108 @@ function chunks<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
+/**
+ * #928 P2 — dispatch the bucket computation. In-VPC the live ReciterDB join is
+ * unreachable, so when `MENTORING_COPUB_BRIDGE=on` we DERIVE the same buckets
+ * from already-bridged LOCAL tables (no ReciterDB). Off ⇒ the live join.
+ */
 async function refresh(): Promise<MentoringPmidBuckets> {
+  if (process.env.MENTORING_COPUB_BRIDGE === "on") return refreshFromBridge();
+  return refreshFromReciter();
+}
+
+/**
+ * #928 P2 — derive the buckets from local tables the #930 bridge already
+ * populates, with NO ReciterDB dependency:
+ *   - `mentee_copublication_pub` holds every (mentor, mentee, pmid) co-authorship
+ *     the export computed across ALL three pair sources (AOC + PhD + postdoc), so
+ *     the union of its pmids is the "all" set.
+ *   - The program type per (mentor, mentee) pair lives in `aoc_mentee`
+ *     (AOC/AOC-2025/MDPHD/ECR), `phd_mentor_relationship` (PhD/MD-PhD), and
+ *     `postdoc_mentor_relationship` (always POSTDOC).
+ *
+ * A pair can carry several program types (e.g. AOC + AOC-2025, or appearing
+ * under both the AOC and PhD sources), so each co-pub pmid is added to EVERY
+ * applicable bucket — mirroring the live path, where each source independently
+ * adds the pmid to its own bucket.
+ *
+ * Parity note vs the live join: the bridge only stores pmids that also have an
+ * `analysis_summary_article` row (the export joins it), so a co-authored pmid
+ * lacking article metadata is absent here. That is harmless — and arguably more
+ * correct — for a Publications-browse facet, whose targets must have article
+ * data to be browsable. Coverage is otherwise identical.
+ *
+ * Like the live path, an empty bridge table (not yet imported) yields empty
+ * buckets, which equals the current in-VPC behavior (honest degradation).
+ */
+async function refreshFromBridge(): Promise<MentoringPmidBuckets> {
+  const allSet = new Set<string>();
+  const bySet: Record<MentoringProgramKey, Set<string>> = {
+    md: new Set(),
+    mdphd: new Set(),
+    phd: new Set(),
+    postdoc: new Set(),
+    ecr: new Set(),
+  };
+
+  // Program type(s) per "mentor::mentee" pair, unioned across the three
+  // relationship sources (a pair may appear in more than one).
+  const pairPrograms = new Map<string, Set<string>>();
+  const addProgram = (mentor: string, mentee: string, programType: string | null) => {
+    if (!programType) return;
+    const key = `${mentor}::${mentee}`;
+    let set = pairPrograms.get(key);
+    if (!set) {
+      set = new Set<string>();
+      pairPrograms.set(key, set);
+    }
+    set.add(programType);
+  };
+
+  const [aoc, phd, postdoc] = await Promise.all([
+    prisma.aocMentee.findMany({
+      select: { mentorCwid: true, menteeCwid: true, programType: true },
+    }),
+    prisma.phdMentorRelationship.findMany({
+      select: { mentorCwid: true, menteeCwid: true, programType: true },
+    }),
+    prisma.postdocMentorRelationship.findMany({
+      select: { mentorCwid: true, menteeCwid: true },
+    }),
+  ]);
+  for (const r of aoc) addProgram(r.mentorCwid, r.menteeCwid, r.programType);
+  for (const r of phd) addProgram(r.mentorCwid, r.menteeCwid, r.programType);
+  for (const r of postdoc) addProgram(r.mentorCwid, r.menteeCwid, "POSTDOC");
+
+  // Every (mentor, mentee, pmid) co-authorship the bridge holds.
+  const copubs = await prisma.menteeCopublicationPub.findMany({
+    select: { mentorCwid: true, menteeCwid: true, pmid: true },
+  });
+  for (const r of copubs) {
+    const pmid = String(r.pmid);
+    allSet.add(pmid);
+    const programs = pairPrograms.get(`${r.mentorCwid}::${r.menteeCwid}`);
+    if (programs) {
+      for (const programType of programs) {
+        const bucket = bucketProgramType(programType);
+        if (bucket) bySet[bucket].add(pmid);
+      }
+    }
+  }
+
+  return {
+    all: [...allSet],
+    byProgram: {
+      md: [...bySet.md],
+      mdphd: [...bySet.mdphd],
+      phd: [...bySet.phd],
+      postdoc: [...bySet.postdoc],
+      ecr: [...bySet.ecr],
+    },
+  };
+}
+
+async function refreshFromReciter(): Promise<MentoringPmidBuckets> {
   const allSet = new Set<string>();
   const bySet: Record<MentoringProgramKey, Set<string>> = {
     md: new Set(),

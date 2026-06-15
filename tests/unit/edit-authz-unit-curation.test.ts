@@ -17,8 +17,8 @@ import {
 } from "@/lib/edit/authz";
 import type { EditSession } from "@/lib/auth/superuser";
 
-const ACTOR: EditSession = { cwid: "act001", isSuperuser: false };
-const SUPER: EditSession = { cwid: "sup001", isSuperuser: true };
+const ACTOR: EditSession = { cwid: "act001", isSuperuser: false, isCommsSteward: false };
+const SUPER: EditSession = { cwid: "sup001", isSuperuser: true, isCommsSteward: false };
 
 type Row = { entityType: "department" | "division" | "center"; entityId: string; role: "owner" | "curator" };
 

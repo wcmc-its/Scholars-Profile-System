@@ -47,6 +47,8 @@ data/
 *.dump
 *.sql.gz
 *.csv
+# JSONL dumps (e.g. etl:coi-gap:diagnose output — carries CWIDs + statement text)
+*.jsonl
 seed-output/
 # Exception: §1.4 curated MeSH-anchor seed is intentionally checked in
 # so curation-team edits flow through PR review.
@@ -154,3 +156,6 @@ scripts/probe-*.ts
 scripts/query-reciterdb.ts
 scripts/query-scholars.ts
 .screenshots/
+
+# Reference material from WCM Operations (ServiceNow KB samples) — local only, never commit
+docs/sample docs from ServiceNow/

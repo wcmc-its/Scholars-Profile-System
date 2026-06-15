@@ -12,9 +12,13 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 
-// 6h fallback TTL; on-demand revalidation triggered by ETL writes.
-export const revalidate = 21600;
-export const dynamicParams = true;
+// #985 — force-dynamic: the #800/#801 family-visibility overlay gate is
+// per-request, but ISR (revalidate=21600) cached the rendered shell for up to
+// 6h, leaving a steward-suppressed/sensitive family publicly reachable (in the
+// supercategory rail, family shell, and JSON-LD) until the next revalidate. The
+// data layer is already overlay-gated per request; force-dynamic makes the page
+// honor it. (Perf-optimal purge-on-edit that restores ISR is the #985 follow-up.)
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Research Methods at WCM",

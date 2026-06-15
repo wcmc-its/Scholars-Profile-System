@@ -301,7 +301,7 @@ async function handleDivision(p: {
     return editError(500, "write_failed");
   }
 
-  reflectUnitChange({ unitKind: "division", unitSlug, parentDeptSlug });
+  await reflectUnitChange({ unitKind: "division", unitSlug, parentDeptSlug });
   return editOk({ unitCode, cwid, action, changed: true });
 }
 
@@ -399,6 +399,6 @@ async function handleCenter(p: {
     return editError(500, "write_failed");
   }
 
-  reflectUnitChange({ unitKind: "center", unitSlug });
+  await reflectUnitChange({ unitKind: "center", unitSlug });
   return editOk({ unitCode, cwid, action, changed: true });
 }

@@ -62,18 +62,27 @@ Log groups owned by other stacks (ReCiter, ReciterAI, etc.) are out of scope for
 
 ## Alarm catalog
 
-Eight alarms per env, all defined in `cdk/lib/observability-stack.ts`. Every alarm publishes to the **page** SNS topic `sps-alarms-${env}`, which a Microsoft Teams channel webhook is subscribed to out-of-band. The operator email no longer rides this topic -- it lives on the sibling **notify** topic (`sps-notify-${env}`) used for cost-guardrail fan-out. Teams matches the WCM-native ops pattern (chat surface + ServiceNow tickets + manual Ops phone escalation); a dedicated paging tool was considered and rejected. See [`docs/oncall.md`](./oncall.md) for the full topology, alternates rationale, and the rollout runbook.
+Ten simple alarms per env plus one composite, all defined in `cdk/lib/observability-stack.ts`, split across two on-call **tiers** so the page channel carries only customer-facing problems:
 
-| # | Alarm name | Metric source | Threshold | Eval | What it catches |
-|---|---|---|---|---|---|
-| 1 | `sps-alb-5xx-rate-${env}` | Public ALB `HTTPCode_Target_5XX_Count / RequestCount` | > 1% | 5m, 2 datapoints | Availability SLO burn. |
-| 2 | `sps-alb-unhealthy-hosts-${env}` | Target group `UnHealthyHostCount` | > 0 | 1m, 5 of 5 datapoints | Zero healthy targets sustained 5 minutes -- circuit-breaker did not catch it. |
-| 3 | `sps-alb-latency-p99-${env}` | Public ALB `TargetResponseTime` p99 | > 1.5 s | 5m, 3 datapoints | Latency SLO burn. |
-| 4 | `sps-ecs-task-shortfall-${env}` | ECS `DesiredTaskCount - RunningTaskCount` | > 0 | 1m, 5 of 5 datapoints | Tasks died and are not being replaced. |
-| 5 | `sps-aurora-cpu-${env}` | Aurora `CPUUtilization` | > 80% | 5m, 3 datapoints | Hot query loop or runaway analytic. |
-| 6 | `sps-aurora-connections-${env}` | Aurora `DatabaseConnections` | > 80 | 5m, 3 datapoints | Connection-pool exhaustion or unintended fan-out. |
-| 7 | `sps-opensearch-jvm-pressure-${env}` | OpenSearch `JVMMemoryPressure` | > 85% | 5m, 3 datapoints | GC pressure cascading into query latency. |
-| 8 | `sps-opensearch-cluster-red-${env}` | OpenSearch `ClusterStatus.red` | >= 1 | 1m, 1 datapoint | Shards unassigned -- searches affected. |
+- **P1 (page)** publishes to the **page** SNS topic `sps-alarms-${env}` -- the Teams on-call channel, via the B27 relay Lambda.
+- **P2 (warn)** publishes to the **warn** SNS topic `sps-warn-${env}` -- the same relay posts these to a separate, quieter Teams channel, falling back to the page channel if that channel's webhook (`scholars/${env}/oncall/teams-webhook-url-warn`) is not yet provisioned, so demoting an alarm never silently drops it. P2 = leading indicators and operational signals that warrant attention but are not "wake on-call": resource pressure, the security-probe counter, and (in `cdk/lib/etl-stack.ts`, topic `etl-failures-${env}`) every ETL/reconciler data-freshness alarm.
+
+The operator email rides the sibling **notify** topic (`sps-notify-${env}`), used for cost-guardrail fan-out and the B27 relay-failure alarm. Teams matches the WCM-native ops pattern (chat surface + ServiceNow tickets + manual Ops phone escalation); a dedicated paging tool was considered and rejected. See [`docs/oncall.md`](./oncall.md) for the full topology, the warn-channel provisioning runbook, alternates rationale, and the rollout runbook.
+
+| # | Alarm name | Tier | Metric source | Threshold | Eval | What it catches |
+|---|---|---|---|---|---|---|
+| 1 | `sps-alb-5xx-rate-${env}` | P1 † | Public ALB `HTTPCode_Target_5XX_Count / RequestCount` | > 1% | 5m, 2 datapoints | Availability SLO burn. |
+| 2 | `sps-alb-unhealthy-hosts-${env}` | P1 † | Target group `UnHealthyHostCount` | > 0 | 1m, 5 of 5 datapoints | Zero healthy targets sustained 5 minutes -- circuit-breaker did not catch it. |
+| 3 | `sps-alb-latency-p99-${env}` | P1 | Public ALB `TargetResponseTime` p99 | > 1.5 s | 5m, 3 datapoints | Latency SLO burn. |
+| 4 | `sps-ecs-task-shortfall-${env}` | P1 † | ECS `DesiredTaskCount - RunningTaskCount` | > 0 | 1m, 5 of 5 datapoints | Tasks died and are not being replaced. |
+| 5 | `sps-aurora-cpu-${env}` | P2 | Aurora `CPUUtilization` | > 80% | 5m, 3 datapoints | Hot query loop or runaway analytic (leading indicator). |
+| 6 | `sps-aurora-connections-${env}` | P2 | Aurora `DatabaseConnections` | > 80 | 5m, 3 datapoints | Connection-pool exhaustion or unintended fan-out (leading indicator). |
+| 7 | `sps-opensearch-jvm-pressure-${env}` | P2 | OpenSearch `JVMMemoryPressure` | > 85% | 5m, 3 datapoints | GC pressure cascading into query latency (leading indicator). |
+| 8 | `sps-opensearch-cluster-red-${env}` | P1 | OpenSearch `ClusterStatus.red` | >= 1 | 1m, 1 datapoint | Shards unassigned -- searches affected. |
+| 9 | `sps-edit-authz-denied-${env}` | P2 | Log metric `SPS/Auth EditAuthzDenied` | > 10 | 5m, 2 datapoints | Sustained edit-surface 403s -- predicate bug or active probing. |
+| C | `sps-app-unavailable-${env}` | P1 | Composite: `ALARM(#1) OR ALARM(#2) OR ALARM(#4)` | any child in ALARM | -- | The serving cascade. Single P1 page when 5xx-burst / zero-healthy-hosts / task-shortfall fire together from one root cause. |
+
+† These three serving-failure symptoms carry **no direct action** -- they feed the `sps-app-unavailable-${env}` composite (row C), which is the single P1 page for a serving cascade. Without the composite, one root cause (e.g. Aurora connection exhaustion) posted three separate page cards for one incident. The children still evaluate, so the reliability dashboard and the composite rule see them.
 
 Threshold values are calibrated for the current 1-2-task-per-env scale. Re-tune at the first SLO review after EdgeStack ships and CloudFront traffic is in the picture.
 
@@ -101,6 +110,8 @@ Quarterly, with two opportunistic triggers:
 
 Review is a written doc-update PR, not a meeting. Each review revises the targets, the alarm thresholds, and the freeze policy with explicit before/after numbers and the rationale.
 
+**Alarm actionability (the standing guard against page-channel re-bloat).** Each review also pulls the per-alarm fire count for the period -- from CloudWatch `DescribeAlarmHistory` and the relay's structured `oncall_relay` log lines (which carry `severity` + `channel`) -- and asks, for every alarm that fired: *did anyone do anything?* Any alarm that fires repeatedly without ever driving an action is demoted (P1 -> P2) or deleted. "Fast and furious but meaningless" is how a page channel trains people to ignore it; this line item is what keeps the channel trustworthy after the initial tiering.
+
 ## Out of scope (for the next at least one quarter)
 
 - **Burn-rate alerts** (multi-window / multi-burn-rate setup à la Google SRE Workbook). Deferred until >= 30 days of post-launch SLI data; pre-launch corpus does not give a real burn-rate distribution to tune against.
@@ -114,6 +125,7 @@ Review is a written doc-update PR, not a meeting. Each review revises the target
 
 On-call topology, provider choice (Teams channel webhook; ServiceNow integration as a follow-on), per-env rollout, and the un-subscribe / rollback flow live in [`docs/oncall.md`](./oncall.md). The relevant SLO-side handles are:
 
-- **Page topic** `sps-alarms-${env}` (CFN output `AlarmTopicArn`) -- the eight alarms in the catalog above publish here; a Microsoft Teams channel webhook is subscribed via HTTPS, configured out-of-band per `oncall.md`. No CDK-declared subscriptions on this topic.
+- **Page topic** `sps-alarms-${env}` (CFN output `AlarmTopicArn`) -- the P1 alarms in the catalog above publish here (the `sps-app-unavailable-${env}` composite, latency-p99, cluster-red); the B27 relay Lambda is subscribed (CDK-managed `SnsEventSource`) and posts to the primary Teams channel.
+- **Warn topic** `sps-warn-${env}` (CFN output `WarnTopicArn`) -- the P2 alarms publish here; the same relay Lambda is subscribed and posts to a separate, quieter Teams channel, falling back to the primary channel until `scholars/${env}/oncall/teams-webhook-url-warn` is provisioned (see `oncall.md` § Severity tiers). Keeps leading-indicator and data-freshness noise off the on-call channel.
 - **Notify topic** `sps-notify-${env}` (CFN output `NotifyTopicArn`) -- account-wide budget thresholds and Cost Anomaly Detection publish here; the operator's work address (`paa2013@med.cornell.edu`) is subscribed by email. The split keeps a forecasted-budget tap off the page channel.
 - Email subscriptions on each env's `sps-notify-${env}` require manual confirmation within 3 days of first deploy; AWS sends the confirmation request to the operator address. An unconfirmed subscription expires and cost notifications fire into the void.

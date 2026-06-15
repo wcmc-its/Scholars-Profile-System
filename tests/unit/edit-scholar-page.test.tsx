@@ -93,8 +93,8 @@ vi.mock("@/components/edit/edit-page", () => ({
   // the real per-mode visible keys; the flag arg doesn't change membership.
   visibleAttrKeys: (mode: "self" | "superuser" | "proxy" | "unit-admin") =>
     mode === "superuser"
-      ? ["home", "name-title", "photo", "overview", "visibility", "funding", "appointments", "education", "profile-url"]
-      : ["home", "name-title", "photo", "overview", "visibility", "publications", "funding", "appointments", "education", "profile-url"],
+      ? ["home", "name-title", "email", "photo", "overview", "visibility", "funding", "appointments", "education", "profile-url"]
+      : ["home", "name-title", "email", "photo", "overview", "visibility", "publications", "funding", "appointments", "education", "profile-url"],
 }));
 vi.mock("@/components/edit/forbidden-edit-page", () => ({
   ForbiddenEditPage: mockForbiddenEditPage,
@@ -111,6 +111,8 @@ const fakeCtx = (cwid: string) => ({
   // The real loader always returns these (array + nullable); the page reads them
   // to derive the valid `?attr` set (#836 highlights + COI-gap visibility).
   unmatchedPubmedCoi: [],
+  unmatchedPubmedCoiLower: [],
+  unmatchedPubmedCoiReviewed: [],
   highlights: null,
 });
 

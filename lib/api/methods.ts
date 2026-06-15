@@ -38,6 +38,7 @@ import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 import {
   isMethodsLensEnabled,
   isMethodsFamilyRosterFallbackOn,
+  isMethodsFamilyDefinitionsOn,
 } from "@/lib/profile/methods-lens-flags";
 import {
   loadFamilyOverlayGate,
@@ -105,6 +106,11 @@ export type ResolvedFamily = {
   familyLabel: string;
   /** URL segment (`${slug(label)}-${familyId}`) — the canonical family slug. */
   familySlug: string;
+  /** #879 — generated capability gloss (passthrough, render-only). `null` until
+   *  the tools-a2-v3 rollup populates it, or when the render flag is off. */
+  definition: string | null;
+  /** #879 — "generated" | null; gates the page's "AI-generated" disclaimer. */
+  definitionSource: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -215,12 +221,31 @@ export async function getFamily(
   const gate = await loadFamilyOverlayGate();
   if (!isFamilyPubliclyVisible(supercategory, chosen.familyLabel, gate)) return null;
 
+  // #879 — family-level generated definition (render-only, flag-gated). The
+  // groupBy above cannot project a text column, so read one matching row by the
+  // stable (supercategory, familyLabel) identity — the value is identical across
+  // the family's scholar rows (indexed by @@index([supercategory, familyLabel])).
+  // Gated on METHODS_LENS_FAMILY_DEFINITIONS so nothing (incl. the DefinedTerm
+  // JSON-LD / SEO) surfaces until the copy is flipped on after EA sign-off.
+  let definition: string | null = null;
+  let definitionSource: string | null = null;
+  if (isMethodsFamilyDefinitionsOn()) {
+    const def = await prisma.scholarFamily.findFirst({
+      where: { supercategory, familyLabel: chosen.familyLabel },
+      select: { definition: true, definitionSource: true },
+    });
+    definition = def?.definition ?? null;
+    definitionSource = def?.definitionSource ?? null;
+  }
+
   return {
     supercategory,
     supercategorySlug: supercategorySlug(supercategory),
     familyId: chosen.familyId,
     familyLabel: chosen.familyLabel,
     familySlug: familySlug(chosen.familyLabel, chosen.familyId),
+    definition,
+    definitionSource,
   };
 }
 
@@ -247,6 +272,12 @@ export type FamilyRosterEntry = {
    *  Rollup` this is the deduped UNION across the family's scholars (cap 3); the
    *  bare `getFamiliesForSupercategory` keeps the single representative row's set. */
   exemplarTools: string[];
+  /** #879 — generated capability gloss (passthrough, render-only). `null` on the
+   *  cheap `getFamiliesForSupercategory` path and whenever the definitions flag is
+   *  off; populated only by `getSupercategoryRollup` (same gate as `getFamily`). */
+  definition: string | null;
+  /** #879 — "generated" | null; gates the "AI-generated" disclaimer in the rail panel. */
+  definitionSource: string | null;
 };
 
 /**
@@ -311,6 +342,8 @@ export async function getFamiliesForSupercategory(
         pmidCountSum: g._sum.pmidCount ?? 0,
         pubCount: null,
         exemplarTools: exemplarById.get(familyId) ?? [],
+        definition: null,
+        definitionSource: null,
       };
     })
     .sort(
@@ -424,6 +457,34 @@ async function loadUnionExemplars(
   return out;
 }
 
+/**
+ * Per-family generated definitions (#879) for the supercategory rail panel, keyed
+ * by familyLabel. Flag-gated by METHODS_LENS_FAMILY_DEFINITIONS — returns an EMPTY
+ * map WITHOUT querying when off, so nothing surfaces in the panel until the same
+ * copy gate `getFamily` honors is flipped on (no prod cost while dark). The gloss
+ * is identical across a family's scholar rows, so one row per label suffices.
+ */
+async function loadFamilyDefinitions(
+  supercategory: string,
+  familyLabels: string[],
+): Promise<Map<string, { definition: string | null; definitionSource: string | null }>> {
+  const out = new Map<string, { definition: string | null; definitionSource: string | null }>();
+  if (!isMethodsFamilyDefinitionsOn() || familyLabels.length === 0) return out;
+
+  const rows = await prisma.scholarFamily.findMany({
+    where: { supercategory, familyLabel: { in: familyLabels } },
+    select: { familyLabel: true, definition: true, definitionSource: true },
+    distinct: ["familyLabel"],
+  });
+  for (const r of rows) {
+    out.set(r.familyLabel, {
+      definition: r.definition ?? null,
+      definitionSource: r.definitionSource ?? null,
+    });
+  }
+  return out;
+}
+
 /** The supercategory-page rollup: the family rail (with DISTINCT paper counts +
  *  union exemplars) plus the default "All work" representative publication list —
  *  all derived from a SINGLE supercategory-wide pmid collection. */
@@ -462,11 +523,17 @@ export async function getSupercategoryRollup(
     supercategory,
     base.map((f) => f.familyLabel),
   );
+  const definitionsByLabel = await loadFamilyDefinitions(
+    supercategory,
+    base.map((f) => f.familyLabel),
+  );
 
   const families: FamilyRosterEntry[] = base.map((f) => ({
     ...f,
     pubCount: pmidsByFamilyLabel.get(f.familyLabel)?.length ?? 0,
     exemplarTools: exemplarsByLabel.get(f.familyLabel) ?? [],
+    definition: definitionsByLabel.get(f.familyLabel)?.definition ?? null,
+    definitionSource: definitionsByLabel.get(f.familyLabel)?.definitionSource ?? null,
   }));
 
   let allWorkPubs: MethodPublicationHit[] = [];

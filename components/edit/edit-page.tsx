@@ -14,6 +14,7 @@ import { CoiGapCard } from "@/components/edit/coi-gap-card";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { EditShell } from "@/components/edit/edit-shell";
 import { EducationCard } from "@/components/edit/education-card";
+import { EmailCard } from "@/components/edit/email-card";
 import { FundingCard } from "@/components/edit/funding-card";
 import { HighlightsCard } from "@/components/edit/highlights-card";
 import { MenteesCard } from "@/components/edit/mentees-card";
@@ -42,6 +43,7 @@ import { isReciterRejectEnabled } from "@/lib/reciter/client";
 type AttrKey =
   | "home"
   | "name-title"
+  | "email"
   | "photo"
   | "overview"
   | "highlights"
@@ -69,6 +71,10 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // reads as a read-only profile-completeness overview of the target scholar.
   { key: "home", label: "Home", modes: ["self", "superuser"] },
   { key: "name-title", label: "Name & Title", readonly: true, modes: ["self", "superuser"] },
+  // Email + its Web Directory release audience — read-only (email-visibility
+  // SPEC § C). The release code is owned by the Web Directory SOR; this panel
+  // only shows the imported state and links out, so it carries no write control.
+  { key: "email", label: "Email", readonly: true, modes: ["self", "superuser"] },
   { key: "photo", label: "Photo", readonly: true, modes: ["self", "superuser"] },
   { key: "overview", label: "Overview", modes: ["self", "superuser"] },
   // Highlights (#836, SELF_EDIT_MANUAL_HIGHLIGHTS) — the opt-in manual override
@@ -113,6 +119,7 @@ const DEFAULT_ATTR: Record<EditMode, AttrKey> = {
   superuser: "home",
   proxy: "home",
   "unit-admin": "home",
+  comms_steward: "home",
 };
 
 /** The actor surfaces. `proxy` (#779) is a scholar-assigned designee, and
@@ -120,14 +127,26 @@ const DEFAULT_ATTR: Record<EditMode, AttrKey> = {
  *  belongs to: both reuse the SELF editable surface (overview + publication
  *  hiding) on the scholar's route, minus the self-only Profile URL request and
  *  the "From your publications" advisory, and neither can manage the proxy list.
- *  Visual/interaction polish is a UI-SPEC deliverable. */
-type EditMode = "self" | "superuser" | "proxy" | "unit-admin";
+ *  `comms_steward` (comms-steward-profile-editing-spec.md §3b) edits any scholar
+ *  at SUPERUSER parity MINUS slug + proxy delegation. Visual/interaction polish
+ *  is a UI-SPEC deliverable. */
+type EditMode = "self" | "superuser" | "proxy" | "unit-admin" | "comms_steward";
+
+/** Whether a mode renders with SUPERUSER editability (overview editable,
+ *  publications hideable, generate enabled): the superuser surface itself, and
+ *  the `comms_steward` profile editor, which is superuser parity minus slug +
+ *  proxy-editors. The child cards collapse to this (`childMode` below). */
+function isSuperuserLike(mode: EditMode): boolean {
+  return mode === "superuser" || mode === "comms_steward";
+}
 
 /** The attribute set visible for a mode, before flag/candidate filtering.
  *  `proxy` and `unit-admin` mirror `self` minus `profile-url` (slug is
  *  self/superuser-only — neither can request a slug for the scholar), `coi-gap`
  *  (self-only advisory; the loader returns no candidates for them anyway), and
- *  `proxy-editors` (only the scholar/superuser manages designees — CD-2). */
+ *  `proxy-editors` (only the scholar/superuser manages designees — CD-2).
+ *  `comms_steward` mirrors `superuser` minus `profile-url` (slug is out of scope,
+ *  §3b) and `proxy-editors` (delegation = "adding/removing users", out of scope). */
 function attrsForMode(mode: EditMode): AttrDef[] {
   if (mode === "proxy" || mode === "unit-admin") {
     return ATTRIBUTES.filter(
@@ -136,6 +155,14 @@ function attrsForMode(mode: EditMode): AttrDef[] {
         a.key !== "profile-url" &&
         a.key !== "coi-gap" &&
         a.key !== "proxy-editors", // a proxy / unit admin can never manage the proxy list (CD-2)
+    );
+  }
+  if (mode === "comms_steward") {
+    return ATTRIBUTES.filter(
+      (a) =>
+        a.modes.includes("superuser") &&
+        a.key !== "profile-url" && // slug — out of the steward's scope (§3b)
+        a.key !== "proxy-editors", // delegation — out of the steward's scope (§3b)
     );
   }
   return ATTRIBUTES.filter((a) => a.modes.includes(mode));
@@ -160,6 +187,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   // gated/read-only it leads the WCM group.)
   "profile-url",
   "name-title",
+  "email",
   "photo",
   "appointments",
   "education",
@@ -182,6 +210,7 @@ const SELF_RAIL_KIND: Record<AttrKey, "owned" | "sourced" | "readonly"> = {
   education: "sourced",
   mentees: "sourced",
   "name-title": "readonly",
+  email: "readonly",
   photo: "readonly",
   coi: "readonly",
   "coi-gap": "readonly",
@@ -204,6 +233,7 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "home",
   "profile-url",
   "name-title",
+  "email",
   "photo",
   "overview",
   // Highlights follows Overview (mirrors the self rail); appears only when the
@@ -241,6 +271,11 @@ export type EditPageProps = {
   /** Self mode only: the viewer is a superuser, so the shell shows a link
    *  across to the Profiles roster. Forwarded to `EditShell`. */
   canBrowseProfiles?: boolean;
+  /** Self mode only: a pre-built console tab strip (the shared `AdminSubnav`)
+   *  for a superuser / comms_steward, rendered by `EditShell` in place of the
+   *  minimal self-edit sub-nav. Built by the `/edit` page (which holds the
+   *  session + role verdicts) and forwarded opaquely. */
+  consoleNav?: React.ReactNode;
   /** Self mode only: org units the viewer may also curate (#753), surfaced on
    *  the Home panel. Empty for most scholars. */
   manageableUnits?: ManageableUnit[];
@@ -293,6 +328,7 @@ export function EditPage({
   slugRequestEnabled = false,
   latestSlugRequest = null,
   canBrowseProfiles = false,
+  consoleNav,
   manageableUnits = [],
   proxyEditors = null,
   unitAdminEditors = null,
@@ -303,14 +339,18 @@ export function EditPage({
   // load them + the flag, so a non-empty array here already implies an allowed
   // actor). Drop it from the visible set otherwise so it appears in neither the
   // rail nor the valid-attr set — an empty panel is never surfaced.
+  // The rail item surfaces when there is High-active work OR settled history to
+  // revisit (Reviewed). A Medium-only group does NOT surface the item — it lives
+  // inside the High panel's lower-confidence expander, never as its own entry.
   const hasCoiGap =
-    (mode === "self" || mode === "superuser") && ctx.unmatchedPubmedCoi.length > 0;
+    (mode === "self" || isSuperuserLike(mode)) &&
+    (ctx.unmatchedPubmedCoi.length > 0 || ctx.unmatchedPubmedCoiReviewed.length > 0);
   // #836 — Highlights is present only when the loader populated `ctx.highlights`
   // (flag on + self or superuser). The loader (per surface) enforces who may load
   // it — self on `/edit`, self or superuser on `/edit/scholar/[cwid]`, never a
   // proxy / unit-admin — so a non-null value here already implies an allowed actor.
   const hasHighlights =
-    (mode === "self" || mode === "superuser") && ctx.highlights !== null;
+    (mode === "self" || isSuperuserLike(mode)) && ctx.highlights !== null;
   const visible = attrsForMode(mode)
     .filter((a) => a.key !== "coi-gap" || hasCoiGap)
     .filter((a) => a.key !== "highlights" || hasHighlights);
@@ -345,6 +385,14 @@ export function EditPage({
               // immediately follows "coi" in SELF_RAIL_ORDER) rather than reading
               // as a flat sibling — it is a sub-view of COI, not its own SOR.
               child: a.key === "coi-gap",
+              // A quiet count of High-tier relationships still worth reviewing.
+              // The badge is the High-active count ONLY — Medium and Reviewed are
+              // excluded — and 0 coerces to undefined so the item can appear for a
+              // Reviewed-only history without showing a "0" badge.
+              count:
+                a.key === "coi-gap"
+                  ? ctx.unmatchedPubmedCoi.length || undefined
+                  : undefined,
             },
           ];
         })
@@ -355,7 +403,23 @@ export function EditPage({
           // it for a superuser viewing another scholar's advisory.
           const label =
             a.key === "coi-gap" ? "From the scholar’s publications" : a.label;
-          return [{ key: a.key, label, readonly: a.readonly }];
+          // Like the self rail, the advisory nests under Conflicts of Interest
+          // (it immediately follows "coi" in SUPERUSER_RAIL_ORDER) rather than
+          // reading as a flat sibling — it is a sub-view of COI, not its own SOR.
+          return [
+            {
+              key: a.key,
+              label,
+              readonly: a.readonly,
+              child: a.key === "coi-gap",
+              // High-active count ONLY (Medium + Reviewed excluded); 0 → undefined
+              // so a Reviewed-only history shows the item without a "0" badge.
+              count:
+                a.key === "coi-gap"
+                  ? ctx.unmatchedPubmedCoi.length || undefined
+                  : undefined,
+            },
+          ];
         });
   // Self edits at "/edit"; superuser and proxy edit a named scholar at
   // "/edit/scholar/<cwid>" (a proxy is never on their own /edit).
@@ -364,7 +428,11 @@ export function EditPage({
 
   return (
     <EditShell
-      mode={mode}
+      // The shell chrome (breadcrumb back to Profiles + the "editing … as an
+      // administrator" banner) is the same a superuser sees — a comms_steward
+      // reaches this editor from the same roster and edits in an administrative
+      // capacity, so reuse it rather than add bespoke chrome.
+      mode={mode === "comms_steward" ? "superuser" : mode}
       scholarName={scholarName}
       railItems={railItems}
       activeAttr={active.key}
@@ -372,6 +440,7 @@ export function EditPage({
       previewHref={profilePath(ctx.scholar.slug)}
       account={mode === "self" ? { slug: ctx.scholar.slug, preferredName: scholarName } : undefined}
       canBrowseProfiles={canBrowseProfiles}
+      consoleNav={consoleNav}
       unitAdmin={unitAdminBanner ?? undefined}
     >
       {renderPanel(
@@ -407,7 +476,7 @@ function renderPanel(
   // (overview editable, publications hide); the proxy-specific affordance gates
   // (no generate, no preview link, no slug request) are derived from the REAL
   // `mode` at each call site below, never from `childMode`.
-  const childMode: "self" | "superuser" = mode === "superuser" ? "superuser" : "self";
+  const childMode: "self" | "superuser" = isSuperuserLike(mode) ? "superuser" : "self";
   const detailBase = mode === "self" ? "/edit" : `/edit/scholar/${cwid}`;
   switch (key) {
     case "home": {
@@ -443,15 +512,27 @@ function renderPanel(
           attribute="name-title"
           cwid={cwid}
           heading="Name & Title"
-          description="Name, title, degrees, department, email, and ORCID come from the WCM directory and faculty records."
+          description="Name, title, degrees, department, and ORCID come from the WCM directory and faculty records."
           fields={[
             { label: "Name", value: ctx.scholar.fullName },
             { label: "Title", value: ctx.scholar.primaryTitle },
             { label: "Degrees", value: ctx.scholar.postnominal },
             { label: "Department", value: ctx.scholar.primaryDepartment },
-            { label: "Email", value: ctx.scholar.email },
             { label: "ORCID", value: ctx.scholar.orcid },
           ]}
+        />
+      );
+    case "email":
+      // Read-only Email tab (email-visibility SPEC § C). Email + its release
+      // audience are owned by the Web Directory SOR; the panel shows the imported
+      // state and links out — no write control. Always shows the email (owner
+      // context is internal); the visibility value is informational.
+      return (
+        <EmailCard
+          mode={childMode}
+          scholarName={scholarName}
+          email={ctx.scholar.email}
+          emailVisibility={ctx.scholar.emailVisibility}
         />
       );
     case "photo":
@@ -483,9 +564,15 @@ function renderPanel(
           cwid={cwid}
           initialHtml={ctx.scholar.overview}
           previewHref={profilePath(ctx.scholar.slug)}
-          // The generator stays an owner-self beta (#742) — a superuser editing
-          // another scholar's bio gets the plain manual editor, no Generate tab.
-          generateEnabled={mode === "self" && isOverviewGenerateEnabled()}
+          // The generator (#742) is offered to the same actors who may WRITE the
+          // bio here: the scholar (self) AND a superuser editing on their behalf
+          // (#844 made the superuser Overview editable, and the generate route +
+          // `authorizeOverviewWrite` already authorize a superuser, so the two
+          // surfaces agree). NOT widened to proxy / unit-admin — that's a
+          // separate governance call. Still gated behind the feature flag.
+          generateEnabled={
+            (mode === "self" || isSuperuserLike(mode)) && isOverviewGenerateEnabled()
+          }
         />
       );
     case "highlights":
@@ -547,11 +634,14 @@ function renderPanel(
           mode={childMode}
           scholarName={scholarName}
           disclosures={ctx.coiDisclosures}
-          // The bridge to "From your publications" only appears for a genuine
-          // self viewer with suggestions — `unmatchedPubmedCoi` is [] for the
-          // superuser/impersonation paths, so the count is naturally 0 there.
+          // The bridge to "From your publications" appears for a self viewer OR a
+          // superuser with suggestions (#836 populates `unmatchedPubmedCoi` for a
+          // superuser too; a comms_steward is excluded at the loader, so it stays
+          // 0 for them). The href targets the ACTIVE surface — `/edit` for self,
+          // `/edit/scholar/{cwid}` for a superuser viewing another scholar (#986) —
+          // and `childMode` reframes the copy from first-person to the scholar's name.
           suggestionCount={ctx.unmatchedPubmedCoi.length}
-          suggestionsHref="/edit?attr=coi-gap"
+          suggestionsHref={`${detailBase}?attr=coi-gap`}
         />
       );
     case "coi-gap":
@@ -566,6 +656,8 @@ function renderPanel(
           mode={childMode}
           scholarName={scholarName}
           candidates={ctx.unmatchedPubmedCoi}
+          lowerCandidates={ctx.unmatchedPubmedCoiLower}
+          reviewed={ctx.unmatchedPubmedCoiReviewed}
         />
       );
     case "profile-url":

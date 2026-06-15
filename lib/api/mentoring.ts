@@ -164,6 +164,60 @@ export type MenteesResult = {
 };
 
 /**
+ * Issue #928 — AOC mentee rows for one mentor. Two sources behind the SAME
+ * `MENTORING_COPUB_BRIDGE` flag as the co-pub count/list bridges. LIVE: the
+ * WCM `reporting_students_mentors` query (load-bearing where the SPS VPC can
+ * reach ReciterDB). BRIDGE: the pre-computed `aoc_mentee` table, populated
+ * from S3 (etl:mentoring:import-aoc) for envs that can't reach ReciterDB.
+ *
+ * Either way the helper returns `[]` on any failure — matching the live
+ * path's historical `.catch(() => [])` — so a missing accessor or an Aurora
+ * hiccup degrades to "no AOC chips", exactly the in-VPC behavior the bridge
+ * replaces (no regression).
+ */
+async function loadAocRows(mentorCwid: string): Promise<AocRow[]> {
+  try {
+    if (process.env.MENTORING_COPUB_BRIDGE === "on") {
+      try {
+        const rows = await prisma.aocMentee.findMany({
+          where: { mentorCwid },
+          select: {
+            menteeCwid: true,
+            firstName: true,
+            lastName: true,
+            graduationYear: true,
+            programType: true,
+          },
+        });
+        return rows.map<AocRow>((r) => ({
+          studentCWID: r.menteeCwid,
+          studentFirstName: r.firstName,
+          studentLastName: r.lastName,
+          studentGraduationYear: r.graduationYear,
+          programType: r.programType,
+        }));
+      } catch (err) {
+        console.error(
+          `[mentoring] aoc bridge read failed for mentor ${mentorCwid}`,
+          err,
+        );
+        return [];
+      }
+    }
+    return (await withReciterConnection(async (conn) => {
+      return (await conn.query(
+        `SELECT studentCWID, studentFirstName, studentLastName, studentGraduationYear, programType
+         FROM reporting_students_mentors
+         WHERE mentorCWID = ? AND studentCWID IS NOT NULL AND studentCWID != ''`,
+        [mentorCwid],
+      )) as AocRow[];
+    })) as AocRow[];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Returns all known mentees for the given mentor CWID. Multiple AOC project
  * rows for the same student are collapsed to a single chip.
  *
@@ -197,14 +251,8 @@ export async function getMenteesForMentor(
   if (!mentorCwid) return { mentees: [], copubSourceAvailable: true };
 
   const [aocRows, jenzabarRows, postdocRows] = await Promise.all([
-    withReciterConnection(async (conn) => {
-      return (await conn.query(
-        `SELECT studentCWID, studentFirstName, studentLastName, studentGraduationYear, programType
-         FROM reporting_students_mentors
-         WHERE mentorCWID = ? AND studentCWID IS NOT NULL AND studentCWID != ''`,
-        [mentorCwid],
-      )) as AocRow[];
-    }).catch(() => [] as AocRow[]),
+    // #928 — AOC source switches on MENTORING_COPUB_BRIDGE inside the helper.
+    loadAocRows(mentorCwid),
     prisma.phdMentorRelationship.findMany({
       where: { mentorCwid },
       select: {
@@ -369,57 +417,126 @@ export async function getMenteesForMentor(
   // so callers can tell "ReciterDB was down" apart from "this mentor genuinely
   // has zero co-pubs" and stop silently dropping the rollup link / badges.
   let copubSourceAvailable = false;
-  await withReciterConnection(async (conn) => {
-    const rows = (await conn.query(
-      `SELECT DISTINCT a2.personIdentifier AS mentee_cwid,
-              a1.pmid AS pmid,
-              art.articleTitle AS title,
-              art.journalTitleVerbose AS journal,
-              art.articleYear AS year
-         FROM analysis_summary_author a1
-         JOIN analysis_summary_author a2
-           ON a1.pmid = a2.pmid AND a2.personIdentifier != a1.personIdentifier
-         JOIN analysis_summary_article art
-           ON art.pmid = a1.pmid
-        WHERE a1.personIdentifier = ?
-          AND a2.personIdentifier IN (${cwids.map(() => "?").join(",")})
-        ORDER BY a2.personIdentifier, art.articleYear DESC, a1.pmid DESC`,
-      [mentorCwid, ...cwids],
-    )) as {
-      mentee_cwid: string;
-      pmid: number | bigint;
-      title: string;
-      journal: string | null;
-      year: number | null;
-    }[];
-    for (const r of rows) {
-      copubCountByCwid.set(
-        r.mentee_cwid,
-        (copubCountByCwid.get(r.mentee_cwid) ?? 0) + 1,
+
+  // Issue #443 — two co-pub sources. LIVE: the WCM ReciterDB query (load-bearing
+  // where the SPS VPC can reach ReciterDB). BRIDGE: the pre-computed
+  // `mentee_copublication` table, populated from S3 (etl:mentoring:import-copubs)
+  // for envs that can't reach ReciterDB. `MENTORING_COPUB_BRIDGE` selects the
+  // source; it's flipped only after the import runs (import-then-flip).
+  if (process.env.MENTORING_COPUB_BRIDGE === "on") {
+    try {
+      const rows = await prisma.menteeCopublication.findMany({
+        where: { mentorCwid, menteeCwid: { in: cwids } },
+        select: { menteeCwid: true, count: true, preview: true },
+      });
+      for (const r of rows) {
+        copubCountByCwid.set(r.menteeCwid, r.count);
+        copubPreviewByCwid.set(r.menteeCwid, (r.preview as CoPublication[]) ?? []);
+      }
+      // Rows for this mentor ⇒ unambiguously covered. NO rows is ambiguous:
+      // "bridge not yet imported" (table globally empty ⇒ degrade honestly to
+      // unavailable, exactly like a live-query outage) vs "this mentor genuinely
+      // has zero co-pubs" (table has data ⇒ available, all counts legitimately
+      // zero). One cheap existence probe — only when this mentor had no rows —
+      // distinguishes them, so a flag flipped before the import never shows
+      // fake zeros.
+      copubSourceAvailable =
+        rows.length > 0 ||
+        (await prisma.menteeCopublication.findFirst({
+          select: { mentorCwid: true },
+        })) !== null;
+    } catch (err) {
+      console.error(
+        `[mentoring] copub bridge read failed for mentor ${mentorCwid}`,
+        err,
       );
-      const preview = copubPreviewByCwid.get(r.mentee_cwid) ?? [];
-      if (preview.length < 3) {
-        preview.push({
-          pmid: typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid,
-          title: r.title,
-          journal: r.journal,
-          year: r.year,
-        });
-        copubPreviewByCwid.set(r.mentee_cwid, preview);
+    }
+  } else {
+    await withReciterConnection(async (conn) => {
+      const rows = (await conn.query(
+        `SELECT DISTINCT a2.personIdentifier AS mentee_cwid,
+                a1.pmid AS pmid,
+                art.articleTitle AS title,
+                art.journalTitleVerbose AS journal,
+                art.articleYear AS year
+           FROM analysis_summary_author a1
+           JOIN analysis_summary_author a2
+             ON a1.pmid = a2.pmid AND a2.personIdentifier != a1.personIdentifier
+           JOIN analysis_summary_article art
+             ON art.pmid = a1.pmid
+          WHERE a1.personIdentifier = ?
+            AND a2.personIdentifier IN (${cwids.map(() => "?").join(",")})
+          ORDER BY a2.personIdentifier, art.articleYear DESC, a1.pmid DESC`,
+        [mentorCwid, ...cwids],
+      )) as {
+        mentee_cwid: string;
+        pmid: number | bigint;
+        title: string;
+        journal: string | null;
+        year: number | null;
+      }[];
+      for (const r of rows) {
+        copubCountByCwid.set(
+          r.mentee_cwid,
+          (copubCountByCwid.get(r.mentee_cwid) ?? 0) + 1,
+        );
+        const preview = copubPreviewByCwid.get(r.mentee_cwid) ?? [];
+        if (preview.length < 3) {
+          preview.push({
+            pmid: typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid,
+            title: r.title,
+            journal: r.journal,
+            year: r.year,
+          });
+          copubPreviewByCwid.set(r.mentee_cwid, preview);
+        }
+      }
+      copubSourceAvailable = true;
+    }).catch((err) => {
+      // Issue #843 — DE-SILENCE: this was a silent `.catch(() => {})`, which
+      // gave operators zero visibility when ReciterDB was unreachable and left
+      // every mentee's co-pub count a misleading zero. Log with the mentor cwid
+      // and that this is the co-pub source so the cause is diagnosable;
+      // `copubSourceAvailable` stays false so the UI degrades honestly.
+      console.error(
+        `[mentoring] reciterdb co-pub count query failed for mentor ${mentorCwid}`,
+        err,
+      );
+    });
+  }
+
+  // Issue #443/#185 — dark-pmid suppression of the badge count + chip preview.
+  // Neither co-pub source (#356) applies publication suppression: the bridge
+  // snapshots count+preview at export time, and the live query joins ReciterDB
+  // (which doesn't know SPS take-downs). So a publication taken down AFTER the
+  // last export (whole-pub #356, or derived-dark = every confirmed WCM author
+  // hidden) would still leak its title/journal/year into the popover preview and
+  // inflate the badge until the next re-import. Re-apply local suppression at
+  // request time over the preview pmids: drop dark pmids from each preview and
+  // decrement that mentee's count by the number dropped. This fully closes the
+  // title/journal/year LEAK (the security-sensitive part); a dark pmid that sits
+  // OUTSIDE the ≤3-most-recent preview can still inflate a bridge-sourced count
+  // by one until re-import (the full pmid list isn't carried on this lightweight
+  // path — getCoPublications, which has it, suppresses exactly).
+  const previewPmids = [
+    ...new Set(
+      [...copubPreviewByCwid.values()].flat().map((p) => String(p.pmid)),
+    ),
+  ];
+  if (previewPmids.length > 0) {
+    const suppressions = await loadPublicationSuppressions(previewPmids, prisma);
+    const darkPmids = await resolveDarkPmids(previewPmids, suppressions, prisma);
+    if (darkPmids.size > 0) {
+      for (const [menteeCwid, preview] of copubPreviewByCwid) {
+        const kept = preview.filter((p) => !darkPmids.has(String(p.pmid)));
+        const dropped = preview.length - kept.length;
+        if (dropped === 0) continue;
+        copubPreviewByCwid.set(menteeCwid, kept);
+        const count = copubCountByCwid.get(menteeCwid) ?? 0;
+        copubCountByCwid.set(menteeCwid, Math.max(0, count - dropped));
       }
     }
-    copubSourceAvailable = true;
-  }).catch((err) => {
-    // Issue #843 — DE-SILENCE: this was a silent `.catch(() => {})`, which
-    // gave operators zero visibility when ReciterDB was unreachable and left
-    // every mentee's co-pub count a misleading zero. Log with the mentor cwid
-    // and that this is the co-pub source so the cause is diagnosable;
-    // `copubSourceAvailable` stays false so the UI degrades honestly.
-    console.error(
-      `[mentoring] reciterdb co-pub count query failed for mentor ${mentorCwid}`,
-      err,
-    );
-  });
+  }
 
   // Scholar-table presence — drives linkability. Non-deleted, active rows only.
   // Only `status='active'` rows can be linked. Suppressed scholars (alumni
@@ -488,22 +605,70 @@ export async function getMenteesForMentor(
 }
 
 /**
- * Returns the full set of publications co-authored by `mentorCwid` and
- * `menteeCwid`, ordered newest first. Sources from ReCiterDB's
- * `analysis_summary_article` for citation fields and
- * `analysis_summary_author_list` for the structured author list (so we
- * can render and bold WCM-affiliated authors).
+ * #356 / #928 — re-apply local publication suppression to a fully-built
+ * `CoPublicationFull[]`. Pulled out of {@link getCoPublications} so BOTH the
+ * live (ReciterDB) and bridge (`mentee_copublication_pub`) source paths run
+ * the same suppression pass: the bridge stores PRE-suppression rows because
+ * the suppression table is env-specific and changes independently of the S3
+ * artifact, so suppression must be a read-time step, not baked into export.
  *
- * Returns an empty array when no co-authored publications exist — drift
- * is possible between this query and the badge count (e.g. an alumnus
- * mentee is in the count query but not in the author-list table for a
- * given pmid); the page surfaces that case via its empty state.
+ * Drops any dark pmid (taken-down or derived-dark) and any per-author-hidden
+ * co-author chip, exactly as the inline pass used to. `[]` in ⇒ `[]` out.
  */
-export async function getCoPublications(
+async function applyCoPubSuppression(
+  pubs: CoPublicationFull[],
+): Promise<CoPublicationFull[]> {
+  if (pubs.length === 0) return [];
+
+  const pmidStrings = pubs.map((p) => String(p.pmid));
+  const suppressions = await loadPublicationSuppressions(pmidStrings, prisma);
+  const darkPmids = await resolveDarkPmids(pmidStrings, suppressions, prisma);
+
+  return pubs
+    .filter((p) => !darkPmids.has(String(p.pmid)))
+    .map<CoPublicationFull>((p) => ({
+      ...p,
+      // #356 — drop the chip of a co-author who hid this publication.
+      authors: p.authors.filter(
+        (a) =>
+          a.personIdentifier === null ||
+          !isAuthorHidden(suppressions, String(p.pmid), a.personIdentifier),
+      ),
+    }));
+}
+
+/**
+ * #928 — RAW (pre-suppression) co-pub list for one mentor↔mentee pair, full
+ * author list included. Two sources behind the SAME `MENTORING_COPUB_BRIDGE`
+ * flag as the AOC and count bridges. LIVE: the WCM ReciterDB query
+ * (`analysis_summary_article` for citation fields + `analysis_summary_author_list`
+ * for the structured author list). BRIDGE: the pre-computed
+ * `mentee_copublication_pub` table, populated from S3 (etl:mentoring:import-copub-list)
+ * for envs that can't reach ReciterDB; the `pub` JSON column holds the
+ * `CoPublicationFull` as exported. Suppression is NOT applied here — the
+ * caller re-applies it via {@link applyCoPubSuppression}. Both paths degrade
+ * to `[]` on failure (preserving the live path's historical `.catch(() => [])`).
+ */
+async function fetchCoPublicationsRaw(
   mentorCwid: string,
   menteeCwid: string,
 ): Promise<CoPublicationFull[]> {
-  if (!mentorCwid || !menteeCwid || mentorCwid === menteeCwid) return [];
+  if (process.env.MENTORING_COPUB_BRIDGE === "on") {
+    try {
+      const rows = await prisma.menteeCopublicationPub.findMany({
+        where: { mentorCwid, menteeCwid },
+        orderBy: [{ pubYear: "desc" }, { pmid: "desc" }],
+        select: { pub: true },
+      });
+      return rows.map((r) => r.pub as unknown as CoPublicationFull);
+    } catch (err) {
+      console.error(
+        `[mentoring] copub-list bridge read failed for mentor ${mentorCwid}`,
+        err,
+      );
+      return [];
+    }
+  }
 
   return await withReciterConnection(async (conn) => {
     // Step 1: intersection of pmids the mentor + mentee both authored.
@@ -558,18 +723,6 @@ export async function getCoPublications(
       typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid,
     );
 
-    // #356 — publication suppression. The co-pub list is ReciterDB-sourced;
-    // the local suppression table is consulted here so a taken-down or
-    // derived-dark publication drops, and a per-author-hidden co-author is
-    // omitted from the chips, on these public, titled, exportable pages.
-    const pmidStrings = pmids.map((p) => String(p));
-    const suppressions = await loadPublicationSuppressions(pmidStrings, prisma);
-    const darkPmids = await resolveDarkPmids(pmidStrings, suppressions, prisma);
-    const visibleArticleRows = articleRows.filter(
-      (r) => !darkPmids.has(String(r.pmid)),
-    );
-    if (visibleArticleRows.length === 0) return [];
-
     // Step 2: full author list per pmid (one round-trip, batched).
     type AuthorRow = {
       pmid: number | bigint;
@@ -599,7 +752,10 @@ export async function getCoPublications(
       authorsByPmid.set(pmid, list);
     }
 
-    return visibleArticleRows.map<CoPublicationFull>((r) => {
+    // RAW CoPublicationFull[] — full author list, no suppression. The caller
+    // applies suppression via applyCoPubSuppression so the bridge and live
+    // paths share one pass.
+    return articleRows.map<CoPublicationFull>((r) => {
       const pmid = typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid;
       return {
         pmid,
@@ -613,15 +769,48 @@ export async function getCoPublications(
         pages: r.pages,
         citationCount: r.citationCount ?? 0,
         abstract: r.abstract ?? null,
-        // #356 — drop the chip of a co-author who hid this publication.
-        authors: (authorsByPmid.get(pmid) ?? []).filter(
-          (a) =>
-            a.personIdentifier === null ||
-            !isAuthorHidden(suppressions, String(pmid), a.personIdentifier),
-        ),
+        authors: authorsByPmid.get(pmid) ?? [],
       };
     });
   }).catch(() => []);
+}
+
+/**
+ * Returns the full set of publications co-authored by `mentorCwid` and
+ * `menteeCwid`, ordered newest first.
+ *
+ * #928 — dual source behind `MENTORING_COPUB_BRIDGE`: LIVE reads ReciterDB's
+ * `analysis_summary_article` (citation fields) + `analysis_summary_author_list`
+ * (structured author list, so we can render and bold WCM-affiliated authors);
+ * BRIDGE reads the pre-computed `mentee_copublication_pub` table. Local
+ * publication suppression (#356) is re-applied on BOTH paths via
+ * {@link applyCoPubSuppression}, since the bridge stores pre-suppression rows.
+ *
+ * Returns an empty array when no co-authored publications exist — drift
+ * is possible between this query and the badge count (e.g. an alumnus
+ * mentee is in the count query but not in the author-list table for a
+ * given pmid); the page surfaces that case via its empty state.
+ */
+export async function getCoPublications(
+  mentorCwid: string,
+  menteeCwid: string,
+): Promise<CoPublicationFull[]> {
+  if (!mentorCwid || !menteeCwid || mentorCwid === menteeCwid) return [];
+
+  const raw = await fetchCoPublicationsRaw(mentorCwid, menteeCwid);
+  try {
+    return await applyCoPubSuppression(raw);
+  } catch (err) {
+    // Fail CLOSED: a suppression-table read failure must never fall through to
+    // the raw, unsuppressed list (that would leak a taken-down pub / per-author
+    // hide). Degrade to [] — matching the prior behavior, when suppression ran
+    // inside the live path's `.catch(() => [])`.
+    console.error(
+      `[mentoring] co-pub suppression pass failed for mentor ${mentorCwid} / mentee ${menteeCwid}`,
+      err,
+    );
+    return [];
+  }
 }
 
 /**
@@ -639,16 +828,43 @@ export async function getMentorMenteePair(
   // Look in all three sources — AOC (ReCiterDB), Jenzabar PhD, and postdoc
   // (local Prisma). First hit wins for the mentee display name.
   type AocPairRow = { studentFirstName: string | null; studentLastName: string | null };
+  // #928 — AOC pair lookup mirrors getMenteesForMentor: bridge reads the
+  // pre-computed `aoc_mentee` table, live reads `reporting_students_mentors`.
+  // Same MENTORING_COPUB_BRIDGE flag; both degrade to `[]` on failure.
+  const loadAocPairRows = async (): Promise<AocPairRow[]> => {
+    try {
+      if (process.env.MENTORING_COPUB_BRIDGE === "on") {
+        try {
+          const row = await prisma.aocMentee.findFirst({
+            where: { mentorCwid, menteeCwid },
+            select: { firstName: true, lastName: true },
+          });
+          return row
+            ? [{ studentFirstName: row.firstName, studentLastName: row.lastName }]
+            : [];
+        } catch (err) {
+          console.error(
+            `[mentoring] aoc bridge read failed for mentor ${mentorCwid}`,
+            err,
+          );
+          return [];
+        }
+      }
+      return (await withReciterConnection(async (conn) => {
+        return (await conn.query(
+          `SELECT studentFirstName, studentLastName
+             FROM reporting_students_mentors
+            WHERE mentorCWID = ? AND studentCWID = ?
+            LIMIT 1`,
+          [mentorCwid, menteeCwid],
+        )) as AocPairRow[];
+      })) as AocPairRow[];
+    } catch {
+      return [];
+    }
+  };
   const [aocRows, jenzabarRow, postdocRow] = await Promise.all([
-    withReciterConnection(async (conn) => {
-      return (await conn.query(
-        `SELECT studentFirstName, studentLastName
-           FROM reporting_students_mentors
-          WHERE mentorCWID = ? AND studentCWID = ?
-          LIMIT 1`,
-        [mentorCwid, menteeCwid],
-      )) as AocPairRow[];
-    }).catch(() => [] as AocPairRow[]),
+    loadAocPairRows(),
     prisma.phdMentorRelationship.findFirst({
       where: { mentorCwid, menteeCwid },
       select: { menteeFirstName: true, menteeLastName: true },
@@ -829,15 +1045,23 @@ export async function getAllMentorCoPublications(
     .map(([programLabel, entries]) => ({ programLabel, entries }))
     .sort((a, b) => a.programLabel.localeCompare(b.programLabel));
 
-  // Distinct counts.
+  // Distinct counts — derived from the POST-suppression entries, NOT the
+  // pre-suppression copublicationCount. #991 — a mentee whose every co-pub is
+  // dark contributes 0 entries (the bridge count can outrun the suppressed list
+  // by the documented ≤1), so `menteesWithCopubs.length` would overstate the
+  // "N publications across M mentees" subtitle. Count mentees actually rendered.
   const distinctCopubIds = new Set<string>();
+  const distinctMenteeCwids = new Set<string>();
   for (const g of groups) {
-    for (const e of g.entries) distinctCopubIds.add(copubId(e.publication));
+    for (const e of g.entries) {
+      distinctCopubIds.add(copubId(e.publication));
+      distinctMenteeCwids.add(e.mentee.cwid);
+    }
   }
 
   return {
     groups,
     publicationCount: distinctCopubIds.size,
-    menteeCount: menteesWithCopubs.length,
+    menteeCount: distinctMenteeCwids.size,
   };
 }

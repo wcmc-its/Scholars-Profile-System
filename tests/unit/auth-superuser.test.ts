@@ -166,12 +166,20 @@ describe("getEditSession", () => {
   it("pairs the CWID with isSuperuser=true for a superuser", async () => {
     mockedGetSession.mockResolvedValue({ cwid: "adm1001", iat: 1, exp: 2 });
     mockedOpenLdap.mockResolvedValue(asClient(fakeClient(async () => entries(1))));
-    expect(await getEditSession()).toEqual({ cwid: "adm1001", isSuperuser: true });
+    expect(await getEditSession()).toEqual({
+      cwid: "adm1001",
+      isSuperuser: true,
+      isCommsSteward: false,
+    });
   });
 
   it("pairs the CWID with isSuperuser=false for a non-superuser", async () => {
     mockedGetSession.mockResolvedValue({ cwid: "usr2002", iat: 1, exp: 2 });
     mockedOpenLdap.mockResolvedValue(asClient(fakeClient(async () => entries(0))));
-    expect(await getEditSession()).toEqual({ cwid: "usr2002", isSuperuser: false });
+    expect(await getEditSession()).toEqual({
+      cwid: "usr2002",
+      isSuperuser: false,
+      isCommsSteward: false,
+    });
   });
 });

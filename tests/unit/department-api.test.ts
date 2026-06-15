@@ -29,6 +29,11 @@ const {
   mockFieldOverrideFindMany,
   mockSuppressionFindFirst,
   mockSuppressionFindMany,
+  mockScholarFamilyGroupBy,
+  mockScholarFamilyFindMany,
+  mockLoadOverlayGate,
+  mockChipsEnabled,
+  mockFacetEnabled,
 } = vi.hoisted(() => ({
   mockDepartmentFindUnique: vi.fn(),
   mockScholarFindUnique: vi.fn(),
@@ -48,6 +53,11 @@ const {
   mockFieldOverrideFindMany: vi.fn(),
   mockSuppressionFindFirst: vi.fn(),
   mockSuppressionFindMany: vi.fn(),
+  mockScholarFamilyGroupBy: vi.fn(),
+  mockScholarFamilyFindMany: vi.fn(),
+  mockLoadOverlayGate: vi.fn(),
+  mockChipsEnabled: vi.fn(),
+  mockFacetEnabled: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -59,6 +69,10 @@ vi.mock("@/lib/db", () => ({
       findMany: mockScholarFindMany,
       count: mockScholarCount,
       groupBy: mockScholarGroupBy,
+    },
+    scholarFamily: {
+      groupBy: mockScholarFamilyGroupBy,
+      findMany: mockScholarFamilyFindMany,
     },
     appointment: { findFirst: mockAppointmentFindFirst },
     publicationTopic: {
@@ -81,6 +95,21 @@ vi.mock("@/lib/db", () => ({
       findMany: mockSuppressionFindMany,
     },
   },
+}));
+// #974 — the roster chips loader (Phase 1) + facet aggregation (Phase 2) read the
+// overlay gate + the methods flags. Default both flags OFF so the existing cases
+// are byte-identical; the Phase-2 cases flip the facet flag on explicitly.
+vi.mock("@/lib/api/methods-overlay", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api/methods-overlay")>(
+    "@/lib/api/methods-overlay",
+  );
+  return { ...actual, loadFamilyOverlayGate: () => mockLoadOverlayGate() };
+});
+vi.mock("@/lib/profile/methods-lens-flags", () => ({
+  isOrgUnitMethodsChipsEnabled: () => mockChipsEnabled(),
+  isOrgUnitMethodsFacetEnabled: () => mockFacetEnabled(),
+  isMethodsLensEnabled: () => false,
+  isMethodsLensSensitiveGateOn: () => false,
 }));
 
 import { getDepartment, getDepartmentFaculty } from "@/lib/api/departments";
@@ -321,6 +350,11 @@ function makeScholarRow(overrides: {
 describe("getDepartmentFaculty", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // #974 — default both methods flags OFF (off-path = byte-identical to pre-#974)
+    // and the overlay gate empty (public) for the cases that flip a flag on.
+    mockChipsEnabled.mockReturnValue(false);
+    mockFacetEnabled.mockReturnValue(false);
+    mockLoadOverlayGate.mockResolvedValue({ suppressed: new Set(), sensitive: new Set() });
   });
 
   it("returns empty result when deptCode has no scholars", async () => {
@@ -440,6 +474,57 @@ describe("getDepartmentFaculty", () => {
     expect(hit.identityImageEndpoint).toContain("abc12345");
     expect(hit.pubCount).toBe(15);
     expect(hit.grantCount).toBe(3);
+  });
+
+  it("#974 — facet flag OFF: no methodFacet key, no scholarFamily.groupBy, no extra cwid query", async () => {
+    mockScholarCount.mockResolvedValue(1);
+    mockDivisionFindFirst.mockResolvedValue(null);
+    mockScholarFindMany.mockResolvedValue([makeScholarRow({ cwid: "off00001" })]);
+    mockPublicationTopicGroupBy.mockResolvedValue([]);
+    mockGrantGroupBy.mockResolvedValue([]);
+
+    const result = await getDepartmentFaculty("MED", {});
+
+    // `methodFacet` is undefined → JSON.stringify omits it, so the SERIALIZED
+    // payload (what reaches the client/CloudFront) is byte-identical to pre-#974.
+    expect(result.methodFacet).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain("methodFacet");
+    expect(mockScholarFamilyGroupBy).not.toHaveBeenCalled();
+    // Only the paginated page query ran — no extra full-member-cwid findMany.
+    expect(mockScholarFindMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("#974 — facet flag ON: methodFacet populated from a PUBLIC-only aggregation", async () => {
+    mockFacetEnabled.mockReturnValue(true);
+    mockScholarCount.mockResolvedValue(2);
+    mockDivisionFindFirst.mockResolvedValue(null);
+    // page-query rows (call 1) then the full-member-cwid select (call 2).
+    mockScholarFindMany
+      .mockResolvedValueOnce([
+        makeScholarRow({ cwid: "on000001" }),
+        makeScholarRow({ cwid: "on000002" }),
+      ])
+      .mockResolvedValueOnce([{ cwid: "on000001" }, { cwid: "on000002" }]);
+    mockPublicationTopicGroupBy.mockResolvedValue([]);
+    mockGrantGroupBy.mockResolvedValue([]);
+    // A public bucket (count 7) and a #800-suppressed one (count 9, must drop).
+    mockScholarFamilyGroupBy.mockResolvedValue([
+      { supercategory: "imaging_x", familyLabel: "Deep learning", _count: { cwid: 7 } },
+      { supercategory: "imaging_x", familyLabel: "Secret", _count: { cwid: 9 } },
+    ]);
+    mockLoadOverlayGate.mockResolvedValue({
+      suppressed: new Set(["imaging_x::Secret"]),
+      sensitive: new Set(),
+    });
+
+    const result = await getDepartmentFaculty("MED", {});
+
+    expect(mockScholarFamilyGroupBy).toHaveBeenCalledTimes(1);
+    // The extra full-member-cwid select ran (page query + member select = 2 calls).
+    expect(mockScholarFindMany).toHaveBeenCalledTimes(2);
+    expect(result.methodFacet).toEqual([
+      { value: "imaging_x::Deep learning", label: "Deep learning", count: 7 },
+    ]);
   });
 
   it("export exists and is a function (GREEN: implementation present)", () => {

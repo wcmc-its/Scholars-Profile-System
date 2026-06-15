@@ -42,8 +42,17 @@ export type EditShellProps = {
   account?: { slug: string; preferredName: string } | null;
   /** Self mode only: the viewer is a superuser, so the sub-nav adds a link
    *  across to the Profiles roster (`/edit/scholars`). Ignored in superuser
-   *  mode, where the "Profiles" tab is always a link back to that roster. */
+   *  mode, where the "Profiles" tab is always a link back to that roster.
+   *  Superseded by `consoleNav` when that is supplied. */
   canBrowseProfiles?: boolean;
+  /** Self mode only: a pre-built console tab strip (the shared `AdminSubnav`)
+   *  rendered IN PLACE OF the minimal "My Profile / All profiles" strip. The
+   *  `/edit` page supplies it for a superuser or comms_steward so the full
+   *  role-gated option set shows on the self-edit surface, not just after
+   *  drilling into the roster (role-aware-navigation-entry-points-spec.md).
+   *  Omitted for a plain scholar — the minimal strip renders instead. The node
+   *  carries its own bottom border + container, replacing the whole sub-nav block. */
+  consoleNav?: React.ReactNode;
   /** Optional block rendered inside the rail column, below the attribute rail
    *  (e.g. a department's sibling-divisions list). Omitted ⇒ no visible change
    *  for the existing /edit/scholar callers. */
@@ -63,6 +72,7 @@ export function EditShell({
   previewHref,
   account,
   canBrowseProfiles = false,
+  consoleNav,
   subRail,
   unitAdmin,
   children,
@@ -110,7 +120,12 @@ export function EditShell({
 
       {/* Sub-nav — maroon underline on the active tab. A superuser editing a
           scholar gets a "Profiles / <name>" breadcrumb back to the roster; a
-          superuser on their own /edit gets an "All profiles" link across. */}
+          superuser on their own /edit gets an "All profiles" link across — or,
+          when `consoleNav` is supplied (superuser / comms_steward self-edit), the
+          full shared admin tab strip in its place. */}
+      {mode === "self" && consoleNav ? (
+        consoleNav
+      ) : (
       <div className="border-border border-b">
         <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-2 px-6">
           {isSuperuser ? (
@@ -163,6 +178,7 @@ export function EditShell({
           )}
         </div>
       </div>
+      )}
 
       {/* Body — rail + detail. The rail column is desktop-only; on phones a
           compact <select> at the top of the detail column replaces it. */}

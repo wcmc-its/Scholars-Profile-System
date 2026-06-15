@@ -1,7 +1,9 @@
 /**
  * POST /api/export/scholars/{method-family|supercategory|topic|subtopic}
  *
- * Internal-only CSV export of a scope's ranked top-50 scholars (#847). Mirrors
+ * Internal-only CSV export of a scope's ranked scholar cohort (#847), offered
+ * only when the displayable cohort is <= 50 (SPEC §B.3 HARD cap; > 50 is refused
+ * server-side via the builder returning null => 404, no partial top-50). Mirrors
  * the publications export route (force-dynamic, defensive body parse, `apiError`,
  * `toCsv`, Content-Disposition attachment) plus an internal-viewer gate: any
  * authenticated WCM session OR an allowlisted on-network viewer (#866) may
@@ -105,9 +107,11 @@ export async function POST(
     return apiError("invalid body", 400);
   }
 
-  // (f) build — null when the scope target does not resolve. The email column
-  // (#866 UC-B) rides on top of the master export flag; the internal-viewer gate
-  // above already ran, so it is only ever passed for an internal viewer.
+  // (f) build — null when the scope target does not resolve OR the displayable
+  // cohort exceeds the HARD <=50 cap (SPEC §B.3): both refuse with the same
+  // dark-feature 404 — never a partial top-50. The email column (#866 UC-B)
+  // rides on top of the master export flag; the internal-viewer gate above
+  // already ran, so it is only ever passed for an internal viewer.
   const includeEmail = isScholarListExportEmailEnabled();
   const result = await buildScholarExport(scope, params, undefined, { includeEmail });
   if (!result) {
@@ -127,9 +131,10 @@ export async function POST(
   // Contact-data audit (#866 UC-B): emit ONE structured record whenever the
   // email column is included. For an anonymous on-network viewer the source IP
   // is the only identifier, so capture it (parsed from the CloudFront viewer
-  // address header). `row_count` = data rows = total CSV lines minus the header.
+  // address header). `row_count` = data rows reported by the builder — NOT
+  // derived by splitting the CSV string, which an RFC-4180 quoted cell with an
+  // embedded newline would over-count.
   if (includeEmail) {
-    const csvLines = result.csv.trim().length === 0 ? 0 : result.csv.trim().split("\r\n").length;
     console.info(
       JSON.stringify({
         event: "scholar_export_email",
@@ -138,7 +143,7 @@ export async function POST(
           request.headers.get("cloudfront-viewer-address"),
         ),
         scope,
-        row_count: Math.max(0, csvLines - 1),
+        row_count: result.rowCount,
         ts: new Date().toISOString(),
       }),
     );

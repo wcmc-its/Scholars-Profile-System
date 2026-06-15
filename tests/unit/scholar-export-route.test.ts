@@ -43,6 +43,7 @@ vi.mock("@/lib/export/scholar-export-flags", () => ({
   isScholarListExportEmailEnabled: vi.fn(),
 }));
 vi.mock("@/lib/profile/methods-lens-flags", () => ({
+  isMethodsFamilyDefinitionsOn: () => false,
   isMethodPagesEnabled: vi.fn(),
 }));
 vi.mock("@/lib/api/export-scholars", () => ({ buildScholarExport: vi.fn() }));
@@ -111,6 +112,7 @@ beforeEach(() => {
   vi.mocked(buildScholarExport).mockResolvedValue({
     filename: "Method-Family-Scholars-2026-06-10.csv",
     csv: sampleCsv(50),
+    rowCount: 50,
   });
 });
 
@@ -204,6 +206,20 @@ describe("POST /api/export/scholars/[scope]", () => {
     expect(resp.status).toBe(404);
   });
 
+  it("(SPEC row 11) 404 when the cohort exceeds the HARD <=50 cap (builder refuses => null), even for an internal viewer", async () => {
+    // The builder returns null for an over-cap cohort (same dark-feature
+    // semantics as an unresolved scope) — the route must 404, never serve a
+    // partial top-50, and never emit a contact audit.
+    vi.mocked(isScholarListExportEmailEnabled).mockReturnValue(true);
+    vi.mocked(buildScholarExport).mockResolvedValue(null);
+    const resp = await call("method-family", {
+      supercategory: "animal-cell-models",
+      family: "crispr-screens-fam_x",
+    });
+    expect(resp.status).toBe(404);
+    expect(console.info).not.toHaveBeenCalled();
+  });
+
   it("returns 400 on a structurally invalid (non-JSON) body", async () => {
     const req = new NextRequest("http://localhost/api/export/scholars/topic", {
       method: "POST",
@@ -240,6 +256,7 @@ describe("POST /api/export/scholars/[scope]", () => {
       vi.mocked(buildScholarExport).mockResolvedValue({
         filename: "Method-Family-Scholars-2026-06-10.csv",
         csv: sampleCsvEmail(3),
+        rowCount: 3,
       });
 
       const resp = await call("method-family", {
@@ -280,6 +297,7 @@ describe("POST /api/export/scholars/[scope]", () => {
       vi.mocked(buildScholarExport).mockResolvedValue({
         filename: "Topic-Scholars-2026-06-10.csv",
         csv: sampleCsvEmail(2),
+        rowCount: 2,
       });
 
       const resp = await call(
@@ -298,6 +316,33 @@ describe("POST /api/export/scholars/[scope]", () => {
         scope: "topic",
         row_count: 2,
       });
+    });
+
+    it("(#991 #9) row_count comes from the builder, not a CSV split — an embedded quoted newline does not over-count", async () => {
+      // A quoted cell with an embedded CRLF (RFC-4180 legal) makes the CSV
+      // string have MORE "\r\n" splits than data rows. The audit must report
+      // the builder's authoritative rowCount (2), not the inflated split count.
+      vi.mocked(isScholarListExportEmailEnabled).mockReturnValue(true);
+      const csvWithEmbeddedNewline =
+        'name,profile_url,email\r\n' +
+        '"Doe, Jane\r\n(she/her)",/p/jane,jane@med.cornell.edu\r\n' +
+        "John Roe,/p/john,john@med.cornell.edu\r\n";
+      vi.mocked(buildScholarExport).mockResolvedValue({
+        filename: "Method-Family-Scholars-2026-06-10.csv",
+        csv: csvWithEmbeddedNewline,
+        rowCount: 2,
+      });
+
+      const resp = await call("method-family", {
+        supercategory: "animal-cell-models",
+        family: "crispr-screens-fam_x",
+      });
+      expect(resp.status).toBe(200);
+
+      expect(console.info).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(vi.mocked(console.info).mock.calls[0][0] as string);
+      // The naive CSV split would yield 3 data lines; the builder count is 2.
+      expect(payload.row_count).toBe(2);
     });
 
     it("still 401s an external viewer even with the email flag on (no email ever leaks)", async () => {

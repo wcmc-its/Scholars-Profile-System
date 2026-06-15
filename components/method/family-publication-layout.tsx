@@ -21,7 +21,7 @@ import { FamilyPublicationFeed } from "@/components/method/publication-feed";
 import { FamilyScholarsRow } from "@/components/method/family-scholars-row";
 import { SupercategoryAllWorkFeed } from "@/components/method/supercategory-all-work-feed";
 import { ScrollFade } from "@/components/ui/scroll-fade";
-import { familySegmentFor } from "@/lib/method-url";
+import { familySegmentFor, resolveFamilyParam } from "@/lib/method-url";
 import type { MethodPublicationHit } from "@/lib/api/methods";
 
 // ---------------------------------------------------------------------------
@@ -53,12 +53,22 @@ export function FamilyPublicationLayout({
 // Supercategory page (type B) — family rail + ?family= right panel.
 // ---------------------------------------------------------------------------
 
+/** familyId → right-panel metadata: the label + canonical URL segment (for the
+ *  feed/scholars hrefs + the "View full method page" link), plus the #879
+ *  generated definition. `definition` is null whenever the definitions flag is
+ *  off — `getSupercategoryRollup` populates it under the same gate as `getFamily`. */
+type FamilyPanelMeta = {
+  familyLabel: string;
+  familySegment: string;
+  definition: string | null;
+  definitionSource: string | null;
+};
+
 export function SupercategoryFamilyLayout(props: {
   supercategorySlug: string;
   supercategoryLabel: string;
   families: FamilyRailItem[];
-  /** familyId → { label, familySegment } for building the feed/scholars hrefs. */
-  familyMeta: Record<string, { familyLabel: string; familySegment: string }>;
+  familyMeta: Record<string, FamilyPanelMeta>;
   /** Representative recent publications across all families — the default
    *  "All work" panel shown until a family is selected (§A2). */
   allWorkPubs: MethodPublicationHit[];
@@ -82,23 +92,23 @@ function SupercategoryFamilyLayoutInner({
   supercategorySlug: string;
   supercategoryLabel: string;
   families: FamilyRailItem[];
-  familyMeta: Record<string, { familyLabel: string; familySegment: string }>;
+  familyMeta: Record<string, FamilyPanelMeta>;
   allWorkPubs: MethodPublicationHit[];
 }) {
   const searchParams = useSearchParams();
   const requestedFamily = searchParams.get("family");
-  const [activeFamilyId, setActiveFamilyId] = useState<string | null>(
-    requestedFamily && families.some((f) => f.familyId === requestedFamily)
-      ? requestedFamily
-      : null,
-  );
+  // `familyId` re-mints on every A2 rebuild, so resolve the deep-link by the
+  // STABLE label-slug (bare id accepted for back-compat) — never a raw-id match,
+  // which silently drifts to a different family after a rebuild (#940).
+  const resolvedFamilyId = resolveFamilyParam(requestedFamily, families);
+  const [activeFamilyId, setActiveFamilyId] = useState<string | null>(resolvedFamilyId);
 
   // Scroll the panel into view when a `?family=` deep-link resolves, once per
   // distinct requested family (mirrors the subtopic layout's scroll behavior).
   const lastScrolledRef = useRef<string | null>(null);
   useEffect(() => {
-    if (requestedFamily && families.some((f) => f.familyId === requestedFamily)) {
-      setActiveFamilyId(requestedFamily);
+    if (resolvedFamilyId) {
+      setActiveFamilyId(resolvedFamilyId);
       if (lastScrolledRef.current !== requestedFamily) {
         lastScrolledRef.current = requestedFamily;
         requestAnimationFrame(() => {
@@ -106,7 +116,7 @@ function SupercategoryFamilyLayoutInner({
         });
       }
     }
-  }, [requestedFamily, families]);
+  }, [resolvedFamilyId, requestedFamily]);
 
   const hasFamilies = families.length > 0;
   const activeMeta = activeFamilyId ? familyMeta[activeFamilyId] ?? null : null;
@@ -115,6 +125,11 @@ function SupercategoryFamilyLayoutInner({
   const activeSegment =
     activeMeta?.familySegment ??
     (activeLabel && activeFamilyId ? familySegmentFor(activeLabel, activeFamilyId) : null);
+  // #879 — the generated capability gloss, mirroring the standalone family page.
+  // Null (nothing rendered) when the definitions flag is off or the rollup never
+  // populated it — the panel stays a clean preview rather than guessing copy.
+  const activeDefinition = activeMeta?.definition ?? null;
+  const activeDefinitionSource = activeMeta?.definitionSource ?? null;
 
   return (
     <div className="mt-16">
@@ -142,6 +157,37 @@ function SupercategoryFamilyLayoutInner({
             <>
               <header className="mb-4">
                 <h2 className="text-xl font-semibold leading-tight">{activeLabel}</h2>
+                {/* #879 — generated capability gloss, mirroring the standalone
+                    family page so the panel is self-explanatory rather than a
+                    bare list of scholars + papers. Em-dashes render verbatim
+                    (house style). */}
+                {activeDefinition && (
+                  <div className="mt-2 max-w-prose">
+                    <p className="text-sm leading-relaxed text-muted-foreground">
+                      {activeDefinition}
+                    </p>
+                    {activeDefinitionSource === "generated" && (
+                      <p className="mt-1 text-xs italic text-muted-foreground/80">
+                        AI-generated definition
+                      </p>
+                    )}
+                  </div>
+                )}
+                {activeSegment && (
+                  // The supercategory panel and the standalone family page show the
+                  // same family. The rail click is an in-page deep-link (`?family=`),
+                  // not navigation, so signpost the canonical family page explicitly
+                  // — otherwise the two surfaces read as accidental duplicates. The
+                  // family label is kept in the link text so it stands alone for a11y.
+                  <a
+                    href={`/methods/${encodeURIComponent(supercategorySlug)}/${encodeURIComponent(
+                      activeSegment,
+                    )}`}
+                    className="mt-1 inline-block text-sm text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                  >
+                    View full {activeLabel} method page →
+                  </a>
+                )}
               </header>
               <FamilyScholarsRow
                 supercategorySlug={supercategorySlug}

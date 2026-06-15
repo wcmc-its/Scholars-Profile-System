@@ -59,6 +59,7 @@ import {
   PEOPLE_PROMINENCE_FACULTY_WEIGHT,
   PEOPLE_PROMINENCE_GRANT_WEIGHT,
   PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
+  FUNDING_INDEX,
   PEOPLE_RESTRUCTURED_MSM,
   PEOPLE_TOPIC_ABSTRACTS_BOOST,
   PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS,
@@ -76,6 +77,9 @@ import {
 } from "@/lib/api/match-provenance";
 import {
   resolveConceptMode,
+  resolveFundingMeshGateField,
+  resolvePeopleConceptGrantAxis,
+  resolvePeopleConceptPrecount,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
   type PubRecencyMode,
@@ -205,9 +209,103 @@ export type PeopleHit = {
    * Present only when a concept resolved and `SEARCH_PEOPLE_MATCH_EXPLAIN` is on.
    * Supersedes the prior pub-highlight / match-provenance / matched-on-fields
    * card surfaces (#688 / #702), now removed.
+   *
+   * Issue #967 — on a pub-evidence reason (tagged / mention), `pub` carries a
+   * representative publication behind the count when
+   * `SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB` is on. Absent on the concept
+   * fallback and whenever the flag is off.
    */
-  matchReason?: { icon: "publications" | "concept" | "area"; text: string };
+  matchReason?: {
+    icon: "publications" | "concept" | "area";
+    text: string;
+    pub?: RepresentativePub;
+  };
 };
+
+/**
+ * Issue #967 — a single representative publication surfaced inside a People
+ * reason line. Drawn from a `top_hits` sub-agg on the publications index (the
+ * same aggregation that computes the reason count), so there is no people-index
+ * field and no reindex. `titleHtml` is the title with the literal query wrapped
+ * in `<mark>` when it appears there (the card renders it via `HighlightedSnippet`);
+ * it is absent on a descriptor-tagged match whose title carries no literal term,
+ * in which case the card renders the plain `title`.
+ */
+export type RepresentativePub = {
+  pmid: string;
+  title: string;
+  titleHtml?: string;
+  year?: number | null;
+};
+
+/** The shape of a reason filter's optional `top` (top_hits) sub-agg. */
+type ReasonTopHitsAgg = {
+  top?: {
+    hits?: {
+      hits?: Array<{
+        _source?: { pmid?: string | number; title?: string; year?: number | null };
+        highlight?: { title?: string[] };
+      }>;
+    };
+  };
+};
+
+/**
+ * Issue #967 — pull the single representative publication out of a reason
+ * filter's `top` (top_hits) sub-agg. Returns undefined when the sub-agg is
+ * absent (flag off), the filter matched no pub, or the hit lacks a pmid/title.
+ * `titleHtml` is set only when the literal query produced a `<mark>` fragment
+ * in the title.
+ */
+export function parseReasonTopHit(
+  agg: ReasonTopHitsAgg | undefined,
+): RepresentativePub | undefined {
+  const hit = agg?.top?.hits?.hits?.[0];
+  const src = hit?._source;
+  if (!src || src.pmid == null || !src.title) return undefined;
+  const titleHtml = hit?.highlight?.title?.[0];
+  return {
+    pmid: String(src.pmid),
+    title: src.title,
+    ...(titleHtml ? { titleHtml } : {}),
+    ...(src.year != null ? { year: src.year } : {}),
+  };
+}
+
+/**
+ * PLAN R4 / #967 — the per-scholar reason line. Strongest signal first:
+ * pub-evidence count (tagged → mention) then the resolved-concept fallback.
+ * When `rep` carries a representative pub for the firing pub-evidence branch
+ * (`SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB`), it rides along as `pub`. The
+ * concept fallback never carries a pub. Pure — extracted so the precedence and
+ * the count cap (`Math.min(count, pubCount)`) are unit-testable without a live
+ * cluster.
+ */
+export function composeMatchReason(args: {
+  counts: { tagged: number; mention: number } | undefined;
+  rep: { tagged?: RepresentativePub; mention?: RepresentativePub } | undefined;
+  pubCount: number;
+  hasProvenance: boolean;
+  provenanceParent: string;
+  contentQuery: string;
+}): PeopleHit["matchReason"] {
+  const { counts: c, rep, pubCount, hasProvenance, provenanceParent, contentQuery } = args;
+  if (c && c.tagged > 0)
+    return {
+      icon: "publications",
+      text: `${Math.min(c.tagged, pubCount)} of ${pubCount} publications tagged ${provenanceParent}`,
+      ...(rep?.tagged ? { pub: rep.tagged } : {}),
+    };
+  if (c && c.mention > 0)
+    return {
+      icon: "publications",
+      text: `${Math.min(c.mention, pubCount)} of ${pubCount} publications mention “${contentQuery}”`,
+      ...(rep?.mention ? { pub: rep.mention } : {}),
+    };
+  if (hasProvenance)
+    return { icon: "concept", text: `via related concept ${provenanceParent}` };
+  return undefined;
+}
 
 export type PublicationHit = {
   pmid: string;
@@ -481,6 +579,39 @@ function demoteScoringClause(opts: {
   };
 }
 
+/**
+ * #921 — concept-scope grant axis. The People index carries no grant MeSH, so
+ * to include scholars FUNDED on a concept (not only those who PUBLISHED on it)
+ * we ask the Funding index which WCM investigators hold a grant whose concept
+ * gate field (`SEARCH_FUNDING_MESH_GATE` via {@link resolveFundingMeshGateField})
+ * intersects the resolved descendant set, then union those cwids into the People
+ * query. Size-capped: a concept broader than the cap undercounts the union,
+ * acceptable for a dark count-oriented feature (no silent ranking change).
+ */
+const GRANT_AXIS_CWID_CAP = 5000;
+
+async function collectGrantMatchedCwids(descendantUis: string[]): Promise<string[]> {
+  if (descendantUis.length === 0) return [];
+  const meshGateField = resolveFundingMeshGateField();
+  const resp = await searchClient().search({
+    index: FUNDING_INDEX,
+    body: {
+      size: 0,
+      query: { bool: { filter: [{ terms: { [meshGateField]: descendantUis } }] } },
+      aggs: {
+        cwids: { terms: { field: "wcmInvestigatorCwids", size: GRANT_AXIS_CWID_CAP } },
+      },
+    } as object,
+  });
+  const buckets =
+    (
+      resp.body as unknown as {
+        aggregations?: { cwids?: { buckets?: Array<{ key: string }> } };
+      }
+    ).aggregations?.cwids?.buckets ?? [];
+  return buckets.map((b) => b.key);
+}
+
 export async function searchPeople(opts: {
   q: string;
   page?: number;
@@ -558,6 +689,13 @@ export async function searchPeople(opts: {
    */
   matchExplain?: boolean;
   /**
+   * Issue #967 — when true (and `matchExplain` is on), the `reasonCounts`
+   * aggregation also fetches a representative publication per page cwid via a
+   * `top_hits` sub-agg, surfaced as `matchReason.pub`. Pure presentation; no
+   * effect on ranking or the result set. Headless callers default to `false`.
+   */
+  representativePub?: boolean;
+  /**
    * Issue #688 — the resolved descriptor's display name (the term the user
    * effectively searched), passed alongside `meshDescendantUis` so the
    * provenance string can read "… narrower term of {name}". Absent when the
@@ -619,6 +757,7 @@ export async function searchPeople(opts: {
   // card can derive a "Matched on …" chip. Default-off ⇒ the highlight block and
   // hit emission below are byte-identical to the pre-#702 shape.
   const matchExplain = opts.matchExplain === true;
+  const representativePub = opts.representativePub === true;
 
   // Issue #259 §1.1 — the people-index query restructure (cross_fields + msm
   // over high-evidence fields, abstracts in a scoring-only should). It was a
@@ -910,17 +1049,40 @@ export async function searchPeople(opts: {
         },
       };
 
+  // #921 — concept-scope grant axis. When ON (dark by default), collect the
+  // cwids of WCM investigators funded on the resolved concept so the People set
+  // / facets / count can union them with the publication-tagged scholars below.
+  // Flag-off (or non-concept scope / no descriptors) → no Funding round-trip and
+  // an empty set, so the query bodies stay byte-identical to today.
+  const grantAxisOn =
+    opts.scope === "concept" &&
+    meshDescendantUis.length > 0 &&
+    resolvePeopleConceptGrantAxis();
+  const grantMatchedCwids = grantAxisOn
+    ? await collectGrantMatchedCwids(meshDescendantUis)
+    : [];
+  const grantAxisActive = grantMatchedCwids.length > 0;
+
   const must: Record<string, unknown>[] = [];
   if (trimmed.length > 0) {
+    const conceptScopeShould: Record<string, unknown>[] = [
+      // CWIDs are stored lowercase as a `keyword` field; an exact term
+      // match wins over the multi_match by a wide boost so a pasted
+      // CWID resolves to its scholar at the top of the result list.
+      { term: { cwid: { value: trimmed.toLowerCase(), boost: 100 } } },
+      queryBranch,
+    ];
+    // #921 — admit grant-funded-on-concept scholars into the scoring gate so a
+    // scholar funded on the concept but WITHOUT a concept-tagged publication
+    // still satisfies `must`. The low constant boost keeps these grant-only
+    // matches below publication BM25 evidence (acceptance #3); the always-on
+    // filter gate below admits them to the result SET.
+    if (grantAxisActive) {
+      conceptScopeShould.push({ terms: { cwid: grantMatchedCwids, boost: 0.1 } });
+    }
     must.push({
       bool: {
-        should: [
-          // CWIDs are stored lowercase as a `keyword` field; an exact term
-          // match wins over the multi_match by a wide boost so a pasted
-          // CWID resolves to its scholar at the top of the result list.
-          { term: { cwid: { value: trimmed.toLowerCase(), boost: 100 } } },
-          queryBranch,
-        ],
+        should: conceptScopeShould,
         minimum_should_match: 1,
       },
     });
@@ -995,7 +1157,23 @@ export async function searchPeople(opts: {
   // query body stays byte-identical to today; `exact` rides the empty-set path
   // (`meshDescendantUis = []` ⇒ the guard is skipped, boost-drop only).
   if (opts.scope === "concept" && meshDescendantUis.length > 0) {
-    queryFilter.push({ terms: { publicationMeshUi: meshDescendantUis } });
+    // #921 — when the grant axis is active, the set gate admits scholars tagged
+    // with the concept in a publication OR funded on it (a should over the two
+    // cwid/mesh predicates); de-dup is automatic. Flag-off keeps the original
+    // single `terms` gate, so the body is byte-identical to today.
+    queryFilter.push(
+      grantAxisActive
+        ? {
+            bool: {
+              should: [
+                { terms: { publicationMeshUi: meshDescendantUis } },
+                { terms: { cwid: grantMatchedCwids } },
+              ],
+              minimum_should_match: 1,
+            },
+          }
+        : { terms: { publicationMeshUi: meshDescendantUis } },
+    );
   }
 
   // Issue #726 — match-type tier (set by the caller from the resolved
@@ -1010,11 +1188,18 @@ export async function searchPeople(opts: {
   // result is sparse (< MESH_ESCALATION_THRESHOLD), OR-in a
   // `terms { publicationMeshUi }` admission so concept-tagged scholars surface
   // on an otherwise-thin page (e.g. tylenol → acetaminophen authors). The
-  // decision is COUNT-GATED by a cheap size:0 pre-count of the lexical
-  // admission so common queries keep count == lexical and aren't diluted; the
-  // two-pass cost is paid only on the eligible/sparse path. The floor is
-  // ambiguity OR an ultra-short matched form — NOT anchor status — so an
-  // unanchored entry-term still escalates (the tylenol 0→N recall win).
+  // decision is COUNT-GATED so common queries keep count == lexical and aren't
+  // diluted; the two-pass cost is paid only on the eligible/sparse path. The
+  // floor is ambiguity OR an ultra-short matched form — NOT anchor status — so
+  // an unanchored entry-term still escalates (the tylenol 0→N recall win).
+  //
+  // HOW the count gate is sourced is the B2 lever below: by default a dedicated
+  // cheap size:0 pre-count of the lexical predicate decides up front; with
+  // SEARCH_PEOPLE_CONCEPT_PRECOUNT=off the count comes from the main search's
+  // OWN total and we re-run escalated only on sparse (one fewer round-trip on
+  // the common non-sparse path). Both source the SAME lexical total against the
+  // SAME predicate, so the escalation decision — and therefore `badge == list`
+  // — is identical under either state.
   //
   // EXCLUDES `concept` scope: that scope already pushes the SAME
   // `terms { publicationMeshUi }` clause into the always-on `queryFilter`
@@ -1023,14 +1208,62 @@ export async function searchPeople(opts: {
   // every doc and make the lexical clause optional — silently widening the
   // precision gate from "lexical ∩ tagged" to "all tagged", the opposite of
   // what concept scope promises. Under `concept` the gate is the admission, so
-  // escalation is both redundant and harmful (and the pre-count is wasted).
+  // escalation is both redundant and harmful (and any pre-count is wasted).
   const meshConceptEligible =
     applyTopicTemplate &&
     opts.scope !== "concept" &&
     meshDescendantUis.length > 0 &&
     !opts.meshAmbiguous &&
     (opts.meshMatchedFormLength ?? 0) >= MESH_MIN_MATCHED_FORM_LEN;
-  if (meshConceptEligible) {
+
+  // The escalate-on-sparse mutation, factored out so the flag-on pre-count path
+  // and the flag-off reorder path apply the IDENTICAL admission. applyTopic-
+  // Template ⇒ queryBranch IS the topic-shape body (the name / dept / hybrid
+  // arms are mutually exclusive shapes), so its `bool.must` is the lexical
+  // clause. Wrap it in a should that ALSO admits concept-tagged docs. A
+  // concept-only doc (no lexical hit) scores ONLY this terms clause's constant
+  // boost (MESH_ADMIT_WEIGHT[tier]); a genuine lexical hit scores BM25 over the
+  // high-evidence topic fields (publicationTitles^6, publicationMesh^4, …),
+  // which empirically runs well above the admit boosts (entry 0.7 … exact 3),
+  // so lexical sorts on top and the admit weights only order the concept-only
+  // tail by match-type trust (see docs/search-recall.md; the runtime order
+  // check is the gate). `must`, the facet aggs, and the count-only body all
+  // reference queryBranch, so this single mutation is reflected in every body
+  // that carries the topic clause — the count-only badge and the full search
+  // share the admitted set however the gate was sourced.
+  const applyConceptEscalation = () => {
+    const topicBool = (
+      queryBranch as { bool: { must: Record<string, unknown>[] } }
+    ).bool;
+    topicBool.must = [
+      {
+        bool: {
+          should: [
+            ...topicBool.must,
+            {
+              terms: {
+                publicationMeshUi: meshDescendantUis,
+                boost: MESH_ADMIT_WEIGHT[meshTier],
+              },
+            },
+          ],
+          minimum_should_match: 1,
+        },
+      },
+    ];
+  };
+
+  // B2 — SEARCH_PEOPLE_CONCEPT_PRECOUNT (default on = today's pre-count path).
+  const conceptPrecount = resolvePeopleConceptPrecount();
+
+  // Flag-ON (default): a dedicated size:0 pre-count of the LEXICAL predicate
+  // gates the escalation up front, so the count/full bodies built below
+  // dispatch once (already escalated when sparse). Mutating AFTER the pre-count
+  // request was dispatched keeps that count lexical. Flag-OFF: skip the
+  // dedicated pre-count — the reordered count-only and full paths below read
+  // the main search's own total (already track_total_hits) and re-run escalated
+  // only on sparse, dropping this hop on the common non-sparse case (the win).
+  if (meshConceptEligible && conceptPrecount) {
     const preCount = await searchClient().search({
       index: PEOPLE_INDEX,
       body: {
@@ -1042,40 +1275,7 @@ export async function searchPeople(opts: {
     const lexicalTotal =
       (preCount.body as unknown as { hits: { total: { value: number } } })
         .hits.total.value;
-    if (lexicalTotal < MESH_ESCALATION_THRESHOLD) {
-      // applyTopicTemplate ⇒ queryBranch IS the topic-shape body (the name /
-      // dept / hybrid arms are mutually exclusive shapes), so its `bool.must`
-      // is the lexical clause. Wrap it in a should that ALSO admits
-      // concept-tagged docs. A concept-only doc (no lexical hit) scores ONLY
-      // this terms clause's constant boost (MESH_ADMIT_WEIGHT[tier]); a genuine
-      // lexical hit scores BM25 over the high-evidence topic fields
-      // (publicationTitles^6, publicationMesh^4, …), which empirically runs well
-      // above the admit boosts (entry 0.7 … exact 3), so lexical sorts on top
-      // and the admit weights only order the concept-only tail by match-type
-      // trust (see docs/search-recall.md; the runtime order check is the gate).
-      // Mutated AFTER the pre-count's request was dispatched, so the count above
-      // stays lexical; `must` references this object, so the count-only badge
-      // below and the full search share the admitted set.
-      const topicBool = (
-        queryBranch as { bool: { must: Record<string, unknown>[] } }
-      ).bool;
-      topicBool.must = [
-        {
-          bool: {
-            should: [
-              ...topicBool.must,
-              {
-                terms: {
-                  publicationMeshUi: meshDescendantUis,
-                  boost: MESH_ADMIT_WEIGHT[meshTier],
-                },
-              },
-            ],
-            minimum_should_match: 1,
-          },
-        },
-      ];
-    }
+    if (lexicalTotal < MESH_ESCALATION_THRESHOLD) applyConceptEscalation();
   }
 
   // Perf — count-only fast path (inactive tab). `hits.total.value` reflects
@@ -1084,17 +1284,35 @@ export async function searchPeople(opts: {
   // same total the full search would, far cheaper. Returns the same empty
   // shape as the no-topic short-circuit above.
   if (opts.countOnly) {
-    const countResp = await searchClient().search({
-      index: PEOPLE_INDEX,
-      body: {
-        size: 0,
-        track_total_hits: true,
-        query: { bool: { must, filter: queryFilter } },
-      } as object,
-    });
-    const total =
-      (countResp.body as unknown as { hits: { total: { value: number } } })
-        .hits.total.value;
+    const runCount = async () =>
+      (
+        (
+          await searchClient().search({
+            index: PEOPLE_INDEX,
+            body: {
+              size: 0,
+              track_total_hits: true,
+              query: { bool: { must, filter: queryFilter } },
+            } as object,
+          })
+        ).body as unknown as { hits: { total: { value: number } } }
+      ).hits.total.value;
+    let total = await runCount();
+    // Flag-OFF reorder: no up-front pre-count mutated the predicate, so the
+    // count above is the LEXICAL total. Escalate + re-count only when eligible
+    // and sparse — the IDENTICAL deterministic decision the flag-on pre-count
+    // makes, off the same lexical predicate and threshold, so the badge equals
+    // the full list under BOTH flag states. (Flag-ON already escalated up
+    // front when sparse, so `runCount` returned the escalated total in one hop
+    // and this never fires.)
+    if (
+      meshConceptEligible &&
+      !conceptPrecount &&
+      total < MESH_ESCALATION_THRESHOLD
+    ) {
+      applyConceptEscalation();
+      total = await runCount();
+    }
     return {
       hits: [],
       total,
@@ -1398,6 +1616,25 @@ export async function searchPeople(opts: {
   const body = {
     from: page * PAGE_SIZE,
     size: PAGE_SIZE,
+    // Perf — return only the scalars the People hit mapper reads (verified
+    // against the `Hit._source` type + the mapper below). Without this,
+    // OpenSearch ships the entire `_source` per hit (incl. concatenated
+    // abstracts) only to be discarded. Highlight fragments arrive on
+    // `hit.highlight`, independent of `_source`, so they are unaffected.
+    _source: [
+      "cwid",
+      "slug",
+      "preferredName",
+      "primaryTitle",
+      "primaryDepartment",
+      "deptName",
+      "divisionName",
+      "personType",
+      "publicationCount",
+      "grantCount",
+      "hasActiveGrants",
+      "publicationMeshUi",
+    ],
     // OpenSearch's default cap of 10000 short-circuits the total counter
     // and would make the subhead read "10,000 publications" even when
     // there are 90k. Costs more on truly broad queries but the people
@@ -1448,7 +1685,25 @@ export async function searchPeople(opts: {
     },
   };
 
-  const resp = await searchClient().search({ index: PEOPLE_INDEX, body: body as object });
+  let resp = await searchClient().search({ index: PEOPLE_INDEX, body: body as object });
+
+  // Flag-OFF reorder: the dispatch above ran the LEXICAL query (no up-front
+  // pre-count mutated it). Read its own total — the body is track_total_hits —
+  // and, only when eligible and sparse, escalate the SHARED query objects
+  // (`body.query` resolves through `must` to `queryBranch`) and re-run the full
+  // search escalated. Non-sparse is the common case and stops at one dispatch
+  // (the win: the dedicated pre-count hop is gone); the rare sparse path pays a
+  // second full search with aggs + hydration. Flag-ON already escalated up
+  // front when sparse, so this never fires and the single dispatch stands.
+  if (meshConceptEligible && !conceptPrecount) {
+    const lexicalTotal =
+      (resp.body as unknown as { hits: { total: { value: number } } }).hits.total
+        .value;
+    if (lexicalTotal < MESH_ESCALATION_THRESHOLD) {
+      applyConceptEscalation();
+      resp = await searchClient().search({ index: PEOPLE_INDEX, body: body as object });
+    }
+  }
 
   type Hit = {
     _source: {
@@ -1517,6 +1772,13 @@ export async function searchPeople(opts: {
   // exceed the scholar's total. No reindex. Skipped on the count-only badge path
   // (returned above) and under `exact` scope (empty `meshDescendantUis`).
   const reasonCounts = new Map<string, { tagged: number; mention: number }>();
+  // Issue #967 — representative pub per cwid, keyed by which reason branch it
+  // belongs to (tagged vs mention). Populated only under `representativePub`;
+  // empty otherwise, so `composeMatchReason` attaches no `pub`.
+  const reasonReps = new Map<
+    string,
+    { tagged?: RepresentativePub; mention?: RepresentativePub }
+  >();
   const pageCwids = r.hits.hits.map((h) => h._source.cwid);
   if (
     matchExplain &&
@@ -1525,6 +1787,30 @@ export async function searchPeople(opts: {
     provenanceParent.length > 0 &&
     pageCwids.length > 0
   ) {
+    // Issue #967 — fetch the strongest representative pub within a reason filter:
+    // most recent, then most cited. Highlight is keyed to the LITERAL query (not
+    // the filter), so the title shows the matched term when it appears; a
+    // descriptor-tagged title with no literal term highlights nothing and the
+    // card renders plain text. Added to each filter only when the flag is on, so
+    // the flag-off agg body is byte-identical to the pre-#967 shape.
+    const repPubTopHits = {
+      top_hits: {
+        size: 1,
+        sort: [
+          { year: { order: "desc", missing: "_last" } },
+          { citationCount: { order: "desc", missing: "_last" } },
+        ],
+        _source: ["pmid", "title", "year"],
+        highlight: {
+          fields: { title: {} },
+          highlight_query: {
+            multi_match: { query: contentQuery, fields: ["title"], operator: "or" },
+          },
+          pre_tags: ["<mark>"],
+          post_tags: ["</mark>"],
+        },
+      },
+    };
     const aggResp = await searchClient().search({
       index: PUBLICATIONS_INDEX,
       body: {
@@ -1536,7 +1822,10 @@ export async function searchPeople(opts: {
             aggs: {
               tagged: {
                 filter: { terms: { meshDescriptorUi: meshDescendantUis } },
-                aggs: { d: { cardinality: { field: "pmid" } } },
+                aggs: {
+                  d: { cardinality: { field: "pmid" } },
+                  ...(representativePub ? { top: repPubTopHits } : {}),
+                },
               },
               mention: {
                 filter: {
@@ -1546,7 +1835,10 @@ export async function searchPeople(opts: {
                     operator: "and",
                   },
                 },
-                aggs: { d: { cardinality: { field: "pmid" } } },
+                aggs: {
+                  d: { cardinality: { field: "pmid" } },
+                  ...(representativePub ? { top: repPubTopHits } : {}),
+                },
               },
             },
           },
@@ -1560,8 +1852,8 @@ export async function searchPeople(opts: {
             byAuthor?: {
               buckets?: Array<{
                 key: string;
-                tagged?: { d?: { value?: number } };
-                mention?: { d?: { value?: number } };
+                tagged?: { d?: { value?: number } } & ReasonTopHitsAgg;
+                mention?: { d?: { value?: number } } & ReasonTopHitsAgg;
               }>;
             };
           };
@@ -1572,32 +1864,31 @@ export async function searchPeople(opts: {
         tagged: b.tagged?.d?.value ?? 0,
         mention: b.mention?.d?.value ?? 0,
       });
+      if (representativePub) {
+        reasonReps.set(b.key, {
+          tagged: parseReasonTopHit(b.tagged),
+          mention: parseReasonTopHit(b.mention),
+        });
+      }
     }
   }
 
   // Strongest-signal reason: pub-evidence count (document) → concept fallback
-  // (sparkle). Y = the scholar's `publicationCount` (the badge number); X is
-  // capped at Y so the phrasing stays coherent under any index drift.
+  // (sparkle). Delegates to the pure `composeMatchReason` (count cap +
+  // precedence + #967 representative-pub attach).
   const buildMatchReason = (
     cwid: string,
     pubCount: number,
     hasProvenance: boolean,
-  ): PeopleHit["matchReason"] => {
-    const c = reasonCounts.get(cwid);
-    if (c && c.tagged > 0)
-      return {
-        icon: "publications",
-        text: `${Math.min(c.tagged, pubCount)} of ${pubCount} publications tagged ${provenanceParent}`,
-      };
-    if (c && c.mention > 0)
-      return {
-        icon: "publications",
-        text: `${Math.min(c.mention, pubCount)} of ${pubCount} publications mention “${contentQuery}”`,
-      };
-    if (hasProvenance)
-      return { icon: "concept", text: `via related concept ${provenanceParent}` };
-    return undefined;
-  };
+  ): PeopleHit["matchReason"] =>
+    composeMatchReason({
+      counts: reasonCounts.get(cwid),
+      rep: reasonReps.get(cwid),
+      pubCount,
+      hasProvenance,
+      provenanceParent,
+      contentQuery,
+    });
 
   return {
     hits: r.hits.hits.map((h) => {
@@ -1698,6 +1989,21 @@ export async function searchPublications(opts: {
    * the same query predicate, so the badge is identical to a full search.
    */
   countOnly?: boolean;
+  /**
+   * Perf — hits-only mode for the sparse/empty concept-fallback preview
+   * (`#298`, gated by `resolveConceptFallbackSparseEnabled`). Like `countOnly`
+   * it omits the OpenSearch `aggs` block and the ≤500-row facet
+   * `scholar.findMany` (the wcmAuthors-bucket hydration) — the dominant cost —
+   * but UNLIKE `countOnly` it keeps `size`, scoring, and per-hit hydration
+   * (`fetchWcmAuthorsForPmids` / `fetchAuthorBylineForPmids` / impact) so the
+   * returned `hits` render in the fallback preview. `total` + hit order are
+   * byte-identical to a full search (same `query` / `post_filter` / sort);
+   * `facets` come back empty (every reader is `?.… ?? []`) and the caller
+   * discards them. Mentoring buckets are loaded only when a `mentoringPrograms`
+   * filter is active (so the filtered total stays correct); otherwise the
+   * stall-prone ReciterDB round-trip is skipped too.
+   */
+  hitsOnly?: boolean;
   /**
    * Issue #645 — injectable "current year" for the recency-decay origin (§7 of
    * the spec). Defaults to `new Date().getUTCFullYear()`. Tests pass a fixed
@@ -2049,9 +2355,16 @@ export async function searchPublications(opts: {
   // mariadb pool's ~10s acquireTimeout on each, the root cause of the /search
   // SSR stall.
   const mentoringPrograms = filters.mentoringPrograms ?? [];
-  const mentoringBuckets = opts.countOnly
-    ? EMPTY_MENTORING_BUCKETS
-    : await getMentoringPmidBuckets();
+  // Perf (B4 hits-only fallback) — `getMentoringPmidBuckets()` is the ReciterDB
+  // round-trip the comment above flags as the /search SSR stall source.
+  // `countOnly` skips it (the badge never reads buckets); `hitsOnly` skips it
+  // too UNLESS a mentoring filter is active, in which case the buckets are
+  // needed to build `mentoringPmids` so the broad total/hits honor the filter
+  // (an active filter with an empty bucket set collapses to `match_none` below).
+  const mentoringBuckets =
+    opts.countOnly || (opts.hitsOnly === true && mentoringPrograms.length === 0)
+      ? EMPTY_MENTORING_BUCKETS
+      : await getMentoringPmidBuckets();
   const mentoringPmids = mentoringPrograms.length > 0
     ? Array.from(new Set(mentoringPrograms.flatMap((p) => mentoringBuckets.byProgram[p] ?? [])))
     : [];
@@ -2400,7 +2713,18 @@ export async function searchPublications(opts: {
     },
   };
 
-  const resp = await searchClient().search({ index: PUBLICATIONS_INDEX, body: body as object });
+  // Perf (B4 hits-only fallback) — drop the `aggs` block from the request when
+  // the caller only needs total + hits (sparse-concept preview). Same `query` /
+  // `post_filter` / `sort` / `size`, so `total` and the hit order are identical
+  // to a full search; only the server-side facet aggregations are skipped.
+  // Mirrors the `countOnly` short-circuit above, but keeps `size` and hit
+  // emission. The facet `scholar.findMany` is skipped separately below.
+  const skipAggs = opts.hitsOnly === true;
+  const { aggs: _aggs, ...bodyNoAggs } = body;
+  const resp = await searchClient().search({
+    index: PUBLICATIONS_INDEX,
+    body: (skipAggs ? bodyNoAggs : body) as object,
+  });
 
   type Hit = {
     _source: {
@@ -2461,12 +2785,27 @@ export async function searchPublications(opts: {
   const facetCwids = new Set(authorBuckets.map((b) => b.key));
   if (filters.wcmAuthor) for (const c of filters.wcmAuthor) facetCwids.add(c);
   const facetCwidList = Array.from(facetCwids);
-  const scholarRows = facetCwidList.length === 0
-    ? []
-    : await prisma.scholar.findMany({
-        where: { cwid: { in: facetCwidList }, deletedAt: null, status: "active" },
-        select: { cwid: true, preferredName: true, slug: true },
-      });
+  // The page's pmids (for the chip-data hydration below). Computed up here so
+  // the facet-scholar lookup and the author-chip lookup — independent reads,
+  // one against Prisma, one against publication_author — issue concurrently
+  // rather than serially. `fetchAuthorBylineForPmids` stays sequential after
+  // this resolves; it depends on `wcmAuthorsByPmid`.
+  const pmids = r.hits.hits.map((h) => h._source.pmid);
+  const [scholarRows, wcmAuthorsByPmid] = await Promise.all([
+    // Perf (B4 hits-only fallback) — skip the ≤500-row facet hydration when the
+    // caller discards facets; the per-hit `fetchWcmAuthorsForPmids` below
+    // (bounded to PAGE_SIZE) still runs so the preview rows render. With aggs
+    // skipped `facetCwidList` is already empty, so this gate is self-documenting.
+    opts.hitsOnly === true || facetCwidList.length === 0
+      ? Promise.resolve([] as { cwid: string; preferredName: string; slug: string }[])
+      : prisma.scholar.findMany({
+          where: { cwid: { in: facetCwidList }, deletedAt: null, status: "active" },
+          select: { cwid: true, preferredName: true, slug: true },
+        }),
+    // Enrich hits with topic-page-style chip data (avatar + isFirst/isLast)
+    // by querying publication_author for the page's pmids. Bounded to PAGE_SIZE.
+    fetchWcmAuthorsForPmids(pmids),
+  ]);
   const scholarByCwid = new Map(scholarRows.map((s) => [s.cwid, s]));
   const wcmAuthorBuckets: WcmAuthorFacetBucket[] = authorBuckets.flatMap((b) => {
     const s = scholarByCwid.get(b.key);
@@ -2498,10 +2837,8 @@ export async function searchPublications(opts: {
     }
   }
 
-  // Enrich hits with topic-page-style chip data (avatar + isFirst/isLast)
-  // by querying publication_author for the page's pmids. Bounded to PAGE_SIZE.
-  const pmids = r.hits.hits.map((h) => h._source.pmid);
-  const wcmAuthorsByPmid = await fetchWcmAuthorsForPmids(pmids);
+  // `pmids` + `wcmAuthorsByPmid` (the topic-page-style chip data) were resolved
+  // above in the same Promise.all as the facet-scholar lookup.
 
   // Issue #718 — a row whose displayable WCM author list is empty (its sole
   // confirmed WCM author was soft-deleted / left WCM) would otherwise render with

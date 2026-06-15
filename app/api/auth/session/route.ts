@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session-server";
 import { isSuperuser } from "@/lib/auth/superuser";
+import { isCommsSteward, isMethodsTabVisible } from "@/lib/auth/comms-steward";
+import { buildConsoleLinks, type ConsoleLink } from "@/lib/auth/console-links";
 import { impersonationActive } from "@/lib/auth/effective-identity";
 import {
   resolveImpersonationDisplay,
   type ImpersonationUnitKind,
 } from "@/lib/edit/impersonation-display";
+import { loadManageableUnits } from "@/lib/edit/manageable-units";
 import { db } from "@/lib/db";
 
 /**
@@ -37,6 +40,13 @@ import { db } from "@/lib/db";
  *     impersonating (`isSuperuser(session.cwid)`, R1, against the real cwid
  *     never the effective one). Gates the switcher entry. Always `false` when
  *     the feature flag is off, so the switcher stays hidden when dark.
+ *   - `consoleLinks` — the ordered, role-aware `/edit` console entry points the
+ *     viewer is entitled to (`lib/auth/console-links.ts`,
+ *     role-aware-navigation-entry-points-spec.md). The account-menu renders them
+ *     verbatim under one "Manage" section, so a non-superuser steward or unit
+ *     admin finally has a clickable path into the console (replacing the old
+ *     superuser-only `canBrowseProfiles` flag). Computed against the REAL cwid;
+ *     `[]` for a plain scholar.
  */
 export const dynamic = "force-dynamic";
 
@@ -45,7 +55,7 @@ type ScholarLite = { slug: string; preferredName: string };
 type ImpersonatingBlock = {
   targetCwid: string;
   targetName: string;
-  role: "owner" | "curator" | "scholar";
+  role: "owner" | "curator" | "scholar" | "comms_steward";
   unitKind: ImpersonationUnitKind | null;
   unit: string | null;
   startedAt: number;
@@ -62,7 +72,7 @@ export async function GET(): Promise<NextResponse> {
         scholar: null,
         impersonating: null,
         canImpersonate: false,
-        canBrowseProfiles: false,
+        consoleLinks: [],
       },
       { headers: noStore },
     );
@@ -89,10 +99,31 @@ export async function GET(): Promise<NextResponse> {
   const featureEnabled = process.env.IMPERSONATION_ENABLED === "true";
   const canImpersonate = featureEnabled && superuser;
 
-  // The admin Profiles-roster entry (`/edit/scholars`) rides the same verdict
-  // but, unlike `canImpersonate`, is INDEPENDENT of the impersonation flag — a
-  // superuser reaches the roster whether or not "View as" is enabled.
-  const canBrowseProfiles = superuser;
+  // Role-aware console entry points for the account-menu dropdown
+  // (`lib/auth/console-links.ts`, role-aware-navigation-entry-points-spec.md).
+  // A superuser collapses to the Profiles roster (its AdminSubnav fans out to
+  // the rest) and skips the steward / unit lookups entirely — so a superuser
+  // probe costs no extra directory or DB work. A non-superuser pays only for the
+  // roles they might hold: `isCommsSteward` (flag-gated — short-circuits to
+  // false with NO directory call when `COMMS_STEWARD_ENABLED` is off) and one
+  // indexed `unit_admin` lookup. All verdicts are against the REAL cwid, like
+  // `canImpersonate` above. Fail-closed: a lookup error just drops that link.
+  let consoleLinks: ConsoleLink[];
+  if (superuser) {
+    consoleLinks = buildConsoleLinks({
+      isSuperuser: true,
+      canManageMethods: false,
+      managesUnits: false,
+    });
+  } else {
+    const commsSteward = await isCommsSteward(session.cwid).catch(() => false);
+    const manageable = await loadManageableUnits(session.cwid, db.read).catch(() => null);
+    consoleLinks = buildConsoleLinks({
+      isSuperuser: false,
+      canManageMethods: isMethodsTabVisible({ isSuperuser: false, isCommsSteward: commsSteward }),
+      managesUnits: manageable !== null && manageable.total > 0,
+    });
+  }
 
   // The live overlay's target, if any. `impersonationActive` already folds in
   // the flag and the read-time TTL, so a stale or flag-off overlay yields null.
@@ -123,11 +154,32 @@ export async function GET(): Promise<NextResponse> {
         unit: display.unit,
         startedAt: session.impersonating.startedAt,
       };
+    } else if (await isCommsSteward(targetCwid).catch(() => false)) {
+      // A profile-less comms_steward target (e.g. dwd2001): no Scholar row to
+      // read, but the overlay is real (the POST guard admitted it,
+      // role-aware-navigation-entry-points-spec.md). Surface it anyway so the
+      // amber banner AND its "Return to my view" exit still render — otherwise a
+      // superuser viewing as a steward would be stuck with no visible way out.
+      // Name comes from the ED-name bridge (`steward_directory`,
+      // comms-steward-profile-editing-spec.md §5) when present, else the CWID.
+      const stewardName = await db.read.stewardDirectory
+        .findUnique({ where: { cwid: targetCwid }, select: { displayName: true } })
+        .catch(() => null);
+      impersonating = {
+        targetCwid,
+        targetName: stewardName?.displayName ?? targetCwid,
+        role: "comms_steward",
+        unitKind: null,
+        unit: null,
+        startedAt: session.impersonating.startedAt,
+      };
     }
+    // else: the target vanished (departed / invalid) — leave `impersonating`
+    // null, exactly as before.
   }
 
   return NextResponse.json(
-    { authenticated: true, scholar, impersonating, canImpersonate, canBrowseProfiles },
+    { authenticated: true, scholar, impersonating, canImpersonate, consoleLinks },
     { headers: noStore },
   );
 }

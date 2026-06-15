@@ -16,7 +16,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AZDirectory } from "@/components/browse/az-directory";
 import { ResearchAreasRow } from "@/components/search/research-areas-row";
 import { ConceptEmptyState } from "@/components/search/concept-empty-state";
-import { ConceptFallbackResults } from "@/components/search/concept-fallback-results";
+import {
+  ConceptFallbackResults,
+  ConceptFallbackAnnouncement,
+} from "@/components/search/concept-fallback-results";
 import {
   ScopeControl,
   ScopeNote,
@@ -33,6 +36,7 @@ import {
   resolveGenericTermMode,
   resolvePeopleMatchProvenance,
   resolvePeopleMatchExplain,
+  resolvePeopleSnippetRepresentativePub,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
@@ -83,6 +87,7 @@ import { mechanismVerbose, mechanismDescriptor } from "@/lib/mechanism-lookup";
 import { methodologyHref } from "@/lib/methodology-anchors";
 import { FunderFacet } from "@/components/search/funder-facet";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { compactUnitName } from "@/lib/org-unit-names";
 
 export const dynamic = "force-dynamic";
 
@@ -349,11 +354,93 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
     knownDepartments: peopleClassifierSets.departments,
   });
 
+  // Perf — start the active tab's FULL faceted search NOW, concurrently with the
+  // three count-only badge queries below, instead of constructing it as a JSX
+  // argument that only begins once the badge `await Promise.all` has settled. The
+  // full search has no data dependency on the badge counts, so hoisting it removes
+  // one serial OpenSearch round-trip from the critical path to the results. The
+  // #861 shell-streaming design is preserved: the shell still paints on the badge
+  // counts and the Suspense child still awaits this promise. Only the active
+  // type's promise is created — the inactive branches stay null and fire no query.
+  // The bare `.catch(() => {})` marks the promise handled so an early rejection
+  // (before the Suspense child attaches its await) can't surface as an unhandled
+  // rejection; the awaiting result component still receives the real value/error.
+  const activePeoplePromise =
+    type === "people"
+      ? searchPeople({
+          q,
+          page,
+          sort: sort as PeopleSort,
+          filters: {
+            deptDiv: deptDiv.length > 0 ? deptDiv : undefined,
+            personType: personType.length > 0 ? personType : undefined,
+            activity: activity.length > 0 ? activity : undefined,
+            pi,
+            piMin,
+          },
+          relevanceMode: peopleRelevanceMode,
+          shape: peopleQueryShape,
+          meshDescendantUis: meshOff ? undefined : taxonomyMatch.meshResolution?.descendantUis,
+          meshMatchTier: meshTier,
+          meshAmbiguous: effectiveMeshResolution?.ambiguous,
+          meshMatchedFormLength: effectiveMeshResolution?.matchedForm.length,
+          scope,
+          deptLeadershipBoost: resolveDeptLeadershipBoost(),
+          genericDemote,
+          contentQuery,
+          matchProvenance: resolvePeopleMatchProvenance(),
+          meshDescriptorName: taxonomyMatch.meshResolution?.name,
+          matchExplain: resolvePeopleMatchExplain(),
+          // Issue #967 — representative matching publication in the reason line.
+          representativePub: resolvePeopleSnippetRepresentativePub(),
+        })
+      : null;
+  const activePubsPromise =
+    type === "publications"
+      ? searchPublications({
+          q,
+          page,
+          sort: sort as PublicationsSort,
+          filters: {
+            yearMin,
+            yearMax,
+            publicationType: publicationType || undefined,
+            journal: journal.length > 0 ? journal : undefined,
+            wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
+            wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
+            department: pubDepartment.length > 0 ? pubDepartment : undefined,
+            mentoringPrograms:
+              mentoringProgram.length > 0 ? mentoringProgram : undefined,
+          },
+          meshResolution: effectiveMeshResolution,
+          meshStrict,
+          genericDemote,
+          contentQuery,
+          highlightMatches: resolvePublicationHighlight(),
+          matchProvenance: resolvePublicationMatchProvenance(),
+        })
+      : null;
+  const activeFundingPromise =
+    type === "funding"
+      ? searchFunding({
+          q,
+          page,
+          sort: sort as FundingSort,
+          filters: fundingFilters,
+          meshResolution: effectiveMeshResolution,
+          scope,
+        })
+      : null;
+  activePeoplePromise?.catch(() => {});
+  activePubsPromise?.catch(() => {});
+  activeFundingPromise?.catch(() => {});
+
   // Tab badge counts for all three corpora, count-only (size:0, no aggs, no
-  // hydration). The active tab's hits + facets come from a separate full search
-  // streamed inside <Suspense> below, so the shell (header, chip, tabs, counts)
-  // paints without waiting on the faceted query. `hits.total.value` is computed
-  // from the same query predicate, so these badge counts equal a full search.
+  // hydration). The active tab's hits + facets come from the hoisted full search
+  // above, streamed inside <Suspense> below, so the shell (header, chip, tabs,
+  // counts) paints without waiting on the faceted query. `hits.total.value` is
+  // computed from the same query predicate, so these badge counts equal a full
+  // search.
   const searchesStart = performance.now();
   const [peopleResult, pubsResult, fundingResult] = await Promise.all([
     searchPeople({
@@ -561,34 +648,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 wcmAuthor={wcmAuthor}
                 department={pubDepartment}
                 mentoringProgram={mentoringProgram}
-                resultPromise={searchPublications({
-                  q,
-                  page,
-                  sort: sort as PublicationsSort,
-                  filters: {
-                    yearMin,
-                    yearMax,
-                    publicationType: publicationType || undefined,
-                    journal: journal.length > 0 ? journal : undefined,
-                    wcmAuthorRole:
-                      wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
-                    wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
-                    department:
-                      pubDepartment.length > 0 ? pubDepartment : undefined,
-                    mentoringPrograms:
-                      mentoringProgram.length > 0 ? mentoringProgram : undefined,
-                  },
-                  meshResolution: effectiveMeshResolution,
-                  meshStrict,
-                  // Issue #692 — generic-term demotion on the streamed pub tab.
-                  genericDemote,
-                  contentQuery,
-                  // SEARCH_PUB_HIGHLIGHT — mark matched terms in the title on the
-                  // SSR render so direct navigation shows highlights too.
-                  highlightMatches: resolvePublicationHighlight(),
-                  // SEARCH_PUB_MATCH_PROVENANCE — #688-parity MeSH note on SSR.
-                  matchProvenance: resolvePublicationMatchProvenance(),
-                })}
+                resultPromise={activePubsPromise!}
                 meshResolution={effectiveMeshResolution}
                 chipMode={chipMode}
                 broadenHref={buildMeshHref(sp, "off")}
@@ -605,16 +665,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 scope={scope}
                 concept={concept}
                 scopeHrefs={scopeHrefs}
-                resultPromise={searchFunding({
-                  q,
-                  page,
-                  sort: sort as FundingSort,
-                  filters: fundingFilters,
-                  meshResolution: effectiveMeshResolution,
-                  // PLAN R5 / handoff item 3 — concept-only result-SET gate
-                  // (in lockstep with the countOnly badge call above).
-                  scope,
-                })}
+                resultPromise={activeFundingPromise!}
               />
             ) : (
               <PeopleResults
@@ -629,43 +680,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 scope={scope}
                 concept={concept}
                 scopeHrefs={scopeHrefs}
-                resultPromise={searchPeople({
-                  q,
-                  page,
-                  sort: sort as PeopleSort,
-                  filters: {
-                    deptDiv: deptDiv.length > 0 ? deptDiv : undefined,
-                    personType: personType.length > 0 ? personType : undefined,
-                    activity: activity.length > 0 ? activity : undefined,
-                    pi,
-                    piMin,
-                  },
-                  relevanceMode: peopleRelevanceMode,
-                  shape: peopleQueryShape,
-                  meshDescendantUis: meshOff ? undefined : taxonomyMatch.meshResolution?.descendantUis,
-                  // #726 — tier + ambiguity/length floor (lockstep with the
-                  // countOnly badge call above, so badge == list).
-                  meshMatchTier: meshTier,
-                  meshAmbiguous: effectiveMeshResolution?.ambiguous,
-                  meshMatchedFormLength: effectiveMeshResolution?.matchedForm.length,
-                  // PLAN R5 / handoff item 3 — concept-only result-SET gate
-                  // (kept in lockstep with the countOnly badge call above).
-                  scope,
-                  deptLeadershipBoost: resolveDeptLeadershipBoost(),
-                  // Issue #692 — generic-term demotion on the streamed people
-                  // tab: gates/highlights on the content query (this is the SSR
-                  // render the screenshot showed un-demoted before the fix).
-                  genericDemote,
-                  contentQuery,
-                  // Issue #688 — MeSH match-provenance on the SSR path too, so
-                  // the "Why this match" note renders on direct navigation, not
-                  // just on a client-side /api/search fetch.
-                  matchProvenance: resolvePeopleMatchProvenance(),
-                  meshDescriptorName: taxonomyMatch.meshResolution?.name,
-                  // Issue #702 — pub-evidence highlighting + "Matched on" chip so
-                  // a publication-only match isn't left bare on the SSR render.
-                  matchExplain: resolvePeopleMatchExplain(),
-                })}
+                resultPromise={activePeoplePromise!}
               />
             )}
           </React.Suspense>
@@ -776,7 +791,6 @@ function ModeTabs({
         label="Scholars"
         count={peopleCount}
         active={activeType === "people"}
-        title="Scholars whose own profile matches your search — counted differently from the Publications tab's author list (authors of the matched publications)."
       />
       <ModeTab
         href={pubHref}
@@ -835,18 +849,61 @@ function ModeTab({
 type PeopleResultData = Awaited<ReturnType<typeof searchPeople>>;
 type PubsResultData = Awaited<ReturnType<typeof searchPublications>>;
 
-// One-shot label resolver for the dept/div/center facet. Cheap because
-// the three tables are small; called once per page render. Centers and
-// departments key on `code`, divisions key on `${deptCode}--${divCode}`,
-// and the long-tail free-text fallback uses the bare name.
+// Module-level TTL cache for the dept/div/center reference rows (B5). The three
+// tables are tiny (~80 near-static rows) and change only on a nightly ETL
+// reseed, yet `resolveDeptDivLabels` runs on every People-tab render (and again
+// on the Pubs Department facet), so without memoization each /search hit pays
+// three Prisma round-trips. We cache the PLAIN ARRAYS and rebuild the Map per
+// call below, mirroring lib/api/people-classifier-sets.ts: a `{ data, ts }`
+// cache + an `inflight` promise guard + a TTL gate. Labels are display-only chip
+// text (never counts/ranking), so the time-based staleness is acceptable;
+// /search is not in the revalidate allow-list, so a TTL is the only viable
+// invalidation here.
+type DeptDivData = {
+  depts: { code: string; name: string }[];
+  divs: { code: string; name: string; deptCode: string }[];
+  centers: { code: string; name: string; compactName: string | null }[];
+};
+
+const DEPT_DIV_TTL_MS = 60 * 60 * 1000; // 1h — well within the nightly ETL reseed cadence
+let deptDivCache: { data: DeptDivData; ts: number } | null = null;
+let deptDivInflight: Promise<DeptDivData> | null = null;
+
+// Loads (and TTL-caches) the three reference tables. Concurrent callers share
+// one inflight refresh so a cold render issues the three queries at most once.
+// An error propagates to the caller (unchanged from the pre-cache behavior) and
+// is not cached, so the next request retries.
+async function loadDeptDivData(): Promise<DeptDivData> {
+  if (deptDivCache && Date.now() - deptDivCache.ts < DEPT_DIV_TTL_MS) {
+    return deptDivCache.data;
+  }
+  if (deptDivInflight) return deptDivInflight;
+  deptDivInflight = (async () => {
+    try {
+      const [depts, divs, centers] = await Promise.all([
+        prisma.department.findMany({ select: { code: true, name: true } }),
+        prisma.division.findMany({
+          select: { code: true, name: true, deptCode: true },
+        }),
+        prisma.center.findMany({ select: { code: true, name: true, compactName: true } }),
+      ]);
+      const data: DeptDivData = { depts, divs, centers };
+      deptDivCache = { data, ts: Date.now() };
+      return data;
+    } finally {
+      deptDivInflight = null;
+    }
+  })();
+  return deptDivInflight;
+}
+
+// One-shot label resolver for the dept/div/center facet. Backed by the
+// module-level TTL cache above so the underlying rows are fetched at most once
+// per TTL window; the returned Map is rebuilt per call. Centers and departments
+// key on `code`, divisions key on `${deptCode}--${divCode}`, and the long-tail
+// free-text fallback uses the bare name.
 async function resolveDeptDivLabels(): Promise<Map<string, string>> {
-  const [depts, divs, centers] = await Promise.all([
-    prisma.department.findMany({ select: { code: true, name: true } }),
-    prisma.division.findMany({
-      select: { code: true, name: true, deptCode: true },
-    }),
-    prisma.center.findMany({ select: { code: true, name: true } }),
-  ]);
+  const { depts, divs, centers } = await loadDeptDivData();
   const deptByCode = new Map(depts.map((d) => [d.code, d.name]));
   const out = new Map<string, string>();
   for (const d of depts) out.set(d.code, d.name);
@@ -854,7 +911,8 @@ async function resolveDeptDivLabels(): Promise<Map<string, string>> {
     const dn = deptByCode.get(div.deptCode);
     out.set(`${div.deptCode}--${div.code}`, dn ? `${div.name} — ${dn}` : div.name);
   }
-  for (const c of centers) out.set(`center:${c.code}`, c.name);
+  for (const c of centers)
+    out.set(`center:${c.code}`, compactUnitName({ name: c.name, compactName: c.compactName }));
   return out;
 }
 
@@ -1206,6 +1264,12 @@ async function PublicationsResults({
       // §8 #6 — the user's year/journal/author filters DO carry into the broad
       // call (broadening is about the concept gate, not the other filters).
       meshResolution: null,
+      // Perf (B4) — the caller reads only `broad.total` + `broad.hits`;
+      // `broad.facets` is discarded. Hits-only keeps the hits + per-hit
+      // hydration but skips the aggs block and the ≤500-row facet
+      // `scholar.findMany` (and the mentoring ReciterDB round-trip when no
+      // mentoring filter is active).
+      hitsOnly: true,
       // SEARCH_PUB_HIGHLIGHT — keep the fallback rows' highlighting consistent
       // with the primary list.
       highlightMatches: resolvePublicationHighlight(),
@@ -1453,6 +1517,12 @@ async function PublicationsResults({
         clearAllHref={clearAllHref}
       />
       <section>
+        {/* #298 §10 / #991 #11 — persistent SR live region. Rendered
+            unconditionally (not inside the {conceptFallback ? …} branch below)
+            so the broad-text count is written into a region that already exists
+            in the DOM and is announced on the result swap. Empty when no
+            co-render is shown. */}
+        <ConceptFallbackAnnouncement query={q} total={conceptFallback?.total ?? null} />
         {scopeRow}
         {chips.length > 0 ? <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} /> : null}
         <ResultsToolbar
@@ -2437,7 +2507,7 @@ function FacetSidebarPubs({
           selection); empty `departmentItems` ⇒ no group. Collapses past 6
           like the People-tab dept facet. */}
       {departmentItems.length > 0 ? (
-        <FacetGroup label="Department" collapseAfter={6}>
+        <FacetGroup label="Department / division / center" collapseAfter={6}>
           {departmentItems.map((d) => (
             <FacetCheckbox
               key={d.value}
@@ -2445,6 +2515,7 @@ function FacetSidebarPubs({
               count={d.count}
               isActive={d.isActive}
               href={d.href}
+              wrap
             />
           ))}
         </FacetGroup>

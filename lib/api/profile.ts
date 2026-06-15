@@ -6,6 +6,7 @@
  * profile page server component imports this directly for ISR; the equivalent
  * external API endpoint would call the same function.
  */
+import { cache } from "react";
 import { prisma } from "@/lib/db";
 import {
   getEffectiveOverview,
@@ -16,6 +17,8 @@ import {
   pickManualHighlights,
 } from "@/lib/api/manual-layer";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
+import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
+import { gateEmailForViewer } from "@/lib/profile/email-display-gate";
 import { MAX_SELECTED_HIGHLIGHTS } from "@/lib/edit/validators";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
@@ -25,6 +28,7 @@ import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import {
   isMethodsLensEnabled,
   isMethodsLensSensitiveGateOn,
+  isMethodsFamilyDefinitionsOn,
 } from "@/lib/profile/methods-lens-flags";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import {
@@ -74,6 +78,12 @@ export type ScholarFamilyView = {
   /** #819 — distinct member PMIDs (digit strings) backing the click-to-filter.
    *  `len === pubCount` upstream (ReciterAI#175); `[]` on a pre-#175 rollup. */
   pmids: string[];
+  /** #879 — generated capability gloss for the family (passthrough, render-only).
+   *  `null` until the tools-a2-v3 rollup populates it. NEVER fed back into any
+   *  LLM/embedding/retrieval — the overview generator reads its own projection. */
+  definition: string | null;
+  /** #879 — "generated" | null; gates the "AI-generated" disclaimer in the UI. */
+  definitionSource: string | null;
 };
 
 /** Publication types excluded from the Topics section's per-keyword counts.
@@ -145,14 +155,23 @@ export function aggregateKeywords(
 // the per-profile lens and the standalone pages apply ONE suppression/sensitivity
 // implementation. Imported above; behavior here is unchanged.
 
-function toScholarFamilyView(r: {
-  familyId: string;
-  familyLabel: string;
-  supercategory: string;
-  pmidCount: number;
-  exemplarTools: unknown;
-  pmids: unknown;
-}): ScholarFamilyView {
+function toScholarFamilyView(
+  r: {
+    familyId: string;
+    familyLabel: string;
+    supercategory: string;
+    pmidCount: number;
+    exemplarTools: unknown;
+    pmids: unknown;
+    definition: string | null;
+    definitionSource: string | null;
+  },
+  // #879 — when the flag is off, drop the definition from the view ENTIRELY. The
+  // public profile payload is CloudFront-cached, so a client-side render gate would
+  // still bake the copy into the cache; nulling it here keeps it out of the payload
+  // until the flag flips (mirrors getFamily reading it only under the same gate).
+  includeDefinition: boolean,
+): ScholarFamilyView {
   return {
     familyId: r.familyId,
     familyLabel: r.familyLabel,
@@ -161,6 +180,10 @@ function toScholarFamilyView(r: {
     exemplarTools: Array.isArray(r.exemplarTools) ? (r.exemplarTools as string[]) : [],
     // Coerce defensively: the column is nullable (pre-#175 rollup) and Json.
     pmids: Array.isArray(r.pmids) ? (r.pmids as unknown[]).map(String) : [],
+    // #879 — render-only passthrough; null until the tools-a2-v3 rollup lands AND
+    // the METHODS_LENS_FAMILY_DEFINITIONS flag is on.
+    definition: includeDefinition ? r.definition : null,
+    definitionSource: includeDefinition ? r.definitionSource : null,
   };
 }
 
@@ -182,6 +205,9 @@ async function partitionScholarFamilies(
 ): Promise<{ publicFamilies: ScholarFamilyView[]; sensitiveFamilies: ScholarFamilyView[] }> {
   if (!isMethodsLensEnabled()) return { publicFamilies: [], sensitiveFamilies: [] };
 
+  // #879 — gate the generated definition out of the (cached) payload unless on.
+  const defsOn = isMethodsFamilyDefinitionsOn();
+
   const rows = await prisma.scholarFamily.findMany({
     where: { cwid },
     orderBy: [{ pmidCount: "desc" }, { familyId: "asc" }],
@@ -192,6 +218,8 @@ async function partitionScholarFamilies(
       pmidCount: true,
       exemplarTools: true,
       pmids: true,
+      definition: true,
+      definitionSource: true,
     },
   });
   if (rows.length === 0) return { publicFamilies: [], sensitiveFamilies: [] };
@@ -207,7 +235,10 @@ async function partitionScholarFamilies(
   );
 
   if (!isMethodsLensSensitiveGateOn()) {
-    return { publicFamilies: visible.map(toScholarFamilyView), sensitiveFamilies: [] };
+    return {
+      publicFamilies: visible.map((r) => toScholarFamilyView(r, defsOn)),
+      sensitiveFamilies: [],
+    };
   }
 
   const sensitivity = await prisma.familySensitivityOverlay.findMany({
@@ -222,15 +253,16 @@ async function partitionScholarFamilies(
     (sensitiveKeys.has(familyOverlayKey(r.supercategory, r.familyLabel))
       ? sensitiveFamilies
       : publicFamilies
-    ).push(toScholarFamilyView(r));
+    ).push(toScholarFamilyView(r, defsOn));
   }
   return { publicFamilies, sensitiveFamilies };
 }
 
 /** PUBLIC method families for the (CloudFront-cached) profile payload (#799).
  *  #800-suppressed and #801-gated families are excluded; [] when the lens flag
- *  is off (the master render gate), so no SEO/JSON side channel can leak. */
-async function loadScholarFamilies(cwid: string): Promise<ScholarFamilyView[]> {
+ *  is off (the master render gate), so no SEO/JSON side channel can leak.
+ *  @internal Exported for the #879 definition flag-gate unit test. */
+export async function loadScholarFamilies(cwid: string): Promise<ScholarFamilyView[]> {
   return (await partitionScholarFamilies(cwid)).publicFamilies;
 }
 
@@ -240,6 +272,23 @@ async function loadScholarFamilies(cwid: string): Promise<ScholarFamilyView[]> {
  *  check; [] unless `METHODS_LENS_SENSITIVE_GATE=on`. */
 export async function loadSensitiveScholarFamilies(cwid: string): Promise<ScholarFamilyView[]> {
   return (await partitionScholarFamilies(cwid)).sensitiveFamilies;
+}
+
+/**
+ * email-visibility-spec § Cache-safety — the cache-unsafe reveal of a scholar's
+ * email for the /api/profile/[cwid]/contact-email endpoint. Returns the raw email
+ * + release audience (the endpoint applies table A against the resolved
+ * internal-viewer signal); `null` for an unknown or soft-deleted scholar.
+ */
+export async function loadScholarContactEmail(
+  cwid: string,
+): Promise<{ email: string | null; emailVisibility: string | null } | null> {
+  const scholar = await prisma.scholar.findUnique({
+    where: { cwid },
+    select: { email: true, emailVisibility: true, deletedAt: true },
+  });
+  if (!scholar || scholar.deletedAt) return null;
+  return { email: scholar.email, emailVisibility: scholar.emailVisibility };
 }
 
 export type ProfilePublication = ScoredPublication<{
@@ -308,6 +357,12 @@ export type ProfilePayload = {
    *  `primaryDepartment` display label to `/departments/<slug>` when present,
    *  strengthening the on-site profile↔department link graph. */
   departmentSlug: string | null;
+  /** Curated official department name from the Department relation (e.g.
+   *  "Samuel J. Wood Library"). NULL when the dept has no curated override or
+   *  no joined Department row — the sidebar then falls back to
+   *  `primaryDepartment`. Resolved via lib/org-unit-names.ts:officialUnitName
+   *  conceptually, but precomputed here so the view stays presentational. */
+  departmentOfficialName: string | null;
   /** Issue #167 — division name when the scholar has a populated divCode
    *  AND the joined division name is not "Administration" (an admin-style
    *  level2 unit that should not be surfaced as a research/clinical
@@ -315,6 +370,14 @@ export type ProfilePayload = {
    *  when present, falling back to department-only when null. */
   division: string | null;
   email: string | null;
+  /** email-visibility-spec § Cache-safety. True when PROFILE_EMAIL_RELEASE_GATE
+   *  is on and the scholar has an email that was WITHHELD from `email` above
+   *  because it is not `public` (i.e. `institution` or `none`). The Contact card
+   *  mounts the uncacheable client reveal island, which fetches
+   *  /api/profile/[cwid]/contact-email and shows the address to internal viewers
+   *  only. Never carries the address itself. False when the gate is off, the
+   *  email is `public` (already baked), or there is no email. */
+  contactEmailRevealable: boolean;
   identityImageEndpoint: string;
   /** Derived in ED ETL — true when LDAP carries a clinical or NYP-credentialed
    *  signal. Drives whether the "Clinical profile →" link renders in the
@@ -530,10 +593,10 @@ function ensureOwnerInChipWindow<T extends { cwid: string }>(
   return next;
 }
 
-export async function getScholarFullProfileBySlug(
+export const getScholarFullProfileBySlug = cache(async (
   slug: string,
   now: Date = new Date(),
-): Promise<ProfilePayload | null> {
+): Promise<ProfilePayload | null> => {
   const scholar = await prisma.scholar.findFirst({
     where: { slug, deletedAt: null, status: "active" },
     include: {
@@ -569,10 +632,11 @@ export async function getScholarFullProfileBySlug(
       // the existing `primaryDepartment` text column.
       division: { select: { name: true } },
       // #684 — the department page slug, so the sidebar department name can
-      // link to /departments/<slug>. The display label stays the free-text
-      // `primaryDepartment`; this is just the link target (null when the
-      // scholar's deptCode has no joined Department row).
-      department: { select: { slug: true } },
+      // link to /departments/<slug> (null when the scholar's deptCode has no
+      // joined Department row). `officialName` is the curated ceremonial name
+      // (e.g. ED "Library" -> "Samuel J. Wood Library") preferred over the raw
+      // `primaryDepartment` string for display; falls back when NULL.
+      department: { select: { slug: true, officialName: true } },
       // Issue #5 — surface the postdoctoral mentor on the sidebar. Hide
       // soft-deleted / suppressed mentors at the API layer so the card
       // never points at a hidden profile.
@@ -592,51 +656,97 @@ export async function getScholarFullProfileBySlug(
   });
   if (!scholar) return null;
 
-  // The effective `overview` merges a manual `field_override` over the ETL
-  // column at read time (#356, lib/api/manual-layer.ts). A self-edited bio is
-  // sanitized on write, so it is rendered as-is.
-  const effectiveOverview = await getEffectiveOverview(
-    scholar.cwid,
-    scholar.overview,
-    prisma,
-  );
-
-  // Authorships for this scholar — drives the publications list. Pull author rows
-  // for every publication so coauthor chips can be rendered. Issue #63: drop
-  // Retraction / Erratum rows at fetch time so the list, header counts, and
-  // keyword aggregation all see the same filtered set.
-  const authorships = await prisma.publicationAuthor.findMany({
-    where: {
-      cwid: scholar.cwid,
-      isConfirmed: true,
-      publication: { publicationType: { notIn: [...NEVER_DISPLAY_TYPES] } },
-    },
-    include: {
-      publication: {
+  // These reads are all keyed only on the (already-fetched) scholar cwid and
+  // have no data dependency on one another, so they run concurrently in one
+  // round of awaits rather than serially. Anything that consumes `authorships`
+  // (suppressions, ranking) stays sequential below, after this resolves.
+  //   - effectiveOverview      — field_override('overview') merge (#356)
+  //   - authorships            — drives the publications list (#63 type filter)
+  //   - nihProfileRow          — preferred NIH RePORTER profile_id (#90)
+  //   - families               — gated Methods-lens rows (#799); [] when off
+  //   - manualHighlightPmids   — field_override('selectedHighlightPmids') (#836);
+  //                              read only when the flag is on, else null (dark)
+  const [effectiveOverview, authorships, nihProfileRow, families, manualHighlightPmids] =
+    await Promise.all([
+      // The effective `overview` merges a manual `field_override` over the ETL
+      // column at read time (#356, lib/api/manual-layer.ts). A self-edited bio is
+      // sanitized on write, so it is rendered as-is.
+      getEffectiveOverview(scholar.cwid, scholar.overview, prisma),
+      // Authorships for this scholar — drives the publications list. Pull author
+      // rows for every publication so coauthor chips can be rendered. Issue #63:
+      // drop Retraction / Erratum rows at fetch time so the list, header counts,
+      // and keyword aggregation all see the same filtered set.
+      prisma.publicationAuthor.findMany({
+        where: {
+          cwid: scholar.cwid,
+          isConfirmed: true,
+          publication: { publicationType: { notIn: [...NEVER_DISPLAY_TYPES] } },
+        },
         include: {
-          authors: {
-            orderBy: { position: "asc" },
-            include: {
-              scholar: {
-                select: {
-                  cwid: true,
-                  slug: true,
-                  preferredName: true,
-                  deletedAt: true,
-                  status: true,
-                  roleCategory: true,
+          publication: {
+            // Tight projection — the publications table carries the huge
+            // `fullAuthorsString` (db.Text) plus ~12 scalars this read never
+            // touches. Select only the scalars the mappers below consume
+            // (verified against every `a.publication.<field>` access) so the row
+            // stays small. `authors` + `publicationScores` are unchanged (nested
+            // relations are listed alongside scalars under `select`).
+            select: {
+              pmid: true,
+              title: true,
+              authorsString: true,
+              journal: true,
+              year: true,
+              publicationType: true,
+              citationCount: true,
+              dateAddedToEntrez: true,
+              doi: true,
+              pmcid: true,
+              pubmedUrl: true,
+              meshTerms: true,
+              abstract: true,
+              impactScore: true,
+              authors: {
+                orderBy: { position: "asc" },
+                include: {
+                  scholar: {
+                    select: {
+                      cwid: true,
+                      slug: true,
+                      preferredName: true,
+                      deletedAt: true,
+                      status: true,
+                      roleCategory: true,
+                    },
+                  },
                 },
               },
+              // ReCiterAI per-scholar publication score (D-08). Filtered to this
+              // scholar's row only; PublicationScore is keyed by (cwid, pmid)
+              // unique pair so this returns at most one row per publication.
+              publicationScores: { where: { cwid: scholar.cwid } },
             },
           },
-          // ReCiterAI per-scholar publication score (D-08). Filtered to this
-          // scholar's row only; PublicationScore is keyed by (cwid, pmid)
-          // unique pair so this returns at most one row per publication.
-          publicationScores: { where: { cwid: scholar.cwid } },
         },
-      },
-    },
-  });
+      }),
+      // Issue #90 — preferred NIH RePORTER profile_id for this scholar, used to
+      // render the outbound "View NIH portfolio on RePORTER" link in the Funding
+      // section header. Null when no mapping was found by the etl:nih-profile
+      // resolver.
+      prisma.personNihProfile.findFirst({
+        where: { cwid: scholar.cwid, isPreferred: true },
+        select: { nihProfileId: true },
+      }),
+      // #799 — family-primary Methods lens rows (gated + overlay-filtered).
+      // Returns [] when the lens flag is off, so this is a no-op until on.
+      loadScholarFamilies(scholar.cwid),
+      // #836 — the scholar's manual Highlights override, in stored order, read
+      // only when the flag is on (else null, keeping the feature fully dark).
+      // The precedence/visibility resolution happens below once the ranked AI
+      // set exists; this fetch is independent and only the read is hoisted here.
+      isManualHighlightsEnabled()
+        ? getSelectedHighlightPmids(scholar.cwid, prisma)
+        : Promise.resolve(null),
+    ]);
 
   // #356 — publication suppression. A publication this scholar has hidden
   // (a per-author suppression on their own cwid), or one taken down whole,
@@ -754,15 +864,13 @@ export async function getScholarFullProfileBySlug(
     0,
     MAX_SELECTED_HIGHLIGHTS,
   );
-  // #836 — a scholar who opted in to choosing their own Highlights manually has
-  // a `field_override(selectedHighlightPmids)` row; when the flag is on it takes
-  // precedence over the AI selection, in stored order, restricted to their still-
-  // visible publications (`pickManualHighlights` drops any suppressed/out-of-set
-  // pmid and falls back to the AI set if none survive). Flag off ⇒ never read the
-  // override, so the feature is fully dark.
-  const manualHighlightPmids = isManualHighlightsEnabled()
-    ? await getSelectedHighlightPmids(scholar.cwid, prisma)
-    : null;
+  // #836 — `manualHighlightPmids` (the scholar's stored override, or null when
+  // the flag is off / no override) was fetched in the cwid-only Promise.all
+  // above. When the flag is on it takes precedence over the AI selection, in
+  // stored order, restricted to their still-visible publications
+  // (`pickManualHighlights` drops any suppressed/out-of-set pmid and falls back
+  // to the AI set if none survive). Flag off ⇒ the read was never issued, so the
+  // feature is fully dark.
   let highlights: ProfilePublication[];
   if (manualHighlightPmids && manualHighlightPmids.length > 0) {
     // Only when a manual override is actually present do we build the pickable
@@ -831,18 +939,10 @@ export async function getScholarFullProfileBySlug(
     .sort((a, b) => tier(a.source) - tier(b.source));
   const annotatedAppointments = annotateAppointments(sortedAppointments, now);
 
-  // Issue #90 — preferred NIH RePORTER profile_id for this scholar, used
-  // to render the outbound "View NIH portfolio on RePORTER" link in the
-  // Funding section header. Null when no mapping was found by the
-  // etl:nih-profile resolver.
-  const nihProfileRow = await prisma.personNihProfile.findFirst({
-    where: { cwid: scholar.cwid, isPreferred: true },
-    select: { nihProfileId: true },
-  });
-
-  // #799 — family-primary Methods lens rows (gated + overlay-filtered). Returns
-  // [] when the lens flag is off, so this is a no-op until it is turned on.
-  const families = await loadScholarFamilies(scholar.cwid);
+  // `nihProfileRow` (#90 — preferred NIH RePORTER profile_id, drives the
+  // "View NIH portfolio on RePORTER" link) and `families` (#799 — gated +
+  // overlay-filtered Methods-lens rows, [] when the lens flag is off) were both
+  // fetched in the cwid-only Promise.all above.
 
   return {
     cwid: scholar.cwid,
@@ -857,6 +957,7 @@ export async function getScholarFullProfileBySlug(
     primaryTitle: scholar.primaryTitle,
     primaryDepartment: scholar.primaryDepartment,
     departmentSlug: scholar.department?.slug ?? null,
+    departmentOfficialName: scholar.department?.officialName ?? null,
     // Issue #167 — belt-and-suspenders filter for the "Administration"
     // division label. The ED ETL drops Administration at the divCode level
     // (EXCLUDED_DIV_NAMES), so this typically only matters when divCode
@@ -866,7 +967,28 @@ export async function getScholarFullProfileBySlug(
       scholar.division && scholar.division.name !== "Administration"
         ? scholar.division.name
         : null,
-    email: scholar.email,
+    // email-visibility-spec § A + Cache-safety — this payload is rendered into
+    // the CloudFront PATH-cached profile page, so it MUST be viewer-independent.
+    // Bake only the cache-safe email: when the gate is on, `public` survives and
+    // `institution`/`none`/null are withheld (gateEmailForViewer with
+    // internalViewer=false). `institution` emails are revealed to internal
+    // viewers out-of-band via the uncacheable /api/profile/[cwid]/contact-email
+    // endpoint (see `contactEmailRevealable`). No-op (raw email) while off.
+    email: gateEmailForViewer(
+      scholar.email,
+      scholar.emailVisibility,
+      false,
+      isEmailReleaseGateEnabled(),
+    ),
+    // True when the gate is on and the scholar has an email withheld above
+    // because it is not `public` — the Contact card mounts the client reveal
+    // island. Covers `institution` (revealed to internal viewers) and `none`
+    // (endpoint returns nothing); both fetch so an external viewer cannot tell
+    // them apart. Carries no address. False when gate off / public / no email.
+    contactEmailRevealable:
+      isEmailReleaseGateEnabled() &&
+      scholar.email != null &&
+      scholar.emailVisibility !== "public",
     identityImageEndpoint: identityImageEndpoint(scholar.cwid),
     hasClinicalProfile: scholar.hasClinicalProfile,
     clinicalProfileUrl: scholar.clinicalProfileUrl,
@@ -985,7 +1107,7 @@ export async function getScholarFullProfileBySlug(
         : null,
     nihReporterProfileId: nihProfileRow?.nihProfileId ?? null,
   };
-}
+});
 
 /**
  * Slugs of all active, non-deleted, non-suppressed scholars — used by Next.js

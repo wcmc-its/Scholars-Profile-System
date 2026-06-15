@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
+import { PubTitle } from "@/components/publication/pub-html";
 import { cn } from "@/lib/utils";
 import {
   getChangeConfig,
@@ -332,9 +333,11 @@ export function RequestAChangeDialog({
             {itemLabel && (
               <p className="flex items-baseline gap-2 text-sm">
                 <span className="text-muted-foreground shrink-0">Regarding</span>
-                <span title={itemLabel} className="line-clamp-1 font-medium">
-                  {itemLabel}
-                </span>
+                <PubTitle
+                  value={itemLabel}
+                  title={itemLabel}
+                  className="line-clamp-1 font-medium"
+                />
               </p>
             )}
             {inRouter && (

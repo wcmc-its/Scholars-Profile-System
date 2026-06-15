@@ -964,6 +964,38 @@ export class AppStack extends Stack {
         // nightly etl:coi-gap source has seeded data in that env. Prod takes
         // effect only on an approval-gated `cdk deploy Sps-App-prod`.
         SELF_EDIT_COI_GAP_HINT: "on",
+        // #443 -- mentee co-publication BRIDGE. getMenteesForMentor's per-mentee
+        // co-pub count + 3-pub preview is a LIVE WCM ReciterDB query the in-VPC
+        // app can't reach, so it degrades to "temporarily unavailable" in
+        // staging/prod. When "on" the read layer serves the pre-computed
+        // `mentee_copublication` table instead (lib/api/mentoring.ts). DATA
+        // PREREQ (import-then-flip): populate that table FIRST -- run
+        // `etl:mentoring:export-copubs` WCM-side (writes S3) then
+        // `etl:mentoring:import-copubs` in-VPC -- BEFORE the activating `cdk
+        // deploy --exclusively Sps-App-<env>` (CD only re-rolls the image, never
+        // CDK). An empty / not-yet-imported table degrades honestly back to
+        // "temporarily unavailable" (the read does one cheap global existence
+        // probe), so a flag that goes live before the import never shows fake
+        // zeros. ON in both envs; prod activates only on the approval-gated prod
+        // cdk deploy.
+        MENTORING_COPUB_BRIDGE: "on",
+        // #928 -- publication-modal cited-by BRIDGE. The modal's "Cited by" list
+        // + total are a LIVE WCM ReciterDB query (analysis_nih_cites, in
+        // lib/api/publication-detail.ts) the in-VPC app can't reach, so they
+        // degrade to "Citation list temporarily unavailable" in staging/prod.
+        // When "on" the read layer serves the pre-computed `publication_citing`
+        // table instead. DATA PREREQ (import-then-flip): populate that table
+        // FIRST -- run `etl:mentoring:export-citing` WCM-side (writes S3) then
+        // `etl:mentoring:import-citing` in-VPC -- BEFORE the activating `cdk
+        // deploy --exclusively Sps-App-<env>` (CD only re-rolls the image, never
+        // CDK; the new etl `citations/*` GetObject grant also needs `cdk deploy
+        // Sps-Etl-<env>`). An empty / not-yet-imported table degrades honestly
+        // back to "temporarily unavailable" (the read does one cheap global
+        // existence probe), so a flag live before the import never shows fake
+        // zeros -- the in-VPC outcome is byte-identical to today's live-path
+        // failure. ON in both envs; prod activates only on the approval-gated
+        // prod cdk deploy.
+        PUBLICATION_CITING_BRIDGE: "on",
         // #497 -- self-serve slug ("Profile URL") request lifecycle: the scholar
         // request card, the superuser /edit/slug-requests approve/decline queue,
         // and the requester notification (PRs #503/#504/#505). Read via
@@ -1040,6 +1072,13 @@ export class AppStack extends Stack {
         //   SEARCH_PUB_MATCH_PROVENANCE  -> Publications-tab match provenance.
         // All three are query-time/render-only (no reindex prereq).
         SEARCH_PEOPLE_MATCH_EXPLAIN: "on",
+        // #967 -- surface a representative matching publication inside the
+        // People reason line (`... tagged HIV -- incl. "<title>" (2024)`). Adds a
+        // `top_hits` sub-agg to the SAME bounded reason-count publications agg
+        // (no people-index field, no reindex); inert unless MATCH_EXPLAIN is on.
+        // resolvePeopleSnippetRepresentativePub reads === "on". STAGING-FIRST:
+        // soak on staging before prod parity.
+        SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB: env === "staging" ? "on" : "off",
         SEARCH_PUB_HIGHLIGHT: "on",
         SEARCH_PUB_MATCH_PROVENANCE: "on",
         // #837 -- Publications-tab Department facet. Unlike the three above this
@@ -1081,6 +1120,44 @@ export class AppStack extends Stack {
         // re-rolls the image only) -- the flag-parity rule. Orthogonal to
         // METHODS_LENS_PAGES.
         SEARCH_SUGGEST_MESH_CONCEPT: "off",
+        // Section B / B2 -- drop the dedicated concept-escalation pre-count on
+        // the People tab. NOTE THE INVERTED POLARITY: "off" is the NEW fast path
+        // (read the main search's own total, re-run escalated only on sparse),
+        // "on" is today's dedicated size:0 pre-count. resolvePeopleConcept-
+        // Precount reads `!== "off"`, so unset == "on" == unchanged. The two
+        // states are RESULT-NEUTRAL -- both make the identical escalation
+        // decision off the same lexical predicate, so `badge == list` holds
+        // either way (locked by tests/unit/search-people-concept-precount.ts);
+        // only the round-trip count differs (the win: 2 fewer hops per cold
+        // concept-People SSR render on the common non-sparse case). BOTH ENVS
+        // now run the reorder ("off"): staging soaked clean, and the win was
+        // confirmed deterministically via the D3 `osRoundTrips` SLI (#927) --
+        // topic-People drops one OpenSearch hop (4 -> 3) -- because prod's tiny
+        // topic-query volume (n=15/14d) is too sparse for a latency-percentile
+        // read. Prod applied via `cdk deploy --exclusively Sps-App-prod` (CD
+        // re-rolls the image only, so an env-flag change needs the explicit cdk
+        // deploy) -- the flag-parity rule.
+        SEARCH_PEOPLE_CONCEPT_PRECOUNT: "off",
+        // #921 -- concept-scope grant axis. When ON, the Scholars tab under
+        // `?match=concept` admits scholars who are FUNDED on the resolved
+        // concept (a grant whose SEARCH_FUNDING_MESH_GATE field -- fundedPubMeshUi
+        // -- intersects the descendant set), not only those with a concept-tagged
+        // publication. The People list, facets, and count badge all widen
+        // together (the union rides the always-on filter gate + the scoring
+        // `must`), and grant-only matches sort BELOW publication evidence (a 0.1
+        // cwid-admission boost, well under pub BM25). resolvePeopleConceptGrant-
+        // Axis reads `=== "on"`, default OFF -- so flag-off skips the extra
+        // Funding round-trip entirely and leaves every concept-People query body
+        // byte-identical to today (the feature ships dark). NO reindex prereq: it
+        // reuses the already-live Funding gate field (SEARCH_FUNDING_MESH_GATE ==
+        // "fundedPubMeshUi", on in both envs), so activation is a pure flag flip.
+        // STAGING-FIRST: on in staging to soak + evaluate (grant-only matches
+        // surface count-only for now -- a distinguishing "funded in X" badge,
+        // ranking-weight tuning past 0.1, and agg sizing past the 5000-cwid cap
+        // are open design follow-ups, NOT activation blockers); prod stays off
+        // until that eval. Flip is env-only via `cdk deploy --exclusively
+        // Sps-App-<env>` (CD re-rolls the image only) -- the flag-parity rule.
+        SEARCH_PEOPLE_CONCEPT_GRANT_AXIS: env === "staging" ? "on" : "off",
         // #637 "View as" impersonation -- the global feature gate. The code
         // checks `=== "true"` exactly (lib/auth/effective-identity.ts,
         // middleware.ts, the /api/impersonation* routes, the /api/auth/session
@@ -1156,6 +1233,65 @@ export class AppStack extends Stack {
         //     a /methods/** route notFound()s and no search candidate/badge or
         //     inbound link renders.
         METHODS_LENS_PAGES: "on",
+        //   METHODS_LENS_FAMILY_DEFINITIONS -- #879. Renders ReciterAI's generated
+        //     per-family `definition` (tools-a2-v3 passthrough) on the family page +
+        //     the profile methods hover, with an "AI-generated" disclaimer gated on
+        //     definition_source === "generated". OFF in BOTH envs at merge -- ships
+        //     fully dark because the generated copy is unreviewed: the ETL populates
+        //     the column unconditionally, but the family page does not even READ the
+        //     definition (no DefinedTerm JSON-LD / SEO side channel) and the profile
+        //     payload omits it until this flips. Go-live: migrate + run
+        //     etl:scholar-tool (backfill) -> flip staging-on here + cdk deploy
+        //     Sps-App-staging to soak -> External Affairs sign-off -> prod on.
+        //     STAGING-ON (soak phase): the generated copy renders on staging for
+        //     review; PROD stays dark until External Affairs signs off.
+        //     RENDER-ONLY: never re-fed into any LLM/embedding/retrieval. Wire in
+        //     BOTH .env.local AND here per the flag-parity rule.
+        METHODS_LENS_FAMILY_DEFINITIONS: env === "staging" ? "on" : "off",
+        //   CENTER_METHODS_FACET -- #962. The center-roster "Methods & tools"
+        //     multi-select facet + per-member tool chips on the GROUPED center
+        //     roster. ADDITIONALLY gated on METHODS_LENS_ENABLED in code (the
+        //     scholar_family substrate): when the lens is off this is off, so a
+        //     center page never queries scholar_family and the payload carries no
+        //     family data (no SEO/JSON side channel). PUBLIC families only (same
+        //     #800/#801 overlay gate as the lens), so the CloudFront-cacheable
+        //     center page stays cacheable -- no per-request/per-viewer call. When
+        //     off the grouped roster is byte-identical to today. STAGING-ON (the
+        //     lens substrate is staging-on); PROD OFF until the methods-lens
+        //     go-live. Wire in BOTH .env.local AND here per the flag-parity rule;
+        //     manual cdk deploy Sps-App-<env> required (CD only re-rolls image).
+        CENTER_METHODS_FACET: env === "staging" ? "on" : "off",
+        //   ORG_UNIT_METHODS_CHIPS -- #974 Phase 1. Per-member "method chips"
+        //     (top-3 public method families) on the DEPARTMENT + DIVISION roster
+        //     rows. ADDITIONALLY gated on METHODS_LENS_ENABLED in code (the
+        //     scholar_family substrate): when the lens is off this is off, so a
+        //     roster page never queries scholar_family and the payload carries no
+        //     family data (no SEO/JSON side channel). PUBLIC families only (same
+        //     #800/#801 overlay gate as the lens), per-page (<=20 CWIDs) read so
+        //     the CloudFront-cacheable roster page stays cacheable -- no
+        //     per-request/per-viewer call. CHIPS ONLY (no facet, no whole-dataset
+        //     aggregation -- that's Phase 2). STAGING-ON (the lens substrate is
+        //     staging-on); PROD OFF until the methods-lens go-live. Wire in BOTH
+        //     .env.local AND here per the flag-parity rule; manual cdk deploy
+        //     Sps-App-<env> required (CD only re-rolls the image).
+        ORG_UNIT_METHODS_CHIPS: env === "staging" ? "on" : "off",
+        //   ORG_UNIT_METHODS_FACET -- #974 Phase 2. The DEPARTMENT + DIVISION
+        //     roster "Methods & tools" multi-select FACET (server-aggregated
+        //     buckets rendered with the cacheable page + a client-fetch to the
+        //     uncacheable /api/units/[kind]/[code]/members route for the filtered
+        //     roster). ADDITIONALLY gated on METHODS_LENS_ENABLED in code (the
+        //     scholar_family substrate): when the lens is off this is off, so no
+        //     aggregation runs and the payload carries no facet data (no SEO/JSON
+        //     side channel). PUBLIC families only (same #800/#801 overlay gate) --
+        //     buckets, selectable families, AND returned chips. The buckets are
+        //     viewer-independent, so the roster page stays CloudFront-cacheable;
+        //     only the force-dynamic API route filters per request. Independent of
+        //     ORG_UNIT_METHODS_CHIPS (Phase 1) so the facet can flip separately.
+        //     STAGING-ON (the lens substrate is staging-on); PROD OFF until the
+        //     methods-lens go-live. Wire in BOTH .env.local AND here per the
+        //     flag-parity rule; manual cdk deploy Sps-App-<env> required (CD only
+        //     re-rolls the image).
+        ORG_UNIT_METHODS_FACET: env === "staging" ? "on" : "off",
         // Scholar-profile facet-filter redesign (PR-2). A BIG visual change to
         // the Topics/Methods facets + a unified filter bar, fully gated. ON in
         // staging to soak the real-data behavior (method rows + cross-facet
@@ -1167,14 +1303,17 @@ export class AppStack extends Stack {
         // #847 -- internal "download the leading scholars" CSV export. When
         // "on", the POST /api/export/scholars/{scope} endpoint accepts
         // authenticated requests and the download button renders; method scopes
-        // are ALSO gated by METHODS_LENS_PAGES above. Default OFF in both envs
-        // (ships dark). Wire in BOTH .env.local AND here per the flag-parity
-        // rule; `cdk deploy Sps-App-<env>` required (CD re-rolls the image only).
-        SCHOLAR_LIST_EXPORT: "off",
+        // are ALSO gated by METHODS_LENS_PAGES above. STAGING ON (soak, paired
+        // with the #866 email column below); prod OFF (ships dark in prod). Wire
+        // in BOTH .env.local AND here per the flag-parity rule; `cdk deploy
+        // Sps-App-<env>` required (CD re-rolls the image only).
+        SCHOLAR_LIST_EXPORT: env === "staging" ? "on" : "off",
         // #866 -- "internal viewer" gating (authenticated session OR on the WCM
-        // network by source IP). Three flags, all OFF in BOTH envs (ships dark);
-        // wire in BOTH .env.local AND here per the flag-parity rule -- a manual
-        // `cdk deploy Sps-App-<env>` is required (CD re-rolls the image only):
+        // network by source IP). STAGING soak ON (network signal + email column);
+        // prod OFF (ships dark in prod, pending #876 authoritative ranges +
+        // Faculty Affairs sign-off on the email column). Wire in BOTH .env.local
+        // AND here per the flag-parity rule -- a manual `cdk deploy Sps-App-<env>`
+        // is required (CD re-rolls the image only):
         //   INTERNAL_VIEWER_NETWORK_SIGNAL -- when "on", an unauthenticated
         //     viewer whose CloudFront-Viewer-Address falls inside INTERNAL_VIEWER_CIDRS
         //     also counts as an internal viewer. While off, "internal" means an
@@ -1184,13 +1323,29 @@ export class AppStack extends Stack {
         //     is also on), the internal-only #847 roster CSV gains an email column
         //     for internal viewers. While off the CSV is byte-identical to today.
         //   INTERNAL_VIEWER_CIDRS -- the CIDR allowlist the network signal matches
-        //     the viewer IP against. EMPTY here (no network signal active until it
-        //     is populated); populate from EdgeStack edgeAllowedCidrs (#461) when
-        //     enabling INTERNAL_VIEWER_NETWORK_SIGNAL. An empty set means the
-        //     network half matches nobody -- default-safe.
-        INTERNAL_VIEWER_NETWORK_SIGNAL: "off",
-        SCHOLAR_LIST_EXPORT_EMAIL: "off",
-        INTERNAL_VIEWER_CIDRS: "",
+        //     the viewer IP against. STAGING carries a TEMP single-host soak CIDR
+        //     (one WCM egress in the 157.139.0.0/16 range) -- REPLACE with the
+        //     authoritative WCM/Qatar/NYP ranges from #876, sourced together with
+        //     EdgeStack edgeAllowedCidrs (#461). Prod EMPTY (network half matches
+        //     nobody -- default-safe).
+        INTERNAL_VIEWER_NETWORK_SIGNAL: env === "staging" ? "on" : "off",
+        SCHOLAR_LIST_EXPORT_EMAIL: env === "staging" ? "on" : "off",
+        INTERNAL_VIEWER_CIDRS: env === "staging" ? "157.139.83.164/32" : "",
+        // PROFILE_EMAIL_RELEASE_GATE -- when "on", the Web Directory
+        // `weillCornellEduReleaseCode;mail` audience (email_visibility) is
+        // respected across both profile-email DISPLAY (table A) and the #847
+        // export row-filter (none blanks the cell). While off, email is shown
+        // to everyone (legacy fail-open) and the export email column is gated
+        // only by viewer-context + hidden-role. STAGING ON; PROD OFF.
+        // Reindex-then-flip discipline: email_visibility is NULL until backfilled,
+        // and NULL is treated as `none` (fail-closed), so flipping before the
+        // backfill would hide every email. Staging is now safe to flip: the
+        // backfill landed 2026-06-11 via the LDAP->S3 bridge (#898; the in-VPC ED
+        // ETL can't reach WCM LDAP -- #443), populating email_visibility for 8,895
+        // scholars (verified). PROD stays OFF until its own backfill runs. Wire in
+        // BOTH .env.local AND here per the flag-parity rule -- a manual
+        // `cdk deploy Sps-App-<env>` is required (CD re-rolls the image only).
+        PROFILE_EMAIL_RELEASE_GATE: env === "staging" ? "on" : "off",
         // #443 INTERIM superuser allowlist. The live LDAP superuser check
         // (lib/auth/superuser.ts, R1) cannot succeed in any deployed env: the
         // SPS VPC has no route to the WCM directory (10.63.x) -- TGW attachment
@@ -1203,6 +1358,43 @@ export class AppStack extends Stack {
         // REMOVE this and set SCHOLARS_SUPERUSER_GROUP_CN once VPC->WCM LDAPS
         // routing lands. CWIDs are directory usernames, not secrets.
         SCHOLARS_SUPERUSER_CWIDS: "paa2013,drw2004,mrj4001,ved4006,mom2021",
+        // comms_steward Method-Family visibility role + surface
+        // (docs/comms-steward-methods-visibility-spec.md §3/§9). Three vars,
+        // OFF in BOTH envs at launch -- the surface ships dark until External
+        // Affairs names the steward set and the LDAP group is created:
+        //   COMMS_STEWARD_ENABLED -- the §9 master kill switch. While not "on",
+        //     isCommsSteward() short-circuits to false BEFORE any directory work,
+        //     so the /edit/methods route 404s and every /api/edit/methods/* and
+        //     the /api/export/methods/families endpoint 404 -- regardless of
+        //     group membership or the allowlist below. Flip to "on" per-env only
+        //     after the group exists (or the interim allowlist is set) AND the
+        //     surfacing pass has run once (npm run etl:family-review).
+        //   SCHOLARS_COMMS_STEWARD_GROUP_CN -- the ED group whose `member` list
+        //     confers the role: ITS:Library:Scholars/comms-steward-role (the
+        //     durable source of truth). Left UNSET like SCHOLARS_SUPERUSER_GROUP_CN
+        //     above: the SPS VPC has no route to the WCM directory yet, so the live
+        //     group search fails closed; setting a cn now would only add an LDAPS
+        //     connect-timeout to each session probe. Set this to the group above
+        //     (and clear the allowlist) once VPC->WCM LDAPS routing lands (#443).
+        //   SCHOLARS_COMMS_STEWARD_ALLOWLIST -- interim comma-separated CWID
+        //     allowlist that confers the role WITHOUT LDAP (mirrors
+        //     SCHOLARS_SUPERUSER_CWIDS), so a tightly-scoped steward set can use
+        //     the Method-Family + profile/unit surfaces before the group/routing
+        //     lands. The live LDAPS group search fails closed in-VPC (#443), so
+        //     this allowlist is the ONLY thing that confers the role to a
+        //     non-superuser in a deployed env today.
+        // PROD ARM (this PR): COMMS_STEWARD_ENABLED flipped on for prod so the
+        // role machinery is live, BUT the prod allowlist is left EMPTY on
+        // purpose -- with it empty, the surfaces are reachable ONLY by prod
+        // superusers (the steward superset), and NO External-Affairs comms
+        // person has the role yet. >>> ACTION REQUIRED before this confers
+        // anything to comms: set the prod allowlist to the EA steward CWIDs
+        // (e.g. "dwd2001,..."), or wire SCHOLARS_COMMS_STEWARD_GROUP_CN once
+        // #443 LDAPS routing lands. Promotion is a manual `cdk deploy
+        // Sps-App-prod` (reviewer-gated); CD re-rolls the image only.
+        COMMS_STEWARD_ENABLED: env === "staging" || env === "prod" ? "on" : "off",
+        SCHOLARS_COMMS_STEWARD_GROUP_CN: "",
+        SCHOLARS_COMMS_STEWARD_ALLOWLIST: env === "staging" ? "dwd2001" : "",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
         // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
         // ships the policy as `Content-Security-Policy-Report-Only` (the

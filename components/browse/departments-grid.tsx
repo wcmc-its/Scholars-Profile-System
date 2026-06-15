@@ -10,9 +10,10 @@
  *   - sort toggle (far right): Name (A–Z) default, or Faculty count
  *
  * Type and sort live in the URL (`?type=clinical,basic&sort=count`) via
- * `router.replace`, so deep-links and back-button restore those. The
- * name filter is intentionally not URL-synced — it's a narrow-the-view
- * affordance, not a shareable selection.
+ * `history.replaceState`, so deep-links and back-button restore those (the
+ * filtered/sorted view is fully client-derived, so no RSC refetch is needed on
+ * a toggle). The name filter is intentionally not URL-synced — it's a
+ * narrow-the-view affordance, not a shareable selection.
  *
  * Client Component so filter/sort run instantly without a server round-
  * trip and without invalidating the parent /browse page's ISR. The full
@@ -25,10 +26,11 @@
  * placeholder so the dept-name column stays aligned across the list.
  */
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useId, useMemo, useState } from "react";
 import type { BrowseDepartment } from "@/lib/api/browse";
 import type { DepartmentCategory } from "@/lib/department-categories";
+import { compactUnitName } from "@/lib/org-unit-names";
 
 const TYPE_FILTER_ORDER: ReadonlyArray<DepartmentCategory> = [
   "clinical",
@@ -88,7 +90,6 @@ function DepartmentsGridInner({
 }: {
   departments: BrowseDepartment[];
 }) {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -117,18 +118,25 @@ function DepartmentsGridInner({
     }
     const needle = nameFilter.trim().toLowerCase();
     if (needle) {
+      // Match the compact name (what's displayed on browse) AND the raw ED
+      // name + official form, so typing any of "Samuel J. Wood", "Library", or
+      // "Samuel J. Wood Library" finds the row after a curated rename.
       filtered = filtered.filter((d) =>
-        d.name.toLowerCase().includes(needle),
+        [compactUnitName(d), d.name, d.officialName ?? ""]
+          .join(" ")
+          .toLowerCase()
+          .includes(needle),
       );
     }
     const sorted = [...filtered];
+    // Sort by the displayed (compact) name so the alphabetical order matches
+    // the visible labels.
+    const byName = (a: BrowseDepartment, b: BrowseDepartment) =>
+      compactUnitName(a).localeCompare(compactUnitName(b));
     if (sortMode === "count") {
-      sorted.sort(
-        (a, b) =>
-          b.scholarCount - a.scholarCount || a.name.localeCompare(b.name),
-      );
+      sorted.sort((a, b) => b.scholarCount - a.scholarCount || byName(a, b));
     } else {
-      sorted.sort((a, b) => a.name.localeCompare(b.name));
+      sorted.sort(byName);
     }
     return sorted;
   }, [departments, activeTypes, sortMode, nameFilter]);
@@ -141,7 +149,14 @@ function DepartmentsGridInner({
     }
     const qs = params.toString();
     const url = qs ? `${pathname}?${qs}#departments` : `${pathname}#departments`;
-    router.replace(url, { scroll: false });
+    // Update the URL in place with the native History API rather than
+    // router.replace(). The filtered/sorted result is fully client-derivable
+    // from the already-shipped `departments` prop (the `visible` useMemo), and
+    // type/sort are read via useSearchParams() — which Next keeps in sync with
+    // history.replaceState — so a router navigation would only trigger a
+    // needless RSC refetch of /browse per toggle. replaceState does not scroll,
+    // matching the prior { scroll: false }. (Mirrors profile-pubs-cluster.tsx.)
+    window.history.replaceState(null, "", url);
   }
 
   function toggleType(t: DepartmentCategory) {
@@ -351,7 +366,7 @@ function DeptRowFlat({ dept }: { dept: BrowseDepartment }) {
           href={`/departments/${dept.slug}`}
           className="inline-flex min-h-6 items-center text-base font-semibold text-foreground hover:text-[var(--color-accent-slate)]"
         >
-          {dept.name}
+          {compactUnitName(dept)}
         </Link>
         <HeadLine dept={dept} />
       </div>
@@ -388,7 +403,7 @@ function DeptRowExpandable({ dept }: { dept: BrowseDepartment }) {
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
           aria-controls={panelId}
-          aria-label={`${open ? "Collapse" : "Expand"} ${dept.name}${
+          aria-label={`${open ? "Collapse" : "Expand"} ${compactUnitName(dept)}${
             divisionCount ? `, ${divisionCount}` : ""
           }`}
           className="-mx-2 flex shrink-0 cursor-pointer items-center self-stretch rounded-sm px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-slate)] focus-visible:ring-offset-1"
@@ -407,7 +422,7 @@ function DeptRowExpandable({ dept }: { dept: BrowseDepartment }) {
             href={`/departments/${dept.slug}`}
             className="inline-flex min-h-6 items-center text-base font-semibold text-foreground hover:text-[var(--color-accent-slate)]"
           >
-            {dept.name}
+            {compactUnitName(dept)}
           </Link>
           <HeadLine dept={dept} />
         </div>
@@ -459,7 +474,7 @@ function DeptRowExpandable({ dept }: { dept: BrowseDepartment }) {
           href={`/departments/${dept.slug}`}
           className="mt-3 inline-block text-sm text-[var(--color-accent-slate)] hover:underline"
         >
-          View {dept.name} &rarr;
+          View {compactUnitName(dept)} &rarr;
         </Link>
       </div>
     </div>

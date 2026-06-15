@@ -14,7 +14,9 @@ export type LeaderRole = "Chair" | "Chief" | "Director";
 export type Leader = {
   cwid: string;
   preferredName: string;
-  slug: string;
+  /** Profile slug, or null for an external leader (not a WCM scholar) — the
+   *  name then renders as plain text with no profile link. */
+  slug: string | null;
   primaryTitle: string | null;
   identityImageEndpoint: string;
 };
@@ -38,13 +40,20 @@ export function LeaderCard({
         <div className="mb-[3px] text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
           {role}
         </div>
-        <a
-          href={profilePath(leader.slug)}
-          className="text-[16px] font-medium leading-[1.2] hover:underline"
-          style={{ textDecoration: "none" }}
-        >
-          {leader.preferredName}
-        </a>
+        {leader.slug ? (
+          <a
+            href={profilePath(leader.slug)}
+            className="text-[16px] font-medium leading-[1.2] hover:underline"
+            style={{ textDecoration: "none" }}
+          >
+            {leader.preferredName}
+          </a>
+        ) : (
+          // External leader (not a WCM scholar) — no profile to link to.
+          <span className="text-[16px] font-medium leading-[1.2]">
+            {leader.preferredName}
+          </span>
+        )}
         {leader.primaryTitle && (
           <div className="text-[13px] leading-[1.4] text-muted-foreground">
             {leader.primaryTitle}

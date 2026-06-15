@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { buildPersonJsonLd } from "@/lib/seo/jsonld";
+import { SidebarCard } from "@/components/profile/sidebar-card";
+import { ContactEmailReveal } from "@/components/profile/contact-email-reveal";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
 import { DisclosureGroupInfoTooltip } from "@/components/scholar/disclosure-group-info-tooltip";
@@ -48,6 +50,14 @@ import { profilePath } from "@/lib/profile-url";
  * MentoringSection; nothing here reads searchParams.
  */
 export async function ProfileView({ slug }: { slug: string }) {
+  // email-visibility-spec § Cache-safety — this page is CloudFront PATH-cached,
+  // so the loader bakes only the viewer-independent (public) email. An
+  // `institution` email is revealed to internal viewers out-of-band by the
+  // <ContactEmailReveal> island below (uncacheable /api/profile/[cwid]/contact-
+  // email), never baked into the shared cache.
+  // Call with just `slug` (the loader defaults `now` to a fresh Date inside its
+  // body) so this render and generateMetadata's identical-arg call share one
+  // React `cache()` entry per request instead of computing the payload twice.
   const profile = await getScholarFullProfileBySlug(slug);
   if (!profile) notFound();
 
@@ -60,7 +70,10 @@ export async function ProfileView({ slug }: { slug: string }) {
   // client island (<EditMyProfileButton>) that probes /api/auth/session. Doing
   // the owner check server-side here both 500'd this statically-generated route
   // (cookies() → DYNAMIC_SERVER_USAGE) and was wrong on CloudFront-cached pages
-  // (the edge strips the cookie). Keeping it client-side preserves ISR.
+  // (the edge strips the cookie). Keeping it client-side preserves ISR. #955 —
+  // the same island also renders a superuser "Edit profile" deep-link to
+  // /edit/scholar/<cwid> off the probe's canImpersonate flag, so the cwid is
+  // threaded through alongside the slug.
 
   // ANALYTICS-01 (D-01): structured page-view log on each ISR render / cache miss.
   console.log(
@@ -177,15 +190,20 @@ export async function ProfileView({ slug }: { slug: string }) {
                       profile↔department link graph. Subtle (color inherited,
                       hover-underline) per the division-page convention. */}
                   {(() => {
+                    // Prefer the curated official department name (e.g. "Samuel
+                    // J. Wood Library") over the raw ED `primaryDepartment`
+                    // string; falls back when no curated name is set.
+                    const deptName =
+                      profile.departmentOfficialName ?? profile.primaryDepartment;
                     const deptLabel = profile.departmentSlug ? (
                       <Link
                         href={`/departments/${profile.departmentSlug}`}
                         className="hover:underline"
                       >
-                        {profile.primaryDepartment}
+                        {deptName}
                       </Link>
                     ) : (
-                      profile.primaryDepartment
+                      deptName
                     );
                     return profile.division ? (
                       <>
@@ -197,7 +215,7 @@ export async function ProfileView({ slug }: { slug: string }) {
                   })()}
                 </div>
               ) : null}
-              <EditMyProfileButton profileSlug={profile.slug} />
+              <EditMyProfileButton profileSlug={profile.slug} profileCwid={profile.cwid} />
             </div>
 
             {profile.email || profile.hasClinicalProfile ? (
@@ -212,6 +230,11 @@ export async function ProfileView({ slug }: { slug: string }) {
                         {profile.email}
                       </a>
                     </li>
+                  ) : null}
+                  {/* email-visibility-spec § Cache-safety — an institution email
+                      is revealed to internal viewers out-of-band (no cache leak). */}
+                  {profile.contactEmailRevealable ? (
+                    <ContactEmailReveal cwid={profile.cwid} mode="li" />
                   ) : null}
                   {profile.hasClinicalProfile ? (
                     <li>
@@ -236,6 +259,11 @@ export async function ProfileView({ slug }: { slug: string }) {
                   ) : null}
                 </ul>
               </SidebarCard>
+            ) : profile.contactEmailRevealable ? (
+              // No server-baked contact content, but an institution email may be
+              // revealable — the island renders its own Contact card iff it
+              // resolves an email, so external viewers never see an empty card.
+              <ContactEmailReveal cwid={profile.cwid} mode="card" />
             ) : null}
 
             {profile.postdoctoralMentor ? (
@@ -456,7 +484,8 @@ export async function ProfileView({ slug }: { slug: string }) {
               0,
             );
             // Issue #201 priority #5 — degree-bucket distribution
-            // ("7 MD · 8 PhD · 6 MD-PhD") renders on its own row beneath
+            // ("7 MD students · 8 PhD students · 6 MD-PhD students")
+            // renders on its own row beneath
             // the count once the portfolio is large enough that the
             // breakdown carries shape the bare count doesn't. Helper
             // returns null below the threshold or when every mentee
@@ -596,13 +625,3 @@ function Section({
   );
 }
 
-function SidebarCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="border-t border-border py-4">
-      <div className="text-muted-foreground mb-3 text-xs font-semibold uppercase tracking-wider">
-        {title}
-      </div>
-      <div className="text-sm">{children}</div>
-    </div>
-  );
-}

@@ -21,6 +21,16 @@ RUN npm ci
 # ---- Build ------------------------------------------------------------------
 FROM base AS build
 ENV NEXT_TELEMETRY_DISABLED=1
+# Version-skew protection. NEXT_DEPLOYMENT_ID (the deploying commit SHA, passed
+# as a build-arg by the Deploy workflow) is inlined by Next into both the client
+# and server bundles. When a browser loaded from an older build makes a
+# client-side <Link>/RSC navigation that lands on a newer running task -- every
+# staging deploy fully swaps the single Fargate task -- Next compares the build
+# IDs and falls back to a hard navigation instead of silently dropping the click
+# (the "tab does nothing during a deploy" symptom). Empty when unset (local / CI
+# `next build`) -> skew protection inert, build byte-for-byte unchanged.
+ARG NEXT_DEPLOYMENT_ID=""
+ENV NEXT_DEPLOYMENT_ID=$NEXT_DEPLOYMENT_ID
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # lib/generated/ is excluded from the build context (.dockerignore); regenerate

@@ -1,13 +1,12 @@
 /**
  * The `/edit/units` index body (#753) — "Units you manage". Lists the actor's
  * directly-granted org units grouped by kind, each linking to its existing
- * editor page, and surfaces the create affordances appropriate to the actor.
+ * editor page, plus the Department-Owner "Add a center" affordance.
  *
- * Server component (no interactivity of its own); it embeds the client
- * `UnitFinder` for the superuser "jump to any unit" case. Create affordances
- * mirror `/edit/unit/new`'s own authorization:
- *   - Superuser → a "Create a unit" button (the form's mode toggle covers both
- *     a coded division and an informal center).
+ * Server component (no interactivity of its own). The superuser/comms-steward
+ * "find or create any unit" affordances now live in `AllUnitsDirectory` (#971),
+ * rendered below this on the page — so this body is purely the actor's own
+ * grants. The one create link here:
  *   - Department Owner → a per-row "Add a center" link carrying that department
  *     as the parent (`?type=center&dept=`); never a dead end — when the
  *     superuser-only lockdown is on, that route renders the request affordance.
@@ -16,54 +15,31 @@
 import Link from "next/link";
 import { ArrowRight, Plus } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { UnitFinder } from "@/components/edit/unit-finder";
 import {
   unitKindLabel,
   type ManageableUnit,
   type ManageableUnits,
-  type UnitFinderEntry,
 } from "@/lib/edit/manageable-units";
 
 export type ManageableUnitsIndexProps = {
   units: ManageableUnits;
   isSuperuser: boolean;
-  /** Every unit, for the superuser finder; empty for non-superusers. */
-  finderUnits: ReadonlyArray<UnitFinderEntry>;
+  /** Whether the actor can edit any unit (a superuser or comms_steward). They
+   *  get the full directory below on the page, so this suppresses the body's
+   *  "you don't manage any units" empty state for them. Defaults to
+   *  `isSuperuser`. */
+  canFindAnyUnit?: boolean;
 };
 
 export function ManageableUnitsIndex({
   units,
   isSuperuser,
-  finderUnits,
+  canFindAnyUnit = isSuperuser,
 }: ManageableUnitsIndexProps) {
   const hasGrants = units.total > 0;
 
   return (
     <div className="flex flex-col gap-8" data-slot="manageable-units-index">
-      {isSuperuser && (
-        <section
-          className="border-apollo-border bg-apollo-surface flex flex-col gap-3 rounded-xl border p-5"
-          data-testid="units-superuser-tools"
-        >
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h2 className="text-[15px] font-semibold">Jump to any unit</h2>
-              <p className="text-muted-foreground text-sm">
-                As a superuser you can edit every department, division, and center.
-              </p>
-            </div>
-            <Button asChild variant="apollo" size="sm">
-              <Link href="/edit/unit/new" data-testid="units-create">
-                <Plus className="size-4" aria-hidden />
-                Create a unit
-              </Link>
-            </Button>
-          </div>
-          <UnitFinder units={finderUnits} />
-        </section>
-      )}
-
       {hasGrants ? (
         <>
           <UnitGroup title="Departments" units={units.departments} showAddCenter={!isSuperuser} />
@@ -71,7 +47,7 @@ export function ManageableUnitsIndex({
           <UnitGroup title="Centers" units={units.centers} showAddCenter={false} />
         </>
       ) : (
-        !isSuperuser && <EmptyState />
+        !canFindAnyUnit && <EmptyState />
       )}
     </div>
   );

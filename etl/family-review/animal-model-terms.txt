@@ -1,0 +1,33 @@
+# Animal-model lexical term list for the comms-steward Method-Family surfacing
+# pass (docs/comms-steward-methods-visibility-spec.md §6).
+#
+# One term per line. Lines starting with `#` and blank lines are ignored.
+# Matching is case-insensitive and whole-word (so "rat" won't fire on "ratio").
+# Multi-word terms (e.g. "in vivo") are matched verbatim.
+#
+# Editable as DATA, not code — External Affairs can extend this list without a
+# deploy. The list is deliberately NOT exhaustive (spec §12): "one slips through"
+# is accepted and caught by the manual override.
+
+mouse
+mice
+murine
+rat
+rodent
+zebrafish
+drosophila
+xenograft
+pdx
+primate
+macaque
+nhp
+canine
+porcine
+swine
+rabbit
+ferret
+knockout
+transgenic
+germline
+in vivo
+animal model

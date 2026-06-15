@@ -76,6 +76,7 @@ function makePayload(
         subtopics: [],
       },
     ],
+    methodFamilies: [],
     citingPubs: [
       { pmid: "999", title: "Citation paper one", journal: "J1", year: 2025 },
       { pmid: "888", title: "Citation paper two", journal: "J2", year: 2024 },
@@ -190,9 +191,13 @@ describe("PublicationModal — content sections", { retry: 2 }, () => {
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    expect(
-      screen.getByText(/Journal of Widgets · 2024 · 10\(2\) · 100-110/),
-    ).toBeDefined();
+    // #946: the journal now renders in its own sanitized <span> (PubJournal)
+    // with year/volume/pages as sibling text nodes, so assert on the citation
+    // paragraph's combined textContent rather than a single text node.
+    const journalEl = screen.getByText("Journal of Widgets");
+    expect(journalEl.parentElement?.textContent).toBe(
+      "Journal of Widgets · 2024 · 10(2) · 100-110",
+    );
   });
 
   it("renders the abstract with whitespace-pre-line so newlines survive", async () => {
@@ -419,6 +424,61 @@ describe("PublicationModal — content sections", { retry: 2 }, () => {
     expect(info.getAttribute("href")).toBe("/about#topics");
     expect(info.getAttribute("target")).toBe("_blank");
     expect(info.getAttribute("rel")).toContain("noopener");
+  });
+});
+
+describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
+  it("omits the Methods section when methodFamilies is empty", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(
+      screen.queryByRole("heading", { name: "Methods" }),
+    ).toBeNull();
+  });
+
+  it("renders family labels as Method-page links when href is set", async () => {
+    mockFetch(
+      makePayload({
+        methodFamilies: [
+          {
+            supercategory: "animal_cell_models",
+            familyLabel: "CRISPR knockout",
+            href: "/methods/animal-cell-models/crispr-knockout-fam_0042",
+          },
+        ],
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.getByRole("heading", { name: "Methods" })).toBeDefined();
+    const link = screen.getByRole("link", { name: "CRISPR knockout" });
+    expect(link.getAttribute("href")).toBe(
+      "/methods/animal-cell-models/crispr-knockout-fam_0042",
+    );
+  });
+
+  it("renders family labels as plain text when href is null (Method pages off)", async () => {
+    mockFetch(
+      makePayload({
+        methodFamilies: [
+          {
+            supercategory: "imaging",
+            familyLabel: "Two-photon microscopy",
+            href: null,
+          },
+        ],
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.getByText("Two-photon microscopy")).toBeDefined();
+    expect(
+      screen.queryByRole("link", { name: "Two-photon microscopy" }),
+    ).toBeNull();
   });
 });
 

@@ -31,6 +31,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { usePublicationModal } from "@/components/publication/publication-modal";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { sanitizePubmedHtml } from "@/lib/utils";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
@@ -242,7 +243,7 @@ function PaperRow({
   subtopicId: string;
   cycleId: string;
 }) {
-  const pubmedUrl = `https://pubmed.ncbi.nlm.nih.gov/${pmid}`;
+  const { open } = usePublicationModal();
   // #811 — never slice off the senior (last) author. SpotlightAuthor carries no
   // isLast flag, but lib/api/home documents the array as byline-position order,
   // so the senior is the last element. On overflow keep the first (CAP-1), the
@@ -276,12 +277,17 @@ function PaperRow({
 
   return (
     <div className="text-sm leading-snug">
-      <a
-        href={pubmedUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={handleClick}
-        className="font-medium text-zinc-900 hover:underline"
+      {/* Title opens the shared publication modal (#947), mirroring the
+          profile/search rows. The spotlight_paper_click CTR beacon (#286/#343)
+          still fires alongside open(); PubMed remains reachable from the modal
+          identifiers row. */}
+      <button
+        type="button"
+        onClick={() => {
+          handleClick();
+          open(pmid);
+        }}
+        className="text-left font-medium text-zinc-900 hover:underline"
         dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(title) }}
       />
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-zinc-500">

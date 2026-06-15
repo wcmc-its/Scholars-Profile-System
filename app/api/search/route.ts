@@ -26,6 +26,7 @@ import {
   resolvePeopleRelevanceMode,
   resolvePeopleMatchProvenance,
   resolvePeopleMatchExplain,
+  resolvePeopleSnippetRepresentativePub,
   resolveGenericTermMode,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
@@ -38,6 +39,10 @@ import {
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
 import { serverTimingHeader } from "@/lib/api/search-timing";
+import {
+  runWithOsRoundTripCounter,
+  getOsRoundTripCount,
+} from "@/lib/api/os-round-trips";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +50,14 @@ export const dynamic = "force-dynamic";
 // Rejects non-slug shapes to prevent blind-comparison probing (T-03-06-01).
 const TOPIC_SLUG_RE = /^[a-zA-Z0-9_][a-zA-Z0-9_-]*$/;
 
+// D3 SLI — wrap the handler in a request-scoped OpenSearch round-trip counter
+// so each `search_query` log can report `osRoundTrips`. The counter is inert
+// outside this scope (ETL / index build).
 export async function GET(request: NextRequest) {
+  return runWithOsRoundTripCounter(() => handleSearch(request));
+}
+
+async function handleSearch(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const q = params.get("q") ?? "";
   const type = params.get("type") ?? "people";
@@ -178,6 +190,8 @@ export async function GET(request: NextRequest) {
         // Issue #294 PR-5 — funding-search latency, mirroring the
         // people / publications branches' `searchLatencyMs`.
         searchLatencyMs,
+        // D3 SLI — OpenSearch round-trips this request made (serial-await guard).
+        osRoundTrips: getOsRoundTripCount(),
         ts: new Date().toISOString(),
       }),
     );
@@ -283,6 +297,11 @@ export async function GET(request: NextRequest) {
           wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
           department: department.length > 0 ? department : undefined,
         },
+        // Perf (B4) — this branch reads only `broad.total` (hits are discarded
+        // and this call passes no mentoring/author filter), so the existing
+        // count-only fast path applies directly: no aggs, no hit emission, no
+        // hydration.
+        countOnly: true,
         meshResolution: null,
       });
       conceptFallbackBroadCount = broad.total;
@@ -357,6 +376,8 @@ export async function GET(request: NextRequest) {
         // so resolver-only regressions are attributable.
         taxonomyMatchMs,
         searchLatencyMs,
+        // D3 SLI — OpenSearch round-trips this request made (serial-await guard).
+        osRoundTrips: getOsRoundTripCount(),
         ts: new Date().toISOString(),
       }),
     );
@@ -461,6 +482,9 @@ export async function GET(request: NextRequest) {
     // Issue #702 — env-gated pub-evidence highlighting + "Matched on" chip so a
     // publication-only match isn't left bare. Pure presentation metadata.
     matchExplain: resolvePeopleMatchExplain(),
+    // Issue #967 — surface a representative matching publication inside the
+    // reason line. Inert unless matchExplain is also on.
+    representativePub: resolvePeopleSnippetRepresentativePub(),
     // Issue #692 — generic-term demotion (mode `on`). Topic/hybrid bodies score
     // and highlight on the content query (full query discounted); inert
     // otherwise and never applied to name/department shapes.
@@ -501,6 +525,8 @@ export async function GET(request: NextRequest) {
       attributionBoostFired: result.attributionBoostFired,
       taxonomyMatchMs,
       searchLatencyMs,
+      // D3 SLI — OpenSearch round-trips this request made (serial-await guard).
+      osRoundTrips: getOsRoundTripCount(),
       // SPEC §9 — top-3 result slugs + person types let the post-flip eval
       // backtest Recall@3 and per-cohort effects from production traffic.
       top3ResultSlugs: result.hits.slice(0, 3).map((h) => h.slug),

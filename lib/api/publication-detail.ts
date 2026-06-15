@@ -10,6 +10,15 @@ import { prisma } from "@/lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 import { normalizeMeshTerms } from "@/lib/api/profile";
 import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-layer";
+import {
+  isMethodsLensEnabled,
+  isMethodPagesEnabled,
+} from "@/lib/profile/methods-lens-flags";
+import {
+  loadFamilyOverlayGate,
+  isFamilyPubliclyVisible,
+} from "@/lib/api/methods-overlay";
+import { methodFamilyPath } from "@/lib/method-url";
 
 const CITING_PUBS_CAP = 500;
 const CITING_PUBS_CSV_CAP = 50_000;
@@ -37,6 +46,22 @@ export type PublicationDetailCitingPub = {
   title: string;
   journal: string | null;
   year: number | null;
+};
+
+/**
+ * #917 — one method family attributed to this pmid, aggregated across every
+ * confirmed WCM author of the paper and de-duped by the stable
+ * `(supercategory, familyLabel)` identity. Already #800-suppressed /
+ * #801-sensitivity-gated by the time it reaches the payload (same gate the rest
+ * of the Methods lens applies), so the modal can render it verbatim.
+ */
+export type PublicationDetailMethodFamily = {
+  supercategory: string;
+  familyLabel: string;
+  /** Precomputed cross-scholar Method-page path, or null when the standalone
+   *  Method pages are gated off (`METHODS_LENS_PAGES`) — the UI then renders the
+   *  label as plain text instead of a dead link. */
+  href: string | null;
 };
 
 export type PublicationDetailPayload = {
@@ -70,6 +95,10 @@ export type PublicationDetailPayload = {
     synopsis: string | null;
   };
   topics: PublicationDetailTopic[];
+  /** #917 — method families attributed to this pmid (de-duped across WCM
+   *  authors), gated + suppression-filtered. Empty when the Methods lens is off
+   *  or the paper has no surfaced family; the modal omits the section then. */
+  methodFamilies: PublicationDetailMethodFamily[];
   /** Up to CITING_PUBS_CAP rows from `analysis_nih_cites` joined to
    *  `analysis_summary_article` (the iCite-derived subset that reciterdb
    *  also has article metadata for), ordered by date desc. Null when
@@ -109,6 +138,140 @@ function parsePmid(pmid: string): number | null {
   const n = Number(pmid);
   if (!Number.isInteger(n) || n <= 0) return null;
   return n;
+}
+
+/**
+ * #917 — method families attributed to ONE pmid, de-duped across every confirmed
+ * WCM author of the paper (the modal has no cwid, so it aggregates exactly like
+ * the Topics rows do). Mirrors the cross-scholar Method-page data layer
+ * (`lib/api/methods.ts`): the master lens gate, the same `(deletedAt, status)`
+ * active-scholar filter, the same in-JS `pmids[]` membership scan (no
+ * `JSON_CONTAINS` anywhere in the codebase), and the SAME #800/#801 overlay gate
+ * so a family the rest of the site hides can never leak through the modal.
+ *
+ * Bounded: the row scan is limited to the paper's confirmed WCM authors, so it is
+ * not the unbounded supercategory scan `collectSupercategoryFamilyPmids` does.
+ */
+async function resolveMethodFamilies(
+  pmid: string,
+): Promise<PublicationDetailMethodFamily[]> {
+  // Master render gate — off (prod) → nothing renders, no side channel (#799).
+  if (!isMethodsLensEnabled()) return [];
+
+  // Confirmed WCM authors of this paper (LOCAL `publication_author`, indexed on
+  // pmid). NULL cwid = non-WCM author; an unconfirmed authorship is not "theirs".
+  const authorRows = await prisma.publicationAuthor.findMany({
+    where: { pmid, isConfirmed: true, cwid: { not: null } },
+    select: { cwid: true },
+  });
+  const cwids = [
+    ...new Set(authorRows.map((r) => r.cwid).filter((c): c is string => !!c)),
+  ];
+  if (cwids.length === 0) return [];
+
+  // Their family rows (active scholars only — same filter the lens uses).
+  const familyRows = await prisma.scholarFamily.findMany({
+    where: {
+      cwid: { in: cwids },
+      scholar: { deletedAt: null, status: "active" },
+    },
+    select: {
+      supercategory: true,
+      familyLabel: true,
+      familyId: true,
+      pmids: true,
+    },
+  });
+  if (familyRows.length === 0) return [];
+
+  const gate = await loadFamilyOverlayGate();
+  const linkable = isMethodPagesEnabled();
+
+  // De-dupe by the stable (supercategory, familyLabel) identity. familyId is only
+  // a Method-page link disambiguator (the loader re-derives & matches on
+  // (sc,label) — see lib/method-url.ts), so keeping the first one seen is correct.
+  const byKey = new Map<string, PublicationDetailMethodFamily>();
+  for (const row of familyRows) {
+    if (!Array.isArray(row.pmids)) continue;
+    if (!row.pmids.some((p) => String(p) === pmid)) continue;
+    if (!isFamilyPubliclyVisible(row.supercategory, row.familyLabel, gate)) {
+      continue;
+    }
+    const key = `${row.supercategory}::${row.familyLabel}`;
+    if (byKey.has(key)) continue;
+    byKey.set(key, {
+      supercategory: row.supercategory,
+      familyLabel: row.familyLabel,
+      href: linkable
+        ? methodFamilyPath(row.supercategory, row.familyId, row.familyLabel)
+        : null,
+    });
+  }
+
+  return [...byKey.values()].sort(
+    (a, b) =>
+      a.supercategory.localeCompare(b.supercategory) ||
+      a.familyLabel.localeCompare(b.familyLabel),
+  );
+}
+
+/** Coerce the stored `publication_citing.citingPubs` JSON into the payload
+ *  shape, dropping malformed entries and capping defensively at CITING_PUBS_CAP
+ *  (the exporter already caps, but a JSON column carries no guarantee). */
+function parseBridgedCitingPubs(raw: unknown): PublicationDetailCitingPub[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PublicationDetailCitingPub[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    if (o.pmid === undefined || o.pmid === null) continue;
+    out.push({
+      pmid: String(o.pmid),
+      title: typeof o.title === "string" ? o.title : "",
+      journal: typeof o.journal === "string" ? o.journal : null,
+      year: typeof o.year === "number" ? o.year : null,
+    });
+    if (out.length >= CITING_PUBS_CAP) break;
+  }
+  return out;
+}
+
+/**
+ * #928 — read the modal's cited-by list + total from the `publication_citing`
+ * bridge instead of live WCM ReciterDB (unreachable in-VPC). Degrades HONESTLY:
+ * a present row → its total + ≤500 list; this pmid absent but the table has rows
+ * → a genuine zero (`0`/`[]`); the table globally empty (flag flipped before the
+ * import ran) → `null`/`null`, exactly the live-outage shape the modal renders as
+ * "temporarily unavailable". The cheap global existence probe runs only on the
+ * absent-pmid path, so it costs nothing for the common (present-row) case.
+ */
+async function readCitingFromBridge(
+  pmidInt: number,
+): Promise<{
+  citingPubs: PublicationDetailCitingPub[] | null;
+  citingPubsTotal: number | null;
+}> {
+  try {
+    const row = await prisma.publicationCiting.findUnique({
+      where: { pmid: pmidInt },
+      select: { total: true, citingPubs: true },
+    });
+    if (row) {
+      return {
+        citingPubs: parseBridgedCitingPubs(row.citingPubs),
+        citingPubsTotal: row.total,
+      };
+    }
+    const anyRow = await prisma.publicationCiting.findFirst({
+      select: { pmid: true },
+    });
+    return anyRow
+      ? { citingPubs: [], citingPubsTotal: 0 } // table populated → genuinely uncited
+      : { citingPubs: null, citingPubsTotal: null }; // empty/un-imported → degrade
+  } catch (err) {
+    console.error("[publication-detail] publication_citing bridge read failed", err);
+    return { citingPubs: null, citingPubsTotal: null };
+  }
 }
 
 export async function getPublicationDetail(
@@ -246,48 +409,59 @@ export async function getPublicationDetail(
     }))
     .sort((a, b) => b.score - a.score);
 
-  // Citing publications via reciterdb. Try/catch so a downstream MySQL
-  // outage doesn't 500 the whole modal — pub + topics still return; citingPubs
-  // becomes null and the UI shows the fallback message.
+  // #917 — method families for this pmid (gated; [] when the lens is off).
+  const methodFamilies = await resolveMethodFamilies(pmid);
+
+  // Citing publications. With PUBLICATION_CITING_BRIDGE=on the in-VPC app serves
+  // the pre-computed `publication_citing` bridge (#928); otherwise it queries WCM
+  // ReciterDB live. Either path soft-degrades to null so a downstream outage (or
+  // an un-imported bridge) shows "Citation list temporarily unavailable" rather
+  // than 500ing the whole modal — pub + topics + methods still return.
   let citingPubs: PublicationDetailCitingPub[] | null = null;
   let citingPubsTotal: number | null = null;
-  try {
-    await withReciterConnection(async (conn) => {
-      const totalRow = (await conn.query(
-        "SELECT COUNT(*) AS n FROM analysis_nih_cites WHERE cited_pmid = ?",
-        [pmidInt],
-      )) as Array<{ n: number | bigint }>;
-      citingPubsTotal = Number(totalRow[0]?.n ?? 0);
+  if (process.env.PUBLICATION_CITING_BRIDGE === "on") {
+    const bridged = await readCitingFromBridge(pmidInt);
+    citingPubs = bridged.citingPubs;
+    citingPubsTotal = bridged.citingPubsTotal;
+  } else {
+    try {
+      await withReciterConnection(async (conn) => {
+        const totalRow = (await conn.query(
+          "SELECT COUNT(*) AS n FROM analysis_nih_cites WHERE cited_pmid = ?",
+          [pmidInt],
+        )) as Array<{ n: number | bigint }>;
+        citingPubsTotal = Number(totalRow[0]?.n ?? 0);
 
-      const rows = (await conn.query(
-        `SELECT a.pmid AS pmid,
-                a.articleTitle AS title,
-                a.journalTitleVerbose AS journal,
-                a.articleYear AS year
-           FROM analysis_nih_cites c
-           JOIN analysis_summary_article a ON a.pmid = c.citing_pmid
-          WHERE c.cited_pmid = ?
-          ORDER BY a.publicationDateStandardized DESC, a.pmid DESC
-          LIMIT ?`,
-        [pmidInt, CITING_PUBS_CAP],
-      )) as Array<{
-        pmid: number | bigint;
-        title: string | null;
-        journal: string | null;
-        year: number | null;
-      }>;
-      citingPubs = rows.map((r) => ({
-        pmid: String(r.pmid),
-        title: r.title ?? "",
-        journal: r.journal ?? null,
-        year: r.year ?? null,
-      }));
-    });
-  } catch (err) {
-    // Soft-fail — log and let the API still return the rest.
-    console.error("[publication-detail] reciterdb citingPubs query failed", err);
-    citingPubs = null;
-    citingPubsTotal = null;
+        const rows = (await conn.query(
+          `SELECT a.pmid AS pmid,
+                  a.articleTitle AS title,
+                  a.journalTitleVerbose AS journal,
+                  a.articleYear AS year
+             FROM analysis_nih_cites c
+             JOIN analysis_summary_article a ON a.pmid = c.citing_pmid
+            WHERE c.cited_pmid = ?
+            ORDER BY a.publicationDateStandardized DESC, a.pmid DESC
+            LIMIT ?`,
+          [pmidInt, CITING_PUBS_CAP],
+        )) as Array<{
+          pmid: number | bigint;
+          title: string | null;
+          journal: string | null;
+          year: number | null;
+        }>;
+        citingPubs = rows.map((r) => ({
+          pmid: String(r.pmid),
+          title: r.title ?? "",
+          journal: r.journal ?? null,
+          year: r.year ?? null,
+        }));
+      });
+    } catch (err) {
+      // Soft-fail — log and let the API still return the rest.
+      console.error("[publication-detail] reciterdb citingPubs query failed", err);
+      citingPubs = null;
+      citingPubsTotal = null;
+    }
   }
 
   return {
@@ -317,6 +491,7 @@ export async function getPublicationDetail(
       synopsis: pub.synopsis && pub.synopsis.length > 0 ? pub.synopsis : null,
     },
     topics,
+    methodFamilies,
     citingPubs,
     citingPubsTotal,
   };
@@ -339,12 +514,38 @@ export type PublicationDetailCsvRow = {
  * papers (5,000+ citers) export completely. Returns `null` when the pmid
  * is invalid; throws on reciterdb failure so the caller can return a
  * 5xx instead of an empty/misleading CSV.
+ *
+ * #928 — with `PUBLICATION_CITING_BRIDGE=on` (the in-VPC posture) it serves the
+ * bridged `publication_citing` rows instead. The bridge stores only the ≤500
+ * most-recent citers and does not retain `publicationDate`, so the in-VPC CSV is
+ * the same ≤500 the modal shows (ordering preserved). For the rare paper with
+ * >500 NIH-cites the full 50k export only ever existed on the WCM network where
+ * the live path below still runs; in-VPC the cap is the bridged 500.
  */
 export async function getCitingPublicationsForCsv(
   pmid: string,
 ): Promise<PublicationDetailCsvRow[] | null> {
   const pmidInt = parsePmid(pmid);
   if (pmidInt === null) return null;
+
+  if (process.env.PUBLICATION_CITING_BRIDGE === "on") {
+    const row = await prisma.publicationCiting.findUnique({
+      where: { pmid: pmidInt },
+      select: { citingPubs: true },
+    });
+    // No row = genuinely uncited OR the table is empty/un-imported. The modal
+    // only renders the download button when citingPubsTotal > 0, so a direct hit
+    // here gets an empty CSV rather than a 5xx (honest degrade, no fake rows).
+    if (!row) return [];
+    return parseBridgedCitingPubs(row.citingPubs).map((p) => ({
+      pmid: p.pmid,
+      title: p.title,
+      journal: p.journal,
+      year: p.year,
+      publicationDate: null,
+    }));
+  }
+
   let rows: PublicationDetailCsvRow[] = [];
   await withReciterConnection(async (conn) => {
     const raw = (await conn.query(

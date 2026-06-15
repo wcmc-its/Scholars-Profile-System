@@ -1,0 +1,232 @@
+/**
+ * COI-gap DIAGNOSTIC projection (internal tooling, not scholar-facing).
+ *
+ * Re-runs the matcher with `includeSuppressed` so the export sees EVERY extracted
+ * entity — the surfaced High/Medium gaps AND the suppressed Low ones (matched as
+ * already-disclosed, attributed to a co-author, or non-personal) — each carrying
+ * the full diagnostics the persisted `coi_gap_candidate` table never keeps:
+ * `nearestDisclosed` (the closest WRG disclosure we compared against), the fuzzy
+ * `nearestScore`, the `tierReason`, the `failureModeGuess`, and the token-level
+ * diff vs the nearest disclosure.
+ *
+ * The numeric score is fine here — this output is INTERNAL (an analyst file on a
+ * developer machine), never the scholar-facing card, so it does not carry the
+ * "no numbers / tier-only" governance constraint of the rendered surface. Its
+ * purpose is the opposite: surface the numbers so we can find the predictable
+ * normalization gaps (corporate suffixes beyond the current strip-list, proper-
+ * noun casing, word order) and tune generation + matching from real data.
+ */
+import {
+  analyzeStatement,
+  countAuthorMentions,
+  isMultiAuthorStatement,
+  looksLikeJunkEntity,
+  looksLikePersonName,
+  normalizeEntity,
+  type AuthorRoster,
+  type Scholar,
+} from "./pipeline";
+import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
+
+export { countAuthorMentions } from "./pipeline";
+
+export type DiagnosticRow = {
+  cwid: string;
+  pmid: string;
+  /** Raw extracted relationship, verbatim. */
+  entity: string;
+  normalizedEntity: string;
+  tier: "High" | "Medium" | "Low";
+  /** tier !== "Low" — i.e. this entity would be shown to the scholar. */
+  surfaced: boolean;
+  attribution: string;
+  attributionReason: string;
+  entityScore: number;
+  category: string;
+  /** Closest entity in the scholar's WRG disclosed set (the "supposed match"). */
+  nearestDisclosed: string;
+  normalizedNearest: string;
+  /** Fuzzy score 0–1 of entity vs nearestDisclosed; ≥ threshold ⇒ suppressed. */
+  nearestScore: number;
+  /** Tokens in the entity that are NOT in the nearest disclosure (after the
+   *  existing corp-suffix strip) — e.g. ["laboratories"] reveals a strip-list gap. */
+  entityExtraTokens: string;
+  /** Tokens in the nearest disclosure not in the entity. */
+  nearestExtraTokens: string;
+  failureModeGuess: string;
+  tierReason: string;
+  /** The extracted entity itself looks like a PERSON's name (e.g. a co-author),
+   *  not an organization — a generation-noise signal. Now also catches bare
+   *  "First Last" co-author names, not just dotted initials. */
+  entityIsPersonName: boolean;
+  /** The extracted entity is a bare junk/boilerplate word ("All", "Various"),
+   *  not an organization — the other extraction-noise signal. */
+  entityIsJunk: boolean;
+  /** The SOURCE STATEMENT names ≥2 distinct authors (an ASCO blob or several
+   *  "Dr X / First Last … discloses" subjects). On such a shared statement an
+   *  `unattributed` surfaced entity is leakage-prone — it may be another author's
+   *  relationship, not the scholar's. */
+  isMultiAuthor: boolean;
+  /** Distinct author subjects named in the statement (best-effort). */
+  authorMentions: number;
+  sourceSentence: string;
+};
+
+export type DiagnoseInput = {
+  cwid: string;
+  scholar: Scholar;
+  disclosed: ReadonlyArray<string>;
+  statements: ReadonlyArray<{ pmid: string; statementText: string }>;
+  /** Per-PMID author byline for the co-author cross-check (see `buildAuthorRoster`).
+   *  Threaded so the diagnostic measures the SAME suppression production applies. */
+  rosters?: Map<string, AuthorRoster>;
+  /** Override the near-disclosed threshold for a what-if pass (default: pipeline). */
+  nearDisclosedThreshold?: number;
+};
+
+const toks = (s: string): Set<string> =>
+  new Set(normalizeEntity(s).split(" ").filter((w) => w.length > 1));
+
+/** Every extracted entity for a scholar (surfaced + suppressed), flattened to
+ *  one diagnostic row per (pmid, entity occurrence). Pure — DB-free. */
+export function diagnoseScholar(input: DiagnoseInput): DiagnosticRow[] {
+  const rows: DiagnosticRow[] = [];
+  for (const st of input.statements) {
+    const { candidates } = analyzeStatement(st.statementText, input.scholar, input.disclosed, {
+      canonicalize: canonicalizeSponsor,
+      includeSuppressed: true,
+      nearDisclosedThreshold: input.nearDisclosedThreshold,
+      roster: input.rosters?.get(st.pmid),
+    });
+    // Per-statement multi-author signal (stamped on every row of the statement),
+    // the same signal the production pipeline now uses to suppress unattributed
+    // clauses in multi-author statements.
+    const authorMentions = countAuthorMentions(st.statementText);
+    const isMultiAuthor = isMultiAuthorStatement(st.statementText);
+    for (const c of candidates) {
+      const normalizedNearest = c.nearestDisclosed ? normalizeEntity(c.nearestDisclosed) : "";
+      const eTok = toks(c.entity);
+      const nTok = c.nearestDisclosed ? toks(c.nearestDisclosed) : new Set<string>();
+      const extra = [...eTok].filter((t) => !nTok.has(t));
+      const missing = [...nTok].filter((t) => !eTok.has(t));
+      rows.push({
+        cwid: input.cwid,
+        pmid: st.pmid,
+        entity: c.entity,
+        normalizedEntity: c.normalized,
+        tier: c.tier,
+        surfaced: c.tier !== "Low",
+        attribution: c.attribution,
+        attributionReason: c.attributionReason,
+        entityScore: c.entityScore,
+        category: c.category,
+        nearestDisclosed: c.nearestDisclosed,
+        normalizedNearest,
+        nearestScore: c.nearestScore,
+        entityExtraTokens: extra.join(" "),
+        nearestExtraTokens: missing.join(" "),
+        failureModeGuess: c.failureModeGuess,
+        tierReason: c.tierReason,
+        entityIsPersonName: looksLikePersonName(c.entity),
+        entityIsJunk: looksLikeJunkEntity(c.entity),
+        isMultiAuthor,
+        authorMentions,
+        sourceSentence: c.sourceSentence,
+      });
+    }
+  }
+  return rows;
+}
+
+export type DiagnoseSummary = {
+  total: number;
+  surfaced: number;
+  byTier: Record<string, number>;
+  /** Surfaced rows bucketed by the pipeline's failure-mode guess. */
+  surfacedByFailureMode: Record<string, number>;
+  /** Surfaced rows whose nearest disclosure was a close-but-rejected near-miss
+   *  (score in [0.3, threshold)) — the prime candidates for normalization tuning. */
+  nearMiss: number;
+  /** Suppressed rows by reason bucket (matched vs co-author vs non-personal). */
+  suppressedByReason: Record<string, number>;
+  /** The precision picture for surfaced rows — what we'd actually show a scholar. */
+  surfacedBreakdown: {
+    /** Attributed to the scholar by name/initials — the trustworthy core. */
+    scholarAttributed: number;
+    /** Unattributed clause in a MULTI-author statement — leakage-prone (may be
+     *  another author's relationship). The dominant precision problem. */
+    leakageRiskMultiAuthor: number;
+    /** Unattributed clause in a single-author statement — the lone subject is the
+     *  scholar, so probably legitimately theirs. */
+    unattributedSingleAuthor: number;
+    /** Surfaced entity that looks like a PERSON's name — a co-author that bled
+     *  through extraction. The author-roster cross-check (`matchesCoAuthor`) now
+     *  drops the ones confirmed on this paper's byline; this RESIDUAL is the
+     *  person-shaped leakage the roster could NOT confirm — byline missing/empty,
+     *  an initials-only byline, or a surname/initial-form mismatch — still surfaced
+     *  because the shape alone collides with founder-named orgs. */
+    personNameSurfaced: number;
+  };
+};
+
+/** Roll diagnostic rows up to a console-friendly summary. */
+export function summarize(rows: ReadonlyArray<DiagnosticRow>, nearThreshold = 0.6): DiagnoseSummary {
+  const byTier: Record<string, number> = {};
+  const surfacedByFailureMode: Record<string, number> = {};
+  const suppressedByReason: Record<string, number> = {};
+  let surfaced = 0;
+  let nearMiss = 0;
+  const surfacedBreakdown = {
+    scholarAttributed: 0,
+    leakageRiskMultiAuthor: 0,
+    unattributedSingleAuthor: 0,
+    personNameSurfaced: 0,
+  };
+  for (const r of rows) {
+    byTier[r.tier] = (byTier[r.tier] ?? 0) + 1;
+    if (r.surfaced) {
+      surfaced++;
+      surfacedByFailureMode[r.failureModeGuess] = (surfacedByFailureMode[r.failureModeGuess] ?? 0) + 1;
+      if (r.nearestScore >= 0.3 && r.nearestScore < nearThreshold) nearMiss++;
+      if (r.entityIsPersonName) surfacedBreakdown.personNameSurfaced++;
+      if (r.attribution === "scholar") surfacedBreakdown.scholarAttributed++;
+      else if (r.attribution === "unattributed") {
+        if (r.isMultiAuthor) surfacedBreakdown.leakageRiskMultiAuthor++;
+        else surfacedBreakdown.unattributedSingleAuthor++;
+      }
+    } else {
+      // Low: classify by reason, mirroring analyzeStatement's suppression order so
+      // the bucket matches the actual cause. Junk-word is checked FIRST because it
+      // short-circuits before tierOf in the pipeline and carries an authoritative
+      // failureModeGuess set at suppression time. The author-roster cross-check is
+      // checked NEXT (it likewise short-circuits and stamps an authoritative
+      // tierReason). Person-name on SHAPE alone is still not a suppression reason:
+      // bare First-Last names that are NOT on the byline stay surfaced — sized via
+      // surfacedBreakdown.personNameSurfaced, not here.
+      const reason =
+        r.failureModeGuess === "junk-token"
+          ? "junk-word"
+          : /roster cross-check/.test(r.tierReason)
+            ? "co-author-roster"
+            : r.nearestScore >= nearThreshold
+              ? "matched-disclosed"
+              : r.category !== "personal"
+                ? "non-personal"
+                : r.attribution === "other"
+                  ? "co-author"
+                  : r.isMultiAuthor && r.attribution === "unattributed"
+                    ? "multi-author-leakage"
+                    : "weak-signal";
+      suppressedByReason[reason] = (suppressedByReason[reason] ?? 0) + 1;
+    }
+  }
+  return {
+    total: rows.length,
+    surfaced,
+    byTier,
+    surfacedByFailureMode,
+    nearMiss,
+    suppressedByReason,
+    surfacedBreakdown,
+  };
+}

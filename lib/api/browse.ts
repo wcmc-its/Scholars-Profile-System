@@ -15,6 +15,7 @@
  */
 import { prisma } from "@/lib/db";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import type {
   DepartmentCategory,
 } from "@/lib/department-categories";
@@ -34,6 +35,8 @@ export type BrowseDepartmentTopicChip = {
 export type BrowseDepartment = {
   code: string;
   name: string;
+  officialName: string | null;
+  compactName: string | null;
   slug: string;
   category: DepartmentCategory;
   scholarCount: number;
@@ -75,6 +78,8 @@ export type BrowseData = {
 type DeptRow = {
   code: string;
   name: string;
+  officialName: string | null;
+  compactName: string | null;
   slug: string;
   category: string;
   scholarCount: number;
@@ -102,6 +107,8 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
     select: {
       code: true,
       name: true,
+      officialName: true,
+      compactName: true,
       slug: true,
       category: true,
       scholarCount: true,
@@ -194,11 +201,23 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
     return {
       code: d.code,
       name: d.name,
+      officialName: d.officialName,
+      compactName: d.compactName,
       slug: d.slug,
       category: cat,
       scholarCount: d.scholarCount,
       chairName: d.chairCwid
-        ? (chairMap.get(d.chairCwid)?.preferredName ?? null)
+        ? // External leader (not a WCM scholar, e.g. Joel Stein / Rehab Med):
+          // the scholar lookup misses, so fall back to the curated name so the
+          // chair still shows on browse. Rendered as plain text (no link), so
+          // no slug is needed — chairSlug stays null below. #991 — gate the
+          // fallback on the external leader's cwid MATCHING the current chairCwid
+          // (mirroring departments.ts), so a stale EXTERNAL_LEADERS entry can't
+          // surface the wrong name if the chair changes to another unresolved cwid.
+          (chairMap.get(d.chairCwid)?.preferredName ??
+          (EXTERNAL_LEADERS[d.code]?.cwid === d.chairCwid
+            ? (EXTERNAL_LEADERS[d.code]?.name ?? null)
+            : null))
         : null,
       chairSlug: d.chairCwid
         ? (chairMap.get(d.chairCwid)?.slug ?? null)
@@ -213,7 +232,9 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
 
 export async function getCentersList(): Promise<BrowseCenter[]> {
   const centers = await prisma.center.findMany({
-    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    // Browse lists centers alphabetically by name (comms 2026-06-12); sortOrder
+    // is retained on the row for other surfaces but no longer drives browse.
+    orderBy: { name: "asc" },
     select: {
       code: true,
       name: true,

@@ -63,7 +63,22 @@ export type ScholarFamilyWrite = {
   /** #819 — distinct member PMIDs (digit strings), read from the artifact; backs
    *  the click-to-filter membership. `[]` on the pre-#175 artifact (no field). */
   pmids: string[];
+  /** #879 — generated 1–2 sentence capability gloss for the family, joined by
+   *  `family_id` from the top-level `families[]` taxonomy (NOT the per-scholar
+   *  slice, which has no definition). `null` when the artifact has none. */
+  definition: string | null;
+  /** #879 — provenance for `definition` ("generated" | null), passed through raw;
+   *  the render layer gates the "AI-generated" disclaimer on `=== "generated"`. */
+  definitionSource: string | null;
 };
+
+/** Family-level definition keyed by `family_id`, joined into the per-scholar rows.
+ *  Built by the loader from the artifact's top-level `families[]` (see etl/tools/
+ *  index.ts) — the per-scholar `faculty[].families[]` slice carries no definition. */
+export type FamilyDefinitionIndex = ReadonlyMap<
+  string,
+  { definition: string | null; definitionSource: string | null }
+>;
 
 export type BuildScholarFamilyS3Result = {
   writes: ScholarFamilyWrite[];
@@ -87,6 +102,25 @@ export type BuildScholarFamilyS3Result = {
    * artifact's pmids (pmidCount stays the upstream pub_count).
    */
   pmidCountMismatch: number;
+  /**
+   * #879 — written rows that got a non-null `definition` from the family-definition
+   * join. Compare against the loader's indexed `with_definition` count to detect a
+   * SILENT join-key divergence (top-level families[] family_id drifting from the
+   * per-scholar slice within one publish): a near-zero hit rate against a populated
+   * index is the alarm. 0 is expected on a pre-v3 artifact (no familyDefById).
+   */
+  definitionJoinHits: number;
+  /**
+   * #989 — per-scholar family entries collapsed because two distinct `family_id`s
+   * shared the same STABLE `(supercategory, familyLabel)` identity. The mapper
+   * keeps the strongest by `pmidCount` so the table holds ≤1 row per
+   * `(cwid, supercategory, familyLabel)` — the basis the distinct-member
+   * aggregations (`_count.cwid` over `groupBy([sc,label])`) and the per-row chips
+   * rely on. A non-zero count is an upstream-taxonomy alarm (the loader logs it),
+   * not a failure: counts stay correct precisely because the duplicate was
+   * collapsed rather than written as a second row.
+   */
+  duplicateFamilyLabel: number;
 };
 
 type Accum = {
@@ -160,6 +194,10 @@ export function buildScholarFamilyWritesFromS3(
     /** Optional known A2 supercategory id set — drives the unknownSupercategory
      *  counter only. Omit to treat every value as known (open-set default). */
     knownSupercategories?: ReadonlySet<string>;
+    /** #879 — `family_id` → generated definition, from the artifact's top-level
+     *  `families[]`. Omit (or a miss) leaves a row's definition null — benign and
+     *  expected on a pre-v3 artifact; never a reason to drop a family. */
+    familyDefById?: FamilyDefinitionIndex;
   },
 ): BuildScholarFamilyS3Result {
   const topN = opts.topNPerScholar ?? 50;
@@ -180,6 +218,8 @@ export function buildScholarFamilyWritesFromS3(
   let skippedMissingFields = 0;
   let unknownSupercategory = 0;
   let pmidCountMismatch = 0;
+  let definitionJoinHits = 0;
+  let duplicateFamilyLabel = 0;
 
   for (const [cwid, rollup] of Object.entries(artifact.faculty ?? {})) {
     if (!cwid || !opts.ourCwidSet.has(cwid)) {
@@ -222,14 +262,36 @@ export function buildScholarFamilyWritesFromS3(
       }
     }
 
-    const ranked = [...byFamilyId.entries()]
-      .map(([familyId, v]) => ({ familyId, ...v }))
-      .sort((a, b) => b.pmidCount - a.pmidCount || a.familyId.localeCompare(b.familyId));
+    // #989 — collapse entries sharing the STABLE (supercategory, familyLabel)
+    // identity but differing in family_id. family_id is re-minted on every A2
+    // rebuild; (supercategory, label) is the permalink + #800/#801 overlay
+    // identity. The table's unique key is (cwid, family_id), so two such entries
+    // would BOTH insert — double-counting `_count.cwid` over groupBy([sc,label])
+    // and duplicating the per-row chips. Keep the strongest by pmidCount; the
+    // dropped duplicates feed the duplicateFamilyLabel data-health counter.
+    const byStableKey = new Map<string, { familyId: string } & Accum>();
+    for (const [familyId, v] of byFamilyId) {
+      const key = `${v.supercategory}::${v.familyLabel}`;
+      const prev = byStableKey.get(key);
+      if (!prev) {
+        byStableKey.set(key, { familyId, ...v });
+      } else {
+        duplicateFamilyLabel += 1;
+        if (v.pmidCount > prev.pmidCount) byStableKey.set(key, { familyId, ...v });
+      }
+    }
+
+    const ranked = [...byStableKey.values()].sort(
+      (a, b) => b.pmidCount - a.pmidCount || a.familyId.localeCompare(b.familyId),
+    );
 
     for (const e of ranked.slice(0, topN)) {
       // Invariant alarm only among populated rows: a pre-#175 artifact has no
       // pmids ([]) on every family, which is expected, not a mismatch.
       if (e.pmids.length > 0 && e.pmids.length !== e.pmidCount) pmidCountMismatch += 1;
+      // #879 — family-level definition joined by family_id; absent → null (benign).
+      const def = opts.familyDefById?.get(e.familyId);
+      if (def?.definition != null) definitionJoinHits += 1;
       writes.push({
         cwid,
         familyId: e.familyId,
@@ -238,9 +300,19 @@ export function buildScholarFamilyWritesFromS3(
         pmidCount: e.pmidCount,
         exemplarTools: e.exemplarTools,
         pmids: e.pmids,
+        definition: def?.definition ?? null,
+        definitionSource: def?.definitionSource ?? null,
       });
     }
   }
 
-  return { writes, skippedMissingCwid, skippedMissingFields, unknownSupercategory, pmidCountMismatch };
+  return {
+    writes,
+    skippedMissingCwid,
+    skippedMissingFields,
+    unknownSupercategory,
+    pmidCountMismatch,
+    definitionJoinHits,
+    duplicateFamilyLabel,
+  };
 }

@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+import { Wrench } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
 import type { DepartmentFacultyHit } from "@/lib/api/departments";
@@ -20,7 +22,22 @@ function RoleTag({ role }: { role: string }) {
   );
 }
 
-export function PersonRow({ hit }: { hit: DepartmentFacultyHit }) {
+export function PersonRow({
+  hit,
+  trailingBadge,
+  methodChips,
+}: {
+  hit: DepartmentFacultyHit;
+  /** Optional badge rendered after the role tag — e.g. the center roster's
+   *  Research/Clinical membership-type chip. Omitted everywhere else. */
+  trailingBadge?: ReactNode;
+  /** #962 — top 2–3 PUBLIC method families (center roster only). Each chip shows
+   *  the `familyLabel` (aligns 1:1 with the facet value) with the methods/wrench
+   *  icon; `exemplarTools` become the title tooltip. Renders nothing when empty
+   *  (a member with no public families passes `undefined`). A structural subset
+   *  of `CenterMemberFamily`, so `topMethods` satisfies it directly. */
+  methodChips?: Array<{ value: string; familyLabel: string; exemplarTools: string[] }>;
+}) {
   const deptLine = hit.divisionName
     ? `${hit.divisionName} · Department of ${hit.departmentName}`
     : `Department of ${hit.departmentName}`;
@@ -60,6 +77,7 @@ export function PersonRow({ hit }: { hit: DepartmentFacultyHit }) {
             const label = formatRoleCategory(hit.roleCategory);
             return label ? <RoleTag role={label} /> : null;
           })()}
+          {trailingBadge}
         </div>
         {hit.primaryTitle && (
           <div className="mb-[2px] text-[13px] text-muted-foreground">
@@ -72,6 +90,20 @@ export function PersonRow({ hit }: { hit: DepartmentFacultyHit }) {
         {snippet && (
           <div className="text-[13px] leading-[1.5] text-muted-foreground">
             {snippet}
+          </div>
+        )}
+        {methodChips && methodChips.length > 0 && (
+          <div className="mt-[6px] flex flex-wrap items-center gap-[6px]">
+            {methodChips.map((c) => (
+              <span
+                key={c.value}
+                title={c.exemplarTools.length > 0 ? c.exemplarTools.join(", ") : undefined}
+                className="inline-flex items-center gap-1 rounded-[3px] border border-border bg-muted px-[6px] py-[1px] text-[11px] font-medium leading-[1.4] text-muted-foreground"
+              >
+                <Wrench aria-hidden className="h-3 w-3" strokeWidth={2} />
+                {c.familyLabel}
+              </span>
+            ))}
           </div>
         )}
       </div>

@@ -21,8 +21,10 @@
  * for a failed CloudFront invalidation is #353; the equivalent for a failed
  * OpenSearch write is #393 (the reconciler — ADR-005 failure-model layer 3).
  *
- * This file owns the ISR + CloudFront half (`reflectVisibilityChange` and
- * `resolveAffectedProfileSlugs`). The OpenSearch fast-path lives in its own
+ * This file owns the ISR + CloudFront half. Every content-edit reflector
+ * (`reflectVisibilityChange`, `reflectOverviewEdit`, `reflectUnitChange`)
+ * busts the ISR cache and purges the edge copy through the shared
+ * `invalidateCloudFront` outbox. The OpenSearch fast-path lives in its own
  * module (`search-suppression.ts`), called from the suppress / revoke
  * endpoints alongside `reflectVisibilityChange`.
  *
@@ -162,28 +164,34 @@ async function invalidateCloudFront(paths: readonly string[]): Promise<void> {
 }
 
 /**
- * Reflect an `overview` edit: bust the profile page. CloudFront's ≤24h lag is
- * acceptable for a corrected bio. A `slug` edit reflects nothing at write time
- * — the URL changes only when `etl/ed` consumes the override — so it has no
+ * Reflect an `overview` edit: bust the profile page. A corrected bio is a
+ * content edit, so the edge copy is purged alongside the ISR cache — the same
+ * ≤24h-staleness argument that makes `reflectVisibilityChange` invalidate
+ * CloudFront applies here. A `slug` edit reflects nothing at write time — the
+ * URL changes only when `etl/ed` consumes the override — so it has no
  * reflection.
  */
-export function reflectOverviewEdit(slug: string): void {
+export async function reflectOverviewEdit(slug: string): Promise<void> {
   // #671 — revalidate the current canonical profile form per PROFILE_CANONICAL
   // (`/scholars/{slug}` by default, root `/{slug}` after the flip).
-  revalidatePaths([canonicalProfilePath(slug)]);
+  const paths = [canonicalProfilePath(slug)];
+  revalidatePaths(paths);
+  await invalidateCloudFront(paths);
 }
 
 /**
  * Reflect a dept/div/center field edit or retire: revalidate the unit page
  * (and, for a division, the parent department whose divisions list shows
  * the chief) and `/browse` (the unit facet). #540 SPEC § Write-path behavior.
+ * These are content edits, so the edge copy is purged alongside the ISR cache,
+ * matching `reflectVisibilityChange`.
  *
  * `slug` field edits on dept/div have no immediate URL flip — that rides the
  * next `etl/ed` run; the route therefore skips this helper for `slug`.
  * Centers update slug in-row, so the route passes both the old and new slug
  * here.
  */
-export function reflectUnitChange(params: {
+export async function reflectUnitChange(params: {
   unitKind: "department" | "division" | "center";
   /** For dept/center: the dept/center slug. For division: the division slug. */
   unitSlug: string;
@@ -191,7 +199,7 @@ export function reflectUnitChange(params: {
   parentDeptSlug?: string;
   /** For a center slug change: the previous slug whose URL flips. */
   previousSlug?: string | null;
-}): void {
+}): Promise<void> {
   const paths: string[] = ["/browse"];
   if (params.unitKind === "department") {
     paths.push(`/departments/${params.unitSlug}`);
@@ -209,6 +217,7 @@ export function reflectUnitChange(params: {
     }
   }
   revalidatePaths(paths);
+  await invalidateCloudFront(paths);
 }
 
 /**

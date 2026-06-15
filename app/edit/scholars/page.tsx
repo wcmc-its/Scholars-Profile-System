@@ -20,6 +20,7 @@ import {
   type EditRosterStatusFilter,
   type EditRosterUnitFilter,
 } from "@/lib/api/edit-roster";
+import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession, impersonationEnabled } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
@@ -69,11 +70,20 @@ export default async function EditScholarsPage({
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/scholars");
   }
-  // Superuser re-check on every GET (B2). Emits the `edit_authz_denied` line.
-  const denial = requireSuperuserGet({ session, path: "/edit/scholars", targetId: "roster" });
-  if (denial !== null) {
-    return <ForbiddenEditPage />;
+  // Roster access on every GET: a comms_steward is a global profile editor
+  // (comms-steward-profile-editing-spec.md §4b), so they browse + open any
+  // profile. A non-steward goes through the superuser re-check, which also emits
+  // the `edit_authz_denied` line for a non-superuser (mirrors /edit/scholar/[cwid]).
+  if (!session.isCommsSteward) {
+    const denial = requireSuperuserGet({ session, path: "/edit/scholars", targetId: "roster" });
+    if (denial !== null) {
+      return <ForbiddenEditPage />;
+    }
   }
+  // The superuser-only admin surfaces (URL requests / Slug registry /
+  // Administrators) stay gated to a superuser; a steward sees only Profiles +
+  // Method Families.
+  const superuserSurfaces = session.isSuperuser;
 
   const { q, status, page, unit: unitParam, type } = (await searchParams) ?? {};
   const query = (q ?? "").trim();
@@ -99,9 +109,8 @@ export default async function EditScholarsPage({
 
   // The "URL requests" admin tab + pending-count pill (#497 PR-3c); `null` when
   // the slug-request feature is off, which hides the tab.
-  const pendingSlugRequests = isSlugRequestEnabled()
-    ? await countPendingSlugRequests(db.read)
-    : null;
+  const pendingSlugRequests =
+    superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
 
   // Back-link to the admin's own self-edit surface — only when they actually
   // have a (non-deleted) profile, so a staff superuser without one never gets
@@ -124,10 +133,14 @@ export default async function EditScholarsPage({
       page={pageNum}
       pageSize={PAGE_SIZE}
       pendingSlugRequests={pendingSlugRequests}
-      administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
+      administratorsTab={superuserSurfaces && isAdministratorsTabEnabled() ? 0 : null}
+      methodsTab={isMethodsTabVisible(session) ? 0 : null}
       selfEditHref={selfEditHref}
       canImpersonate={impersonationEnabled() && session.isSuperuser}
       viewerCwid={session.cwid}
+      superuserSurfaces={superuserSurfaces}
+      profilesTab
+      unitsTab={session.isSuperuser || session.isCommsSteward}
     />
   );
 }

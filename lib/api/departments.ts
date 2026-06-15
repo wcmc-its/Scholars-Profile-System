@@ -20,6 +20,7 @@
  */
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
+import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
 import type { LeaderRole } from "@/components/scholar/leader-card";
 import {
@@ -28,11 +29,24 @@ import {
   mergeUnitFields,
   resolveActiveGrantSuppression,
 } from "@/lib/api/manual-layer";
+import {
+  aggregatePublicFamiliesForUnit,
+  loadPublicFamiliesForMembers,
+  ROSTER_ROW_METHODS_CAP,
+  type MemberMethodFamily,
+} from "@/lib/api/methods-roster";
+import type { FacetOption } from "@/components/center/center-roster-facets";
+import {
+  isOrgUnitMethodsChipsEnabled,
+  isOrgUnitMethodsFacetEnabled,
+} from "@/lib/profile/methods-lens-flags";
 
 export type DepartmentChair = {
   cwid: string;
   preferredName: string;
-  slug: string;
+  /** Profile slug, or null for an external leader (lib/external-leaders.ts) who
+   *  is not a WCM scholar — rendered as a non-linked name. */
+  slug: string | null;
   /** From appointment.title, e.g. "Chairman and Stephen and Suzanne Weiss Professor"
    *  or "Director of Library" for administrative depts (issue #58). */
   chairTitle: string;
@@ -74,7 +88,14 @@ export type DepartmentStats = {
 };
 
 export type DepartmentDetail = {
-  dept: { code: string; name: string; slug: string; description: string | null };
+  dept: {
+    code: string;
+    name: string;
+    officialName: string | null;
+    compactName: string | null;
+    slug: string;
+    description: string | null;
+  };
   chair: DepartmentChair | null;
   topResearchAreas: DepartmentTopicArea[];
   divisions: DepartmentDivisionSummary[];
@@ -143,6 +164,24 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
         role: leaderRole,
         isInterim: merged.leaderInterim,
       };
+    } else {
+      // External-leader hack (lib/external-leaders.ts): a leader CWID that is
+      // NOT a WCM scholar (e.g. a Columbia primary appointment, like Joel Stein
+      // for Rehabilitation Medicine) renders as a non-linked name + Directory
+      // photo. The CWID still drives the photo via identityImageEndpoint.
+      const external = EXTERNAL_LEADERS[dept.code];
+      if (external && external.cwid === merged.leaderCwid) {
+        chair = {
+          cwid: external.cwid,
+          preferredName: external.name,
+          slug: null,
+          chairTitle: leaderRole,
+          primaryTitle: external.primaryTitle,
+          identityImageEndpoint: identityImageEndpoint(external.cwid),
+          role: leaderRole,
+          isInterim: merged.leaderInterim,
+        };
+      }
     }
   }
 
@@ -242,7 +281,14 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
   };
 
   return {
-    dept: { code: dept.code, name: dept.name, slug: dept.slug, description: merged.description },
+    dept: {
+      code: dept.code,
+      name: dept.name,
+      officialName: dept.officialName,
+      compactName: dept.compactName,
+      slug: dept.slug,
+      description: merged.description,
+    },
     chair,
     topResearchAreas,
     divisions,
@@ -265,6 +311,10 @@ export type DepartmentFacultyHit = {
   overview: string | null;
   pubCount: number;
   grantCount: number;
+  /** #974 — top ≤3 PUBLIC method families for the per-row chips. Present only
+   *  when ORG_UNIT_METHODS_CHIPS (+ METHODS_LENS_ENABLED) is on AND the member
+   *  has ≥1 public family; undefined otherwise (off-path payload carries nothing). */
+  topMethods?: MemberMethodFamily[];
 };
 
 export type DepartmentFacultyResult = {
@@ -283,6 +333,11 @@ export type DepartmentFacultyResult = {
   roleCategoryCounts: Record<string, number>;
   page: number;
   pageSize: number;
+  /** #974 Phase 2 — unit-wide PUBLIC method-family facet buckets (count-desc).
+   *  Present (possibly empty) only when ORG_UNIT_METHODS_FACET (+
+   *  METHODS_LENS_ENABLED) is on; undefined otherwise so the off-path payload is
+   *  byte-identical. Viewer-independent → the page stays CloudFront-cacheable. */
+  methodFacet?: FacetOption[];
 };
 
 const FACULTY_PAGE_SIZE = 20;
@@ -428,5 +483,44 @@ export async function getDepartmentFaculty(
     grantCount: grantMap.get(s.cwid) ?? 0,
   }));
 
-  return { hits, total, roleCategoryCounts, page, pageSize: FACULTY_PAGE_SIZE };
+  // #974 — attach top-≤3 PUBLIC method families for the per-row chips, keyed on
+  // the visible page's ≤20 CWIDs (no whole-dataset aggregation — that's Phase 2).
+  // The loader self-gates on the flag, so off → empty map → hits pass through
+  // byte-identical, and the page stays CloudFront-cacheable (a plain DB read,
+  // no per-viewer call).
+  const famByCwid = await loadPublicFamiliesForMembers(cwids, {
+    enabled: isOrgUnitMethodsChipsEnabled(),
+  });
+  const finalHits =
+    famByCwid.size === 0
+      ? hits
+      : hits.map((h) => {
+          const fams = famByCwid.get(h.cwid);
+          return fams && fams.length > 0
+            ? { ...h, topMethods: fams.slice(0, ROSTER_ROW_METHODS_CAP) }
+            : h;
+        });
+
+  // #974 Phase 2 — unit-wide "Methods & tools" facet buckets. Cheap `select cwid`
+  // of the FULL active member set (the paginated page above is only ≤20 rows),
+  // aggregated into PUBLIC family buckets. Flag-gated: when off, no extra query
+  // runs and `methodFacet` is undefined → omitted from JSON → off-path payload is
+  // byte-identical. Viewer-independent → the page stays CloudFront-cacheable.
+  const methodFacet = isOrgUnitMethodsFacetEnabled()
+    ? await aggregatePublicFamiliesForUnit(
+        (
+          await prisma.scholar.findMany({ where: baseWhere, select: { cwid: true } })
+        ).map((r) => r.cwid),
+        { enabled: true },
+      )
+    : undefined;
+
+  return {
+    hits: finalHits,
+    total,
+    roleCategoryCounts,
+    page,
+    pageSize: FACULTY_PAGE_SIZE,
+    methodFacet,
+  };
 }

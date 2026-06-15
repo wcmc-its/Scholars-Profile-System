@@ -154,7 +154,27 @@ export function PeopleResultCard({
             explains ranking (mockup); a self-reported bio highlight is the
             self-evident fallback when no reason was computed. */}
         {hit.matchReason ? (
-          <MatchReason kind={hit.matchReason.icon}>{hit.matchReason.text}</MatchReason>
+          <MatchReason kind={hit.matchReason.icon}>
+            {hit.matchReason.text}
+            {/* #967 — concrete proof behind the count: a representative matching
+                publication. The title is <mark>-highlighted when the literal
+                query appears in it, otherwise rendered plain. */}
+            {hit.matchReason.pub ? (
+              <>
+                {" — incl. "}
+                <span className="italic">
+                  &ldquo;
+                  {hit.matchReason.pub.titleHtml ? (
+                    <HighlightedSnippet html={hit.matchReason.pub.titleHtml} />
+                  ) : (
+                    hit.matchReason.pub.title
+                  )}
+                  &rdquo;
+                </span>
+                {hit.matchReason.pub.year ? ` (${hit.matchReason.pub.year})` : ""}
+              </>
+            ) : null}
+          </MatchReason>
         ) : snippet ? (
           <div className="text-[13px] leading-snug text-[#4a4a4a]">
             <HighlightedSnippet html={snippet} />

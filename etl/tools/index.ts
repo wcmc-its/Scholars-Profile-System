@@ -290,6 +290,7 @@ async function main(): Promise<void> {
   const parsed = JSON.parse(Buffer.from(bytes).toString("utf-8")) as {
     tools?: unknown;
     faculty?: unknown;
+    families?: unknown;
   };
   if (!Array.isArray(parsed.tools) || !parsed.faculty || typeof parsed.faculty !== "object") {
     throw new Error("tools.json missing tools[] array or faculty{} object");
@@ -302,6 +303,31 @@ async function main(): Promise<void> {
     tools: artifact.tools.length,
     faculty: Object.keys(artifact.faculty).length,
     integrity_ok: true,
+  });
+
+  // #879 — index the TOP-LEVEL `families[]` taxonomy by family_id → generated
+  // definition. The per-scholar `faculty[].families[]` slice carries no definition,
+  // so the family mapper joins it in by family_id. Additive/optional: a pre-v3
+  // artifact (or a family with no generated gloss) yields null, never an error.
+  const familyDefById = new Map<
+    string,
+    { definition: string | null; definitionSource: string | null }
+  >();
+  for (const raw of Array.isArray(parsed.families) ? parsed.families : []) {
+    const f = raw as { family_id?: unknown; definition?: unknown; definition_source?: unknown };
+    const id = typeof f?.family_id === "string" ? f.family_id.trim() : "";
+    if (!id) continue;
+    const definition =
+      typeof f?.definition === "string" && f.definition.trim() ? f.definition.trim() : null;
+    const definitionSource =
+      typeof f?.definition_source === "string" && f.definition_source.trim()
+        ? f.definition_source.trim()
+        : null;
+    familyDefById.set(id, { definition, definitionSource });
+  }
+  log("family_definitions_indexed", {
+    families: familyDefById.size,
+    with_definition: [...familyDefById.values()].filter((v) => v.definition !== null).length,
   });
 
   // Step 4: FK scope — active in-scope scholars, same filter as the other ETL
@@ -324,7 +350,7 @@ async function main(): Promise<void> {
 
   // scholar_family (#799) — mapped from the same artifact slice. Reuse the same
   // FK scope; the family rollup carries its own counters (see the mapper).
-  const familyResult = buildScholarFamilyWritesFromS3(artifact, { ourCwidSet });
+  const familyResult = buildScholarFamilyWritesFromS3(artifact, { ourCwidSet, familyDefById });
   log("mapped_families", {
     rows: familyResult.writes.length,
     skipped_out_of_scope_cwid: familyResult.skippedMissingCwid,
@@ -333,6 +359,15 @@ async function main(): Promise<void> {
     // #819 — rows whose distinct(pmids).length !== pub_count (ReciterAI#175
     // invariant). Should be 0; non-zero is a data-health alarm for the operator.
     pmid_count_mismatch: familyResult.pmidCountMismatch,
+    // #879 — written rows that got a non-null definition from the join. Compare to
+    // `with_definition` in the family_definitions_indexed log above: a near-zero
+    // hit rate against a populated index signals a silent family_id join-key drift.
+    definition_join_hits: familyResult.definitionJoinHits,
+    // #989 — per-scholar families collapsed because two family_ids shared one
+    // (supercategory, familyLabel). Should be 0; non-zero means the upstream
+    // taxonomy emitted duplicate ids for a stable family — the mapper collapsed
+    // them (so counts/chips stay correct) but the operator should reconcile A2.
+    duplicate_family_label: familyResult.duplicateFamilyLabel,
   });
 
   // Dry-run: diff against the live table and stop — never write, never record.
@@ -390,6 +425,8 @@ async function main(): Promise<void> {
         pmidCount: w.pmidCount,
         exemplarTools: w.exemplarTools,
         pmids: w.pmids,
+        definition: w.definition,
+        definitionSource: w.definitionSource,
         sourceArtifactSha: manifest.sha256,
       })),
       skipDuplicates: true,

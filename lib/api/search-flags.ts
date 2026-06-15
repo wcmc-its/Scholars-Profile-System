@@ -253,6 +253,22 @@ export function resolvePeopleMatchExplain(): boolean {
   return process.env.SEARCH_PEOPLE_MATCH_EXPLAIN !== "off";
 }
 
+/**
+ * Issue #967 — surface a representative matching publication inside the People
+ * reason line (e.g. `… tagged HIV — incl. "Broadly neutralizing antibodies…"
+ * (2024)`), so the count gets concrete proof of the work behind it and rows stop
+ * reading identically on a topic query. The pub is drawn from a `top_hits`
+ * sub-agg on the SAME publications-index aggregation that already computes the
+ * count (`reasonCounts`) — no people-index field, no reindex.
+ *
+ * Pure presentation metadata: no effect on the query predicate, scoring, or
+ * result set. Layered on top of `SEARCH_PEOPLE_MATCH_EXPLAIN` (inert when that is
+ * off — there is no reason line to enrich). Default OFF; `=on` to enable.
+ */
+export function resolvePeopleSnippetRepresentativePub(): boolean {
+  return process.env.SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB === "on";
+}
+
 export type GenericTermMode = "off" | "resolve" | "on";
 
 /**
@@ -513,4 +529,52 @@ export function resolveSearchShellStreaming(): boolean {
  */
 export function resolveSearchSuggestMeshConcept(): boolean {
   return process.env.SEARCH_SUGGEST_MESH_CONCEPT === "on";
+}
+
+/**
+ * Issue #726 follow-up (Section B / B2) — drop the dedicated concept-escalation
+ * pre-count on the People tab. The escalate-on-sparse recall floor (#726) admits
+ * concept-tagged scholars when a TRUSTWORTHY descriptor resolved AND the lexical
+ * result is sparse (< `MESH_ESCALATION_THRESHOLD`). Today that decision is gated
+ * by a dedicated `size:0` pre-count of the lexical predicate — a full extra
+ * OpenSearch round-trip fired even on common high-volume topics that will never
+ * be sparse, and on the SSR page it fires twice (the People badge count-call and
+ * the full People search each pay it).
+ *
+ * When this lever is at its default (`on`), `searchPeople` keeps that pre-count:
+ * the escalation is decided up front, so the count/full bodies dispatch once
+ * (already escalated if sparse). When `off`, `searchPeople` skips the pre-count
+ * and instead reads the main search's OWN `hits.total` (the bodies are already
+ * `track_total_hits: true`), re-running escalated ONLY when sparse. That drops
+ * the dedicated hop on the common non-sparse path (the win — 2 fewer hops per
+ * SSR concept-People render) and pays a second search only on the rare sparse
+ * path.
+ *
+ * Result-NEUTRAL by construction: BOTH states make the identical deterministic
+ * escalation decision (`lexicalTotal < MESH_ESCALATION_THRESHOLD`) off the
+ * identical lexical predicate, so the count-only badge and the full list reach
+ * the same total under either state (`badge == list`). Only the number of
+ * round-trips differs. Default ON (`SEARCH_PEOPLE_CONCEPT_PRECOUNT=off` enables
+ * the reorder); a `!== "off"` default-on lever so the implementation ships dark
+ * (zero behavior change until flipped) with an independent rollback trigger,
+ * separate from `SEARCH_SHELL_STREAMING` and the ranking flags above.
+ */
+export function resolvePeopleConceptPrecount(): boolean {
+  return process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT !== "off";
+}
+
+/**
+ * #921 — concept-scope grant axis. When ON, the Scholars tab under
+ * `?match=concept` admits scholars who are FUNDED on the resolved concept (a
+ * grant whose `SEARCH_FUNDING_MESH_GATE` field intersects the descendant set),
+ * not only those with a concept-tagged publication. The People list, facets,
+ * and the count badge all widen together (the union rides the always-on filter
+ * + the scoring `must`), and grant-only matches sort below publication evidence.
+ *
+ * Default OFF (an `=== "on"` opt-in, opposite the default-on precount lever) so
+ * the feature ships dark: flag-off skips the extra Funding round-trip entirely
+ * and leaves every concept-People query body byte-identical to today.
+ */
+export function resolvePeopleConceptGrantAxis(): boolean {
+  return process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS === "on";
 }

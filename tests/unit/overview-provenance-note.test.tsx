@@ -23,7 +23,7 @@ describe("OverviewProvenanceNote", () => {
         provenance={{ origin: "authored", model: null, updatedAt: UPDATED_AT }}
       />,
     );
-    expect(screen.getByText("Current bio: written by you.")).toBeTruthy();
+    expect(screen.getByText("Current overview: written by you.")).toBeTruthy();
   });
 
   it("generated → 'generated with {model}'", () => {
@@ -32,7 +32,7 @@ describe("OverviewProvenanceNote", () => {
         provenance={{ origin: "generated", model: "openai/gpt", updatedAt: UPDATED_AT }}
       />,
     );
-    expect(screen.getByText("Current bio: generated with openai/gpt.")).toBeTruthy();
+    expect(screen.getByText("Current overview: generated with openai/gpt.")).toBeTruthy();
   });
 
   it("generated_edited → 'generated with {model}, then edited by you'", () => {
@@ -42,7 +42,7 @@ describe("OverviewProvenanceNote", () => {
       />,
     );
     expect(
-      screen.getByText("Current bio: generated with google/gemini, then edited by you."),
+      screen.getByText("Current overview: generated with google/gemini, then edited by you."),
     ).toBeTruthy();
   });
 });

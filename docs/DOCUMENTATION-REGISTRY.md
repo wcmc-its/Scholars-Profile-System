@@ -30,6 +30,7 @@ in **§10**.
 
 | The question | Go to |
 |---|---|
+| **How do I run / manage the app day-to-day?** (start, stop, deploy, monitor, common fixes) | [`OPERATIONS-RUNBOOK.md`](./OPERATIONS-RUNBOOK.md) — the single consolidated operator runbook; links out to the deep docs below |
 | Show me how this hangs together (the diagram) | [`architecture/`](./architecture/index.html) — 5 visual diagrams; or [`architecture-overview.md`](./architecture-overview.md) (prose + mermaid) |
 | What is this system, end to end? | [`architecture-overview.md`](./architecture-overview.md) → [`PRODUCTION.md`](./PRODUCTION.md) → [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md) |
 | Why is a page slow? / What's cached where? | [`performance-baseline.md`](./performance-baseline.md), [`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md), [`ADR-001`](./ADR-001-runtime-dal-vs-etl-transform.md) |
@@ -50,6 +51,7 @@ in **§10**.
 | Why does search rank things this way? | [`search.md`](./search.md), [`people-relevance-baseline.md`](./people-relevance-baseline.md) |
 | Why doesn't searching `covid19` or `tylenol` find the obvious people? | [`search-recall.md`](./search-recall.md) |
 | Why doesn't this (retracted) paper show up? | [`retracted-publications.md`](./retracted-publications.md) |
+| Can a scholar hide a publication / grant / their whole profile / a **method**? What can be hidden? | [`what-can-be-hidden.md`](./what-can-be-hidden.md) (the catalog — by section and by record) |
 | What is the WAF / firewall posture? | [`network-security-topology.md`](./network-security-topology.md), [`waf-request-RITM0792011.md`](./waf-request-RITM0792011.md) |
 | Can we restore from backup? | [`restore-drill-runbook.md`](./restore-drill-runbook.md) |
 
@@ -94,6 +96,7 @@ in **§10**.
 
 | Doc | Answers |
 |---|---|
+| [`OPERATIONS-RUNBOOK.md`](./OPERATIONS-RUNBOOK.md) | **The consolidated operator entry point** — services used, start/stop/deploy/rollback, what to monitor, a Symptom→Cause→Fix troubleshooting table, and host/contacts/access, all in one place. Pulls the essentials from the docs below and links out for detail. Start here, then drill down. |
 | [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md) | How to ship a build to staging or prod; pairs with `.github/workflows/deploy.yml`. |
 | [`rollback-runbook.md`](./rollback-runbook.md) | How to roll the prod ECS service back to the previous task-definition revision. |
 | [`restore-drill-runbook.md`](./restore-drill-runbook.md) | How to verify the Aurora cluster can actually be restored from backup. |
@@ -130,7 +133,7 @@ in **§10**.
 | [`data-population-runbook.md`](./data-population-runbook.md) | The operational procedure to load/refresh that data and the search index. |
 | [`spotlight-integration-plan.md`](./spotlight-integration-plan.md) | How ReciterAI spotlight data integrates into the home page. |
 | [`scholar-tools-taxonomy.md`](./scholar-tools-taxonomy.md) | Where the **Methods & tools** (method-family) taxonomy comes from — the ReciterAI A2 artifact on S3 (**not** DynamoDB; the legacy `reciterai` `TOOL#` rows are per-PMID activity, not the canonical registry), the published `tools[]`/`families[]` schema, the `etl:scholar-tool` loader + reversible `SCHOLAR_TOOL_SOURCE` (ddb→s3) switch (#794), the `scholar_tool` field mapping, and the offline consolidation-export script. |
-| [`coi-pubmed-suggestion-approach.md`](./coi-pubmed-suggestion-approach.md) | Where the self-only "From your publications" COI suggestions come from — the nightly `etl:coi-gap` source, the extract→attribute→diff→tier pipeline, the funnel (why ~10.7k co-author matches get suppressed), worked examples, and the v0 quality limits. |
+| [`coi-pubmed-suggestion-approach.md`](./coi-pubmed-suggestion-approach.md) | Where the "From your publications" COI suggestions come from — the nightly `etl:coi-gap` source, the extract→attribute→diff→tier pipeline, and **the 2026 hardening**: why the rendered surface is **`High` tier only** (#909; Medium is ~92% co-author leakage), the count chip (#910), junk-word suppression and why two-word person-name suppression was rejected as unsafe (#907), the production-scale distribution (585 scholars with ≥1 High, ~3.5k relationships), worked cases (Drilon vs Tamimi), governance, and the next lever (the `A.Ashworth`/`C Lehman` initial-surname co-author leak that still escapes #903). |
 
 ## 7. Architecture Decision Records — why it's built this way
 
@@ -161,6 +164,7 @@ ADRs capture decisions and their rationale; reach for these when a colleague ask
 | [`taxonomy-aware-search.md`](./taxonomy-aware-search.md) | Taxonomy/MeSH-aware relevance re-weighting (v2.2). |
 | [`feedback-handling-matrix.md`](./feedback-handling-matrix.md) | How user feedback is routed (and the planned ServiceNow intake). |
 | [`retracted-publications.md`](./retracted-publications.md) | Why retracted papers don't display — the two-record problem (notice vs original), ReCiter's re-fetch lag, and the nightly PubMed-retraction stamp (#604) that closes the gap via the existing `NEVER_DISPLAY_TYPES` filter. |
+| [`what-can-be-hidden.md`](./what-can-be-hidden.md) | **The catalog of everything that can be removed from a public profile and search**, by section and by record — the four mechanisms (`suppression` rows, the `overview` `field_override`, the two Methods-lens overlays, and `deleted_at` soft-delete), the `EntityType` reach (scholar / publication / grant / education / appointment / mentee / org-unit), per-author hide vs whole-pub takedown vs derived-dark, the non-suppressible leadership guard, who can hide what, and the new **Methods & tools** case (no per-scholar control — families are hidden editorially/globally via `family_suppression_overlay`, or public-gated via `family_sensitivity_overlay` + `METHODS_LENS_SENSITIVE_GATE`). The deliberate-hiding counterpart to `retracted-publications.md`; operational view over `ADR-005`. |
 | [`vivo-incident-analysis.md`](./vivo-incident-analysis.md) | VIVO incident history — what the predecessor system's support load looked like. |
 
 ## 9. Build-time specs & drafts (not operational)
@@ -236,7 +240,13 @@ while writing the §1–§8 docs. Tracked in **[issue #560](https://github.com/w
 
 ---
 
-*Last updated: 2026-06-09 — §0/§6 added [`scholar-tools-taxonomy.md`](./scholar-tools-taxonomy.md):
+*Last updated: 2026-06-10 — §0/§8 added [`what-can-be-hidden.md`](./what-can-be-hidden.md):
+the catalog of everything that can be removed from a public profile and search, by section and by
+record — the four mechanisms (`suppression`, the `overview` `field_override`, the two Methods-lens
+overlays, `deleted_at` soft-delete), per-author hide vs whole-pub takedown vs derived-dark, the
+non-suppressible leadership guard, the who-can-hide-what matrix, and the new **Methods & tools**
+case (no per-scholar control — families are hidden editorially via `family_suppression_overlay` or
+public-gated via `family_sensitivity_overlay` + `METHODS_LENS_SENSITIVE_GATE`). 2026-06-09 — §0/§6 added [`scholar-tools-taxonomy.md`](./scholar-tools-taxonomy.md):
 where the Methods & tools (method-family) taxonomy lives — the ReciterAI A2 artifact set on S3
 (`tools/latest/{tools,families}.json`), **not** DynamoDB (the legacy `reciterai` `TOOL#` rows are
 per-PMID activity, not the canonical registry) — plus the published `tools[]`/`families[]` schema,

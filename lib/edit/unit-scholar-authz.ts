@@ -43,9 +43,10 @@
  * impersonate a unit admin (or the scholar) and inherit this path. The caller
  * asserts `impersonatedCwid === null` before taking the unit-admin branch, just
  * as the #779 proxy branch in `app/api/edit/field/route.ts` does. The
- * synthetic `EditSession` below carries `isSuperuser: false` because
- * `getEffectiveUnitRole` ignores that field (superuser is a separate, earlier
- * allow in the route) — it is never an assertion about A's superuser status.
+ * synthetic `EditSession` below carries `isSuperuser: false` (and
+ * `isCommsSteward: false`) because `getEffectiveUnitRole` ignores those fields
+ * (superuser is a separate, earlier allow in the route; the comms-steward role
+ * is orthogonal to unit curation) — it is never an assertion about A's tier.
  *
  * ── Fail-closed ────────────────────────────────────────────────────────────
  * Returns `false` on: empty `adminCwid`/`scholarCwid` (no DB hit); a missing or
@@ -169,9 +170,14 @@ export async function resolveEditableUnitViaUnitAdmin(
     for (const d of divisions) parentByDivision.set(d.code, d.deptCode);
   }
 
-  // `getEffectiveUnitRole` keys on `session.cwid` and ignores `isSuperuser`;
-  // pass A's real cwid. (Superuser is allowed earlier in the route, not here.)
-  const session: EditSession = { cwid: adminCwid, isSuperuser: false };
+  // `getEffectiveUnitRole` keys on `session.cwid` and ignores `isSuperuser` /
+  // `isCommsSteward`; pass A's real cwid. (Superuser is allowed earlier in the
+  // route, not here; the comms-steward role is unrelated to unit curation.)
+  const session: EditSession = {
+    cwid: adminCwid,
+    isSuperuser: false,
+    isCommsSteward: false,
+  };
 
   // Department membership (no cascade for a department — #540 edge 9).
   if (scholar.deptCode) {

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { sanitizePubTitle } from "@/lib/utils";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { PubJournal } from "@/components/publication/pub-html";
 
 /**
  * Shared expand UX for grant rows. Used by:
@@ -132,7 +133,7 @@ export function ExpandedGrant({
                 {p.isLowerConfidence ? <LowerConfidenceBadge /> : null}
               </div>
               <div className="text-muted-foreground mt-0.5 text-xs">
-                {p.journal ? <em>{p.journal}</em> : null}
+                <PubJournal value={p.journal} />
                 {p.year ? <> · {p.year}</> : null}
                 {" · PMID "}
                 {p.pmid}

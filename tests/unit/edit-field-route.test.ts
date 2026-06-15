@@ -254,6 +254,21 @@ describe("POST /api/edit/field", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
+  // #955 item 4 — the best-effort profanity screen the self-serve slug-request
+  // path enforces (`validateRequestedSlug`) now also blocks the superuser/owner
+  // override path here, so the override can't bypass it. Token-exact, name-safe;
+  // blocks with the matching `profanity` code (400) before any write.
+  it("rejects a profane slug with 400 (profanity) on the superuser override path", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "sch5", fieldName: "slug", value: "john-fuck-smith" }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("profanity");
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
   // ─── #742 Phase B — overview provenance, upserted in the save tx ───
 
   it("overview save WITH a matching sourceGenerationId saved verbatim -> origin 'generated'", async () => {

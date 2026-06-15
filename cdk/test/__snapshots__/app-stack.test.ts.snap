@@ -352,6 +352,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "MENTORING_COPUB_BRIDGE",
+                "Value": "on",
+              },
+              {
+                "Name": "PUBLICATION_CITING_BRIDGE",
+                "Value": "on",
+              },
+              {
                 "Name": "SELF_EDIT_SLUG_REQUEST",
                 "Value": "on",
               },
@@ -388,6 +396,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PUB_HIGHLIGHT",
                 "Value": "on",
               },
@@ -413,6 +425,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_SUGGEST_MESH_CONCEPT",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_CONCEPT_PRECOUNT",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_CONCEPT_GRANT_AXIS",
                 "Value": "off",
               },
               {
@@ -444,6 +464,22 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "METHODS_LENS_FAMILY_DEFINITIONS",
+                "Value": "off",
+              },
+              {
+                "Name": "CENTER_METHODS_FACET",
+                "Value": "off",
+              },
+              {
+                "Name": "ORG_UNIT_METHODS_CHIPS",
+                "Value": "off",
+              },
+              {
+                "Name": "ORG_UNIT_METHODS_FACET",
+                "Value": "off",
+              },
+              {
                 "Name": "PROFILE_FACET_REDESIGN",
                 "Value": "off",
               },
@@ -464,8 +500,24 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "",
               },
               {
+                "Name": "PROFILE_EMAIL_RELEASE_GATE",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_SUPERUSER_CWIDS",
                 "Value": "paa2013,drw2004,mrj4001,ved4006,mom2021",
+              },
+              {
+                "Name": "COMMS_STEWARD_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_COMMS_STEWARD_GROUP_CN",
+                "Value": "",
+              },
+              {
+                "Name": "SCHOLARS_COMMS_STEWARD_ALLOWLIST",
+                "Value": "",
               },
               {
                 "Name": "SECURITY_CSP_MODE",
@@ -3400,6 +3452,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "MENTORING_COPUB_BRIDGE",
+                "Value": "on",
+              },
+              {
+                "Name": "PUBLICATION_CITING_BRIDGE",
+                "Value": "on",
+              },
+              {
                 "Name": "SELF_EDIT_SLUG_REQUEST",
                 "Value": "on",
               },
@@ -3436,6 +3496,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB",
+                "Value": "on",
+              },
+              {
                 "Name": "SEARCH_PUB_HIGHLIGHT",
                 "Value": "on",
               },
@@ -3462,6 +3526,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_SUGGEST_MESH_CONCEPT",
                 "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_CONCEPT_PRECOUNT",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_CONCEPT_GRANT_AXIS",
+                "Value": "on",
               },
               {
                 "Name": "IMPERSONATION_ENABLED",
@@ -3492,28 +3564,60 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "METHODS_LENS_FAMILY_DEFINITIONS",
+                "Value": "on",
+              },
+              {
+                "Name": "CENTER_METHODS_FACET",
+                "Value": "on",
+              },
+              {
+                "Name": "ORG_UNIT_METHODS_CHIPS",
+                "Value": "on",
+              },
+              {
+                "Name": "ORG_UNIT_METHODS_FACET",
+                "Value": "on",
+              },
+              {
                 "Name": "PROFILE_FACET_REDESIGN",
                 "Value": "on",
               },
               {
                 "Name": "SCHOLAR_LIST_EXPORT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "INTERNAL_VIEWER_NETWORK_SIGNAL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLAR_LIST_EXPORT_EMAIL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "INTERNAL_VIEWER_CIDRS",
-                "Value": "",
+                "Value": "157.139.83.164/32",
+              },
+              {
+                "Name": "PROFILE_EMAIL_RELEASE_GATE",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_SUPERUSER_CWIDS",
                 "Value": "paa2013,drw2004,mrj4001,ved4006,mom2021",
+              },
+              {
+                "Name": "COMMS_STEWARD_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_COMMS_STEWARD_GROUP_CN",
+                "Value": "",
+              },
+              {
+                "Name": "SCHOLARS_COMMS_STEWARD_ALLOWLIST",
+                "Value": "dwd2001",
               },
               {
                 "Name": "SECURITY_CSP_MODE",

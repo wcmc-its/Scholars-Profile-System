@@ -78,6 +78,40 @@ run. **Do not infer the TBDs from the Observed column** — they are different r
 | Restore drill (PITR, mechanism only) | 19 min (2026-05-21) | [`PRODUCTION.md § Recovery objectives`](./PRODUCTION.md) |
 | ETL `reciter` run | ~5 min (heavy) | [`PRODUCTION.md § ETL scheduling`](./PRODUCTION.md) |
 
+## Search origin-path optimizations (2026-06)
+
+`/search` is `force-dynamic` — every request hits origin and is bounded by **serial
+OpenSearch round-trips**, not cache. So the lever there is *round-trip count*, and three
+changes cut it on the hot concept-People path (fix plan: `.planning/perf-audit.md`):
+
+- **Section A** (#913, `5db894d`) — People `_source` include-list (stop shipping
+  concatenated abstracts only to discard them), the active-tab full search hoisted above
+  the badge `await` (one fewer serial RTT), and profile fan-out dedup/projection/parallelize.
+- **Section B trio** (#922, `1e3dfdd`) — dept-label TTL cache, request-scoped taxonomy
+  memo, and a hits-only mode for the sparse-concept fallback (skips discarded facets +
+  ≤500-row hydration).
+- **B2** (#924, `77f5af0`) — dropped the dedicated concept-escalation **pre-count**: the
+  escalation decision now reads the main search's own `hits.total` and re-runs escalated
+  only on the rare sparse case, removing **2 round-trips per cold concept-People SSR render**
+  on the common non-sparse path. Gated by `SEARCH_PEOPLE_CONCEPT_PRECOUNT` (default-on = old
+  pre-count path; `off` = reorder). **Staging flipped to the reorder 2026-06-12** (task def
+  `sps-app-staging:45`); prod still on the old path.
+
+> ⚠️ **Not yet a measured win.** A staging curl probe (`/search?q=…&type=people`, HTTP 200)
+> confirmed the B2 reorder is live with no hot-path regression, but staging's small
+> OpenSearch + single-sample curl noise (±1 s run-to-run) **cannot isolate** the per-RTT
+> delta — do not cite the staging numbers as a baseline. The real before/after is the
+> `search_query` `duration_ms` **p50/p95** (Logs Insights, see [§ How to (re)measure](#how-to-remeasure))
+> under **prod** traffic; capture that before flipping `SEARCH_PEOPLE_CONCEPT_PRECOUNT=off`
+> in prod. Until then the `/search` origin cell above stays `TBD (measure)`.
+
+> ⚠️ **Profile edge-cache reality vs. the table.** The Scholar-profile row lists ISR TTL
+> 24 h, but that is the *intended* state — the canonical root profile URL is currently
+> served `force-dynamic` and lands on no cacheable CloudFront behavior, so today it is an
+> origin miss every view (audit F1 / C1). The fix (force-static + edge-behavior carve) is
+> **#914, held** pending its prod prerequisites (`PROFILE_EMAIL_RELEASE_GATE` on in prod
+> first + a shared multi-task ISR cacheHandler). This is the single biggest site-wide win.
+
 ## Scaling characteristics
 
 - **App tier:** ECS Fargate, prod 1024 CPU / 2048 MiB per task. Target-tracking
@@ -125,5 +159,6 @@ moves the render path (a new heavy query, an ISR TTL change, an instance-size ch
 
 ---
 
-*Baseline last updated: 2026-05-28 — pre-launch; per-surface latency cells pending a
-production-traffic or load-test measurement run.*
+*Baseline last updated: 2026-06-12 — search origin-path optimizations (Section A/B, #913 /
+#922 / #924) recorded; per-surface latency cells still pending a production-traffic or
+load-test measurement run.*

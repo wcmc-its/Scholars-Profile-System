@@ -118,6 +118,40 @@ describe("buildOverviewUserPrompt — element emphasis", () => {
     const prompt = buildOverviewUserPrompt(FACTS, params({ elements: [] }));
     expect(prompt).not.toContain("Emphasize these themes");
   });
+
+  // #886 honesty guard — Methods is default-on, but the emphasis must follow the
+  // grounding: a scholar with no method families in FACTS is never told to
+  // foreground Methods (the #875 dishonesty the default-on flip would otherwise
+  // reintroduce).
+  it("drops Methods from the emphasis line when facts.methods is empty", () => {
+    const prompt = buildOverviewUserPrompt(
+      FACTS, // FACTS.methods === []
+      params({ elements: ["research_focus", "methods"] }),
+    );
+    expect(prompt).toContain(
+      "Emphasize these themes: Research focus. Give less weight to themes not listed.",
+    );
+    expect(prompt).not.toContain("Methods");
+  });
+
+  it("omits the emphasis line entirely when Methods was the only selected theme but facts.methods is empty", () => {
+    const prompt = buildOverviewUserPrompt(FACTS, params({ elements: ["methods"] }));
+    expect(prompt).not.toContain("Emphasize these themes");
+  });
+
+  it("keeps Methods in the emphasis line when facts.methods is non-empty", () => {
+    const factsWithMethods: OverviewFacts = {
+      ...FACTS,
+      methods: [{ name: "AAV vectors", category: "vector platform", examples: ["AAV9"] }],
+    };
+    const prompt = buildOverviewUserPrompt(
+      factsWithMethods,
+      params({ elements: ["research_focus", "methods"] }),
+    );
+    expect(prompt).toContain(
+      "Emphasize these themes: Research focus, Methods. Give less weight to themes not listed.",
+    );
+  });
 });
 
 describe("buildOverviewUserPrompt — untrusted instructions", () => {
