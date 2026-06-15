@@ -874,7 +874,7 @@ describe("EtlStack", () => {
           );
         });
 
-      it("the ETL task role grants dynamodb:Scan scoped to the reciterai table (exactly Scan, no bare *)", () => {
+      it("the ETL task role grants dynamodb:Scan scoped to the reciterai + Identity tables (exactly Scan, no bare *)", () => {
         const policy = etlTaskRolePolicy();
         expect(policy).toBeDefined();
         const statements = policy?.Properties?.PolicyDocument
@@ -891,9 +891,11 @@ describe("EtlStack", () => {
         expect(Array.isArray(action) ? action : [action]).toEqual([
           "dynamodb:Scan",
         ]);
-        // resource is the single reciterai table, never a bare *
+        // resources are the reciterai table + the #918 Identity table (ORCID
+        // backfill), each named exactly, never a bare *
         const serialized = JSON.stringify(dynamoStmt?.Resource);
         expect(serialized).toMatch(/table\/reciterai/);
+        expect(serialized).toMatch(/table\/Identity/);
         expect(serialized).not.toMatch(/\*/);
       });
 

@@ -359,6 +359,7 @@ export class EtlStack extends Stack {
     // service-wide `*`:
     //
     //   etl:dynamodb     (nightly) dynamodb:Scan  table/reciterai
+    //   etl:identity     (nightly) dynamodb:Scan  table/Identity
     //   etl:spotlight    (weekly)  s3:GetObject   wcmc-reciterai-artifacts/spotlight/*
     //   etl:scholar-tool (nightly) s3:GetObject   wcmc-reciterai-artifacts/tools/*
     //   etl:hierarchy    (annual)  s3:GetObject   wcmc-reciterai-hierarchy/*
@@ -385,6 +386,14 @@ export class EtlStack extends Stack {
           actions: ["dynamodb:Scan"],
           resources: [
             `arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`,
+            // #918 — etl:identity scans the Identity table for ORCID iDs to
+            // populate Scholar.orcid. Scoped to this account, matching the
+            // account-shared reciterai store. OPERATOR: confirm the Identity
+            // table resides in this account before enabling the schedule —
+            // else this ARN needs a cross-account assume-role. The step
+            // fail-and-catches in the state machine if the grant is wrong, so
+            // a misconfiguration alarms the one step, not the nightly chain.
+            `arn:aws:dynamodb:${this.region}:${this.account}:table/Identity`,
           ],
         }),
         new iam.PolicyStatement({
@@ -484,6 +493,8 @@ export class EtlStack extends Stack {
         // 8 GB task memory (etlTaskMemoryMiB) so it can use what's allocated.
         NODE_OPTIONS: "--max-old-space-size=7168",
         SCHOLARS_DYNAMODB_TABLE: "reciterai",
+        // #918 — etl:identity scans this table for ORCID iDs → Scholar.orcid.
+        SCHOLARS_IDENTITY_TABLE: "Identity",
         ARTIFACTS_BUCKET: "wcmc-reciterai-artifacts",
         ARTIFACT_PREFIX: "spotlight",
         HIERARCHY_BUCKET: "wcmc-reciterai-hierarchy",
@@ -695,6 +706,12 @@ export class EtlStack extends Stack {
       // same night) and before search:index (so the rebuilt index carries the
       // day's scores).
       { id: "Dynamodb", npmScript: "etl:dynamodb", external: true },
+      // #918 — populate Scholar.orcid from the WCM Identity table (DynamoDB
+      // Scan, external:true). After Dynamodb (scholars exist; both are DynamoDB
+      // scans); ORCID feeds the profile JSON-LD `sameAs`, not the search index,
+      // so there's no SearchIndex ordering dependency. Never NULLs an existing
+      // orcid — Identity may lag ED — so re-running nightly only self-heals.
+      { id: "Identity", npmScript: "etl:identity", external: true },
       // #794 — A2 canonical tools taxonomy → scholar_tool. Runs after Dynamodb
       // (whose scholar projection the cwid FK targets) and before SearchIndex.
       // external:true — reads s3://wcmc-reciterai-artifacts/tools/ via the task
