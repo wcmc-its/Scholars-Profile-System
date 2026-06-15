@@ -21,6 +21,15 @@ export interface CloudWatchAlarmPayload {
 }
 
 /**
+ * Severity tier assigned by the relay from the originating SNS topic. P1
+ * ("page") posts to the primary on-call Teams channel; P2 ("warn") posts to a
+ * separate, quieter channel (data-freshness, reconciler, and resource-pressure
+ * signals). Rendered as a card fact so the tier is visible even if a P2 alert
+ * falls back to the primary channel.
+ */
+export type AlertSeverity = "page" | "warn";
+
+/**
  * Schema of the custom JSON the EtlStack Step Functions publish to the
  * `etl-failures-<env>` topic — the per-step failure Catch (`NotifyEd` etc.)
  * and the annual approval gate. Distinct from {@link CloudWatchAlarmPayload}:
@@ -81,12 +90,79 @@ function cloudwatchConsoleUrl(alarmName: string, region: string): string {
   return `https://${region}.console.aws.amazon.com/cloudwatch/home?region=${region}#alarmsV2:alarm/${encoded}`;
 }
 
+/**
+ * Console deep-link to the reliability dashboard for the alarm's env, derived
+ * from the `-prod` / `-staging` suffix on the alarm name (every SPS alarm
+ * carries the env literal -- Footgun #4). Returns `undefined` when the env is
+ * not recognisable, so the action is omitted rather than guessed. The first
+ * thing an operator wants after the alarm name is the at-a-glance board, not
+ * the single-metric alarm page.
+ */
+function reliabilityDashboardUrl(
+  alarmName: string,
+  region: string,
+): string | undefined {
+  const env = alarmName.endsWith("-prod")
+    ? "prod"
+    : alarmName.endsWith("-staging")
+      ? "staging"
+      : undefined;
+  if (env === undefined) return undefined;
+  return `https://${region}.console.aws.amazon.com/cloudwatch/home?region=${region}#dashboards:name=sps-reliability-${env}`;
+}
+
+/** Human-readable severity label for the card fact. */
+function severityLabel(severity: AlertSeverity): string {
+  return severity === "warn" ? "P2 (warn)" : "P1 (page)";
+}
+
 export function buildAdaptiveCard(
   alarm: CloudWatchAlarmPayload,
+  severity?: AlertSeverity,
 ): AdaptiveCardEnvelope {
   const region = alarm.Region ?? "us-east-1";
   const emoji = STATE_EMOJI[alarm.NewStateValue] ?? UNKNOWN_STATE_EMOJI;
   const when = alarm.StateChangeTime ?? "(unknown)";
+
+  // Facts are looked up by title (order-independent) on the receiving side.
+  // State first, then severity + description (the actionable context, incl.
+  // the runbook pointer baked into AlarmDescription), then the raw reason.
+  const facts: Array<{ title: string; value: string }> = [
+    { title: "State", value: alarm.NewStateValue },
+  ];
+  if (severity !== undefined) {
+    facts.push({ title: "Severity", value: severityLabel(severity) });
+  }
+  if (
+    alarm.AlarmDescription !== undefined &&
+    alarm.AlarmDescription.length > 0
+  ) {
+    facts.push({
+      title: "Description",
+      value: truncate(alarm.AlarmDescription, REASON_MAX_CHARS),
+    });
+  }
+  facts.push({ title: "Reason", value: reasonFact(alarm.NewStateReason) });
+  facts.push({ title: "Region", value: region });
+  facts.push({ title: "When", value: when });
+
+  // CloudWatch alarm page stays first (actions[0]); the reliability dashboard
+  // is the natural second click and is added only when the env is known.
+  const actions: Array<{ type: string; title: string; url: string }> = [
+    {
+      type: "Action.OpenUrl",
+      title: "View in CloudWatch",
+      url: cloudwatchConsoleUrl(alarm.AlarmName, region),
+    },
+  ];
+  const dashboardUrl = reliabilityDashboardUrl(alarm.AlarmName, region);
+  if (dashboardUrl !== undefined) {
+    actions.push({
+      type: "Action.OpenUrl",
+      title: "View reliability dashboard",
+      url: dashboardUrl,
+    });
+  }
 
   return {
     type: "message",
@@ -107,21 +183,10 @@ export function buildAdaptiveCard(
             },
             {
               type: "FactSet",
-              facts: [
-                { title: "State", value: alarm.NewStateValue },
-                { title: "Reason", value: reasonFact(alarm.NewStateReason) },
-                { title: "Region", value: region },
-                { title: "When", value: when },
-              ],
+              facts,
             },
           ],
-          actions: [
-            {
-              type: "Action.OpenUrl",
-              title: "View in CloudWatch",
-              url: cloudwatchConsoleUrl(alarm.AlarmName, region),
-            },
-          ],
+          actions,
         },
       },
     ],

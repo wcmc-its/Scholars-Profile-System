@@ -24,6 +24,12 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         ],
       },
     },
+    "WarnTopicArn": {
+      "Description": "SNS topic for the P2 warn tier (data-freshness / reconciler / resource-pressure). Relayed to a separate Teams channel, falling back to the page channel if scholars/{env}/oncall/teams-webhook-url-warn is unset.",
+      "Value": {
+        "Ref": "WarnTopicFEEED862",
+      },
+    },
   },
   "Parameters": {
     "BootstrapVersion": {
@@ -70,11 +76,52 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CE::AnomalySubscription",
     },
-    "AuroraConnectionsAlarm320D1F2B": {
+    "AppUnavailableAlarm128C3206": {
       "Properties": {
         "AlarmActions": [
           {
             "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "Public serving is degraded or down (prod): one or more of 5xx-rate / zero-healthy-hosts / task-shortfall is in ALARM. Single P1 page for the serving cascade. See docs/SLOs.md.",
+        "AlarmName": "sps-app-unavailable-prod",
+        "AlarmRule": {
+          "Fn::Join": [
+            "",
+            [
+              "(ALARM("",
+              {
+                "Fn::GetAtt": [
+                  "PublicAlb5xxRateAlarmC7D5139D",
+                  "Arn",
+                ],
+              },
+              "") OR ALARM("",
+              {
+                "Fn::GetAtt": [
+                  "PublicAlbUnhealthyHostsAlarm114335BE",
+                  "Arn",
+                ],
+              },
+              "") OR ALARM("",
+              {
+                "Fn::GetAtt": [
+                  "EcsTaskShortfallAlarm951444EC",
+                  "Arn",
+                ],
+              },
+              ""))",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::CloudWatch::CompositeAlarm",
+    },
+    "AuroraConnectionsAlarm320D1F2B": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
           },
         ],
         "AlarmDescription": "Aurora active connection count > 80 sustained over 5m (prod). Symptom of connection-pool exhaustion or unintended app fan-out.",
@@ -103,7 +150,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       "Properties": {
         "AlarmActions": [
           {
-            "Ref": "AlarmTopicD01E77F9",
+            "Ref": "WarnTopicFEEED862",
           },
         ],
         "AlarmDescription": "Aurora cluster CPU > 80% sustained for 10m (prod). Likely a hot query loop or runaway analytic.",
@@ -130,11 +177,6 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
     },
     "EcsTaskShortfallAlarm951444EC": {
       "Properties": {
-        "AlarmActions": [
-          {
-            "Ref": "AlarmTopicD01E77F9",
-          },
-        ],
         "AlarmDescription": "ECS service running task count is below desired for 5 consecutive minutes (prod). Tasks died and are not being replaced.",
         "AlarmName": "sps-ecs-task-shortfall-prod",
         "ComparisonOperator": "GreaterThanThreshold",
@@ -209,7 +251,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       "Properties": {
         "AlarmActions": [
           {
-            "Ref": "AlarmTopicD01E77F9",
+            "Ref": "WarnTopicFEEED862",
           },
         ],
         "AlarmDescription": "Edit-surface 403 (edit_authz_denied) count > 10 in any 5m window for 2 consecutive windows (prod). Sustained rate -- predicate bug or active probing. See docs/SLOs.md.",
@@ -414,10 +456,22 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "d75879b698788b251a8ef78982b96e776a1c4052184904d756fb30440b123012.zip",
+          "S3Key": "c15b8e9d5e8a281128f2c4956d74dcbee6bdd42a39431a2cd7e2bf88c03c1856.zip",
         },
         "Environment": {
           "Variables": {
+            "TEAMS_WARN_WEBHOOK_SECRET_ARN": {
+              "Fn::Join": [
+                "",
+                [
+                  "arn:",
+                  {
+                    "Ref": "AWS::Partition",
+                  },
+                  ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/oncall/teams-webhook-url-warn",
+                ],
+              ],
+            },
             "TEAMS_WEBHOOK_SECRET_ARN": {
               "Fn::Join": [
                 "",
@@ -498,6 +552,22 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::Lambda::Permission",
     },
+    "OncallRelayFunctionAllowInvokeSpsObservabilityprodWarnTopicFDB460DBF3E11FA4": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Principal": "sns.amazonaws.com",
+        "SourceArn": {
+          "Ref": "WarnTopicFEEED862",
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
     "OncallRelayFunctionServiceRole66F12272": {
       "Properties": {
         "AssumeRolePolicyDocument": {
@@ -552,6 +622,25 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
                 ],
               },
             },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/oncall/teams-webhook-url-warn-??????",
+                  ],
+                ],
+              },
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -563,6 +652,21 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         ],
       },
       "Type": "AWS::IAM::Policy",
+    },
+    "OncallRelayFunctionWarnTopicFC283EAE": {
+      "Properties": {
+        "Endpoint": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Protocol": "lambda",
+        "TopicArn": {
+          "Ref": "WarnTopicFEEED862",
+        },
+      },
+      "Type": "AWS::SNS::Subscription",
     },
     "OncallRelayLogGroup260778A1": {
       "DeletionPolicy": "Retain",
@@ -610,7 +714,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       "Properties": {
         "AlarmActions": [
           {
-            "Ref": "AlarmTopicD01E77F9",
+            "Ref": "WarnTopicFEEED862",
           },
         ],
         "AlarmDescription": "OpenSearch JVM memory pressure > 85% for 15m (prod). GC pressure will cascade into query latency.",
@@ -641,11 +745,6 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
     },
     "PublicAlb5xxRateAlarmC7D5139D": {
       "Properties": {
-        "AlarmActions": [
-          {
-            "Ref": "AlarmTopicD01E77F9",
-          },
-        ],
         "AlarmDescription": "Public ALB target 5xx rate exceeds 1% over 5m (prod). Burns the 99.5% availability SLO budget. See docs/SLOs.md.",
         "AlarmName": "sps-alb-5xx-rate-prod",
         "ComparisonOperator": "GreaterThanThreshold",
@@ -735,11 +834,6 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
     },
     "PublicAlbUnhealthyHostsAlarm114335BE": {
       "Properties": {
-        "AlarmActions": [
-          {
-            "Ref": "AlarmTopicD01E77F9",
-          },
-        ],
         "AlarmDescription": "Public ALB has zero healthy targets for 5 consecutive minutes (prod). Circuit-breaker did not catch it -- real outage.",
         "AlarmName": "sps-alb-unhealthy-hosts-prod",
         "ComparisonOperator": "GreaterThanThreshold",
@@ -939,6 +1033,13 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudWatch::Dashboard",
     },
+    "WarnTopicFEEED862": {
+      "Properties": {
+        "DisplayName": "SPS prod warnings (P2)",
+        "TopicName": "sps-warn-prod",
+      },
+      "Type": "AWS::SNS::Topic",
+    },
   },
   "Rules": {
     "CheckBootstrapVersion": {
@@ -994,6 +1095,12 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         ],
       },
     },
+    "WarnTopicArn": {
+      "Description": "SNS topic for the P2 warn tier (data-freshness / reconciler / resource-pressure). Relayed to a separate Teams channel, falling back to the page channel if scholars/{env}/oncall/teams-webhook-url-warn is unset.",
+      "Value": {
+        "Ref": "WarnTopicFEEED862",
+      },
+    },
   },
   "Parameters": {
     "BootstrapVersion": {
@@ -1010,11 +1117,52 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::SNS::Topic",
     },
-    "AuroraConnectionsAlarm320D1F2B": {
+    "AppUnavailableAlarm128C3206": {
       "Properties": {
         "AlarmActions": [
           {
             "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "Public serving is degraded or down (staging): one or more of 5xx-rate / zero-healthy-hosts / task-shortfall is in ALARM. Single P1 page for the serving cascade. See docs/SLOs.md.",
+        "AlarmName": "sps-app-unavailable-staging",
+        "AlarmRule": {
+          "Fn::Join": [
+            "",
+            [
+              "(ALARM("",
+              {
+                "Fn::GetAtt": [
+                  "PublicAlb5xxRateAlarmC7D5139D",
+                  "Arn",
+                ],
+              },
+              "") OR ALARM("",
+              {
+                "Fn::GetAtt": [
+                  "PublicAlbUnhealthyHostsAlarm114335BE",
+                  "Arn",
+                ],
+              },
+              "") OR ALARM("",
+              {
+                "Fn::GetAtt": [
+                  "EcsTaskShortfallAlarm951444EC",
+                  "Arn",
+                ],
+              },
+              ""))",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::CloudWatch::CompositeAlarm",
+    },
+    "AuroraConnectionsAlarm320D1F2B": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
           },
         ],
         "AlarmDescription": "Aurora active connection count > 80 sustained over 5m (staging). Symptom of connection-pool exhaustion or unintended app fan-out.",
@@ -1043,7 +1191,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       "Properties": {
         "AlarmActions": [
           {
-            "Ref": "AlarmTopicD01E77F9",
+            "Ref": "WarnTopicFEEED862",
           },
         ],
         "AlarmDescription": "Aurora cluster CPU > 80% sustained for 10m (staging). Likely a hot query loop or runaway analytic.",
@@ -1070,11 +1218,6 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
     },
     "EcsTaskShortfallAlarm951444EC": {
       "Properties": {
-        "AlarmActions": [
-          {
-            "Ref": "AlarmTopicD01E77F9",
-          },
-        ],
         "AlarmDescription": "ECS service running task count is below desired for 5 consecutive minutes (staging). Tasks died and are not being replaced.",
         "AlarmName": "sps-ecs-task-shortfall-staging",
         "ComparisonOperator": "GreaterThanThreshold",
@@ -1149,7 +1292,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       "Properties": {
         "AlarmActions": [
           {
-            "Ref": "AlarmTopicD01E77F9",
+            "Ref": "WarnTopicFEEED862",
           },
         ],
         "AlarmDescription": "Edit-surface 403 (edit_authz_denied) count > 10 in any 5m window for 2 consecutive windows (staging). Sustained rate -- predicate bug or active probing. See docs/SLOs.md.",
@@ -1253,10 +1396,22 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "d75879b698788b251a8ef78982b96e776a1c4052184904d756fb30440b123012.zip",
+          "S3Key": "c15b8e9d5e8a281128f2c4956d74dcbee6bdd42a39431a2cd7e2bf88c03c1856.zip",
         },
         "Environment": {
           "Variables": {
+            "TEAMS_WARN_WEBHOOK_SECRET_ARN": {
+              "Fn::Join": [
+                "",
+                [
+                  "arn:",
+                  {
+                    "Ref": "AWS::Partition",
+                  },
+                  ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/oncall/teams-webhook-url-warn",
+                ],
+              ],
+            },
             "TEAMS_WEBHOOK_SECRET_ARN": {
               "Fn::Join": [
                 "",
@@ -1337,6 +1492,22 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::Lambda::Permission",
     },
+    "OncallRelayFunctionAllowInvokeSpsObservabilitystagingWarnTopic55AD92C81249F5FD": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Principal": "sns.amazonaws.com",
+        "SourceArn": {
+          "Ref": "WarnTopicFEEED862",
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
     "OncallRelayFunctionServiceRole66F12272": {
       "Properties": {
         "AssumeRolePolicyDocument": {
@@ -1391,6 +1562,25 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
                 ],
               },
             },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/oncall/teams-webhook-url-warn-??????",
+                  ],
+                ],
+              },
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -1402,6 +1592,21 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         ],
       },
       "Type": "AWS::IAM::Policy",
+    },
+    "OncallRelayFunctionWarnTopicFC283EAE": {
+      "Properties": {
+        "Endpoint": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Protocol": "lambda",
+        "TopicArn": {
+          "Ref": "WarnTopicFEEED862",
+        },
+      },
+      "Type": "AWS::SNS::Subscription",
     },
     "OncallRelayLogGroup260778A1": {
       "DeletionPolicy": "Retain",
@@ -1449,7 +1654,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       "Properties": {
         "AlarmActions": [
           {
-            "Ref": "AlarmTopicD01E77F9",
+            "Ref": "WarnTopicFEEED862",
           },
         ],
         "AlarmDescription": "OpenSearch JVM memory pressure > 85% for 15m (staging). GC pressure will cascade into query latency.",
@@ -1480,11 +1685,6 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
     },
     "PublicAlb5xxRateAlarmC7D5139D": {
       "Properties": {
-        "AlarmActions": [
-          {
-            "Ref": "AlarmTopicD01E77F9",
-          },
-        ],
         "AlarmDescription": "Public ALB target 5xx rate exceeds 1% over 5m (staging). Burns the 99.5% availability SLO budget. See docs/SLOs.md.",
         "AlarmName": "sps-alb-5xx-rate-staging",
         "ComparisonOperator": "GreaterThanThreshold",
@@ -1574,11 +1774,6 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
     },
     "PublicAlbUnhealthyHostsAlarm114335BE": {
       "Properties": {
-        "AlarmActions": [
-          {
-            "Ref": "AlarmTopicD01E77F9",
-          },
-        ],
         "AlarmDescription": "Public ALB has zero healthy targets for 5 consecutive minutes (staging). Circuit-breaker did not catch it -- real outage.",
         "AlarmName": "sps-alb-unhealthy-hosts-staging",
         "ComparisonOperator": "GreaterThanThreshold",
@@ -1777,6 +1972,13 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "DashboardName": "sps-reliability-staging",
       },
       "Type": "AWS::CloudWatch::Dashboard",
+    },
+    "WarnTopicFEEED862": {
+      "Properties": {
+        "DisplayName": "SPS staging warnings (P2)",
+        "TopicName": "sps-warn-staging",
+      },
+      "Type": "AWS::SNS::Topic",
     },
   },
   "Rules": {
