@@ -494,8 +494,8 @@ export async function isChairAppointment(
 // ---------------------------------------------------------------------------
 // unit-curation fields (#540 Phase 5 / SPEC § 1)
 //
-// Department and division `field_override` rows curate four fields:
-//   `description`, `slug`, `leaderCwid`, `leaderInterim`.
+// Department and division `field_override` rows curate five fields:
+//   `description`, `url`, `slug`, `leaderCwid`, `leaderInterim`.
 // Each has its own validator. The route picks the validator by `fieldName`.
 //
 // Centers do NOT use `field_override` — they edit in-row through
@@ -506,6 +506,7 @@ export async function isChairAppointment(
 /** The dept/div `field_override.fieldName` allowlist. */
 export const EDITABLE_UNIT_FIELDS = [
   "description",
+  "url",
   "slug",
   "leaderCwid",
   "leaderInterim",
@@ -519,6 +520,9 @@ export function isEditableUnitField(value: string): value is EditableUnitField {
 
 /** Max length of a unit `description` blurb — SPEC § 1. */
 export const UNIT_DESCRIPTION_MAX_LENGTH = 4_000;
+
+/** Max length of a unit `url` — matches `@db.VarChar(512)` on all three models. */
+export const UNIT_URL_MAX_LENGTH = 512;
 
 export type UnitFieldResult =
   | { ok: true; value: string }
@@ -539,6 +543,43 @@ export function validateUnitDescription(input: string): UnitFieldResult {
   if (trimmed.length > UNIT_DESCRIPTION_MAX_LENGTH) {
     return { ok: false, error: "description_too_long" };
   }
+  return { ok: true, value: trimmed };
+}
+
+/**
+ * Validate a unit `url` (#1021) — the optional outbound website link rendered
+ * beside the unit name on the public page.
+ *
+ * Rules:
+ *  - `""`         → accepted; clears the link (the curator removes it). The
+ *                   stored value is `""`; the read-merge surfaces null-vs-value
+ *                   via `mergeUnitFields`, and the center in-row path coerces
+ *                   `""` → NULL on the column (mirroring `description`).
+ *  - https only   → mirrors `Scholar.clinicalProfileUrl`, which is normalized
+ *                   to https:// at ETL time. A curated link is public-facing, so
+ *                   we reject `http:`/`mailto:`/`javascript:` and any other
+ *                   scheme rather than silently upgrade it.
+ *  - well-formed  → must parse as a URL (host required); garbage → error.
+ *  - ≤ 512 chars  → matches the `@db.VarChar(512)` column.
+ *
+ * Whitespace is trimmed before validation. The value is stored verbatim (the
+ * `URL`-parsed canonical form is intentionally NOT used — a curator's exact
+ * URL, including path/query, round-trips unchanged).
+ */
+export function validateUnitUrl(input: string): UnitFieldResult {
+  if (typeof input !== "string") return { ok: false, error: "invalid_value" };
+  const trimmed = input.trim();
+  if (trimmed === "") return { ok: true, value: "" };
+  if (trimmed.length > UNIT_URL_MAX_LENGTH) {
+    return { ok: false, error: "url_too_long" };
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return { ok: false, error: "invalid_url" };
+  }
+  if (parsed.protocol !== "https:") return { ok: false, error: "invalid_url" };
   return { ok: true, value: trimmed };
 }
 
@@ -586,6 +627,7 @@ export function validateUnitFieldValue(
   value: string,
 ): UnitFieldResult {
   if (fieldName === "description") return validateUnitDescription(value);
+  if (fieldName === "url") return validateUnitUrl(value);
   if (fieldName === "slug") return validateSlugFormat(value);
   if (fieldName === "leaderCwid") return validateUnitLeaderCwid(value);
   return validateUnitLeaderInterim(value);

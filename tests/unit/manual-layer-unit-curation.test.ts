@@ -97,6 +97,7 @@ describe("mergeUnitFields", () => {
   it("returns the column when the override is undefined (edge 1 read fallback)", () => {
     expect(mergeUnitFields(ETL, {})).toEqual({
       description: "ETL desc",
+      url: null,
       leaderCwid: "etl0001",
       leaderInterim: false,
     });
@@ -105,14 +106,30 @@ describe("mergeUnitFields", () => {
   it("the override wins on each field independently (edge 1, 6)", () => {
     const overrides: UnitFieldOverrides = {
       description: "Curated desc",
+      url: "https://ovr.example.org",
       leaderCwid: "ovr0001",
       leaderInterim: "true",
     };
     expect(mergeUnitFields(ETL, overrides)).toEqual({
       description: "Curated desc",
+      url: "https://ovr.example.org",
       leaderCwid: "ovr0001",
       leaderInterim: true,
     });
+  });
+
+  it("url override wins over the column; falls back to the column otherwise (#1021)", () => {
+    const row = { description: null, url: "https://col.example.org", leaderCwid: null };
+    // No override → the column value shows through.
+    expect(mergeUnitFields(row, {}).url).toBe("https://col.example.org");
+    // Override → wins.
+    expect(mergeUnitFields(row, { url: "https://ovr.example.org" }).url).toBe(
+      "https://ovr.example.org",
+    );
+    // Empty-string override clears the link (distinct from the column value).
+    expect(mergeUnitFields(row, { url: "" }).url).toBe("");
+    // A row with no url column at all merges to null.
+    expect(mergeUnitFields({ description: null, leaderCwid: null }, {}).url).toBeNull();
   });
 
   it("`leaderCwid: \"\"` overrides the column with 'explicitly cleared' — distinct from null", () => {

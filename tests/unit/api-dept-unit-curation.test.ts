@@ -80,6 +80,7 @@ const DEPT = {
   name: "Department of Medicine",
   slug: "medicine",
   description: "The ETL-seeded description.",
+  url: null,
   chairCwid: "etl0001",
   category: "clinical",
   scholarCount: 200,

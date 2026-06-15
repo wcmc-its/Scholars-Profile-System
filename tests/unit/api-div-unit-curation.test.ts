@@ -82,6 +82,7 @@ const DIVISION = {
   name: "Cardiology",
   slug: "cardiology",
   description: "ETL-seeded division blurb.",
+  url: null,
   chiefCwid: "etl0002",
   scholarCount: 50,
   source: "ED",

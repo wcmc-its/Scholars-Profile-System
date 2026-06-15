@@ -19,8 +19,8 @@
  *
  *  - **`op: "update"`** — update a `Center` in-row (centers do NOT use
  *    `field_override`; they edit in place). Field-level authz: `description`
- *    / `directorCwid` / `leaderInterim` are Curator/Owner-editable;
- *    `slug` and `centerType` are Superuser-only (SPEC § Authorization).
+ *    / `url` (#1021) / `directorCwid` / `leaderInterim` are Curator/Owner-
+ *    editable; `slug` and `centerType` are Superuser-only (SPEC § Authorization).
  *
  * Every write is one MySQL transaction with the B03 audit row. Post-commit
  * reflection: `reflectUnitChange` on the unit page + `/browse`.
@@ -50,6 +50,7 @@ import {
   validateUnitLeaderCwid,
   validateUnitLeaderInterim,
   validateUnitName,
+  validateUnitUrl,
 } from "@/lib/edit/validators";
 
 const PATH = "/api/edit/unit";
@@ -57,6 +58,7 @@ const PATH = "/api/edit/unit";
 /** The set of Center fields a per-field update touches. */
 const CENTER_UPDATE_FIELDS = [
   "description",
+  "url",
   "slug",
   "directorCwid",
   "leaderInterim",
@@ -465,6 +467,12 @@ async function handleUpdate(
     if (!r.ok) return editError(400, r.error, "value");
     storedValue = r.value;
     updatePayload = { description: r.value === "" ? null : r.value };
+  } else if (fieldName === "url") {
+    const r = validateUnitUrl(value);
+    if (!r.ok) return editError(400, r.error, "value");
+    storedValue = r.value;
+    // "" = curator cleared the link → null on the column (mirrors description).
+    updatePayload = { url: r.value === "" ? null : r.value };
   } else if (fieldName === "slug") {
     const r = validateSlugFormat(value);
     if (!r.ok) return editError(400, r.error, "value");
@@ -505,6 +513,7 @@ async function handleUpdate(
         select: {
           slug: true,
           description: true,
+          url: true,
           directorCwid: true,
           leaderInterim: true,
           centerType: true,
@@ -519,11 +528,13 @@ async function handleUpdate(
           ? before?.slug
           : fieldName === "description"
             ? before?.description
-            : fieldName === "directorCwid"
-              ? before?.directorCwid
-              : fieldName === "leaderInterim"
-                ? before?.leaderInterim
-                : before?.centerType;
+            : fieldName === "url"
+              ? before?.url
+              : fieldName === "directorCwid"
+                ? before?.directorCwid
+                : fieldName === "leaderInterim"
+                  ? before?.leaderInterim
+                  : before?.centerType;
       await appendAuditRow(tx, {
         actorCwid: realCwid,
         impersonatedCwid,
