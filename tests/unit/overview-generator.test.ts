@@ -89,10 +89,11 @@ describe("buildOverviewUserPrompt — length band", () => {
     expect(prompt).toContain("90");
   });
 
-  it("standard band names the 120–180 word numbers", () => {
+  it("standard band names the 120–160 word numbers (#742 tightened ceiling)", () => {
     const prompt = buildOverviewUserPrompt(FACTS, params({ length: "standard" }));
     expect(prompt).toContain("120");
-    expect(prompt).toContain("180");
+    expect(prompt).toContain("160");
+    expect(prompt).not.toContain("180");
   });
 
   it("extended band names the 200–260 word numbers", () => {
@@ -253,5 +254,85 @@ describe("buildOverviewUserPrompt — sparse-tier directive (#778)", () => {
   it("omits the sparse directive when FACTS carry research signal", () => {
     const prompt = buildOverviewUserPrompt(FACTS, params());
     expect(prompt).not.toContain("little structured research signal");
+  });
+});
+
+// #742 grounding hardening — the validation NO-GO caught the model blending real
+// FACTS with parametric recall (inventing tool names, diseases, and grant aims).
+// These four ABSOLUTE naming rules fence the exact leak vectors.
+describe("OVERVIEW_SYSTEM_PROMPT — #742 naming rules", () => {
+  const flat = OVERVIEW_SYSTEM_PROMPT.replace(/\s+/g, " ");
+
+  it("fences tool / method / software names to a methods entry or a title", () => {
+    expect(flat).toContain("NEVER name a tool, method, software");
+    expect(flat).toContain("do NOT supply a name or invent an acronym");
+  });
+
+  it("fences numeric metrics (h-index, counts) to FACTS — no compute/recall", () => {
+    expect(flat).toContain("NEVER state a numeric metric");
+    expect(flat).toContain("Do NOT compute, estimate, or recall one.");
+  });
+
+  it("fences disease names, blocks funder→disease AND therapy→indication inference", () => {
+    expect(flat).toContain("NEVER name a disease, condition, syndrome, gene");
+    expect(flat).toContain("identifies the SPONSOR, not the disease a grant studies");
+    // #742 re-audit: the rgcryst "anti-eosinophil therapy" → "hypereosinophilia" leak.
+    expect(flat).toContain("the disease or indication that a therapy");
+  });
+
+  it("fences grant aims to an activeGrants title", () => {
+    expect(flat).toContain("NEVER describe a grant's aim");
+    expect(flat).toContain("is funded by <funder>");
+  });
+
+  it("forbids embellishing the department / title with an eponym or institute name", () => {
+    // #742 re-audit: the jom2025 "Brain and Mind Research" → "Feil Family ... Institute" leak.
+    expect(flat).toContain("Do NOT expand or embellish them");
+    expect(flat).toContain("do not add an eponym");
+  });
+
+  it("treats the upper word bound as a firm ceiling", () => {
+    expect(flat).toContain("the upper word bound as a FIRM ceiling");
+  });
+});
+
+// #742 — the topics-but-no-representative-pubs middle tier (the jom2025 NO-GO
+// vector). The fully-sparse branch (#778) covers no-topics-AND-no-pubs; this one
+// stops the model inventing specific findings/methods/aims when it has topic
+// areas but zero per-paper grounding.
+describe("buildOverviewUserPrompt — no-representative-publications directive (#742)", () => {
+  it("adds the no-per-paper-grounding directive when topics exist but no rep pubs", () => {
+    // FACTS has a topic but representativePublications: [] → the middle tier.
+    const prompt = buildOverviewUserPrompt(FACTS, params());
+    expect(prompt).toContain("FACTS contains NO representative publications");
+    // It is NOT the fully-sparse branch (FACTS still carries a topic).
+    expect(prompt).not.toContain("little structured research signal");
+  });
+
+  it("omits it when representative pubs are present", () => {
+    const withPub: OverviewFacts = {
+      ...FACTS,
+      representativePublications: [
+        {
+          pmid: "1",
+          title: "A paper",
+          venue: null,
+          year: null,
+          impact: null,
+          synopsis: null,
+          impactJustification: null,
+          topicRationale: null,
+          authorPosition: null,
+        },
+      ],
+    };
+    const prompt = buildOverviewUserPrompt(withPub, params());
+    expect(prompt).not.toContain("FACTS contains NO representative publications");
+  });
+
+  it("the fully-sparse branch wins over the middle tier (no double directive)", () => {
+    const prompt = buildOverviewUserPrompt(SPARSE_FACTS, params());
+    expect(prompt).toContain("little structured research signal");
+    expect(prompt).not.toContain("FACTS contains NO representative publications");
   });
 });

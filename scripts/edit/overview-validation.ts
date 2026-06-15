@@ -160,6 +160,36 @@ function renderFactsSummary(facts: OverviewFacts): string {
   } else {
     lines.push(`- **Education:** (none)`);
   }
+  // #742 — methods + facultyMetrics ARE in the FACTS the model sees (serialized in
+  // the user turn), but were omitted from this summary, so a grader could not tell a
+  // grounded tool name ("Blackbird") or a real metric ("h-index 27") from a
+  // fabrication. Render them: they are legitimate ground truth for the faithfulness
+  // verdict, and the #742 prompt-hardening naming rules depend on them.
+  if (facts.methods.length > 0) {
+    lines.push(
+      `- **Methods / tools:** ` +
+        facts.methods
+          .map((m) => {
+            const ex =
+              m.examples && m.examples.length > 0
+                ? ` (e.g. ${m.examples.slice(0, 3).join(", ")})`
+                : "";
+            return `${m.name}${m.category ? ` [${m.category}]` : ""}${ex}`;
+          })
+          .join("; "),
+    );
+  } else {
+    lines.push(`- **Methods / tools:** (none)`);
+  }
+  if (facts.facultyMetrics) {
+    const m = facts.facultyMetrics;
+    lines.push(
+      `- **Faculty metrics:** h-index ${m.hIndex ?? "—"}; scored pubs ${m.scoredPubCount ?? "—"}; ` +
+        `first-author ${m.firstAuthorCount ?? "—"}; last-author ${m.lastAuthorCount ?? "—"}`,
+    );
+  } else {
+    lines.push(`- **Faculty metrics:** (none)`);
+  }
   lines.push(
     `- **existingBio:** ${facts.existingBio ? `present (source: ${facts.existingBio.source})` : "none"}`,
   );
