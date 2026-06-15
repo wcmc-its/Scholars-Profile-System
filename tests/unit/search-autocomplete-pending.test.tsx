@@ -1,7 +1,9 @@
 /**
- * `components/search/autocomplete.tsx` — submit routing + the "pending" search
+ * `components/search/autocomplete.tsx` — submit routing, the "pending" search
  * affordance (useTransition + Loader2 spinner + aria-busy + sr-only "Searching"
- * status + a disabled hero Search button).
+ * status + a disabled hero Search button), and the on-/search URL context
+ * (preserving the active `&type=` tab on a new search + pre-filling the box
+ * with the current query, both read from `window.location`).
  *
  * The suggest `useEffect` fires `fetch` on >=2 chars; we stub it to resolve an
  * empty suggestion set so it never throws. The pending affordance is forced
@@ -111,5 +113,64 @@ describe("SearchAutocomplete — pending affordance", () => {
     h.pending = true;
     render(<SearchAutocomplete variant="hero" />);
     expect((screen.getByRole("button", { name: "Search" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("SearchAutocomplete — URL context (type preservation + query pre-fill)", () => {
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+    vi.useRealTimers();
+  });
+
+  it("preserves the active &type= tab on a new search from /search", () => {
+    window.history.replaceState(null, "", "/search?q=hiv&type=publications");
+    render(<SearchAutocomplete />);
+    const input = screen.getByLabelText("Search scholars");
+    fireEvent.change(input, { target: { value: "cancer" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(pushMock).toHaveBeenCalledWith("/search?q=cancer&type=publications");
+  });
+
+  it("does not append type when the active tab is the people default", () => {
+    window.history.replaceState(null, "", "/search?q=hiv&type=people");
+    render(<SearchAutocomplete />);
+    const input = screen.getByLabelText("Search scholars");
+    fireEvent.change(input, { target: { value: "cancer" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(pushMock).toHaveBeenCalledWith("/search?q=cancer");
+  });
+
+  it("does not preserve type when submitting from a non-/search page", () => {
+    window.history.replaceState(null, "", "/scholars/jane-doe?type=publications");
+    render(<SearchAutocomplete />);
+    const input = screen.getByLabelText("Search scholars");
+    fireEvent.change(input, { target: { value: "cancer" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(pushMock).toHaveBeenCalledWith("/search?q=cancer");
+  });
+
+  it("pre-fills the box with the active query when landing on /search", () => {
+    window.history.replaceState(null, "", "/search?q=real-world%20evidence&type=publications");
+    render(<SearchAutocomplete />);
+    expect((screen.getByLabelText("Search scholars") as HTMLInputElement).value).toBe(
+      "real-world evidence",
+    );
+  });
+
+  it("does not pre-fill on a non-/search page", () => {
+    window.history.replaceState(null, "", "/?q=cancer");
+    render(<SearchAutocomplete />);
+    expect((screen.getByLabelText("Search scholars") as HTMLInputElement).value).toBe("");
+  });
+
+  it("the pre-fill does not fire a suggest fetch or open the dropdown", async () => {
+    vi.useFakeTimers();
+    window.history.replaceState(null, "", "/search?q=cancer");
+    render(<SearchAutocomplete />);
+    // Advance past the 150ms suggest debounce: with the skip guard the effect
+    // early-returned, so no timer was scheduled and no fetch fires.
+    await vi.advanceTimersByTimeAsync(300);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox")).toBeNull();
   });
 });

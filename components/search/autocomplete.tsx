@@ -39,9 +39,16 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
   const [activeIndex, setActiveIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const skipSuggestRef = useRef(false);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
+    // Skip the suggestion fetch for a programmatic value change (the on-/search
+    // pre-fill below), so the dropdown doesn't auto-open on page load.
+    if (skipSuggestRef.current) {
+      skipSuggestRef.current = false;
+      return;
+    }
     if (value.trim().length < 2) {
       setSuggestions([]);
       setOpen(false);
@@ -83,13 +90,36 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
+  // Pre-fill the box with the active query when landing on /search, so the
+  // header search reflects what the user is looking at. Reads window.location
+  // directly (client-only) instead of useSearchParams, which the cached header
+  // is barred from — it forces a Suspense boundary or `next build` fails to
+  // prerender. Mount-only: sets the initial value and intentionally does not
+  // chase in-page soft-nav (the header stays mounted across result refinements).
+  useEffect(() => {
+    if (window.location.pathname !== "/search") return;
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) {
+      skipSuggestRef.current = true;
+      setValue(q);
+    }
+  }, []);
+
   const submit = () => {
     if (value.trim().length === 0) return;
     abortRef.current?.abort();
     setSuggestions([]);
     setOpen(false);
+    let href = `/search?q=${encodeURIComponent(value.trim())}`;
+    // Preserve the active result tab on a new search instead of bouncing to the
+    // Scholars default. Read at submit time (always client) so the header avoids
+    // useSearchParams; a fresh query still resets facets/sort/page.
+    if (window.location.pathname === "/search") {
+      const t = new URLSearchParams(window.location.search).get("type");
+      if (t && t !== "people") href += `&type=${encodeURIComponent(t)}`;
+    }
     startTransition(() => {
-      router.push(`/search?q=${encodeURIComponent(value.trim())}`);
+      router.push(href);
     });
   };
 
