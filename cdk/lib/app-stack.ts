@@ -1029,6 +1029,16 @@ export class AppStack extends Stack {
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`
         // (the CD pipeline re-rolls the image, never CDK).
         SELF_EDIT_OVERVIEW_GENERATE: "on",
+        // #742 -- post-generation faithfulness pass. OFF in both envs: the #742
+        // validation gate showed the generator already grounds drafts on the FACTS
+        // (including the ReciterAI distilled synopsis/justification it is designed to
+        // use), so this is OPTIONAL defense-in-depth for the bulk rollout, not a fix.
+        // When "on" (isOverviewFaithfulnessPassEnabled, lib/edit/overview-generator.ts)
+        // each generate runs a verify -> revise critic pass that strips any specific
+        // a draft adds beyond ALL fact fields, at the cost of one or two extra Bedrock
+        // calls. Same TaskRoleBedrockPolicy; no new IAM. Flip per-env here + a manual
+        // `cdk deploy --exclusively Sps-App-<env>`.
+        OVERVIEW_FAITHFULNESS_PASS: "off",
         // #538 -- site-wide feedback badge + /about/feedback form. When "on",
         // the badge renders on every page (except /about/feedback itself,
         // suppressed inside open Radix Dialogs) and the form route accepts
