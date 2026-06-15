@@ -21,6 +21,7 @@
 import { identityImageEndpoint } from "@/lib/headshot";
 import { prisma } from "@/lib/db";
 import { profilePath } from "@/lib/profile-url";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { fetchAuthorBylineForPmids, fetchWcmAuthorsForPmids } from "@/lib/api/topics";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import {
@@ -330,7 +331,9 @@ export type PublicationHit = {
   wcmAuthors: Array<{
     name: string;
     cwid: string;
-    slug: string;
+    /** Nullable: a soft-deleted doctoral-student co-author (#1026) may have no
+     *  slug. A null slug forces a NON-LINKED chip — the FERPA-required rendering. */
+    slug: string | null;
     identityImageEndpoint: string;
     isFirst: boolean;
     isLast: boolean;
@@ -2845,9 +2848,17 @@ export async function searchPublications(opts: {
   // no author line at all. Hydrate a suppression-safe unstructured byline for just
   // those pmids so the row keeps attribution. Emptiness is measured against the
   // same `cwid+slug+headshot` predicate the per-hit chip map applies below.
+  // #1026 — a hidden-class co-author (soft-deleted doctoral student) can be
+  // slug-less; it still renders as a NON-LINKED chip, so it counts as a
+  // displayable author. When the flag is off no such author is in the hydration,
+  // so the `|| !isPubliclyDisplayed(...)` branch never matches and behavior is
+  // byte-identical to the prior `cwid && slug && img` predicate.
   const hasDisplayableAuthor = (pmid: string): boolean =>
     (wcmAuthorsByPmid.get(pmid) ?? []).some(
-      (a) => a.cwid && a.slug && a.identityImageEndpoint,
+      (a) =>
+        a.cwid &&
+        a.identityImageEndpoint &&
+        (a.slug || !isPubliclyDisplayed(a.roleCategory)),
     );
   const authorsFallbackByPmid = await fetchAuthorBylineForPmids(
     pmids.filter((p) => !hasDisplayableAuthor(p)),
@@ -2880,8 +2891,12 @@ export async function searchPublications(opts: {
   return {
     hits: r.hits.hits.map((h) => {
       const enriched = wcmAuthorsByPmid.get(h._source.pmid) ?? [];
+      // #1026 — keep slug-less hidden-class co-authors (soft-deleted doctoral
+      // students); their slug passes through as null so the chip renders
+      // NON-LINKED. Flag-off → no such author is hydrated, so the predicate is
+      // equivalent to the prior `cwid && slug && img`.
       const wcmAuthors = enriched.flatMap((a) =>
-        a.cwid && a.slug && a.identityImageEndpoint
+        a.cwid && a.identityImageEndpoint && (a.slug || !isPubliclyDisplayed(a.roleCategory))
           ? [
               {
                 name: a.name,
