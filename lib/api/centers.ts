@@ -244,23 +244,37 @@ async function buildCenterMemberHits(
 ): Promise<DepartmentFacultyHit[]> {
   const cwids = rows.map((s) => s.cwid);
   const now = new Date();
-  const [pubCounts, grantCounts] = cwids.length > 0
+  const [pubCounts, grantRows] = cwids.length > 0
     ? await Promise.all([
         prisma.publicationTopic.groupBy({
           by: ["cwid"],
           where: { cwid: { in: cwids } },
           _count: { pmid: true },
         }) as unknown as Promise<Array<{ cwid: string; _count: { pmid: number } }>>,
-        prisma.grant.groupBy({
-          by: ["cwid"],
+        prisma.grant.findMany({
           where: { cwid: { in: cwids }, endDate: { gte: now } },
-          _count: { _all: true },
-        }) as unknown as Promise<Array<{ cwid: string; _count: { _all: number } }>>,
+          select: { cwid: true, externalId: true, id: true },
+        }) as Promise<
+          Array<{ cwid: string; externalId: string | null; id: string }>
+        >,
       ])
     : [[], []];
 
   const pubMap = new Map(pubCounts.map((p) => [p.cwid, p._count.pmid]));
-  const grantMap = new Map(grantCounts.map((g) => [g.cwid, g._count._all]));
+
+  // #481(b) — exclude #160-suppressed grants from the per-faculty badge so a
+  // hidden grant never inflates the count, keeping the roster badge in agreement
+  // with getCenterGrantsList and its total (which already drop suppressed rows).
+  // Same per-investigator `externalId` keying as resolveActiveGrantSuppression.
+  const suppressed =
+    grantRows.length > 0
+      ? (await resolveActiveGrantSuppression(grantRows, prisma)).suppressed
+      : new Set<string>();
+  const grantMap = new Map<string, number>();
+  for (const g of grantRows) {
+    if (g.externalId !== null && suppressed.has(g.externalId)) continue;
+    grantMap.set(g.cwid, (grantMap.get(g.cwid) ?? 0) + 1);
+  }
 
   return rows.map((s) => ({
     cwid: s.cwid,

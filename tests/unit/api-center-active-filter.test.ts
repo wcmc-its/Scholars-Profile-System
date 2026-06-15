@@ -59,13 +59,15 @@ const {
   mockScholarFindMany,
   mockCenterProgramFindMany,
   mockPublicationTopicGroupBy,
-  mockGrantGroupBy,
+  mockGrantFindMany,
+  mockSuppressionFindMany,
 } = vi.hoisted(() => ({
   mockCenterMembershipFindMany: vi.fn(),
   mockScholarFindMany: vi.fn(),
   mockCenterProgramFindMany: vi.fn(),
   mockPublicationTopicGroupBy: vi.fn(),
-  mockGrantGroupBy: vi.fn(),
+  mockGrantFindMany: vi.fn(),
+  mockSuppressionFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -74,7 +76,8 @@ vi.mock("@/lib/db", () => ({
     scholar: { findMany: mockScholarFindMany },
     centerProgram: { findMany: mockCenterProgramFindMany },
     publicationTopic: { groupBy: mockPublicationTopicGroupBy },
-    grant: { groupBy: mockGrantGroupBy },
+    grant: { findMany: mockGrantFindMany },
+    suppression: { findMany: mockSuppressionFindMany },
   },
 }));
 
@@ -108,7 +111,8 @@ const ACTIVE = { startDate: null, endDate: null }; // null dates = active foreve
 beforeEach(() => {
   vi.clearAllMocks();
   mockPublicationTopicGroupBy.mockResolvedValue([]);
-  mockGrantGroupBy.mockResolvedValue([]);
+  mockGrantFindMany.mockResolvedValue([]);
+  mockSuppressionFindMany.mockResolvedValue([]);
   mockCenterProgramFindMany.mockResolvedValue([]);
   mockScholarFindMany.mockImplementation(routeScholar());
 });
@@ -181,6 +185,22 @@ describe("getCenterMembers — active filter + grouping (#552 §6.2)", () => {
 
     const result = await getCenterMembers("MEYER", {});
     expect(result.mode).toBe("flat");
+  });
+
+  it("excludes #160-suppressed grants from the per-faculty grant badge (#481b)", async () => {
+    mockCenterMembershipFindMany.mockResolvedValue([
+      { cwid: "a", programCode: null, ...ACTIVE },
+    ]);
+    // "a" has two active grants; G2 is suppressed → badge must read 1, not 2.
+    mockGrantFindMany.mockResolvedValue([
+      { cwid: "a", externalId: "G1", id: "1" },
+      { cwid: "a", externalId: "G2", id: "2" },
+    ]);
+    mockSuppressionFindMany.mockResolvedValue([{ entityId: "G2" }]);
+
+    const result = await getCenterMembers("MEYER", {});
+    if (result.mode !== "flat") throw new Error("expected flat");
+    expect(result.hits[0].grantCount).toBe(1);
   });
 
   it("excludes inactive (lapsed) and pending memberships before grouping", async () => {
