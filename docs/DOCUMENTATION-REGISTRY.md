@@ -51,6 +51,7 @@ in **§10**.
 | Why does search rank things this way? | [`search.md`](./search.md), [`people-relevance-baseline.md`](./people-relevance-baseline.md) |
 | Why doesn't searching `covid19` or `tylenol` find the obvious people? | [`search-recall.md`](./search-recall.md) |
 | Why doesn't this (retracted) paper show up? | [`retracted-publications.md`](./retracted-publications.md) |
+| Can a scholar hide a publication / grant / their whole profile / a **method**? What can be hidden? | [`what-can-be-hidden.md`](./what-can-be-hidden.md) (the catalog — by section and by record) |
 | What is the WAF / firewall posture? | [`network-security-topology.md`](./network-security-topology.md), [`waf-request-RITM0792011.md`](./waf-request-RITM0792011.md) |
 | Can we restore from backup? | [`restore-drill-runbook.md`](./restore-drill-runbook.md) |
 
@@ -163,6 +164,7 @@ ADRs capture decisions and their rationale; reach for these when a colleague ask
 | [`taxonomy-aware-search.md`](./taxonomy-aware-search.md) | Taxonomy/MeSH-aware relevance re-weighting (v2.2). |
 | [`feedback-handling-matrix.md`](./feedback-handling-matrix.md) | How user feedback is routed (and the planned ServiceNow intake). |
 | [`retracted-publications.md`](./retracted-publications.md) | Why retracted papers don't display — the two-record problem (notice vs original), ReCiter's re-fetch lag, and the nightly PubMed-retraction stamp (#604) that closes the gap via the existing `NEVER_DISPLAY_TYPES` filter. |
+| [`what-can-be-hidden.md`](./what-can-be-hidden.md) | **The catalog of everything that can be removed from a public profile and search**, by section and by record — the four mechanisms (`suppression` rows, the `overview` `field_override`, the two Methods-lens overlays, and `deleted_at` soft-delete), the `EntityType` reach (scholar / publication / grant / education / appointment / mentee / org-unit), per-author hide vs whole-pub takedown vs derived-dark, the non-suppressible leadership guard, who can hide what, and the new **Methods & tools** case (no per-scholar control — families are hidden editorially/globally via `family_suppression_overlay`, or public-gated via `family_sensitivity_overlay` + `METHODS_LENS_SENSITIVE_GATE`). The deliberate-hiding counterpart to `retracted-publications.md`; operational view over `ADR-005`. |
 | [`vivo-incident-analysis.md`](./vivo-incident-analysis.md) | VIVO incident history — what the predecessor system's support load looked like. |
 
 ## 9. Build-time specs & drafts (not operational)
@@ -238,7 +240,13 @@ while writing the §1–§8 docs. Tracked in **[issue #560](https://github.com/w
 
 ---
 
-*Last updated: 2026-06-09 — §0/§6 added [`scholar-tools-taxonomy.md`](./scholar-tools-taxonomy.md):
+*Last updated: 2026-06-10 — §0/§8 added [`what-can-be-hidden.md`](./what-can-be-hidden.md):
+the catalog of everything that can be removed from a public profile and search, by section and by
+record — the four mechanisms (`suppression`, the `overview` `field_override`, the two Methods-lens
+overlays, `deleted_at` soft-delete), per-author hide vs whole-pub takedown vs derived-dark, the
+non-suppressible leadership guard, the who-can-hide-what matrix, and the new **Methods & tools**
+case (no per-scholar control — families are hidden editorially via `family_suppression_overlay` or
+public-gated via `family_sensitivity_overlay` + `METHODS_LENS_SENSITIVE_GATE`). 2026-06-09 — §0/§6 added [`scholar-tools-taxonomy.md`](./scholar-tools-taxonomy.md):
 where the Methods & tools (method-family) taxonomy lives — the ReciterAI A2 artifact set on S3
 (`tools/latest/{tools,families}.json`), **not** DynamoDB (the legacy `reciterai` `TOOL#` rows are
 per-PMID activity, not the canonical registry) — plus the published `tools[]`/`families[]` schema,
