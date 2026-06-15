@@ -34,6 +34,7 @@ import { db } from "../../lib/db";
 import { closeJenzabarPool, getJenzabarPool } from "@/lib/sources/mssql-jenzabar";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
 import { appointmentContentKey } from "@/lib/etl/content-keys";
+import { normalizeGradSchoolFacultyTitle } from "@/lib/faculty-rank";
 
 const VIEW = "[TmsEPly].[dbo].[WCN_vw_GS_Faculty_LR]";
 const SOURCE = "JENZABAR-GSFACULTY";
@@ -163,18 +164,22 @@ async function main() {
     // matches etl/ed/index.ts:874-880 for the NYP branch). This naturally
     // excludes MSK/Rockefeller/HSS home faculty who have no Scholar row.
     const candidateCwids = [...new Set(candidates.map((c) => c.cwid))];
-    const knownScholars = new Set(
-      (
-        await db.write.scholar.findMany({
-          where: {
-            cwid: { in: candidateCwids },
-            deletedAt: null,
-            status: "active",
-          },
-          select: { cwid: true },
-        })
-      ).map((s) => s.cwid),
-    );
+    // #1034 — also pull each scholar's ASMS-authoritative professorial rank
+    // (persisted by the ED ETL) so we can normalize the Jenzabar title: strip
+    // the chair/program-head designation the Grad School doesn't confer and tie
+    // a professorial rank to ASMS rather than the independently-maintained
+    // INSTRUCTOR TYPE. ED runs before this import in the nightly order, so the
+    // rank is fresh.
+    const scholarRows = await db.write.scholar.findMany({
+      where: {
+        cwid: { in: candidateCwids },
+        deletedAt: null,
+        status: "active",
+      },
+      select: { cwid: true, professorialRank: true },
+    });
+    const knownScholars = new Set(scholarRows.map((s) => s.cwid));
+    const rankByCwid = new Map(scholarRows.map((s) => [s.cwid, s.professorialRank]));
     const skippedNoScholar = candidates.filter((c) => !knownScholars.has(c.cwid));
     if (skippedNoScholar.length > 0) {
       const sample = skippedNoScholar.slice(0, 5).map((c) => c.cwid).join(", ");
@@ -191,7 +196,14 @@ async function main() {
     // place, so a row's PK is never regenerated (issue #352).
     const inserts = importable.map((c) => ({
       cwid: c.cwid,
-      title: c.title,
+      // #1034 — Rule A (strip chair/program-head) + Rule B (tie professorial
+      // rank to the ASMS person-type rank); non-professorial titles
+      // (Instructor/Lecturer/...) and rows with no resolvable ASMS rank are
+      // left as-is.
+      title: normalizeGradSchoolFacultyTitle({
+        jenzabarTitle: c.title,
+        professorialRank: rankByCwid.get(c.cwid) ?? null,
+      }),
       organization: `${SCHOOL_LABEL} — ${c.program}`,
       startDate: c.startDate,
       endDate: null,

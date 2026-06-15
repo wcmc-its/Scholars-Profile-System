@@ -32,6 +32,7 @@ import {
 } from "./unit-overrides";
 import { DEPARTMENT_CATEGORIES } from "@/lib/department-categories";
 import { DEPARTMENT_NAMES } from "@/lib/department-names";
+import { deriveProfessorialRank } from "@/lib/faculty-rank";
 import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug, reconcileScholarSlug } from "@/lib/slug";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
@@ -795,6 +796,9 @@ async function main() {
             email: f.email,
             emailVisibility: f.emailVisibility,
             roleCategory,
+            // #1034 — ASMS-authoritative professorial rank from the person-type
+            // leaf; read by the Jenzabar GS import to normalize its titles.
+            professorialRank: deriveProfessorialRank(f.personTypeCodes),
             ...(wasDeleted ? { deletedAt: null } : {}),
             // Phase 3 — D-01 / probe 2026-05-06: dept + div sourced from
             // SOR primary active appointment (level1/level2 subtypes).
@@ -841,6 +845,9 @@ async function main() {
             emailVisibility: f.emailVisibility,
             slug,
             roleCategory,
+            // #1034 — ASMS-authoritative professorial rank from the person-type
+            // leaf; read by the Jenzabar GS import to normalize its titles.
+            professorialRank: deriveProfessorialRank(f.personTypeCodes),
             // Phase 3 — D-01 / probe 2026-05-06: dept + div sourced from SOR.
             deptCode: effectiveDeptCode,
             divCode: effectiveDivCode,
