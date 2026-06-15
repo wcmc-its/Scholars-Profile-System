@@ -156,3 +156,6 @@ scripts/probe-*.ts
 scripts/query-reciterdb.ts
 scripts/query-scholars.ts
 .screenshots/
+
+# Reference material from WCM Operations (ServiceNow KB samples) — local only, never commit
+docs/sample docs from ServiceNow/
