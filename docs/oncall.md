@@ -31,11 +31,12 @@ Alternates considered and rejected:
 
 ## Topic topology
 
-Two SNS topics per env, both provisioned by `cdk/lib/observability-stack.ts`:
+Three SNS topics per env, all provisioned by `cdk/lib/observability-stack.ts`:
 
 | Topic | Logical id | AWS name | Subscriber | What publishes here |
 |---|---|---|---|---|
-| **Page** | `AlarmTopic` | `sps-alarms-${env}` | `OncallRelayFunction` Lambda (CDK-managed; B27) -> Teams channel | All 9 CloudWatch alarm actions plus the B02 `edit_authz_denied` alarm |
+| **Page** (P1) | `AlarmTopic` | `sps-alarms-${env}` | `OncallRelayFunction` Lambda (CDK-managed; B27) -> primary Teams channel | Customer-facing P1 only: the `sps-app-unavailable-${env}` composite, latency-p99, cluster-red |
+| **Warn** (P2) | `WarnTopic` | `sps-warn-${env}` | same `OncallRelayFunction` Lambda -> separate "warn" Teams channel (falls back to the primary channel until provisioned) | Leading-indicator + operational alarms: Aurora CPU/connections, OpenSearch JVM pressure, `edit_authz_denied` |
 | **Notify** | `NotifyTopic` | `sps-notify-${env}` | `paa2013@med.cornell.edu` (email); + `OncallRelayErrors` alarm | `sps-monthly-budget` thresholds + `sps-anomaly-subscription` (prod only); B27 relay-Lambda failure alarm |
 
 The split is the point of B23: a forecasted-budget tap at 50% of `$600/mo` is not channel-worthy noise for the page channel, and pre-B23 the cost notifications rode the same alarm topic. Page goes to the Teams channel via the B27 relay Lambda; notify goes to the operator's inbox. Topic policies grant `sns:Publish` on the **notify** topic to `budgets.amazonaws.com` and `costalerts.amazonaws.com`; the page topic carries no service-principal grants because nothing in AWS publishes to it directly -- only CloudWatch alarm actions (which use the SNS-resource ARN, not a service principal) and the B27 Lambda subscription (managed by CDK via `SnsEventSource`, which sets up the `lambda:InvokeFunction` permission with `SourceArn: alarmTopicArn`).
@@ -43,6 +44,40 @@ The split is the point of B23: a forecasted-budget tap at 50% of `$600/mo` is no
 B27 changes the page-topic subscriber from "Teams webhook via HTTPS (out-of-band `aws sns subscribe`)" to "Lambda relay (CDK-managed) that POSTs an Adaptive Card to the Teams workflow URL." The Lambda reads the workflow URL from `scholars/${env}/oncall/teams-webhook-url` (already declared by SecretsStack per ADR-008's "no secret values in CDK source" rule) at cold start and caches it for the container lifetime. The original direct-HTTPS path was empirically disproven on 2026-05-21 -- see § Gotchas: *Power Automate Request trigger requires JSON body*. The runbook below seeds the secret and verifies the CDK-provisioned subscription; no `aws sns subscribe` call against the workflow URL is needed (or possible -- the trap is permanent).
 
 The Teams webhook URL **is** stored in Secrets Manager for audit + rotate even though it appears in `aws sns list-subscriptions-by-topic` output anyway. Two reasons: (1) it makes the seed-then-subscribe flow uniform with every other external endpoint in this stack; (2) it gives a rotation handle if the workflow is recreated or the channel moves.
+
+## Severity tiers (P1 page / P2 warn) and the warn channel
+
+The relay assigns a **severity** to every record from its originating SNS topic and routes accordingly:
+
+| Originating topic | Severity | Posts to |
+|---|---|---|
+| `sps-alarms-${env}` (page) | **P1** | primary Teams channel (`teams-webhook-url`) |
+| `sps-warn-${env}` (warn) | **P2** | warn Teams channel (`teams-webhook-url-warn`), else primary |
+| `etl-failures-${env}` (ETL) | **P2** | warn Teams channel, else primary |
+
+Discrimination is on the topic-ARN substring (`:sps-warn-`, `:etl-failures-`) in `lambda/oncall-relay/index.ts` (`severityForRecord`); everything else is P1. The point is to keep data-freshness, reconciler, and resource-pressure signals off the on-call channel -- the core alert-fatigue fix -- so the page channel carries only customer-facing P1. P2/warn ALARM cards lead with a warning glyph (vs the alarm glyph on P1). Each card carries a **Severity** fact (`P1 (page)` / `P2 (warn)`), the alarm **Description** (so the runbook pointer baked into the alarm text reaches Teams), a **Next step** first-response hint (per-alarm, from the `COURSE_OF_ACTION` table in `adaptive-card.ts`, with a generic default), and a **View reliability dashboard** button alongside the CloudWatch link. The relay log line (`"event":"oncall_relay"`) records `severity` and the `channel` it actually delivered to.
+
+### Provision the warn channel (optional, one-time per env)
+
+The warn webhook is **optional by design**: until it exists, P2 alerts fall back to the primary channel (logged `"channel":"page"`), so demoting an alarm to warn never drops it. To give P2 its own quieter channel:
+
+1. Create (or pick) a second Teams channel, e.g. `#sps-alerts-warn`, and add the same **"Post to a channel when a webhook request is received"** Power Automate workflow used for the primary channel (§ Rollout per env, step 1). Capture its HTTPS URL.
+2. Seed the secret -- no redeploy needed, the relay reads it on the next cold start:
+   ```bash
+   aws secretsmanager create-secret \
+     --name "scholars/${ENV}/oncall/teams-webhook-url-warn" \
+     --secret-string "<WARN-TEAMS-WEBHOOK-URL>"
+   # use put-secret-value instead if the secret already exists
+   ```
+3. Verify: trip a P2 alarm and confirm the card lands in the warn channel with a `P2 (warn)` Severity fact, and the relay log shows `"channel":"warn"`:
+   ```bash
+   aws cloudwatch set-alarm-state --alarm-name "sps-aurora-cpu-${ENV}" \
+     --state-value ALARM --state-reason "warn-channel test"
+   aws cloudwatch set-alarm-state --alarm-name "sps-aurora-cpu-${ENV}" \
+     --state-value OK --state-reason "reset"
+   ```
+
+The relay's IAM role already grants `secretsmanager:GetSecretValue` on this secret name (declared via `fromSecretNameV2` in `observability-stack.ts`), so activation is the secret alone -- no redeploy.
 
 ## Rollout per env
 

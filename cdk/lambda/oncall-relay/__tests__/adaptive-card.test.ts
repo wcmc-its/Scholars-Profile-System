@@ -127,6 +127,112 @@ describe("buildAdaptiveCard", () => {
     expect(fact(c, "Reason")).toBe("(no reason provided)");
     expect(header(c)).toBe("\u{1F6A8} sps-alb-5xx-rate-staging");
   });
+
+  it("renders AlarmDescription as a Description fact (the runbook pointer reaches Teams)", () => {
+    const alarm: CloudWatchAlarmPayload = {
+      AlarmName: "sps-aurora-cpu-prod",
+      AlarmDescription:
+        "Aurora cluster CPU > 80% sustained for 10m (prod). See docs/SLOs.md.",
+      NewStateValue: "ALARM",
+      NewStateReason: "Threshold Crossed",
+      Region: "us-east-1",
+    };
+    const c = content(buildAdaptiveCard(alarm));
+    expect(fact(c, "Description")).toBe(alarm.AlarmDescription);
+  });
+
+  it("omits the Description fact when AlarmDescription is absent", () => {
+    const c = content(
+      buildAdaptiveCard({
+        AlarmName: "sps-aurora-cpu-prod",
+        NewStateValue: "ALARM",
+        Region: "us-east-1",
+      }),
+    );
+    expect(fact(c, "Description")).toBeUndefined();
+  });
+
+  it("renders the severity tier as a fact when supplied (P1 page / P2 warn), omitted otherwise", () => {
+    const base: CloudWatchAlarmPayload = {
+      AlarmName: "sps-aurora-cpu-prod",
+      NewStateValue: "ALARM",
+      Region: "us-east-1",
+    };
+    expect(fact(content(buildAdaptiveCard(base, "warn")), "Severity")).toBe(
+      "P2 (warn)",
+    );
+    expect(fact(content(buildAdaptiveCard(base, "page")), "Severity")).toBe(
+      "P1 (page)",
+    );
+    expect(fact(content(buildAdaptiveCard(base)), "Severity")).toBeUndefined();
+  });
+
+  it("adds a reliability-dashboard action for a known env, keeping CloudWatch first", () => {
+    const c = content(
+      buildAdaptiveCard({
+        AlarmName: "sps-aurora-cpu-staging",
+        NewStateValue: "ALARM",
+        Region: "us-east-1",
+      }),
+    );
+    expect(c.actions[0]!.title).toBe("View in CloudWatch");
+    expect(c.actions[1]!.url).toContain(
+      "dashboards:name=sps-reliability-staging",
+    );
+  });
+
+  it("P2/warn ALARM cards lead with the warning glyph; P1 keeps the alarm glyph", () => {
+    const alarm: CloudWatchAlarmPayload = {
+      AlarmName: "sps-aurora-cpu-prod",
+      NewStateValue: "ALARM",
+      Region: "us-east-1",
+    };
+    expect(header(content(buildAdaptiveCard(alarm, "warn")))).toBe(
+      "\u{26A0}\u{FE0F} sps-aurora-cpu-prod",
+    );
+    expect(header(content(buildAdaptiveCard(alarm, "page")))).toBe(
+      "\u{1F6A8} sps-aurora-cpu-prod",
+    );
+    // No severity arg keeps the state glyph (back-compat).
+    expect(header(content(buildAdaptiveCard(alarm)))).toBe(
+      "\u{1F6A8} sps-aurora-cpu-prod",
+    );
+  });
+
+  it("includes a per-alarm Next step course of action, with a default fallback", () => {
+    const cpu = content(
+      buildAdaptiveCard(
+        {
+          AlarmName: "sps-aurora-cpu-prod",
+          NewStateValue: "ALARM",
+          Region: "us-east-1",
+        },
+        "warn",
+      ),
+    );
+    expect(fact(cpu, "Next step")).toContain("hot query loop");
+
+    const unknown = content(
+      buildAdaptiveCard({
+        AlarmName: "some-external-alarm",
+        NewStateValue: "ALARM",
+        Region: "us-east-1",
+      }),
+    );
+    expect(fact(unknown, "Next step")).toContain("reliability dashboard");
+  });
+
+  it("omits the dashboard action when the env is not derivable from the alarm name", () => {
+    const c = content(
+      buildAdaptiveCard({
+        AlarmName: "some-external-alarm",
+        NewStateValue: "ALARM",
+        Region: "us-east-1",
+      }),
+    );
+    expect(c.actions).toHaveLength(1);
+    expect(c.actions[0]!.title).toBe("View in CloudWatch");
+  });
 });
 
 describe("isCloudWatchAlarmPayload", () => {

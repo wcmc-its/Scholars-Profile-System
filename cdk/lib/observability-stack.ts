@@ -126,6 +126,14 @@ export class SpsObservabilityStack extends Stack {
    */
   public readonly notifyTopic: sns.Topic;
   /**
+   * SNS topic for the P2 "warn" tier: data-freshness / reconciler / resource-
+   * pressure alarms demoted off the page topic so the on-call channel carries
+   * only customer-facing P1. The relay subscribes to it and posts to a
+   * separate, quieter Teams channel (falling back to the page channel if that
+   * channel's webhook is not yet provisioned).
+   */
+  public readonly warnTopic: sns.Topic;
+  /**
    * Lambda that subscribes to {@link alarmTopic} and POSTs an Adaptive Card
    * to the Power Automate Teams webhook (B27). Replaces the direct SNS HTTPS
    * subscription that B23 originally documented -- empirically disproven
@@ -165,7 +173,21 @@ export class SpsObservabilityStack extends Stack {
       new snsSubs.EmailSubscription(NOTIFY_SUBSCRIBER_EMAIL),
     );
 
+    // Warn topic carries the P2 tier: data-freshness / reconciler / resource-
+    // pressure alarms that warrant attention but are not "wake on-call". The
+    // on-call relay subscribes to it (below) and posts to a separate, quieter
+    // Teams channel; if that channel's webhook is not yet provisioned the relay
+    // falls back to the page channel, so demoting an alarm here never silently
+    // drops it. Splitting the P2 traffic off the page topic is the core of the
+    // alert-fatigue fix -- the page channel now carries only customer-facing
+    // P1 (the app-unavailable composite, latency, and cluster-red).
+    this.warnTopic = new sns.Topic(this, "WarnTopic", {
+      topicName: `sps-warn-${env}`,
+      displayName: `SPS ${env} warnings (P2)`,
+    });
+
     const snsAction = new cwActions.SnsAction(this.alarmTopic);
+    const warnAction = new cwActions.SnsAction(this.warnTopic);
 
     // ------------------------------------------------------------------
     // Public ALB alarms (3)
@@ -204,7 +226,9 @@ export class SpsObservabilityStack extends Stack {
         cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
-    alb5xxAlarm.addAlarmAction(snsAction);
+    // No direct action -- folded into the app-unavailable composite below so a
+    // serving cascade pages once, not three times. Still evaluates (feeds the
+    // composite + the reliability dashboard).
 
     // (2) Unhealthy host count -- requires both LoadBalancer + TargetGroup
     // dimensions; metric pulled off the target group directly.
@@ -226,7 +250,7 @@ export class SpsObservabilityStack extends Stack {
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       },
     );
-    unhealthyAlarm.addAlarmAction(snsAction);
+    // No direct action -- folded into the app-unavailable composite below.
 
     // (3) Latency p99 -- the latency SLI directly.
     const latencyAlarm = new cloudwatch.Alarm(
@@ -286,7 +310,42 @@ export class SpsObservabilityStack extends Stack {
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       },
     );
-    taskShortfallAlarm.addAlarmAction(snsAction);
+    // No direct action -- folded into the app-unavailable composite below.
+
+    // ------------------------------------------------------------------
+    // App-unavailable composite (cascade dedup)
+    // ------------------------------------------------------------------
+    // The three serving-failure symptoms above (5xx burst, zero healthy hosts,
+    // task shortfall) commonly fire together from one root cause -- e.g. Aurora
+    // connection-pool exhaustion takes the app down, which trips all three and
+    // previously posted three separate page cards for one incident. Folding
+    // them into a CloudWatch composite pages ONCE on any of them; the children
+    // stay action-less (they still evaluate, feeding this composite and the
+    // dashboard). Latency and cluster-red remain independent P1 alarms --
+    // distinct failure modes, not part of the serving-down cascade.
+    const appUnavailableAlarm = new cloudwatch.CompositeAlarm(
+      this,
+      "AppUnavailableAlarm",
+      {
+        compositeAlarmName: `sps-app-unavailable-${env}`,
+        alarmDescription: `Public serving is degraded or down (${env}): one or more of 5xx-rate / zero-healthy-hosts / task-shortfall is in ALARM. Single P1 page for the serving cascade. See docs/SLOs.md.`,
+        alarmRule: cloudwatch.AlarmRule.anyOf(
+          cloudwatch.AlarmRule.fromAlarm(
+            alb5xxAlarm,
+            cloudwatch.AlarmState.ALARM,
+          ),
+          cloudwatch.AlarmRule.fromAlarm(
+            unhealthyAlarm,
+            cloudwatch.AlarmState.ALARM,
+          ),
+          cloudwatch.AlarmRule.fromAlarm(
+            taskShortfallAlarm,
+            cloudwatch.AlarmState.ALARM,
+          ),
+        ),
+      },
+    );
+    appUnavailableAlarm.addAlarmAction(snsAction);
 
     // ------------------------------------------------------------------
     // Aurora cluster alarms (2)
@@ -306,7 +365,7 @@ export class SpsObservabilityStack extends Stack {
         cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
-    auroraCpuAlarm.addAlarmAction(snsAction);
+    auroraCpuAlarm.addAlarmAction(warnAction); // P2 -- leading indicator, not an outage
 
     // (6) Connection count -- catches connection-pool exhaustion before
     // the app starts surfacing connection errors. Threshold is absolute
@@ -331,7 +390,7 @@ export class SpsObservabilityStack extends Stack {
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       },
     );
-    auroraConnectionsAlarm.addAlarmAction(snsAction);
+    auroraConnectionsAlarm.addAlarmAction(warnAction); // P2 -- leading indicator
 
     // ------------------------------------------------------------------
     // OpenSearch domain alarms (2)
@@ -355,7 +414,7 @@ export class SpsObservabilityStack extends Stack {
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       },
     );
-    openSearchJvmAlarm.addAlarmAction(snsAction);
+    openSearchJvmAlarm.addAlarmAction(warnAction); // P2 -- GC pressure, not down yet
 
     // (8) Cluster status red -- shards unassigned, immediate.
     const openSearchRedAlarm = new cloudwatch.Alarm(
@@ -427,7 +486,7 @@ export class SpsObservabilityStack extends Stack {
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       },
     );
-    editAuthzDeniedAlarm.addAlarmAction(snsAction);
+    editAuthzDeniedAlarm.addAlarmAction(warnAction); // P2 -- security signal, review-in-hours
 
     // ------------------------------------------------------------------
     // On-call relay Lambda (B27)
@@ -453,6 +512,20 @@ export class SpsObservabilityStack extends Stack {
       `scholars/${env}/oncall/teams-webhook-url`,
     );
 
+    // P2 warn-channel webhook. Optional by design: the relay falls back to the
+    // page channel when this secret is absent (lambda/oncall-relay/index.ts
+    // getWarnWebhookUrl), so alarms can be demoted to the warn topic and ship
+    // before the second Teams channel + its Power Automate webhook are
+    // provisioned. `fromSecretNameV2` grants read on the name-scoped ARN
+    // whether or not the secret exists yet; the runtime GetSecretValue
+    // tolerates ResourceNotFound. To activate: create the secret with the
+    // workflow URL, no redeploy needed (cold start picks it up).
+    const teamsWarnWebhookSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "TeamsWarnWebhookSecret",
+      `scholars/${env}/oncall/teams-webhook-url-warn`,
+    );
+
     // Explicit log group rather than NodejsFunction's `logRetention` prop --
     // the prop pulls in a CloudFormation custom resource (a second
     // AWS::Lambda::Function and IAM::Role per stack) which would double the
@@ -474,6 +547,7 @@ export class SpsObservabilityStack extends Stack {
       logGroup: relayLogGroup,
       environment: {
         TEAMS_WEBHOOK_SECRET_ARN: teamsWebhookSecret.secretArn,
+        TEAMS_WARN_WEBHOOK_SECRET_ARN: teamsWarnWebhookSecret.secretArn,
       },
       bundling: {
         // Provided by the Lambda runtime; bundling it duplicates the SDK
@@ -489,7 +563,9 @@ export class SpsObservabilityStack extends Stack {
     this.relayFunction = relay;
 
     teamsWebhookSecret.grantRead(relay);
+    teamsWarnWebhookSecret.grantRead(relay);
     relay.addEventSource(new SnsEventSource(this.alarmTopic));
+    relay.addEventSource(new SnsEventSource(this.warnTopic));
 
     // #595 — also relay ETL failures to Teams. EtlStack publishes three signal
     // types to `etl-failures-{env}`: per-step Catch SnsPublish, the
@@ -949,6 +1025,11 @@ export class SpsObservabilityStack extends Stack {
       value: this.notifyTopic.topicArn,
       description:
         "SNS topic for cost guardrails + low-urgency fan-out (notify). Operator email subscription lands here, not on the page topic.",
+    });
+    new CfnOutput(this, "WarnTopicArn", {
+      value: this.warnTopic.topicArn,
+      description:
+        "SNS topic for the P2 warn tier (data-freshness / reconciler / resource-pressure). Relayed to a separate Teams channel, falling back to the page channel if scholars/{env}/oncall/teams-webhook-url-warn is unset.",
     });
     new CfnOutput(this, "OncallRelayFunctionArn", {
       value: relay.functionArn,

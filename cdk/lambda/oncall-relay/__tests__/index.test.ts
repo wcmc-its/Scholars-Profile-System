@@ -19,8 +19,17 @@ const SECRET_ARN =
   "arn:aws:secretsmanager:us-east-1:665083158573:secret:scholars/staging/oncall/teams-webhook-url-AbCdEf";
 const WEBHOOK_URL =
   "https://prod-99.eastus.logic.azure.com:443/workflows/abc/triggers/manual/paths/invoke?api-version=2016-06-01&sig=DEADBEEFCAFEBABE0123456789ABCDEF";
+const WARN_SECRET_ARN =
+  "arn:aws:secretsmanager:us-east-1:665083158573:secret:scholars/staging/oncall/teams-webhook-url-warn-ZzZzZz";
+const WARN_URL =
+  "https://prod-77.eastus.logic.azure.com:443/workflows/warn/triggers/manual/paths/invoke?api-version=2016-06-01&sig=WARNWARNWARN0123456789ABCDEF";
+const WARN_TOPIC_ARN = "arn:aws:sns:us-east-1:0:sps-warn-staging";
+const ETL_TOPIC_ARN = "arn:aws:sns:us-east-1:0:etl-failures-staging";
 
-function snsEvent(messageOverride?: Record<string, unknown>): SNSEvent {
+function snsEvent(
+  messageOverride?: Record<string, unknown>,
+  topicArn = "arn:aws:sns:us-east-1:0:t",
+): SNSEvent {
   const message = JSON.stringify({
     AlarmName: "sps-alb-5xx-rate-staging",
     NewStateValue: "ALARM",
@@ -38,7 +47,7 @@ function snsEvent(messageOverride?: Record<string, unknown>): SNSEvent {
         Sns: {
           Type: "Notification",
           MessageId: "00000000-0000-0000-0000-000000000000",
-          TopicArn: "arn:aws:sns:us-east-1:0:t",
+          TopicArn: topicArn,
           Subject: "ALARM: sps-alb-5xx-rate-staging",
           Message: message,
           Timestamp: "2026-05-21T18:00:00.000Z",
@@ -60,6 +69,7 @@ beforeEach(() => {
   __resetForTests();
   sendMock.mockReset();
   process.env.TEAMS_WEBHOOK_SECRET_ARN = SECRET_ARN;
+  delete process.env.TEAMS_WARN_WEBHOOK_SECRET_ARN;
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
   consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -183,5 +193,86 @@ describe("oncall-relay handler", () => {
       const line = String(call[0]);
       expect(line).not.toContain(WEBHOOK_URL);
     }
+  });
+
+  it("warn-topic record posts to the warn webhook when configured and logs channel=warn", async () => {
+    process.env.TEAMS_WARN_WEBHOOK_SECRET_ARN = WARN_SECRET_ARN;
+    sendMock.mockImplementation(
+      async (cmd: { input: { SecretId: string } }) =>
+        cmd.input.SecretId === WARN_SECRET_ARN
+          ? { SecretString: WARN_URL }
+          : { SecretString: WEBHOOK_URL },
+    );
+    fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+    await handler(snsEvent(undefined, WARN_TOPIC_ARN), {} as never, () => undefined);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toBe(WARN_URL);
+    const logs = consoleLogSpy.mock.calls.map((c) => String(c[0]));
+    const delivered = logs.find((l) => l.includes('"outcome":"delivered"'));
+    expect(delivered).toContain('"severity":"warn"');
+    expect(delivered).toContain('"channel":"warn"');
+  });
+
+  it("warn-topic record falls back to the primary channel when the warn webhook is unset", async () => {
+    // No TEAMS_WARN_WEBHOOK_SECRET_ARN configured (cleared in beforeEach).
+    sendMock.mockResolvedValueOnce({ SecretString: WEBHOOK_URL });
+    fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+    await handler(snsEvent(undefined, WARN_TOPIC_ARN), {} as never, () => undefined);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toBe(WEBHOOK_URL);
+    const logs = consoleLogSpy.mock.calls.map((c) => String(c[0]));
+    const delivered = logs.find((l) => l.includes('"outcome":"delivered"'));
+    expect(delivered).toContain('"severity":"warn"');
+    expect(delivered).toContain('"channel":"page"');
+  });
+
+  it("etl-failures topic is treated as the warn tier", async () => {
+    sendMock.mockResolvedValueOnce({ SecretString: WEBHOOK_URL });
+    fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+    await handler(
+      snsEvent({ AlarmName: undefined, env: "staging", step: "Ed" }, ETL_TOPIC_ARN),
+      {} as never,
+      () => undefined,
+    );
+
+    const logs = consoleLogSpy.mock.calls.map((c) => String(c[0]));
+    const delivered = logs.find((l) => l.includes('"outcome":"delivered"'));
+    expect(delivered).toContain('"severity":"warn"');
+  });
+
+  it("warn-secret read failure falls back to the primary channel (never drops the alert)", async () => {
+    process.env.TEAMS_WARN_WEBHOOK_SECRET_ARN = WARN_SECRET_ARN;
+    sendMock.mockImplementation(
+      async (cmd: { input: { SecretId: string } }) => {
+        if (cmd.input.SecretId === WARN_SECRET_ARN) {
+          throw new Error("ResourceNotFoundException");
+        }
+        return { SecretString: WEBHOOK_URL };
+      },
+    );
+    fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+    await handler(snsEvent(undefined, WARN_TOPIC_ARN), {} as never, () => undefined);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toBe(WEBHOOK_URL);
+  });
+
+  it("page-tier record (generic topic) posts to the primary channel and logs channel=page", async () => {
+    sendMock.mockResolvedValueOnce({ SecretString: WEBHOOK_URL });
+    fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+    await handler(snsEvent(), {} as never, () => undefined);
+
+    expect(fetchMock.mock.calls[0]![0]).toBe(WEBHOOK_URL);
+    const logs = consoleLogSpy.mock.calls.map((c) => String(c[0]));
+    const delivered = logs.find((l) => l.includes('"outcome":"delivered"'));
+    expect(delivered).toContain('"severity":"page"');
+    expect(delivered).toContain('"channel":"page"');
   });
 });

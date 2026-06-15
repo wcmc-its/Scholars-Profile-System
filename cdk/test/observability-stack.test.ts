@@ -136,12 +136,25 @@ describe("SpsObservabilityStack", () => {
       }
     });
 
-    it("every alarm publishes to the SNS topic and only to that topic", () => {
+    it("each simple alarm has at most one action; the three composite-child alarms have none", () => {
+      // 5xx-rate / unhealthy-hosts / task-shortfall feed the app-unavailable
+      // composite and carry no direct action (so a serving cascade pages once
+      // via the composite, not three times). Every other simple alarm
+      // publishes to exactly one topic.
+      const childNames = new Set([
+        "sps-alb-5xx-rate-prod",
+        "sps-alb-unhealthy-hosts-prod",
+        "sps-ecs-task-shortfall-prod",
+      ]);
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       for (const r of Object.values(alarms)) {
-        const actions = r.Properties?.AlarmActions as unknown[] | undefined;
-        expect(actions).toBeDefined();
-        expect(actions).toHaveLength(1);
+        const name = r.Properties?.AlarmName as string | undefined;
+        const actions = (r.Properties?.AlarmActions ?? []) as unknown[];
+        if (typeof name === "string" && childNames.has(name)) {
+          expect(actions).toHaveLength(0);
+        } else {
+          expect(actions).toHaveLength(1);
+        }
       }
     });
 
@@ -183,21 +196,25 @@ describe("SpsObservabilityStack", () => {
       expect(expr).toContain("m5xx >= 5");
     });
 
-    it("creates two SNS topics (page + notify) with the documented names", () => {
-      template.resourceCountIs("AWS::SNS::Topic", 2);
+    it("creates three SNS topics (page + notify + warn) with the documented names", () => {
+      template.resourceCountIs("AWS::SNS::Topic", 3);
       template.hasResourceProperties("AWS::SNS::Topic", {
         TopicName: "sps-alarms-prod",
       });
       template.hasResourceProperties("AWS::SNS::Topic", {
         TopicName: "sps-notify-prod",
       });
+      template.hasResourceProperties("AWS::SNS::Topic", {
+        TopicName: "sps-warn-prod",
+      });
     });
 
     it("notify topic has exactly one email subscription to the operator", () => {
-      // Three AWS::SNS::Subscription resources total: email on notify topic,
-      // Lambda on page topic (the B27 relay), and (#595) Lambda on the
+      // Four AWS::SNS::Subscription resources total: email on notify topic,
+      // Lambda on page topic (the B27 relay), Lambda on the new warn topic
+      // (relay routes it to the P2 channel), and (#595) Lambda on the
       // cross-stack etl-failures topic (also the relay).
-      template.resourceCountIs("AWS::SNS::Subscription", 3);
+      template.resourceCountIs("AWS::SNS::Subscription", 4);
       template.hasResourceProperties("AWS::SNS::Subscription", {
         Protocol: "email",
         Endpoint: "paa2013@med.cornell.edu",
@@ -240,29 +257,85 @@ describe("SpsObservabilityStack", () => {
       expect(proto).toBe("lambda");
     });
 
-    it("all 9 platform alarms resolve their AlarmActions to the page topic ARN", () => {
+    it("platform alarms route by severity tier: P1 -> page, P2 -> warn, relay-errors -> notify, composite-children -> none", () => {
       const topics = template.findResources("AWS::SNS::Topic");
-      const pageLogicalId = Object.entries(topics).find(
+      const topicId = (name: string): string | undefined =>
+        Object.entries(topics).find(
+          ([, r]) =>
+            (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
+            name,
+        )?.[0];
+      const pageId = topicId("sps-alarms-prod");
+      const warnId = topicId("sps-warn-prod");
+      const notifyId = topicId("sps-notify-prod");
+      expect(pageId).toBeDefined();
+      expect(warnId).toBeDefined();
+      expect(notifyId).toBeDefined();
+
+      // Expected single-action destination per alarm; undefined = no action
+      // (the composite-child indicators).
+      const expected: Record<string, string | undefined> = {
+        "sps-alb-latency-p99-prod": pageId,
+        "sps-opensearch-cluster-red-prod": pageId,
+        "sps-aurora-cpu-prod": warnId,
+        "sps-aurora-connections-prod": warnId,
+        "sps-opensearch-jvm-pressure-prod": warnId,
+        "sps-edit-authz-denied-prod": warnId,
+        "sps-oncall-relay-errors-prod": notifyId,
+        "sps-alb-5xx-rate-prod": undefined,
+        "sps-alb-unhealthy-hosts-prod": undefined,
+        "sps-ecs-task-shortfall-prod": undefined,
+      };
+
+      const alarms = template.findResources("AWS::CloudWatch::Alarm");
+      let seen = 0;
+      for (const r of Object.values(alarms)) {
+        const name = r.Properties?.AlarmName as string | undefined;
+        if (typeof name !== "string") continue;
+        expect(Object.prototype.hasOwnProperty.call(expected, name)).toBe(true);
+        seen++;
+        const actions = (r.Properties?.AlarmActions ?? []) as Array<{
+          Ref?: string;
+        }>;
+        const dest = expected[name];
+        if (dest === undefined) {
+          expect(actions).toHaveLength(0);
+        } else {
+          expect(actions).toHaveLength(1);
+          expect(actions[0]?.Ref).toBe(dest);
+        }
+      }
+      expect(seen).toBe(10);
+    });
+
+    it("creates the app-unavailable composite that pages on the serving cascade", () => {
+      template.resourceCountIs("AWS::CloudWatch::CompositeAlarm", 1);
+      const composites = template.findResources(
+        "AWS::CloudWatch::CompositeAlarm",
+      );
+      const props = Object.values(composites)[0]?.Properties as
+        | {
+            AlarmName?: string;
+            AlarmRule?: unknown;
+            AlarmActions?: Array<{ Ref?: string }>;
+          }
+        | undefined;
+      expect(props?.AlarmName).toBe("sps-app-unavailable-prod");
+      // Rule ORs the three serving-failure indicators (referenced by construct id).
+      const rule = JSON.stringify(props?.AlarmRule);
+      expect(rule).toContain("ALARM");
+      expect(rule).toContain("PublicAlb5xxRateAlarm");
+      expect(rule).toContain("PublicAlbUnhealthyHostsAlarm");
+      expect(rule).toContain("EcsTaskShortfallAlarm");
+      // Pages on the page topic (P1).
+      const topics = template.findResources("AWS::SNS::Topic");
+      const pageId = Object.entries(topics).find(
         ([, r]) =>
           (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
           "sps-alarms-prod",
       )?.[0];
-      expect(pageLogicalId).toBeDefined();
-      const alarms = template.findResources("AWS::CloudWatch::Alarm");
-      let platformCount = 0;
-      for (const r of Object.values(alarms)) {
-        const name = r.Properties?.AlarmName as string | undefined;
-        // The B27 relay-errors alarm goes to the notify topic by design --
-        // see SPEC § Failure-mode design; covered in a separate test below.
-        if (name === "sps-oncall-relay-errors-prod") continue;
-        const actions = r.Properties?.AlarmActions as
-          | Array<{ Ref?: string }>
-          | undefined;
-        expect(actions).toHaveLength(1);
-        expect(actions?.[0]?.Ref).toBe(pageLogicalId);
-        platformCount++;
-      }
-      expect(platformCount).toBe(9);
+      expect(props?.AlarmActions).toHaveLength(1);
+      expect(props?.AlarmActions?.[0]?.Ref).toBe(pageId);
     });
 
     it("creates the account-wide monthly budget (prod only) with three notifications", () => {
@@ -407,6 +480,7 @@ describe("SpsObservabilityStack", () => {
     it("emits AlarmTopicArn, NotifyTopicArn, and OncallRelayFunctionArn CFN outputs", () => {
       template.hasOutput("AlarmTopicArn", {});
       template.hasOutput("NotifyTopicArn", {});
+      template.hasOutput("WarnTopicArn", {});
       template.hasOutput("OncallRelayFunctionArn", {});
     });
 
@@ -490,7 +564,10 @@ describe("SpsObservabilityStack", () => {
         Timeout: 10,
         Handler: "index.handler",
         Environment: {
-          Variables: { TEAMS_WEBHOOK_SECRET_ARN: Match.anyValue() },
+          Variables: {
+            TEAMS_WEBHOOK_SECRET_ARN: Match.anyValue(),
+            TEAMS_WARN_WEBHOOK_SECRET_ARN: Match.anyValue(),
+          },
         },
       });
     });
@@ -501,7 +578,9 @@ describe("SpsObservabilityStack", () => {
         | { Environment?: { Variables?: Record<string, unknown> } }
         | undefined;
       const vars = props?.Environment?.Variables ?? {};
-      expect(Object.keys(vars)).toEqual(["TEAMS_WEBHOOK_SECRET_ARN"]);
+      expect(new Set(Object.keys(vars))).toEqual(
+        new Set(["TEAMS_WEBHOOK_SECRET_ARN", "TEAMS_WARN_WEBHOOK_SECRET_ARN"]),
+      );
       // No env-var key should match /url/i (T3 -- defense against a later
       // PR that smuggles the resolved URL into env vars by mistake).
       for (const k of Object.keys(vars)) {
@@ -744,20 +823,24 @@ describe("SpsObservabilityStack", () => {
       }
     });
 
-    it("creates two SNS topics (page + notify) with the staging env literals", () => {
-      template.resourceCountIs("AWS::SNS::Topic", 2);
+    it("creates three SNS topics (page + notify + warn) with the staging env literals", () => {
+      template.resourceCountIs("AWS::SNS::Topic", 3);
       template.hasResourceProperties("AWS::SNS::Topic", {
         TopicName: "sps-alarms-staging",
       });
       template.hasResourceProperties("AWS::SNS::Topic", {
         TopicName: "sps-notify-staging",
       });
+      template.hasResourceProperties("AWS::SNS::Topic", {
+        TopicName: "sps-warn-staging",
+      });
     });
 
     it("page topic carries the B27 Lambda subscription; notify topic has the operator email", () => {
-      // Three AWS::SNS::Subscription resources: email on notify, lambda on
-      // page, and (#595) lambda on the cross-stack etl-failures topic.
-      template.resourceCountIs("AWS::SNS::Subscription", 3);
+      // Four AWS::SNS::Subscription resources: email on notify, lambda on
+      // page, lambda on the new warn topic, and (#595) lambda on the
+      // cross-stack etl-failures topic.
+      template.resourceCountIs("AWS::SNS::Subscription", 4);
       template.hasResourceProperties("AWS::SNS::Subscription", {
         Protocol: "email",
         Endpoint: "paa2013@med.cornell.edu",
@@ -797,26 +880,55 @@ describe("SpsObservabilityStack", () => {
       ).toBe("email");
     });
 
-    it("all 9 staging platform alarms publish to the page topic ARN", () => {
+    it("staging platform alarms route by severity tier (P1 page / P2 warn / composite-children none)", () => {
       const topics = template.findResources("AWS::SNS::Topic");
-      const pageLogicalId = Object.entries(topics).find(
-        ([, r]) =>
-          (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
-          "sps-alarms-staging",
-      )?.[0];
+      const topicId = (name: string): string | undefined =>
+        Object.entries(topics).find(
+          ([, r]) =>
+            (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
+            name,
+        )?.[0];
+      const pageId = topicId("sps-alarms-staging");
+      const warnId = topicId("sps-warn-staging");
+      const notifyId = topicId("sps-notify-staging");
+      const expected: Record<string, string | undefined> = {
+        "sps-alb-latency-p99-staging": pageId,
+        "sps-opensearch-cluster-red-staging": pageId,
+        "sps-aurora-cpu-staging": warnId,
+        "sps-aurora-connections-staging": warnId,
+        "sps-opensearch-jvm-pressure-staging": warnId,
+        "sps-edit-authz-denied-staging": warnId,
+        "sps-oncall-relay-errors-staging": notifyId,
+        "sps-alb-5xx-rate-staging": undefined,
+        "sps-alb-unhealthy-hosts-staging": undefined,
+        "sps-ecs-task-shortfall-staging": undefined,
+      };
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
-      let platformCount = 0;
+      let seen = 0;
       for (const r of Object.values(alarms)) {
         const name = r.Properties?.AlarmName as string | undefined;
-        if (name === "sps-oncall-relay-errors-staging") continue;
-        const actions = r.Properties?.AlarmActions as
-          | Array<{ Ref?: string }>
-          | undefined;
-        expect(actions).toHaveLength(1);
-        expect(actions?.[0]?.Ref).toBe(pageLogicalId);
-        platformCount++;
+        if (typeof name !== "string") continue;
+        expect(Object.prototype.hasOwnProperty.call(expected, name)).toBe(true);
+        seen++;
+        const actions = (r.Properties?.AlarmActions ?? []) as Array<{
+          Ref?: string;
+        }>;
+        const dest = expected[name];
+        if (dest === undefined) {
+          expect(actions).toHaveLength(0);
+        } else {
+          expect(actions).toHaveLength(1);
+          expect(actions[0]?.Ref).toBe(dest);
+        }
       }
-      expect(platformCount).toBe(9);
+      expect(seen).toBe(10);
+    });
+
+    it("creates the app-unavailable composite in staging too", () => {
+      template.resourceCountIs("AWS::CloudWatch::CompositeAlarm", 1);
+      template.hasResourceProperties("AWS::CloudWatch::CompositeAlarm", {
+        AlarmName: "sps-app-unavailable-staging",
+      });
     });
 
     it("staging Lambda + alarm shape mirrors prod (env literal differs only)", () => {
@@ -863,6 +975,7 @@ describe("SpsObservabilityStack", () => {
     it("emits AlarmTopicArn, NotifyTopicArn, and OncallRelayFunctionArn CFN outputs", () => {
       template.hasOutput("AlarmTopicArn", {});
       template.hasOutput("NotifyTopicArn", {});
+      template.hasOutput("WarnTopicArn", {});
       template.hasOutput("OncallRelayFunctionArn", {});
     });
 

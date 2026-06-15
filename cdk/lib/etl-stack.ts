@@ -1240,7 +1240,14 @@ export class EtlStack extends Stack {
           period: Duration.minutes(15),
           dimensionsMap: reconcileDimensions,
         }),
-        evaluationPeriods: 1,
+        // Require ~30 min of sustained failure (2 consecutive 15 min windows)
+        // before alerting. The reconciler runs every 5 min and is idempotent,
+        // so a single failed run self-heals on the next fire and is not worth a
+        // notification; two windows = a persistent failure (e.g. a row that
+        // keeps failing to reflect), which is. The cadence alarm below still
+        // alerts immediately on schedule death.
+        evaluationPeriods: 2,
+        datapointsToAlarm: 2,
         threshold: 0,
         comparisonOperator:
           cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
@@ -1535,7 +1542,13 @@ export class EtlStack extends Stack {
           period: Duration.minutes(15),
           dimensionsMap: cdnReconcileDimensions,
         }),
-        evaluationPeriods: 1,
+        // Require ~30 min of sustained failure (2 consecutive 15 min windows)
+        // before alerting. The reconciler runs every 5 min and is idempotent,
+        // so a single failed run self-heals on the next fire and is not worth a
+        // notification; two windows = a persistent failure, which is. The
+        // cadence alarm below still alerts immediately on schedule death.
+        evaluationPeriods: 2,
+        datapointsToAlarm: 2,
         threshold: 0,
         comparisonOperator:
           cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
