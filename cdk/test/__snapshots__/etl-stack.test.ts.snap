@@ -454,7 +454,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL annual (prod) -- execution failed.",
+        "AlarmDescription": "SPS ETL annual (prod) -- execution failed. Next: check the Step Functions execution and the failing step's logs; data freshness lags until it reruns.",
         "AlarmName": "sps-etl-annual-status-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "Dimensions": [
@@ -482,7 +482,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS CloudFront-invalidation reconciler (prod) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires).",
+        "AlarmDescription": "SPS CloudFront-invalidation reconciler (prod) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.",
         "AlarmName": "sps-cdn-reconcile-cadence-prod",
         "ComparisonOperator": "LessThanThreshold",
         "Dimensions": [
@@ -895,7 +895,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS CloudFront-invalidation reconciler (prod) -- run failed (>=1 pending edge purge could not be replayed).",
+        "AlarmDescription": "SPS CloudFront-invalidation reconciler (prod) -- run failed (>=1 pending edge purge could not be replayed). Next: check the Step Functions execution for the failing purge; it replays on the next run once CloudFront accepts it.",
         "AlarmName": "sps-cdn-reconcile-status-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 2,
@@ -2336,7 +2336,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL heartbeat (prod) -- cadence missed (no execution started in period).",
+        "AlarmDescription": "SPS ETL heartbeat (prod) -- cadence missed (no execution started in period). Next: confirm the EventBridge schedule is enabled and the state-machine IAM is intact; the job never started.",
         "AlarmName": "sps-etl-heartbeat-cadence-prod",
         "ComparisonOperator": "LessThanThreshold",
         "Dimensions": [
@@ -2737,7 +2737,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL heartbeat (prod) -- execution failed.",
+        "AlarmDescription": "SPS ETL heartbeat (prod) -- execution failed. Next: check the Step Functions execution and the failing step's logs; data freshness lags until it reruns.",
         "AlarmName": "sps-etl-heartbeat-status-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "Dimensions": [
@@ -2780,7 +2780,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL nightly (prod) -- cadence missed (no execution started in period).",
+        "AlarmDescription": "SPS ETL nightly (prod) -- cadence missed (no execution started in period). Next: confirm the EventBridge schedule is enabled and the state-machine IAM is intact; the job never started.",
         "AlarmName": "sps-etl-nightly-cadence-prod",
         "ComparisonOperator": "LessThanThreshold",
         "Dimensions": [
@@ -3517,7 +3517,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL nightly (prod) -- execution failed.",
+        "AlarmDescription": "SPS ETL nightly (prod) -- execution failed. Next: check the Step Functions execution and the failing step's logs; data freshness lags until it reruns.",
         "AlarmName": "sps-etl-nightly-status-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "Dimensions": [
@@ -3545,7 +3545,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS reconciler (prod) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires).",
+        "AlarmDescription": "SPS reconciler (prod) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.",
         "AlarmName": "sps-reconcile-cadence-prod",
         "ComparisonOperator": "LessThanThreshold",
         "Dimensions": [
@@ -3958,7 +3958,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS reconciler (prod) -- run failed (>=1 suppression row could not be reflected into the index).",
+        "AlarmDescription": "SPS reconciler (prod) -- run failed (>=1 suppression row could not be reflected into the index). Next: check the Step Functions execution for the failing row; it self-heals once the underlying write succeeds.",
         "AlarmName": "sps-reconcile-status-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 2,
@@ -4317,7 +4317,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL weekly (prod) -- cadence missed (no execution started in period).",
+        "AlarmDescription": "SPS ETL weekly (prod) -- cadence missed (no execution started in period). Next: confirm the EventBridge schedule is enabled and the state-machine IAM is intact; the job never started.",
         "AlarmName": "sps-etl-weekly-cadence-prod",
         "ComparisonOperator": "LessThanThreshold",
         "Dimensions": [
@@ -4942,7 +4942,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL weekly (prod) -- execution failed.",
+        "AlarmDescription": "SPS ETL weekly (prod) -- execution failed. Next: check the Step Functions execution and the failing step's logs; data freshness lags until it reruns.",
         "AlarmName": "sps-etl-weekly-status-prod",
         "ComparisonOperator": "GreaterThanThreshold",
         "Dimensions": [
@@ -5448,7 +5448,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL annual (staging) -- execution failed.",
+        "AlarmDescription": "SPS ETL annual (staging) -- execution failed. Next: check the Step Functions execution and the failing step's logs; data freshness lags until it reruns.",
         "AlarmName": "sps-etl-annual-status-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "Dimensions": [
@@ -5476,7 +5476,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS CloudFront-invalidation reconciler (staging) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires).",
+        "AlarmDescription": "SPS CloudFront-invalidation reconciler (staging) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.",
         "AlarmName": "sps-cdn-reconcile-cadence-staging",
         "ComparisonOperator": "LessThanThreshold",
         "Dimensions": [
@@ -5889,7 +5889,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS CloudFront-invalidation reconciler (staging) -- run failed (>=1 pending edge purge could not be replayed).",
+        "AlarmDescription": "SPS CloudFront-invalidation reconciler (staging) -- run failed (>=1 pending edge purge could not be replayed). Next: check the Step Functions execution for the failing purge; it replays on the next run once CloudFront accepts it.",
         "AlarmName": "sps-cdn-reconcile-status-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 2,
@@ -7330,7 +7330,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL heartbeat (staging) -- cadence missed (no execution started in period).",
+        "AlarmDescription": "SPS ETL heartbeat (staging) -- cadence missed (no execution started in period). Next: confirm the EventBridge schedule is enabled and the state-machine IAM is intact; the job never started.",
         "AlarmName": "sps-etl-heartbeat-cadence-staging",
         "ComparisonOperator": "LessThanThreshold",
         "Dimensions": [
@@ -7731,7 +7731,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL heartbeat (staging) -- execution failed.",
+        "AlarmDescription": "SPS ETL heartbeat (staging) -- execution failed. Next: check the Step Functions execution and the failing step's logs; data freshness lags until it reruns.",
         "AlarmName": "sps-etl-heartbeat-status-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "Dimensions": [
@@ -7774,7 +7774,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL nightly (staging) -- cadence missed (no execution started in period).",
+        "AlarmDescription": "SPS ETL nightly (staging) -- cadence missed (no execution started in period). Next: confirm the EventBridge schedule is enabled and the state-machine IAM is intact; the job never started.",
         "AlarmName": "sps-etl-nightly-cadence-staging",
         "ComparisonOperator": "LessThanThreshold",
         "Dimensions": [
@@ -8511,7 +8511,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL nightly (staging) -- execution failed.",
+        "AlarmDescription": "SPS ETL nightly (staging) -- execution failed. Next: check the Step Functions execution and the failing step's logs; data freshness lags until it reruns.",
         "AlarmName": "sps-etl-nightly-status-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "Dimensions": [
@@ -8539,7 +8539,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS reconciler (staging) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires).",
+        "AlarmDescription": "SPS reconciler (staging) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.",
         "AlarmName": "sps-reconcile-cadence-staging",
         "ComparisonOperator": "LessThanThreshold",
         "Dimensions": [
@@ -8952,7 +8952,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS reconciler (staging) -- run failed (>=1 suppression row could not be reflected into the index).",
+        "AlarmDescription": "SPS reconciler (staging) -- run failed (>=1 suppression row could not be reflected into the index). Next: check the Step Functions execution for the failing row; it self-heals once the underlying write succeeds.",
         "AlarmName": "sps-reconcile-status-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "DatapointsToAlarm": 2,
@@ -9311,7 +9311,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL weekly (staging) -- cadence missed (no execution started in period).",
+        "AlarmDescription": "SPS ETL weekly (staging) -- cadence missed (no execution started in period). Next: confirm the EventBridge schedule is enabled and the state-machine IAM is intact; the job never started.",
         "AlarmName": "sps-etl-weekly-cadence-staging",
         "ComparisonOperator": "LessThanThreshold",
         "Dimensions": [
@@ -9936,7 +9936,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             "Ref": "EtlFailureTopic8361D0D0",
           },
         ],
-        "AlarmDescription": "SPS ETL weekly (staging) -- execution failed.",
+        "AlarmDescription": "SPS ETL weekly (staging) -- execution failed. Next: check the Step Functions execution and the failing step's logs; data freshness lags until it reruns.",
         "AlarmName": "sps-etl-weekly-status-staging",
         "ComparisonOperator": "GreaterThanThreshold",
         "Dimensions": [

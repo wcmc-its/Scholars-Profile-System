@@ -217,7 +217,7 @@ export class SpsObservabilityStack extends Stack {
     });
     const alb5xxAlarm = new cloudwatch.Alarm(this, "PublicAlb5xxRateAlarm", {
       alarmName: `sps-alb-5xx-rate-${env}`,
-      alarmDescription: `Public ALB target 5xx rate exceeds 1% over 5m (${env}). Burns the 99.5% availability SLO budget. See docs/SLOs.md.`,
+      alarmDescription: `Public ALB target 5xx rate exceeds 1% over 5m (${env}). Burns the 99.5% availability SLO budget. See docs/SLOs.md. Next: check the ALB 5xx panel and the most recent deploy; roll back if the spike tracks a release, else pull app logs for the failing route.`,
       metric: alb5xxRate,
       threshold: 1,
       evaluationPeriods: 2,
@@ -237,7 +237,7 @@ export class SpsObservabilityStack extends Stack {
       "PublicAlbUnhealthyHostsAlarm",
       {
         alarmName: `sps-alb-unhealthy-hosts-${env}`,
-        alarmDescription: `Public ALB has zero healthy targets for 5 consecutive minutes (${env}). Circuit-breaker did not catch it -- real outage.`,
+        alarmDescription: `Public ALB has zero healthy targets for 5 consecutive minutes (${env}). Circuit-breaker did not catch it -- real outage. Next: check ECS task health, the in-flight deploy, and the target-group health-check path.`,
         metric: appStack.publicTargetGroup.metrics.unhealthyHostCount({
           statistic: "Maximum",
           period: Duration.minutes(1),
@@ -258,7 +258,7 @@ export class SpsObservabilityStack extends Stack {
       "PublicAlbLatencyP99Alarm",
       {
         alarmName: `sps-alb-latency-p99-${env}`,
-        alarmDescription: `Public ALB target response time p99 > ${LATENCY_P99_THRESHOLD_MS}ms over 5m (${env}). Burns the latency SLO budget. See docs/SLOs.md.`,
+        alarmDescription: `Public ALB target response time p99 > ${LATENCY_P99_THRESHOLD_MS}ms over 5m (${env}). Burns the latency SLO budget. See docs/SLOs.md. Next: open the reliability dashboard latency and Aurora SelectLatency panels; look for a slow query, a cold cache, or an undersized task.`,
         metric: appStack.publicAlb.metrics.targetResponseTime({
           statistic: "p99",
           period: Duration.minutes(5),
@@ -300,7 +300,7 @@ export class SpsObservabilityStack extends Stack {
       "EcsTaskShortfallAlarm",
       {
         alarmName: `sps-ecs-task-shortfall-${env}`,
-        alarmDescription: `ECS service running task count is below desired for 5 consecutive minutes (${env}). Tasks died and are not being replaced.`,
+        alarmDescription: `ECS service running task count is below desired for 5 consecutive minutes (${env}). Tasks died and are not being replaced. Next: check ECS service events for image-pull, capacity, or IAM failures and the recent deploy.`,
         metric: taskCountShortfall,
         threshold: 0,
         evaluationPeriods: 5,
@@ -328,7 +328,7 @@ export class SpsObservabilityStack extends Stack {
       "AppUnavailableAlarm",
       {
         compositeAlarmName: `sps-app-unavailable-${env}`,
-        alarmDescription: `Public serving is degraded or down (${env}): one or more of 5xx-rate / zero-healthy-hosts / task-shortfall is in ALARM. Single P1 page for the serving cascade. See docs/SLOs.md.`,
+        alarmDescription: `Public serving is degraded or down (${env}): one or more of 5xx-rate / zero-healthy-hosts / task-shortfall is in ALARM. Single P1 page for the serving cascade. See docs/SLOs.md. Next: open the reliability dashboard; if Aurora CPU/connections are also high, suspect DB connection-pool exhaustion; if it tracks the last deploy, roll back (DEPLOY-RUNBOOK.md).`,
         alarmRule: cloudwatch.AlarmRule.anyOf(
           cloudwatch.AlarmRule.fromAlarm(
             alb5xxAlarm,
@@ -353,7 +353,7 @@ export class SpsObservabilityStack extends Stack {
     // (5) CPU -- catches hot loops + runaway queries.
     const auroraCpuAlarm = new cloudwatch.Alarm(this, "AuroraCpuAlarm", {
       alarmName: `sps-aurora-cpu-${env}`,
-      alarmDescription: `Aurora cluster CPU > 80% sustained for 10m (${env}). Likely a hot query loop or runaway analytic.`,
+      alarmDescription: `Aurora cluster CPU > 80% sustained for 10m (${env}). Likely a hot query loop or runaway analytic. Next: check Performance Insights or the slow-query log; scale ACUs only if the load is legitimate.`,
       metric: dataStack.auroraCluster.metricCPUUtilization({
         statistic: "Average",
         period: Duration.minutes(5),
@@ -377,7 +377,7 @@ export class SpsObservabilityStack extends Stack {
       "AuroraConnectionsAlarm",
       {
         alarmName: `sps-aurora-connections-${env}`,
-        alarmDescription: `Aurora active connection count > 80 sustained over 5m (${env}). Symptom of connection-pool exhaustion or unintended app fan-out.`,
+        alarmDescription: `Aurora active connection count > 80 sustained over 5m (${env}). Symptom of connection-pool exhaustion or unintended app fan-out. Next: look for leaked or idle connections; recycle the app tasks if the count will not drain.`,
         metric: dataStack.auroraCluster.metricDatabaseConnections({
           statistic: "Maximum",
           period: Duration.minutes(5),
@@ -401,7 +401,7 @@ export class SpsObservabilityStack extends Stack {
       "OpenSearchJvmPressureAlarm",
       {
         alarmName: `sps-opensearch-jvm-pressure-${env}`,
-        alarmDescription: `OpenSearch JVM memory pressure > 85% for 15m (${env}). GC pressure will cascade into query latency.`,
+        alarmDescription: `OpenSearch JVM memory pressure > 85% for 15m (${env}). GC pressure will cascade into query latency. Next: check shard count and query load on the dashboard; throttle heavy queries or scale the domain.`,
         metric: dataStack.opensearchDomain.metric("JVMMemoryPressure", {
           statistic: "Maximum",
           period: Duration.minutes(5),
@@ -422,7 +422,7 @@ export class SpsObservabilityStack extends Stack {
       "OpenSearchClusterRedAlarm",
       {
         alarmName: `sps-opensearch-cluster-red-${env}`,
-        alarmDescription: `OpenSearch cluster status is RED (${env}). Shards unassigned -- searches affected.`,
+        alarmDescription: `OpenSearch cluster status is RED (${env}). Shards unassigned -- searches affected. Next: check OpenSearch _cluster/health; reallocate or restore the affected index from snapshot.`,
         metric: dataStack.opensearchDomain.metric("ClusterStatus.red", {
           statistic: "Maximum",
           period: Duration.minutes(1),
@@ -471,7 +471,7 @@ export class SpsObservabilityStack extends Stack {
       "EditAuthzDeniedAlarm",
       {
         alarmName: `sps-edit-authz-denied-${env}`,
-        alarmDescription: `Edit-surface 403 (edit_authz_denied) count > ${EDIT_AUTHZ_DENIED_THRESHOLD} in any 5m window for 2 consecutive windows (${env}). Sustained rate -- predicate bug or active probing. See docs/SLOs.md.`,
+        alarmDescription: `Edit-surface 403 (edit_authz_denied) count > ${EDIT_AUTHZ_DENIED_THRESHOLD} in any 5m window for 2 consecutive windows (${env}). Sustained rate -- predicate bug or active probing. See docs/SLOs.md. Next: check for an authz-predicate regression in the last deploy, or active probing; review the edit_authz_denied logs for the actor and path.`,
         metric: new cloudwatch.Metric({
           namespace: "SPS/Auth",
           metricName: "EditAuthzDenied",
