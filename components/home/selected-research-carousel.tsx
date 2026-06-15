@@ -26,7 +26,7 @@ export function SelectedResearchCarousel({
       <div className="flex items-baseline gap-4">
         <h2 className="text-lg font-semibold">Selected research</h2>
         <Link
-          href="/browse"
+          href="/#browse-all-research-areas"
           className="ml-auto text-sm font-medium text-[var(--color-accent-slate)] hover:underline"
         >
           Browse all areas ↓

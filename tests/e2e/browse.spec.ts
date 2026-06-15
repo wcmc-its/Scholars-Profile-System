@@ -57,8 +57,8 @@ test.describe("/browse", () => {
     await page.goto("/browse");
     const link = page.getByRole("link", { name: /Research areas/i });
     await expect(link).toBeVisible();
-    // Target locked to /#research-areas (no /topics listing exists per RESEARCH.md Pitfall 3)
-    await expect(link).toHaveAttribute("href", "/#research-areas");
+    // Target locked to /#browse-all-research-areas (no /topics listing exists per RESEARCH.md Pitfall 3)
+    await expect(link).toHaveAttribute("href", "/#browse-all-research-areas");
   });
 
   test("breadcrumb shows Home › Browse", async ({ page }) => {
