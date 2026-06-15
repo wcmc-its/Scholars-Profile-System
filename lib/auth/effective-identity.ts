@@ -29,13 +29,14 @@ import { type SessionData, nowSeconds } from "@/lib/auth/session";
 import { type EditSession, isSuperuser } from "@/lib/auth/superuser";
 
 /**
- * Read-time impersonation TTL, seconds (#637). Default 30 min; the hard cap
- * remains the 8h cookie `exp`. Read at CALL TIME (not module load) so tests and
+ * Read-time impersonation TTL, seconds (#637). Default 1 hour — the 2026-06-15
+ * conservative-defaults decision; the hard cap remains the 8h cookie `exp`. Read
+ * at CALL TIME (not module load) so tests and
  * deployments can vary it without re-import — mirroring `impersonationEnabled()`.
  * (#991: the prior module-load `const` froze the value and contradicted this.)
  */
 function impersonationTtlSeconds(): number {
-  return Number(process.env.IMPERSONATION_TTL_SECONDS ?? 1800);
+  return Number(process.env.IMPERSONATION_TTL_SECONDS ?? 3600);
 }
 
 /** Whether the impersonation feature is enabled at all (default off). */
