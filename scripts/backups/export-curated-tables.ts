@@ -79,7 +79,9 @@ const CURATED_TABLES: readonly string[] = [
   "division",
   "center",
   "center_program",
-  "center_membership_type",
+  // NB: there is no `center_membership_type` TABLE — `CenterMembershipType`
+  // (research/clinical) is a Prisma ENUM realized as the `membership_type`
+  // column on `center_membership`, so that data is already captured below.
   "center_membership",
   "division_membership",
   "unit_admin",

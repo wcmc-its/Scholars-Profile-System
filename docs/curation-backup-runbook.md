@@ -23,8 +23,9 @@ belt-and-suspenders: long-lived, diffable, and restorable row-by-row.
 Defined in `scripts/backups/export-curated-tables.ts` (`CURATED_TABLES`):
 
 - **Org units:** `department`, `division`, `center`, `center_program`,
-  `center_membership_type`, `center_membership`, `division_membership`,
-  `unit_admin`
+  `center_membership`, `division_membership`, `unit_admin` (membership
+  research/clinical type is a `membership_type` enum column on
+  `center_membership`, not a separate table)
 - **Methods & tools visibility overlays:** `family_suppression_overlay`,
   `family_sensitivity_overlay`
 - **Cross-cutting manual curation** (org-unit descriptions, leader overrides,
