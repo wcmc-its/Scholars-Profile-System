@@ -1,9 +1,9 @@
 "use client";
 
-import { Search } from "lucide-react";
+import { Loader2, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 
 import type { EntityKind } from "@/lib/api/search";
 import { EntityBadge } from "@/components/ui/entity-badge";
@@ -39,6 +39,7 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
   const [activeIndex, setActiveIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     if (value.trim().length < 2) {
@@ -87,7 +88,9 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
     abortRef.current?.abort();
     setSuggestions([]);
     setOpen(false);
-    router.push(`/search?q=${encodeURIComponent(value.trim())}`);
+    startTransition(() => {
+      router.push(`/search?q=${encodeURIComponent(value.trim())}`);
+    });
   };
 
   const containerClass = isHero
@@ -105,7 +108,16 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
   return (
     <div ref={containerRef} className={containerClass}>
       <div className={inputBoxClass}>
-        <Search className={isHero ? "ml-3 h-4 w-4 shrink-0 text-zinc-400" : "h-4 w-4"} />
+        {isPending ? (
+          <Loader2
+            className={
+              isHero ? "ml-3 h-4 w-4 shrink-0 text-zinc-400 animate-spin" : "h-4 w-4 animate-spin"
+            }
+            aria-hidden="true"
+          />
+        ) : (
+          <Search className={isHero ? "ml-3 h-4 w-4 shrink-0 text-zinc-400" : "h-4 w-4"} />
+        )}
         <input
           type="search"
           value={value}
@@ -116,7 +128,9 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
                 abortRef.current?.abort();
                 setSuggestions([]);
                 setOpen(false);
-                router.push(suggestions[activeIndex].href);
+                startTransition(() => {
+                  router.push(suggestions[activeIndex].href);
+                });
               } else {
                 submit();
               }
@@ -139,12 +153,14 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
           }
           className={inputClass}
           aria-label="Search scholars"
+          aria-busy={isPending}
           autoComplete="off"
         />
         {isHero ? (
           <button
             onClick={submit}
-            className="shrink-0 rounded bg-[var(--color-primary-cornell-red)] px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-[#951616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary-cornell-red)]"
+            disabled={isPending}
+            className="shrink-0 rounded bg-[var(--color-primary-cornell-red)] px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-[#951616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary-cornell-red)] disabled:opacity-70 disabled:cursor-default"
           >
             Search
           </button>
@@ -195,6 +211,9 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
           ))}
         </ul>
       ) : null}
+      <span role="status" aria-live="polite" className="sr-only">
+        {isPending ? "Searching…" : ""}
+      </span>
     </div>
   );
 }
