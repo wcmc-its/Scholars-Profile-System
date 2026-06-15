@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   MENTORING_DISTRIBUTION_THRESHOLD,
+  degreeSuffix,
   formatMentoringDistribution,
   formatProgramLabel,
+  menteeProgramLabel,
   menteeTerminalYear,
   mentoringDistributionBucket,
   partitionMenteesByBucket,
@@ -48,6 +50,66 @@ describe("formatProgramLabel", () => {
 
   it("returns null for null input", () => {
     expect(formatProgramLabel(null)).toBeNull();
+  });
+});
+
+describe("degreeSuffix", () => {
+  it("appends ' (PhD)' for the PhD degree track", () => {
+    expect(degreeSuffix("PhD")).toBe(" (PhD)");
+  });
+
+  it("appends ' (MD-PhD)' for both MD-PhD source spellings", () => {
+    expect(degreeSuffix("MDPHD")).toBe(" (MD-PhD)");
+    expect(degreeSuffix("MD-PhD")).toBe(" (MD-PhD)");
+  });
+
+  it("adds no suffix for POSTDOC / AOC* / ECR / unknown / null", () => {
+    expect(degreeSuffix("POSTDOC")).toBe("");
+    expect(degreeSuffix("AOC")).toBe("");
+    expect(degreeSuffix("AOC-2025")).toBe("");
+    expect(degreeSuffix("ECR")).toBe("");
+    expect(degreeSuffix("Something New")).toBe("");
+    expect(degreeSuffix(null)).toBe("");
+  });
+});
+
+describe("menteeProgramLabel", () => {
+  it("appends the degree after a PhD programName (issue #1019)", () => {
+    // The exact subtitle prefix for the chip / co-pubs meta line — the
+    // class-year segment is joined on by the caller.
+    expect(
+      menteeProgramLabel("Biochemistry & Structural Biology", "PhD"),
+    ).toBe("Biochemistry & Structural Biology (PhD)");
+  });
+
+  it("appends the degree after an MD-PhD programName (both spellings)", () => {
+    expect(menteeProgramLabel("Immunology & Microbial Pathogenesis", "MDPHD")).toBe(
+      "Immunology & Microbial Pathogenesis (MD-PhD)",
+    );
+    expect(menteeProgramLabel("Immunology & Microbial Pathogenesis", "MD-PhD")).toBe(
+      "Immunology & Microbial Pathogenesis (MD-PhD)",
+    );
+  });
+
+  it("leaves the programName bare for POSTDOC / AOC* / ECR / unknown / null type", () => {
+    expect(menteeProgramLabel("Cardiology Fellowship", "POSTDOC")).toBe(
+      "Cardiology Fellowship",
+    );
+    expect(menteeProgramLabel("Some MD Track", "AOC")).toBe("Some MD Track");
+    expect(menteeProgramLabel("Some MD Track", "AOC-2025")).toBe("Some MD Track");
+    expect(menteeProgramLabel("Some Track", "ECR")).toBe("Some Track");
+    expect(menteeProgramLabel("Mystery Program", "Whatever")).toBe("Mystery Program");
+    expect(menteeProgramLabel("Bare Name", null)).toBe("Bare Name");
+  });
+
+  it("falls back to formatProgramLabel when programName is null", () => {
+    // No finer-grained name → defer to the degree-bucket label, which
+    // already encodes the degree in its "<degree> mentee" form.
+    expect(menteeProgramLabel(null, "PhD")).toBe("PhD mentee");
+    expect(menteeProgramLabel(null, "MD-PhD")).toBe("MD-PhD mentee");
+    expect(menteeProgramLabel(null, "POSTDOC")).toBe("Postdoc mentee");
+    expect(menteeProgramLabel(null, "AOC")).toBe("MD mentee");
+    expect(menteeProgramLabel(null, null)).toBeNull();
   });
 });
 

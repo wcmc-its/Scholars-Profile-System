@@ -30,7 +30,7 @@ import {
 import { prisma } from "@/lib/db";
 import {
   copubId,
-  formatProgramLabel,
+  menteeProgramLabel,
   getAllMentorCoPublications,
   type CoPublicationAuthor,
   type CoPublicationFull,
@@ -216,8 +216,11 @@ async function renderDocx(opts: {
         const yearSeg = e.mentee.graduationYear
           ? ` · Class of ${e.mentee.graduationYear}`
           : "";
+        // Issue #1019 — keep the degree visible when programName is the
+        // source ("… (PhD)"); falls back to the degree-bucket label otherwise.
         const subProgramLabel =
-          formatProgramLabel(e.mentee.programType) ?? "Other mentee";
+          menteeProgramLabel(e.mentee.programName, e.mentee.programType) ??
+          "Other mentee";
         bodyChildren.push(
           new Paragraph({
             children: [

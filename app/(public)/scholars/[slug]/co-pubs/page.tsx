@@ -14,7 +14,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import {
-  formatProgramLabel,
+  menteeProgramLabel,
   getAllMentorCoPublications,
   type MenteeCoPubEntry,
 } from "@/lib/api/mentoring";
@@ -283,8 +283,12 @@ function CoPubCitation({
           {menteeName}
         </Link>
         {(() => {
+          // Issue #1019 — keep the degree visible when a finer-grained
+          // programName is the source ("… (PhD)"); falls back to the
+          // degree-bucket label when programName is absent.
           const label =
-            formatProgramLabel(entry.mentee.programType) ?? "Other mentee";
+            menteeProgramLabel(entry.mentee.programName, entry.mentee.programType) ??
+            "Other mentee";
           return ` · ${label}${yearSeg}`;
         })()}
       </p>

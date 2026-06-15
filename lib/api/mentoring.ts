@@ -135,7 +135,7 @@ type AocRow = {
 
 /** Re-exported from the client-safe label module so server callers can
  *  pull everything they need from `@/lib/api/mentoring`. */
-export { formatProgramLabel } from "@/lib/mentoring-labels";
+export { formatProgramLabel, menteeProgramLabel } from "@/lib/mentoring-labels";
 import { formatProgramLabel } from "@/lib/mentoring-labels";
 import { formatPublishedName } from "@/lib/postnominal";
 
@@ -911,6 +911,10 @@ export type MenteeCoPubEntry = {
     fullName: string;
     graduationYear: number | null;
     programType: string | null;
+    /** Finer-grained program name (ED/Jenzabar) when available; drives the
+     *  meta-line label via `menteeProgramLabel`, with `programType` carrying
+     *  the degree suffix (issue #1019). Null falls back to `formatProgramLabel`. */
+    programName: string | null;
     /** Populated when the mentee has an active Scholar row. Drives whether
      *  the mentee name in the meta line renders as a link. */
     scholar: { slug: string; publishedName: string } | null;
@@ -1020,6 +1024,7 @@ export async function getAllMentorCoPublications(
           fullName: m.fullName,
           graduationYear: m.graduationYear,
           programType: m.programType,
+          programName: m.programName,
           scholar: m.scholar
             ? { slug: m.scholar.slug, publishedName: m.scholar.publishedName }
             : null,

@@ -32,6 +32,35 @@ export function formatProgramLabel(programType: string | null): string | null {
   return programType;
 }
 
+/** Issue #1019 — the parenthetical degree suffix appended after a finer-grained
+ *  `programName` (e.g. "Biochemistry & Structural Biology (PhD)"). Only the two
+ *  degree-track types that carry a degree the program name omits get a suffix:
+ *  PhD and MD-PhD (both source spellings). POSTDOC, AOC*, ECR, other, and null return
+ *  `""` — those program names already read as roles or carry no degree to
+ *  disambiguate, so a suffix would be noise. */
+export function degreeSuffix(programType: string | null): string {
+  if (programType === "PhD") return " (PhD)";
+  if (programType === "MDPHD" || programType === "MD-PhD") return " (MD-PhD)";
+  return "";
+}
+
+/** Issue #1019 — the per-chip program label that keeps the degree visible even
+ *  when a human-readable `programName` is the display source.
+ *
+ *  When `programName` is set, the bare name (e.g. "Biochemistry & Structural
+ *  Biology") loses the degree that `formatProgramLabel` would otherwise encode,
+ *  so the matching `degreeSuffix` is appended — "Biochemistry & Structural
+ *  Biology (PhD)". When `programName` is null, this defers entirely to
+ *  `formatProgramLabel(programType)`, which already encodes the degree in its
+ *  "<degree> mentee" form. */
+export function menteeProgramLabel(
+  programName: string | null,
+  programType: string | null,
+): string | null {
+  if (programName) return `${programName}${degreeSuffix(programType)}`;
+  return formatProgramLabel(programType);
+}
+
 /** Issue #201 — at or above this mentee count, the section header switches
  *  from the bare "N mentees" subhead to a degree-bucket distribution.
  *  Defined as a named constant so the eventual recalibration after measuring
