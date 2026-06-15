@@ -181,6 +181,47 @@ describe("buildAdaptiveCard", () => {
     );
   });
 
+  it("P2/warn ALARM cards lead with the warning glyph; P1 keeps the alarm glyph", () => {
+    const alarm: CloudWatchAlarmPayload = {
+      AlarmName: "sps-aurora-cpu-prod",
+      NewStateValue: "ALARM",
+      Region: "us-east-1",
+    };
+    expect(header(content(buildAdaptiveCard(alarm, "warn")))).toBe(
+      "\u{26A0}\u{FE0F} sps-aurora-cpu-prod",
+    );
+    expect(header(content(buildAdaptiveCard(alarm, "page")))).toBe(
+      "\u{1F6A8} sps-aurora-cpu-prod",
+    );
+    // No severity arg keeps the state glyph (back-compat).
+    expect(header(content(buildAdaptiveCard(alarm)))).toBe(
+      "\u{1F6A8} sps-aurora-cpu-prod",
+    );
+  });
+
+  it("includes a per-alarm Next step course of action, with a default fallback", () => {
+    const cpu = content(
+      buildAdaptiveCard(
+        {
+          AlarmName: "sps-aurora-cpu-prod",
+          NewStateValue: "ALARM",
+          Region: "us-east-1",
+        },
+        "warn",
+      ),
+    );
+    expect(fact(cpu, "Next step")).toContain("hot query loop");
+
+    const unknown = content(
+      buildAdaptiveCard({
+        AlarmName: "some-external-alarm",
+        NewStateValue: "ALARM",
+        Region: "us-east-1",
+      }),
+    );
+    expect(fact(unknown, "Next step")).toContain("reliability dashboard");
+  });
+
   it("omits the dashboard action when the env is not derivable from the alarm name", () => {
     const c = content(
       buildAdaptiveCard({

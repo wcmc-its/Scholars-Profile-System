@@ -456,7 +456,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "c15b8e9d5e8a281128f2c4956d74dcbee6bdd42a39431a2cd7e2bf88c03c1856.zip",
+          "S3Key": "e1bee27b9475dc88e54d8e9713f1dab3df6037a665f7c8b4e6a0843e6848fce0.zip",
         },
         "Environment": {
           "Variables": {
@@ -1396,7 +1396,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "c15b8e9d5e8a281128f2c4956d74dcbee6bdd42a39431a2cd7e2bf88c03c1856.zip",
+          "S3Key": "e1bee27b9475dc88e54d8e9713f1dab3df6037a665f7c8b4e6a0843e6848fce0.zip",
         },
         "Environment": {
           "Variables": {
