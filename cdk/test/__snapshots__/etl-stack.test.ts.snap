@@ -6451,6 +6451,411 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::S3::BucketPolicy",
     },
+    "CurationBackupCadenceAlarm63200126": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS curated-tables backup (staging) -- cadence missed (no execution started in ~2 days). Next: confirm the daily rule is enabled and the state-machine IAM is intact; run 'npm run backup:curated' via run-task to bridge the gap.",
+        "AlarmName": "sps-curation-backup-cadence-staging",
+        "ComparisonOperator": "LessThanThreshold",
+        "DatapointsToAlarm": 2,
+        "Dimensions": [
+          {
+            "Name": "StateMachineArn",
+            "Value": {
+              "Ref": "CurationBackupStateMachineE55D38A8",
+            },
+          },
+        ],
+        "EvaluationPeriods": 2,
+        "MetricName": "ExecutionsStarted",
+        "Namespace": "AWS/States",
+        "Period": 86400,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "breaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "CurationBackupScheduleRuleC639AC0F": {
+      "Properties": {
+        "Description": "SPS curated-tables logical backup -- daily 06:00 UTC (staging). #1032.",
+        "Name": "sps-curation-backup-staging",
+        "ScheduleExpression": "cron(0 6 * * ? *)",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Ref": "CurationBackupStateMachineE55D38A8",
+            },
+            "Id": "Target0",
+            "Input": "{}",
+            "RetryPolicy": {
+              "MaximumRetryAttempts": 0,
+            },
+            "RoleArn": {
+              "Fn::GetAtt": [
+                "CurationBackupStateMachineEventsRoleC249388D",
+                "Arn",
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
+    "CurationBackupSmLogGroupA3E7C587": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/states/curation-backup-staging",
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "CurationBackupStateMachineE55D38A8": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "CurationBackupStateMachineRoleDefaultPolicy297C4A6A",
+        "CurationBackupStateMachineRoleC211BA30",
+      ],
+      "Properties": {
+        "DefinitionString": {
+          "Fn::Join": [
+            "",
+            [
+              "{"StartAt":"TaskCurationBackup","States":{"TaskCurationBackup":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":60,"MaxAttempts":1,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCurationBackup"}],"Type":"Task","TimeoutSeconds":1800,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["",
+              {
+                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
+              },
+              "","",
+              {
+                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
+              },
+              ""],"SecurityGroups":["",
+              {
+                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
+              },
+              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","backup:curated"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyCurationBackup":{"Next":"FailCurationBackup","Type":"Task","Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"staging","step":"CurationBackup","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS curated-tables backup staging -- run failed"}},"FailCurationBackup":{"Type":"Fail","Cause":"curated-tables backup run failed"}},"TimeoutSeconds":2100}",
+            ],
+          ],
+        },
+        "LoggingConfiguration": {
+          "Destinations": [
+            {
+              "CloudWatchLogsLogGroup": {
+                "LogGroupArn": {
+                  "Fn::GetAtt": [
+                    "CurationBackupSmLogGroupA3E7C587",
+                    "Arn",
+                  ],
+                },
+              },
+            },
+          ],
+          "IncludeExecutionData": false,
+          "Level": "ERROR",
+        },
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "CurationBackupStateMachineRoleC211BA30",
+            "Arn",
+          ],
+        },
+        "StateMachineName": "scholars-curation-backup-staging",
+        "StateMachineType": "STANDARD",
+        "TracingConfiguration": {
+          "Enabled": true,
+        },
+      },
+      "Type": "AWS::StepFunctions::StateMachine",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "CurationBackupStateMachineEventsRoleC249388D": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "events.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "CurationBackupStateMachineEventsRoleDefaultPolicyFF5435D1": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "states:StartExecution",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "CurationBackupStateMachineE55D38A8",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "CurationBackupStateMachineEventsRoleDefaultPolicyFF5435D1",
+        "Roles": [
+          {
+            "Ref": "CurationBackupStateMachineEventsRoleC249388D",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "CurationBackupStateMachineRoleC211BA30": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "states.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "CurationBackupStateMachineRoleDefaultPolicy297C4A6A": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecs:RunTask",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        2,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        3,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        4,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        0,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlTaskDefinition32654FF8",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    "/",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlTaskDefinition32654FF8",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ecs:StopTask",
+                "ecs:DescribeTasks",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskRoleD514E3A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskExecutionRoleC745E2CD",
+                    "Arn",
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "events:PutTargets",
+                "events:PutRule",
+                "events:DescribeRule",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogDelivery",
+                "logs:GetLogDelivery",
+                "logs:UpdateLogDelivery",
+                "logs:DeleteLogDelivery",
+                "logs:ListLogDeliveries",
+                "logs:PutResourcePolicy",
+                "logs:DescribeResourcePolicies",
+                "logs:DescribeLogGroups",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "xray:PutTraceSegments",
+                "xray:PutTelemetryRecords",
+                "xray:GetSamplingRules",
+                "xray:GetSamplingTargets",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "CurationBackupStateMachineRoleDefaultPolicy297C4A6A",
+        "Roles": [
+          {
+            "Ref": "CurationBackupStateMachineRoleC211BA30",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "EtlFailureTopic8361D0D0": {
       "Properties": {
         "DisplayName": "SPS ETL failures (staging)",

@@ -1643,6 +1643,144 @@ export class EtlStack extends Stack {
     cdnReconcileCadenceAlarm.addAlarmAction(alarmAction);
 
     // ------------------------------------------------------------------
+    // Curated-tables logical backup schedule (#1032).
+    //
+    // A daily EventBridge cron fires a one-shot `backup:curated` run on the
+    // shared ETL task def (which already carries CURATION_BACKUP_BUCKET, the
+    // DATABASE_URL secret, and the S3 PutObject grant). Wrapped in a minimal
+    // state machine -- like the reconcilers -- so a failed run Catches to the
+    // ETL failure topic instead of dying silently; a silent backup is worse than
+    // no backup. Reuses the 8 GB ETL task def rather than a lean one: the run is
+    // daily (not 5 min) so the cost is negligible and a second task def +
+    // execution/task roles would be pure overhead.
+    //
+    // Unlike the cadence/reconciler rules (which prod ships present-but-disabled
+    // for an out-of-band `aws events enable-rule`), the WHOLE block is gated on
+    // `curationBackupScheduleEnabled`: on prod the curated-tables backup is not
+    // yet provisioned (the bucket/grant/env land with the first
+    // `cdk deploy Sps-Etl-prod`, and the first run must be verified by hand
+    // before a schedule is trusted), so prod creates no schedule at all until the
+    // flag flips. See docs/curation-backup-runbook.md § Prod.
+    // ------------------------------------------------------------------
+    if (envConfig.curationBackupScheduleEnabled) {
+      const backupTask = new tasks.EcsRunTask(this, "TaskCurationBackup", {
+        integrationPattern: sfn.IntegrationPattern.RUN_JOB,
+        cluster: ecsCluster,
+        taskDefinition: this.etlTaskDefinition,
+        launchTarget: new tasks.EcsFargateLaunchTarget({
+          platformVersion: ecs.FargatePlatformVersion.LATEST,
+        }),
+        assignPublicIp: false,
+        subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        securityGroups: [etlSecurityGroup],
+        containerOverrides: [
+          {
+            containerDefinition: etlContainer,
+            command: ["npm", "run", "backup:curated"],
+          },
+        ],
+        // The dump is seconds of work; 30 min is generous over cold start +
+        // connect, and well under the daily cadence so a wedged run can't stack
+        // on the next fire.
+        taskTimeout: sfn.Timeout.duration(Duration.minutes(30)),
+      });
+      backupTask.addRetry({
+        errors: ["States.TaskFailed", "States.Timeout"],
+        maxAttempts: 1,
+        backoffRate: 2,
+        interval: Duration.minutes(1),
+      });
+      backupTask.addCatch(
+        new tasks.SnsPublish(this, "NotifyCurationBackup", {
+          topic: this.failureTopic,
+          subject: `SPS curated-tables backup ${env} -- run failed`,
+          message: sfn.TaskInput.fromObject({
+            env,
+            step: "CurationBackup",
+            stateMachine: sfn.JsonPath.stateMachineName,
+            execution: sfn.JsonPath.executionName,
+            error: sfn.JsonPath.stringAt("$.error"),
+          }),
+        }).next(
+          new sfn.Fail(this, "FailCurationBackup", {
+            cause: "curated-tables backup run failed",
+          }),
+        ),
+        { errors: ["States.ALL"], resultPath: "$.error" },
+      );
+
+      const backupSmLogGroup = new logs.LogGroup(
+        this,
+        "CurationBackupSmLogGroup",
+        {
+          logGroupName: `/aws/states/curation-backup-${env}`,
+          retention: logRetention,
+          removalPolicy: RemovalPolicy.RETAIN,
+        },
+      );
+      const curationBackupStateMachine = new sfn.StateMachine(
+        this,
+        "CurationBackupStateMachine",
+        {
+          stateMachineName: `scholars-curation-backup-${env}`,
+          stateMachineType: sfn.StateMachineType.STANDARD,
+          definitionBody: sfn.DefinitionBody.fromChainable(backupTask),
+          timeout: Duration.minutes(35),
+          logs: {
+            destination: backupSmLogGroup,
+            level: sfn.LogLevel.ERROR,
+            includeExecutionData: false,
+          },
+          tracingEnabled: true,
+        },
+      );
+
+      // Daily at 06:00 UTC -- ahead of the 07:00 nightly ETL, so the snapshot
+      // reflects the curated state as last hand-edited, before any nightly churn.
+      const backupRule = new events.Rule(this, "CurationBackupScheduleRule", {
+        ruleName: `sps-curation-backup-${env}`,
+        description: `SPS curated-tables logical backup -- daily 06:00 UTC (${env}). #1032.`,
+        schedule: events.Schedule.cron({ minute: "0", hour: "6" }),
+        enabled: true,
+      });
+      backupRule.addTarget(
+        new eventsTargets.SfnStateMachine(curationBackupStateMachine, {
+          input: events.RuleTargetInput.fromObject({}),
+          retryAttempts: 0,
+        }),
+      );
+
+      // Cadence alarm -- the load-bearing signal for a backup: silent schedule
+      // death (rule disabled, IAM gap) is discovered only when you go to restore.
+      // Alarm if no execution started across two consecutive 1-day windows (~2
+      // missed daily fires). The Catch above already notifies on a failed run;
+      // this owns absence.
+      const curationBackupCadenceAlarm = new cloudwatch.Alarm(
+        this,
+        "CurationBackupCadenceAlarm",
+        {
+          alarmName: `sps-curation-backup-cadence-${env}`,
+          alarmDescription: `SPS curated-tables backup (${env}) -- cadence missed (no execution started in ~2 days). Next: confirm the daily rule is enabled and the state-machine IAM is intact; run 'npm run backup:curated' via run-task to bridge the gap.`,
+          metric: new cloudwatch.Metric({
+            namespace: "AWS/States",
+            metricName: "ExecutionsStarted",
+            statistic: cloudwatch.Stats.SUM,
+            period: Duration.days(1),
+            dimensionsMap: {
+              StateMachineArn: curationBackupStateMachine.stateMachineArn,
+            },
+          }),
+          evaluationPeriods: 2,
+          datapointsToAlarm: 2,
+          threshold: 1,
+          comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+          treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+        },
+      );
+      curationBackupCadenceAlarm.addAlarmAction(alarmAction);
+    }
+
+    // ------------------------------------------------------------------
     // Outputs. Surface the SNS topic ARN (B23 subscribes PagerDuty),
     // each state-machine ARN (operator runbook uses them in
     // start-execution / describe-execution calls), and the ETL task
