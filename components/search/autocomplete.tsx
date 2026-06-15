@@ -1,9 +1,9 @@
 "use client";
 
-import { Search } from "lucide-react";
+import { Loader2, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 
 import type { EntityKind } from "@/lib/api/search";
 import { EntityBadge } from "@/components/ui/entity-badge";
@@ -39,8 +39,16 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
   const [activeIndex, setActiveIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const skipSuggestRef = useRef(false);
+  const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
+    // Skip the suggestion fetch for a programmatic value change (the on-/search
+    // pre-fill below), so the dropdown doesn't auto-open on page load.
+    if (skipSuggestRef.current) {
+      skipSuggestRef.current = false;
+      return;
+    }
     if (value.trim().length < 2) {
       setSuggestions([]);
       setOpen(false);
@@ -82,12 +90,37 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
+  // Pre-fill the box with the active query when landing on /search, so the
+  // header search reflects what the user is looking at. Reads window.location
+  // directly (client-only) instead of useSearchParams, which the cached header
+  // is barred from — it forces a Suspense boundary or `next build` fails to
+  // prerender. Mount-only: sets the initial value and intentionally does not
+  // chase in-page soft-nav (the header stays mounted across result refinements).
+  useEffect(() => {
+    if (window.location.pathname !== "/search") return;
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) {
+      skipSuggestRef.current = true;
+      setValue(q);
+    }
+  }, []);
+
   const submit = () => {
     if (value.trim().length === 0) return;
     abortRef.current?.abort();
     setSuggestions([]);
     setOpen(false);
-    router.push(`/search?q=${encodeURIComponent(value.trim())}`);
+    let href = `/search?q=${encodeURIComponent(value.trim())}`;
+    // Preserve the active result tab on a new search instead of bouncing to the
+    // Scholars default. Read at submit time (always client) so the header avoids
+    // useSearchParams; a fresh query still resets facets/sort/page.
+    if (window.location.pathname === "/search") {
+      const t = new URLSearchParams(window.location.search).get("type");
+      if (t && t !== "people") href += `&type=${encodeURIComponent(t)}`;
+    }
+    startTransition(() => {
+      router.push(href);
+    });
   };
 
   const containerClass = isHero
@@ -105,7 +138,16 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
   return (
     <div ref={containerRef} className={containerClass}>
       <div className={inputBoxClass}>
-        <Search className={isHero ? "ml-3 h-4 w-4 shrink-0 text-zinc-400" : "h-4 w-4"} />
+        {isPending ? (
+          <Loader2
+            className={
+              isHero ? "ml-3 h-4 w-4 shrink-0 text-zinc-400 animate-spin" : "h-4 w-4 animate-spin"
+            }
+            aria-hidden="true"
+          />
+        ) : (
+          <Search className={isHero ? "ml-3 h-4 w-4 shrink-0 text-zinc-400" : "h-4 w-4"} />
+        )}
         <input
           type="search"
           value={value}
@@ -116,7 +158,9 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
                 abortRef.current?.abort();
                 setSuggestions([]);
                 setOpen(false);
-                router.push(suggestions[activeIndex].href);
+                startTransition(() => {
+                  router.push(suggestions[activeIndex].href);
+                });
               } else {
                 submit();
               }
@@ -139,12 +183,14 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
           }
           className={inputClass}
           aria-label="Search scholars"
+          aria-busy={isPending}
           autoComplete="off"
         />
         {isHero ? (
           <button
             onClick={submit}
-            className="shrink-0 rounded bg-[var(--color-primary-cornell-red)] px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-[#951616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary-cornell-red)]"
+            disabled={isPending}
+            className="shrink-0 rounded bg-[var(--color-primary-cornell-red)] px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-[#951616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary-cornell-red)] disabled:opacity-70 disabled:cursor-default"
           >
             Search
           </button>
@@ -195,6 +241,9 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
           ))}
         </ul>
       ) : null}
+      <span role="status" aria-live="polite" className="sr-only">
+        {isPending ? "Searching…" : ""}
+      </span>
     </div>
   );
 }
