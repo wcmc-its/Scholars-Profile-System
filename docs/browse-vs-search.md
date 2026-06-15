@@ -19,7 +19,7 @@ Earlier the app had two pages both calling themselves "Browse." The A–Z direct
 **Breadcrumb:** Home › Departments & Centers
 
 **Sections (in order):**
-1. **Anchor strip** (`components/browse/browse-anchor-strip.tsx`) — two in-page anchors (Departments, Centers & Institutes) plus a subordinate cross-link "Or browse by research area →" that targets `/#research-areas`.
+1. **Anchor strip** (`components/browse/browse-anchor-strip.tsx`) — two in-page anchors (Departments, Centers & Institutes) plus a subordinate cross-link "Or browse by research area →" that targets `/#browse-all-research-areas`.
 2. **Departments** (`components/browse/departments-grid.tsx`) — compact single-column expandable list, grouped by category (Clinical, Basic Science, Basic & Clinical, Administrative). Each row collapses to name + chair + counts; expanding reveals division and topic chips plus a "View {dept} →" link. (Issue #22 will flatten the four-category grouping into a single sortable/filterable list with type badges per card; tracked separately.)
 3. **Centers & Institutes** (`components/browse/centers-grid.tsx`) — 2-column card grid. Each card shows name, description, and director (when present).
 
