@@ -861,16 +861,26 @@ describe("EtlStack", () => {
       // IAM-based source steps (dynamodb nightly, spotlight weekly, hierarchy
       // annual) failed closed (AccessDenied -> exit 1) every cadence. These
       // guards pin EtlTaskRoleReciterAiPolicy to exactly what each step reads.
+      // The read-only external-source policy (dynamodb Scan + ReciterAI
+      // artifact GetObject). The task role now carries a SECOND policy — the
+      // curation-backup-bucket write grant added by grantPut — so these
+      // read-only intent assertions target the ReciterAI policy specifically
+      // (selected by its explicit `-reciterai` PolicyName). The write grant has
+      // its own dedicated test below.
       const etlTaskRolePolicy = () =>
         Object.values(template.findResources("AWS::IAM::Policy")).find((p) => {
           const roles = p.Properties?.Roles as
             | Array<{ Ref?: string }>
             | undefined;
-          return roles?.some(
+          const onTaskRole = roles?.some(
             (r) =>
               typeof r.Ref === "string" &&
               r.Ref.includes("EtlTaskRole") &&
               !r.Ref.includes("EtlTaskExecutionRole"),
+          );
+          const name = p.Properties?.PolicyName;
+          return (
+            onTaskRole && typeof name === "string" && name.includes("reciterai")
           );
         });
 
@@ -934,7 +944,7 @@ describe("EtlStack", () => {
         ]);
       });
 
-      it("the ETL task role policy is read-only -- only Scan/GetObject, never a bare * resource", () => {
+      it("the ETL task role ReciterAI source policy is read-only -- only Scan/GetObject, never a bare * resource", () => {
         const policy = etlTaskRolePolicy();
         expect(policy).toBeDefined();
         const statements = policy?.Properties?.PolicyDocument
@@ -954,6 +964,54 @@ describe("EtlStack", () => {
             expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
           }
         }
+      });
+
+      it("the ETL task role's only write grant is PutObject scoped to the curation backup bucket (no bare *, no other bucket, no delete)", () => {
+        // The backup step (scripts/backups/export-curated-tables.ts) is the sole
+        // writer; grantPut emits Put*/Abort* on exactly the CurationBackupBucket.
+        const policies = Object.values(
+          template.findResources("AWS::IAM::Policy"),
+        ).filter((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) =>
+              typeof r.Ref === "string" &&
+              r.Ref.includes("EtlTaskRole") &&
+              !r.Ref.includes("EtlTaskExecutionRole"),
+          );
+        });
+        // Find the single statement (across the task role's policies) that
+        // grants any S3 write action.
+        const writeStmts = policies.flatMap((p) => {
+          const statements = (p.Properties?.PolicyDocument?.Statement ??
+            []) as Array<Record<string, unknown>>;
+          return statements.filter((s) => {
+            const action = s.Action;
+            const actions = Array.isArray(action) ? action : [action];
+            return actions.some(
+              (a) => typeof a === "string" && /^s3:(Put|Abort)/.test(a),
+            );
+          });
+        });
+        expect(writeStmts).toHaveLength(1);
+        const stmt = writeStmts[0];
+        const actions = (
+          Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action]
+        ) as string[];
+        // Put/Abort only — never GetObject, DeleteObject, or s3:*.
+        for (const a of actions) {
+          expect(a).toMatch(/^s3:(PutObject|Abort)/);
+        }
+        expect(actions).not.toContain("s3:DeleteObject");
+        expect(actions).not.toContain("s3:*");
+        // Resource is the backup bucket's objects, never a bare * or any other
+        // bucket (the ReciterAI artifact buckets stay read-only).
+        const serialized = JSON.stringify(stmt.Resource);
+        expect(serialized).toMatch(/CurationBackupBucket/);
+        expect(serialized).not.toMatch(/wcmc-reciterai/);
+        expect(serialized).not.toMatch(/^"\*"$/);
       });
 
       it("every EventBridge-rule role has states:StartExecution scoped to a single state-machine ARN (no *)", () => {

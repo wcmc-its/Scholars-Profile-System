@@ -15,6 +15,7 @@ import * as events from "aws-cdk-lib/aws-events";
 import * as eventsTargets from "aws-cdk-lib/aws-events-targets";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
+import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as sns from "aws-cdk-lib/aws-sns";
 import * as sfn from "aws-cdk-lib/aws-stepfunctions";
@@ -416,6 +417,45 @@ export class EtlStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // Curated-tables logical-backup bucket (belt-and-suspenders over AWS
+    // Backup / Aurora PITR).
+    //
+    // Staging is the system-of-record for the hand-curated, staging-
+    // authoritative tables — org-unit structure/names/leaders/descriptions and
+    // the methods-&-tools family-visibility overlays, including edits made by
+    // external Comms collaborators. AWS Backup (daily, 14d, cross-region) +
+    // PITR already protect the whole cluster, but those are whole-cluster
+    // restores capped at the 14-day window. The `backup:curated` step
+    // (scripts/backups/export-curated-tables.ts) writes a small, diffable,
+    // long-lived gzipped SQL dump of just those tables here.
+    //
+    // SPS-account-owned (unlike the cross-account ReciterAI artifact buckets,
+    // which the task role may only READ). Versioned so an accidental overwrite
+    // of the `latest/` pointer is recoverable; dated objects are kept
+    // indefinitely (they are tiny); old noncurrent versions and incomplete
+    // multipart uploads age out. Name left CFN-generated (env-scoped via the
+    // stack name) and injected into the task as CURATION_BACKUP_BUCKET below,
+    // mirroring the logs/analytics bucket pattern.
+    // ------------------------------------------------------------------
+    const curationBackupBucket = new s3.Bucket(this, "CurationBackupBucket", {
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      versioned: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+      lifecycleRules: [
+        {
+          id: "expire-noncurrent-versions",
+          noncurrentVersionExpiration: Duration.days(90),
+          abortIncompleteMultipartUploadAfter: Duration.days(7),
+        },
+      ],
+    });
+    // The task role's ONLY write grant — PutObject (+ Abort*) on this bucket.
+    // The dump step uploads here; restores read it out-of-band by an operator.
+    curationBackupBucket.grantPut(taskRole);
+
+    // ------------------------------------------------------------------
     // ETL task family. One image, one container -- per-step
     // differentiation lives in ContainerOverrides at state-machine task
     // construction time (`command: ["npm","run","etl:<source>"]`). Base
@@ -531,6 +571,10 @@ export class EtlStack extends Stack {
         // in prod until the staging soak completes; the EventBridge → Step
         // Function schedule is a follow-up.
         RECITER_REJECT_SEND: env === "staging" ? "on" : "off",
+        // Destination bucket for the `backup:curated` logical-dump step. The
+        // task role is granted PutObject on exactly this bucket above; the
+        // script defaults the key prefix to "sps-curation-backups".
+        CURATION_BACKUP_BUCKET: curationBackupBucket.bucketName,
       },
       secrets: containerSecrets,
     });
@@ -1611,6 +1655,11 @@ export class EtlStack extends Stack {
     new CfnOutput(this, "EtlTaskFamily", {
       value: this.etlTaskDefinition.family,
       description: "SPS ETL Fargate task family.",
+    });
+    new CfnOutput(this, "CurationBackupBucketName", {
+      value: curationBackupBucket.bucketName,
+      description:
+        "SPS curated-tables logical-backup bucket (backup:curated uploads here).",
     });
     new CfnOutput(this, "NightlyStateMachineArn", {
       value: this.nightlyStateMachine.stateMachineArn,
