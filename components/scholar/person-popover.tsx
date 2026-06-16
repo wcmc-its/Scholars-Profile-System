@@ -560,7 +560,7 @@ function SurfaceContextLine({
     return (
       <div className="mt-3 border-t border-border pt-2.5 text-[11.5px] leading-snug text-muted-foreground">
         Rank <strong className="font-semibold text-foreground">#{displayRank}</strong>{" "}
-        in this topic ·{" "}
+        in this research area ·{" "}
         <strong className="font-semibold text-foreground">{tr.topicPubCount} pubs</strong>{" "}
         tagged
       </div>
@@ -692,7 +692,7 @@ function SurfaceRecentList({
   if (rows.length === 0) return null;
   const label =
     surface === "top-scholar"
-      ? `Recent in ${contextTopicLabel ?? "this topic"}`
+      ? `Recent in ${contextTopicLabel ?? "this research area"}`
       : "Recent pubs";
   return (
     <div className="mt-3 border-t border-border pt-2.5">
@@ -805,7 +805,7 @@ function derivePrimaryAction({
   if (surface === "top-scholar" && data.topicRank && profileHref) {
     return {
       href: profileHref,
-      label: `See ${data.topicRank.topicPubCount} topic pubs →`,
+      label: `See ${data.topicRank.topicPubCount} research-area pubs →`,
       eventKey: "topic_pubs",
     };
   }

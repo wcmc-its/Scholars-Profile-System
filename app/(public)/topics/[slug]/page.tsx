@@ -130,7 +130,7 @@ export default async function TopicPage({
               totalPubsForStats > 0
                 ? `${totalPubsForStats.toLocaleString()} publications`
                 : null,
-              subtopicCount > 0 ? `${subtopicCount.toLocaleString()} subtopics` : null,
+              subtopicCount > 0 ? `${subtopicCount.toLocaleString()} subareas` : null,
             ]
               .filter(Boolean)
               .join(" · ")}

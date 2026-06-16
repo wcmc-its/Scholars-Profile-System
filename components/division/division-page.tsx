@@ -141,8 +141,8 @@ export async function DivisionPage({
             <div className="mb-[11px] inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
               Top research areas in this division
               <SectionInfoButton label="Top research areas in this division" anchor="topResearchAreas">
-                Topics are aggregated from ReCiterAI publication scores for
-                division members. The order reflects recent publication
+                Research areas are aggregated from ReCiterAI publication scores
+                for division members. The order reflects recent publication
                 activity, not editorial judgment.
               </SectionInfoButton>
             </div>

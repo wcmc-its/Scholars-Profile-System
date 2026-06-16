@@ -523,9 +523,9 @@ function TopicsSection({
   return (
     <section>
       <div className="flex items-center gap-1.5">
-        <SectionHeading>Topics</SectionHeading>
+        <SectionHeading>Research areas</SectionHeading>
         <SectionInfoLink
-          label="About Topics"
+          label="About Research areas"
           description={TOPICS_INFO_COPY}
           href={methodologyHref("whyAi")}
         />
@@ -928,7 +928,7 @@ const IMPACT_INFO_COPY =
   "An AI-generated research-impact score from 0–100. A language model reads the title, abstract, journal, citation pattern, and iCite signals and scores against a rubric covering novelty, methodology, evidence of influence, translational relevance, and venue prestige. Click for the full methodology.";
 
 const TOPICS_INFO_COPY =
-  "ReCiterAI assigns each publication to one or more research areas. The score (0–1) reflects how strongly the paper fits each parent topic; subtopics give finer-grained breakdown. Click for the full methodology.";
+  "ReCiterAI assigns each publication to one or more research areas. The score (0–1) reflects how strongly the paper fits each research area; subareas give finer-grained breakdown. Click for the full methodology.";
 
 function SectionInfoLink({
   label,

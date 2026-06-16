@@ -111,8 +111,8 @@ export function SpotlightSection({ items }: { items: SpotlightCard[] }) {
       <h2 className="inline-flex items-center gap-2 text-lg font-semibold">
         Spotlight
         <SectionInfoButton label="Spotlight" anchor="spotlight">
-          Spotlight rotates subtopics with the strongest recent activity at
-          WCM, one per parent area, refreshed weekly. Subtopics are scored
+          Spotlight rotates subareas with the strongest recent activity at
+          WCM, one per research area, refreshed weekly. Subareas are scored
           from ReCiterAI publication scores on PubMed records.
         </SectionInfoButton>
       </h2>
@@ -161,7 +161,7 @@ function SpotlightDetail({ card }: { card: SpotlightCard }) {
     >
       <a
         href={parentHref}
-        aria-label={`View parent topic ${card.parentTopicLabel}`}
+        aria-label={`View research area ${card.parentTopicLabel}`}
         className={`text-[10.5px] font-medium uppercase tracking-[0.13em] text-[var(--color-primary-cornell-red)] ${noUnderlineHover}`}
       >
         {card.parentTopicLabel}
@@ -169,7 +169,7 @@ function SpotlightDetail({ card }: { card: SpotlightCard }) {
       <h3 className="text-3xl font-medium leading-tight tracking-tight">
         <a
           href={subtopicHref}
-          aria-label={`View topic page for ${card.displayName}`}
+          aria-label={`View subarea ${card.displayName}`}
           className={`text-zinc-900 ${noUnderlineHover}`}
         >
           {card.displayName}
