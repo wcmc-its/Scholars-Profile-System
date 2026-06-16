@@ -7,8 +7,12 @@
  *      doctoral_student_* roles and the bare value are hidden; displayed roles
  *      and null/unknown are unaffected.
  *   2. fetchWcmAuthorsForPmids scholar-filter shape (CHANGE 3): flag OFF →
- *      { deletedAt:null, status:"active" }; flag ON → status:"active" with
- *      OR[deletedAt:null, roleCategory startsWith doctoral_student].
+ *      { deletedAt:null, status:"active" }; flag ON → OR[{deletedAt:null,
+ *      status:"active"}, {roleCategory startsWith doctoral_student}] — the
+ *      student branch does NOT gate on `status` (it's an unreliable artifact;
+ *      642 staging students carry status="suppressed" with no backing
+ *      Suppression row). Genuine whole-scholar takedowns are enforced
+ *      authoritatively from the Suppression table instead.
  *   3. The relaxed renderable predicate (CHANGE 4): a slug-less hidden-class
  *      student chip counts as displayable; an active author with slug is
  *      unchanged; flag-off path is identical to before.
@@ -122,13 +126,12 @@ describe("fetchWcmAuthorsForPmids — #1026 hidden-student chip filter shape", (
     expect(capturedScholarWhere()).toEqual({ deletedAt: null, status: "active" });
   });
 
-  it("flag ON → status:'active' with OR[deletedAt:null, roleCategory startsWith doctoral_student]", async () => {
+  it("flag ON → OR[{deletedAt:null,status:active},{roleCategory startsWith doctoral_student}] (no status gate on students)", async () => {
     process.env[FLAG] = "on";
     await fetchWcmAuthorsForPmids(["100"]);
     expect(capturedScholarWhere()).toEqual({
-      status: "active",
       OR: [
-        { deletedAt: null },
+        { deletedAt: null, status: "active" },
         { roleCategory: { startsWith: "doctoral_student" } },
       ],
     });
@@ -144,9 +147,31 @@ describe("fetchWcmAuthorsForPmids — #1026 hidden-student chip filter shape", (
         roleCategory: "doctoral_student_md",
       }),
     ]);
-    mockSuppressionFindMany.mockResolvedValue([
-      { entityId: "100", contributorCwid: "stu2222" }, // student hidden per-author
+    // Dispatch by entityType: the publication query carries the per-author hide;
+    // the scholar-takedown query returns none.
+    mockSuppressionFindMany.mockImplementation(async (args) =>
+      args?.where?.entityType === "scholar"
+        ? []
+        : [{ entityId: "100", contributorCwid: "stu2222" }],
+    );
+    const byPmid = await fetchWcmAuthorsForPmids(["100"]);
+    expect((byPmid.get("100") ?? []).map((c) => c.cwid)).toEqual(["aaa1111"]);
+  });
+
+  it("flag ON drops an author with an active whole-scholar takedown (authoritative — not the status column)", async () => {
+    process.env[FLAG] = "on";
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      authorRow("100", "aaa1111", "Ada First", { isFirst: true }),
+      authorRow("100", "stu2222", "Stu Dent", {
+        isLast: true,
+        slug: null,
+        roleCategory: "doctoral_student_md",
+      }),
     ]);
+    // A genuine ADR-005 whole-scholar takedown exists for the student.
+    mockSuppressionFindMany.mockImplementation(async (args) =>
+      args?.where?.entityType === "scholar" ? [{ entityId: "stu2222" }] : [],
+    );
     const byPmid = await fetchWcmAuthorsForPmids(["100"]);
     expect((byPmid.get("100") ?? []).map((c) => c.cwid)).toEqual(["aaa1111"]);
   });

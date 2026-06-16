@@ -932,13 +932,21 @@ export async function fetchWcmAuthorsForPmids(
 ): Promise<Map<string, WcmAuthorChip[]>> {
   if (pmids.length === 0) return new Map();
   // #1026 — when on, also include soft-deleted (deletedAt != null) doctoral
-  // students whose status is still "active", so a mentor↔mentee co-pub keeps
-  // the student in the chip row (rendered NON-LINKED downstream via
-  // isPubliclyDisplayed). Still EXCLUDES status:"suppressed" students and other
-  // soft-deleted classes (alumni, departed faculty). Default off → identical to
-  // the prior { deletedAt: null, status: "active" } filter.
+  // students so a mentor↔mentee co-pub keeps the student in the chip row
+  // (rendered NON-LINKED downstream via the prefix-hardened isPubliclyDisplayed).
+  //
+  // The `status` column is NOT a reliable hide signal for students: it is meant
+  // to be the denormalized projection of a Suppression(scholar) takedown row
+  // (set only by the manual suppress route), but a bulk artifact left soft-deleted
+  // students carrying status="suppressed" with NO backing Suppression row
+  // (verified on staging 2026-06-16: 642 such students, 0 with a row). The
+  // student-hide is `deleted_at` — which we deliberately override here — NOT
+  // `status`, so gating on it wrongly dropped legitimate co-authors. Hence the
+  // student branch admits them regardless of `status`; genuine whole-scholar
+  // takedowns are enforced AUTHORITATIVELY from the Suppression table below.
+  // Default off → identical to the prior { deletedAt: null, status: "active" }.
   const includeHiddenStudents = resolveHiddenStudentCoauthorChips();
-  const [rows, suppressions] = await Promise.all([
+  const [rows, suppressions, scholarTakedowns] = await Promise.all([
     prisma.publicationAuthor.findMany({
       where: {
         pmid: { in: pmids },
@@ -946,9 +954,8 @@ export async function fetchWcmAuthorsForPmids(
         cwid: { not: null },
         scholar: includeHiddenStudents
           ? {
-              status: "active",
               OR: [
-                { deletedAt: null },
+                { deletedAt: null, status: "active" },
                 { roleCategory: { startsWith: "doctoral_student" } },
               ],
             }
@@ -966,10 +973,24 @@ export async function fetchWcmAuthorsForPmids(
       },
     }),
     loadPublicationSuppressions(pmids, prisma),
+    // #1026 — authoritative whole-scholar takedowns (ADR-005). Drop these even
+    // when the student branch admits them; this is the genuine suppression
+    // signal (`status="suppressed"` is its unreliable denormalization, above).
+    // Small table; loaded only when the student branch is active.
+    includeHiddenStudents
+      ? prisma.suppression.findMany({
+          where: { entityType: "scholar", revokedAt: null },
+          select: { entityId: true },
+        })
+      : Promise.resolve([] as { entityId: string }[]),
   ]);
+  const scholarTakedownCwids = new Set(scholarTakedowns.map((s) => s.entityId));
   const byPmid = new Map<string, WcmAuthorChip[]>();
   for (const row of rows) {
     if (!row.scholar) continue;
+    // #1026 — authoritative whole-scholar takedown (ADR-005), independent of the
+    // unreliable `status` column the student branch no longer gates on.
+    if (scholarTakedownCwids.has(row.scholar.cwid)) continue;
     // #356 — a per-author hide removes the scholar from this publication's
     // author chips across every surface this resolver feeds (topic feed,
     // publication search, spotlight).
