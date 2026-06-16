@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ChevronDown, FileText, Sparkles, Tag, Wrench } from "lucide-react";
+import { PubTitle } from "@/components/publication/pub-html";
 
 /**
  * PLAN R4 — the kind of match a reason line explains, which picks the leading
@@ -149,8 +150,11 @@ export function MethodExemplarLine({
           <span aria-hidden className="text-[#c9c4ba]">
             ↳{" "}
           </span>
-          Representative paper:{" "}
-          <span className="italic text-[#4a4a4a]">&ldquo;{pub.title}&rdquo;</span>
+          Representative paper: &ldquo;
+          {/* #946 — PubMed titles can carry markup (<i>, <sub>, …); render through
+              the sanctioned PubTitle, never raw. */}
+          <PubTitle as="span" value={pub.title} className="italic text-[#4a4a4a]" />
+          &rdquo;
           {pub.year ? <span className="text-[#777]"> ({pub.year})</span> : null}
         </span>
       ) : (
