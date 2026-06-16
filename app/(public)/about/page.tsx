@@ -16,7 +16,7 @@ export const revalidate = false;
 export const metadata: Metadata = {
   title: "About — Scholars at WCM",
   description:
-    "How your Scholars profile is built, how to read it, and how to change the things that are yours to change: provenance, corrections, the Impact score, topics, search, and the showcase surfaces.",
+    "How your Scholars profile is built, how to read it, and how to change the things that are yours to change: provenance, corrections, the Impact score, research areas, search, and the showcase surfaces.",
   alternates: { canonical: "/about" },
 };
 
@@ -44,7 +44,7 @@ const NAV: NavGroup[] = [
       { id: "correct", label: "How to correct something" },
       { id: "control", label: "What you control" },
       { id: "roles", label: "Roles & who can edit" },
-      { id: "topics", label: "Topics & subtopics" },
+      { id: "research-areas", label: "Research areas" },
       { id: "methods", label: "Methods & tools" },
       { id: "impact", label: "The Impact score" },
       { id: "search", label: "Search" },
@@ -135,7 +135,7 @@ export default function DocsPage() {
               <em>Where your data comes from</em> &mdash; authoritative source systems (PubMed, the
               Enterprise Directory, InfoEd, NIH RePORTER, NYP, the Graduate School, the COI system)
               plus two in-house layers: ReCiter, which decides which publications are yours, and
-              ReciterAI, which derives topics, the Impact score, and synopses.
+              ReciterAI, which derives research areas, the Impact score, and synopses.
             </li>
             <li>
               <em>How you correct it</em> &mdash; almost always at the source, not in Scholars.
@@ -157,7 +157,7 @@ export default function DocsPage() {
           publications, and there is no &ldquo;claim your profile&rdquo; step; profiles are built
           automatically. Two names recur and are easy to confuse: <em>ReCiter</em> decides which
           publications are yours (author disambiguation), while <em>ReciterAI</em> derives what a
-          publication is about and how notable it is (topics, the Impact score, the one-line
+          publication is about and how notable it is (research areas, the Impact score, the one-line
           synopsis). Different systems, different jobs.
         </p>
 
@@ -252,7 +252,7 @@ export default function DocsPage() {
           from PubMed. Your funding comes from InfoEd, WCM&apos;s grants system of record for all
           sponsors; for federally funded work, NIH RePORTER supplies the abstract text and the
           NIH-portfolio link. Disclosures come from the COI system, and a NewYork-Presbyterian
-          position from NYP. Your topics, the Impact numbers, and the synopses are computed by
+          position from NYP. Your research areas, the Impact numbers, and the synopses are computed by
           ReciterAI.
         </p>
         <p>
@@ -277,7 +277,7 @@ export default function DocsPage() {
           publication is added there too &mdash; by you or the library curation team, whoever gets
           to it first. Your name, department, title, funding, disclosures, and
           appointments are corrected at their source. Use Request a change in your self-edit
-          interface, and it routes to the right office. Topics, Impact, and synopsis are computed by
+          interface, and it routes to the right office. Research areas, Impact, and synopsis are computed by
           ReciterAI and cannot be hand-edited. The full map is in{" "}
           <Link href="#provenance" className={LINK}>
             Where your data comes from
@@ -325,7 +325,7 @@ export default function DocsPage() {
           ).
         </p>
         <p>
-          Anyone can browse a unit&apos;s output (its faculty, topics, and publications) on the
+          Anyone can browse a unit&apos;s output (its faculty, research areas, and publications) on the
           department and division surfaces. An Owner or Curator of a unit can edit
           unit-level data in-app at <code>/edit/department/[code]</code> or{" "}
           <code>/edit/division/[code]</code>: unit metadata (leadership, slug, browse category) and
@@ -339,7 +339,7 @@ export default function DocsPage() {
           Affairs, by way of ASMS and Enterprise Directory) and isn&apos;t directly editable; it
           changes only when the appointment does. The two personal controls (overview, publication
           visibility) belong to the scholar.
-          For recurring reports by topic, date, or funding, ask the Scholars team through{" "}
+          For recurring reports by research area, date, or funding, ask the Scholars team through{" "}
           <Link href="#requests" className={LINK}>
             Request a change
           </Link>
@@ -351,9 +351,9 @@ export default function DocsPage() {
           <Link href="#impact" className={LINK}>
             the Impact score
           </Link>
-          ); topics are model-derived (
-          <Link href="#topics" className={LINK}>
-            Topics
+          ); research areas are model-derived (
+          <Link href="#research-areas" className={LINK}>
+            Research areas
           </Link>
           ); and the showcase surfaces are algorithmic (
           <Link href="#showcase" className={LINK}>
@@ -382,7 +382,7 @@ export default function DocsPage() {
         </p>
         <p>
           Everything else about your center&apos;s people (names, titles, departments, publications,
-          funding, topics, scores) comes from the same sources and follows the same correction paths
+          funding, research areas, scores) comes from the same sources and follows the same correction paths
           as any scholar. You route those; you do not own them.
         </p>
 
@@ -485,7 +485,7 @@ export default function DocsPage() {
                 <td>NIH / iCite source</td>
               </tr>
               <tr>
-                <td>Topics, subtopics, Impact score, synopsis</td>
+                <td>Research areas, subareas, Impact score, synopsis</td>
                 <td>ReciterAI (in-house)</td>
                 <td>Weekly (taxonomy roughly annual)</td>
                 <td>Not hand-editable; report a systematic error</td>
@@ -655,7 +655,7 @@ export default function DocsPage() {
                 <td>Request a change (routes to the COI office)</td>
               </tr>
               <tr>
-                <td>A wrong topic, Impact score, or synopsis</td>
+                <td>A wrong research area, Impact score, or synopsis</td>
                 <td>ReciterAI (computed)</td>
                 <td>Report a systematic error via Request a change (routes to the Scholars team)</td>
               </tr>
@@ -702,7 +702,7 @@ export default function DocsPage() {
         </ul>
         <Callout variant="note" heading="Not a control — worth knowing">
           <p>
-            You cannot edit Impact scores, topics, or synopses (computed); you cannot pick which
+            You cannot edit Impact scores, research areas, or synopses (computed); you cannot pick which
             papers are featured (algorithmic; see{" "}
             <Link href="#showcase" className={LINK}>
               Spotlight
@@ -756,61 +756,61 @@ export default function DocsPage() {
           ED person-type (faculty / appointee) that categorizes people on their profiles.
         </p>
 
-        <h2 id="topics">Topics &amp; subtopics</h2>
+        <h2 id="research-areas">Research areas</h2>
         <p>
-          Topics and subtopics are not self-selected, and they are not raw MeSH terms or a borrowed
-          subject classification. Instead, ReciterAI reads across plain-language summaries of every
-          Weill Cornell publication and lets the major research domains emerge from what is actually
-          there &mdash; areas like Cardiovascular Disease, Immunology, and Cancer Biology. The model
-          consolidates overlapping areas and validates the result against a set of representative
-          queries, so the domains hold together without being hand-built. Within each domain, the
-          same approach surfaces more specific subtopics, organized as a parent-topic to subtopic
-          hierarchy.
+          Research areas are not self-selected, and they are not the same as the MeSH keywords that
+          power search. Rather than borrowing a standard subject classification, ReciterAI reads
+          across plain-language summaries of every Weill Cornell publication and lets the major
+          domains emerge from what is actually there: areas like Cardiovascular Disease, Immunology,
+          and Cancer Biology. The model consolidates overlapping areas and validates the result
+          against a set of representative queries, so the areas hold together without being
+          hand-built. Within each area, the same approach surfaces finer subareas, organized as a
+          research-area to subarea hierarchy.
         </p>
         <p>
           As an independent check, that map was benchmarked against authoritative institutional
-          reference points &mdash; Weill Cornell&apos;s divisions and departments, its strategic
-          research roadmap, and NIH research designations &mdash; and aligned cleanly with all three,
-          confirming that what the model surfaced from the literature mirrors how the institution and
-          the wider field already organize science.
+          reference points: Weill Cornell&apos;s divisions and departments, its strategic research
+          roadmap, and NIH research designations. It aligned cleanly with all three, confirming that
+          what the model surfaced from the literature mirrors how the institution and the wider field
+          already organize science.
         </p>
         <p>
           Each publication is then placed on that map. ReciterAI classifies a paper from its title,
-          abstract (where available), MeSH descriptors, and NIH RePORTER terms, assigning one parent
-          topic and zero or more subtopics and scoring how strongly the paper relates to each.
+          abstract (where available), MeSH descriptors, and NIH RePORTER terms, assigning one
+          research area and zero or more subareas and scoring how strongly the paper relates to each.
           Because real research often spans several areas, a single paper can sit under more than one
-          parent topic. The topics shown on a scholar&apos;s profile reflect the balance of their
-          published work across these areas.
+          research area. The areas shown on a scholar&apos;s profile reflect the balance of their
+          published work.
         </p>
         <Callout variant="warn" heading="An internal score you never see">
           <p>
-            Each publication-to-topic pairing carries a relevance score used only to rank
-            publications within a topic. It is never shown. The only score you see in a publication
+            Each publication-to-area pairing carries a relevance score used only to rank publications
+            within a research area. It is never shown. The only score you see in a publication
             context is the Impact score (&ldquo;Impact: NN&rdquo;).
           </p>
         </Callout>
         <p>
-          <strong>Freshness.</strong> The taxonomy &mdash; the set of topics itself &mdash;
-          recomputes on a longer (roughly annual) cycle, but your publications are classified into
-          the current taxonomy as they are ingested on the nightly pipeline, so an individual paper
-          does not wait a year to receive topics, and your profile updates automatically as new work
-          is added. A topic can shift when the taxonomy is rebuilt; that is expected. A publication
-          with no abstract is classified from title, MeSH, and RePORTER terms. A genuinely wrong
-          topic is a ReciterAI matter; report a systematic error.
+          <strong>Freshness.</strong> The taxonomy (the set of research areas itself) recomputes on a
+          longer, roughly annual cycle, but your publications are classified into the current
+          taxonomy as they are ingested on the nightly pipeline, so an individual paper does not wait
+          a year to receive areas, and your profile updates automatically as new work is added. An
+          area can shift when the taxonomy is rebuilt; that is expected. A publication with no
+          abstract is classified from title, MeSH, and RePORTER terms. A genuinely wrong area is a
+          ReciterAI matter; report a systematic error.
         </p>
 
         <h2 id="methods">Methods &amp; tools</h2>
         <p>
-          Methods and tools describe <em>how</em> a scholar does their research &mdash; the
-          techniques, instruments, datasets, models, and software behind the work &mdash; and they
-          are read directly from the publications themselves. ReciterAI scans the abstracts of each
-          Weill Cornell scholar&apos;s papers and grants and identifies the specific methods and
-          resources actually used, deliberately skipping the commodity lab staples that don&apos;t
-          distinguish one group from another.
+          Methods and tools describe <em>how</em> a scholar does their research: the techniques,
+          instruments, datasets, models, and software behind the work. They are read directly from
+          the publications themselves. ReciterAI scans the abstracts of each Weill Cornell
+          scholar&apos;s papers and grants and identifies the specific methods and resources actually
+          used, deliberately skipping the commodity lab staples that don&apos;t distinguish one group
+          from another.
         </p>
         <p>
-          Closely related mentions are merged &mdash; &ldquo;MRI,&rdquo; &ldquo;magnetic resonance
-          imaging,&rdquo; and &ldquo;MRI scanner&rdquo; become a single entry &mdash; and grouped
+          Closely related mentions are merged, so that &ldquo;MRI,&rdquo; &ldquo;magnetic resonance
+          imaging,&rdquo; and &ldquo;MRI scanner&rdquo; become a single entry, and they are grouped
           into broader capability families, so a profile reads at the right level rather than as a
           list of synonyms. Each method is weighted by how distinctive it is across the institution:
           a technique only a handful of labs use ranks higher than one everyone shares.
@@ -880,9 +880,9 @@ export default function DocsPage() {
                 <td>Yes — &ldquo;Impact: NN&rdquo;</td>
               </tr>
               <tr>
-                <td>Topic-relevance score</td>
-                <td>How central a paper is to a topic</td>
-                <td>per (publication, topic)</td>
+                <td>Research-area relevance score</td>
+                <td>How central a paper is to a research area</td>
+                <td>per (publication, research area)</td>
                 <td>No — internal ranking only</td>
               </tr>
             </tbody>
@@ -933,8 +933,8 @@ export default function DocsPage() {
               <tr>
                 <td>Selected research / Spotlight</td>
                 <td>Home page</td>
-                <td>Representative publications per subtopic, in a small rotating set</td>
-                <td>Ranked by Impact within the subtopic; refreshed weekly</td>
+                <td>Representative publications per subarea, in a small rotating set</td>
+                <td>Ranked by Impact within the subarea; refreshed weekly</td>
               </tr>
               <tr id="selected-highlights" className="scroll-mt-28 lg:scroll-mt-20">
                 <td>Selected highlights</td>
@@ -950,15 +950,15 @@ export default function DocsPage() {
               </tr>
               <tr id="recent-highlights" className="scroll-mt-28 lg:scroll-mt-20">
                 <td>Recent highlights</td>
-                <td>Topic page</td>
-                <td>Recent notable work in a topic</td>
+                <td>Research area page</td>
+                <td>Recent notable work in a research area</td>
                 <td>Impact and heavy recency; all attributed authors</td>
               </tr>
               <tr id="top-scholars" className="scroll-mt-28 lg:scroll-mt-20">
                 <td>Top scholars</td>
-                <td>Topic page</td>
+                <td>Research area page</td>
                 <td>Full-time faculty most active in a research area</td>
-                <td>Summed Impact of their first- or senior-author papers in the topic; refreshed weekly</td>
+                <td>Summed Impact of their first- or senior-author papers in the research area; refreshed weekly</td>
               </tr>
             </tbody>
           </table>
@@ -1025,7 +1025,7 @@ export default function DocsPage() {
         <h2 id="requests">Requesting a correction, bug, or enhancement</h2>
         <p>
           Three different requests go to different places. A <em>correction</em> means something is
-          wrong: a misattributed paper, a stale department, or a bad topic. Use{" "}
+          wrong: a misattributed paper, a stale department, or a bad research area. Use{" "}
           <Link href="#correct" className={LINK}>
             How to correct something
           </Link>
@@ -1034,7 +1034,7 @@ export default function DocsPage() {
           <Link href="#correct" className={LINK}>
             Request a change
           </Link>
-          , and a systematic model error, such as wrong scores or topics across many items, routes to
+          , and a systematic model error, such as wrong scores or research areas across many items, routes to
           a ReciterAI review. An <em>enhancement</em> is a feature request: include your stakeholder
           role, the surface or behavior, what you want, and the underlying need, and submit it the
           same way. Every request is logged as a support ticket and routed for you.
@@ -1049,7 +1049,8 @@ export default function DocsPage() {
             { term: "Author Position", def: "Your place in a publication’s author list (first / middle / senior). This, not Impact, conveys your role on a paper." },
             { term: "ReCiter", def: "WCM’s author-disambiguation engine. Decides which publications are yours, from PubMed. Runs nightly." },
             { term: "ReCiter Publication Manager", def: "The curation interface at reciter.weill.cornell.edu where a publication’s attribution is corrected. A misattributed paper is rejected here; a missing one is added here." },
-            { term: "ReciterAI", def: "WCM’s pipeline that derives a publication’s topics, Impact score, and one-line synopsis. Impact and synopsis refresh nightly; the topic taxonomy recomputes roughly annually." },
+            { term: "ReciterAI", def: "WCM’s pipeline that derives a publication’s research areas, Impact score, and one-line synopsis. Impact and synopsis refresh nightly; the research-area taxonomy recomputes roughly annually." },
+            { term: "Research areas (and subareas)", def: "WCM’s AI-derived map of what scholars work on: broad research areas such as Cancer Biology, each with finer subareas. ReciterAI derives them from publications, not from MeSH or a fixed list, and scores how strongly each paper relates to each area. Distinct from the MeSH keywords that power search." },
             { term: "Self-edit interface", def: "Where a scholar edits their overview, hides or restores publications, and submits data corrections (Request a change), which route to the owning office." },
             { term: "Profile URL (slug)", def: "A profile’s web address — the short scholars.weill.cornell.edu/<slug> and the longer /scholars/<slug> both work and lead to the same page. The slug is derived automatically from the scholar’s preferred name (e.g. jane-smith); a later namesake gets a number (jane-smith-2) and the earlier profile keeps the plain form — it is not a ranking. The address is stable: if it changes, the old one permanently redirects, so existing links keep working. A custom address — still based on the scholar’s name — can be set by a Scholars administrator." },
             { term: "iCite", def: "The NIH tool Scholars uses as its only citation source. Scholars does not use Scopus." },
@@ -1057,7 +1058,7 @@ export default function DocsPage() {
             { term: "MeSH", def: "Medical Subject Headings, the NLM’s controlled vocabulary for indexing biomedical literature. Scholars search is MeSH-aware." },
             { term: "System of record (SOR)", def: "The authoritative system that owns a field. Scholars shows a copy and cannot override it; corrections happen at the SOR. Center membership is the only field whose SOR is Scholars itself." },
             { term: "Roles (Superuser / Owner / Curator)", def: "Unit-scoped permissions for curating centers, divisions, and departments. Superuser is global and grants roles; Owner and Curator act on one unit. Every edit is audit-logged." },
-            { term: "Spotlight / Selected research", def: "The home-page showcase of representative publications per subtopic, selected by ReciterAI Impact within the subtopic and refreshed weekly. Not scholar-curated." },
+            { term: "Spotlight / Selected research", def: "The home-page showcase of representative publications per subarea, selected by ReciterAI Impact within the subarea and refreshed weekly. Not scholar-curated." },
             { term: "Suppression", def: "Hiding a misattributed publication from a profile. A reversible, recorded near-term measure; the source-level fix is rejecting the paper in Publication Manager." },
           ].map(({ term, def }) => (
             <div key={term} id={`g-${term.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}`} className="scroll-mt-28 lg:scroll-mt-20">
