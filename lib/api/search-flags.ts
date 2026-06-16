@@ -546,6 +546,28 @@ export function resolvePeopleMatchAwareSnippet(): boolean {
 }
 
 /**
+ * #824 follow-up Phase 1 — the coherent `ResultEvidence` snippet model
+ * (`docs/search-snippet-handoff.md` §4). When on, `searchPeople` derives a
+ * single typed `evidence` object per hit via one precedence function and the
+ * card renders it through one `<ResultEvidence>` component, SUPERSEDING the
+ * accreted `matchReason` / `humanizedAreas` priority chain. Implies the
+ * match-aware derivation (method/topic/areas) so it works on its own.
+ *
+ * App-only, NO reindex (same query-time derive as the match-aware snippet).
+ * Default OFF (`SEARCH_RESULT_EVIDENCE=on` enables) — an `=== "on"` opt-in gate
+ * so the redesign ships dark for a staging soak alongside the still-live
+ * `SEARCH_PEOPLE_MATCH_AWARE_SNIPPET`. Flag-OFF ⇒ no `evidence` field and the
+ * card render is byte-identical to today.
+ *
+ * Flag-parity note: NOT wired in `cdk/lib/app-stack.ts` yet — enabling later is
+ * the operator rollout step (wire the env var per environment + `cdk deploy`,
+ * the same recipe as the match-aware flag above).
+ */
+export function resolveSearchResultEvidence(): boolean {
+  return process.env.SEARCH_RESULT_EVIDENCE === "on";
+}
+
+/**
  * Issue #1026 — surface soft-deleted active doctoral-student co-authors as
  * NON-LINKED author chips (name + headshot only) on publication chip surfaces
  * (search results, topic feeds, methods pages, home spotlight). Without this,
