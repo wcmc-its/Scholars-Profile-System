@@ -22,12 +22,14 @@ const {
   mockTopicFindMany,
   mockSuppressionOverlayFindMany,
   mockSensitivityOverlayFindMany,
+  mockSearch,
 } = vi.hoisted(() => ({
   mockPubTopicGroupBy: vi.fn(),
   mockScholarFamilyFindMany: vi.fn(),
   mockTopicFindMany: vi.fn(),
   mockSuppressionOverlayFindMany: vi.fn(),
   mockSensitivityOverlayFindMany: vi.fn(),
+  mockSearch: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -126,7 +128,8 @@ vi.mock("@/lib/search", () => ({
   MESH_ESCALATION_THRESHOLD: 50,
   MESH_MIN_MATCHED_FORM_LEN: 4,
   searchClient: () => ({
-    async search() {
+    async search(args: unknown) {
+      mockSearch(args);
       return {
         body: {
           hits: { total: { value: 2 }, hits: HITS },
@@ -176,7 +179,20 @@ beforeEach(() => {
   mockTopicFindMany.mockReset().mockResolvedValue(TOPIC_ROWS);
   mockSuppressionOverlayFindMany.mockReset().mockResolvedValue([]);
   mockSensitivityOverlayFindMany.mockReset().mockResolvedValue([]);
+  mockSearch.mockReset();
 });
+
+// Pull the people-index search request body (the call whose highlight targets
+// the self-reported name field, not the pub-agg `title` highlight).
+function peopleHighlightFields(): Record<string, unknown> {
+  const call = mockSearch.mock.calls.find(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (c) => (c[0] as any)?.body?.highlight?.fields?.preferredName !== undefined,
+  );
+  if (!call) throw new Error("no people-index search captured");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (call[0] as any).body.highlight.fields as Record<string, unknown>;
+}
 
 afterEach(() => {
   if (prior === undefined) delete process.env[FLAG];
@@ -348,6 +364,39 @@ describe("match-aware snippet — flag ON", () => {
     // None of the labels contain an underscore.
     expect(oe.humanizedAreas!.labels.every((l) => !l.includes("_"))).toBe(true);
     expect(oe.humanizedAreas!.matchedIndex).toBe(-1);
+  });
+});
+
+describe("match-aware snippet — raw areasOfInterest highlight is replaced (regression)", () => {
+  // The bug: the server kept highlighting `areasOfInterest` even with the flag on,
+  // so the raw `under_score` slug fragment came back as `hit.highlight` and the
+  // card rendered it BEFORE `humanizedAreas` — the slug dump still showed (e.g.
+  // Olivier Elemento, row 1, on staging). Fix: drop areasOfInterest from the
+  // highlight request when matchAwareContext is set, so humanized areas (or a real
+  // overview sentence) is the only areas-grade snippet.
+  it("(f) flag ON + context ⇒ areasOfInterest is NOT in the people highlight; overview stays", async () => {
+    process.env[FLAG] = "on";
+    await searchPeople({
+      q: "single cell rna sequencing",
+      relevanceMode: "v3",
+      shape: "topic",
+      matchAwareContext: { methodFamily: FAMILY, topics: [] },
+    });
+    const fields = peopleHighlightFields();
+    expect(fields).not.toHaveProperty("areasOfInterest");
+    expect(fields).toHaveProperty("overview");
+    expect(fields).toHaveProperty("preferredName");
+  });
+
+  it("(f-off) flag OFF ⇒ areasOfInterest IS highlighted (today's behavior unchanged)", async () => {
+    delete process.env[FLAG];
+    await searchPeople({
+      q: "single cell rna sequencing",
+      relevanceMode: "v3",
+      shape: "topic",
+      matchAwareContext: { methodFamily: FAMILY, topics: [] },
+    });
+    expect(peopleHighlightFields()).toHaveProperty("areasOfInterest");
   });
 });
 
