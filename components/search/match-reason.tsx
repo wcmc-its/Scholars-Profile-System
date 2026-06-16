@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { FileText, FlaskConical, Sparkles, Tag } from "lucide-react";
+import { FileText, Sparkles, Tag, Wrench } from "lucide-react";
 
 /**
  * PLAN R4 — the kind of match a reason line explains, which picks the leading
@@ -69,12 +69,17 @@ export function MatchAwareReason({
     kind === "method"
       ? "border-[#ecdcc8] bg-[#fbf4ea] text-[#8a4a1f]"
       : "border-[#d8e2ec] bg-[#eef2f6] text-[#2c4f6e]";
-  const Icon = kind === "method" ? FlaskConical : Tag;
+  // Method uses the SAME Wrench glyph as the "Methods and Tools" facet/chip row
+  // (research-areas-row.tsx) and the /methods lens, so the concept reads with one
+  // icon everywhere; topic keeps the Tag.
+  const Icon = kind === "method" ? Wrench : Tag;
   const badgeText = kind === "method" ? "Method" : "Topic";
   return (
-    <div className="mt-2 flex min-w-0 items-baseline gap-2 text-[13px] leading-snug">
+    // items-center (not baseline): the bordered pill and the bold label line up
+    // on a shared center axis so the badge doesn't sit low next to the label.
+    <div className="mt-2 flex min-w-0 items-center gap-2 text-[13px] leading-snug">
       <span
-        className={`inline-flex shrink-0 -translate-y-px items-center gap-1 rounded-[5px] border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.02em] ${badge}`}
+        className={`inline-flex shrink-0 items-center gap-1 rounded-[5px] border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.02em] ${badge}`}
       >
         <Icon aria-hidden className="size-3 shrink-0" strokeWidth={2} />
         {badgeText}
