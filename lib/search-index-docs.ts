@@ -27,6 +27,14 @@ import {
   isPublicationDark,
   type PublicationSuppressions,
 } from "@/lib/api/manual-layer";
+// Issue #824 §4c — the public method-family rollup is gated through the SAME
+// #800/#801 overlay every public Method surface uses. `isFamilyPubliclyVisible`
+// is a pure predicate (no DB / no module side effect), and `methods-overlay`
+// only imports `lib/db` + `methods-lens-flags` — neither imports this module —
+// so the value import introduces no import cycle. `FamilyOverlayGate` is a
+// type-only import.
+import { isFamilyPubliclyVisible } from "@/lib/api/methods-overlay";
+import type { FamilyOverlayGate } from "@/lib/api/methods-overlay";
 import { isFundingActive } from "@/lib/api/search-funding";
 import { extractMeshDescriptorUis } from "@/lib/mesh-descriptor-uis";
 import { extractLastNameSort } from "@/lib/name-sort";
@@ -600,8 +608,16 @@ export async function buildPeopleDoc(
     | "publicationAuthor"
     | "department"
     | "division"
+    | "scholarFamily"
   >,
   sup: PublicationSuppressions,
+  // Issue #824 §4c — OPTIONAL public method-family overlay gate. When provided
+  // (the ETL + the live reconciler pass it, loaded with `forceSensitive: true`),
+  // the builder emits a `methodFamily` rollup of the scholar's overlay-VISIBLE
+  // families. When OMITTED — every existing test, and any caller that doesn't
+  // want the rollup — the builder NEVER touches `client.scholarFamily` and never
+  // emits the field, so the produced doc is byte-identical to today.
+  gate?: FamilyOverlayGate,
 ): Promise<Record<string, unknown> | null> {
   // Title-field repetition by authorship position.
   const titleParts: string[] = [];
@@ -889,6 +905,39 @@ export async function buildPeopleDoc(
       ? { leadership: { isChair, chairOf, isChief, chiefOf } }
       : {};
 
+  // Issue #824 §4c — public method-family rollup (omit-on-empty). Only built
+  // when a `gate` is passed (the ETL + the live reconciler, both with
+  // `forceSensitive: true`); a gate-less call skips the query entirely so every
+  // existing caller / test is byte-identical. Sidecar query mirrors the
+  // `centerMembership` block above. Each family is filtered through the SAME
+  // #800/#801 gate (`isFamilyPubliclyVisible`) the public Method pages use, then
+  // its label and its exemplar-tool DISPLAY NAMES are collected into one deduped,
+  // insertion-ordered set — so a method query matches on either the family name
+  // or a representative tool. `exemplarTools` is a `Json` column: guard the
+  // array shape, coerce each entry to a trimmed string, drop empties.
+  let methodFamilyField: { methodFamily: string } | Record<string, never> = {};
+  if (gate) {
+    const famRows = await client.scholarFamily.findMany({
+      where: { cwid: s.cwid },
+      select: { supercategory: true, familyLabel: true, exemplarTools: true },
+    });
+    const methodTerms = new Set<string>();
+    for (const r of famRows) {
+      if (!isFamilyPubliclyVisible(r.supercategory, r.familyLabel, gate)) continue;
+      const label = r.familyLabel.trim();
+      if (label) methodTerms.add(label);
+      if (Array.isArray(r.exemplarTools)) {
+        for (const t of r.exemplarTools) {
+          const name = String(t).trim();
+          if (name) methodTerms.add(name);
+        }
+      }
+    }
+    if (methodTerms.size > 0) {
+      methodFamilyField = { methodFamily: Array.from(methodTerms).join(" ") };
+    }
+  }
+
   return {
     cwid: s.cwid,
     slug: s.slug,
@@ -936,6 +985,9 @@ export async function buildPeopleDoc(
     // neither chair nor chief write nothing for this field, mirroring
     // `publicationMeshUi` / `topicImpacts`).
     ...leadershipField,
+    // Issue #824 §4c — public method-family rollup (OMIT-on-empty, gate-only).
+    // Empty `{}` unless a gate was passed AND ≥1 overlay-visible family exists.
+    ...methodFamilyField,
   };
 }
 

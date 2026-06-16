@@ -241,6 +241,25 @@ export const peopleIndexMapping = {
           chiefOf: { type: "keyword" },
         },
       },
+      // Issue #824 §4c — per-scholar rollup of the scholar's overlay-VISIBLE
+      // method-family LABELS plus those families' exemplar-tool display names
+      // (e.g. "Single-cell RNA sequencing Seurat CellRanger CRISPR gene editing
+      // Cas9"). Sourced from `ScholarFamily` rows filtered through the SAME
+      // #800-suppression / #801-sensitivity gate every public Method surface
+      // uses (`isFamilyPubliclyVisible`), so a suppressed or sensitive family
+      // never leaks into public ranking. Analyzed `scholar_text` (same analyzer
+      // as the other people-ladder fields) so a free-text method query
+      // ("CRISPR", "single-cell RNA sequencing", "Seurat") ranks the scholar via
+      // the cross_fields blended group, and the `.keyword` sub-field is reserved
+      // for a future exact method-family facet. OMITTED on scholars with no
+      // visible family (omit-on-empty, like `publicationMeshUi` / `leadership`).
+      // The query-time boost on this field is behind the default-OFF
+      // `SEARCH_PEOPLE_METHOD_FAMILY` flag (reindex-then-flip).
+      methodFamily: {
+        type: "text",
+        analyzer: "scholar_text",
+        fields: { keyword: { type: "keyword" } },
+      },
     },
   },
 };

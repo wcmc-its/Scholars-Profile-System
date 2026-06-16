@@ -70,6 +70,21 @@ describe("loadFamilyOverlayGate", () => {
     expect(gate.sensitive.has(familyOverlayKey(SENSITIVE.supercategory, SENSITIVE.familyLabel))).toBe(true);
     expect(prisma.familySensitivityOverlay.findMany).toHaveBeenCalledTimes(1);
   });
+
+  it("#824 §4c — forceSensitive:true loads the sensitivity overlay even when the runtime gate is OFF (public-index exclusion)", async () => {
+    // The runtime sensitivity gate is OFF — yet the public people index MUST
+    // still exclude #801-sensitive families, so `forceSensitive: true` loads
+    // the overlay regardless and populates `sensitive`.
+    vi.mocked(isMethodsLensSensitiveGateOn).mockReturnValue(false);
+    vi.mocked(prisma.familySuppressionOverlay.findMany).mockResolvedValue([SUPPRESSED] as never);
+    vi.mocked(prisma.familySensitivityOverlay.findMany).mockResolvedValue([SENSITIVE] as never);
+
+    const gate = await loadFamilyOverlayGate({ forceSensitive: true });
+
+    expect(gate.suppressed.has(familyOverlayKey(SUPPRESSED.supercategory, SUPPRESSED.familyLabel))).toBe(true);
+    expect(gate.sensitive.has(familyOverlayKey(SENSITIVE.supercategory, SENSITIVE.familyLabel))).toBe(true);
+    expect(prisma.familySensitivityOverlay.findMany).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("isFamilyPubliclyVisible", () => {

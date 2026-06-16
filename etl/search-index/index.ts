@@ -30,6 +30,7 @@ import {
   loadAllGrantSuppressions,
   loadAllPublicationSuppressions,
 } from "@/lib/api/manual-layer";
+import { loadFamilyOverlayGate } from "@/lib/api/methods-overlay";
 import {
   GRANT_INDEX_SELECT,
   GRANT_INDEX_WHERE,
@@ -178,6 +179,11 @@ async function indexPeople(concreteIndex: string) {
   // Phase 4b C4 — load the active publication-suppression set once per run
   // (same contract as the indexPublications load — see comment there).
   const sup = await loadAllPublicationSuppressions(prisma);
+  // #824 §4c — load the method-family overlay gate once per run with
+  // `forceSensitive: true`: the people index is a PUBLIC surface, so it always
+  // excludes #800-suppressed AND #801-sensitive families regardless of the
+  // runtime sensitivity flag. Passed to every `buildPeopleDoc` below.
+  const gate = await loadFamilyOverlayGate({ forceSensitive: true });
   const scholars = await prisma.scholar.findMany({
     where: PEOPLE_INDEX_WHERE,
     select: PEOPLE_INDEX_SELECT,
@@ -196,7 +202,9 @@ async function indexPeople(concreteIndex: string) {
     // index, so they don't surface on the people tab or in autocomplete. Skipped
     // before buildPeopleDoc to avoid the per-scholar centerMembership query.
     if (!isPubliclyDisplayed(s.roleCategory)) continue;
-    const doc = await buildPeopleDoc(s, prisma, sup);
+    // #824 §4c — pass the public overlay gate so `buildPeopleDoc` emits the
+    // `methodFamily` rollup (suppressed + sensitive families always excluded).
+    const doc = await buildPeopleDoc(s, prisma, sup, gate);
     if (doc !== null) docs.push({ cwid: s.cwid, doc });
   }
 

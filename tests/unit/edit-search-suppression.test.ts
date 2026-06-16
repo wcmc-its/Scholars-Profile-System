@@ -26,6 +26,7 @@ const hoisted = vi.hoisted(() => ({
   mockSuppressionUpdate: vi.fn(),
   mockDepartmentFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
+  mockScholarFamilyFindMany: vi.fn(),
   mockBulk: vi.fn(),
 }));
 
@@ -48,10 +49,28 @@ vi.mock("@/lib/db", () => ({
       // leadership content, so both default to empty.
       department: { findMany: hoisted.mockDepartmentFindMany },
       division: { findMany: hoisted.mockDivisionFindMany },
+      // #824 §4c — `buildPeopleDoc` issues a `scholarFamily` sidecar for the
+      // public method-family rollup when a gate is passed (the reconciler now
+      // passes one). This suite doesn't exercise method families; the default
+      // empty result keeps the rollup omit-on-empty.
+      scholarFamily: { findMany: hoisted.mockScholarFamilyFindMany },
     },
     // #393 — the reconciler sentinel stamp on a successful reflect.
     write: { suppression: { update: hoisted.mockSuppressionUpdate } },
   },
+}));
+
+// #824 §4c — the reconciler loads the public method-family overlay gate
+// (`loadFamilyOverlayGate({ forceSensitive: true })`) before re-projecting an
+// affected people doc. Stub it to an empty gate so the takedown-reconciliation
+// assertions here stay focused on the bulk delete + co-author re-index; the
+// gating/rollup logic is covered by search-index-docs-method-family.test.ts.
+vi.mock("@/lib/api/methods-overlay", () => ({
+  loadFamilyOverlayGate: async () => ({
+    suppressed: new Set<string>(),
+    sensitive: new Set<string>(),
+  }),
+  isFamilyPubliclyVisible: () => true,
 }));
 
 vi.mock("@/lib/search", () => ({
@@ -141,6 +160,7 @@ beforeEach(() => {
   hoisted.mockDivisionMembershipFindMany.mockResolvedValue([]);
   hoisted.mockDepartmentFindMany.mockResolvedValue([]);
   hoisted.mockDivisionFindMany.mockResolvedValue([]);
+  hoisted.mockScholarFamilyFindMany.mockResolvedValue([]);
 });
 
 describe("reflectSearchSuppression — scholar suppress", () => {

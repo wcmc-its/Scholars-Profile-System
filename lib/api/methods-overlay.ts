@@ -50,8 +50,18 @@ export type FamilyOverlayGate = {
  * as `partitionScholarFamilies`). Per-request, never cached: the overlays are an
  * Aurora query-time merge (reversible with no rebuild), so caching would
  * reintroduce the staleness window the overlay exists to close.
+ *
+ * `opts.forceSensitive` (#824 §4c) ALWAYS loads the `FamilySensitivityOverlay`,
+ * ignoring `isMethodsLensSensitiveGateOn()`. The people search index is a PUBLIC
+ * surface, so it must exclude sensitive families regardless of the runtime
+ * sensitivity flag — otherwise a #801-sensitive family would leak into public
+ * search ranking the moment the gate flag is off. The index builders pass this
+ * option; no other caller does, so the DEFAULT (no `opts`) is BYTE-IDENTICAL to
+ * today's gate-conditional behavior the per-profile lens relies on.
  */
-export async function loadFamilyOverlayGate(): Promise<FamilyOverlayGate> {
+export async function loadFamilyOverlayGate(
+  opts?: { forceSensitive?: boolean },
+): Promise<FamilyOverlayGate> {
   const suppression = await prisma.familySuppressionOverlay.findMany({
     select: { supercategory: true, familyLabel: true },
   });
@@ -59,7 +69,7 @@ export async function loadFamilyOverlayGate(): Promise<FamilyOverlayGate> {
     suppression.map((o) => familyOverlayKey(o.supercategory, o.familyLabel)),
   );
 
-  if (!isMethodsLensSensitiveGateOn()) {
+  if (!opts?.forceSensitive && !isMethodsLensSensitiveGateOn()) {
     return { suppressed, sensitive: new Set<string>() };
   }
 
