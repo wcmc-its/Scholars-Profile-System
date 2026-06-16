@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import {
   selectEvidence,
+  bioCoversQuery,
   refineExemplarTools,
   firstMatchingSentence,
   classifyNameHighlight,
@@ -27,7 +28,7 @@ describe("selectEvidence — precedence (handoff §4 principle 2)", () => {
       nameHighlight: NAME_WITH_ORG_HL,
       method: { family: "Flow cytometry", tools: ["FACS"] },
       topic: { label: "Immunology", id: "immunology" },
-      pub: { tagged: { text: "5 of 9 publications tagged X" } },
+      pub: { tagged: { text: "5 of 9 publications tagged X", count: 5 } },
       bioHighlight: BIO_HL,
       areas: { labels: ["A"], total: 1 },
     });
@@ -38,7 +39,7 @@ describe("selectEvidence — precedence (handoff §4 principle 2)", () => {
     const ev = selectEvidence({
       method: { family: "Single-cell RNA sequencing", tools: ["scRNA-seq"] },
       topic: { label: "Immunology", id: "immunology" },
-      pub: { tagged: { text: "5 of 9 publications tagged X" } },
+      pub: { tagged: { text: "5 of 9 publications tagged X", count: 5 } },
     });
     expect(ev).toEqual({ kind: "method", family: "Single-cell RNA sequencing", tools: ["scRNA-seq"] });
   });
@@ -46,7 +47,7 @@ describe("selectEvidence — precedence (handoff §4 principle 2)", () => {
   it("topic (rank 3) beats pub:tagged and bio", () => {
     const ev = selectEvidence({
       topic: { label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" },
-      pub: { tagged: { text: "5 of 9 publications tagged X" } },
+      pub: { tagged: { text: "5 of 9 publications tagged X", count: 5 } },
       bioHighlight: BIO_HL,
     });
     expect(ev).toEqual({
@@ -56,32 +57,45 @@ describe("selectEvidence — precedence (handoff §4 principle 2)", () => {
     });
   });
 
-  it("pub:tagged (rank 4) beats bio (rank 5) — strong subject tag above a sentence", () => {
+  it("pub:tagged (rank 4) beats bio (rank 5) — strong subject tag above a sentence; carries count", () => {
     const ev = selectEvidence({
-      pub: { tagged: { text: "25 of 373 publications tagged Melanoma" } },
+      pub: { tagged: { text: "25 of 373 publications tagged Melanoma", count: 25 } },
       bioHighlight: BIO_HL,
     });
-    expect(ev).toEqual({ kind: "publications", strength: "tagged", text: "25 of 373 publications tagged Melanoma" });
+    expect(ev).toEqual({
+      kind: "publications",
+      strength: "tagged",
+      text: "25 of 373 publications tagged Melanoma",
+      count: 25,
+    });
   });
 
-  it("bio (rank 5) beats pub:mention (rank 6) — '1 of 133 mention' must not outrank a real sentence", () => {
+  it("bio (rank 5) beats pub:mention (rank 6) — '1 of 133 mention' must not outrank a real FULL-query bio match", () => {
+    // single-token query ⇒ bioCoversQuery true ⇒ bio is "full" and wins.
     const ev = selectEvidence({
       bioHighlight: BIO_HL,
-      pub: { mention: { text: "1 of 133 publications mention “optogenetics”" } },
+      pub: { mention: { text: "1 of 133 publications mention “optogenetics”", count: 1 } },
+      query: "rna",
     });
     expect(ev.kind).toBe("selfDescription");
   });
 
   it("pub:mention (rank 6) beats affiliation", () => {
     const mention = selectEvidence({
-      pub: { mention: { text: "1 of 133 publications mention “x”" } },
+      pub: { mention: { text: "1 of 133 publications mention “x”", count: 1 } },
       nameHighlight: AFFIL_HL,
     });
-    expect(mention).toEqual({ kind: "publications", strength: "mention", text: "1 of 133 publications mention “x”" });
+    expect(mention).toEqual({
+      kind: "publications",
+      strength: "mention",
+      text: "1 of 133 publications mention “x”",
+      count: 1,
+    });
   });
 
   it("concept folds into the tagged tier (rank 4) — beats bio + mention, loses to tagged", () => {
-    // concept above bio (matches the documented precedence + the legacy chain)
+    // concept above bio (matches the documented precedence + the legacy chain).
+    // Concept carries no count/pubs (folded text variant).
     expect(selectEvidence({ pub: { concept: { text: "via related concept X" } }, bioHighlight: BIO_HL })).toEqual({
       kind: "publications",
       strength: "concept",
@@ -89,10 +103,14 @@ describe("selectEvidence — precedence (handoff §4 principle 2)", () => {
     });
     // tagged still wins over concept when both present
     expect(
-      selectEvidence({ pub: { tagged: { text: "5 of 9 tagged X" }, concept: { text: "via related concept X" } } }),
+      selectEvidence({
+        pub: { tagged: { text: "5 of 9 tagged X", count: 5 }, concept: { text: "via related concept X" } },
+      }),
     ).toMatchObject({ kind: "publications", strength: "tagged" });
     // concept (rank 4) beats a free-text mention (rank 6)
-    expect(selectEvidence({ pub: { concept: { text: "c" }, mention: { text: "m" } } })).toMatchObject({
+    expect(
+      selectEvidence({ pub: { concept: { text: "c" }, mention: { text: "m", count: 1 } } }),
+    ).toMatchObject({
       strength: "concept",
     });
   });
@@ -112,11 +130,141 @@ describe("selectEvidence — precedence (handoff §4 principle 2)", () => {
     expect(selectEvidence({ areas: { labels: [], total: 0 } })).toEqual({ kind: "none" });
   });
 
-  it("carries the representative pub payload (for a future hover) without rendering it", () => {
+  it("carries up to 3 representative papers (pubs) + count on a tagged publications result", () => {
     const ev = selectEvidence({
-      pub: { tagged: { text: "5 of 9 tagged X", pub: { pmid: "1", title: "T", year: 2020 } } },
+      pub: {
+        tagged: {
+          text: "5 of 9 tagged X",
+          count: 5,
+          pubs: [
+            { pmid: "1", title: "T1", year: 2020 },
+            { pmid: "2", title: "T2", year: 2019 },
+          ],
+        },
+      },
     });
-    expect(ev).toMatchObject({ kind: "publications", strength: "tagged", pub: { pmid: "1" } });
+    expect(ev).toEqual({
+      kind: "publications",
+      strength: "tagged",
+      text: "5 of 9 tagged X",
+      count: 5,
+      pubs: [
+        { pmid: "1", title: "T1", year: 2020 },
+        { pmid: "2", title: "T2", year: 2019 },
+      ],
+    });
+  });
+
+  it("omits `pubs` (but always sets `count`) when the rep-pub list is empty", () => {
+    const tagged = selectEvidence({ pub: { tagged: { text: "5 of 9 tagged X", count: 5, pubs: [] } } });
+    expect(tagged).toEqual({ kind: "publications", strength: "tagged", text: "5 of 9 tagged X", count: 5 });
+    expect("pubs" in tagged).toBe(false);
+
+    const mention = selectEvidence({ pub: { mention: { text: "1 of 9 mention x", count: 1 } } });
+    expect(mention).toEqual({ kind: "publications", strength: "mention", text: "1 of 9 mention x", count: 1 });
+    expect("pubs" in mention).toBe(false);
+  });
+
+  it("carries `pubs` + `count` on a mention publications result too", () => {
+    const ev = selectEvidence({
+      pub: { mention: { text: "2 of 40 mention 16s rna", count: 2, pubs: [{ pmid: "9", title: "M", year: 2022 }] } },
+    });
+    expect(ev).toEqual({
+      kind: "publications",
+      strength: "mention",
+      text: "2 of 40 mention 16s rna",
+      count: 2,
+      pubs: [{ pmid: "9", title: "M", year: 2022 }],
+    });
+  });
+});
+
+describe("selectEvidence — partial-bio-vs-pub.mention precedence split (handoff decision 2)", () => {
+  // A multi-word query whose bio highlight covered only a SUBSET loses to a
+  // publication-mention; a FULL-query (or single-token) bio match still wins.
+  const MULTI = "single cell rna";
+  // bio highlight marked only "single" — a SUBSET of the 3-token query.
+  const PARTIAL_BIO = "The lab studies <mark>single</mark> things broadly.";
+  // bio highlight marked every significant token of the query.
+  const FULL_BIO = "We do <mark>single</mark> <mark>cell</mark> <mark>rna</mark> sequencing.";
+
+  it("partial-bio match loses to pub.mention (rank 6 beats the demoted bio)", () => {
+    const ev = selectEvidence({
+      bioHighlight: PARTIAL_BIO,
+      pub: { mention: { text: "4 of 80 publications mention “single cell rna”", count: 4 } },
+      query: MULTI,
+    });
+    expect(ev).toEqual({
+      kind: "publications",
+      strength: "mention",
+      text: "4 of 80 publications mention “single cell rna”",
+      count: 4,
+    });
+  });
+
+  it("full-query bio match still wins over pub.mention", () => {
+    const ev = selectEvidence({
+      bioHighlight: FULL_BIO,
+      pub: { mention: { text: "4 of 80 publications mention “single cell rna”", count: 4 } },
+      query: MULTI,
+    });
+    expect(ev.kind).toBe("selfDescription");
+  });
+
+  it("a demoted partial-bio match still beats affiliation / areas / empty (rank 6b)", () => {
+    const ev = selectEvidence({
+      bioHighlight: PARTIAL_BIO,
+      nameHighlight: AFFIL_HL,
+      areas: { labels: ["A"], total: 1 },
+      query: MULTI,
+    });
+    // no pub.mention present ⇒ the partial bio falls to 6b and beats affiliation
+    expect(ev.kind).toBe("selfDescription");
+  });
+
+  it("absent query ⇒ no demotion (back-compat: any bio match wins)", () => {
+    const ev = selectEvidence({
+      bioHighlight: PARTIAL_BIO,
+      pub: { mention: { text: "4 of 80 mention x", count: 4 } },
+    });
+    expect(ev.kind).toBe("selfDescription");
+  });
+});
+
+describe("bioCoversQuery (handoff decision 2 — does the bio cover the WHOLE query)", () => {
+  it("≤1 significant token ⇒ true (a single-token bio match is 'full')", () => {
+    expect(bioCoversQuery("The <mark>rna</mark> lab.", "rna")).toBe(true);
+    // a query of only sub-2-char tokens has 0 significant tokens ⇒ true
+    expect(bioCoversQuery("nothing marked here", "a b")).toBe(true);
+  });
+
+  it("empty / absent query ⇒ true (back-compat: no demotion)", () => {
+    expect(bioCoversQuery("The <mark>rna</mark> lab.", "")).toBe(true);
+    // @ts-expect-error — exercise the nullish-coalescing guard
+    expect(bioCoversQuery("anything", undefined)).toBe(true);
+  });
+
+  it("true only when EVERY significant query token appears in the marked text", () => {
+    const full = "We do <mark>single</mark> <mark>cell</mark> <mark>rna</mark> sequencing.";
+    expect(bioCoversQuery(full, "single cell rna")).toBe(true);
+    // a partial highlight (only 'single' marked) ⇒ false
+    expect(bioCoversQuery("The <mark>single</mark> lab.", "single cell rna")).toBe(false);
+  });
+
+  it("only MARKED text counts — unmarked occurrences don't satisfy a token", () => {
+    // 'cell' appears in the sentence but only OUTSIDE the marks ⇒ not covered.
+    expect(bioCoversQuery("The <mark>single</mark> cell lab.", "single cell")).toBe(false);
+  });
+
+  it("a mark spanning the whole multi-word phrase covers all its tokens", () => {
+    expect(bioCoversQuery("We study <mark>single cell rna</mark> biology.", "single cell rna")).toBe(true);
+  });
+
+  it("tokenizes on punctuation and drops sub-2-char tokens", () => {
+    // '16s' and 'rna' are the significant tokens; both inside the mark.
+    expect(bioCoversQuery("Profiling <mark>16s rna</mark> amplicons.", "16s-rna")).toBe(true);
+    // a 1-char stray ('a') is dropped, so the rest must still match
+    expect(bioCoversQuery("The <mark>crispr</mark> screen.", "crispr a")).toBe(true);
   });
 });
 

@@ -15,21 +15,26 @@ import { loadMethodExemplar, loadTopicExemplar } from "@/lib/api/method-exemplar
  * search-results derive so the cacheable page isn't tainted and the per-row pub
  * lookups only run when a row is actually hovered/focused.
  *
- * - Gated behind `SEARCH_RESULT_EVIDENCE` (the snippet flag): off ⇒ `{ pub: null }`
- *   so prod (flag-off) is inert and the route can't be probed for data early.
+ * - Gated behind `SEARCH_RESULT_EVIDENCE` (the snippet flag): off ⇒
+ *   `{ pubs: [], total: 0 }` so prod (flag-off) is inert and the route can't be
+ *   probed for data early.
  * - Public surface: the scholar / family / publication gates run INSIDE the
- *   loaders. Never cached; default-safe null on any error (a hover must never 500).
+ *   loaders. Never cached; default-safe empty on any error (a disclosure fetch
+ *   must never 500).
  */
 export const dynamic = "force-dynamic";
 
 const NO_STORE = { "cache-control": "no-store" } as const;
+
+/** The inert / error / no-selector response — never a dead control on the card. */
+const EMPTY: { pubs: unknown[]; total: number } = { pubs: [], total: 0 };
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ cwid: string }> },
 ): Promise<NextResponse> {
   if (!resolveSearchResultEvidence()) {
-    return NextResponse.json({ pub: null }, { headers: NO_STORE });
+    return NextResponse.json(EMPTY, { headers: NO_STORE });
   }
 
   const { cwid } = await params;
@@ -38,14 +43,14 @@ export async function GET(
   const topic = sp.get("topic")?.trim();
 
   try {
-    let pub = null;
+    let result: { pubs: unknown[]; total: number } = EMPTY;
     if (family) {
-      pub = await loadMethodExemplar(cwid, family);
+      result = await loadMethodExemplar(cwid, family);
     } else if (topic) {
-      pub = await loadTopicExemplar(cwid, topic);
+      result = await loadTopicExemplar(cwid, topic);
     }
-    return NextResponse.json({ pub }, { headers: NO_STORE });
+    return NextResponse.json(result, { headers: NO_STORE });
   } catch {
-    return NextResponse.json({ pub: null }, { headers: NO_STORE });
+    return NextResponse.json(EMPTY, { headers: NO_STORE });
   }
 }

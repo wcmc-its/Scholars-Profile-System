@@ -334,6 +334,35 @@ export function parseReasonTopHit(
 }
 
 /**
+ * Rep-papers disclosure — the array form of {@link parseReasonTopHit}. Map every
+ * hit in a reason filter's `top` (top_hits) sub-agg through the same
+ * pmid/title/year/titleHtml logic, dropping any hit that lacks a pmid/title, and
+ * keep at most `limit` (3). Empty / absent sub-agg ⇒ `[]`. Used by the evidence
+ * model (the disclosure shows up to 3 representative papers); `parseReasonTopHit`
+ * stays for the legacy `composeMatchReason` single-pub path.
+ */
+export function parseReasonTopHits(
+  agg: ReasonTopHitsAgg | undefined,
+  limit = 3,
+): RepresentativePub[] {
+  const hits = agg?.top?.hits?.hits ?? [];
+  const out: RepresentativePub[] = [];
+  for (const hit of hits) {
+    const src = hit?._source;
+    if (!src || src.pmid == null || !src.title) continue;
+    const titleHtml = hit?.highlight?.title?.[0];
+    out.push({
+      pmid: String(src.pmid),
+      title: src.title,
+      ...(titleHtml ? { titleHtml } : {}),
+      ...(src.year != null ? { year: src.year } : {}),
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
  * PLAN R4 / #967 — the per-scholar reason line. Strongest signal first:
  * pub-evidence count (tagged → mention) then the resolved-concept fallback.
  * When `rep` carries a representative pub for the firing pub-evidence branch
@@ -1975,20 +2004,43 @@ export async function searchPeople(opts: {
   // exceed the scholar's total. No reindex. Skipped on the count-only badge path
   // (returned above) and under `exact` scope (empty `meshDescendantUis`).
   const reasonCounts = new Map<string, { tagged: number; mention: number }>();
-  // Issue #967 — representative pub per cwid, keyed by which reason branch it
-  // belongs to (tagged vs mention). Populated only under `representativePub`;
-  // empty otherwise, so `composeMatchReason` attaches no `pub`.
+  // Issue #967 / rep-papers disclosure — representative pubs per cwid, keyed by
+  // which reason branch they belong to (tagged vs mention), up to 3 each.
+  // Populated only under `representativePub`; empty otherwise, so the legacy
+  // `composeMatchReason` (which takes a single pub) attaches none.
   const reasonReps = new Map<
     string,
-    { tagged?: RepresentativePub; mention?: RepresentativePub }
+    { tagged?: RepresentativePub[]; mention?: RepresentativePub[] }
   >();
   const pageCwids = r.hits.hits.map((h) => h._source.cwid);
+  // Rep-papers disclosure (#1) — the reason aggregation also runs for a
+  // content-shaped free-text query that did NOT resolve to a concept (e.g.
+  // `16s rna`), so the card can show `N of M publications mention "<query>"` with
+  // representative papers. `contentShape` is the set of bodies that search pub
+  // content (topic / hybrid / the non-template restructured_msm) — NOT a name or
+  // a department query, which carry no pub-mention evidence. When there is no
+  // resolved descriptor (`meshDescendantUis` empty) the `tagged` sub-agg is
+  // OMITTED below, so only `mention` is computed.
+  //
+  // The content-shape widening is GATED on `resultEvidence`: only the evidence
+  // path renders the new free-text mention disclosure, so this is where the
+  // broadened agg may fire. When `resultEvidence` is OFF (default/prod posture,
+  // with `matchExplain` still default-ON) the gate falls back to the original
+  // pre-disclosure predicate (`applyTopicTemplate && a resolved descriptor && a
+  // framed parent`), keeping the legacy `composeMatchReason` reason line — and
+  // the agg request itself — byte-identical to commit 259018be. Without this the
+  // widening would emit a brand-new "N of M publications mention …" legacy line
+  // (and an extra OpenSearch round-trip) on the flag-off path.
+  const contentShape =
+    applyTopicTemplate || applyHybridTemplate || queryShape === "restructured_msm";
+  const runReasonAgg = resultEvidence
+    ? contentShape
+    : applyTopicTemplate && meshDescendantUis.length > 0 && provenanceParent.length > 0;
   if (
     matchExplain &&
-    applyTopicTemplate &&
-    meshDescendantUis.length > 0 &&
-    provenanceParent.length > 0 &&
-    pageCwids.length > 0
+    contentQuery.length > 0 &&
+    pageCwids.length > 0 &&
+    runReasonAgg
   ) {
     // Issue #967 — fetch the strongest representative pub within a reason filter:
     // most recent, then most cited. Highlight is keyed to the LITERAL query (not
@@ -1998,7 +2050,7 @@ export async function searchPeople(opts: {
     // the flag-off agg body is byte-identical to the pre-#967 shape.
     const repPubTopHits = {
       top_hits: {
-        size: 1,
+        size: 3,
         sort: [
           { year: { order: "desc", missing: "_last" } },
           { citationCount: { order: "desc", missing: "_last" } },
@@ -2023,13 +2075,21 @@ export async function searchPeople(opts: {
           byAuthor: {
             terms: { field: "wcmAuthorCwids", include: pageCwids, size: pageCwids.length },
             aggs: {
-              tagged: {
-                filter: { terms: { meshDescriptorUi: meshDescendantUis } },
-                aggs: {
-                  d: { cardinality: { field: "pmid" } },
-                  ...(representativePub ? { top: repPubTopHits } : {}),
-                },
-              },
+              // The `tagged` sub-agg needs a resolved descriptor set; OMIT it when
+              // the query resolved to no concept (`meshDescendantUis` empty — the
+              // free-text mention path), so `tagged` stays 0/absent and only
+              // `mention` is computed.
+              ...(meshDescendantUis.length > 0
+                ? {
+                    tagged: {
+                      filter: { terms: { meshDescriptorUi: meshDescendantUis } },
+                      aggs: {
+                        d: { cardinality: { field: "pmid" } },
+                        ...(representativePub ? { top: repPubTopHits } : {}),
+                      },
+                    },
+                  }
+                : {}),
               mention: {
                 filter: {
                   multi_match: {
@@ -2069,8 +2129,8 @@ export async function searchPeople(opts: {
       });
       if (representativePub) {
         reasonReps.set(b.key, {
-          tagged: parseReasonTopHit(b.tagged),
-          mention: parseReasonTopHit(b.mention),
+          tagged: parseReasonTopHits(b.tagged),
+          mention: parseReasonTopHits(b.mention),
         });
       }
     }
@@ -2148,15 +2208,20 @@ export async function searchPeople(opts: {
     cwid: string,
     pubCount: number,
     hasProvenance: boolean,
-  ): PeopleHit["matchReason"] =>
-    composeMatchReason({
+  ): PeopleHit["matchReason"] => {
+    // `reasonReps` now stores up to 3 reps per branch (for the disclosure); the
+    // legacy reason carries a SINGLE pub, so adapt by taking the first of each so
+    // the existing `composeMatchReason` output is byte-identical.
+    const reps = reasonReps.get(cwid);
+    return composeMatchReason({
       counts: reasonCounts.get(cwid),
-      rep: reasonReps.get(cwid),
+      rep: reps ? { tagged: reps.tagged?.[0], mention: reps.mention?.[0] } : undefined,
       pubCount,
       hasProvenance,
       provenanceParent,
       contentQuery,
     });
+  };
 
   // #824 follow-up — pick the per-hit reason with the match-aware PRIORITY:
   // method > topic > (legacy concept/pub reason). Off ⇒ `matchAwareContext` is
@@ -2213,15 +2278,20 @@ export async function searchPeople(opts: {
     const counts = reasonCounts.get(cwid);
     const reps = reasonReps.get(cwid);
     const pub: NonNullable<Parameters<typeof selectEvidence>[0]["pub"]> = {};
-    if (counts && counts.tagged > 0)
+    // `tagged` is only meaningful with a resolved descriptor NAME to show — guard
+    // against an empty `provenanceParent` rendering "publications tagged " with a
+    // trailing blank (the content-shape relaxation dropped the old name gate).
+    if (counts && counts.tagged > 0 && provenanceParent.length > 0)
       pub.tagged = {
         text: `${Math.min(counts.tagged, pubCount)} of ${pubCount} publications tagged ${provenanceParent}`,
-        ...(reps?.tagged ? { pub: reps.tagged } : {}),
+        count: Math.min(counts.tagged, pubCount),
+        ...(reps?.tagged && reps.tagged.length > 0 ? { pubs: reps.tagged } : {}),
       };
     if (counts && counts.mention > 0)
       pub.mention = {
         text: `${Math.min(counts.mention, pubCount)} of ${pubCount} publications mention “${contentQuery}”`,
-        ...(reps?.mention ? { pub: reps.mention } : {}),
+        count: Math.min(counts.mention, pubCount),
+        ...(reps?.mention && reps.mention.length > 0 ? { pubs: reps.mention } : {}),
       };
     if (hasProvenance) pub.concept = { text: `via related concept ${provenanceParent}` };
 
@@ -2241,6 +2311,9 @@ export async function searchPeople(opts: {
       method: m ? { family: m.family, tools: refineExemplarTools(m.family, m.rawTools) } : undefined,
       topic,
       pub: Object.keys(pub).length > 0 ? pub : undefined,
+      // The content query drives the partial-bio-vs-pub.mention precedence split
+      // (a subset-only bio highlight loses to publication-mention evidence).
+      query: contentQuery,
       areas,
     });
   };

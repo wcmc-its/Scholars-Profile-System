@@ -1,11 +1,13 @@
 /**
- * #967 §7 (Variant 2) — PeopleResultCard lazily reveals the matched method
- * FAMILY's representative paper on row hover/focus:
- *   - hovering a method-evidence row fetches /api/scholar/[cwid]/method-exemplar
- *     ONCE and renders "Representative paper: <title> (year)";
- *   - a row with no qualifying paper renders nothing (omitted, not blank);
- *   - non-method evidence never fetches and never shows the line;
- *   - the reveal stays inside the single row <Link> (no nested interactive el).
+ * #967 §7 (Variant 2) + rep-papers disclosure — PeopleResultCard reveals the
+ * matched method FAMILY's (or topic's) representative papers via a CLICKABLE
+ * chevron disclosure (replaces the old hover reveal):
+ *   - the row is a stretched-link card: the NAME is the only <Link>, the chevron
+ *     is a real <button> sitting above the stretched overlay;
+ *   - clicking the chevron fetches /api/scholar/[cwid]/method-exemplar ONCE and
+ *     renders the up-to-3 representative papers ({ pubs, total } shape);
+ *   - a row whose fetch resolves with 0 papers drops the chevron (no dead control);
+ *   - non-method/non-topic evidence never fetches a method-exemplar.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -42,11 +44,15 @@ const props = {
   filters: { deptDiv: [], personType: [], activity: [] },
 };
 
-function mockFetch(pub: unknown) {
-  const fn = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ pub }) });
+/** Stub the lazy exemplar fetch with a `{ pubs, total }` payload. */
+function mockFetch(payload: { pubs: unknown[]; total: number }) {
+  const fn = vi.fn().mockResolvedValue({ ok: true, json: async () => payload });
   vi.stubGlobal("fetch", fn);
   return fn;
 }
+
+/** The chevron disclosure button (its aria-label mentions representative papers). */
+const chevron = () => screen.getByRole("button", { name: /representative papers/i });
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -57,40 +63,62 @@ const methodHit = makeHit({
   evidence: { kind: "method", family: "Confocal microscopy", tools: ["CCM"] },
 });
 
-describe("PeopleResultCard — method-exemplar hover", () => {
-  it("fetches once on hover and reveals the representative paper", async () => {
-    const fetchFn = mockFetch({ pmid: "123", title: "A confocal study of the cornea", year: 2021 });
+describe("PeopleResultCard — stretched-link structure", () => {
+  it("the NAME is the only <Link>, and the disclosure is a real <button>", () => {
+    mockFetch({ pubs: [], total: 0 });
     const { container } = render(<PeopleResultCard {...props} hit={methodHit} />);
-    const row = container.querySelector("a")!;
+    const links = container.querySelectorAll("a");
+    // exactly one link — the stretched name link to the profile.
+    expect(links).toHaveLength(1);
+    expect(links[0].textContent).toContain("Jane Doe");
+    expect(links[0].className).toContain("after:absolute");
+    // the disclosure chevron is a button (keyboard-operable), not a link.
+    expect(chevron()).toBeTruthy();
+  });
+});
 
-    fireEvent.mouseEnter(row);
-    fireEvent.mouseEnter(row); // second hover must NOT re-fetch
+describe("PeopleResultCard — method/topic rep-papers disclosure (click)", () => {
+  it("fetches once on the FIRST expand click and reveals the representative papers", async () => {
+    const fetchFn = mockFetch({
+      pubs: [
+        { pmid: "123", title: "A confocal study of the cornea", year: 2021 },
+        { pmid: "124", title: "Another confocal study", year: 2020 },
+      ],
+      total: 7,
+    });
+    render(<PeopleResultCard {...props} hit={methodHit} />);
 
-    await waitFor(() =>
-      expect(screen.getByText(/A confocal study of the cornea/)).toBeTruthy(),
-    );
-    expect(screen.getByText(/Representative paper:/)).toBeTruthy();
+    fireEvent.click(chevron()); // open
+    await waitFor(() => expect(screen.getByText(/A confocal study of the cornea/)).toBeTruthy());
     expect(screen.getByText(/\(2021\)/)).toBeTruthy();
+    // total (7) > shown (2) ⇒ "+5 more in profile".
+    expect(screen.getByText(/\+5 more in profile/)).toBeTruthy();
 
+    // collapse + re-open must NOT re-fetch (fetch is once, cached in a ref).
+    fireEvent.click(chevron()); // close
+    fireEvent.click(chevron()); // re-open
     expect(fetchFn).toHaveBeenCalledTimes(1);
     expect(fetchFn.mock.calls[0][0]).toBe(
       "/api/scholar/abc1234/method-exemplar?family=Confocal%20microscopy",
     );
   });
 
-  it("renders nothing when the family has no qualifying paper", async () => {
-    const fetchFn = mockFetch(null);
-    const { container } = render(<PeopleResultCard {...props} hit={methodHit} />);
-    fireEvent.mouseEnter(container.querySelector("a")!);
+  it("drops the chevron (no dead control) when the fetch resolves with 0 papers", async () => {
+    mockFetch({ pubs: [], total: 0 });
+    render(<PeopleResultCard {...props} hit={methodHit} />);
 
-    await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.queryByText(/finding a representative paper/)).toBeNull());
-    expect(screen.queryByText(/Representative paper:/)).toBeNull();
+    fireEvent.click(chevron());
+    // once the fetch resolves empty, the chevron disappears.
+    await waitFor(() => expect(screen.queryByRole("button", { name: /representative papers/i })).toBeNull());
+    expect(screen.queryByText(/Rep\. papers/i)).toBeNull();
   });
 
   it("fetches with ?topic= and reveals for topic evidence", async () => {
-    const fetchFn = mockFetch({ pmid: "77", title: "A single-cell atlas of the cortex", year: 2023 });
-    const { container } = render(
+    const fetchFn = mockFetch({
+      pubs: [{ pmid: "77", title: "A single-cell atlas of the cortex", year: 2023 }],
+      total: 1,
+    });
+    render(
       <PeopleResultCard
         {...props}
         hit={makeHit({
@@ -98,39 +126,55 @@ describe("PeopleResultCard — method-exemplar hover", () => {
         })}
       />,
     );
-    fireEvent.mouseEnter(container.querySelector("a")!);
 
+    fireEvent.click(chevron());
     await waitFor(() => expect(screen.getByText(/A single-cell atlas of the cortex/)).toBeTruthy());
     expect(fetchFn.mock.calls[0][0]).toBe(
       "/api/scholar/abc1234/method-exemplar?topic=single_cell_spatial_biology",
     );
   });
+});
 
-  it("does not fetch or reveal for non-method/non-topic evidence", async () => {
-    const fetchFn = mockFetch({ pmid: "1", title: "x", year: 2020 });
-    const { container } = render(
+describe("PeopleResultCard — non-method/topic evidence never fetches a method-exemplar", () => {
+  it("publications evidence with inline pubs renders the stack from the hit, no fetch", async () => {
+    const fetchFn = mockFetch({ pubs: [{ pmid: "1", title: "x", year: 2020 }], total: 1 });
+    render(
       <PeopleResultCard
         {...props}
         hit={makeHit({
-          evidence: { kind: "publications", strength: "tagged", text: "5 of 9 publications tagged X" },
+          evidence: {
+            kind: "publications",
+            strength: "mention",
+            text: "2 of 100 publications mention “confocal”",
+            count: 2,
+            pubs: [
+              { pmid: "5", title: "Inline mention paper one", year: 2022 },
+              { pmid: "6", title: "Inline mention paper two", year: 2021 },
+            ],
+          },
         })}
       />,
     );
-    fireEvent.mouseEnter(container.querySelector("a")!);
 
-    // Give any stray microtask a chance, then assert no fetch happened.
-    await Promise.resolve();
+    fireEvent.click(chevron());
+    await waitFor(() => expect(screen.getByText(/Inline mention paper one/)).toBeTruthy());
+    expect(screen.getByText(/Inline mention paper two/)).toBeTruthy();
+    // inline pubs ⇒ NO method-exemplar fetch.
     expect(fetchFn).not.toHaveBeenCalled();
-    expect(screen.queryByText(/Representative paper:/)).toBeNull();
   });
 
-  it("keeps the reveal inside the single row Link (no nested interactive element)", async () => {
-    mockFetch({ pmid: "123", title: "A confocal study", year: 2021 });
-    const { container } = render(<PeopleResultCard {...props} hit={methodHit} />);
-    fireEvent.mouseEnter(container.querySelector("a")!);
-    await waitFor(() => expect(screen.getByText(/A confocal study/)).toBeTruthy());
-
-    expect(container.querySelectorAll("a")).toHaveLength(1);
-    expect(container.querySelectorAll("button")).toHaveLength(0);
+  it("a publications match with no pubs offers no chevron and never fetches", async () => {
+    const fetchFn = mockFetch({ pubs: [], total: 0 });
+    render(
+      <PeopleResultCard
+        {...props}
+        hit={makeHit({
+          evidence: { kind: "publications", strength: "tagged", text: "5 of 9 publications tagged X", count: 5 },
+        })}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /representative papers/i })).toBeNull();
+    await Promise.resolve();
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 });

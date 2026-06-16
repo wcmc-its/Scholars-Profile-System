@@ -293,11 +293,6 @@ function MethodChip({ match }: { match: TaxonomyMatch }) {
           href={match.href}
           className={`group inline-flex items-center gap-1.5 rounded-full border-[0.5px] border-[#ecdcc8] bg-[#fbf4ea] px-[11px] py-[5px] text-[13px] leading-none text-[#2b2f36] no-underline transition-colors hover:border-[#b5701f] hover:bg-[#f6ead8] hover:text-[#7a3f15] ${FOCUS_RING}`}
         >
-          <Wrench
-            aria-hidden
-            className="h-3 w-3 shrink-0 text-[#8a5a1e] group-hover:text-[#7a3f15]"
-            strokeWidth={2}
-          />
           {match.name}
           <span className="inline-flex items-center gap-[3px] text-[#7a7e85] group-hover:text-[#7a3f15]">
             <Users aria-hidden className="h-3 w-3 shrink-0" strokeWidth={2} />

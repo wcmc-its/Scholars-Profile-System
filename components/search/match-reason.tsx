@@ -1,6 +1,9 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { ChevronDown, FileText, Sparkles, Tag, Wrench } from "lucide-react";
 import { PubTitle } from "@/components/publication/pub-html";
+import { HighlightedSnippet } from "@/components/search/highlight-snippet";
+import type { EvidencePub } from "@/lib/api/result-evidence";
 
 /**
  * PLAN R4 — the kind of match a reason line explains, which picks the leading
@@ -16,21 +19,76 @@ const ICONS: Record<MatchReasonKind, typeof Sparkles> = {
 };
 
 /**
+ * Rep-papers disclosure — the real clickable chevron the reason rows show when a
+ * representative-papers panel can open. A `<button>` (not the decorative ▾) so
+ * it is keyboard-operable and announces its expanded state; `preventDefault` +
+ * `stopPropagation` so a click never triggers the stretched name-link navigation
+ * (the whole card is a stretched link). `relative z-10` lifts it above the
+ * card's `after:absolute inset-0` overlay.
+ */
+function DisclosureChevron({
+  expanded,
+  onToggle,
+  panelId,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+  panelId?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onToggle();
+      }}
+      aria-expanded={expanded}
+      // Only reference the panel while it exists — it is mounted (with id=panelId)
+      // by the card only when expanded, so a collapsed-state aria-controls would
+      // be a dangling reference.
+      aria-controls={expanded ? panelId : undefined}
+      aria-label={expanded ? "Hide representative papers" : "Show representative papers"}
+      className="relative z-10 ml-auto inline-flex shrink-0 items-center justify-center rounded p-0.5 text-[#9a958a] hover:text-[#4a4a4a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2c4f6e] focus-visible:ring-offset-1"
+    >
+      <ChevronDown
+        aria-hidden
+        strokeWidth={2}
+        className={`size-3.5 motion-safe:transition-transform motion-safe:duration-150 ${
+          expanded ? "rotate-180" : ""
+        }`}
+      />
+    </button>
+  );
+}
+
+/**
  * PLAN R4 — one quiet "why this match" reason line, shared by the Publications,
  * Scholars, and Funding rows. Muted, single line, small leading icon by kind.
  * Replaces the #688/#702/#707 "Why this match" / "Matched in publications" /
  * "Matched on" surfaces. Shown only when the match isn't self-evident from the
  * row's own visible content (e.g. a highlighted title), never identical on
  * every row — the caller decides whether and what to render.
+ *
+ * Rep-papers disclosure — when `canExpand`, the row trails a real chevron
+ * `<button>` opening the representative-papers panel `panelId`.
  */
 export function MatchReason({
   kind,
   children,
   className = "",
+  canExpand = false,
+  expanded = false,
+  onToggle,
+  panelId,
 }: {
   kind: MatchReasonKind;
   children: ReactNode;
   className?: string;
+  canExpand?: boolean;
+  expanded?: boolean;
+  onToggle?: () => void;
+  panelId?: string;
 }) {
   const Icon = ICONS[kind];
   return (
@@ -42,6 +100,9 @@ export function MatchReason({
           title) rather than wrapping. A no-op for the short count/concept
           reasons, which already fit. */}
       <span className="truncate">{children}</span>
+      {canExpand && onToggle ? (
+        <DisclosureChevron expanded={expanded} onToggle={onToggle} panelId={panelId} />
+      ) : null}
     </div>
   );
 }
@@ -51,25 +112,29 @@ export function MatchReason({
  * (`docs/mockups/search-snippet/match-aware-snippet.html`). A small uppercase
  * badge (rust for method, blue for topic) with a leading lucide icon, then the
  * matched label in bold; the method variant trails up to 3 exemplar tool names,
- * muted and " · "-separated. Lives inside the result-card `<Link>`, so it is a
- * row of `<span>`s only (no nested interactive element); the icon is decorative
- * (`aria-hidden`). Colors are inlined from the mockup CSS variables.
+ * muted and " · "-separated. Lives inside the result card's stretched-link
+ * wrapper, so it is a row of `<span>`s plus (when `canExpand`) a real chevron
+ * `<button>`; the icon is decorative (`aria-hidden`). Colors are inlined from
+ * the mockup CSS variables.
  */
 export function MatchAwareReason({
   kind,
   label,
   tools = [],
-  expandable = false,
+  canExpand = false,
+  expanded = false,
+  onToggle,
+  panelId,
 }: {
   kind: "method" | "topic";
   label: string;
   tools?: string[];
-  /** #967 §7 — when true (method or topic), trail a muted ▾ cueing that hovering
-   *  / focusing the row reveals the representative paper (the `MethodExemplarLine`
-   *  below). Purely decorative; the reveal is driven by the
-   *  card's `group` hover/focus, not by clicking this glyph (it can't be an
-   *  interactive element — the whole card is one `<Link>`). */
-  expandable?: boolean;
+  /** Rep-papers disclosure — when true, trail a clickable chevron `<button>`
+   *  that opens the representative-papers panel `panelId`. */
+  canExpand?: boolean;
+  expanded?: boolean;
+  onToggle?: () => void;
+  panelId?: string;
 }) {
   // From the mockup: method bg #fbf4ea / border #ecdcc8 / ink #8a4a1f;
   // topic bg #eef2f6 / border #d8e2ec / ink #2c4f6e.
@@ -107,64 +172,84 @@ export function MatchAwareReason({
           </span>
         ) : null}
       </span>
-      {expandable ? (
-        // Rotates on row hover/focus (motion-safe only) to read as a disclosure;
-        // shrink-0 so it stays visible while the label/tools span truncates.
-        <ChevronDown
-          aria-hidden
-          strokeWidth={2}
-          className="size-3 shrink-0 text-[#c9c4ba] motion-safe:transition-transform motion-safe:duration-150 group-hover:rotate-180 group-focus:rotate-180"
-        />
+      {canExpand && onToggle ? (
+        <DisclosureChevron expanded={expanded} onToggle={onToggle} panelId={panelId} />
       ) : null}
     </div>
   );
 }
 
-/** Fetch lifecycle of the lazily-loaded method exemplar (see `MethodExemplarLine`). */
+/** Fetch lifecycle of the lazily-loaded representative papers (method/topic). */
 export type ExemplarFetchStatus = "idle" | "loading" | "done";
 
 /**
- * #967 §7 (Variant 2) — the row's representative-paper reveal for a method
- * match. Hidden at rest; shown when the result row (the `group` `<Link>` in
- * `people-result-card`) is hovered or keyboard-focused. The pub is fetched lazily
- * by the card on that same hover/focus (`/api/scholar/[cwid]/method-exemplar`), so
- * the cacheable results derive is untouched.
- *
- * No transition on the reveal itself — the handoff wants "show, don't animate",
- * which is also the reduced-motion-safe default. A row with no qualifying paper
- * renders nothing (handoff: "omitted, not blank").
+ * Rep-papers disclosure — the mockup's `REP. PAPERS` block: a small uppercase
+ * `REP. PAPERS` label above a column of up to 3 italic paper titles (rendered
+ * through `PubTitle`, never raw — #946) with a muted ` (year)`, and a
+ * `+{total - papers.length} more in profile →` link to `profileHref` when there
+ * are more than shown. The link is `relative z-10` and stops propagation so it
+ * never triggers the card's stretched name-link navigation. While `status` is
+ * `"loading"` (a method/topic lazy fetch in flight) it shows a muted
+ * "finding representative papers…" placeholder (aria-hidden so a screen reader
+ * tabbing the row never reads it). Renders nothing when there are no papers and
+ * the fetch has resolved.
  */
-export function MethodExemplarLine({
-  status,
-  pub,
+export function RepresentativePapers({
+  papers,
+  total,
+  profileHref,
+  status = "done",
+  panelId,
 }: {
-  status: ExemplarFetchStatus;
-  pub: { title: string; year?: number | null } | null;
+  papers: EvidencePub[];
+  total: number;
+  profileHref: string;
+  status?: ExemplarFetchStatus;
+  panelId?: string;
 }) {
-  // Once resolved with nothing to show, drop the line entirely.
-  if (status === "done" && !pub) return null;
-  return (
-    <div className="mt-1 hidden pl-[1px] text-[12px] leading-snug group-hover:block group-focus:block">
-      {pub ? (
-        <span className="line-clamp-2 text-muted-foreground">
-          <span aria-hidden className="text-[#c9c4ba]">
-            ↳{" "}
-          </span>
-          Representative paper: &ldquo;
-          {/* #946 — PubMed titles can carry markup (<i>, <sub>, …); render through
-              the sanctioned PubTitle, never raw. */}
-          <PubTitle as="span" value={pub.title} className="italic text-[#4a4a4a]" />
-          &rdquo;
-          {pub.year ? <span className="text-[#777]"> ({pub.year})</span> : null}
-        </span>
-      ) : (
-        // Transient visual placeholder only — aria-hidden so a screen reader
-        // tabbing onto the row never reads "finding a representative paper…" as
-        // part of the focused link's accessible name.
+  if (status === "loading" && papers.length === 0) {
+    return (
+      <div id={panelId} className="mt-1.5 pl-[1px] text-[12px] leading-snug">
         <span aria-hidden className="text-[#9a958a]">
-          ↳ finding a representative paper&hellip;
+          finding representative papers&hellip;
         </span>
-      )}
+      </div>
+    );
+  }
+  if (papers.length === 0) return null;
+
+  const more = total - papers.length;
+  return (
+    <div id={panelId} className="mt-1.5 pl-[1px]">
+      <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
+        Rep. papers
+      </div>
+      <ul className="mt-1 space-y-0.5 text-[12px] leading-snug">
+        {papers.map((p) => (
+          <li key={p.pmid} className="text-muted-foreground">
+            {/* #946 — PubMed titles can carry markup (<i>, <sub>, …); render
+                through the sanctioned PubTitle (with a <mark>-aware variant when
+                the literal query appeared in the title), never raw. */}
+            {p.titleHtml ? (
+              <span className="italic text-[#4a4a4a]">
+                <HighlightedSnippet html={p.titleHtml} />
+              </span>
+            ) : (
+              <PubTitle as="span" value={p.title} className="italic text-[#4a4a4a]" />
+            )}
+            {p.year ? <span className="text-[#777]"> ({p.year})</span> : null}
+          </li>
+        ))}
+      </ul>
+      {more > 0 ? (
+        <Link
+          href={profileHref}
+          onClick={(e) => e.stopPropagation()}
+          className="relative z-10 mt-1 inline-block text-[12px] font-medium text-[#1f51a8] no-underline hover:underline"
+        >
+          +{more} more in profile →
+        </Link>
+      ) : null}
     </div>
   );
 }

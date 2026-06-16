@@ -27,7 +27,20 @@ import {
   loadPublicationSuppressions,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
-import { rankMethodExemplar, type ExemplarCandidate } from "@/lib/api/method-exemplar-rank";
+import {
+  filterRenderableExemplars,
+  rankMethodExemplarList,
+  type ExemplarCandidate,
+} from "@/lib/api/method-exemplar-rank";
+
+/** Up to N representative papers + the renderable-candidate total ("+N more"). */
+export type ExemplarResult = { pubs: EvidencePub[]; total: number };
+
+/** The null-equivalent empty result (no candidate / nothing renderable). */
+const EMPTY_EXEMPLAR: ExemplarResult = { pubs: [], total: 0 };
+
+/** Top-N representative papers shown in the disclosure stack. */
+const EXEMPLAR_LIMIT = 3;
 
 /** Pure OVERFLOW guard on the candidate set — NOT a ranked top-N. Set well above
  *  any real family / per-topic pub count so it only ever caps a pathological row. */
@@ -58,15 +71,15 @@ function toPmidArray(json: unknown): string[] {
 async function rankExemplarForPmids(
   cwid: string,
   pmids: string[],
-): Promise<EvidencePub | null> {
-  if (pmids.length === 0) return null;
+): Promise<ExemplarResult> {
+  if (pmids.length === 0) return EMPTY_EXEMPLAR;
 
   const suppressions = await loadPublicationSuppressions(pmids, prisma);
   const dark = await resolveDarkPmids(pmids, suppressions, prisma);
   const safePmids = pmids.filter(
     (p) => !dark.has(p) && !isAuthorHidden(suppressions, p, cwid),
   );
-  if (safePmids.length === 0) return null;
+  if (safePmids.length === 0) return EMPTY_EXEMPLAR;
 
   // Metadata + this scholar's authorship position (the first/senior signal is NOT
   // attributable per-candidate in the search index — handoff §7 G3 — so read it
@@ -107,21 +120,27 @@ async function rankExemplarForPmids(
     isFirstOrSenior: ownership.has(p.pmid),
   }));
 
-  return rankMethodExemplar(candidates, new Date().getFullYear());
+  // `total` = the RENDERABLE candidate count (drops corrections / untitled stubs,
+  // matching what the profile would list), so "+N more" never over-promises;
+  // `pubs` = the top-N for the disclosure stack.
+  const renderable = filterRenderableExemplars(candidates);
+  const pubsRanked = rankMethodExemplarList(renderable, new Date().getFullYear(), EXEMPLAR_LIMIT);
+  return { pubs: pubsRanked, total: renderable.length };
 }
 
 /**
- * The representative paper for `(cwid, familyLabel)`, or null when the family is
+ * Up to {@link EXEMPLAR_LIMIT} representative papers for `(cwid, familyLabel)`
+ * plus the candidate total ("+N more"), or `{pubs:[],total:0}` when the family is
  * not publicly visible, has no candidate pmids, or nothing renderable survives.
  * `familyLabel` is the label the method badge shows (`scholar_family.familyLabel`).
  */
 export async function loadMethodExemplar(
   cwid: string,
   familyLabel: string,
-): Promise<EvidencePub | null> {
+): Promise<ExemplarResult> {
   const id = cwid.trim();
   const label = familyLabel.trim();
-  if (!id || !label) return null;
+  if (!id || !label) return EMPTY_EXEMPLAR;
 
   // (1a) SCHOLAR gate — the scholar predicate the search badge + profile use
   // (`deletedAt: null, status: "active"`). scholar_family rows SURVIVE a soft
@@ -145,7 +164,7 @@ export async function loadMethodExemplar(
   const visible = familyRows.filter((r) =>
     isFamilyPubliclyVisible(r.supercategory, r.familyLabel, gate),
   );
-  if (visible.length === 0) return null;
+  if (visible.length === 0) return EMPTY_EXEMPLAR;
 
   // (2) Candidate pmids — union across the matching public rows (a label can in
   // principle recur under two supercategories; both public here), bounded.
@@ -162,7 +181,8 @@ export async function loadMethodExemplar(
 }
 
 /**
- * The representative paper for `(cwid, parentTopicId)`, or null when the scholar
+ * Up to {@link EXEMPLAR_LIMIT} representative papers for `(cwid, parentTopicId)`
+ * plus the candidate total ("+N more"), or `{pubs:[],total:0}` when the scholar
  * is not publicly visible, has no pubs in the topic, or nothing renderable
  * survives. `parentTopicId` is the topic SLUG the topic badge carries (`Topic.id`
  * = `PublicationTopic.parentTopicId`). Topics carry no #800/#801 overlay (those
@@ -172,10 +192,10 @@ export async function loadMethodExemplar(
 export async function loadTopicExemplar(
   cwid: string,
   parentTopicId: string,
-): Promise<EvidencePub | null> {
+): Promise<ExemplarResult> {
   const id = cwid.trim();
   const topicId = parentTopicId.trim();
-  if (!id || !topicId) return null;
+  if (!id || !topicId) return EMPTY_EXEMPLAR;
 
   // Candidate pmids = the scholar's pubs in this parent topic (ReciterAI-
   // attributed; `publication_topic` has no confirm/reject flag), behind the same
