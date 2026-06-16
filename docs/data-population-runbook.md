@@ -355,6 +355,20 @@ npm run etl:mesh-coverage
 # (skip search:index here -- built in-VPC in §3)
 ```
 
+> **`etl:nih-profile` runs in-VPC — no produce-and-ship needed.** Unlike the
+> WCM-blocked sources above, it reads NIH RePORTER (public API) plus the
+> already-loaded `grant` table and writes `person_nih_profile`. Run it directly
+> as a one-off ECS `run-task` on `sps-etl-$ENV`, overriding the command with
+> `npm run etl:nih-profile -- --full`. Modes: `--full` walks FY 1985→present for
+> the grant-join + name-match passes; the default (incremental) covers FY −4→
+> present, **but Pass 3 (`pi_names`) is not FY-bounded**, so it still re-resolves
+> the subaward / Co-I PI cohort (e.g. multi-site MPIs) on every run. A scholar
+> gets the "View NIH portfolio on RePORTER" link only when a pass resolves a
+> RePORTER PI `nihProfileId`; NIH-grant holders who are only Co-I / Key Personnel
+> / subaward correctly get none. The weekly cadence (#658/#659) runs the
+> incremental form once networking is in place; a one-off `--full` closes the
+> long-inactive-PI tail that incremental can't reach.
+
 Spot-check the result before dumping (Prisma maps models to snake_case tables;
 `grant` is a reserved word, hence the backticks):
 ```bash
