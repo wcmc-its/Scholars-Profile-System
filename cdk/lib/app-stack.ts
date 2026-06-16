@@ -1109,6 +1109,13 @@ export class AppStack extends Stack {
         // never a 500). STAGING-FIRST: on for staging (people index reindexed
         // 2026-06-16), off for prod (prod go-live is a separate reindex + flip).
         SEARCH_PEOPLE_METHOD_FAMILY: env === "staging" ? "on" : "off",
+        // #824 follow-up -- match-aware People-results "why" line (method/topic/
+        // humanized-areas snippet). APP-ONLY, no reindex: derives from
+        // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-
+        // AwareSnippet reads === "on"; off => today's snippet. STAGING-FIRST: on
+        // for staging (pairs with SEARCH_PEOPLE_METHOD_FAMILY above so the method
+        // badge has families to surface), off for prod.
+        SEARCH_PEOPLE_MATCH_AWARE_SNIPPET: env === "staging" ? "on" : "off",
         // #295 / #723 -- funding-tab concept clause + result-SET gate field.
         // Enabled in both envs now that the funding index carries the descriptor
         // rollup. `fundedPubMeshUi` is the higher-fidelity gate (funded-pub MeSH)
