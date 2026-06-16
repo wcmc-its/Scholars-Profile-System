@@ -1819,9 +1819,18 @@ export async function searchPeople(opts: {
       // pub-evidence / detection-field widening fed the now-removed
       // `pubHighlight` / `matchedOnFields` card surfaces; the per-row reason line
       // is driven by the `reasonCounts` aggregation below, not by highlighting.)
+      //
+      // #824 follow-up — when the match-aware snippet is active (`matchAwareContext`
+      // set), the raw `areasOfInterest` highlight is REPLACED by the server-built
+      // humanized-areas fallback (`buildHumanizedAreas`, emitted per hit below).
+      // We must NOT request its highlight then: the flattened fragment is a raw
+      // `under_score` slug dump that the card renders BEFORE `humanizedAreas`
+      // (priority: method > topic > legacy > bio highlight > humanized areas), so
+      // leaving it on lets the ugly slug line win. `overview` (real bio sentence)
+      // stays highlighted — it's the desired snippet above humanized areas.
       fields: {
         preferredName: {},
-        areasOfInterest: {},
+        ...(matchAwareContext ? {} : { areasOfInterest: {} }),
         overview: {},
       },
       // Issue #692 — when demoting, restrict highlighting to the content query
@@ -1833,7 +1842,11 @@ export async function searchPeople(opts: {
             highlight_query: {
               multi_match: {
                 query: contentQuery,
-                fields: ["preferredName", "areasOfInterest", "overview"],
+                // Mirror the `fields` set above — drop areasOfInterest when the
+                // match-aware snippet replaces it with humanized areas (#824).
+                fields: matchAwareContext
+                  ? ["preferredName", "overview"]
+                  : ["preferredName", "areasOfInterest", "overview"],
                 type: "best_fields",
                 operator: "or",
               },
@@ -2140,9 +2153,12 @@ export async function searchPeople(opts: {
   return {
     hits: r.hits.hits.map((h) => {
       const hl = h.highlight;
-      // Only the three self-reported fields are highlighted (see the request
-      // body above), so the flattened fragments are exactly the self snippet the
-      // card falls back to when no `matchReason` was computed.
+      // The self-reported fields are highlighted (see the request body above):
+      // {preferredName, areasOfInterest, overview} normally, or {preferredName,
+      // overview} when the match-aware snippet is active (areasOfInterest is then
+      // surfaced as the humanized-areas fallback, never a raw slug highlight).
+      // The flattened fragments are the self snippet the card falls back to when
+      // no `matchReason` was computed.
       const highlight = hl ? Object.values(hl).flat() : undefined;
       // `prov` still feeds the per-row reason (`buildMatchReason`, concept
       // fallback); it is no longer surfaced as a hit field of its own.
