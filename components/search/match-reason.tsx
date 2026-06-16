@@ -146,7 +146,7 @@ export function MatchAwareReason({
   // (research-areas-row.tsx) and the /methods lens, so the concept reads with one
   // icon everywhere; topic keeps the Tag.
   const Icon = kind === "method" ? Wrench : Tag;
-  const badgeText = kind === "method" ? "Method" : "Topic";
+  const badgeText = kind === "method" ? "Method" : "Research area";
   return (
     // items-center (not baseline): the bordered pill and the bold label line up
     // on a shared center axis so the badge doesn't sit low next to the label.

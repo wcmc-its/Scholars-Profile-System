@@ -33,8 +33,8 @@ export function SelectedResearchCarousel({
         </Link>
       </div>
       <p className="text-muted-foreground mt-1 text-sm">
-        Eight subtopics with the strongest recent activity at WCM, one per
-        parent area, refreshed weekly ·{" "}
+        Eight subareas with the strongest recent activity at WCM, one per
+        research area, refreshed weekly ·{" "}
         <a
           href={`${METHODOLOGY_BASE}#${METHODOLOGY_ANCHORS.selectedResearch}`}
           className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"

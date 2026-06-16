@@ -16,8 +16,8 @@ import type { EntityKind } from "@/lib/api/search";
  */
 const KIND_LABEL: Record<EntityKind, string> = {
   person: "Scholar",
-  topic: "Topic",
-  subtopic: "Subtopic",
+  topic: "Research area",
+  subtopic: "Subarea",
   department: "Department",
   division: "Division",
   center: "Center",

@@ -775,12 +775,12 @@ export default function DocsPage() {
           already organize science.
         </p>
         <p>
-          Each publication is then placed on that map. ReciterAI classifies a paper from its title,
-          abstract (where available), MeSH descriptors, and NIH RePORTER terms, assigning one
-          research area and zero or more subareas and scoring how strongly the paper relates to each.
-          Because real research often spans several areas, a single paper can sit under more than one
-          research area. The areas shown on a scholar&apos;s profile reflect the balance of their
-          published work.
+          Each publication is then placed on that map. ReciterAI scores each paper against every
+          research area, using a plain-language synopsis of the paper together with its abstract, then
+          associates the paper with all the research areas it relates to (and, within each, zero or
+          more subareas), each carrying its own relevance score. Because real research often spans
+          several areas, a single paper is commonly associated with more than one. The areas shown on
+          a scholar&apos;s profile reflect the balance of their published work.
         </p>
         <Callout variant="warn" heading="An internal score you never see">
           <p>

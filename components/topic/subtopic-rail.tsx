@@ -47,14 +47,14 @@ export function SubtopicRail({
   );
 
   return (
-    <aside className="w-full" aria-label="Subtopics">
+    <aside className="w-full" aria-label="Subareas">
       <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        SUBTOPICS ({subtopics.length})
+        SUBAREAS ({subtopics.length})
       </div>
       <div className="relative mb-3">
         <Input
           type="text"
-          placeholder="Filter subtopics…"
+          placeholder="Filter subareas…"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           className="pr-8"
@@ -73,7 +73,7 @@ export function SubtopicRail({
 
       {visible.length === 0 ? (
         <div className="py-4 text-center text-sm italic text-muted-foreground">
-          No subtopics match &ldquo;{filter}&rdquo;
+          No subareas match &ldquo;{filter}&rdquo;
         </div>
       ) : (
         <ScrollArea className="h-full">

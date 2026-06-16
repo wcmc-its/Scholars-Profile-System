@@ -48,7 +48,7 @@ describe("SubtopicRail", () => {
 
   it("filter input filters items client-side — non-matching items not rendered", () => {
     render(<SubtopicRail subtopics={subtopics} activeSubtopic={null} onSelect={() => {}} />);
-    const input = screen.getByPlaceholderText("Filter subtopics…");
+    const input = screen.getByPlaceholderText("Filter subareas…");
     fireEvent.change(input, { target: { value: "Cardiac" } });
     expect(screen.getByText("Cardiac Surgery")).toBeTruthy();
     expect(screen.queryByText("Oncology")).toBeNull();
@@ -56,7 +56,7 @@ describe("SubtopicRail", () => {
 
   it("filter clear X button has aria-label='Clear filter'", () => {
     render(<SubtopicRail subtopics={subtopics} activeSubtopic={null} onSelect={() => {}} />);
-    const input = screen.getByPlaceholderText("Filter subtopics…");
+    const input = screen.getByPlaceholderText("Filter subareas…");
     fireEvent.change(input, { target: { value: "x" } });
     const clearBtn = screen.getByLabelText("Clear filter");
     expect(clearBtn).toBeTruthy();
@@ -99,7 +99,7 @@ describe("SubtopicRail", () => {
     // The test asserts the filter still works after the rail's internal filter callback rename
     // from s.label to s.displayName.
     render(<SubtopicRail subtopics={subtopics} activeSubtopic={null} onSelect={() => {}} />);
-    const input = screen.getByPlaceholderText("Filter subtopics…");
+    const input = screen.getByPlaceholderText("Filter subareas…");
     fireEvent.change(input, { target: { value: "cardiac" } });
     expect(screen.getByText("Cardiac Surgery")).toBeTruthy();
     expect(screen.queryByText("Oncology")).toBeFalsy();

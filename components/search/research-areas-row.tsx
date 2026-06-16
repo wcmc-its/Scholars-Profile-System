@@ -256,7 +256,7 @@ function AreaPreview({ area }: { area: TaxonomyMatch }) {
       {area.description ? (
         <p className="mt-1 line-clamp-4 text-[12.5px] text-muted-foreground">{area.description}</p>
       ) : null}
-      {/* RA-11 — publications · subtopics; scholar count is on the chip. */}
+      {/* RA-11 — publications · subareas; scholar count is on the chip. */}
       <div className="mt-2 text-[12px] text-muted-foreground">
         {area.publicationCount.toLocaleString()}{" "}
         {area.publicationCount === 1 ? "publication" : "publications"}
@@ -264,7 +264,7 @@ function AreaPreview({ area }: { area: TaxonomyMatch }) {
           <>
             {" · "}
             {area.subtopicCount.toLocaleString()}{" "}
-            {area.subtopicCount === 1 ? "subtopic" : "subtopics"}
+            {area.subtopicCount === 1 ? "subarea" : "subareas"}
           </>
         ) : null}
       </div>

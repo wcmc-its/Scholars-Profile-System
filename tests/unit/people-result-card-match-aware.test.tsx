@@ -86,7 +86,7 @@ describe("PeopleResultCard — #824 match-aware snippet", () => {
         })}
       />,
     );
-    expect(screen.getByText("Topic")).toBeTruthy();
+    expect(screen.getByText("Research area")).toBeTruthy();
     expect(screen.getByText("Single-cell & spatial biology").tagName).toBe("STRONG");
   });
 
@@ -140,9 +140,9 @@ describe("PeopleResultCard — #824 match-aware snippet", () => {
       />,
     );
     expect(screen.getByText(/14 of 100 publications tagged HIV/)).toBeTruthy();
-    // No method/topic badge for the legacy variant.
+    // No method/research-area badge for the legacy variant.
     expect(screen.queryByText("Method")).toBeNull();
-    expect(screen.queryByText("Topic")).toBeNull();
+    expect(screen.queryByText("Research area")).toBeNull();
   });
 
   it("badges are spans, not nested interactive elements, inside the row Link", () => {

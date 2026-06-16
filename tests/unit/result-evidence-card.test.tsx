@@ -20,9 +20,9 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(screen.getByText("10x")).toBeTruthy();
   });
 
-  it("topic ⇒ Topic badge + bold label", () => {
+  it("topic ⇒ Research area badge + bold label", () => {
     renderEv({ kind: "topic", label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" });
-    expect(screen.getByText("Topic")).toBeTruthy();
+    expect(screen.getByText("Research area")).toBeTruthy();
     expect(screen.getByText("Single-cell & spatial biology").tagName).toBe("STRONG");
   });
 
