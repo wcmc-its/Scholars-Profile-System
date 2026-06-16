@@ -3,7 +3,7 @@
  *
  * Four projection blocks land ReCiterAI ground truth into MySQL:
  *
- *   1. TAXONOMY#  → topic                  (67 rows; parent topic catalog)
+ *   1. TAXONOMY#  → topic                  (68 rows; parent topic catalog)
  *   2. TOPIC#     → publication_topic      (~78,103 rows; per-pub × scholar × parent_topic triples)
  *   3. FACULTY#   → topic_assignment       (Q6 minimal projection — preserved unchanged)
  *   4. IMPACT#    → publication             (issue #316; global per-pmid impact score + GPT justification)
@@ -172,7 +172,7 @@ async function main() {
       console.log(
         `Upserting ${topics.length} topic rows from ${tax.PK} (taxonomy_version=${taxonomyVersion})...`,
       );
-      // Sequential upsert — 67 rows is trivial and guarantees deterministic ordering
+      // Sequential upsert — 68 rows is trivial and guarantees deterministic ordering
       // for FK targets used by the TOPIC# block below.
       for (const t of topics) {
         if (!t || typeof t.id !== "string" || typeof t.label !== "string") continue;
@@ -198,9 +198,9 @@ async function main() {
     console.log(`Topic upserts complete: ${topicRowsUpserted} rows.`);
 
     const topicCount = await db.write.topic.count();
-    console.log(`topic table count: ${topicCount} (expected 67 for taxonomy_v2)`);
-    if (topicCount !== 67) {
-      console.warn(`WARN: topic count ${topicCount} != 67 — investigate TAXONOMY# probe output.`);
+    console.log(`topic table count: ${topicCount} (expected 68 for taxonomy_v2)`);
+    if (topicCount !== 68) {
+      console.warn(`WARN: topic count ${topicCount} != 68 — investigate TAXONOMY# probe output.`);
     }
 
     // ===================================================================

@@ -6,7 +6,7 @@
  * Schema shape: candidate (e) per 02-SCHEMA-DECISION.md. The mocks use the
  * `publicationTopic` Prisma model (composite PK on pmid+cwid+parentTopicId,
  * embedded subtopic JSON, no first-class subtopic table). The `topic` table
- * contains 67 rows — ALL parents — with no `parentId` column.
+ * contains 68 rows — ALL parents — with no `parentId` column.
  */
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
@@ -691,23 +691,23 @@ describe("getSpotlights (Phase 9 SPOTLIGHT-03)", () => {
 });
 
 describe("getBrowseAllResearchAreas (HOME-03)", () => {
-  it("returns 67 parent topic rows from Topic table (under (e), every Topic row is a parent)", async () => {
+  it("returns 68 parent topic rows from Topic table (under (e), every Topic row is a parent)", async () => {
     mockTopicFindMany.mockResolvedValue(
-      Array.from({ length: 67 }, (_, i) => ({
+      Array.from({ length: 68 }, (_, i) => ({
         id: `topic_${i}`,
         label: `Topic ${i}`,
         description: null,
       })),
     );
     mockQueryRaw.mockResolvedValue(
-      Array.from({ length: 67 }, (_, i) => ({
+      Array.from({ length: 68 }, (_, i) => ({
         parent_topic_id: `topic_${i}`,
         scholar_count: 100 + i,
       })),
     );
     const result = await getBrowseAllResearchAreas();
     expect(result).not.toBeNull();
-    expect(result!.length).toBe(67);
+    expect(result!.length).toBe(68);
   });
 
   it("never returns null even with 0 topics (D-12 — Browse always renders)", async () => {

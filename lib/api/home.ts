@@ -13,7 +13,7 @@
  * boundary; see threat T-02-07-01).
  *
  * Schema shape: candidate (e) per 02-SCHEMA-DECISION.md.
- *   - `topic` table contains 67 rows — ALL parents (no parentId column).
+ *   - `topic` table contains 68 rows — ALL parents (no parentId column).
  *   - `publication_topic` holds (pmid, cwid, parent_topic_id) triples with
  *     subtopic data embedded (`primary_subtopic_id`, `subtopic_ids`).
  *   - Subtopics ARE first-class entities (Phase 8 / HIERARCHY-05): the
@@ -767,8 +767,8 @@ void SPOTLIGHT_TARGET; // producer ceiling (max cards per publish); documented, 
 // ---------------------------------------------------------------------------
 
 /**
- * All 67 parents with active-scholar counts (D-03). Never hidden — Browse
- * grid always renders all 67 parents. If <67 rows exist, that's a data-layer
+ * All 68 parents with active-scholar counts (D-03). Never hidden — Browse
+ * grid always renders all 68 parents. If <68 rows exist, that's a data-layer
  * bug, not a sparse-state condition (D-12). Returns [] in that case (UI
  * renders the "Research areas temporarily unavailable" error state).
  *
