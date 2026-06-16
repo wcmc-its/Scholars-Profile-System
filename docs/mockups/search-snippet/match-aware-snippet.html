@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Scholars search — match-aware snippet mockup (#824 follow-up)</title>
+<style>
+  :root{
+    --wcm-red:#b31b1b;
+    --ink:#1a1a1a; --ink2:#4a4a4a; --muted:#6b6b6b; --rule:#e3e2dd;
+    --bg:#ffffff; --row-hover:#fafaf8;
+    --role-bg:#f0eeea; --role-ink:#5f594d;
+    /* method accent (matches the existing "Methods and Tools" chip) */
+    --method-bg:#fbf4ea; --method-bd:#ecdcc8; --method-ink:#8a4a1f;
+    /* topic accent (existing research-areas treatment) */
+    --topic-bg:#eef2f6; --topic-bd:#d8e2ec; --topic-ink:#2c4f6e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .serif{font-family:Georgia,"Times New Roman",serif;}
+
+  /* top red bar */
+  header.bar{background:var(--wcm-red);color:#fff;display:flex;align-items:center;gap:18px;
+    padding:10px 26px;}
+  .brand{font-family:Georgia,serif;font-size:17px;font-weight:600;white-space:nowrap;}
+  .brand .beta{font-size:9px;background:#ffffff22;border:1px solid #ffffff55;border-radius:3px;
+    padding:1px 4px;margin-left:6px;vertical-align:2px;letter-spacing:.06em;}
+  .brand .sub{display:block;font-family:-apple-system,sans-serif;font-size:8.5px;letter-spacing:.14em;
+    font-weight:400;opacity:.85;margin-top:1px;}
+  .searchbox{flex:1;max-width:560px;background:#fff;border-radius:6px;padding:8px 12px;color:#333;
+    font-size:13px;display:flex;align-items:center;gap:8px;}
+  .searchbox svg{flex:0 0 auto;opacity:.5}
+  .navlinks{margin-left:auto;display:flex;gap:18px;font-size:13px;}
+  .navlinks span{opacity:.92}
+
+  .wrap{max-width:980px;margin:0 auto;padding:26px 26px 60px;}
+  h1.results{font-family:Georgia,serif;font-weight:600;font-size:25px;margin:6px 0 12px;}
+  h1.results em{font-style:italic;}
+
+  .methodschip{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);
+    margin-bottom:16px;}
+  .methodschip .lbl{display:inline-flex;align-items:center;gap:5px;}
+  .chip{display:inline-flex;align-items:center;gap:7px;background:var(--method-bg);
+    border:1px solid var(--method-bd);color:var(--method-ink);border-radius:14px;padding:4px 10px;
+    font-size:12px;font-weight:500;}
+  .chip .x{opacity:.6}
+  .chip .ct{background:#ffffff8c;border-radius:9px;padding:0 6px;font-size:11px;}
+
+  .tabs{display:flex;gap:22px;border-bottom:1px solid var(--rule);margin-bottom:8px;}
+  .tabs a{padding:8px 2px;font-size:13.5px;color:var(--ink2);text-decoration:none;
+    border-bottom:2px solid transparent;display:flex;align-items:center;gap:7px;}
+  .tabs a.active{color:var(--ink);font-weight:600;border-bottom-color:var(--wcm-red);}
+  .tabs .pill{background:#eef0ee;border-radius:9px;font-size:11px;padding:0 6px;color:#555;font-weight:600;}
+
+  .toolbar{display:flex;align-items:center;justify-content:space-between;margin:14px 0 4px;}
+  .count{font-size:12.5px;color:var(--muted);}
+  .toggle{display:flex;align-items:center;gap:0;border:1px solid var(--rule);border-radius:7px;overflow:hidden;}
+  .toggle button{border:0;background:#fff;padding:6px 12px;font-size:12px;cursor:pointer;color:var(--ink2);}
+  .toggle button.on{background:var(--ink);color:#fff;font-weight:600;}
+
+  /* result row */
+  .row{display:grid;grid-template-columns:56px 1fr auto;gap:16px;padding:18px 6px;
+    border-bottom:1px solid var(--rule);}
+  .row:hover{background:var(--row-hover);}
+  .av{width:56px;height:56px;border-radius:50%;background:#dfe4e1;display:flex;align-items:center;
+    justify-content:center;color:#6f7b73;font-size:15px;font-weight:600;overflow:hidden;}
+  .av img{width:100%;height:100%;object-fit:cover;}
+  .name{font-size:16px;font-weight:600;color:var(--ink);display:flex;align-items:baseline;flex-wrap:wrap;}
+  .name .nm:hover{color:#2c4f6e}
+  .roletag{margin-left:9px;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;
+    background:var(--role-bg);color:var(--role-ink);border-radius:3px;padding:2px 6px;font-weight:500;}
+  .title{font-size:13px;color:var(--ink2);margin-top:2px;}
+  .dept{font-size:12px;color:var(--muted);margin-top:2px;}
+  .stats{text-align:right;white-space:nowrap;color:var(--muted);font-size:12px;}
+  .stats b{display:block;font-size:16px;color:var(--ink);font-variant-numeric:tabular-nums;}
+  .stats .unit{font-weight:400;font-size:12px;color:var(--muted);}
+
+  /* ---- snippet treatments ---- */
+  .snip{margin-top:9px;font-size:13px;line-height:1.45;}
+
+  /* TODAY: raw slug dump */
+  .snip.today{color:#777;font-size:12.5px;}
+  .snip.today b{color:#1a1a1a;font-weight:700;} /* mid-word bolding, intentionally ugly */
+
+  /* PROPOSED: match-aware "why" line */
+  .why{display:inline-flex;align-items:baseline;gap:8px;max-width:100%;}
+  .badge{flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;border-radius:5px;
+    padding:2px 8px;font-size:10.5px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;
+    transform:translateY(-1px);}
+  .badge.method{background:var(--method-bg);border:1px solid var(--method-bd);color:var(--method-ink);}
+  .badge.topic{background:var(--topic-bg);border:1px solid var(--topic-bd);color:var(--topic-ink);}
+  .why .lead{color:var(--ink);font-weight:600;}
+  .why .tools{color:var(--muted);font-weight:400;}
+  .why .tools .sep{color:#c9c4ba;padding:0 5px;}
+  .snip.bio{color:var(--ink2);}
+  .snip.bio b{color:#111;font-weight:600;}
+  .snip .areas{color:var(--ink2);}
+  .snip .areas b{color:#111;font-weight:600;}
+
+  .legend{margin-top:26px;padding:16px 18px;background:#faf9f6;border:1px solid var(--rule);
+    border-radius:8px;font-size:12.5px;color:var(--ink2);line-height:1.55;}
+  .legend h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);}
+  .legend code{background:#eee;border-radius:3px;padding:1px 4px;font-size:11.5px;}
+  .legend .k{display:inline-flex;gap:6px;align-items:center;margin-right:14px;}
+  footer{max-width:980px;margin:0 auto;padding:0 26px 50px;color:#9a958a;font-size:11px;}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="brand">Scholars <span class="beta">BETA</span><span class="sub">WEILL CORNELL MEDICINE</span></div>
+  <div class="searchbox">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    single-cell RNA sequencing
+  </div>
+  <div class="navlinks"><span>Browse</span><span>About</span><span>Sign in</span></div>
+</header>
+
+<div class="wrap">
+  <h1 class="results serif">Results for <em>&ldquo;single-cell RNA sequencing&rdquo;</em></h1>
+
+  <div class="methodschip">
+    <span class="lbl">⚲ Methods and Tools</span>
+    <span class="chip">Single-cell RNA sequencing <span class="ct">62</span> <span class="x">✕</span></span>
+  </div>
+
+  <div class="tabs">
+    <a class="active">Scholars <span class="pill">609</span></a>
+    <a>Publications <span class="pill">2,413</span></a>
+    <a>Funding <span class="pill">1,381</span></a>
+  </div>
+
+  <div class="toolbar">
+    <span class="count">Showing 1&ndash;5 of 609 scholars</span>
+    <div class="toggle">
+      <button id="bToday" onclick="setMode('today')">Today</button>
+      <button id="bProp" class="on" onclick="setMode('prop')">Proposed</button>
+    </div>
+  </div>
+
+  <!-- ROW 1 — method match -->
+  <div class="row">
+    <div class="av">OE</div>
+    <div>
+      <div class="name"><span class="nm">Olivier Elemento, PhD</span><span class="roletag">Full-time faculty</span></div>
+      <div class="title">Professor of Systems and Computational Biomedicine</div>
+      <div class="dept">Department of Systems and Computational Biomedicine</div>
+      <div class="snip today" data-mode="today">pulmonary_critical_care gi_cancer <b>single_cell</b>_spatial_biology <b>cell</b>_molecular_biology lung_cancer womens_health_reproductive_medicine</div>
+      <div class="snip prop" data-mode="prop">
+        <span class="why">
+          <span class="badge method">⌖ Method</span>
+          <span><span class="lead">Single-cell RNA sequencing</span>
+            <span class="tools"><span class="sep">·</span>scRNA-seq<span class="sep">·</span>single-nuclei<span class="sep">·</span>10x</span>
+          </span>
+        </span>
+      </div>
+    </div>
+    <div class="stats"><b>538</b><span class="unit">pubs</span><b>132</b><span class="unit">grants</span></div>
+  </div>
+
+  <!-- ROW 2 — method match, different tools -->
+  <div class="row">
+    <div class="av">RC</div>
+    <div>
+      <div class="name"><span class="nm">Ronald G. Crystal, MD</span><span class="roletag">Full-time faculty</span></div>
+      <div class="title">Chair of Genetic Medicine</div>
+      <div class="dept">Department of Genetic Medicine</div>
+      <div class="snip today" data-mode="today">pulmonary_critical_care gene_<b>cell</b>_therapy substance_use_addiction_medicine neurodegenerative_disease</div>
+      <div class="snip prop" data-mode="prop">
+        <span class="why">
+          <span class="badge method">⌖ Method</span>
+          <span><span class="lead">Single-cell RNA sequencing</span>
+            <span class="tools"><span class="sep">·</span>scRNA-seq<span class="sep">·</span>single-cell transcriptomics</span>
+          </span>
+        </span>
+      </div>
+    </div>
+    <div class="stats"><b>920</b><span class="unit">pubs</span><b>65</b><span class="unit">grants</span></div>
+  </div>
+
+  <!-- ROW 3 — topic match (no method family on this query for this scholar) -->
+  <div class="row">
+    <div class="av">DL</div>
+    <div>
+      <div class="name"><span class="nm">Dan A. Landau, MD, PhD</span><span class="roletag">Full-time faculty</span></div>
+      <div class="title">Professor of Medicine</div>
+      <div class="dept">Department of Medicine</div>
+      <div class="snip today" data-mode="today"><b>single_cell</b>_spatial_biology neuro_oncology hematology stem_<b>cell</b>_regenerative_medicine genetics_genomics_precision_medicine</div>
+      <div class="snip prop" data-mode="prop">
+        <span class="why">
+          <span class="badge topic">⌖ Topic</span>
+          <span class="lead">Single-cell &amp; spatial biology</span>
+        </span>
+      </div>
+    </div>
+    <div class="stats"><b>103</b><span class="unit">pubs</span><b>63</b><span class="unit">grants</span></div>
+  </div>
+
+  <!-- ROW 4 — bio sentence (no method/topic reason; overview wins) -->
+  <div class="row">
+    <div class="av">SJ</div>
+    <div>
+      <div class="name"><span class="nm">Samie R. Jaffrey, MD, PhD</span><span class="roletag">Full-time faculty</span></div>
+      <div class="title">Professor of Pharmacology</div>
+      <div class="dept">Department of Pharmacology</div>
+      <div class="snip today" data-mode="today">The Jaffrey lab is interested in identifying <b>RNA</b> regulatory pathways that control protein expression</div>
+      <div class="snip prop bio" data-mode="prop">The Jaffrey lab is interested in identifying <b>RNA</b> regulatory pathways that control protein expression</div>
+    </div>
+    <div class="stats"><b>193</b><span class="unit">pubs</span><b>43</b><span class="unit">grants</span></div>
+  </div>
+
+  <!-- ROW 5 — humanized areas fallback (no method/topic/bio) -->
+  <div class="row">
+    <div class="av">KS</div>
+    <div>
+      <div class="name"><span class="nm">Karsten Suhre, PhD</span><span class="roletag">Full-time faculty</span></div>
+      <div class="title">Professor of Systems and Computational Biomedicine</div>
+      <div class="dept">Department of Systems and Computational Biomedicine</div>
+      <div class="snip today" data-mode="today">metabolic_endocrine_disease mental_health_psychiatry <b>single_cell</b>_spatial_biology genetics_genomics_precision_medicine</div>
+      <div class="snip prop" data-mode="prop">
+        <span class="areas"><b>Single-cell &amp; spatial biology</b>, Metabolic &amp; endocrine disease, Genetics, genomics &amp; precision medicine</span>
+      </div>
+    </div>
+    <div class="stats"><b>319</b><span class="unit">pubs</span><b>10</b><span class="unit">grants</span></div>
+  </div>
+
+  <div class="legend">
+    <h3>How the "why" line is chosen (priority order)</h3>
+    <div class="k"><span class="badge method" style="text-transform:uppercase">⌖ Method</span> matched method family + up to 3 exemplar tools (from the new <code>methodFamily</code> field)</div><br/>
+    <div class="k"><span class="badge topic" style="text-transform:uppercase">⌖ Topic</span> matched research-area topic, shown as a clean human label</div><br/>
+    <div class="k"><b>Bio sentence</b> &nbsp;a real sentence from the scholar's overview, matched term in bold</div><br/>
+    <div class="k"><b>Research areas</b> &nbsp;humanized, comma-separated areas (no <code>under_scores</code>, whole-word bold) — last resort</div>
+    <p style="margin:10px 0 0;color:var(--muted)">Today every row falls into the raw <code>areas_of_interest</code> slug dump unless the bio happens to win — that's the line we're replacing.</p>
+  </div>
+</div>
+
+<footer>Mockup for #824 follow-up · scholars-staging search · names/families/tools are real staging data; bio + tool lists abbreviated for layout.</footer>
+
+<script>
+  function setMode(m){
+    document.querySelectorAll('.snip').forEach(function(el){
+      el.style.display = (el.getAttribute('data-mode')===m) ? '' : 'none';
+    });
+    document.getElementById('bToday').classList.toggle('on', m==='today');
+    document.getElementById('bProp').classList.toggle('on', m==='prop');
+  }
+  setMode('prop');
+</script>
+</body>
+</html>

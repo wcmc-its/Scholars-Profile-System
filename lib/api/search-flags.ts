@@ -513,6 +513,39 @@ export function resolvePeopleMethodFamilyBoost(): boolean {
 }
 
 /**
+ * #824 follow-up — match-aware People snippet. Replaces the per-scholar snippet
+ * line — today a raw underscore-slug dump of `areasOfInterest` rendered with
+ * mid-word bolding (e.g. "single_cell_spatial_biology cell_molecular_biology")
+ * — with a clean, MATCH-AWARE "why" line. In priority order the card renders a
+ * matched method family (+ exemplar tools), else the matched research-area topic
+ * as a clean human label, else the scholar's bio highlight, else a HUMANIZED
+ * comma-separated research-areas line (no under_scores). See the approved mockup
+ * `docs/mockups/search-snippet/match-aware-snippet.html`.
+ *
+ * App-only: NO reindex. The method/topic reasons are DERIVED at query time from
+ * `scholar_family` (the #1045 index `methodFamily` field is NOT required for this
+ * surface) + the already-resolved topic taxonomy, and the humanized fallback is a
+ * pure render of the existing `areasOfInterest` highlight against a topic
+ * slug→label map. Staging-first.
+ *
+ * Default OFF (`SEARCH_PEOPLE_MATCH_AWARE_SNIPPET=on` enables) — an `=== "on"`
+ * opt-in gate, opposite the `!== "off"` default-on presentation flags above, so
+ * the feature ships dark for a staging soak. Flag-OFF ⇒ `searchPeople` runs no
+ * new query, emits no new reason kinds, and the card render is byte-identical to
+ * today.
+ *
+ * Flag-parity note: when enabling later, wire the env var in BOTH `.env.local`
+ * AND `cdk/lib/app-stack.ts` per environment — a local-on / deployed-off split
+ * silently ships nothing. (NOT wired now; cdk wiring is the operator rollout
+ * step.) A separate lever from `SEARCH_PEOPLE_METHOD_FAMILY` (the reindex-gated
+ * ranking BOOST) and `SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB`, each with an
+ * independent rollback trigger.
+ */
+export function resolvePeopleMatchAwareSnippet(): boolean {
+  return process.env.SEARCH_PEOPLE_MATCH_AWARE_SNIPPET === "on";
+}
+
+/**
  * Issue #1026 — surface soft-deleted active doctoral-student co-authors as
  * NON-LINKED author chips (name + headshot only) on publication chip surfaces
  * (search results, topic feeds, methods pages, home spotlight). Without this,

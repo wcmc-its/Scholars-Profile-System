@@ -21,6 +21,8 @@ function area(name: string, n: number): TaxonomyMatch {
     similarity: 1 / name.length,
     description: `${name} description.`,
     subtopicCount: 2,
+    supercategory: null,
+    familyLabel: null,
   };
 }
 
@@ -98,6 +100,8 @@ function methodMatch(
     similarity: 0.9,
     description: `${name} descriptor.`,
     subtopicCount: 0,
+    supercategory: entityType === "methodFamily" || entityType === "supercategory" ? "imaging" : null,
+    familyLabel: entityType === "methodFamily" ? name : null,
   };
 }
 

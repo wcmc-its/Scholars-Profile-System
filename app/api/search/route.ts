@@ -14,7 +14,10 @@ import {
   type FundingSort,
   type FundingStatus,
 } from "@/lib/api/search-funding";
-import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
+import {
+  matchQueryToTaxonomy,
+  buildMatchAwareContext,
+} from "@/lib/api/search-taxonomy";
 import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
 import {
   parseScopeParam,
@@ -493,6 +496,11 @@ async function handleSearch(request: NextRequest) {
     // Issue #532 — env-gated dept-shape leadership boost. Ignored for
     // non-dept shapes inside `searchPeople`.
     deptLeadershipBoost: resolveDeptLeadershipBoost(),
+    // #824 follow-up — match-aware snippet context so client tab-nav / pagination
+    // (this route) keeps the method/topic reason the SSR page produced. Built off
+    // the taxonomyMatch already resolved at the top of the handler; inert unless
+    // SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on (searchPeople gates it).
+    matchAwareContext: buildMatchAwareContext(taxonomyMatch),
   });
   const searchLatencyMs = Date.now() - searchStart;
   // ANALYTICS-02 (D-02): structured search-query log (people branch).
