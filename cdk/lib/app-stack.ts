@@ -1101,6 +1101,14 @@ export class AppStack extends Stack {
         // --exclusively Sps-App-prod` activates it, the facet stays invisible until
         // the prod publications index is reindexed (search:index:publications).
         SEARCH_PUB_DEPARTMENT_FILTER: "on",
+        // #824 sec4c -- People-tab method-family ranking boost. Same
+        // reindex-then-flip shape as SEARCH_PUB_DEPARTMENT_FILTER above: the
+        // people index must be rebuilt so docs carry the `methodFamily` rollup
+        // before the boost serves (resolvePeopleMethodFamilyBoost reads
+        // === "on"; a not-yet-reindexed cluster simply matches an absent field,
+        // never a 500). STAGING-FIRST: on for staging (people index reindexed
+        // 2026-06-16), off for prod (prod go-live is a separate reindex + flip).
+        SEARCH_PEOPLE_METHOD_FAMILY: env === "staging" ? "on" : "off",
         // #295 / #723 -- funding-tab concept clause + result-SET gate field.
         // Enabled in both envs now that the funding index carries the descriptor
         // rollup. `fundedPubMeshUi` is the higher-fidelity gate (funded-pub MeSH)
