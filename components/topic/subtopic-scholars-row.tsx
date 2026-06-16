@@ -76,7 +76,7 @@ export function SubtopicScholarsRow({
       <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         {subtopicLabel
           ? `Researchers in ${subtopicLabel} · ${scholars.length}`
-          : `Researchers in this subtopic · ${scholars.length}`}
+          : `Researchers in this subarea · ${scholars.length}`}
       </div>
       {/* Spec: text-[14px], weight 500 names, line-height 2 (`leading-loose`
           in Tailwind = 2). Middot is `--border` color (faint, structural
@@ -186,7 +186,7 @@ function ResearcherNameLink({ scholar }: { scholar: SubtopicScholarRowData }) {
           </div>
           <div className="mt-3 border-t border-border/60 pt-2.5 text-xs leading-relaxed">
             <div className="text-foreground">
-              {scholar.pubCountInSubtopic.toLocaleString()} publications in this subtopic
+              {scholar.pubCountInSubtopic.toLocaleString()} publications in this subarea
             </div>
             <div className="text-muted-foreground">
               {scholar.pubCountTotal.toLocaleString()} publications total

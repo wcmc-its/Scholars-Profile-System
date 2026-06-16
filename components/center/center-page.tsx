@@ -131,8 +131,8 @@ export async function CenterPage({
             <div className="mb-[11px] inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
               Top research areas
               <SectionInfoButton label="Top research areas" anchor="topResearchAreas">
-                Topics are aggregated from ReCiterAI publication scores for
-                this center&apos;s members. The order reflects recent
+                Research areas are aggregated from ReCiterAI publication scores
+                for this center&apos;s members. The order reflects recent
                 publication activity, not editorial judgment.
               </SectionInfoButton>
             </div>

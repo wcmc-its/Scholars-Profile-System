@@ -415,13 +415,13 @@ describe("PublicationModal — content sections", { retry: 2 }, () => {
     expect(info.getAttribute("rel")).toContain("noopener");
   });
 
-  it("renders an About Topics info link in the Topics heading", async () => {
+  it("renders an About Research areas info link in the Research areas heading", async () => {
     mockFetch(makePayload());
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    const info = screen.getByRole("link", { name: /About Topics/ });
-    expect(info.getAttribute("href")).toBe("/about#topics");
+    const info = screen.getByRole("link", { name: /About Research areas/ });
+    expect(info.getAttribute("href")).toBe("/about#research-areas");
     expect(info.getAttribute("target")).toBe("_blank");
     expect(info.getAttribute("rel")).toContain("noopener");
   });

@@ -33,10 +33,10 @@ export const METHODOLOGY_ANCHORS = {
   // Eligibility carve-outs (which roles appear on algorithmic surfaces) live in
   // the #showcase "Who appears on these surfaces" note.
   eligibilityCarves: "showcase",
-  // Aggregate topic ranking on dept/division/center pages (#176).
-  topResearchAreas: "topics",
-  // Topic derivation / "why a model assigns this" — the Topics info button.
-  whyAi: "topics",
+  // Aggregate research-area ranking on dept/division/center pages (#176).
+  topResearchAreas: "research-areas",
+  // Research-area derivation / "why a model assigns this" — the info button.
+  whyAi: "research-areas",
   // Publication-type weighting and hard exclusions are described in #impact.
   exclusions: "impact",
   // Refresh cadence is part of the provenance map.
