@@ -78,6 +78,16 @@ describe("ResearchAreasRow (#709)", () => {
     );
     expect(container.textContent).toBe("");
   });
+
+  it("keeps the collapsed chip row on a single non-wrapping line", () => {
+    // The row must never wrap to a second line (the whole point of the measured
+    // single-row layout). Guard against a regression back to `flex-wrap`.
+    render(<ResearchAreasRow result={matches(["Breast Cancer", "Metastatic", "Genomics"])} />);
+    const row = screen.getByText("Research Areas").closest("div")!;
+    expect(row.className).toContain("flex-nowrap");
+    expect(row.className).toContain("overflow-hidden");
+    expect(row.className).not.toContain("flex-wrap");
+  });
 });
 
 // #860 — Method-taxonomy "Methods and Tools" chip row (replaces the #824 callout).

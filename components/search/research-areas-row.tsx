@@ -26,97 +26,201 @@
  *
  * All data is on the TaxonomyMatchResult computed in page.tsx — no new fetch.
  */
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Sparkles, Users, ArrowUpRight, Wrench } from "lucide-react";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import type { TaxonomyMatch, TaxonomyMatchResult } from "@/lib/api/search-taxonomy";
 
-const VISIBLE = 4;
+/** Chips shown when layout can't be measured (SSR + jsdom). On a real client the
+ *  count is measured to fill exactly one line (see {@link MeasuredChipRow}). */
+const FALLBACK_VISIBLE = 4;
+/** Tailwind `gap-2` between flex items, in px — used by the fit measurement. */
+const GAP_PX = 8;
 const FOCUS_RING =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8102E] focus-visible:ring-offset-1";
 
+// useLayoutEffect on the client (measure before paint, no flash), useEffect on
+// the server (React no-ops layout effects there — avoids the SSR warning).
+const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
 export function ResearchAreasRow({ result }: { result: TaxonomyMatchResult }) {
-  const [expanded, setExpanded] = useState(false);
-  const [methodsExpanded, setMethodsExpanded] = useState(false);
   // RA-12 — nothing matched → render nothing (no label, no empty row, no card).
   if (result.state !== "matches") return null;
   const methodMatches = result.methodMatches ?? [];
   if (result.areas.length === 0 && methodMatches.length === 0) return null;
 
   const { areas, totalMatched, query } = result;
-  const shown = expanded ? areas : areas.slice(0, VISIBLE);
-  const moreCount = totalMatched - VISIBLE; // RA-5
-  const beyondRow = totalMatched - areas.length; // areas capped at ROW_AREA_CAP
-
-  // #860 — Methods and Tools chip row. methodMatches has no separate
-  // totalMatched, so the "+N more" count is methodMatches.length − VISIBLE.
-  const shownMethods = methodsExpanded ? methodMatches : methodMatches.slice(0, VISIBLE);
-  const moreMethods = methodMatches.length - VISIBLE;
 
   return (
     <>
-      {/* #709 — Research Areas chip row (Topic/Subtopic). Unchanged. */}
+      {/* #709 — Research Areas chip row (Topic/Subtopic). Single line: as many
+          chips as fit, the rest folded into "+N more" (expands inline). */}
       {areas.length > 0 ? (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <span className="mr-0.5 inline-flex items-center gap-1.5 text-[12.5px] text-[#7a7e85]">
-            <Sparkles aria-hidden className="h-[15px] w-[15px] shrink-0" strokeWidth={2} />
-            Research Areas
-          </span>
-
-          {shown.map((area) => (
-            <AreaChip key={`${area.entityType}:${area.id}`} area={area} />
-          ))}
-
-          {!expanded && moreCount > 0 ? (
-            <button
-              type="button"
-              onClick={() => setExpanded(true)}
-              aria-label={`Show ${moreCount} more research area${moreCount === 1 ? "" : "s"}`}
-              className={`rounded px-1 text-[13px] text-[#1f51a8] hover:underline ${FOCUS_RING}`}
-            >
-              +{moreCount} more
-            </button>
-          ) : null}
-
-          {expanded && beyondRow > 0 ? (
-            <Link
-              href={`/search?q=${encodeURIComponent(query)}`}
-              className={`rounded px-1 text-[13px] text-[#1f51a8] no-underline hover:underline ${FOCUS_RING}`}
-            >
-              +{beyondRow} more in Browse →
-            </Link>
-          ) : null}
-        </div>
+        <MeasuredChipRow
+          icon={<Sparkles aria-hidden className="h-[15px] w-[15px] shrink-0" strokeWidth={2} />}
+          label="Research Areas"
+          items={areas}
+          total={totalMatched}
+          moreNoun="research area"
+          renderChip={(m) => <AreaChip area={m} />}
+          getKey={(m) => `${m.entityType}:${m.id}`}
+          browseQuery={query}
+        />
       ) : null}
 
       {/* #860 — Methods and Tools chip row. Mirrors the Research Areas row above
           (label → chips → "+N more"), with a method-tinted chip cue so the two
-          rows read as a parallel pair. No "Browse" link on the methods row. */}
+          rows read as a parallel pair. No "Browse" link on the methods row
+          (methodMatches has no separate total, so "+N more" = the loaded set). */}
       {methodMatches.length > 0 ? (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <span className="mr-0.5 inline-flex items-center gap-1.5 text-[12.5px] text-[#7a7e85]">
-            <Wrench aria-hidden className="h-[15px] w-[15px] shrink-0" strokeWidth={2} />
-            Methods and Tools
-          </span>
-
-          {shownMethods.map((match) => (
-            <MethodChip key={`${match.entityType}:${match.id}`} match={match} />
-          ))}
-
-          {!methodsExpanded && moreMethods > 0 ? (
-            <button
-              type="button"
-              onClick={() => setMethodsExpanded(true)}
-              aria-label={`Show ${moreMethods} more method${moreMethods === 1 ? "" : "s"}`}
-              className={`rounded px-1 text-[13px] text-[#1f51a8] hover:underline ${FOCUS_RING}`}
-            >
-              +{moreMethods} more
-            </button>
-          ) : null}
-        </div>
+        <MeasuredChipRow
+          icon={<Wrench aria-hidden className="h-[15px] w-[15px] shrink-0" strokeWidth={2} />}
+          label="Methods and Tools"
+          items={methodMatches}
+          total={methodMatches.length}
+          moreNoun="method"
+          renderChip={(m) => <MethodChip match={m} />}
+          getKey={(m) => `${m.entityType}:${m.id}`}
+        />
       ) : null}
     </>
+  );
+}
+
+/**
+ * One labeled chip row (Research Areas or Methods and Tools) constrained to a
+ * SINGLE line: it measures the available width and shows only as many chips as
+ * fit, folding the rest into a "+N more" control that expands the row inline.
+ *
+ * Measurement runs in a `useLayoutEffect` (before paint, so there's no flash of
+ * the full set) and re-runs on container resize. When layout is unavailable
+ * (SSR / jsdom, `clientWidth === 0`) it falls back to {@link FALLBACK_VISIBLE}
+ * chips so the server render and unit tests stay deterministic.
+ */
+function MeasuredChipRow({
+  icon,
+  label,
+  items,
+  total,
+  moreNoun,
+  renderChip,
+  getKey,
+  browseQuery,
+}: {
+  icon: ReactNode;
+  label: string;
+  items: TaxonomyMatch[];
+  /** The TRUE total matched (drives "+N more"); ≥ `items.length` when the
+   *  payload caps the loaded set (areas at ROW_AREA_CAP). */
+  total: number;
+  moreNoun: string;
+  renderChip: (m: TaxonomyMatch) => ReactNode;
+  getKey: (m: TaxonomyMatch) => string;
+  /** Areas only: when expanded past the loaded set, link to Browse for the rest. */
+  browseQuery?: string;
+}) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const moreRef = useRef<HTMLSpanElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  // While measuring, ALL chips render (so their widths can be read); the effect
+  // then collapses to the count that fits. Starts true so the first client pass
+  // measures; flips back to true on resize.
+  const [measuring, setMeasuring] = useState(true);
+  const [fit, setFit] = useState(Math.min(items.length, FALLBACK_VISIBLE));
+
+  useIsoLayoutEffect(() => {
+    if (expanded || !measuring) return;
+    const row = rowRef.current;
+    const avail = row?.clientWidth ?? 0;
+    const chipEls = row ? Array.from(row.querySelectorAll<HTMLElement>("[data-mcr-chip]")) : [];
+    // No layout (SSR / jsdom) → deterministic fallback, stable + unit-testable.
+    if (!row || avail <= 0 || chipEls.length === 0) {
+      setFit(Math.min(items.length, FALLBACK_VISIBLE));
+      setMeasuring(false);
+      return;
+    }
+    const labelW = row.querySelector<HTMLElement>("[data-mcr-label]")?.offsetWidth ?? 0;
+    const moreW = (moreRef.current?.offsetWidth ?? 56) + GAP_PX;
+    let used = labelW;
+    let n = 0;
+    for (let i = 0; i < chipEls.length; i++) {
+      // Reserve room for "+N more" whenever a chip would remain hidden after this
+      // one (conservative: guarantees the control is never pushed off the line).
+      const reserve = i < chipEls.length - 1 ? moreW : 0;
+      const next = used + GAP_PX + chipEls[i].offsetWidth;
+      if (next + reserve > avail) break;
+      used = next;
+      n += 1;
+    }
+    setFit(Math.max(1, n)); // always show at least one chip
+    setMeasuring(false);
+  }, [expanded, measuring, items, total]);
+
+  // Re-measure when the row's width changes (collapsed only).
+  useEffect(() => {
+    const row = rowRef.current;
+    if (!row || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (!expanded) setMeasuring(true);
+    });
+    ro.observe(row);
+    return () => ro.disconnect();
+  }, [expanded]);
+
+  const shown = expanded || measuring ? items : items.slice(0, fit);
+  const hiddenCount = total - shown.length;
+  const beyond = total - items.length; // loaded cap (areas) < total
+
+  return (
+    <div
+      ref={rowRef}
+      className={`mt-4 flex items-center gap-2 ${
+        expanded ? "flex-wrap" : "flex-nowrap overflow-hidden"
+      }`}
+    >
+      <span
+        data-mcr-label
+        className="mr-0.5 inline-flex shrink-0 items-center gap-1.5 text-[12.5px] text-[#7a7e85]"
+      >
+        {icon}
+        {label}
+      </span>
+
+      {shown.map((m) => (
+        <span key={getKey(m)} data-mcr-chip className="shrink-0">
+          {renderChip(m)}
+        </span>
+      ))}
+
+      {/* Invisible width sizer so the measure reserves real space for the
+          (widest-possible) "+N more" control before deciding the fit. */}
+      {measuring ? (
+        <span ref={moreRef} aria-hidden className="invisible shrink-0 px-1 text-[13px]">
+          +{total} more
+        </span>
+      ) : null}
+
+      {!expanded && !measuring && hiddenCount > 0 ? (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          aria-label={`Show ${hiddenCount} more ${moreNoun}${hiddenCount === 1 ? "" : "s"}`}
+          className={`shrink-0 rounded px-1 text-[13px] text-[#1f51a8] hover:underline ${FOCUS_RING}`}
+        >
+          +{hiddenCount} more
+        </button>
+      ) : null}
+
+      {expanded && browseQuery && beyond > 0 ? (
+        <Link
+          href={`/search?q=${encodeURIComponent(browseQuery)}`}
+          className={`shrink-0 rounded px-1 text-[13px] text-[#1f51a8] no-underline hover:underline ${FOCUS_RING}`}
+        >
+          +{beyond} more in Browse →
+        </Link>
+      ) : null}
+    </div>
   );
 }
 
