@@ -85,9 +85,16 @@ import {
   resolvePeopleMethodFamilyBoost,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
+  resolveSearchResultEvidence,
   type PubRecencyMode,
   type Scope,
 } from "@/lib/api/search-flags";
+import {
+  selectEvidence,
+  refineExemplarTools,
+  AREAS_CAP,
+  type ResultEvidence,
+} from "@/lib/api/result-evidence";
 // Issue #309 / SPEC §6.1.2 — the classifier's shape enum (cwid / name / …),
 // distinct from the OS-body `PeopleQueryShape` telemetry label below. Aliased
 // to keep both names unambiguous within this module.
@@ -240,6 +247,15 @@ export type PeopleHit = {
    * back to today's raw slug highlight) when off.
    */
   humanizedAreas?: { labels: string[]; matchedIndex: number };
+  /**
+   * #824 follow-up Phase 1 — the coherent `ResultEvidence` object (one typed
+   * "why this matched", selected by one precedence function; see
+   * `lib/api/result-evidence.ts`). Present only when `SEARCH_RESULT_EVIDENCE` is
+   * on; when present the card renders it via `<ResultEvidence>` and IGNORES the
+   * legacy `matchReason` / `highlight` / `humanizedAreas` chain. Absent ⇒ the
+   * card falls back to that legacy chain (today's behavior). Serializable.
+   */
+  evidence?: ResultEvidence;
 };
 
 /**
@@ -888,7 +904,12 @@ export async function searchPeople(opts: {
   // method/topic reason and a humanized-areas fallback (all from query-time data,
   // no reindex). Gating on the flag here keeps the off path byte-identical: no
   // extra `_source` field, no extra `scholar_family` query, no new reason kinds.
-  const matchAwareSnippet = resolvePeopleMatchAwareSnippet();
+  // The Phase-1 `ResultEvidence` redesign IMPLIES the match-aware derivation
+  // (method/topic/areas), so either flag turns it on; `resultEvidence` then also
+  // emits the single typed `evidence` object per hit and bumps the overview
+  // highlight fragment_size for the Case-D sentence trim.
+  const resultEvidence = resolveSearchResultEvidence();
+  const matchAwareSnippet = resolvePeopleMatchAwareSnippet() || resultEvidence;
   const matchAwareContext = matchAwareSnippet ? opts.matchAwareContext : undefined;
 
   // Issue #259 §1.1 — the people-index query restructure (cross_fields + msm
@@ -1831,7 +1852,11 @@ export async function searchPeople(opts: {
       fields: {
         preferredName: {},
         ...(matchAwareContext ? {} : { areasOfInterest: {} }),
-        overview: {},
+        // #824 follow-up Phase 1 — under the ResultEvidence redesign the bio
+        // snippet is trimmed to the first MATCHING SENTENCE (handoff Case D), so
+        // ask OpenSearch for a larger single fragment instead of the default
+        // ~100-char one that cuts mid-word. Off-flag ⇒ default fragmenting.
+        overview: resultEvidence ? { fragment_size: 320, number_of_fragments: 1 } : {},
       },
       // Issue #692 — when demoting, restrict highlighting to the content query
       // so stripped generics ("Research") are never <mark>-ed. Without this the
@@ -2060,7 +2085,10 @@ export async function searchPeople(opts: {
   //   topicLabelBySlug — slug→`Topic.label` map for the humanized-areas fallback.
   // Guarded by `matchAwareContext` (already null when the flag is off), so the
   // off path runs none of this and adds no query.
-  const methodReasonByCwid = new Map<string, { family: string; tools: string[] }>();
+  const methodReasonByCwid = new Map<
+    string,
+    { family: string; tools: string[]; rawTools: unknown }
+  >();
   const matchedTopicSlugs = new Set<string>();
   const topicLabelByMatchedSlug = new Map<string, string>();
   const topicLabelBySlug = new Map<string, string>();
@@ -2088,6 +2116,10 @@ export async function searchPeople(opts: {
           methodReasonByCwid.set(row.cwid, {
             family: row.familyLabel,
             tools: cleanExemplarTools(row.exemplarTools),
+            // Raw kept so the ResultEvidence path can apply the denser
+            // `refineExemplarTools` cleaning (Case A) without changing the
+            // legacy `cleanExemplarTools` output the off-flag path renders.
+            rawTools: row.exemplarTools,
           });
         }
       }
@@ -2150,6 +2182,66 @@ export async function searchPeople(opts: {
     return buildMatchReason(cwid, pubCount, hasProvenance);
   };
 
+  // #824 follow-up Phase 1 — the ResultEvidence redesign. Resolve the SAME
+  // per-hit signals the legacy chain uses, but hand them to the one precedence
+  // function (`selectEvidence`) so priority lives in exactly one place. Only
+  // called when `resultEvidence` is on (and then `matchAwareContext` is set, so
+  // method/topic/areas are derived). Keyed `hl` (NOT the flattened `highlight`)
+  // is required so name vs affiliation can be told apart (handoff Edge G).
+  const resolveHitEvidence = (
+    cwid: string,
+    areasOfInterest: string | undefined,
+    pubCount: number,
+    hasProvenance: boolean,
+    hl: Record<string, string[]> | undefined,
+  ): ResultEvidence => {
+    const m = methodReasonByCwid.get(cwid);
+    let topic: { label: string } | undefined;
+    if (matchedTopicSlugs.size > 0 && areasOfInterest) {
+      const areaSlugs = areasOfInterest.trim().split(/\s+/).filter(Boolean);
+      const hitSlug = areaSlugs.find((s) => matchedTopicSlugs.has(s));
+      if (hitSlug) topic = { label: topicLabelByMatchedSlug.get(hitSlug) ?? hitSlug };
+    }
+
+    // Publication-evidence parts — tagged and mention split out so the
+    // precedence can rank `tagged` above the bio and `mention` below it (handoff
+    // §5.0C); same text format as `composeMatchReason`. Concept is the folded
+    // text variant (Case F).
+    const counts = reasonCounts.get(cwid);
+    const reps = reasonReps.get(cwid);
+    const pub: NonNullable<Parameters<typeof selectEvidence>[0]["pub"]> = {};
+    if (counts && counts.tagged > 0)
+      pub.tagged = {
+        text: `${Math.min(counts.tagged, pubCount)} of ${pubCount} publications tagged ${provenanceParent}`,
+        ...(reps?.tagged ? { pub: reps.tagged } : {}),
+      };
+    if (counts && counts.mention > 0)
+      pub.mention = {
+        text: `${Math.min(counts.mention, pubCount)} of ${pubCount} publications mention “${contentQuery}”`,
+        ...(reps?.mention ? { pub: reps.mention } : {}),
+      };
+    if (hasProvenance) pub.concept = { text: `via related concept ${provenanceParent}` };
+
+    // Bounded research-areas hint — score-desc (areasOfInterest is already
+    // score-ordered), capped to AREAS_CAP, no `matchedIndex` (always -1 here by
+    // construction — handoff §5.0A).
+    let areas: { labels: string[]; total: number } | null = null;
+    const areaSlugs = (areasOfInterest ?? "").trim().split(/\s+/).filter(Boolean);
+    if (areaSlugs.length > 0) {
+      const labels = areaSlugs.map((s) => topicLabelBySlug.get(s) ?? humanizeAreaSlug(s));
+      areas = { labels: labels.slice(0, AREAS_CAP), total: labels.length };
+    }
+
+    return selectEvidence({
+      nameHighlight: hl?.preferredName?.[0],
+      bioHighlight: hl?.overview?.[0],
+      method: m ? { family: m.family, tools: refineExemplarTools(m.family, m.rawTools) } : undefined,
+      topic,
+      pub: Object.keys(pub).length > 0 ? pub : undefined,
+      areas,
+    });
+  };
+
   return {
     hits: r.hits.hits.map((h) => {
       const hl = h.highlight;
@@ -2204,6 +2296,20 @@ export async function searchPeople(opts: {
               );
               return ha ? { humanizedAreas: ha } : {};
             })()
+          : {}),
+        // #824 follow-up Phase 1 — the single typed evidence object. Present
+        // only under `SEARCH_RESULT_EVIDENCE`; when present the card renders it
+        // via `<ResultEvidence>` and ignores the legacy fields above.
+        ...(resultEvidence
+          ? {
+              evidence: resolveHitEvidence(
+                h._source.cwid,
+                h._source.areasOfInterest,
+                h._source.publicationCount,
+                prov != null,
+                hl,
+              ),
+            }
           : {}),
       };
     }),

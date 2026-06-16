@@ -6,6 +6,8 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { formatRoleCategory } from "@/lib/role-display";
 import { profilePath } from "@/lib/profile-url";
 import { MatchReason, MatchAwareReason } from "@/components/search/match-reason";
+import { HighlightedSnippet } from "@/components/search/highlight-snippet";
+import { ResultEvidence } from "@/components/search/result-evidence";
 import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
 
 /**
@@ -43,57 +45,16 @@ function RoleTag({ role }: { role: string }) {
   );
 }
 
-// Inline match highlight rendered as bold text — never the post-it-yellow
-// background style the mockup explicitly calls out as an anti-pattern.
-//
-// The OpenSearch query in lib/api/search.ts wraps matches in <mark>; this
-// renderer rewrites them as <strong> with the design's typographic weight.
-// (Issue #20 — earlier code split on <em> and let <mark> tags fall through
-// as literal text.) The `overview` field can contain raw HTML (<p>, <br>,
-// &nbsp;, &amp;, etc.) from the source bios; strip non-mark tags and
-// decode the common named/numeric entities so they don't render as literal
-// text in the snippet.
-function stripHtmlTags(s: string): string {
-  return s.replace(/<(?!\/?mark\b)[^>]*>/gi, "");
-}
-
-function decodeEntities(s: string): string {
-  const named: Record<string, string> = {
-    nbsp: " ",
-    amp: "&",
-    lt: "<",
-    gt: ">",
-    quot: '"',
-    apos: "'",
-  };
-  return s
-    .replace(/&(nbsp|amp|lt|gt|quot|apos);/gi, (_, n) => named[n.toLowerCase()] ?? "")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)));
-}
-
-function HighlightedSnippet({ html }: { html: string }) {
-  const cleaned = decodeEntities(stripHtmlTags(html));
-  return (
-    <>
-      {cleaned.split(/(<mark>.*?<\/mark>)/g).map((part, i) =>
-        part.startsWith("<mark>") ? (
-          <strong key={i} className="font-semibold text-[#1a1a1a]">
-            {part.replace(/<\/?mark>/g, "")}
-          </strong>
-        ) : (
-          <span key={i}>{part}</span>
-        ),
-      )}
-    </>
-  );
-}
+// `HighlightedSnippet` (the <mark>→<strong> rewriter + HTML strip / entity
+// decode, issue #20) now lives in `components/search/highlight-snippet.tsx`,
+// shared with the `<ResultEvidence>` renderer.
 
 // #824 follow-up — the humanized research-areas fallback (mockup ROW 5). Clean,
 // comma-separated area LABELS (no under_scores; the matched area, if any, bold as
 // a WHOLE label). Replaces today's raw `areas_of_interest` slug dump with
 // mid-word bolding. Server already humanized the slugs (real Topic.label when
-// known, else a sentence-cased slug) — this is pure presentation.
+// known, else a sentence-cased slug) — this is pure presentation. LEGACY: used
+// only on the pre-ResultEvidence path (`SEARCH_RESULT_EVIDENCE` off).
 function HumanizedAreas({
   labels,
   matchedIndex,
@@ -154,64 +115,70 @@ export function PeopleResultCard({
   const pubLabel = hit.pubCount === 1 ? "pub" : "pubs";
   const grantLabel = hit.grantCount === 1 ? "grant" : "grants";
 
-  // PLAN R4 / #824-follow-up — one "why" line per scholar, in PRIORITY order:
-  //   method > topic > (legacy concept/pub matchReason) > bio highlight >
-  //   humanized research areas.
-  // The method/topic badge kinds and the humanized-areas fallback are produced by
-  // the server ONLY when SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on; off ⇒ the
-  // matchReason is the legacy `{ icon, text }` shape (or absent) and
-  // `humanizedAreas` is absent, so this falls through to today's render exactly.
-  const reason = hit.matchReason;
+  // #824 follow-up Phase 1 — the coherent ResultEvidence model. When present
+  // (`SEARCH_RESULT_EVIDENCE` on), the server already selected the ONE "why"
+  // via one precedence function, so render it through one component and IGNORE
+  // the legacy priority chain below. Absent ⇒ fall through to today's chain.
   let snippetLine: ReactNode = null;
-  if (reason && "kind" in reason) {
-    // New match-aware badge reasons (method / topic).
-    snippetLine =
-      reason.kind === "method" ? (
-        <MatchAwareReason kind="method" label={reason.family} tools={reason.tools} />
-      ) : (
-        <MatchAwareReason kind="topic" label={reason.label} />
+  if (hit.evidence) {
+    snippetLine = <ResultEvidence evidence={hit.evidence} />;
+  } else {
+    // LEGACY priority chain (pre-ResultEvidence): method > topic > (legacy
+    // concept/pub matchReason) > bio highlight > humanized research areas. The
+    // method/topic kinds + humanized areas are produced by the server only when
+    // SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on; off ⇒ legacy `{ icon, text }`
+    // reason (or absent) and no humanizedAreas, rendering today's snippet exactly.
+    const reason = hit.matchReason;
+    if (reason && "kind" in reason) {
+      // New match-aware badge reasons (method / topic).
+      snippetLine =
+        reason.kind === "method" ? (
+          <MatchAwareReason kind="method" label={reason.family} tools={reason.tools} />
+        ) : (
+          <MatchAwareReason kind="topic" label={reason.label} />
+        );
+    } else if (reason) {
+      // Legacy PLAN R4 (#688/#702/#967) pub-evidence / concept reason.
+      snippetLine = (
+        <MatchReason kind={reason.icon}>
+          {reason.text}
+          {/* #967 — concrete proof behind the count: a representative matching
+              publication. The title is <mark>-highlighted when the literal query
+              appears in it, otherwise rendered plain. */}
+          {reason.pub ? (
+            <>
+              {" — incl. "}
+              <span className="italic">
+                &ldquo;
+                {reason.pub.titleHtml ? (
+                  <HighlightedSnippet html={reason.pub.titleHtml} />
+                ) : (
+                  reason.pub.title
+                )}
+                &rdquo;
+              </span>
+              {reason.pub.year ? ` (${reason.pub.year})` : ""}
+            </>
+          ) : null}
+        </MatchReason>
       );
-  } else if (reason) {
-    // Legacy PLAN R4 (#688/#702/#967) pub-evidence / concept reason.
-    snippetLine = (
-      <MatchReason kind={reason.icon}>
-        {reason.text}
-        {/* #967 — concrete proof behind the count: a representative matching
-            publication. The title is <mark>-highlighted when the literal query
-            appears in it, otherwise rendered plain. */}
-        {reason.pub ? (
-          <>
-            {" — incl. "}
-            <span className="italic">
-              &ldquo;
-              {reason.pub.titleHtml ? (
-                <HighlightedSnippet html={reason.pub.titleHtml} />
-              ) : (
-                reason.pub.title
-              )}
-              &rdquo;
-            </span>
-            {reason.pub.year ? ` (${reason.pub.year})` : ""}
-          </>
-        ) : null}
-      </MatchReason>
-    );
-  } else if (snippet) {
-    // Self-evident bio/overview/areas highlight from a self-reported field.
-    snippetLine = (
-      <div className="text-[13px] leading-snug text-[#4a4a4a]">
-        <HighlightedSnippet html={snippet} />
-      </div>
-    );
-  } else if (hit.humanizedAreas && hit.humanizedAreas.labels.length > 0) {
-    // #824 follow-up — last-resort humanized research areas (no under_scores),
-    // replacing today's raw slug dump. Only present when the flag is on.
-    snippetLine = (
-      <HumanizedAreas
-        labels={hit.humanizedAreas.labels}
-        matchedIndex={hit.humanizedAreas.matchedIndex}
-      />
-    );
+    } else if (snippet) {
+      // Self-evident bio/overview/areas highlight from a self-reported field.
+      snippetLine = (
+        <div className="text-[13px] leading-snug text-[#4a4a4a]">
+          <HighlightedSnippet html={snippet} />
+        </div>
+      );
+    } else if (hit.humanizedAreas && hit.humanizedAreas.labels.length > 0) {
+      // #824 follow-up — last-resort humanized research areas (no under_scores),
+      // replacing today's raw slug dump. Only present when the flag is on.
+      snippetLine = (
+        <HumanizedAreas
+          labels={hit.humanizedAreas.labels}
+          matchedIndex={hit.humanizedAreas.matchedIndex}
+        />
+      );
+    }
   }
 
   return (
@@ -239,9 +206,8 @@ export function PeopleResultCard({
         {deptLine ? (
           <div className="mb-2 text-xs text-muted-foreground">{deptLine}</div>
         ) : null}
-        {/* PLAN R4 / #824-follow-up — one reason line per scholar, picked above
-            in priority order (method > topic > concept/pub > bio > humanized
-            areas). */}
+        {/* #824 follow-up — one reason line per scholar: the ResultEvidence
+            object when present, else the legacy priority chain. */}
         {snippetLine}
       </div>
       <div className="flex flex-col items-end gap-1 whitespace-nowrap text-right text-xs text-muted-foreground">
