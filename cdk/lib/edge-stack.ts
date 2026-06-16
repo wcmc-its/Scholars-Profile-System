@@ -517,6 +517,12 @@ export class EdgeStack extends Stack {
       ["/api/nih-portfolio", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Person-popover context -- reads `surface` + `context*` params.
       ["/api/scholars/*/popover-context", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // Method-badge representative-paper hover (#967 §7) -- `force-dynamic`,
+      // `no-store`, reads `?family=` to resolve the family's exemplar pub.
+      // Unlisted it falls to the cacheable default, whose query allow-list omits
+      // `family`, so the param would be stripped before the origin and the hover
+      // would always come back empty. AllViewer forwards it. GET-only (a read).
+      ["/api/scholar/*/method-exemplar", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Topic publication feed -- reads `sort`/`filter`/`subtopic`/`tier`/`page`.
       ["/api/topics/*/publications", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Method (cross-scholar family) publication feed -- reads `sort`/`filter`/

@@ -48,10 +48,26 @@ function AreasHint({ labels, total }: { labels: string[]; total: number }) {
   );
 }
 
-export function ResultEvidence({ evidence }: { evidence: ResultEvidence }) {
+export function ResultEvidence({
+  evidence,
+  methodExpandable = false,
+}: {
+  evidence: ResultEvidence;
+  /** #967 §7 — when true and the evidence is a method match, cue the method-
+   *  exemplar hover with a ▾ on the badge. The card sets this and renders the
+   *  matching `MethodExemplarLine` reveal; off ⇒ Phase-1 render is unchanged. */
+  methodExpandable?: boolean;
+}) {
   switch (evidence.kind) {
     case "method":
-      return <MatchAwareReason kind="method" label={evidence.family} tools={evidence.tools} />;
+      return (
+        <MatchAwareReason
+          kind="method"
+          label={evidence.family}
+          tools={evidence.tools}
+          expandable={methodExpandable}
+        />
+      );
     case "topic":
       return <MatchAwareReason kind="topic" label={evidence.label} />;
     case "publications":
