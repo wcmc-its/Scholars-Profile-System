@@ -39,7 +39,7 @@ vi.mock("@/lib/search", () => ({
   ],
   PEOPLE_ABSTRACTS_BOOST: 0.3,
   PEOPLE_RESTRUCTURED_MSM: "2<-34%",
-  PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS: [
+  PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS: Object.freeze([
     "preferredName^1",
     "fullName^1",
     "areasOfInterest^3",
@@ -48,7 +48,7 @@ vi.mock("@/lib/search", () => ({
     "overview^2",
     "publicationTitles^6",
     "publicationMesh^4",
-  ],
+  ]),
   PEOPLE_TOPIC_ABSTRACTS_BOOST: 0.5,
   PEOPLE_PROMINENCE_BASE_WEIGHT: 1.0,
   PEOPLE_PROMINENCE_PUBCOUNT_FACTOR: 1,
@@ -409,5 +409,80 @@ describe("generic-term demotion — #692 (people topic shape)", () => {
     const must0 = topicMust0(capturedBodies[0]) as { multi_match?: { query: string } };
     expect(must0.multi_match?.query).toBe("microbiome");
     expect(highlightOf(capturedBodies[0]).highlight_query).toBeUndefined();
+  });
+});
+
+// Issue #824 §4c — method-family boost is flag-gated (reindex-then-flip) and
+// must NOT mutate the exported constant ladder (frozen above to prove it).
+describe("method-family boost — #824 §4c (people topic shape)", () => {
+  const FLAG = "SEARCH_PEOPLE_METHOD_FAMILY";
+  let prior: string | undefined;
+
+  beforeEach(() => {
+    capturedBodies.length = 0;
+    groupByMock.mockResolvedValue([]);
+    prior = process.env[FLAG];
+  });
+  afterEach(() => {
+    if (prior === undefined) delete process.env[FLAG];
+    else process.env[FLAG] = prior;
+    vi.clearAllMocks();
+  });
+
+  const topicFields = (body: Record<string, unknown>): string[] => {
+    const mm = (topicBranch(body).bool as { must: Record<string, unknown>[] })
+      .must[0] as { multi_match: { fields: string[] } };
+    return mm.multi_match.fields;
+  };
+
+  it("flag OFF (default): methodFamily is NOT in the topic boost fields", async () => {
+    delete process.env[FLAG];
+    await searchPeople({
+      q: "single cell rna sequencing",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: DESCENDANTS,
+    });
+    const fields = topicFields(capturedBodies[0]);
+    expect(fields.some((f) => f.startsWith("methodFamily"))).toBe(false);
+    // The canonical topic ladder is intact.
+    expect(fields).toContain("publicationMesh^4");
+  });
+
+  it("flag ON: methodFamily^4 appears in the topic boost fields", async () => {
+    process.env[FLAG] = "on";
+    await searchPeople({
+      q: "single cell rna sequencing",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: DESCENDANTS,
+    });
+    const fields = topicFields(capturedBodies[0]);
+    expect(fields).toContain("methodFamily^4");
+    // The constant ladder fields are still present (appended, not replaced).
+    expect(fields).toContain("publicationMesh^4");
+    expect(fields).toContain("preferredName^1");
+  });
+
+  it("flag ON does NOT mutate the exported constant (frozen array, fresh copy each call)", async () => {
+    process.env[FLAG] = "on";
+    await searchPeople({
+      q: "crispr",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: DESCENDANTS,
+    });
+    // A second call with the flag OFF must not see a leaked methodFamily entry.
+    delete process.env[FLAG];
+    capturedBodies.length = 0;
+    await searchPeople({
+      q: "crispr",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: DESCENDANTS,
+    });
+    expect(topicFields(capturedBodies[0]).some((f) => f.startsWith("methodFamily"))).toBe(
+      false,
+    );
   });
 });

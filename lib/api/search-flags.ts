@@ -488,6 +488,31 @@ export function resolvePublicationDepartmentFilter(): boolean {
 }
 
 /**
+ * Issue #824 §4c — People-tab method-family ranking boost. When on, the people
+ * query adds the `methodFamily` field (a per-scholar rollup of overlay-visible
+ * method-family labels + their exemplar-tool names) to the multi_match boost
+ * ladders, so a free-text method/tool query ("CRISPR", "single-cell RNA
+ * sequencing", "Seurat") ranks scholars who work in that method family.
+ *
+ * Default OFF (`SEARCH_PEOPLE_METHOD_FAMILY=on` enables). This is a
+ * reindex-then-flip rollout like the other search-index features here: the
+ * `methodFamily` field the boost references is populated by the search-index
+ * ETL (`buildPeopleDoc`), so the people index must be reindexed with the new
+ * field BEFORE flipping the flag on — flipping first would boost an absent
+ * field (a wasted, no-op clause). Reversible by clearing the flag.
+ *
+ * Deliberately a `=== "on"` default-off gate (not the `!== "off"` default-on
+ * shape of the presentation flags above) so the feature ships inert until the
+ * reindex lands. Flag-parity note: when enabling later, wire the env var in
+ * BOTH `.env.local` AND `cdk/lib/app-stack.ts` per environment — a local-on /
+ * deployed-off split silently ships nothing. (NOT wired now; cdk wiring is the
+ * operator rollout step.)
+ */
+export function resolvePeopleMethodFamilyBoost(): boolean {
+  return process.env.SEARCH_PEOPLE_METHOD_FAMILY === "on";
+}
+
+/**
  * Issue #1026 — surface soft-deleted active doctoral-student co-authors as
  * NON-LINKED author chips (name + headshot only) on publication chip surfaces
  * (search results, topic feeds, methods pages, home spotlight). Without this,

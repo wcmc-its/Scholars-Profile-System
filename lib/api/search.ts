@@ -81,6 +81,7 @@ import {
   resolveFundingMeshGateField,
   resolvePeopleConceptGrantAxis,
   resolvePeopleConceptPrecount,
+  resolvePeopleMethodFamilyBoost,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
   type PubRecencyMode,
@@ -895,6 +896,29 @@ export async function searchPeople(opts: {
   // records", and/or are equivalent (msm requires all 3 anyway); they
   // diverge on 4+ tokens where msm allows 25% missing and "and" doesn't.
   //
+  // Issue #824 §4c — method-family boost. When `SEARCH_PEOPLE_METHOD_FAMILY` is
+  // on, append the index-time `methodFamily` rollup field to the topic + default
+  // boost ladders so a free-text method/tool query ranks scholars who work in
+  // that method family. `methodFamily` uses the SAME `scholar_text` analyzer as
+  // the other ladder fields, so it joins the `cross_fields` blended group
+  // cleanly and does not perturb the `minimum_should_match` token accounting.
+  // Default OFF (reindex-then-flip): when off, these are byte-identical spreads
+  // of the unchanged constant ladders, so the query is unchanged. The exported
+  // constant arrays are NEVER mutated (their msm-parser + snapshot tests stay
+  // green) — we only build local copies. Built LAZILY (thunks) so a shape that
+  // never reaches the topic/default branch — e.g. a pure name-template query —
+  // does not spread a ladder it doesn't use; this preserves the prior
+  // per-branch evaluation (a name query never referenced these constants).
+  const methodBoostOn = resolvePeopleMethodFamilyBoost();
+  const peopleTopicFields = (): string[] =>
+    methodBoostOn
+      ? [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS, "methodFamily^4"]
+      : [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS];
+  const peopleDefaultFields = (): string[] =>
+    methodBoostOn
+      ? [...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS, "methodFamily^3"]
+      : [...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS];
+
   // Issue #311 / SPEC §6.1.4 — name-template should-clauses, reused by the name
   // template (#309) and as the name half of the hybrid template. The cwid^100
   // term stays in the outer `should` (the existing short-circuit), so it is NOT
@@ -956,13 +980,13 @@ export async function searchPeople(opts: {
               ? demoteScoringClause({
                   contentQuery,
                   fullQuery: trimmed,
-                  fields: [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS],
+                  fields: peopleTopicFields(), // #824 §4c — incl. methodFamily^4 when flag on
                   type: "cross_fields",
                 })
               : {
                   multi_match: {
                     query: trimmed,
-                    fields: [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS],
+                    fields: peopleTopicFields(), // #824 §4c — incl. methodFamily^4 when flag on
                     type: "cross_fields",
                     operator: "or",
                   },
@@ -995,14 +1019,14 @@ export async function searchPeople(opts: {
               ? demoteScoringClause({
                   contentQuery,
                   fullQuery: trimmed,
-                  fields: [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS],
+                  fields: peopleTopicFields(), // #824 §4c — incl. methodFamily^4 when flag on
                   type: "cross_fields",
                   msm: PEOPLE_RESTRUCTURED_MSM,
                 })
               : {
                   multi_match: {
                     query: trimmed,
-                    fields: [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS],
+                    fields: peopleTopicFields(), // #824 §4c — incl. methodFamily^4 when flag on
                     type: "cross_fields",
                     operator: "or",
                     minimum_should_match: PEOPLE_RESTRUCTURED_MSM,
@@ -1032,7 +1056,7 @@ export async function searchPeople(opts: {
             {
               multi_match: {
                 query: trimmed,
-                fields: [...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS],
+                fields: peopleDefaultFields(), // #824 §4c — incl. methodFamily^3 when flag on
                 type: "cross_fields",
                 operator: "or",
                 minimum_should_match: PEOPLE_RESTRUCTURED_MSM,

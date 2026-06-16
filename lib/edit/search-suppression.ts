@@ -58,6 +58,10 @@ import {
   loadAllGrantSuppressions,
   loadPublicationSuppressions,
 } from "@/lib/api/manual-layer";
+import {
+  loadFamilyOverlayGate,
+  type FamilyOverlayGate,
+} from "@/lib/api/methods-overlay";
 import { coreProjectNum } from "@/lib/award-number";
 import { db } from "@/lib/db";
 import {
@@ -284,7 +288,10 @@ async function buildGrantOps(externalId: string): Promise<Op[]> {
   ];
 }
 
-async function buildScholarOps(cwid: string): Promise<Op[]> {
+async function buildScholarOps(
+  cwid: string,
+  gate?: FamilyOverlayGate,
+): Promise<Op[]> {
   // PEOPLE_INDEX_WHERE excludes suppressed / deleted scholars at the query
   // layer. A suppressed scholar's findFirst returns null → we issue a
   // delete; a revoked-to-active scholar returns the row → we re-index.
@@ -306,7 +313,17 @@ async function buildScholarOps(cwid: string): Promise<Op[]> {
   // `PEOPLE_INDEX_WHERE`-filtered input the builder never returns null,
   // but the type permits it so a future builder-internal gate doesn't
   // require widening the fast-path's contract.
-  const doc = await buildPeopleDoc(scholar, db.read, sup);
+  //
+  // #824 §4c — the public method-family overlay gate (loaded with
+  // `forceSensitive: true`) makes `buildPeopleDoc` emit the `methodFamily`
+  // rollup, so a single-doc fast-path update keeps it consistent with the
+  // nightly public index (suppressed + sensitive families always excluded),
+  // not just on the next full rebuild. The gate is scholar-INDEPENDENT, so the
+  // `buildPublicationOps` fan-out loads it ONCE and passes it in; the lone
+  // scholar entry path loads its own.
+  const overlayGate =
+    gate ?? (await loadFamilyOverlayGate({ forceSensitive: true }));
+  const doc = await buildPeopleDoc(scholar, db.read, sup, overlayGate);
   if (doc === null) {
     return [{ type: "delete", index: PEOPLE_INDEX, id: cwid }];
   }
@@ -350,8 +367,14 @@ async function buildPublicationOps(
   // co-author count). Each `buildScholarOps` opens its own per-scholar
   // queries; for a takedown of ~5-20 co-authors that's ≤80 reads, then
   // one bulk write.
+  //
+  // #824 §4c — the method-family overlay gate is scholar-INDEPENDENT, so load
+  // it ONCE here and thread it into every `buildScholarOps` in the fan-out
+  // (mirrors the nightly ETL's once-per-batch load) rather than re-scanning the
+  // overlay tables per co-author.
+  const gate = await loadFamilyOverlayGate({ forceSensitive: true });
   const scholarOpsArrays = await Promise.all(
-    affectedCwids.map((c) => buildScholarOps(c)),
+    affectedCwids.map((c) => buildScholarOps(c, gate)),
   );
   for (const arr of scholarOpsArrays) ops.push(...arr);
   return ops;
