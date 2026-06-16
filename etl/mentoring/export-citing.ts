@@ -97,7 +97,7 @@ async function countsForBatch(citedPmids: number[]): Promise<Map<number, number>
   if (citedPmids.length === 0) return totals;
   await withReciterConnection(async (conn) => {
     const rows = (await conn.query(
-      `SELECT cited_pmid AS cited_pmid, COUNT(*) AS n
+      `SELECT cited_pmid AS cited_pmid, COUNT(DISTINCT citing_pmid) AS n
          FROM analysis_nih_cites
         WHERE cited_pmid IN (${citedPmids.map(() => "?").join(",")})
         GROUP BY cited_pmid`,
@@ -134,9 +134,9 @@ async function listsForBatch(
                     PARTITION BY c.cited_pmid
                     ORDER BY a.publicationDateStandardized DESC, a.pmid DESC
                   ) AS rn
-             FROM analysis_nih_cites c
+             FROM (SELECT DISTINCT cited_pmid, citing_pmid FROM analysis_nih_cites
+                    WHERE cited_pmid IN (${citedPmids.map(() => "?").join(",")})) c
              JOIN analysis_summary_article a ON a.pmid = c.citing_pmid
-            WHERE c.cited_pmid IN (${citedPmids.map(() => "?").join(",")})
          ) t
         WHERE t.rn <= ?
         ORDER BY t.cited_pmid, t.rn`,

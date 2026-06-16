@@ -99,13 +99,15 @@ export type PublicationDetailPayload = {
    *  authors), gated + suppression-filtered. Empty when the Methods lens is off
    *  or the paper has no surfaced family; the modal omits the section then. */
   methodFamilies: PublicationDetailMethodFamily[];
-  /** Up to CITING_PUBS_CAP rows from `analysis_nih_cites` joined to
+  /** Up to CITING_PUBS_CAP distinct citers from `analysis_nih_cites` joined to
    *  `analysis_summary_article` (the iCite-derived subset that reciterdb
-   *  also has article metadata for), ordered by date desc. Null when
-   *  reciterdb was unreachable — the modal renders "Citation list
-   *  temporarily unavailable" in that case. */
+   *  also has article metadata for), ordered by date desc. De-duped on the
+   *  citing pmid — `analysis_nih_cites` can hold the same (cited, citing) pair
+   *  twice (#1041). Null when reciterdb was unreachable — the modal renders
+   *  "Citation list temporarily unavailable" in that case. */
   citingPubs: PublicationDetailCitingPub[] | null;
-  /** Total rows in `analysis_nih_cites` for this `cited_pmid`. Typically
+  /** Count of distinct citing pmids in `analysis_nih_cites` for this
+   *  `cited_pmid`. Typically
    *  smaller than `pub.citationCount` because the upstream table is iCite-
    *  derived and Cornell-indexed (NIH-funded citers only, and only those
    *  also present in `analysis_summary_article`). Null when reciterdb was
@@ -221,12 +223,16 @@ async function resolveMethodFamilies(
 function parseBridgedCitingPubs(raw: unknown): PublicationDetailCitingPub[] {
   if (!Array.isArray(raw)) return [];
   const out: PublicationDetailCitingPub[] = [];
+  const seen = new Set<string>();
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const o = item as Record<string, unknown>;
     if (o.pmid === undefined || o.pmid === null) continue;
+    const pmidStr = String(o.pmid);
+    if (seen.has(pmidStr)) continue;
+    seen.add(pmidStr);
     out.push({
-      pmid: String(o.pmid),
+      pmid: pmidStr,
       title: typeof o.title === "string" ? o.title : "",
       journal: typeof o.journal === "string" ? o.journal : null,
       year: typeof o.year === "number" ? o.year : null,
@@ -427,7 +433,7 @@ export async function getPublicationDetail(
     try {
       await withReciterConnection(async (conn) => {
         const totalRow = (await conn.query(
-          "SELECT COUNT(*) AS n FROM analysis_nih_cites WHERE cited_pmid = ?",
+          "SELECT COUNT(DISTINCT citing_pmid) AS n FROM analysis_nih_cites WHERE cited_pmid = ?",
           [pmidInt],
         )) as Array<{ n: number | bigint }>;
         citingPubsTotal = Number(totalRow[0]?.n ?? 0);
@@ -437,9 +443,8 @@ export async function getPublicationDetail(
                   a.articleTitle AS title,
                   a.journalTitleVerbose AS journal,
                   a.articleYear AS year
-             FROM analysis_nih_cites c
+             FROM (SELECT DISTINCT citing_pmid FROM analysis_nih_cites WHERE cited_pmid = ?) c
              JOIN analysis_summary_article a ON a.pmid = c.citing_pmid
-            WHERE c.cited_pmid = ?
             ORDER BY a.publicationDateStandardized DESC, a.pmid DESC
             LIMIT ?`,
           [pmidInt, CITING_PUBS_CAP],
@@ -554,9 +559,8 @@ export async function getCitingPublicationsForCsv(
               a.journalTitleVerbose AS journal,
               a.articleYear AS year,
               a.publicationDateStandardized AS publicationDate
-         FROM analysis_nih_cites c
+         FROM (SELECT DISTINCT citing_pmid FROM analysis_nih_cites WHERE cited_pmid = ?) c
          JOIN analysis_summary_article a ON a.pmid = c.citing_pmid
-        WHERE c.cited_pmid = ?
         ORDER BY a.publicationDateStandardized DESC, a.pmid DESC
         LIMIT ?`,
       [pmidInt, CITING_PUBS_CSV_CAP],

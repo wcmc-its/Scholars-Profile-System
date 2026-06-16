@@ -280,7 +280,7 @@ describe("getPublicationDetail — citing publications", () => {
     mocks.publicationFindUnique.mockResolvedValueOnce(emptyPub());
     const queryMock = vi
       .fn()
-      .mockResolvedValueOnce([{ n: 3 }]) // COUNT(*)
+      .mockResolvedValueOnce([{ n: 3 }]) // COUNT(DISTINCT citing_pmid)
       .mockResolvedValueOnce([
         { pmid: 100, title: "Newest", journal: "J1", year: 2024 },
         { pmid: 200, title: "Older", journal: "J2", year: 2022 },
@@ -303,6 +303,32 @@ describe("getPublicationDetail — citing publications", () => {
       /ORDER BY a\.publicationDateStandardized DESC, a\.pmid DESC/,
     );
     expect(selectCall[1]).toEqual([12345, 500]);
+  });
+
+  it("collapses duplicate (cited, citing) pairs via the DISTINCT-citing subquery (#1041)", async () => {
+    // analysis_nih_cites holds dup (cited_pmid, citing_pmid) pairs; the count
+    // query is COUNT(DISTINCT citing_pmid) and the list query pre-dedupes the
+    // citing pmid in a subquery before the join, so each citer appears once.
+    mocks.publicationFindUnique.mockResolvedValueOnce(emptyPub());
+    const queryMock = vi
+      .fn()
+      .mockResolvedValueOnce([{ n: 2 }]) // distinct count, not the inflated COUNT(*)
+      .mockResolvedValueOnce([
+        { pmid: 100, title: "First", journal: "J1", year: 2024 },
+        { pmid: 200, title: "Second", journal: "J2", year: 2022 },
+      ]);
+    mocks.withReciterConnection.mockImplementationOnce(
+      async (fn: (conn: unknown) => Promise<unknown>) => fn({ query: queryMock }),
+    );
+    const r = await getPublicationDetail("12345");
+    const pmids = r?.citingPubs?.map((p) => p.pmid) ?? [];
+    expect(new Set(pmids).size).toBe(pmids.length); // all unique
+    expect(r?.citingPubsTotal).toBe(2);
+    // Count query dedupes citing_pmid; list query collapses dups pre-join.
+    expect(queryMock.mock.calls[0][0]).toMatch(/COUNT\(DISTINCT citing_pmid\)/);
+    expect(queryMock.mock.calls[1][0]).toMatch(
+      /SELECT DISTINCT citing_pmid FROM analysis_nih_cites WHERE cited_pmid = \?/,
+    );
   });
 
   it("returns empty array + total 0 when reciterdb has no rows", async () => {
@@ -505,6 +531,25 @@ describe("getPublicationDetail — citing bridge (#928)", () => {
       { pmid: "888", title: "Older", journal: null, year: 2024 },
     ]);
     expect(mocks.withReciterConnection).not.toHaveBeenCalled();
+  });
+
+  it("dedupes duplicate citing pmids in the stored bridge JSON (#1041)", async () => {
+    // A bridge row written before the export dedupe fix can carry the same
+    // citing pmid twice; parseBridgedCitingPubs collapses it (first wins).
+    process.env.PUBLICATION_CITING_BRIDGE = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(bridgePub());
+    mocks.publicationCitingFindUnique.mockResolvedValueOnce({
+      total: 2,
+      citingPubs: [
+        { pmid: 999, title: "Newest", journal: "J1", year: 2025 },
+        { pmid: 999, title: "Dup", journal: "J1", year: 2025 },
+        { pmid: 888, title: "Older", journal: null, year: 2024 },
+      ],
+    });
+    const r = await getPublicationDetail("12345");
+    const pmids = r?.citingPubs?.map((p) => p.pmid) ?? [];
+    expect(new Set(pmids).size).toBe(pmids.length); // all unique
+    expect(pmids).toEqual(["999", "888"]); // first occurrence wins, order kept
   });
 
   it("degrades to null/null when the bridge table is empty (un-imported)", async () => {
