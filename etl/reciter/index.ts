@@ -160,6 +160,88 @@ function countAuthors(authorsString: string | null): number {
     .filter((s) => s.length > 0).length;
 }
 
+/**
+ * #1052 — which scholars' authorships flow into PublicationAuthor. The active,
+ * non-deleted set (existing behavior) UNION every doctoral student, including
+ * soft-deleted ones (roleCategory prefix `doctoral_student`). Student author
+ * rows must be ingested so non-linked student co-authors still chip on a
+ * mentor's profile (#1026), and must survive the scoped per-pmid
+ * delete/recreate below.
+ *
+ * The doctoral-student branch deliberately carries NO `status` gate: the
+ * `status` column is corrupt for many students, and gating on it is the #1050
+ * bug. This widening grants author rows ONLY — no profile, search, or facet
+ * presence keys off this set. Genuine takedowns stay enforced downstream:
+ * soft-deleted students remain gated by `deletedAt` + `isPubliclyDisplayed` at
+ * display time (#1050).
+ */
+export const INGESTION_SCHOLAR_WHERE: Prisma.ScholarWhereInput = {
+  OR: [
+    { deletedAt: null, status: "active" },
+    { roleCategory: { startsWith: "doctoral_student" } },
+  ],
+};
+
+export type AuthorshipRow = {
+  pmid: string;
+  cwid: string;
+  position: number;
+  totalAuthors: number;
+  isFirst: boolean;
+  isLast: boolean;
+  isPenultimate: boolean;
+  isConfirmed: boolean;
+};
+
+/**
+ * Build the PublicationAuthor rows from ReciterDB authorship rows, keeping only
+ * authorships whose CWID is in the ingestion set (see INGESTION_SCHOLAR_WHERE).
+ * Pure — no DB access — so the #1052 invariant (a soft-deleted doctoral-student
+ * co-author in `ourCwidSet` still yields an author row) is unit-testable.
+ */
+export function buildAuthorshipRows(
+  authorRows: AuthorRow[],
+  ourCwidSet: Set<string>,
+  rankByPmidCwid: Map<string, number>,
+  totalAuthorsByPmidFromList: Map<number, number>,
+): AuthorshipRow[] {
+  const authorshipRows: AuthorshipRow[] = [];
+
+  for (const r of authorRows) {
+    const cwid = r.personIdentifier;
+    // Skip authorships whose CWID isn't in the ingestion set.
+    if (!ourCwidSet.has(cwid)) continue;
+
+    const flags = classifyPosition(r.authorPosition);
+    // Issue #132 — prefer the per-pmid rank from analysis_summary_author_list
+    // (1..N, matches PubMed author position). Fall back to the categorical
+    // authorPosition in analysis_summary_author when no list row is matched
+    // (very rare; produces middle-author position=0 like the old code path).
+    const totalFromList = totalAuthorsByPmidFromList.get(Number(r.pmid));
+    const total = totalFromList ?? (countAuthors(r.authors) || 1);
+    const rank = rankByPmidCwid.get(`${r.pmid}|${cwid}`);
+    const position = rank
+      ?? (flags.isFirst ? 1 : flags.isLast ? total : flags.isPenultimate ? Math.max(1, total - 1) : 0);
+    const isFirst = rank !== undefined ? rank === 1 : flags.isFirst;
+    const isLast = rank !== undefined ? rank === total : flags.isLast;
+    const isPenultimate =
+      rank !== undefined ? total >= 2 && rank === total - 1 : flags.isPenultimate;
+
+    authorshipRows.push({
+      pmid: String(r.pmid),
+      cwid,
+      position,
+      totalAuthors: total,
+      isFirst,
+      isLast,
+      isPenultimate,
+      isConfirmed: true,
+    });
+  }
+
+  return authorshipRows;
+}
+
 async function main() {
   const start = Date.now();
   const run = await db.write.etlRun.create({
@@ -172,15 +254,16 @@ async function main() {
   await markTopicRebuildStarted();
 
   try {
-    // 1. Active scholar CWIDs from our DB
-    console.log("Loading active CWIDs from local DB...");
+    // 1. Ingestion scholar CWIDs from our DB (active scholars + all doctoral
+    //    students incl. soft-deleted — see INGESTION_SCHOLAR_WHERE / #1052).
+    console.log("Loading ingestion CWIDs from local DB...");
     const ourScholars = await db.write.scholar.findMany({
-      where: { deletedAt: null, status: "active" },
+      where: INGESTION_SCHOLAR_WHERE,
       select: { cwid: true },
     });
     const ourCwidSet = new Set(ourScholars.map((s) => s.cwid));
     const cwidList = Array.from(ourCwidSet);
-    console.log(`Querying ReciterDB for ${cwidList.length} active CWIDs...`);
+    console.log(`Querying ReciterDB for ${cwidList.length} ingestion CWIDs...`);
 
     // 2. Batched fetch of authorship rows for our scholars
     const authorRows: AuthorRow[] = [];
@@ -408,48 +491,12 @@ async function main() {
     //    for the source PMID set, then bulk insert the freshly-computed rows.
     //    PublicationAuthor has no inbound FK references, so the scoped delete
     //    doesn't cascade anywhere.
-    const authorshipRows: Array<{
-      pmid: string;
-      cwid: string;
-      position: number;
-      totalAuthors: number;
-      isFirst: boolean;
-      isLast: boolean;
-      isPenultimate: boolean;
-      isConfirmed: boolean;
-    }> = [];
-
-    for (const r of authorRows) {
-      const cwid = r.personIdentifier;
-      // Skip authorships whose CWID isn't an active scholar in our DB.
-      if (!ourCwidSet.has(cwid)) continue;
-
-      const flags = classifyPosition(r.authorPosition);
-      // Issue #132 — prefer the per-pmid rank from analysis_summary_author_list
-      // (1..N, matches PubMed author position). Fall back to the categorical
-      // authorPosition in analysis_summary_author when no list row is matched
-      // (very rare; produces middle-author position=0 like the old code path).
-      const totalFromList = totalAuthorsByPmidFromList.get(Number(r.pmid));
-      const total = totalFromList ?? (countAuthors(r.authors) || 1);
-      const rank = rankByPmidCwid.get(`${r.pmid}|${cwid}`);
-      const position = rank
-        ?? (flags.isFirst ? 1 : flags.isLast ? total : flags.isPenultimate ? Math.max(1, total - 1) : 0);
-      const isFirst = rank !== undefined ? rank === 1 : flags.isFirst;
-      const isLast = rank !== undefined ? rank === total : flags.isLast;
-      const isPenultimate =
-        rank !== undefined ? total >= 2 && rank === total - 1 : flags.isPenultimate;
-
-      authorshipRows.push({
-        pmid: String(r.pmid),
-        cwid,
-        position,
-        totalAuthors: total,
-        isFirst,
-        isLast,
-        isPenultimate,
-        isConfirmed: true,
-      });
-    }
+    const authorshipRows = buildAuthorshipRows(
+      authorRows,
+      ourCwidSet,
+      rankByPmidCwid,
+      totalAuthorsByPmidFromList,
+    );
 
     console.log(`Clearing prior WCM authorship rows for ${sourcePmids.length} source PMIDs...`);
     for (const batch of chunks(sourcePmids, IN_BATCH)) {
@@ -516,12 +563,18 @@ async function main() {
   }
 }
 
-main()
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await db.write.$disconnect();
-    await closeReciterPool();
-  });
+// Run the ETL only when this file is executed as a script — never when it is
+// imported (a unit test importing `buildAuthorshipRows` / `INGESTION_SCHOLAR_WHERE`
+// must not trigger a full ReciterDB sync inside the vitest worker). Mirrors the
+// guard in `etl/ed/index.ts` and `etl/search-index/index.ts`.
+if (!process.env.VITEST) {
+  main()
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await db.write.$disconnect();
+      await closeReciterPool();
+    });
+}
