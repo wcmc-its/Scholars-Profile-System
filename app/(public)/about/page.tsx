@@ -45,6 +45,7 @@ const NAV: NavGroup[] = [
       { id: "control", label: "What you control" },
       { id: "roles", label: "Roles & who can edit" },
       { id: "topics", label: "Topics & subtopics" },
+      { id: "methods", label: "Methods & tools" },
       { id: "impact", label: "The Impact score" },
       { id: "search", label: "Search" },
       { id: "showcase", label: "Spotlight & Selected research" },
@@ -757,11 +758,29 @@ export default function DocsPage() {
 
         <h2 id="topics">Topics &amp; subtopics</h2>
         <p>
-          Topics and subtopics are not self-selected and not raw MeSH terms. ReciterAI derives them
-          per publication from the title, abstract (where available), MeSH descriptors, and NIH
-          RePORTER terms, mapped against a curated set of parent-topic anchors and organized as a
-          parent-topic to subtopic hierarchy. The pipeline assigns one topic and zero or more
-          subtopics per publication.
+          Topics and subtopics are not self-selected, and they are not raw MeSH terms or a borrowed
+          subject classification. Instead, ReciterAI reads across plain-language summaries of every
+          Weill Cornell publication and lets the major research domains emerge from what is actually
+          there &mdash; areas like Cardiovascular Disease, Immunology, and Cancer Biology. The model
+          consolidates overlapping areas and validates the result against a set of representative
+          queries, so the domains hold together without being hand-built. Within each domain, the
+          same approach surfaces more specific subtopics, organized as a parent-topic to subtopic
+          hierarchy.
+        </p>
+        <p>
+          As an independent check, that map was benchmarked against authoritative institutional
+          reference points &mdash; Weill Cornell&apos;s divisions and departments, its strategic
+          research roadmap, and NIH research designations &mdash; and aligned cleanly with all three,
+          confirming that what the model surfaced from the literature mirrors how the institution and
+          the wider field already organize science.
+        </p>
+        <p>
+          Each publication is then placed on that map. ReciterAI classifies a paper from its title,
+          abstract (where available), MeSH descriptors, and NIH RePORTER terms, assigning one parent
+          topic and zero or more subtopics and scoring how strongly the paper relates to each.
+          Because real research often spans several areas, a single paper can sit under more than one
+          parent topic. The topics shown on a scholar&apos;s profile reflect the balance of their
+          published work across these areas.
         </p>
         <Callout variant="warn" heading="An internal score you never see">
           <p>
@@ -771,13 +790,35 @@ export default function DocsPage() {
           </p>
         </Callout>
         <p>
-          <strong>Freshness.</strong> The taxonomy, the set of topics, recomputes on a
-          longer (roughly annual) cycle, but your publications are classified into the current
-          taxonomy as they are ingested on the nightly pipeline, so an individual paper does not wait
-          a year to receive topics. A topic can shift when the taxonomy is rebuilt; that is expected.
-          A publication with no abstract is classified from title, MeSH, and RePORTER terms, and a
-          cross-cutting paper can sit under more than one parent topic. A genuinely wrong topic is a
-          ReciterAI matter; report a systematic error.
+          <strong>Freshness.</strong> The taxonomy &mdash; the set of topics itself &mdash;
+          recomputes on a longer (roughly annual) cycle, but your publications are classified into
+          the current taxonomy as they are ingested on the nightly pipeline, so an individual paper
+          does not wait a year to receive topics, and your profile updates automatically as new work
+          is added. A topic can shift when the taxonomy is rebuilt; that is expected. A publication
+          with no abstract is classified from title, MeSH, and RePORTER terms. A genuinely wrong
+          topic is a ReciterAI matter; report a systematic error.
+        </p>
+
+        <h2 id="methods">Methods &amp; tools</h2>
+        <p>
+          Methods and tools describe <em>how</em> a scholar does their research &mdash; the
+          techniques, instruments, datasets, models, and software behind the work &mdash; and they
+          are read directly from the publications themselves. ReciterAI scans the abstracts of each
+          Weill Cornell scholar&apos;s papers and grants and identifies the specific methods and
+          resources actually used, deliberately skipping the commodity lab staples that don&apos;t
+          distinguish one group from another.
+        </p>
+        <p>
+          Closely related mentions are merged &mdash; &ldquo;MRI,&rdquo; &ldquo;magnetic resonance
+          imaging,&rdquo; and &ldquo;MRI scanner&rdquo; become a single entry &mdash; and grouped
+          into broader capability families, so a profile reads at the right level rather than as a
+          list of synonyms. Each method is weighted by how distinctive it is across the institution:
+          a technique only a handful of labs use ranks higher than one everyone shares.
+        </p>
+        <p>
+          Because this is drawn from a scholar&apos;s own publications, it reflects demonstrated,
+          hands-on use rather than self-reported interests, and it refreshes automatically as new
+          work is published.
         </p>
 
         <h2 id="impact">The Impact score</h2>
