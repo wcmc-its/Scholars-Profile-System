@@ -46,7 +46,9 @@ import {
   resolveByNameFallback,
   resolveByPiNameQuery,
   resolveProjectGrantJoin,
+  selectNihScholarPool,
   type GrantRowForResolution,
+  type PoolGrantRow,
   type ResolvedObservation,
 } from "./resolver";
 
@@ -93,14 +95,18 @@ async function loadGrantsByCoreProjectNum(): Promise<Map<string, GrantRowForReso
 }
 
 /** Pool of scholars with at least one NIH grant — used for the
- *  global name-match fallback. */
+ *  global name-match fallback. Fetches every (non-null-awardNumber)
+ *  grant row for active scholars and includes a scholar when ANY of
+ *  their grants parses as an NIH award. Must NOT `distinct` to one
+ *  arbitrary row per cwid first: a scholar whose representative row is
+ *  non-NIH (e.g. a PCORI award) but who also holds NIH grants would be
+ *  wrongly dropped. `selectNihScholarPool` does the per-cwid dedup after
+ *  the NIH parse check. */
 async function loadNihScholarPool(): Promise<GrantRowForResolution[]> {
   const rows = await db.write.grant.findMany({
     where: {
       awardNumber: { not: null },
       scholar: { deletedAt: null, status: "active" },
-      // NIH-only filter: the awardNumber parses to a coreProjectNum.
-      // Cheap pre-filter; we re-check with coreProjectNum() below.
     },
     select: {
       cwid: true,
@@ -108,17 +114,14 @@ async function loadNihScholarPool(): Promise<GrantRowForResolution[]> {
       awardNumber: true,
       scholar: { select: { fullName: true } },
     },
-    distinct: ["cwid"],
   });
-  const out: GrantRowForResolution[] = [];
-  const seen = new Set<string>();
-  for (const r of rows) {
-    if (!coreProjectNum(r.awardNumber)) continue;
-    if (seen.has(r.cwid)) continue;
-    seen.add(r.cwid);
-    out.push({ cwid: r.cwid, role: r.role, fullName: r.scholar.fullName });
-  }
-  return out;
+  const poolRows: PoolGrantRow[] = rows.map((r) => ({
+    cwid: r.cwid,
+    role: r.role,
+    awardNumber: r.awardNumber,
+    fullName: r.scholar.fullName,
+  }));
+  return selectNihScholarPool(poolRows);
 }
 
 async function main() {

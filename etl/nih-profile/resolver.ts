@@ -27,6 +27,7 @@
  * the curator review queue can surface low-confidence matches without
  * re-running the resolver.
  */
+import { coreProjectNum } from "@/lib/award-number";
 import type { ReporterPI, ReporterProject } from "./fetcher";
 
 export type ResolutionSource =
@@ -186,6 +187,26 @@ export function resolveProjectGrantJoin(
   }
 
   return { observations, unresolved };
+}
+
+/** A scholar's grant row as it comes off the DB query feeding the NIH
+ *  pool builder: cwid, role, the raw awardNumber, and the scholar's
+ *  fullName. `selectNihScholarPool` collapses these to the
+ *  `GrantRowForResolution` shape the resolver consumes. */
+export type PoolGrantRow = { cwid: string; role: string; awardNumber: string | null; fullName: string };
+
+/** Build the NIH-grant scholar pool: include a scholar when ANY of their
+ *  grants parses as an NIH award (coreProjectNum != null), keeping the
+ *  first such grant row per cwid. Replaces a buggy distinct-then-filter
+ *  that dropped scholars whose arbitrary representative grant was non-NIH. */
+export function selectNihScholarPool(rows: PoolGrantRow[]): GrantRowForResolution[] {
+  const byCwid = new Map<string, GrantRowForResolution>();
+  for (const r of rows) {
+    if (!coreProjectNum(r.awardNumber)) continue;
+    if (byCwid.has(r.cwid)) continue;
+    byCwid.set(r.cwid, { cwid: r.cwid, role: r.role, fullName: r.fullName });
+  }
+  return Array.from(byCwid.values());
 }
 
 /** Name-match an unresolved PI against the broader pool of scholars

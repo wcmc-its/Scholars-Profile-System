@@ -5,7 +5,9 @@ import {
   resolveByNameFallback,
   resolveByPiNameQuery,
   resolveProjectGrantJoin,
+  selectNihScholarPool,
   type GrantRowForResolution,
+  type PoolGrantRow,
   type ResolvedObservation,
 } from "@/etl/nih-profile/resolver";
 import type { ReporterPI, ReporterProject } from "@/etl/nih-profile/fetcher";
@@ -266,6 +268,66 @@ describe("aggregatePreferred", () => {
         resolutionSource: "grant_join_contact",
       },
     ]);
+  });
+});
+
+describe("selectNihScholarPool", () => {
+  function poolRow(opts: Partial<PoolGrantRow> & { cwid: string }): PoolGrantRow {
+    return {
+      cwid: opts.cwid,
+      role: opts.role ?? "PI",
+      awardNumber: opts.awardNumber ?? null,
+      fullName: opts.fullName ?? "Unnamed Scholar",
+    };
+  }
+
+  it("includes a scholar whose first row is non-NIH but a later row is NIH (the bug)", () => {
+    // rak2007-style: representative row is a non-NIH (PCORI/PCRF) award, but a
+    // subsequent row is a genuine NIH grant. The old distinct-then-filter
+    // collapsed to the first row, saw a non-NIH awardNumber, and dropped them.
+    const rows: PoolGrantRow[] = [
+      poolRow({ cwid: "rak2007", awardNumber: "PCRF 182710-01", role: "PI", fullName: "Rainu Kaushal" }),
+      poolRow({ cwid: "rak2007", awardNumber: "5 R03 AG046671-02", role: "Co-I", fullName: "Rainu Kaushal" }),
+    ];
+    const out = selectNihScholarPool(rows);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.cwid).toBe("rak2007");
+  });
+
+  it("excludes a scholar with only non-NIH grants", () => {
+    const rows: PoolGrantRow[] = [
+      poolRow({ cwid: "noi1001", awardNumber: "HSD-1604-35187", fullName: "Non Nih" }),
+      poolRow({ cwid: "noi1001", awardNumber: "PCRF 182710-01", fullName: "Non Nih" }),
+    ];
+    expect(selectNihScholarPool(rows)).toHaveLength(0);
+  });
+
+  it("dedupes a scholar with multiple NIH grants to exactly one pool row", () => {
+    const rows: PoolGrantRow[] = [
+      poolRow({ cwid: "abc1001", awardNumber: "5 R01 CA123456-03", fullName: "Alice Aaron" }),
+      poolRow({ cwid: "abc1001", awardNumber: "1 U01 HL654321-01", fullName: "Alice Aaron" }),
+      poolRow({ cwid: "abc1001", awardNumber: "2 P30 AG012345-26", fullName: "Alice Aaron" }),
+    ];
+    const out = selectNihScholarPool(rows);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.cwid).toBe("abc1001");
+  });
+
+  it("returns fullName and role from the first NIH-parsing row", () => {
+    // The leading non-NIH row's role/name must be ignored; the kept row is the
+    // first one that actually parses as NIH.
+    const rows: PoolGrantRow[] = [
+      poolRow({ cwid: "rak2007", awardNumber: "PCRF 182710-01", role: "PI", fullName: "Wrong Name" }),
+      poolRow({ cwid: "rak2007", awardNumber: "5 R03 AG046671-02", role: "Co-I", fullName: "Rainu Kaushal" }),
+      poolRow({ cwid: "rak2007", awardNumber: "1 R01 HL999999-01", role: "PI", fullName: "Rainu Kaushal" }),
+    ];
+    const out = selectNihScholarPool(rows);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toEqual<GrantRowForResolution>({
+      cwid: "rak2007",
+      role: "Co-I",
+      fullName: "Rainu Kaushal",
+    });
   });
 });
 
