@@ -1,23 +1,24 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { resolveSearchResultEvidence } from "@/lib/api/search-flags";
-import { loadMethodExemplar } from "@/lib/api/method-exemplar";
+import { loadMethodExemplar, loadTopicExemplar } from "@/lib/api/method-exemplar";
 
 /**
  * GET /api/scholar/[cwid]/method-exemplar?family=<familyLabel>
+ * GET /api/scholar/[cwid]/method-exemplar?topic=<parentTopicSlug>
  *
- * Lazy, on-hover resolve of the ONE representative paper for a scholar's matched
- * method FAMILY — the Variant-2 method-badge hover (`docs/search-snippet-
- * handoff.md` §7). Kept off the search-results derive so the cacheable results
- * page isn't tainted and the per-row pub lookups only run when a row is actually
- * hovered/focused.
+ * Lazy, on-hover resolve of the ONE representative paper for a search-result row
+ * — `?family=` for a method-badge match, `?topic=` for a topic-badge match (the
+ * §7 "one function, three callers"). The path keeps its historical `method-`
+ * name because its CloudFront behavior already forwards the FULL query string
+ * (AllViewer), so `?topic=` is served with NO edge change. Kept off the
+ * search-results derive so the cacheable page isn't tainted and the per-row pub
+ * lookups only run when a row is actually hovered/focused.
  *
  * - Gated behind `SEARCH_RESULT_EVIDENCE` (the snippet flag): off ⇒ `{ pub: null }`
  *   so prod (flag-off) is inert and the route can't be probed for data early.
- * - Public surface: the #800/#801 overlay gate runs INSIDE `loadMethodExemplar`
- *   (forceSensitive, identical to the badge), so a suppressed/sensitive family
- *   yields null even when requested directly. Never cached; default-safe null on
- *   any error (a hover must never surface a 500).
+ * - Public surface: the scholar / family / publication gates run INSIDE the
+ *   loaders. Never cached; default-safe null on any error (a hover must never 500).
  */
 export const dynamic = "force-dynamic";
 
@@ -32,13 +33,17 @@ export async function GET(
   }
 
   const { cwid } = await params;
-  const family = request.nextUrl.searchParams.get("family")?.trim();
-  if (!family) {
-    return NextResponse.json({ pub: null }, { headers: NO_STORE });
-  }
+  const sp = request.nextUrl.searchParams;
+  const family = sp.get("family")?.trim();
+  const topic = sp.get("topic")?.trim();
 
   try {
-    const pub = await loadMethodExemplar(cwid, family);
+    let pub = null;
+    if (family) {
+      pub = await loadMethodExemplar(cwid, family);
+    } else if (topic) {
+      pub = await loadTopicExemplar(cwid, topic);
+    }
     return NextResponse.json({ pub }, { headers: NO_STORE });
   } catch {
     return NextResponse.json({ pub: null }, { headers: NO_STORE });

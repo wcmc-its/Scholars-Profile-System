@@ -26,7 +26,7 @@ describe("selectEvidence — precedence (handoff §4 principle 2)", () => {
     const ev = selectEvidence({
       nameHighlight: NAME_WITH_ORG_HL,
       method: { family: "Flow cytometry", tools: ["FACS"] },
-      topic: { label: "Immunology" },
+      topic: { label: "Immunology", id: "immunology" },
       pub: { tagged: { text: "5 of 9 publications tagged X" } },
       bioHighlight: BIO_HL,
       areas: { labels: ["A"], total: 1 },
@@ -37,7 +37,7 @@ describe("selectEvidence — precedence (handoff §4 principle 2)", () => {
   it("method (rank 2) beats topic and pub:tagged", () => {
     const ev = selectEvidence({
       method: { family: "Single-cell RNA sequencing", tools: ["scRNA-seq"] },
-      topic: { label: "Immunology" },
+      topic: { label: "Immunology", id: "immunology" },
       pub: { tagged: { text: "5 of 9 publications tagged X" } },
     });
     expect(ev).toEqual({ kind: "method", family: "Single-cell RNA sequencing", tools: ["scRNA-seq"] });
@@ -45,11 +45,15 @@ describe("selectEvidence — precedence (handoff §4 principle 2)", () => {
 
   it("topic (rank 3) beats pub:tagged and bio", () => {
     const ev = selectEvidence({
-      topic: { label: "Single-cell & spatial biology" },
+      topic: { label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" },
       pub: { tagged: { text: "5 of 9 publications tagged X" } },
       bioHighlight: BIO_HL,
     });
-    expect(ev).toEqual({ kind: "topic", label: "Single-cell & spatial biology" });
+    expect(ev).toEqual({
+      kind: "topic",
+      label: "Single-cell & spatial biology",
+      id: "single_cell_spatial_biology",
+    });
   });
 
   it("pub:tagged (rank 4) beats bio (rank 5) — strong subject tag above a sentence", () => {

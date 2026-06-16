@@ -46,8 +46,10 @@ export type ResultEvidence =
   | { kind: "name"; html: string }
   /** Matched method family + ≤3 cleaned exemplar tools (#824 §4c derive). */
   | { kind: "method"; family: string; tools: string[] }
-  /** Matched curated research-area parent topic (v1 keeps the parent label). */
-  | { kind: "topic"; label: string }
+  /** Matched curated research-area parent topic (v1 keeps the parent label).
+   *  `id` is the topic SLUG (= `Topic.id` = `PublicationTopic.parentTopicId`) so
+   *  the hover can resolve the scholar's representative paper in this topic. */
+  | { kind: "topic"; label: string; id: string }
   /** Publication-count evidence. `strength` ranks it: `tagged` (subject tag,
    *  strong) above bio; `mention` (free-text, weak) below bio; `concept` is the
    *  MeSH-expansion text variant (handoff Case F — folded in, no own kind). */
@@ -287,8 +289,9 @@ export type SelectEvidenceInput = {
   bioHighlight?: string;
   /** Resolved method-family reason (overlay-gated), tools already refined. */
   method?: { family: string; tools: string[] };
-  /** Resolved matched parent-topic label. */
-  topic?: { label: string };
+  /** Resolved matched parent topic — `label` for display, `id` (slug) for the
+   *  representative-paper hover. */
+  topic?: { label: string; id: string };
   /** Pre-formatted publication-evidence parts (counts already capped, text
    *  already built; any one may be absent). */
   pub?: {
@@ -314,7 +317,7 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
   // 2 — method
   if (input.method) return { kind: "method", family: input.method.family, tools: input.method.tools };
   // 3 — topic
-  if (input.topic) return { kind: "topic", label: input.topic.label };
+  if (input.topic) return { kind: "topic", label: input.topic.label, id: input.topic.id };
   // 4 — publications, strong tier (above bio): tagged subject match, then the
   // `concept` MeSH-expansion text variant — both fold into the tagged tier per
   // the handoff precedence (`publications:tagged (+concept text variant)`), and

@@ -64,9 +64,9 @@ export function MatchAwareReason({
   kind: "method" | "topic";
   label: string;
   tools?: string[];
-  /** #967 §7 — when true (method only), trail a muted ▾ cueing that hovering /
-   *  focusing the row reveals the family's representative paper (the
-   *  `MethodExemplarLine` below). Purely decorative; the reveal is driven by the
+  /** #967 §7 — when true (method or topic), trail a muted ▾ cueing that hovering
+   *  / focusing the row reveals the representative paper (the `MethodExemplarLine`
+   *  below). Purely decorative; the reveal is driven by the
    *  card's `group` hover/focus, not by clicking this glyph (it can't be an
    *  interactive element — the whole card is one `<Link>`). */
   expandable?: boolean;

@@ -1,19 +1,21 @@
 /**
- * Loader for the method-badge hover exemplar (Variant 2 — `docs/search-snippet-
- * handoff.md` §7). Resolves the ONE representative paper for a scholar's matched
- * method FAMILY at request time, from Aurora only (no DynamoDB, no reindex):
+ * Loaders for the search-result "representative paper" hover (Variant 2 —
+ * `docs/search-snippet-handoff.md` §7, "one function, three callers"). Given a
+ * scholar's matched evidence, resolve the ONE most-representative paper at
+ * request time, from Aurora only (no DynamoDB, no reindex):
  *
- *   1. Public-surface overlay gate — the SAME #800/#801 gate the search method
- *      badge applies (`loadFamilyOverlayGate({ forceSensitive: true })`), so a
- *      suppressed/#801-sensitive family yields null even if hit directly.
- *   2. `scholar_family.pmids` → the candidate PMID set (the distinct member pubs
- *      that put this scholar in this family; 100% populated, `len == pmid_count`).
- *   3. Publication metadata + this scholar's author position → ranked by the pure
- *      {@link rankMethodExemplar} key, top 1.
+ *   - {@link loadMethodExemplar} — for a `method` badge: candidate pmids are the
+ *     matched method FAMILY's members (`scholar_family.pmids`), behind the
+ *     #800/#801 overlay gate (identical to the badge).
+ *   - {@link loadTopicExemplar} — for a `topic` badge: candidate pmids are the
+ *     scholar's pubs in the matched parent topic (`publication_topic`).
  *
- * Kept OUT of `searchPeople` (the cacheable results derive) on purpose: this is a
- * lazy, on-hover fetch (one route call per hovered row), so the up-to-N pub
- * lookups never run for the whole result set. Server-only.
+ * Both share {@link rankExemplarForPmids}: the SCHOLAR gate, the ADR-005
+ * publication-suppression gate, the author-position read, and the pure
+ * {@link rankMethodExemplar} key. Kept OUT of `searchPeople` (the cacheable
+ * results derive) on purpose — this is a lazy, on-hover fetch (one route call per
+ * hovered row), so the up-to-N pub lookups never run for the whole result set.
+ * Server-only.
  */
 import "server-only";
 
@@ -27,10 +29,8 @@ import {
 } from "@/lib/api/manual-layer";
 import { rankMethodExemplar, type ExemplarCandidate } from "@/lib/api/method-exemplar-rank";
 
-/** Pure OVERFLOW guard on the candidate set — NOT a ranked top-N. It truncates
- *  the pmid set in raw `scholar_family.pmids` (export) order, so a family that
- *  ever exceeds this could drop the true best before ranking; set well above any
- *  real family size (staging max ≪ this) so it only ever caps a pathological row. */
+/** Pure OVERFLOW guard on the candidate set — NOT a ranked top-N. Set well above
+ *  any real family / per-topic pub count so it only ever caps a pathological row. */
 const MAX_CANDIDATES = 2000;
 
 /** `scholar_family.pmids` is a JSON array of pmid strings; coerce + keep only
@@ -43,6 +43,71 @@ function toPmidArray(json: unknown): string[] {
     if (/^\d+$/.test(s)) out.push(s);
   }
   return out;
+}
+
+/**
+ * Shared tail of both loaders: from a candidate pmid set for `cwid`, drop
+ * suppressed pubs (ADR-005), rank the rest by the §7 key, and return the winner.
+ *
+ * PUBLICATION gate — the same gate every other member-scoped pub surface applies
+ * (centers/divisions/dept-highlights and the per-profile lens, lib/api/profile.ts):
+ * the candidate pmids come from a full-replacement ETL load independent of the
+ * suppression overlays, so a sitewide-taken-down pmid, a derived-dark pmid, or one
+ * THIS scholar hid via /edit can still be present — drop them before ranking.
+ */
+async function rankExemplarForPmids(
+  cwid: string,
+  pmids: string[],
+): Promise<EvidencePub | null> {
+  if (pmids.length === 0) return null;
+
+  const suppressions = await loadPublicationSuppressions(pmids, prisma);
+  const dark = await resolveDarkPmids(pmids, suppressions, prisma);
+  const safePmids = pmids.filter(
+    (p) => !dark.has(p) && !isAuthorHidden(suppressions, p, cwid),
+  );
+  if (safePmids.length === 0) return null;
+
+  // Metadata + this scholar's authorship position (the first/senior signal is NOT
+  // attributable per-candidate in the search index — handoff §7 G3 — so read it
+  // from `publication_author`). `isConfirmed: true` so a rejected/unconfirmed
+  // attribution can't grant a false ownership boost (matches publication-detail).
+  const [pubs, authorRows] = await Promise.all([
+    prisma.publication.findMany({
+      where: { pmid: { in: safePmids } },
+      select: {
+        pmid: true,
+        title: true,
+        year: true,
+        publicationType: true,
+        impactScore: true,
+        citationCount: true,
+      },
+    }),
+    prisma.publicationAuthor.findMany({
+      where: { cwid, pmid: { in: safePmids }, isConfirmed: true },
+      select: { pmid: true, isFirst: true, isLast: true, totalAuthors: true },
+    }),
+  ]);
+
+  // Ownership = first OR senior (last), with sole-authorship counting as both —
+  // mirrors the index's `wcmAuthorPositions` derivation (lib/search-index-docs).
+  const ownership = new Set<string>();
+  for (const a of authorRows) {
+    if (a.isFirst || a.isLast || a.totalAuthors === 1) ownership.add(a.pmid);
+  }
+
+  const candidates: ExemplarCandidate[] = pubs.map((p) => ({
+    pmid: p.pmid,
+    title: p.title,
+    year: p.year ?? null,
+    publicationType: p.publicationType ?? null,
+    impactScore: p.impactScore != null ? Number(p.impactScore) : null,
+    citationCount: p.citationCount ?? 0,
+    isFirstOrSenior: ownership.has(p.pmid),
+  }));
+
+  return rankMethodExemplar(candidates, new Date().getFullYear());
 }
 
 /**
@@ -92,60 +157,41 @@ export async function loadMethodExemplar(
     }
     if (pmidSet.size >= MAX_CANDIDATES) break;
   }
-  const pmids = Array.from(pmidSet);
-  if (pmids.length === 0) return null;
 
-  // (3) PUBLICATION gate — ADR-005 manual layer, the same gate every other
-  // member-scoped pub surface applies (centers/divisions/dept-highlights and the
-  // per-profile methods lens, lib/api/profile.ts). `scholar_family.pmids` is a
-  // full-replacement ETL load independent of the suppression overlays, so a
-  // sitewide-taken-down pmid, a derived-dark pmid, or one THIS scholar hid via
-  // /edit can still sit in it — drop them before they can be the exemplar.
-  const suppressions = await loadPublicationSuppressions(pmids, prisma);
-  const dark = await resolveDarkPmids(pmids, suppressions, prisma);
-  const safePmids = pmids.filter(
-    (p) => !dark.has(p) && !isAuthorHidden(suppressions, p, id),
-  );
-  if (safePmids.length === 0) return null;
+  return rankExemplarForPmids(id, Array.from(pmidSet));
+}
 
-  // (4) Metadata + this scholar's authorship position (the first/senior signal is
-  // NOT attributable per-candidate in the search index — handoff §7 G3 — so read
-  // it from `publication_author`). `isConfirmed: true` so a rejected/unconfirmed
-  // attribution can't grant a false ownership boost (matches publication-detail).
-  const [pubs, authorRows] = await Promise.all([
-    prisma.publication.findMany({
-      where: { pmid: { in: safePmids } },
-      select: {
-        pmid: true,
-        title: true,
-        year: true,
-        publicationType: true,
-        impactScore: true,
-        citationCount: true,
-      },
-    }),
-    prisma.publicationAuthor.findMany({
-      where: { cwid: id, pmid: { in: safePmids }, isConfirmed: true },
-      select: { pmid: true, isFirst: true, isLast: true, totalAuthors: true },
-    }),
-  ]);
+/**
+ * The representative paper for `(cwid, parentTopicId)`, or null when the scholar
+ * is not publicly visible, has no pubs in the topic, or nothing renderable
+ * survives. `parentTopicId` is the topic SLUG the topic badge carries (`Topic.id`
+ * = `PublicationTopic.parentTopicId`). Topics carry no #800/#801 overlay (those
+ * gate method families only); the SCHOLAR gate + the publication-suppression gate
+ * inside {@link rankExemplarForPmids} still apply.
+ */
+export async function loadTopicExemplar(
+  cwid: string,
+  parentTopicId: string,
+): Promise<EvidencePub | null> {
+  const id = cwid.trim();
+  const topicId = parentTopicId.trim();
+  if (!id || !topicId) return null;
 
-  // Ownership = first OR senior (last), with sole-authorship counting as both —
-  // mirrors the index's `wcmAuthorPositions` derivation (lib/search-index-docs).
-  const ownership = new Set<string>();
-  for (const a of authorRows) {
-    if (a.isFirst || a.isLast || a.totalAuthors === 1) ownership.add(a.pmid);
-  }
+  // Candidate pmids = the scholar's pubs in this parent topic (ReciterAI-
+  // attributed; `publication_topic` has no confirm/reject flag), behind the same
+  // active/non-deleted SCHOLAR gate. Ordered by the ReciterAI parent-topic score
+  // so that, if a prolific scholar exceeds the cap, the most topic-relevant pubs
+  // are the ones ranked (not an arbitrary truncation).
+  const rows = await prisma.publicationTopic.findMany({
+    where: {
+      cwid: id,
+      parentTopicId: topicId,
+      scholar: { deletedAt: null, status: "active" },
+    },
+    select: { pmid: true },
+    orderBy: { score: "desc" },
+    take: MAX_CANDIDATES,
+  });
 
-  const candidates: ExemplarCandidate[] = pubs.map((p) => ({
-    pmid: p.pmid,
-    title: p.title,
-    year: p.year ?? null,
-    publicationType: p.publicationType ?? null,
-    impactScore: p.impactScore != null ? Number(p.impactScore) : null,
-    citationCount: p.citationCount ?? 0,
-    isFirstOrSenior: ownership.has(p.pmid),
-  }));
-
-  return rankMethodExemplar(candidates, new Date().getFullYear());
+  return rankExemplarForPmids(id, rows.map((r) => r.pmid));
 }

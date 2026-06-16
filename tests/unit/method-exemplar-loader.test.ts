@@ -14,11 +14,13 @@ vi.mock("server-only", () => ({}));
 const scholarFamilyFindMany = vi.fn();
 const publicationFindMany = vi.fn();
 const publicationAuthorFindMany = vi.fn();
+const publicationTopicFindMany = vi.fn();
 vi.mock("@/lib/db", () => ({
   prisma: {
     scholarFamily: { findMany: (...a: unknown[]) => scholarFamilyFindMany(...a) },
     publication: { findMany: (...a: unknown[]) => publicationFindMany(...a) },
     publicationAuthor: { findMany: (...a: unknown[]) => publicationAuthorFindMany(...a) },
+    publicationTopic: { findMany: (...a: unknown[]) => publicationTopicFindMany(...a) },
   },
 }));
 
@@ -37,7 +39,7 @@ vi.mock("@/lib/api/manual-layer", () => ({
   isAuthorHidden: (...a: unknown[]) => isAuthorHidden(...a),
 }));
 
-import { loadMethodExemplar } from "@/lib/api/method-exemplar";
+import { loadMethodExemplar, loadTopicExemplar } from "@/lib/api/method-exemplar";
 
 const pub = (over: Record<string, unknown>) => ({
   title: "Paper",
@@ -55,6 +57,7 @@ beforeEach(() => {
   resolveDarkPmids.mockResolvedValue(new Set());
   isAuthorHidden.mockReturnValue(false);
   publicationAuthorFindMany.mockResolvedValue([]);
+  publicationTopicFindMany.mockResolvedValue([]);
 });
 
 describe("loadMethodExemplar — gating", () => {
@@ -120,5 +123,44 @@ describe("loadMethodExemplar — gating", () => {
     expect(await loadMethodExemplar("abc", "   ")).toBeNull();
     expect(await loadMethodExemplar("", "F")).toBeNull();
     expect(scholarFamilyFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("loadTopicExemplar — gating", () => {
+  it("queries the scholar's pubs in the parent topic, active+non-deleted only", async () => {
+    publicationTopicFindMany.mockResolvedValue([{ pmid: "1" }, { pmid: "2" }]);
+    publicationFindMany.mockResolvedValue([pub({ pmid: "1", title: "Best topic paper", impactScore: 80 })]);
+
+    const r = await loadTopicExemplar("abc", "single_cell_spatial_biology");
+    expect(r?.pmid).toBe("1");
+    const where = publicationTopicFindMany.mock.calls[0][0].where;
+    expect(where).toMatchObject({
+      cwid: "abc",
+      parentTopicId: "single_cell_spatial_biology",
+      scholar: { deletedAt: null, status: "active" },
+    });
+  });
+
+  it("applies the same publication-suppression gate before ranking", async () => {
+    publicationTopicFindMany.mockResolvedValue([{ pmid: "1" }, { pmid: "2" }, { pmid: "3" }]);
+    resolveDarkPmids.mockResolvedValue(new Set(["2"]));
+    isAuthorHidden.mockImplementation((_s: unknown, pmid: string) => pmid === "3");
+    publicationFindMany.mockResolvedValue([pub({ pmid: "1", title: "Safe" })]);
+
+    const r = await loadTopicExemplar("abc", "t1");
+    expect(r?.pmid).toBe("1");
+    expect(publicationFindMany.mock.calls[0][0].where.pmid.in).toEqual(["1"]);
+  });
+
+  it("returns null when the scholar has no pubs in the topic", async () => {
+    publicationTopicFindMany.mockResolvedValue([]); // hidden scholar or no membership
+    expect(await loadTopicExemplar("abc", "t1")).toBeNull();
+    expect(publicationFindMany).not.toHaveBeenCalled();
+  });
+
+  it("returns null for a blank topic or cwid without touching the DB", async () => {
+    expect(await loadTopicExemplar("abc", "  ")).toBeNull();
+    expect(await loadTopicExemplar("", "t1")).toBeNull();
+    expect(publicationTopicFindMany).not.toHaveBeenCalled();
   });
 });

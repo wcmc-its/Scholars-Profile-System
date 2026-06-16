@@ -50,13 +50,14 @@ function AreasHint({ labels, total }: { labels: string[]; total: number }) {
 
 export function ResultEvidence({
   evidence,
-  methodExpandable = false,
+  exemplarExpandable = false,
 }: {
   evidence: ResultEvidence;
-  /** #967 §7 — when true and the evidence is a method match, cue the method-
-   *  exemplar hover with a ▾ on the badge. The card sets this and renders the
-   *  matching `MethodExemplarLine` reveal; off ⇒ Phase-1 render is unchanged. */
-  methodExpandable?: boolean;
+  /** #967 §7 — when true and the evidence is a method OR topic match, cue the
+   *  representative-paper hover with a ▾ on the badge. The card sets this and
+   *  renders the matching `MethodExemplarLine` reveal; off ⇒ Phase-1 render is
+   *  unchanged. */
+  exemplarExpandable?: boolean;
 }) {
   switch (evidence.kind) {
     case "method":
@@ -65,11 +66,13 @@ export function ResultEvidence({
           kind="method"
           label={evidence.family}
           tools={evidence.tools}
-          expandable={methodExpandable}
+          expandable={exemplarExpandable}
         />
       );
     case "topic":
-      return <MatchAwareReason kind="topic" label={evidence.label} />;
+      return (
+        <MatchAwareReason kind="topic" label={evidence.label} expandable={exemplarExpandable} />
+      );
     case "publications":
       // Count-only (handoff Case C "C1 default" — the count IS the evidence; the
       // representative pub is a future hover, not always-on). Concept is the

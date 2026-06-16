@@ -109,28 +109,31 @@ export function PeopleResultCard({
     );
   }
 
-  // #967 §7 (Variant 2) — the method-badge hover exemplar. Only the ResultEvidence
-  // `method` kind has a representative paper to reveal; resolve it lazily so the
-  // cacheable results derive stays untouched and the lookup runs only for a row
-  // the viewer actually hovers/focuses.
-  const methodFamily =
-    hit.evidence?.kind === "method" ? hit.evidence.family : null;
+  // #967 §7 — the representative-paper hover. Both the `method` and `topic`
+  // evidence kinds have a paper to reveal; resolve it lazily so the cacheable
+  // results derive stays untouched and the lookup runs only for a row the viewer
+  // actually hovers/focuses. The query string selects which loader the (shared)
+  // route uses: `?family=` for method, `?topic=` for topic.
+  const exemplarQuery =
+    hit.evidence?.kind === "method"
+      ? `family=${encodeURIComponent(hit.evidence.family)}`
+      : hit.evidence?.kind === "topic"
+        ? `topic=${encodeURIComponent(hit.evidence.id)}`
+        : null;
   const [exemplar, setExemplar] = useState<EvidencePub | null>(null);
   const [exemplarStatus, setExemplarStatus] = useState<ExemplarFetchStatus>("idle");
   const exemplarFetched = useRef(false);
 
   const ensureExemplar = useCallback(() => {
-    if (!methodFamily || exemplarFetched.current) return;
+    if (!exemplarQuery || exemplarFetched.current) return;
     exemplarFetched.current = true;
     setExemplarStatus("loading");
-    fetch(
-      `/api/scholar/${encodeURIComponent(hit.cwid)}/method-exemplar?family=${encodeURIComponent(methodFamily)}`,
-    )
+    fetch(`/api/scholar/${encodeURIComponent(hit.cwid)}/method-exemplar?${exemplarQuery}`)
       .then((r) => (r.ok ? r.json() : { pub: null }))
       .then((d: { pub: EvidencePub | null }) => setExemplar(d?.pub ?? null))
       .catch(() => setExemplar(null))
       .finally(() => setExemplarStatus("done"));
-  }, [hit.cwid, methodFamily]);
+  }, [hit.cwid, exemplarQuery]);
 
   const deptLine = hit.divisionName
     ? `${hit.divisionName} · Department of ${hit.deptName ?? hit.primaryDepartment ?? ""}`.trim()
@@ -148,16 +151,16 @@ export function PeopleResultCard({
   // (`SEARCH_RESULT_EVIDENCE` on), the server already selected the ONE "why"
   // via one precedence function, so render it through one component and IGNORE
   // the legacy priority chain below. Absent ⇒ fall through to today's chain.
-  // Show the ▾ disclosure cue for a method row UNTIL the lazy fetch tells us
-  // there is no qualifying paper — then drop it so it never promises a reveal
+  // Show the ▾ disclosure cue for a method/topic row UNTIL the lazy fetch tells
+  // us there is no qualifying paper — then drop it so it never promises a reveal
   // that won't appear (no dead affordance).
-  const methodExpandable =
-    !!methodFamily && !(exemplarStatus === "done" && !exemplar);
+  const exemplarExpandable =
+    !!exemplarQuery && !(exemplarStatus === "done" && !exemplar);
 
   let snippetLine: ReactNode = null;
   if (hit.evidence) {
     snippetLine = (
-      <ResultEvidence evidence={hit.evidence} methodExpandable={methodExpandable} />
+      <ResultEvidence evidence={hit.evidence} exemplarExpandable={exemplarExpandable} />
     );
   } else {
     // LEGACY priority chain (pre-ResultEvidence): method > topic > (legacy
@@ -250,10 +253,10 @@ export function PeopleResultCard({
         {/* #824 follow-up — one reason line per scholar: the ResultEvidence
             object when present, else the legacy priority chain. */}
         {snippetLine}
-        {/* #967 §7 — method match: the family's representative paper, revealed on
-            row hover/focus (lazy-fetched above). Renders nothing for non-method
-            rows or once resolved with no qualifying paper. */}
-        {methodFamily ? (
+        {/* #967 §7 — method/topic match: the representative paper, revealed on
+            row hover/focus (lazy-fetched above). Renders nothing for rows with no
+            exemplar selector or once resolved with no qualifying paper. */}
+        {exemplarQuery ? (
           <MethodExemplarLine status={exemplarStatus} pub={exemplar} />
         ) : null}
       </div>

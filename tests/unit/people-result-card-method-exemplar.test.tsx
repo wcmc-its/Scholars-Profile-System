@@ -88,12 +88,32 @@ describe("PeopleResultCard — method-exemplar hover", () => {
     expect(screen.queryByText(/Representative paper:/)).toBeNull();
   });
 
-  it("does not fetch or reveal for non-method evidence", async () => {
+  it("fetches with ?topic= and reveals for topic evidence", async () => {
+    const fetchFn = mockFetch({ pmid: "77", title: "A single-cell atlas of the cortex", year: 2023 });
+    const { container } = render(
+      <PeopleResultCard
+        {...props}
+        hit={makeHit({
+          evidence: { kind: "topic", label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" },
+        })}
+      />,
+    );
+    fireEvent.mouseEnter(container.querySelector("a")!);
+
+    await waitFor(() => expect(screen.getByText(/A single-cell atlas of the cortex/)).toBeTruthy());
+    expect(fetchFn.mock.calls[0][0]).toBe(
+      "/api/scholar/abc1234/method-exemplar?topic=single_cell_spatial_biology",
+    );
+  });
+
+  it("does not fetch or reveal for non-method/non-topic evidence", async () => {
     const fetchFn = mockFetch({ pmid: "1", title: "x", year: 2020 });
     const { container } = render(
       <PeopleResultCard
         {...props}
-        hit={makeHit({ evidence: { kind: "topic", label: "Single-cell & spatial biology" } })}
+        hit={makeHit({
+          evidence: { kind: "publications", strength: "tagged", text: "5 of 9 publications tagged X" },
+        })}
       />,
     );
     fireEvent.mouseEnter(container.querySelector("a")!);

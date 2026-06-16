@@ -2196,11 +2196,14 @@ export async function searchPeople(opts: {
     hl: Record<string, string[]> | undefined,
   ): ResultEvidence => {
     const m = methodReasonByCwid.get(cwid);
-    let topic: { label: string } | undefined;
+    let topic: { label: string; id: string } | undefined;
     if (matchedTopicSlugs.size > 0 && areasOfInterest) {
       const areaSlugs = areasOfInterest.trim().split(/\s+/).filter(Boolean);
       const hitSlug = areaSlugs.find((s) => matchedTopicSlugs.has(s));
-      if (hitSlug) topic = { label: topicLabelByMatchedSlug.get(hitSlug) ?? hitSlug };
+      // `hitSlug` IS the parent-topic slug (= Topic.id = PublicationTopic
+      // .parentTopicId) — carry it as `id` so the hover can resolve the
+      // scholar's representative paper in this topic.
+      if (hitSlug) topic = { label: topicLabelByMatchedSlug.get(hitSlug) ?? hitSlug, id: hitSlug };
     }
 
     // Publication-evidence parts — tagged and mention split out so the

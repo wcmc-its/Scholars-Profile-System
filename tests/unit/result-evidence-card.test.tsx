@@ -20,9 +20,32 @@ describe("<ResultEvidence> — one render per kind", () => {
   });
 
   it("topic ⇒ Topic badge + bold label", () => {
-    renderEv({ kind: "topic", label: "Single-cell & spatial biology" });
+    renderEv({ kind: "topic", label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" });
     expect(screen.getByText("Topic")).toBeTruthy();
     expect(screen.getByText("Single-cell & spatial biology").tagName).toBe("STRONG");
+  });
+
+  it("shows the ▾ disclosure cue on method AND topic badges when exemplarExpandable", () => {
+    // The chevron (a rotating svg) is the hover cue for the representative-paper
+    // reveal; it must appear for both kinds, and only when expandable.
+    const { container: m } = render(
+      <ResultEvidence evidence={{ kind: "method", family: "Flow cytometry", tools: [] }} exemplarExpandable />,
+    );
+    expect(m.querySelector('[class*="rotate-180"]')).toBeTruthy();
+
+    const { container: t } = render(
+      <ResultEvidence
+        evidence={{ kind: "topic", label: "Immunology", id: "immunology" }}
+        exemplarExpandable
+      />,
+    );
+    expect(t.querySelector('[class*="rotate-180"]')).toBeTruthy();
+
+    // Off ⇒ no chevron.
+    const { container: off } = render(
+      <ResultEvidence evidence={{ kind: "topic", label: "Immunology", id: "immunology" }} />,
+    );
+    expect(off.querySelector('[class*="rotate-180"]')).toBeNull();
   });
 
   it("publications:tagged ⇒ count line (C1, count only)", () => {

@@ -182,6 +182,7 @@ describe("searchPeople — evidence emission gated on SEARCH_RESULT_EVIDENCE", (
     expect(result.hits[0].evidence).toEqual({
       kind: "topic",
       label: "Single-cell & spatial biology",
+      id: "single_cell_spatial_biology",
     });
   });
 
