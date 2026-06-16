@@ -81,6 +81,7 @@ import {
   resolveFundingMeshGateField,
   resolvePeopleConceptGrantAxis,
   resolvePeopleConceptPrecount,
+  resolvePeopleMatchAwareSnippet,
   resolvePeopleMethodFamilyBoost,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
@@ -206,22 +207,64 @@ export type PeopleHit = {
    *  first as a self-evident snippet fallback when no `matchReason` was computed. */
   highlight?: string[];
   /**
-   * PLAN R4 — the single "why this match" reason line the card renders, picked
-   * from the strongest signal (pub-evidence count, else the resolved concept).
-   * Present only when a concept resolved and `SEARCH_PEOPLE_MATCH_EXPLAIN` is on.
-   * Supersedes the prior pub-highlight / match-provenance / matched-on-fields
-   * card surfaces (#688 / #702), now removed.
+   * PLAN R4 / #967 / #824-follow-up — the single "why this match" reason line the
+   * card renders. A discriminated union:
    *
-   * Issue #967 — on a pub-evidence reason (tagged / mention), `pub` carries a
-   * representative publication behind the count when
-   * `SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB` is on. Absent on the concept
-   * fallback and whenever the flag is off.
+   *   - `{ kind: "method"; family; tools[] }` — #824 follow-up. The matched method
+   *     family label + up to 3 exemplar tool names, derived at query time from
+   *     `scholar_family`. HIGHEST priority. Only produced when
+   *     `SEARCH_PEOPLE_MATCH_AWARE_SNIPPET` is on and the query resolved to a
+   *     publicly-visible method family the scholar works in.
+   *   - `{ kind: "topic"; label }` — #824 follow-up. The matched research-area
+   *     topic shown as a clean human label. Produced when the snippet flag is on
+   *     and one of the matched topic slugs appears in the scholar's
+   *     `areasOfInterest`. Lower priority than method, higher than the legacy
+   *     icon reasons below.
+   *   - `{ icon: "publications" | "concept" | "area"; text; pub? }` — the legacy
+   *     PLAN R4 (#688/#702) pub-evidence / concept reason, unchanged. Present when
+   *     a concept resolved and `SEARCH_PEOPLE_MATCH_EXPLAIN` is on; on a
+   *     pub-evidence reason, `pub` carries a representative publication when
+   *     `SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB` is on.
+   *
+   * Serializable (it crosses to the `PeopleResultCard` client component).
    */
-  matchReason?: {
-    icon: "publications" | "concept" | "area";
-    text: string;
-    pub?: RepresentativePub;
-  };
+  matchReason?: PeopleMatchReason;
+  /**
+   * #824 follow-up (match-aware snippet) — humanized, comma-separated research
+   * areas (no under_scores) used as the LAST-resort snippet line when no
+   * method/topic/concept/pub reason fires and no bio highlight is present. Each
+   * area is a clean human label (real `Topic.label` when known, else a sentence-
+   * cased humanization of the slug); `matchedIndex` flags which entry should be
+   * bold (the area whose slug the query matched), or -1 when none. Present only
+   * when `SEARCH_PEOPLE_MATCH_AWARE_SNIPPET` is on; absent (and the card falls
+   * back to today's raw slug highlight) when off.
+   */
+  humanizedAreas?: { labels: string[]; matchedIndex: number };
+};
+
+/**
+ * #824 follow-up — the discriminated reason-line union. The two NEW kinds carry
+ * structured data (method tools / topic label) so the card can render the
+ * mockup's badge styles; the legacy `icon`/`text` variant is unchanged so the
+ * #688/#702/#967 render path keeps working. Discriminated by the presence of
+ * `kind` (new) vs `icon` (legacy).
+ */
+export type PeopleMatchReason =
+  | { kind: "method"; family: string; tools: string[] }
+  | { kind: "topic"; label: string }
+  | LegacyMatchReason;
+
+/**
+ * The legacy PLAN R4 (#688/#702/#967) reason variant: a leading icon + a text
+ * line, optionally carrying a representative pub. Named separately so
+ * `composeMatchReason` can return exactly this (it never produces the #824
+ * method/topic kinds), keeping the existing `.text` / `.pub` test assertions
+ * precise.
+ */
+export type LegacyMatchReason = {
+  icon: "publications" | "concept" | "area";
+  text: string;
+  pub?: RepresentativePub;
 };
 
 /**
@@ -290,7 +333,7 @@ export function composeMatchReason(args: {
   hasProvenance: boolean;
   provenanceParent: string;
   contentQuery: string;
-}): PeopleHit["matchReason"] {
+}): LegacyMatchReason | undefined {
   const { counts: c, rep, pubCount, hasProvenance, provenanceParent, contentQuery } = args;
   if (c && c.tagged > 0)
     return {
@@ -307,6 +350,61 @@ export function composeMatchReason(args: {
   if (hasProvenance)
     return { icon: "concept", text: `via related concept ${provenanceParent}` };
   return undefined;
+}
+
+/**
+ * #824 follow-up — sentence-case a snake_case topic/area slug for the humanized
+ * research-areas fallback. Splits on "_", joins with spaces, upper-cases only the
+ * first letter of the whole string (sentence case, matching the mockup's
+ * "Metabolic & endocrine disease"). `"single_cell_spatial_biology"` →
+ * `"Single cell spatial biology"`; `""` → `""`. Used only when no real
+ * `Topic.label` is known for the slug.
+ */
+export function humanizeAreaSlug(slug: string): string {
+  const words = slug.split("_").filter(Boolean).join(" ");
+  if (!words) return "";
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * #824 follow-up — clean exemplar-tool names off a `scholar_family.exemplarTools`
+ * JSON value: coerce to string, trim, drop empties, dedupe (case-insensitively),
+ * cap at `limit` (3). Defensive against the Json column shape (non-array → []).
+ */
+export function cleanExemplarTools(raw: unknown, limit = 3): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const t of raw) {
+    const name = String(t).trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * #824 follow-up — derive the humanized research-areas fallback for a scholar from
+ * the space-joined `areasOfInterest` slug string, a topic slug→label map (real
+ * `Topic.label` preferred, else {@link humanizeAreaSlug}), and the matched topic
+ * slugs (so the matched area can be bolded as a WHOLE label). Returns null when
+ * the scholar has no areas. `matchedIndex` is the index of the first area whose
+ * slug is in `matchedSlugs`, or -1.
+ */
+export function buildHumanizedAreas(
+  areasOfInterest: string | undefined,
+  labelBySlug: Map<string, string>,
+  matchedSlugs: Set<string>,
+): { labels: string[]; matchedIndex: number } | null {
+  const slugs = (areasOfInterest ?? "").trim().split(/\s+/).filter(Boolean);
+  if (slugs.length === 0) return null;
+  const labels = slugs.map((s) => labelBySlug.get(s) ?? humanizeAreaSlug(s));
+  const matchedIndex = slugs.findIndex((s) => matchedSlugs.has(s));
+  return { labels, matchedIndex };
 }
 
 export type PublicationHit = {
@@ -741,6 +839,29 @@ export async function searchPeople(opts: {
    * safe. Headless callers default to a full search.
    */
   countOnly?: boolean;
+  /**
+   * #824 follow-up (match-aware snippet) — resolved-match context the page/route
+   * derives from the already-computed `taxonomyMatch` (so there is no added
+   * taxonomy resolution inside `searchPeople`). Consumed ONLY when
+   * `resolvePeopleMatchAwareSnippet()` is on; absent/ignored otherwise.
+   *
+   *   - `methodFamily` — the resolved method family's stable
+   *     `(supercategory, familyLabel)` identity (from `taxonomyMatch.methodMatches[0]`).
+   *     When set, `searchPeople` runs ONE batched `scholar_family` query over the
+   *     page cwids (overlay-gated — a suppressed/sensitive family never surfaces)
+   *     and emits a `{ kind: "method" }` reason per matching scholar.
+   *   - `topics` — the matched research-area topics `{ slug, label }` (from
+   *     `taxonomyMatch.areas`). A scholar whose `areasOfInterest` contains a
+   *     matched slug gets a `{ kind: "topic" }` reason (lower priority than method).
+   *
+   * No reindex: both derive at query time. Flag-OFF ⇒ this is never read, no
+   * extra query fires, and the per-hit reason/snippet shape is byte-identical to
+   * today.
+   */
+  matchAwareContext?: {
+    methodFamily?: { supercategory: string; familyLabel: string } | null;
+    topics?: { slug: string; label: string }[];
+  };
 }): Promise<PeopleSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -762,6 +883,13 @@ export async function searchPeople(opts: {
   // hit emission below are byte-identical to the pre-#702 shape.
   const matchExplain = opts.matchExplain === true;
   const representativePub = opts.representativePub === true;
+
+  // #824 follow-up — match-aware snippet. When on, `searchPeople` may derive a
+  // method/topic reason and a humanized-areas fallback (all from query-time data,
+  // no reindex). Gating on the flag here keeps the off path byte-identical: no
+  // extra `_source` field, no extra `scholar_family` query, no new reason kinds.
+  const matchAwareSnippet = resolvePeopleMatchAwareSnippet();
+  const matchAwareContext = matchAwareSnippet ? opts.matchAwareContext : undefined;
 
   // Issue #259 §1.1 — the people-index query restructure (cross_fields + msm
   // over high-evidence fields, abstracts in a scoring-only should). It was a
@@ -1661,6 +1789,11 @@ export async function searchPeople(opts: {
       "grantCount",
       "hasActiveGrants",
       "publicationMeshUi",
+      // #824 follow-up — the topic-slug rollup, returned ONLY when the
+      // match-aware snippet flag is on, so the topic-reason match and the
+      // humanized-areas fallback can read the scholar's areas without a highlight
+      // round-trip. Off ⇒ the field is not requested (today's `_source` shape).
+      ...(matchAwareSnippet ? ["areasOfInterest"] : []),
     ],
     // OpenSearch's default cap of 10000 short-circuits the total counter
     // and would make the subhead read "10,000 publications" even when
@@ -1749,6 +1882,11 @@ export async function searchPeople(opts: {
       // in the ETL). Read only for the match-provenance path; the field is
       // already in `_source` (no `_source` include-list trims it).
       publicationMeshUi?: string[];
+      // #824 follow-up — space-joined topic SLUGS (e.g. "single_cell_spatial_biology
+      // cell_molecular_biology"). Present only when the match-aware snippet flag
+      // is on (added to `_source` above); drives the topic-reason match and the
+      // humanized-areas fallback.
+      areasOfInterest?: string;
     };
     highlight?: Record<string, string[]>;
   };
@@ -1900,6 +2038,64 @@ export async function searchPeople(opts: {
     }
   }
 
+  // #824 follow-up — match-aware snippet derivation. All query-time; no reindex.
+  //   methodReasonByCwid — per-scholar method-family reason ({ kind:"method" }).
+  //     ONE batched `scholar_family` query over the page cwids for the resolved
+  //     `(supercategory, familyLabel)`, overlay-gated so a #800-suppressed /
+  //     #801-sensitive family NEVER surfaces (same invariant as the index emit).
+  //   matchedTopicSlugs / topicLabelByMatchedSlug — drive { kind:"topic" }.
+  //   topicLabelBySlug — slug→`Topic.label` map for the humanized-areas fallback.
+  // Guarded by `matchAwareContext` (already null when the flag is off), so the
+  // off path runs none of this and adds no query.
+  const methodReasonByCwid = new Map<string, { family: string; tools: string[] }>();
+  const matchedTopicSlugs = new Set<string>();
+  const topicLabelByMatchedSlug = new Map<string, string>();
+  const topicLabelBySlug = new Map<string, string>();
+  if (matchAwareContext && pageCwids.length > 0) {
+    const family = matchAwareContext.methodFamily;
+    if (family) {
+      // The overlay gate forces sensitive loading (#824 §4c): the public people
+      // surface must exclude #801-sensitive families regardless of the runtime
+      // sensitivity flag. SKIP the whole query when the resolved family is not
+      // publicly visible — suppressed/sensitive must never surface here.
+      const gate = await loadFamilyOverlayGate({ forceSensitive: true });
+      if (isFamilyPubliclyVisible(family.supercategory, family.familyLabel, gate)) {
+        const rows = await prisma.scholarFamily.findMany({
+          where: {
+            cwid: { in: pageCwids },
+            supercategory: family.supercategory,
+            familyLabel: family.familyLabel,
+            scholar: { deletedAt: null, status: "active" },
+          },
+          select: { cwid: true, familyLabel: true, exemplarTools: true },
+        });
+        for (const row of rows) {
+          // One row per (cwid, family) via the @@unique, so first-wins is exact.
+          if (methodReasonByCwid.has(row.cwid)) continue;
+          methodReasonByCwid.set(row.cwid, {
+            family: row.familyLabel,
+            tools: cleanExemplarTools(row.exemplarTools),
+          });
+        }
+      }
+    }
+
+    const topics = matchAwareContext.topics ?? [];
+    for (const t of topics) {
+      if (t.slug) {
+        matchedTopicSlugs.add(t.slug);
+        topicLabelByMatchedSlug.set(t.slug, t.label);
+      }
+    }
+
+    // Real `Topic.id`→`Topic.label` map for the humanized-areas fallback (no
+    // under_scores). `areasOfInterest` is a space-join of `Topic.id` slugs, so a
+    // single `topic.findMany` resolves every area to its curated label; unknown
+    // slugs fall back to `humanizeAreaSlug`.
+    const topicRows = await prisma.topic.findMany({ select: { id: true, label: true } });
+    for (const tr of topicRows) topicLabelBySlug.set(tr.id, tr.label);
+  }
+
   // Strongest-signal reason: pub-evidence count (document) → concept fallback
   // (sparkle). Delegates to the pure `composeMatchReason` (count cap +
   // precedence + #967 representative-pub attach).
@@ -1916,6 +2112,30 @@ export async function searchPeople(opts: {
       provenanceParent,
       contentQuery,
     });
+
+  // #824 follow-up — pick the per-hit reason with the match-aware PRIORITY:
+  // method > topic > (legacy concept/pub reason). Off ⇒ `matchAwareContext` is
+  // null, both new branches are skipped, and this returns `buildMatchReason` —
+  // byte-identical to today.
+  const resolveHitMatchReason = (
+    cwid: string,
+    areasOfInterest: string | undefined,
+    pubCount: number,
+    hasProvenance: boolean,
+  ): PeopleHit["matchReason"] => {
+    if (matchAwareContext) {
+      const method = methodReasonByCwid.get(cwid);
+      if (method) return { kind: "method", family: method.family, tools: method.tools };
+      if (matchedTopicSlugs.size > 0 && areasOfInterest) {
+        const areaSlugs = areasOfInterest.trim().split(/\s+/).filter(Boolean);
+        const hitSlug = areaSlugs.find((s) => matchedTopicSlugs.has(s));
+        if (hitSlug) {
+          return { kind: "topic", label: topicLabelByMatchedSlug.get(hitSlug) ?? hitSlug };
+        }
+      }
+    }
+    return buildMatchReason(cwid, pubCount, hasProvenance);
+  };
 
   return {
     hits: r.hits.hits.map((h) => {
@@ -1948,7 +2168,27 @@ export async function searchPeople(opts: {
         hasActiveGrants: h._source.hasActiveGrants,
         identityImageEndpoint: identityImageEndpoint(h._source.cwid),
         highlight,
-        matchReason: buildMatchReason(h._source.cwid, h._source.publicationCount, prov != null),
+        matchReason: resolveHitMatchReason(
+          h._source.cwid,
+          h._source.areasOfInterest,
+          h._source.publicationCount,
+          prov != null,
+        ),
+        // #824 follow-up — humanized research-areas fallback (no under_scores),
+        // emitted only when the flag is on. The card renders it as the last-resort
+        // snippet line when no method/topic/concept/pub reason fires and no bio
+        // highlight is present; null/absent when off (card falls back to today's
+        // raw slug highlight).
+        ...(matchAwareContext
+          ? (() => {
+              const ha = buildHumanizedAreas(
+                h._source.areasOfInterest,
+                topicLabelBySlug,
+                matchedTopicSlugs,
+              );
+              return ha ? { humanizedAreas: ha } : {};
+            })()
+          : {}),
       };
     }),
     total: r.hits.total.value,

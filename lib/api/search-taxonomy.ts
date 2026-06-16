@@ -101,6 +101,18 @@ export type TaxonomyMatch = {
    * subtopic). Drives the popover "publications · subtopics" stat line.
    */
   subtopicCount: number;
+  /**
+   * #824 follow-up (match-aware snippet) — the matched method family's STABLE
+   * `(supercategory, familyLabel)` identity, populated on `methodFamily` /
+   * `supercategory` matches and null on Topic/Subtopic matches. The search page
+   * reads these off `methodMatches[0]` to identify the resolved family by
+   * (supercategory, familyLabel) and derive the per-scholar method reason from
+   * `scholar_family` at query time. `familyLabel` is null on a `supercategory`
+   * match (no single family). Threaded straight through from the matching
+   * `EntityCandidate`, which already carries them.
+   */
+  supercategory: string | null;
+  familyLabel: string | null;
 };
 
 /**
@@ -607,6 +619,11 @@ export async function matchQueryToTaxonomy(
       similarity: c.similarity,
       description: c.description,
       subtopicCount: c.subtopicCount,
+      // #824 follow-up — carry the method family's stable identity through to the
+      // public match. Null on Topic/Subtopic candidates (set null there); on a
+      // supercategory candidate `familyLabel` is null (no single family).
+      supercategory: c.supercategory,
+      familyLabel: c.familyLabel,
     };
   };
 
@@ -664,6 +681,58 @@ export async function matchQueryToTaxonomy(
     totalMatched,
     methodMatches,
   };
+}
+
+/**
+ * #824 follow-up (match-aware snippet) — the resolved-match context the People
+ * search consumes to derive the per-scholar method/topic reason at query time.
+ * Built off an already-resolved {@link TaxonomyMatchResult} so there is no second
+ * taxonomy round-trip:
+ *
+ *   - `methodFamily` — the top method match's stable `(supercategory, familyLabel)`
+ *     identity. Null when no method matched (or the top method match is a bare
+ *     supercategory with no single family).
+ *   - `topics` — the matched research-area topics as `{ slug, label }`, where
+ *     `slug` is the PARENT-topic id (`areasOfInterest` is a space-join of
+ *     parent-topic ids, so a subtopic match keys on its `parentTopicId`) and
+ *     `label` is the clean parent-topic label.
+ *
+ * Returns `undefined` on a non-"matches" result (nothing to surface). Pure: no
+ * DB/OpenSearch — safe in both the SSR page and the route handler.
+ */
+export type PeopleMatchAwareContext = {
+  methodFamily: { supercategory: string; familyLabel: string } | null;
+  topics: { slug: string; label: string }[];
+};
+
+export function buildMatchAwareContext(
+  result: TaxonomyMatchResult,
+): PeopleMatchAwareContext | undefined {
+  if (result.state !== "matches") return undefined;
+
+  // Top method match → its (supercategory, familyLabel). A bare supercategory
+  // match (familyLabel null) carries no single family, so it contributes no
+  // method reason.
+  const topMethod = result.methodMatches[0];
+  const methodFamily =
+    topMethod && topMethod.supercategory && topMethod.familyLabel
+      ? { supercategory: topMethod.supercategory, familyLabel: topMethod.familyLabel }
+      : null;
+
+  // Matched topic areas → { parent-topic slug, parent-topic label }, deduped by
+  // slug (multiple matched subtopics under one parent collapse to one reason).
+  const seen = new Set<string>();
+  const topics: { slug: string; label: string }[] = [];
+  for (const a of result.areas) {
+    const slug = a.entityType === "subtopic" ? a.parentTopicId : a.id;
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+    const label =
+      a.entityType === "subtopic" ? a.parentTopicLabel ?? a.name : a.name;
+    topics.push({ slug, label });
+  }
+
+  return { methodFamily, topics };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

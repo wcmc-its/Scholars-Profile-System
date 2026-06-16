@@ -74,6 +74,7 @@ import { InvestigatorFacet } from "@/components/search/investigator-facet";
 import { getAZBuckets } from "@/lib/api/browse";
 import {
   matchQueryToTaxonomy,
+  buildMatchAwareContext,
   type MeshResolution,
   type TaxonomyMatchResult,
 } from "@/lib/api/search-taxonomy";
@@ -393,6 +394,10 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           matchExplain: resolvePeopleMatchExplain(),
           // Issue #967 — representative matching publication in the reason line.
           representativePub: resolvePeopleSnippetRepresentativePub(),
+          // #824 follow-up — match-aware snippet context (resolved method family +
+          // matched topics) derived from the already-resolved taxonomyMatch. Inert
+          // unless SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on (searchPeople gates it).
+          matchAwareContext: buildMatchAwareContext(taxonomyMatch),
         })
       : null;
   const activePubsPromise =
