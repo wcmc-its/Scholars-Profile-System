@@ -1,13 +1,19 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { type ReactNode, useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { formatRoleCategory } from "@/lib/role-display";
 import { profilePath } from "@/lib/profile-url";
-import { MatchReason, MatchAwareReason } from "@/components/search/match-reason";
+import {
+  MatchReason,
+  MatchAwareReason,
+  MethodExemplarLine,
+  type ExemplarFetchStatus,
+} from "@/components/search/match-reason";
 import { HighlightedSnippet } from "@/components/search/highlight-snippet";
 import { ResultEvidence } from "@/components/search/result-evidence";
+import type { EvidencePub } from "@/lib/api/result-evidence";
 import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
 
 /**
@@ -103,6 +109,29 @@ export function PeopleResultCard({
     );
   }
 
+  // #967 §7 (Variant 2) — the method-badge hover exemplar. Only the ResultEvidence
+  // `method` kind has a representative paper to reveal; resolve it lazily so the
+  // cacheable results derive stays untouched and the lookup runs only for a row
+  // the viewer actually hovers/focuses.
+  const methodFamily =
+    hit.evidence?.kind === "method" ? hit.evidence.family : null;
+  const [exemplar, setExemplar] = useState<EvidencePub | null>(null);
+  const [exemplarStatus, setExemplarStatus] = useState<ExemplarFetchStatus>("idle");
+  const exemplarFetched = useRef(false);
+
+  const ensureExemplar = useCallback(() => {
+    if (!methodFamily || exemplarFetched.current) return;
+    exemplarFetched.current = true;
+    setExemplarStatus("loading");
+    fetch(
+      `/api/scholar/${encodeURIComponent(hit.cwid)}/method-exemplar?family=${encodeURIComponent(methodFamily)}`,
+    )
+      .then((r) => (r.ok ? r.json() : { pub: null }))
+      .then((d: { pub: EvidencePub | null }) => setExemplar(d?.pub ?? null))
+      .catch(() => setExemplar(null))
+      .finally(() => setExemplarStatus("done"));
+  }, [hit.cwid, methodFamily]);
+
   const deptLine = hit.divisionName
     ? `${hit.divisionName} · Department of ${hit.deptName ?? hit.primaryDepartment ?? ""}`.trim()
     : hit.deptName
@@ -119,9 +148,17 @@ export function PeopleResultCard({
   // (`SEARCH_RESULT_EVIDENCE` on), the server already selected the ONE "why"
   // via one precedence function, so render it through one component and IGNORE
   // the legacy priority chain below. Absent ⇒ fall through to today's chain.
+  // Show the ▾ disclosure cue for a method row UNTIL the lazy fetch tells us
+  // there is no qualifying paper — then drop it so it never promises a reveal
+  // that won't appear (no dead affordance).
+  const methodExpandable =
+    !!methodFamily && !(exemplarStatus === "done" && !exemplar);
+
   let snippetLine: ReactNode = null;
   if (hit.evidence) {
-    snippetLine = <ResultEvidence evidence={hit.evidence} />;
+    snippetLine = (
+      <ResultEvidence evidence={hit.evidence} methodExpandable={methodExpandable} />
+    );
   } else {
     // LEGACY priority chain (pre-ResultEvidence): method > topic > (legacy
     // concept/pub matchReason) > bio highlight > humanized research areas. The
@@ -185,7 +222,11 @@ export function PeopleResultCard({
     <Link
       href={profilePath(hit.slug)}
       onClick={handleClick}
-      className="grid grid-cols-[56px_1fr_auto] gap-4 border-b border-[#e3e2dd] py-5 no-underline hover:bg-[#fafaf8] hover:no-underline"
+      // `group` so the method-exemplar reveal can show on row hover/keyboard
+      // focus; the lazy fetch fires once on the first hover/focus of the row.
+      onMouseEnter={ensureExemplar}
+      onFocus={ensureExemplar}
+      className="group grid grid-cols-[56px_1fr_auto] gap-4 border-b border-[#e3e2dd] py-5 no-underline hover:bg-[#fafaf8] hover:no-underline"
     >
       <HeadshotAvatar
         size="md"
@@ -209,6 +250,12 @@ export function PeopleResultCard({
         {/* #824 follow-up — one reason line per scholar: the ResultEvidence
             object when present, else the legacy priority chain. */}
         {snippetLine}
+        {/* #967 §7 — method match: the family's representative paper, revealed on
+            row hover/focus (lazy-fetched above). Renders nothing for non-method
+            rows or once resolved with no qualifying paper. */}
+        {methodFamily ? (
+          <MethodExemplarLine status={exemplarStatus} pub={exemplar} />
+        ) : null}
       </div>
       <div className="flex flex-col items-end gap-1 whitespace-nowrap text-right text-xs text-muted-foreground">
         {hit.pubCount > 0 ? (

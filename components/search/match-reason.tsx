@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { FileText, Sparkles, Tag, Wrench } from "lucide-react";
+import { ChevronDown, FileText, Sparkles, Tag, Wrench } from "lucide-react";
 
 /**
  * PLAN R4 — the kind of match a reason line explains, which picks the leading
@@ -58,10 +58,17 @@ export function MatchAwareReason({
   kind,
   label,
   tools = [],
+  expandable = false,
 }: {
   kind: "method" | "topic";
   label: string;
   tools?: string[];
+  /** #967 §7 — when true (method only), trail a muted ▾ cueing that hovering /
+   *  focusing the row reveals the family's representative paper (the
+   *  `MethodExemplarLine` below). Purely decorative; the reveal is driven by the
+   *  card's `group` hover/focus, not by clicking this glyph (it can't be an
+   *  interactive element — the whole card is one `<Link>`). */
+  expandable?: boolean;
 }) {
   // From the mockup: method bg #fbf4ea / border #ecdcc8 / ink #8a4a1f;
   // topic bg #eef2f6 / border #d8e2ec / ink #2c4f6e.
@@ -99,6 +106,61 @@ export function MatchAwareReason({
           </span>
         ) : null}
       </span>
+      {expandable ? (
+        // Rotates on row hover/focus (motion-safe only) to read as a disclosure;
+        // shrink-0 so it stays visible while the label/tools span truncates.
+        <ChevronDown
+          aria-hidden
+          strokeWidth={2}
+          className="size-3 shrink-0 text-[#c9c4ba] motion-safe:transition-transform motion-safe:duration-150 group-hover:rotate-180 group-focus:rotate-180"
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** Fetch lifecycle of the lazily-loaded method exemplar (see `MethodExemplarLine`). */
+export type ExemplarFetchStatus = "idle" | "loading" | "done";
+
+/**
+ * #967 §7 (Variant 2) — the row's representative-paper reveal for a method
+ * match. Hidden at rest; shown when the result row (the `group` `<Link>` in
+ * `people-result-card`) is hovered or keyboard-focused. The pub is fetched lazily
+ * by the card on that same hover/focus (`/api/scholar/[cwid]/method-exemplar`), so
+ * the cacheable results derive is untouched.
+ *
+ * No transition on the reveal itself — the handoff wants "show, don't animate",
+ * which is also the reduced-motion-safe default. A row with no qualifying paper
+ * renders nothing (handoff: "omitted, not blank").
+ */
+export function MethodExemplarLine({
+  status,
+  pub,
+}: {
+  status: ExemplarFetchStatus;
+  pub: { title: string; year?: number | null } | null;
+}) {
+  // Once resolved with nothing to show, drop the line entirely.
+  if (status === "done" && !pub) return null;
+  return (
+    <div className="mt-1 hidden pl-[1px] text-[12px] leading-snug group-hover:block group-focus:block">
+      {pub ? (
+        <span className="line-clamp-2 text-muted-foreground">
+          <span aria-hidden className="text-[#c9c4ba]">
+            ↳{" "}
+          </span>
+          Representative paper:{" "}
+          <span className="italic text-[#4a4a4a]">&ldquo;{pub.title}&rdquo;</span>
+          {pub.year ? <span className="text-[#777]"> ({pub.year})</span> : null}
+        </span>
+      ) : (
+        // Transient visual placeholder only — aria-hidden so a screen reader
+        // tabbing onto the row never reads "finding a representative paper…" as
+        // part of the focused link's accessible name.
+        <span aria-hidden className="text-[#9a958a]">
+          ↳ finding a representative paper&hellip;
+        </span>
+      )}
     </div>
   );
 }

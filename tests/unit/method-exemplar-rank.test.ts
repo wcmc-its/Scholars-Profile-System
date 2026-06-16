@@ -1,0 +1,93 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  rankMethodExemplar,
+  type ExemplarCandidate,
+} from "@/lib/api/method-exemplar-rank";
+
+const YEAR = 2026;
+
+/** Minimal candidate with overridable fields; defaults are a plain, non-owned,
+ *  unscored original-research paper so each test isolates ONE ranking signal. */
+function cand(over: Partial<ExemplarCandidate> & { pmid: string }): ExemplarCandidate {
+  return {
+    title: `Title ${over.pmid}`,
+    year: 2020,
+    publicationType: "Academic Article",
+    impactScore: null,
+    citationCount: 0,
+    isFirstOrSenior: false,
+    ...over,
+  };
+}
+
+describe("rankMethodExemplar — §7 lexicographic key", () => {
+  it("returns null on an empty candidate set", () => {
+    expect(rankMethodExemplar([], YEAR)).toBeNull();
+  });
+
+  it("1. original research outranks a review even if the review is newer / more cited", () => {
+    const review = cand({ pmid: "2", publicationType: "Review", year: 2025, citationCount: 999 });
+    const original = cand({ pmid: "1", publicationType: "Academic Article", year: 2010 });
+    expect(rankMethodExemplar([review, original], YEAR)?.pmid).toBe("1");
+  });
+
+  it("falls back to the best NON-original when no original research exists (not null)", () => {
+    const olderReview = cand({ pmid: "2", publicationType: "Review", year: 2012 });
+    const newerReview = cand({ pmid: "1", publicationType: "Review", year: 2024 });
+    // No Academic Article present ⇒ originals tier is a wash ⇒ later keys decide.
+    expect(rankMethodExemplar([olderReview, newerReview], YEAR)?.pmid).toBe("1");
+  });
+
+  it("2. first/senior author outranks a middle-author paper at equal type", () => {
+    const middle = cand({ pmid: "2", isFirstOrSenior: false, impactScore: 90 });
+    const owned = cand({ pmid: "1", isFirstOrSenior: true, impactScore: 10 });
+    // Ownership is checked BEFORE impact, so the low-impact owned paper wins.
+    expect(rankMethodExemplar([middle, owned], YEAR)?.pmid).toBe("1");
+  });
+
+  it("3a. higher impactScore wins; nulls rank last", () => {
+    const unscored = cand({ pmid: "2", impactScore: null, citationCount: 500 });
+    const scored = cand({ pmid: "1", impactScore: 42 });
+    expect(rankMethodExemplar([unscored, scored], YEAR)?.pmid).toBe("1");
+  });
+
+  it("3b. citations-per-year breaks ties when impactScore is equal/absent", () => {
+    const lowCpy = cand({ pmid: "2", year: 2016, citationCount: 10 }); // 10/11 ≈ 0.9/yr
+    const highCpy = cand({ pmid: "1", year: 2024, citationCount: 30 }); // 30/3 = 10/yr
+    expect(rankMethodExemplar([lowCpy, highCpy], YEAR)?.pmid).toBe("1");
+  });
+
+  it("4. recency is the final substantive tiebreak", () => {
+    const older = cand({ pmid: "2", year: 2018 });
+    const newer = cand({ pmid: "1", year: 2023 });
+    expect(rankMethodExemplar([older, newer], YEAR)?.pmid).toBe("1");
+  });
+
+  it("5. equal on every signal ⇒ deterministic pmid tiebreak (stable across requests)", () => {
+    const a = cand({ pmid: "555" });
+    const b = cand({ pmid: "111" });
+    expect(rankMethodExemplar([a, b], YEAR)?.pmid).toBe("111");
+    // Order-independent.
+    expect(rankMethodExemplar([b, a], YEAR)?.pmid).toBe("111");
+  });
+
+  it("hard-drops Retraction / Erratum even when they would otherwise win", () => {
+    const retraction = cand({ pmid: "2", publicationType: "Retraction", impactScore: 100, isFirstOrSenior: true });
+    const erratum = cand({ pmid: "3", publicationType: "Erratum", impactScore: 100 });
+    const plain = cand({ pmid: "1", publicationType: "Review", impactScore: 1 });
+    expect(rankMethodExemplar([retraction, erratum, plain], YEAR)?.pmid).toBe("1");
+    expect(rankMethodExemplar([retraction, erratum], YEAR)).toBeNull();
+  });
+
+  it("drops candidates with a blank title", () => {
+    const blank = cand({ pmid: "2", title: "   ", impactScore: 100, isFirstOrSenior: true });
+    const real = cand({ pmid: "1", title: "Real paper", impactScore: 1 });
+    expect(rankMethodExemplar([blank, real], YEAR)?.pmid).toBe("1");
+  });
+
+  it("returns {pmid,title,year} of the winner; undated year normalizes to null", () => {
+    const undated = cand({ pmid: "9", year: null, title: "Undated", publicationType: "Review" });
+    expect(rankMethodExemplar([undated], YEAR)).toEqual({ pmid: "9", title: "Undated", year: null });
+  });
+});
