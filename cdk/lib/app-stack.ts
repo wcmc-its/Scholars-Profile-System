@@ -1116,6 +1116,13 @@ export class AppStack extends Stack {
         // for staging (pairs with SEARCH_PEOPLE_METHOD_FAMILY above so the method
         // badge has families to surface), off for prod.
         SEARCH_PEOPLE_MATCH_AWARE_SNIPPET: env === "staging" ? "on" : "off",
+        // #824 follow-up Phase 1 -- the coherent ResultEvidence snippet model
+        // (#1056). When on, supersedes the match-aware chain above with one typed
+        // evidence object per hit selected by one precedence function and rendered
+        // by one <ResultEvidence> component. APP-ONLY, no reindex (same query-time
+        // derive). resolveSearchResultEvidence reads === "on". STAGING-FIRST soak:
+        // on for staging, off for prod (handoff doc §8 -- flip prod after the soak).
+        SEARCH_RESULT_EVIDENCE: env === "staging" ? "on" : "off",
         // #295 / #723 -- funding-tab concept clause + result-SET gate field.
         // Enabled in both envs now that the funding index carries the descriptor
         // rollup. `fundedPubMeshUi` is the higher-fidelity gate (funded-pub MeSH)
