@@ -63,7 +63,7 @@ import {
 } from "@/tests/util/session-as";
 
 const GROUP_CN = "ITS:Library:Scholars/superuser-role";
-const TTL = 1800; // matches the default `IMPERSONATION_TTL_SECONDS`
+const TTL = 1800; // pinned for exact NOW+TTL fixture arithmetic (independent of the runtime default, now 3600)
 const SECRET = "test-session-secret-0123456789-0123456789";
 
 const mockedOpenLdap = vi.mocked(openLdap);
