@@ -34,6 +34,7 @@ import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
 import { getMentoringPmidBuckets } from "@/lib/api/mentoring-pmids";
 import { searchPeople, searchPublications } from "@/lib/api/search";
+import { getSpotlights, getBrowseAllResearchAreas, getHomeStats } from "@/lib/api/home";
 
 /**
  * Upper bound on the warm-up pass. The latch flips no later than this after a
@@ -50,6 +51,33 @@ const WARMUP_BUDGET_MS = 15_000;
  * depending on any one MeSH descriptor existing in the loaded ETL data.
  */
 const WARMUP_QUERY = "cancer";
+
+/**
+ * Home-page cache re-warm cadence. The home loaders are cached with a 15-min
+ * fresh window + 1h serve-stale ceiling (lib/api/home.ts). Re-touching them
+ * below the TTL keeps the in-process cache from ever aging into its blocking
+ * path during a traffic lull, so even a low-traffic env never serves a cold
+ * (~5.7s) home render. The boot pass (the primers below) fills it once before
+ * the task joins the ALB rotation; this keeps it filled. Skipped under test so
+ * no interval handle leaks into the suite.
+ */
+const HOME_REWARM_INTERVAL_MS = 10 * 60 * 1000; // 10 min — under the 15-min home TTL
+const HOME_REWARM_DISABLED =
+  Boolean(process.env.VITEST) || process.env.NODE_ENV === "test";
+let homeRewarmTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Start the periodic home-cache re-warm. Idempotent; best-effort (a failed
+ * re-warm keeps the prior entry); `unref`'d so it never by itself keeps the
+ * process alive.
+ */
+function startHomeCacheRewarm(): void {
+  if (HOME_REWARM_DISABLED || homeRewarmTimer) return;
+  homeRewarmTimer = setInterval(() => {
+    void Promise.allSettled([getSpotlights(), getBrowseAllResearchAreas(), getHomeStats()]);
+  }, HOME_REWARM_INTERVAL_MS);
+  homeRewarmTimer.unref?.();
+}
 
 let started = false;
 
@@ -84,16 +112,27 @@ export async function warmUp(): Promise<void> {
       getMentoringPmidBuckets(),
       searchPeople({ q: WARMUP_QUERY, countOnly: true }),
       searchPublications({ q: WARMUP_QUERY, countOnly: true }),
+      // Fill the home-page read cache (lib/api/home.ts) before the task joins
+      // the ALB rotation, so the first user never pays the ~5.7s home render.
+      getSpotlights(),
+      getBrowseAllResearchAreas(),
+      getHomeStats(),
     ].map((p) => p.catch(() => undefined));
     await settleWithin(WARMUP_BUDGET_MS, primers);
   } finally {
     // Join the ALB rotation now: warm in the happy path, degraded-but-serving
     // if a dependency was down. NEVER left dark — see the safety contract above.
     markWarmed();
+    // Keep the home cache warm thereafter (no-op under test).
+    startHomeCacheRewarm();
   }
 }
 
 /** Test-only: reset the once-guard so a fresh `warmUp()` can run. */
 export function __resetWarmupForTests(): void {
   started = false;
+  if (homeRewarmTimer) {
+    clearInterval(homeRewarmTimer);
+    homeRewarmTimer = null;
+  }
 }

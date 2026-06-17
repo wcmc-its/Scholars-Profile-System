@@ -20,6 +20,9 @@ const mocks = vi.hoisted(() => ({
   mentoring: vi.fn(),
   peeps: vi.fn(),
   pubs: vi.fn(),
+  spotlights: vi.fn(),
+  browse: vi.fn(),
+  homeStats: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: { $queryRaw: mocks.queryRaw } }));
@@ -32,6 +35,11 @@ vi.mock("@/lib/api/mentoring-pmids", () => ({ getMentoringPmidBuckets: mocks.men
 vi.mock("@/lib/api/search", () => ({
   searchPeople: mocks.peeps,
   searchPublications: mocks.pubs,
+}));
+vi.mock("@/lib/api/home", () => ({
+  getSpotlights: mocks.spotlights,
+  getBrowseAllResearchAreas: mocks.browse,
+  getHomeStats: mocks.homeStats,
 }));
 
 import { warmUp, __resetWarmupForTests } from "@/lib/warmup";
@@ -50,6 +58,9 @@ describe("warmUp — readiness latch safety contract", () => {
     mocks.mentoring.mockRejectedValue(new Error("reciterdb down"));
     mocks.peeps.mockRejectedValue(new Error("search down"));
     mocks.pubs.mockRejectedValue(new Error("search down"));
+    mocks.spotlights.mockRejectedValue(new Error("home down"));
+    mocks.browse.mockRejectedValue(new Error("home down"));
+    mocks.homeStats.mockRejectedValue(new Error("home down"));
   });
 
   it("flips the latch even when every dependency fails (never leaves the task dark)", async () => {
