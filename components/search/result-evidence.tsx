@@ -71,7 +71,6 @@ export function ResultEvidence({
         <MatchAwareReason
           kind="method"
           label={evidence.family}
-          tools={evidence.tools}
           canExpand={canExpand}
           expanded={expanded}
           onToggle={onToggle}

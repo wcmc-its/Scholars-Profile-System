@@ -12,12 +12,14 @@ import type { ResultEvidence as Evidence } from "@/lib/api/result-evidence";
 const renderEv = (evidence: Evidence) => render(<ResultEvidence evidence={evidence} />);
 
 describe("<ResultEvidence> — one render per kind", () => {
-  it("method ⇒ Method badge, bold family, dot-separated tools", () => {
+  it("method ⇒ Method badge + bold family, with NO exemplar-tool trail", () => {
     renderEv({ kind: "method", family: "Single-cell RNA sequencing", tools: ["scRNA-seq", "10x"] });
     expect(screen.getByText("Method")).toBeTruthy();
     expect(screen.getByText("Single-cell RNA sequencing").tagName).toBe("STRONG");
-    expect(screen.getByText("scRNA-seq")).toBeTruthy();
-    expect(screen.getByText("10x")).toBeTruthy();
+    // The related-terms trail was dropped — the family name stands alone even when
+    // the evidence object still carries tools (kept so it can be reinstated later).
+    expect(screen.queryByText("scRNA-seq")).toBeNull();
+    expect(screen.queryByText("10x")).toBeNull();
   });
 
   it("topic ⇒ Research area badge + bold label", () => {

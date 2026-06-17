@@ -43,7 +43,7 @@ const props = {
 };
 
 describe("PeopleResultCard — #824 match-aware snippet", () => {
-  it("renders the method badge, bold family, and muted dot-separated tools", () => {
+  it("renders the method badge + bold family, with NO exemplar-tool trail", () => {
     render(
       <PeopleResultCard
         {...props}
@@ -59,9 +59,10 @@ describe("PeopleResultCard — #824 match-aware snippet", () => {
     expect(screen.getByText("Method")).toBeTruthy();
     const family = screen.getByText("Single-cell RNA sequencing");
     expect(family.tagName).toBe("STRONG");
-    expect(screen.getByText("scRNA-seq")).toBeTruthy();
-    expect(screen.getByText("single-nuclei")).toBeTruthy();
-    expect(screen.getByText("10x")).toBeTruthy();
+    // The muted dot-separated tool trail was dropped from the method row.
+    expect(screen.queryByText("scRNA-seq")).toBeNull();
+    expect(screen.queryByText("single-nuclei")).toBeNull();
+    expect(screen.queryByText("10x")).toBeNull();
   });
 
   it("renders the method badge with no tools (empty exemplar list)", () => {
