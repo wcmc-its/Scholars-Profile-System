@@ -49,7 +49,16 @@ vi.mock("@/lib/search", () => ({
             ],
           },
           aggregations: {
-            deptDivs: { keys: { buckets: [] } },
+            deptDivs: {
+              keys: {
+                buckets: [
+                  { key: "DEPT_MED", doc_count: 12 },
+                  { key: "center:meyer_cancer_center", doc_count: 5 },
+                  // #1074 — a program key that must NOT surface in the facet.
+                  { key: "centerProgram:CT", doc_count: 3 },
+                ],
+              },
+            },
             personTypes: { keys: { buckets: [] } },
             activityHasGrants: { doc_count: 0 },
             activityRecentPub: { doc_count: 0 },
@@ -77,5 +86,22 @@ describe("search hit mapper (PeopleHit)", () => {
       hits: Array<{ identityImageEndpoint?: string }>;
     };
     expect(result.hits[0].identityImageEndpoint).toBe(EXPECTED_HEADSHOT_URL);
+  });
+
+  it("excludes centerProgram: buckets from the dept/division/center facet (#1074)", async () => {
+    const mod: Record<string, unknown> = await import("@/lib/api/search");
+    const fn =
+      (mod as { searchPeople?: (opts: unknown) => Promise<unknown> }).searchPeople ??
+      (mod as { peopleSearch?: (opts: unknown) => Promise<unknown> }).peopleSearch ??
+      (mod as { search?: (opts: unknown) => Promise<unknown> }).search;
+    const result = (await fn!({ q: "doe", page: 0 })) as {
+      facets: { deptDivs: Array<{ value: string }> };
+    };
+    const values = result.facets.deptDivs.map((d) => d.value);
+    // Departments and centers still surface…
+    expect(values).toContain("DEPT_MED");
+    expect(values).toContain("center:meyer_cancer_center");
+    // …but the center *program* bucket is filtered out (center-page concern).
+    expect(values.some((v) => v.startsWith("centerProgram:"))).toBe(false);
   });
 });

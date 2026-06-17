@@ -2395,15 +2395,23 @@ export async function searchPeople(opts: {
     queryShape,
     attributionBoostFired,
     facets: {
-      deptDivs: (r.aggregations?.deptDivs?.keys.buckets ?? []).map((b) => ({
-        value: b.key,
-        // Label is resolved server-side in the page (PeopleResults) by
-        // joining b.value against Department / Division / Center via
-        // Prisma. Returning the raw key as a fallback keeps callers that
-        // don't resolve labels (e.g. the analytics log) intelligible.
-        label: b.key,
-        count: b.doc_count,
-      })),
+      deptDivs: (r.aggregations?.deptDivs?.keys.buckets ?? [])
+        // #1074 — center *programs* don't belong in the global dept/division/
+        // center browse facet (that's a center-page concern, #906/#911). The
+        // index no longer emits `centerProgram:<code>` keys (search-index-docs),
+        // but guard here too so any still-indexed key drops immediately without
+        // waiting for a rebuild, and a future regression can't resurface a raw
+        // `centerProgram:` bucket.
+        .filter((b) => !String(b.key).startsWith("centerProgram:"))
+        .map((b) => ({
+          value: b.key,
+          // Label is resolved server-side in the page (PeopleResults) by
+          // joining b.value against Department / Division / Center via
+          // Prisma. Returning the raw key as a fallback keeps callers that
+          // don't resolve labels (e.g. the analytics log) intelligible.
+          label: b.key,
+          count: b.doc_count,
+        })),
       personTypes: (r.aggregations?.personTypes?.keys.buckets ?? []).map((b) => ({
         value: b.key,
         count: b.doc_count,
