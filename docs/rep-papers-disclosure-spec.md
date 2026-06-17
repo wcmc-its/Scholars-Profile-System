@@ -1,148 +1,170 @@
-# Implementation spec — Representative-papers disclosure + free-text pub evidence + chip-wrench fix
+# Search-result evidence & representative-papers disclosure — as-built
 
-Branch `feat/topic-exemplar-hover` (worktree `~/worktrees/sps-method-hover`). All edits
-happen IN THIS WORKTREE. Rides the existing `SEARCH_RESULT_EVIDENCE` (staging-on, prod-off)
-+ `SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB` (staging-on, prod-off) flags — no new flag,
-no reindex, no edge deploy (the `/api/scholar/[cwid]/method-exemplar` route path is unchanged).
+The People-tab search-result snippet: one typed evidence object per result, rendered as a
+"why this matched" line, with a clickable disclosure that reveals the scholar's representative
+papers. This is the as-built record of the behavior shipped across **#1064 → #1066 → #1067**
+(it supersedes the original implementation spec and the #1060 hover-reveal).
 
-This SUPERSEDES the hover-reveal (#1060/#1064): the ▾ becomes a real clickable disclosure.
+**Flags (no new flag, no reindex, no edge deploy — the `/api/scholar/[cwid]/method-exemplar`
+route path is unchanged):**
+- `SEARCH_RESULT_EVIDENCE` — emits the typed `evidence` object + the disclosure. Staging **on**,
+  prod **off**.
+- `SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB` — attaches the inline representative pubs to the
+  pub-count evidence. Staging **on**, prod **off**.
+- `SEARCH_PEOPLE_MATCH_EXPLAIN` — the underlying reason-count aggregation. On in both envs.
 
-## User decisions (locked)
-1. **Free-text pub evidence (#1).** For content queries that do NOT resolve to a concept
-   (e.g. `16s rna`), show `N of M publications mention "<query>"` (with representative papers
-   on the disclosure) instead of a weak partial bio highlight or "no specific match".
-2. **Precedence — publications win on partial bio.** A bio highlight that matched only a
-   SUBSET of a multi-word query loses to publication-mention evidence. A FULL-query bio match
-   (or a single-token query) still wins, as today.
-3. **Reveal = clickable chevron, COLLAPSED by default.** Replaces hover. Requires the card to
-   stop being a single `<Link>` (stretched-link pattern below).
-4. **Up to 3 representative papers** in the stack + `+N more in profile →`.
-5. **Wrench (#3).** Remove the per-chip `Wrench` from `MethodChip` (the section label keeps it).
+Everything here is **presentation-only**: the query predicate, scoring, result set, facets, and
+counts are unchanged, and the `SEARCH_RESULT_EVIDENCE`-off (prod) path is byte-identical to the
+pre-feature legacy reason line.
 
-## Files & changes
+---
 
-### 1. `lib/api/result-evidence.ts` (contract + precedence)
-- `EvidencePub` unchanged.
-- `publications` kind: replace `pub?: EvidencePub` with `pubs?: EvidencePub[]` AND add
-  `count?: number` (the numeric "N" for `+N more` math; the `text` keeps the human string).
-- `SelectEvidenceInput.pub.tagged` / `.mention`: replace `pub?: EvidencePub` with
-  `pubs?: EvidencePub[]` and carry `count: number`.
-- Add `query?: string` to `SelectEvidenceInput` (the content query, for partial-bio detection).
-- New exported pure helper `bioCoversQuery(bioHighlight: string, query: string): boolean`:
-  tokenize `query` (lowercase, split on non-alphanumeric, drop tokens < 2 chars); extract the
-  text inside every `<mark>…</mark>` in `bioHighlight` (lowercased, concatenated); return true
-  iff EVERY query token appears in that marked text. A query with ≤1 significant token → true
-  (single-token bio match is "full"). Empty/absent query → true (back-compat: no demotion).
-- `selectEvidence` precedence, updated (tiers unchanged except bio split):
-  1 name → 2 method → 3 topic → 4 `pub.tagged` → 4b `pub.concept`
-  → **5 selfDescription ONLY IF `bioCoversQuery(bioHighlight, query)`**
-  → 6 `pub.mention`
-  → **6b selfDescription (partial bio falls here — still beats affiliation)**
-  → 7 affiliation → 8 areas → 9 none.
-  When building a `publications` evidence, pass `pubs` + `count` through.
+## The contract — `lib/api/result-evidence.ts`
 
-### 2. `lib/api/method-exemplar-rank.ts` (top-N)
-- Add exported `rankMethodExemplarList(candidates, currentYear, limit = 3): EvidencePub[]`:
-  same filter + same lexicographic sort as `rankMethodExemplar`, return the top `limit` mapped
-  to `EvidencePub` (`{ pmid, title, year }`).
-- Keep `rankMethodExemplar` returning `rankMethodExemplarList(c, y, 1)[0] ?? null` (back-compat;
-  `method-exemplar-rank.test.ts` still passes).
+One `ResultEvidence` per hit, selected server-side by ONE precedence function (`selectEvidence`);
+the card renders it and never re-ranks. Relevant shapes:
 
-### 3. `lib/api/method-exemplar.ts` (loaders return top-N + total)
-- `rankExemplarForPmids(cwid, pmids): Promise<{ pubs: EvidencePub[]; total: number }>`:
-  after building `candidates`, set `total = candidates.length` (renderable safe candidates,
-  pre-cap is fine), `pubs = rankMethodExemplarList(candidates, year, 3)`. Empty → `{pubs:[],total:0}`.
-- `loadMethodExemplar` / `loadTopicExemplar` return `{ pubs, total }` (null-equivalent = `{pubs:[],total:0}`).
+- `EvidencePub = { pmid; title; titleHtml?; year? }`.
+- `publications` kind: `{ kind:"publications"; strength:"tagged"|"mention"|"concept"; text;
+  pubs?: EvidencePub[]; count?: number }` — `pubs` is the (≤3) representative stack, `count` the
+  numeric N for the `+N more` math, `text` the human "N of M …" string.
+- `method` kind: `{ kind:"method"; family: string; tools: string[] }`. **The `tools` are no
+  longer rendered** (the trail was dropped in #1067 — see "Method row" below), but the field is
+  retained so a curated 1–2 terms could be reinstated without re-deriving anything.
+- `SelectEvidenceInput.pub.{tagged,mention}` carry `{ text; count; pubs? }`; the input also
+  carries `query` (the content query) for the partial-bio test.
 
-### 4. `app/api/scholar/[cwid]/method-exemplar/route.ts`
-- Return `{ pubs, total }` (not `{ pub }`). Flag-off / error / no-selector → `{ pubs: [], total: 0 }`.
+### Precedence (`selectEvidence`)
+`name → method → topic → pub.tagged → pub.concept → selfDescription(bio, IF it covers the query)
+→ pub.mention → selfDescription(partial-bio fallback) → affiliation → areas → none`
 
-### 5. `lib/api/search.ts` (free-text mention + multi-pub parsing)
-- Add `parseReasonTopHits(agg, limit = 3): RepresentativePub[]` (array form of `parseReasonTopHit`;
-  iterate `agg.top.hits.hits`, map each via the same pmid/title/year/titleHtml logic, drop invalid).
-  Keep `parseReasonTopHit` (used by `composeMatchReason`/legacy).
-- `repPubTopHits.top_hits.size`: 1 → 3.
-- **Gating fix (the core of #1).** Today the reason aggregation block (`reasonCounts`/`reasonReps`)
-  runs only when `applyTopicTemplate && meshDescendantUis.length > 0 && provenanceParent.length > 0`.
-  Change so it ALSO runs for content-shaped free-text queries with no resolved concept:
-  - Compute `contentShape = applyTopicTemplate || applyHybridTemplate || queryShape === "restructured_msm"`
-    (i.e. NOT `name_template`, NOT `department_template`).
-  - Run the agg when `matchExplain && contentQuery.length > 0 && pageCwids.length > 0 && contentShape`.
-  - Inside: the `tagged` sub-filter requires `meshDescendantUis.length > 0` — when empty, OMIT the
-    `tagged` sub-agg entirely and compute `mention` only (so `tagged` count stays 0 / absent).
-  - `mention` filter is unchanged (`multi_match` title+abstract `operator:"and"` on `contentQuery`).
-- In `reasonReps`, store `tagged`/`mention` as `RepresentativePub[]` (via `parseReasonTopHits`).
-  (Update the `reasonReps` Map value type to arrays; `composeMatchReason` legacy path still wants a
-  single `pub` — give it `reps?.tagged?.[0]` etc. via a tiny adapter so the legacy reason is unchanged.)
-- In `resolveHitEvidence`: build `pub.tagged`/`pub.mention` with `{ text, count, pubs }`
-  (`pubs = reps?.tagged ?? []`, `count = Math.min(counts.x, pubCount)`). Pass `query: contentQuery`
-  into `selectEvidence`. Only set `pub.tagged` when `counts.tagged > 0`, `pub.mention` when
-  `counts.mention > 0` (unchanged thresholds).
-- Do NOT change ranking, the result SET, facets, or counts — evidence is presentation-only.
+The bio is split into two tiers by **`bioCoversQuery(bioHighlight, query)`** (exported, pure): a
+bio highlight that marked only a SUBSET of a multi-word query loses to `pub.mention`; a full-query
+(or single-token) bio still wins. Implementation: tokenize `query` (lowercase, split on
+non-alphanumeric, drop tokens < 2 chars); a bio "covers" the query iff every query token appears
+inside the `<mark>…</mark>` spans. ≤1 significant token, or empty/absent query → true (no
+demotion). This is why `16s rna` rows show "N of M publications mention …" instead of a bio
+sentence that only matched "RNA".
 
-### 6. `components/search/match-reason.tsx`
-- `MatchAwareReason` (method/topic) + `MatchReason` (publications count line) gain disclosure props:
-  `canExpand?: boolean`, `expanded?: boolean`, `onToggle?: () => void`, `panelId?: string`.
-  When `canExpand`, render a real `<button type="button">` at the row end (`margin-left:auto`,
-  `relative z-10`) with `aria-expanded={expanded}`, `aria-controls={panelId}`, a
-  `ChevronDown`/`ChevronUp` (or rotate on `expanded`), and an `aria-label` like
-  `Show representative papers` / `Hide representative papers`. `onClick` calls `onToggle` AND
-  `e.preventDefault()/stopPropagation()` so it never triggers the stretched name-link navigation.
-  Remove the old decorative `group-hover:rotate` ▾.
-- New exported `RepresentativePapers({ papers, total, profileHref, status, panelId })`:
-  the mockup's `REP. PAPERS` block — a small uppercase `REP. PAPERS` label + a column of up to 3
-  italic titles via `PubTitle` + ` (year)` muted; when `total > papers.length`, a
-  `+{total - papers.length} more in profile →` `<Link>` (`relative z-10`, stops propagation) to
-  `profileHref`. While `status==="loading"` show a muted "finding representative papers…" (aria-hidden).
-  `MethodExemplarLine` (single-paper hover) is REMOVED (superseded).
+---
 
-### 7. `components/search/result-evidence.tsx`
-- Thread disclosure props through `<ResultEvidence>` (`canExpand`, `expanded`, `onToggle`, `panelId`)
-  to `MatchAwareReason` (method/topic) and the `publications` `MatchReason`.
-- `publications` case: `canExpand = (evidence.pubs?.length ?? 0) > 0`.
+## Free-text publication evidence — `lib/api/search.ts`
 
-### 8. `components/search/people-result-card.tsx` (the structural refactor)
-- **Stretched-link card.** Replace the single `<Link>` wrapper with a `<div className="group relative …">`
-  (keep the grid + hover bg). The NAME becomes the profile link:
-  `<Link href={profilePath(hit.slug)} onClick={handleClick} className="… after:absolute after:inset-0 after:content-['']">{hit.preferredName}</Link>`
-  so the whole card stays clickable. Every other interactive element (chevron button, `+N more` link)
-  sits ABOVE the overlay with `relative z-10`. The analytics `handleClick` beacon moves onto the name link.
-  Keep `onMouseEnter`/`onFocus` off (no longer hover-driven).
-- **Disclosure state.** `const [expanded, setExpanded] = useState(false)`. `panelId = useId()`.
-  - method/topic: lazy-fetch on FIRST expand (not hover). `exemplarQuery` as today (`family=`/`topic=`).
-    `fetch(...).then(r => r.json()).then((d:{pubs:EvidencePub[]; total:number}) => …)`. Store
-    `{pubs,total}`. `canExpand` = `!!exemplarQuery` (optimistic; if fetch returns empty, render an
-    empty stack / collapse — never a dead control: if `status==="done" && pubs.length===0`, hide chevron).
-  - publications: pubs are INLINE (`evidence.pubs`), `total = evidence.count ?? evidence.pubs.length`.
-    No fetch. `canExpand` = `pubs.length > 0`.
-  - `onToggle` flips `expanded`; on first open for method/topic, trigger the fetch.
-- Render order inside the text column: name → title → dept → `<ResultEvidence … disclosure props>`
-  → (when `expanded`) `<RepresentativePapers papers total profileHref={`${profilePath(hit.slug)}#publications`} status panelId/>`.
-- LEGACY path (no `hit.evidence`) is unchanged EXCEPT the wrapper is now the stretched-link div
-  (the legacy snippet lines are non-interactive, so they're fine under the overlay).
+The "N of M publications tagged/mention X" reason (and its representative pubs) is produced by ONE
+aggregation on the publications index keyed by page cwid — no people-index field, no reindex.
 
-### 9. `components/search/research-areas-row.tsx` (#3 wrench)
-- In `MethodChip`, DELETE the leading `<Wrench …/>` element. Keep the rust tint, the name, and the
-  `Users` count. (The `Wrench` import stays — still used by the section-label icon in `ResearchAreasRow`.)
+**Gating (the core of the `16s rna` fix).** Historically the aggregation ran only when a query
+resolved to a MeSH concept (`applyTopicTemplate && meshDescendantUis>0 && provenanceParent>0`),
+so a content-shaped free-text query that resolves to nothing fell through to a weak bio highlight
+or "no specific match". It now also runs for **content-shaped free-text queries**, but the
+widening is gated on `resultEvidence` so the flag-off prod legacy reason stays byte-identical:
 
-## Tests to update / add (run with `--maxWorkers=4`)
-- `result-evidence-select.test.ts` — new precedence (partial-bio→pubs, full-bio→bio), `bioCoversQuery`,
-  `pubs`/`count` shape on `publications`.
-- `result-evidence-card.test.tsx` — `publications` renders the count line; chevron present when `pubs`;
-  `RepresentativePapers` stack + `+N more`.
-- `method-exemplar-rank.test.ts` — add `rankMethodExemplarList` (ordering, limit, empty).
-- `method-exemplar-loader.test.ts` — loaders return `{pubs,total}`; gates unchanged.
-- `people-result-card-method-exemplar.test.tsx` + `people-result-card-representative-pub.test.tsx` —
-  click-to-expand (not hover), fetch shape `{pubs,total}`, stretched-link (name is the link, chevron
-  is a button), stack render. (Rename/replace the hover assertions.)
-- `search-people-result-evidence.test.ts` / `search-match-reason-representative-pub.test.ts` —
-  free-text (no concept) now yields `publications:mention` with `pubs`; `parseReasonTopHits`; the
-  `tagged` sub-agg omitted when no descriptor; legacy `composeMatchReason` unchanged.
-- `research-areas-row.test.tsx` — method chip no longer renders a per-chip wrench.
-- Search the suite for other refs to `evidence.pub`/`{ pub }` from the route/`MethodExemplarLine` and fix.
+```ts
+const contentShape =
+  applyTopicTemplate || applyHybridTemplate || queryShape === "restructured_msm"; // NOT name/department
+const runReasonAgg = resultEvidence
+  ? matchExplain && contentQuery.length > 0 && pageCwids.length > 0 && contentShape
+  : matchExplain && applyTopicTemplate && meshDescendantUis.length > 0 && provenanceParent.length > 0;
+```
 
-## Guardrails
-- No `git commit`/`push`/`gh pr merge` — leave the worktree dirty for review.
-- Assert `git rev-parse --show-toplevel` == the worktree before editing.
-- Presentation-only: do not alter the query predicate, scoring, result set, facets, or counts.
-- Keep the `SEARCH_RESULT_EVIDENCE` off-path byte-identical (no evidence field, legacy chain).
+- Name- and department-shaped queries never run it (no "publications mention 'John Smith'").
+- The `tagged` sub-filter requires a resolved descriptor: when `meshDescendantUis` is empty it is
+  OMITTED and only `mention` (`multi_match` title+abstract, `operator:"and"` on `contentQuery`) is
+  computed. The `tagged` evidence is additionally guarded on `provenanceParent.length > 0` so an
+  empty descriptor can never render "publications tagged " with a trailing blank.
+- Representative pubs: `repPubTopHits` is `top_hits` `size: 3`, sorted year-desc then citations-desc,
+  with the title `<mark>`-highlighted against the literal `contentQuery`. Parsed by
+  `parseReasonTopHits(agg, 3): RepresentativePub[]` (array form of `parseReasonTopHit`, which is
+  kept for the legacy `composeMatchReason` path — fed `reps.x?.[0]` so the legacy reason is
+  unchanged).
+- `resolveHitEvidence` builds `pub.tagged`/`pub.mention` as `{ text, count: Math.min(count,
+  pubCount), pubs }` and passes `query: contentQuery` into `selectEvidence`.
+
+---
+
+## Representative-paper loaders — method/topic (lazy, Aurora-only)
+
+`/api/scholar/[cwid]/method-exemplar?family=` / `?topic=` resolves the stack on first expand
+(`{ pubs: EvidencePub[]; total: number }`; flag-off / error / no-selector → `{ pubs:[], total:0 }`).
+
+- `rankMethodExemplarList(candidates, year, limit=3)` — same lexicographic rank as the single-pick
+  `rankMethodExemplar` (original-research → first/senior → impact → citations/yr → year → pmid),
+  returning the top `limit`. `filterRenderableExemplars` drops corrections / untitled stubs.
+- `rankExemplarForPmids` returns `{ pubs, total }` where `total` is the **renderable** candidate
+  count (so `+N more` never over-promises). All gates intact: scholar active/non-deleted, #800/#801
+  family overlay (method), ADR-005 publication suppression.
+- These titles carry **no `titleHtml`** (no analyzer at fetch time), so method/topic rep papers
+  render plain — see "Keyword highlighting" below.
+
+---
+
+## Rendering — `components/search/match-reason.tsx`, `result-evidence.tsx`, `people-result-card.tsx`
+
+### Disclosure = the whole summary row is the toggle (#1066)
+Not a chevron marooned at the right edge: the `[icon] [label] [chevron]` cluster is ONE
+content-width native `<button>` (`DisclosureRow`) — implicit role=button, native Enter/Space,
+`aria-expanded`, `aria-controls` **only while expanded** (the panel mounts only then, so a
+collapsed `aria-controls` would dangle). It has a hover surface (`hover:bg-[#f0eeea]`) and
+`-mx-2 / px-2` so the surface breathes ±8px without shifting the content's left edge; the chevron
+rotates 180° on expand. `onClick` does `preventDefault`/`stopPropagation` so it never triggers the
+card's stretched name-link. The accessible name is the visible content (the count / method label)
+plus an `sr-only " representative papers"` affordance. Applies to both the publication-count
+`MatchReason` row and the method/Research-area `MatchAwareReason` pill row.
+
+### Method row (#1067)
+Just the `METHOD` pill + the bold family name + the chevron — the muted `· term · term`
+exemplar-tool trail was removed (the rep-papers list does the evidentiary work; the bare name
+reads as a confident label with no casing/truncation to maintain). The family name is
+`font-semibold` (600) `#1a1a1a` — the same weight as the in-title highlight.
+
+### Representative-papers panel — `RepresentativePapers`
+- Label pluralizes: **"Rep. paper"** for one, **"Rep. papers"** for more.
+- Each paper is a flex `[•] [title]` row (`items-start`, bullet `flex-shrink-0`, **6px** gap), so a
+  wrapped title hangs under the title text, not the bullet.
+- Titles are **roman, 15px, and never truncate** — the full article title always wraps. Rendered
+  through `PubTitle` (markup-safe) or `HighlightedSnippet` when a `titleHtml` is present; the
+  matched keyword stays `font-semibold` (600) `#1a1a1a`. The trailing ` (year)` is non-italic
+  tertiary.
+- `+{total - papers.length} more in profile →` `<Link>` (`relative z-10`, stops propagation) to
+  `${profilePath(slug)}#publications` when `total > shown`.
+- While a method/topic fetch is in flight: a muted, `aria-hidden` "finding representative papers…"
+  placeholder. Renders nothing once a fetch resolves with zero papers (no dead block / no dead
+  chevron).
+
+### Stretched-link card — `people-result-card.tsx`
+The card is no longer a single `<Link>`. The NAME is the profile link with an
+`after:absolute after:inset-0` overlay (whole-card click + analytics beacon preserved); the
+chevron button and the `+N more` link sit above it (`relative z-10`). Disclosure state is
+`useState` + `useId`; method/topic lazy-fetch `{pubs,total}` on first expand, publications use the
+inline `evidence.pubs` (no fetch).
+
+### Chip wrench (#1064 #3)
+`MethodChip` (the "Methods and Tools" header chip row) no longer carries a per-chip `Wrench`; the
+rust tint already cues "method" and the section label keeps its icon — consistent with the
+Research-Areas chips.
+
+---
+
+## Keyword highlighting — confirmed behavior (not morphological)
+
+- **Publication-mention / tagged** rep-paper titles are highlighted by OpenSearch using the title
+  field's analyzer: exact + light English stemming (catches simple inflections), but **NOT**
+  cross-morphological (`metabolomics` does not light up `metabolic` / `metabolome` — different
+  stems).
+- **Method / topic** rep-paper titles come from the lazy Aurora fetch with no analyzer, so they
+  currently render **plain (no highlight)**.
+- Accepted limitation: exact/stemmed-token only; some titles show no highlight. Morphological
+  matching is intentionally not built. If method/topic rep papers should later highlight verbatim
+  query terms for page-wide consistency, that is a small separate follow-up (highlight the query
+  tokens client-side in the card, which already has `q`).
+
+---
+
+## Invariants (keep these true)
+- Presentation-only: never alter the query predicate, scoring, result set, facets, or counts.
+- `SEARCH_RESULT_EVIDENCE`-off path is byte-identical to the legacy reason line (the `runReasonAgg`
+  guard is what protects this).
+- Every returned representative pub passes the scholar / family-overlay / ADR-005 suppression gates
+  — top-N must not bypass a gate the single-pick had.
+- No interactive element nested inside the card's name `<a>`; the disclosure button and `+N more`
+  link live above the stretched-link overlay (`relative z-10`).
