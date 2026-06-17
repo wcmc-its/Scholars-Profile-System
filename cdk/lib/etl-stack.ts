@@ -776,6 +776,14 @@ export class EtlStack extends Stack {
     ];
     const weeklySteps: ReadonlyArray<StepSpec> = [
       { id: "Completeness", npmScript: "etl:completeness", external: false },
+      // Data Quality dashboard headshot signal (docs/data-quality-dashboard-spec.md).
+      // Probes the PUBLIC WCM directory (`identityImageEndpoint`, which 404s when no
+      // photo exists) per active scholar and persists has_headshot — the app can't
+      // know presence otherwise (it derives the URL from the cwid, client-side).
+      // Reads the directory over NAT egress with no credential (like etl:nsf), so
+      // external:false; mutates SPS-DB only. Weekly cadence is plenty for a slow-
+      // changing signal; incremental by default (re-probes never-checked + >30d-stale).
+      { id: "HeadshotPresence", npmScript: "etl:headshot", external: false },
       { id: "Spotlight", npmScript: "etl:spotlight", external: true },
       // Grant-enrichment sources (#608). They key off the `grant` table that
       // etl:infoed refreshes nightly; none needs 24h freshness, so they batch

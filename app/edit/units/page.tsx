@@ -20,6 +20,7 @@ import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
+import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { loadAllUnitsDirectory, loadManageableUnits } from "@/lib/edit/manageable-units";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
@@ -88,6 +89,14 @@ export default async function EditUnitsPage() {
         pendingSlugRequests={pendingSlugRequests}
         administratorsTab={session.isSuperuser && isAdministratorsTabEnabled() ? 0 : null}
         methodsTab={isMethodsTabVisible(session) ? 0 : null}
+        // A global editor (superuser/comms_steward) OR a unit Owner/Curator with
+        // grants gets the Data quality tab — the latter sees it scoped to their units.
+        dataQualityTab={
+          isDataQualityDashboardEnabled() &&
+          (session.isSuperuser || session.isCommsSteward || units.total > 0)
+            ? 0
+            : null
+        }
         selfEditHref={selfEditHref}
       />
 

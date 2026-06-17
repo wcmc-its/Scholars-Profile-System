@@ -27,6 +27,7 @@ import {
 } from "@/lib/edit/unit-scholar-authz";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
+import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import {
   countPendingSlugRequests,
@@ -255,6 +256,14 @@ export default async function EditSelfPage({
                 isSuperuser: canBrowseProfiles,
                 isCommsSteward: commsSteward,
               })
+                ? 0
+                : null
+            }
+            // A global editor OR a unit Owner/Curator with grants gets the Data
+            // quality tab (mirrors `unitsTab`); the latter sees it scoped to their units.
+            dataQualityTab={
+              isDataQualityDashboardEnabled() &&
+              (canBrowseProfiles || commsSteward || hasUnitGrants)
                 ? 0
                 : null
             }

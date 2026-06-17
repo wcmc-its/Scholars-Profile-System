@@ -167,6 +167,42 @@ describe("AdminSubnav", () => {
     expect(self.getAttribute("href")).toBe("/edit");
   });
 
+  // Data Quality dashboard tab (docs/data-quality-dashboard-spec.md).
+  it("hides the Data quality tab when dataQualityTab is null/omitted", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} dataQualityTab={null} />);
+    expect(screen.queryByTestId("admin-tab-data-quality")).toBeNull();
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} />);
+    expect(screen.queryByTestId("admin-tab-data-quality")).toBeNull();
+  });
+
+  it("shows the Data quality tab (linking /edit/data-quality) when dataQualityTab is 0", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} dataQualityTab={0} />);
+    const tab = screen.getByTestId("admin-tab-data-quality");
+    expect(tab.getAttribute("href")).toBe("/edit/data-quality");
+    expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
+  });
+
+  it("marks the Data quality tab active with aria-current", () => {
+    render(<AdminSubnav active="data-quality" pendingSlugRequests={null} dataQualityTab={0} />);
+    expect(screen.getByTestId("admin-tab-data-quality").getAttribute("aria-current")).toBe("page");
+  });
+
+  // A unit Owner/Curator (superuserSurfaces=false) still gets Data quality scoped
+  // to their units — the `/edit/units` page passes dataQualityTab on grants.
+  it("shows Data quality for a non-superuser when dataQualityTab is set", () => {
+    render(
+      <AdminSubnav
+        active="units"
+        pendingSlugRequests={null}
+        superuserSurfaces={false}
+        unitsTab
+        dataQualityTab={0}
+      />,
+    );
+    expect(screen.getByTestId("admin-tab-data-quality")).toBeTruthy();
+    expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
+  });
+
   // comms-steward-profile-editing-spec.md §3b — a steward edits org units, so
   // the Units tab is shown via the `unitsTab` capability.
   it("shows the Units tab (linking /edit/units) when unitsTab is true", () => {

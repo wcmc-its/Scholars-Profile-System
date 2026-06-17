@@ -340,6 +340,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "EDIT_DATA_QUALITY_DASHBOARD",
+                "Value": "off",
+              },
+              {
                 "Name": "RECITER_REJECT_SEND",
                 "Value": "off",
               },
@@ -3458,6 +3462,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY",
                 "Value": "off",
+              },
+              {
+                "Name": "EDIT_DATA_QUALITY_DASHBOARD",
+                "Value": "on",
               },
               {
                 "Name": "RECITER_REJECT_SEND",

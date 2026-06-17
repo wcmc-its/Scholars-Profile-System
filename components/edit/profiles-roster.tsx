@@ -47,6 +47,9 @@ export type ProfilesRosterProps = {
   /** Forwarded to the sub-nav: `null` hides the "Method Families" tab
    *  (comms_steward surface, flag + role-gated). */
   methodsTab?: number | null;
+  /** Forwarded to the sub-nav: `null` hides the "Data quality" tab
+   *  (flag + role-gated). */
+  dataQualityTab?: number | null;
   /** Link back to the viewer's own self-edit surface, forwarded to the
    *  sub-nav; `null` when they have no profile of their own. */
   selfEditHref?: string | null;
@@ -96,6 +99,7 @@ export function ProfilesRoster({
   pendingSlugRequests,
   administratorsTab,
   methodsTab,
+  dataQualityTab,
   selfEditHref,
   canImpersonate,
   viewerCwid,
@@ -126,6 +130,7 @@ export function ProfilesRoster({
         pendingSlugRequests={pendingSlugRequests}
         administratorsTab={administratorsTab}
         methodsTab={methodsTab}
+        dataQualityTab={dataQualityTab}
         selfEditHref={selfEditHref}
         superuserSurfaces={superuserSurfaces}
         profilesTab={profilesTab}

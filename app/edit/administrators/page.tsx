@@ -27,6 +27,7 @@ import {
   loadOwnerManagedUnitScope,
 } from "@/lib/edit/administrators";
 import { logEditDenial } from "@/lib/edit/authz";
+import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
@@ -108,6 +109,7 @@ export default async function AdministratorsPage() {
         pendingSlugRequests={pendingSlugRequests}
         administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
         methodsTab={isMethodsTabVisible(session) ? 0 : null}
+        dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
         selfEditHref={selfEditHref}
       />
 
