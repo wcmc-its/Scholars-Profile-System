@@ -20,10 +20,14 @@ vi.mock("@/lib/edit/data-quality", () => ({
   isEmptyScope: mockEmpty,
   loadDataQualityScope: mockScope,
 }));
-vi.mock("@/lib/api/data-quality", () => ({
-  loadDataQualityExport: mockExport,
-  buildDataQualityCsv: mockCsv,
-}));
+vi.mock("@/lib/api/data-quality", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/api/data-quality")>();
+  return {
+    ...actual, // keep the real parseDataQualityParams so param threading is exercised
+    loadDataQualityExport: mockExport,
+    buildDataQualityCsv: mockCsv,
+  };
+});
 vi.mock("@/lib/db", () => ({ db: { read: {} } }));
 
 import { GET } from "@/app/edit/data-quality/export/route";
@@ -74,13 +78,18 @@ describe("/edit/data-quality/export gating", () => {
     expect(await res.text()).toBe("rank,cwid\r\n1,fac1\r\n");
   });
 
-  it("threads the query-param filters into the export loader", async () => {
-    await GET(req("?type=postdoc&dept=MED&gap=no-headshot&hidden=0"));
+  it("threads the multi-value query-param filters into the export loader", async () => {
+    await GET(req("?q=harr&type=postdoc&type=staff&unit=dept:MED&unit=center:MCC&gap=no-headshot&overviewAge=imported&hidden=0"));
     expect(mockExport).toHaveBeenCalledWith(
       expect.objectContaining({
-        roleCategory: "postdoc",
-        deptCode: "MED",
+        query: "harr",
+        roleCategories: ["postdoc", "staff"],
+        units: [
+          { kind: "department", code: "MED" },
+          { kind: "center", code: "MCC" },
+        ],
         gap: "no-headshot",
+        overviewAge: "imported",
         includeHidden: false,
       }),
       expect.anything(),

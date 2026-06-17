@@ -35,8 +35,20 @@ vi.mock("@/lib/edit/data-quality", () => ({
   loadDataQualityScope: mockScope,
   isEmptyScope: mockEmpty,
 }));
-vi.mock("@/lib/api/data-quality", () => ({ loadDataQualityRoster: mockRoster }));
-vi.mock("@/lib/api/edit-roster", () => ({ loadRosterFacets: mockFacets }));
+vi.mock("@/lib/api/data-quality", () => ({
+  loadDataQualityRoster: mockRoster,
+  loadDataQualityFacets: mockFacets,
+  parseDataQualityParams: vi.fn(() => ({
+    q: "",
+    roleCategories: [],
+    units: [],
+    unitValues: [],
+    gap: "all",
+    overviewAge: "all",
+    includeHidden: true,
+    page: 0,
+  })),
+}));
 vi.mock("@/lib/auth/comms-steward", () => ({ isMethodsTabVisible: () => false }));
 vi.mock("@/lib/edit/administrators", () => ({ isAdministratorsTabEnabled: () => false }));
 vi.mock("@/lib/edit/slug-request", () => ({
@@ -62,12 +74,7 @@ beforeEach(() => {
     total: 0,
     counts: { inScope: 0, missingHeadshot: 0, missingOverview: 0, withCoi: 0 },
   });
-  mockFacets.mockResolvedValue({
-    departments: [],
-    divisions: [],
-    centers: [],
-    roleCategories: [],
-  });
+  mockFacets.mockResolvedValue({ roleCategories: [], departments: [], centers: [] });
 });
 
 const run = () => Page({ searchParams: Promise.resolve({}) });

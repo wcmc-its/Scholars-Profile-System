@@ -19,10 +19,10 @@ import { notFound, redirect } from "next/navigation";
 import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { DataQualityDashboard } from "@/components/edit/data-quality-dashboard";
 import {
+  loadDataQualityFacets,
   loadDataQualityRoster,
-  type DataQualityGapFilter,
+  parseDataQualityParams,
 } from "@/lib/api/data-quality";
-import { loadRosterFacets } from "@/lib/api/edit-roster";
 import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -41,22 +41,12 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-const PAGE_SIZE = 50;
-
-function parseGap(v: string | undefined): DataQualityGapFilter {
-  return v === "no-headshot" || v === "no-overview" || v === "has-coi" ? v : "all";
-}
+const PAGE_SIZE = 100;
 
 export default async function EditDataQualityPage({
   searchParams,
 }: {
-  searchParams?: Promise<{
-    type?: string;
-    dept?: string;
-    gap?: string;
-    hidden?: string;
-    page?: string;
-  }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await getEffectiveEditSession();
   if (!session) {
@@ -75,28 +65,26 @@ export default async function EditDataQualityPage({
     notFound();
   }
 
-  const { type, dept, gap, hidden, page } = (await searchParams) ?? {};
-  const roleCategory = (type ?? "").trim() || undefined;
-  const deptCode = (dept ?? "").trim() || undefined;
-  const gapFilter = parseGap(gap);
-  // Hidden identity classes are INCLUDED by default; an explicit "0"/"false" hides them.
-  const includeHidden = !(hidden === "0" || hidden === "false");
-  const pageNum = Math.max(Number.parseInt(page ?? "0", 10) || 0, 0);
+  // Name/CWID search, person-type + org-unit multi-selects, gap, overview-age,
+  // hidden-roles, page — all parsed once here (and identically by the export route).
+  const params = parseDataQualityParams((await searchParams) ?? {});
 
   const [roster, facets] = await Promise.all([
     loadDataQualityRoster(
       {
         scope,
-        roleCategory,
-        deptCode,
-        gap: gapFilter,
-        includeHidden,
+        query: params.q,
+        roleCategories: params.roleCategories,
+        units: params.units,
+        gap: params.gap,
+        overviewAge: params.overviewAge,
+        includeHidden: params.includeHidden,
         limit: PAGE_SIZE,
-        offset: pageNum * PAGE_SIZE,
+        offset: params.page * PAGE_SIZE,
       },
       db.read,
     ),
-    loadRosterFacets(db.read),
+    loadDataQualityFacets(db.read),
   ]);
 
   // Sub-nav: a superuser sees the full strip; a comms_steward sees Profiles +
@@ -149,11 +137,13 @@ export default async function EditDataQualityPage({
           total={roster.total}
           counts={roster.counts}
           facets={facets}
-          roleCategory={roleCategory ?? ""}
-          deptCode={deptCode ?? ""}
-          gap={gapFilter}
-          includeHidden={includeHidden}
-          page={pageNum}
+          roleCategories={params.roleCategories}
+          units={params.unitValues}
+          q={params.q}
+          gap={params.gap}
+          overviewAge={params.overviewAge}
+          includeHidden={params.includeHidden}
+          page={params.page}
           pageSize={PAGE_SIZE}
         />
       </main>

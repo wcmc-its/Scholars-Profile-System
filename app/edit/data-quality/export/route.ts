@@ -15,7 +15,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   buildDataQualityCsv,
   loadDataQualityExport,
-  type DataQualityGapFilter,
+  parseDataQualityParams,
 } from "@/lib/api/data-quality";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -27,10 +27,6 @@ import {
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
-
-function parseGap(v: string | null): DataQualityGapFilter {
-  return v === "no-headshot" || v === "no-overview" || v === "has-coi" ? v : "all";
-}
 
 export async function GET(request: NextRequest) {
   if (!isDataQualityDashboardEnabled()) {
@@ -45,15 +41,19 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Not found", { status: 404 });
   }
 
-  const sp = request.nextUrl.searchParams;
-  const roleCategory = (sp.get("type") ?? "").trim() || undefined;
-  const deptCode = (sp.get("dept") ?? "").trim() || undefined;
-  const gap = parseGap(sp.get("gap"));
-  const hidden = sp.get("hidden");
-  const includeHidden = !(hidden === "0" || hidden === "false");
+  // Identical parse to the page (the query, not the UI, is the boundary).
+  const params = parseDataQualityParams(request.nextUrl.searchParams);
 
   const { rows, total, truncated } = await loadDataQualityExport(
-    { scope, roleCategory, deptCode, gap, includeHidden },
+    {
+      scope,
+      query: params.q,
+      roleCategories: params.roleCategories,
+      units: params.units,
+      gap: params.gap,
+      overviewAge: params.overviewAge,
+      includeHidden: params.includeHidden,
+    },
     db.read,
   );
 
