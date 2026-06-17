@@ -76,6 +76,7 @@ export function SortLinks({
             <li key={o.value} role="option" aria-selected={o.value === current}>
               <Link
                 href={o.href}
+                scroll={false}
                 onClick={() => setOpen(false)}
                 className={`block px-3 py-1.5 text-[13px] hover:bg-[#fafaf8] ${
                   o.value === current ? "font-semibold text-[#2c4f6e]" : "text-[#1a1a1a]"
