@@ -40,7 +40,10 @@ describe("<ResultEvidence> — one render per kind", () => {
     const mBtn = m.querySelector("button");
     expect(mBtn).toBeTruthy();
     expect(mBtn?.getAttribute("aria-expanded")).toBe("false");
-    expect(mBtn?.getAttribute("aria-label")).toMatch(/representative papers/i);
+    // Item 1 — the whole cluster is the button: its accessible name carries the
+    // matched label PLUS the sr-only "representative papers" affordance.
+    expect(mBtn?.textContent).toMatch(/Flow cytometry/);
+    expect(mBtn?.textContent).toMatch(/representative papers/i);
 
     const { container: t } = render(
       <ResultEvidence
@@ -95,7 +98,11 @@ describe("<ResultEvidence> — one render per kind", () => {
         onToggle={onToggle}
       />,
     );
-    expect(container.querySelector("button")).toBeTruthy();
+    const btn = container.querySelector("button")!;
+    expect(btn).toBeTruthy();
+    // Item 1 — the count line lives INSIDE the toggle (content-width cluster), so
+    // clicking the count — not just a marooned chevron — opens the panel.
+    expect(btn.textContent).toMatch(/25 of 373 publications tagged Melanoma/);
   });
 
   it("publications:concept ⇒ the folded text variant", () => {
@@ -178,10 +185,16 @@ describe("<RepresentativePapers> — the disclosure stack", () => {
 
   it("renders the REP. PAPERS label + the (up to 3) italic titles with year", () => {
     render(<RepresentativePapers papers={PAPERS} total={3} profileHref="/p/jane#publications" />);
-    expect(screen.getByText(/Rep\. papers/i)).toBeTruthy();
+    expect(screen.getByText("Rep. papers")).toBeTruthy();
     expect(screen.getByText("First representative paper")).toBeTruthy();
     expect(screen.getByText("Third representative paper")).toBeTruthy();
     expect(screen.getByText(/\(2024\)/)).toBeTruthy();
+  });
+
+  it("uses the singular 'Rep. paper' label for a single paper", () => {
+    render(<RepresentativePapers papers={[PAPERS[0]]} total={1} profileHref="/p/jane#publications" />);
+    expect(screen.getByText("Rep. paper")).toBeTruthy();
+    expect(screen.queryByText("Rep. papers")).toBeNull();
   });
 
   it("renders a '+N more in profile →' link to the profile when total exceeds the shown papers", () => {
