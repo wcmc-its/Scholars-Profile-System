@@ -156,6 +156,13 @@ export type OverviewCardProps = {
    * Phase 6 surface did.
    */
   generateEnabled?: boolean;
+  /**
+   * Who is editing: the scholar themselves (`self`) or a superuser on their
+   * behalf (`superuser`). Only reframes the provenance note's first-person copy
+   * (#1077 follow-up) — a superuser must not be told the bio was "written by
+   * you". Mirrors the `mode` reframing the sibling cards already take.
+   */
+  mode?: "self" | "superuser";
 };
 
 export function OverviewCard({
@@ -164,6 +171,7 @@ export function OverviewCard({
   previewHref,
   readOnly = false,
   generateEnabled = false,
+  mode = "self",
 }: OverviewCardProps) {
   if (readOnly) return <OverviewReadOnlyCard initialHtml={initialHtml} />;
   return (
@@ -172,6 +180,7 @@ export function OverviewCard({
       initialHtml={initialHtml}
       previewHref={previewHref}
       generateEnabled={generateEnabled}
+      mode={mode}
     />
   );
 }
@@ -224,7 +233,7 @@ function OverviewReadOnlyCard({ initialHtml }: { initialHtml: string }) {
 
 type OverviewEditorCardProps = Pick<
   OverviewCardProps,
-  "cwid" | "initialHtml" | "previewHref" | "generateEnabled"
+  "cwid" | "initialHtml" | "previewHref" | "generateEnabled" | "mode"
 >;
 
 function OverviewEditorCard({
@@ -232,6 +241,7 @@ function OverviewEditorCard({
   initialHtml,
   previewHref,
   generateEnabled = false,
+  mode = "self",
 }: OverviewEditorCardProps) {
   // The currently-published bio — the dirty baseline.
   const [savedHtml, setSavedHtml] = React.useState(initialHtml);
@@ -313,6 +323,7 @@ function OverviewEditorCard({
         provenance={provenance}
         loaded={provenanceLoaded}
         hasSavedOverview={savedHtml.trim().length > 0}
+        mode={mode}
       />
       <OverviewGeneratorArm
         cwid={cwid}

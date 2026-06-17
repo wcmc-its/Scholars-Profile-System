@@ -57,6 +57,43 @@ describe("OverviewProvenanceNote", () => {
     expect(text).toContain("Last updated Jun 1, 2026");
   });
 
+  // #1077 follow-up — superuser-on-behalf reframing: never "by you" (which would
+  // read as the superuser), the method stated neutrally instead.
+  it("superuser authored → 'written manually', never 'by you'", () => {
+    render(
+      <OverviewProvenanceNote
+        mode="superuser"
+        provenance={{ origin: "authored", model: null, updatedAt: UPDATED_AT }}
+      />,
+    );
+    const text = noteText();
+    expect(text).toContain("Current overview: written manually");
+    expect(text).toContain("Last updated Jun 1, 2026");
+    expect(text).not.toContain("by you");
+  });
+
+  it("superuser generated_edited → 'then edited manually', never 'by you'", () => {
+    render(
+      <OverviewProvenanceNote
+        mode="superuser"
+        provenance={{ origin: "generated_edited", model: "google/gemini", updatedAt: UPDATED_AT }}
+      />,
+    );
+    const text = noteText();
+    expect(text).toContain("generated with google/gemini, then edited manually");
+    expect(text).not.toContain("by you");
+  });
+
+  it("superuser generated → identical to self (no person in the copy)", () => {
+    render(
+      <OverviewProvenanceNote
+        mode="superuser"
+        provenance={{ origin: "generated", model: "openai/gpt", updatedAt: UPDATED_AT }}
+      />,
+    );
+    expect(noteText()).toContain("Current overview: generated with openai/gpt");
+  });
+
   // #1077 — imported-bio fallback: no provenance row, but a bio exists and the
   // read has resolved → label it honestly, with no fabricated date.
   it("no provenance + saved overview + loaded → imported-bio label", () => {
