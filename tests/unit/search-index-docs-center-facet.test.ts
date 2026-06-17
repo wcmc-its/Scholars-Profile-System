@@ -1,9 +1,14 @@
 /**
  * #552 Phase 6 — `buildPeopleDoc` center facet keys are gated on the §3.3
- * active predicate. An inactive (lapsed) or pending membership emits NO facet
- * key — neither `center:<code>` nor `centerProgram:<code>` — matching the
- * public center page (PR-4). `centerProgram:<code>` is additionally gated on a
- * non-null program code. Date-only legacy rows (null dates) read as active.
+ * active predicate. An inactive (lapsed) or pending membership emits NO
+ * `center:<code>` key, matching the public center page (PR-4). Date-only legacy
+ * rows (null dates) read as active.
+ *
+ * #1074 — center *programs* are NOT emitted into the combined dept/division/
+ * center facet field. A per-program facet is a center-page concern (#906/#911,
+ * sourced from Prisma); emitting `centerProgram:<code>` here leaked raw,
+ * label-less buckets into the global People-tab browse facet. Only `center:` is
+ * emitted now, so the program code on a membership never contributes a key.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -64,12 +69,12 @@ async function keysFor(centerRows: ReadonlyArray<CenterRow>): Promise<string[]> 
 }
 
 describe("buildPeopleDoc — center facet active gating (#552 Phase 6)", () => {
-  it("active + programmed → emits both center: and centerProgram:", async () => {
+  it("active + programmed → emits center: only, never centerProgram: (#1074)", async () => {
     const keys = await keysFor([
       { centerCode: "meyer_cancer_center", programCode: "CT", startDate: null, endDate: null },
     ]);
     expect(keys).toContain("center:meyer_cancer_center");
-    expect(keys).toContain("centerProgram:CT");
+    expect(keys.some((k) => k.startsWith("centerProgram:"))).toBe(false);
   });
 
   it("active + null program → emits center: only (no centerProgram:)", async () => {
@@ -103,22 +108,22 @@ describe("buildPeopleDoc — center facet active gating (#552 Phase 6)", () => {
     expect(keys).toContain("center:englander_ipm");
   });
 
-  it("explicit range spanning today → active; both keys emitted", async () => {
+  it("explicit range spanning today → active; center: emitted, no program key", async () => {
     const keys = await keysFor([
       { centerCode: "meyer_cancer_center", programCode: "CB", startDate: D("2000-01-01"), endDate: D("2999-12-31") },
     ]);
     expect(keys).toContain("center:meyer_cancer_center");
-    expect(keys).toContain("centerProgram:CB");
+    expect(keys.some((k) => k.startsWith("centerProgram:"))).toBe(false);
   });
 
-  it("mixed memberships: only the active ones contribute keys", async () => {
+  it("mixed memberships: only the active ones contribute center: keys (no program keys)", async () => {
     const keys = await keysFor([
       { centerCode: "active_ctr", programCode: "CT", startDate: null, endDate: null },
       { centerCode: "lapsed_ctr", programCode: "CB", startDate: null, endDate: D("2000-01-01") },
       { centerCode: "pending_ctr", programCode: "CB", startDate: D("2999-01-01"), endDate: null },
     ]);
     expect(keys).toContain("center:active_ctr");
-    expect(keys).toContain("centerProgram:CT");
+    expect(keys.some((k) => k.startsWith("centerProgram:"))).toBe(false);
     expect(keys.some((k) => k.includes("lapsed_ctr"))).toBe(false);
     expect(keys.some((k) => k.includes("pending_ctr"))).toBe(false);
   });

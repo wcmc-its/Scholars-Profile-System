@@ -827,15 +827,20 @@ export async function buildPeopleDoc(
   // `isCenterMembershipActive` the public page uses). An inactive (lapsed) or
   // pending membership emits NO facet key, so an expired member drops out of
   // the center's People-tab bucket on the next nightly rebuild — consistent
-  // with PR-4's public page. The new `centerProgram:` key is additionally
-  // gated on a non-null program code. Date-derived status re-evaluates every
-  // rebuild automatically; no new step.
+  // with PR-4's public page. Date-derived status re-evaluates every rebuild
+  // automatically; no new step.
+  //
+  // #1074 — only the `center:<code>` key belongs in the combined
+  // dept/division/center facet. Center *programs* are intentionally NOT emitted
+  // here: a per-program facet is a center-page concern (#906/#911, sourced
+  // directly from Prisma in lib/api/centers.ts), and a raw `centerProgram:<code>`
+  // bucket leaked into the global People-tab browse facet with no label
+  // resolution. Keeping programs off this field is the fix at the source.
   const centerToday = new Date().toISOString().slice(0, 10);
   const centerRows = await client.centerMembership.findMany({
     where: { cwid: s.cwid },
     select: {
       centerCode: true,
-      programCode: true,
       startDate: true,
       endDate: true,
     },
@@ -845,9 +850,6 @@ export async function buildPeopleDoc(
       continue;
     }
     deptDivKeys.push(`center:${row.centerCode}`);
-    if (row.programCode) {
-      deptDivKeys.push(`centerProgram:${row.programCode}`);
-    }
   }
   // #540 Phase 8 — manual-roster division facet keys. A scholar manually
   // rostered into a `source='manual'` division contributes the division's
