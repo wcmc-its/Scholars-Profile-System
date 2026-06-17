@@ -1,14 +1,21 @@
 /**
  * Home page composition (Phase 2).
  *
- * Hero + Recent contributions (RANKING-01) + Selected research (HOME-02) +
- * Browse all research areas (HOME-03). Sparse-state hide policy per D-12:
- * Recent contributions hides when <3 qualify, Selected research hides when
- * <4 qualify, Browse never hides.
+ * Hero + Spotlights (SPOTLIGHT-03) + Browse all research areas (HOME-03) +
+ * Browse by method. Sparse-state hide policy per D-12: Spotlights hides under
+ * its floor, Browse never hides.
  *
  * ISR per ADR-008: 6h fallback TTL; on-demand revalidation will fire after
  * each ETL completion via /api/revalidate?path=/ (Plan 09).
+ *
+ * Streaming: the shell (header + hero + search) is data-free and paints
+ * immediately (TTFB ~70ms); each data-backed region is an async server
+ * component behind its own <Suspense>, so a slow/cold render of one surface no
+ * longer blocks first paint. The loaders are cached + stale-while-revalidate
+ * (lib/api/home.ts) and pre-warmed at boot (lib/warmup.ts), so in steady state
+ * the sections resolve before the shell flushes and no fallback is shown.
  */
+import { cache, Suspense } from "react";
 import {
   getSpotlights,
   getBrowseAllResearchAreas,
@@ -28,19 +35,14 @@ import { SiteFooter } from "@/components/site/footer";
 export const revalidate = 21600; // 6 hours
 export const dynamicParams = true;
 
-export default async function HomePage() {
-  // Three independent fetches; .catch defense-in-depth so a transient DB blip
-  // on one surface does not 5xx the whole page. Phase 9 SPOTLIGHT-04: the new
-  // spotlight section replaces both Selected research and Recent contributions
-  // (the latter is suppressed; existing files are kept until Plan 09-07
-  // cleanup removes them).
-  const [spotlights, browse, stats, methodCategories] = await Promise.all([
-    getSpotlights().catch(() => null),
-    getBrowseAllResearchAreas().catch(() => [] as Awaited<ReturnType<typeof getBrowseAllResearchAreas>>),
-    getHomeStats().catch(() => null),
-    getHomeMethodCategories().catch(() => null),
-  ]);
+// methodCategories drives BOTH the hero "N methods" stat (in HomeStatsStrip)
+// and the Browse-by-method section, which now stream as independent Suspense
+// boundaries. Memoize per request so the (uncached) taxonomy query runs once,
+// not twice. React cache() is request-scoped, so — unlike a cross-request
+// cache — it does not extend the #800/#801 overlay-visibility staleness.
+const getMethodCategoriesOnce = cache(getHomeMethodCategories);
 
+export default function HomePage() {
   return (
     <div className="home-page-root flex min-h-screen flex-col">
       {/*
@@ -56,6 +58,7 @@ export default async function HomePage() {
       </a>
       <SiteHeader revealOnScrollPast="home-hero-search-sentinel" />
       <main id="main-content" tabIndex={-1} className="flex-1 outline-none">
+        {/* Hero — data-free, paints immediately so search is usable at once. */}
         <section className="border-border border-b bg-gradient-to-b from-white to-zinc-50 px-6 py-16">
           <div className="mx-auto max-w-[760px] text-center">
             <h1 className="page-title text-4xl font-semibold tracking-tight sm:text-5xl">
@@ -71,59 +74,101 @@ export default async function HomePage() {
           </div>
         </section>
 
-        {stats ? (
-          <div className="border-border border-b">
-            <div className="mx-auto flex max-w-[1100px] flex-wrap justify-center gap-8 px-6 py-5 text-sm text-zinc-500">
-              <span>
-                <strong className="text-zinc-700">{stats.scholarCount.toLocaleString()}</strong> scholars
-              </span>
-              <span>
-                <strong className="text-zinc-700">{stats.publicationCount.toLocaleString()}</strong> publications
-              </span>
-              <a
-                href="#browse-all-research-areas"
-                aria-label={`Browse ${stats.researchAreaCount} research areas`}
-                className="no-underline hover:underline underline-offset-4 decoration-1"
-              >
-                <strong className="text-zinc-700">{stats.researchAreaCount}</strong> research areas
-              </a>
-              {methodCategories ? (
-                <MethodBeaconLink
-                  href="#browse-by-method"
-                  event="home_methods_stat_click"
-                  aria-label={`Browse ${methodCategories.totalFamilyCount} methods`}
-                  className="no-underline hover:underline underline-offset-4 decoration-1"
-                >
-                  <strong className="text-zinc-700">{methodCategories.totalFamilyCount}</strong> methods
-                </MethodBeaconLink>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
+        {/* Each data region streams independently behind its own Suspense. */}
+        <Suspense fallback={null}>
+          <HomeStatsStrip />
+        </Suspense>
 
         <div className="mx-auto max-w-[1100px] px-6 py-12">
-          {spotlights ? (
-            // Home lives outside the (public) route group, so the modal
-            // provider mounted in app/(public)/layout.tsx is not in scope.
-            // Wrap just the spotlight — the only home surface with pub-title
-            // triggers — so its representative-paper titles open the shared
-            // publication modal (#947). Modal portals to <body>, so scope here
-            // is purely about context availability.
-            <PublicationModalProvider>
-              <SpotlightSection items={spotlights} />
-            </PublicationModalProvider>
-          ) : null}
+          <Suspense fallback={null}>
+            <HomeSpotlights />
+          </Suspense>
           <div id="browse-all-research-areas" tabIndex={-1} className="scroll-mt-16 outline-none">
-            <BrowseAllResearchAreasGrid items={browse ?? []} />
+            <Suspense fallback={null}>
+              <HomeBrowseGrid />
+            </Suspense>
           </div>
-          {methodCategories ? (
-            <div id="browse-by-method" tabIndex={-1} className="scroll-mt-16 outline-none">
-              <BrowseByMethodSection data={methodCategories} />
-            </div>
-          ) : null}
+          <Suspense fallback={null}>
+            <HomeMethodsSection />
+          </Suspense>
         </div>
       </main>
       <SiteFooter />
+    </div>
+  );
+}
+
+// --- Streamed data regions -------------------------------------------------
+// Each is `.catch`-guarded (defense-in-depth so a transient DB blip on one
+// surface hides only that surface rather than 5xx-ing the page) and returns
+// null when its data is absent/sparse, exactly as the previous inline render
+// did.
+
+async function HomeStatsStrip() {
+  const [stats, methodCategories] = await Promise.all([
+    getHomeStats().catch(() => null),
+    getMethodCategoriesOnce().catch(() => null),
+  ]);
+  if (!stats) return null;
+  return (
+    <div className="border-border border-b">
+      <div className="mx-auto flex max-w-[1100px] flex-wrap justify-center gap-8 px-6 py-5 text-sm text-zinc-500">
+        <span>
+          <strong className="text-zinc-700">{stats.scholarCount.toLocaleString()}</strong> scholars
+        </span>
+        <span>
+          <strong className="text-zinc-700">{stats.publicationCount.toLocaleString()}</strong> publications
+        </span>
+        <a
+          href="#browse-all-research-areas"
+          aria-label={`Browse ${stats.researchAreaCount} research areas`}
+          className="no-underline hover:underline underline-offset-4 decoration-1"
+        >
+          <strong className="text-zinc-700">{stats.researchAreaCount}</strong> research areas
+        </a>
+        {methodCategories ? (
+          <MethodBeaconLink
+            href="#browse-by-method"
+            event="home_methods_stat_click"
+            aria-label={`Browse ${methodCategories.totalFamilyCount} methods`}
+            className="no-underline hover:underline underline-offset-4 decoration-1"
+          >
+            <strong className="text-zinc-700">{methodCategories.totalFamilyCount}</strong> methods
+          </MethodBeaconLink>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+async function HomeSpotlights() {
+  const spotlights = await getSpotlights().catch(() => null);
+  if (!spotlights) return null;
+  // Home lives outside the (public) route group, so the modal provider mounted
+  // in app/(public)/layout.tsx is not in scope. Wrap just the spotlight — the
+  // only home surface with pub-title triggers — so its representative-paper
+  // titles open the shared publication modal (#947). Modal portals to <body>,
+  // so scope here is purely about context availability.
+  return (
+    <PublicationModalProvider>
+      <SpotlightSection items={spotlights} />
+    </PublicationModalProvider>
+  );
+}
+
+async function HomeBrowseGrid() {
+  const browse = await getBrowseAllResearchAreas().catch(
+    () => [] as Awaited<ReturnType<typeof getBrowseAllResearchAreas>>,
+  );
+  return <BrowseAllResearchAreasGrid items={browse ?? []} />;
+}
+
+async function HomeMethodsSection() {
+  const methodCategories = await getMethodCategoriesOnce().catch(() => null);
+  if (!methodCategories) return null;
+  return (
+    <div id="browse-by-method" tabIndex={-1} className="scroll-mt-16 outline-none">
+      <BrowseByMethodSection data={methodCategories} />
     </div>
   );
 }
