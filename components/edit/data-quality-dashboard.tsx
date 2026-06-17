@@ -56,6 +56,22 @@ function pageHref(opts: {
   return qs ? `${BASE}?${qs}` : BASE;
 }
 
+/** The CSV-export URL carrying the current filters (no page — export is unpaginated). */
+function exportHref(opts: {
+  roleCategory: string;
+  deptCode: string;
+  gap: DataQualityGapFilter;
+  includeHidden: boolean;
+}): string {
+  const p = new URLSearchParams();
+  if (opts.roleCategory) p.set("type", opts.roleCategory);
+  if (opts.deptCode) p.set("dept", opts.deptCode);
+  if (opts.gap !== "all") p.set("gap", opts.gap);
+  if (!opts.includeHidden) p.set("hidden", "0");
+  const qs = p.toString();
+  return qs ? `${BASE}/export?${qs}` : `${BASE}/export`;
+}
+
 /** A green ✓ (good) or muted "—" (not checked / n/a). */
 function Yes() {
   return <span className="font-semibold text-emerald-600" aria-label="yes">✓</span>;
@@ -182,8 +198,19 @@ export function DataQualityDashboard({
         </Button>
       </form>
 
-      <div className="text-muted-foreground mb-2 text-sm" data-testid="dq-result-count">
-        {total === 0 ? "No scholars match these filters." : `Showing ${start}–${end} of ${total}`}
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-muted-foreground text-sm" data-testid="dq-result-count">
+          {total === 0 ? "No scholars match these filters." : `Showing ${start}–${end} of ${total}`}
+        </div>
+        {total > 0 && (
+          <a
+            href={exportHref({ roleCategory, deptCode, gap, includeHidden })}
+            className="text-sm hover:underline"
+            data-testid="dq-export-link"
+          >
+            Download CSV
+          </a>
+        )}
       </div>
 
       <div className="overflow-x-auto rounded-md border">

@@ -234,7 +234,14 @@ A separate `includeHidden` toggle controls the hidden identity classes (per §1)
 
 - Inline quick-actions (generate overview, dismiss COI) — deferred.
 - Additional gap signals (missing slug, missing appointments, stale overview, etc.).
-- CSV export of the dashboard (could reuse `lib/api/export-scholars.ts` patterns later).
+
+### Done in v1
+
+- **CSV export** — `GET /edit/data-quality/export` (`buildDataQualityCsv` + `loadDataQualityExport`,
+  `lib/api/data-quality.ts`). Same flag/scope/filters as the page, unpaginated, prominence-sorted,
+  capped at `DATA_QUALITY_EXPORT_CAP` (5000); columns: rank, cwid, name, title, unit, person_type,
+  leadership, headshot, has_overview, pending_coi_high, pending_coi_medium, prominence. "Download CSV"
+  link on the dashboard carries the active filters.
 
 ---
 

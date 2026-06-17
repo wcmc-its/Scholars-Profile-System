@@ -19,6 +19,8 @@
  * Server-only by construction (uses Prisma) — no `server-only` import so it loads
  * under vitest with a fake client, matching `edit-roster.ts`.
  */
+import { toCsv } from "@/lib/csv";
+import { formatRoleCategory } from "@/lib/role-display";
 import type { DataQualityScope } from "@/lib/edit/data-quality";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 
@@ -156,10 +158,15 @@ function buildWhere(
   return where;
 }
 
-export async function loadDataQualityRoster(
+/**
+ * Compute the FULL, filtered, prominence-sorted entry set + summary counts —
+ * shared by the paginated page loader and the (unpaginated) CSV export. Honors
+ * everything in `opts` except `limit`/`offset`, which only the page loader applies.
+ */
+async function computeDataQualityEntries(
   opts: DataQualityOptions,
   client: DataQualityClient,
-): Promise<DataQualityResult> {
+): Promise<{ entries: DataQualityEntry[]; counts: DataQualityCounts }> {
   // Center-scope expands to member cwids (a center scopes by membership, not a
   // scholar column). Only needed for a non-global viewer with center grants.
   let centerCwids: string[] = [];
@@ -280,9 +287,82 @@ export async function loadDataQualityRoster(
   // Prominence desc, then name asc for a stable page boundary.
   entries.sort((a, b) => b.prominence - a.prominence || a.name.localeCompare(b.name));
 
+  return { entries, counts };
+}
+
+/** Load one page of the dashboard — the prominence-sorted slice + total + counts. */
+export async function loadDataQualityRoster(
+  opts: DataQualityOptions,
+  client: DataQualityClient,
+): Promise<DataQualityResult> {
+  const { entries, counts } = await computeDataQualityEntries(opts, client);
   const total = entries.length;
   const take = Math.min(Math.max(opts.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
   const skip = Math.max(opts.offset ?? 0, 0);
-
   return { entries: entries.slice(skip, skip + take), total, counts };
+}
+
+/** Upper bound on rows in one CSV export — keeps a steward's "export everything"
+ *  bounded; the export route logs when it truncates. */
+export const DATA_QUALITY_EXPORT_CAP = 5000;
+
+export type DataQualityExport = {
+  /** The top rows (prominence-sorted), capped at DATA_QUALITY_EXPORT_CAP. */
+  rows: DataQualityEntry[];
+  /** Total matching the filters, before the cap. */
+  total: number;
+  /** True when `total` exceeded the cap and `rows` was truncated. */
+  truncated: boolean;
+};
+
+/**
+ * The full (capped) filtered + prominence-sorted set for CSV export — same scope
+ * and filters as the page, just unpaginated.
+ */
+export async function loadDataQualityExport(
+  opts: DataQualityOptions,
+  client: DataQualityClient,
+): Promise<DataQualityExport> {
+  const { entries } = await computeDataQualityEntries(opts, client);
+  const total = entries.length;
+  return {
+    rows: entries.slice(0, DATA_QUALITY_EXPORT_CAP),
+    total,
+    truncated: total > DATA_QUALITY_EXPORT_CAP,
+  };
+}
+
+const CSV_HEADERS = [
+  "rank",
+  "cwid",
+  "name",
+  "title",
+  "unit",
+  "person_type",
+  "leadership",
+  "headshot",
+  "has_overview",
+  "pending_coi_high",
+  "pending_coi_medium",
+  "prominence",
+] as const;
+
+/** Serialize export rows to a CSV string. `rank` is the 1-based position in the
+ *  prominence-sorted set the rows arrive in. */
+export function buildDataQualityCsv(rows: readonly DataQualityEntry[]): string {
+  const body = rows.map((e, i) => [
+    i + 1,
+    e.cwid,
+    e.name,
+    e.title ?? "",
+    e.unit ?? "",
+    formatRoleCategory(e.roleCategory) ?? e.roleCategory ?? "",
+    e.isChair ? "Chair" : e.isChief ? "Chief" : "",
+    e.headshot,
+    e.hasOverview ? "yes" : "no",
+    e.pendingCoiHigh,
+    e.pendingCoiMedium,
+    e.prominence.toFixed(2),
+  ]);
+  return toCsv(CSV_HEADERS, body);
 }
