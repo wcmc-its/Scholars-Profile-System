@@ -241,6 +241,9 @@ function OverviewEditorCard({
   // of the *currently saved* bio.
   const [generations, setGenerations] = React.useState<OverviewGenerationItem[]>([]);
   const [provenance, setProvenance] = React.useState<OverviewProvenanceLine | null>(null);
+  // #1077 — has the provenance read resolved? Gates the imported-bio fallback in
+  // the note so it never flashes before the fetch lands.
+  const [provenanceLoaded, setProvenanceLoaded] = React.useState(false);
 
   // Re-read the owner's draft history + the saved bio's provenance. Best-effort:
   // a failed read leaves the panel/line in their last state.
@@ -260,6 +263,10 @@ function OverviewEditorCard({
       setProvenance(data.provenance ?? null);
     } catch {
       // Swallow — the history panel is non-essential and must never disrupt the editor.
+    } finally {
+      // #1077 — mark the read resolved either way so the note can decide between
+      // a real "Last updated" line and the imported-bio fallback (vs. nothing).
+      setProvenanceLoaded(true);
     }
   }, [generateEnabled, cwid]);
 
@@ -302,7 +309,11 @@ function OverviewEditorCard({
       description="A short overview shown at the top of your public profile."
     >
       <UnsavedChangesGuard dirty={editor.dirty} />
-      <OverviewProvenanceNote provenance={provenance} />
+      <OverviewProvenanceNote
+        provenance={provenance}
+        loaded={provenanceLoaded}
+        hasSavedOverview={savedHtml.trim().length > 0}
+      />
       <OverviewGeneratorArm
         cwid={cwid}
         savedHtml={savedHtml}

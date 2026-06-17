@@ -638,8 +638,18 @@ describe("OverviewCard — version history (Phase B)", () => {
       provenance: { origin: "generated", model: "openai/gpt", updatedAt: "2026-06-01T12:00:00.000Z" },
     });
     render(<OverviewCard cwid={CWID} initialHtml="<p>x</p>" generateEnabled />);
-    expect(await screen.findByTestId("overview-provenance-note")).toBeTruthy();
-    expect(screen.getByText("Current overview: generated with openai/gpt.")).toBeTruthy();
+    const note = await screen.findByTestId("overview-provenance-note");
+    // #1077 — provenance phrase + the appended "Last updated {date}" clause.
+    expect(note.textContent).toContain("Current overview: generated with openai/gpt");
+    expect(note.textContent).toContain("Last updated Jun 1, 2026");
+  });
+
+  it("imported-bio label when there's a saved overview but no provenance (#1077)", async () => {
+    stubFetchRouted(() => jsonResponse({ ok: true }), { provenance: null });
+    render(<OverviewCard cwid={CWID} initialHtml="<p>An imported bio.</p>" generateEnabled />);
+    const note = await screen.findByTestId("overview-provenance-note");
+    expect(note.textContent).toContain("Imported from the previous profile system");
+    expect(note.textContent).not.toContain("Last updated");
   });
 
   it("viewing a version lands it in the review card (not the editor) with the banner", async () => {
