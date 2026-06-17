@@ -21,6 +21,7 @@
  */
 import { toCsv } from "@/lib/csv";
 import { formatRoleCategory } from "@/lib/role-display";
+import type { EditRosterUnitFilter } from "@/lib/api/edit-roster";
 import type { DataQualityScope } from "@/lib/edit/data-quality";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 
@@ -30,11 +31,17 @@ export type DataQualityClient = Pick<
   | "scholar"
   | "department"
   | "division"
+  | "center"
   | "grant"
   | "coiGapCandidate"
   | "fieldOverride"
   | "centerMembership"
+  | "overviewProvenance"
 >;
+
+/** A single org-unit filter (department / division / center); reused from the
+ *  Profiles roster so the encoding stays consistent. */
+export type { EditRosterUnitFilter };
 
 /** Grant `role` values that count as a principal-investigator role ("times as PI").
  *  PI-Subaward is still PI (on a subaward); Co-PI is a shared principal role.
@@ -55,9 +62,100 @@ const W_CHAIR = 3.0;
 const W_CHIEF = 1.5;
 const W_FACULTY = 1.0;
 
+/**
+ * Institutional-leadership sort tiers (lower number ranks higher), #1 v2 decision.
+ * The Dean must rank #1 even though he is not a department chair. Tiers 0/1 are
+ * derived from `primaryTitle` TEXT — no hand-maintained cwid map — so the set
+ * stays current as titles change; chairs/chiefs (tier 2) keep their FK-based
+ * prominence boost; everyone else is tier 3. Within a tier, prominence then name.
+ *
+ *   0 — THE Dean (an unmodified "Dean": not Associate/…, not school-specific)
+ *   1 — the active deanery + named institutional officers (Provost/President/EVP)
+ *   2 — department chairs / division chiefs (FK-identified)
+ *   3 — everyone else
+ *
+ * Emeritus/Emerita titles are excluded from leadership entirely — a retired dean
+ * ranks by prominence like everyone else (#1 v2 refinement).
+ */
+export const LEADERSHIP_TIER = { dean: 0, deanery: 1, chairChief: 2, none: 3 } as const;
+
+const TITLE_EMERITUS = /\bemerit(?:us|a|i)\b/i;
+const HAS_DEAN = /\bdean\b/i;
+/** Modifiers that demote a "Dean" title out of tier 0 (it's a sub-dean). */
+const SUBDEAN_MODIFIER = /\b(?:associate|assistant|affiliate|senior|interim|deputy|vice)\b/i;
+/** A school/college-specific deanship (Graduate School, WCM-Qatar) is not THE dean. */
+const SCHOOL_SPECIFIC_DEAN = /\b(?:graduate school|qatar)\b/i;
+
+/** A concise label for an active (non-Emeritus) deanery / institutional-officer title. */
+function deaneryLabel(title: string): string | null {
+  if (/\bsenior associate dean\b/i.test(title)) return "Senior Associate Dean";
+  if (/\bassociate dean\b/i.test(title)) return "Associate Dean";
+  if (/\bassistant dean\b/i.test(title)) return "Assistant Dean";
+  if (/\baffiliate dean\b/i.test(title)) return "Affiliate Dean";
+  if (/\b(?:vice|deputy) dean\b/i.test(title)) return "Vice Dean";
+  if (/\binterim dean\b/i.test(title)) return "Interim Dean";
+  if (HAS_DEAN.test(title)) return "Dean"; // school-specific dean (Graduate School / Qatar)
+  if (/\bprovost\b/i.test(title)) return "Provost";
+  if (/\bpresident\b/i.test(title)) return "President";
+  if (/\bexecutive vice (?:president|dean)\b|\bevp\b/i.test(title)) return "EVP";
+  return null;
+}
+
+/**
+ * Classify a scholar's leadership tier + display label from their title + the
+ * chair/chief FK flags. THE Dean (tier 0) sorts above the active deanery (tier 1),
+ * which sorts above FK chairs/chiefs (tier 2), which sort above everyone (tier 3).
+ */
+export function classifyLeadership(
+  title: string | null,
+  isChair: boolean,
+  isChief: boolean,
+): { tier: number; label: string | null } {
+  const t = (title ?? "").trim();
+  if (t && !TITLE_EMERITUS.test(t)) {
+    if (HAS_DEAN.test(t) && !SUBDEAN_MODIFIER.test(t) && !SCHOOL_SPECIFIC_DEAN.test(t)) {
+      return { tier: LEADERSHIP_TIER.dean, label: "Dean" };
+    }
+    const label = deaneryLabel(t);
+    if (label) return { tier: LEADERSHIP_TIER.deanery, label };
+  }
+  if (isChair) return { tier: LEADERSHIP_TIER.chairChief, label: "Chair" };
+  if (isChief) return { tier: LEADERSHIP_TIER.chairChief, label: "Chief" };
+  return { tier: LEADERSHIP_TIER.none, label: null };
+}
+
+const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
+
+/**
+ * Classify an overview's freshness (#6), agreeing with the #1077 edit surface:
+ *  - "never"    — no overview at all
+ *  - "imported" — a bio exists but has NO OverviewProvenance row (still the VIVO
+ *                 seed, never edited in /edit) → no genuine last-edited date
+ *  - "lt1yr"/"1to2yr"/"gt2yr" — edited in /edit; bucketed by the provenance date
+ * `Scholar.overviewUpdatedAt` is dormant (never written) so it is NOT used.
+ */
+function classifyOverview(
+  hasOverview: boolean,
+  updatedAt: Date | string | null | undefined,
+  now: number,
+): { overviewState: OverviewState; overviewUpdatedAt: string | null } {
+  if (!hasOverview) return { overviewState: "never", overviewUpdatedAt: null };
+  if (!updatedAt) return { overviewState: "imported", overviewUpdatedAt: null };
+  const d = updatedAt instanceof Date ? updatedAt : new Date(updatedAt);
+  if (Number.isNaN(d.getTime())) return { overviewState: "imported", overviewUpdatedAt: null };
+  const ageYears = (now - d.getTime()) / MS_PER_YEAR;
+  const state: OverviewState = ageYears < 1 ? "lt1yr" : ageYears < 2 ? "1to2yr" : "gt2yr";
+  return { overviewState: state, overviewUpdatedAt: d.toISOString() };
+}
+
 export type HeadshotState = "present" | "missing" | "unknown";
 
 export type DataQualityGapFilter = "all" | "no-headshot" | "no-overview" | "has-coi";
+
+/** Overview-freshness bucket (#6); see `classifyOverview`. */
+export type OverviewState = "never" | "imported" | "lt1yr" | "1to2yr" | "gt2yr";
+/** The "overview last updated" filter — "all" plus the freshness buckets. */
+export type OverviewAgeFilter = "all" | OverviewState;
 
 /** One row in the dashboard table. Plain-serializable (crosses to a client UI). */
 export type DataQualityEntry = {
@@ -70,9 +168,18 @@ export type DataQualityEntry = {
   roleCategory: string | null;
   isChair: boolean;
   isChief: boolean;
+  /** Leadership display label for the row/CSV ("Dean", "Associate Dean",
+   *  "Provost", "Chair", "Chief", …) or null. */
+  leadership: string | null;
+  /** Leadership sort tier (0 Dean · 1 deanery · 2 chair/chief · 3 none). */
+  leadershipTier: number;
   /** "present" | "missing" | "unknown" (not yet probed by etl:headshot). */
   headshot: HeadshotState;
   hasOverview: boolean;
+  /** ISO date the overview was last edited in /edit; null when imported/never. */
+  overviewUpdatedAt: string | null;
+  /** Overview freshness bucket (#1077 parity). */
+  overviewState: OverviewState;
   pendingCoiHigh: number;
   pendingCoiMedium: number;
   prominence: number;
@@ -83,14 +190,18 @@ export type DataQualityEntry = {
 export type DataQualityOptions = {
   /** Resolved viewer scope (`loadDataQualityScope`). */
   scope: DataQualityScope;
-  /** Role-category (person-type) filter; raw DB value. Empty = no filter. */
-  roleCategory?: string;
-  /** Department-code filter. Empty = no filter. */
-  deptCode?: string;
+  /** Name / CWID substring search (#3); trimmed, empty = no filter. */
+  query?: string;
+  /** Person-type (roleCategory) multi-select (#4); raw DB values. Empty = no filter. */
+  roleCategories?: readonly string[];
+  /** Org-unit multi-select (#5): departments / divisions / centers, OR'd together. */
+  units?: readonly EditRosterUnitFilter[];
   /** Gap-type filter; defaults to "all". */
   gap?: DataQualityGapFilter;
+  /** Overview-freshness filter (#6); defaults to "all". */
+  overviewAge?: OverviewAgeFilter;
   /** Include #536 hidden identity classes (doctoral students / alumni). Default
-   *  true; ignored when a specific `roleCategory` is chosen. */
+   *  true; ignored when a specific person-type is chosen. */
   includeHidden?: boolean;
   /** Page size (default 50, capped at 200). */
   limit?: number;
@@ -121,26 +232,76 @@ function nonEmpty(s: string | null | undefined): boolean {
   return typeof s === "string" && s.trim().length > 0;
 }
 
+/** A center membership active by date today (pending / expired excluded). Mirrors
+ *  `isCenterMembershipActive` (`lib/api/centers.ts`) — duplicated here so this
+ *  module keeps its light, vitest-loadable import graph (no `server-only` /
+ *  `lib/db`), exactly as `lib/api/edit-roster.ts` does. */
+function isMembershipActive(
+  startDate: Date | null,
+  endDate: Date | null,
+  today: string,
+): boolean {
+  const start = startDate ? startDate.toISOString().slice(0, 10) : null;
+  const end = endDate ? endDate.toISOString().slice(0, 10) : null;
+  if (start && start > today) return false; // pending
+  if (end && end < today) return false; // expired
+  return true;
+}
+
 /**
  * Build the candidate `where`: in-scope, active, non-deleted scholars, with the
- * optional person-type / department / hidden-roles filters applied.
+ * optional name/CWID search, person-type, org-unit, and hidden-roles filters
+ * applied. Each independent OR-group is pushed as its own element of `AND` so the
+ * groups compose without clobbering one another.
+ *
+ * `filterCenterCwids` = members of the SELECTED center units (#5 filter);
+ * `scopeCenterCwids` = members of the viewer's GRANTED center units (scope).
  */
 function buildWhere(
   opts: DataQualityOptions,
-  centerCwids: readonly string[],
+  scopeCenterCwids: readonly string[],
+  filterCenterCwids: readonly string[],
 ): Prisma.ScholarWhereInput {
   const and: Prisma.ScholarWhereInput[] = [];
   const where: Prisma.ScholarWhereInput = { deletedAt: null, status: "active" };
 
-  if (opts.roleCategory) {
-    // An explicit person-type filter governs; the hidden-roles toggle is moot.
-    where.roleCategory = opts.roleCategory;
+  // Name / CWID free-text search (#3) — its own AND clause so it never clobbers
+  // the scope / unit / hidden-roles OR groups.
+  const q = opts.query?.trim();
+  if (q) {
+    and.push({
+      OR: [
+        { preferredName: { contains: q } },
+        { fullName: { contains: q } },
+        { cwid: { contains: q } },
+      ],
+    });
+  }
+
+  // Person-type multi-select (#4). An explicit selection governs; the hidden-roles
+  // toggle is then moot (the viewer asked for exactly these types).
+  const roles = (opts.roleCategories ?? []).filter(Boolean);
+  if (roles.length > 0) {
+    where.roleCategory = { in: [...roles] };
   } else if (opts.includeHidden === false) {
     // Exclude hidden identity classes but KEEP nulls (fail-open display, #536).
     and.push({ OR: [{ roleCategory: null }, { roleCategory: { notIn: [...HIDDEN_ROLES] } }] });
   }
 
-  if (opts.deptCode) where.deptCode = opts.deptCode;
+  // Org-unit multi-select (#5): selected departments / divisions / centers OR
+  // together. Centers were pre-resolved to member cwids by the caller.
+  const units = opts.units ?? [];
+  if (units.length > 0) {
+    const deptCodes = units.filter((u) => u.kind === "department").map((u) => u.code);
+    const divCodes = units.filter((u) => u.kind === "division").map((u) => u.code);
+    const unitOr: Prisma.ScholarWhereInput[] = [];
+    if (deptCodes.length > 0) unitOr.push({ deptCode: { in: deptCodes } });
+    if (divCodes.length > 0) unitOr.push({ divCode: { in: divCodes } });
+    if (filterCenterCwids.length > 0) unitOr.push({ cwid: { in: [...filterCenterCwids] } });
+    // Units selected but nothing resolves (e.g. an empty center) → match nothing
+    // rather than silently dropping the filter.
+    and.push(unitOr.length > 0 ? { OR: unitOr } : { cwid: { in: [] } });
+  }
 
   if (opts.scope.all === false) {
     const scopeOr: Prisma.ScholarWhereInput[] = [];
@@ -148,7 +309,7 @@ function buildWhere(
       scopeOr.push({ deptCode: { in: opts.scope.unitCodes } });
       scopeOr.push({ divCode: { in: opts.scope.unitCodes } });
     }
-    if (centerCwids.length > 0) scopeOr.push({ cwid: { in: [...centerCwids] } });
+    if (scopeCenterCwids.length > 0) scopeOr.push({ cwid: { in: [...scopeCenterCwids] } });
     // Empty scope → match nothing (the route forbids this case before we get here,
     // but be safe rather than returning everyone).
     and.push(scopeOr.length > 0 ? { OR: scopeOr } : { cwid: { in: [] } });
@@ -167,22 +328,45 @@ async function computeDataQualityEntries(
   opts: DataQualityOptions,
   client: DataQualityClient,
 ): Promise<{ entries: DataQualityEntry[]; counts: DataQualityCounts }> {
-  // Center-scope expands to member cwids (a center scopes by membership, not a
-  // scholar column). Only needed for a non-global viewer with center grants.
-  let centerCwids: string[] = [];
-  if (opts.scope.all === false && opts.scope.centerCodes.length > 0) {
+  // Center membership expands to member cwids (a center scopes by membership, not
+  // a scholar column) for BOTH the viewer's granted scope and a selected center
+  // *filter* (#5) — read in one query, partitioned in-app.
+  const scopeCenterCodes =
+    opts.scope.all === false ? opts.scope.centerCodes : [];
+  const filterCenterCodes = (opts.units ?? [])
+    .filter((u) => u.kind === "center")
+    .map((u) => u.code);
+  const allCenterCodes = [...new Set([...scopeCenterCodes, ...filterCenterCodes])];
+
+  let scopeCenterCwids: string[] = [];
+  let filterCenterCwids: string[] = [];
+  if (allCenterCodes.length > 0) {
+    const today = new Date().toISOString().slice(0, 10);
     const rows = await client.centerMembership.findMany({
-      where: { centerCode: { in: opts.scope.centerCodes } },
-      select: { cwid: true },
+      where: { centerCode: { in: allCenterCodes } },
+      select: { cwid: true, centerCode: true, startDate: true, endDate: true },
     });
-    centerCwids = [...new Set(rows.map((r) => r.cwid))];
+    const scopeSet = new Set(scopeCenterCodes);
+    const filterSet = new Set(filterCenterCodes);
+    const scope = new Set<string>();
+    const filter = new Set<string>();
+    for (const r of rows) {
+      // Exclude pending / expired memberships (consistent with every other center
+      // surface) — a still-active scholar who rotated off a center must not appear
+      // when that center is filtered or scoped.
+      if (!isMembershipActive(r.startDate, r.endDate, today)) continue;
+      if (scopeSet.has(r.centerCode)) scope.add(r.cwid);
+      if (filterSet.has(r.centerCode)) filter.add(r.cwid);
+    }
+    scopeCenterCwids = [...scope];
+    filterCenterCwids = [...filter];
   }
 
-  const where = buildWhere(opts, centerCwids);
+  const where = buildWhere(opts, scopeCenterCwids, filterCenterCwids);
 
   // Candidate identities + prominence inputs. The whole in-scope set loads (the
   // prominence sort is computed in-app over all of it, then paginated).
-  const [candidates, chairRows, chiefRows, piRows, nihPiRows, coiRows, overrideRows] =
+  const [candidates, chairRows, chiefRows, piRows, nihPiRows, coiRows, overrideRows, provRows] =
     await Promise.all([
       client.scholar.findMany({
         where,
@@ -221,6 +405,8 @@ async function computeDataQualityEntries(
         where: { entityType: "scholar", fieldName: "overview" },
         select: { entityId: true, value: true },
       }),
+      // #1077 parity — the last-edited-in-/edit date; absence ⇒ imported VIVO seed.
+      client.overviewProvenance.findMany({ select: { cwid: true, updatedAt: true } }),
     ]);
 
   const chairs = new Set(chairRows.map((r) => r.chairCwid).filter((c): c is string => !!c));
@@ -230,12 +416,15 @@ async function computeDataQualityEntries(
   const overviewOverride = new Set(
     overrideRows.filter((r) => nonEmpty(r.value)).map((r) => r.entityId),
   );
+  const provByCwid = new Map(provRows.map((r) => [r.cwid, r.updatedAt]));
   const coiHigh = new Map<string, number>();
   const coiMedium = new Map<string, number>();
   for (const r of coiRows) {
     if (r.tier === "High") coiHigh.set(r.cwid, r._count._all);
     else if (r.tier === "Medium") coiMedium.set(r.cwid, r._count._all);
   }
+
+  const now = Date.now();
 
   let entries: DataQualityEntry[] = candidates.map((s) => {
     const isChair = chairs.has(s.cwid);
@@ -250,8 +439,17 @@ async function computeDataQualityEntries(
       W_NIH_PI * Math.log1p(nihPi) +
       (s.roleCategory === "full_time_faculty" ? W_FACULTY : 0);
 
+    const { tier, label } = classifyLeadership(s.primaryTitle ?? null, isChair, isChief);
+
     const headshot: HeadshotState =
       s.hasHeadshot === true ? "present" : s.hasHeadshot === false ? "missing" : "unknown";
+
+    const hasOverview = nonEmpty(s.overview) || overviewOverride.has(s.cwid);
+    const { overviewState, overviewUpdatedAt } = classifyOverview(
+      hasOverview,
+      provByCwid.get(s.cwid),
+      now,
+    );
 
     return {
       cwid: s.cwid,
@@ -262,8 +460,12 @@ async function computeDataQualityEntries(
       roleCategory: s.roleCategory ?? null,
       isChair,
       isChief,
+      leadership: label,
+      leadershipTier: tier,
       headshot,
-      hasOverview: nonEmpty(s.overview) || overviewOverride.has(s.cwid),
+      hasOverview,
+      overviewUpdatedAt,
+      overviewState,
       pendingCoiHigh: coiHigh.get(s.cwid) ?? 0,
       pendingCoiMedium: coiMedium.get(s.cwid) ?? 0,
       prominence,
@@ -271,7 +473,7 @@ async function computeDataQualityEntries(
     };
   });
 
-  // Summary counts across the in-scope, filtered set (before the gap filter).
+  // Summary counts across the in-scope, filtered set (before the gap/age filters).
   const counts: DataQualityCounts = {
     inScope: entries.length,
     missingHeadshot: entries.filter((e) => e.headshot === "missing").length,
@@ -284,8 +486,19 @@ async function computeDataQualityEntries(
   else if (opts.gap === "no-overview") entries = entries.filter((e) => !e.hasOverview);
   else if (opts.gap === "has-coi") entries = entries.filter((e) => e.pendingCoiHigh > 0);
 
-  // Prominence desc, then name asc for a stable page boundary.
-  entries.sort((a, b) => b.prominence - a.prominence || a.name.localeCompare(b.name));
+  // Overview-age filter (#6) — independent of the gap filter above.
+  if (opts.overviewAge && opts.overviewAge !== "all") {
+    entries = entries.filter((e) => e.overviewState === opts.overviewAge);
+  }
+
+  // Leadership tier first (Dean #1), then prominence desc, then name asc for a
+  // stable page boundary.
+  entries.sort(
+    (a, b) =>
+      a.leadershipTier - b.leadershipTier ||
+      b.prominence - a.prominence ||
+      a.name.localeCompare(b.name),
+  );
 
   return { entries, counts };
 }
@@ -342,10 +555,18 @@ const CSV_HEADERS = [
   "leadership",
   "headshot",
   "has_overview",
+  "overview_updated",
   "pending_coi_high",
   "pending_coi_medium",
   "prominence",
 ] as const;
+
+/** The CSV "overview_updated" cell: the edit date (YYYY-MM-DD) when known,
+ *  "imported" for the un-edited VIVO seed, "" when there's no overview. */
+function overviewUpdatedCell(e: DataQualityEntry): string {
+  if (e.overviewUpdatedAt) return e.overviewUpdatedAt.slice(0, 10);
+  return e.overviewState === "imported" ? "imported" : "";
+}
 
 /** Serialize export rows to a CSV string. `rank` is the 1-based position in the
  *  prominence-sorted set the rows arrive in. */
@@ -357,12 +578,189 @@ export function buildDataQualityCsv(rows: readonly DataQualityEntry[]): string {
     e.title ?? "",
     e.unit ?? "",
     formatRoleCategory(e.roleCategory) ?? e.roleCategory ?? "",
-    e.isChair ? "Chair" : e.isChief ? "Chief" : "",
+    e.leadership ?? "",
     e.headshot,
     e.hasOverview ? "yes" : "no",
+    overviewUpdatedCell(e),
     e.pendingCoiHigh,
     e.pendingCoiMedium,
     e.prominence.toFixed(2),
   ]);
   return toCsv(CSV_HEADERS, body);
+}
+
+// ---------------------------------------------------------------------------
+// Shared param parsing (#3/#4/#5/#6) — the page and the export route parse the
+// SAME query string identically through this helper, so they can never drift.
+// ---------------------------------------------------------------------------
+
+function parseGap(v: string | undefined): DataQualityGapFilter {
+  return v === "no-headshot" || v === "no-overview" || v === "has-coi" ? v : "all";
+}
+
+function parseOverviewAge(v: string | undefined): OverviewAgeFilter {
+  return v === "imported" || v === "never" || v === "lt1yr" || v === "1to2yr" || v === "gt2yr"
+    ? v
+    : "all";
+}
+
+/** Decode a unit-filter value (`dept:CODE` / `div:CODE` / `center:CODE`). */
+function parseUnitValue(v: string): EditRosterUnitFilter | null {
+  const sep = v.indexOf(":");
+  if (sep < 0) return null;
+  const kind = v.slice(0, sep);
+  const code = v.slice(sep + 1);
+  if (!code) return null;
+  if (kind === "dept") return { kind: "department", code };
+  if (kind === "div") return { kind: "division", code };
+  if (kind === "center") return { kind: "center", code };
+  return null;
+}
+
+export type ParsedDataQualityParams = {
+  q: string;
+  roleCategories: string[];
+  units: EditRosterUnitFilter[];
+  /** The raw encoded unit values (`dept:CODE` …) — for href building + UI seeding. */
+  unitValues: string[];
+  gap: DataQualityGapFilter;
+  overviewAge: OverviewAgeFilter;
+  includeHidden: boolean;
+  page: number;
+};
+
+/**
+ * Parse the dashboard's filter/pagination query params from EITHER a Web
+ * `URLSearchParams` (the export route) OR a Next.js searchParams object (the
+ * page) — the dual-source idiom from `lib/api/search-flags.ts`. Multi-value
+ * params (`type`, `unit`) arrive as repeated keys.
+ */
+export function parseDataQualityParams(
+  source: URLSearchParams | Record<string, string | string[] | undefined>,
+): ParsedDataQualityParams {
+  const valuesOf = (key: string): string[] => {
+    if (source instanceof URLSearchParams) return source.getAll(key);
+    const raw = source[key];
+    return Array.isArray(raw) ? raw : raw !== undefined ? [raw] : [];
+  };
+  const first = (key: string): string | undefined => valuesOf(key)[0];
+
+  const q = (first("q") ?? "").trim();
+  const roleCategories = valuesOf("type")
+    .map((v) => v.trim())
+    .filter(Boolean);
+  const unitValues = valuesOf("unit")
+    .map((v) => v.trim())
+    .filter(Boolean);
+  const units = unitValues
+    .map(parseUnitValue)
+    .filter((u): u is EditRosterUnitFilter => u !== null);
+  const hidden = first("hidden");
+
+  return {
+    q,
+    roleCategories,
+    units,
+    unitValues,
+    gap: parseGap(first("gap")),
+    overviewAge: parseOverviewAge(first("overviewAge")),
+    includeHidden: !(hidden === "0" || hidden === "false"),
+    page: Math.max(Number.parseInt(first("page") ?? "0", 10) || 0, 0),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Filter-bar facet options (#4/#5) — person types + the org-unit hierarchy
+// (departments with their child divisions + a flat centers group), each with a
+// static active-scholar count for the RosterFacet UI.
+// ---------------------------------------------------------------------------
+
+/** One selectable facet value with a count, matching the RosterFacet shape. */
+export type DataQualityFacetOption = { value: string; label: string; count: number };
+
+export type DataQualityFacets = {
+  /** Person types present on active scholars, with counts. */
+  roleCategories: DataQualityFacetOption[];
+  /** Departments (value `dept:CODE`) each with their child divisions (`div:CODE`). */
+  departments: Array<DataQualityFacetOption & { divisions: DataQualityFacetOption[] }>;
+  /** Research centers (value `center:CODE`), with active-member counts. */
+  centers: DataQualityFacetOption[];
+};
+
+const ACTIVE_WHERE = { deletedAt: null, status: "active" } as const;
+
+/**
+ * Load the filter-bar facets. Counts are STATIC (independent of the other current
+ * filters) — meaningful as a baseline and cheap (a handful of grouped aggregates).
+ * The option set is the full catalog, matching v1's global dropdowns; the query
+ * (not the option list) remains the scope boundary.
+ *
+ * Dept / division / role counts are active scholars (`ACTIVE_WHERE`). Center
+ * counts are date-active MEMBERSHIPS (pending / expired excluded, matching the
+ * center filter); note a center count can still slightly exceed the filtered row
+ * count because a membership cannot be joined to the scholar's active status in a
+ * `groupBy` — a few may point at since-inactivated scholars.
+ */
+export async function loadDataQualityFacets(client: DataQualityClient): Promise<DataQualityFacets> {
+  const today = new Date();
+  const [deptRows, divRows, ctrRows, roleAgg, deptAgg, divAgg, ctrAgg] = await Promise.all([
+    client.department.findMany({ select: { code: true, name: true }, orderBy: { name: "asc" } }),
+    client.division.findMany({
+      select: { code: true, name: true, deptCode: true },
+      orderBy: { name: "asc" },
+    }),
+    client.center.findMany({ select: { code: true, name: true }, orderBy: { name: "asc" } }),
+    client.scholar.groupBy({ by: ["roleCategory"], where: ACTIVE_WHERE, _count: { _all: true } }),
+    client.scholar.groupBy({ by: ["deptCode"], where: ACTIVE_WHERE, _count: { _all: true } }),
+    client.scholar.groupBy({ by: ["divCode"], where: ACTIVE_WHERE, _count: { _all: true } }),
+    client.centerMembership.groupBy({
+      by: ["centerCode"],
+      where: {
+        AND: [
+          { OR: [{ startDate: null }, { startDate: { lte: today } }] },
+          { OR: [{ endDate: null }, { endDate: { gte: today } }] },
+        ],
+      },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const roleCount = new Map(
+    roleAgg.map((r) => [r.roleCategory ?? "", r._count._all] as const),
+  );
+  const deptCount = new Map(deptAgg.map((r) => [r.deptCode ?? "", r._count._all] as const));
+  const divCount = new Map(divAgg.map((r) => [r.divCode ?? "", r._count._all] as const));
+  const ctrCount = new Map(ctrAgg.map((r) => [r.centerCode, r._count._all] as const));
+
+  const roleCategories: DataQualityFacetOption[] = roleAgg
+    .map((r) => r.roleCategory)
+    .filter((v): v is string => Boolean(v))
+    .map((value) => ({
+      value,
+      label: formatRoleCategory(value) ?? value,
+      count: roleCount.get(value) ?? 0,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  const divByDept = new Map<string, DataQualityFacetOption[]>();
+  for (const d of divRows) {
+    const arr = divByDept.get(d.deptCode) ?? [];
+    arr.push({ value: `div:${d.code}`, label: d.name, count: divCount.get(d.code) ?? 0 });
+    divByDept.set(d.deptCode, arr);
+  }
+
+  const departments = deptRows.map((dep) => ({
+    value: `dept:${dep.code}`,
+    label: dep.name,
+    count: deptCount.get(dep.code) ?? 0,
+    divisions: divByDept.get(dep.code) ?? [],
+  }));
+
+  const centers: DataQualityFacetOption[] = ctrRows.map((c) => ({
+    value: `center:${c.code}`,
+    label: c.name,
+    count: ctrCount.get(c.code) ?? 0,
+  }));
+
+  return { roleCategories, departments, centers };
 }

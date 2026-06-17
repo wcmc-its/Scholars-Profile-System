@@ -22,8 +22,12 @@ function entry(over: Partial<DataQualityEntry> = {}): DataQualityEntry {
     roleCategory: "full_time_faculty",
     isChair: false,
     isChief: true,
+    leadership: "Chief",
+    leadershipTier: 2,
     headshot: "present",
     hasOverview: true,
+    overviewUpdatedAt: null,
+    overviewState: "imported",
     pendingCoiHigh: 0,
     pendingCoiMedium: 1,
     prominence: 10.567,
@@ -33,36 +37,44 @@ function entry(over: Partial<DataQualityEntry> = {}): DataQualityEntry {
 }
 
 describe("buildDataQualityCsv", () => {
-  it("emits the header and rank/leadership/headshot/prominence, quoting commas", () => {
+  it("emits the header and rank/leadership/overview_updated/prominence, quoting commas", () => {
     const csv = buildDataQualityCsv([
-      entry(),
+      entry({ leadership: "Dean", overviewState: "lt1yr", overviewUpdatedAt: "2026-06-01T12:00:00.000Z" }),
       entry({
         cwid: "fac2",
         name: "Ben Chair",
         isChair: true,
         isChief: false,
+        leadership: "Chair",
         headshot: "missing",
         hasOverview: false,
+        overviewState: "never",
+        overviewUpdatedAt: null,
         pendingCoiHigh: 2,
       }),
     ]);
     const lines = csv.trimEnd().split("\r\n");
     expect(lines[0]).toBe(
-      "rank,cwid,name,title,unit,person_type,leadership,headshot,has_overview,pending_coi_high,pending_coi_medium,prominence",
+      "rank,cwid,name,title,unit,person_type,leadership,headshot,has_overview,overview_updated,pending_coi_high,pending_coi_medium,prominence",
     );
-    // Row 1: rank 1, name with a comma is quoted, Chief, present, prominence to 2dp.
+    // Row 1: rank 1, name with a comma is quoted, Dean label, edit date (YYYY-MM-DD), prominence to 2dp.
     expect(lines[1].startsWith("1,fac1,")).toBe(true);
     expect(lines[1]).toContain('"Ada, Faculty"');
-    expect(lines[1]).toContain(",Chief,present,yes,0,1,");
+    expect(lines[1]).toContain(",Dean,present,yes,2026-06-01,0,1,");
     expect(lines[1].endsWith(",10.57")).toBe(true);
-    // Row 2: rank 2, Chair, missing headshot, no overview, 2 COI.
+    // Row 2: rank 2, Chair, missing headshot, no overview (empty overview_updated), 2 COI.
     expect(lines[2].startsWith("2,fac2,")).toBe(true);
-    expect(lines[2]).toContain(",Chair,missing,no,2,");
+    expect(lines[2]).toContain(",Chair,missing,no,,2,");
+  });
+
+  it("an imported (un-edited) overview shows 'imported' in overview_updated", () => {
+    const csv = buildDataQualityCsv([entry({ overviewState: "imported", overviewUpdatedAt: null })]);
+    expect(csv.split("\r\n")[1]).toContain(",present,yes,imported,");
   });
 
   it("renders a non-leader with an empty leadership cell", () => {
-    const csv = buildDataQualityCsv([entry({ isChief: false, isChair: false })]);
-    expect(csv.split("\r\n")[1]).toContain(",,present,"); // empty leadership between unit/person_type and headshot
+    const csv = buildDataQualityCsv([entry({ isChief: false, isChair: false, leadership: null })]);
+    expect(csv.split("\r\n")[1]).toContain(",,present,"); // empty leadership between person_type and headshot
   });
 });
 
@@ -75,6 +87,7 @@ function fakeClient(scholars: unknown[]) {
     grant: { groupBy: vi.fn().mockResolvedValue([]) },
     coiGapCandidate: { groupBy: vi.fn().mockResolvedValue([]) },
     fieldOverride: { findMany: vi.fn().mockResolvedValue([]) },
+    overviewProvenance: { findMany: vi.fn().mockResolvedValue([]) },
     centerMembership: { findMany: vi.fn().mockResolvedValue([]) },
   };
 }
