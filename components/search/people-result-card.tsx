@@ -209,7 +209,7 @@ export function PeopleResultCard({
       // New match-aware badge reasons (method / topic).
       snippetLine =
         reason.kind === "method" ? (
-          <MatchAwareReason kind="method" label={reason.family} tools={reason.tools} />
+          <MatchAwareReason kind="method" label={reason.family} />
         ) : (
           <MatchAwareReason kind="topic" label={reason.label} />
         );

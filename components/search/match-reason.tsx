@@ -134,19 +134,19 @@ export function MatchReason({
 }
 
 /**
- * #824 follow-up — the match-aware "why" line in the approved mockup
- * (`docs/mockups/search-snippet/match-aware-snippet.html`). A small uppercase
- * badge (rust for method, blue for topic) with a leading lucide icon, then the
- * matched label in bold; the method variant trails up to 3 exemplar tool names,
- * muted and " · "-separated. Lives inside the result card's stretched-link
- * wrapper, so it is a row of `<span>`s plus (when `canExpand`) a real chevron
- * `<button>`; the icon is decorative (`aria-hidden`). Colors are inlined from
- * the mockup CSS variables.
+ * #824 follow-up — the match-aware "why" line. A small uppercase badge (rust for
+ * method, blue for topic) with a leading lucide icon, then the matched label in
+ * bold. The method family name now stands ALONE — the muted exemplar-tool trail
+ * was dropped: the rep-papers list below does the evidentiary work, and the bare
+ * name reads as a confident, unambiguous label with no casing/truncation to
+ * maintain. (The `tools` data is still on the evidence object, so a curated 1–2
+ * terms could be reinstated later without re-deriving anything.) Lives inside the
+ * result card's stretched-link wrapper, so it is a row of `<span>`s plus (when
+ * `canExpand`) a real chevron `<button>`; the icon is decorative (`aria-hidden`).
  */
 export function MatchAwareReason({
   kind,
   label,
-  tools = [],
   canExpand = false,
   expanded = false,
   onToggle,
@@ -154,7 +154,6 @@ export function MatchAwareReason({
 }: {
   kind: "method" | "topic";
   label: string;
-  tools?: string[];
   /** Rep-papers disclosure — when true, trail a clickable chevron `<button>`
    *  that opens the representative-papers panel `panelId`. */
   canExpand?: boolean;
@@ -185,18 +184,6 @@ export function MatchAwareReason({
       </span>
       <span className="min-w-0 truncate">
         <strong className="font-semibold text-[#1a1a1a]">{label}</strong>
-        {kind === "method" && tools.length > 0 ? (
-          <span className="font-normal text-muted-foreground">
-            {tools.map((t, i) => (
-              <span key={`${t}-${i}`}>
-                <span aria-hidden className="px-1.5 text-[#c9c4ba]">
-                  ·
-                </span>
-                {t}
-              </span>
-            ))}
-          </span>
-        ) : null}
       </span>
     </>
   );
@@ -222,8 +209,9 @@ export type ExemplarFetchStatus = "idle" | "loading" | "done";
 
 /**
  * Rep-papers disclosure — the mockup's `REP. PAPERS` block: a small uppercase
- * `REP. PAPERS` label above a column of up to 3 italic paper titles (rendered
- * through `PubTitle`, never raw — #946) with a muted ` (year)`, and a
+ * `REP. PAPER(S)` label above a column of up to 3 roman 15px paper titles (full,
+ * never truncated; rendered through `PubTitle`, never raw — #946; matched keyword
+ * highlighted 600/primary) with a muted ` (year)`, and a
  * `+{total - papers.length} more in profile →` link to `profileHref` when there
  * are more than shown. The link is `relative z-10` and stops propagation so it
  * never triggers the card's stretched name-link navigation. While `status` is
@@ -262,12 +250,13 @@ export function RepresentativePapers({
       <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
         {papers.length === 1 ? "Rep. paper" : "Rep. papers"}
       </div>
-      <ul className="mt-1 flex flex-col gap-1.5 text-[12px] leading-snug">
+      <ul className="mt-1 flex flex-col gap-1.5 text-[15px] leading-snug">
         {papers.map((p) => (
-          // Item 2 — bullet + hanging indent: the dot is its own flex item, so a
-          // title that wraps aligns line 2 under the TITLE text (not the bullet).
-          // The dot shares the title's line-height so it baselines with line 1.
-          <li key={p.pmid} className="flex items-start gap-[9px] text-muted-foreground">
+          // Bullet + hanging indent: the dot is its own flex item, so a title that
+          // wraps aligns line 2 under the TITLE text (not the bullet); the dot
+          // shares the title's line-height so it baselines with line 1. Titles are
+          // roman at 15px and NEVER truncate — the full article title always wraps.
+          <li key={p.pmid} className="flex items-start gap-[6px] text-muted-foreground">
             <span aria-hidden className="shrink-0 leading-snug text-[#9a958a]">
               &bull;
             </span>
@@ -276,11 +265,11 @@ export function RepresentativePapers({
                   through the sanctioned PubTitle (with a <mark>-aware variant when
                   the literal query appeared in the title), never raw. */}
               {p.titleHtml ? (
-                <span className="italic text-[#4a4a4a]">
+                <span className="text-[#4a4a4a]">
                   <HighlightedSnippet html={p.titleHtml} />
                 </span>
               ) : (
-                <PubTitle as="span" value={p.title} className="italic text-[#4a4a4a]" />
+                <PubTitle as="span" value={p.title} className="text-[#4a4a4a]" />
               )}
               {p.year ? <span className="text-[#777]"> ({p.year})</span> : null}
             </span>
