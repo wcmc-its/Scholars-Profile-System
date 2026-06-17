@@ -186,6 +186,23 @@ describe("ResearchAreasRow — Methods and Tools chip row (#860)", () => {
     expect(screen.getByText("Imaging Flow")).toBeTruthy();
   });
 
+  it("the method chip has NO per-chip wrench (#3) — only the Users count icon", () => {
+    render(
+      <ResearchAreasRow
+        result={methodResult([
+          methodMatch("Flow Cytometry", "methodFamily", "/methods/a/flow-fam_1", 248, 3914),
+        ])}
+      />,
+    );
+    const chip = screen.getByText("Flow Cytometry").closest("a")!;
+    // The leading Wrench glyph was removed; the only icon left inside the chip is
+    // the Users count icon, so the anchor carries exactly one svg.
+    expect(chip.querySelectorAll("svg")).toHaveLength(1);
+    // The section LABEL keeps its Wrench — the row still has more than one svg.
+    const label = screen.getByText("Methods and Tools").closest("span")!;
+    expect(label.querySelector("svg")).toBeTruthy();
+  });
+
   it("renders the methods row AND the topic chip row together", () => {
     render(
       <ResearchAreasRow

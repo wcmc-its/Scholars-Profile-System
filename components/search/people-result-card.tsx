@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useCallback, useRef, useState } from "react";
+import { type ReactNode, useCallback, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -8,7 +8,7 @@ import { profilePath } from "@/lib/profile-url";
 import {
   MatchReason,
   MatchAwareReason,
-  MethodExemplarLine,
+  RepresentativePapers,
   type ExemplarFetchStatus,
 } from "@/components/search/match-reason";
 import { HighlightedSnippet } from "@/components/search/highlight-snippet";
@@ -109,28 +109,66 @@ export function PeopleResultCard({
     );
   }
 
-  // #967 §7 (Variant 2) — the method-badge hover exemplar. Only the ResultEvidence
-  // `method` kind has a representative paper to reveal; resolve it lazily so the
-  // cacheable results derive stays untouched and the lookup runs only for a row
-  // the viewer actually hovers/focuses.
-  const methodFamily =
-    hit.evidence?.kind === "method" ? hit.evidence.family : null;
-  const [exemplar, setExemplar] = useState<EvidencePub | null>(null);
+  // Rep-papers disclosure — clickable, collapsed by default (replaces the #1060
+  // hover reveal). State lives here; the chevron lives in the evidence row.
+  const [expanded, setExpanded] = useState(false);
+  const panelId = useId();
+
+  // method/topic kinds resolve their representative papers LAZILY (on the first
+  // expand, not on hover) so the cacheable results derive stays untouched and the
+  // lookup runs only for a row the viewer actually opens. The query string
+  // selects which loader the (shared) route uses: `?family=` / `?topic=`.
+  const exemplarQuery =
+    hit.evidence?.kind === "method"
+      ? `family=${encodeURIComponent(hit.evidence.family)}`
+      : hit.evidence?.kind === "topic"
+        ? `topic=${encodeURIComponent(hit.evidence.id)}`
+        : null;
+  const [exemplar, setExemplar] = useState<{ pubs: EvidencePub[]; total: number }>({
+    pubs: [],
+    total: 0,
+  });
   const [exemplarStatus, setExemplarStatus] = useState<ExemplarFetchStatus>("idle");
   const exemplarFetched = useRef(false);
 
   const ensureExemplar = useCallback(() => {
-    if (!methodFamily || exemplarFetched.current) return;
+    if (!exemplarQuery || exemplarFetched.current) return;
     exemplarFetched.current = true;
     setExemplarStatus("loading");
-    fetch(
-      `/api/scholar/${encodeURIComponent(hit.cwid)}/method-exemplar?family=${encodeURIComponent(methodFamily)}`,
-    )
-      .then((r) => (r.ok ? r.json() : { pub: null }))
-      .then((d: { pub: EvidencePub | null }) => setExemplar(d?.pub ?? null))
-      .catch(() => setExemplar(null))
+    fetch(`/api/scholar/${encodeURIComponent(hit.cwid)}/method-exemplar?${exemplarQuery}`)
+      .then((r) => (r.ok ? r.json() : { pubs: [], total: 0 }))
+      .then((d: { pubs: EvidencePub[]; total: number }) =>
+        setExemplar({ pubs: d?.pubs ?? [], total: d?.total ?? 0 }),
+      )
+      .catch(() => setExemplar({ pubs: [], total: 0 }))
       .finally(() => setExemplarStatus("done"));
-  }, [hit.cwid, methodFamily]);
+  }, [hit.cwid, exemplarQuery]);
+
+  // publications kind: the representative papers are INLINE in the evidence
+  // (`evidence.pubs`) — no fetch. method/topic: the lazily-fetched `exemplar`.
+  const inlinePubs =
+    hit.evidence?.kind === "publications" ? (hit.evidence.pubs ?? []) : null;
+  const isLazyExemplar = !!exemplarQuery;
+  const repPapers = inlinePubs ?? exemplar.pubs;
+  const repTotal =
+    inlinePubs != null
+      ? (hit.evidence?.kind === "publications" ? hit.evidence.count : undefined) ??
+        inlinePubs.length
+      : exemplar.total;
+
+  // A disclosure is offered when there is something to reveal. For inline pubs
+  // that is `pubs.length > 0`. For a lazy method/topic exemplar it is optimistic
+  // (`!!exemplarQuery`) until the fetch resolves; once it resolves with 0 papers
+  // we drop the chevron so there is never a dead control.
+  const canExpand =
+    inlinePubs != null
+      ? inlinePubs.length > 0
+      : isLazyExemplar && !(exemplarStatus === "done" && exemplar.pubs.length === 0);
+
+  const onToggle = useCallback(() => {
+    if (isLazyExemplar) ensureExemplar();
+    setExpanded((v) => !v);
+  }, [isLazyExemplar, ensureExemplar]);
 
   const deptLine = hit.divisionName
     ? `${hit.divisionName} · Department of ${hit.deptName ?? hit.primaryDepartment ?? ""}`.trim()
@@ -148,16 +186,17 @@ export function PeopleResultCard({
   // (`SEARCH_RESULT_EVIDENCE` on), the server already selected the ONE "why"
   // via one precedence function, so render it through one component and IGNORE
   // the legacy priority chain below. Absent ⇒ fall through to today's chain.
-  // Show the ▾ disclosure cue for a method row UNTIL the lazy fetch tells us
-  // there is no qualifying paper — then drop it so it never promises a reveal
-  // that won't appear (no dead affordance).
-  const methodExpandable =
-    !!methodFamily && !(exemplarStatus === "done" && !exemplar);
-
+  // The disclosure props drive the clickable rep-papers chevron + panel.
   let snippetLine: ReactNode = null;
   if (hit.evidence) {
     snippetLine = (
-      <ResultEvidence evidence={hit.evidence} methodExpandable={methodExpandable} />
+      <ResultEvidence
+        evidence={hit.evidence}
+        canExpand={canExpand}
+        expanded={expanded}
+        onToggle={onToggle}
+        panelId={panelId}
+      />
     );
   } else {
     // LEGACY priority chain (pre-ResultEvidence): method > topic > (legacy
@@ -218,16 +257,15 @@ export function PeopleResultCard({
     }
   }
 
+  // Stretched-link card (rep-papers disclosure): the row is a `<div>` and the
+  // NAME is the profile `<Link>` whose `after:absolute inset-0` overlay makes the
+  // WHOLE card clickable (whole-card navigation preserved). The chevron button +
+  // `+N more` link sit ABOVE that overlay with `relative z-10`, so a disclosure
+  // click never navigates. The analytics beacon rides the name link.
+  const profileHref = `${profilePath(hit.slug)}#publications`;
+
   return (
-    <Link
-      href={profilePath(hit.slug)}
-      onClick={handleClick}
-      // `group` so the method-exemplar reveal can show on row hover/keyboard
-      // focus; the lazy fetch fires once on the first hover/focus of the row.
-      onMouseEnter={ensureExemplar}
-      onFocus={ensureExemplar}
-      className="group grid grid-cols-[56px_1fr_auto] gap-4 border-b border-[#e3e2dd] py-5 no-underline hover:bg-[#fafaf8] hover:no-underline"
-    >
+    <div className="group relative grid grid-cols-[56px_1fr_auto] gap-4 border-b border-[#e3e2dd] py-5 hover:bg-[#fafaf8]">
       <HeadshotAvatar
         size="md"
         cwid={hit.cwid}
@@ -236,7 +274,16 @@ export function PeopleResultCard({
       />
       <div className="min-w-0">
         <div className="mb-[2px] flex flex-wrap items-baseline text-[16px] font-semibold leading-tight text-[#1a1a1a]">
-          <span className="hover:text-[#2c4f6e]">{hit.preferredName}</span>
+          {/* The name IS the stretched profile link: `after:absolute inset-0`
+              spans the whole card so clicking anywhere (outside a `z-10` control)
+              navigates. The analytics beacon fires here. */}
+          <Link
+            href={profilePath(hit.slug)}
+            onClick={handleClick}
+            className="text-[#1a1a1a] no-underline after:absolute after:inset-0 after:content-[''] hover:text-[#2c4f6e] hover:no-underline"
+          >
+            {hit.preferredName}
+          </Link>
           {roleLabel ? <RoleTag role={roleLabel} /> : null}
         </div>
         {hit.primaryTitle ? (
@@ -250,11 +297,17 @@ export function PeopleResultCard({
         {/* #824 follow-up — one reason line per scholar: the ResultEvidence
             object when present, else the legacy priority chain. */}
         {snippetLine}
-        {/* #967 §7 — method match: the family's representative paper, revealed on
-            row hover/focus (lazy-fetched above). Renders nothing for non-method
-            rows or once resolved with no qualifying paper. */}
-        {methodFamily ? (
-          <MethodExemplarLine status={exemplarStatus} pub={exemplar} />
+        {/* Rep-papers disclosure — the representative papers, shown when the row
+            is expanded. Inline for the publications kind; lazily fetched for a
+            method/topic match (the fetch is triggered on first toggle). */}
+        {hit.evidence && expanded && canExpand ? (
+          <RepresentativePapers
+            papers={repPapers}
+            total={repTotal}
+            profileHref={profileHref}
+            status={isLazyExemplar ? exemplarStatus : "done"}
+            panelId={panelId}
+          />
         ) : null}
       </div>
       <div className="flex flex-col items-end gap-1 whitespace-nowrap text-right text-xs text-muted-foreground">
@@ -275,6 +328,6 @@ export function PeopleResultCard({
           </span>
         ) : null}
       </div>
-    </Link>
+    </div>
   );
 }

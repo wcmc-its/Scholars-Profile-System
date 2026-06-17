@@ -12,6 +12,7 @@ const {
   mockSuppressionOverlayFindMany,
   mockSensitivityOverlayFindMany,
   mockSearch,
+  mockReasonAgg,
 } = vi.hoisted(() => ({
   mockPubTopicGroupBy: vi.fn(),
   mockScholarFamilyFindMany: vi.fn(),
@@ -19,6 +20,9 @@ const {
   mockSuppressionOverlayFindMany: vi.fn(),
   mockSensitivityOverlayFindMany: vi.fn(),
   mockSearch: vi.fn(),
+  // Drives the reason-aggregation response (the publications-index `size:0`
+  // query). Defaults to no buckets; individual tests override.
+  mockReasonAgg: vi.fn((): unknown[] => []),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -79,8 +83,14 @@ vi.mock("@/lib/search", () => ({
   MESH_ESCALATION_THRESHOLD: 50,
   MESH_MIN_MATCHED_FORM_LEN: 4,
   searchClient: () => ({
-    async search(args: unknown) {
+    async search(args: { index?: string }) {
       mockSearch(args);
+      // The reason aggregation (#1 free-text mention disclosure) is a separate
+      // `size:0` query against the PUBLICATIONS index. The test sets
+      // `mockReasonAgg` to drive it; everything else is the people query.
+      if (args?.index === "scholars-publications") {
+        return { body: { aggregations: { byAuthor: { buckets: mockReasonAgg() } } } };
+      }
       return {
         body: {
           hits: { total: { value: 1 }, hits: HITS },
@@ -118,6 +128,7 @@ beforeEach(() => {
   mockSuppressionOverlayFindMany.mockReset().mockResolvedValue([]);
   mockSensitivityOverlayFindMany.mockReset().mockResolvedValue([]);
   mockSearch.mockReset();
+  mockReasonAgg.mockReset().mockReturnValue([]);
   delete process.env[MATCH_AWARE];
 });
 
@@ -182,6 +193,7 @@ describe("searchPeople — evidence emission gated on SEARCH_RESULT_EVIDENCE", (
     expect(result.hits[0].evidence).toEqual({
       kind: "topic",
       label: "Single-cell & spatial biology",
+      id: "single_cell_spatial_biology",
     });
   });
 
@@ -205,5 +217,113 @@ describe("searchPeople — evidence emission gated on SEARCH_RESULT_EVIDENCE", (
     expect("matchedIndex" in ev).toBe(false);
     // Humanized — no raw slugs.
     expect(ev.labels.every((l) => !l.includes("_"))).toBe(true);
+  });
+});
+
+// Rep-papers disclosure (#1) — the content-shaped free-text mention path. A query
+// that resolves to NO concept (`meshDescendantUis` empty, `queryShape` ===
+// "restructured_msm") must, ONLY when the evidence flag is on, run the reason
+// aggregation and surface `publications:mention`. With the flag OFF the agg gate
+// falls back to the original pre-disclosure predicate, so neither the extra
+// publications-index round-trip nor the new "publications mention" legacy reason
+// line appears (off-path byte-identical).
+const PUBLICATIONS_INDEX = "scholars-publications";
+
+const MENTION_BUCKET = [
+  {
+    key: "el1",
+    mention: {
+      d: { value: 7 },
+      top: {
+        hits: {
+          hits: [
+            {
+              _source: { pmid: "33144353", title: "16S rRNA gut microbiome survey", year: 2021 },
+              highlight: { title: ["<mark>16S rRNA</mark> gut microbiome survey"] },
+            },
+            {
+              _source: { pmid: "31000000", title: "Microbial community profiling", year: 2019 },
+            },
+          ],
+        },
+      },
+    },
+  },
+];
+
+describe("searchPeople — free-text publications:mention evidence (#1)", () => {
+  it("flag OFF + matchExplain on + free-text query ⇒ NO reason agg, NO mention reason line", async () => {
+    // No EVIDENCE flag. matchExplain on, a free-text query with no shape →
+    // queryShape stays "restructured_msm", no resolved descriptor. The widened
+    // content-shape gate must NOT fire on the off-path.
+    mockReasonAgg.mockReturnValue(MENTION_BUCKET);
+    const result = await searchPeople({
+      q: "16s rna",
+      relevanceMode: "v3",
+      matchExplain: true,
+      representativePub: true,
+    });
+    // The publications-index reason aggregation must not have been issued.
+    expect(
+      mockSearch.mock.calls.some(([a]) => (a as { index?: string })?.index === PUBLICATIONS_INDEX),
+    ).toBe(false);
+    // No evidence object (flag off) and no "publications mention" legacy reason.
+    expect(result.hits[0].evidence).toBeUndefined();
+    const reason = result.hits[0].matchReason;
+    if (reason && "text" in reason) {
+      expect(reason.text).not.toMatch(/publications mention/i);
+    }
+  });
+
+  it("flag ON + matchExplain/representativePub + free-text no-concept query ⇒ publications:mention with pubs", async () => {
+    process.env[EVIDENCE] = "on";
+    mockReasonAgg.mockReturnValue(MENTION_BUCKET);
+    const result = await searchPeople({
+      q: "16s rna",
+      relevanceMode: "v3",
+      matchExplain: true,
+      representativePub: true,
+      matchAwareContext: { methodFamily: null, topics: [] },
+    });
+    // The reason agg DID run against the publications index.
+    expect(
+      mockSearch.mock.calls.some(([a]) => (a as { index?: string })?.index === PUBLICATIONS_INDEX),
+    ).toBe(true);
+    const ev = result.hits[0].evidence;
+    expect(ev?.kind).toBe("publications");
+    if (ev?.kind !== "publications") throw new Error("expected publications evidence");
+    expect(ev.strength).toBe("mention");
+    // count is min(mention=7, pubCount=200) = 7; text is the human "N of M" line.
+    expect(ev.count).toBe(7);
+    expect(ev.text).toBe('7 of 200 publications mention “16s rna”');
+    expect(ev.pubs).toEqual([
+      {
+        pmid: "33144353",
+        title: "16S rRNA gut microbiome survey",
+        titleHtml: "<mark>16S rRNA</mark> gut microbiome survey",
+        year: 2021,
+      },
+      { pmid: "31000000", title: "Microbial community profiling", year: 2019 },
+    ]);
+  });
+
+  it("flag ON + no descriptor ⇒ the `tagged` sub-agg is OMITTED from the request body", async () => {
+    process.env[EVIDENCE] = "on";
+    mockReasonAgg.mockReturnValue(MENTION_BUCKET);
+    await searchPeople({
+      q: "16s rna",
+      relevanceMode: "v3",
+      matchExplain: true,
+      representativePub: true,
+      matchAwareContext: { methodFamily: null, topics: [] },
+    });
+    const aggCall = mockSearch.mock.calls
+      .map(([a]) => a as { index?: string; body?: { aggs?: { byAuthor?: { aggs?: Record<string, unknown> } } } })
+      .find((a) => a?.index === PUBLICATIONS_INDEX);
+    expect(aggCall).toBeDefined();
+    const byAuthorAggs = aggCall?.body?.aggs?.byAuthor?.aggs ?? {};
+    // No resolved descriptor ⇒ only `mention` is computed; `tagged` is absent.
+    expect("tagged" in byAuthorAggs).toBe(false);
+    expect("mention" in byAuthorAggs).toBe(true);
   });
 });

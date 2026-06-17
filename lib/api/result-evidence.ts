@@ -46,16 +46,21 @@ export type ResultEvidence =
   | { kind: "name"; html: string }
   /** Matched method family + ≤3 cleaned exemplar tools (#824 §4c derive). */
   | { kind: "method"; family: string; tools: string[] }
-  /** Matched curated research-area parent topic (v1 keeps the parent label). */
-  | { kind: "topic"; label: string }
+  /** Matched curated research-area parent topic (v1 keeps the parent label).
+   *  `id` is the topic SLUG (= `Topic.id` = `PublicationTopic.parentTopicId`) so
+   *  the hover can resolve the scholar's representative paper in this topic. */
+  | { kind: "topic"; label: string; id: string }
   /** Publication-count evidence. `strength` ranks it: `tagged` (subject tag,
    *  strong) above bio; `mention` (free-text, weak) below bio; `concept` is the
-   *  MeSH-expansion text variant (handoff Case F — folded in, no own kind). */
+   *  MeSH-expansion text variant (handoff Case F — folded in, no own kind).
+   *  `pubs` carries up to 3 representative papers for the disclosure, `count` the
+   *  numeric "N" for the `+N more` math (the human "N of M" string lives in `text`). */
   | {
       kind: "publications";
       strength: "tagged" | "mention" | "concept";
       text: string;
-      pub?: EvidencePub;
+      pubs?: EvidencePub[];
+      count?: number;
     }
   /** A genuine sentence from the scholar's overview (matched term bold). */
   | { kind: "selfDescription"; html: string }
@@ -287,19 +292,49 @@ export type SelectEvidenceInput = {
   bioHighlight?: string;
   /** Resolved method-family reason (overlay-gated), tools already refined. */
   method?: { family: string; tools: string[] };
-  /** Resolved matched parent-topic label. */
-  topic?: { label: string };
+  /** Resolved matched parent topic — `label` for display, `id` (slug) for the
+   *  representative-paper hover. */
+  topic?: { label: string; id: string };
   /** Pre-formatted publication-evidence parts (counts already capped, text
-   *  already built; any one may be absent). */
+   *  already built; any one may be absent). `count` is the numeric "N" (the
+   *  `+N more` math), `pubs` up to 3 representative papers for the disclosure. */
   pub?: {
-    tagged?: { text: string; pub?: EvidencePub };
-    mention?: { text: string; pub?: EvidencePub };
+    tagged?: { text: string; count: number; pubs?: EvidencePub[] };
+    mention?: { text: string; count: number; pubs?: EvidencePub[] };
     concept?: { text: string };
   };
+  /** The content query (the literal free-text terms the search ran against),
+   *  used by the bio-vs-pub precedence split: a bio highlight that covered only a
+   *  SUBSET of a multi-word query loses to publication-mention evidence (handoff
+   *  decision 2). Absent ⇒ no demotion (back-compat). */
+  query?: string;
   /** Bounded research-areas hint (labels already capped to {@link AREAS_CAP},
    *  `total` is the full count). */
   areas?: { labels: string[]; total: number } | null;
 };
+
+/**
+ * Handoff decision 2 — does the bio highlight cover the WHOLE content query?
+ * Tokenize `query` (lowercase, split on non-alphanumeric, drop tokens < 2 chars)
+ * and extract the text inside every `<mark>…</mark>` span in `bioHighlight`
+ * (lowercased, concatenated); return true iff EVERY query token appears in that
+ * marked text. A query with ≤1 significant token → true (a single-token bio match
+ * is "full"). Empty/absent query → true (back-compat: no demotion). Pure +
+ * client-safe (imported by the selector and the unit tests).
+ */
+export function bioCoversQuery(bioHighlight: string, query: string): boolean {
+  const tokens = (query ?? "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 2);
+  // ≤1 significant token ⇒ a single-token bio match is "full" (no demotion).
+  if (tokens.length <= 1) return true;
+  const marked = (bioHighlight.match(/<mark>([\s\S]*?)<\/mark>/gi) ?? [])
+    .map((m) => m.replace(/<\/?mark>/gi, ""))
+    .join(" ")
+    .toLowerCase();
+  return tokens.every((t) => marked.includes(t));
+}
 
 /**
  * THE precedence function (handoff §4 principle 2). Returns exactly one
@@ -314,20 +349,40 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
   // 2 — method
   if (input.method) return { kind: "method", family: input.method.family, tools: input.method.tools };
   // 3 — topic
-  if (input.topic) return { kind: "topic", label: input.topic.label };
+  if (input.topic) return { kind: "topic", label: input.topic.label, id: input.topic.id };
   // 4 — publications, strong tier (above bio): tagged subject match, then the
   // `concept` MeSH-expansion text variant — both fold into the tagged tier per
   // the handoff precedence (`publications:tagged (+concept text variant)`), and
   // both ranked the bio in the legacy chain.
   if (input.pub?.tagged)
-    return { kind: "publications", strength: "tagged", text: input.pub.tagged.text, ...(input.pub.tagged.pub ? { pub: input.pub.tagged.pub } : {}) };
+    return {
+      kind: "publications",
+      strength: "tagged",
+      text: input.pub.tagged.text,
+      ...(input.pub.tagged.pubs && input.pub.tagged.pubs.length > 0 ? { pubs: input.pub.tagged.pubs } : {}),
+      count: input.pub.tagged.count,
+    };
   if (input.pub?.concept) return { kind: "publications", strength: "concept", text: input.pub.concept.text };
-  // 5 — selfDescription (bio)
-  if (input.bioHighlight) return { kind: "selfDescription", html: firstMatchingSentence(input.bioHighlight) };
-  // 6 — publications:mention (free-text, weak — below bio so "1 of 133 mention"
-  // never outranks a real overview sentence; handoff §5.0C)
+  // 5 — selfDescription (bio) — ONLY when the bio covered the WHOLE query (a
+  // FULL-query / single-token bio match still wins, as today). A partial-bio
+  // match falls through to 6 (pub.mention) so a real subset-only highlight never
+  // outranks publication-mention evidence (handoff decision 2).
+  if (input.bioHighlight && bioCoversQuery(input.bioHighlight, input.query ?? ""))
+    return { kind: "selfDescription", html: firstMatchingSentence(input.bioHighlight) };
+  // 6 — publications:mention (free-text, weak — below a FULL bio match so
+  // "1 of 133 mention" never outranks a real overview sentence; handoff §5.0C —
+  // but a PARTIAL-only bio match has fallen through above and loses to this).
   if (input.pub?.mention)
-    return { kind: "publications", strength: "mention", text: input.pub.mention.text, ...(input.pub.mention.pub ? { pub: input.pub.mention.pub } : {}) };
+    return {
+      kind: "publications",
+      strength: "mention",
+      text: input.pub.mention.text,
+      ...(input.pub.mention.pubs && input.pub.mention.pubs.length > 0 ? { pubs: input.pub.mention.pubs } : {}),
+      count: input.pub.mention.count,
+    };
+  // 6b — selfDescription (bio) — the partial-bio match that lost to pub.mention
+  // above still beats affiliation/areas/empty, so it falls here.
+  if (input.bioHighlight) return { kind: "selfDescription", html: firstMatchingSentence(input.bioHighlight) };
   // 7 — affiliation (weak/organizational, just above empty)
   if (nameKind === "affiliation") return { kind: "affiliation", html: input.nameHighlight! };
   // 8 — areas (who-is-this hint; E2 renders it OUTSIDE the match slot)

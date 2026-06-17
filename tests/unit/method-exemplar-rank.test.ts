@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   rankMethodExemplar,
+  rankMethodExemplarList,
   type ExemplarCandidate,
 } from "@/lib/api/method-exemplar-rank";
 
@@ -89,5 +90,58 @@ describe("rankMethodExemplar — §7 lexicographic key", () => {
   it("returns {pmid,title,year} of the winner; undated year normalizes to null", () => {
     const undated = cand({ pmid: "9", year: null, title: "Undated", publicationType: "Review" });
     expect(rankMethodExemplar([undated], YEAR)).toEqual({ pmid: "9", title: "Undated", year: null });
+  });
+});
+
+describe("rankMethodExemplarList — top-N (rep-papers disclosure)", () => {
+  it("returns [] on an empty candidate set", () => {
+    expect(rankMethodExemplarList([], YEAR)).toEqual([]);
+  });
+
+  it("returns up to `limit` papers, default 3, in the SAME ranked order as the single pick", () => {
+    // Four candidates; recency is the only differentiating signal here.
+    const c = [
+      cand({ pmid: "a", year: 2018, title: "Oldest" }),
+      cand({ pmid: "b", year: 2024, title: "Newest" }),
+      cand({ pmid: "c", year: 2021, title: "Middle" }),
+      cand({ pmid: "d", year: 2020, title: "Older" }),
+    ];
+    const top = rankMethodExemplarList(c, YEAR);
+    expect(top).toHaveLength(3);
+    expect(top.map((p) => p.pmid)).toEqual(["b", "c", "d"]); // 2024 ▸ 2021 ▸ 2020
+    // The single-pick helper agrees with the head of the list.
+    expect(rankMethodExemplar(c, YEAR)?.pmid).toBe("b");
+  });
+
+  it("honors a custom `limit`", () => {
+    const c = [
+      cand({ pmid: "b", year: 2024 }),
+      cand({ pmid: "c", year: 2021 }),
+      cand({ pmid: "d", year: 2020 }),
+    ];
+    expect(rankMethodExemplarList(c, YEAR, 1).map((p) => p.pmid)).toEqual(["b"]);
+    expect(rankMethodExemplarList(c, YEAR, 2).map((p) => p.pmid)).toEqual(["b", "c"]);
+    // limit ≥ pool size returns the whole sorted pool.
+    expect(rankMethodExemplarList(c, YEAR, 10)).toHaveLength(3);
+  });
+
+  it("limit ≤ 0 ⇒ []", () => {
+    const c = [cand({ pmid: "b", year: 2024 })];
+    expect(rankMethodExemplarList(c, YEAR, 0)).toEqual([]);
+  });
+
+  it("applies the same hard-drop (Retraction/Erratum) + blank-title filter before slicing", () => {
+    const c = [
+      cand({ pmid: "ret", publicationType: "Retraction", year: 2025, isFirstOrSenior: true }),
+      cand({ pmid: "blank", title: "  ", year: 2025 }),
+      cand({ pmid: "ok1", year: 2024, title: "Good 1" }),
+      cand({ pmid: "ok2", year: 2023, title: "Good 2" }),
+    ];
+    expect(rankMethodExemplarList(c, YEAR).map((p) => p.pmid)).toEqual(["ok1", "ok2"]);
+  });
+
+  it("maps each entry to {pmid,title,year}, normalizing an undated year to null", () => {
+    const undated = cand({ pmid: "9", year: null, title: "Undated", publicationType: "Review" });
+    expect(rankMethodExemplarList([undated], YEAR)).toEqual([{ pmid: "9", title: "Undated", year: null }]);
   });
 });

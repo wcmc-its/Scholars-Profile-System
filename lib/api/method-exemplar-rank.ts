@@ -65,16 +65,30 @@ function citationsPerYear(c: ExemplarCandidate, currentYear: number): number {
  * per-pub-per-topic signal in the data — see handoff §7 "Index reality").
  * Returns null only when nothing renderable survives (empty title / corrections).
  */
-export function rankMethodExemplar(
+/**
+ * The candidates a representative-paper surface may actually show: a non-empty
+ * title and not a correction (Retraction / Erratum, `NEVER_DISPLAY_TYPES`).
+ * Exported so the loader's "+N more" total counts the SAME renderable set the
+ * ranker slices from, not the raw candidate rows (which can include corrections /
+ * untitled stubs the profile would never list).
+ */
+export function filterRenderableExemplars(
   candidates: ExemplarCandidate[],
-  currentYear: number,
-): EvidencePub | null {
-  const pool = candidates.filter(
+): ExemplarCandidate[] {
+  return candidates.filter(
     (c) =>
       c.title.trim().length > 0 &&
       !(c.publicationType != null && NEVER_DISPLAY.has(c.publicationType)),
   );
-  if (pool.length === 0) return null;
+}
+
+export function rankMethodExemplarList(
+  candidates: ExemplarCandidate[],
+  currentYear: number,
+  limit = 3,
+): EvidencePub[] {
+  const pool = filterRenderableExemplars(candidates);
+  if (pool.length === 0) return [];
 
   pool.sort((a, b) => {
     const ao = a.publicationType === ORIGINAL_RESEARCH_TYPE ? 1 : 0;
@@ -98,6 +112,21 @@ export function rankMethodExemplar(
     return a.pmid.localeCompare(b.pmid);
   });
 
-  const top = pool[0];
-  return { pmid: top.pmid, title: top.title, year: top.year ?? null };
+  return pool.slice(0, Math.max(0, limit)).map((c) => ({
+    pmid: c.pmid,
+    title: c.title,
+    year: c.year ?? null,
+  }));
+}
+
+/**
+ * Back-compat single-paper pick — the top of {@link rankMethodExemplarList}, or
+ * null when nothing renderable survives. Kept so the existing one-paper callers
+ * (and `method-exemplar-rank.test.ts`) are unchanged.
+ */
+export function rankMethodExemplar(
+  candidates: ExemplarCandidate[],
+  currentYear: number,
+): EvidencePub | null {
+  return rankMethodExemplarList(candidates, currentYear, 1)[0] ?? null;
 }

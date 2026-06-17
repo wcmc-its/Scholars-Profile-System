@@ -50,13 +50,20 @@ function AreasHint({ labels, total }: { labels: string[]; total: number }) {
 
 export function ResultEvidence({
   evidence,
-  methodExpandable = false,
+  canExpand = false,
+  expanded = false,
+  onToggle,
+  panelId,
 }: {
   evidence: ResultEvidence;
-  /** #967 §7 — when true and the evidence is a method match, cue the method-
-   *  exemplar hover with a ▾ on the badge. The card sets this and renders the
-   *  matching `MethodExemplarLine` reveal; off ⇒ Phase-1 render is unchanged. */
-  methodExpandable?: boolean;
+  /** Rep-papers disclosure — when true and the evidence is a method/topic/
+   *  publications match, the reason row shows a clickable chevron `<button>`
+   *  controlling the representative-papers panel `panelId`. The card owns the
+   *  state + the lazy fetch (method/topic) or the inline pubs (publications). */
+  canExpand?: boolean;
+  expanded?: boolean;
+  onToggle?: () => void;
+  panelId?: string;
 }) {
   switch (evidence.kind) {
     case "method":
@@ -65,17 +72,35 @@ export function ResultEvidence({
           kind="method"
           label={evidence.family}
           tools={evidence.tools}
-          expandable={methodExpandable}
+          canExpand={canExpand}
+          expanded={expanded}
+          onToggle={onToggle}
+          panelId={panelId}
         />
       );
     case "topic":
-      return <MatchAwareReason kind="topic" label={evidence.label} />;
-    case "publications":
-      // Count-only (handoff Case C "C1 default" — the count IS the evidence; the
-      // representative pub is a future hover, not always-on). Concept is the
-      // sparkle variant (Case F, folded in).
       return (
-        <MatchReason kind={evidence.strength === "concept" ? "concept" : "publications"}>
+        <MatchAwareReason
+          kind="topic"
+          label={evidence.label}
+          canExpand={canExpand}
+          expanded={expanded}
+          onToggle={onToggle}
+          panelId={panelId}
+        />
+      );
+    case "publications":
+      // The count line IS the evidence; the representative papers ride the
+      // disclosure (canExpand = pubs present). Concept is the sparkle variant
+      // (Case F, folded in) and carries no pubs.
+      return (
+        <MatchReason
+          kind={evidence.strength === "concept" ? "concept" : "publications"}
+          canExpand={canExpand}
+          expanded={expanded}
+          onToggle={onToggle}
+          panelId={panelId}
+        >
           {evidence.text}
         </MatchReason>
       );

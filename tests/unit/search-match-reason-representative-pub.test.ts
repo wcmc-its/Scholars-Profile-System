@@ -8,27 +8,30 @@
  * No live cluster: these are the logic the agg JSON and the render depend on.
  */
 import { describe, expect, it } from "vitest";
-import { composeMatchReason, parseReasonTopHit, type RepresentativePub } from "@/lib/api/search";
+import {
+  composeMatchReason,
+  parseReasonTopHit,
+  parseReasonTopHits,
+  type RepresentativePub,
+} from "@/lib/api/search";
+
+type HitArg = { pmid?: string | number; title?: string; year?: number | null; titleHighlight?: string };
+
+function hitOf(args: HitArg) {
+  return {
+    _source: { pmid: args.pmid, title: args.title, year: args.year },
+    ...(args.titleHighlight ? { highlight: { title: [args.titleHighlight] } } : {}),
+  };
+}
 
 // A top_hits sub-agg result as OpenSearch returns it inside a `filter` agg.
-function topHit(args: {
-  pmid?: string | number;
-  title?: string;
-  year?: number | null;
-  titleHighlight?: string;
-}) {
-  return {
-    top: {
-      hits: {
-        hits: [
-          {
-            _source: { pmid: args.pmid, title: args.title, year: args.year },
-            ...(args.titleHighlight ? { highlight: { title: [args.titleHighlight] } } : {}),
-          },
-        ],
-      },
-    },
-  };
+function topHit(args: HitArg) {
+  return { top: { hits: { hits: [hitOf(args)] } } };
+}
+
+// A multi-hit top_hits sub-agg (rep-papers disclosure shows up to 3).
+function topHits(args: HitArg[]) {
+  return { top: { hits: { hits: args.map(hitOf) } } };
 }
 
 describe("parseReasonTopHit (#967)", () => {
@@ -74,6 +77,61 @@ describe("parseReasonTopHit (#967)", () => {
   it("returns undefined when the hit lacks a pmid or title", () => {
     expect(parseReasonTopHit(topHit({ title: "No pmid" }))).toBeUndefined();
     expect(parseReasonTopHit(topHit({ pmid: "1" }))).toBeUndefined();
+  });
+});
+
+describe("parseReasonTopHits (rep-papers disclosure — array form)", () => {
+  it("maps every hit through the same logic, preserving order, capped at 3", () => {
+    const reps = parseReasonTopHits(
+      topHits([
+        { pmid: 1, title: "First", year: 2024 },
+        { pmid: 2, title: "Second", year: 2023 },
+        { pmid: 3, title: "Third", year: 2022 },
+        { pmid: 4, title: "Fourth (over cap)", year: 2021 },
+      ]),
+    );
+    expect(reps.map((r) => r.pmid)).toEqual(["1", "2", "3"]);
+    expect(reps[0]).toEqual({ pmid: "1", title: "First", year: 2024 });
+  });
+
+  it("honors a custom limit", () => {
+    const reps = parseReasonTopHits(
+      topHits([
+        { pmid: 1, title: "First", year: 2024 },
+        { pmid: 2, title: "Second", year: 2023 },
+      ]),
+      1,
+    );
+    expect(reps).toHaveLength(1);
+    expect(reps[0].pmid).toBe("1");
+  });
+
+  it("carries titleHtml only when the literal query highlighted the title", () => {
+    const reps = parseReasonTopHits(
+      topHits([
+        { pmid: 1, title: "Marked one", titleHighlight: "<mark>Marked</mark> one", year: 2024 },
+        { pmid: 2, title: "Plain two", year: 2023 },
+      ]),
+    );
+    expect(reps[0].titleHtml).toBe("<mark>Marked</mark> one");
+    expect(reps[1].titleHtml).toBeUndefined();
+  });
+
+  it("drops hits missing a pmid or title; keeps the valid ones", () => {
+    const reps = parseReasonTopHits(
+      topHits([
+        { title: "No pmid", year: 2024 },
+        { pmid: 2, title: "Valid", year: 2023 },
+        { pmid: 3, year: 2022 }, // no title
+      ]),
+    );
+    expect(reps.map((r) => r.pmid)).toEqual(["2"]);
+  });
+
+  it("empty / absent sub-agg ⇒ []", () => {
+    expect(parseReasonTopHits(undefined)).toEqual([]);
+    expect(parseReasonTopHits({})).toEqual([]);
+    expect(parseReasonTopHits({ top: { hits: { hits: [] } } })).toEqual([]);
   });
 });
 
