@@ -235,6 +235,61 @@ function logSparseHide(
 }
 
 // ---------------------------------------------------------------------------
+// Home-surface read cache
+// ---------------------------------------------------------------------------
+//
+// The home page is public, viewer-independent, and only changes after the
+// nightly ETL — it was designed as 6h ISR (`app/page.tsx` `revalidate = 21600`).
+// But under Next 15 a DB-backed route silently deopts to dynamic and that
+// `revalidate` is a no-op, so these loaders ran on EVERY request (~5.7s warm
+// origin time). `force-static` can't fix the home page specifically: it's a
+// STATIC route, so it would prerender at build time — and the Docker image
+// builds with no `DATABASE_URL`, so the `.catch` fallbacks would bake an empty
+// home into the image until revalidation (strictly worse, and per-task in
+// multi-task prod). Instead cache the DATA in-process: the route stays dynamic
+// (always real data, never empty) and is slow only on a cold cache.
+//
+// Throw-preserving (NOT degrade-to-empty): a failed load is neither cached nor
+// swallowed — it propagates to the per-surface `.catch` in `app/page.tsx`
+// (which hides that one surface for that render) and the next request retries.
+// Mirrors the {data, ts} + inflight idiom in `lib/api/people-classifier-sets.ts`.
+// Per-task, like every cache in this app.
+//
+// `getHomeMethodCategories` is deliberately NOT cached here — it reads the
+// #800/#801 family-overlay visibility gate, where cross-request caching would
+// freeze method-family visibility changes (the B6 lesson) — and it is the
+// cheapest of the four loaders.
+//
+// Bypassed under vitest: the module-level state would otherwise leak across
+// test cases (`home-api.test.ts` statically imports these loaders, calls some
+// twice in one case, and does not `vi.resetModules()`).
+const HOME_CACHE_TTL_MS = 15 * 60 * 1000; // 15 min — far fresher than the 6h ISR intent; bounds #356 suppression lag; a busy home pays ~1 cold render / 15 min / task
+const HOME_CACHE_BYPASS =
+  Boolean(process.env.VITEST) || process.env.NODE_ENV === "test";
+
+type HomeCacheEntry<T> = { data: T; ts: number };
+const homeCache = new Map<string, HomeCacheEntry<unknown>>();
+const homeInflight = new Map<string, Promise<unknown>>();
+
+function cachedHomeRead<T>(key: string, load: () => Promise<T>): Promise<T> {
+  if (HOME_CACHE_BYPASS) return load();
+  const hit = homeCache.get(key) as HomeCacheEntry<T> | undefined;
+  if (hit && Date.now() - hit.ts < HOME_CACHE_TTL_MS) return Promise.resolve(hit.data);
+  const existing = homeInflight.get(key) as Promise<T> | undefined;
+  if (existing) return existing;
+  const p = load()
+    .then((data) => {
+      homeCache.set(key, { data, ts: Date.now() });
+      return data;
+    })
+    .finally(() => {
+      homeInflight.delete(key);
+    });
+  homeInflight.set(key, p);
+  return p;
+}
+
+// ---------------------------------------------------------------------------
 // getRecentContributions — RANKING-01
 // ---------------------------------------------------------------------------
 
@@ -587,7 +642,11 @@ export async function getSelectedResearch(
  * fully replaces the spotlight rows; this DAL never persists subtopic IDs
  * outward.
  */
-export async function getSpotlights(): Promise<SpotlightCard[] | null> {
+export function getSpotlights(): Promise<SpotlightCard[] | null> {
+  return cachedHomeRead("home:spotlights", getSpotlightsUncached);
+}
+
+async function getSpotlightsUncached(): Promise<SpotlightCard[] | null> {
   // Step 1: Read all spotlight rows. Stable alphabetical order by
   // parentTopicId, re-sorted in JS so the ordering invariant is enforced at
   // the DAL boundary regardless of how the underlying driver interprets the
@@ -776,7 +835,11 @@ void SPOTLIGHT_TARGET; // producer ceiling (max cards per publish); documented, 
  * filter needed. Active-scholar count is computed on demand via raw SQL
  * (Prisma groupBy can't express COUNT(DISTINCT cwid)).
  */
-export async function getBrowseAllResearchAreas(): Promise<ParentTopic[]> {
+export function getBrowseAllResearchAreas(): Promise<ParentTopic[]> {
+  return cachedHomeRead("home:browse-research-areas", getBrowseAllResearchAreasUncached);
+}
+
+async function getBrowseAllResearchAreasUncached(): Promise<ParentTopic[]> {
   const topics = await prisma.topic.findMany({
     select: { id: true, label: true },
     orderBy: { label: "asc" },
@@ -823,7 +886,11 @@ export async function getBrowseAllResearchAreas(): Promise<ParentTopic[]> {
 // getHomeStats — hero stats strip
 // ---------------------------------------------------------------------------
 
-export async function getHomeStats(): Promise<HomeStats> {
+export function getHomeStats(): Promise<HomeStats> {
+  return cachedHomeRead("home:stats", getHomeStatsUncached);
+}
+
+async function getHomeStatsUncached(): Promise<HomeStats> {
   // Apply NEVER_DISPLAY_TYPES so the homepage publication stat matches the
   // /search publications index (built with the same exclusion in
   // etl/search-index/index.ts:412). Issue #216 — without this filter the
