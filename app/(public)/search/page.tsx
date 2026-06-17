@@ -829,6 +829,7 @@ function ModeTab({
   return (
     <Link
       href={href}
+      scroll={false}
       title={title}
       className={`-mb-px inline-flex h-[42px] items-center gap-2 border-b-2 px-4 text-[13px] transition-colors ${
         active
@@ -2077,6 +2078,7 @@ function FundingSortLinks({
           {i > 0 ? <span className="text-muted-foreground"> · </span> : null}
           <Link
             href={buildHref(opt.value)}
+            scroll={false}
             className={
               sort === opt.value
                 ? "font-semibold text-[#1a1a1a]"
