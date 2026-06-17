@@ -573,6 +573,9 @@ function renderPanel(
           generateEnabled={
             (mode === "self" || isSuperuserLike(mode)) && isOverviewGenerateEnabled()
           }
+          // #1077 follow-up — reframe the provenance note's "written by you" copy
+          // for a superuser editing on the scholar's behalf (`childMode`).
+          mode={childMode}
         />
       );
     case "highlights":

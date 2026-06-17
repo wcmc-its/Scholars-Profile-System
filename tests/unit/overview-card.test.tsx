@@ -652,6 +652,17 @@ describe("OverviewCard — version history (Phase B)", () => {
     expect(note.textContent).not.toContain("Last updated");
   });
 
+  it("superuser mode reframes 'written by you' to 'written manually' (#1077 follow-up)", async () => {
+    stubFetchRouted(() => jsonResponse({ ok: true }), {
+      provenance: { origin: "authored", model: null, updatedAt: "2026-06-01T12:00:00.000Z" },
+    });
+    render(<OverviewCard cwid={CWID} initialHtml="<p>x</p>" generateEnabled mode="superuser" />);
+    const note = await screen.findByTestId("overview-provenance-note");
+    expect(note.textContent).toContain("Current overview: written manually");
+    expect(note.textContent).toContain("Last updated Jun 1, 2026");
+    expect(note.textContent).not.toContain("by you");
+  });
+
   it("viewing a version lands it in the review card (not the editor) with the banner", async () => {
     stubFetchRouted(() => jsonResponse({ ok: true }), { generations: HISTORY });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
