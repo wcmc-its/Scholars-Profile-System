@@ -19,21 +19,30 @@ const ICONS: Record<MatchReasonKind, typeof Sparkles> = {
 };
 
 /**
- * Rep-papers disclosure — the real clickable chevron the reason rows show when a
- * representative-papers panel can open. A `<button>` (not the decorative ▾) so
- * it is keyboard-operable and announces its expanded state; `preventDefault` +
- * `stopPropagation` so a click never triggers the stretched name-link navigation
- * (the whole card is a stretched link). `relative z-10` lifts it above the
- * card's `after:absolute inset-0` overlay.
+ * Rep-papers disclosure — the summary row IS the toggle (polish spec item 1).
+ * Instead of a chevron marooned at the right edge, the whole
+ * `[icon] [label] [chevron]` cluster is one content-width control. A native
+ * `<button>` (implicit role=button, focusable, native Enter/Space) so it stays
+ * keyboard-operable and announces its expanded state; `stopPropagation` so a
+ * click never triggers the stretched name-link navigation (the whole card is a
+ * stretched link), and `relative z-10` lifts it above the card's
+ * `after:absolute inset-0` overlay. The accessible name is the cluster's text
+ * (the count / method label) — an accordion-header pattern — with `aria-expanded`
+ * for state. The negative inline margin lets the hover surface breathe ±8px
+ * without shifting the content's left edge (`-mx-2` cancels `px-2`).
  */
-function DisclosureChevron({
+function DisclosureRow({
   expanded,
   onToggle,
   panelId,
+  className = "",
+  children,
 }: {
   expanded: boolean;
   onToggle: () => void;
   panelId?: string;
+  className?: string;
+  children: ReactNode;
 }) {
   return (
     <button
@@ -48,13 +57,18 @@ function DisclosureChevron({
       // by the card only when expanded, so a collapsed-state aria-controls would
       // be a dangling reference.
       aria-controls={expanded ? panelId : undefined}
-      aria-label={expanded ? "Hide representative papers" : "Show representative papers"}
-      className="relative z-10 ml-auto inline-flex shrink-0 items-center justify-center rounded p-0.5 text-[#9a958a] hover:text-[#4a4a4a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2c4f6e] focus-visible:ring-offset-1"
+      className={`relative z-10 -mx-2 inline-flex max-w-full cursor-pointer items-center gap-[7px] rounded-md px-2 py-[5px] text-left align-top hover:bg-[#f0eeea] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2c4f6e] focus-visible:ring-offset-1 ${className}`}
     >
+      {children}
+      {/* The visible cluster text (the count / method label) is the button's
+          accessible name; this appends an explicit affordance so a screen reader
+          announces what the disclosure reveals, while `aria-expanded` carries the
+          state. */}
+      <span className="sr-only"> representative papers</span>
       <ChevronDown
         aria-hidden
         strokeWidth={2}
-        className={`size-3.5 motion-safe:transition-transform motion-safe:duration-150 ${
+        className={`size-3.5 shrink-0 text-[#9a958a] motion-safe:transition-transform motion-safe:duration-150 ${
           expanded ? "rotate-180" : ""
         }`}
       />
@@ -91,18 +105,30 @@ export function MatchReason({
   panelId?: string;
 }) {
   const Icon = ICONS[kind];
+  // Single line — clips an over-long reason (e.g. a representative-pub title)
+  // rather than wrapping. A no-op for the short count/concept reasons.
+  const inner = (
+    <>
+      <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={2} />
+      <span className="min-w-0 truncate">{children}</span>
+    </>
+  );
+  // Item 1 — when a panel can open, the whole [icon · count · chevron] cluster is
+  // the toggle (content-width, left-aligned), not a chevron flush to the far edge.
+  if (canExpand && onToggle) {
+    return (
+      <div className={`mt-2 text-[12.5px] leading-snug text-muted-foreground ${className}`}>
+        <DisclosureRow expanded={expanded} onToggle={onToggle} panelId={panelId}>
+          {inner}
+        </DisclosureRow>
+      </div>
+    );
+  }
   return (
     <div
       className={`mt-2 flex min-w-0 items-center gap-1.5 text-[12.5px] leading-snug text-muted-foreground ${className}`}
     >
-      <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={2} />
-      {/* Single line — clips an over-long reason (e.g. #967's representative-pub
-          title) rather than wrapping. A no-op for the short count/concept
-          reasons, which already fit. */}
-      <span className="truncate">{children}</span>
-      {canExpand && onToggle ? (
-        <DisclosureChevron expanded={expanded} onToggle={onToggle} panelId={panelId} />
-      ) : null}
+      {inner}
     </div>
   );
 }
@@ -147,10 +173,10 @@ export function MatchAwareReason({
   // icon everywhere; topic keeps the Tag.
   const Icon = kind === "method" ? Wrench : Tag;
   const badgeText = kind === "method" ? "Method" : "Research area";
-  return (
-    // items-center (not baseline): the bordered pill and the bold label line up
-    // on a shared center axis so the badge doesn't sit low next to the label.
-    <div className="mt-2 flex min-w-0 items-center gap-2 text-[13px] leading-snug">
+  // items-center (not baseline): the bordered pill and the bold label line up on
+  // a shared center axis so the badge doesn't sit low next to the label.
+  const inner = (
+    <>
       <span
         className={`inline-flex shrink-0 items-center gap-1 rounded-[5px] border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.02em] ${badge}`}
       >
@@ -172,9 +198,21 @@ export function MatchAwareReason({
           </span>
         ) : null}
       </span>
-      {canExpand && onToggle ? (
-        <DisclosureChevron expanded={expanded} onToggle={onToggle} panelId={panelId} />
-      ) : null}
+    </>
+  );
+  // Item 1 — the whole [badge · label · chevron] cluster is the toggle.
+  if (canExpand && onToggle) {
+    return (
+      <div className="mt-2 text-[13px] leading-snug">
+        <DisclosureRow expanded={expanded} onToggle={onToggle} panelId={panelId}>
+          {inner}
+        </DisclosureRow>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-2 flex min-w-0 items-center gap-2 text-[13px] leading-snug">
+      {inner}
     </div>
   );
 }
@@ -222,22 +260,30 @@ export function RepresentativePapers({
   return (
     <div id={panelId} className="mt-1.5 pl-[1px]">
       <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
-        Rep. papers
+        {papers.length === 1 ? "Rep. paper" : "Rep. papers"}
       </div>
-      <ul className="mt-1 space-y-0.5 text-[12px] leading-snug">
+      <ul className="mt-1 flex flex-col gap-1.5 text-[12px] leading-snug">
         {papers.map((p) => (
-          <li key={p.pmid} className="text-muted-foreground">
-            {/* #946 — PubMed titles can carry markup (<i>, <sub>, …); render
-                through the sanctioned PubTitle (with a <mark>-aware variant when
-                the literal query appeared in the title), never raw. */}
-            {p.titleHtml ? (
-              <span className="italic text-[#4a4a4a]">
-                <HighlightedSnippet html={p.titleHtml} />
-              </span>
-            ) : (
-              <PubTitle as="span" value={p.title} className="italic text-[#4a4a4a]" />
-            )}
-            {p.year ? <span className="text-[#777]"> ({p.year})</span> : null}
+          // Item 2 — bullet + hanging indent: the dot is its own flex item, so a
+          // title that wraps aligns line 2 under the TITLE text (not the bullet).
+          // The dot shares the title's line-height so it baselines with line 1.
+          <li key={p.pmid} className="flex items-start gap-[9px] text-muted-foreground">
+            <span aria-hidden className="shrink-0 leading-snug text-[#9a958a]">
+              &bull;
+            </span>
+            <span className="min-w-0">
+              {/* #946 — PubMed titles can carry markup (<i>, <sub>, …); render
+                  through the sanctioned PubTitle (with a <mark>-aware variant when
+                  the literal query appeared in the title), never raw. */}
+              {p.titleHtml ? (
+                <span className="italic text-[#4a4a4a]">
+                  <HighlightedSnippet html={p.titleHtml} />
+                </span>
+              ) : (
+                <PubTitle as="span" value={p.title} className="italic text-[#4a4a4a]" />
+              )}
+              {p.year ? <span className="text-[#777]"> ({p.year})</span> : null}
+            </span>
           </li>
         ))}
       </ul>
