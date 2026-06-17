@@ -10,6 +10,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 import {
+  fetchSuggestedArticles,
+  formatSuggestionAuthors,
   isReciterRejectEnabled,
   isReciterApiConfigured,
   postGoldStandardReject,
@@ -111,6 +113,242 @@ describe("runFeatureGenerator", () => {
     expect(url.searchParams.get("useGoldStandard")).toBe("AS_EVIDENCE");
     expect(calledInit().method).toBe("GET");
     expect((calledInit().headers as Record<string, string>)["api-key"]).toBe("admin-secret");
+  });
+});
+
+describe("fetchSuggestedArticles", () => {
+  /** Build one reCiterArticleFeature object (the Analysis list entry shape). */
+  function feature(
+    pmid: number,
+    score: number,
+    extra: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return {
+      pmid,
+      authorshipLikelihoodScore: score,
+      userAssertion: "NULL",
+      articleTitle: `Article ${pmid}`,
+      journalTitleVerbose: `Journal ${pmid}`,
+      publicationDateDisplay: "2025 May 28",
+      publicationType: { publicationTypeCanonical: "Academic Article" },
+      reCiterArticleAuthorFeatures: [
+        { rank: 1, firstName: "Ada", lastName: "Lovelace" },
+        { rank: 2, firstName: "Alan", lastName: "Turing" },
+      ],
+      ...extra,
+    };
+  }
+
+  type GsItem =
+    | { knownpmids?: number[]; rejectedpmids?: number[] }
+    | undefined
+    | "throw";
+  type AnItem =
+    | { reCiterFeature: { reCiterArticleFeatures: unknown[] } } // inline
+    | { uid: string; usingS3: true } // offloaded (no inline reCiterFeature)
+    | undefined;
+
+  /**
+   * A fake DynamoDBDocumentClient: `.send(GetCommand)` resolves `{ Item }`
+   * keyed by the command's `TableName` (GoldStandard vs Analysis). A "throw"
+   * GoldStandard item simulates an unreadable table (the degrade-to-[] path).
+   */
+  function fakeDdb(gs: GsItem, an: AnItem) {
+    const send = vi.fn((command: { input: { TableName: string; Key: unknown } }) => {
+      const table = command.input.TableName;
+      if (table === "GoldStandard") {
+        if (gs === "throw") return Promise.reject(new Error("GoldStandard unreadable"));
+        return Promise.resolve({ Item: gs });
+      }
+      if (table === "Analysis") return Promise.resolve({ Item: an });
+      return Promise.resolve({ Item: undefined });
+    });
+    return { client: { send } as never, send };
+  }
+
+  /** A fake S3Client: `.send(GetObjectCommand)` returns a body of the given JSON. */
+  function fakeS3(json: unknown) {
+    const send = vi.fn((_command: { input: { Bucket: string; Key: string } }) =>
+      Promise.resolve({
+        Body: { transformToString: () => Promise.resolve(JSON.stringify(json)) },
+      }),
+    );
+    return { client: { send } as never, send };
+  }
+
+  const noS3 = fakeS3(null).client; // never reached in inline-path tests
+
+  it("returns score>=40, uncurated suggestions sorted by score desc", async () => {
+    const ddb = fakeDdb(
+      { knownpmids: [], rejectedpmids: [] },
+      {
+        reCiterFeature: {
+          reCiterArticleFeatures: [feature(111, 55), feature(222, 92), feature(333, 73)],
+        },
+      },
+    );
+
+    const out = await fetchSuggestedArticles("abc123", { ddb: ddb.client, s3: noS3 });
+    expect(out.map((s) => s.pmid)).toEqual(["222", "333", "111"]);
+    expect(out.map((s) => s.score)).toEqual([92, 73, 55]);
+    expect(out[0]).toMatchObject({
+      articleTitle: "Article 222",
+      journal: "Journal 222",
+      datePublished: "2025 May 28",
+      isPreprint: false,
+      authors: "Ada Lovelace, Alan Turing",
+    });
+
+    // Read both tables by uid (key); the S3 fallback is never hit inline.
+    expect(ddb.send).toHaveBeenCalledTimes(2);
+    const tables = ddb.send.mock.calls.map((c) => c[0].input.TableName).sort();
+    expect(tables).toEqual(["Analysis", "GoldStandard"]);
+    const keys = ddb.send.mock.calls.map((c) => c[0].input.Key);
+    for (const k of keys) expect(k).toEqual({ uid: "abc123" });
+  });
+
+  it("drops a pmid in knownpmids/rejectedpmids even when userAssertion is NULL (freshness)", async () => {
+    const ddb = fakeDdb(
+      { knownpmids: [111], rejectedpmids: [222] },
+      {
+        reCiterFeature: {
+          reCiterArticleFeatures: [
+            feature(111, 90), // freshly accepted -> in knownpmids
+            feature(222, 80), // freshly rejected -> in rejectedpmids
+            feature(333, 70), // genuinely new
+          ],
+        },
+      },
+    );
+
+    const out = await fetchSuggestedArticles("abc123", { ddb: ddb.client, s3: noS3 });
+    expect(out.map((s) => s.pmid)).toEqual(["333"]);
+  });
+
+  it("returns [] when the GoldStandard read THROWS (cannot apply freshness filter)", async () => {
+    const ddb = fakeDdb("throw", {
+      reCiterFeature: { reCiterArticleFeatures: [feature(111, 90)] },
+    });
+    const out = await fetchSuggestedArticles("abc123", { ddb: ddb.client, s3: noS3 });
+    expect(out).toEqual([]);
+  });
+
+  it("returns candidates when the GoldStandard item is MISSING (uncurated scholar is normal)", async () => {
+    // Item undefined ⇒ empty curated set ⇒ everything qualifying is kept.
+    const ddb = fakeDdb(undefined, {
+      reCiterFeature: { reCiterArticleFeatures: [feature(111, 90), feature(222, 75)] },
+    });
+    const out = await fetchSuggestedArticles("abc123", { ddb: ddb.client, s3: noS3 });
+    expect(out.map((s) => s.pmid)).toEqual(["111", "222"]);
+  });
+
+  it("reads OFFLOADED analysis from S3 when the item has no inline reCiterFeature", async () => {
+    // Analysis item present but carries only uid/usingS3 ⇒ the full object is in
+    // S3, whose top level IS the reCiterFeature object.
+    const ddb = fakeDdb({ knownpmids: [222], rejectedpmids: [] }, {
+      uid: "abc123",
+      usingS3: true,
+    });
+    const s3 = fakeS3({
+      reCiterArticleFeatures: [feature(111, 91), feature(222, 80), feature(333, 60)],
+    });
+
+    const out = await fetchSuggestedArticles("abc123", { ddb: ddb.client, s3: s3.client });
+    expect(s3.send).toHaveBeenCalledTimes(1);
+    const s3Input = s3.send.mock.calls[0][0].input as { Bucket: string; Key: string };
+    expect(s3Input.Bucket).toBe("reciter-dynamodb");
+    expect(s3Input.Key).toBe("AnalysisOutput/abc123");
+    // 222 is curated (rejected) ⇒ dropped; 111 + 333 kept, sorted desc.
+    expect(out.map((s) => s.pmid)).toEqual(["111", "333"]);
+  });
+
+  it("drops candidates scoring below 40", async () => {
+    const ddb = fakeDdb(
+      { knownpmids: [], rejectedpmids: [] },
+      {
+        reCiterFeature: {
+          reCiterArticleFeatures: [feature(111, 39), feature(222, 40)],
+        },
+      },
+    );
+    const out = await fetchSuggestedArticles("abc123", { ddb: ddb.client, s3: noS3 });
+    expect(out.map((s) => s.pmid)).toEqual(["222"]);
+  });
+
+  it("flags a Preprint and falls back journal/date to null", async () => {
+    const ddb = fakeDdb(
+      { knownpmids: [], rejectedpmids: [] },
+      {
+        reCiterFeature: {
+          reCiterArticleFeatures: [
+            feature(111, 88, {
+              publicationType: { publicationTypeCanonical: "Preprint" },
+              journalTitleVerbose: "",
+              publicationDateDisplay: "",
+            }),
+          ],
+        },
+      },
+    );
+    const out = await fetchSuggestedArticles("abc123", { ddb: ddb.client, s3: noS3 });
+    expect(out[0]).toMatchObject({ isPreprint: true, journal: null, datePublished: null });
+  });
+
+  it("truncates the author byline to first 6, ellipsis, last (>8 authors)", async () => {
+    const manyAuthors = Array.from({ length: 10 }, (_, i) => ({
+      rank: i + 1,
+      firstName: `F${i + 1}`,
+      lastName: `L${i + 1}`,
+    }));
+    const ddb = fakeDdb(
+      { knownpmids: [], rejectedpmids: [] },
+      {
+        reCiterFeature: {
+          reCiterArticleFeatures: [
+            feature(111, 70, { reCiterArticleAuthorFeatures: manyAuthors }),
+          ],
+        },
+      },
+    );
+    const out = await fetchSuggestedArticles("abc123", { ddb: ddb.client, s3: noS3 });
+    expect(out[0].authors).toBe("F1 L1, F2 L2, F3 L3, F4 L4, F5 L5, F6 L6, …, F10 L10");
+  });
+
+  it("returns [] when the Analysis item is absent (no candidates, no S3 read)", async () => {
+    const ddb = fakeDdb({ knownpmids: [], rejectedpmids: [] }, undefined);
+    const s3 = fakeS3(null);
+    const out = await fetchSuggestedArticles("abc123", { ddb: ddb.client, s3: s3.client });
+    expect(out).toEqual([]);
+    expect(s3.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("formatSuggestionAuthors", () => {
+  it("orders by rank and renders 'First Last' joined by ', '", () => {
+    const out = formatSuggestionAuthors([
+      { rank: 2, firstName: "Alan", lastName: "Turing" },
+      { rank: 1, firstName: "Ada", lastName: "Lovelace" },
+    ]);
+    expect(out).toBe("Ada Lovelace, Alan Turing");
+  });
+
+  it("collapses >8 authors to first 6, ellipsis, then the last author", () => {
+    const features = Array.from({ length: 10 }, (_, i) => ({
+      rank: i + 1,
+      firstName: `F${i + 1}`,
+      lastName: `L${i + 1}`,
+    }));
+    const out = formatSuggestionAuthors(features);
+    expect(out).toBe("F1 L1, F2 L2, F3 L3, F4 L4, F5 L5, F6 L6, …, F10 L10");
+  });
+
+  it("keeps exactly 8 authors fully expanded", () => {
+    const features = Array.from({ length: 8 }, (_, i) => ({
+      rank: i + 1,
+      firstName: `F${i + 1}`,
+      lastName: `L${i + 1}`,
+    }));
+    expect(formatSuggestionAuthors(features)).not.toContain("…");
   });
 });
 

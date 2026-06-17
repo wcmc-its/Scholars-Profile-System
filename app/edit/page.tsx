@@ -28,6 +28,7 @@ import {
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
+import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
 import {
   countPendingSlugRequests,
   isSlugRequestEnabled,
@@ -77,6 +78,14 @@ export default async function EditSelfPage({
   // `/edit` route is only ever the scholar themselves (or an impersonation we
   // deliberately exclude here).
   const includeHighlights = isManualHighlightsEnabled() && genuineSelf;
+  // ReCiter "pending / suggested" candidate publications nudge
+  // (`SELF_EDIT_RECITER_PENDING_HINT`, dormant). Like the COI-gap hint, this is
+  // self-only: surfaced ONLY when the real scholar is viewing — never a superuser
+  // impersonating them via "View as" (`genuineSelf` is the gate). The data is a
+  // LIVE client read against the ReCiter engine, fetched lazily from the client
+  // component behind `/api/edit/reciter-pending` — so `reciterPendingEnabled`
+  // gates whether that loader mounts at all (false ⇒ ZERO fetch, no engine read).
+  const reciterPendingEnabled = isReciterPendingHintEnabled() && genuineSelf;
   const ctx = await loadEditContext(editCwid, db.read, new Date(), undefined, {
     includeCoiGap,
     includeHighlights,
@@ -264,6 +273,7 @@ export default async function EditSelfPage({
       manageableUnits={manageableUnits}
       proxyEditors={proxyEditors}
       unitAdminEditors={unitAdminEditors}
+      reciterPendingEnabled={reciterPendingEnabled}
     />
   );
 }

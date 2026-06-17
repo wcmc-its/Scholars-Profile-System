@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ReCiter "pending articles" nudge — self-edit mockups (#1078, throwaway)</title>
+<style>
+  :root {
+    --apollo-maroon: #8a1f2b;
+    --apollo-maroon-press: #6e1620;
+    --apollo-border: #e9e3df;
+    --apollo-border-strong: #dbd3cd;
+    --apollo-rail: #f4f1ed;
+    --apollo-rail-border: #e9e3df;
+    --apollo-rail-hover: #ece7e1;
+    /* Semantic amber — "incomplete / needs you" (app token, app/globals.css) */
+    --apollo-amber: #8a5a06;
+    --apollo-amber-tint: #fbf1dc;
+    --apollo-amber-tint-border: #efdbaf;
+    --green: #2f7a3f;
+    --green-tint: #eef6ef;
+    --muted: #8c857d;
+    --ink: #2c2925;
+    --card: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 28px 90px;
+    background: #faf8f6; color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  h1 { font-size: 21px; margin: 0 0 4px; letter-spacing: -.01em; }
+  .lede { color: var(--muted); margin: 0 0 6px; max-width: 760px; }
+  .meta { color: var(--muted); font-size: 12.5px; margin: 0 0 34px; }
+  .meta a { color: var(--apollo-maroon); }
+
+  h2.sec { font-size: 13px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+    color: var(--apollo-maroon); margin: 44px 0 4px; }
+  .sec-sub { color: var(--muted); font-size: 13px; margin: 0 0 16px; max-width: 720px; }
+
+  /* App chrome frame — a faithful slice of the /edit surface */
+  .frame { background: var(--card); border: 1px solid var(--apollo-border); border-radius: 12px;
+    padding: 22px 24px 24px; box-shadow: 0 1px 2px rgba(20,12,8,.04); }
+  .frame + .frame { margin-top: 18px; }
+  .frame-tag { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.04em;
+    text-transform:uppercase; color: var(--muted); margin: 0 0 14px; }
+  .frame-tag.rec { color: var(--green); }
+  .frame-tag.rec::after { content:"  ·  recommended"; }
+
+  /* ---- the amber bridge banner (clone of coi-suggestions-bridge) ---- */
+  .bridge {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;
+    border: 1px solid var(--apollo-amber-tint-border); background: var(--apollo-amber-tint);
+    border-radius: 8px; padding: 14px 16px;
+  }
+  .bridge .lhs { min-width: 0; }
+  .bridge .title { display:flex; align-items:center; gap:9px; font-size:14px; font-weight:600; color: var(--ink); }
+  .bridge .dot { width:7px; height:7px; border-radius:50%; background: var(--apollo-amber); flex:0 0 auto; }
+  .bridge .sub { color: var(--muted); font-size: 12.8px; line-height: 1.5; margin: 5px 0 0; max-width: 60ch; }
+  .bridge .sub .visonly { color: var(--apollo-amber); font-weight:600; }
+
+  /* outline button (shadcn variant=outline size=sm) */
+  .btn {
+    display:inline-flex; align-items:center; gap:7px; white-space:nowrap;
+    font-size:13px; font-weight:600; line-height:1; cursor:pointer;
+    border:1px solid var(--apollo-border-strong); background:#fff; color: var(--ink);
+    border-radius:7px; padding:9px 13px; text-decoration:none;
+  }
+  .btn:hover { background: var(--apollo-rail); }
+  .btn .arrow { font-size: 14px; }
+  .btn.maroon { background: var(--apollo-maroon); border-color: var(--apollo-maroon); color:#fff; }
+  .btn.maroon:hover { background: var(--apollo-maroon-press); }
+
+  /* publications-card context below the banner */
+  .pubhdr { display:flex; align-items:baseline; justify-content:space-between; margin: 0 0 14px; }
+  .pubhdr h3 { font-size: 16px; margin:0; font-weight:600; }
+  .pubhdr .cnt { color: var(--muted); font-size: 13px; }
+  .yeargrp { color: var(--muted); font-size:12px; font-weight:600; letter-spacing:.04em;
+    text-transform:uppercase; margin: 18px 0 8px; }
+  .pubrow { padding: 11px 0; border-top: 1px solid var(--apollo-border); }
+  .pubrow .t { font-weight:600; }
+  .pubrow .a { color: var(--muted); font-size: 12.8px; margin-top: 2px; }
+  .ghost { opacity: .5; }
+
+  /* ---- home board (HomePanel) faithful slice ---- */
+  .board-head { display:flex; align-items:center; gap:16px; margin: 0 0 18px; }
+  .avatar { width:52px; height:52px; border-radius:50%; background:#e9e3df; flex:0 0 auto;
+    display:flex; align-items:center; justify-content:center; color:#a59a8f; font-weight:700; }
+  .board-head h3 { margin:0; font-size:17px; font-weight:600; }
+  .meterrow { display:flex; align-items:center; gap:10px; margin-top:6px; }
+  .meter { width:180px; height:6px; border-radius:99px; background: var(--apollo-rail); overflow:hidden; }
+  .meter > i { display:block; height:100%; background: var(--green); }
+  .meterrow .lbl { color: var(--muted); font-size:12.5px; }
+
+  .grp-label { color: var(--muted); font-size:11px; font-weight:700; letter-spacing:.06em;
+    text-transform:uppercase; margin: 20px 0 8px; }
+  .check {
+    display:flex; align-items:flex-start; gap:12px; padding: 12px 14px;
+    border:1px solid var(--apollo-border); border-radius:9px; background:#fff;
+  }
+  .check + .check { margin-top: 8px; }
+  .check.todo { border-color: var(--apollo-amber-tint-border); background: var(--apollo-amber-tint); }
+  .ic { width:22px; height:22px; border-radius:50%; flex:0 0 auto; display:flex; align-items:center;
+    justify-content:center; font-size:13px; font-weight:800; margin-top:1px; }
+  .ic.done { background: var(--green-tint); color: var(--green); }
+  .ic.amber { background:#f6e7c4; color: var(--apollo-amber); }
+  .check .body { flex:1; min-width:0; }
+  .check .h { font-weight:600; }
+  .check .d { color: var(--muted); font-size:12.8px; margin-top:2px; }
+  .check .cta { display:inline-flex; align-items:center; gap:5px; margin-top:9px;
+    color: var(--apollo-maroon); font-weight:600; font-size:13px; text-decoration:none; }
+  .check.todo .cta { color: var(--apollo-amber); }
+  .pendpill { display:inline-flex; align-items:center; gap:6px; margin-top:9px;
+    background:#fff; border:1px solid var(--apollo-amber-tint-border); color: var(--apollo-amber);
+    border-radius:99px; padding:5px 11px 5px 9px; font-size:12.5px; font-weight:600; text-decoration:none; }
+  .pendpill .dot { width:6px; height:6px; border-radius:50%; background: var(--apollo-amber); }
+
+  /* rail badge variant */
+  .rail { background: var(--apollo-rail); border:1px solid var(--apollo-rail-border);
+    border-radius:8px; padding:8px; width:280px; }
+  .railitem { display:flex; align-items:center; justify-content:space-between; padding:8px 10px;
+    border-radius:6px; }
+  .railitem.active { background: var(--apollo-maroon); color:#fff; }
+  .railitem .lhs { display:flex; align-items:center; gap:8px; }
+  .railbadge { background: var(--apollo-amber); color:#fff; font-size:11px; font-weight:700;
+    min-width:18px; height:18px; padding:0 5px; border-radius:99px; display:inline-flex;
+    align-items:center; justify-content:center; }
+
+  /* ---- rich variant: article preview + ReCiter score chip ---- */
+  .bridge.rich { display:block; }
+  .bridge.rich .title { margin-bottom: 12px; }
+  .artcard { display:flex; gap:14px; align-items:flex-start; background:#fff;
+    border:1px solid var(--apollo-amber-tint-border); border-radius:8px; padding:13px 14px; }
+  .score { flex:0 0 auto; width:50px; height:50px; border-radius:8px; background: var(--green-tint);
+    border:1px solid #cfe6d3; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .score .n { font-size:19px; font-weight:800; color: var(--green); line-height:1; }
+  .score .l { font-size:8.5px; font-weight:700; letter-spacing:.08em; color: var(--green); margin-top:2px; }
+  .score.mid { background:#fdf3e2; border-color:#eedcb6; }
+  .score.mid .n, .score.mid .l { color: var(--apollo-amber); }
+  .art .meta-line { font-size:12px; color: var(--muted); display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .pill-pre { background:#efeae4; color:#6b645c; font-size:10.5px; font-weight:700; letter-spacing:.03em;
+    text-transform:uppercase; border-radius:4px; padding:2px 6px; }
+  .art .t { font-weight:600; margin:5px 0 3px; line-height:1.35; }
+  .art .a { font-size:12.6px; color: var(--muted); }
+  .art-actions { display:flex; align-items:center; gap:14px; margin-top:11px; }
+  .moreline { margin-top:11px; font-size:12.6px; color: var(--apollo-amber); font-weight:600; }
+  .teaser { display:block; margin-top:9px; padding:9px 11px; background:#fff;
+    border:1px solid var(--apollo-amber-tint-border); border-radius:8px; text-decoration:none; color:inherit; }
+  .teaser .tt { display:flex; align-items:center; gap:9px; }
+  .scorechip { flex:0 0 auto; font-size:11px; font-weight:800; color: var(--green);
+    background: var(--green-tint); border:1px solid #cfe6d3; border-radius:5px; padding:2px 6px; }
+  .teaser .ttext { font-weight:600; font-size:13px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .teaser .go { color: var(--apollo-amber); font-size:12.4px; margin-top:4px; }
+
+  /* score-chip info tooltip */
+  .score.hasinfo { position: relative; cursor: help; }
+  .infomark { position:absolute; top:-6px; right:-6px; width:15px; height:15px; border-radius:50%;
+    background:#fff; border:1px solid var(--apollo-border-strong); color:var(--muted);
+    font-size:10px; font-weight:800; display:flex; align-items:center; justify-content:center; }
+  .tip { position:absolute; left:60px; top:-6px; width:268px; z-index:5; background:#2c2925; color:#fff;
+    font-size:11.8px; line-height:1.5; border-radius:8px; padding:11px 12px; box-shadow:0 6px 24px rgba(20,12,8,.22);
+    opacity:0; pointer-events:none; transform:translateY(4px); transition:.12s; }
+  .tip b { color:#fff; }
+  .tip .lc { color:#d9b8bd; font-weight:600; }
+  .score.hasinfo:hover .tip { opacity:1; transform:none; }
+
+  /* threshold ladder */
+  .ladder { display:flex; flex-direction:column; gap:0; border:1px solid var(--apollo-border); border-radius:10px; overflow:hidden; }
+  .rung { display:grid; grid-template-columns:88px 120px 1fr; align-items:center; gap:14px; padding:13px 16px; }
+  .rung + .rung { border-top:1px solid var(--apollo-border); }
+  .rung .band { font-weight:800; font-size:13px; }
+  .rung .swatch { display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600; }
+  .sw { width:11px; height:11px; border-radius:3px; }
+  .rung .treat { font-size:13px; }
+  .rung .treat b { font-weight:700; }
+  .rung.green .band { color:#2f7a3f; } .rung.green .sw { background:#22c55e; }
+  .rung.amber .band { color: var(--apollo-amber); } .rung.amber .sw { background:#f59e0b; }
+  .rung.gray  .band { color:#6b645c; } .rung.gray .sw { background:#9ca3af; }
+
+  .note { font-size:12.5px; color: var(--muted); margin: 10px 2px 0; max-width: 720px; }
+  .note b { color: var(--ink); font-weight:600; }
+  .copyvars { display:flex; flex-wrap:wrap; gap:14px; margin-top: 8px; }
+  .copyvar { flex:1 1 280px; border:1px dashed var(--apollo-border-strong); border-radius:8px; padding:12px 14px; background:#fff; }
+  .copyvar .vlabel { font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
+  .copyvar .vtitle { font-weight:600; }
+  .copyvar .vsub { color:var(--muted); font-size:12.6px; margin-top:3px; }
+  .row2 { display:flex; gap:18px; flex-wrap:wrap; align-items:flex-start; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>ReCiter “pending articles” nudge — self-edit mockups</h1>
+  <p class="lede">Surfacing ReCiter Feature Generator’s <b>suggested / pending</b> candidate publications on the
+  scholar’s own <code>/edit</code> surfaces, prompting them to confirm (“claim”) the articles in ReCiter so they appear on the profile.</p>
+  <p class="meta">Throwaway mockup for <a href="https://github.com/wcmc-its/Scholars-Profile-System/issues/1078">#1078</a> ·
+  data from David Julius’s real ReCiter profile (Suggested 1 · Accepted 72 · Rejected 92) · Apollo tokens are faithful;
+  the amber “needs-you” treatment reuses the COI-gap bridge (<code>coi-suggestions-bridge</code>).</p>
+
+  <!-- ============================ PUBLICATIONS PAGE ============================ -->
+  <h2 class="sec">A · Publications page  (/edit?attr=publications)</h2>
+  <p class="sec-sub">Primary surface. An amber bridge banner sits above the publication list — a structural clone of the
+  COI-gap “suggestions bridge,” so it reads as the same “there’s something here only you can resolve” affordance.</p>
+
+  <div class="frame">
+    <span class="frame-tag rec">Bridge banner — single suggestion (real data)</span>
+
+    <div class="bridge">
+      <div class="lhs">
+        <p class="title"><span class="dot"></span> 1 publication may be missing from your profile</p>
+        <p class="sub">ReCiter found <b>1 article</b> that looks like yours but hasn’t been confirmed. Review it in ReCiter to
+        accept or reject — accepted papers appear here automatically. <span class="visonly">Visible only to you.</span></p>
+      </div>
+      <a class="btn" href="#">Review in ReCiter <span class="arrow">→</span></a>
+    </div>
+
+    <div style="margin-top:22px">
+      <div class="pubhdr"><h3>Publications</h3><span class="cnt">72 shown · 0 hidden</span></div>
+      <div class="yeargrp">2025</div>
+      <div class="pubrow ghost">
+        <div class="t">Molecular basis of TRPV1 thermal gating revisited.</div>
+        <div class="a">D Julius, J Cao, F Bohlen · Nature</div>
+      </div>
+      <div class="pubrow ghost">
+        <div class="t">Capsaicin receptor signaling in afferent nociceptors.</div>
+        <div class="a">D Julius, M Caterina · Neuron</div>
+      </div>
+    </div>
+    <p class="note"><b>Why a banner, not a row in the list:</b> the suggested article is <i>not</i> on the profile yet and
+    can’t be acted on inside Scholars (the accept/reject happens in ReCiter). A banner points out; it doesn’t pretend the
+    row is editable here.</p>
+  </div>
+
+  <div class="frame">
+    <span class="frame-tag">Bridge banner — multiple suggestions (plural copy)</span>
+    <div class="bridge">
+      <div class="lhs">
+        <p class="title"><span class="dot"></span> 4 publications may be missing from your profile</p>
+        <p class="sub">ReCiter found <b>4 articles</b> that look like yours but haven’t been confirmed. Confirm or dismiss
+        them in ReCiter so your profile stays complete. <span class="visonly">Visible only to you.</span></p>
+      </div>
+      <a class="btn" href="#">Review 4 in ReCiter <span class="arrow">→</span></a>
+    </div>
+  </div>
+
+  <p class="note"><b>Copy variants for the heading</b> (pick one in the issue):</p>
+  <div class="copyvars">
+    <div class="copyvar"><div class="vlabel">A · profile-outcome framing (shown above)</div>
+      <div class="vtitle">1 publication may be missing from your profile</div>
+      <div class="vsub">Leads with the scholar’s payoff. Recommended.</div></div>
+    <div class="copyvar"><div class="vlabel">B · system framing</div>
+      <div class="vtitle">1 article awaiting your review in ReCiter</div>
+      <div class="vsub">More literal to the PM “Suggested” tab.</div></div>
+    <div class="copyvar"><div class="vlabel">C · action framing</div>
+      <div class="vtitle">1 suggested article to claim</div>
+      <div class="vsub">Shortest; matches the user’s “claim them.”</div></div>
+  </div>
+
+  <!-- ============================ RICH: ARTICLE + SCORE ============================ -->
+  <h2 class="sec">A2 · With the article + ReCiter confidence score  (recommended)</h2>
+  <p class="sec-sub">Showing the <b>recognizable title</b> and the <b>score</b> (styled like ReCiter’s own chip) is the
+  biggest conversion lever — the scholar sees their own paper, not an abstract count — and it markets ReCiter twice:
+  the chip reinforces the brand and a high score advertises the engine’s precision.</p>
+
+  <div class="frame">
+    <span class="frame-tag rec">Rich bridge — high-confidence hero (real data)</span>
+    <div class="bridge rich">
+      <p class="title" style="margin-bottom:6px"><span class="dot"></span> 1 publication may be missing from your profile</p>
+      <p class="sub" style="margin:0 0 12px">Candidate articles like this are often accepted or rejected by WCM library
+      curators on scholars’ behalf; the ones still pending may include papers of yours that aren’t on your profile yet.</p>
+      <div class="artcard">
+        <div class="score hasinfo">
+          <span class="n">100</span><span class="l">SCORE</span><span class="infomark">i</span>
+          <span class="tip"><b>Authorship confidence — 100 / 100.</b> ReCiter’s empirically-derived estimate of how
+          likely this paper is yours, based on your name, affiliations, co-authors, topics and grants. Higher means
+          more certain.</span>
+        </div>
+        <div class="art">
+          <div class="meta-line"><span class="pill-pre">Preprint</span> 2025 May 28 · PMID 40501885</div>
+          <div class="t">A Cellular Basis for Heightened Gut Sensitivity in Females.</div>
+          <div class="a">Archana Venkataraman, Eric E Figueroa, Joel Castro, … Holly A Ingraham · bioRxiv</div>
+          <div class="art-actions">
+            <a class="btn maroon" href="#">Review in ReCiter <span class="arrow">→</span></a>
+            <span style="color:var(--muted);font-size:12.6px">ReCiter is highly confident this is yours.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note"><b>Score chip</b> mirrors the PM’s green “100 / SCORE.” It’s the same number the scholar will see once
+    they click through, so the surfaces feel like one product.</p>
+  </div>
+
+  <div class="frame">
+    <span class="frame-tag rec">Rich bridge — hero + “and N more” (the canonical treatment)</span>
+    <div class="bridge rich">
+      <p class="title" style="margin-bottom:6px"><span class="dot"></span> 4 publications may be missing from your profile</p>
+      <p class="sub" style="margin:0 0 12px">Candidate articles like these are often accepted or rejected by WCM library
+      curators on scholars’ behalf; the ones still pending may include papers of yours that aren’t on your profile yet.</p>
+      <div class="artcard">
+        <div class="score hasinfo">
+          <span class="n">100</span><span class="l">SCORE</span><span class="infomark">i</span>
+          <span class="tip"><b>Authorship confidence — 100 / 100.</b> ReCiter’s empirically-derived estimate of how
+          likely this paper is yours, based on your name, affiliations, co-authors, topics and grants. Higher means
+          more certain.</span>
+        </div>
+        <div class="art">
+          <div class="meta-line"><span class="pill-pre">Preprint</span> 2025 May 28 · PMID 40501885</div>
+          <div class="t">A Cellular Basis for Heightened Gut Sensitivity in Females.</div>
+          <div class="a">Archana Venkataraman, Eric E Figueroa, … Holly A Ingraham · bioRxiv</div>
+          <div class="moreline">+ 3 more suggested articles in ReCiter</div>
+          <div class="art-actions"><a class="btn maroon" href="#">Review all 4 in ReCiter <span class="arrow">→</span></a></div>
+        </div>
+      </div>
+    </div>
+    <p class="note">Feature only the <b>top-scored</b> article (with its score chip + tooltip); roll the rest into “+N more.”
+    Compact no matter how long the queue, and the hero is always the most recognizable, highest-confidence paper.</p>
+  </div>
+
+  <div class="frame">
+    <span class="frame-tag">Below-threshold fallback — count only (the guardrail)</span>
+    <div class="bridge">
+      <div class="lhs">
+        <p class="title"><span class="dot"></span> 2 possible publications to review in ReCiter</p>
+        <p class="sub">ReCiter found articles that <i>might</i> be yours. Confirm or dismiss them in ReCiter.
+        <span class="visonly">Visible only to you.</span></p>
+      </div>
+      <a class="btn" href="#">Review in ReCiter <span class="arrow">→</span></a>
+    </div>
+    <p class="note"><b>Why a threshold:</b> prominently featuring a “score 100” article that clearly isn’t theirs would
+    <i>undercut</i> ReCiter’s credibility. Below the confidence bar, drop the hero card and soften the copy to “possible.”</p>
+  </div>
+
+  <!-- ============================ THRESHOLD LADDER ============================ -->
+  <h2 class="sec">A3 · Verbose vs. referred-to — the score threshold</h2>
+  <p class="sec-sub">Reuse ReCiter’s own score bands (<code>authorshipLikelihoodScore</code>, 0–100; XGBoost probability →
+  calibrated → ×100). ReCiter only “suggests” at ≥ 30 for <i>curators</i>; for a <b>self-serve scholar</b> we hold a higher
+  bar so we never nag about a borderline match.</p>
+  <div class="frame">
+    <div class="ladder">
+      <div class="rung green">
+        <div class="band">≥ 70</div>
+        <div class="swatch"><span class="sw"></span> Strong</div>
+        <div class="treat"><b>Verbose</b> — full citation card + green score chip + tooltip (the hero shown in A2).</div>
+      </div>
+      <div class="rung amber">
+        <div class="band">40–69</div>
+        <div class="swatch"><span class="sw"></span> Moderate</div>
+        <div class="treat"><b>Referred-to</b> — count + plain title list (“N possible publications”), no hero card, softer copy.</div>
+      </div>
+      <div class="rung gray">
+        <div class="band">30–39</div>
+        <div class="swatch"><span class="sw"></span> Weak</div>
+        <div class="treat"><b>Don’t nudge</b> the scholar — leave these to library curation in ReCiter.</div>
+      </div>
+    </div>
+    <p class="note"><b>Bands are ReCiter’s</b> (PM colors green ≥70 / amber 40–69 / gray &lt;40). The only SPS-specific call is
+    the <b>nudge floor</b>: skip 30–39 so the self-serve surface stays high-precision. Raise to ≥50 if early feedback is noisy.</p>
+    <p class="note" style="margin-top:16px"><b>Score-chip tooltip</b> (hover preview — describes the score only, no curation claim):</p>
+    <div style="background:#2c2925;color:#fff;font-size:12px;line-height:1.55;border-radius:8px;padding:12px 14px;max-width:330px;margin-top:6px">
+      <b>Authorship confidence — 100 / 100.</b> ReCiter’s empirically-derived estimate of how likely this paper is yours,
+      based on your name, affiliations, co-authors, topics and grants. Higher means more certain.
+    </div>
+    <p class="note" style="margin-top:14px"><b>Curation context</b> lives in the banner copy, not the score tooltip (plain
+    text, not red): “Candidate articles like this are often accepted or rejected by WCM library curators on scholars’
+    behalf; the ones still pending may include papers of yours that aren’t on your profile yet.”</p>
+  </div>
+
+  <!-- ============================ EDIT HOME ============================ -->
+  <h2 class="sec">B · Edit home  (/edit — “Complete your profile”)</h2>
+  <p class="sec-sub">The home board is a four-item completeness checklist (amber = needs you, green = done), grouped
+  “Yours to edit” / “From WCM systems.” Publications already live under <i>From WCM systems</i> (“flow from PubMed/ReCiter”),
+  so the nudge belongs on that row.</p>
+
+  <div class="frame">
+    <span class="frame-tag rec">Option B1 — flips the Publications checklist row to amber “needs you”</span>
+
+    <div class="board-head">
+      <div class="avatar">DJ</div>
+      <div>
+        <h3>Complete your profile</h3>
+        <div class="meterrow">
+          <div class="meter"><i style="width:100%"></i></div>
+          <span class="lbl">4 of 4 essentials</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="grp-label">Yours to edit</div>
+    <div class="check">
+      <div class="ic done">✓</div>
+      <div class="body"><div class="h">Overview</div><div class="d">Your bio is written.</div></div>
+    </div>
+    <div class="check">
+      <div class="ic done">✓</div>
+      <div class="body"><div class="h">Visibility</div><div class="d">Your profile is public.</div></div>
+    </div>
+
+    <div class="grp-label">From WCM systems</div>
+    <div class="check">
+      <div class="ic done">✓</div>
+      <div class="body"><div class="h">Headshot</div><div class="d">Pulled from the WCM Web Directory.</div></div>
+    </div>
+    <div class="check todo">
+      <div class="ic amber">!</div>
+      <div class="body">
+        <div class="h">Publications</div>
+        <div class="d">72 shown on your profile, from PubMed / ReCiter.</div>
+        <a class="teaser" href="#">
+          <div class="tt"><span class="scorechip">100</span>
+            <span class="ttext">A Cellular Basis for Heightened Gut Sensitivity in Females.</span></div>
+          <div class="go">1 suggested article — review in ReCiter →</div>
+        </a>
+      </div>
+    </div>
+    <p class="note"><b>Why here:</b> the row is normally a green “done” reassurance. When ReCiter has suggestions it gains an
+    amber teaser carrying the <b>title + score</b>, so even the home board shows the concrete paper. The completeness meter is
+    untouched (a suggestion isn’t an incomplete essential, just an opportunity). Falls back to a plain “N suggested →” pill
+    below the confidence threshold.</p>
+  </div>
+
+  <div class="frame">
+    <span class="frame-tag">Option B2 — standalone amber callout at the top of the board</span>
+    <div class="bridge" style="margin-bottom:18px">
+      <div class="lhs">
+        <p class="title"><span class="dot"></span> 1 publication may be missing from your profile</p>
+        <p class="sub">ReCiter found a likely-yours article you haven’t confirmed. <span class="visonly">Visible only to you.</span></p>
+      </div>
+      <a class="btn" href="#">Review in ReCiter <span class="arrow">→</span></a>
+    </div>
+    <div class="board-head" style="opacity:.45">
+      <div class="avatar">DJ</div>
+      <div><h3>Complete your profile</h3>
+        <div class="meterrow"><div class="meter"><i style="width:100%"></i></div><span class="lbl">4 of 4 essentials</span></div></div>
+    </div>
+    <p class="note">More prominent, but competes with the completeness header for the top slot. Prefer B1 unless the count is
+    routinely large.</p>
+  </div>
+
+  <!-- ============================ RAIL BADGE ============================ -->
+  <h2 class="sec">C · Attribute-rail count badge  (optional companion)</h2>
+  <p class="sec-sub">Same idea as the COI-gap rail count — a small amber badge on the Publications rail item so the nudge is
+  discoverable from any panel, not only the two surfaces above.</p>
+  <div class="row2">
+    <div class="rail">
+      <div class="railitem"><div class="lhs">Overview</div></div>
+      <div class="railitem active"><div class="lhs">Publications</div><span class="railbadge">1</span></div>
+      <div class="railitem"><div class="lhs">Visibility</div></div>
+    </div>
+    <p class="note" style="flex:1 1 320px"><b>Treatment:</b> amber pill, count only (High-signal == the whole list here, no tiering).
+    Mirrors <code>coi-gap-rail-badge.html</code>. Hidden when the count is 0 — same gate as the banner.</p>
+  </div>
+
+</div>
+</body>
+</html>

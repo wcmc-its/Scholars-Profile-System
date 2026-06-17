@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8" />
+<title>ReCiter pending nudge — canonical hero</title>
+<style>
+  :root{--maroon:#8a1f2b;--maroon-press:#6e1620;--border:#e9e3df;--border-strong:#dbd3cd;
+    --rail:#f4f1ed;--amber:#8a5a06;--amber-tint:#fbf1dc;--amber-tint-border:#efdbaf;
+    --green:#2f7a3f;--green-tint:#eef6ef;--muted:#8c857d;--ink:#2c2925;}
+  *{box-sizing:border-box;}
+  body{margin:0;padding:38px;background:#faf8f6;color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .card{max-width:760px;background:#fff;border:1px solid var(--border);border-radius:12px;
+    padding:22px 24px;box-shadow:0 1px 2px rgba(20,12,8,.04);}
+  .ctx{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:0 0 14px;}
+  .bridge{border:1px solid var(--amber-tint-border);background:var(--amber-tint);border-radius:8px;padding:15px 16px;}
+  .title{display:flex;align-items:center;gap:9px;font-size:14.5px;font-weight:600;color:var(--ink);margin:0 0 6px;}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--amber);flex:0 0 auto;}
+  .sub{color:var(--muted);font-size:12.8px;line-height:1.5;margin:0 0 13px;max-width:64ch;}
+  .artcard{display:flex;gap:14px;align-items:flex-start;background:#fff;border:1px solid var(--amber-tint-border);border-radius:8px;padding:13px 14px;}
+  .score{position:relative;flex:0 0 auto;width:52px;height:52px;border-radius:8px;background:var(--green-tint);
+    border:1px solid #cfe6d3;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:help;}
+  .score .n{font-size:20px;font-weight:800;color:var(--green);line-height:1;}
+  .score .l{font-size:8.5px;font-weight:700;letter-spacing:.08em;color:var(--green);margin-top:2px;}
+  .infomark{position:absolute;top:-6px;right:-6px;width:15px;height:15px;border-radius:50%;background:#fff;
+    border:1px solid var(--border-strong);color:var(--muted);font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;}
+  .meta-line{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .pill-pre{background:#efeae4;color:#6b645c;font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;border-radius:4px;padding:2px 6px;}
+  .t{font-weight:600;margin:5px 0 3px;line-height:1.35;}
+  .a{font-size:12.6px;color:var(--muted);}
+  .moreline{margin-top:11px;font-size:12.6px;color:var(--amber);font-weight:600;}
+  .actions{display:flex;align-items:center;gap:14px;margin-top:12px;}
+  .btn{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;line-height:1;cursor:pointer;
+    border:1px solid var(--maroon);background:var(--maroon);color:#fff;border-radius:7px;padding:10px 14px;text-decoration:none;}
+  .tipnote{margin:14px 0 0;font-size:11.5px;color:var(--muted);}
+  .tipbox{background:#2c2925;color:#fff;font-size:12px;line-height:1.55;border-radius:8px;padding:11px 13px;max-width:330px;margin-top:6px;}
+  .tipbox b{color:#fff;}
+</style></head>
+<body>
+  <div class="card">
+    <p class="ctx">Your profile · Publications</p>
+    <div class="bridge">
+      <p class="title"><span class="dot"></span> 4 publications may be missing from your profile</p>
+      <p class="sub">Candidate articles like these are often accepted or rejected by WCM library curators on scholars’
+      behalf; the ones still pending may include papers of yours that aren’t on your profile yet.</p>
+      <div class="artcard">
+        <div class="score"><span class="n">100</span><span class="l">SCORE</span><span class="infomark">i</span></div>
+        <div class="art">
+          <div class="meta-line"><span class="pill-pre">Preprint</span> 2025 May 28 · PMID 40501885</div>
+          <div class="t">A Cellular Basis for Heightened Gut Sensitivity in Females.</div>
+          <div class="a">Archana Venkataraman, Eric E Figueroa, … Holly A Ingraham · bioRxiv</div>
+          <div class="moreline">+ 3 more suggested articles in ReCiter</div>
+          <div class="actions"><a class="btn" href="#">Review all 4 in ReCiter →</a></div>
+        </div>
+      </div>
+    </div>
+    <p class="tipnote">Hover the score → tooltip:</p>
+    <div class="tipbox"><b>Authorship confidence — 100 / 100.</b> ReCiter’s empirically-derived estimate of how likely
+    this paper is yours, based on your name, affiliations, co-authors, topics and grants. Higher means more certain.</div>
+  </div>
+</body></html>

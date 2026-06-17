@@ -1485,12 +1485,64 @@ describe("AppStack", () => {
         expect(JSON.stringify(resource)).toContain(":distribution/");
       });
 
+      it("the ReCiter read grant is dynamodb:GetItem on Analysis/GoldStandard + s3:GetObject on AnalysisOutput/* only, never * (#746)", () => {
+        // Synth-time guard: the live "suggested articles" nudge
+        // (lib/reciter/client.ts fetchSuggestedArticles) reads ReCiter's own
+        // DynamoDB GoldStandard + Analysis tables and the offloaded
+        // AnalysisOutput/<uid> S3 object under THIS task role -- read-only,
+        // no api-key. Least-privilege: a keyed GetItem (never Scan/Query) on
+        // exactly the two tables, and s3:GetObject scoped to the
+        // AnalysisOutput/* prefix -- never a bare `*`.
+        const reciterPolicy = findTaskRolePolicies().find((p) =>
+          JSON.stringify(p.Properties?.PolicyDocument).includes(
+            "AnalysisOutput/",
+          ),
+        );
+        expect(reciterPolicy).toBeDefined();
+        const statements = reciterPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        expect(statements).toHaveLength(2);
+
+        // DynamoDB statement: GetItem only, scoped to Analysis + GoldStandard.
+        const ddbStmt = statements!.find((s) =>
+          JSON.stringify(s.Action).includes("dynamodb:"),
+        )!;
+        expect(ddbStmt.Action).toBe("dynamodb:GetItem");
+        // No Scan/Query — a keyed point read only.
+        expect(JSON.stringify(ddbStmt.Action)).not.toContain("Scan");
+        expect(JSON.stringify(ddbStmt.Action)).not.toContain("Query");
+        const ddbResources = (
+          Array.isArray(ddbStmt.Resource) ? ddbStmt.Resource : [ddbStmt.Resource]
+        ) as string[];
+        for (const r of ddbResources) expect(r).not.toBe("*");
+        const ddbSerialized = JSON.stringify(ddbStmt.Resource);
+        expect(ddbSerialized).toContain("table/Analysis");
+        expect(ddbSerialized).toContain("table/GoldStandard");
+
+        // S3 statement: GetObject only, scoped to the AnalysisOutput/* prefix.
+        const s3Stmt = statements!.find((s) =>
+          JSON.stringify(s.Action).includes("s3:"),
+        )!;
+        expect(s3Stmt.Action).toBe("s3:GetObject");
+        const s3Resource = s3Stmt.Resource as string;
+        expect(s3Resource).not.toBe("*");
+        expect(s3Resource).toBe(
+          "arn:aws:s3:::reciter-dynamodb/AnalysisOutput/*",
+        );
+      });
+
       it("the app ships the request-change mailer OFF with the verified From set (#160 Phase 2)", () => {
         // Dormant by default: the endpoint 503s + the client mailto: fallback
         // stays in force until ops flip the flag post-verification.
         const env = appContainerEnv();
         expect(env.get("SELF_EDIT_REQUEST_CHANGE_SEND")).toBe("off");
         expect(env.get("SCHOLARS_MAIL_FROM")).toBe("no-reply-scholars@weill.cornell.edu");
+      });
+
+      it("ships the ReCiter pending-suggestions nudge OFF in prod (SELF_EDIT_RECITER_PENDING_HINT, dormant in both envs)", () => {
+        // Dormant: the backing reciter_pending_suggestion table is empty until an
+        // ETL seeds it, and the flag is "off" in BOTH envs until a gated rollout.
+        expect(appContainerEnv().get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("off");
       });
 
       it("keeps the ReCiter 'Not mine' reject OFF in prod during the staging-first rollout (#746)", () => {
@@ -1941,6 +1993,20 @@ describe("AppStack", () => {
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("SELF_EDIT_OVERVIEW_GENERATE")).toBe("on");
+    });
+
+    it("ships the ReCiter pending-suggestions nudge OFF in staging (SELF_EDIT_RECITER_PENDING_HINT, dormant in both envs)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appContainer = (
+        Object.values(taskDefs).find((r) => r.Properties?.Family === "sps-app-staging")
+          ?.Properties?.ContainerDefinitions as
+          | Array<{ Name?: string; Environment?: Array<{ Name?: string; Value?: string }> }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("off");
     });
 
     it("autoscales between min=1 and max=3 for staging (#596)", () => {

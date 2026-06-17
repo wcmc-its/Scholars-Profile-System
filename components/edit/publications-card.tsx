@@ -20,6 +20,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { FirstHideNoticeDialog } from "@/components/edit/first-hide-notice-dialog";
+import { ReciterPendingCardClient } from "@/components/edit/reciter-pending-card";
 import { RejectNoticeDialog } from "@/components/edit/reject-notice-dialog";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
@@ -47,6 +48,14 @@ export type PublicationsCardProps = {
    * gold-standard write.
    */
   rejectEnabled?: boolean;
+  /**
+   * Whether to mount the live ReCiter pending-articles nudge at the top of the
+   * card (`SELF_EDIT_RECITER_PENDING_HINT`). Only the genuine, non-impersonating
+   * self page passes `true`, and only when the flag is on; when `true` the client
+   * loader lazily fetches `/api/edit/reciter-pending` and renders nothing until
+   * (and unless) the engine returns suggestions. Off (default) ⇒ ZERO fetch.
+   */
+  reciterPendingEnabled?: boolean;
 };
 
 /**
@@ -99,6 +108,7 @@ export function PublicationsCard({
   scholarName = "",
   publications,
   rejectEnabled = false,
+  reciterPendingEnabled = false,
 }: PublicationsCardProps) {
   // Copy reframes for a superuser acting on the scholar's behalf (mirrors the
   // Mentees / Highlights cards): "yourself" → "{Name}", "your profile" →
@@ -286,6 +296,7 @@ export function PublicationsCard({
         </>
       }
     >
+      {reciterPendingEnabled && <ReciterPendingCardClient />}
       <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground" aria-live="polite">
             <span className="text-foreground font-medium">{totalCount.toLocaleString()}</span>

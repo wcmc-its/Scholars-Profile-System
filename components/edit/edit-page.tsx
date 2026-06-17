@@ -292,6 +292,11 @@ export type EditPageProps = {
    *  administers this scholar, for the "via {unit} administrator" banner.
    *  `null`/absent in every other mode. */
   unitAdminBanner?: { unitKind: "department" | "division"; unitName: string } | null;
+  /** Self mode only: whether to mount the live ReCiter pending-articles nudge
+   *  (`SELF_EDIT_RECITER_PENDING_HINT`). True only for a genuine, non-impersonating
+   *  self viewer with the flag on; when true the Publications card + Home teaser
+   *  lazily client-fetch `/api/edit/reciter-pending`. Off (default) ⇒ no fetch. */
+  reciterPendingEnabled?: boolean;
 };
 
 /**
@@ -333,6 +338,7 @@ export function EditPage({
   proxyEditors = null,
   unitAdminEditors = null,
   unitAdminBanner = null,
+  reciterPendingEnabled = false,
 }: EditPageProps) {
   // "From your publications" is conditionally present: self OR superuser, and only
   // when the loader returned candidates (the loader per surface enforces who may
@@ -454,6 +460,7 @@ export function EditPage({
         canBrowseProfiles,
         proxyEditors,
         unitAdminEditors,
+        reciterPendingEnabled,
       )}
     </EditShell>
   );
@@ -470,6 +477,7 @@ function renderPanel(
   isSuperuser: boolean,
   proxyEditors: ProxyRow[] | null,
   unitAdminEditors: UnitAdminEditorRow[] | null,
+  reciterPendingEnabled: boolean,
 ) {
   const cwid = ctx.scholar.cwid;
   // Child cards model only self vs superuser. A proxy reuses the SELF cards
@@ -503,6 +511,10 @@ function renderPanel(
           // shown only to a genuine self viewer, never a superuser or a proxy.
           manageableUnits={mode === "self" ? manageableUnits : []}
           isSuperuser={mode === "self" ? isSuperuser : false}
+          // ReCiter pending suggestions are self-only: the page computes
+          // `reciterPendingEnabled` = flag on AND genuine self, and only then does
+          // the Home teaser client-fetch. Self-only by construction.
+          reciterPendingEnabled={mode === "self" ? reciterPendingEnabled : false}
         />
       );
     }
@@ -606,6 +618,10 @@ function renderPanel(
           scholarName={scholarName}
           publications={ctx.publications}
           rejectEnabled={isReciterRejectEnabled()}
+          // Self-only by construction: the page sets `reciterPendingEnabled` only
+          // for a genuine self viewer with the flag on; a superuser/proxy child
+          // mode gets false and the client loader never mounts.
+          reciterPendingEnabled={childMode === "self" ? reciterPendingEnabled : false}
         />
       );
     case "funding":
