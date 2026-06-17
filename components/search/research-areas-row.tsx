@@ -28,7 +28,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { Sparkles, Users, ArrowUpRight, Wrench } from "lucide-react";
+import { Shapes, Users, ArrowUpRight, Wrench } from "lucide-react";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import type { TaxonomyMatch, TaxonomyMatchResult } from "@/lib/api/search-taxonomy";
 
@@ -58,7 +58,7 @@ export function ResearchAreasRow({ result }: { result: TaxonomyMatchResult }) {
           chips as fit, the rest folded into "+N more" (expands inline). */}
       {areas.length > 0 ? (
         <MeasuredChipRow
-          icon={<Sparkles aria-hidden className="h-[15px] w-[15px] shrink-0" strokeWidth={2} />}
+          icon={<Shapes aria-hidden className="h-[15px] w-[15px] shrink-0" strokeWidth={2} />}
           label="Research Areas"
           items={areas}
           total={totalMatched}
