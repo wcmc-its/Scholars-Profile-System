@@ -77,10 +77,36 @@ export function SearchTransitionProvider({ children }: { children: ReactNode }) 
     };
   }, []);
 
+  // #1069 follow-up — scroll preservation across in-place refinements.
+  // `scroll: false` (passed by every facet / sort / mode-tab TransitionLink) is
+  // INERT on this page: it suppresses Next's explicit `window.scrollTo`, but the
+  // App Router's ScrollAndFocusHandler ALSO calls `<main>.focus()` after the
+  // navigation commits, and focusing an off-screen landmark scrolls it back into
+  // view — re-jumping the page to the top. (Verified on staging: the reset comes
+  // from that `focus()`, not from a `scrollTo`.) We deliberately don't suppress
+  // the focus — it's Next-internal a11y behaviour we want to keep for screen
+  // readers — so instead we save the scroll offset when a `scroll: false` nav
+  // starts and restore it once the transition commits, in the same frame as the
+  // focus-scroll (rAF runs before paint, so the restore is flicker-free).
+  const restoreYRef = useRef<number | null>(null);
+  const prevPendingRef = useRef(isPending);
+  useEffect(() => {
+    const justSettled = prevPendingRef.current && !isPending;
+    prevPendingRef.current = isPending;
+    if (!justSettled || restoreYRef.current === null) return;
+    const y = restoreYRef.current;
+    restoreYRef.current = null;
+    requestAnimationFrame(() => window.scrollTo(0, y));
+  }, [isPending]);
+
   const value = useMemo<SearchTransitionValue>(
     () => ({
       isPending,
       navigate: (href, options) => {
+        // Arm scroll preservation only for the opt-out-of-scroll refinements
+        // (facets / sort / mode tabs). Pagination omits `scroll: false`, so it
+        // stays disarmed and keeps the conventional scroll-to-top on page change.
+        restoreYRef.current = options?.scroll === false ? window.scrollY : null;
         startTransition(() => {
           router.push(href, options);
         });
