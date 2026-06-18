@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ExternalLink, Search, Sparkles } from "lucide-react";
+import { ExternalLink, Search, Waypoints } from "lucide-react";
 import type { Scope } from "@/lib/api/search-flags";
 
 /**
@@ -118,7 +118,7 @@ export function ScopeNote({
         {/* Header — the MeSH concept identity */}
         <span className="block rounded-t-xl bg-[#eeedfe] px-[15px] pb-[13px] pt-[11px]">
           <span className="flex items-center gap-1.5 text-[11.5px] font-medium tracking-wide text-[#4a40a8]">
-            <Sparkles aria-hidden className="size-[13px]" strokeWidth={2} />
+            <Waypoints aria-hidden className="size-[13px]" strokeWidth={2} />
             MeSH concept
           </span>
           <span className="mt-[5px] block text-[15px] font-semibold leading-[1.35] text-[#26215c]">
@@ -172,7 +172,7 @@ export function ScopeNote({
 
   return (
     <div className="relative inline-flex items-center gap-1.5 text-[13px] text-muted-foreground">
-      <Sparkles aria-hidden className="size-3.5 shrink-0" strokeWidth={2} />
+      <Waypoints aria-hidden className="size-3.5 shrink-0" strokeWidth={2} />
       <span>
         {scope === "exact" ? (
           <>Matching the exact word “{query}”.</>

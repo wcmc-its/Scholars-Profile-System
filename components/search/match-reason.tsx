@@ -1,21 +1,24 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { ChevronDown, FileText, Sparkles, Tag, Wrench } from "lucide-react";
+import { ChevronDown, FileText, Shapes, Waypoints, Wrench } from "lucide-react";
 import { PubTitle } from "@/components/publication/pub-html";
 import { HighlightedSnippet } from "@/components/search/highlight-snippet";
 import type { EvidencePub } from "@/lib/api/result-evidence";
 
 /**
  * PLAN R4 — the kind of match a reason line explains, which picks the leading
- * icon (mockup mapping: document = publication-count evidence, tag = research
- * area, sparkle = concept expansion).
+ * icon. Icon namespaces (#1073): research area = the `Shapes` content-type glyph
+ * (shared with the chip row + the match badge); publications = document;
+ * concept = `Waypoints`, the search-mechanic marker for a MeSH-expansion match
+ * ("connected related nodes"). `Sparkles` was retired here — it now means only
+ * "AI did something" (the overview generator).
  */
 export type MatchReasonKind = "concept" | "publications" | "area";
 
-const ICONS: Record<MatchReasonKind, typeof Sparkles> = {
-  concept: Sparkles,
+const ICONS: Record<MatchReasonKind, typeof FileText> = {
+  concept: Waypoints,
   publications: FileText,
-  area: Tag,
+  area: Shapes,
 };
 
 /**
@@ -167,10 +170,11 @@ export function MatchAwareReason({
     kind === "method"
       ? "border-[#ecdcc8] bg-[#fbf4ea] text-[#8a4a1f]"
       : "border-[#d8e2ec] bg-[#eef2f6] text-[#2c4f6e]";
-  // Method uses the SAME Wrench glyph as the "Methods and Tools" facet/chip row
-  // (research-areas-row.tsx) and the /methods lens, so the concept reads with one
-  // icon everywhere; topic keeps the Tag.
-  const Icon = kind === "method" ? Wrench : Tag;
+  // One content-type glyph per notion across every surface (#1073): method = the
+  // SAME Wrench as the "Methods and Tools" chip row + /methods lens; research area
+  // = the SAME Shapes as the Research Areas chip row (research-areas-row.tsx),
+  // replacing Tag (which now means only profile Topics/MeSH).
+  const Icon = kind === "method" ? Wrench : Shapes;
   const badgeText = kind === "method" ? "Method" : "Research area";
   // items-center (not baseline): the bordered pill and the bold label line up on
   // a shared center axis so the badge doesn't sit low next to the label.
