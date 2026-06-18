@@ -135,16 +135,16 @@ function lastNameOf(full: string): string {
 // line + subject tag), so hue is never the only signal.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Color tokens from spec §4 (light + dark). Inlined so the chip is self-contained. */
-const HL_CSS = `
-.coi-hl-org{background:#FAEEDA;color:#633806;font-weight:500;border-radius:4px;padding:0 4px;white-space:nowrap}
-.coi-hl-self{font-weight:600;border-bottom:1px solid var(--color-border-secondary,#c9cdd6)}
-.coi-hl-co{background:#EEEDFE;color:#3C3489;font-weight:500;border-radius:4px;padding:0 4px;white-space:nowrap}
-.coi-unclear-tag{display:inline-flex;align-items:center;font-size:11px;border:1px dashed var(--color-border-secondary,#c9cdd6);color:var(--color-text-tertiary,#6b7280);border-radius:999px;padding:1px 8px}
-@media (prefers-color-scheme: dark){
- .coi-hl-org{background:#412402;color:#FAC775}
- .coi-hl-co{background:#26215C;color:#CECBF6}
-}`;
+/** Two highlight roles only — COMPANY (the named organization) and PERSON (the
+ *  named subject, self OR co-author alike). Uses the console's calm tint tokens
+ *  (auto light/dark), so marks stay light and consistent with the rest of /edit.
+ *  Self vs co-author is conveyed in TEXT — the row's subject tag + the accessible
+ *  label — never by color. A small key names the two swatches. The leading
+ *  `coi-hl-*` token is a stable hook for tests; the visual is the tint utilities. */
+const HL_ORG =
+  "coi-hl-org rounded-[4px] bg-apollo-amber-tint text-apollo-amber px-1 font-medium whitespace-nowrap";
+const HL_PERSON =
+  "coi-hl-person rounded-[4px] bg-apollo-slate-tint text-apollo-slate px-1 font-medium whitespace-nowrap";
 
 /** Marks for a single rendered clause/statement. */
 function MarkedText({
@@ -168,19 +168,21 @@ function MarkedText({
     if (span.start > cursor) out.push(<span key={`t${i}`}>{text.slice(cursor, span.start)}</span>);
     if (span.role === "organization") {
       out.push(
-        <mark key={`m${i}`} className="coi-hl-org" aria-label={`organization: ${span.text}`}>
-          {span.text}
-        </mark>,
-      );
-    } else if (subjectType === "self") {
-      out.push(
-        <mark key={`m${i}`} className="coi-hl-self" aria-label="you" style={{ background: "transparent" }}>
+        <mark key={`m${i}`} className={HL_ORG} aria-label={`organization: ${span.text}`}>
           {span.text}
         </mark>,
       );
     } else {
+      // One PERSON treatment for self and co-author alike; the distinction lives in
+      // the accessible label + the row's subject tag, not in color.
+      const label =
+        subjectType === "self"
+          ? "you"
+          : subjectType === "coauthor"
+            ? `co-author: ${span.text}`
+            : `person: ${span.text}`;
       out.push(
-        <mark key={`m${i}`} className="coi-hl-co" aria-label={`co-author: ${span.text}`}>
+        <mark key={`m${i}`} className={HL_PERSON} aria-label={label}>
           {span.text}
         </mark>,
       );
@@ -191,10 +193,13 @@ function MarkedText({
   return <>{out}</>;
 }
 
-/** The dashed "Subject unclear" tag (spec §4 — unknown subjects, row/card level). */
+/** The dashed "Subject unclear" tag (unknown subjects, row/card level). */
 function UnclearTag() {
   return (
-    <span className="coi-unclear-tag" data-testid="coi-gap-unclear">
+    <span
+      className="border-apollo-border text-muted-foreground inline-flex items-center rounded-full border border-dashed px-2 py-px text-[11px]"
+      data-testid="coi-gap-unclear"
+    >
       Subject unclear
     </span>
   );
@@ -209,15 +214,13 @@ function SubjectTag({
   subjectMention: string | null;
 }) {
   if (subjectType === "self") {
-    return (
-      <span className="coi-hl-self text-foreground text-sm" style={{ background: "transparent" }}>
-        you
-      </span>
-    );
+    return <span className="text-apollo-slate text-sm font-medium">you</span>;
   }
   if (subjectType === "coauthor") {
     return (
-      <span className="coi-hl-co text-sm">co-author · {subjectMention ?? "unnamed"}</span>
+      <span className="text-apollo-slate text-sm font-medium">
+        co-author · {subjectMention ?? "unnamed"}
+      </span>
     );
   }
   return <UnclearTag />;
@@ -884,7 +887,6 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
 
   return (
     <>
-      <style>{HL_CSS}</style>
       <Link
         href={backHref}
         data-testid="coi-gap-back"
@@ -913,6 +915,28 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
           <ReassureChip icon={Info} label="Not a compliance judgement" />
           <ReassureChip icon={Lock} label="Managed in the Gateway, never here" />
         </ul>
+
+        {/* Key — the two things a highlight can mark. Swatches are decorative; the
+            words carry the meaning for screen readers. */}
+        <div
+          className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 text-xs"
+          data-testid="coi-gap-key"
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="border-apollo-amber-tint-border bg-apollo-amber-tint inline-block size-3 rounded-[3px] border"
+              aria-hidden
+            />
+            company
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="border-apollo-slate-tint-border bg-apollo-slate-tint inline-block size-3 rounded-[3px] border"
+              aria-hidden
+            />
+            person
+          </span>
+        </div>
 
         {/* Controls: group-by segmented control + filter + counter. */}
         <div className="border-apollo-border flex flex-wrap items-center justify-between gap-3 border-t pt-3">

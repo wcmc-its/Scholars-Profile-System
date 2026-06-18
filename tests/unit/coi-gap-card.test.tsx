@@ -193,15 +193,28 @@ describe("CoiGapCard #1112 redesign", () => {
     expect(clauseP?.querySelectorAll("mark").length).toBe(2);
   });
 
-  it("self subject is bold+underline (you), co-author is a purple chip — accessible labels", () => {
+  it("self and co-author share ONE 'person' highlight; the distinction stays in the label", () => {
     render(<CoiGapCard cwid="self01" mentions={MENTIONS} />);
-    // Self mention row carries a "you" labelled mark.
+    // Self mention: a "you"-labelled person mark.
     const selfRow = screen.getByTestId("coi-gap-org-row-c-az-self");
-    expect(within(selfRow).getByLabelText("you").textContent).toBe("Altorki");
-    expect(within(selfRow).getByLabelText("you").className).toContain("coi-hl-self");
-    // Co-author mention row carries a purple co-author chip.
+    const selfMark = within(selfRow).getByLabelText("you");
+    expect(selfMark.textContent).toBe("Altorki");
+    expect(selfMark.className).toContain("coi-hl-person");
+    // Co-author mention: same person treatment, distinct label.
     const coRow = screen.getByTestId("coi-gap-org-row-c-az-co");
-    expect(within(coRow).getByLabelText("co-author: A Saxena").className).toContain("coi-hl-co");
+    const coMark = within(coRow).getByLabelText("co-author: A Saxena");
+    expect(coMark.className).toContain("coi-hl-person");
+    // An org mark uses the company treatment, not the person one.
+    expect(within(coRow).getByLabelText("organization: AstraZeneca").className).toContain(
+      "coi-hl-org",
+    );
+  });
+
+  it("renders a company/person key", () => {
+    render(<CoiGapCard cwid="self01" mentions={MENTIONS} />);
+    const key = screen.getByTestId("coi-gap-key");
+    expect(key.textContent).toContain("company");
+    expect(key.textContent).toContain("person");
   });
 
   it("unknown subject renders a dashed 'Subject unclear' tag and marks no name inline", () => {
