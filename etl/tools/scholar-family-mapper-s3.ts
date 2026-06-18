@@ -168,19 +168,27 @@ function resolveExemplarTools(raw: unknown, toolsById: Map<string, string>): str
  * tool DISPLAY NAME (the same key space as `resolveExemplarTools`, deduped
  * first-wins so the two stay 1:1). Candidate snippets are scoped to this family's
  * member pmids (the closest available "scholar's pmids for that tool"), falling
- * back inside `selectBestSnippet` to any of the tool's snippets. Only exemplars
- * with a usable snippet appear; returns `{}` otherwise. A `seen` Set (not an `in`
- * check) avoids prototype-key pitfalls for unusual tool names.
+ * back inside `selectBestSnippet` to any of the tool's snippets. A `seen` Set (not
+ * an `in` check) avoids prototype-key pitfalls for unusual tool names.
+ *
+ * Two calibration levers apply here (see `docs/methodcontext-snippet-eval-findings.md`):
+ *   - the opaque-tool GATE — `selectBestSnippet` returns null for a high-frequency
+ *     tool (via `pubCountById`), so its snippet is omitted;
+ *   - within-family DEDUPE — the same sentence is never shown for two exemplars of
+ *     one family (a later exemplar whose best snippet duplicates an earlier one is
+ *     collapsed). Returns `{}` when no exemplar yields a kept snippet.
  */
 function resolveExemplarContexts(
   raw: unknown,
   toolsById: Map<string, string>,
+  pubCountById: Map<string, number>,
   toolContext: ToolContextIndex,
   scholarPmids: ReadonlySet<string>,
 ): Record<string, string> {
   if (!Array.isArray(raw)) return {};
   const out: Record<string, string> = {};
   const seen = new Set<string>();
+  const chosen = new Set<string>(); // normalized snippets already kept in this family
   for (const v of raw) {
     if (typeof v !== "string") continue;
     const id = v.trim();
@@ -188,8 +196,16 @@ function resolveExemplarContexts(
     const name = toolsById.get(id);
     if (!name || seen.has(name)) continue;
     seen.add(name);
-    const best = selectBestSnippet(toolContext, id, { displayName: name, scholarPmids });
-    if (best) out[name] = best.context;
+    const best = selectBestSnippet(toolContext, id, {
+      displayName: name,
+      scholarPmids,
+      toolPubCount: pubCountById.get(id),
+    });
+    if (!best) continue;
+    const norm = best.context.toLowerCase().replace(/\s+/g, " ").trim();
+    if (chosen.has(norm)) continue; // identical to a sibling exemplar's snippet → collapse
+    chosen.add(norm);
+    out[name] = best.context;
   }
   return out;
 }
@@ -249,12 +265,19 @@ export function buildScholarFamilyWritesFromS3(
   const toolContext = opts.toolContext;
 
   // Index canonical tools by id → display name, to resolve each family's
-  // exemplar_tool_ids into the member-tool names the lens renders.
+  // exemplar_tool_ids into the member-tool names the lens renders; and id → GLOBAL
+  // pub_count, the #1119 opaque-tool gate signal for the usage snippet.
   const toolsById = new Map<string, string>();
+  const pubCountById = new Map<string, number>();
   for (const t of artifact.tools ?? []) {
-    if (t && typeof t.canonical_tool_id === "string" && typeof t.display_name === "string") {
-      const name = t.display_name.trim();
-      if (name) toolsById.set(t.canonical_tool_id, name);
+    if (t && typeof t.canonical_tool_id === "string") {
+      if (typeof t.display_name === "string") {
+        const name = t.display_name.trim();
+        if (name) toolsById.set(t.canonical_tool_id, name);
+      }
+      if (typeof t.pub_count === "number" && Number.isFinite(t.pub_count)) {
+        pubCountById.set(t.canonical_tool_id, Math.max(0, Math.trunc(t.pub_count)));
+      }
     }
   }
 
@@ -298,7 +321,7 @@ export function buildScholarFamilyWritesFromS3(
       const pmids = normalizePmids(f?.pmids);
       // #1119 — scope the snippet search to this family's member pmids.
       const exemplarContexts = toolContext
-        ? resolveExemplarContexts(f?.exemplar_tool_ids, toolsById, toolContext, new Set(pmids))
+        ? resolveExemplarContexts(f?.exemplar_tool_ids, toolsById, pubCountById, toolContext, new Set(pmids))
         : {};
       const prev = byFamilyId.get(familyId);
       if (!prev) {

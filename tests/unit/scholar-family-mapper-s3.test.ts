@@ -467,4 +467,69 @@ describe("buildScholarFamilyWritesFromS3 — #1119 exemplar contexts", () => {
     );
     expect(writes[0].exemplarContexts).toEqual({});
   });
+
+  it("#1119 dedupe: never surfaces the same sentence for two exemplars of one family", () => {
+    const shared =
+      "Linked-read barcoded sequencing reconstructs full-length isoforms in a reference-free manner across samples";
+    const toolContext = buildToolContextIndex({
+      tool_a: { "111": shared },
+      tool_b: { "111": shared }, // identical best snippet
+    });
+    const { writes } = buildScholarFamilyWritesFromS3(
+      artifact(
+        {
+          aog: [
+            {
+              family_id: "fam_1",
+              label: "Long-read isoform assembly",
+              supercategory: "omics_profiling",
+              pub_count: 1,
+              exemplar_tool_ids: ["tool_a", "tool_b"],
+              pmids: ["111"],
+            },
+          ],
+        },
+        [
+          { canonical_tool_id: "tool_a", display_name: "cloudrnaSPAdes" },
+          { canonical_tool_id: "tool_b", display_name: "LoopSeq" },
+        ],
+      ),
+      { ourCwidSet: new Set(["aog"]), toolContext },
+    );
+    // Both exemplars are still listed in exemplarTools, but the duplicate snippet
+    // is kept only ONCE (first exemplar wins); the second is collapsed.
+    expect(writes[0].exemplarTools).toEqual(["cloudrnaSPAdes", "LoopSeq"]);
+    expect(Object.keys(writes[0].exemplarContexts)).toEqual(["cloudrnaSPAdes"]);
+    expect(writes[0].exemplarContexts.LoopSeq).toBeUndefined();
+  });
+
+  it("#1119 opaque gate: omits the snippet for a high-frequency tool, keeps it for a niche one", () => {
+    const toolContext = buildToolContextIndex({
+      tool_a: { "1": "RNA-seq analysis of E. coli K12 revealed 447 differentially expressed genes overall" },
+      tool_b: { "1": "wsPurity quantifies tumor purity within a digitally captured H&E stained histological slide" },
+    });
+    const { writes } = buildScholarFamilyWritesFromS3(
+      artifact(
+        {
+          aog: [
+            {
+              family_id: "fam_1",
+              label: "Transcriptomics",
+              supercategory: "omics_profiling",
+              pub_count: 1,
+              exemplar_tool_ids: ["tool_a", "tool_b"],
+              pmids: ["1"],
+            },
+          ],
+        },
+        [
+          { canonical_tool_id: "tool_a", display_name: "RNA-seq", pub_count: 900 }, // common → gated
+          { canonical_tool_id: "tool_b", display_name: "wsPurity", pub_count: 2 }, // niche → kept
+        ],
+      ),
+      { ourCwidSet: new Set(["aog"]), toolContext },
+    );
+    expect(writes[0].exemplarContexts["RNA-seq"]).toBeUndefined();
+    expect(writes[0].exemplarContexts.wsPurity).toContain("tumor purity");
+  });
 });

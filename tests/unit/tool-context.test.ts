@@ -7,12 +7,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MAX_PUB_COUNT_FOR_SNIPPET,
   MAX_SNIPPET_LEN,
   buildToolContextIndex,
   clampSnippet,
   isUsableSnippet,
   salientNameForms,
   selectBestSnippet,
+  startsAtSentenceBoundary,
 } from "@/etl/tools/tool-context";
 
 describe("isUsableSnippet — junk filter", () => {
@@ -172,5 +174,74 @@ describe("selectBestSnippet — best-of-N", () => {
     });
     const best = selectBestSnippet(tie, "t");
     expect(best?.pmid).toBe("10");
+  });
+});
+
+describe("startsAtSentenceBoundary", () => {
+  it("accepts a capitalized / digit / bracket sentence start", () => {
+    expect(startsAtSentenceBoundary("FooTool maps reads to a reference")).toBe(true);
+    expect(startsAtSentenceBoundary("42 patients were enrolled in the trial")).toBe(true);
+    expect(startsAtSentenceBoundary("(MRI) was acquired on every participant")).toBe(true);
+  });
+  it("rejects a lowercase or continuation-word mid-clause start", () => {
+    expect(startsAtSentenceBoundary("using FooTool we aligned the reads")).toBe(false);
+    expect(startsAtSentenceBoundary("were compared measuring the AUC across arms")).toBe(false);
+    expect(startsAtSentenceBoundary("Which the model then ranked by score")).toBe(false); // capital continuation word
+  });
+});
+
+describe("selectBestSnippet — #1119 calibration levers", () => {
+  const gidx = buildToolContextIndex({
+    g: { "1": "GeneTool assembles full-length transcripts from linked-read data in a reference-free manner" },
+  });
+
+  it("opaque gate: suppresses the snippet when pub_count exceeds the cut", () => {
+    expect(selectBestSnippet(gidx, "g", { displayName: "GeneTool", toolPubCount: 5 })).toBeNull();
+    expect(selectBestSnippet(gidx, "g", { displayName: "GeneTool", toolPubCount: 9 })).toBeNull();
+  });
+
+  it("opaque gate: keeps the snippet at or below the cut, and when pub_count is unknown", () => {
+    expect(selectBestSnippet(gidx, "g", { displayName: "GeneTool", toolPubCount: MAX_PUB_COUNT_FOR_SNIPPET })?.context).toContain("assembles");
+    expect(selectBestSnippet(gidx, "g", { displayName: "GeneTool" })?.context).toContain("assembles");
+    expect(selectBestSnippet(gidx, "g", { displayName: "GeneTool", toolPubCount: null })?.context).toContain("assembles");
+  });
+
+  it("subject-not-foil guard: prefers an early-named snippet over a LONGER one that names the tool only late (foil)", () => {
+    const idx = buildToolContextIndex({
+      f: {
+        "1": "FooTool quantifies tumor purity directly from a stained histological slide",
+        // longer, but names the tool only at the very end → a foil/contrast mention
+        "2": "Results were markedly worse for every alternative pipeline we benchmarked against the older FooTool",
+      },
+    });
+    const best = selectBestSnippet(idx, "f", { displayName: "FooTool" });
+    expect(best?.pmid).toBe("1"); // early-named bucket wins despite pmid 2 being longer
+  });
+
+  it("subject-not-foil guard: falls back to a late-named snippet when it is the only one (never drops)", () => {
+    const idx = buildToolContextIndex({
+      f: { "1": "Results were markedly worse for the alternative pipelines benchmarked against the older FooTool" },
+    });
+    expect(selectBestSnippet(idx, "f", { displayName: "FooTool" })?.pmid).toBe("1");
+  });
+
+  it("clean-start breaks an EXACT length tie (over the lower pmid)", () => {
+    const clean = "FooTool maps short reads to the reference genome assembly";
+    const frag = "via FooTool we map short reads to a reference genome here";
+    expect(clean.length).toBe(frag.length); // self-check: the tiebreak only fires on equal length
+    const idx = buildToolContextIndex({ t: { "1": frag, "2": clean } });
+    const best = selectBestSnippet(idx, "t", { displayName: "FooTool" });
+    expect(best?.pmid).toBe("2"); // clean sentence-start wins even though pmid 1 is lower
+  });
+
+  it("length stays PRIMARY: a long descriptive fragment beats a short clean snippet (wins are not dropped)", () => {
+    const idx = buildToolContextIndex({
+      d: {
+        "1": "FooTool is a sequencing assay tool.",
+        "2": "using FooTool we generated a detailed and lengthy descriptive characterization of method behavior across many varied clinical samples",
+      },
+    });
+    // pmid 2 begins mid-clause but is far more descriptive → still chosen.
+    expect(selectBestSnippet(idx, "d", { displayName: "FooTool" })?.pmid).toBe("2");
   });
 });

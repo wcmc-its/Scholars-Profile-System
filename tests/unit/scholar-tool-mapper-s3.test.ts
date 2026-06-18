@@ -197,4 +197,37 @@ describe("buildScholarToolWritesFromS3 — #1119 sample context", () => {
     );
     expect(writes[0].sampleContext).toBeNull();
   });
+
+  it("#1119 opaque gate: suppresses sampleContext for a high-frequency tool (canonical pub_count)", () => {
+    const toolContext = buildToolContextIndex({
+      tool_1: {
+        "111": "RNA-seq analysis of E. coli K12 revealed 447 differentially expressed genes across conditions",
+      },
+    });
+    // Canonical GLOBAL pub_count is the gate signal — NOT the per-scholar faculty count.
+    const { writes } = buildScholarToolWritesFromS3(
+      artifact(
+        [{ canonical_tool_id: "tool_1", display_name: "RNA-seq", salience_tier: "S", pub_count: 900 }],
+        { aog: [{ canonical_tool_id: "tool_1", pub_count: 8 }] },
+      ),
+      { ourCwidSet: new Set(["aog"]), toolContext },
+    );
+    expect(writes[0].sampleContext).toBeNull();
+  });
+
+  it("#1119 opaque gate: keeps sampleContext for a niche tool with a low canonical pub_count", () => {
+    const toolContext = buildToolContextIndex({
+      tool_1: {
+        "111": "wsPurity quantifies tumor purity within a digitally captured H&E stained histological slide",
+      },
+    });
+    const { writes } = buildScholarToolWritesFromS3(
+      artifact(
+        [{ canonical_tool_id: "tool_1", display_name: "wsPurity", salience_tier: "B", pub_count: 2 }],
+        { aog: [{ canonical_tool_id: "tool_1", pub_count: 2 }] },
+      ),
+      { ourCwidSet: new Set(["aog"]), toolContext },
+    );
+    expect(writes[0].sampleContext).toContain("tumor purity");
+  });
 });

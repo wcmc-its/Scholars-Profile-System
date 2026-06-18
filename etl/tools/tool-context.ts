@@ -32,6 +32,23 @@ export const MIN_SNIPPET_LEN = 25;
 export const MAX_SNIPPET_LEN = 240;
 
 /**
+ * #1119 opaque-tool gate. A tool used in MORE than this many papers (its GLOBAL
+ * canonical `pub_count`) is a common, self-explanatory method whose usage snippet
+ * is one paper's specific result, not a definition — measured display win-rate is
+ * ~2% at `pub_count ≥ 5` vs ~28–34% below the cut, with 96% of real wins retained
+ * (see `docs/methodcontext-snippet-eval-findings.md` §3). `selectBestSnippet`
+ * suppresses the snippet for such a tool, but ONLY when a numeric `pub_count` is
+ * supplied — an unknown count never gates (conservative: keep the snippet).
+ */
+export const MAX_PUB_COUNT_FOR_SNIPPET = 4;
+
+/** The leading fraction of a snippet within which a "subject" mention of the tool
+ *  must appear. Real wins name the tool early (median position ~0.28); foils name
+ *  it late as a contrast/incidental mention (~0.81). Used as a selection PREFERENCE
+ *  in the name-bias pass — never a hard drop (see findings §5). */
+export const EARLY_NAME_MAX_FRACTION = 0.75;
+
+/**
  * Junk filter (#1119): drop bare URLs, "available at …" repo pointers, raw
  * code-host links, and sub-`MIN_SNIPPET_LEN` boilerplate. Observed on the live
  * artifact, e.g. `Blackbird → "available at https://github.com/1dayac/Blackbird"`.
@@ -83,6 +100,53 @@ function namesTool(snippet: string, forms: string[]): boolean {
   if (forms.length === 0) return false;
   const s = snippet.toLowerCase();
   return forms.some((f) => s.includes(f));
+}
+
+/** Earliest position (as a fraction of length) at which the snippet names the
+ *  tool; returns 1 when it never does. Lower ⇒ the tool is the subject (a win);
+ *  high ⇒ a late foil/incidental mention. */
+function nameFirstFraction(snippet: string, forms: string[]): number {
+  if (forms.length === 0) return 1;
+  const s = snippet.toLowerCase();
+  let first = -1;
+  for (const f of forms) {
+    const i = s.indexOf(f);
+    if (i >= 0 && (first < 0 || i < first)) first = i;
+  }
+  return first < 0 ? 1 : first / Math.max(1, snippet.length);
+}
+
+/** Continuation words that mark a snippet beginning mid-clause even when the
+ *  first letter happens to be capitalized. */
+const FRAGMENT_LEAD_RE =
+  /^(?:were|was|are|is|been|being|and|but|or|nor|which|that|who|whose|whom|revealing|showing|measuring|comparing|including|yielding|demonstrating|suggesting|indicating|resulting)\b/i;
+
+/**
+ * True when the snippet reads as a complete sentence start (begins with a capital
+ * letter, digit, or opening bracket and not a dangling continuation word) rather
+ * than mid-clause. Used ONLY as a best-of-N TIE-BREAKER — never to drop a snippet:
+ * the cheap heuristic is ~45% precise and a hard drop would kill ~half of the real
+ * wins, which legitimately begin mid-clause (see findings §4).
+ */
+export function startsAtSentenceBoundary(snippet: string): boolean {
+  const t = snippet.trimStart();
+  if (!t) return false;
+  if (/^[a-z]/.test(t)) return false;
+  if (FRAGMENT_LEAD_RE.test(t)) return false;
+  return true;
+}
+
+/**
+ * Selection comparator: LONGEST (most descriptive) is primary — this preserves
+ * real wins that begin mid-clause, so the clean-start signal can only break an
+ * exact length tie; the source pmid (asc) is the final deterministic tiebreak.
+ */
+function isBetterSnippet(c: SurvivingSnippet, best: SurvivingSnippet): boolean {
+  if (c.snippet.length !== best.snippet.length) return c.snippet.length > best.snippet.length;
+  const cClean = startsAtSentenceBoundary(c.snippet);
+  const bClean = startsAtSentenceBoundary(best.snippet);
+  if (cClean !== bClean) return cClean;
+  return c.pmid < best.pmid;
 }
 
 /** A junk-filter-surviving snippet and its provenance pmid, in artifact order. */
@@ -156,8 +220,20 @@ export type BestSnippet = { context: string; pmid: string };
 export function selectBestSnippet(
   index: ToolContextIndex,
   toolId: string,
-  opts?: { displayName?: string | null; scholarPmids?: ReadonlySet<string> },
+  opts?: {
+    displayName?: string | null;
+    scholarPmids?: ReadonlySet<string>;
+    /** #1119 — the tool's GLOBAL canonical `pub_count`. When numeric and above
+     *  `MAX_PUB_COUNT_FOR_SNIPPET`, the snippet is suppressed (opaque-tool gate).
+     *  Unknown/non-numeric ⇒ no gate. */
+    toolPubCount?: number | null;
+  },
 ): BestSnippet | null {
+  // #1119 opaque-tool gate — a common, self-explanatory method's snippet is noise
+  // (~2% win-rate); suppress it. Only fires when a numeric pub_count is supplied.
+  const pubCount = opts?.toolPubCount;
+  if (typeof pubCount === "number" && pubCount > MAX_PUB_COUNT_FOR_SNIPPET) return null;
+
   const survivors = index.byTool.get(toolId);
   if (!survivors || survivors.length === 0) return null;
 
@@ -172,18 +248,21 @@ export function selectBestSnippet(
   let pool = candidates;
   if (forms.length > 0) {
     const named = candidates.filter((c) => namesTool(c.snippet, forms));
-    if (named.length > 0) pool = named;
+    if (named.length > 0) {
+      pool = named;
+      // Subject-not-foil guard: prefer snippets that name the tool EARLY, not only
+      // as a late-sentence foil/contrast. Bucket-prefer; fall back to the late ones
+      // when none qualify, so a tool's only snippet is never dropped.
+      const early = named.filter((c) => nameFirstFraction(c.snippet, forms) <= EARLY_NAME_MAX_FRACTION);
+      if (early.length > 0) pool = early;
+    }
   }
 
-  // Longest (by RAW length, before clamping), tie-broken by pmid asc → deterministic.
+  // Longest (by RAW length, before clamping); clean sentence-start breaks an exact
+  // length tie; pmid asc is the final deterministic tiebreak.
   let best = pool[0];
   for (const c of pool) {
-    if (
-      c.snippet.length > best.snippet.length ||
-      (c.snippet.length === best.snippet.length && c.pmid < best.pmid)
-    ) {
-      best = c;
-    }
+    if (isBetterSnippet(c, best)) best = c;
   }
   return { context: clampSnippet(best.snippet), pmid: best.pmid };
 }

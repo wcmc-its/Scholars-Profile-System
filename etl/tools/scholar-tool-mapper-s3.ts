@@ -43,6 +43,9 @@ export type ToolsArtifactTool = {
   display_name: string;
   method_family_label?: string | null;
   salience_tier?: string | null;
+  /** #1119 — GLOBAL pub_count (across all faculty); the opaque-tool gate signal
+   *  for the usage snippet (NOT the per-scholar faculty pub_count). */
+  pub_count?: number | null;
   [key: string]: unknown;
 };
 
@@ -178,10 +181,14 @@ export function buildScholarToolWritesFromS3(
       const confidence = tierToConfidence(rec?.salience_tier ?? null);
       // #1119 — the tool's best usage snippet (global per tool; the artifact has
       // no per-(scholar,tool) pmids, so no scope to intersect). Keyed by id; the
-      // display name drives the name-bias pass.
+      // display name drives the name-bias pass; the canonical GLOBAL pub_count
+      // drives the opaque-tool gate (suppressed for common high-frequency tools).
       const sampleContext =
         id && toolContext
-          ? (selectBestSnippet(toolContext, id, { displayName: toolName })?.context ?? null)
+          ? (selectBestSnippet(toolContext, id, {
+              displayName: toolName,
+              toolPubCount: rec?.pub_count,
+            })?.context ?? null)
           : null;
 
       const prev = byName.get(toolName);
