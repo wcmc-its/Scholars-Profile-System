@@ -40,9 +40,13 @@
  */
 import { cache } from "react";
 import { prisma } from "@/lib/db";
-import { normalizeForMatch } from "@/lib/api/normalize";
+import { normalizeForMatch, normalizedWindows } from "@/lib/api/normalize";
 import { resolveSearchSuggestMeshConcept } from "@/lib/api/search-flags";
-import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
+import {
+  isMethodPagesEnabled,
+  isMethodFamilySynonymsEnabled,
+} from "@/lib/profile/methods-lens-flags";
+import { familySynonymKeys } from "@/lib/methods/family-synonyms";
 import {
   loadFamilyOverlayGate,
   isFamilyPubliclyVisible,
@@ -213,6 +217,14 @@ type EntityCandidate = {
   supercategory: string | null;
   familyId: string | null;
   familyLabel: string | null;
+  /**
+   * Curated synonym match-keys (normalized) for a `methodFamily` candidate — the
+   * lay-term / brand / acronym forms that should also match this family
+   * (`lib/methods/family-synonyms.ts`). Empty/undefined on every other candidate
+   * kind and when `METHODS_LENS_FAMILY_SYNONYMS` is off. Matched against the query's
+   * whole-word windows in `matchQueryToTaxonomy`, never as a raw substring.
+   */
+  synonymKeys?: readonly string[];
 };
 
 // Request-scoped memo (B6): the generic-strip retry calls `matchQueryToTaxonomy`
@@ -305,6 +317,9 @@ const loadEntityCandidates = cache(async (): Promise<EntityCandidate[]> => {
  * The overlay gate is loaded ONCE here and applied to both kinds.
  */
 async function loadMethodCandidates(): Promise<EntityCandidate[]> {
+  // Curated synonyms only participate when the flag is on; off ⇒ never attach,
+  // so the candidate set is byte-identical to the pre-synonym behavior.
+  const synonymsOn = isMethodFamilySynonymsEnabled();
   const [rows, gate] = await Promise.all([
     // Distinct (supercategory, familyLabel) with a representative familyId. `_min`
     // gives a stable representative id within a load (familyId re-mints per
@@ -343,6 +358,9 @@ async function loadMethodCandidates(): Promise<EntityCandidate[]> {
       supercategory: r.supercategory,
       familyId,
       familyLabel: r.familyLabel,
+      synonymKeys: synonymsOn
+        ? familySynonymKeys(r.supercategory, r.familyLabel)
+        : undefined,
     });
   }
 
@@ -566,12 +584,31 @@ export async function matchQueryToTaxonomy(
     loadEntityCandidates(),
     resolveMeshDescriptor(trimmed),
   ]);
+  // Curated method-family synonyms (flag-gated; only methodFamily candidates carry
+  // `synonymKeys`). Match a synonym only when it equals a whole-word WINDOW of the
+  // query — window-exact, never raw substring — so a short acronym like "ML" matches
+  // the query "ML" but never the token "html". Windows are computed once, and only
+  // when some candidate actually carries synonyms.
+  const queryWindows =
+    all.some((c) => c.synonymKeys && c.synonymKeys.length > 0)
+      ? normalizedWindows(trimmed)
+      : null;
+
   const matchedAll = all
-    .filter((c) => c.matchKey.includes(normalized))
-    .map((c) => ({
-      ...c,
-      similarity: normalized.length / c.matchKey.length,
-    }));
+    .map((c) => {
+      const canonical = c.matchKey.includes(normalized);
+      const synonym =
+        !canonical &&
+        queryWindows !== null &&
+        c.synonymKeys !== undefined &&
+        c.synonymKeys.some((k) => queryWindows.has(k));
+      if (!canonical && !synonym) return null;
+      // Canonical hits keep length-normalized similarity; a curated synonym hit is
+      // an explicit editorial mapping, so it scores as a strong (1.0) match.
+      const similarity = canonical ? normalized.length / c.matchKey.length : 1;
+      return { ...c, similarity };
+    })
+    .filter((c): c is EntityCandidate & { similarity: number } => c !== null);
   if (matchedAll.length === 0) return { state: "none", meshResolution };
 
   // #824 PR-2 — partition Topic-taxonomy matches (the #709 chip row + the existing

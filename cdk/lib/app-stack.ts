@@ -1359,6 +1359,18 @@ export class AppStack extends Stack {
         //     RENDER-ONLY: never re-fed into any LLM/embedding/retrieval. Wire in
         //     BOTH .env.local AND here per the flag-parity rule.
         METHODS_LENS_FAMILY_DEFINITIONS: env === "staging" ? "on" : "off",
+        //   METHODS_LENS_FAMILY_SYNONYMS -- method-family search synonyms. When on,
+        //     matchQueryToTaxonomy ALSO matches a family against its curated lay-term /
+        //     brand / acronym synonyms (lib/methods/family-synonyms.ts) via whole-word
+        //     window exact match -- so "Seahorse" reaches `extracellular flux
+        //     respirometry`, "FACS" reaches `flow cytometry assays`, which the canonical
+        //     substring matcher cannot. ADDITIONALLY gated on METHODS_LENS_PAGES (method
+        //     candidates only load then), so off OR pages-off => byte-identical to today.
+        //     Match-only: no DB, no ETL, no reindex; flip is env-only via cdk deploy
+        //     Sps-App-<env> (CD only re-rolls the image). STAGING ON (method lens is
+        //     staging-live -> synonyms soak there); PROD OFF (inert anyway until the
+        //     methods-lens go-live flips METHODS_LENS_ENABLED in prod).
+        METHODS_LENS_FAMILY_SYNONYMS: env === "staging" ? "on" : "off",
         //   CENTER_METHODS_FACET -- #962. The center-roster "Methods & tools"
         //     multi-select facet + per-member tool chips on the GROUPED center
         //     roster. ADDITIONALLY gated on METHODS_LENS_ENABLED in code (the

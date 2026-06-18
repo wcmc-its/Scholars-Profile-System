@@ -141,3 +141,18 @@ export function isOrgUnitMethodsChipsEnabled(): boolean {
 export function isOrgUnitMethodsFacetEnabled(): boolean {
   return isMethodsLensEnabled() && process.env.ORG_UNIT_METHODS_FACET === "on";
 }
+
+/**
+ * Method-family search SYNONYMS. When on, `matchQueryToTaxonomy` also matches a
+ * method family against its curated lay-term / brand / acronym synonyms
+ * (`lib/methods/family-synonyms.ts`) via whole-word-window exact match — so e.g.
+ * "Seahorse" reaches `extracellular flux respirometry` and "FACS" reaches `flow
+ * cytometry assays`, which the canonical substring matcher (`matchKey.includes`)
+ * cannot. ADDITIONALLY gated on `isMethodPagesEnabled()` (method candidates are
+ * only loaded then), so off → byte-identical to today (no synonym pass). Match-only:
+ * no DB, no ETL, no reindex. Wire in BOTH `.env.local` AND the per-env block in
+ * cdk/lib/app-stack.ts per the flag-parity rule.
+ */
+export function isMethodFamilySynonymsEnabled(): boolean {
+  return isMethodPagesEnabled() && process.env.METHODS_LENS_FAMILY_SYNONYMS === "on";
+}
