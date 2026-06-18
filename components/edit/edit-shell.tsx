@@ -34,6 +34,10 @@ export type EditShellProps = {
   basePath: string;
   /** "Preview Profile" target (the public profile by slug). */
   previewHref?: string;
+  /** "View change history" target — the scholar's `/edit/scholar/[cwid]/history`
+   *  audit page (#955). Internal, so it opens in the same tab. Shown for every
+   *  edit mode (history visibility == edit access). Omit ⇒ no link. */
+  historyHref?: string;
   /**
    * The signed-in (actor) scholar's identity for the header account menu. In
    * self mode this is the scholar themselves; omit it for surfaces that don't
@@ -70,6 +74,7 @@ export function EditShell({
   activeAttr,
   basePath,
   previewHref,
+  historyHref,
   account,
   canBrowseProfiles = false,
   consoleNav,
@@ -198,20 +203,32 @@ export function EditShell({
             </p>
           )}
 
-          {/* Standalone "Preview Profile" link (mockup parity) — slate text + an
-              external ↗ arrow. Shown alongside the account menu's "View my
-              profile". */}
-          {previewHref && (
-            <div className="mb-4 flex justify-end">
-              <Link
-                href={previewHref}
-                className="text-apollo-slate inline-flex items-center gap-1.5 text-sm font-medium hover:underline"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Preview Profile
-                <ArrowUpRight className="size-4" aria-hidden />
-              </Link>
+          {/* Secondary links row (mockup parity, slate text). "View change
+              history" (internal audit page, #955) sits beside "Preview Profile"
+              (the public profile, external ↗). Shown alongside the account
+              menu's "View my profile". */}
+          {(historyHref || previewHref) && (
+            <div className="mb-4 flex items-center justify-end gap-4">
+              {historyHref && (
+                <Link
+                  href={historyHref}
+                  className="text-apollo-slate inline-flex items-center gap-1.5 text-sm font-medium hover:underline"
+                  data-testid="edit-history-link"
+                >
+                  View change history
+                </Link>
+              )}
+              {previewHref && (
+                <Link
+                  href={previewHref}
+                  className="text-apollo-slate inline-flex items-center gap-1.5 text-sm font-medium hover:underline"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Preview Profile
+                  <ArrowUpRight className="size-4" aria-hidden />
+                </Link>
+              )}
             </div>
           )}
 

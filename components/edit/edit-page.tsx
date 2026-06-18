@@ -444,6 +444,10 @@ export function EditPage({
       activeAttr={active.key}
       basePath={basePath}
       previewHref={profilePath(ctx.scholar.slug)}
+      // History visibility == edit access, so every mode gets the link; the
+      // route is always `/edit/scholar/[cwid]/history` (self resolves via the
+      // gate's isSelf branch), never the bare `/edit`. (#955)
+      historyHref={`/edit/scholar/${ctx.scholar.cwid}/history`}
       account={mode === "self" ? { slug: ctx.scholar.slug, preferredName: scholarName } : undefined}
       canBrowseProfiles={canBrowseProfiles}
       consoleNav={consoleNav}
