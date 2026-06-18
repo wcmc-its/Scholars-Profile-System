@@ -1470,3 +1470,96 @@ describe("suggestMeshConcepts (#878)", () => {
     expect(out).toEqual([]);
   });
 });
+
+describe("resolveMeshDescriptor — decompose-and-resolve fallback (SEARCH_MESH_RESOLUTION_FALLBACK)", () => {
+  const D_WEARABLE = {
+    descriptorUi: "D000076251",
+    name: "Wearable Electronic Devices",
+    entryTerms: ["Wearable Devices"],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["J01.637.100"],
+  };
+  const D_MATMORT = {
+    descriptorUi: "D008428",
+    name: "Maternal Mortality",
+    entryTerms: [],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["N01.224.100"],
+  };
+  const D_MORBIDITY = {
+    descriptorUi: "D009017",
+    name: "Morbidity",
+    entryTerms: [],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["N01.224.200"],
+  };
+  // Homonym trap: the single common word "Seahorse" is only an ENTRY TERM here.
+  const D_SEAHORSE = {
+    descriptorUi: "D012691",
+    name: "Smegmamorpha",
+    entryTerms: ["Seahorse"],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["B01.050.150"],
+  };
+  const D_RADIOMICS = {
+    descriptorUi: "D000095024",
+    name: "Radiomics",
+    entryTerms: [],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["L01.224.300"],
+  };
+
+  afterEach(() => {
+    delete process.env.SEARCH_MESH_RESOLUTION_FALLBACK;
+  });
+
+  it("flag OFF: a whole-query miss stays null (byte-identical baseline)", async () => {
+    delete process.env.SEARCH_MESH_RESOLUTION_FALLBACK;
+    mockMeshFindMany.mockResolvedValue([D_WEARABLE]);
+    expect(await resolveMeshDescriptor("Wearable devices & sensors")).toBeNull();
+  });
+
+  it("flag ON: a contiguous word-window resolves at confidence 'partial'", async () => {
+    process.env.SEARCH_MESH_RESOLUTION_FALLBACK = "on";
+    mockMeshFindMany.mockResolvedValue([D_WEARABLE]);
+    const r = await resolveMeshDescriptor("Wearable devices & sensors");
+    expect(r?.descriptorUi).toBe("D000076251");
+    expect(r?.confidence).toBe("partial");
+    expect(r?.matchedForm).toBe("wearable devices");
+  });
+
+  it("flag ON: longest-window-first picks the specific descriptor, not a generic single word", async () => {
+    process.env.SEARCH_MESH_RESOLUTION_FALLBACK = "on";
+    mockMeshFindMany.mockResolvedValue([D_MATMORT, D_MORBIDITY]);
+    const r = await resolveMeshDescriptor("Maternal mortality & morbidity");
+    // 2-token "maternal mortality" wins over the 1-token "morbidity".
+    expect(r?.name).toBe("Maternal Mortality");
+    expect(r?.confidence).toBe("partial");
+  });
+
+  it("flag ON: a single-token window is BLOCKED unless it is an exact descriptor name (homonym guard)", async () => {
+    process.env.SEARCH_MESH_RESOLUTION_FALLBACK = "on";
+    mockMeshFindMany.mockResolvedValue([D_SEAHORSE]);
+    // "seahorse" matches only as an entry term → rejected → no "Seahorse → Smegmamorpha".
+    expect(await resolveMeshDescriptor("Seahorse metabolic flux")).toBeNull();
+  });
+
+  it("flag ON: a single-token window resolves when it IS an exact descriptor name", async () => {
+    process.env.SEARCH_MESH_RESOLUTION_FALLBACK = "on";
+    mockMeshFindMany.mockResolvedValue([D_RADIOMICS]);
+    const r = await resolveMeshDescriptor("advanced radiomics pipeline");
+    expect(r?.name).toBe("Radiomics");
+    expect(r?.confidence).toBe("partial");
+  });
+
+  it("flag ON: still null when no window resolves", async () => {
+    process.env.SEARCH_MESH_RESOLUTION_FALLBACK = "on";
+    mockMeshFindMany.mockResolvedValue([D_WEARABLE]);
+    expect(await resolveMeshDescriptor("html parsing widget")).toBeNull();
+  });
+});

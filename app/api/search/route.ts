@@ -129,7 +129,12 @@ async function handleSearch(request: NextRequest) {
   // it. Spread into the response body by `jsonWithTiming`.
   const conceptLabel = taxonomyMatch.meshResolution?.name ?? null;
   const meshMapped = taxonomyMatch.meshResolution !== null;
-  const searchInterpretation = { scope, conceptLabel, meshMapped };
+  const searchInterpretation = {
+    scope,
+    conceptLabel,
+    meshMapped,
+    meshConfidence: meshResolutionConfidence,
+  };
 
   // Issue #78 — Funding tab. Multi-select facets are repeated params,
   // OR within group, AND across groups. Mirrors the people/publications
@@ -597,4 +602,11 @@ type SearchInterpretation = {
   scope: Scope;
   conceptLabel: string | null;
   meshMapped: boolean;
+  /**
+   * How the concept was resolved. `partial` = the decompose-and-resolve fallback
+   * interpreted the query (a word-window matched, not the whole query) — the UI
+   * should frame `conceptLabel` tentatively ("interpreted from your search").
+   * `null` when nothing mapped.
+   */
+  meshConfidence: "exact" | "entry-term" | "partial" | null;
 };

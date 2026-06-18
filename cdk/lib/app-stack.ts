@@ -1463,6 +1463,21 @@ export class AppStack extends Stack {
         // until that eval. Flip is env-only via `cdk deploy --exclusively
         // Sps-App-<env>` (CD re-rolls the image only) -- the flag-parity rule.
         SEARCH_PEOPLE_CONCEPT_GRANT_AXIS: env === "staging" ? "on" : "off",
+        //   SEARCH_MESH_RESOLUTION_FALLBACK -- decompose-and-resolve MeSH fallback.
+        //     When ON, resolveMeshDescriptor -- after the exact name/entry-term/alias
+        //     lookup misses -- retries the query's contiguous word-windows
+        //     (longest-first) and, on a hit, returns the descriptor at the new low
+        //     `partial` confidence tier (admits/attributes BENEATH every verbatim tier
+        //     via MESH_ADMIT_WEIGHT, so a guess never out-ranks a real match; concept-
+        //     only docs already sort below lexical hits). Lets a multi-concept or
+        //     qualifier-laden query (e.g. "Liquid biopsy / circulating tumor DNA")
+        //     reach its dominant descriptor instead of degrading to free-text.
+        //     Guardrail: a single-token window resolves ONLY on an exact descriptor-
+        //     NAME match, so a short/common word can't mis-map (the "Seahorse ->
+        //     Smegmamorpha" trap). STAGING ON to soak + measure; PROD OFF pending eval.
+        //     Resolve-time only: no reindex. Flip is env-only via cdk deploy
+        //     Sps-App-<env> (CD re-rolls the image only) -- the flag-parity rule.
+        SEARCH_MESH_RESOLUTION_FALLBACK: env === "staging" ? "on" : "off",
         // #1026 -- surface soft-deleted doctoral-student co-authors as NON-LINKED
         // chips (name + headshot, no profile link, never faceted/searchable) on
         // publication chip surfaces site-wide (search, topic feeds, methods pages,
