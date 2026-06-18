@@ -28,6 +28,7 @@ const {
   mockPubAuthorFindMany,
   mockMethodPagesEnabled,
   mockSensitiveGateOn,
+  mockFamilySynonymsEnabled,
 } = vi.hoisted(() => ({
   mockTopicFindMany: vi.fn(),
   mockSubtopicFindMany: vi.fn(),
@@ -45,6 +46,7 @@ const {
   mockPubAuthorFindMany: vi.fn(),
   mockMethodPagesEnabled: vi.fn(),
   mockSensitiveGateOn: vi.fn(),
+  mockFamilySynonymsEnabled: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -72,6 +74,7 @@ vi.mock("@/lib/profile/methods-lens-flags", () => ({
   isMethodPagesEnabled: () => mockMethodPagesEnabled(),
   isMethodsLensSensitiveGateOn: () => mockSensitiveGateOn(),
   isMethodsLensEnabled: () => true,
+  isMethodFamilySynonymsEnabled: () => mockFamilySynonymsEnabled(),
 }));
 
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
@@ -93,6 +96,7 @@ beforeEach(() => {
   mockPubAuthorFindMany.mockReset().mockResolvedValue([]);
   mockMethodPagesEnabled.mockReset().mockReturnValue(true);
   mockSensitiveGateOn.mockReset().mockReturnValue(false);
+  mockFamilySynonymsEnabled.mockReset().mockReturnValue(false);
 });
 
 /** Helper: stub the distinct (supercategory, familyLabel) groupBy. */
@@ -269,5 +273,79 @@ describe("matchQueryToTaxonomy — Method taxonomy candidates (#824)", () => {
     expect(r.areas.every((a) => a.entityType === "parentTopic")).toBe(true);
     // The method surfaces only in methodMatches.
     expect(r.methodMatches.some((m) => m.entityType === "methodFamily")).toBe(true);
+  });
+});
+
+describe("matchQueryToTaxonomy — method-family synonyms (METHODS_LENS_FAMILY_SYNONYMS)", () => {
+  // The real curated map (lib/methods/family-synonyms.ts) is exercised against a
+  // family whose (supercategory, label) carries synonyms there.
+  const seahorseFamily = {
+    supercategory: "functional_metabolic_cellular_assays",
+    familyLabel: "extracellular flux respirometry",
+    familyId: "fam_0050",
+  };
+
+  it("flag OFF: a synonym query does NOT match (byte-identical baseline)", async () => {
+    mockFamilySynonymsEnabled.mockReturnValue(false);
+    familyGroups([seahorseFamily]);
+    familyRows([{ cwid: "a1", familyLabel: "extracellular flux respirometry", pmids: ["1"] }]);
+
+    // "Seahorse" is not a substring of the canonical label → no match when off.
+    const r = await matchQueryToTaxonomy("Seahorse metabolic flux");
+    expect(r.state).toBe("none");
+  });
+
+  it("flag ON: a curated synonym reaches the existing family", async () => {
+    mockFamilySynonymsEnabled.mockReturnValue(true);
+    familyGroups([seahorseFamily]);
+    familyRows([{ cwid: "a1", familyLabel: "extracellular flux respirometry", pmids: ["1", "2"] }]);
+
+    const r = await matchQueryToTaxonomy("Seahorse metabolic flux");
+    expect(r.state).toBe("matches");
+    if (r.state !== "matches") return;
+    const fam = r.methodMatches.find((m) => m.entityType === "methodFamily");
+    expect(fam?.name).toBe("extracellular flux respirometry");
+    expect(fam?.href).toBe(
+      "/methods/functional-metabolic-cellular-assays/extracellular-flux-respirometry-fam_0050",
+    );
+  });
+
+  it("flag ON: window-exact — acronym 'ADC' matches its family but a substring inside a token does not", async () => {
+    mockFamilySynonymsEnabled.mockReturnValue(true);
+    const adcFamily = {
+      supercategory: "therapeutics_interventions",
+      familyLabel: "antibody drug conjugate therapeutics",
+      familyId: "fam_0060",
+    };
+    familyGroups([adcFamily]);
+    familyRows([
+      { cwid: "a1", familyLabel: "antibody drug conjugate therapeutics", pmids: ["1"] },
+    ]);
+
+    // "ADC" is a whole-word window → matches via synonym.
+    const hit = await matchQueryToTaxonomy("ADC");
+    expect(hit.state).toBe("matches");
+    if (hit.state === "matches") {
+      expect(
+        hit.methodMatches.some((m) => m.name === "antibody drug conjugate therapeutics"),
+      ).toBe(true);
+    }
+
+    // "adcock smith" contains the substring "adc" inside the token "adcock", but
+    // never the WINDOW "adc" → window-exact matching rejects it (no false positive).
+    const miss = await matchQueryToTaxonomy("adcock smith");
+    expect(miss.state).toBe("none");
+  });
+
+  it("flag ON: canonical substring matching still works (no regression)", async () => {
+    mockFamilySynonymsEnabled.mockReturnValue(true);
+    familyGroups([seahorseFamily]);
+    familyRows([{ cwid: "a1", familyLabel: "extracellular flux respirometry", pmids: ["1"] }]);
+
+    // The canonical label is still matched as before, synonyms or not.
+    const r = await matchQueryToTaxonomy("extracellular flux");
+    expect(r.state).toBe("matches");
+    if (r.state !== "matches") return;
+    expect(r.methodMatches.some((m) => m.name === "extracellular flux respirometry")).toBe(true);
   });
 });

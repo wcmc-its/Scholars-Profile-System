@@ -26,3 +26,34 @@ export function normalizeForMatch(s: string): string {
     .replace(/\band\b/g, " ")
     .replace(/[^a-z0-9]+/g, "");
 }
+
+/**
+ * Normalized contiguous word-windows (n-grams) of a query, for whole-word
+ * synonym/alias matching. Tokenizes on the SAME rules as {@link normalizeForMatch}
+ * (lowercase, drop standalone "and", split on non-alphanumerics), then joins every
+ * contiguous run of 1..`maxTokens` tokens into a key. Whole-token by construction,
+ * so a short key like "ml" matches the query "ML" / "machine ML" but NOT "html"
+ * (a single token "html" never yields the window "ml") — avoiding the raw-substring
+ * false positives that make a naive alias matcher map "Seahorse" → "Smegmamorpha".
+ *
+ * Keys shorter than `minLen` are skipped. Returns a Set for O(1) membership.
+ */
+export function normalizedWindows(
+  s: string,
+  { maxTokens = 8, minLen = 2 }: { maxTokens?: number; minLen?: number } = {},
+): Set<string> {
+  const tokens = s
+    .toLowerCase()
+    .replace(/\band\b/g, " ")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  const out = new Set<string>();
+  const span = Math.min(maxTokens, tokens.length);
+  for (let size = 1; size <= span; size++) {
+    for (let i = 0; i + size <= tokens.length; i++) {
+      const w = tokens.slice(i, i + size).join("");
+      if (w.length >= minLen) out.add(w);
+    }
+  }
+  return out;
+}
