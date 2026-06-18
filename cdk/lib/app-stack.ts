@@ -1198,6 +1198,17 @@ export class AppStack extends Stack {
         // never a 500). STAGING-FIRST: on for staging (people index reindexed
         // 2026-06-16), off for prod (prod go-live is a separate reindex + flip).
         SEARCH_PEOPLE_METHOD_FAMILY: env === "staging" ? "on" : "off",
+        // #1119 -- People-tab method-CONTEXT ranking boost (tool-usage snippet text
+        // from ReciterAI tool_context). Same reindex-then-flip shape as
+        // SEARCH_PEOPLE_METHOD_FAMILY, but OFF in BOTH envs at merge: the
+        // `methodContext` field is NOT populated until the people index is
+        // reindexed on this code (which itself needs the tools ETL to backfill
+        // scholar_family.exemplar_contexts first). It is PROSE, so it must SOAK on
+        // staging before any prod flip. Go-live: tools ETL -> reindex people ->
+        // flip staging-on here + cdk deploy -> measure -> prod. resolvePeopleMethod-
+        // ContextBoost reads === "on"; a not-yet-reindexed cluster matches an absent
+        // field (never a 500).
+        SEARCH_PEOPLE_METHOD_CONTEXT: "off",
         // #824 follow-up -- match-aware People-results "why" line (method/topic/
         // humanized-areas snippet). APP-ONLY, no reindex: derives from
         // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-

@@ -83,6 +83,7 @@ import {
   resolvePeopleConceptPrecount,
   resolvePeopleMatchAwareSnippet,
   resolvePeopleMethodFamilyBoost,
+  resolvePeopleMethodContextBoost,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
   resolveSearchResultEvidence,
@@ -1095,15 +1096,24 @@ export async function searchPeople(opts: {
   // never reaches the topic/default branch — e.g. a pure name-template query —
   // does not spread a ladder it doesn't use; this preserves the prior
   // per-branch evaluation (a name query never referenced these constants).
+  // #1119 — the sibling method-CONTEXT boost (`SEARCH_PEOPLE_METHOD_CONTEXT`) adds
+  // the index-time `methodContext` usage-snippet field to the SAME ladders, so a
+  // usage query ranks on the real language of the work. Independent flag (it can
+  // ship/flip separately from methodFamily). Same analyzer + cross_fields group, so
+  // msm accounting is unchanged. PROSE → boosted MODESTLY (below methodFamily) so
+  // generic words don't out-rank a label/name hit (#1056/#1090). Reindex-then-flip.
   const methodBoostOn = resolvePeopleMethodFamilyBoost();
-  const peopleTopicFields = (): string[] =>
-    methodBoostOn
-      ? [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS, "methodFamily^4"]
-      : [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS];
-  const peopleDefaultFields = (): string[] =>
-    methodBoostOn
-      ? [...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS, "methodFamily^3"]
-      : [...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS];
+  const methodContextBoostOn = resolvePeopleMethodContextBoost();
+  const peopleTopicFields = (): string[] => [
+    ...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS,
+    ...(methodBoostOn ? ["methodFamily^4"] : []),
+    ...(methodContextBoostOn ? ["methodContext^2"] : []),
+  ];
+  const peopleDefaultFields = (): string[] => [
+    ...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS,
+    ...(methodBoostOn ? ["methodFamily^3"] : []),
+    ...(methodContextBoostOn ? ["methodContext^1.5"] : []),
+  ];
 
   // Issue #311 / SPEC §6.1.4 — name-template should-clauses, reused by the name
   // template (#309) and as the name half of the hybrid template. The cwid^100

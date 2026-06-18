@@ -260,6 +260,20 @@ export const peopleIndexMapping = {
         analyzer: "scholar_text",
         fields: { keyword: { type: "keyword" } },
       },
+      // #1119 — per-scholar rollup of the overlay-VISIBLE method families' tool-USAGE
+      // snippets (the ReciterAI tool_context text, e.g. "a non-invasive automated
+      // method of embryo evaluation that predicts ploidy"), deduped + joined. Same
+      // #800/#801 gate as `methodFamily`, so a suppressed/sensitive family never
+      // leaks. Analyzed `scholar_text` so a usage query ("embryo ploidy time-lapse")
+      // ranks the scholar via the cross_fields group, matching the real language of
+      // the work rather than just the tool's name. OMITTED on scholars with no
+      // visible family-with-snippet (omit-on-empty). The query-time boost is behind
+      // the default-OFF `SEARCH_PEOPLE_METHOD_CONTEXT` flag (reindex-then-flip);
+      // prose, so it relies on the people MSM (#1090) and is boosted modestly.
+      methodContext: {
+        type: "text",
+        analyzer: "scholar_text",
+      },
     },
   },
 };

@@ -32,6 +32,7 @@ type FamilyRow = {
   supercategory: string;
   familyLabel: string;
   exemplarTools: unknown;
+  exemplarContexts?: unknown;
 };
 
 // Mock client whose scholarFamily sidecar returns the given rows; every other
@@ -216,5 +217,73 @@ describe("buildPeopleDoc — methodFamily rollup (#824 §4c)", () => {
       (client as unknown as { scholarFamily: { findMany: ReturnType<typeof vi.fn> } })
         .scholarFamily.findMany,
     ).not.toHaveBeenCalled();
+  });
+});
+
+// #1119 — the sibling methodContext field: the visible families' tool-USAGE
+// snippets (values of the exemplar_contexts JSON map), deduped + joined. Same
+// gate as methodFamily; omit-on-empty.
+async function methodContextFor(
+  familyRows: ReadonlyArray<FamilyRow>,
+  gate: FamilyOverlayGate,
+): Promise<string | undefined> {
+  const doc = (await buildPeopleDoc(makeScholar(), mockClient(familyRows), NO_SUP, gate)) as {
+    methodContext?: string;
+  };
+  return doc.methodContext;
+}
+
+describe("buildPeopleDoc — methodContext rollup (#1119)", () => {
+  it("emits the visible families' usage snippets, deduped", async () => {
+    const methodContext = await methodContextFor(
+      [
+        {
+          ...CRISPR,
+          exemplarTools: ["Cas9"],
+          exemplarContexts: { Cas9: "introduced a double-strand break at the target locus" },
+        },
+        {
+          ...SCRNA,
+          exemplarTools: ["Seurat"],
+          exemplarContexts: { Seurat: "clustered single cells into transcriptional subtypes" },
+        },
+      ],
+      EMPTY_GATE,
+    );
+    expect(methodContext).toContain("introduced a double-strand break at the target locus");
+    expect(methodContext).toContain("clustered single cells into transcriptional subtypes");
+  });
+
+  it("excludes a gated family's usage snippet (same overlay gate as methodFamily)", async () => {
+    const methodContext = await methodContextFor(
+      [
+        {
+          ...CRISPR,
+          exemplarTools: ["Cas9"],
+          exemplarContexts: { Cas9: "edited the safe-harbor locus in primary T cells" },
+        },
+        {
+          ...SENSITIVE,
+          exemplarTools: ["Cre-lox"],
+          exemplarContexts: { "Cre-lox": "conditional knockout restricted to hepatocytes" },
+        },
+      ],
+      GATE,
+    );
+    expect(methodContext).toContain("edited the safe-harbor locus");
+    expect(methodContext).not.toContain("conditional knockout");
+  });
+
+  it("omits methodContext when no visible family carries a snippet", async () => {
+    const doc = (await buildPeopleDoc(
+      makeScholar(),
+      // exemplarTools present, but no exemplarContexts → no snippet.
+      mockClient([{ ...CRISPR, exemplarTools: ["Cas9"] }]),
+      NO_SUP,
+      EMPTY_GATE,
+    )) as Record<string, unknown>;
+    expect(doc).not.toHaveProperty("methodContext");
+    // ...while methodFamily is still emitted (the fields are independent).
+    expect(doc).toHaveProperty("methodFamily");
   });
 });

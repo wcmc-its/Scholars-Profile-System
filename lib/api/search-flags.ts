@@ -617,6 +617,26 @@ export function resolvePeopleMethodFamilyBoost(): boolean {
 }
 
 /**
+ * #1119 — People-tab method-CONTEXT ranking boost. When on, the people query adds
+ * the `methodContext` field (a per-scholar rollup of the overlay-visible families'
+ * tool-USAGE snippets — the ReciterAI tool_context text) to the multi_match boost
+ * ladders, so a usage query ("embryo ploidy time-lapse") ranks scholars by the real
+ * language of their work, not just a tool's name.
+ *
+ * Default OFF (`SEARCH_PEOPLE_METHOD_CONTEXT=on` enables) — a `=== "on"` gate, like
+ * the sibling `SEARCH_PEOPLE_METHOD_FAMILY` boost, and the SAME reindex-then-flip
+ * discipline: the `methodContext` field is populated by the search-index ETL
+ * (`buildPeopleDoc`), so reindex the people index BEFORE flipping. `methodContext`
+ * is PROSE, so it is boosted MODESTLY (below `methodFamily`) and relies on the
+ * existing people minimum-should-match to keep generic words from over-matching
+ * (the #1056/#1090 relevance lesson). SOAK before any prod flip. Flag-parity:
+ * when enabling, wire the env var in BOTH `.env.local` AND cdk/lib/app-stack.ts.
+ */
+export function resolvePeopleMethodContextBoost(): boolean {
+  return process.env.SEARCH_PEOPLE_METHOD_CONTEXT === "on";
+}
+
+/**
  * #824 follow-up — match-aware People snippet. Replaces the per-scholar snippet
  * line — today a raw underscore-slug dump of `areasOfInterest` rendered with
  * mid-word bolding (e.g. "single_cell_spatial_biology cell_molecular_biology")

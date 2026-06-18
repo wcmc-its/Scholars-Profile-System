@@ -448,6 +448,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_PEOPLE_METHOD_CONTEXT",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
                 "Value": "off",
               },
@@ -3631,6 +3635,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_PEOPLE_METHOD_FAMILY",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_METHOD_CONTEXT",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
