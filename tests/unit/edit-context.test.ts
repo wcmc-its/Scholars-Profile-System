@@ -15,6 +15,7 @@ vi.mock("@/lib/api/mentoring", () => ({
 }));
 
 import { loadEditContext } from "@/lib/api/edit-context";
+import { getMenteesForMentor } from "@/lib/api/mentoring";
 import { REJECT_REASON } from "@/lib/edit/reject-reason";
 
 type AnyMock = ReturnType<typeof vi.fn>;
@@ -129,6 +130,18 @@ describe("loadEditContext — boundary cases", () => {
     expect(ctx!.scholar.cwid).toBe(SELF);
     // The pmid-scoped queries are skipped (publication suppression load + confirmed authors).
     expect(c.suppression.findMany).toHaveBeenCalledTimes(1); // just the scholar one
+  });
+
+  it("default mentee-loader skips the co-pub query on the edit surface (#955 #5)", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    await loadEditContext(SELF, asClient(c));
+    // The /edit Mentees panel renders no co-pub count, so the default loader asks
+    // getMenteesForMentor to skip that source.
+    expect(vi.mocked(getMenteesForMentor)).toHaveBeenCalledWith(
+      SELF,
+      expect.objectContaining({ includeCopubs: false, sort: "class-year" }),
+    );
   });
 });
 

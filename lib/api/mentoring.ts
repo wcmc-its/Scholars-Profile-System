@@ -243,10 +243,16 @@ async function loadAocRows(mentorCwid: string): Promise<AocRow[]> {
  * `copublicationCount` is a fallback zero, not a real count). The early-return
  * paths (no mentor cwid / no recorded mentees) never reach the co-pub query,
  * so they report `copubSourceAvailable: true`.
+ *
+ * `options.includeCopubs` (default `true`) — pass `false` to skip the co-pub
+ * source entirely (both the bridge and the live path). Callers that render only
+ * mentee identity + program (the `/edit` Mentees panel, #955 finding #5) use
+ * this to avoid the per-mentee count/preview work on every load; every
+ * `copublicationCount` is then 0 and `copubSourceAvailable` is false.
  */
 export async function getMenteesForMentor(
   mentorCwid: string,
-  options?: { sort?: MenteeSort },
+  options?: { sort?: MenteeSort; includeCopubs?: boolean },
 ): Promise<MenteesResult> {
   if (!mentorCwid) return { mentees: [], copubSourceAvailable: true };
 
@@ -416,6 +422,10 @@ export async function getMenteesForMentor(
   // after the query completes without throwing; a thrown error leaves it false
   // so callers can tell "ReciterDB was down" apart from "this mentor genuinely
   // has zero co-pubs" and stop silently dropping the rollup link / badges.
+  // #955 finding #5 — callers that don't render the per-mentee co-pub count (the
+  // `/edit` Mentees panel) pass `includeCopubs: false` to skip the co-pub source
+  // entirely; counts stay 0 and `copubSourceAvailable` stays false.
+  const includeCopubs = options?.includeCopubs ?? true;
   let copubSourceAvailable = false;
 
   // Issue #443 — two co-pub sources. LIVE: the WCM ReciterDB query (load-bearing
@@ -423,7 +433,10 @@ export async function getMenteesForMentor(
   // `mentee_copublication` table, populated from S3 (etl:mentoring:import-copubs)
   // for envs that can't reach ReciterDB. `MENTORING_COPUB_BRIDGE` selects the
   // source; it's flipped only after the import runs (import-then-flip).
-  if (process.env.MENTORING_COPUB_BRIDGE === "on") {
+  if (!includeCopubs) {
+    // Skip both co-pub sources — the caller doesn't render counts (#955 #5). The
+    // dark-pmid suppression below no-ops on the empty preview map.
+  } else if (process.env.MENTORING_COPUB_BRIDGE === "on") {
     try {
       const rows = await prisma.menteeCopublication.findMany({
         where: { mentorCwid, menteeCwid: { in: cwids } },
