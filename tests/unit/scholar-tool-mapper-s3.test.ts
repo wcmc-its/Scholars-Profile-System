@@ -12,6 +12,7 @@ import {
   TIER_CONFIDENCE,
   type ToolsArtifactSlice,
 } from "@/etl/tools/scholar-tool-mapper-s3";
+import { buildToolContextIndex } from "@/etl/tools/tool-context";
 
 /** Build a minimal artifact slice from tool records + a per-cwid tool list. */
 function artifact(
@@ -164,5 +165,36 @@ describe("tierToConfidence", () => {
       expect(v).toBeLessThanOrEqual(1);
     }
     expect(tierToConfidence("Z")).toBe(0.1); // unrecognized tier → unknown floor
+  });
+});
+
+describe("buildScholarToolWritesFromS3 — #1119 sample context", () => {
+  it("populates sampleContext from the tool's best snippet (keyed by canonical id)", () => {
+    const toolContext = buildToolContextIndex({
+      tool_1: {
+        "111":
+          "cloudrnaSPAdes assembles full-length isoforms from barcoded RNA-seq linked-read data in a reference-free fashion",
+        "222": "short", // junk
+      },
+    });
+    const { writes } = buildScholarToolWritesFromS3(
+      artifact(
+        [{ canonical_tool_id: "tool_1", display_name: "cloudrnaSPAdes", salience_tier: "A" }],
+        { aog: [{ canonical_tool_id: "tool_1", pub_count: 3 }] },
+      ),
+      { ourCwidSet: new Set(["aog"]), toolContext },
+    );
+    expect(writes[0].sampleContext).toContain("full-length isoforms");
+  });
+
+  it("leaves sampleContext null when no toolContext index is supplied", () => {
+    const { writes } = buildScholarToolWritesFromS3(
+      artifact(
+        [{ canonical_tool_id: "tool_1", display_name: "X", salience_tier: "A" }],
+        { aog: [{ canonical_tool_id: "tool_1", pub_count: 3 }] },
+      ),
+      { ourCwidSet: new Set(["aog"]) },
+    );
+    expect(writes[0].sampleContext).toBeNull();
   });
 });

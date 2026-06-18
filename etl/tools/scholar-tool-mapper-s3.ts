@@ -26,10 +26,16 @@
  *   - pmidCount   ← faculty tool `pub_count` (the "used in N papers" count)
  *   - maxConfidence ← derived from salience_tier (orderBy tiebreak ONLY; never
  *                     displayed, never sent to the LLM — see TIER_CONFIDENCE)
- *   - sampleContext ← null   (no per-(scholar,tool) context in the artifact)
+ *   - sampleContext ← #1119 — the tool's best junk-filtered usage snippet from
+ *                     the A2 `tool_context.json` artifact, keyed by canonical
+ *                     tool id (when an index is supplied; null otherwise). The
+ *                     artifact carries no per-(scholar,tool) pmids, so this is the
+ *                     tool's GLOBAL best snippet (best-of-N falls back to all of a
+ *                     tool's snippets) — still tool-specific, paper-grounded text.
  *   - pmids         ← []     (Json NOT NULL needs a value; read by nothing)
  */
 import type { ScholarToolWrite } from "../dynamodb/scholar-tool-mapper";
+import { selectBestSnippet, type ToolContextIndex } from "./tool-context";
 
 /** Canonical tool record (the fields this mapper reads from `tools[]`). */
 export type ToolsArtifactTool = {
@@ -98,7 +104,13 @@ export function tierToConfidence(tier: string | null | undefined): number {
   return UNKNOWN_TIER_CONFIDENCE;
 }
 
-type Accum = { pmidCount: number; maxConfidence: number; category: string | null };
+type Accum = {
+  pmidCount: number;
+  maxConfidence: number;
+  category: string | null;
+  /** #1119 — best usage snippet across the ids that collapsed to this name. */
+  sampleContext: string | null;
+};
 
 /**
  * Build the `scholar_tool` rollup writes from the A2 tools + faculty slices.
@@ -116,9 +128,16 @@ type Accum = { pmidCount: number; maxConfidence: number; category: string | null
  */
 export function buildScholarToolWritesFromS3(
   artifact: ToolsArtifactSlice,
-  opts: { ourCwidSet: Set<string>; topNPerScholar?: number },
+  opts: {
+    ourCwidSet: Set<string>;
+    topNPerScholar?: number;
+    /** #1119 — junk-filtered tool→snippet index. Omit (or a miss) leaves
+     *  sampleContext null — benign and expected on a pre-v3 artifact. */
+    toolContext?: ToolContextIndex;
+  },
 ): BuildScholarToolS3Result {
   const topN = opts.topNPerScholar ?? 30;
+  const toolContext = opts.toolContext;
 
   // Index canonical tools by id for the display_name / family / tier join.
   const toolsById = new Map<string, ToolsArtifactTool>();
@@ -157,16 +176,27 @@ export function buildScholarToolWritesFromS3(
           : 0;
       const category = rec?.method_family_label ?? null;
       const confidence = tierToConfidence(rec?.salience_tier ?? null);
+      // #1119 — the tool's best usage snippet (global per tool; the artifact has
+      // no per-(scholar,tool) pmids, so no scope to intersect). Keyed by id; the
+      // display name drives the name-bias pass.
+      const sampleContext =
+        id && toolContext
+          ? (selectBestSnippet(toolContext, id, { displayName: toolName })?.context ?? null)
+          : null;
 
       const prev = byName.get(toolName);
       if (!prev) {
-        byName.set(toolName, { pmidCount: pubCount, maxConfidence: confidence, category });
+        byName.set(toolName, { pmidCount: pubCount, maxConfidence: confidence, category, sampleContext });
       } else {
-        // Two ids collapsed to one display name: keep the strongest signal, and
-        // the first non-null family label (first-wins, like the legacy mapper).
+        // Two ids collapsed to one display name: keep the strongest signal, the
+        // first non-null family label (first-wins, like the legacy mapper), and
+        // the longer usage snippet (the more descriptive of the collapsed ids).
         if (pubCount > prev.pmidCount) prev.pmidCount = pubCount;
         if (confidence > prev.maxConfidence) prev.maxConfidence = confidence;
         if (prev.category === null && category !== null) prev.category = category;
+        if (sampleContext && (!prev.sampleContext || sampleContext.length > prev.sampleContext.length)) {
+          prev.sampleContext = sampleContext;
+        }
       }
     }
 
@@ -181,7 +211,7 @@ export function buildScholarToolWritesFromS3(
         category: e.category,
         pmidCount: e.pmidCount,
         maxConfidence: e.maxConfidence,
-        sampleContext: null,
+        sampleContext: e.sampleContext,
         pmids: [],
       });
     }
