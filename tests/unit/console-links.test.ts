@@ -39,14 +39,14 @@ describe("buildConsoleLinks", () => {
     ]);
   });
 
-  it("unit Owner/Curator (not a superuser) → 'Org Units'", () => {
+  it("unit Owner/Curator (not a superuser) → 'Org units'", () => {
     const links = buildConsoleLinks({
       isSuperuser: false,
       canManageMethods: false,
       managesUnits: true,
     });
     expect(links).toEqual([
-      { id: "units", label: "Org Units", href: "/edit/units" },
+      { id: "units", label: "Org units", href: "/edit/units" },
     ]);
   });
 

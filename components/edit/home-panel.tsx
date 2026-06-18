@@ -162,7 +162,7 @@ function ManageableUnitsSection({
   return (
     <div className="flex flex-col gap-2" data-testid="home-units">
       <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-        Units you manage
+        Org units you manage
       </p>
       {hasUnits ? (
         <ul className="flex flex-col gap-2">

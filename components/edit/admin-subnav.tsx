@@ -84,7 +84,7 @@ export function AdminSubnav({
           <AdminTab href="/edit/scholars" id="profiles" label="Profiles" active={active === "profiles"} />
         )}
         {unitsTab && (
-          <AdminTab href="/edit/units" id="units" label="Org Units" active={active === "units"} />
+          <AdminTab href="/edit/units" id="units" label="Org units" active={active === "units"} />
         )}
         {superuserSurfaces && pendingSlugRequests !== null && (
           <AdminTab
