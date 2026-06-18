@@ -27,6 +27,7 @@ import {
   FUNDING_INDEX,
   FUNDING_FIELD_BOOSTS,
   PUBLICATIONS_INDEX,
+  PUBLICATIONS_RESTRUCTURED_MSM,
   searchClient,
 } from "@/lib/search";
 import { coreProjectNum } from "@/lib/award-number";
@@ -34,8 +35,12 @@ import {
   resolveFundingConceptEnabled,
   resolveFundingMatchReason,
   resolveFundingMeshGateField,
+  resolveFundingPhraseBoost,
+  resolveFundingTabMsm,
+  resolveFundingTextEvidence,
   type Scope,
 } from "@/lib/api/search-flags";
+import { clampAroundMarks } from "@/lib/api/result-evidence";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
 
 const PAGE_SIZE = 20;
@@ -168,6 +173,14 @@ export type FundingHit = {
    *  coherent "X of Y" phrasing. Present only under the flag + a resolved
    *  concept; 0 when the grant has no on-topic funded outputs. */
   matchedFundedPubs: number;
+  /** Tier 3 (`SEARCH_FUNDING_TEXT_EVIDENCE`) — the clamped, mark-aware snippet of
+   *  the best non-title / non-concept text-field highlight (abstract → keyword →
+   *  sponsor), so a grant matched ONLY on text still shows a "why it matched"
+   *  reason line. `field` names the source for the row's leading label; `snippet`
+   *  carries only balanced `<mark>` spans (non-mark tags stripped, clamped via
+   *  `clampAroundMarks`). Null under the flag-off path / empty query / no text
+   *  highlight, so the off contract is byte-identical to today. */
+  textEvidence: { field: "abstract" | "keywordsText" | "sponsorText"; snippet: string } | null;
 };
 
 export type SearchFacetBucket = { value: string; count: number };
@@ -250,6 +263,43 @@ function statusToFilterClause(
   return { bool: { should, minimum_should_match: 1 } };
 }
 
+/** Tier 3 — visible-length budget for the abstract/keyword text-evidence
+ *  snippet. Short enough to sit as a one-line reason; clamped mark-aware. */
+const TEXT_EVIDENCE_MAX_LEN = 160;
+
+/** Tier 3 — strip every NON-`<mark>` tag (the contract `clampAroundMarks`
+ *  requires: only balanced `<mark>`/`</mark>` may remain). Inlined here rather
+ *  than importing the `highlight-snippet` client component into this server
+ *  module. */
+function stripNonMarkTags(s: string): string {
+  return s.replace(/<(?!\/?mark\b)[^>]*>/gi, "");
+}
+
+/** Tier 3 — pick the best non-title text-field highlight fragment and return a
+ *  clamped, mark-aware snippet. Precedence abstract → keywordsText →
+ *  sponsorText. A field is only evidence when its first fragment actually
+ *  carries a `<mark>` (OpenSearch can return a fragment with no mark on a
+ *  partial highlight). Returns null when no text field produced a marked
+ *  fragment. */
+function pickTextEvidence(
+  highlight: { abstract?: string[]; keywordsText?: string[]; sponsorText?: string[] } | undefined,
+): { field: "abstract" | "keywordsText" | "sponsorText"; snippet: string } | null {
+  if (!highlight) return null;
+  const order: Array<"abstract" | "keywordsText" | "sponsorText"> = [
+    "abstract",
+    "keywordsText",
+    "sponsorText",
+  ];
+  for (const field of order) {
+    const frag = highlight[field]?.[0];
+    if (!frag || !frag.includes("<mark>")) continue;
+    const snippet = clampAroundMarks(stripNonMarkTags(frag), TEXT_EVIDENCE_MAX_LEN);
+    if (!snippet.includes("<mark>")) continue; // defensive: clamp dropped the mark
+    return { field, snippet };
+  }
+  return null;
+}
+
 export async function searchFunding(opts: {
   q: string;
   page?: number;
@@ -299,13 +349,33 @@ export async function searchFunding(opts: {
   // keywords via multi_match. User-axis filters live in post_filter so each
   // per-facet aggregation can re-apply only the OTHER axes and produce correct
   // excluding-self counts.
+  // Tier 1 (relevance gate). When SEARCH_FUNDING_TAB_MSM is on, the funding
+  // multi_match gains the same minimum_should_match floor the publications tab
+  // uses (PUBLICATIONS_RESTRUCTURED_MSM) so a multi-token query can't be admitted
+  // by ONE stemmed token in one field (e.g. `natural language processing`
+  // matching a kidney grant on `processing`->`process`), and the abstract boost
+  // drops ^1 -> ^0.5 (matching the pub-tab abstract weight) so a passing abstract
+  // mention can't dominate a direct title hit. Both are local to this clause: the
+  // shared FUNDING_FIELD_BOOSTS constant is NOT mutated (other call sites read it).
+  // Flag off => `fields` is the unchanged constant and the conditional spread is
+  // empty, so the emitted body is byte-identical to today.
+  const useFundingMsm = resolveFundingTabMsm();
+  const fundingFields = useFundingMsm
+    ? FUNDING_FIELD_BOOSTS.map((f) => (f === "abstract^1" ? "abstract^0.5" : f))
+    : [...FUNDING_FIELD_BOOSTS];
   const textClause: Record<string, unknown> =
     trimmed.length > 0
       ? {
           multi_match: {
             query: trimmed,
-            fields: [...FUNDING_FIELD_BOOSTS],
+            fields: fundingFields,
             type: "best_fields",
+            ...(useFundingMsm
+              ? {
+                  operator: "or",
+                  minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM,
+                }
+              : {}),
           },
         }
       : { match_all: {} };
@@ -379,6 +449,24 @@ export async function searchFunding(opts: {
       },
     };
   }
+
+  // TIER 2 — phrase-first ranking. A pure scoring `should` (NO
+  // `minimum_should_match`) so it can never change which documents are
+  // admitted: a contiguous-phrase title/abstract hit gets a strong score boost
+  // over a doc that merely scatters the same tokens via the `must` multi_match.
+  // Lives on the SAME bool as `must` (added in the body assembly below). The
+  // facet aggregations and the countOnly path read `must` directly, so the
+  // admission set AND every excluding-self facet count stay byte-identical to
+  // the flag-off body. Omitted entirely (empty array → no `should` key) when the
+  // flag is off or `q` is empty (a phrase on `match_all` is meaningless).
+  // No reindex: `title` / `abstract` are analyzed text in `fundingIndexMapping`.
+  const phraseShould: Record<string, unknown>[] =
+    resolveFundingPhraseBoost() && trimmed.length > 0
+      ? [
+          { match_phrase: { title: { query: trimmed, boost: 6 } } },
+          { match_phrase: { abstract: { query: trimmed, boost: 2 } } },
+        ]
+      : [];
 
   // Named filter clauses — built once, re-used for post_filter and for
   // each per-facet excluding-self aggregation.
@@ -593,24 +681,74 @@ export async function searchFunding(opts: {
   // Omitted when the flag is off / query is empty ⇒ body byte-identical to today.
   const matchReason = resolveFundingMatchReason();
   const wantTitleHighlight = matchReason && trimmed.length > 0;
+  // Tier 3 — also highlight the text fields (abstract / keywordsText /
+  // sponsorText) so a grant matched ONLY on text still shows a reason line.
+  const wantTextEvidence = resolveFundingTextEvidence() && trimmed.length > 0;
+  const anyHighlight = wantTitleHighlight || wantTextEvidence;
+
+  // Per-field highlight config. `title` keeps the whole-field fragment
+  // (`number_of_fragments: 0`) as today; the text fields use a single best
+  // fragment (`number_of_fragments: 1`, default fragment_size) since abstracts
+  // are long. Each field carries its OWN `highlight_query` `match` so the marks
+  // reflect the literal text hit, independent of the concept-admission clause.
+  const highlightFields: Record<string, unknown> = {};
+  if (wantTitleHighlight) {
+    highlightFields.title = {
+      number_of_fragments: 0,
+      highlight_query: { match: { title: trimmed } },
+    };
+  }
+  if (wantTextEvidence) {
+    highlightFields.abstract = {
+      number_of_fragments: 1,
+      highlight_query: { match: { abstract: trimmed } },
+    };
+    highlightFields.keywordsText = {
+      number_of_fragments: 1,
+      highlight_query: { match: { keywordsText: trimmed } },
+    };
+    highlightFields.sponsorText = {
+      number_of_fragments: 1,
+      highlight_query: { match: { sponsorText: trimmed } },
+    };
+  }
 
   const body = {
     from: page * PAGE_SIZE,
     size: PAGE_SIZE,
     track_total_hits: true,
-    query: { bool: { must } },
+    // TIER 2 — `phraseShould` rides as a top-level `should` on the SAME bool as
+    // `must`. With no `minimum_should_match`, a bool that already matches via
+    // `must` is NOT filtered by the should — it only adds to `_score`. Spread is
+    // empty (key omitted) when the phrase-boost flag is off / q is empty, so the
+    // off-path body is byte-identical to today.
+    query: { bool: { must, ...(phraseShould.length > 0 ? { should: phraseShould } : {}) } },
     ...(userAxisFilters.length > 0
       ? { post_filter: { bool: { filter: userAxisFilters } } }
       : {}),
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
-    ...(wantTitleHighlight
+    // Tier 3 keeps the highlight request byte-identical to the pre-Tier-3
+    // match-reason path UNLESS the text-evidence flag is on. With text evidence
+    // OFF we emit the original top-level `highlight_query` + single `title`
+    // field shape, so the DEFAULT-ON `SEARCH_FUNDING_MATCH_REASON` request is
+    // unchanged (no structural drift on the live path). Only when
+    // `SEARCH_FUNDING_TEXT_EVIDENCE` is on do we switch to the per-field shape
+    // (title carries its own `highlight_query`, plus the abstract/keyword/sponsor
+    // fields) — that change rides entirely behind the new flag.
+    ...(anyHighlight
       ? {
-          highlight: {
-            fields: { title: { number_of_fragments: 0 } },
-            highlight_query: { match: { title: trimmed } },
-            pre_tags: ["<mark>"],
-            post_tags: ["</mark>"],
-          },
+          highlight: wantTextEvidence
+            ? {
+                fields: highlightFields,
+                pre_tags: ["<mark>"],
+                post_tags: ["</mark>"],
+              }
+            : {
+                fields: { title: { number_of_fragments: 0 } },
+                highlight_query: { match: { title: trimmed } },
+                pre_tags: ["<mark>"],
+                post_tags: ["</mark>"],
+              },
         }
       : {}),
     aggs,
@@ -633,8 +771,15 @@ export async function searchFunding(opts: {
      *  clause (the concept admission); a literal-text hit is read off
      *  `highlight.title` instead. */
     matched_queries?: string[];
-    /** PLAN P4 — title highlight fragments under `SEARCH_FUNDING_MATCH_REASON`. */
-    highlight?: { title?: string[] };
+    /** PLAN P4 — title highlight fragments under `SEARCH_FUNDING_MATCH_REASON`.
+     *  Tier 3 — abstract/keywordsText/sponsorText fragments under
+     *  `SEARCH_FUNDING_TEXT_EVIDENCE`. */
+    highlight?: {
+      title?: string[];
+      abstract?: string[];
+      keywordsText?: string[];
+      sponsorText?: string[];
+    };
     _source: {
       projectId: string;
       title: string;
@@ -807,6 +952,8 @@ export async function searchFunding(opts: {
     const matchedFundedPubs = matchReason
       ? Math.min(fundedOutputs.get(src.projectId) ?? 0, pubCount)
       : 0;
+    // Tier 3 — abstract/keyword/sponsor text-hit snippet, only under the flag.
+    const textEvidence = wantTextEvidence ? pickTextEvidence(h.highlight) : null;
     return {
       projectId: src.projectId,
       title: src.title,
@@ -835,6 +982,7 @@ export async function searchFunding(opts: {
       matchedLiteralTitle: titleHighlight !== null,
       matchedConcept,
       matchedFundedPubs,
+      textEvidence,
       people: (src.people ?? []).map((p) => ({
         cwid: p.cwid,
         slug: p.slug,

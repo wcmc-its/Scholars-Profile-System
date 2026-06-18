@@ -12,6 +12,7 @@ import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { ExpandedGrant, expandLabel } from "@/components/funding/expanded-grant";
 import { highlightedTitleHtml } from "@/components/search/publication-result-row";
 import { MatchReason } from "@/components/search/match-reason";
+import { HighlightedSnippet } from "@/components/search/highlight-snippet";
 import { profilePath } from "@/lib/profile-url";
 import type { FundingFilters, FundingHit } from "@/lib/api/search-funding";
 
@@ -216,6 +217,15 @@ export function FundingResultRow({
           </MatchReason>
         ) : hit.matchedConcept && conceptLabel ? (
           <MatchReason kind="concept">via related concept {conceptLabel}</MatchReason>
+        ) : hit.textEvidence ? (
+          <MatchReason kind="publications">
+            {hit.textEvidence.field === "abstract"
+              ? "In abstract: "
+              : hit.textEvidence.field === "keywordsText"
+                ? "In keywords: "
+                : "In sponsor text: "}
+            <HighlightedSnippet html={hit.textEvidence.snippet} />
+          </MatchReason>
         ) : null}
 
         {canExpand ? (

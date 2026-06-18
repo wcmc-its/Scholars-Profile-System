@@ -12,6 +12,9 @@ import {
   resolveDeptLeadershipBoost,
   resolveFundingConceptEnabled,
   resolveFundingMeshGateField,
+  resolveFundingPhraseBoost,
+  resolveFundingTabMsm,
+  resolveFundingTextEvidence,
   resolvePeopleConceptGrantAxis,
   resolvePeopleConceptPrecount,
   resolvePeopleMethodFamilyBoost,
@@ -136,6 +139,102 @@ describe("resolveFundingConceptEnabled (#295)", () => {
     expect(resolveFundingConceptEnabled()).toBe(true);
     process.env.SEARCH_FUNDING_TAB_CONCEPT = "true";
     expect(resolveFundingConceptEnabled()).toBe(true);
+  });
+});
+
+describe("resolveFundingTabMsm (Tier 1 relevance gate)", () => {
+  const original = process.env.SEARCH_FUNDING_TAB_MSM;
+
+  beforeEach(() => {
+    delete process.env.SEARCH_FUNDING_TAB_MSM;
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_FUNDING_TAB_MSM;
+    else process.env.SEARCH_FUNDING_TAB_MSM = original;
+  });
+
+  it("defaults to false (dark) when the env is unset", () => {
+    expect(resolveFundingTabMsm()).toBe(false);
+  });
+
+  it("is on only for exactly 'on'", () => {
+    process.env.SEARCH_FUNDING_TAB_MSM = "on";
+    expect(resolveFundingTabMsm()).toBe(true);
+  });
+
+  it("is off for 'off', 'ON', 'true', or any other non-'on' value", () => {
+    process.env.SEARCH_FUNDING_TAB_MSM = "off";
+    expect(resolveFundingTabMsm()).toBe(false);
+    process.env.SEARCH_FUNDING_TAB_MSM = "ON";
+    expect(resolveFundingTabMsm()).toBe(false);
+    process.env.SEARCH_FUNDING_TAB_MSM = "true";
+    expect(resolveFundingTabMsm()).toBe(false);
+    process.env.SEARCH_FUNDING_TAB_MSM = "1";
+    expect(resolveFundingTabMsm()).toBe(false);
+  });
+});
+
+describe("resolveFundingPhraseBoost (Tier 2 phrase-first ranking)", () => {
+  const original = process.env.SEARCH_FUNDING_PHRASE_BOOST;
+
+  beforeEach(() => {
+    delete process.env.SEARCH_FUNDING_PHRASE_BOOST;
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_FUNDING_PHRASE_BOOST;
+    else process.env.SEARCH_FUNDING_PHRASE_BOOST = original;
+  });
+
+  it("defaults to false (dark) when the env is unset", () => {
+    expect(resolveFundingPhraseBoost()).toBe(false);
+  });
+
+  it("is on only for exactly 'on'", () => {
+    process.env.SEARCH_FUNDING_PHRASE_BOOST = "on";
+    expect(resolveFundingPhraseBoost()).toBe(true);
+  });
+
+  it("is off for 'off', 'ON', 'true', or any other non-'on' value", () => {
+    process.env.SEARCH_FUNDING_PHRASE_BOOST = "off";
+    expect(resolveFundingPhraseBoost()).toBe(false);
+    process.env.SEARCH_FUNDING_PHRASE_BOOST = "ON";
+    expect(resolveFundingPhraseBoost()).toBe(false);
+    process.env.SEARCH_FUNDING_PHRASE_BOOST = "true";
+    expect(resolveFundingPhraseBoost()).toBe(false);
+    process.env.SEARCH_FUNDING_PHRASE_BOOST = "1";
+    expect(resolveFundingPhraseBoost()).toBe(false);
+  });
+});
+
+describe("resolveFundingTextEvidence (Tier 3 text-hit evidence line)", () => {
+  const original = process.env.SEARCH_FUNDING_TEXT_EVIDENCE;
+
+  beforeEach(() => {
+    delete process.env.SEARCH_FUNDING_TEXT_EVIDENCE;
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_FUNDING_TEXT_EVIDENCE;
+    else process.env.SEARCH_FUNDING_TEXT_EVIDENCE = original;
+  });
+
+  it("defaults to false (dark) when the env is unset", () => {
+    expect(resolveFundingTextEvidence()).toBe(false);
+  });
+
+  it("is on only for exactly 'on'", () => {
+    process.env.SEARCH_FUNDING_TEXT_EVIDENCE = "on";
+    expect(resolveFundingTextEvidence()).toBe(true);
+  });
+
+  it("is off for 'off', 'ON', 'true', or any other non-'on' value", () => {
+    process.env.SEARCH_FUNDING_TEXT_EVIDENCE = "off";
+    expect(resolveFundingTextEvidence()).toBe(false);
+    process.env.SEARCH_FUNDING_TEXT_EVIDENCE = "ON";
+    expect(resolveFundingTextEvidence()).toBe(false);
+    process.env.SEARCH_FUNDING_TEXT_EVIDENCE = "true";
+    expect(resolveFundingTextEvidence()).toBe(false);
+    process.env.SEARCH_FUNDING_TEXT_EVIDENCE = "1";
+    expect(resolveFundingTextEvidence()).toBe(false);
   });
 });
 
