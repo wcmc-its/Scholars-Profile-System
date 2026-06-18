@@ -446,16 +446,27 @@ export function CoiGapCard({
   );
 
   // Primary counter (spec §2/§7 — HIGH confidence only; Medium excluded). Counts
-  // high-confidence MENTIONS (each a company). Softened copy.
-  const highMentions = mentions.filter((m) => m.confidence === "high");
-  const highCurrent = highMentions.filter((m) => !isSetAside(m.candidateId)).length;
-  const highSetAside = highMentions.filter((m) => isSetAside(m.candidateId)).length;
+  // distinct COMPANIES (the Organization-view decision grain): a company is current
+  // if any of its high mentions is current, set aside once all are. Softened copy.
+  const highByOrg = new Map<string, EditContextCoiGapMention[]>();
+  for (const m of mentions) {
+    if (m.confidence !== "high") continue;
+    const arr = highByOrg.get(m.organization) ?? [];
+    arr.push(m);
+    highByOrg.set(m.organization, arr);
+  }
+  let currentCompanies = 0;
+  let setAsideCompanies = 0;
+  for (const arr of highByOrg.values()) {
+    if (arr.some((m) => !isSetAside(m.candidateId))) currentCompanies += 1;
+    else setAsideCompanies += 1;
+  }
   const voicePoss = su ? "their" : "your";
   const counter =
-    highCurrent === 0 && highSetAside === 0
+    currentCompanies === 0 && setAsideCompanies === 0
       ? "Nothing here right now"
-      : `${highCurrent} from ${voicePoss} publications` +
-        (highSetAside > 0 ? ` · ${highSetAside} set aside` : "");
+      : `${currentCompanies} from ${voicePoss} publications` +
+        (setAsideCompanies > 0 ? ` · ${setAsideCompanies} set aside` : "");
 
   const confirmName = scholarName || "the scholar";
 
@@ -593,6 +604,14 @@ export function CoiGapCard({
     const yearRange = minY != null ? (minY === maxY ? `${minY}` : `${minY}–${maxY}`) : "";
     const summaryParts = [yearRange, attribution, humanKinds.join(" · ")].filter(Boolean);
 
+    // ONE decision per COMPANY: the action fans out to every still-current paper
+    // of this org (`currentIds`); once all are set aside the footer collapses to
+    // the Set-aside line (Undo restores the whole company).
+    const companyIds = card.mentions.map((m) => m.candidateId);
+    const currentIds = companyIds.filter((id) => !isSetAside(id));
+    const cardPending = companyIds.some((id) => pending.has(id));
+    const cardError = companyIds.map((id) => errors.get(id)).find(Boolean) ?? null;
+
     return (
       <div
         className={cn(
@@ -621,16 +640,46 @@ export function CoiGapCard({
             <OrgRow key={m.candidateId} m={m} />
           ))}
         </ul>
+        <div className="border-apollo-border mt-3 border-t pt-3">
+          {currentIds.length === 0 ? (
+            <SetAsideLine
+              reason={effectiveReason(companyIds[0]) ?? "invalid"}
+              ids={companyIds}
+              orgCount={0}
+              scope={card.organization}
+              isPending={cardPending}
+            />
+          ) : (
+            <>
+              {currentIds.length > 1 && (
+                <p
+                  className="text-muted-foreground text-xs"
+                  data-testid={`coi-gap-org-hint-${card.organization}`}
+                >
+                  Applies to all {currentIds.length} papers
+                </p>
+              )}
+              <ActionSet
+                ids={currentIds}
+                orgCount={0}
+                scope={card.organization}
+                isPending={cardPending}
+              />
+            </>
+          )}
+          {cardError && (
+            <Alert variant="destructive" className="mt-2">
+              <AlertDescription>{cardError}</AlertDescription>
+            </Alert>
+          )}
+        </div>
       </div>
     );
   }
 
   function OrgRow({ m }: { m: EditContextCoiGapMention }) {
-    // An Org row resolves ONLY its own company's mention (`m.candidateId`) — never
-    // the paper's other organizations.
-    const setAside = isSetAside(m.candidateId);
-    const error = errors.get(m.candidateId) ?? null;
-    const isPending = pending.has(m.candidateId);
+    // A row is a CITATION only — the action lives once at the company-card level,
+    // since a decision applies to the whole organization across its papers.
     const [showFull, setShowFull] = React.useState(false);
     return (
       <li
@@ -688,22 +737,6 @@ export function CoiGapCard({
                 </p>
               )}
             </>
-          )}
-          {setAside ? (
-            <SetAsideLine
-              reason={effectiveReason(m.candidateId)!}
-              ids={[m.candidateId]}
-              orgCount={1}
-              scope={m.candidateId}
-              isPending={isPending}
-            />
-          ) : (
-            <ActionSet ids={[m.candidateId]} orgCount={1} scope={m.candidateId} isPending={isPending} />
-          )}
-          {error && (
-            <Alert variant="destructive" className="mt-2">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
           )}
         </div>
       </li>
@@ -1060,9 +1093,15 @@ export function CoiGapCard({
         )}
       </EditPanel>
 
-      {/* Gentle resolve toast (~5s) — reports org breadth + Undo, aria-live polite. */}
+      {/* Gentle resolve toast (~5s) — Undo, aria-live polite. A Paper-view action
+          reports the org breadth (`orgCount > 0`); an Organization (company) action
+          covers a single org across its papers, so it just reads "Set aside". */}
       <div aria-live="polite" className="sr-only" data-testid="coi-gap-toast-live">
-        {toast ? `Set aside, covers ${toast.orgCount} organizations.` : ""}
+        {toast
+          ? toast.orgCount > 0
+            ? `Set aside, covers ${toast.orgCount} organizations.`
+            : "Set aside."
+          : ""}
       </div>
       {toast && (
         <div
@@ -1070,7 +1109,9 @@ export function CoiGapCard({
           data-testid="coi-gap-toast"
         >
           <span className="text-foreground">
-            Set aside · covers {toast.orgCount} organization{toast.orgCount === 1 ? "" : "s"}
+            {toast.orgCount > 0
+              ? `Set aside · covers ${toast.orgCount} organization${toast.orgCount === 1 ? "" : "s"}`
+              : "Set aside"}
           </span>
           <Button
             type="button"

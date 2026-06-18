@@ -67,6 +67,21 @@ const MENTIONS: EditContextCoiGapMention[] = [
     relationshipKinds: ["grant"],
   }),
   mention({
+    // AstraZeneca again, a SECOND paper — so the AstraZeneca company card spans two
+    // papers and a single company decision must fan out to both.
+    candidateId: "c-az-self2",
+    pmid: "39478895",
+    year: 2024,
+    organization: "astrazeneca",
+    organizationRaw: "AstraZeneca",
+    subjectType: "self",
+    subjectMention: "Dr Altorki",
+    subjectId: "self",
+    clause: "Dr Altorki received grants or contracts from AstraZeneca.",
+    fullText: "Dr Altorki has received grants or contracts from AstraZeneca and Roche/Genentech.",
+    relationshipKinds: ["grant"],
+  }),
+  mention({
     candidateId: "c-roche-self",
     pmid: "41679681",
     year: 2026,
@@ -165,23 +180,23 @@ describe("CoiGapCard #1112 redesign", () => {
     expect(screen.getByTestId("coi-gap-paper-card-41679681")).toBeTruthy();
   });
 
-  it("counter shows the high self-mention count in softened copy; excludes Medium + co-authors", () => {
+  it("counter shows the distinct-COMPANY count in softened copy; excludes Medium + co-authors", () => {
     render(<CoiGapCard cwid="self01" mentions={[...MENTIONS, LOWER]} />);
-    // 2 surfaced high mentions (AZ-self, Roche-self). The co-author (AZ) mention
-    // and the Medium row are both excluded.
+    // 2 distinct high companies: AstraZeneca (across 2 papers) + Roche. The
+    // co-author (AZ) mention is filtered; the Medium row is excluded.
     expect(screen.getByTestId("coi-gap-summary").textContent).toBe("2 from your publications");
   });
 
   it("action buttons use the full canonical (dev) labels — no compact variants", () => {
     render(<CoiGapCard cwid="self01" mentions={MENTIONS} />);
-    // Organization-view row buttons read the SAME as dev (not "Update COI" etc.).
-    expect(screen.getByTestId("coi-gap-choice-will_disclose-c-az-self").textContent).toBe(
+    // Organization-view company buttons read the SAME as dev (not "Update COI" etc.).
+    expect(screen.getByTestId("coi-gap-choice-will_disclose-astrazeneca").textContent).toBe(
       "I intend to update my COI statement",
     );
-    expect(screen.getByTestId("coi-gap-choice-historical-c-az-self").textContent).toBe(
+    expect(screen.getByTestId("coi-gap-choice-historical-astrazeneca").textContent).toBe(
       "Historically true but not currently valid",
     );
-    expect(screen.getByTestId("coi-gap-choice-invalid-c-az-self").textContent).toBe(
+    expect(screen.getByTestId("coi-gap-choice-invalid-astrazeneca").textContent).toBe(
       "Not a valid suggestion",
     );
     expect(document.body.textContent ?? "").not.toContain("Update COI");
@@ -191,8 +206,9 @@ describe("CoiGapCard #1112 redesign", () => {
   it("Organization-view summary line states the attribution split, year range, kinds", () => {
     render(<CoiGapCard cwid="self01" scholarName="Nasser Altorki" mentions={MENTIONS} />);
     const az = screen.getByTestId("coi-gap-org-summary-astrazeneca").textContent ?? "";
-    // Only the scholar's own mention is surfaced (the co-author one is filtered).
-    expect(az).toContain("1 attributed to Altorki");
+    // Both of the scholar's own AstraZeneca mentions are surfaced (co-author filtered).
+    expect(az).toContain("2 attributed to Altorki");
+    expect(az).toContain("2024–2026");
     expect(az).not.toContain("co-author");
     expect(az).toContain("grants");
   });
@@ -250,45 +266,47 @@ describe("CoiGapCard #1112 redesign", () => {
     );
   });
 
-  it("Org-view action resolves ONLY that company — the paper's other orgs stay Current", async () => {
+  it("ONE Org-view decision resolves the whole COMPANY (all its papers); other companies stay Current", async () => {
     render(<CoiGapCard cwid="self01" mentions={MENTIONS} />);
-    // Resolve AstraZeneca-in-41679681 (the self mention). It must NOT touch Roche,
-    // which shares the same paper + subject.
-    fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-c-az-self"));
+    // AstraZeneca spans two papers; its single card action must fan out to both,
+    // and must NOT touch Roche (a different company).
+    fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-astrazeneca"));
     await screen.findByTestId("coi-gap-toast");
-    // Roche is a DIFFERENT company in the same paper → still Current.
+    // Roche is a DIFFERENT company → still Current.
     expect(screen.getByTestId("coi-gap-org-card-roche/genentech")).toBeTruthy();
-    expect(screen.getByTestId("coi-gap-org-row-c-roche-self")).toBeTruthy();
-    // The AstraZeneca self row left Current.
-    expect(screen.queryByTestId("coi-gap-org-row-c-az-self")).toBeNull();
-    // Only that ONE candidate was POSTed — never Roche.
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      "/api/edit/coi-gap/c-az-self/feedback",
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "invalid" }) }),
-    );
+    // AstraZeneca (every paper) left Current.
+    expect(screen.queryByTestId("coi-gap-org-card-astrazeneca")).toBeNull();
+    // BOTH AstraZeneca papers were POSTed; Roche never.
+    for (const id of ["c-az-self", "c-az-self2"]) {
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `/api/edit/coi-gap/${id}/feedback`,
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "invalid" }) }),
+      );
+    }
     expect(globalThis.fetch).not.toHaveBeenCalledWith(
       "/api/edit/coi-gap/c-roche-self/feedback",
       expect.anything(),
     );
-    // Counter: 2 surfaced high mentions → 1 current, 1 set aside.
+    // Counter is company-grained: AstraZeneca set aside, Roche current.
     expect(screen.getByTestId("coi-gap-summary").textContent).toBe(
       "1 from your publications · 1 set aside",
     );
   });
 
-  it("the Org-view decision persists into Paper view (cross-view) at the company grain", () => {
+  it("an Org-view company decision persists into Paper view (cross-view)", () => {
     render(<CoiGapCard cwid="self01" mentions={MENTIONS} />);
-    fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-c-az-self"));
-    // Switch to Paper view: 41679681 still shows (Roche still Current) but now the
-    // footer covers only the ONE remaining company, not two.
+    fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-astrazeneca"));
+    // Paper view: 41679681 now covers only the remaining company (Roche); the
+    // AZ-only paper 39478895 is fully set aside → gone from Current.
     fireEvent.click(screen.getByTestId("coi-gap-groupby-paper"));
     expect(screen.getByTestId("coi-gap-paper-hint-41679681::self").textContent).toBe(
       "Covers all 1 organization",
     );
-    // And the set-aside AZ mention surfaces under the Set-aside filter, Org view.
+    expect(screen.queryByTestId("coi-gap-paper-card-39478895")).toBeNull();
+    // The company shows acted under the Set-aside filter, Org view.
     fireEvent.click(screen.getByTestId("coi-gap-filter-set_aside"));
     fireEvent.click(screen.getByTestId("coi-gap-groupby-organization"));
-    expect(screen.getByTestId("coi-gap-acted-c-az-self")).toBeTruthy();
+    expect(screen.getByTestId("coi-gap-acted-astrazeneca")).toBeTruthy();
   });
 
   it("Paper-view footer resolves ALL of a statement's current companies at once", async () => {
@@ -308,19 +326,22 @@ describe("CoiGapCard #1112 redesign", () => {
     expect(screen.queryByTestId("coi-gap-paper-card-41679681")).toBeNull();
   });
 
-  it("a resolve toast reports the org count and offers Undo (aria-live polite)", async () => {
+  it("an Organization (company) action shows a gentle 'Set aside' toast + Undo (aria-live polite)", async () => {
     render(<CoiGapCard cwid="self01" mentions={MENTIONS} />);
-    // An Org-row action covers exactly ONE company.
-    fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-c-az-self"));
+    // A company action covers ONE org across its papers → no "covers N organizations".
+    fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-astrazeneca"));
     const toast = await screen.findByTestId("coi-gap-toast");
-    expect(toast.textContent).toContain("covers 1 organization");
+    expect(toast.textContent).toContain("Set aside");
+    expect(toast.textContent).not.toContain("covers");
     expect(screen.getByTestId("coi-gap-toast-live").getAttribute("aria-live")).toBe("polite");
-    // Undo restores exactly that one company.
+    // Undo restores every paper of that company; never a different company.
     fireEvent.click(screen.getByTestId("coi-gap-toast-undo"));
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      "/api/edit/coi-gap/c-az-self/restore",
-      expect.objectContaining({ method: "POST" }),
-    );
+    for (const id of ["c-az-self", "c-az-self2"]) {
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `/api/edit/coi-gap/${id}/restore`,
+        expect.objectContaining({ method: "POST" }),
+      );
+    }
     expect(globalThis.fetch).not.toHaveBeenCalledWith(
       "/api/edit/coi-gap/c-roche-self/restore",
       expect.anything(),
@@ -342,12 +363,12 @@ describe("CoiGapCard #1112 redesign", () => {
     expect(screen.getByTestId("coi-gap-filter-all").textContent).toBe("All");
     // Default is Current.
     expect(screen.getByTestId("coi-gap-filter-current").getAttribute("aria-pressed")).toBe("true");
-    // Set aside a unit, then the Set-aside filter shows it and Current hides it.
-    fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-c-az-self"));
+    // Set aside a company, then the Set-aside filter shows it and Current hides it.
+    fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-astrazeneca"));
     fireEvent.click(screen.getByTestId("coi-gap-filter-set_aside"));
-    expect(screen.getByTestId("coi-gap-acted-c-az-self")).toBeTruthy();
+    expect(screen.getByTestId("coi-gap-acted-astrazeneca")).toBeTruthy();
     fireEvent.click(screen.getByTestId("coi-gap-filter-current"));
-    expect(screen.queryByTestId("coi-gap-acted-c-az-self")).toBeNull();
+    expect(screen.queryByTestId("coi-gap-acted-astrazeneca")).toBeNull();
   });
 
   describe("Paper view", () => {
@@ -476,17 +497,19 @@ describe("CoiGapCard #1112 redesign", () => {
 
     it("nags before any response — opens a confirm and does NOT write until confirmed", async () => {
       render(<CoiGapCard cwid="self01" mode="superuser" scholarName="Nasser Altorki" mentions={MENTIONS} />);
-      fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-c-az-self"));
+      fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-astrazeneca"));
       const continueBtn = await screen.findByRole("button", { name: "Continue" });
       expect(globalThis.fetch).not.toHaveBeenCalled();
       assertNoForbidden();
       fireEvent.click(continueBtn);
       await screen.findByTestId("coi-gap-toast");
-      // Only that one company is POSTed (Org-row grain), even through the nag.
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        "/api/edit/coi-gap/c-az-self/feedback",
-        expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "invalid" }) }),
-      );
+      // The whole AstraZeneca company is POSTed (both papers), even through the nag.
+      for (const id of ["c-az-self", "c-az-self2"]) {
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          `/api/edit/coi-gap/${id}/feedback`,
+          expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "invalid" }) }),
+        );
+      }
       expect(globalThis.fetch).not.toHaveBeenCalledWith(
         "/api/edit/coi-gap/c-roche-self/feedback",
         expect.anything(),
@@ -494,19 +517,20 @@ describe("CoiGapCard #1112 redesign", () => {
     });
   });
 
-  it("rolls a mention back to Current and surfaces a retry when the POST fails", async () => {
+  it("rolls a company back to Current and surfaces a retry when the POST fails", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValueOnce({ ok: false, json: async () => ({ ok: false }) }),
+      vi.fn().mockResolvedValue({ ok: false, json: async () => ({ ok: false }) }),
     );
     render(<CoiGapCard cwid="self01" mentions={MENTIONS} />);
-    fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-c-az-self"));
-    // Rolls back to the active choices + surfaces a retry on that row.
+    // Roche is a single-paper company → one failing POST → rollback.
+    fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-roche/genentech"));
+    // Rolls back to the active choices + surfaces a retry on that card.
     const retries = await screen.findAllByText(
       /couldn’t update this just now|couldn't update this just now/i,
     );
     expect(retries.length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByTestId("coi-gap-choices-c-az-self")).toBeTruthy();
+    expect(screen.getByTestId("coi-gap-choices-roche/genentech")).toBeTruthy();
   });
 
   it("a set-aside mention is shown for an already-responded (persisted) row", () => {
@@ -523,10 +547,10 @@ describe("CoiGapCard #1112 redesign", () => {
     ];
     render(<CoiGapCard cwid="self01" mentions={persisted} />);
     // Default Current filter hides it; switching to Set aside shows the line.
-    // (Org-view row testids are candidate-scoped.)
-    expect(screen.queryByTestId("coi-gap-acted-c-done")).toBeNull();
+    // (The Org-view acted line is now COMPANY-scoped.)
+    expect(screen.queryByTestId("coi-gap-acted-novartis")).toBeNull();
     fireEvent.click(screen.getByTestId("coi-gap-filter-set_aside"));
-    expect(screen.getByTestId("coi-gap-acted-c-done").textContent).toContain(
+    expect(screen.getByTestId("coi-gap-acted-novartis").textContent).toContain(
       "Historically true, not currently valid",
     );
   });
