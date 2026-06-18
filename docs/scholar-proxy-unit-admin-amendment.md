@@ -55,9 +55,11 @@ allowed via this path iff **all** hold:
 2. `A` holds a `UnitAdmin` row over a unit `U` with `role ∈ {owner, curator}` — **both** (D2);
 3. `S` is a **member of `U`** — `U` is `S`'s **department** (`Scholar.deptCode`, ED/LDAP-authoritative,
    not `field_override`-able, **not** appointment-derived) **or** a **division** `S` belongs to
-   (`Scholar.divCode` **or** the `DivisionMembership` roster); **centers are excluded** (D1).
+   (`Scholar.divCode` **or** the `DivisionMembership` roster); **centers are excluded by default**,
+   admitted **only behind `UNIT_ADMIN_CENTER_PROXY`** (#1104 — see § D1 revision below: a `center`
+   `S` is a **current** member of, `CenterMembership` date-filtered via `isCenterMembershipActive`).
    Includes the #540 owner→division cascade (a department owner/curator reaches scholars in that
-   department's divisions);
+   department's divisions); centers have no parent, so no cascade applies to them;
 4. the field is in the **positive allowlist** — `overview` for a field edit; `publication` +
    `contributorCwid === S` for a hide (identical to the #779 proxy scope — PE-03/IS-2).
 
@@ -119,11 +121,44 @@ every edit is audited. Revisit an opt-out only if faculty object.
 
 | | Decision | Resolution |
 |---|---|---|
-| **D1** | "Member-of" relation | **Department + division** (ED `orgUnit` L1 / `DivisionMembership`); **centers excluded**; owner→division cascade applies |
+| **D1** | "Member-of" relation | **Department + division** (ED `orgUnit` L1 / `DivisionMembership`); **centers excluded** by default — **revised by #1104**: centers admitted behind `UNIT_ADMIN_CENTER_PROXY` (current `CenterMembership` only); owner→division cascade applies (centers do not cascade) |
 | **D2** | Which unit roles | **Owner + curator** both |
 | **D3** | Consent | **Automatic, no opt-out** in v1 (institutional access) |
 | **D4** | Assigned-proxy rule | **Relax** scholar + unit-admin; **keep superuser excluded** (a grant to them is meaningless) |
 | **D5** | Panel naming | **Rename "Proxy editors" → "Profile editors"**; role-derived rows labelled by unit |
+
+### 7a. D1 revision — center owners/curators as proxy editors (#1104, 2026-06-XX)
+
+D1 originally **excluded centers** from the "member-of" relation. #1104 **revises D1** to admit
+centers, **behind a new default-off flag `UNIT_ADMIN_CENTER_PROXY`** (prod stays dark until ops flip
+it). The extension is deliberately minimal and reuses the SHIPPED Amendment 4 path (mode
+`unit-admin`):
+
+- **Membership relation.** `S` is a member of a center `U` when `S` holds a **current**
+  `CenterMembership` row for `U` — "current" per `isCenterMembershipActive` (`lib/api/centers.ts`),
+  the SAME date predicate the public center roster uses. **Lapsed** (`endDate` past) and **pending**
+  (`startDate` future) memberships confer **nothing**. Centers have no parent unit, so **no cascade**
+  applies.
+- **Roles (D2 unchanged).** Owner **or** curator of the center, resolved live via
+  `getEffectiveUnitRole({kind:'center', code})` (the `UnitAdmin.entityType` enum already includes
+  `center`).
+- **Surface (unchanged).** Exactly the existing allowlist — `overview` (bio) edit + own-publication
+  hide (`publication` + `contributorCwid === S`). **No** slug / visibility / highlights / COI /
+  topics / unit structure.
+- **Invariants preserved.** Keyed on `realCwid` with the `impersonatedCwid === null` gate (IS-1: a
+  #637 "View as" overlay never confers the center path); `scholar.deletedAt` fail-closed; the #536
+  hidden-identity (doctoral-student) 404 in `/edit/scholar/[cwid]` still fires for every non-superuser
+  unit admin — a center owner can **not** reach a hidden student's edit surface.
+- **Flag-off behavior.** With `UNIT_ADMIN_CENTER_PROXY` off, **no** `CenterMembership` read is issued
+  and no `center` unit is ever resolved, so the dept/division behavior is byte-identical to today.
+
+**Accepted risk (date-scoped).** A center **owner/curator** can add an arbitrary scholar to their
+center's `CenterMembership` roster and thereby gain the bounded `overview`/own-pub-hide access — the
+same roster-self-add escalation already accepted for divisions (§5), now extended to centers. It is
+**narrowed by the date filter**: only a **current** membership confers access, so a lapsed or
+not-yet-started add is inert. Bounded (overview + own-pub hide only), automatic/no-opt-out (D3), and
+fully traceable (every edit is a B03 row with `actor_cwid` = the admin; the roster add is itself
+audited). Revisit if abuse appears in the trail.
 
 ## 8. Implementation plan (phased — each phase a PR, on approval)
 
