@@ -348,4 +348,63 @@ describe("matchQueryToTaxonomy — method-family synonyms (METHODS_LENS_FAMILY_S
     if (r.state !== "matches") return;
     expect(r.methodMatches.some((m) => m.name === "extracellular flux respirometry")).toBe(true);
   });
+
+  it("flag ON: a multi-word / hyphenated synonym matches via the token window", async () => {
+    mockFamilySynonymsEnabled.mockReturnValue(true);
+    const scRnaFamily = {
+      supercategory: "genomics_sequencing",
+      familyLabel: "single cell rna sequencing",
+      familyId: "fam_0070",
+    };
+    familyGroups([scRnaFamily]);
+    familyRows([{ cwid: "a1", familyLabel: "single cell rna sequencing", pmids: ["1"] }]);
+
+    // "single-cell RNA-seq" is a curated multi-token synonym (normalizes to a
+    // single joined key spanning several query tokens) — the window matcher must
+    // find it, not just single-token acronyms like "ADC".
+    const r = await matchQueryToTaxonomy("single-cell RNA-seq");
+    expect(r.state).toBe("matches");
+    if (r.state !== "matches") return;
+    expect(r.methodMatches.some((m) => m.name === "single cell rna sequencing")).toBe(true);
+  });
+
+  it("flag ON: a synonym substring inside a longer token does NOT over-match (selfish ≠ FISH)", async () => {
+    mockFamilySynonymsEnabled.mockReturnValue(true);
+    const fishFamily = {
+      supercategory: "microscopy_histology",
+      familyLabel: "in situ hybridization",
+      familyId: "fam_0080",
+    };
+    familyGroups([fishFamily]);
+    familyRows([{ cwid: "a1", familyLabel: "in situ hybridization", pmids: ["1"] }]);
+
+    // "FISH" is a curated synonym (normalizes to "fish"); "selfish" CONTAINS
+    // "fish" as a substring but never as a whole-word window → no false match.
+    const r = await matchQueryToTaxonomy("selfish behavior");
+    expect(r.state).toBe("none");
+  });
+
+  it("flag ON: dropped polysemous acronyms (OCT/SEM/PALM) no longer reach a family; full forms still do (#1094)", async () => {
+    mockFamilySynonymsEnabled.mockReturnValue(true);
+    const families = [
+      { supercategory: "imaging_image_analysis", familyLabel: "optical coherence tomography", familyId: "fam_oct" },
+      { supercategory: "microscopy_histology", familyLabel: "electron microscopy", familyId: "fam_em" },
+      { supercategory: "microscopy_histology", familyLabel: "super resolution microscopy", familyId: "fam_sr" },
+    ];
+    familyGroups(families);
+    familyRows(families.map((f) => ({ cwid: "a1", familyLabel: f.familyLabel, pmids: ["1"] })));
+
+    // The bare acronyms were removed (date / stats / anatomy collisions) → none
+    // surfaces a method family.
+    for (const q of ["OCT", "SEM", "PALM"]) {
+      const r = await matchQueryToTaxonomy(q);
+      expect(r.state, `"${q}" should not match after the acronym drop`).toBe("none");
+    }
+
+    // The retained full-form synonym still reaches its family.
+    const oc = await matchQueryToTaxonomy("optical coherence");
+    expect(oc.state).toBe("matches");
+    if (oc.state !== "matches") return;
+    expect(oc.methodMatches.some((m) => m.name === "optical coherence tomography")).toBe(true);
+  });
 });

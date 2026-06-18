@@ -14,6 +14,11 @@
  *
  * Draft + rationale: `docs/method-family-synonyms-draft.md`. Animal / in-vivo
  * vertebrate model families are intentionally excluded.
+ *
+ * Polysemous 3-letter acronyms (OCT, SEM, PALM) are intentionally NOT curated —
+ * they collide with everyday date / statistics / anatomy terms ("OCT 2024", the
+ * "standard error of the mean", "palm of the hand"), and their families stay
+ * reachable via the retained full-form synonyms (#1094 review follow-up).
  */
 import { normalizeForMatch } from "@/lib/api/normalize";
 
@@ -44,12 +49,12 @@ export const FAMILY_SYNONYMS: readonly FamilySynonymEntry[] = [
   { supercategory: "imaging_image_analysis", familyLabel: "diffusion mri", synonyms: ["DTI", "diffusion tensor imaging", "tractography"] },
   { supercategory: "imaging_image_analysis", familyLabel: "pet imaging", synonyms: ["PET scan", "FDG-PET", "PET molecular imaging"] },
   { supercategory: "imaging_image_analysis", familyLabel: "pet ct", synonyms: ["PET/CT"] },
-  { supercategory: "imaging_image_analysis", familyLabel: "optical coherence tomography", synonyms: ["OCT", "optical coherence"] },
+  { supercategory: "imaging_image_analysis", familyLabel: "optical coherence tomography", synonyms: ["optical coherence"] },
   { supercategory: "imaging_image_analysis", familyLabel: "spect imaging", synonyms: ["SPECT"] },
   { supercategory: "imaging_image_analysis", familyLabel: "echocardiography", synonyms: ["echocardiogram", "cardiac echo"] },
   { supercategory: "microscopy_histology", familyLabel: "multiphoton microscopy", synonyms: ["two-photon microscopy", "2-photon", "multiphoton"] },
-  { supercategory: "microscopy_histology", familyLabel: "super resolution microscopy", synonyms: ["STORM", "STED", "PALM", "super-resolution"] },
-  { supercategory: "microscopy_histology", familyLabel: "electron microscopy", synonyms: ["TEM", "SEM", "electron micrograph"] },
+  { supercategory: "microscopy_histology", familyLabel: "super resolution microscopy", synonyms: ["STORM", "STED", "super-resolution"] },
+  { supercategory: "microscopy_histology", familyLabel: "electron microscopy", synonyms: ["TEM", "electron micrograph"] },
   { supercategory: "microscopy_histology", familyLabel: "immunohistochemistry", synonyms: ["IHC"] },
   { supercategory: "microscopy_histology", familyLabel: "in situ hybridization", synonyms: ["FISH", "in-situ hybridization"] },
   { supercategory: "microscopy_histology", familyLabel: "immunofluorescence microscopy", synonyms: ["immunofluorescence"] },
