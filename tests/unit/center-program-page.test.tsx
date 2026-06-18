@@ -27,9 +27,24 @@ vi.mock("@/lib/profile/methods-lens-flags", () => ({
 vi.mock("@/components/scholar/leader-card", () => ({
   LeaderCard: ({ role }: { role: string }) => <div data-testid="leader-card">{role}</div>,
 }));
-vi.mock("@/components/department/person-row", () => ({
-  PersonRow: ({ hit }: { hit: { cwid: string } }) => (
-    <div data-testid="person-row">{hit.cwid}</div>
+// #1105 — the roster is delegated to the center's facet client (reused with
+// `singleProgram`); mock it and assert composition. Its internals (facets,
+// header-hiding) are covered by center-members-grouped.test.tsx.
+vi.mock("@/components/center/center-members-client", () => ({
+  CenterMembersClient: ({
+    result,
+    singleProgram,
+  }: {
+    result: { groups: { members: { cwid: string }[] }[] };
+    singleProgram?: boolean;
+  }) => (
+    <div data-testid="members-client" data-single={String(!!singleProgram)}>
+      {result.groups[0].members.map((m) => (
+        <span key={m.cwid} data-testid="member">
+          {m.cwid}
+        </span>
+      ))}
+    </div>
   ),
 }));
 vi.mock("@/components/ui/breadcrumb", () => ({
@@ -82,14 +97,24 @@ describe("CenterProgramPage (#1105)", () => {
     );
   });
 
-  it("renders the program hero, leader, and members for a valid program", async () => {
+  it("renders the program hero, leader, and members (via the singleProgram facet client)", async () => {
     const ui = await CenterProgramPage({ centerSlug: "meyer-cancer-center", code: "CB" });
     render(ui);
     // getBy* throws when absent, so these are existence assertions.
     expect(screen.getByRole("heading", { name: "Cancer Biology" })).toBeTruthy();
     expect(screen.getByText("Studies cancer biology.")).toBeTruthy();
     expect(screen.getByTestId("leader-card").textContent).toBe("Leader");
-    expect(screen.getByTestId("person-row").textContent).toBe("a");
+    // roster delegated to CenterMembersClient in single-program mode.
+    expect(screen.getByTestId("members-client").getAttribute("data-single")).toBe("true");
+    expect(screen.getByTestId("member").textContent).toBe("a");
+  });
+
+  it("renders the empty state (not the facet client) when the program has no members", async () => {
+    mockGetCenterProgram.mockResolvedValueOnce({ ...DETAIL, members: [], scholarCount: 0 });
+    const ui = await CenterProgramPage({ centerSlug: "meyer-cancer-center", code: "CB" });
+    render(ui);
+    expect(screen.getByText("No members listed for this program.")).toBeTruthy();
+    expect(screen.queryByTestId("members-client")).toBeNull();
   });
 
   it("labels the leader as Interim Leader when isInterim", async () => {

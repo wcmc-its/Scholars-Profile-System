@@ -176,6 +176,28 @@ describe("CenterMembersClient — grouped facet sidebar (#552)", () => {
     expect(screen.getByRole("heading", { name: "Membership type" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Cancer Biology" })).toBeTruthy();
   });
+
+  it("singleProgram (program page) hides the lone section header but keeps facets + members", () => {
+    const single: CenterMembersResult = {
+      mode: "grouped",
+      total: 2,
+      groups: [
+        {
+          code: "CB",
+          label: "Cancer Biology",
+          members: [hit("a", FT, "research", "Medicine"), hit("b", FT, "clinical", "Medicine")],
+        },
+      ],
+    };
+    render(<CenterMembersClient result={single} centerSlug="x" singleProgram />);
+
+    // On a dedicated program page the section header would just echo the page
+    // title, so it's suppressed; the facets + members still render.
+    expect(screen.queryByRole("heading", { name: "Cancer Biology" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Membership type" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Organizational unit" })).toBeTruthy();
+    expect(personCwids().sort()).toEqual(["a", "b"]);
+  });
 });
 
 const SC = "imaging_image_analysis";

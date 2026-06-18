@@ -15,7 +15,7 @@ import { notFound } from "next/navigation";
 import { getCenterProgram } from "@/lib/api/centers";
 import { isCenterProgramPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import { LeaderCard } from "@/components/scholar/leader-card";
-import { PersonRow } from "@/components/department/person-row";
+import { CenterMembersClient } from "@/components/center/center-members-client";
 import {
   Breadcrumb,
   BreadcrumbList,
@@ -105,20 +105,32 @@ export async function CenterProgramPage({
         </div>
       </section>
 
-      <div className="mt-12">
-        <h2 className="mb-5 text-[12px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-          Members
-        </h2>
+      <div className="mt-10">
         {detail.members.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
             No members listed for this program.
           </p>
         ) : (
-          <div className="flex flex-col">
-            {detail.members.map((m) => (
-              <PersonRow key={m.cwid} hit={m} methodChips={m.topMethods} />
-            ))}
-          </div>
+          // #1105 — reuse the center roster's facet sidebar (Membership type /
+          // Methods & tools / Organizational unit + the Appointment chip row) by
+          // feeding this program's members as a single group. `singleProgram`
+          // hides the redundant lone section header; the Program facet auto-hides
+          // with one group. Still Prisma-sourced — no search-index facet key.
+          <CenterMembersClient
+            result={{
+              mode: "grouped",
+              groups: [
+                {
+                  label: detail.program.label,
+                  code: detail.program.code,
+                  members: detail.members,
+                },
+              ],
+              total: detail.members.length,
+            }}
+            centerSlug={detail.center.slug}
+            singleProgram
+          />
         )}
       </div>
     </main>

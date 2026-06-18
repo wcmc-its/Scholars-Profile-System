@@ -31,12 +31,17 @@ export function CenterMembersClient({
   result,
   centerSlug,
   programPagesEnabled = false,
+  singleProgram = false,
 }: {
   result: CenterMembersResult;
   centerSlug: string;
   /** #1105 — when on, eligible (non-excluded) program section headers link to
    *  the dedicated `/centers/[slug]/programs/[code]` page. */
   programPagesEnabled?: boolean;
+  /** #1105 — rendered on a dedicated program page (a single group). The Program
+   *  facet auto-hides (one option) and the lone section header is suppressed,
+   *  since it would just echo the page title. */
+  singleProgram?: boolean;
 }) {
   if (result.mode === "grouped") {
     return (
@@ -45,6 +50,7 @@ export function CenterMembersClient({
         total={result.total}
         centerSlug={centerSlug}
         programPagesEnabled={programPagesEnabled}
+        singleProgram={singleProgram}
       />
     );
   }
@@ -94,11 +100,13 @@ function GroupedRoster({
   total,
   centerSlug,
   programPagesEnabled,
+  singleProgram = false,
 }: {
   groups: CenterMemberGroup[];
   total: number;
   centerSlug: string;
   programPagesEnabled: boolean;
+  singleProgram?: boolean;
 }) {
   const [appointment, setAppointment] = useState<RoleCategory>("All");
   const [selPrograms, setSelPrograms] = useState<ReadonlySet<string>>(new Set());
@@ -232,7 +240,9 @@ function GroupedRoster({
 
   // Once the Program facet is narrowed to a single program, the lone section
   // header just echoes the active filter — drop it (option A redundancy fix).
-  const hideHeaders = selPrograms.size === 1;
+  // On a dedicated program page (#1105, `singleProgram`) the header is likewise
+  // redundant with the page title, so it's always hidden.
+  const hideHeaders = singleProgram || selPrograms.size === 1;
   const anySelected =
     selPrograms.size + selTypes.size + selDepts.size + selMethods.size > 0;
   const clearAll = () => {
