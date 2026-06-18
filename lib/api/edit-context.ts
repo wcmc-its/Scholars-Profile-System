@@ -397,7 +397,14 @@ export type LoadMentees = (mentorCwid: string) => Promise<EditContextMenteeSourc
  * reporting connection; `loadEditContext` still wraps the call in try/catch.
  */
 const defaultLoadMentees: LoadMentees = async (mentorCwid) => {
-  const { mentees } = await getMenteesForMentor(mentorCwid);
+  // #955 finding #5 — the `/edit` Mentees panel renders only name + hide-state,
+  // never the co-pub count, so skip the per-mentee co-pub query (a cross-VPC
+  // ReciterDB / bridge read) on every edit load. `class-year` gives a
+  // deterministic order without the now-absent co-pub sort key.
+  const { mentees } = await getMenteesForMentor(mentorCwid, {
+    includeCopubs: false,
+    sort: "class-year",
+  });
   return mentees.map((m) => ({
     cwid: m.cwid,
     fullName: m.fullName,
