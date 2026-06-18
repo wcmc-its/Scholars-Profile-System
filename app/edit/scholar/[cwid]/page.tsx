@@ -110,7 +110,9 @@ export default async function EditScholarPage({
   // hidden-class-404 guards below. The conferring unit's display name feeds the
   // "via {unit} administrator" banner.
   let isUnitAdmin = false;
-  let unitAdminBanner: { unitKind: "department" | "division"; unitName: string } | null = null;
+  let unitAdminBanner:
+    | { unitKind: "department" | "division" | "center"; unitName: string }
+    | null = null;
   if (!isSelf && !isProxy && !session.isSuperuser && raw.cwid === session.cwid) {
     const unit = await resolveEditableUnitViaUnitAdmin(
       raw.cwid,
@@ -119,16 +121,24 @@ export default async function EditScholarPage({
     );
     if (unit) {
       isUnitAdmin = true;
+      // #1104 — the conferring unit can now be a center (behind
+      // UNIT_ADMIN_CENTER_PROXY); resolve its display name for the banner just
+      // as a department / division name is resolved.
       const named =
         unit.kind === "department"
           ? await db.read.department.findUnique({
               where: { code: unit.code },
               select: { name: true },
             })
-          : await db.read.division.findUnique({
-              where: { code: unit.code },
-              select: { name: true },
-            });
+          : unit.kind === "center"
+            ? await db.read.center.findUnique({
+                where: { code: unit.code },
+                select: { name: true },
+              })
+            : await db.read.division.findUnique({
+                where: { code: unit.code },
+                select: { name: true },
+              });
       unitAdminBanner = { unitKind: unit.kind, unitName: named?.name ?? unit.code };
     }
   }

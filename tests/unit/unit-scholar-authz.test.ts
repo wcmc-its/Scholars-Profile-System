@@ -6,14 +6,25 @@
  * `docs/scholar-proxy-unit-admin-amendment.md` or to a #540 dept→division
  * cascade edge (`docs/unit-curation-spec.md`), so a failure names the risk.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   canEditScholarViaUnit,
   listUnitAdminEditorsForScholar,
+  resolveEditableUnitViaUnitAdmin,
   type UnitAdminEditorsLookup,
   type UnitScholarLookup,
 } from "@/lib/edit/unit-scholar-authz";
+
+/** #1104 — the center leg is behind `UNIT_ADMIN_CENTER_PROXY` (default off). The
+ *  flag reads `process.env`, so toggle it here; every test cleans up after. */
+function withCenterProxyFlag(on: boolean): void {
+  if (on) process.env.UNIT_ADMIN_CENTER_PROXY = "on";
+  else delete process.env.UNIT_ADMIN_CENTER_PROXY;
+}
+afterEach(() => {
+  delete process.env.UNIT_ADMIN_CENTER_PROXY;
+});
 
 const ADMIN = "adm001"; // the org-unit administrator (real cwid)
 const SCHOLAR = "sch001"; // the scholar whose profile is being edited
@@ -24,6 +35,8 @@ const DEPT_OTHER = "DEPT-SURG";
 const DIV = "DIV-CARD"; // a division of DEPT-MED
 const DIV_ROSTER = "DIV-ONC"; // a division S is on the roster of (not LDAP-primary)
 const DIV_OTHER = "DIV-NEURO"; // a division of DEPT-SURG
+const CENTER = "CTR-CANCER"; // a center S is a current member of (#1104)
+const CENTER_OTHER = "CTR-CARDIO"; // a center S is NOT a member of
 
 type UnitAdminRow = {
   entityType: "department" | "division" | "center";
@@ -32,6 +45,8 @@ type UnitAdminRow = {
   role: "owner" | "curator";
 };
 type ScholarRow = { deptCode: string | null; divCode: string | null; deletedAt?: Date | null };
+/** A center membership the scholar holds, with its dated window. */
+type CenterMemRow = { centerCode: string; startDate: Date | null; endDate: Date | null };
 
 /** A `UnitScholarLookup` mock whose reads honor their `where` clauses (so the
  *  predicate's query logic — not the mock — is what each test exercises). */
@@ -42,11 +57,15 @@ function lookup(opts: {
   /** divisionCode → parent department code (the `Division` row). Omit a code to
    *  simulate an orphan roster entry with no `Division` row. */
   divisions?: Record<string, string>;
+  /** cwid → center memberships the scholar holds (`CenterMembership`), each with
+   *  its dated window so the active filter can be exercised (#1104). */
+  centerMemberships?: Record<string, CenterMemRow[]>;
   unitAdmins?: UnitAdminRow[];
 }): UnitScholarLookup {
   const scholars = opts.scholars ?? {};
   const rosters = opts.rosters ?? {};
   const divisions = opts.divisions ?? {};
+  const centerMemberships = opts.centerMemberships ?? {};
   const rows = opts.unitAdmins ?? [];
   return {
     scholar: {
@@ -68,6 +87,9 @@ function lookup(opts: {
           .filter((code: string) => code in divisions)
           .map((code: string) => ({ code, deptCode: divisions[code] })),
       ),
+    },
+    centerMembership: {
+      findMany: vi.fn(async ({ where }) => centerMemberships[where.cwid] ?? []),
     },
     unitAdmin: {
       findMany: vi.fn(async ({ where }) =>
@@ -173,7 +195,7 @@ describe("canEditScholarViaUnit — dept→division cascade (#540 edges 8/9, reu
   });
 });
 
-describe("canEditScholarViaUnit — centers excluded (D1)", () => {
+describe("canEditScholarViaUnit — centers excluded when flag OFF (D1 default)", () => {
   it("never matches a CENTER admin row, even one keyed to the scholar's department code", async () => {
     const db = lookup({
       scholars: { [SCHOLAR]: { deptCode: DEPT, divCode: null } },
@@ -184,7 +206,7 @@ describe("canEditScholarViaUnit — centers excluded (D1)", () => {
     expect(await canEditScholarViaUnit(ADMIN, SCHOLAR, db)).toBe(false);
   });
 
-  it("issues no center lookups — every OR clause is department or division", async () => {
+  it("issues no center lookups — every OR clause is department or division, and CenterMembership is never read", async () => {
     const db = lookup({
       scholars: { [SCHOLAR]: { deptCode: DEPT, divCode: DIV } },
       rosters: { [SCHOLAR]: [DIV_ROSTER] },
@@ -196,6 +218,123 @@ describe("canEditScholarViaUnit — centers excluded (D1)", () => {
         expect(clause.entityType === "department" || clause.entityType === "division").toBe(true);
       }
     }
+    // Flag off ⇒ the CenterMembership read is never issued (dept/division unchanged).
+    expect(db.centerMembership.findMany).not.toHaveBeenCalled();
+  });
+
+  it("a center owner of the scholar's CURRENT center confers nothing while the flag is off", async () => {
+    const db = lookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: null } },
+      centerMemberships: { [SCHOLAR]: [{ centerCode: CENTER, startDate: null, endDate: null }] },
+      unitAdmins: [{ entityType: "center", entityId: CENTER, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await canEditScholarViaUnit(ADMIN, SCHOLAR, db)).toBe(false);
+    expect(db.centerMembership.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("canEditScholarViaUnit — center membership when flag ON (#1104)", () => {
+  // A wide-open window: started in the past, no end. Active for any `today`.
+  const OPEN: CenterMemRow = {
+    centerCode: CENTER,
+    startDate: new Date("2020-01-01"),
+    endDate: null,
+  };
+
+  it("allows a center OWNER of a center the scholar is a CURRENT member of", async () => {
+    withCenterProxyFlag(true);
+    const db = lookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: null } },
+      centerMemberships: { [SCHOLAR]: [OPEN] },
+      unitAdmins: [{ entityType: "center", entityId: CENTER, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await canEditScholarViaUnit(ADMIN, SCHOLAR, db)).toBe(true);
+  });
+
+  it("allows a center CURATOR too — D2 is owner OR curator", async () => {
+    withCenterProxyFlag(true);
+    const db = lookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: null } },
+      centerMemberships: { [SCHOLAR]: [OPEN] },
+      unitAdmins: [{ entityType: "center", entityId: CENTER, cwid: ADMIN, role: "curator" }],
+    });
+    expect(await canEditScholarViaUnit(ADMIN, SCHOLAR, db)).toBe(true);
+  });
+
+  it("denies a center admin when the scholar is NOT a member of that center", async () => {
+    withCenterProxyFlag(true);
+    const db = lookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: null } },
+      centerMemberships: { [SCHOLAR]: [OPEN] }, // member of CENTER, not CENTER_OTHER
+      unitAdmins: [{ entityType: "center", entityId: CENTER_OTHER, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await canEditScholarViaUnit(ADMIN, SCHOLAR, db)).toBe(false);
+  });
+
+  it("excludes a LAPSED membership (endDate in the past) — confers nothing", async () => {
+    withCenterProxyFlag(true);
+    const db = lookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: null } },
+      centerMemberships: {
+        [SCHOLAR]: [
+          { centerCode: CENTER, startDate: new Date("2020-01-01"), endDate: new Date("2021-01-01") },
+        ],
+      },
+      unitAdmins: [{ entityType: "center", entityId: CENTER, cwid: ADMIN, role: "owner" }],
+    });
+    // No active center membership → no dept/div either → no unit_admin query.
+    expect(await canEditScholarViaUnit(ADMIN, SCHOLAR, db)).toBe(false);
+    expect(db.unitAdmin.findMany).not.toHaveBeenCalled();
+  });
+
+  it("excludes a PENDING membership (startDate in the future) — confers nothing", async () => {
+    withCenterProxyFlag(true);
+    const db = lookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: null } },
+      centerMemberships: {
+        [SCHOLAR]: [{ centerCode: CENTER, startDate: new Date("2999-01-01"), endDate: null }],
+      },
+      unitAdmins: [{ entityType: "center", entityId: CENTER, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await canEditScholarViaUnit(ADMIN, SCHOLAR, db)).toBe(false);
+    expect(db.unitAdmin.findMany).not.toHaveBeenCalled();
+  });
+
+  it("binds the center lookup to the supplied admin cwid (IS-1 real-CWID keying)", async () => {
+    withCenterProxyFlag(true);
+    const db = lookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: null } },
+      centerMemberships: { [SCHOLAR]: [OPEN] },
+      // The grant belongs to OTHER_ADMIN, not ADMIN.
+      unitAdmins: [{ entityType: "center", entityId: CENTER, cwid: OTHER_ADMIN, role: "owner" }],
+    });
+    expect(await canEditScholarViaUnit(ADMIN, SCHOLAR, db)).toBe(false);
+    expect(await canEditScholarViaUnit(OTHER_ADMIN, SCHOLAR, db)).toBe(true);
+  });
+
+  it("returns the center as the conferring EditableUnit (resolver, not the boolean façade)", async () => {
+    withCenterProxyFlag(true);
+    const db = lookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: null } },
+      centerMemberships: { [SCHOLAR]: [OPEN] },
+      unitAdmins: [{ entityType: "center", entityId: CENTER, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await resolveEditableUnitViaUnitAdmin(ADMIN, SCHOLAR, db)).toEqual({
+      kind: "center",
+      code: CENTER,
+    });
+  });
+
+  it("dept/division access is unchanged with the flag on (center leg is purely additive)", async () => {
+    withCenterProxyFlag(true);
+    const db = lookup({
+      scholars: { [SCHOLAR]: { deptCode: DEPT, divCode: null } },
+      unitAdmins: [{ entityType: "department", entityId: DEPT, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await resolveEditableUnitViaUnitAdmin(ADMIN, SCHOLAR, db)).toEqual({
+      kind: "department",
+      code: DEPT,
+    });
   });
 });
 
@@ -268,12 +407,18 @@ function inverseLookup(opts: {
   divisions?: Record<string, { deptCode: string; name: string }>;
   /** deptCode → name. Omit a code to simulate a pruned `Department` row. */
   departments?: Record<string, string>;
+  /** cwid → center memberships the scholar holds, each dated (#1104). */
+  centerMemberships?: Record<string, CenterMemRow[]>;
+  /** centerCode → name. Omit a code to simulate a pruned `Center` row. */
+  centers?: Record<string, string>;
   unitAdmins?: UnitAdminRow[];
 }): UnitAdminEditorsLookup {
   const scholars = opts.scholars ?? {};
   const rosters = opts.rosters ?? {};
   const divisions = opts.divisions ?? {};
   const departments = opts.departments ?? {};
+  const centerMemberships = opts.centerMemberships ?? {};
+  const centers = opts.centers ?? {};
   const rows = opts.unitAdmins ?? [];
   return {
     scholar: {
@@ -305,6 +450,16 @@ function inverseLookup(opts: {
         where.code.in
           .filter((code: string) => code in departments)
           .map((code: string) => ({ code, name: departments[code] })),
+      ),
+    },
+    centerMembership: {
+      findMany: vi.fn(async ({ where }) => centerMemberships[where.cwid] ?? []),
+    },
+    center: {
+      findMany: vi.fn(async ({ where }) =>
+        where.code.in
+          .filter((code: string) => code in centers)
+          .map((code: string) => ({ code, name: centers[code] })),
       ),
     },
     unitAdmin: {
@@ -486,6 +641,111 @@ describe("listUnitAdminEditorsForScholar — attribution + cascade (mirrors the 
         conferringUnitKind: "department",
         conferringUnitCode: DEPT,
         conferringUnitName: DEPT,
+        role: "owner",
+      },
+    ]);
+  });
+});
+
+describe("listUnitAdminEditorsForScholar — center extension (#1104)", () => {
+  const OPEN: CenterMemRow = {
+    centerCode: CENTER,
+    startDate: new Date("2020-01-01"),
+    endDate: null,
+  };
+
+  it("never lists a center admin while the flag is OFF, and never reads CenterMembership", async () => {
+    const db = inverseLookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: null } },
+      centerMemberships: { [SCHOLAR]: [OPEN] },
+      centers: { [CENTER]: "Cancer Center" },
+      unitAdmins: [{ entityType: "center", entityId: CENTER, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await listUnitAdminEditorsForScholar(SCHOLAR, db)).toEqual([]);
+    expect(db.centerMembership.findMany).not.toHaveBeenCalled();
+  });
+
+  it("lists a center admin attributed to the CENTER (name resolved) when the flag is ON", async () => {
+    withCenterProxyFlag(true);
+    const db = inverseLookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: null } },
+      centerMemberships: { [SCHOLAR]: [OPEN] },
+      centers: { [CENTER]: "Cancer Center" },
+      unitAdmins: [{ entityType: "center", entityId: CENTER, cwid: ADMIN, role: "curator" }],
+    });
+    expect(await listUnitAdminEditorsForScholar(SCHOLAR, db)).toEqual([
+      {
+        adminCwid: ADMIN,
+        conferringUnitKind: "center",
+        conferringUnitCode: CENTER,
+        conferringUnitName: "Cancer Center",
+        role: "curator",
+      },
+    ]);
+  });
+
+  it("excludes a center admin for a LAPSED membership when the flag is ON", async () => {
+    withCenterProxyFlag(true);
+    const db = inverseLookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: null } },
+      centerMemberships: {
+        [SCHOLAR]: [
+          { centerCode: CENTER, startDate: new Date("2020-01-01"), endDate: new Date("2021-01-01") },
+        ],
+      },
+      centers: { [CENTER]: "Cancer Center" },
+      unitAdmins: [{ entityType: "center", entityId: CENTER, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await listUnitAdminEditorsForScholar(SCHOLAR, db)).toEqual([]);
+    // No active center, no dept/div → no unit_admin scan.
+    expect(db.unitAdmin.findMany).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the center code when the Center name row is pruned (flag ON)", async () => {
+    withCenterProxyFlag(true);
+    const db = inverseLookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: null } },
+      centerMemberships: { [SCHOLAR]: [OPEN] },
+      // CENTER intentionally absent from `centers` → no name row.
+      unitAdmins: [{ entityType: "center", entityId: CENTER, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await listUnitAdminEditorsForScholar(SCHOLAR, db)).toEqual([
+      {
+        adminCwid: ADMIN,
+        conferringUnitKind: "center",
+        conferringUnitCode: CENTER,
+        conferringUnitName: CENTER,
+        role: "owner",
+      },
+    ]);
+  });
+
+  it("lists dept and center admins together, stably ordered (flag ON)", async () => {
+    withCenterProxyFlag(true);
+    const db = inverseLookup({
+      scholars: { [SCHOLAR]: { deptCode: DEPT, divCode: null } },
+      departments: { [DEPT]: "Department of Medicine" },
+      centerMemberships: { [SCHOLAR]: [OPEN] },
+      centers: { [CENTER]: "Cancer Center" },
+      unitAdmins: [
+        { entityType: "center", entityId: CENTER, cwid: OTHER_ADMIN, role: "owner" },
+        { entityType: "department", entityId: DEPT, cwid: ADMIN, role: "curator" },
+      ],
+    });
+    const list = await listUnitAdminEditorsForScholar(SCHOLAR, db);
+    expect(list).toEqual([
+      {
+        adminCwid: ADMIN, // adm001 < adm999
+        conferringUnitKind: "department",
+        conferringUnitCode: DEPT,
+        conferringUnitName: "Department of Medicine",
+        role: "curator",
+      },
+      {
+        adminCwid: OTHER_ADMIN,
+        conferringUnitKind: "center",
+        conferringUnitCode: CENTER,
+        conferringUnitName: "Cancer Center",
         role: "owner",
       },
     ]);

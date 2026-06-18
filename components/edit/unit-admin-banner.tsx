@@ -22,8 +22,9 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 export type UnitAdminBannerProps = {
   /** The scholar whose profile is being edited — their preferred name. */
   targetLabel: string;
-  /** The kind of unit through which access is conferred (D1: never a center). */
-  unitKind: "department" | "division";
+  /** The kind of unit through which access is conferred — `center` only when
+   *  UNIT_ADMIN_CENTER_PROXY is on (#1104; D1 originally excluded centers). */
+  unitKind: "department" | "division" | "center";
   /** The conferring unit's display name (resolved from `Department`/`Division`). */
   unitName: string;
 };

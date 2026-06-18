@@ -37,7 +37,7 @@ export type ProxyRow = {
  *  to a display name via the directory, like a proxy. */
 export type UnitAdminEditorRow = {
   adminCwid: string;
-  conferringUnitKind: "department" | "division";
+  conferringUnitKind: "department" | "division" | "center";
   conferringUnitName: string;
 };
 
