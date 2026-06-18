@@ -193,7 +193,12 @@ export function buildScholarToolWritesFromS3(
 
       const prev = byName.get(toolName);
       if (!prev) {
-        byName.set(toolName, { pmidCount: pubCount, maxConfidence: confidence, category, sampleContext });
+        byName.set(toolName, {
+          pmidCount: pubCount,
+          maxConfidence: confidence,
+          category,
+          sampleContext,
+        });
       } else {
         // Two ids collapsed to one display name: keep the strongest signal, the
         // first non-null family label (first-wins, like the legacy mapper), and
@@ -201,7 +206,10 @@ export function buildScholarToolWritesFromS3(
         if (pubCount > prev.pmidCount) prev.pmidCount = pubCount;
         if (confidence > prev.maxConfidence) prev.maxConfidence = confidence;
         if (prev.category === null && category !== null) prev.category = category;
-        if (sampleContext && (!prev.sampleContext || sampleContext.length > prev.sampleContext.length)) {
+        if (
+          sampleContext &&
+          (!prev.sampleContext || sampleContext.length > prev.sampleContext.length)
+        ) {
           prev.sampleContext = sampleContext;
         }
       }

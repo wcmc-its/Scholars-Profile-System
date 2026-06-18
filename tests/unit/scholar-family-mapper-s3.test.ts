@@ -224,8 +224,18 @@ describe("buildScholarFamilyWritesFromS3 — ranking, cap, dedup", () => {
     const res = buildScholarFamilyWritesFromS3(
       artifact({
         aog: [
-          { family_id: "fam_old", label: "CRISPR screens", supercategory: "genomics", pub_count: 3 },
-          { family_id: "fam_new", label: "CRISPR screens", supercategory: "genomics", pub_count: 9 },
+          {
+            family_id: "fam_old",
+            label: "CRISPR screens",
+            supercategory: "genomics",
+            pub_count: 3,
+          },
+          {
+            family_id: "fam_new",
+            label: "CRISPR screens",
+            supercategory: "genomics",
+            pub_count: 9,
+          },
         ],
       }),
       { ourCwidSet: new Set(["aog"]) },
@@ -371,7 +381,13 @@ describe("buildScholarFamilyWritesFromS3 — #879 family definition join", () =>
         ourCwidSet: new Set(["aog"]),
         familyDefById: new Map([
           // em-dash kept verbatim (house style — no transform)
-          ["fam_1", { definition: "Pooled loss-of-function screens—including X.", definitionSource: "generated" }],
+          [
+            "fam_1",
+            {
+              definition: "Pooled loss-of-function screens—including X.",
+              definitionSource: "generated",
+            },
+          ],
           // fam_2 intentionally absent → its row stays null
         ]),
       },
@@ -397,7 +413,9 @@ describe("buildScholarFamilyWritesFromS3 — #879 family definition join", () =>
 
   it("never drops a family for a missing definition (a join miss is benign)", () => {
     const res = buildScholarFamilyWritesFromS3(
-      artifact({ aog: [{ family_id: "fam_1", label: "Keep me", supercategory: "s", pub_count: 7 }] }),
+      artifact({
+        aog: [{ family_id: "fam_1", label: "Keep me", supercategory: "s", pub_count: 7 }],
+      }),
       { ourCwidSet: new Set(["aog"]), familyDefById: new Map() },
     );
     expect(res.writes).toHaveLength(1);
@@ -410,7 +428,8 @@ describe("buildScholarFamilyWritesFromS3 — #1119 exemplar contexts", () => {
   it("resolves a best snippet per exemplar tool, keyed by display name, scoped to family pmids", () => {
     const toolContext = buildToolContextIndex({
       tool_a: {
-        "111": "CheXpert labels chest radiographs across 14 observations using an uncertainty-aware policy",
+        "111":
+          "CheXpert labels chest radiographs across 14 observations using an uncertainty-aware policy",
         "999": "an out-of-family paper that should be ignored by the pmid scope filter entirely",
       },
       tool_b: {
@@ -439,8 +458,10 @@ describe("buildScholarFamilyWritesFromS3 — #1119 exemplar contexts", () => {
       { ourCwidSet: new Set(["aog"]), toolContext },
     );
     expect(writes[0].exemplarContexts).toEqual({
-      CheXpert: "CheXpert labels chest radiographs across 14 observations using an uncertainty-aware policy",
-      "MIMIC-CXR": "MIMIC-CXR is a large public dataset of chest radiographs with free-text reports",
+      CheXpert:
+        "CheXpert labels chest radiographs across 14 observations using an uncertainty-aware policy",
+      "MIMIC-CXR":
+        "MIMIC-CXR is a large public dataset of chest radiographs with free-text reports",
     });
     // pmid 999 (out of the family's pmids) was not chosen for CheXpert.
     expect(writes[0].exemplarContexts.CheXpert).not.toContain("out-of-family");
@@ -505,8 +526,12 @@ describe("buildScholarFamilyWritesFromS3 — #1119 exemplar contexts", () => {
 
   it("#1119 opaque gate: omits the snippet for a high-frequency tool, keeps it for a niche one", () => {
     const toolContext = buildToolContextIndex({
-      tool_a: { "1": "RNA-seq analysis of E. coli K12 revealed 447 differentially expressed genes overall" },
-      tool_b: { "1": "wsPurity quantifies tumor purity within a digitally captured H&E stained histological slide" },
+      tool_a: {
+        "1": "RNA-seq analysis of E. coli K12 revealed 447 differentially expressed genes overall",
+      },
+      tool_b: {
+        "1": "wsPurity quantifies tumor purity within a digitally captured H&E stained histological slide",
+      },
     });
     const { writes } = buildScholarFamilyWritesFromS3(
       artifact(

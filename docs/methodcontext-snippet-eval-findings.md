@@ -1,4 +1,4 @@
-# Findings — #1119 method tool-usage *snippet* calibration (lever decision)
+# Findings — #1119 method tool-usage _snippet_ calibration (lever decision)
 
 **Companion to** `docs/methodcontext-snippet-eval-handoff.md`. This is the output of the
 measurement/judgment phase that handoff asked for: judge many real (scholar, family,
@@ -8,13 +8,13 @@ with unit tests** (see §6) and verified end-to-end on the live artifact.
 
 ## TL;DR — what to adopt
 
-| Lever (handoff name) | Decision | Why (from the data) |
-|---|---|---|
-| **#3 Opaque-tool gating** | **ADOPT — primary lever** | Gate snippet emission on tool **frequency**: surface only when `pub_count ≤ 4`. Retains **26/27 wins (96%)**, drops 38% of rows, lifts surviving win-rate **18% → 28%**. Addresses the dominant failure (61% of rows = "well-known name, snippet is one paper's result"). |
-| **#1 Clean-sentence filter** | **REJECT as proposed** | The cheap mechanical "starts mid-clause" heuristic is 45% precise and **would kill 14 of 27 wins for ~0 net precision**. A *perfect* fragment detector would help (28%→38%, −2 wins) — so the value is real but the heuristic is the wrong tool. Demote to a best-of-N tie-breaker only; push true fix upstream (extraction span). |
-| **#2 Subject-not-foil name-bias** | **ADOPT — low priority, as a selection refinement** | `namePosition` is a clean signal: wins have the tool name early (median 0.28), foils late (0.81). Use it to bias selection + guard foils. Foils are only 4% of rows, so low impact. The foil-cue regex alone is too sparse (33% precision). |
-| **Dedupe** | **ADOPT — conservative** | Collapse identical snippets *within* a family's exemplar set / search blob; do **not** globally suppress a reused-but-good snippet (5 of 13 reused rows are wins). ~9% of rows. |
-| **Display placement** | **KEEP in the expandable disclosure** (label leads); do NOT promote onto the collapsed evidence line | Even after the opaque gate, surviving win-rate is only ~28% (≈72% non-win residue). The snippet should stay low-cost (revealed on expand), not front-and-center. |
+| Lever (handoff name)              | Decision                                                                                             | Why (from the data)                                                                                                                                                                                                                                                                                                                |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **#3 Opaque-tool gating**         | **ADOPT — primary lever**                                                                            | Gate snippet emission on tool **frequency**: surface only when `pub_count ≤ 4`. Retains **26/27 wins (96%)**, drops 38% of rows, lifts surviving win-rate **18% → 28%**. Addresses the dominant failure (61% of rows = "well-known name, snippet is one paper's result").                                                          |
+| **#1 Clean-sentence filter**      | **REJECT as proposed**                                                                               | The cheap mechanical "starts mid-clause" heuristic is 45% precise and **would kill 14 of 27 wins for ~0 net precision**. A _perfect_ fragment detector would help (28%→38%, −2 wins) — so the value is real but the heuristic is the wrong tool. Demote to a best-of-N tie-breaker only; push true fix upstream (extraction span). |
+| **#2 Subject-not-foil name-bias** | **ADOPT — low priority, as a selection refinement**                                                  | `namePosition` is a clean signal: wins have the tool name early (median 0.28), foils late (0.81). Use it to bias selection + guard foils. Foils are only 4% of rows, so low impact. The foil-cue regex alone is too sparse (33% precision).                                                                                        |
+| **Dedupe**                        | **ADOPT — conservative**                                                                             | Collapse identical snippets _within_ a family's exemplar set / search blob; do **not** globally suppress a reused-but-good snippet (5 of 13 reused rows are wins). ~9% of rows.                                                                                                                                                    |
+| **Display placement**             | **KEEP in the expandable disclosure** (label leads); do NOT promote onto the collapsed evidence line | Even after the opaque gate, surviving win-rate is only ~28% (≈72% non-win residue). The snippet should stay low-cost (revealed on expand), not front-and-center.                                                                                                                                                                   |
 
 ## 1. Method
 
@@ -39,12 +39,12 @@ warranted; the question was which levers and how aggressive.
 
 ## 2. Failure-mode distribution (judge)
 
-| Failure mode | Share of rows | Addressed by |
-|---|---|---|
-| `well_known_name_clear` (#1) | **61%** | opaque-tool gating (#3) |
-| (clean win / fine) | 19% | — |
-| `broken_fragment` (#2) | 16% | clean-sentence (but see §4) |
-| `tool_is_foil` (#4) | 4% | name-position bias |
+| Failure mode                 | Share of rows | Addressed by                |
+| ---------------------------- | ------------- | --------------------------- |
+| `well_known_name_clear` (#1) | **61%**       | opaque-tool gating (#3)     |
+| (clean win / fine)           | 19%           | —                           |
+| `broken_fragment` (#2)       | 16%           | clean-sentence (but see §4) |
+| `tool_is_foil` (#4)          | 4%            | name-position bias          |
 
 The dominant problem by far is **#1** (the snippet is one paper's specific result for a method whose
 name is already self-explanatory — `Wilcoxon signed-rank test`, `RNA-seq`, `online survey`). This is
@@ -54,31 +54,31 @@ what the opaque gate kills.
 
 Value is driven by tool **frequency**, more cleanly than by salience tier alone:
 
-| Cut | win% | beatsName% |
-|---|---|---|
-| `pub_count = 1` | 25% | 27% |
-| `pub_count 2–4` | 34% | 41% |
-| **`pub_count ≥ 5`** | **2%** | **2%** |
-| tier S | 2% | 2% |
-| tier A | 34% | 36% |
-| tier B | 18% | 22% |
+| Cut                 | win%   | beatsName% |
+| ------------------- | ------ | ---------- |
+| `pub_count = 1`     | 25%    | 27%        |
+| `pub_count 2–4`     | 34%    | 41%        |
+| **`pub_count ≥ 5`** | **2%** | **2%**     |
+| tier S              | 2%     | 2%         |
+| tier A              | 34%    | 36%        |
+| tier B              | 18%    | 22%        |
 
 Candidate gate rules (retained wins / dropped rows / resulting precision):
 
-| Gate | rows kept | wins kept | wins dropped | surviving win% |
-|---|---|---|---|---|
-| none (today) | 150 | 27/27 | 0 | 18% |
-| `tier ≠ S` | 100 | 26/27 | 1 | 26% |
-| **`pub_count ≤ 4`** | **92** | **26/27** | **1** | **28%** |
-| `pub_count ≤ 2` | 77 | 22/27 | 5 | 29% |
+| Gate                | rows kept | wins kept | wins dropped | surviving win% |
+| ------------------- | --------- | --------- | ------------ | -------------- |
+| none (today)        | 150       | 27/27     | 0            | 18%            |
+| `tier ≠ S`          | 100       | 26/27     | 1            | 26%            |
+| **`pub_count ≤ 4`** | **92**    | **26/27** | **1**        | **28%**        |
+| `pub_count ≤ 2`     | 77        | 22/27     | 5            | 29%            |
 
 **→ Recommended rule: emit a snippet only when `pub_count ≤ 4`** (equivalently: suppress for tier S
-*or* `pub_count ≥ 5`). It retains 96% of wins, drops the 2%-win high-frequency long tail, and is a
+_or_ `pub_count ≥ 5`). It retains 96% of wins, drops the 2%-win high-frequency long tail, and is a
 better signal than tier alone. `pub_count ≤ 2` is too aggressive (loses 5 wins for +1pt precision).
 The one win the gate sacrifices is `Quantitative susceptibility mapping (QSM)` (tier S, pubN40) whose
-snippet *is* a real definition — an acceptable 1/27 loss.
+snippet _is_ a real definition — an acceptable 1/27 loss.
 
-> Note: #800 family-suppression already hides generic *families*, but does nothing for generic *tools*
+> Note: #800 family-suppression already hides generic _families_, but does nothing for generic _tools_
 > inside un-suppressed families. The tool-level frequency gate closes exactly that gap.
 
 ## 4. Lever #1 (clean-sentence) — why we reject the cheap version
@@ -86,15 +86,15 @@ snippet *is* a real definition — an acceptable 1/27 loss.
 - Mechanical `fragmentStart` (first char lowercase / continuation word) flags 41% of rows; judge
   "reads broken" is 25%. **Precision 45%, recall 76%.**
 - **Collateral is fatal:** of the 62 fragmentStart-flagged rows, **13 are wins.** Layering a
-  fragmentStart *drop* on top of the opaque gate collapses wins **26 → 13 (kills 14)** while surviving
+  fragmentStart _drop_ on top of the opaque gate collapses wins **26 → 13 (kills 14)** while surviving
   win-rate barely moves (28% → 26%). Many great snippets legitimately begin mid-clause
   (`"central thalamic deep brain stimulation for the treatment of TBI using the Medtronic PC+S
-  first-in-human…"`).
-- A **perfect** broken-fragment detector *would* help: dropping the judge's true-broken rows lifts
+first-in-human…"`).
+- A **perfect** broken-fragment detector _would_ help: dropping the judge's true-broken rows lifts
   28% → **38%** at a cost of only 2 wins. So the value is real — the heuristic is just the wrong tool.
 
 **→ Do not ship a sentence-boundary drop in the pure mapper.** Instead: (a) use clean-start only as a
-best-of-N *tie-breaker* (prefer a clean snippet, never drop a tool's only snippet for it); (b) raise
+best-of-N _tie-breaker_ (prefer a clean snippet, never drop a tool's only snippet for it); (b) raise
 the real fix upstream — the snippets are extracted mid-sentence at the ReciterAI source, so a
 sentence-aligned extraction span there is the high-leverage change (file against ReciterAI).
 
@@ -121,8 +121,8 @@ All adopted levers landed in the pure, unit-tested mappers (`tool-context.ts`,
    in the leading `EARLY_NAME_MAX_FRACTION` (= 0.75) of the sentence; bucket-prefer with fallback, so
    a tool's only snippet is never dropped.
 3. **DONE — within-family dedupe.** `resolveExemplarContexts` collapses a later exemplar whose best
-   snippet (normalized) duplicates an earlier sibling's. *(Cross-family / search-blob dedupe in
-   `lib/search-index-docs.ts` deferred — ranking-only prose, low harm.)*
+   snippet (normalized) duplicates an earlier sibling's. _(Cross-family / search-blob dedupe in
+   `lib/search-index-docs.ts` deferred — ranking-only prose, low harm.)_
 4. **DONE — clean-start tie-breaker.** `startsAtSentenceBoundary` breaks an exact length tie only;
    length stays primary, so descriptive mid-clause wins are preserved. No drop filter (the cheap
    heuristic would kill ~half the wins — §4).

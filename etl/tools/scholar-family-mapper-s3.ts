@@ -321,7 +321,13 @@ export function buildScholarFamilyWritesFromS3(
       const pmids = normalizePmids(f?.pmids);
       // #1119 — scope the snippet search to this family's member pmids.
       const exemplarContexts = toolContext
-        ? resolveExemplarContexts(f?.exemplar_tool_ids, toolsById, pubCountById, toolContext, new Set(pmids))
+        ? resolveExemplarContexts(
+            f?.exemplar_tool_ids,
+            toolsById,
+            pubCountById,
+            toolContext,
+            new Set(pmids),
+          )
         : {};
       const prev = byFamilyId.get(familyId);
       if (!prev) {

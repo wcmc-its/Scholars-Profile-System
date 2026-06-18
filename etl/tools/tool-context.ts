@@ -91,7 +91,10 @@ export function salientNameForms(displayName: string): string[] {
     const inner = m[1].trim().toLowerCase();
     if (inner.length >= 2) forms.add(inner);
   }
-  const noParens = lower.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  const noParens = lower
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (noParens.length >= 3 && noParens !== lower) forms.add(noParens);
   return [...forms];
 }
@@ -253,7 +256,9 @@ export function selectBestSnippet(
       // Subject-not-foil guard: prefer snippets that name the tool EARLY, not only
       // as a late-sentence foil/contrast. Bucket-prefer; fall back to the late ones
       // when none qualify, so a tool's only snippet is never dropped.
-      const early = named.filter((c) => nameFirstFraction(c.snippet, forms) <= EARLY_NAME_MAX_FRACTION);
+      const early = named.filter(
+        (c) => nameFirstFraction(c.snippet, forms) <= EARLY_NAME_MAX_FRACTION,
+      );
       if (early.length > 0) pool = early;
     }
   }

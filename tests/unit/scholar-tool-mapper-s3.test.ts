@@ -17,7 +17,10 @@ import { buildToolContextIndex } from "@/etl/tools/tool-context";
 /** Build a minimal artifact slice from tool records + a per-cwid tool list. */
 function artifact(
   tools: ToolsArtifactSlice["tools"],
-  faculty: Record<string, Array<{ canonical_tool_id: string; display_name?: string; pub_count?: number }>>,
+  faculty: Record<
+    string,
+    Array<{ canonical_tool_id: string; display_name?: string; pub_count?: number }>
+  >,
 ): ToolsArtifactSlice {
   return {
     tools,
@@ -64,17 +67,20 @@ describe("buildScholarToolWritesFromS3 — canonical join", () => {
       ),
       { ourCwidSet: new Set(["aog"]) },
     );
-    expect(writes[0]).toMatchObject({ toolName: "Flow cytometry", category: null, maxConfidence: 0.7 });
+    expect(writes[0]).toMatchObject({
+      toolName: "Flow cytometry",
+      category: null,
+      maxConfidence: 0.7,
+    });
   });
 });
 
 describe("buildScholarToolWritesFromS3 — guards", () => {
   it("skips scholars whose cwid is out of FK scope", () => {
     const res = buildScholarToolWritesFromS3(
-      artifact(
-        [{ canonical_tool_id: "tool_1", display_name: "X", salience_tier: "B" }],
-        { stranger: [{ canonical_tool_id: "tool_1", pub_count: 1 }] },
-      ),
+      artifact([{ canonical_tool_id: "tool_1", display_name: "X", salience_tier: "B" }], {
+        stranger: [{ canonical_tool_id: "tool_1", pub_count: 1 }],
+      }),
       { ourCwidSet: new Set(["aog"]) },
     );
     expect(res.writes).toEqual([]);
@@ -83,7 +89,9 @@ describe("buildScholarToolWritesFromS3 — guards", () => {
 
   it("falls back to the faculty display_name when the tool id is unknown (category null, weakest tier)", () => {
     const res = buildScholarToolWritesFromS3(
-      artifact([], { aog: [{ canonical_tool_id: "ghost", display_name: "Mystery assay", pub_count: 2 }] }),
+      artifact([], {
+        aog: [{ canonical_tool_id: "ghost", display_name: "Mystery assay", pub_count: 2 }],
+      }),
       { ourCwidSet: new Set(["aog"]) },
     );
     expect(res.writes[0]).toMatchObject({
@@ -189,10 +197,9 @@ describe("buildScholarToolWritesFromS3 — #1119 sample context", () => {
 
   it("leaves sampleContext null when no toolContext index is supplied", () => {
     const { writes } = buildScholarToolWritesFromS3(
-      artifact(
-        [{ canonical_tool_id: "tool_1", display_name: "X", salience_tier: "A" }],
-        { aog: [{ canonical_tool_id: "tool_1", pub_count: 3 }] },
-      ),
+      artifact([{ canonical_tool_id: "tool_1", display_name: "X", salience_tier: "A" }], {
+        aog: [{ canonical_tool_id: "tool_1", pub_count: 3 }],
+      }),
       { ourCwidSet: new Set(["aog"]) },
     );
     expect(writes[0].sampleContext).toBeNull();
@@ -201,13 +208,21 @@ describe("buildScholarToolWritesFromS3 — #1119 sample context", () => {
   it("#1119 opaque gate: suppresses sampleContext for a high-frequency tool (canonical pub_count)", () => {
     const toolContext = buildToolContextIndex({
       tool_1: {
-        "111": "RNA-seq analysis of E. coli K12 revealed 447 differentially expressed genes across conditions",
+        "111":
+          "RNA-seq analysis of E. coli K12 revealed 447 differentially expressed genes across conditions",
       },
     });
     // Canonical GLOBAL pub_count is the gate signal — NOT the per-scholar faculty count.
     const { writes } = buildScholarToolWritesFromS3(
       artifact(
-        [{ canonical_tool_id: "tool_1", display_name: "RNA-seq", salience_tier: "S", pub_count: 900 }],
+        [
+          {
+            canonical_tool_id: "tool_1",
+            display_name: "RNA-seq",
+            salience_tier: "S",
+            pub_count: 900,
+          },
+        ],
         { aog: [{ canonical_tool_id: "tool_1", pub_count: 8 }] },
       ),
       { ourCwidSet: new Set(["aog"]), toolContext },
@@ -218,12 +233,20 @@ describe("buildScholarToolWritesFromS3 — #1119 sample context", () => {
   it("#1119 opaque gate: keeps sampleContext for a niche tool with a low canonical pub_count", () => {
     const toolContext = buildToolContextIndex({
       tool_1: {
-        "111": "wsPurity quantifies tumor purity within a digitally captured H&E stained histological slide",
+        "111":
+          "wsPurity quantifies tumor purity within a digitally captured H&E stained histological slide",
       },
     });
     const { writes } = buildScholarToolWritesFromS3(
       artifact(
-        [{ canonical_tool_id: "tool_1", display_name: "wsPurity", salience_tier: "B", pub_count: 2 }],
+        [
+          {
+            canonical_tool_id: "tool_1",
+            display_name: "wsPurity",
+            salience_tier: "B",
+            pub_count: 2,
+          },
+        ],
         { aog: [{ canonical_tool_id: "tool_1", pub_count: 2 }] },
       ),
       { ourCwidSet: new Set(["aog"]), toolContext },

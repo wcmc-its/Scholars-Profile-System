@@ -192,7 +192,9 @@ describe("startsAtSentenceBoundary", () => {
 
 describe("selectBestSnippet — #1119 calibration levers", () => {
   const gidx = buildToolContextIndex({
-    g: { "1": "GeneTool assembles full-length transcripts from linked-read data in a reference-free manner" },
+    g: {
+      "1": "GeneTool assembles full-length transcripts from linked-read data in a reference-free manner",
+    },
   });
 
   it("opaque gate: suppresses the snippet when pub_count exceeds the cut", () => {
@@ -201,9 +203,18 @@ describe("selectBestSnippet — #1119 calibration levers", () => {
   });
 
   it("opaque gate: keeps the snippet at or below the cut, and when pub_count is unknown", () => {
-    expect(selectBestSnippet(gidx, "g", { displayName: "GeneTool", toolPubCount: MAX_PUB_COUNT_FOR_SNIPPET })?.context).toContain("assembles");
-    expect(selectBestSnippet(gidx, "g", { displayName: "GeneTool" })?.context).toContain("assembles");
-    expect(selectBestSnippet(gidx, "g", { displayName: "GeneTool", toolPubCount: null })?.context).toContain("assembles");
+    expect(
+      selectBestSnippet(gidx, "g", {
+        displayName: "GeneTool",
+        toolPubCount: MAX_PUB_COUNT_FOR_SNIPPET,
+      })?.context,
+    ).toContain("assembles");
+    expect(selectBestSnippet(gidx, "g", { displayName: "GeneTool" })?.context).toContain(
+      "assembles",
+    );
+    expect(
+      selectBestSnippet(gidx, "g", { displayName: "GeneTool", toolPubCount: null })?.context,
+    ).toContain("assembles");
   });
 
   it("subject-not-foil guard: prefers an early-named snippet over a LONGER one that names the tool only late (foil)", () => {
@@ -220,7 +231,9 @@ describe("selectBestSnippet — #1119 calibration levers", () => {
 
   it("subject-not-foil guard: falls back to a late-named snippet when it is the only one (never drops)", () => {
     const idx = buildToolContextIndex({
-      f: { "1": "Results were markedly worse for the alternative pipelines benchmarked against the older FooTool" },
+      f: {
+        "1": "Results were markedly worse for the alternative pipelines benchmarked against the older FooTool",
+      },
     });
     expect(selectBestSnippet(idx, "f", { displayName: "FooTool" })?.pmid).toBe("1");
   });
