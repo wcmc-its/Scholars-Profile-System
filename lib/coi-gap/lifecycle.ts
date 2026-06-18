@@ -26,6 +26,15 @@ export interface FreshGap {
   entityScore: number;
   category: string;
   sourceSentence: string;
+  // --- #1112 per-mention subject attribution, persisted on the candidate row so
+  // the review-redesign client can mark self / co-author / unknown without the
+  // numeric score or attribution level ever crossing to the client. ---
+  /** Grammatical subject of the clause naming this org: "self" | "coauthor" |
+   *  "unknown" (never guessed "self"). */
+  subjectType: string;
+  /** Exact subject token as written ("Dr Altorki", "A Saxena", "SR"), or null
+   *  when the subject is unknown. */
+  subjectMention: string | null;
 }
 
 /** The minimal persisted shape needed to decide a transition. */

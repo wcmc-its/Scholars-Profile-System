@@ -31,6 +31,7 @@ type FakeClient = {
   coiActivity: { findMany: AnyMock };
   coiGapCandidate: { findMany: AnyMock };
   publication: { findMany: AnyMock };
+  publicationConflictStatement: { findMany: AnyMock };
 };
 type EditContextClient = Parameters<typeof loadEditContext>[1];
 
@@ -62,6 +63,9 @@ function fakeClient(): FakeClient {
     // Publications — the COI-gap loader joins this by pmid for the per-source
     // year + sort date. Default to "no rows" (year/ts fall back to null/0).
     publication: { findMany: vi.fn().mockResolvedValue([]) },
+    // #1112 — the COI-gap loader joins this by pmid for Paper view's verbatim
+    // `fullText`. Default to "no statement row" (fullText falls back to clause).
+    publicationConflictStatement: { findMany: vi.fn().mockResolvedValue([]) },
   };
 }
 
@@ -1249,6 +1253,165 @@ describe("loadEditContext — COI-gap surface hidden + reviewed (active / lower 
     for (const s of rev.sources) {
       for (const f of SOURCE_FORBIDDEN) expect(s).not.toHaveProperty(f);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1112 — the FLAT mention projection (`unmatchedPubmedCoiMentions`): one paper ×
+// one matched org, both `current` and `set_aside`, with the (pmid, subjectId)
+// decision-unit grouping, low-confidence (Medium) marking, and governance
+// starvation. Derives from the SAME `groups` the grouped arrays use.
+// ---------------------------------------------------------------------------
+
+describe("loadEditContext — COI-gap flat mention projection (#1112)", () => {
+  const mrow = (over: Record<string, unknown>) => ({
+    id: "m-x",
+    pmid: "40000001",
+    entity: "Acme Therapeutics",
+    normalizedEntity: "acme therapeutics",
+    tier: "High",
+    sourceSentence: "Dr Self is a consultant for Acme Therapeutics and serves on its advisory board.",
+    status: "new",
+    feedbackReason: null,
+    reviewedAt: null,
+    subjectType: "self",
+    subjectMention: "Dr Self",
+    ...over,
+  });
+
+  const PUBS = [
+    { pmid: "40000001", year: 2024, dateAddedToEntrez: new Date("2024-02-01T00:00:00Z") },
+    { pmid: "40000002", year: 2023, dateAddedToEntrez: new Date("2023-02-01T00:00:00Z") },
+  ];
+
+  function loadM(gapRows: unknown[], statements: Array<{ pmid: string; statementText: string }> = []) {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.coiGapCandidate.findMany.mockResolvedValue(gapRows);
+    c.publication.findMany.mockResolvedValue(PUBS);
+    c.publicationConflictStatement.findMany.mockResolvedValue(statements);
+    return loadEditContext(SELF, asClient(c), undefined, async () => [], { includeCoiGap: true });
+  }
+
+  it("self mention → subjectId 'self', status 'current', confidence 'high'", async () => {
+    const ctx = await loadM([mrow({})]);
+    expect(ctx!.unmatchedPubmedCoiMentions).toHaveLength(1);
+    const m = ctx!.unmatchedPubmedCoiMentions[0];
+    expect(m).toMatchObject({
+      candidateId: "m-x",
+      pmid: "40000001",
+      organization: "acme therapeutics",
+      organizationRaw: "Acme Therapeutics",
+      subjectType: "self",
+      subjectId: "self",
+      status: "current",
+      confidence: "high",
+    });
+    // relationshipKinds re-derived from the clause (consulting + advisory board).
+    expect(m.relationshipKinds).toEqual(expect.arrayContaining(["consulting", "advisory_board"]));
+  });
+
+  it("two orgs named by the SAME self subject in one paper share (pmid, subjectId='self')", async () => {
+    const ctx = await loadM([
+      mrow({ id: "m-a", normalizedEntity: "acme therapeutics", entity: "Acme Therapeutics" }),
+      mrow({ id: "m-b", normalizedEntity: "globex", entity: "Globex" }),
+    ]);
+    const ms = ctx!.unmatchedPubmedCoiMentions;
+    expect(ms).toHaveLength(2);
+    // Both resolve to the same decision unit, so a single action clears both.
+    expect(new Set(ms.map((m) => `${m.pmid}::${m.subjectId}`))).toEqual(new Set(["40000001::self"]));
+  });
+
+  it("a co-author mention is EXCLUDED from the projection (scholar's own relationships only)", async () => {
+    const ctx = await loadM([
+      mrow({
+        id: "m-co",
+        normalizedEntity: "astrazeneca",
+        entity: "AstraZeneca",
+        subjectType: "coauthor",
+        subjectMention: "A Saxena",
+      }),
+    ]);
+    // A co-author's disclosure that merely rode along in a shared paper is not the
+    // scholar's to act on — it never crosses to the client.
+    expect(ctx!.unmatchedPubmedCoiMentions).toHaveLength(0);
+  });
+
+  it("a co-author mention alongside a self mention: only the self crosses to the client", async () => {
+    const ctx = await loadM([
+      mrow({ id: "m-self", normalizedEntity: "acme", entity: "Acme", subjectType: "self", subjectMention: "Dr Self" }),
+      mrow({
+        id: "m-co",
+        normalizedEntity: "globex",
+        entity: "Globex",
+        subjectType: "coauthor",
+        subjectMention: "A Saxena",
+      }),
+    ]);
+    const ms = ctx!.unmatchedPubmedCoiMentions;
+    expect(ms).toHaveLength(1);
+    expect(ms[0].candidateId).toBe("m-self");
+  });
+
+  it("two distinct UNKNOWN subjects in one paper get separate, stable subjectIds (never merged, never 'self')", async () => {
+    const ctx = await loadM([
+      mrow({ id: "m-u1", normalizedEntity: "org one", entity: "Org One", subjectType: null, subjectMention: null }),
+      mrow({ id: "m-u2", normalizedEntity: "org two", entity: "Org Two", subjectType: null, subjectMention: null }),
+    ]);
+    const ms = ctx!.unmatchedPubmedCoiMentions;
+    expect(ms.every((m) => m.subjectType === "unknown")).toBe(true);
+    const ids = new Set(ms.map((m) => m.subjectId));
+    expect(ids.size).toBe(2); // not merged
+    for (const id of ids) expect(id).toMatch(/^unknown:#\d+$/); // never "self"
+  });
+
+  it("a NULL subject_type row (pre-#1112) degrades to 'unknown' with a null token — never guessed 'self'", async () => {
+    const ctx = await loadM([mrow({ subjectType: null, subjectMention: "Stale Token" })]);
+    const m = ctx!.unmatchedPubmedCoiMentions[0];
+    expect(m.subjectType).toBe("unknown");
+    expect(m.subjectMention).toBeNull();
+  });
+
+  it("Medium tier → confidence 'low' (excluded from the primary counter by the UI)", async () => {
+    const ctx = await loadM([mrow({ tier: "Medium" })]);
+    expect(ctx!.unmatchedPubmedCoiMentions[0].confidence).toBe("low");
+  });
+
+  it("an acted (dismissed) mention is 'set_aside' with reason + reviewedAt; a 'new' one is 'current' with null reason", async () => {
+    const ctx = await loadM([
+      mrow({ id: "m-new", normalizedEntity: "new co", entity: "New Co", status: "new" }),
+      mrow({
+        id: "m-set",
+        pmid: "40000002",
+        normalizedEntity: "set co",
+        entity: "Set Co",
+        status: "dismissed",
+        feedbackReason: "invalid",
+        reviewedAt: new Date("2026-03-01T00:00:00Z"),
+      }),
+    ]);
+    const byId = new Map(ctx!.unmatchedPubmedCoiMentions.map((m) => [m.candidateId, m]));
+    expect(byId.get("m-new")).toMatchObject({ status: "current", reason: null, reviewedAt: null });
+    expect(byId.get("m-set")).toMatchObject({ status: "set_aside", reason: "invalid", reviewedAt: "2026-03-01" });
+  });
+
+  it("Paper view fullText = the verbatim statement when present, else the clause", async () => {
+    const FULL = "Competing interests: Dr Self is a consultant for Acme Therapeutics. Dr Other reports grants from Globex.";
+    const ctx = await loadM([mrow({})], [{ pmid: "40000001", statementText: FULL }]);
+    expect(ctx!.unmatchedPubmedCoiMentions[0].fullText).toBe(FULL);
+    // No statement row → fall back to the stored clause.
+    const ctx2 = await loadM([mrow({ pmid: "40000002" })]);
+    expect(ctx2!.unmatchedPubmedCoiMentions[0].fullText).toBe(ctx2!.unmatchedPubmedCoiMentions[0].clause);
+  });
+
+  it("GOVERNANCE: a mention never exposes entityScore/attribution/category/status-internals/normalizedEntity-as-score", async () => {
+    const ctx = await loadM([mrow({})]);
+    const m = ctx!.unmatchedPubmedCoiMentions[0];
+    for (const f of ["entityScore", "attribution", "category", "tier"]) {
+      expect(m).not.toHaveProperty(f);
+    }
+    // `confidence` is the only confidence signal, and it is qualitative.
+    expect(["high", "low"]).toContain(m.confidence);
   });
 });
 

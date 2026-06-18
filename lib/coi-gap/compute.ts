@@ -114,6 +114,11 @@ export async function computeScholarGaps(cwid: string): Promise<FreshGap[]> {
         entityScore: c.entityScore,
         category: c.category,
         sourceSentence: c.sourceSentence,
+        // #1112 — carry the per-mention subject through to persistence. Each row
+        // is per (pmid, normalized entity), so it holds the one mention's subject
+        // (the highest-tier mention wins the dedup below, with its own subject).
+        subjectType: c.subjectType,
+        subjectMention: c.subjectMention,
       };
       const k = `${fg.pmid}::${fg.normalizedEntity}`;
       const prev = byKey.get(k);

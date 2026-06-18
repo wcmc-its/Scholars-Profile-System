@@ -15,6 +15,7 @@ import {
   buildAuthorRoster,
   countAuthorMentions,
   deriveScholar,
+  deriveSubject,
   extractEntities,
   fuzzyScore,
   isCommonGivenName,
@@ -28,7 +29,9 @@ import {
   looksLikePersonName,
   matchesCoAuthor,
   normalizeEntity,
+  relationshipKinds,
   scholarSlice,
+  trimClause,
 } from "@/lib/coi-gap/pipeline";
 
 describe("deriveScholar", () => {
@@ -693,5 +696,187 @@ describe("analyzeStatement — Tamimi-style co-author org leakage (end to end)",
     expect(noRoster.candidates.map((c) => c.entity).sort()).toEqual(
       ["C Lehman", "Clairity", "Merck", "Tango Therapeutics"].sort(),
     );
+  });
+});
+
+// ============================ #1112 review redesign ============================
+
+describe("deriveSubject — per-mention grammatical subject", () => {
+  const smith = () => deriveScholar("John", "Smith");
+  const tamimi = () => deriveScholar("Rulla", "Tamimi");
+
+  it("resolves the scholar's surname as self", () => {
+    // Clauses reach deriveSubject already de-dotted by segment() ("Dr. " -> "Dr ").
+    expect(deriveSubject("Dr Smith is a consultant for Pfizer", smith())).toEqual({
+      type: "self",
+      mention: "Dr Smith",
+    });
+  });
+
+  it("resolves the scholar's own bare surname as self", () => {
+    const r = deriveSubject("Smith reports honoraria from Merck", smith());
+    expect(r.type).toBe("self");
+    expect(r.mention).toBe("Smith");
+  });
+
+  it("resolves exact author-ref initials as self", () => {
+    // "JS" matches John Smith's initials in author-ref position.
+    const r = deriveSubject("J.S. serves on the advisory board of Regeneron", smith());
+    expect(r.type).toBe("self");
+    expect(r.mention?.replace(/[^A-Z]/g, "")).toBe("JS");
+  });
+
+  it("resolves a DIFFERENT author's initials as coauthor (initials form 'SR')", () => {
+    const r = deriveSubject("SR declared serving on advisory boards of AstraZeneca", smith());
+    expect(r.type).toBe("coauthor");
+    expect(r.mention?.replace(/[^A-Z]/g, "")).toBe("SR");
+  });
+
+  it("resolves a roster-confirmed initial+surname co-author as coauthor ('A Saxena')", () => {
+    const roster = buildAuthorRoster("Smith J, Saxena A");
+    const r = deriveSubject("A Saxena receives research funding from AstraZeneca", smith(), roster);
+    expect(r.type).toBe("coauthor");
+    expect(r.mention).toBe("A Saxena");
+  });
+
+  it("resolves a 'Dr <co-author>' subject as coauthor ('Dr Altorki')", () => {
+    const r = deriveSubject("Dr Altorki is a consultant for AstraZeneca", smith());
+    expect(r.type).toBe("coauthor");
+    expect(r.mention).toBe("Dr Altorki");
+  });
+
+  it("emits unknown — NEVER guesses self — when no subject is resolvable", () => {
+    const r = deriveSubject("Consulting fees were received from Boston Scientific", smith());
+    expect(r).toEqual({ type: "unknown", mention: null });
+  });
+
+  it("does NOT trust an UNconfirmed initial+surname (no byline match) → unknown", () => {
+    // "A Saxena" with no roster / not on the byline must not be read as an author.
+    const noRoster = deriveSubject("A Saxena receives funding from AstraZeneca", smith());
+    expect(noRoster.type).toBe("unknown");
+    const wrongByline = deriveSubject(
+      "A Saxena receives funding from AstraZeneca",
+      smith(),
+      buildAuthorRoster("Smith J, Jones B"),
+    );
+    expect(wrongByline.type).toBe("unknown");
+  });
+
+  it("picks the scholar when the scholar leads, even alongside a co-author (calm self)", () => {
+    const roster = buildAuthorRoster("Tamimi R, Ashworth A");
+    const r = deriveSubject("Dr. Tamimi and A Ashworth are consultants for Merck", tamimi(), roster);
+    expect(r.type).toBe("self");
+  });
+
+  it("attaches the right subject per clause across a multi-subject statement", () => {
+    // End-to-end: each org's row carries the subject of ITS clause.
+    const roster = buildAuthorRoster("Smith J, Saxena A");
+    const stmt =
+      "Dr. Smith is a consultant for Boston Scientific. A Saxena receives research funding from Gilead.";
+    const r = analyzeStatement(stmt, smith(), [], { roster });
+    const bySubj = Object.fromEntries(r.candidates.map((c) => [c.entity, c.subjectType]));
+    expect(bySubj["Boston Scientific"]).toBe("self");
+    // Gilead's clause is funder-classed (research funding) so it is suppressed,
+    // but the self clause's org surfaces with a self subject.
+    expect(r.candidates.find((c) => c.entity === "Boston Scientific")?.subjectMention).toMatch(/Smith/);
+  });
+
+  it("marks every org in one multi-org clause with the same (single) subject", () => {
+    const r = analyzeStatement(
+      "Dr. Smith is a consultant for Boston Scientific and Genmab.",
+      smith(),
+      [],
+    );
+    const subjects = new Set(r.candidates.map((c) => c.subjectType));
+    expect(subjects).toEqual(new Set(["self"]));
+    expect(r.candidates.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("structured ASCO sections attribute to self (section header bounds the scholar)", () => {
+    const blob =
+      "Eleni Andreopoulou Honoraria: AstraZeneca, AbbVie Consulting or Advisory Role: Eisai " +
+      "Kevin Holcomb Research Funding: Fujirebio Diagnostics";
+    const r = analyzeStatement(blob, deriveScholar("Eleni", "Andreopoulou"), []);
+    const astra = r.candidates.find((c) => c.entity === "AstraZeneca");
+    expect(astra?.subjectType).toBe("self");
+    expect(astra?.subjectMention).toMatch(/Andreopoulou/);
+  });
+});
+
+describe("relationshipKinds — disclosure-kind parsing", () => {
+  it("parses advisory board + consulting", () => {
+    expect(relationshipKinds("serves on the scientific advisory board and as a consultant for Pfizer")).toEqual(
+      expect.arrayContaining(["advisory_board", "consulting"]),
+    );
+  });
+  it("parses ownership/equity and royalties", () => {
+    expect(relationshipKinds("holds equity in Genmab")).toContain("ownership");
+    expect(relationshipKinds("receives royalties from a licensed patent")).toContain("royalties");
+  });
+  it("parses grant funding and honoraria", () => {
+    expect(relationshipKinds("received research funding from Gilead")).toContain("grant");
+    expect(relationshipKinds("received honoraria from Merck")).toContain("honoraria");
+  });
+  it("parses steering committee and DSMB", () => {
+    expect(relationshipKinds("is a member of the steering committee")).toContain("steering_committee");
+    expect(relationshipKinds("sits on the data safety monitoring board")).toContain("dsmb");
+  });
+  it("returns [] when no kind is recognized", () => {
+    expect(relationshipKinds("has a relationship with Acme")).toEqual([]);
+  });
+});
+
+describe("trimClause — Organization-view clause trimming", () => {
+  it("returns a short clause unchanged", () => {
+    const c = "Dr. Smith is a consultant for Pfizer";
+    expect(trimClause(c, "Pfizer", "Dr Smith")).toBe(c);
+  });
+
+  it("windows around the org with elision on a long clause", () => {
+    const long =
+      "During the conduct of this study and outside the submitted work Dr. Smith reports that he is a paid " +
+      "consultant and advisory board member for Boston Scientific as well as several unrelated activities";
+    const out = trimClause(long, "Boston Scientific", "Dr Smith");
+    expect(out).toContain("Boston Scientific");
+    expect(out).toContain("…");
+    expect(out.length).toBeLessThan(long.length);
+  });
+
+  it("joins a far-apart subject and org with ' … ' (tolerant of trailing punctuation)", () => {
+    // The de-dotted subject token "Dr Smith" still locates "Dr. Smith," in the
+    // source clause (punctuation-tolerant word match).
+    const long =
+      "Dr. Smith, in the interest of full transparency and following institutional policy regarding the " +
+      "disclosure of financial relationships, wishes to note a consulting relationship with Genmab here";
+    const out = trimClause(long, "Genmab", "Dr Smith");
+    expect(out).toMatch(/Smith/);
+    expect(out).toContain("Genmab");
+    expect(out).toContain("…");
+  });
+
+  it("does not drop the org when it can't locate the subject token", () => {
+    const long =
+      "An extended boilerplate preamble about competing interests and disclosure policy precedes the actual " +
+      "named relationship which is finally a consulting arrangement with Boston Scientific at the very end";
+    const out = trimClause(long, "Boston Scientific", null);
+    expect(out).toContain("Boston Scientific");
+  });
+});
+
+describe("analyzeStatement — #1112 per-mention fields on surfaced candidates", () => {
+  const smith = () => deriveScholar("John", "Smith");
+
+  it("populates organizationRaw, clause, subject, and relationshipKinds", () => {
+    const r = analyzeStatement(
+      "Dr. Smith is a consultant for Boston Scientific.",
+      smith(),
+      [],
+    );
+    const c = r.candidates.find((x) => x.entity === "Boston Scientific")!;
+    expect(c.organizationRaw).toBe("Boston Scientific");
+    expect(c.subjectType).toBe("self");
+    expect(c.subjectMention).toMatch(/Smith/);
+    expect(c.clause).toContain("Boston Scientific");
+    expect(c.relationshipKinds).toContain("consulting");
   });
 });

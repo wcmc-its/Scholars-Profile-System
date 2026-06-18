@@ -150,6 +150,9 @@ async function main() {
             category: u.category,
             sourceSentence: u.sourceSentence,
             status: u.status,
+            // #1112 — per-mention subject attribution (self/coauthor/unknown + token).
+            subjectType: u.subjectType,
+            subjectMention: u.subjectMention,
           },
           update: {
             entity: u.entity,
@@ -159,6 +162,10 @@ async function main() {
             category: u.category,
             sourceSentence: u.sourceSentence,
             status: u.status,
+            // #1112 — refresh the subject each recompute so a re-parsed clause (e.g.
+            // once the byline is available) corrects an earlier "unknown".
+            subjectType: u.subjectType,
+            subjectMention: u.subjectMention,
             lastSeenAt: new Date(),
             // #988 — a reopened (resolved → new) gap must shed the prior review's
             // feedbackReason/reviewedAt so an active "new" row never carries a stale

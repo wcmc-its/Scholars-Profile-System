@@ -38,6 +38,9 @@ import { isChairTitleFor } from "@/lib/leadership";
 import { formatProgramLabel } from "@/lib/mentoring-labels";
 import { isRejectReason } from "@/lib/edit/reject-reason";
 import type { FeedbackReason } from "@/lib/coi-gap/feedback";
+import { subjectId as deriveSubjectId } from "@/lib/coi-gap/mention";
+import type { SubjectType } from "@/lib/coi-gap/mention";
+import { relationshipKinds as deriveRelationshipKinds } from "@/lib/coi-gap/pipeline";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 
 /** The Prisma surface `loadEditContext` needs — a client or tx satisfies it. */
@@ -54,6 +57,7 @@ type EditContextReadClient = Pick<
   | "coiActivity"
   | "coiGapCandidate"
   | "publication"
+  | "publicationConflictStatement"
 >;
 
 export type EditContextScholar = {
@@ -282,6 +286,75 @@ export type EditContextCoiGapReviewed = {
 };
 
 /**
+ * #1112 — one MENTION (one paper × one matched organization) in the redesigned
+ * "From the scholar's publications" review surface. This is the FLAT atomic unit
+ * the client fetches ONCE and pivots into Organization OR Paper view entirely
+ * client-side (spec §3/§9: "both views derive from one fetched mention set"). The
+ * three grouped arrays above (`unmatchedPubmedCoi*`) stay for the existing card +
+ * rail badge; this is the parallel projection the redesign consumes.
+ *
+ * GOVERNANCE (same starvation as the grouped projection): the numeric
+ * `entityScore`, the internal `attribution` LEVEL, `category`, and the raw
+ * lifecycle `status` NEVER cross. Confidence is the qualitative `tier` only, mapped
+ * to a `confidence` marker ("high" | "low") for the spec's primary-counter rule
+ * (Medium = low-confidence, collapsed + excluded from the primary count). Subject
+ * attribution is honest: `subjectType: "unknown"` is emitted when the parse could
+ * not resolve a subject — NEVER guessed "self".
+ *
+ * The DECISION UNIT is `(pmid, subjectId)` (see `lib/coi-gap/mention.ts`):
+ * resolving it POSTs the existing per-id `/feedback` (or `/restore`) for EVERY
+ * `candidateId` whose mention shares that `(pmid, subjectId)`. The 3-way feedback
+ * SEMANTICS are unchanged — only the client-side fan-out set changes.
+ */
+export type EditContextCoiGapMention = {
+  /** Source `CoiGapCandidate.id` — the unit the per-id `/feedback` & `/restore`
+   *  routes target. One mention === one candidate row. */
+  candidateId: string;
+  pmid: string;
+  /** Publication year for display, or null when unknown. */
+  year: number | null;
+  /** Canonical/normalized matched org — the dedupe/group key for Organization view
+   *  (a lowercased form already shown verbatim; never the score/status). */
+  organization: string;
+  /** The organization as PRINTED in the sentence ("Roche/Genentech"). */
+  organizationRaw: string;
+  /** Grammatical subject of the clause naming this org. `"unknown"` when the parse
+   *  could not resolve it — never guessed `"self"`. */
+  subjectType: SubjectType;
+  /** The exact subject token as written ("Dr Altorki", "A Saxena", "SR"), or null
+   *  when `subjectType === "unknown"`. */
+  subjectMention: string | null;
+  /** Stable decision-unit key WITHIN this pmid — `subjectId(pmid,…)` from
+   *  `lib/coi-gap/mention.ts` ("self" | "coauthor:<norm>" | "unknown:#idx"). All
+   *  mentions sharing `(pmid, subjectId)` resolve together. */
+  subjectId: string;
+  /** Trimmed span for the Organization-view row (subject token + matched org +
+   *  ~6 words connective, eliding with "…"). Organization view marks org + subject
+   *  per spec §4. */
+  clause: string;
+  /** The ENTIRE competing-interests statement (verbatim) — Paper view renders this
+   *  with no trimming, since the statement appears exactly once there. */
+  fullText: string;
+  /** Disclosure kinds parsed from the clause ("advisory_board", "grant", …); `[]`
+   *  when none recognized. Humanize via `lib/coi-gap/mention.ts`. */
+  relationshipKinds: ReadonlyArray<string>;
+  /** Qualitative confidence ONLY: "high" === High tier, "low" === Medium tier
+   *  (the lower-confidence bucket — collapsed + EXCLUDED from the primary counter
+   *  per spec §2/§7). Never a percentage, never the numeric score. */
+  confidence: "high" | "low";
+  /** Review status of THIS mention's decision unit: `"current"` (not yet responded
+   *  — i.e. the candidate row is still `new`) vs `"set_aside"` (responded — the row
+   *  was `acknowledged`/`dismissed`). Mirrors the grouped active/Reviewed split at
+   *  the mention grain. `resolved` rows are excluded entirely (the gap closed). */
+  status: "current" | "set_aside";
+  /** The recorded 3-way feedback reason for a set-aside mention, else null. */
+  reason: FeedbackReason | null;
+  /** The scholar's own action date as ISO `YYYY-MM-DD` for a set-aside mention,
+   *  else null. Governance-allowed (the scholar's own action, not a verdict). */
+  reviewedAt: string | null;
+};
+
+/**
  * One mentee on the suppressible Mentees panel. Mentees are derived (no FK; the
  * reporting DB is truncate-rebuilt nightly), so they have no #352 stable DB key
  * — instead `externalId` is the composite `"{mentorCwid}:{menteeCwid}"`, which
@@ -366,6 +439,18 @@ export type EditContext = {
    * every non-self caller and when `includeCoiGap` is absent.
    */
   unmatchedPubmedCoiReviewed: ReadonlyArray<EditContextCoiGapReviewed>;
+  /**
+   * #1112 — the FLAT mention set (one paper × one matched org) the redesigned
+   * review surface pivots into Organization OR Paper view entirely client-side
+   * (spec §3/§9). Holds BOTH `current` (not-yet-responded) and `set_aside`
+   * (responded) mentions, each marked `confidence: "high" | "low"` so the UI can
+   * collapse the low-confidence (Medium) ones and exclude them from the primary
+   * counter. Same governance starvation as the grouped arrays (no score/attribution
+   * /category/raw status). Populated ONLY with `opts.includeCoiGap === true`
+   * (behind `SELF_EDIT_COI_GAP_HINT`); empty for every other caller. `resolved`
+   * candidates are excluded (the gap closed once the disclosure appeared).
+   */
+  unmatchedPubmedCoiMentions: ReadonlyArray<EditContextCoiGapMention>;
   /**
    * The manual-Highlights editor state (#836), or `null` when the surface is not
    * available (flag off, or a non-self caller). Populated only when
@@ -669,6 +754,8 @@ export async function loadEditContext(
   const unmatchedPubmedCoi: EditContextCoiGapCandidate[] = [];
   const unmatchedPubmedCoiLower: EditContextCoiGapCandidate[] = [];
   const unmatchedPubmedCoiReviewed: EditContextCoiGapReviewed[] = [];
+  // #1112 — the FLAT mention set the redesigned review surface pivots client-side.
+  const unmatchedPubmedCoiMentions: EditContextCoiGapMention[] = [];
 
   if (opts?.includeCoiGap === true) {
     const gapRows = await client.coiGapCandidate.findMany({
@@ -689,8 +776,14 @@ export async function loadEditContext(
         status: true,
         feedbackReason: true,
         reviewedAt: true,
+        // #1112 per-mention subject attribution (null on pre-#1112 rows until the
+        // next `etl:coi-gap` recompute backfills them — treated as "unknown").
+        subjectType: true,
+        subjectMention: true,
       },
-      orderBy: [{ entity: "asc" }],
+      // Stable secondary order by id so the per-paper `unknown:#idx` decision-unit
+      // index (see `subjectId`) is reproducible across reloads.
+      orderBy: [{ entity: "asc" }, { id: "asc" }],
     });
 
     // The candidate has no date column, so join `publication` by pmid for the
@@ -705,6 +798,19 @@ export async function loadEditContext(
             select: { pmid: true, year: true, dateAddedToEntrez: true },
           })
         : [];
+    // #1112 — the ENTIRE competing-interests statement per pmid, for Paper view's
+    // verbatim `fullText` (the candidate row stores only the per-clause
+    // `sourceSentence`). Keyed by pmid (one statement per publication). Falls back
+    // to the clause's `sourceSentence` when no statement row exists.
+    const statementRows =
+      gapPmids.length > 0
+        ? await client.publicationConflictStatement.findMany({
+            where: { pmid: { in: gapPmids } },
+            select: { pmid: true, statementText: true },
+          })
+        : [];
+    const statementByPmid = new Map(statementRows.map((s) => [s.pmid, s.statementText]));
+
     const dateByPmid = new Map(
       pubDates.map((p) => [
         p.pmid,
@@ -732,10 +838,14 @@ export async function loadEditContext(
       year: number | null;
       ts: number;
       entity: string;
+      normalizedEntity: string;
       tier: "High" | "Medium";
       status: string;
       feedbackReason: string | null;
       reviewedAt: Date | null;
+      // #1112 per-mention subject (null → "unknown" on pre-#1112 rows).
+      subjectType: SubjectType;
+      subjectMention: string | null;
     };
     const groups = new Map<string, { key: string; sources: GapSrc[] }>();
     for (const g of gapRows) {
@@ -743,6 +853,11 @@ export async function loadEditContext(
       // treat any unexpected value as the more conservative "Medium" tier.
       const tier: "High" | "Medium" = g.tier === "High" ? "High" : "Medium";
       const d = dateByPmid.get(g.pmid) ?? { year: null, ts: 0 };
+      // Narrow the free-text `subject_type` column to the union; any unexpected
+      // value (incl. NULL on pre-#1112 rows) degrades to the honest "unknown" —
+      // never guessed "self".
+      const subjectType: SubjectType =
+        g.subjectType === "self" ? "self" : g.subjectType === "coauthor" ? "coauthor" : "unknown";
       const src: GapSrc = {
         id: g.id,
         pmid: g.pmid,
@@ -750,10 +865,13 @@ export async function loadEditContext(
         year: d.year,
         ts: d.ts,
         entity: g.entity,
+        normalizedEntity: g.normalizedEntity,
         tier,
         status: g.status,
         feedbackReason: g.feedbackReason,
         reviewedAt: g.reviewedAt,
+        subjectType,
+        subjectMention: subjectType === "unknown" ? null : g.subjectMention,
       };
       const existing = groups.get(g.normalizedEntity);
       if (existing) {
@@ -842,6 +960,73 @@ export async function loadEditContext(
         b.reviewedAt.localeCompare(a.reviewedAt) ||
         b.newestTs - a.newestTs ||
         a.entity.localeCompare(b.entity),
+    );
+
+    // #1112 — the FLAT mention set. One mention per candidate row (one paper × one
+    // matched org), projected from the SAME `groups` the three grouped arrays were
+    // built from — so a decision taken in either view (Org / Paper) reconciles to
+    // the same persisted rows. Both `current` (still `new`) and `set_aside`
+    // (`acknowledged`/`dismissed`) mentions cross; the UI partitions on `status`.
+    //
+    // `subjectId` is the per-paper decision-unit key. For `unknown` (and a
+    // tokenless `coauthor`) the contract uses a STABLE per-paper index so two
+    // unresolved subjects in one paper never merge — assigned here from the
+    // candidates' deterministic fetch order (entity asc, id asc) within each pmid.
+    const allSources: GapSrc[] = [];
+    for (const grp of groups.values()) allSources.push(...grp.sources);
+    // Deterministic order so the per-pmid index is reproducible across reloads.
+    allSources.sort((a, b) => a.pmid.localeCompare(b.pmid) || a.entity.localeCompare(b.entity) || a.id.localeCompare(b.id));
+    const indexableSeen = new Map<string, number>(); // `${pmid}::${id}` → assigned idx
+    const indexCursor = new Map<string, number>(); // pmid → next index for an indexable subject
+    const indexFor = (s: GapSrc): number => {
+      const k = `${s.pmid}::${s.id}`;
+      const prev = indexableSeen.get(k);
+      if (prev !== undefined) return prev;
+      const next = indexCursor.get(s.pmid) ?? 0;
+      indexCursor.set(s.pmid, next + 1);
+      indexableSeen.set(k, next);
+      return next;
+    };
+    for (const s of allSources) {
+      if (s.status === "resolved") continue; // defensive — query already excludes it
+      // This surface is the scholar's OWN relationships only: a co-author's
+      // disclosure that rode along in a shared paper's statement is not theirs to
+      // act on, so it never crosses to the client. Keep `self` + `unknown`.
+      if (s.subjectType === "coauthor") continue;
+      const sid = deriveSubjectId(s.subjectType, s.subjectMention, indexFor(s));
+      const acted = s.status === "acknowledged" || s.status === "dismissed";
+      const reason = acted ? (reasonOf(s) ?? null) : null;
+      const reviewedAt = acted && s.reviewedAt ? s.reviewedAt.toISOString().slice(0, 10) : null;
+      unmatchedPubmedCoiMentions.push({
+        candidateId: s.id,
+        pmid: s.pmid,
+        year: s.year,
+        organization: s.normalizedEntity,
+        organizationRaw: s.entity,
+        subjectType: s.subjectType,
+        subjectMention: s.subjectMention,
+        subjectId: sid,
+        // The candidate stores the trimmed clause as `sourceSentence` (see
+        // `mentionMeta`/`analyzeStatement`), so Organization view uses it directly.
+        clause: s.sourceSentence,
+        // Paper view's verbatim statement — fall back to the clause if absent.
+        fullText: statementByPmid.get(s.pmid) ?? s.sourceSentence,
+        // Re-derived (pure) from the stored clause — `relationshipKinds` is not a
+        // persisted column; the same cue parser the pipeline uses runs here.
+        relationshipKinds: deriveRelationshipKinds(s.sourceSentence),
+        confidence: s.tier === "High" ? "high" : "low",
+        status: acted ? "set_aside" : "current",
+        reason,
+        reviewedAt,
+      });
+    }
+    // Stable client order: high-confidence first, newest within, then pmid/org.
+    unmatchedPubmedCoiMentions.sort(
+      (a, b) =>
+        (a.confidence === b.confidence ? 0 : a.confidence === "high" ? -1 : 1) ||
+        (b.year ?? 0) - (a.year ?? 0) ||
+        b.pmid.localeCompare(a.pmid) ||
+        a.organization.localeCompare(b.organization),
     );
   }
 
@@ -1015,6 +1200,7 @@ export async function loadEditContext(
       unmatchedPubmedCoi,
       unmatchedPubmedCoiLower,
       unmatchedPubmedCoiReviewed,
+      unmatchedPubmedCoiMentions,
       // No confirmed publications → nothing to pick or rank. Surface an empty
       // editor state (still reading any stored override) when requested.
       highlights: includeHighlights
@@ -1175,6 +1361,7 @@ export async function loadEditContext(
     unmatchedPubmedCoi,
     unmatchedPubmedCoiLower,
     unmatchedPubmedCoiReviewed,
+    unmatchedPubmedCoiMentions,
     highlights,
   };
 }
