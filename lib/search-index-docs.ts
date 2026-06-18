@@ -918,12 +918,22 @@ export async function buildPeopleDoc(
   // or a representative tool. `exemplarTools` is a `Json` column: guard the
   // array shape, coerce each entry to a trimmed string, drop empties.
   let methodFamilyField: { methodFamily: string } | Record<string, never> = {};
+  // #1119 — sibling rollup of the visible families' tool-USAGE snippets, indexed in
+  // its own `methodContext` field so usage language is matchable (gated query-side
+  // by SEARCH_PEOPLE_METHOD_CONTEXT). Built from the SAME gate + sidecar query.
+  let methodContextField: { methodContext: string } | Record<string, never> = {};
   if (gate) {
     const famRows = await client.scholarFamily.findMany({
       where: { cwid: s.cwid },
-      select: { supercategory: true, familyLabel: true, exemplarTools: true },
+      select: {
+        supercategory: true,
+        familyLabel: true,
+        exemplarTools: true,
+        exemplarContexts: true,
+      },
     });
     const methodTerms = new Set<string>();
+    const contextSnippets = new Set<string>();
     for (const r of famRows) {
       if (!isFamilyPubliclyVisible(r.supercategory, r.familyLabel, gate)) continue;
       const label = r.familyLabel.trim();
@@ -934,9 +944,23 @@ export async function buildPeopleDoc(
           if (name) methodTerms.add(name);
         }
       }
+      // #1119 — collect the per-exemplar usage snippets (values of the JSON map).
+      if (
+        r.exemplarContexts &&
+        typeof r.exemplarContexts === "object" &&
+        !Array.isArray(r.exemplarContexts)
+      ) {
+        for (const v of Object.values(r.exemplarContexts as Record<string, unknown>)) {
+          const snippet = typeof v === "string" ? v.trim() : "";
+          if (snippet) contextSnippets.add(snippet);
+        }
+      }
     }
     if (methodTerms.size > 0) {
       methodFamilyField = { methodFamily: Array.from(methodTerms).join(" ") };
+    }
+    if (contextSnippets.size > 0) {
+      methodContextField = { methodContext: Array.from(contextSnippets).join(" ") };
     }
   }
 
@@ -990,6 +1014,8 @@ export async function buildPeopleDoc(
     // Issue #824 §4c — public method-family rollup (OMIT-on-empty, gate-only).
     // Empty `{}` unless a gate was passed AND ≥1 overlay-visible family exists.
     ...methodFamilyField,
+    // #1119 — public method-family tool-USAGE snippets (OMIT-on-empty, gate-only).
+    ...methodContextField,
   };
 }
 

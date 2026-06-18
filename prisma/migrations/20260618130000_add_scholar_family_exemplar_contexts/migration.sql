@@ -1,0 +1,17 @@
+-- Per-(scholar-family, exemplar-tool) usage-context snippets (#1119).
+--
+-- The ReciterAI tool-context artifact (tools/latest/tool_context.json) maps each
+-- tool to a per-publication usage sentence (tool_id -> pmid -> "…how the tool was
+-- used in that paper…"). The tools ETL now resolves, for each of a family's
+-- exemplar tools, the single best junk-filtered snippet drawn from a paper in the
+-- family's own `pmids` (falling back to any of the tool's snippets), keyed by the
+-- exemplar tool DISPLAY NAME so it lines up 1:1 with `exemplar_tools`.
+--
+-- Unlike the RENDER-ONLY generated `definition` (#879 / D-19), these are EXTRACTED
+-- real publication text and are grounding-eligible for the overview generator —
+-- still treated as injection-safe DATA in any LLM prompt.
+--
+-- Nullable so the additive migration applies cleanly to the populated table (a
+-- MySQL/MariaDB JSON column takes no default); `{}` when no exemplar has a usable
+-- snippet, NULL until the next full-replace tools ETL backfills it.
+ALTER TABLE `scholar_family` ADD COLUMN `exemplar_contexts` JSON NULL;

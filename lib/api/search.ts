@@ -51,6 +51,8 @@ import {
   MESH_ESCALATION_THRESHOLD,
   MESH_MIN_MATCHED_FORM_LEN,
   PEOPLE_ABSTRACTS_BOOST,
+  PEOPLE_METHOD_CONTEXT_BOOST,
+  PEOPLE_TOPIC_METHOD_CONTEXT_BOOST,
   PEOPLE_DEPT_LEADERSHIP_CHAIR_WEIGHT,
   PEOPLE_DEPT_LEADERSHIP_CHIEF_WEIGHT,
   PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE,
@@ -83,6 +85,7 @@ import {
   resolvePeopleConceptPrecount,
   resolvePeopleMatchAwareSnippet,
   resolvePeopleMethodFamilyBoost,
+  resolvePeopleMethodContextBoost,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
   resolveSearchResultEvidence,
@@ -1105,6 +1108,19 @@ export async function searchPeople(opts: {
       ? [...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS, "methodFamily^3"]
       : [...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS];
 
+  // #1119 — the sibling method-CONTEXT boost (`SEARCH_PEOPLE_METHOD_CONTEXT`). The
+  // `methodContext` field is a multi-sentence usage-prose blob, so — UNLIKE the
+  // short controlled-vocab `methodFamily` — it must NOT join the cross_fields/msm
+  // `must` ladder: a term landing only in usage prose would satisfy
+  // minimum-should-match for the whole group and admit an off-topic scholar (the
+  // exact reason `publicationAbstracts` is excluded from these ladders; #1056/#1090).
+  // It rides a scoring-only `should` match clause instead — nudging rank, never
+  // admitting a doc. Independent flag (ships/flips separately from methodFamily);
+  // reindex-then-flip + soak. Built lazily so a name-only query never references it.
+  const methodContextBoostOn = resolvePeopleMethodContextBoost();
+  const methodContextShould = (query: string, boost: number): Record<string, unknown>[] =>
+    methodContextBoostOn ? [{ match: { methodContext: { query, boost } } }] : [];
+
   // Issue #311 / SPEC §6.1.4 — name-template should-clauses, reused by the name
   // template (#309) and as the name half of the hybrid template. The cwid^100
   // term stays in the outer `should` (the existing short-circuit), so it is NOT
@@ -1228,6 +1244,8 @@ export async function searchPeople(opts: {
                 },
               },
             },
+            // #1119 — methodContext is scoring-only here too (topic-raised boost).
+            ...methodContextShould(contentQuery, PEOPLE_TOPIC_METHOD_CONTEXT_BOOST),
           ],
         },
       }
@@ -1258,6 +1276,8 @@ export async function searchPeople(opts: {
                 },
               },
             },
+            // #1119 — methodContext scoring-only should (cannot admit; #1056/#1090).
+            ...methodContextShould(trimmed, PEOPLE_METHOD_CONTEXT_BOOST),
           ],
         },
       };

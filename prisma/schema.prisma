@@ -1743,6 +1743,18 @@ model ScholarFamily {
   /// no endpoint. Nullable: the ALTER adds it to a possibly-populated table and a
   /// MySQL JSON column takes no default; the next full-replace ETL backfills it.
   pmids             Json?
+  /// #1119 — best per-(scholar-family, exemplar-tool) usage snippet, keyed by the
+  /// exemplar tool DISPLAY NAME (parallel to `exemplar_tools`), e.g.
+  /// `{ "STORK-A": "a non-invasive and automated method of embryo evaluation…" }`.
+  /// Resolved at ETL time from the A2 `tool_context.json` artifact (the tool→pmid→
+  /// usage-sentence map): per exemplar tool, the best junk-filtered snippet from a
+  /// paper in this family's `pmids` (falling back to any of the tool's snippets).
+  /// EXTRACTED real publication text — grounding-eligible for the overview
+  /// generator (unlike the RENDER-ONLY `definition`), but strictly injection-safe
+  /// DATA in any LLM prompt. Nullable: the ALTER adds it to a possibly-populated
+  /// table (MySQL JSON takes no default); `{}` when no exemplar has a usable
+  /// snippet; the next full-replace ETL backfills it.
+  exemplarContexts  Json?    @map("exemplar_contexts")
   /// The `manifest.sha256` of the artifact this row was loaded from — lets a
   /// family-id renumber be detected per refresh (no semantic taxonomy_version).
   sourceArtifactSha String?  @map("source_artifact_sha") @db.VarChar(64)

@@ -124,9 +124,22 @@ export function PeopleResultCard({
       : hit.evidence?.kind === "topic"
         ? `topic=${encodeURIComponent(hit.evidence.id)}`
         : null;
-  const [exemplar, setExemplar] = useState<{ pubs: EvidencePub[]; total: number }>({
+  // #1119 — `methodContext` is the family's "how researchers use <tool>" snippet,
+  // returned alongside the representative papers for a method match (null unless
+  // METHODS_LENS_TOOL_CONTEXT is on; the server gates it).
+  type ExemplarPayload = {
+    pubs: EvidencePub[];
+    total: number;
+    methodContext?: { tool: string; context: string } | null;
+  };
+  const [exemplar, setExemplar] = useState<{
+    pubs: EvidencePub[];
+    total: number;
+    methodContext: { tool: string; context: string } | null;
+  }>({
     pubs: [],
     total: 0,
+    methodContext: null,
   });
   const [exemplarStatus, setExemplarStatus] = useState<ExemplarFetchStatus>("idle");
   const exemplarFetched = useRef(false);
@@ -137,10 +150,14 @@ export function PeopleResultCard({
     setExemplarStatus("loading");
     fetch(`/api/scholar/${encodeURIComponent(hit.cwid)}/method-exemplar?${exemplarQuery}`)
       .then((r) => (r.ok ? r.json() : { pubs: [], total: 0 }))
-      .then((d: { pubs: EvidencePub[]; total: number }) =>
-        setExemplar({ pubs: d?.pubs ?? [], total: d?.total ?? 0 }),
+      .then((d: ExemplarPayload) =>
+        setExemplar({
+          pubs: d?.pubs ?? [],
+          total: d?.total ?? 0,
+          methodContext: d?.methodContext ?? null,
+        }),
       )
-      .catch(() => setExemplar({ pubs: [], total: 0 }))
+      .catch(() => setExemplar({ pubs: [], total: 0, methodContext: null }))
       .finally(() => setExemplarStatus("done"));
   }, [hit.cwid, exemplarQuery]);
 
@@ -301,13 +318,23 @@ export function PeopleResultCard({
             is expanded. Inline for the publications kind; lazily fetched for a
             method/topic match (the fetch is triggered on first toggle). */}
         {hit.evidence && expanded && canExpand ? (
-          <RepresentativePapers
-            papers={repPapers}
-            total={repTotal}
-            profileHref={profileHref}
-            status={isLazyExemplar ? exemplarStatus : "done"}
-            panelId={panelId}
-          />
+          <>
+            {/* #1119 — "how researchers use <tool>" for a method match, shown
+                above the representative papers (plain text; flag-gated server-side). */}
+            {hit.evidence.kind === "method" && exemplar.methodContext ? (
+              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                <span className="font-medium">How {exemplar.methodContext.tool} is used:</span>{" "}
+                {exemplar.methodContext.context}
+              </p>
+            ) : null}
+            <RepresentativePapers
+              papers={repPapers}
+              total={repTotal}
+              profileHref={profileHref}
+              status={isLazyExemplar ? exemplarStatus : "done"}
+              panelId={panelId}
+            />
+          </>
         ) : null}
       </div>
       <div className="flex flex-col items-end gap-1 whitespace-nowrap text-right text-xs text-muted-foreground">

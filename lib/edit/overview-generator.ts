@@ -76,8 +76,9 @@ export const OVERVIEW_SYSTEM_PROMPT = [
   "  colleague could equally claim. Such sentences state no fact about THIS person —",
   "  omit them rather than reach for them to fill space.",
   "- Ground every specific in the FACTS only: a publication's synopsis,",
-  "  impactJustification, topicRationale, or title; a `methods` family (its `name`",
-  "  or its `examples`); a `facultyMetrics` number; an `activeGrants` entry. Prefer",
+  "  impactJustification, topicRationale, or title; a `methods` family (its `name`,",
+  "  its `examples`, or an `exemplarContexts` entry's per-paper usage snippet); a",
+  "  `facultyMetrics` number; an `activeGrants` entry. Prefer",
   "  one concrete, true specific over three vague topic labels. You may foreground",
   "  the scholar's research focus, distinctive methods/platforms, and the scale of",
   "  their work — but only as far as these FACTS support it.",
@@ -88,8 +89,11 @@ export const OVERVIEW_SYSTEM_PROMPT = [
   "  NOT. Use ONLY what the FACTS contain.",
   "  1. NEVER name a tool, method, software, instrument, dataset, assay, model",
   "     system, platform, algorithm, or acronym unless that exact name appears in",
-  "     FACTS — in a `methods` entry (its `name` or `examples`) or verbatim in a",
-  "     publication `title`. If a real contribution is described in FACTS but not",
+  "     FACTS — in a `methods` entry (its `name`, `examples`, or an `exemplarContexts`",
+  "     entry's name) or verbatim in a publication `title`. An `exemplarContexts`",
+  "     snippet is extracted paper text describing how that exemplar tool was used;",
+  "     you MAY ground a description of the tool on it, but only name the tool if its",
+  "     name is itself in FACTS. If a real contribution is described in FACTS but not",
   "     named there, describe what it does; do NOT supply a name or invent an acronym.",
   "  2. NEVER state a numeric metric — an h-index, a citation / publication / author",
   "     count, years, or any figure — unless it appears in FACTS (`facultyMetrics`,",
@@ -363,7 +367,10 @@ export const OVERVIEW_VERIFY_SYSTEM_PROMPT = [
   "  in ALLOWED METHOD / TOOL NAMES (a name or one of its examples) and not inside a",
   '  PUBLICATION TITLE. Do NOT flag generic, UN-named descriptions ("deep learning",',
   '  "enzyme kinetics", "time-lapse imaging", "claims-based analysis") — only proper',
-  "  names / acronyms.",
+  "  names / acronyms. A proper name that appears ONLY inside a TOOL USAGE DESCRIPTION is",
+  "  NOT an allowed name (those snippets often mention OTHER tools incidentally); only the",
+  "  names on the ALLOWED METHOD / TOOL NAMES list (a name or one of its examples) count —",
+  "  so flag a tool/model/algorithm name the draft took from a usage description.",
   "- number: any figure — h-index, a count, a year, a percentage, a statistic — not present",
   '  in ALLOWED NUMBERS. Invented quantitative findings (e.g. a "60-90%" result) are the',
   "  single most important thing to catch.",
@@ -413,6 +420,22 @@ export function buildGroundingReference(facts: OverviewFacts): string {
     for (const m of facts.methods) {
       const ex = m.examples && m.examples.length > 0 ? ` — examples: ${m.examples.join("; ")}` : "";
       lines.push(`- ${m.name}${m.category ? ` [${m.category}]` : ""}${ex}`);
+    }
+    // #1119 — per-exemplar usage snippets, in a SEPARATE block (NOT under ALLOWED
+    // NAMES, so the verifier never treats an incidentally-mentioned proper noun in
+    // the snippet text as an allow-listed name). The snippet is grounded text the
+    // draft may DESCRIBE from, but it does NOT add to the allowed-names list above.
+    const usageLines: string[] = [];
+    for (const m of facts.methods) {
+      for (const c of m.exemplarContexts ?? []) {
+        usageLines.push(`- ${c.name}: ${c.context}`);
+      }
+    }
+    if (usageLines.length > 0) {
+      lines.push(
+        "TOOL USAGE DESCRIPTIONS (extracted publication text describing HOW an exemplar tool above is used — a description may be grounded on these; they do NOT add any new ALLOWED NAME: a tool/model/gene/disease named only inside a usage description is NOT thereby allowed):",
+        ...usageLines,
+      );
     }
   } else {
     lines.push(

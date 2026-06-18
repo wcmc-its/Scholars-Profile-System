@@ -448,6 +448,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_PEOPLE_METHOD_CONTEXT",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
                 "Value": "off",
               },
@@ -513,6 +517,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "METHODS_LENS_FAMILY_DEFINITIONS",
+                "Value": "off",
+              },
+              {
+                "Name": "METHODS_LENS_TOOL_CONTEXT",
                 "Value": "off",
               },
               {
@@ -3629,6 +3637,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SEARCH_PEOPLE_METHOD_CONTEXT",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
                 "Value": "on",
               },
@@ -3695,6 +3707,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "METHODS_LENS_FAMILY_DEFINITIONS",
                 "Value": "on",
+              },
+              {
+                "Name": "METHODS_LENS_TOOL_CONTEXT",
+                "Value": "off",
               },
               {
                 "Name": "METHODS_LENS_FAMILY_SYNONYMS",

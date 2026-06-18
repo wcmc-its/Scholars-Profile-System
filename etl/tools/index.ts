@@ -53,6 +53,7 @@ import {
   buildScholarFamilyWritesFromS3,
   type ScholarFamilyWrite,
 } from "./scholar-family-mapper-s3";
+import { buildToolContextIndex, type ToolContextIndex } from "./tool-context";
 
 // ---------------------------------------------------------------------------
 // Module-level env constants — AWS SDK default credential chain; never hardcode
@@ -84,8 +85,9 @@ interface ToolsManifest {
   generated_at: string;
   sha256: string; // sha256 of the primary artifact (tools.json) bytes
   artifact_bytes: number;
-  objects: Record<string, ManifestObject>; // "tools.json" | "faculty.json" | "families.json"
-  counts?: { tools?: number; families?: number; faculty?: number };
+  // "tools.json" | "faculty.json" | "families.json" | "tool_context.json" (#1119)
+  objects: Record<string, ManifestObject>;
+  counts?: { tools?: number; families?: number; faculty?: number; tool_context?: number };
 }
 
 function log(event: string, fields: Record<string, unknown> = {}): void {
@@ -207,6 +209,9 @@ function printFamilyDryRun(writes: ScholarFamilyWrite[]): void {
         label: f.familyLabel,
         supercategory: f.supercategory,
         pmid_count: f.pmidCount,
+        // #1119 — how many exemplar tools resolved a usage snippet, and one sample.
+        exemplar_contexts: Object.keys(f.exemplarContexts).length,
+        sample_context: Object.values(f.exemplarContexts)[0] ?? null,
       })),
     });
   }
@@ -330,6 +335,48 @@ async function main(): Promise<void> {
     with_definition: [...familyDefById.values()].filter((v) => v.definition !== null).length,
   });
 
+  // #1119 — tool-context: the sibling `tool_context.json` object maps each tool to
+  // a per-publication usage sentence (tool_id → pmid → snippet). OPTIONAL: a
+  // pre-v3 manifest omits the object, which leaves sampleContext/exemplarContexts
+  // null/{} (benign). When PRESENT it is sha256-verified like the primary artifact
+  // — a mismatch fails the run rather than writing partially-grounded context.
+  let toolContext: ToolContextIndex = buildToolContextIndex(null);
+  const ctxObj = manifest.objects?.["tool_context.json"];
+  if (!ctxObj?.key) {
+    log("tool_context_absent", { reason: "manifest has no tool_context.json object" });
+  } else {
+    const ctxBytes = await fetchBytes(s3, ctxObj.key);
+    const ctxDigest = sha256hex(ctxBytes);
+    if (ctxObj.sha256 && ctxDigest !== ctxObj.sha256) {
+      log("integrity_failed", {
+        key: ctxObj.key,
+        expected_sha256: ctxObj.sha256,
+        actual_sha256: ctxDigest,
+        bytes: ctxBytes.byteLength,
+      });
+      await recordRun({
+        status: "failed",
+        rowsProcessed: 0,
+        manifest,
+        errorMessage: `sha256 mismatch on ${ctxObj.key}: expected ${ctxObj.sha256}, got ${ctxDigest}`,
+      });
+      process.exit(1);
+    }
+    const ctxParsed = JSON.parse(Buffer.from(ctxBytes).toString("utf-8")) as {
+      tool_context?: unknown;
+      tool_context_kind?: unknown;
+    };
+    toolContext = buildToolContextIndex(ctxParsed.tool_context);
+    log("tool_context_loaded", {
+      kind: typeof ctxParsed.tool_context_kind === "string" ? ctxParsed.tool_context_kind : null,
+      tools_with_context: toolContext.stats.toolsWithContext,
+      tools_with_usable_snippet: toolContext.stats.toolsWithUsable,
+      raw_snippets: toolContext.stats.rawSnippets,
+      dropped_junk: toolContext.stats.droppedJunk,
+      integrity_ok: true,
+    });
+  }
+
   // Step 4: FK scope — active in-scope scholars, same filter as the other ETL
   // projections (scholar_tool.cwid → scholar.cwid). Out-of-scope cwids in the
   // artifact are silently skipped (counted) rather than erroring the run.
@@ -340,17 +387,23 @@ async function main(): Promise<void> {
   const ourCwidSet = new Set(ourScholars.map((s) => s.cwid));
 
   // Step 5: map.
-  const result = buildScholarToolWritesFromS3(artifact, { ourCwidSet });
+  const result = buildScholarToolWritesFromS3(artifact, { ourCwidSet, toolContext });
   log("mapped", {
     rows: result.writes.length,
     skipped_out_of_scope_cwid: result.skippedMissingCwid,
     skipped_missing_fields: result.skippedMissingFields,
     unknown_tool_fallback: result.unknownToolFallback,
+    // #1119 — scholar_tool rows that got a non-null usage snippet from tool_context.
+    with_sample_context: result.writes.filter((w) => w.sampleContext != null).length,
   });
 
   // scholar_family (#799) — mapped from the same artifact slice. Reuse the same
   // FK scope; the family rollup carries its own counters (see the mapper).
-  const familyResult = buildScholarFamilyWritesFromS3(artifact, { ourCwidSet, familyDefById });
+  const familyResult = buildScholarFamilyWritesFromS3(artifact, {
+    ourCwidSet,
+    familyDefById,
+    toolContext,
+  });
   log("mapped_families", {
     rows: familyResult.writes.length,
     skipped_out_of_scope_cwid: familyResult.skippedMissingCwid,
@@ -368,6 +421,13 @@ async function main(): Promise<void> {
     // taxonomy emitted duplicate ids for a stable family — the mapper collapsed
     // them (so counts/chips stay correct) but the operator should reconcile A2.
     duplicate_family_label: familyResult.duplicateFamilyLabel,
+    // #1119 — family rows with ≥1 exemplar-tool usage snippet, and the total
+    // distinct exemplar snippets resolved. Compare the former to total family rows
+    // for coverage; a near-zero count against a populated tool_context index hints
+    // at an exemplar_tool_id ↔ tool_context tool_id key drift.
+    families_with_exemplar_context: familyResult.writes.filter(
+      (w) => Object.keys(w.exemplarContexts).length > 0,
+    ).length,
   });
 
   // Dry-run: diff against the live table and stop — never write, never record.
@@ -424,6 +484,7 @@ async function main(): Promise<void> {
         supercategory: w.supercategory,
         pmidCount: w.pmidCount,
         exemplarTools: w.exemplarTools,
+        exemplarContexts: w.exemplarContexts,
         pmids: w.pmids,
         definition: w.definition,
         definitionSource: w.definitionSource,

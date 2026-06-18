@@ -260,6 +260,20 @@ export const peopleIndexMapping = {
         analyzer: "scholar_text",
         fields: { keyword: { type: "keyword" } },
       },
+      // #1119 — per-scholar rollup of the overlay-VISIBLE method families' tool-USAGE
+      // snippets (the ReciterAI tool_context text, e.g. "a non-invasive automated
+      // method of embryo evaluation that predicts ploidy"), deduped + joined. Same
+      // #800/#801 gate as `methodFamily`, so a suppressed/sensitive family never
+      // leaks. Analyzed `scholar_text` so a usage query ("embryo ploidy time-lapse")
+      // ranks the scholar via the cross_fields group, matching the real language of
+      // the work rather than just the tool's name. OMITTED on scholars with no
+      // visible family-with-snippet (omit-on-empty). The query-time boost is behind
+      // the default-OFF `SEARCH_PEOPLE_METHOD_CONTEXT` flag (reindex-then-flip);
+      // prose, so it relies on the people MSM (#1090) and is boosted modestly.
+      methodContext: {
+        type: "text",
+        analyzer: "scholar_text",
+      },
     },
   },
 };
@@ -568,6 +582,21 @@ export const PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS: ReadonlyArray<string> = [
  * clause: contributes to BM25 ranking, cannot admit a doc on its own.
  */
 export const PEOPLE_ABSTRACTS_BOOST = 0.3;
+
+/**
+ * #1119 — boost for the `methodContext` tool-usage prose on the people index when
+ * SEARCH_PEOPLE_METHOD_CONTEXT is on. Like `publicationAbstracts`, this lives in a
+ * scoring-only `should` clause — NOT in the cross_fields/msm `must` ladder — because
+ * it is a multi-sentence prose blob that would otherwise let a term landing only in
+ * usage prose satisfy minimum-should-match for the whole group and ADMIT an
+ * off-topic scholar (the same reason abstracts are excluded; #1056/#1090). It can
+ * nudge ranking but never admit a doc on its own. Modestly above the abstracts boost
+ * (the text is curated usage language, more specific than a raw abstract).
+ */
+export const PEOPLE_METHOD_CONTEXT_BOOST = 0.5;
+/** Topic-shape counterpart of {@link PEOPLE_METHOD_CONTEXT_BOOST} (raised, like the
+ *  topic abstracts boost), still scoring-only. */
+export const PEOPLE_TOPIC_METHOD_CONTEXT_BOOST = 0.8;
 
 /**
  * Minimum-should-match expression for the restructured people query
