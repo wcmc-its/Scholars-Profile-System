@@ -77,4 +77,17 @@ describe("profile serializer", () => {
     expect(payload).not.toBeNull();
     expect(payload!.identityImageEndpoint).toBe(EXPECTED_HEADSHOT_URL);
   });
+
+  // #1103 — the payload always carries a `centers` field. With the
+  // PROFILE_CENTER_AFFILIATION flag off (default), the reverse query is never
+  // issued (centerMembership isn't even mocked here) and the field is `[]`.
+  it("carries an empty `centers` array when the affiliation flag is off", async () => {
+    const mod: Record<string, unknown> = await import("@/lib/api/profile");
+    const fn = (mod as {
+      getScholarFullProfileBySlug?: (id: string) => Promise<unknown>;
+    }).getScholarFullProfileBySlug;
+    const payload = (await fn!("jane-doe")) as { centers?: unknown } | null;
+    expect(payload).not.toBeNull();
+    expect(payload!.centers).toEqual([]);
+  });
 });

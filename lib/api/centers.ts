@@ -95,6 +95,103 @@ export async function loadActiveCenterMemberCwids(
   return scholars.map((s) => s.cwid);
 }
 
+/**
+ * #1103 — one ACTIVE center membership of a single scholar, for the reverse
+ * "Centers" card on the profile (the inverse of the center-page roster). The
+ * card links `name` → `/centers/<slug>`. `programLabel` / `membershipType` are
+ * populated only when the membership row carries them (all legacy rows are
+ * null) — the card omits them silently otherwise.
+ */
+export type ScholarCenterAffiliation = {
+  code: string;
+  slug: string;
+  /** Curated official name, falling back to `Center.name` (resolver contract,
+   *  symmetric with org-unit-names). */
+  name: string;
+  programLabel: string | null;
+  membershipType: CenterMembershipType | null;
+};
+
+/**
+ * Reverse query for #1103: the ACTIVE center memberships of one scholar, for
+ * the profile "Centers" card. Mirrors the public roster's gating exactly — only
+ * rows active per § 3.3 (`isCenterMembershipActive`) survive, so a pending or
+ * lapsed membership NEVER shows. A retired (whole-unit-suppressed) center is
+ * dropped too, matching `getCenter`'s 404. Ordered by `Center.sortOrder` then
+ * name, the same order the centers directory uses.
+ *
+ * PRISMA-SOURCED ONLY — this adds no search-index/browse-facet key (#1074/#1076).
+ */
+export async function getScholarCenterAffiliations(
+  cwid: string,
+): Promise<ScholarCenterAffiliation[]> {
+  const today = todayIso();
+  const memberships = (await prisma.centerMembership.findMany({
+    where: { cwid },
+    select: {
+      centerCode: true,
+      membershipType: true,
+      startDate: true,
+      endDate: true,
+      center: {
+        select: {
+          code: true,
+          slug: true,
+          name: true,
+          officialName: true,
+          sortOrder: true,
+        },
+      },
+      program: { select: { label: true } },
+    },
+  })) as Array<{
+    centerCode: string;
+    membershipType: CenterMembershipType | null;
+    startDate: Date | null;
+    endDate: Date | null;
+    center: {
+      code: string;
+      slug: string;
+      name: string;
+      officialName: string | null;
+      sortOrder: number;
+    } | null;
+    program: { label: string } | null;
+  }>;
+
+  // §3.3 active filter — non-negotiable. Drop pending/lapsed and any orphaned
+  // row whose center join is missing.
+  const active = memberships.filter(
+    (m) =>
+      m.center !== null &&
+      isCenterMembershipActive(m.startDate, m.endDate, today),
+  );
+  if (active.length === 0) return [];
+
+  // #540 — drop retired (whole-unit-suppressed) centers, mirroring getCenter's
+  // 404 so the card never links to a 404 page.
+  const codes = Array.from(new Set(active.map((m) => m.centerCode)));
+  const suppressedFlags = await Promise.all(
+    codes.map(async (code) => [code, await isUnitSuppressed("center", code, prisma)] as const),
+  );
+  const suppressed = new Set(
+    suppressedFlags.filter(([, isHidden]) => isHidden).map(([code]) => code),
+  );
+
+  return active
+    .filter((m) => !suppressed.has(m.centerCode))
+    .map((m) => ({
+      code: m.center!.code,
+      slug: m.center!.slug,
+      name: m.center!.officialName ?? m.center!.name,
+      programLabel: m.program?.label ?? null,
+      membershipType: m.membershipType,
+      sortOrder: m.center!.sortOrder,
+    }))
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+    .map(({ sortOrder: _sortOrder, ...rest }) => rest);
+}
+
 export type CenterDetail = {
   code: string;
   name: string;
