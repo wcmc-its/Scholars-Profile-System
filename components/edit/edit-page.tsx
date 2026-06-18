@@ -386,7 +386,13 @@ export function EditPage({
               label: a.label,
               readonly: a.readonly,
               kind,
-              group: SELF_RAIL_GROUP[kind],
+              // "Yours to edit" is first-person — a proxy / unit-admin edits on
+              // the scholar's behalf, so reframe the owned rail group to the
+              // third-person "Profile content" the home board uses (#955 #10).
+              group:
+                mode !== "self" && kind === "owned"
+                  ? "Profile content"
+                  : SELF_RAIL_GROUP[kind],
               // "From your publications" nests under Conflicts of Interest (it
               // immediately follows "coi" in SELF_RAIL_ORDER) rather than reading
               // as a flat sibling — it is a sub-view of COI, not its own SOR.
@@ -489,6 +495,15 @@ function renderPanel(
   // (no generate, no preview link, no slug request) are derived from the REAL
   // `mode` at each call site below, never from `childMode`.
   const childMode: "self" | "superuser" = isSuperuserLike(mode) ? "superuser" : "self";
+  // #955 #10 — copy-only child cards take their VOICE via a display mode:
+  // third-person whenever the editor is NOT the scholar (superuser,
+  // comms_steward, proxy, unit-admin). This is NOT the capability mode — a proxy
+  // / unit-admin still reuses the SELF cards' behavior (childMode === "self").
+  // The only card that needs the real capability is VisibilityCard (its
+  // ownRow/adminRow state machine), which keeps `mode={childMode}` and takes an
+  // explicit `thirdPerson` purely for its copy.
+  const thirdPerson = mode !== "self";
+  const voiceMode: "self" | "superuser" = thirdPerson ? "superuser" : "self";
   const detailBase = mode === "self" ? "/edit" : `/edit/scholar/${cwid}`;
   switch (key) {
     case "home": {
@@ -503,7 +518,7 @@ function renderPanel(
       // target's. (When a superuser edits their OWN profile this is mode='self'.)
       return (
         <HomePanel
-          mode={childMode}
+          mode={voiceMode}
           basePath={detailBase}
           cwid={cwid}
           preferredName={scholarName}
@@ -550,7 +565,7 @@ function renderPanel(
       // context is internal); the visibility value is informational.
       return (
         <EmailCard
-          mode={childMode}
+          mode={voiceMode}
           scholarName={scholarName}
           email={ctx.scholar.email}
           emailVisibility={ctx.scholar.emailVisibility}
@@ -595,8 +610,8 @@ function renderPanel(
             (mode === "self" || isSuperuserLike(mode)) && isOverviewGenerateEnabled()
           }
           // #1077 follow-up — reframe the provenance note's "written by you" copy
-          // for a superuser editing on the scholar's behalf (`childMode`).
-          mode={childMode}
+          // for any third-person editor (superuser / proxy / unit-admin).
+          mode={voiceMode}
         />
       );
     case "highlights":
@@ -608,7 +623,7 @@ function renderPanel(
       return ctx.highlights ? (
         <HighlightsCard
           cwid={cwid}
-          mode={childMode}
+          mode={voiceMode}
           scholarName={scholarName}
           highlights={ctx.highlights}
         />
@@ -619,14 +634,18 @@ function renderPanel(
           cwid={cwid}
           suppression={ctx.scholar.suppression}
           scholarName={scholarName}
+          // VisibilityCard keeps the REAL capability mode (its ownRow/adminRow
+          // state machine + reason-required behavior), and takes `thirdPerson`
+          // purely to reframe its copy for a proxy / unit-admin (#955 #10).
           mode={childMode}
+          thirdPerson={thirdPerson}
         />
       );
     case "publications":
       return (
         <PublicationsCard
           cwid={cwid}
-          mode={childMode}
+          mode={voiceMode}
           scholarName={scholarName}
           publications={ctx.publications}
           rejectEnabled={isReciterRejectEnabled()}
@@ -642,29 +661,29 @@ function renderPanel(
         />
       );
     case "funding":
-      return <FundingCard cwid={cwid} mode={childMode} scholarName={scholarName} grants={ctx.grants} />;
+      return <FundingCard cwid={cwid} mode={voiceMode} scholarName={scholarName} grants={ctx.grants} />;
     case "appointments":
       return (
         <AppointmentsCard
           cwid={cwid}
-          mode={childMode}
+          mode={voiceMode}
           scholarName={scholarName}
           appointments={ctx.appointments}
         />
       );
     case "education":
       return (
-        <EducationCard cwid={cwid} mode={childMode} scholarName={scholarName} educations={ctx.educations} />
+        <EducationCard cwid={cwid} mode={voiceMode} scholarName={scholarName} educations={ctx.educations} />
       );
     case "mentees":
       return (
-        <MenteesCard cwid={cwid} mode={childMode} scholarName={scholarName} mentees={ctx.mentees} />
+        <MenteesCard cwid={cwid} mode={voiceMode} scholarName={scholarName} mentees={ctx.mentees} />
       );
     case "coi":
       return (
         <CoiCard
           cwid={cwid}
-          mode={childMode}
+          mode={voiceMode}
           scholarName={scholarName}
           disclosures={ctx.coiDisclosures}
           // The bridge to "From your publications" appears for a self viewer OR a
@@ -686,7 +705,7 @@ function renderPanel(
       return (
         <CoiGapCard
           cwid={cwid}
-          mode={childMode}
+          mode={voiceMode}
           scholarName={scholarName}
           mentions={ctx.unmatchedPubmedCoiMentions}
         />

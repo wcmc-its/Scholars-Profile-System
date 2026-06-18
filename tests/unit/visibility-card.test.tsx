@@ -263,6 +263,61 @@ describe("VisibilityCard — superuser arm (Phase 7) — admin-hidden target", (
   });
 });
 
+// ---------------------------------------------------------------------------
+// #955 #10 — proxy / unit-admin arm: the SELF (ownRow) state machine driven on
+// the scholar's behalf, with third-person copy. `mode` stays "self" (so the
+// correctness-critical behavior is byte-identical to a self edit); only the
+// copy reframes via `thirdPerson`.
+// ---------------------------------------------------------------------------
+
+describe("VisibilityCard — proxy / unit-admin arm (#955 #10)", () => {
+  const PROXY = { mode: "self" as const, thirdPerson: true, scholarName: "Alex Other" };
+
+  it("keeps the self state machine (data-mode='self'), third-person copy, no ownership badge", () => {
+    render(<VisibilityCard cwid="other7" suppression={NEITHER} {...PROXY} />);
+    // Third-person copy — the scholar's name, never first-person.
+    expect(screen.getByText("Alex Other's profile is visible to the public.")).toBeTruthy();
+    expect(screen.getByTestId("visibility-hide").textContent).toBe("Hide profile");
+    expect(screen.queryByText(/\byour\b/i)).toBeNull();
+    // The first-person "Yours to edit" ownership cue is dropped.
+    expect(screen.queryByText("Yours to edit")).toBeNull();
+    // Behavior preserved — the OWN-row (self) machine, NOT the admin arm.
+    expect(
+      document.querySelector('[data-slot="visibility-card"]')?.getAttribute("data-mode"),
+    ).toBe("self");
+  });
+
+  it("Hide uses the optional-preset dialog (NOT required-text) and POSTs an OWN-row suppression", async () => {
+    const f = stubFetch({ body: { ok: true, suppressionId: "sup-fresh" } });
+    render(<VisibilityCard cwid="other7" suppression={NEITHER} {...PROXY} />);
+    fireEvent.click(screen.getByTestId("visibility-hide"));
+    // Third-person dialog title.
+    expect(await screen.findByText("Hide Alex Other's profile?")).toBeTruthy();
+    const confirm = screen.getByRole("button", { name: "Hide profile" });
+    // optional-preset (self machine) → confirm is enabled immediately, unlike
+    // the superuser required-text dialog.
+    expect(confirm.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(confirm);
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    const [url, opts] = f.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/edit/suppress");
+    // Own-row suppression with the preset reason — NOT an admin-hold payload.
+    expect(JSON.parse(opts.body as string)).toEqual({
+      entityType: "scholar",
+      entityId: "other7",
+      reason: "Information is out of date",
+    });
+    // Flips into the hidden-self state with third-person copy.
+    await waitFor(() => expect(screen.getByText(/Alex Other's profile is hidden/)).toBeTruthy());
+  });
+
+  it("hidden-self target: third-person alert + 'Make profile visible'", () => {
+    render(<VisibilityCard cwid="other7" suppression={SELF} {...PROXY} />);
+    expect(screen.getByText(/Alex Other's profile is hidden/)).toBeTruthy();
+    expect(screen.getByTestId("visibility-revoke-self").textContent).toBe("Make profile visible");
+  });
+});
+
 describe("VisibilityCard — props default ('self') is unchanged behavior", () => {
   it("omitting mode defaults to self — Phase 6 surface", () => {
     render(<VisibilityCard cwid={CWID} suppression={NEITHER} />);
