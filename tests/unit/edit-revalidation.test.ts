@@ -7,6 +7,7 @@ const {
   mockCdnCreate,
   mockCdnUpdate,
   mockCfSend,
+  deferredTasks,
 } = vi.hoisted(() => ({
   mockScholarFindUnique: vi.fn(),
   mockPublicationAuthorFindMany: vi.fn(),
@@ -14,6 +15,10 @@ const {
   mockCdnCreate: vi.fn(),
   mockCdnUpdate: vi.fn(),
   mockCfSend: vi.fn(),
+  // #955 #6 — `runAfterResponse` defers the CloudFront send off the request
+  // path. Capture each scheduled task so a test can assert it was NOT run
+  // in-request, then `flushDeferred()` to drive the deferred send + bookkeeping.
+  deferredTasks: [] as Array<() => Promise<void>>,
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -28,6 +33,13 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("next/cache", () => ({ revalidatePath: mockRevalidatePath }));
+// Capture deferred tasks instead of scheduling them on Next's `after()`, which
+// is unavailable outside a request scope in a unit test.
+vi.mock("@/lib/edit/after-response", () => ({
+  runAfterResponse: (task: () => Promise<void>) => {
+    deferredTasks.push(task);
+  },
+}));
 // Mock the CloudFront SDK so the enqueue/mark path runs without real AWS.
 vi.mock("@aws-sdk/client-cloudfront", () => ({
   CloudFrontClient: vi.fn().mockImplementation(() => ({ send: mockCfSend })),
@@ -41,8 +53,15 @@ import {
   resolveAffectedProfiles,
 } from "@/lib/edit/revalidation";
 
+/** Run everything `runAfterResponse` deferred, mimicking the post-response tick. */
+async function flushDeferred(): Promise<void> {
+  const tasks = deferredTasks.splice(0);
+  for (const task of tasks) await task();
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  deferredTasks.length = 0;
   delete process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID;
   mockCdnCreate.mockResolvedValue({ id: "row-1" });
   mockCdnUpdate.mockResolvedValue({});
@@ -89,13 +108,17 @@ describe("reflectOverviewEdit", () => {
     expect(mockRevalidatePath).toHaveBeenCalledTimes(1);
   });
 
-  it("enqueues a CloudFront invalidation for the profile page", async () => {
+  it("enqueues the outbox row in-path and defers the CloudFront send", async () => {
     process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID = "E1234567890ABC";
     await reflectOverviewEdit("jane-smith");
+    // Durable row enqueued synchronously (#353 backstop stays in the request).
     expect(mockCdnCreate).toHaveBeenCalledTimes(1);
     expect(JSON.parse(mockCdnCreate.mock.calls[0][0].data.paths)).toEqual([
       "/scholars/jane-smith",
     ]);
+    // The slow AWS send is deferred — not issued when the response returns.
+    expect(mockCfSend).not.toHaveBeenCalled();
+    await flushDeferred();
     expect(mockCfSend).toHaveBeenCalledTimes(1);
   });
 });
@@ -115,6 +138,8 @@ describe("reflectUnitChange", () => {
       "/browse",
       "/departments/medicine",
     ]);
+    expect(mockCfSend).not.toHaveBeenCalled();
+    await flushDeferred();
     expect(mockCfSend).toHaveBeenCalledTimes(1);
   });
 
@@ -130,6 +155,7 @@ describe("reflectUnitChange", () => {
       "/centers/new-center",
       "/centers/old-center",
     ]);
+    await flushDeferred();
     expect(mockCfSend).toHaveBeenCalledTimes(1);
   });
 
@@ -168,42 +194,49 @@ describe("invalidateCloudFront enqueue/mark (#353 outbox)", () => {
     expect(mockCdnUpdate).not.toHaveBeenCalled();
   });
 
-  it("enqueues the exact paths (JSON) and, on a successful send, stamps invalidatedAt", async () => {
+  it("enqueues the exact paths (JSON) in-path and, on the deferred send, stamps invalidatedAt", async () => {
     process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID = "E1234567890ABC";
 
     await reflectVisibilityChange(["jane-smith"]);
 
-    // Enqueued pending row remembering the literal paths (not recomputable).
+    // Enqueued pending row remembering the literal paths (not recomputable) —
+    // synchronously, before the response returns.
     expect(mockCdnCreate).toHaveBeenCalledTimes(1);
     const createArg = mockCdnCreate.mock.calls[0][0];
     expect(JSON.parse(createArg.data.paths)).toEqual(["/browse", "/scholars/jane-smith"]);
     expect(createArg.data.attempts).toBe(0);
 
-    // CreateInvalidation issued for those paths.
-    expect(mockCfSend).toHaveBeenCalledTimes(1);
+    // Neither the send nor the stamp has happened yet — both are deferred.
+    expect(mockCfSend).not.toHaveBeenCalled();
+    expect(mockCdnUpdate).not.toHaveBeenCalled();
 
-    // Sentinel stamped on success.
+    await flushDeferred();
+
+    // CreateInvalidation issued for those paths, sentinel stamped on success.
+    expect(mockCfSend).toHaveBeenCalledTimes(1);
     expect(mockCdnUpdate).toHaveBeenCalledTimes(1);
     const updateArg = mockCdnUpdate.mock.calls[0][0];
     expect(updateArg.where).toEqual({ id: "row-1" });
     expect(updateArg.data.invalidatedAt).toBeInstanceOf(Date);
   });
 
-  it("on a failed send, records attempts=1 + lastError and leaves the row pending (no invalidatedAt)", async () => {
+  it("on a failed deferred send, records attempts=1 + lastError and leaves the row pending (no invalidatedAt)", async () => {
     process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID = "E1234567890ABC";
     mockCfSend.mockRejectedValue(new Error("cloudfront 503"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    // Must not throw into the caller.
+    // The in-request call returns once the row is enqueued (send still deferred).
     await expect(reflectVisibilityChange(["jane-smith"])).resolves.toBeUndefined();
-
     expect(mockCdnCreate).toHaveBeenCalledTimes(1);
+
+    // The deferred send fails best-effort — never thrown into the (already sent)
+    // response — and records the retry budget for the #353 reconciler.
+    await expect(flushDeferred()).resolves.toBeUndefined();
     expect(mockCdnUpdate).toHaveBeenCalledTimes(1);
     expect(mockCdnUpdate.mock.calls[0][0]).toEqual({
       where: { id: "row-1" },
       data: { attempts: 1, lastError: "cloudfront 503" },
     });
-    // The original best-effort failure log is preserved.
     const failLog = consoleError.mock.calls
       .map((c) => JSON.parse(c[0] as string))
       .find((l) => l.event === "edit_cdn_invalidation_failed");
@@ -211,20 +244,22 @@ describe("invalidateCloudFront enqueue/mark (#353 outbox)", () => {
     consoleError.mockRestore();
   });
 
-  it("a DB enqueue failure is logged, not thrown, and still attempts a one-shot send", async () => {
+  it("a DB enqueue failure is logged in-path, not thrown, and still defers a one-shot send", async () => {
     process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID = "E1234567890ABC";
     mockCdnCreate.mockRejectedValue(new Error("db down"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(reflectVisibilityChange(["jane-smith"])).resolves.toBeUndefined();
-
-    // Enqueue failed → no row to mark, but the purge is still attempted.
-    expect(mockCfSend).toHaveBeenCalledTimes(1);
-    expect(mockCdnUpdate).not.toHaveBeenCalled();
+    // The enqueue failure is logged synchronously in the request path.
     const enqLog = consoleError.mock.calls
       .map((c) => JSON.parse(c[0] as string))
       .find((l) => l.event === "edit_cdn_invalidation_enqueue_failed");
     expect(enqLog).toMatchObject({ error: "db down" });
+
+    await flushDeferred();
+    // Enqueue failed → no row to mark, but the purge is still attempted.
+    expect(mockCfSend).toHaveBeenCalledTimes(1);
+    expect(mockCdnUpdate).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });
 });

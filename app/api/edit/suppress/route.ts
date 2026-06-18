@@ -11,6 +11,7 @@
 import { type NextRequest, type NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
+import { runAfterResponse } from "@/lib/edit/after-response";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { authorizeSuppress, logEditDenial } from "@/lib/edit/authz";
 import {
@@ -354,12 +355,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // Prisma read feeds both reflections (plan §3 tightening C7).
   // The result is ignored here (best-effort); on success the reflector stamps
   // `searchReflectedAt`, on failure it leaves it NULL for the #393 reconciler.
-  await reflectSearchSuppression({
-    suppressionId,
-    entityType,
-    entityId,
-    contributorCwid: contributor,
-    affectedCwids: affected.map((a) => a.cwid),
+  // Run it AFTER the response (#955 #6): the suppression row is already durable,
+  // so the #393 reconciler backstops a deferred run that is lost or fails.
+  runAfterResponse(async () => {
+    await reflectSearchSuppression({
+      suppressionId,
+      entityType,
+      entityId,
+      contributorCwid: contributor,
+      affectedCwids: affected.map((a) => a.cwid),
+    });
   });
 
   return editOk({ suppressionId });

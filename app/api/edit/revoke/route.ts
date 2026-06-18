@@ -10,6 +10,7 @@
 import { type NextRequest, type NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
+import { runAfterResponse } from "@/lib/edit/after-response";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { authorizeRevoke, logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
@@ -121,13 +122,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // Phase 4b C6 — OpenSearch fast-path (lib/edit/search-suppression.ts).
   // Best-effort: failures are logged inside the reflector and never thrown.
   // `affectedCwids` shares the same `resolveAffectedProfiles` query as the
-  // slug fan-out above (plan §3 tightening C7).
-  await reflectSearchSuppression({
-    suppressionId: suppression.id,
-    entityType: suppression.entityType,
-    entityId: suppression.entityId,
-    contributorCwid: suppression.contributorCwid,
-    affectedCwids: affected.map((a) => a.cwid),
+  // slug fan-out above (plan §3 tightening C7). Run AFTER the response (#955 #6);
+  // the revoked suppression row backstops it via the #393 reconciler.
+  runAfterResponse(async () => {
+    await reflectSearchSuppression({
+      suppressionId: suppression.id,
+      entityType: suppression.entityType,
+      entityId: suppression.entityId,
+      contributorCwid: suppression.contributorCwid,
+      affectedCwids: affected.map((a) => a.cwid),
+    });
   });
 
   return editOk({ suppressionId });
