@@ -10,6 +10,7 @@ import {
   bioCoversQuery,
   refineExemplarTools,
   firstMatchingSentence,
+  clampAroundMarks,
   classifyNameHighlight,
   AREAS_CAP,
   type SelectEvidenceInput,
@@ -404,6 +405,36 @@ describe("firstMatchingSentence (handoff Case D — trim a fragment to one sente
     expect(s).toContain("<mark>HIT</mark>");
     expect(s.startsWith("…")).toBe(true);
     expect(visible(s).length).toBeLessThanOrEqual(202);
+  });
+});
+
+// Tier 3 (funding text-evidence) depends on `clampAroundMarks` being EXPORTED.
+// These pin the now-public contract directly (independent of firstMatchingSentence).
+describe("clampAroundMarks (Tier 3 — now-exported mark-aware clamp)", () => {
+  const visible = (s: string) => s.replace(/<\/?mark>/g, "");
+
+  it("returns a short marked string under maxLen verbatim", () => {
+    const s = "targeting <mark>BRCA</mark> in tumor cells";
+    expect(clampAroundMarks(s, 160)).toBe(s);
+  });
+
+  it("windows AROUND a mark that sits past the budget, keeping exactly one balanced mark", () => {
+    const s = "a ".repeat(120) + "<mark>WIDGET</mark>" + " b".repeat(120);
+    const out = clampAroundMarks(s, 60);
+    expect((out.match(/<mark>/g) ?? []).length).toBe(1);
+    expect((out.match(/<\/mark>/g) ?? []).length).toBe(1);
+    expect(out).toContain("<mark>WIDGET</mark>");
+    expect(out).not.toMatch(/<mar(?!k>)/); // no truncated "<mark" tag
+  });
+
+  it("bounds the visible length to maxLen + the marked region size", () => {
+    const region = "<mark>HIT</mark>";
+    const s = "z".repeat(400) + " " + region + " " + "y".repeat(400);
+    const maxLen = 80;
+    const out = clampAroundMarks(s, maxLen);
+    // visible budget = maxLen window + the visible region ("HIT") it windows around
+    expect(visible(out).length).toBeLessThanOrEqual(maxLen + "HIT".length);
+    expect(out).toContain(region);
   });
 });
 

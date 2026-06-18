@@ -44,6 +44,9 @@ const baseHit: FundingHit = {
   matchedLiteralTitle: false,
   matchedConcept: false,
   matchedFundedPubs: 0,
+  // Tier 3 — the API emits null under the flag-off path; the off render must be
+  // byte-identical to today (no text-evidence line).
+  textEvidence: null,
 };
 
 describe("FundingResultRow — basics", () => {
@@ -238,5 +241,135 @@ describe("FundingResultRow — PLAN P4 match-reason line", () => {
       <FundingResultRow hit={{ ...baseHit, matchedConcept: true, matchedFundedPubs: 0 }} />,
     );
     expect(container.textContent).not.toMatch(/via related concept/);
+  });
+});
+
+describe("FundingResultRow — Tier 3 text-evidence line (SEARCH_FUNDING_TEXT_EVIDENCE)", () => {
+  it("renders an abstract text-evidence snippet line when the grant matched only on text", () => {
+    const { container } = render(
+      <FundingResultRow
+        hit={{
+          ...baseHit,
+          titleHighlight: null,
+          matchedLiteralTitle: false,
+          matchedConcept: false,
+          matchedFundedPubs: 0,
+          textEvidence: { field: "abstract", snippet: "targeting <mark>BRCA</mark> in tumor cells" },
+        }}
+      />,
+    );
+    expect(container.textContent).toMatch(/In abstract:/);
+    // The <mark> renders as a <strong> child (HighlightedSnippet sink).
+    const strong = container.querySelector("strong");
+    expect(strong?.textContent).toBe("BRCA");
+    // The text-evidence line is the ONLY reason — neither higher-precedence
+    // reason fired.
+    expect(container.textContent).not.toMatch(/Matched through/);
+    expect(container.textContent).not.toMatch(/via related concept/);
+  });
+
+  it("uses the 'In keywords:' label for a keywordsText hit", () => {
+    const { container } = render(
+      <FundingResultRow
+        hit={{
+          ...baseHit,
+          textEvidence: {
+            field: "keywordsText",
+            snippet: "machine <mark>learning</mark> methods",
+          },
+        }}
+      />,
+    );
+    expect(container.textContent).toMatch(/In keywords:/);
+    expect(container.querySelector("strong")?.textContent).toBe("learning");
+  });
+
+  it("uses the 'In sponsor text:' label for a sponsorText hit", () => {
+    const { container } = render(
+      <FundingResultRow
+        hit={{
+          ...baseHit,
+          textEvidence: {
+            field: "sponsorText",
+            snippet: "<mark>Komen</mark> Foundation award",
+          },
+        }}
+      />,
+    );
+    expect(container.textContent).toMatch(/In sponsor text:/);
+    expect(container.querySelector("strong")?.textContent).toBe("Komen");
+  });
+
+  it("funded-pubs outranks text-evidence", () => {
+    const { container } = render(
+      <FundingResultRow
+        hit={{
+          ...baseHit,
+          pubCount: 9,
+          matchedConcept: true,
+          matchedFundedPubs: 2,
+          textEvidence: { field: "abstract", snippet: "targeting <mark>BRCA</mark>" },
+        }}
+        conceptLabel="Ovarian Neoplasms"
+      />,
+    );
+    expect(container.textContent).toMatch(/Matched through 2 of 9 funded/);
+    expect(container.textContent).not.toMatch(/In abstract:/);
+  });
+
+  it("the concept reason outranks text-evidence", () => {
+    const { container } = render(
+      <FundingResultRow
+        hit={{
+          ...baseHit,
+          matchedConcept: true,
+          matchedFundedPubs: 0,
+          textEvidence: { field: "abstract", snippet: "targeting <mark>BRCA</mark>" },
+        }}
+        conceptLabel="Ovarian Neoplasms"
+      />,
+    );
+    expect(container.textContent).toMatch(/via related concept Ovarian Neoplasms/);
+    expect(container.textContent).not.toMatch(/In abstract:/);
+  });
+
+  it("a literal title hit suppresses the text-evidence line (title is self-evident)", () => {
+    const { container } = render(
+      <FundingResultRow
+        hit={{
+          ...baseHit,
+          titleHighlight: "PARP inhibitor in <mark>ovarian</mark> cancer",
+          matchedLiteralTitle: true,
+          textEvidence: { field: "abstract", snippet: "targeting <mark>BRCA</mark>" },
+        }}
+      />,
+    );
+    expect(container.textContent).not.toMatch(/In abstract:/);
+    // The title highlight still renders its own <mark>.
+    expect(container.querySelector("mark")).toBeTruthy();
+  });
+
+  it("renders no text-evidence line when textEvidence is null (flag-off contract)", () => {
+    // baseHit carries textEvidence: null — the off-path the API emits.
+    const { container } = render(<FundingResultRow hit={baseHit} />);
+    expect(container.textContent).not.toMatch(/In abstract:|In keywords:|In sponsor text:/);
+  });
+
+  it("renders balanced marks only — no literal '<mark>' string leaks into textContent (#1051 guard)", () => {
+    const { container } = render(
+      <FundingResultRow
+        hit={{
+          ...baseHit,
+          textEvidence: {
+            field: "abstract",
+            snippet: "studies of <mark>glioblastoma</mark> progression",
+          },
+        }}
+      />,
+    );
+    expect(container.textContent).not.toContain("<mark>");
+    expect(container.textContent).not.toContain("</mark>");
+    // …but the matched term is present (rendered as a <strong>).
+    expect(container.textContent).toMatch(/glioblastoma/);
   });
 });

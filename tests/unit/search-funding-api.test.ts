@@ -27,10 +27,25 @@ const requests: Array<{ index: string; body: Record<string, unknown> }> = [];
  *  publications index. Empty → no funded-outputs counts. */
 let pubAggByProject: Record<string, number> = {};
 
+/** TIER 3 — override the `highlight` object on the funding hit the mock
+ *  returns. `undefined` → the default title-only highlight. Tests set this to
+ *  inject abstract/keywordsText/sponsorText fragments and assert the
+ *  server-side `pickTextEvidence` output. */
+let hitHighlightOverride:
+  | { title?: string[]; abstract?: string[]; keywordsText?: string[]; sponsorText?: string[] }
+  | undefined;
+
 vi.mock("@/lib/search", () => ({
   FUNDING_INDEX: "scholars-funding",
   PUBLICATIONS_INDEX: "scholars-publications",
-  FUNDING_FIELD_BOOSTS: ["title^4", "sponsorText^2", "peopleNames^1"],
+  FUNDING_FIELD_BOOSTS: [
+    "title^4",
+    "sponsorText^2",
+    "peopleNames^1",
+    "abstract^1",
+    "keywordsText^1",
+  ],
+  PUBLICATIONS_RESTRUCTURED_MSM: "2<-34%",
   searchClient: () => ({
     async search(req: { index: string; body: Record<string, unknown> }) {
       lastRequest = req;
@@ -89,7 +104,9 @@ vi.mock("@/lib/search", () => ({
                     { pmid: "333", title: "P3", journal: null, year: 2022, citationCount: 0, isLowerConfidence: false },
                   ],
                 },
-                highlight: { title: ["A study of <mark>widgets</mark>"] },
+                highlight: hitHighlightOverride ?? {
+                  title: ["A study of <mark>widgets</mark>"],
+                },
                 matched_queries: ["concept"],
               },
             ],
@@ -127,6 +144,7 @@ beforeEach(() => {
   lastRequest = null;
   requests.length = 0;
   pubAggByProject = {};
+  hitHighlightOverride = undefined;
 });
 afterEach(() => {
   vi.clearAllMocks();
@@ -145,7 +163,13 @@ describe("searchFunding (OpenSearch)", () => {
     expect(must[0]).toEqual({
       multi_match: {
         query: "widgets",
-        fields: ["title^4", "sponsorText^2", "peopleNames^1"],
+        fields: [
+          "title^4",
+          "sponsorText^2",
+          "peopleNames^1",
+          "abstract^1",
+          "keywordsText^1",
+        ],
         type: "best_fields",
       },
     });
@@ -354,7 +378,13 @@ describe("searchFunding — issue #295 MeSH concept clause", () => {
   const textClause = {
     multi_match: {
       query: "cancer",
-      fields: ["title^4", "sponsorText^2", "peopleNames^1"],
+      fields: [
+        "title^4",
+        "sponsorText^2",
+        "peopleNames^1",
+        "abstract^1",
+        "keywordsText^1",
+      ],
       type: "best_fields",
     },
   };
@@ -418,6 +448,110 @@ describe("searchFunding — issue #295 MeSH concept clause", () => {
   });
 });
 
+describe("searchFunding — Tier 1 relevance gate (SEARCH_FUNDING_TAB_MSM)", () => {
+  const original = process.env.SEARCH_FUNDING_TAB_MSM;
+  const conceptOriginal = process.env.SEARCH_FUNDING_TAB_CONCEPT;
+  const reasonOriginal = process.env.SEARCH_FUNDING_MATCH_REASON;
+  beforeEach(() => {
+    delete process.env.SEARCH_FUNDING_TAB_MSM;
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_FUNDING_TAB_MSM;
+    else process.env.SEARCH_FUNDING_TAB_MSM = original;
+    if (conceptOriginal === undefined) delete process.env.SEARCH_FUNDING_TAB_CONCEPT;
+    else process.env.SEARCH_FUNDING_TAB_CONCEPT = conceptOriginal;
+    if (reasonOriginal === undefined) delete process.env.SEARCH_FUNDING_MATCH_REASON;
+    else process.env.SEARCH_FUNDING_MATCH_REASON = reasonOriginal;
+  });
+
+  const NEOPLASMS: MeshResolution = {
+    descriptorUi: "D009369",
+    name: "Neoplasms",
+    matchedForm: "neoplasms",
+    confidence: "exact",
+    scopeNote: null,
+    entryTerms: [],
+    curatedTopicAnchors: [],
+    descendantUis: ["D009369", "D001943"],
+  };
+
+  const mustOf = () =>
+    (lastRequest!.body.query as { bool: { must: unknown[] } }).bool.must;
+
+  it("adds minimum_should_match + abstract^0.5 when the flag is on (and leaves the shared constant intact)", async () => {
+    process.env.SEARCH_FUNDING_TAB_MSM = "on";
+    await runSearch({ q: "natural language processing" });
+    const must = mustOf();
+    expect(must).toHaveLength(1);
+    expect(must[0]).toEqual({
+      multi_match: {
+        query: "natural language processing",
+        fields: [
+          "title^4",
+          "sponsorText^2",
+          "peopleNames^1",
+          "abstract^0.5",
+          "keywordsText^1",
+        ],
+        type: "best_fields",
+        operator: "or",
+        minimum_should_match: "2<-34%",
+      },
+    });
+  });
+
+  it("emits a byte-identical-to-today multi_match when the flag is off", async () => {
+    delete process.env.SEARCH_FUNDING_TAB_MSM;
+    await runSearch({ q: "natural language processing" });
+    const must = mustOf();
+    expect(must).toHaveLength(1);
+    expect(must[0]).toEqual({
+      multi_match: {
+        query: "natural language processing",
+        fields: [
+          "title^4",
+          "sponsorText^2",
+          "peopleNames^1",
+          "abstract^1",
+          "keywordsText^1",
+        ],
+        type: "best_fields",
+      },
+    });
+  });
+
+  it("does not touch the empty-query match_all path when the flag is on", async () => {
+    process.env.SEARCH_FUNDING_TAB_MSM = "on";
+    await runSearch({ q: "" });
+    expect(mustOf()).toEqual([{ match_all: {} }]);
+  });
+
+  it("propagates the MSM gate through the #295 OR-of-evidence concept wrap", async () => {
+    process.env.SEARCH_FUNDING_TAB_MSM = "on";
+    process.env.SEARCH_FUNDING_TAB_CONCEPT = "on";
+    process.env.SEARCH_FUNDING_MATCH_REASON = "off";
+    await runSearch({ q: "cancer", meshResolution: NEOPLASMS });
+    const must = mustOf();
+    expect(must).toHaveLength(1);
+    const should = (must[0] as { bool: { should: unknown[] } }).bool.should;
+    expect(should[0]).toEqual({
+      multi_match: {
+        query: "cancer",
+        fields: [
+          "title^4",
+          "sponsorText^2",
+          "peopleNames^1",
+          "abstract^0.5",
+          "keywordsText^1",
+        ],
+        type: "best_fields",
+        operator: "or",
+        minimum_should_match: "2<-34%",
+      },
+    });
+  });
+});
+
 describe("searchFunding — PLAN P4 match-reason (funded outputs + named queries)", () => {
   const conceptOriginal = process.env.SEARCH_FUNDING_TAB_CONCEPT;
   const reasonOriginal = process.env.SEARCH_FUNDING_MATCH_REASON;
@@ -470,6 +604,10 @@ describe("searchFunding — PLAN P4 match-reason (funded outputs + named queries
       fields: { title: unknown };
       highlight_query: unknown;
     };
+    // Match-reason-only path (text-evidence OFF) keeps the original top-level
+    // `highlight_query` + single `title` field shape — byte-identical to the
+    // pre-Tier-3 request. The per-field shape is exercised ONLY under
+    // SEARCH_FUNDING_TEXT_EVIDENCE (covered in the Tier 3 describe block).
     expect(highlight.fields.title).toEqual({ number_of_fragments: 0 });
     expect(highlight.highlight_query).toEqual({ match: { title: "cancer" } });
   });
@@ -591,5 +729,227 @@ describe("searchFunding — SEARCH_FUNDING_MESH_GATE (funded-pub MeSH gate)", ()
     expect(should[1]).toEqual({
       terms: { fundedPubMeshUi: ["D009369", "D001943"], boost: 4 },
     });
+  });
+});
+
+describe("searchFunding — TIER 2 phrase boost (SEARCH_FUNDING_PHRASE_BOOST)", () => {
+  const original = process.env.SEARCH_FUNDING_PHRASE_BOOST;
+  beforeEach(() => {
+    delete process.env.SEARCH_FUNDING_PHRASE_BOOST;
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_FUNDING_PHRASE_BOOST;
+    else process.env.SEARCH_FUNDING_PHRASE_BOOST = original;
+  });
+
+  const boolOf = () =>
+    (lastRequest!.body.query as {
+      bool: { must: unknown[]; should?: unknown[] };
+    }).bool;
+
+  // The lone multi_match the must should still hold under the flag — built
+  // from the MOCK FUNDING_FIELD_BOOSTS (which omits abstract^1/keywordsText^1
+  // mutations; the mock array IS the source of truth for the fields assertion).
+  const TEXT_MUST = {
+    multi_match: {
+      query: "natural language processing",
+      fields: [
+        "title^4",
+        "sponsorText^2",
+        "peopleNames^1",
+        "abstract^1",
+        "keywordsText^1",
+      ],
+      type: "best_fields",
+    },
+  };
+
+  it("adds a phrase should-clause (title^6 + abstract^2) when the flag is on and q is non-empty", async () => {
+    process.env.SEARCH_FUNDING_PHRASE_BOOST = "on";
+    await runSearch({ q: "natural language processing" });
+    const should = boolOf().should;
+    expect(should).toContainEqual({
+      match_phrase: { title: { query: "natural language processing", boost: 6 } },
+    });
+    expect(should).toContainEqual({
+      match_phrase: { abstract: { query: "natural language processing", boost: 2 } },
+    });
+  });
+
+  it("leaves admission (the must array) byte-identical when the flag is on — the should never leaks into must, and no minimum_should_match is introduced", async () => {
+    process.env.SEARCH_FUNDING_PHRASE_BOOST = "on";
+    await runSearch({ q: "natural language processing" });
+    const bool = boolOf();
+    expect(bool.must).toEqual([TEXT_MUST]);
+    expect(bool).not.toHaveProperty("minimum_should_match");
+  });
+
+  it("keeps every excluding-self facet aggregation must-only (no should) when the flag is on — ranking-only contract", async () => {
+    process.env.SEARCH_FUNDING_PHRASE_BOOST = "on";
+    await runSearch({ q: "natural language processing", filters: { funder: ["NCI"] } });
+    const aggs = lastRequest!.body.aggs as Record<string, { filter: { bool: Record<string, unknown> } }>;
+    for (const key of [
+      "funders",
+      "directFunders",
+      "programTypes",
+      "mechanisms",
+      "departments",
+      "roleBuckets",
+      "investigators",
+    ]) {
+      expect(aggs[key].filter.bool).not.toHaveProperty("should");
+      expect(aggs[key].filter.bool).toHaveProperty("must");
+    }
+  });
+
+  it("is byte-identical to today when the flag is off (default) — no should key, lone multi_match must", async () => {
+    delete process.env.SEARCH_FUNDING_PHRASE_BOOST;
+    await runSearch({ q: "natural language processing" });
+    const bool = boolOf();
+    expect(bool.should).toBeUndefined();
+    expect(bool.must).toEqual([TEXT_MUST]);
+  });
+
+  it("emits no should-clause when the flag is on but q is empty (a phrase on match_all is meaningless)", async () => {
+    process.env.SEARCH_FUNDING_PHRASE_BOOST = "on";
+    await runSearch({ q: "" });
+    const bool = boolOf();
+    expect(bool.must).toEqual([{ match_all: {} }]);
+    expect(bool.should).toBeUndefined();
+  });
+
+  it("does not add a should-clause to the countOnly body when the flag is on — tab-badge total stays must-only", async () => {
+    process.env.SEARCH_FUNDING_PHRASE_BOOST = "on";
+    await runSearch({ q: "natural language processing", countOnly: true });
+    const bool = boolOf();
+    expect(bool.must).toEqual([TEXT_MUST]);
+    expect(bool.should).toBeUndefined();
+  });
+});
+
+describe("searchFunding — TIER 3 text-hit evidence (SEARCH_FUNDING_TEXT_EVIDENCE)", () => {
+  const original = process.env.SEARCH_FUNDING_TEXT_EVIDENCE;
+  const reasonOriginal = process.env.SEARCH_FUNDING_MATCH_REASON;
+  beforeEach(() => {
+    delete process.env.SEARCH_FUNDING_TEXT_EVIDENCE;
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_FUNDING_TEXT_EVIDENCE;
+    else process.env.SEARCH_FUNDING_TEXT_EVIDENCE = original;
+    if (reasonOriginal === undefined) delete process.env.SEARCH_FUNDING_MATCH_REASON;
+    else process.env.SEARCH_FUNDING_MATCH_REASON = reasonOriginal;
+  });
+
+  type Highlight = {
+    fields: Record<string, { number_of_fragments?: number; highlight_query?: unknown }>;
+    pre_tags?: string[];
+    post_tags?: string[];
+  };
+  const highlightOf = () => lastRequest!.body.highlight as Highlight | undefined;
+
+  it("requests abstract/keywordsText/sponsorText highlights only when the flag is on", async () => {
+    process.env.SEARCH_FUNDING_TEXT_EVIDENCE = "on";
+    await runSearch({ q: "widgets" });
+    const hl = highlightOf()!;
+    expect(hl.fields.abstract).toEqual({
+      number_of_fragments: 1,
+      highlight_query: { match: { abstract: "widgets" } },
+    });
+    expect(hl.fields.keywordsText).toEqual({
+      number_of_fragments: 1,
+      highlight_query: { match: { keywordsText: "widgets" } },
+    });
+    expect(hl.fields.sponsorText).toEqual({
+      number_of_fragments: 1,
+      highlight_query: { match: { sponsorText: "widgets" } },
+    });
+    expect(hl.pre_tags).toEqual(["<mark>"]);
+    expect(hl.post_tags).toEqual(["</mark>"]);
+  });
+
+  it("does not request the text-evidence highlight fields when the flag is off (title-only under match-reason)", async () => {
+    delete process.env.SEARCH_FUNDING_TEXT_EVIDENCE;
+    // match-reason defaults on → a title-only highlight is requested.
+    await runSearch({ q: "widgets" });
+    const hl = highlightOf()!;
+    expect(Object.keys(hl.fields)).toEqual(["title"]);
+    expect(hl.fields.abstract).toBeUndefined();
+    expect(hl.fields.keywordsText).toBeUndefined();
+    expect(hl.fields.sponsorText).toBeUndefined();
+  });
+
+  it("omits the highlight key entirely when BOTH gates are off and q is present", async () => {
+    delete process.env.SEARCH_FUNDING_TEXT_EVIDENCE;
+    process.env.SEARCH_FUNDING_MATCH_REASON = "off";
+    await runSearch({ q: "widgets" });
+    expect(highlightOf()).toBeUndefined();
+  });
+
+  it("requests no highlight when the flag is on but q is empty (no text to mark)", async () => {
+    process.env.SEARCH_FUNDING_TEXT_EVIDENCE = "on";
+    process.env.SEARCH_FUNDING_MATCH_REASON = "off";
+    await runSearch({ q: "" });
+    expect(highlightOf()).toBeUndefined();
+  });
+
+  it("emits textEvidence on a hit when an abstract highlight fragment is returned (flag on)", async () => {
+    process.env.SEARCH_FUNDING_TEXT_EVIDENCE = "on";
+    hitHighlightOverride = {
+      abstract: ["a study of fancy <mark>widgets</mark> and gadgets"],
+    };
+    const result = await runSearch({ q: "widgets" });
+    expect(result.hits[0].textEvidence).toEqual({
+      field: "abstract",
+      snippet: "a study of fancy <mark>widgets</mark> and gadgets",
+    });
+  });
+
+  it("clamps a long abstract fragment mark-aware (no literal '<mark>' leak, one balanced mark)", async () => {
+    process.env.SEARCH_FUNDING_TEXT_EVIDENCE = "on";
+    hitHighlightOverride = {
+      abstract: ["x ".repeat(120) + "<mark>widgets</mark>" + " y".repeat(120)],
+    };
+    const result = await runSearch({ q: "widgets" });
+    const ev = result.hits[0].textEvidence!;
+    expect(ev.field).toBe("abstract");
+    // exactly one balanced mark, never a truncated tag
+    expect((ev.snippet.match(/<mark>/g) ?? []).length).toBe(1);
+    expect((ev.snippet.match(/<\/mark>/g) ?? []).length).toBe(1);
+    expect(ev.snippet).toContain("<mark>widgets</mark>");
+    // visible length bounded by the budget (TEXT_EVIDENCE_MAX_LEN=160) + region
+    expect(ev.snippet.replace(/<\/?mark>/g, "").length).toBeLessThanOrEqual(160 + "widgets".length);
+  });
+
+  it("prefers abstract over keyword over sponsor when several fields highlight", async () => {
+    process.env.SEARCH_FUNDING_TEXT_EVIDENCE = "on";
+    hitHighlightOverride = {
+      abstract: ["the <mark>widgets</mark> abstract"],
+      keywordsText: ["<mark>widgets</mark> keyword"],
+      sponsorText: ["<mark>widgets</mark> sponsor"],
+    };
+    const result = await runSearch({ q: "widgets" });
+    expect(result.hits[0].textEvidence?.field).toBe("abstract");
+  });
+
+  it("skips a text field whose first fragment has no mark, falling through to the next", async () => {
+    process.env.SEARCH_FUNDING_TEXT_EVIDENCE = "on";
+    hitHighlightOverride = {
+      abstract: ["an unmarked abstract fragment"],
+      keywordsText: ["<mark>widgets</mark> keyword"],
+    };
+    const result = await runSearch({ q: "widgets" });
+    expect(result.hits[0].textEvidence).toEqual({
+      field: "keywordsText",
+      snippet: "<mark>widgets</mark> keyword",
+    });
+  });
+
+  it("textEvidence is null when the flag is off even if the index returns a text fragment (server-side gating)", async () => {
+    delete process.env.SEARCH_FUNDING_TEXT_EVIDENCE;
+    hitHighlightOverride = {
+      abstract: ["a study of fancy <mark>widgets</mark> and gadgets"],
+    };
+    const result = await runSearch({ q: "widgets" });
+    expect(result.hits[0].textEvidence).toBeNull();
   });
 });

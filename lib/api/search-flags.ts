@@ -162,6 +162,35 @@ export function resolveFundingMatchReason(): boolean {
 }
 
 /**
+ * TIER 2 — funding-tab phrase-first ranking. When on, `searchFunding` adds a
+ * pure-ranking `should` clause (a `match_phrase` on `title`, plus a lower-boost
+ * `match_phrase` on `abstract`) to the SAME bool that holds the existing text
+ * `must`, so a grant whose title (or abstract) contains the typed phrase
+ * contiguously ranks above grants that merely scatter the same single tokens.
+ *
+ * RANKING ONLY — never admission. The clause is a top-level `should` with NO
+ * `minimum_should_match`, so it cannot admit or drop a document; the `must`
+ * array (and therefore `hits.total`, the `countOnly` total, and every
+ * excluding-self facet aggregation, all of which reference `must` directly)
+ * is byte-identical to the flag-off body. No reindex: `title` and `abstract`
+ * are already `{ type: "text", analyzer: "funding_text" }` in
+ * `fundingIndexMapping` (lib/search.ts), so `match_phrase` is valid today.
+ *
+ * Default OFF (`SEARCH_FUNDING_PHRASE_BOOST=on` enables) — an `=== "on"`
+ * opt-in gate (opposite the `!== "off"` default-on reason/concept flags above)
+ * so the ranking change ships dark for a staging soak. A separate lever from
+ * `SEARCH_FUNDING_TAB_CONCEPT` and `SEARCH_FUNDING_MATCH_REASON`, each with an
+ * independent rollback trigger.
+ *
+ * Flag-parity note: when enabling later, wire the env var in BOTH `.env.local`
+ * AND `cdk/lib/app-stack.ts` per environment (the operator rollout step) — a
+ * local-on / deployed-off split silently ships nothing.
+ */
+export function resolveFundingPhraseBoost(): boolean {
+  return process.env.SEARCH_FUNDING_PHRASE_BOOST === "on";
+}
+
+/**
  * Funding reindex — which funding-index field the concept result-SET gate
  * filters on. When a query resolves to a descriptor and `scope=concept`,
  * `searchFunding` admits grants whose MeSH ∩ the resolved descendant set is
@@ -182,6 +211,58 @@ export function resolveFundingMeshGateField(): "meshDescriptorUi" | "fundedPubMe
   return process.env.SEARCH_FUNDING_MESH_GATE === "fundedPubMeshUi"
     ? "fundedPubMeshUi"
     : "meshDescriptorUi";
+}
+
+/**
+ * TIER 3 — funding-tab text-hit evidence line. A grant matched ONLY on a text
+ * field (abstract / keywordsText / sponsorText) — not title, not concept, not
+ * funded-pubs — renders today with NO "why it matched" reason (just a bare,
+ * un-highlighted title). When on, `searchFunding` ALSO requests OpenSearch
+ * highlights for `abstract` + `keywordsText` + `sponsorText` and computes a
+ * clamped, mark-aware `textEvidence` snippet of the best non-title match; the
+ * row renders it as the reason line so no text-matched result shows a
+ * zero-reason row.
+ *
+ * App-only, NO reindex: the highlighted fields are already in the funding
+ * index (`abstract^1`, `keywordsText^1`, `sponsorText^2` in FUNDING_FIELD_BOOSTS).
+ * Pure presentation metadata — no effect on the query predicate, scoring, or
+ * result set (highlight requests don't admit/rank docs).
+ *
+ * Default OFF (`SEARCH_FUNDING_TEXT_EVIDENCE=on` enables) — an `=== "on"` opt-in
+ * gate so it ships dark, separate from `SEARCH_FUNDING_MATCH_REASON` (the
+ * title-highlight + X-of-Y reasons) with an independent rollback trigger.
+ * Flag-OFF ⇒ no extra highlight fields requested, no `textEvidence` emitted, and
+ * the row render is byte-identical to today.
+ *
+ * Flag-parity note: when enabling, wire the env var in BOTH `.env.local` AND
+ * `cdk/lib/app-stack.ts` per environment (operator rollout step).
+ */
+export function resolveFundingTextEvidence(): boolean {
+  return process.env.SEARCH_FUNDING_TEXT_EVIDENCE === "on";
+}
+
+/**
+ * Funding-tab relevance gate — the funding twin of the pub-tab
+ * `SEARCH_PUB_TAB_MSM` (issue #259 §1.2). The funding `multi_match`
+ * (best_fields, default OR, no floor) admits a grant on a SINGLE stemmed
+ * token in any one field — e.g. `natural language processing` matching a
+ * kidney grant on `processing`→`process`. When on, `searchFunding` adds the
+ * same `minimum_should_match` floor publications uses
+ * (`PUBLICATIONS_RESTRUCTURED_MSM`) so a multi-token query must cover most of
+ * its tokens, and lowers the `abstract` boost from ^1 to ^0.5 (a passing
+ * abstract mention shouldn't admit/dominate on its own — matching the
+ * publications-tab abstract^0.5 weight).
+ *
+ * Default OFF (`SEARCH_FUNDING_TAB_MSM=on` enables) — an `=== "on"` opt-in
+ * gate, opposite the `!== "off"` default-on presentation flags, so the
+ * relevance change ships dark for a staging soak. Flag-OFF ⇒ the funding
+ * `multi_match` body is byte-identical to today (no `operator`/`minimum_should_match`
+ * keys, abstract^1 from the unmutated `FUNDING_FIELD_BOOSTS`). A separate lever
+ * from `SEARCH_FUNDING_TAB_CONCEPT` / `SEARCH_FUNDING_MATCH_REASON` so the gate
+ * rolls back independently.
+ */
+export function resolveFundingTabMsm(): boolean {
+  return process.env.SEARCH_FUNDING_TAB_MSM === "on";
 }
 
 /**

@@ -205,8 +205,14 @@ const visibleLen = (s: string): string => s.replace(/<\/?mark>/g, "");
  * region sits past the budget, windows AROUND it (so the matched term is never
  * silently dropped) and snaps the edges to word boundaries with an ellipsis.
  * Input must already have NON-mark tags stripped (only `<mark>`/`</mark>` remain).
+ *
+ * EXPORTED for the funding-tab text-evidence snippet (Tier 3 — issue funding
+ * `SEARCH_FUNDING_TEXT_EVIDENCE`), which reuses it from `search-funding.ts` to
+ * clamp abstract/keyword/sponsor highlight fragments. Output always has balanced
+ * `<mark>`/`</mark>` tags. Behaviour unchanged for existing in-module callers
+ * (`firstMatchingSentence`); the `export` keyword is the only edit.
  */
-function clampAroundMarks(s: string, maxLen: number): string {
+export function clampAroundMarks(s: string, maxLen: number): string {
   if (visibleLen(s).length <= maxLen) return s;
 
   const firstMark = s.indexOf("<mark>");
