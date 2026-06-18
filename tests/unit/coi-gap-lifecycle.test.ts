@@ -15,6 +15,8 @@ function fresh(pmid: string, entity: string, tier: "High" | "Medium" = "High"): 
     entityScore: 0.9,
     category: "personal",
     sourceSentence: `... ${entity} ...`,
+    subjectType: "self",
+    subjectMention: "Dr Smith",
   };
 }
 function existing(pmid: string, entity: string, status: ExistingGap["status"]): ExistingGap {

@@ -105,6 +105,8 @@ const ctx: EditContext = {
   // empty by default; populated only when the flag is on for a genuine viewer.
   unmatchedPubmedCoiLower: [],
   unmatchedPubmedCoiReviewed: [],
+  // #1112 — flat mention set for the redesigned review surface; empty by default.
+  unmatchedPubmedCoiMentions: [],
   // #836 — null unless SELF_EDIT_MANUAL_HIGHLIGHTS is on AND the viewer is self.
   highlights: null,
 };
@@ -430,13 +432,37 @@ describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)",
     expect(item.querySelector('[aria-label="12 to review"]')?.textContent).toBe("9+");
   });
 
-  it("?attr=coi-gap renders the panel with the verbatim source sentence + tier chip", () => {
-    render(<EditPage ctx={gapCtx} mode="self" attr="coi-gap" />);
+  it("?attr=coi-gap renders the #1112 redesigned panel (Organization view) from the mention set", () => {
+    // The rail badge still derives from `unmatchedPubmedCoi`, but the panel body
+    // now consumes the flat `unmatchedPubmedCoiMentions` projection.
+    const mentionCtx: EditContext = {
+      ...gapCtx,
+      unmatchedPubmedCoiMentions: [
+        {
+          candidateId: "gap-1",
+          pmid: "31508198",
+          year: 2019,
+          organization: "procept biorobotics",
+          organizationRaw: "Procept BioRobotics",
+          subjectType: "self",
+          subjectMention: "Smith",
+          subjectId: "self",
+          clause: "Smith is a clinical research investigator for Procept BioRobotics.",
+          fullText: "Smith is a clinical research investigator for Procept BioRobotics.",
+          relationshipKinds: [],
+          confidence: "high",
+          status: "current",
+          reason: null,
+          reviewedAt: null,
+        },
+      ],
+    };
+    render(<EditPage ctx={mentionCtx} mode="self" attr="coi-gap" />);
     expect(document.querySelector('[data-slot="coi-gap-panel"]')).not.toBeNull();
-    expect(screen.getByTestId("coi-gap-source-gap-1").textContent).toContain(
-      "Clinical Research investigator for Procept Aquablation and Neotract Urolift.",
+    // Default Organization view shows a card for the matched org with its clause.
+    expect(screen.getByTestId("coi-gap-org-card-procept biorobotics").textContent).toContain(
+      "clinical research investigator for Procept BioRobotics",
     );
-    expect(screen.getByTestId("coi-gap-tier-High")).toBeTruthy();
   });
 
   it("surfaces coi-gap in superuser mode when candidates are present (operator decision), with reframed rail label", () => {

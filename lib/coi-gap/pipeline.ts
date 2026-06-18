@@ -33,6 +33,37 @@ export type Tier = "High" | "Medium" | "Low";
 export type Category = "personal" | "funder" | "employer";
 export type AttributionLevel = "scholar" | "other" | "unattributed";
 
+/**
+ * The grammatical SUBJECT of the clause that names an organization, for the
+ * redesigned review surface (#1112). This is the per-mention attribution the UI
+ * highlights:
+ *   - `self`     — the clause subject resolves to the scholar (their own tie);
+ *   - `coauthor` — it resolves to a DIFFERENT author of this paper (roster-confirmed
+ *                  or an honorific/initials author-ref that is not the scholar);
+ *   - `unknown`  — no subject is resolvable (NEVER guessed `self`: a wrong
+ *                  self-attribution is worse than an honest "unclear").
+ *
+ * Derived from the SAME author-resolution primitives `attribute` already uses
+ * (`surnameRe`, `authorRefInitials`, `drSurnames`, `initialSurnameRefs`), so the
+ * subject and the existing tier-driving attribution stay consistent.
+ */
+export type SubjectType = "self" | "coauthor" | "unknown";
+
+/** A disclosure-relationship kind parsed from the clause's verbs/cues (advisory
+ *  board, consulting, grant, …). `[]` when no kind is recognized. */
+export type RelationshipKind =
+  | "advisory_board"
+  | "consulting"
+  | "honoraria"
+  | "grant"
+  | "speaker_fees"
+  | "royalties"
+  | "ownership"
+  | "dsmb"
+  | "steering_committee"
+  | "lecture_fees"
+  | "other";
+
 export interface Scholar {
   surname: string;
   /** Regex matching the surname as a whole word (null when surname is empty). */
@@ -68,6 +99,26 @@ export interface GapCandidate {
   failureModeGuess: string;
   tierReason: string;
   sourceSentence: string;
+  // --- #1112 review-redesign per-mention metadata (the data layer feeds these
+  // through to the client projection; the score/attribution above still never
+  // cross to the client). ---
+  /** Grammatical subject of the clause naming THIS org. NEVER guessed `self`
+   *  when unresolvable (emits `unknown`). See {@link SubjectType}. */
+  subjectType: SubjectType;
+  /** The exact subject token as written ("Dr Altorki", "A Saxena", "SR"), or
+   *  null when `subjectType === "unknown"`. */
+  subjectMention: string | null;
+  /** The organization as printed in the clause (`EntityCandidate.raw`), kept for
+   *  display fidelity inside the trimmed clause; `entity` is the same raw value
+   *  today, `normalized` is the deduped/canonical key. */
+  organizationRaw: string;
+  /** Trimmed span for the Organization-view row: subject token (if present) +
+   *  the matched org + ~6 words of connective context, eliding with "…". The
+   *  full statement stays available in `sourceSentence`. */
+  clause: string;
+  /** Disclosure kinds parsed from the clause (advisory_board, grant, …); `[]`
+   *  when none recognized. */
+  relationshipKinds: RelationshipKind[];
 }
 
 export interface AnalyzeOptions {
@@ -273,6 +324,223 @@ export function attribute(clause: string, scholar: Scholar, roster?: AuthorRoste
   }
   if (allAuthors) return { level: "unattributed", score: 0.45, reason: '"the authors" — collective' };
   return { level: "unattributed", score: 0.5, reason: "no author named in clause" };
+}
+
+// ------------------------- subject attribution (#1112) -------------------------
+
+/**
+ * Resolve the GRAMMATICAL SUBJECT of a clause for the review-redesign surface:
+ * who, in this clause, holds the named relationship.
+ *
+ * Heuristic (two sentences): reuse the SAME author-reference primitives
+ * `attribute` uses — the scholar's surname / author-ref initials / "Dr <surname>"
+ * / no-honorific first-initial+surname (roster-confirmed) — and return the FIRST
+ * such reference in clause order as the subject token, typed `self` if it is the
+ * scholar and `coauthor` if it is a different author; when NO author reference is
+ * found we return `unknown` with a null token rather than guessing `self`,
+ * because a wrong self-attribution is worse than an honest "unclear".
+ *
+ * This is intentionally consistent with `attribute` (it consumes the same
+ * signals) but is a SEPARATE concern: `attribute` decides the tier-driving
+ * attribution LEVEL (and is roster-gated to avoid suppressing the scholar's own
+ * tie), whereas this returns the exact display token + a self/coauthor/unknown
+ * label for the UI mark. `self`/`coauthor` here therefore track `attribute`'s
+ * scholar/other, and an `unattributed` clause maps to `unknown`.
+ */
+export function deriveSubject(
+  clause: string,
+  scholar: Scholar,
+  roster?: AuthorRoster,
+): { type: SubjectType; mention: string | null } {
+  // Each candidate subject reference, tagged with its position in the clause so
+  // we can pick the FIRST (the grammatical subject normally leads the clause).
+  type Ref = { index: number; mention: string; isScholar: boolean };
+  const refs: Ref[] = [];
+  const indexOf = (needle: string): number => {
+    const i = clause.indexOf(needle);
+    return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+  };
+
+  // 1. "Dr <Surname>" / "Drs <Surname>" — honorific + surname (group 1 = surname).
+  {
+    const re = /\bDrs?\.?\s+(?:[A-Z]\.?\s*){0,3}([A-Z][a-z]{2,})/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(clause))) {
+      refs.push({
+        index: m.index,
+        mention: m[0].trim(),
+        isScholar: m[1].toLowerCase() === scholar.surname.toLowerCase(),
+      });
+    }
+  }
+
+  // 2. The scholar's bare surname ("Altorki reports …" / "… for Altorki"), only
+  //    when not already captured by a "Dr <Surname>" hit above.
+  if (scholar.surnameRe) {
+    const sm = clause.match(scholar.surnameRe);
+    if (sm && sm.index != null) {
+      const already = refs.some((r) => r.mention.toLowerCase().includes(scholar.surname.toLowerCase()));
+      if (!already) refs.push({ index: sm.index, mention: sm[0], isScholar: true });
+    }
+  }
+
+  // 3. Author-ref initials groups ("A.P.:", "SMM has …", "SR declared …").
+  for (const letters of authorRefInitials(clause)) {
+    const isScholar = letters === scholar.initials || letters === scholar.initialsAlt;
+    // Recover the printed token (spacing/dots vary) by scanning for the letters
+    // in author-ref position; fall back to the bare letters.
+    const tok = findInitialsToken(clause, letters) ?? letters;
+    refs.push({ index: indexOf(tok), mention: tok, isScholar });
+  }
+
+  // 4. No-honorific first-initial + surname ("A Saxena", "C Lehman"). Only trust
+  //    the co-author form when the byline CONFIRMS it (mirrors `attribute`); the
+  //    scholar's own surname is already covered by (2).
+  const initSurn = roster && roster.size > 0 ? initialSurnameRefs(clause) : [];
+  for (const r of initSurn) {
+    const isScholar = bareSurname(r.surname) === bareSurname(scholar.surname);
+    const confirmedCo = !!roster!.get(bareSurname(r.surname))?.has(r.initial);
+    if (!isScholar && !confirmedCo) continue; // unconfirmed → not a trusted subject
+    const tok = findInitialSurnameToken(clause, r.initial, r.surname) ?? `${r.initial} ${r.surname}`;
+    refs.push({ index: indexOf(tok), mention: tok, isScholar });
+  }
+
+  if (refs.length === 0) return { type: "unknown", mention: null };
+
+  // The grammatical subject is the EARLIEST author reference in the clause.
+  refs.sort((a, b) => a.index - b.index);
+  // Prefer the scholar when they and a co-author share the earliest position
+  // band — `attribute` already treats "scholar named alongside another author" as
+  // the scholar's; mirror that so the mark is calm (self) not alarming (coauthor).
+  const first = refs[0];
+  const scholarAtFront = refs.find((r) => r.isScholar && r.index <= first.index);
+  const chosen = scholarAtFront ?? first;
+  return { type: chosen.isScholar ? "self" : "coauthor", mention: chosen.mention };
+}
+
+/** Recover the printed initials token for a letters group ("AP" → "A.P." / "A P")
+ *  at clause start or before a reporting verb, so the UI shows what was written. */
+function findInitialsToken(clause: string, letters: string): string | null {
+  // Build a tolerant pattern: each letter, optional dot, optional space.
+  const pat = letters
+    .split("")
+    .map((c) => `${c}\\.?\\s?`)
+    .join("");
+  const head = clause.match(new RegExp(`^\\s*(?:Drs?\\.?\\s+|Prof\\.?\\s+)?(${pat})`));
+  if (head) return head[1].trim();
+  const verb = clause.match(new RegExp(`\\b(${pat})\\s+${REPORTING_VERB}\\b`));
+  if (verb) return verb[1].trim();
+  return null;
+}
+
+/** Recover the printed "A Saxena" / "A.Saxena" token for an initial+surname ref. */
+function findInitialSurnameToken(clause: string, initial: string, surname: string): string | null {
+  const re = new RegExp(`\\b${initial}\\.?\\s*${surname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+  const m = clause.match(re);
+  return m ? m[0].trim() : null;
+}
+
+// --------------------- relationship-kind parsing (#1112) ---------------------
+
+/** Ordered cue → relationship-kind table. First-match-per-kind; a clause can
+ *  carry several kinds ("advisory board and consulting fees"). Patterns are
+ *  deliberately specific so a generic "fees" alone does not mint a kind. */
+const RELATIONSHIP_CUES: ReadonlyArray<{ kind: RelationshipKind; re: RegExp }> = [
+  { kind: "advisory_board", re: /\b(advisory board|scientific advisory|advisor[y]?\b|advisory committee)\b/i },
+  { kind: "consulting", re: /\b(consult(?:ant|ing|s)?|consultancy)\b/i },
+  { kind: "steering_committee", re: /\b(steering committee)\b/i },
+  { kind: "dsmb", re: /\b(data (?:and )?safety monitoring|dsmb|data monitoring committee|\bdmc\b)\b/i },
+  { kind: "speaker_fees", re: /\b(speaker(?:s'?)?(?: bureau| fees?| honoraria)?|speakers'? bureau)\b/i },
+  { kind: "lecture_fees", re: /\b(lecture fees?|lecture honorari\w+|payment for lectures)\b/i },
+  { kind: "honoraria", re: /\b(honorari\w+)\b/i },
+  { kind: "royalties", re: /\b(royalt\w+|licens\w+|patent\w*)\b/i },
+  { kind: "ownership", re: /\b(equity|stock|shares?|shareholder|ownership|owns?\b|co-?founder|founder|holds? equity)\b/i },
+  { kind: "grant", re: /\b(research (?:support|funding|grant)s?|grants?(?: from| support| funding)?|grant (?:support|funding)|funded by|research funding)\b/i },
+];
+
+/** Parse the disclosure kinds named in a clause. `[]` when none recognized
+ *  (e.g. "has a relationship with X"). Order is the cue-table order, deduped. */
+export function relationshipKinds(clause: string): RelationshipKind[] {
+  const out: RelationshipKind[] = [];
+  for (const { kind, re } of RELATIONSHIP_CUES) {
+    if (re.test(clause) && !out.includes(kind)) out.push(kind);
+  }
+  return out;
+}
+
+// ------------------------------ clause trimming (#1112) ------------------------------
+
+/** Trim a clause to the smallest span containing the subject token (when present)
+ *  and the matched org, plus ~`context` words on each side, eliding the rest with
+ *  "…". When the subject is far from the org, render `subject … org-clause`. The
+ *  full statement stays available via `sourceSentence`. Organization-view only;
+ *  Paper view uses `fullText` verbatim. */
+export function trimClause(
+  clause: string,
+  organizationRaw: string,
+  subjectMention: string | null,
+  context = 6,
+): string {
+  const full = clause.trim();
+  if (!full) return "";
+  const words = full.split(/\s+/);
+  if (words.length <= context * 3) return full; // short enough — show whole clause
+
+  // Locate a needle as a WORD range, tolerant of trivial punctuation/spacing
+  // differences (the subject token can arrive de-dotted — "Dr Smith" — while the
+  // source clause still carries "Dr. Smith,"). Compares on a punctuation-stripped
+  // lowercase form of each word.
+  const norm = (w: string) => w.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const wordsNorm = words.map(norm);
+  const findRange = (needle: string | null): [number, number] | null => {
+    if (!needle) return null;
+    const needleWords = needle.trim().split(/\s+/).map(norm).filter(Boolean);
+    if (needleWords.length === 0) return null;
+    for (let i = 0; i + needleWords.length <= wordsNorm.length; i++) {
+      let ok = true;
+      for (let j = 0; j < needleWords.length; j++) {
+        if (wordsNorm[i + j] !== needleWords[j]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return [i, i + needleWords.length - 1];
+    }
+    return null;
+  };
+
+  const orgRange = findRange(organizationRaw);
+  const subjRange = findRange(subjectMention);
+  if (!orgRange) return full; // can't locate the org → don't risk dropping it
+
+  // Window around the org, plus the subject if it's nearby; if the subject is far,
+  // emit a separate leading subject window joined by "…".
+  const segments: Array<[number, number]> = [];
+  const orgWin: [number, number] = [Math.max(0, orgRange[0] - context), Math.min(words.length - 1, orgRange[1] + context)];
+
+  if (subjRange) {
+    const subjWin: [number, number] = [
+      Math.max(0, subjRange[0] - 1),
+      Math.min(words.length - 1, subjRange[1] + 1),
+    ];
+    if (subjWin[1] + 1 >= orgWin[0]) {
+      // Overlapping / adjacent → one merged window from subject to org.
+      segments.push([Math.min(subjWin[0], orgWin[0]), Math.max(subjWin[1], orgWin[1])]);
+    } else {
+      segments.push(subjWin, orgWin); // disjoint → "subject … org-clause"
+    }
+  } else {
+    segments.push(orgWin);
+  }
+
+  const parts: string[] = [];
+  if (segments[0][0] > 0) parts.push("…");
+  segments.forEach((seg, i) => {
+    if (i > 0) parts.push("…");
+    parts.push(words.slice(seg[0], seg[1] + 1).join(" "));
+  });
+  if (segments[segments.length - 1][1] < words.length - 1) parts.push("…");
+  return parts.join(" ").replace(/\s+…\s+/g, " … ").trim();
 }
 
 // ------------------------------- extraction -------------------------------
@@ -712,11 +980,20 @@ interface Unit {
   attribution: Attribution;
   entities: EntityCandidate[];
   source: string;
+  /** #1112 — grammatical subject of this unit's clause (self/coauthor/unknown)
+   *  + the exact printed token, for the per-mention review mark. */
+  subject: { type: SubjectType; mention: string | null };
 }
 
 /** Turn the scholar's structured section into attributed entity units. */
 export function structuredEntities(slice: string, scholar: Scholar): Unit[] {
   const units: Unit[] = [];
+  // The slice begins with the scholar's own name header (scholarSlice bounds it),
+  // so the structured section's subject is ALWAYS the scholar. Use the printed
+  // header text as the subject token when present, else the bare surname.
+  const headerMatch = slice.match(/^\s*([A-Z][a-z]+(?:\s+[A-Z]\.?)?(?:\s+(?:van|von|de|del|della|di|la))?\s+[A-Z][a-z]+)/);
+  const subjectMention = headerMatch ? headerMatch[1].trim() : scholar.surname || null;
+  const subject: { type: SubjectType; mention: string | null } = { type: "self", mention: subjectMention };
   const re = new RegExp(`\\b(${CAT_ALT})\\s*:\\s*([^]*?)(?=\\b(?:${CAT_ALT})\\s*:|$)`, "g");
   let m: RegExpExecArray | null;
   while ((m = re.exec(slice))) {
@@ -739,6 +1016,7 @@ export function structuredEntities(slice: string, scholar: Scholar): Unit[] {
         attribution: { level: "scholar", score: 0.85, reason: "ASCO-structured section header" },
         entities,
         source: `${m[1]}: ${m[2].trim()}`.slice(0, 400),
+        subject,
       });
   }
   return units;
@@ -766,6 +1044,7 @@ export function statementUnits(
     attribution: attribute(clause, scholar, roster),
     entities: extractEntities(clause),
     source: clause,
+    subject: deriveSubject(clause, scholar, roster),
   }));
   return { units, unparsedStructured: false };
 }
@@ -852,6 +1131,22 @@ export function failureModeGuess(args: {
 
 // ------------------------------- orchestration -------------------------------
 
+/** Build the #1112 per-mention metadata (subject, org-raw, trimmed clause,
+ *  relationship kinds) for one (unit, entity) pairing — shared by every
+ *  GapCandidate construction site so the four fields stay in lock-step. */
+function mentionMeta(
+  unit: Unit,
+  e: EntityCandidate,
+): Pick<GapCandidate, "subjectType" | "subjectMention" | "organizationRaw" | "clause" | "relationshipKinds"> {
+  return {
+    subjectType: unit.subject.type,
+    subjectMention: unit.subject.mention,
+    organizationRaw: e.raw,
+    clause: trimClause(unit.source, e.raw, unit.subject.mention),
+    relationshipKinds: relationshipKinds(unit.source),
+  };
+}
+
 /**
  * Analyze one COI statement for a scholar against their disclosed entities.
  * Returns surfaced (High/Medium) candidates deduped per normalized entity,
@@ -916,6 +1211,7 @@ export function analyzeStatement(
           failureModeGuess: "junk-token",
           tierReason: "extracted phrase is a boilerplate/junk word, not an organization",
           sourceSentence: unit.source,
+          ...mentionMeta(unit, e),
         };
         const prev0 = byEntity.get(norm);
         if (!prev0 || RANK[cand.tier] > RANK[prev0.tier]) byEntity.set(norm, cand);
@@ -952,6 +1248,7 @@ export function analyzeStatement(
           failureModeGuess: "co-author",
           tierReason: "entity matches a co-author of this paper (roster cross-check)",
           sourceSentence: unit.source,
+          ...mentionMeta(unit, e),
         };
         const prevR = byEntity.get(norm);
         if (!prevR || RANK[candR.tier] > RANK[prevR.tier]) byEntity.set(norm, candR);
@@ -995,6 +1292,7 @@ export function analyzeStatement(
         }),
         tierReason: t.why,
         sourceSentence: unit.source,
+        ...mentionMeta(unit, e),
       };
       const prev = byEntity.get(norm);
       if (!prev || RANK[cand.tier] > RANK[prev.tier]) byEntity.set(norm, cand);

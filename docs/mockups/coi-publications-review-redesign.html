@@ -1,0 +1,133 @@
+<style>
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+.seg{display:inline-flex;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);overflow:hidden}
+.seg button{border:none;background:transparent;font-size:13px;padding:6px 14px;cursor:pointer;color:var(--color-text-secondary)}
+.seg button.on{background:var(--color-background-secondary);color:var(--color-text-primary);font-weight:500}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--color-text-secondary);margin-top:10px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.sw{width:13px;height:13px;border-radius:3px;display:inline-block}
+.note{font-size:12px;color:var(--color-text-tertiary);margin:12px 0 4px;line-height:1.5}
+.card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px 18px;margin-top:12px}
+.chead{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:8px}
+.pid{font-size:13px;color:var(--color-text-tertiary)}
+.pid b{color:var(--color-text-info);font-weight:400}
+.orgname{font-size:17px;font-weight:500}
+.row{display:flex;gap:14px;padding:10px 0;border-top:0.5px solid var(--color-border-tertiary)}
+.rmeta{flex:0 0 92px;font-size:12px;line-height:1.45;color:var(--color-text-tertiary)}
+.rmeta b{color:var(--color-text-info);font-weight:400}
+.rbody{flex:1;font-size:14px;line-height:1.55}
+.stmt{font-size:14px;line-height:1.65;margin:0}
+.o{background:#FAEEDA;color:#633806;font-weight:500;border-radius:4px;padding:0 4px;white-space:nowrap}
+.s{background:#F1EFE8;color:#444441;font-weight:500;border-radius:4px;padding:0 4px;white-space:nowrap}
+.c{background:#EEEDFE;color:#3C3489;font-weight:500;border-radius:4px;padding:0 4px;white-space:nowrap}
+.acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.acts.foot{border-top:0.5px solid var(--color-border-tertiary);padding-top:11px;margin-top:11px;align-items:center}
+.acts button{font-size:13px}
+.acts.cmp button{font-size:12px;padding:4px 9px}
+.hint{font-size:12px;color:var(--color-text-tertiary);margin-right:auto}
+.rp{display:inline-flex;align-items:center;gap:5px;font-size:12px;background:var(--color-background-secondary);color:var(--color-text-secondary);border-radius:var(--border-radius-md);padding:3px 9px}
+.undo{background:none;border:none;color:var(--color-text-info);font-size:12px;cursor:pointer;padding:0 0 0 8px}
+.resolved{opacity:0.5}
+.more{font-size:12px;color:var(--color-text-tertiary);padding:12px 2px 2px}
+</style>
+
+<div id="coi-root">
+  <h2 class="sr-only">Interactive prototype: toggle between grouping conflict-of-interest disclosures by organization or by paper. Decisions persist across both views because each decision applies to a whole paper.</h2>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <div style="font-size:13px;color:var(--color-text-secondary)">Showing 4 of 13 papers · <span id="counter">0 reviewed</span></div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:12px;color:var(--color-text-tertiary)">Group by</span>
+      <span class="seg"><button data-view="organization" class="on">Organization</button><button data-view="paper">Paper</button></span>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><span class="sw" style="background:#FAEEDA"></span>named organization</span>
+    <span><span class="sw" style="background:#F1EFE8"></span>you</span>
+    <span><span class="sw" style="background:#EEEDFE"></span>a co-author</span>
+  </div>
+
+  <div id="view" style="min-height:120px"></div>
+</div>
+
+<script>
+(function(){
+  var papers=[
+    {id:"41679681",year:2026,subj:{t:"s",n:"Nasser Altorki"},orgs:["AstraZeneca","Janssen","Roche/Genentech","Regeneron"],
+     full:'<span class="s">Nasser Altorki</span> reports grant funding from <span class="o">AstraZeneca</span> LLC and <span class="o">Janssen</span> Pharmaceuticals, steering committee membership for <span class="o">Roche/Genentech</span>, and advisory board position for <span class="o">Regeneron</span> Pharmaceuticals.',
+     frag:{"AstraZeneca":'<span class="s">Nasser Altorki</span> reports grant funding from <span class="o">AstraZeneca</span> LLC…',"Roche/Genentech":'<span class="s">Nasser Altorki</span> … steering committee membership for <span class="o">Roche/Genentech</span>…'}},
+    {id:"40217113",year:2025,subj:{t:"c",n:"A Saxena"},orgs:["AstraZeneca","Bristol Myers Squibb","Galvanize Therapeutics"],
+     full:'<span class="c">A Saxena</span> receives research funding from <span class="o">AstraZeneca</span>, has served on advisory boards including <span class="o">Bristol Myers Squibb</span>, and as a consultant for <span class="o">Galvanize Therapeutics</span>.',
+     frag:{"AstraZeneca":'<span class="c">A Saxena</span> receives research funding from <span class="o">AstraZeneca</span>…'}},
+    {id:"39478895",year:2024,subj:{t:"s",n:"Dr Altorki"},orgs:["AstraZeneca","Roche/Genentech"],
+     full:'<span class="s">Dr Altorki</span> has received grants or contracts from <span class="o">AstraZeneca</span> and <span class="o">Roche/Genentech</span> and has ownership interest in Angiocrine Bioscience, TMRW, and Viewpoint Medical.',
+     frag:{"AstraZeneca":'<span class="s">Dr Altorki</span> received grants or contracts from <span class="o">AstraZeneca</span>…',"Roche/Genentech":'<span class="s">Dr Altorki</span> … grants or contracts from … <span class="o">Roche/Genentech</span>…'}},
+    {id:"30442588",year:2018,subj:{t:"c",n:"SR"},orgs:["AstraZeneca","Roche/Genentech","Amgen","Merck"],
+     full:'…is supported, in part, by NIH/NCI Cancer Center Support Grant P30 CA008748. <span class="c">SR</span> declared serving on advisory boards of <span class="o">Amgen</span>, <span class="o">AstraZeneca</span>, <span class="o">Roche</span> and <span class="o">Merck</span>, among others.',
+     frag:{"AstraZeneca":'…<span class="c">SR</span> declared serving on advisory boards of … <span class="o">AstraZeneca</span> …',"Roche/Genentech":'…<span class="c">SR</span> declared serving on advisory boards of … <span class="o">Roche</span> …'}}
+  ];
+  var orgList=["AstraZeneca","Roche/Genentech"];
+  var orgMembers={"AstraZeneca":["41679681","40217113","39478895","30442588"],"Roche/Genentech":["41679681","39478895","30442588"]};
+  var byId={}; papers.forEach(function(p){byId[p.id]=p;});
+  var FULL={update:"I intend to update my COI statement",expired:"Historically true but not currently valid",invalid:"Not a valid suggestion"};
+  var SHORT={update:"Update",expired:"Expired",invalid:"Not valid"};
+  var PILL={update:"will update COI",expired:"historically true",invalid:"not a valid suggestion"};
+  var decisions={};
+  var view="organization";
+
+  function actsHTML(id,compact,foot){
+    if(decisions[id]) return '<div class="acts'+(foot?' foot':'')+'"><span class="rp"><i class="ti ti-check" aria-hidden="true"></i> Marked: '+PILL[decisions[id]]+'</span><button class="undo" data-undo="'+id+'">Undo</button></div>';
+    var L=compact?SHORT:FULL;
+    return '<div class="acts'+(foot?' foot':'')+(compact?' cmp':'')+'">'+
+      (foot?'<span class="hint">One decision clears all '+byId[id].orgs.length+' organizations</span>':'')+
+      '<button data-act="update" data-pmid="'+id+'">'+L.update+'</button>'+
+      '<button data-act="expired" data-pmid="'+id+'">'+L.expired+'</button>'+
+      '<button data-act="invalid" data-pmid="'+id+'">'+L.invalid+'</button></div>';
+  }
+  function subjChip(s){ return s.t==="s"?'<span class="s">you</span>':'<span class="c">co-author · '+s.n+'</span>'; }
+
+  function paperCard(p){
+    var r=decisions[p.id]?' resolved':'';
+    return '<div class="card">'+
+      '<div class="chead"><span class="pid'+r+'">'+p.year+' · <b>PMID '+p.id+'</b></span><span class="'+r.trim()+'">'+subjChip(p.subj)+'</span></div>'+
+      '<p class="stmt'+r+'">'+p.full+'</p>'+
+      actsHTML(p.id,false,true)+'</div>';
+  }
+  function orgCard(org){
+    var ids=orgMembers[org];
+    var rows=ids.map(function(id){
+      var p=byId[id]; var r=decisions[id]?' resolved':'';
+      var frag=(p.frag&&p.frag[org])?p.frag[org]:p.full;
+      return '<div class="row"><div class="rmeta'+r+'">'+p.year+'<br><b>PMID '+id+'</b></div>'+
+        '<div class="rbody"><div class="'+r.trim()+'">'+frag+'</div>'+actsHTML(id,true,false)+'</div></div>';
+    }).join('');
+    return '<div class="card"><div class="chead"><span class="orgname">'+org+'</span><span class="pid">'+ids.length+' papers</span></div>'+rows+'</div>';
+  }
+
+  var root=document.getElementById("coi-root");
+  var viewEl=document.getElementById("view");
+  var counterEl=document.getElementById("counter");
+
+  function render(){
+    var done=papers.filter(function(p){return decisions[p.id];}).length;
+    counterEl.textContent=done+" of 4 reviewed";
+    var segs=root.querySelectorAll(".seg button");
+    for(var i=0;i<segs.length;i++) segs[i].classList.toggle("on",segs[i].getAttribute("data-view")===view);
+    if(view==="organization"){
+      viewEl.innerHTML='<div class="note">A decision applies to the whole paper — resolving one row clears that paper from every organization it appears under.</div>'+
+        orgList.map(orgCard).join('')+'<div class="more">+ 6 more organizations</div>';
+    } else {
+      viewEl.innerHTML='<div class="note">Each paper\u2019s competing-interests statement is a single decision that clears every organization that paper names.</div>'+
+        papers.map(paperCard).join('')+'<div class="more">+ 9 more papers</div>';
+    }
+  }
+  root.addEventListener("click",function(e){
+    var b=e.target.closest("button"); if(!b) return;
+    if(b.getAttribute("data-view")){ view=b.getAttribute("data-view"); render(); return; }
+    if(b.getAttribute("data-act")){ decisions[b.getAttribute("data-pmid")]=b.getAttribute("data-act"); render(); return; }
+    if(b.getAttribute("data-undo")){ delete decisions[b.getAttribute("data-undo")]; render(); return; }
+  });
+  render();
+})();
+</script>

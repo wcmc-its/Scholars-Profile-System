@@ -1270,6 +1270,16 @@ model CoiGapCandidate {
   /// vs invalid is what makes the data usable for a suggestion-quality paper —
   /// see `docs/coi-gap-feedback-spec.md` and `lib/coi-gap/feedback.ts`.
   feedbackReason   String?   @map("feedback_reason") @db.VarChar(24)
+  /// #1112 — grammatical subject of the clause naming this org, for the review
+  /// redesign's per-mention mark: "self" | "coauthor" | "unknown". NEVER guessed
+  /// "self" when the parse can't resolve the subject (honest "unknown" instead).
+  /// Nullable: pre-#1112 rows and rows written before this column existed are null
+  /// until the next `etl:coi-gap` recompute backfills them.
+  subjectType      String?   @map("subject_type") @db.VarChar(16)
+  /// #1112 — the exact subject token as printed ("Dr Altorki", "A Saxena", "SR"),
+  /// or null when the subject is unknown. Display fidelity for the mark; never a
+  /// model verdict.
+  subjectMention   String?   @map("subject_mention") @db.VarChar(128)
 
   @@unique([cwid, pmid, normalizedEntity], name: "cwid_pmid_entity")
   @@index([cwid, status])

@@ -684,9 +684,7 @@ function renderPanel(
           cwid={cwid}
           mode={childMode}
           scholarName={scholarName}
-          candidates={ctx.unmatchedPubmedCoi}
-          lowerCandidates={ctx.unmatchedPubmedCoiLower}
-          reviewed={ctx.unmatchedPubmedCoiReviewed}
+          mentions={ctx.unmatchedPubmedCoiMentions}
         />
       );
     case "profile-url":

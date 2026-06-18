@@ -113,6 +113,7 @@ const fakeCtx = (cwid: string) => ({
   unmatchedPubmedCoi: [],
   unmatchedPubmedCoiLower: [],
   unmatchedPubmedCoiReviewed: [],
+  unmatchedPubmedCoiMentions: [],
   highlights: null,
 });
 
