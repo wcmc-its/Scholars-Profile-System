@@ -3,6 +3,7 @@ import { buildOrganizationJsonLd } from "@/lib/seo/jsonld";
 import {
   getCenter,
   getCenterMembers,
+  getCenterPrograms,
   getCenterPublicationsList,
   getCenterTopResearchAreas,
 } from "@/lib/api/centers";
@@ -67,6 +68,13 @@ export async function CenterPage({
     tab === "scholars"
       ? await getCenterMembers(detail.code, { page: Math.max(0, page - 1) })
       : null;
+
+  // #1105 — page-eligible programs for the "Programs" nav under the hero. Only
+  // when the program-pages flag is on (so links never point at notFound()).
+  const programPagesEnabled = isCenterProgramPagesEnabled();
+  const programs = programPagesEnabled
+    ? await getCenterPrograms(detail.code)
+    : [];
 
   const spotlightData = spotlightCards
     ? {
@@ -184,6 +192,32 @@ export async function CenterPage({
         </div>
       </section>
 
+      {programs.length > 0 && (
+        <nav className="mt-8" aria-label="Programs">
+          <div className="mb-[11px] text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            Programs
+          </div>
+          <div className="flex flex-wrap gap-[7px]">
+            {programs.map((p) => (
+              <a
+                key={p.code}
+                href={`/centers/${detail.slug}/programs/${p.code}`}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-[5px] text-[13px] text-foreground hover:bg-accent"
+                style={{ textDecoration: "none" }}
+              >
+                {p.label}
+                <span
+                  aria-hidden
+                  className="text-[12px] text-[var(--color-text-tertiary)]"
+                >
+                  →
+                </span>
+              </a>
+            ))}
+          </div>
+        </nav>
+      )}
+
       <Spotlight data={spotlightData} />
 
       <div id="tab-content" className="mt-12 scroll-mt-16">
@@ -198,7 +232,7 @@ export async function CenterPage({
           <CenterMembersClient
             result={members}
             centerSlug={detail.slug}
-            programPagesEnabled={isCenterProgramPagesEnabled()}
+            programPagesEnabled={programPagesEnabled}
           />
         )}
 
