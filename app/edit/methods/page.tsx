@@ -38,7 +38,7 @@ import { isMethodsLensSensitiveGateOn } from "@/lib/profile/methods-lens-flags";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Method Families — Scholars Profile Console",
+  title: "Method families — Scholars Profile Console",
   robots: { index: false, follow: false },
 };
 
@@ -114,7 +114,7 @@ export default async function MethodFamiliesPage() {
       />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
-        <h1 className="mb-1 text-xl font-semibold">Method Families</h1>
+        <h1 className="mb-1 text-xl font-semibold">Method families</h1>
         <p className="text-muted-foreground mb-6 max-w-3xl text-sm">
           Control the visibility tier of each method family and review the ones flagged as
           potentially sensitive. The review queue surfaces flagged families first; setting a tier

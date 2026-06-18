@@ -87,26 +87,26 @@ describe("AdminSubnav", () => {
     );
   });
 
-  it("hides the Method Families tab when methodsTab is null/omitted", () => {
+  it("hides the Method families tab when methodsTab is null/omitted", () => {
     render(<AdminSubnav active="profiles" pendingSlugRequests={null} methodsTab={null} />);
     expect(screen.queryByTestId("admin-tab-methods")).toBeNull();
     render(<AdminSubnav active="profiles" pendingSlugRequests={null} />);
     expect(screen.queryByTestId("admin-tab-methods")).toBeNull();
   });
 
-  it("shows the Method Families tab (linking /edit/methods) when methodsTab is 0", () => {
+  it("shows the Method families tab (linking /edit/methods) when methodsTab is 0", () => {
     render(<AdminSubnav active="profiles" pendingSlugRequests={null} methodsTab={0} />);
     const tab = screen.getByTestId("admin-tab-methods");
     expect(tab.getAttribute("href")).toBe("/edit/methods");
     expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
   });
 
-  it("marks the Method Families tab active with aria-current", () => {
+  it("marks the Method families tab active with aria-current", () => {
     render(<AdminSubnav active="methods" pendingSlugRequests={null} methodsTab={0} />);
     expect(screen.getByTestId("admin-tab-methods").getAttribute("aria-current")).toBe("page");
   });
 
-  it("superuserSurfaces=false shows ONLY Method Families (a comms_steward who is not a superuser)", () => {
+  it("superuserSurfaces=false shows ONLY Method families (a comms_steward who is not a superuser)", () => {
     render(
       <AdminSubnav
         active="methods"
@@ -146,7 +146,7 @@ describe("AdminSubnav", () => {
     expect(screen.getByTestId("admin-subnav-self-edit").getAttribute("aria-current")).toBe("page");
   });
 
-  it('active="self" for a steward-only viewer shows only Method Families + My Profile', () => {
+  it('active="self" for a steward-only viewer shows only Method families + My Profile', () => {
     render(
       <AdminSubnav
         active="self"
