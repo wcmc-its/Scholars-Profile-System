@@ -1539,9 +1539,9 @@ describe("AppStack", () => {
         expect(env.get("SCHOLARS_MAIL_FROM")).toBe("no-reply-scholars@weill.cornell.edu");
       });
 
-      it("ships the ReCiter pending-suggestions nudge OFF in prod (SELF_EDIT_RECITER_PENDING_HINT, dormant in both envs)", () => {
-        // Dormant: the backing reciter_pending_suggestion table is empty until an
-        // ETL seeds it, and the flag is "off" in BOTH envs until a gated rollout.
+      it("keeps the ReCiter pending-suggestions nudge OFF in prod (SELF_EDIT_RECITER_PENDING_HINT — armed; staging flips first)", () => {
+        // Prod is armed but off: the live DynamoDB read is staging-on for the soak,
+        // and prod flips only on the next approval-gated Sps-App-prod deploy.
         expect(appContainerEnv().get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("off");
       });
 
@@ -1995,7 +1995,7 @@ describe("AppStack", () => {
       expect(envByName.get("SELF_EDIT_OVERVIEW_GENERATE")).toBe("on");
     });
 
-    it("ships the ReCiter pending-suggestions nudge OFF in staging (SELF_EDIT_RECITER_PENDING_HINT, dormant in both envs)", () => {
+    it("ships the ReCiter pending-suggestions nudge ON in staging (SELF_EDIT_RECITER_PENDING_HINT — live DynamoDB read for the soak)", () => {
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const appContainer = (
         Object.values(taskDefs).find((r) => r.Properties?.Family === "sps-app-staging")
@@ -2006,7 +2006,7 @@ describe("AppStack", () => {
       const envByName = new Map(
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
-      expect(envByName.get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("off");
+      expect(envByName.get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("on");
     });
 
     it("autoscales between min=1 and max=3 for staging (#596)", () => {

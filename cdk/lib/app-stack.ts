@@ -1010,15 +1010,17 @@ export class AppStack extends Stack {
         // nightly etl:coi-gap source has seeded data in that env. Prod takes
         // effect only on an approval-gated `cdk deploy Sps-App-prod`.
         SELF_EDIT_COI_GAP_HINT: "on",
-        // SELF_EDIT_RECITER_PENDING_HINT — the self-only, dormant ReCiter
-        // "pending / suggested" candidate-publications nudge on the publications +
-        // home self-edit surfaces (so the scholar logs into Publication Manager to
-        // claim them). Ships OFF in BOTH envs: the backing
-        // `reciter_pending_suggestion` table is empty until an ETL populates it, and
-        // the nudge only renders for a genuine (non-impersonating) self viewer with
-        // this flag on. Flipping it on is a separate, gated rollout once the table is
-        // seeded in an env.
-        SELF_EDIT_RECITER_PENDING_HINT: "off",
+        // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
+        // suggested" candidate-publications nudge on the publications + home
+        // self-edit surfaces (so the scholar logs into Publication Manager to claim
+        // them). The read is a LIVE, on-the-fly DynamoDB GetItem of ReCiter's
+        // GoldStandard + Analysis tables (read-only via the task role's
+        // TaskRoleReciterReadPolicy — no api-key), filtered against the live gold
+        // standard, so it shows nothing when a scholar has no pending suggestions.
+        // ON in staging (live rollout); OFF in prod (armed — flips on the next
+        // approval-gated Sps-App-prod deploy after the staging soak). The nudge only
+        // renders for a genuine (non-impersonating) self viewer with this flag on.
+        SELF_EDIT_RECITER_PENDING_HINT: env === "staging" ? "on" : "off",
         // #443 -- mentee co-publication BRIDGE. getMenteesForMentor's per-mentee
         // co-pub count + 3-pub preview is a LIVE WCM ReciterDB query the in-VPC
         // app can't reach, so it degrades to "temporarily unavailable" in
