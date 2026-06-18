@@ -17,12 +17,15 @@
  *     split into one block per disclosure SUBJECT, each with its OWN footer
  *     actions.
  *
- * The DECISION UNIT is `(pmid, subjectId)` — one author's relationships in one
- * paper. Resolving it removes every sharing mention from the Current list in BOTH
- * views at once and fans the existing 3-way feedback out to EVERY underlying
- * `candidateId` via the unchanged per-id `/feedback` (or `/restore`) routes. The
- * feedback SEMANTICS are unchanged (will_disclose → acknowledged; historical /
- * invalid → dismissed); only the client-side fan-out SET and the UI change.
+ * The atomic decision is the MENTION (one `candidateId` = one paper × one org).
+ * In Organization view a row action resolves ONLY that company's mention — it does
+ * NOT clear the paper's other organizations. In Paper view the statement footer
+ * resolves all of that statement's currently-current org mentions at once (a
+ * convenience batch). Either way the response fans out to the chosen `candidateId`s
+ * via the unchanged per-id `/feedback` (or `/restore`) routes, and a mention
+ * resolved in one view shows resolved in the other. The feedback SEMANTICS are
+ * unchanged (will_disclose → acknowledged; historical / invalid → dismissed); only
+ * the client-side fan-out SCOPE and the UI change.
  *
  * HIGHLIGHTING (spec §4): in any rendered clause / statement we mark EXACTLY two
  * things — the matched organization(s) (amber chip) and the SINGLE disclosure
@@ -98,12 +101,6 @@ const CHOICE_LABEL: Record<FeedbackReason, string> = {
   will_disclose: "I intend to update my COI statement",
   historical: "Historically true but not currently valid",
   invalid: "Not a valid suggestion",
-};
-/** Compact short forms for the dense Organization-view rows (softened copy). */
-const CHOICE_LABEL_SHORT: Record<FeedbackReason, string> = {
-  will_disclose: "Update COI",
-  historical: "No longer current",
-  invalid: "Not valid",
 };
 /** The shorter recorded form shown once a response is filed (and in the superuser
  *  nag), phrased to read in either voice. */
@@ -225,22 +222,11 @@ function SubjectTag({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Decision-unit derivation: a "unit" is one (pmid, subjectId). Both views resolve
-// at this grain, so a decision in either clears it from the other.
+// Decisions are atomic at the MENTION (`candidateId` = one paper × one org), so an
+// Organization-view row resolves only that company. A Paper-view footer batches all
+// of a statement's currently-current mentions. `${pmid}::${subjectId}` still keys a
+// Paper-view subject BLOCK (for grouping + its footer testids), not the decision.
 // ─────────────────────────────────────────────────────────────────────────────
-
-type DecisionUnit = {
-  /** `${pmid}::${subjectId}` — globally unique decision-unit key. */
-  unitKey: string;
-  pmid: string;
-  subjectId: string;
-  subjectType: EditContextCoiGapMention["subjectType"];
-  subjectMention: string | null;
-  /** Every candidate id that resolves together for this unit (the fan-out set). */
-  candidateIds: string[];
-  /** The distinct matched orgs this subject names in this paper. */
-  organizations: string[];
-};
 
 const unitKeyOf = (m: EditContextCoiGapMention) => `${m.pmid}::${m.subjectId}`;
 
@@ -271,138 +257,116 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
 
   const [filter, setFilter] = React.useState<ShowFilter>("current");
 
-  // The superuser "nag": confirm before recording any response (or undo). `target`
-  // is the chosen reason, or null for an undo. Null when closed.
+  // The superuser "nag": confirm before recording any response (or undo). Carries
+  // the exact candidate ids the action targets + the org breadth (for the toast).
+  // `target` is the chosen reason, or null for an undo. Null when closed.
   const [confirm, setConfirm] = React.useState<{
-    unitKey: string;
+    ids: string[];
     target: FeedbackReason | null;
+    orgCount: number;
   } | null>(null);
 
-  // LOCAL decision overlay, keyed by decision-unit key. The DB is the source of
-  // truth on reload; this reflects optimistic in-session decisions across both
-  // views simultaneously. `null` value = explicitly restored (Current again).
+  // LOCAL decision overlay, keyed by `candidateId` (the mention). The DB is the
+  // source of truth on reload; this reflects optimistic in-session decisions across
+  // both views simultaneously. `restored` = explicitly returned to Current.
   const [decided, setDecided] = React.useState<Map<string, FeedbackReason>>(new Map());
   const [restored, setRestored] = React.useState<Set<string>>(new Set());
   const [pending, setPending] = React.useState<Set<string>>(new Set());
   const [errors, setErrors] = React.useState<Map<string, string>>(new Map());
 
-  // A gentle resolve toast (aria-live polite, ~5s) reporting the org breadth.
-  const [toast, setToast] = React.useState<{ unitKey: string; orgCount: number; reason: FeedbackReason } | null>(null);
+  // A gentle resolve toast (aria-live polite, ~5s) reporting the org breadth; its
+  // Undo restores exactly the ids the action set aside.
+  const [toast, setToast] = React.useState<{ ids: string[]; orgCount: number; reason: FeedbackReason } | null>(null);
   const toastTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   React.useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
   }, []);
 
-  // Build the decision units once per mention set. Each unit collects its fan-out
-  // candidate ids and orgs. A unit is "high" confidence iff ANY of its mentions is
-  // high; Medium-only units feed the lower-confidence expander + are excluded from
-  // the primary counter.
-  const { highUnits, lowerUnits, unitByKey, persistedReason, persistedSetAside } = React.useMemo(() => {
-    const units = new Map<string, DecisionUnit>();
-    const anyHigh = new Map<string, boolean>();
+  // Persisted (server-side) set-aside state per `candidateId` — used when there is
+  // no local override.
+  const { persistedReason, persistedSetAside } = React.useMemo(() => {
     const persistedReason = new Map<string, FeedbackReason>();
     const persistedSetAside = new Set<string>();
-    const seenOrg = new Map<string, Set<string>>();
-    const seenCand = new Map<string, Set<string>>();
-    // Preserve mention order (the projection already sorted high-first, newest).
     for (const m of mentions) {
-      const k = unitKeyOf(m);
-      let u = units.get(k);
-      if (!u) {
-        u = {
-          unitKey: k,
-          pmid: m.pmid,
-          subjectId: m.subjectId,
-          subjectType: m.subjectType,
-          subjectMention: m.subjectMention,
-          candidateIds: [],
-          organizations: [],
-        };
-        units.set(k, u);
-        anyHigh.set(k, false);
-        seenOrg.set(k, new Set());
-        seenCand.set(k, new Set());
-      }
-      const oset = seenOrg.get(k)!;
-      const cset = seenCand.get(k)!;
-      if (!cset.has(m.candidateId)) {
-        cset.add(m.candidateId);
-        u.candidateIds.push(m.candidateId);
-      }
-      const ok = m.organization.toLowerCase();
-      if (!oset.has(ok)) {
-        oset.add(ok);
-        u.organizations.push(m.organization);
-      }
-      if (m.confidence === "high") anyHigh.set(k, true);
-      // Persisted (server-side) set-aside state — used when no local override.
       if (m.status === "set_aside") {
-        persistedSetAside.add(k);
-        if (m.reason) persistedReason.set(k, m.reason);
+        persistedSetAside.add(m.candidateId);
+        if (m.reason) persistedReason.set(m.candidateId, m.reason);
       }
     }
-    const highUnits: DecisionUnit[] = [];
-    const lowerUnits: DecisionUnit[] = [];
-    for (const [k, u] of units) (anyHigh.get(k) ? highUnits : lowerUnits).push(u);
-    return { highUnits, lowerUnits, unitByKey: units, persistedReason, persistedSetAside };
+    return { persistedReason, persistedSetAside };
   }, [mentions]);
 
-  // The effective decision state for a unit: a local override wins; else the
+  // The effective decision state for a MENTION: a local override wins; else the
   // persisted server state; `restored` clears it back to Current.
   const effectiveReason = React.useCallback(
-    (unitKey: string): FeedbackReason | null => {
-      if (restored.has(unitKey)) return null;
-      if (decided.has(unitKey)) return decided.get(unitKey)!;
-      if (persistedSetAside.has(unitKey)) return persistedReason.get(unitKey) ?? "invalid";
+    (candId: string): FeedbackReason | null => {
+      if (restored.has(candId)) return null;
+      if (decided.has(candId)) return decided.get(candId)!;
+      if (persistedSetAside.has(candId)) return persistedReason.get(candId) ?? "invalid";
       return null;
     },
     [restored, decided, persistedSetAside, persistedReason],
   );
-  const isSetAside = React.useCallback((unitKey: string) => effectiveReason(unitKey) !== null, [effectiveReason]);
+  const isSetAside = React.useCallback((candId: string) => effectiveReason(candId) !== null, [effectiveReason]);
 
-  function setError(unitKey: string, msg: string | null) {
+  function setErrorsFor(ids: string[], msg: string | null) {
     setErrors((prev) => {
       const next = new Map(prev);
-      if (msg === null) next.delete(unitKey);
-      else next.set(unitKey, msg);
+      for (const id of ids) {
+        if (msg === null) next.delete(id);
+        else next.set(id, msg);
+      }
       return next;
     });
   }
 
-  // Resolve / undo a DECISION UNIT — flips local state, then POSTs the existing
-  // per-id route for EVERY candidate id in the unit's fan-out set (a reason →
-  // /feedback, an undo → /restore). Both routes are idempotent + server-guarded,
-  // so a retry after a partial failure converges. On failure we roll back.
-  function mutate(unitKey: string, target: FeedbackReason | null) {
-    const unit = unitByKey.get(unitKey);
-    if (!unit) return;
-    const previousReason = effectiveReason(unitKey);
-    setError(unitKey, null);
-    setPending((p) => new Set(p).add(unitKey));
+  // Resolve / undo a set of MENTIONS — flips local state per `candidateId`, then
+  // POSTs the existing per-id route for EACH id (a reason → /feedback, an undo →
+  // /restore). An Organization row passes ONE id (just that company); a Paper
+  // footer passes the statement's currently-current ids. Both routes are idempotent
+  // + server-guarded, so a retry converges. On failure we roll the whole batch back.
+  function mutate(ids: string[], target: FeedbackReason | null, orgCount: number) {
+    if (ids.length === 0) return;
+    const previous = new Map<string, FeedbackReason | null>();
+    for (const id of ids) previous.set(id, effectiveReason(id));
+    setErrorsFor(ids, null);
+    setPending((p) => {
+      const next = new Set(p);
+      for (const id of ids) next.add(id);
+      return next;
+    });
     // Optimistic local flip.
     if (target === null) {
-      setRestored((s) => new Set(s).add(unitKey));
+      setRestored((s) => {
+        const next = new Set(s);
+        for (const id of ids) next.add(id);
+        return next;
+      });
       setDecided((m) => {
         const next = new Map(m);
-        next.delete(unitKey);
+        for (const id of ids) next.delete(id);
         return next;
       });
     } else {
       setRestored((s) => {
         const next = new Set(s);
-        next.delete(unitKey);
+        for (const id of ids) next.delete(id);
         return next;
       });
-      setDecided((m) => new Map(m).set(unitKey, target));
+      setDecided((m) => {
+        const next = new Map(m);
+        for (const id of ids) next.set(id, target);
+        return next;
+      });
       // Gentle resolve toast with the org breadth + Undo (~5s, aria-live polite).
       if (toastTimer.current) clearTimeout(toastTimer.current);
-      setToast({ unitKey, orgCount: unit.organizations.length, reason: target });
+      setToast({ ids, orgCount, reason: target });
       toastTimer.current = setTimeout(() => setToast(null), 5000);
     }
     void (async () => {
       try {
         const results = await Promise.all(
-          unit.candidateIds.map(async (id) => {
+          ids.map(async (id) => {
             const base = `/api/edit/coi-gap/${encodeURIComponent(id)}`;
             const res = await fetch(target === null ? `${base}/restore` : `${base}/feedback`, {
               method: "POST",
@@ -414,52 +378,51 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
           }),
         );
         if (!results.every(Boolean)) {
-          rollBack(unitKey, previousReason);
-          setError(unitKey, "We couldn’t update this just now. Please try again.");
+          rollBack(ids, previous);
+          setErrorsFor(ids, "We couldn’t update this just now. Please try again.");
         }
       } catch {
-        rollBack(unitKey, previousReason);
-        setError(unitKey, "We couldn’t update this just now. Please try again.");
+        rollBack(ids, previous);
+        setErrorsFor(ids, "We couldn’t update this just now. Please try again.");
       } finally {
         setPending((p) => {
           const next = new Set(p);
-          next.delete(unitKey);
+          for (const id of ids) next.delete(id);
           return next;
         });
       }
     })();
   }
 
-  function rollBack(unitKey: string, previousReason: FeedbackReason | null) {
-    if (toast?.unitKey === unitKey) setToast(null);
-    if (previousReason === null) {
-      setRestored((s) => new Set(s).add(unitKey));
-      setDecided((m) => {
-        const next = new Map(m);
-        next.delete(unitKey);
-        return next;
-      });
-    } else {
-      setRestored((s) => {
-        const next = new Set(s);
-        next.delete(unitKey);
-        return next;
-      });
-      setDecided((m) => new Map(m).set(unitKey, previousReason));
-    }
+  function rollBack(ids: string[], previous: Map<string, FeedbackReason | null>) {
+    setToast((t) => (t && t.ids.some((id) => ids.includes(id)) ? null : t));
+    setRestored((s) => {
+      const next = new Set(s);
+      for (const id of ids) (previous.get(id) == null ? next.add(id) : next.delete(id));
+      return next;
+    });
+    setDecided((m) => {
+      const next = new Map(m);
+      for (const id of ids) {
+        const p = previous.get(id);
+        if (p == null) next.delete(id);
+        else next.set(id, p);
+      }
+      return next;
+    });
   }
 
   // A superuser routes every response through the confirm "nag" first; a scholar
   // records directly on their own suggestions.
-  function requestMutate(unitKey: string, target: FeedbackReason | null) {
-    if (su) setConfirm({ unitKey, target });
-    else mutate(unitKey, target);
+  function requestMutate(ids: string[], target: FeedbackReason | null, orgCount: number) {
+    if (su) setConfirm({ ids, target, orgCount });
+    else mutate(ids, target, orgCount);
   }
 
-  // Which units pass the active Show filter.
-  const filterUnit = React.useCallback(
-    (unitKey: string) => {
-      const setAside = isSetAside(unitKey);
+  // Which mentions pass the active Show filter.
+  const filterMention = React.useCallback(
+    (candId: string) => {
+      const setAside = isSetAside(candId);
       if (filter === "current") return !setAside;
       if (filter === "set_aside") return setAside;
       return true;
@@ -467,10 +430,11 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
     [filter, isSetAside],
   );
 
-  // Primary counter (spec §2/§7 — HIGH confidence only; Medium excluded). Softened
-  // copy: "{Y} from {your/their} publications · {N} set aside".
-  const highCurrent = highUnits.filter((u) => !isSetAside(u.unitKey)).length;
-  const highSetAside = highUnits.filter((u) => isSetAside(u.unitKey)).length;
+  // Primary counter (spec §2/§7 — HIGH confidence only; Medium excluded). Counts
+  // high-confidence MENTIONS (each a company). Softened copy.
+  const highMentions = mentions.filter((m) => m.confidence === "high");
+  const highCurrent = highMentions.filter((m) => !isSetAside(m.candidateId)).length;
+  const highSetAside = highMentions.filter((m) => isSetAside(m.candidateId)).length;
   const voicePoss = su ? "their" : "your";
   const counter =
     highCurrent === 0 && highSetAside === 0
@@ -480,17 +444,24 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
 
   const confirmName = scholarName || "the scholar";
 
-  // ── shared per-unit action set ─────────────────────────────────────────────
-  // `scope` keys the testids: it equals `unitKey` for Paper-view footers (one
-  // block per unit, unique) but the per-row candidateId in Organization view,
-  // where the SAME decision unit can appear on several org rows (a multi-org unit)
-  // and a bare unitKey testid would collide.
-  function ActionSet({ unitKey, scope, compact }: { unitKey: string; scope?: string; compact: boolean }) {
-    const isPending = pending.has(unitKey);
-    const labels = compact ? CHOICE_LABEL_SHORT : CHOICE_LABEL;
-    const tk = scope ?? unitKey;
+  // ── shared action set ──────────────────────────────────────────────────────
+  // `ids` = the candidate ids this action resolves (one for an Org row; the
+  // statement's current ids for a Paper footer). `orgCount` is the toast breadth.
+  // `scope` keys the testids (the row's candidateId in Org view; the block unitKey
+  // in Paper view).
+  function ActionSet({
+    ids,
+    orgCount,
+    scope,
+    isPending,
+  }: {
+    ids: string[];
+    orgCount: number;
+    scope: string;
+    isPending: boolean;
+  }) {
     return (
-      <div className="mt-2 flex flex-wrap gap-2" data-testid={`coi-gap-choices-${tk}`}>
+      <div className="mt-2 flex flex-wrap gap-2" data-testid={`coi-gap-choices-${scope}`}>
         {FEEDBACK_REASONS.map((r) => (
           <Button
             key={r}
@@ -498,10 +469,10 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
             variant="outline"
             size="sm"
             disabled={isPending}
-            onClick={() => requestMutate(unitKey, r)}
-            data-testid={`coi-gap-choice-${r}-${tk}`}
+            onClick={() => requestMutate(ids, r, orgCount)}
+            data-testid={`coi-gap-choice-${r}-${scope}`}
           >
-            {labels[r]}
+            {CHOICE_LABEL[r]}
           </Button>
         ))}
       </div>
@@ -509,13 +480,22 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
   }
 
   // The settled in-place "set aside" line with Undo (used in both views).
-  function SetAsideLine({ unitKey, scope }: { unitKey: string; scope?: string }) {
-    const reason = effectiveReason(unitKey)!;
-    const isPending = pending.has(unitKey);
-    const tk = scope ?? unitKey;
+  function SetAsideLine({
+    reason,
+    ids,
+    orgCount,
+    scope,
+    isPending,
+  }: {
+    reason: FeedbackReason;
+    ids: string[];
+    orgCount: number;
+    scope: string;
+    isPending: boolean;
+  }) {
     return (
       <div className="flex items-center justify-between gap-3 opacity-80">
-        <span className="text-muted-foreground text-sm" data-testid={`coi-gap-acted-${tk}`}>
+        <span className="text-muted-foreground text-sm" data-testid={`coi-gap-acted-${scope}`}>
           Set aside · {ACTED_LABEL[reason]}
         </span>
         <Button
@@ -523,8 +503,8 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
           variant="ghost"
           size="sm"
           disabled={isPending}
-          onClick={() => requestMutate(unitKey, null)}
-          data-testid={`coi-gap-undo-${tk}`}
+          onClick={() => requestMutate(ids, null, orgCount)}
+          data-testid={`coi-gap-undo-${scope}`}
         >
           Undo
         </Button>
@@ -629,9 +609,11 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
   }
 
   function OrgRow({ m }: { m: EditContextCoiGapMention }) {
-    const unitKey = unitKeyOf(m);
-    const setAside = isSetAside(unitKey);
-    const error = errors.get(unitKey) ?? null;
+    // An Org row resolves ONLY its own company's mention (`m.candidateId`) — never
+    // the paper's other organizations.
+    const setAside = isSetAside(m.candidateId);
+    const error = errors.get(m.candidateId) ?? null;
+    const isPending = pending.has(m.candidateId);
     const [showFull, setShowFull] = React.useState(false);
     return (
       <li
@@ -691,9 +673,15 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
             </>
           )}
           {setAside ? (
-            <SetAsideLine unitKey={unitKey} scope={m.candidateId} />
+            <SetAsideLine
+              reason={effectiveReason(m.candidateId)!}
+              ids={[m.candidateId]}
+              orgCount={1}
+              scope={m.candidateId}
+              isPending={isPending}
+            />
           ) : (
-            <ActionSet unitKey={unitKey} scope={m.candidateId} compact />
+            <ActionSet ids={[m.candidateId]} orgCount={1} scope={m.candidateId} isPending={isPending} />
           )}
           {error && (
             <Alert variant="destructive" className="mt-2">
@@ -717,7 +705,9 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
       subjectType: EditContextCoiGapMention["subjectType"];
       subjectMention: string | null;
       organizationRaws: string[];
-      orgCount: number;
+      /** Every candidate id (company) in this subject's statement — the footer
+       *  resolves the currently-current ones in one batch. */
+      candidateIds: string[];
     }[];
     lower: boolean;
   };
@@ -725,6 +715,7 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
     const byPmid = new Map<string, PaperCard>();
     const blockByUnit = new Map<string, PaperCard["blocks"][number]>();
     const seenOrg = new Map<string, Set<string>>();
+    const seenCand = new Map<string, Set<string>>();
     for (const m of set) {
       let card = byPmid.get(m.pmid);
       if (!card) {
@@ -740,18 +731,23 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
           subjectType: m.subjectType,
           subjectMention: m.subjectMention,
           organizationRaws: [],
-          orgCount: 0,
+          candidateIds: [],
         };
         blockByUnit.set(uk, block);
         card.blocks.push(block);
         seenOrg.set(uk, new Set());
+        seenCand.set(uk, new Set());
+      }
+      const cset = seenCand.get(uk)!;
+      if (!cset.has(m.candidateId)) {
+        cset.add(m.candidateId);
+        block.candidateIds.push(m.candidateId);
       }
       const oset = seenOrg.get(uk)!;
       const ok = m.organization.toLowerCase();
       if (!oset.has(ok)) {
         oset.add(ok);
         block.organizationRaws.push(m.organizationRaw);
-        block.orgCount += 1;
       }
     }
     return [...byPmid.values()].sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || b.pmid.localeCompare(a.pmid));
@@ -841,18 +837,32 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
   }
 
   function PaperFooter({ block }: { block: PaperCard["blocks"][number] }) {
-    const setAside = isSetAside(block.unitKey);
-    const error = errors.get(block.unitKey) ?? null;
+    // The footer resolves all of the statement's currently-current companies at
+    // once; once every one is set aside it collapses to the Set-aside line.
+    const currentIds = block.candidateIds.filter((id) => !isSetAside(id));
+    const isPending = block.candidateIds.some((id) => pending.has(id));
+    const error = block.candidateIds.map((id) => errors.get(id)).find(Boolean) ?? null;
     return (
       <div className="border-apollo-border mt-3 border-t pt-3">
-        {setAside ? (
-          <SetAsideLine unitKey={block.unitKey} />
+        {currentIds.length === 0 ? (
+          <SetAsideLine
+            reason={effectiveReason(block.candidateIds[0]) ?? "invalid"}
+            ids={block.candidateIds}
+            orgCount={block.candidateIds.length}
+            scope={block.unitKey}
+            isPending={isPending}
+          />
         ) : (
           <>
             <p className="text-muted-foreground text-xs" data-testid={`coi-gap-paper-hint-${block.unitKey}`}>
-              Covers all {block.orgCount} organization{block.orgCount === 1 ? "" : "s"}
+              Covers all {currentIds.length} organization{currentIds.length === 1 ? "" : "s"}
             </p>
-            <ActionSet unitKey={block.unitKey} compact={false} />
+            <ActionSet
+              ids={currentIds}
+              orgCount={currentIds.length}
+              scope={block.unitKey}
+              isPending={isPending}
+            />
           </>
         )}
         {error && (
@@ -864,22 +874,22 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
     );
   }
 
-  // ── filtered partitions for the active view ────────────────────────────────
-  const visibleHighMentions = React.useMemo(() => {
-    const allow = new Set(highUnits.filter((u) => filterUnit(u.unitKey)).map((u) => u.unitKey));
-    return mentions.filter((m) => m.confidence === "high" && allow.has(unitKeyOf(m)));
-  }, [mentions, highUnits, filterUnit]);
-
-  const visibleLowerMentions = React.useMemo(() => {
-    const allow = new Set(lowerUnits.filter((u) => filterUnit(u.unitKey)).map((u) => u.unitKey));
-    return mentions.filter((m) => m.confidence === "low" && allow.has(unitKeyOf(m)));
-  }, [mentions, lowerUnits, filterUnit]);
+  // ── filtered partitions for the active view (mention-level) ────────────────
+  // A half-resolved statement shows only its still-current companies under Current.
+  const visibleHighMentions = React.useMemo(
+    () => mentions.filter((m) => m.confidence === "high" && filterMention(m.candidateId)),
+    [mentions, filterMention],
+  );
+  const visibleLowerMentions = React.useMemo(
+    () => mentions.filter((m) => m.confidence === "low" && filterMention(m.candidateId)),
+    [mentions, filterMention],
+  );
 
   const orgCards = buildOrgCards(visibleHighMentions);
   const paperCards = buildPaperCards(visibleHighMentions);
   const lowerOrgCards = buildOrgCards(visibleLowerMentions);
   const lowerPaperCards = buildPaperCards(visibleLowerMentions);
-  const lowerUnitCount = lowerUnits.filter((u) => filterUnit(u.unitKey)).length;
+  const lowerUnitCount = visibleLowerMentions.length;
 
   const isEmptyHigh = visibleHighMentions.length === 0;
 
@@ -1053,7 +1063,7 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
             onClick={() => {
               const t = toast;
               setToast(null);
-              if (t) requestMutate(t.unitKey, null);
+              if (t) requestMutate(t.ids, null, t.orgCount);
             }}
           >
             Undo
@@ -1083,7 +1093,7 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
         onConfirm={() => {
           const c = confirm;
           setConfirm(null);
-          if (c) mutate(c.unitKey, c.target);
+          if (c) mutate(c.ids, c.target, c.orgCount);
         }}
       />
     </>
