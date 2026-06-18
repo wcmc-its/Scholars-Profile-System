@@ -34,6 +34,7 @@ import { UnitRosterCard } from "@/components/edit/unit-roster-card";
 import { UnitSlugCard } from "@/components/edit/unit-slug-card";
 import type { RailItem } from "@/components/edit/attribute-rail";
 import type { UnitActorRole, UnitEditContext } from "@/lib/api/unit-edit-context";
+import { isUnitRosterExportEnabled } from "@/lib/edit/unit-roster-export";
 
 type AttrKey =
   | "description"
@@ -181,6 +182,7 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
             unitCode={ctx.unit.code}
             members={ctx.roster ?? []}
             programs={ctx.programs ?? []}
+            exportEnabled={isUnitRosterExportEnabled()}
           />
         );
       }
