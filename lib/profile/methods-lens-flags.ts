@@ -156,3 +156,17 @@ export function isOrgUnitMethodsFacetEnabled(): boolean {
 export function isMethodFamilySynonymsEnabled(): boolean {
   return isMethodPagesEnabled() && process.env.METHODS_LENS_FAMILY_SYNONYMS === "on";
 }
+
+/**
+ * #1105 — dedicated per-program pages for a center
+ * (`/centers/[slug]/programs/[code]`), modeled on division pages, with a single
+ * program leader (LeaderCard) + a prose description. When off, the route
+ * `notFound()`s and the center page's program section headers stay plain text
+ * (no links). Standalone (NOT gated on the methods lens) and default OFF, so the
+ * surface ships dark — the `CenterProgram.{leaderCwid,description}` columns are
+ * curated independently. Wire in BOTH `.env.local` AND the per-env
+ * `environment:` block in cdk/lib/app-stack.ts per the flag-parity rule.
+ */
+export function isCenterProgramPagesEnabled(): boolean {
+  return process.env.CENTER_PROGRAM_PAGES === "on";
+}

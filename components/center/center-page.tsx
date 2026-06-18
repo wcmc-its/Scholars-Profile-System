@@ -8,6 +8,7 @@ import {
 } from "@/lib/api/centers";
 import { getSpotlightCardsForCenter } from "@/lib/api/spotlight";
 import { CenterMembersClient } from "@/components/center/center-members-client";
+import { isCenterProgramPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import { CenterTabs } from "@/components/center/center-tabs";
 import { DeptPublicationsList } from "@/components/department/dept-publications-list";
 import { Spotlight } from "@/components/shared/spotlight";
@@ -194,7 +195,11 @@ export async function CenterPage({
         />
 
         {tab === "scholars" && members && (
-          <CenterMembersClient result={members} centerSlug={detail.slug} />
+          <CenterMembersClient
+            result={members}
+            centerSlug={detail.slug}
+            programPagesEnabled={isCenterProgramPagesEnabled()}
+          />
         )}
 
         {tab === "publications" && (

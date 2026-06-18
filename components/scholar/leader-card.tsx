@@ -9,7 +9,14 @@
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { profilePath } from "@/lib/profile-url";
 
-export type LeaderRole = "Chair" | "Chief" | "Director";
+export type LeaderRole =
+  | "Chair"
+  | "Chief"
+  | "Director"
+  // #1105 — center program leader (and its interim qualifier). The card renders
+  // the role string verbatim in the eyebrow.
+  | "Leader"
+  | "Interim Leader";
 
 export type Leader = {
   cwid: string;

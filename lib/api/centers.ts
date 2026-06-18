@@ -9,6 +9,7 @@
  */
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
+import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
 import { extractLastNameSort } from "@/lib/name-sort";
 import type {
@@ -239,9 +240,24 @@ export type CenterMemberHit = DepartmentFacultyHit & {
 
 /** A program section on the public roster (#552 § 6.2). */
 export type CenterMemberGroup = {
+  /** Program code, or null for the synthetic "Other" bucket (#1105 — the page
+   *  link is suppressed for null / excluded codes). */
+  code: string | null;
   label: string;
   members: CenterMemberHit[];
 };
+
+/**
+ * #1105 — program codes that never get a dedicated page. Meyer Cancer Center's
+ * `ZY` ("Non-aligned Clinical") is a catch-all bucket, not a real program, so it
+ * is excluded from page generation and from the center page's program links.
+ */
+export const PROGRAM_PAGE_EXCLUDED_CODES: ReadonlySet<string> = new Set(["ZY"]);
+
+/** #1105 — true when a program code is eligible for a dedicated page. */
+export function isProgramPageEligible(code: string | null | undefined): boolean {
+  return !!code && !PROGRAM_PAGE_EXCLUDED_CODES.has(code);
+}
 
 /**
  * #552 Phase 4 — the public roster is either a flat, paginated list (centers
@@ -542,13 +558,122 @@ export async function getCenterMembers(
       .filter((h): h is CenterMemberHit => Boolean(h));
     if (members.length > 0) {
       members.forEach((h) => placed.add(h.cwid));
-      groups.push({ label: p.label, members });
+      groups.push({ code: p.code, label: p.label, members });
     }
   }
   const other = hits.filter((h) => !placed.has(h.cwid));
-  if (other.length > 0) groups.push({ label: "Other", members: other });
+  if (other.length > 0) groups.push({ code: null, label: "Other", members: other });
 
   return { mode: "grouped", groups, total };
+}
+
+/** #1105 — a program leader for the program page hero (LeaderCard shape). */
+export type ProgramLeader = {
+  cwid: string;
+  preferredName: string;
+  /** Profile slug, or null for an external leader (no WCM scholar to link). */
+  slug: string | null;
+  primaryTitle: string | null;
+  identityImageEndpoint: string;
+  /** Interim/acting qualifier — renders "Interim Leader". */
+  isInterim: boolean;
+};
+
+/** #1105 — a dedicated per-program page detail. */
+export type CenterProgramDetail = {
+  center: { code: string; name: string; slug: string };
+  program: { code: string; label: string; description: string | null };
+  leader: ProgramLeader | null;
+  /** Active members of THIS program, shaped for `PersonRow`. */
+  members: CenterMemberHit[];
+  scholarCount: number;
+};
+
+/**
+ * #1105 — assemble the dedicated page for a single center program, modeled on
+ * `getDivision`. Resolves the center by slug, the program by code (the `ZY`
+ * "Non-aligned Clinical" catch-all and any other excluded code are NOT pages →
+ * null), the single program leader (`leaderCwid` → WCM scholar, else the
+ * `lib/external-leaders.ts` fallback keyed `<centerCode>:<programCode>`), and
+ * the program's ACTIVE members (reusing the §3.3 `getCenterMembers` grouping,
+ * filtered to this program). Returns null when the center/program doesn't exist,
+ * the center is whole-unit-suppressed (#540, via `getCenter`), or the code is
+ * excluded. The route additionally gates the whole surface behind
+ * `CENTER_PROGRAM_PAGES`.
+ *
+ * Membership is sourced DIRECTLY from Prisma (via `getCenterMembers`), NEVER
+ * from the search index — per #1074/#1076 no `centerProgram:` key exists there.
+ */
+export async function getCenterProgram(
+  centerSlug: string,
+  code: string,
+): Promise<CenterProgramDetail | null> {
+  if (!isProgramPageEligible(code)) return null;
+
+  // `getCenter` enforces the #540 whole-unit-suppression 404 + resolves the slug.
+  const center = await getCenter(centerSlug);
+  if (!center) return null;
+
+  const program = (await prisma.centerProgram.findUnique({
+    where: { centerCode_code: { centerCode: center.code, code } },
+    select: { code: true, label: true, description: true, leaderCwid: true, leaderInterim: true },
+  })) as {
+    code: string;
+    label: string;
+    description: string | null;
+    leaderCwid: string | null;
+    leaderInterim: boolean;
+  } | null;
+  if (!program) return null;
+
+  // Leader — `leaderCwid` resolves to a WCM scholar (profile-linked) or, failing
+  // that, the external-leader fallback keyed `<centerCode>:<programCode>`.
+  let leader: ProgramLeader | null = null;
+  if (program.leaderCwid && program.leaderCwid !== "") {
+    const scholar = await prisma.scholar.findUnique({
+      where: { cwid: program.leaderCwid },
+      select: { cwid: true, preferredName: true, slug: true, primaryTitle: true },
+    });
+    if (scholar) {
+      leader = {
+        cwid: scholar.cwid,
+        preferredName: scholar.preferredName,
+        slug: scholar.slug,
+        primaryTitle: scholar.primaryTitle,
+        identityImageEndpoint: identityImageEndpoint(scholar.cwid),
+        isInterim: program.leaderInterim,
+      };
+    }
+  }
+  if (!leader) {
+    const ext = EXTERNAL_LEADERS[`${center.code}:${code}`];
+    if (ext) {
+      leader = {
+        cwid: ext.cwid,
+        preferredName: ext.name,
+        slug: null,
+        primaryTitle: ext.primaryTitle,
+        identityImageEndpoint: identityImageEndpoint(ext.cwid),
+        isInterim: program.leaderInterim,
+      };
+    }
+  }
+
+  // Members of THIS program — reuse the §3.3 grouped roster and pluck this
+  // program's group (active-gated, soft-delete-filtered already).
+  const roster = await getCenterMembers(center.code);
+  const members =
+    roster.mode === "grouped"
+      ? (roster.groups.find((g) => g.code === code)?.members ?? [])
+      : [];
+
+  return {
+    center: { code: center.code, name: center.name, slug: center.slug },
+    program: { code: program.code, label: program.label, description: program.description },
+    leader,
+    members,
+    scholarCount: members.length,
+  };
 }
 
 const PUB_PAGE_SIZE = 20;

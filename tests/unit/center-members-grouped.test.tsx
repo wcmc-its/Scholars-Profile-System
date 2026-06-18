@@ -86,14 +86,16 @@ const grouped: CenterMembersResult = {
   total: 5,
   groups: [
     {
+      code: "CB",
       label: "Cancer Biology",
       members: [hit("a", FT, "research", "Medicine"), hit("b", FT, "clinical", "Medicine")],
     },
     {
+      code: "CT",
       label: "Cancer Therapeutics",
       members: [hit("c", FT, "research", "Pathology"), hit("d", AFF, "clinical", "Pathology")],
     },
-    { label: "Other", members: [hit("e", AFF, "research", "Surgery")] },
+    { code: null, label: "Other", members: [hit("e", AFF, "research", "Surgery")] },
   ],
 };
 
@@ -162,6 +164,7 @@ describe("CenterMembersClient — grouped facet sidebar (#552)", () => {
       total: 2,
       groups: [
         {
+          code: "CB",
           label: "Cancer Biology",
           members: [hit("a", FT, "research", "Medicine"), hit("b", FT, "clinical", "Medicine")],
         },
@@ -172,6 +175,28 @@ describe("CenterMembersClient — grouped facet sidebar (#552)", () => {
     expect(screen.queryByRole("heading", { name: "Program" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Membership type" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Cancer Biology" })).toBeTruthy();
+  });
+
+  it("singleProgram (program page) hides the lone section header but keeps facets + members", () => {
+    const single: CenterMembersResult = {
+      mode: "grouped",
+      total: 2,
+      groups: [
+        {
+          code: "CB",
+          label: "Cancer Biology",
+          members: [hit("a", FT, "research", "Medicine"), hit("b", FT, "clinical", "Medicine")],
+        },
+      ],
+    };
+    render(<CenterMembersClient result={single} centerSlug="x" singleProgram />);
+
+    // On a dedicated program page the section header would just echo the page
+    // title, so it's suppressed; the facets + members still render.
+    expect(screen.queryByRole("heading", { name: "Cancer Biology" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Membership type" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Organizational unit" })).toBeTruthy();
+    expect(personCwids().sort()).toEqual(["a", "b"]);
   });
 });
 
@@ -186,6 +211,7 @@ const withMethods: CenterMembersResult = {
   total: 4,
   groups: [
     {
+      code: "CB",
       label: "Cancer Biology",
       members: [
         hit("a", FT, "research", "Medicine", [DL, MRI]),
@@ -193,6 +219,7 @@ const withMethods: CenterMembersResult = {
       ],
     },
     {
+      code: "CT",
       label: "Cancer Therapeutics",
       members: [
         hit("c", FT, "research", "Pathology", [SEQ]),
@@ -250,5 +277,48 @@ describe("CenterMembersClient — Methods & tools facet (#962)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(personCwids().sort()).toEqual(["a", "b", "c", "d"]);
+  });
+});
+
+// --- #1105 program-page section-header links --------------------------------
+describe("CenterMembersClient — program-page header links (#1105)", () => {
+  it("links eligible program headers and skips Other / ZY when flag on", () => {
+    const withOther: CenterMembersResult = {
+      mode: "grouped",
+      total: 3,
+      groups: [
+        { code: "CB", label: "Cancer Biology", members: [hit("a", FT, "research", "Medicine")] },
+        { code: "ZY", label: "Non-aligned Clinical", members: [hit("z", FT, "clinical", "Medicine")] },
+        { code: null, label: "Other", members: [hit("o", FT, "research", "Surgery")] },
+      ],
+    };
+    render(
+      <CenterMembersClient
+        result={withOther}
+        centerSlug="meyer-cancer-center"
+        programPagesEnabled
+      />,
+    );
+    const link = screen.getByRole("link", { name: "Cancer Biology" });
+    expect(link.getAttribute("href")).toBe(
+      "/centers/meyer-cancer-center/programs/CB",
+    );
+    // ZY and Other headers exist as plain text, not links.
+    expect(screen.queryByRole("link", { name: "Non-aligned Clinical" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Other" })).toBeNull();
+  });
+
+  it("renders plain-text headers (no links) when the flag is off", () => {
+    const two: CenterMembersResult = {
+      mode: "grouped",
+      total: 2,
+      groups: [
+        { code: "CB", label: "Cancer Biology", members: [hit("a", FT, "research", "Medicine")] },
+        { code: "CT", label: "Cancer Therapeutics", members: [hit("c", FT, "research", "Pathology")] },
+      ],
+    };
+    render(<CenterMembersClient result={two} centerSlug="meyer-cancer-center" />);
+    expect(screen.queryByRole("link", { name: "Cancer Biology" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Cancer Biology" })).toBeTruthy();
   });
 });
