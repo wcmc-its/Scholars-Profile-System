@@ -33,6 +33,9 @@ export const ALLOWED_PATTERNS: readonly RegExp[] = [
   new RegExp(`^/departments/${SLUG_RE_SOURCE}/divisions/${SLUG_RE_SOURCE}$`),
   // Center retire / curation revalidates `/centers/{slug}` (#540 Phase 5).
   new RegExp(`^/centers/${SLUG_RE_SOURCE}$`),
+  // #1117 — a program leader/description edit revalidates its dedicated page
+  // `/centers/{slug}/programs/{code}` (the code segment is slug-shaped, e.g. `CB`).
+  new RegExp(`^/centers/${SLUG_RE_SOURCE}/programs/${SLUG_RE_SOURCE}$`),
   // Standalone cross-scholar Method pages: supercategory `/methods/{slug}` and
   // family `/methods/{slug}/{slug}`. The ETL revalidates these on a tools refresh.
   new RegExp(`^/methods/${SLUG_RE_SOURCE}$`),

@@ -3,7 +3,7 @@
  *
  *  - flag off → notFound (no loader call);
  *  - loader returns null (ZY / unknown / suppressed) → notFound;
- *  - valid program → renders the hero (label, description) + leader + members.
+ *  - valid program → renders the hero (label, description) + leader(s) + members.
  *
  * Child components (LeaderCard, PersonRow, Breadcrumb) are mocked — they have
  * their own tests — so this file asserts the page's gating + composition.
@@ -61,14 +61,16 @@ import { CenterProgramPage } from "@/components/center-program/program-page";
 const DETAIL = {
   center: { code: "MEYER", name: "Meyer Cancer Center", slug: "meyer-cancer-center" },
   program: { code: "CB", label: "Cancer Biology", description: "Studies cancer biology." },
-  leader: {
-    cwid: "lead001",
-    preferredName: "Dana Leader",
-    slug: "dana-leader",
-    primaryTitle: "Professor",
-    identityImageEndpoint: "/img",
-    isInterim: false,
-  },
+  leaders: [
+    {
+      cwid: "lead001",
+      preferredName: "Dana Leader",
+      slug: "dana-leader",
+      primaryTitle: "Professor",
+      identityImageEndpoint: "/img",
+      isInterim: false,
+    },
+  ],
   members: [
     { cwid: "a", preferredName: "A", slug: "a", primaryTitle: null, divisionName: null, departmentName: "Medicine", identityImageEndpoint: "/i", roleCategory: "Faculty", overview: null, pubCount: 0, grantCount: 0, membershipType: "research" as const },
   ],
@@ -120,10 +122,31 @@ describe("CenterProgramPage (#1105)", () => {
   it("labels the leader as Interim Leader when isInterim", async () => {
     mockGetCenterProgram.mockResolvedValueOnce({
       ...DETAIL,
-      leader: { ...DETAIL.leader, isInterim: true },
+      leaders: [{ ...DETAIL.leaders[0], isInterim: true }],
     });
     const ui = await CenterProgramPage({ centerSlug: "meyer-cancer-center", code: "CB" });
     render(ui);
     expect(screen.getByTestId("leader-card").textContent).toBe("Interim Leader");
+  });
+
+  it("renders a card per leader for a co-led program (#1117)", async () => {
+    mockGetCenterProgram.mockResolvedValueOnce({
+      ...DETAIL,
+      leaders: [
+        { ...DETAIL.leaders[0], cwid: "lead001", isInterim: false },
+        { ...DETAIL.leaders[0], cwid: "lead002", isInterim: true },
+      ],
+    });
+    const ui = await CenterProgramPage({ centerSlug: "meyer-cancer-center", code: "CB" });
+    render(ui);
+    const cards = screen.getAllByTestId("leader-card");
+    expect(cards.map((c) => c.textContent)).toEqual(["Leader", "Interim Leader"]);
+  });
+
+  it("renders no leader card when the program has no leaders", async () => {
+    mockGetCenterProgram.mockResolvedValueOnce({ ...DETAIL, leaders: [] });
+    const ui = await CenterProgramPage({ centerSlug: "meyer-cancer-center", code: "CB" });
+    render(ui);
+    expect(screen.queryByTestId("leader-card")).toBeNull();
   });
 });

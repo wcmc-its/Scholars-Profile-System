@@ -4,8 +4,10 @@
  *  - resolves center (by slug) + program (by code), active members only;
  *  - ZY (and any excluded code) → null (never a page);
  *  - unknown center / unknown program → null;
- *  - leader resolution: leaderCwid → WCM scholar (profile-linked); else the
- *    external-leaders fallback keyed `<centerCode>:<programCode>` (slug null).
+ *  - leaders resolution (#1117 — 0..N): each `CenterProgramLeader` cwid → WCM
+ *    scholar (profile-linked); else the external-leaders fallback keyed
+ *    `<centerCode>:<programCode>` (slug null) when it names that cwid; an
+ *    unresolvable cwid is dropped.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -107,13 +109,12 @@ beforeEach(() => {
   mockScholarFindMany.mockImplementation(routeScholarFindMany);
   mockPublicationTopicGroupBy.mockResolvedValue([]);
   mockGrantFindMany.mockResolvedValue([]);
-  // program row
+  // program row (#1117 — leaders are a relation, empty by default)
   mockCenterProgramFindUnique.mockResolvedValue({
     code: "CB",
     label: "Cancer Biology",
     description: "Studies the biology of cancer.",
-    leaderCwid: null,
-    leaderInterim: false,
+    leaders: [],
   });
   mockScholarFindUnique.mockResolvedValue(null);
 });
@@ -158,49 +159,73 @@ describe("getCenterProgram (#1105)", () => {
     expect(detail).toBeNull();
   });
 
-  it("resolves the leader from leaderCwid (WCM scholar, profile-linked)", async () => {
+  it("resolves co-leaders from the join rows (WCM scholars, profile-linked, in order)", async () => {
     mockCenterProgramFindUnique.mockResolvedValueOnce({
       code: "CB",
       label: "Cancer Biology",
       description: null,
-      leaderCwid: "lead001",
-      leaderInterim: true,
-    });
-    mockScholarFindUnique.mockResolvedValueOnce({
-      cwid: "lead001",
-      preferredName: "Dana Leader",
-      slug: "dana-leader",
-      primaryTitle: "Professor of Medicine",
+      leaders: [
+        { cwid: "lead001", interim: true },
+        { cwid: "lead002", interim: false },
+      ],
     });
     const detail = await getCenterProgram("meyer-cancer-center", "CB");
-    expect(detail!.leader).toEqual({
-      cwid: "lead001",
-      preferredName: "Dana Leader",
-      slug: "dana-leader",
-      primaryTitle: "Professor of Medicine",
-      identityImageEndpoint: expect.any(String),
-      isInterim: true,
-    });
+    // routeScholarFindMany resolves each requested cwid (preferredName = CWID upper).
+    expect(detail!.leaders).toEqual([
+      {
+        cwid: "lead001",
+        preferredName: "LEAD001",
+        slug: "lead001",
+        primaryTitle: null,
+        identityImageEndpoint: expect.any(String),
+        isInterim: true,
+      },
+      {
+        cwid: "lead002",
+        preferredName: "LEAD002",
+        slug: "lead002",
+        primaryTitle: null,
+        identityImageEndpoint: expect.any(String),
+        isInterim: false,
+      },
+    ]);
   });
 
-  it("falls back to the external leader (slug null) when leaderCwid does not resolve", async () => {
+  it("falls back to the external leader (slug null) for a cwid with no scholar row", async () => {
     mockCenterProgramFindUnique.mockResolvedValueOnce({
       code: "CPC",
       label: "Cancer Prevention & Control",
       description: null,
-      leaderCwid: null,
-      leaderInterim: false,
+      leaders: [{ cwid: "ext1234", interim: false }],
     });
+    // ext1234 is not a scholar — drop it from EVERY resolver call so the fallback
+    // fires (full impl, not `…Once`, so call ordering can't matter).
+    mockScholarFindMany.mockImplementation((args?: { where?: { cwid?: { in?: string[] } } }) =>
+      routeScholarFindMany({
+        where: { cwid: { in: (args?.where?.cwid?.in ?? []).filter((c) => c !== "ext1234") } },
+      }),
+    );
     const detail = await getCenterProgram("meyer-cancer-center", "CPC");
-    expect(detail!.leader).not.toBeNull();
-    expect(detail!.leader!.cwid).toBe("ext1234");
-    expect(detail!.leader!.preferredName).toBe("External PI");
-    expect(detail!.leader!.slug).toBeNull();
+    expect(detail!.leaders).toHaveLength(1);
+    expect(detail!.leaders[0].cwid).toBe("ext1234");
+    expect(detail!.leaders[0].preferredName).toBe("External PI");
+    expect(detail!.leaders[0].slug).toBeNull();
   });
 
-  it("returns null leader when neither cwid nor external fallback resolves", async () => {
+  it("drops a leader cwid that resolves to neither a scholar nor the external fallback", async () => {
+    mockCenterProgramFindUnique.mockResolvedValueOnce({
+      code: "CB",
+      label: "Cancer Biology",
+      description: null,
+      leaders: [{ cwid: "ghost", interim: false }],
+    });
+    mockScholarFindMany.mockImplementation((args?: { where?: { cwid?: { in?: string[] } } }) =>
+      routeScholarFindMany({
+        where: { cwid: { in: (args?.where?.cwid?.in ?? []).filter((c) => c !== "ghost") } },
+      }),
+    );
     const detail = await getCenterProgram("meyer-cancer-center", "CB");
-    expect(detail!.leader).toBeNull();
+    expect(detail!.leaders).toEqual([]);
   });
 });
 

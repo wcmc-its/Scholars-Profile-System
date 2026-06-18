@@ -66,7 +66,9 @@ describe("buildUnitRosterCsv", () => {
       endDate: null,
     },
   ];
-  const programs = [{ code: "CPC", label: "Cancer Prevention & Control", sortOrder: 0 }];
+  const programs = [
+    { code: "CPC", label: "Cancer Prevention & Control", sortOrder: 0, description: null, leaders: [] },
+  ];
 
   it("emits the #1102 header order with no email column", () => {
     const csv = buildUnitRosterCsv(ctx(roster, programs), { today: TODAY });

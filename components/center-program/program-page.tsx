@@ -2,8 +2,9 @@
  * Center program page (#1105) — first-class surface for
  * /centers/[slug]/programs/[code], modeled on the division page.
  *
- * Bordered hero card with a "Program in {Center}" eyebrow, description, a single
- * program LeaderCard, and a dashed-divider scholars count; below it, the active
+ * Bordered hero card with a "Program in {Center}" eyebrow, description, the
+ * program's LeaderCard(s) (#1117 — a program may be co-led), and a dashed-divider
+ * scholars count; below it, the active
  * roster of that program's members. Gated behind `CENTER_PROGRAM_PAGES` (the
  * route `notFound()`s when off, the center/program is missing, or the code is
  * excluded — e.g. ZY "Non-aligned Clinical").
@@ -84,12 +85,13 @@ export async function CenterProgramPage({
           </p>
         )}
 
-        {detail.leader && (
+        {detail.leaders.map((leader) => (
           <LeaderCard
-            leader={detail.leader}
-            role={detail.leader.isInterim ? "Interim Leader" : "Leader"}
+            key={leader.cwid}
+            leader={leader}
+            role={leader.isInterim ? "Interim Leader" : "Leader"}
           />
-        )}
+        ))}
 
         <div className="mt-[22px] flex flex-wrap gap-[9px] border-t border-dashed border-border pt-4 text-[14px] text-muted-foreground">
           {detail.scholarCount > 0 ? (

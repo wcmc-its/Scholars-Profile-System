@@ -158,14 +158,16 @@ export function isMethodFamilySynonymsEnabled(): boolean {
 }
 
 /**
- * #1105 — dedicated per-program pages for a center
- * (`/centers/[slug]/programs/[code]`), modeled on division pages, with a single
- * program leader (LeaderCard) + a prose description. When off, the route
- * `notFound()`s and the center page's program section headers stay plain text
- * (no links). Standalone (NOT gated on the methods lens) and default OFF, so the
- * surface ships dark — the `CenterProgram.{leaderCwid,description}` columns are
- * curated independently. Wire in BOTH `.env.local` AND the per-env
- * `environment:` block in cdk/lib/app-stack.ts per the flag-parity rule.
+ * #1105/#1117 — dedicated per-program pages for a center
+ * (`/centers/[slug]/programs/[code]`), modeled on division pages, with the
+ * program's leaders (one LeaderCard each — a program may be co-led, #1117) + a
+ * prose description. When off, the route `notFound()`s and the center page's
+ * program section headers stay plain text (no links). Standalone (NOT gated on
+ * the methods lens) and default OFF, so the surface ships dark — the
+ * `CenterProgramLeader` rows + `CenterProgram.description` are curated
+ * independently (via `/edit/center/[code]` → Programs). Wire in BOTH `.env.local`
+ * AND the per-env `environment:` block in cdk/lib/app-stack.ts per the
+ * flag-parity rule.
  */
 export function isCenterProgramPagesEnabled(): boolean {
   return process.env.CENTER_PROGRAM_PAGES === "on";
