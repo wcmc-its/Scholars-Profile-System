@@ -1,11 +1,17 @@
 /**
  * `components/edit/data-quality-filters.tsx` — the client filter island. Verifies
- * the Set→hidden-input bridge (the repeated ?type=/?unit= the server parser
- * decodes), the hide-students checkbox polarity, and the structural division
- * indent (#3 fix).
+ * auto-apply: every change navigates via router.replace to a query string the
+ * server parser decodes (repeated ?type=/?unit=, the gap/overview-age selects, the
+ * hidden-roles toggle, and the debounced search), with no "Apply" button. Also
+ * checks the structural division indent (#3 fix).
  */
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen, fireEvent, act } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const replace = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace, push: vi.fn(), prefetch: vi.fn() }),
+}));
 
 import { DataQualityFilters } from "@/components/edit/data-quality-filters";
 
@@ -40,51 +46,84 @@ function renderFilters(over: Record<string, unknown> = {}) {
   );
 }
 
-const names = (container: HTMLElement, name: string) =>
-  [...container.querySelectorAll(`input[name="${name}"]`)].map((i) => (i as HTMLInputElement).value);
+const lastUrl = () => String(replace.mock.calls.at(-1)?.[0] ?? "");
 
-describe("DataQualityFilters", () => {
-  it("posts a GET form to the dashboard route", () => {
-    const { container } = renderFilters();
-    const form = container.querySelector("form");
-    expect(form?.getAttribute("method")).toBe("get");
-    expect(form?.getAttribute("action")).toBe("/edit/data-quality");
+beforeEach(() => vi.clearAllMocks());
+
+describe("DataQualityFilters — auto-apply", () => {
+  it("has no Apply button", () => {
+    renderFilters();
+    expect(screen.queryByRole("button", { name: /apply/i })).toBeNull();
   });
 
-  it("mirrors the seeded selections into hidden type/unit inputs", () => {
-    const { container } = renderFilters();
-    expect(names(container, "type")).toEqual(["postdoc"]);
-    expect(names(container, "unit")).toEqual(["dept:MED"]);
-  });
-
-  it("adds a hidden input when a facet option is toggled on, removes it when toggled off", () => {
-    const { container } = renderFilters({ roleCategories: [] });
+  it("navigates on facet toggle, carrying the full selection as repeated params", () => {
+    renderFilters({ roleCategories: [] });
     fireEvent.click(screen.getByText("Full-time faculty"));
-    expect(names(container, "type")).toContain("full_time_faculty");
-    fireEvent.click(screen.getByText("Full-time faculty"));
-    expect(names(container, "type")).not.toContain("full_time_faculty");
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(lastUrl()).toContain("type=full_time_faculty");
+    // Toggling a second facet keeps the existing selection (still has the dept).
+    fireEvent.click(screen.getByText("Postdoc"));
+    const url = lastUrl();
+    expect(url).toContain("type=full_time_faculty");
+    expect(url).toContain("type=postdoc");
+    expect(url).toContain("unit=dept%3AMED");
   });
 
   it("toggles a center into the shared unit set (encoded center:CODE)", () => {
-    const { container } = renderFilters({ units: [] });
+    renderFilters({ units: [] });
     fireEvent.click(screen.getByText("Meyer Cancer Center"));
-    expect(names(container, "unit")).toEqual(["center:MCC"]);
+    expect(lastUrl()).toContain("unit=center%3AMCC");
   });
 
-  it("checks the hide-students box exactly when includeHidden is false", () => {
-    const hidden = renderFilters({ includeHidden: false });
-    expect((hidden.getByLabelText(/Hide students/) as HTMLInputElement).checked).toBe(true);
-    hidden.unmount();
-    const shown = renderFilters({ includeHidden: true });
-    expect((shown.getByLabelText(/Hide students/) as HTMLInputElement).checked).toBe(false);
+  it("navigates when the gap and overview-age selects change", () => {
+    renderFilters();
+    fireEvent.change(screen.getByLabelText("Gap"), { target: { value: "no-headshot" } });
+    expect(lastUrl()).toContain("gap=no-headshot");
+    fireEvent.change(screen.getByLabelText("Overview last updated"), {
+      target: { value: "imported" },
+    });
+    expect(lastUrl()).toContain("overviewAge=imported");
+  });
+
+  it("navigates when the hide-students checkbox changes", () => {
+    renderFilters();
+    fireEvent.click(screen.getByLabelText(/Hide students/));
+    expect(lastUrl()).toContain("hidden=0");
+  });
+
+  it("debounces the search box, then navigates with ?q=", () => {
+    vi.useFakeTimers();
+    try {
+      renderFilters({ roleCategories: [], units: [] });
+      fireEvent.change(screen.getByLabelText(/Search name or CWID/), {
+        target: { value: "harrington" },
+      });
+      expect(replace).not.toHaveBeenCalled(); // debounced
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      expect(lastUrl()).toContain("q=harrington");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("applies the search immediately on Enter", () => {
+    const { container } = renderFilters({ roleCategories: [], units: [] });
+    fireEvent.change(screen.getByLabelText(/Search name or CWID/), { target: { value: "silver" } });
+    fireEvent.submit(container.querySelector("form")!);
+    expect(lastUrl()).toContain("q=silver");
+  });
+
+  it("Clear navigates back to the unfiltered route", () => {
+    renderFilters();
+    fireEvent.click(screen.getByRole("button", { name: /clear/i }));
+    expect(replace).toHaveBeenLastCalledWith("/edit/data-quality", { scroll: false });
   });
 
   it("indents division options structurally under their parent department", () => {
     renderFilters();
-    const cardio = screen.getByText("Cardiology").closest("button")!;
-    expect(cardio.style.paddingInlineStart).toBe("1rem");
-    // The department row above it is not indented.
-    const med = screen.getByText("Medicine").closest("button")!;
-    expect(med.style.paddingInlineStart).toBe("");
+    expect(screen.getByText("Cardiology").closest("button")!.style.paddingInlineStart).toBe("1rem");
+    expect(screen.getByText("Medicine").closest("button")!.style.paddingInlineStart).toBe("");
   });
 });
