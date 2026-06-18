@@ -94,6 +94,27 @@ describe("ScholarHistoryView", () => {
     expect(row.textContent).toMatch(/as own0002/);
   });
 
+  it("renders timestamps in WCM-local Eastern time (DST-aware EST/EDT)", () => {
+    render(
+      <ScholarHistoryView
+        cwid="abc1001"
+        scholarName="Jane"
+        entries={[
+          entry({ id: "summer", ts: "2026-06-05T13:00:00.000Z" }), // June → EDT (UTC-4)
+          entry({ id: "winter", ts: "2026-01-15T13:00:00.000Z" }), // Jan → EST (UTC-5)
+        ]}
+        windowDays={90}
+      />,
+    );
+    // 13:00 UTC → 09:00 EDT in summer, 08:00 EST in winter.
+    expect(screen.getByTestId("scholar-history-row-summer").textContent).toContain(
+      "2026-06-05 09:00 EDT",
+    );
+    expect(screen.getByTestId("scholar-history-row-winter").textContent).toContain(
+      "2026-01-15 08:00 EST",
+    );
+  });
+
   it("renders an empty state when there are no entries", () => {
     render(
       <ScholarHistoryView cwid="abc1001" scholarName="Jane" entries={[]} windowDays={90} />,

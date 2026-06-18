@@ -25,12 +25,27 @@ export type ScholarHistoryViewProps = {
   windowDays: number;
 };
 
-/** Format a stored ISO-8601 instant as a compact UTC wall-clock string. */
+/**
+ * Format a stored UTC instant as WCM-local Eastern time. `America/New_York` is
+ * DST-aware, so the zone abbreviation renders EST in winter and EDT in summer.
+ * Rendered server-side (this is a server component), so no client TZ drift.
+ */
 function formatTs(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  // YYYY-MM-DD HH:MM UTC — unambiguous, locale-independent, no client drift.
-  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZoneName: "short",
+  }).formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  // YYYY-MM-DD HH:MM EST/EDT
+  return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")} ${get("timeZoneName")}`;
 }
 
 /** Render one row's detail: the changed fields, or a compact extra, else a dash. */
