@@ -32,6 +32,11 @@ import {
 } from "@/lib/profile/methods-lens-flags";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import {
+  getScholarCenterAffiliations,
+  type ScholarCenterAffiliation,
+} from "@/lib/api/centers";
+import { isProfileCenterAffiliationEnabled } from "@/lib/profile/center-affiliation-flag";
+import {
   rankForSelectedHighlights,
   scorePublication,
   type ScoredPublication,
@@ -498,6 +503,11 @@ export type ProfilePayload = {
    *  outbound "View NIH portfolio on RePORTER ↗" link in the Funding
    *  section header. Null when no mapping exists. */
   nihReporterProfileId: number | null;
+  /** #1103 — the scholar's ACTIVE center memberships (reverse of the center
+   *  roster), for the sidebar "Centers" card. Empty when PROFILE_CENTER_AFFILIATION
+   *  is off (the reverse query is never issued) or the scholar has no active
+   *  membership. Prisma-sourced; carries no search-index/browse-facet key. */
+  centers: ScholarCenterAffiliation[];
 };
 
 /**
@@ -666,8 +676,14 @@ export const getScholarFullProfileBySlug = cache(async (
   //   - families               — gated Methods-lens rows (#799); [] when off
   //   - manualHighlightPmids   — field_override('selectedHighlightPmids') (#836);
   //                              read only when the flag is on, else null (dark)
-  const [effectiveOverview, authorships, nihProfileRow, families, manualHighlightPmids] =
-    await Promise.all([
+  const [
+    effectiveOverview,
+    authorships,
+    nihProfileRow,
+    families,
+    manualHighlightPmids,
+    centers,
+  ] = await Promise.all([
       // The effective `overview` merges a manual `field_override` over the ETL
       // column at read time (#356, lib/api/manual-layer.ts). A self-edited bio is
       // sanitized on write, so it is rendered as-is.
@@ -746,6 +762,12 @@ export const getScholarFullProfileBySlug = cache(async (
       isManualHighlightsEnabled()
         ? getSelectedHighlightPmids(scholar.cwid, prisma)
         : Promise.resolve(null),
+      // #1103 — the scholar's ACTIVE center memberships for the "Centers" card,
+      // read only when the flag is on (else [] — the reverse query is never
+      // issued, keeping the feature fully dark). Date-filtered inside the loader.
+      isProfileCenterAffiliationEnabled()
+        ? getScholarCenterAffiliations(scholar.cwid)
+        : Promise.resolve([] as ScholarCenterAffiliation[]),
     ]);
 
   // #356 — publication suppression. A publication this scholar has hidden
@@ -1106,6 +1128,7 @@ export const getScholarFullProfileBySlug = cache(async (
           }
         : null,
     nihReporterProfileId: nihProfileRow?.nihProfileId ?? null,
+    centers,
   };
 });
 
