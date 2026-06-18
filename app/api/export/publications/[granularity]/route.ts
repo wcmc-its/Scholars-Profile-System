@@ -39,6 +39,7 @@ import type {
   WcmAuthorRole,
 } from "@/lib/api/search";
 import type { MentoringProgramKey } from "@/lib/api/mentoring-pmids";
+import { resolvePublicationMeshOnlyFilter } from "@/lib/api/search-flags";
 import { toCsv, type CsvCell } from "@/lib/csv";
 
 export const dynamic = "force-dynamic";
@@ -104,6 +105,14 @@ function parseBody(body: unknown): ExportRequest | null {
   // department clause on `SEARCH_PUB_DEPARTMENT_FILTER`, so passing these
   // through is inert when the flag is off.
   if (isStringArray(f.department)) filters.department = f.department;
+  // Issue #396 — "Show only MeSH-tagged matches". Unlike the department clause,
+  // `searchPublications` does NOT gate `meshOnly` internally, so gate the flag
+  // HERE (as the route/page do) to keep the off-is-inert contract uniform — a
+  // hand-crafted body can't activate the restriction when the flag is off. When
+  // on, it keeps the export in lockstep with the "N MeSH-tagged matches" count.
+  if (f.meshOnly === true && resolvePublicationMeshOnlyFilter()) {
+    filters.meshOnly = true;
+  }
   // Issue #1025 — Mentoring-activity program keys. `searchPublications`
   // resolves these to a pmid union (or `match_none` when the union is empty),
   // so the export must pass the same allowlisted set through.

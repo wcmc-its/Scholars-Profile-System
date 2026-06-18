@@ -34,6 +34,7 @@ import {
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
+  resolvePublicationMeshOnlyFilter,
   resolveConceptFallbackSparseEnabled,
   computeConceptFallback,
   CONCEPT_FALLBACK_CAP,
@@ -224,6 +225,12 @@ async function handleSearch(request: NextRequest) {
     const department = resolvePublicationDepartmentFilter()
       ? params.getAll("department")
       : [];
+    // Issue #396 — "Show only MeSH-tagged matches". Activated only when the
+    // flag is on AND `?searchMode=mesh-only` is present, so a stale param is
+    // inert when the flag is off (same gating shape as the department filter).
+    const meshOnly =
+      resolvePublicationMeshOnlyFilter() &&
+      params.get("searchMode") === "mesh-only";
     // Issue #259 SPEC §7.5 — `searchLatencyMs` covers the body construction
     // + OpenSearch round-trip + Prisma hydration. Excludes the resolver
     // (captured separately as `taxonomyMatchMs`) so the §3.1 (c) guardrail
@@ -241,6 +248,7 @@ async function handleSearch(request: NextRequest) {
         journal: journal.length > 0 ? journal : undefined,
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
         department: department.length > 0 ? department : undefined,
+        meshOnly: meshOnly || undefined,
       },
       // Issue #259 §5 — pass the MeSH resolution computed at the top of
       // the handler. Under `SEARCH_PUB_TAB_CONCEPT_MODE=expanded` and this
@@ -299,6 +307,7 @@ async function handleSearch(request: NextRequest) {
           journal: journal.length > 0 ? journal : undefined,
           wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
           department: department.length > 0 ? department : undefined,
+          meshOnly: meshOnly || undefined,
         },
         // Perf (B4) — this branch reads only `broad.total` (hits are discarded
         // and this call passes no mentoring/author filter), so the existing
@@ -337,7 +346,7 @@ async function handleSearch(request: NextRequest) {
         // fallback). Captures the per-request shape without analysts
         // having to know which env mapping was active.
         conceptMode,
-        filters: { yearMin, yearMax, publicationType, journal, wcmAuthorRole, department },
+        filters: { yearMin, yearMax, publicationType, journal, wcmAuthorRole, department, meshOnly },
         meshResolutionDescriptorUi,
         meshResolutionConfidence,
         // Issue #259 §5.4.2 / SPEC §7.5. Bucketed in the post-flip retro plot

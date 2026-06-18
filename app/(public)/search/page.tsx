@@ -8,6 +8,7 @@ import { ChevronDown } from "lucide-react";
 import { SortLinks } from "@/components/search/sort-links";
 import { JournalFacet } from "@/components/search/journal-facet";
 import { AuthorFacet } from "@/components/search/author-facet";
+import { MeshOnlyToggle } from "@/components/search/mesh-only-toggle";
 import { ExportButton } from "@/components/search/export-button";
 import { PeopleResultCard } from "@/components/search/people-result-card";
 import { PublicationResultRow } from "@/components/search/publication-result-row";
@@ -40,6 +41,7 @@ import {
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
+  resolvePublicationMeshOnlyFilter,
   resolveConceptFallbackSparseEnabled,
   resolveSearchShellStreaming,
   computeConceptFallback,
@@ -324,6 +326,16 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // tabs is active at a time). Only forwarded to `searchPublications` when the
   // flag is on; otherwise the array is dropped so a stale URL is inert.
   const pubDepartment = resolvePublicationDepartmentFilter() ? parseList(sp.department) : [];
+  // Issue #396 — "Show only MeSH-tagged matches". The flag gates whether the
+  // toggle renders at all; activation additionally needs `?searchMode=mesh-only`
+  // present, so a stale param is inert when the flag is off (same gating shape
+  // as the Department filter above). `meshOnlyFilterEnabled` flows to the rail
+  // so it knows whether to render the toggle; `pubMeshOnly` is the active state.
+  const meshOnlyFilterEnabled = resolvePublicationMeshOnlyFilter();
+  const pubMeshOnly =
+    meshOnlyFilterEnabled &&
+    (Array.isArray(sp.searchMode) ? sp.searchMode[0] : sp.searchMode) ===
+      "mesh-only";
   // Mentoring activity facet — multi-select on mentee program at time of
   // mentorship. URL param `mentoringProgram` accepts repeated values from
   // the set {md, mdphd, phd, postdoc, ecr}.
@@ -414,6 +426,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
             wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
             department: pubDepartment.length > 0 ? pubDepartment : undefined,
+            meshOnly: pubMeshOnly || undefined,
             mentoringPrograms:
               mentoringProgram.length > 0 ? mentoringProgram : undefined,
           },
@@ -494,6 +507,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
         wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
         department: pubDepartment.length > 0 ? pubDepartment : undefined,
+        meshOnly: pubMeshOnly || undefined,
         mentoringPrograms: mentoringProgram.length > 0 ? mentoringProgram : undefined,
       },
       // Issue #259 §5 + §1.8 — taxonomyMatch is computed unconditionally
@@ -652,6 +666,8 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 wcmAuthorRole={wcmAuthorRole}
                 wcmAuthor={wcmAuthor}
                 department={pubDepartment}
+                meshOnly={pubMeshOnly}
+                meshOnlyFilterEnabled={meshOnlyFilterEnabled}
                 mentoringProgram={mentoringProgram}
                 resultPromise={activePubsPromise!}
                 meshResolution={effectiveMeshResolution}
@@ -1168,6 +1184,8 @@ async function PublicationsResults({
   wcmAuthorRole,
   wcmAuthor,
   department,
+  meshOnly,
+  meshOnlyFilterEnabled,
   mentoringProgram,
   resultPromise,
   meshResolution,
@@ -1189,6 +1207,12 @@ async function PublicationsResults({
   /** Issue #837 — active WCM-author department keys (empty when the flag is
    *  off; the page drops the param in that case). */
   department: string[];
+  /** Issue #396 — "Show only MeSH-tagged matches" active state (true only when
+   *  the flag is on AND `?searchMode=mesh-only` is present). */
+  meshOnly: boolean;
+  /** Issue #396 — whether the MeSH-only toggle should render in the facet rail
+   *  (the `SEARCH_PUB_MESH_ONLY_FILTER` flag). */
+  meshOnlyFilterEnabled: boolean;
   mentoringProgram: Array<"md" | "mdphd" | "phd" | "postdoc" | "ecr">;
   /** Perf streaming — see PeopleResults.resultPromise. */
   resultPromise: Promise<PubsResultData>;
@@ -1263,6 +1287,7 @@ async function PublicationsResults({
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
         wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
         department: department.length > 0 ? department : undefined,
+        meshOnly: meshOnly || undefined,
         mentoringPrograms:
           mentoringProgram.length > 0 ? mentoringProgram : undefined,
       },
@@ -1329,6 +1354,10 @@ async function PublicationsResults({
     for (const v of wcmAuthor) sp.append("wcmAuthor", v);
     for (const v of department) sp.append("department", v);
     for (const v of mentoringProgram) sp.append("mentoringProgram", v);
+    // Issue #396 — preserve the MeSH-only filter across every facet/sort/page
+    // link so toggling another filter doesn't silently drop it. The toggle's
+    // own on/off hrefs override `searchMode` in their `mut` callback.
+    if (meshOnly) sp.set("searchMode", "mesh-only");
     if (scope !== "expanded") sp.set("match", scope);
     if (resetPage) sp.delete("page");
     mut(sp);
@@ -1358,6 +1387,14 @@ async function PublicationsResults({
   const clearAllParams = new URLSearchParams({ q, type: "publications" });
   if (scope !== "expanded") clearAllParams.set("match", scope);
   const clearAllHref = `/search?${clearAllParams.toString()}`;
+
+  // Issue #396 — MeSH-only toggle hrefs (page always reset). ON adds
+  // `searchMode=mesh-only`; OFF removes it. Both override the param `buildUrl`
+  // would otherwise preserve, so the toggle flips state regardless of the
+  // current value. The "Remove filter" link in the count line / empty state
+  // reuses `meshOnlyOffHref`.
+  const meshOnlyOnHref = buildUrl((sp) => sp.set("searchMode", "mesh-only"));
+  const meshOnlyOffHref = buildUrl((sp) => sp.delete("searchMode"));
 
   const ROLE_LABEL: Record<"first" | "senior" | "middle", string> = {
     first: "First author",
@@ -1519,6 +1556,10 @@ async function PublicationsResults({
             }
           })
         }
+        meshOnlyFilterEnabled={meshOnlyFilterEnabled}
+        meshOnly={meshOnly}
+        meshOnlyHref={meshOnly ? meshOnlyOffHref : meshOnlyOnHref}
+        q={q}
         hasActiveFilters={chips.length > 0}
         clearAllHref={clearAllHref}
       />
@@ -1544,6 +1585,8 @@ async function PublicationsResults({
               else sp.set("sort", value);
             })
           }
+          meshOnly={meshOnly}
+          meshOnlyRemoveHref={meshOnlyOffHref}
           extraControls={
             <ExportButton
               q={q}
@@ -1555,6 +1598,10 @@ async function PublicationsResults({
                 wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
                 wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
                 department: department.length > 0 ? department : undefined,
+                // Issue #396 — keep the export in lockstep with the displayed
+                // count: when MeSH-only is active the export carries it too, so
+                // the exported set equals the "N MeSH-tagged matches" shown.
+                meshOnly: meshOnly || undefined,
                 mentoringPrograms:
                   mentoringProgram.length > 0 ? mentoringProgram : undefined,
               }}
@@ -1574,6 +1621,11 @@ async function PublicationsResults({
               // the zero-trigger co-render renders below.
               omitCta={conceptFallback !== null}
             />
+          ) : meshOnly ? (
+            // Issue #396 — MeSH-only restriction emptied the set; offer the
+            // remove-filter escape (defers to conceptEmpty above, which has its
+            // own broaden CTA).
+            <MeshOnlyEmptyState removeHref={meshOnlyOffHref} />
           ) : (
             <EmptyState
               query={q}
@@ -2147,6 +2199,8 @@ function ResultsToolbar({
   sort,
   buildSortHref,
   hasActiveFilters,
+  meshOnly = false,
+  meshOnlyRemoveHref,
   extraControls,
 }: {
   tab: "people" | "publications";
@@ -2156,6 +2210,12 @@ function ResultsToolbar({
   sort: PeopleSort | PublicationsSort;
   buildSortHref: (value: string) => string;
   hasActiveFilters: boolean;
+  /** Issue #396 — pub-tab "Show only MeSH-tagged matches" active. When true and
+   *  total>0 the count line reads "Showing N MeSH-tagged matches." + a
+   *  "Remove filter" link (no fractional "N of M" denominator). */
+  meshOnly?: boolean;
+  /** Issue #396 — href that drops `searchMode` (the "Remove filter" target). */
+  meshOnlyRemoveHref?: string;
   /** Optional trailing controls rendered before the Sort group (#89 — Export). */
   extraControls?: React.ReactNode;
 }) {
@@ -2209,24 +2269,50 @@ function ResultsToolbar({
   return (
     <div className="mb-2 flex items-center border-b border-[#e3e2dd] pb-3 text-[13px] text-muted-foreground">
       {total > 0 ? (
-        <span>
-          Showing {start}–{end} of{" "}
-          <strong className="font-semibold text-[#4a4a4a]">{total.toLocaleString()}</strong> {noun}
-          {showAboutImpact ? (
-            <>
-              {" "}
-              <span aria-hidden="true" className="text-muted-foreground/60">
-                ·
-              </span>{" "}
-              <Link
-                href={methodologyHref("impact")}
-                className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
-              >
-                About impact
-              </Link>
-            </>
-          ) : null}
-        </span>
+        meshOnly ? (
+          // Issue #396 — MeSH-only count line. No fractional "N of M"
+          // denominator (the set IS the mesh-tagged subset), plus a
+          // "Remove filter" escape styled like the "About impact" link below.
+          <span>
+            Showing{" "}
+            <strong className="font-semibold text-[#4a4a4a]">{total.toLocaleString()}</strong>{" "}
+            MeSH-tagged matches.
+            {meshOnlyRemoveHref ? (
+              <>
+                {" "}
+                <span aria-hidden="true" className="text-muted-foreground/60">
+                  ·
+                </span>{" "}
+                <Link
+                  href={meshOnlyRemoveHref}
+                  scroll={false}
+                  className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
+                >
+                  Remove filter
+                </Link>
+              </>
+            ) : null}
+          </span>
+        ) : (
+          <span>
+            Showing {start}–{end} of{" "}
+            <strong className="font-semibold text-[#4a4a4a]">{total.toLocaleString()}</strong> {noun}
+            {showAboutImpact ? (
+              <>
+                {" "}
+                <span aria-hidden="true" className="text-muted-foreground/60">
+                  ·
+                </span>{" "}
+                <Link
+                  href={methodologyHref("impact")}
+                  className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
+                >
+                  About impact
+                </Link>
+              </>
+            ) : null}
+          </span>
+        )
       ) : null}
       <span className="ml-auto inline-flex items-center gap-3 text-[#4a4a4a]">
         {extraControls}
@@ -2457,6 +2543,10 @@ function FacetSidebarPubs({
   mentoringProgramCounts,
   toggleHref,
   buildHref,
+  meshOnlyFilterEnabled,
+  meshOnly,
+  meshOnlyHref,
+  q,
   hasActiveFilters,
   clearAllHref,
 }: {
@@ -2482,6 +2572,15 @@ function FacetSidebarPubs({
   mentoringProgramCounts: Record<"md" | "mdphd" | "phd" | "postdoc" | "ecr", number>;
   toggleHref: (axis: string, value: string) => string;
   buildHref: (overrides: Record<string, string>) => string;
+  /** Issue #396 — whether the "Show only MeSH-tagged matches" toggle renders
+   *  (the `SEARCH_PUB_MESH_ONLY_FILTER` flag). */
+  meshOnlyFilterEnabled: boolean;
+  /** Issue #396 — current MeSH-only active state. */
+  meshOnly: boolean;
+  /** Issue #396 — toggle target href: the ON url when off, the OFF url when on. */
+  meshOnlyHref: string;
+  /** Query string, forwarded to the MeSH-only toggle's turn-ON telemetry beacon. */
+  q: string;
   hasActiveFilters: boolean;
   clearAllHref: string;
 }) {
@@ -2502,6 +2601,16 @@ function FacetSidebarPubs({
           </Link>
         ) : null}
       </div>
+
+      {/* Issue #396 — "Show only MeSH-tagged matches" toggle. Rendered only
+          when the flag is on; styled like the other facet groups (single
+          checkbox-style row). A client component so it can fire the
+          `search_mesh_restrict` beacon on turn-ON without blocking nav. */}
+      {meshOnlyFilterEnabled ? (
+        <FacetGroup label="Match quality">
+          <MeshOnlyToggle href={meshOnlyHref} isActive={meshOnly} q={q} />
+        </FacetGroup>
+      ) : null}
 
       {/* WCM author role first — it's the highest-signal pub filter
           for promotion/recruiting use cases. */}
@@ -2815,6 +2924,29 @@ function EmptyState({ query, tip }: { query: string; tip: string }) {
     <div className="mt-12 flex flex-col items-center text-center">
       <div className="text-lg font-medium">No results{query ? ` for "${query}"` : ""}</div>
       <div className="mt-1 text-sm text-muted-foreground">{tip}</div>
+    </div>
+  );
+}
+
+/**
+ * Issue #396 — empty state when the "Show only MeSH-tagged matches" filter
+ * leaves zero hits. Mirrors `EmptyState`'s centered markup, swapping the tip
+ * for a "Remove filter" link that drops `searchMode` so the user lands back on
+ * the full (unrestricted) result set for the same query.
+ */
+function MeshOnlyEmptyState({ removeHref }: { removeHref: string }) {
+  return (
+    <div className="mt-12 flex flex-col items-center text-center">
+      <div className="text-lg font-medium">No MeSH-tagged matches for this query.</div>
+      <div className="mt-1 text-sm text-muted-foreground">
+        <Link
+          href={removeHref}
+          scroll={false}
+          className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
+        >
+          Remove filter
+        </Link>
+      </div>
     </div>
   );
 }

@@ -26,7 +26,10 @@
  *  - search_nav_watchdog: the #1017 deploy-cutover navigation watchdog forced a
  *    hard reload because a /search soft-nav hung past the timeout. Carries
  *    `surface` (which entry point hung) and `n` (the elapsed timeout) so the
- *    firing rate can be observed and NAV_WATCHDOG_MS tuned. */
+ *    firing rate can be observed and NAV_WATCHDOG_MS tuned.
+ *  - search_mesh_restrict: the #396 Publications-tab "Show only MeSH-tagged
+ *    matches" facet toggle was turned ON. Carries `q` so the engage rate can be
+ *    observed per query. Emitted only on turn-ON, never on turn-OFF. */
 export const VALID_EVENTS = new Set<string>([
   "search_click",
   "mentoring_copubs_open",
@@ -39,6 +42,7 @@ export const VALID_EVENTS = new Set<string>([
   "home_method_category_click",
   "home_methods_explore_all_click",
   "search_nav_watchdog",
+  "search_mesh_restrict",
 ]);
 
 /**
