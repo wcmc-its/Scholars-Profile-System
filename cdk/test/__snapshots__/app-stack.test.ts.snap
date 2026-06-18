@@ -356,6 +356,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SELF_EDIT_RECITER_PENDING_HINT",
+                "Value": "off",
+              },
+              {
                 "Name": "MENTORING_COPUB_BRIDGE",
                 "Value": "on",
               },
@@ -2832,6 +2836,35 @@ service:
       },
       "Type": "AWS::IAM::Policy",
     },
+    "TaskRoleReciterReadPolicyE018B6D7": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "dynamodb:GetItem",
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:dynamodb:us-east-1:665083158573:table/Analysis",
+                "arn:aws:dynamodb:us-east-1:665083158573:table/GoldStandard",
+              ],
+            },
+            {
+              "Action": "s3:GetObject",
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::reciter-dynamodb/AnalysisOutput/*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-prod-reciter-read",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "TaskRoleSesPolicy94AACEAC": {
       "Properties": {
         "PolicyDocument": {
@@ -3477,6 +3510,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_COI_GAP_HINT",
+                "Value": "on",
+              },
+              {
+                "Name": "SELF_EDIT_RECITER_PENDING_HINT",
                 "Value": "on",
               },
               {
@@ -6034,6 +6071,35 @@ service:
           "Version": "2012-10-17",
         },
         "PolicyName": "sps-task-staging-cloudfront",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "TaskRoleReciterReadPolicyE018B6D7": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "dynamodb:GetItem",
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:dynamodb:us-east-1:665083158573:table/Analysis",
+                "arn:aws:dynamodb:us-east-1:665083158573:table/GoldStandard",
+              ],
+            },
+            {
+              "Action": "s3:GetObject",
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::reciter-dynamodb/AnalysisOutput/*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-staging-reciter-read",
         "Roles": [
           {
             "Ref": "TaskRole30FC0FBB",

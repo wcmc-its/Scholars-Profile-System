@@ -662,6 +662,7 @@ export async function loadEditContext(
   const unmatchedPubmedCoi: EditContextCoiGapCandidate[] = [];
   const unmatchedPubmedCoiLower: EditContextCoiGapCandidate[] = [];
   const unmatchedPubmedCoiReviewed: EditContextCoiGapReviewed[] = [];
+
   if (opts?.includeCoiGap === true) {
     const gapRows = await client.coiGapCandidate.findMany({
       // The three reviewable states. `resolved` is excluded (the gap closed

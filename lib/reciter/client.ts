@@ -34,7 +34,15 @@
  * Connectivity caveat (#443/#483): if the ReCiter engine is WCM-internal, calls
  * from the SPS VPC can time out. Every call is bounded by `AbortSignal.timeout`
  * and surfaces failure as a thrown error the caller treats as best-effort.
+ *
+ * The suggested-articles READ (`fetchSuggestedArticles`, below) does NOT touch
+ * the engine HTTP API at all — it reads ReCiter's DynamoDB (GoldStandard +
+ * Analysis) and S3 (offloaded AnalysisOutput) directly with a read-only IAM
+ * grant and NO api-key. The #746 reject WRITE path above is unchanged.
  */
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 
 /** Provenance recorded on the ReCiter `GoldStandardAuditLog` — this app. */
 export const GOLD_STANDARD_SOURCE = "Scholars";
@@ -164,6 +172,244 @@ export async function runFeatureGenerator(
     throw new Error(
       `ReCiter feature-generator failed for uid ${uid}: ${res.status} ${res.statusText}`,
     );
+  }
+}
+
+/**
+ * Live "suggested articles" read (replaces the nightly
+ * `reciter_pending_suggestion` table). The freshness fix: instead of trusting a
+ * cached snapshot of the engine's per-article `userAssertion`, we cross the
+ * candidate list against the uid's gold standard (`knownpmids`/`rejectedpmids`),
+ * which is written synchronously on every accept/reject — so a pub the scholar
+ * just curated disappears from the suggestions immediately.
+ *
+ * SOURCE: ReCiter's own DynamoDB + S3 (account 665083158573, us-east-1), read
+ * directly with a read-only IAM grant — NO api-key, no engine HTTP round-trip:
+ *
+ *   - DynamoDB `GoldStandard` (key uid = bare cwid): `knownpmids` /
+ *     `rejectedpmids` (Number lists; ABSENT when empty), written synchronously
+ *     on every curate so they are real-time fresh. A MISSING item is normal
+ *     (uncurated scholar) ⇒ empty curated set.
+ *   - DynamoDB `Analysis` (key uid): `reCiterFeature.reCiterArticleFeatures`.
+ *     When the analysis is large it is OFFLOADED — the item then carries only
+ *     uid/usingS3/schemaVersion and the full object is plain JSON (NOT gzipped)
+ *     at s3://reciter-dynamodb/AnalysisOutput/<uid>, whose top level IS the
+ *     reCiterFeature object.
+ *
+ * `GetCommand` from lib-dynamodb auto-unmarshalls, so `Item.knownpmids` is a
+ * `number[]` and `Item.reCiterFeature` is a plain object. Credentials come from
+ * the AWS SDK default chain (ECS task role in prod) — never hardcoded here.
+ */
+
+/** Minimum authorship-likelihood score (0-100) a candidate must clear. */
+export const SUGGESTED_ARTICLES_MIN_SCORE = 40;
+/** ReCiter's gold-standard table (key uid = bare cwid). */
+const GOLDSTANDARD_TABLE = process.env.SCHOLARS_GOLDSTANDARD_TABLE ?? "GoldStandard";
+/** ReCiter's analysis table (key uid; reCiterFeature inline or S3-offloaded). */
+const ANALYSIS_TABLE = process.env.SCHOLARS_ANALYSIS_TABLE ?? "Analysis";
+/** Bucket holding offloaded AnalysisOutput/<uid> JSON. */
+const ANALYSIS_BUCKET = process.env.RECITER_ANALYSIS_BUCKET ?? "reciter-dynamodb";
+/** ReCiter's DynamoDB/S3 live in us-east-1 regardless of the SPS region. */
+const RECITER_REGION =
+  process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1";
+/** Max authors to render inline before collapsing to "first 6 … last". */
+const AUTHORS_DISPLAY_MAX = 8;
+
+/** A suggested-article card payload (the shape the card component consumes). */
+export interface ReciterSuggestion {
+  pmid: string;
+  score: number;
+  articleTitle: string;
+  authors: string;
+  journal: string | null;
+  datePublished: string | null;
+  isPreprint: boolean;
+}
+
+interface ReciterAuthorFeature {
+  rank?: number;
+  firstName?: string;
+  lastName?: string;
+  initials?: string;
+  isTargetAuthor?: boolean;
+}
+
+interface ReciterArticleFeature {
+  pmid?: number;
+  authorshipLikelihoodScore?: number;
+  userAssertion?: string;
+  articleTitle?: string;
+  journalTitleVerbose?: string;
+  publicationDateDisplay?: string;
+  publicationType?: { publicationTypeCanonical?: string };
+  reCiterArticleAuthorFeatures?: ReciterAuthorFeature[];
+}
+
+/** The `reCiterFeature` object — inline on the Analysis item or the S3 top level. */
+interface ReciterFeature {
+  reCiterArticleFeatures?: ReciterArticleFeature[];
+}
+
+/** The unmarshalled `Analysis` item (GetCommand auto-unmarshalls). */
+interface AnalysisItem {
+  uid?: string;
+  reCiterFeature?: ReciterFeature;
+  // Offload markers (naming varies across ReCiter versions); when present (and
+  // reCiterFeature absent) the full object lives in S3.
+  usingS3?: boolean;
+  s3StorageFlag?: boolean;
+  schemaVersion?: unknown;
+}
+
+/** The unmarshalled `GoldStandard` item — knownpmids/rejectedpmids are number lists. */
+interface GoldStandardItem {
+  uid?: string;
+  knownpmids?: number[];
+  rejectedpmids?: number[];
+}
+
+/**
+ * The minimal surface of the two AWS clients this module uses. Both accept a
+ * `.send(command)` and are injectable via `opts.ddb` / `opts.s3` so tests can
+ * supply fakes without real AWS access.
+ */
+export interface ReciterDdbClient {
+  send(command: GetCommand): Promise<{ Item?: Record<string, unknown> }>;
+}
+export interface ReciterS3Client {
+  send(command: GetObjectCommand): Promise<{ Body?: { transformToString(enc: string): Promise<string> } }>;
+}
+
+// Lazily-constructed module singletons — only built when a real read happens
+// (and never in tests, which inject fakes). Region-pinned to ReCiter's us-east-1.
+let ddbSingleton: ReciterDdbClient | undefined;
+let s3Singleton: ReciterS3Client | undefined;
+
+function defaultDdb(): ReciterDdbClient {
+  if (!ddbSingleton) {
+    ddbSingleton = DynamoDBDocumentClient.from(
+      new DynamoDBClient({ region: RECITER_REGION }),
+    ) as unknown as ReciterDdbClient;
+  }
+  return ddbSingleton;
+}
+
+function defaultS3(): ReciterS3Client {
+  if (!s3Singleton) {
+    s3Singleton = new S3Client({ region: RECITER_REGION }) as unknown as ReciterS3Client;
+  }
+  return s3Singleton;
+}
+
+/**
+ * Render the author byline: order by rank, "FirstName LastName" each, joined by
+ * ", ". Beyond {@link AUTHORS_DISPLAY_MAX} authors, collapse to the first 6, an
+ * ellipsis, then the last author ("A, B, … LastAuthor"), mirroring the mockup.
+ */
+export function formatSuggestionAuthors(features: ReciterAuthorFeature[]): string {
+  const names = [...features]
+    .sort((a, b) => (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER))
+    .map((f) => [f.firstName, f.lastName].filter(Boolean).join(" ").trim())
+    .filter((n) => n.length > 0);
+
+  if (names.length <= AUTHORS_DISPLAY_MAX) return names.join(", ");
+
+  const head = names.slice(0, 6);
+  const last = names[names.length - 1];
+  return [...head, "…", last].join(", ");
+}
+
+/**
+ * Fetch the uid's live "suggested articles" by reading ReCiter's DynamoDB +
+ * S3 directly (read-only IAM, NO api-key) and filtering to genuinely-uncurated
+ * candidates.
+ *
+ * Two parallel DynamoDB GetItem reads:
+ *   1. `GoldStandard` — the fresh accept/reject sets (`knownpmids` /
+ *      `rejectedpmids`), written synchronously on every curate.
+ *   2. `Analysis` — the candidate list with scores
+ *      (`reCiterFeature.reCiterArticleFeatures`). When OFFLOADED the item has
+ *      no `reCiterFeature`; the full object is then read from
+ *      s3://{ANALYSIS_BUCKET}/AnalysisOutput/<uid> (plain JSON, top level IS
+ *      the reCiterFeature object).
+ *
+ * A candidate is KEPT iff score >= {@link SUGGESTED_ARTICLES_MIN_SCORE}, its
+ * pmid is in NEITHER knownpmids nor rejectedpmids, and its (stale) userAssertion
+ * is not ACCEPTED/REJECTED. Kept candidates are mapped to {@link
+ * ReciterSuggestion} and sorted by score descending.
+ *
+ * SAFETY: a THROWN GoldStandard read (table unreadable) means we cannot apply
+ * the freshness filter, so the catch returns `[]` (degrade to hidden) rather
+ * than risk surfacing an already-curated pub. A MISSING GoldStandard item is
+ * NORMAL (an uncurated scholar) ⇒ empty curated set ⇒ candidates returned. Any
+ * error / timeout returns `[]` — this function NEVER throws.
+ *
+ * `opts.ddb` / `opts.s3` inject fake clients for tests; production uses the
+ * lazily-built region-pinned singletons.
+ */
+export async function fetchSuggestedArticles(
+  uid: string,
+  opts: { ddb?: ReciterDdbClient; s3?: ReciterS3Client } = {},
+): Promise<ReciterSuggestion[]> {
+  const ddb = opts.ddb ?? defaultDdb();
+  const s3 = opts.s3 ?? defaultS3();
+
+  try {
+    const [gs, an] = await Promise.all([
+      ddb.send(new GetCommand({ TableName: GOLDSTANDARD_TABLE, Key: { uid } })),
+      ddb.send(new GetCommand({ TableName: ANALYSIS_TABLE, Key: { uid } })),
+    ]);
+
+    // A THROW above (GoldStandard unreadable) is caught below ⇒ []. A missing
+    // Item is fine: an uncurated scholar has an empty curated set.
+    const gsItem = gs.Item as GoldStandardItem | undefined;
+    const curated = new Set<string>(
+      [...(gsItem?.knownpmids ?? []), ...(gsItem?.rejectedpmids ?? [])].map((p) =>
+        String(p),
+      ),
+    );
+
+    const anItem = an.Item as AnalysisItem | undefined;
+    let feature: ReciterFeature | undefined = anItem?.reCiterFeature;
+    // Offloaded: the item exists but carries no inline reCiterFeature ⇒ S3.
+    if (anItem && !feature) {
+      const obj = await s3.send(
+        new GetObjectCommand({
+          Bucket: ANALYSIS_BUCKET,
+          Key: `AnalysisOutput/${uid}`,
+        }),
+      );
+      const body = await obj.Body?.transformToString("utf-8");
+      feature = body ? (JSON.parse(body) as ReciterFeature) : undefined;
+    }
+
+    const features = feature?.reCiterArticleFeatures ?? [];
+    const kept: ReciterSuggestion[] = [];
+
+    for (const a of features) {
+      const score = a.authorshipLikelihoodScore;
+      if (typeof score !== "number" || score < SUGGESTED_ARTICLES_MIN_SCORE) continue;
+      if (a.pmid == null) continue;
+      const pmid = String(a.pmid);
+      if (curated.has(pmid)) continue;
+      if (a.userAssertion === "ACCEPTED" || a.userAssertion === "REJECTED") continue;
+
+      kept.push({
+        pmid,
+        score: Math.round(score),
+        articleTitle: a.articleTitle ?? "",
+        authors: formatSuggestionAuthors(a.reCiterArticleAuthorFeatures ?? []),
+        journal: a.journalTitleVerbose || null,
+        datePublished: a.publicationDateDisplay || null,
+        isPreprint: a.publicationType?.publicationTypeCanonical === "Preprint",
+      });
+    }
+
+    kept.sort((x, y) => y.score - x.score);
+    return kept;
+  } catch {
+    // Timeout, non-2xx parse, network failure — degrade to hidden.
+    return [];
   }
 }
 

@@ -734,6 +734,52 @@ export class AppStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // ReCiter read grant (#746 -- live "suggested articles" nudge).
+    //
+    // GET /api/edit/reciter-pending reads the self viewer's live ReCiter
+    // candidate publications DIRECTLY from ReCiter's own DynamoDB + S3 (no
+    // engine HTTP round-trip, no api-key): the GoldStandard table (the fresh
+    // accept/reject sets) + the Analysis table (the scored candidate list),
+    // falling back to s3://reciter-dynamodb/AnalysisOutput/<uid> when the
+    // analysis is offloaded. lib/reciter/client.ts fetchSuggestedArticles
+    // resolves THIS task role via the AWS SDK default chain -- institutional
+    // AWS, no secret to seed.
+    //
+    // A custom *inline* policy, least-privilege:
+    //   - dynamodb:GetItem ONLY (a keyed GetItem on uid -- never Scan/Query),
+    //     scoped to exactly the Analysis + GoldStandard tables (these are the
+    //     account-shared ReCiter stores, NOT region/account-tokenized like the
+    //     SPS tables, so the ARNs are pinned to us-east-1 / 665083158573 where
+    //     ReCiter runs).
+    //   - s3:GetObject ONLY, scoped to the AnalysisOutput/* prefix of the
+    //     reciter-dynamodb bucket -- never a bare `*`.
+    //
+    // Read-only by construction; the #746 reject WRITE path is the engine HTTP
+    // call gated separately. Contains no secretsmanager reference, so the "zero
+    // secretsmanager on the task role" assertion still holds; app-stack.test.ts
+    // adds the matching scope assertions.
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "TaskRoleReciterReadPolicy", {
+      policyName: `sps-task-${env}-reciter-read`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["dynamodb:GetItem"],
+          resources: [
+            "arn:aws:dynamodb:us-east-1:665083158573:table/Analysis",
+            "arn:aws:dynamodb:us-east-1:665083158573:table/GoldStandard",
+          ],
+        }),
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["s3:GetObject"],
+          resources: ["arn:aws:s3:::reciter-dynamodb/AnalysisOutput/*"],
+        }),
+      ],
+    });
+
+    // ------------------------------------------------------------------
     // Internal ALB security group.
     //
     // The public ALB's SG (albSecurityGroup) is owned by NetworkStack;
@@ -974,6 +1020,17 @@ export class AppStack extends Stack {
         // nightly etl:coi-gap source has seeded data in that env. Prod takes
         // effect only on an approval-gated `cdk deploy Sps-App-prod`.
         SELF_EDIT_COI_GAP_HINT: "on",
+        // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
+        // suggested" candidate-publications nudge on the publications + home
+        // self-edit surfaces (so the scholar logs into Publication Manager to claim
+        // them). The read is a LIVE, on-the-fly DynamoDB GetItem of ReCiter's
+        // GoldStandard + Analysis tables (read-only via the task role's
+        // TaskRoleReciterReadPolicy — no api-key), filtered against the live gold
+        // standard, so it shows nothing when a scholar has no pending suggestions.
+        // ON in staging (live rollout); OFF in prod (armed — flips on the next
+        // approval-gated Sps-App-prod deploy after the staging soak). The nudge only
+        // renders for a genuine (non-impersonating) self viewer with this flag on.
+        SELF_EDIT_RECITER_PENDING_HINT: env === "staging" ? "on" : "off",
         // #443 -- mentee co-publication BRIDGE. getMenteesForMentor's per-mentee
         // co-pub count + 3-pub preview is a LIVE WCM ReciterDB query the in-VPC
         // app can't reach, so it degrades to "temporarily unavailable" in

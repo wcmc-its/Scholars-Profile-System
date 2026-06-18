@@ -28,9 +28,11 @@ import { ArrowRight, ArrowUpRight, Check, Plus } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { WEB_DIRECTORY_URL } from "@/lib/edit/request-a-change";
+import { PUBLICATION_MANAGER_URL, WEB_DIRECTORY_URL } from "@/lib/edit/request-a-change";
 import { unitKindLabel, type ManageableUnit } from "@/lib/edit/manageable-units";
 import { cn, initials } from "@/lib/utils";
+import { useReciterPendingSuggestions } from "@/components/edit/reciter-pending-card";
+import type { ReciterSuggestion } from "@/lib/reciter/client";
 
 // Must match EditShell's `<main aria-labelledby="panel-heading">` and
 // EditPanel's EDIT_PANEL_HEADING_ID — this panel forgoes EditPanel for the
@@ -59,6 +61,12 @@ export type HomePanelProps = {
    *  yet usually holds no `unit_admin` grant, so the section still shows them a
    *  way through to the `/edit/units` finder even when `manageableUnits` is empty. */
   isSuperuser?: boolean;
+  /** Whether to mount the live ReCiter pending-articles teaser on the Publications
+   *  row (`SELF_EDIT_RECITER_PENDING_HINT`). Only a genuine self viewer with the flag
+   *  on passes `true`; when `true` a client loader lazily fetches
+   *  `/api/edit/reciter-pending` and shows a compact teaser only if a high-confidence
+   *  (≥70) hero suggestion comes back. Off (default) ⇒ ZERO fetch, nothing renders. */
+  reciterPendingEnabled?: boolean;
 };
 
 type HeadshotState = "loading" | "present" | "missing";
@@ -74,6 +82,7 @@ export function HomePanel({
   hiddenPublications,
   manageableUnits = [],
   isSuperuser = false,
+  reciterPendingEnabled = false,
 }: HomePanelProps) {
   const headshot = useHeadshotProbe(identityImageEndpoint);
   const isAdmin = mode === "superuser";
@@ -113,6 +122,7 @@ export function HomePanel({
           hidden={hiddenPublications}
           isAdmin={isAdmin}
           name={preferredName}
+          reciterPendingEnabled={reciterPendingEnabled}
         />
       </ChecklistGroup>
 
@@ -305,12 +315,16 @@ function ChecklistRow({
   subtitle,
   action,
   testId,
+  teaser,
 }: {
   marker: Marker;
   title: string;
   subtitle: string;
   action: React.ReactNode;
   testId: string;
+  /** Optional secondary content rendered beneath the subtitle (e.g. the ReCiter
+   *  pending-suggestion teaser). */
+  teaser?: React.ReactNode;
 }) {
   return (
     <li
@@ -321,6 +335,7 @@ function ChecklistRow({
       <div className="min-w-0 flex-1">
         <div className="text-[15px] font-semibold">{title}</div>
         <div className="text-muted-foreground text-sm leading-snug">{subtitle}</div>
+        {teaser}
       </div>
       <div className="flex-none">{action}</div>
     </li>
@@ -538,12 +553,15 @@ function PublicationsItem({
   hidden,
   isAdmin,
   name,
+  reciterPendingEnabled,
 }: {
   basePath: string;
   total: number;
   hidden: number;
   isAdmin: boolean;
   name: string;
+  /** Whether to mount the live pending-articles teaser loader (self + flag on). */
+  reciterPendingEnabled: boolean;
 }) {
   const subtitle =
     total === 0
@@ -559,6 +577,7 @@ function PublicationsItem({
       marker={total > 0 ? "done" : "info"}
       title="Publications"
       subtitle={subtitle}
+      teaser={reciterPendingEnabled ? <PublicationsSuggestionTeaserLoader /> : null}
       // Both self and superuser now have a per-scholar Publications tab to
       // deep-link into (a superuser manages pubs on the scholar's behalf), so the
       // "Review" link shows in both modes.
@@ -568,5 +587,56 @@ function PublicationsItem({
         </RowLink>
       }
     />
+  );
+}
+
+/**
+ * Lazily fetch the self viewer's live ReCiter suggestions and render the compact
+ * Publications-row teaser only when a high-confidence (≥70) hero exists. Mounted
+ * only when `reciterPendingEnabled` is true (genuine self + flag on), so the
+ * dormant page makes ZERO fetch. Renders nothing while loading / empty / sub-hero.
+ */
+function PublicationsSuggestionTeaserLoader() {
+  const suggestions = useReciterPendingSuggestions();
+  const hero =
+    suggestions.length > 0 && suggestions[0].score >= 70 ? suggestions[0] : null;
+  if (!hero) return null;
+  return <PublicationsSuggestionTeaser hero={hero} count={suggestions.length} />;
+}
+
+/**
+ * The compact "pending in ReCiter" teaser shown beneath the Publications row's
+ * subtitle when a high-confidence (≥70) hero suggestion exists: a small green
+ * score chip + the truncated article title + a link into Publication Manager.
+ */
+function PublicationsSuggestionTeaser({
+  hero,
+  count,
+}: {
+  hero: ReciterSuggestion;
+  count: number;
+}) {
+  return (
+    <div
+      data-testid="home-reciter-pending-teaser"
+      className="mt-1.5 flex flex-col gap-1"
+    >
+      <p className="flex min-w-0 items-center gap-1.5 text-[0.8rem]">
+        <span className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green inline-flex flex-none items-center rounded-full border px-1.5 py-0.5 text-[0.65rem] font-semibold tabular-nums">
+          {hero.score}
+        </span>
+        <span className="text-foreground truncate font-medium">{hero.articleTitle}</span>
+      </p>
+      <a
+        href={PUBLICATION_MANAGER_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        data-testid="home-reciter-pending-link"
+        className="text-apollo-slate inline-flex items-center gap-1 self-start text-[0.8rem] font-medium"
+      >
+        {count === 1 ? "1 suggested article" : `${count} suggested articles`} — review in ReCiter
+        <ArrowUpRight className="size-3.5" aria-hidden />
+      </a>
+    </div>
   );
 }
