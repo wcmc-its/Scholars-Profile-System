@@ -2057,7 +2057,7 @@ export async function searchPeople(opts: {
         ],
         _source: ["pmid", "title", "year"],
         highlight: {
-          fields: { title: {} },
+          fields: { title: { number_of_fragments: 0 } },
           highlight_query: {
             multi_match: { query: contentQuery, fields: ["title"], operator: "or" },
           },

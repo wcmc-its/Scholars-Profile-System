@@ -34,7 +34,7 @@ export function HighlightedSnippet({ html }: { html: string }) {
     <>
       {cleaned.split(/(<mark>.*?<\/mark>)/g).map((part, i) =>
         part.startsWith("<mark>") ? (
-          <strong key={i} className="font-semibold text-[#1a1a1a]">
+          <strong key={i} className="font-medium text-[#1a1a1a]">
             {part.replace(/<\/?mark>/g, "")}
           </strong>
         ) : (

@@ -74,7 +74,7 @@ function HumanizedAreas({
         <span key={`${label}-${i}`}>
           {i > 0 ? ", " : ""}
           {i === matchedIndex ? (
-            <strong className="font-semibold text-[#111]">{label}</strong>
+            <strong className="font-medium text-[#111]">{label}</strong>
           ) : (
             label
           )}
