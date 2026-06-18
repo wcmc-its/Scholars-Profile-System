@@ -2,24 +2,30 @@
  * Self-edit v1 — post-commit reflection (#356, `self-edit-spec.md` § Post-commit
  * reflection).
  *
- * After an `/api/edit/*` write commits, three caches are refreshed in the
- * request path:
+ * After an `/api/edit/*` write commits, three caches are refreshed:
  *
  *   - **Next.js ISR** — `revalidatePath()` busts the per-route cache so the
- *     origin regenerates the affected pages.
+ *     origin regenerates the affected pages. In-process and cheap, so it stays
+ *     in the request path.
  *   - **CloudFront CDN** — a `CreateInvalidation` purges the edge copy, since
  *     `revalidatePath()` does not. A ≤24h edge-cache window on a suppressed
  *     page reintroduces exactly the staleness the urgency split exists to
- *     eliminate. Dormant pre-launch (no `SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID`).
+ *     eliminate. The durable outbox row is enqueued in the request path, but
+ *     the slow AWS `CreateInvalidation` round-trip runs AFTER the response
+ *     (#955 #6 — `runAfterResponse`). Dormant pre-launch (no
+ *     `SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID`).
  *   - **OpenSearch index** — `reflectSearchSuppression` (Phase 4b C5,
- *     `lib/edit/search-suppression.ts`) writes the synchronous fast-path —
- *     ADR-005 failure-model layer 1. Closes the ≤24h gap between a
- *     suppress / revoke and the nightly `etl/search-index` rebuild.
+ *     `lib/edit/search-suppression.ts`) writes the fast-path — ADR-005
+ *     failure-model layer 1. The suppress / revoke / reject routes now schedule
+ *     it AFTER the response too (#955 #6); it closes the ≤24h gap to the nightly
+ *     `etl/search-index` rebuild.
  *
  * All three are **best-effort**: failures are logged, never thrown, so they
- * cannot roll back the already-committed write. The durable retry / outbox
- * for a failed CloudFront invalidation is #353; the equivalent for a failed
- * OpenSearch write is #393 (the reconciler — ADR-005 failure-model layer 3).
+ * cannot roll back the already-committed write. Because the slow reflections run
+ * off the request path, the durable backstops carry them home: a failed (or
+ * lost) CloudFront invalidation is retried from the #353 outbox row enqueued
+ * in-path; a failed OpenSearch write is retried by #393 from the suppression
+ * row's NULL `searchReflectedAt` sentinel (both ADR-005 failure-model layer 3).
  *
  * This file owns the ISR + CloudFront half. Every content-edit reflector
  * (`reflectVisibilityChange`, `reflectOverviewEdit`, `reflectUnitChange`)
@@ -40,6 +46,7 @@ import { CloudFrontClient, CreateInvalidationCommand } from "@aws-sdk/client-clo
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/lib/db";
+import { runAfterResponse } from "@/lib/edit/after-response";
 import { isAllowedRevalidatePath } from "@/lib/revalidate-allowlist";
 import { canonicalProfilePath } from "@/lib/profile-url";
 
@@ -106,8 +113,11 @@ async function invalidateCloudFront(paths: readonly string[]): Promise<void> {
   const distributionId = process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID;
   if (!distributionId || paths.length === 0) return;
 
-  // 1. Enqueue a pending outbox row remembering the exact (non-recomputable)
-  //    paths. Best-effort: if the INSERT fails we log and fall through to a
+  // 1. Enqueue a pending outbox row IN the request path, remembering the exact
+  //    (non-recomputable) paths. This durable row is the #353 backstop, so it
+  //    must be written synchronously: if the deferred send below never completes
+  //    (process death) or fails, the reconciler still has the row to retry.
+  //    Best-effort — if the INSERT itself fails we log and still schedule a
   //    best-effort one-shot send without a row to mark.
   let rowId: string | null = null;
   try {
@@ -126,7 +136,26 @@ async function invalidateCloudFront(paths: readonly string[]): Promise<void> {
     );
   }
 
-  // 2. Attempt the invalidation and mark the row accordingly.
+  // 2. Defer the slow CloudFront `CreateInvalidation` (an AWS API round-trip)
+  //    off the request path (#955 #6). The edit POST returns as soon as the
+  //    durable row above is enqueued; the purge lands right after the response,
+  //    and the #353 reconciler retries on its ≤5 min cadence if the deferred
+  //    send is lost or fails.
+  runAfterResponse(() => sendAndRecordCloudFront(distributionId, paths, rowId));
+}
+
+/**
+ * Send one CloudFront invalidation and record the outcome on its outbox row —
+ * stamp `invalidatedAt` on success, or `attempts`/`lastError` on failure (left
+ * pending for the #353 reconciler). Split out of `invalidateCloudFront` so it
+ * can run AFTER the response (#955 #6). Entirely best-effort: every failure is
+ * logged, never thrown, so it cannot disturb the already-committed write.
+ */
+async function sendAndRecordCloudFront(
+  distributionId: string,
+  paths: readonly string[],
+  rowId: string | null,
+): Promise<void> {
   try {
     await sendCloudFrontInvalidation(distributionId, paths);
     if (rowId) {

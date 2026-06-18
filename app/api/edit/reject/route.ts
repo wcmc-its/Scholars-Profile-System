@@ -25,6 +25,7 @@
 import { type NextRequest, type NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
+import { runAfterResponse } from "@/lib/edit/after-response";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { authorizeSuppress, logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
@@ -138,12 +139,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // Drop the rejected authorship from the profile + search, exactly like a hide.
   const affected = await resolveAffectedProfiles("publication", pmid, uid);
   await reflectVisibilityChange(affected.map((a) => a.slug));
-  await reflectSearchSuppression({
-    suppressionId: result.suppressionId,
-    entityType: "publication",
-    entityId: pmid,
-    contributorCwid: uid,
-    affectedCwids: affected.map((a) => a.cwid),
+  // Run the OpenSearch fast-path AFTER the response (#955 #6); the suppression
+  // row is durable, so the #393 reconciler backstops a lost or failed run.
+  runAfterResponse(async () => {
+    await reflectSearchSuppression({
+      suppressionId: result.suppressionId,
+      entityType: "publication",
+      entityId: pmid,
+      contributorCwid: uid,
+      affectedCwids: affected.map((a) => a.cwid),
+    });
   });
 
   // Best-effort gold-standard write. Dormant (unconfigured) ⇒ leave the pending
