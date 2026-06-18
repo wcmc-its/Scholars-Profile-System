@@ -30,15 +30,34 @@ import type {
 export function CenterMembersClient({
   result,
   centerSlug,
+  programPagesEnabled = false,
 }: {
   result: CenterMembersResult;
   centerSlug: string;
+  /** #1105 — when on, eligible (non-excluded) program section headers link to
+   *  the dedicated `/centers/[slug]/programs/[code]` page. */
+  programPagesEnabled?: boolean;
 }) {
   if (result.mode === "grouped") {
-    return <GroupedRoster groups={result.groups} total={result.total} />;
+    return (
+      <GroupedRoster
+        groups={result.groups}
+        total={result.total}
+        centerSlug={centerSlug}
+        programPagesEnabled={programPagesEnabled}
+      />
+    );
   }
   return <FlatMembers result={result} centerSlug={centerSlug} />;
 }
+
+/**
+ * #1105 — program codes that have no dedicated page (the `ZY` "Non-aligned
+ * Clinical" catch-all). Mirrors `lib/api/centers.ts` `PROGRAM_PAGE_EXCLUDED_CODES`
+ * — duplicated as a literal here to keep this a client component (no server
+ * import). Keep the two in sync.
+ */
+const PROGRAM_PAGE_EXCLUDED_CODES: ReadonlySet<string> = new Set(["ZY"]);
 
 /** Research/Clinical pill rendered after a member's role tag in the roster. */
 function MembershipBadge({ type }: { type: CenterMembershipType | null }) {
@@ -73,9 +92,13 @@ const NO_DEPT = "—";
 function GroupedRoster({
   groups,
   total,
+  centerSlug,
+  programPagesEnabled,
 }: {
   groups: CenterMemberGroup[];
   total: number;
+  centerSlug: string;
+  programPagesEnabled: boolean;
 }) {
   const [appointment, setAppointment] = useState<RoleCategory>("All");
   const [selPrograms, setSelPrograms] = useState<ReadonlySet<string>>(new Set());
@@ -91,6 +114,12 @@ function GroupedRoster({
     [groups],
   );
   const programOrder = useMemo(() => groups.map((g) => g.label), [groups]);
+  // #1105 — program code per section label, for the optional page link on the
+  // section header. The synthetic "Other" group has a null code (no page).
+  const codeByLabel = useMemo(
+    () => new Map(groups.map((g) => [g.label, g.code])),
+    [groups],
+  );
 
   const deptKey = (m: RowWithProgram) => m.departmentName || NO_DEPT;
   const typeKey = (m: RowWithProgram): string => m.membershipType ?? "";
@@ -284,12 +313,31 @@ function GroupedRoster({
           </p>
         ) : (
           <div className="flex flex-col gap-8">
-            {sections.map((g) => (
+            {sections.map((g) => {
+              // #1105 — link the section header to the dedicated program page
+              // when the flag is on and the program is page-eligible (has a code,
+              // not the excluded ZY catch-all / the synthetic "Other" bucket).
+              const code = codeByLabel.get(g.label) ?? null;
+              const linked =
+                programPagesEnabled &&
+                !!code &&
+                !PROGRAM_PAGE_EXCLUDED_CODES.has(code);
+              return (
               <section key={g.label}>
                 {!hideHeaders && (
                   <div className="mb-3 flex items-baseline justify-between border-b border-border pb-2">
                     <h2 className="text-[12px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                      {g.label}
+                      {linked ? (
+                        <a
+                          href={`/centers/${centerSlug}/programs/${code}`}
+                          className="hover:underline"
+                          style={{ textDecoration: "none" }}
+                        >
+                          {g.label}
+                        </a>
+                      ) : (
+                        g.label
+                      )}
                     </h2>
                     <span className="text-[11px] text-muted-foreground">
                       {g.members.length} {g.members.length === 1 ? "member" : "members"}
@@ -307,7 +355,8 @@ function GroupedRoster({
                   ))}
                 </div>
               </section>
-            ))}
+              );
+            })}
           </div>
         )}
 

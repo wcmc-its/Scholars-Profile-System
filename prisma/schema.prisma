@@ -1020,6 +1020,16 @@ model CenterProgram {
   code       String @db.VarChar(16)
   label      String @db.VarChar(255)
   sortOrder  Int    @default(0) @map("sort_order")
+  /// #1105 — per-program page fields. A program's dedicated page
+  /// (`/centers/[slug]/programs/[code]`, flag `CENTER_PROGRAM_PAGES`) renders a
+  /// LeaderCard from `leaderCwid` (resolving to a WCM scholar, or the
+  /// `lib/external-leaders.ts` fallback keyed `<centerCode>:<programCode>`) and a
+  /// prose `description`. All three are manually owned (no ETL writes them) and
+  /// null/false by default, so the feature ships dark.
+  leaderCwid    String?  @map("leader_cwid") @db.VarChar(32)
+  /// Interim/acting qualifier for the program leader — renders "Interim Leader".
+  leaderInterim Boolean  @default(false) @map("leader_interim")
+  description   String?  @map("description") @db.Text
 
   center  Center             @relation(fields: [centerCode], references: [code], onDelete: Cascade)
   members CenterMembership[]
