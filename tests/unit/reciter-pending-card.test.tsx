@@ -119,4 +119,34 @@ describe("ReciterPendingCard — dormant-safe pending-suggestions nudge", () => 
     render(<ReciterPendingCard suggestions={[suggestion({ score: 80, isPreprint: true })]} />);
     expect(screen.getByTestId("reciter-pending-preprint")).toBeTruthy();
   });
+
+  it("self mode keeps the first-person copy (unchanged)", () => {
+    render(<ReciterPendingCard suggestions={[suggestion({ score: 85 })]} />);
+    const bridge = screen.getByTestId("reciter-pending-bridge");
+    expect(bridge.textContent).toContain("missing from your profile");
+    expect(bridge.textContent).toContain("papers of yours that aren");
+    // The first-person authorship tooltip is present.
+    expect(document.body.textContent).toContain("how likely this paper is yours");
+    expect(document.body.textContent).not.toContain("this scholar");
+  });
+
+  it("superuser mode reframes the copy in the third person for the target scholar", () => {
+    render(
+      <ReciterPendingCard
+        suggestions={[suggestion({ score: 85 })]}
+        mode="superuser"
+        scholarName="Jane Doe"
+      />,
+    );
+    const bridge = screen.getByTestId("reciter-pending-bridge");
+    // Title: "this profile", not "your profile".
+    expect(bridge.textContent).toContain("missing from this profile");
+    expect(bridge.textContent).not.toContain("missing from your profile");
+    // Curation line: "this scholar's … their profile", not first-person.
+    expect(bridge.textContent).toContain("papers of this scholar");
+    expect(bridge.textContent).toContain("on Jane Doe");
+    // Score tooltip: "how likely this paper is Jane Doe's", not "yours".
+    expect(document.body.textContent).toContain("how likely this paper is Jane Doe");
+    expect(document.body.textContent).not.toContain("this paper is yours");
+  });
 });

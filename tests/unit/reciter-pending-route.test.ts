@@ -1,11 +1,13 @@
 /**
- * GET /api/edit/reciter-pending — the self-only live ReCiter pending-articles
- * read (`SELF_EDIT_RECITER_PENDING_HINT`).
+ * GET /api/edit/reciter-pending — the live ReCiter pending-articles read
+ * (`SELF_EDIT_RECITER_PENDING_HINT`).
  *
  * Verifies: dormant flag-off returns `{ suggestions: [] }` WITHOUT touching the
- * session or the engine; no session returns `[]`; the engine read is keyed on
- * the REAL `session.cwid` (the self-only uid — never an impersonation target);
- * the route degrades to `[]` (and never throws) when the client read throws.
+ * session or the engine; no session returns `[]`; a self read (no/own `?cwid`)
+ * is keyed on the session's own cwid; a SUPERUSER may read another scholar's
+ * suggestions via `?cwid=`; a NON-superuser asking for another scholar's cwid
+ * degrades to `[]` (the engine is never read for the other target); the route
+ * degrades to `[]` (and never throws) when the client read throws.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
@@ -15,7 +17,9 @@ const { mockGetSession, mockIsEnabled, mockFetchSuggested } = vi.hoisted(() => (
   mockFetchSuggested: vi.fn(),
 }));
 
-vi.mock("@/lib/auth/session-server", () => ({ getSession: mockGetSession }));
+vi.mock("@/lib/auth/effective-identity", () => ({
+  getEffectiveEditSession: mockGetSession,
+}));
 vi.mock("@/lib/edit/reciter-pending-hint", () => ({
   isReciterPendingHintEnabled: mockIsEnabled,
 }));
@@ -35,18 +39,23 @@ const SUGGESTION = {
   isPreprint: false,
 };
 
+/** A minimal NextRequest-ish stand-in: GET only reads `request.url`. */
+function req(url = "https://app.example/api/edit/reciter-pending"): Request {
+  return new Request(url);
+}
+
 describe("GET /api/edit/reciter-pending", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: flag on, a genuine self session, the engine returns one suggestion.
+    // Default: flag on, a genuine self superuser-false session, one suggestion.
     mockIsEnabled.mockReturnValue(true);
-    mockGetSession.mockResolvedValue({ cwid: "self01" });
+    mockGetSession.mockResolvedValue({ cwid: "self01", isSuperuser: false });
     mockFetchSuggested.mockResolvedValue([SUGGESTION]);
   });
 
   it("returns { suggestions: [] } and does NOT read the session or engine when the flag is off", async () => {
     mockIsEnabled.mockReturnValue(false);
-    const res = await GET();
+    const res = await GET(req() as never);
     expect(await res.json()).toEqual({ suggestions: [] });
     expect(mockGetSession).not.toHaveBeenCalled();
     expect(mockFetchSuggested).not.toHaveBeenCalled();
@@ -54,26 +63,53 @@ describe("GET /api/edit/reciter-pending", () => {
 
   it("returns { suggestions: [] } and does NOT read the engine when there is no session", async () => {
     mockGetSession.mockResolvedValue(null);
-    const res = await GET();
+    const res = await GET(req() as never);
     expect(await res.json()).toEqual({ suggestions: [] });
     expect(mockFetchSuggested).not.toHaveBeenCalled();
   });
 
-  it("reads the engine with the REAL session.cwid (self-only uid) and returns its suggestions", async () => {
-    const res = await GET();
+  it("reads the engine with the session's own cwid when no ?cwid is supplied (self)", async () => {
+    const res = await GET(req() as never);
     expect(mockFetchSuggested).toHaveBeenCalledTimes(1);
     expect(mockFetchSuggested).toHaveBeenCalledWith("self01");
     expect(await res.json()).toEqual({ suggestions: [SUGGESTION] });
   });
 
+  it("reads the engine with the session's own cwid when ?cwid equals it (self)", async () => {
+    const res = await GET(req("https://app.example/api/edit/reciter-pending?cwid=self01") as never);
+    expect(mockFetchSuggested).toHaveBeenCalledTimes(1);
+    expect(mockFetchSuggested).toHaveBeenCalledWith("self01");
+    expect(await res.json()).toEqual({ suggestions: [SUGGESTION] });
+  });
+
+  it("lets a SUPERUSER read another scholar's suggestions via ?cwid (superuser parity)", async () => {
+    mockGetSession.mockResolvedValue({ cwid: "admin99", isSuperuser: true });
+    const res = await GET(
+      req("https://app.example/api/edit/reciter-pending?cwid=other22") as never,
+    );
+    expect(mockFetchSuggested).toHaveBeenCalledTimes(1);
+    expect(mockFetchSuggested).toHaveBeenCalledWith("other22");
+    expect(await res.json()).toEqual({ suggestions: [SUGGESTION] });
+  });
+
+  it("returns { suggestions: [] } and never reads the target when a NON-superuser asks for another cwid", async () => {
+    mockGetSession.mockResolvedValue({ cwid: "self01", isSuperuser: false });
+    const res = await GET(
+      req("https://app.example/api/edit/reciter-pending?cwid=other22") as never,
+    );
+    expect(await res.json()).toEqual({ suggestions: [] });
+    expect(mockFetchSuggested).not.toHaveBeenCalledWith("other22");
+    expect(mockFetchSuggested).not.toHaveBeenCalled();
+  });
+
   it("never marks the response cacheable (no-store)", async () => {
-    const res = await GET();
+    const res = await GET(req() as never);
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
   it("degrades to { suggestions: [] } (never throws) when the client read throws", async () => {
     mockFetchSuggested.mockRejectedValue(new Error("engine down"));
-    const res = await GET();
+    const res = await GET(req() as never);
     expect(await res.json()).toEqual({ suggestions: [] });
   });
 });

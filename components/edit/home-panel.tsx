@@ -47,6 +47,10 @@ export type HomePanelProps = {
    *  pubs tab). */
   mode?: "self" | "superuser";
   basePath: string;
+  /** The target scholar's CWID — threaded to the ReCiter pending teaser so a
+   *  superuser reads the target scholar's suggestions (self omits it / reads
+   *  the signed-in identity). */
+  cwid?: string;
   preferredName: string;
   /** The WCM directory headshot URL for this scholar (404s when none exists). */
   identityImageEndpoint: string;
@@ -74,6 +78,7 @@ type HeadshotState = "loading" | "present" | "missing";
 export function HomePanel({
   mode = "self",
   basePath,
+  cwid,
   preferredName,
   identityImageEndpoint,
   hasBio,
@@ -123,6 +128,7 @@ export function HomePanel({
           isAdmin={isAdmin}
           name={preferredName}
           reciterPendingEnabled={reciterPendingEnabled}
+          cwid={cwid}
         />
       </ChecklistGroup>
 
@@ -554,14 +560,18 @@ function PublicationsItem({
   isAdmin,
   name,
   reciterPendingEnabled,
+  cwid,
 }: {
   basePath: string;
   total: number;
   hidden: number;
   isAdmin: boolean;
   name: string;
-  /** Whether to mount the live pending-articles teaser loader (self + flag on). */
+  /** Whether to mount the live pending-articles teaser loader (self/superuser + flag on). */
   reciterPendingEnabled: boolean;
+  /** Target scholar's CWID — threaded to the teaser so a superuser reads the
+   *  target scholar's suggestions; omitted ⇒ the signed-in identity (self). */
+  cwid?: string;
 }) {
   const subtitle =
     total === 0
@@ -577,7 +587,11 @@ function PublicationsItem({
       marker={total > 0 ? "done" : "info"}
       title="Publications"
       subtitle={subtitle}
-      teaser={reciterPendingEnabled ? <PublicationsSuggestionTeaserLoader /> : null}
+      teaser={
+        reciterPendingEnabled ? (
+          <PublicationsSuggestionTeaserLoader cwid={cwid} />
+        ) : null
+      }
       // Both self and superuser now have a per-scholar Publications tab to
       // deep-link into (a superuser manages pubs on the scholar's behalf), so the
       // "Review" link shows in both modes.
@@ -591,13 +605,15 @@ function PublicationsItem({
 }
 
 /**
- * Lazily fetch the self viewer's live ReCiter suggestions and render the compact
- * Publications-row teaser only when a high-confidence (≥70) hero exists. Mounted
- * only when `reciterPendingEnabled` is true (genuine self + flag on), so the
- * dormant page makes ZERO fetch. Renders nothing while loading / empty / sub-hero.
+ * Lazily fetch the target scholar's live ReCiter suggestions and render the
+ * compact Publications-row teaser only when a high-confidence (≥70) hero exists.
+ * Pass `cwid` to read a specific scholar (the superuser-parity case); omit it to
+ * read the signed-in identity (self). Mounted only when `reciterPendingEnabled`
+ * is true (self/superuser + flag on), so the dormant page makes ZERO fetch.
+ * Renders nothing while loading / empty / sub-hero.
  */
-function PublicationsSuggestionTeaserLoader() {
-  const suggestions = useReciterPendingSuggestions();
+function PublicationsSuggestionTeaserLoader({ cwid }: { cwid?: string }) {
+  const suggestions = useReciterPendingSuggestions(cwid);
   const hero =
     suggestions.length > 0 && suggestions[0].score >= 70 ? suggestions[0] : null;
   if (!hero) return null;

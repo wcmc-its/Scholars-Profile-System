@@ -82,4 +82,21 @@ describe("ReciterPendingCardClient — lazy self-only loader", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(container.firstChild).toBeNull();
   });
+
+  it("appends ?cwid= when a target cwid is supplied (superuser-parity read)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ suggestions: [HERO] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ReciterPendingCardClient cwid="other22" mode="superuser" scholarName="Jane Doe" />);
+
+    await waitFor(() => expect(screen.getByTestId("reciter-pending-bridge")).toBeTruthy());
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/edit/reciter-pending?cwid=other22");
+    // Superuser-mode third-person copy flows through to the card.
+    expect(screen.getByTestId("reciter-pending-bridge").textContent).toContain(
+      "missing from this profile",
+    );
+  });
 });
