@@ -296,7 +296,9 @@ export function PublicationsCard({
         </>
       }
     >
-      {reciterPendingEnabled && <ReciterPendingCardClient />}
+      {reciterPendingEnabled && (
+        <ReciterPendingCardClient cwid={cwid} mode={mode} scholarName={scholarName} />
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground" aria-live="polite">
             <span className="text-foreground font-medium">{totalCount.toLocaleString()}</span>

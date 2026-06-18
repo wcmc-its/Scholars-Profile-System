@@ -501,6 +501,7 @@ function renderPanel(
         <HomePanel
           mode={childMode}
           basePath={detailBase}
+          cwid={cwid}
           preferredName={scholarName}
           identityImageEndpoint={identityImageEndpoint(cwid)}
           hasBio={ctx.scholar.overview.trim().length > 0}
@@ -511,10 +512,14 @@ function renderPanel(
           // shown only to a genuine self viewer, never a superuser or a proxy.
           manageableUnits={mode === "self" ? manageableUnits : []}
           isSuperuser={mode === "self" ? isSuperuser : false}
-          // ReCiter pending suggestions are self-only: the page computes
-          // `reciterPendingEnabled` = flag on AND genuine self, and only then does
-          // the Home teaser client-fetch. Self-only by construction.
-          reciterPendingEnabled={mode === "self" ? reciterPendingEnabled : false}
+          // ReCiter pending suggestions are surfaced for the scholar themselves OR
+          // a superuser viewing the target (parity with the COI-gap hint). The page
+          // computes `reciterPendingEnabled` = flag on AND (self OR superuser); the
+          // teaser fetches the target `cwid`, which the route re-authorizes. Proxy /
+          // unit-admin get false (no nudge).
+          reciterPendingEnabled={
+            mode === "self" || mode === "superuser" ? reciterPendingEnabled : false
+          }
         />
       );
     }
@@ -621,10 +626,15 @@ function renderPanel(
           scholarName={scholarName}
           publications={ctx.publications}
           rejectEnabled={isReciterRejectEnabled()}
-          // Self-only by construction: the page sets `reciterPendingEnabled` only
-          // for a genuine self viewer with the flag on; a superuser/proxy child
-          // mode gets false and the client loader never mounts.
-          reciterPendingEnabled={childMode === "self" ? reciterPendingEnabled : false}
+          // Surfaced for the scholar themselves OR a superuser viewing the target
+          // (parity with the COI-gap hint). `childMode` is "self" for a genuine
+          // self viewer and "superuser" for a superuser; both mount the loader,
+          // which fetches the target `cwid` (route-authorized). A proxy / unit-admin
+          // collapses to "self" childMode but the page sets `reciterPendingEnabled`
+          // only for self|superuser, so they get false (no nudge).
+          reciterPendingEnabled={
+            childMode === "self" || childMode === "superuser" ? reciterPendingEnabled : false
+          }
         />
       );
     case "funding":

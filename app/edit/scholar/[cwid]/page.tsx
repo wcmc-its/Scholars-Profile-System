@@ -42,6 +42,7 @@ import {
 import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
+import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
 
 export const dynamic = "force-dynamic";
 
@@ -169,6 +170,13 @@ export default async function EditScholarPage({
   const selfOrSuperuser = isSelf || session.isSuperuser || session.isCommsSteward;
   const includeHighlights = isManualHighlightsEnabled() && selfOrSuperuser;
   const includeCoiGap = isCoiGapHintEnabled() && (isSelf || session.isSuperuser);
+  // ReCiter pending-pubs nudge — superuser parity with the COI-gap hint above:
+  // surfaced for the scholar themselves OR a (non-impersonating) superuser viewing
+  // the target. The data is a LIVE client read against the ReCiter engine, fetched
+  // lazily behind `/api/edit/reciter-pending?cwid=<target>` which re-authorizes the
+  // supplied cwid; this flag only gates whether the client loader mounts at all.
+  const reciterPendingEnabled =
+    isReciterPendingHintEnabled() && (isSelf || session.isSuperuser);
   const ctx = await loadEditContext(targetCwid, db.read, new Date(), undefined, {
     includeHighlights,
     includeCoiGap,
@@ -283,6 +291,7 @@ export default async function EditScholarPage({
       proxyEditors={proxyEditors}
       unitAdminEditors={unitAdminEditors}
       unitAdminBanner={unitAdminBanner}
+      reciterPendingEnabled={reciterPendingEnabled}
     />
   );
 }

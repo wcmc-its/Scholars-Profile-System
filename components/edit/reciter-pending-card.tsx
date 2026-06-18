@@ -41,6 +41,13 @@ import type { ReciterSuggestion } from "@/lib/reciter/client";
 
 export type ReciterPendingCardProps = {
   suggestions: ReadonlyArray<ReciterSuggestion>;
+  /** `"self"` (default) uses first-person copy ("your profile"); `"superuser"`
+   *  reframes it in the third person for an admin curating another scholar's
+   *  suggestions, mirroring the COI-gap / Publications cards. */
+  mode?: "self" | "superuser";
+  /** The target scholar's display name — only used in `"superuser"` mode to
+   *  possessivize the third-person copy. */
+  scholarName?: string;
 };
 
 /** A hero shows only when the top suggestion clears this confidence bar. */
@@ -49,12 +56,18 @@ const HERO_SCORE = 70;
 const PUBMED_URL = (pmid: string) =>
   `https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(pmid)}/`;
 
-export function ReciterPendingCard({ suggestions }: ReciterPendingCardProps) {
+export function ReciterPendingCard({
+  suggestions,
+  mode = "self",
+  scholarName = "",
+}: ReciterPendingCardProps) {
   if (suggestions.length === 0) return null;
 
   const n = suggestions.length;
   const top = suggestions[0];
   const hasHero = top.score >= HERO_SCORE;
+  const su = mode === "superuser";
+  const possessive = su ? `${scholarName}’s` : "your";
 
   return (
     <div
@@ -65,18 +78,18 @@ export function ReciterPendingCard({ suggestions }: ReciterPendingCardProps) {
         <p className="text-foreground flex items-center gap-2 text-sm font-semibold">
           <span className="bg-apollo-amber size-[7px] shrink-0 rounded-full" aria-hidden />
           {n === 1
-            ? "1 publication may be missing from your profile"
-            : `${n} publications may be missing from your profile`}
+            ? `1 publication may be missing from ${su ? "this" : "your"} profile`
+            : `${n} publications may be missing from ${su ? "this" : "your"} profile`}
         </p>
         <p className="text-muted-foreground mt-1 max-w-prose text-[0.8rem] leading-relaxed">
           Candidate articles like {n === 1 ? "this" : "these"} are often accepted or rejected by WCM
-          library curators on scholars&rsquo; behalf; the ones still pending may include papers of
-          yours that aren&rsquo;t on your profile yet.
+          library curators on scholars&rsquo; behalf; the ones still pending may include papers of{" "}
+          {su ? "this scholar’s" : "yours"} that aren&rsquo;t on {possessive} profile yet.
         </p>
       </div>
 
       {hasHero ? (
-        <HeroSuggestion suggestion={top} more={n - 1} />
+        <HeroSuggestion suggestion={top} more={n - 1} mode={mode} scholarName={scholarName} />
       ) : (
         <ReferredList suggestions={suggestions} />
       )}
@@ -102,13 +115,25 @@ export function ReciterPendingCard({ suggestions }: ReciterPendingCardProps) {
 }
 
 /** The amber/green numeric authorship-confidence chip with an info tooltip. */
-function ScoreChip({ score }: { score: number }) {
+function ScoreChip({
+  score,
+  mode = "self",
+  scholarName = "",
+}: {
+  score: number;
+  mode?: "self" | "superuser";
+  scholarName?: string;
+}) {
   const green = score >= HERO_SCORE;
+  const su = mode === "superuser";
   // The authorship-confidence explanation (operator-approved verbatim copy). It
   // is the hover tooltip's content AND an always-present visually-hidden
   // description, so the affordance is keyboard/SR-reachable even when the Radix
-  // portal isn't mounted (it mounts only while open).
-  const tooltipCopy = `Authorship confidence — ${score} / 100. ReCiter's empirically-derived estimate of how likely this paper is yours, based on your name, affiliations, co-authors, topics and grants. Higher means more certain.`;
+  // portal isn't mounted (it mounts only while open). In superuser mode the
+  // first-person "yours" / "your" become third-person for the target scholar.
+  const whose = su ? `this paper is ${scholarName}’s` : "this paper is yours";
+  const possessive = su ? "their" : "your";
+  const tooltipCopy = `Authorship confidence — ${score} / 100. ReCiter's empirically-derived estimate of how likely ${whose}, based on ${possessive} name, affiliations, co-authors, topics and grants. Higher means more certain.`;
   return (
     <span
       data-testid="reciter-pending-score-chip"
@@ -195,16 +220,20 @@ function Citation({ suggestion }: { suggestion: ReciterSuggestion }) {
 function HeroSuggestion({
   suggestion,
   more,
+  mode = "self",
+  scholarName = "",
 }: {
   suggestion: ReciterSuggestion;
   more: number;
+  mode?: "self" | "superuser";
+  scholarName?: string;
 }) {
   return (
     <div
       data-testid="reciter-pending-hero"
       className="border-apollo-border bg-apollo-surface flex flex-col gap-2.5 rounded-md border px-3.5 py-3"
     >
-      <ScoreChip score={suggestion.score} />
+      <ScoreChip score={suggestion.score} mode={mode} scholarName={scholarName} />
       <Citation suggestion={suggestion} />
       {more > 0 && (
         <p className="text-muted-foreground text-[0.8rem]">
@@ -237,28 +266,34 @@ function ReferredList({
   );
 }
 
-/** The self-only API the client loader fetches. Server-gated: the route returns
- *  `{ suggestions: [] }` when the flag is off or the viewer isn't a genuine self,
- *  so a dormant page never surfaces anything. */
+/** The API the client loader fetches. The route is the authz point: it returns
+ *  `{ suggestions: [] }` when the flag is off, there is no session, or a
+ *  non-superuser asks for a cwid that isn't their own — so a dormant page (or an
+ *  unauthorized read) never surfaces anything. */
 const RECITER_PENDING_ENDPOINT = "/api/edit/reciter-pending";
 
 /**
- * Lazily fetch the self viewer's live ReCiter pending suggestions on mount.
+ * Lazily fetch the target scholar's live ReCiter pending suggestions on mount.
  *
- * Returns the suggestions (empty until the fetch resolves) — the ReCiter engine
- * read happens client-side so the dormant page makes ZERO server round-trip:
- * the loader is only ever rendered when `reciterPendingEnabled` is true. Any
- * non-2xx / parse / network failure degrades silently to `[]` (the route itself
- * also degrades to `[]`).
+ * Pass `cwid` to read a specific scholar (the superuser-parity case); omit it to
+ * read the signed-in identity (the self case). The route authorizes the supplied
+ * cwid (a non-superuser may only read their own). Returns the suggestions (empty
+ * until the fetch resolves) — the ReCiter engine read happens client-side so the
+ * dormant page makes ZERO server round-trip: the loader is only ever rendered
+ * when `reciterPendingEnabled` is true. Any non-2xx / parse / network failure
+ * degrades silently to `[]` (the route itself also degrades to `[]`).
  */
-export function useReciterPendingSuggestions(): ReciterSuggestion[] {
+export function useReciterPendingSuggestions(cwid?: string): ReciterSuggestion[] {
   const [suggestions, setSuggestions] = React.useState<ReciterSuggestion[]>([]);
 
   React.useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(RECITER_PENDING_ENDPOINT, {
+        const url =
+          RECITER_PENDING_ENDPOINT +
+          (cwid ? "?cwid=" + encodeURIComponent(cwid) : "");
+        const res = await fetch(url, {
           method: "GET",
           headers: { accept: "application/json" },
         });
@@ -274,18 +309,28 @@ export function useReciterPendingSuggestions(): ReciterSuggestion[] {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [cwid]);
 
   return suggestions;
 }
 
 /**
- * Client loader for the full publications-card nudge. Fetches the self viewer's
- * live ReCiter suggestions on mount and renders {@link ReciterPendingCard} once
- * populated; renders nothing while loading, empty, or on error.
+ * Client loader for the full publications-card nudge. Fetches the target
+ * scholar's live ReCiter suggestions on mount (self by default, or the supplied
+ * `cwid` for a superuser viewing another scholar) and renders
+ * {@link ReciterPendingCard} once populated; renders nothing while loading,
+ * empty, or on error.
  */
-export function ReciterPendingCardClient() {
-  const suggestions = useReciterPendingSuggestions();
+export function ReciterPendingCardClient({
+  cwid,
+  mode,
+  scholarName,
+}: {
+  cwid?: string;
+  mode?: "self" | "superuser";
+  scholarName?: string;
+} = {}) {
+  const suggestions = useReciterPendingSuggestions(cwid);
   if (suggestions.length === 0) return null;
-  return <ReciterPendingCard suggestions={suggestions} />;
+  return <ReciterPendingCard suggestions={suggestions} mode={mode} scholarName={scholarName} />;
 }
