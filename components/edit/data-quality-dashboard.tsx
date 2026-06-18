@@ -3,11 +3,11 @@
  * (`docs/data-quality-dashboard-spec.md`).
  *
  * Server-rendered. The filter sidebar is a small client island
- * (`DataQualityFilters`) that submits a plain GET form; this component renders the
- * summary chips, the prominence-sorted table it is handed, the CSV-export link,
- * and pagination — all carrying the current filters as query params, so the page
- * needs no client JS beyond the facet pickers. The page supplies the Apollo header
- * + `AdminSubnav`.
+ * (`DataQualityFilters`) that auto-applies each change by navigating to a new
+ * query string; this component renders the summary chips, the prominence-sorted
+ * table it is handed, the CSV-export link, and pagination — all carrying the
+ * current filters as query params. The page supplies the Apollo header +
+ * `AdminSubnav`.
  *
  * Authorization/scope is the page's job; this component only renders what it gets.
  */

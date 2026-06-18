@@ -3,22 +3,21 @@
 /**
  * The Data Quality dashboard filter sidebar (#3/#4/#5/#6 — v2).
  *
- * A small client island: the only client-side state is the multi-select facet
- * choices (person type + org units), held as `Set`s and mirrored into hidden
- * `<input>`s so the surrounding plain `<form method="get">` submits them as
- * repeated query params on "Apply". The server (page + export route) re-runs the
- * query with the new params — the query, never the UI, stays the scope boundary.
+ * A client island that AUTO-APPLIES: every change (facet toggle, select, the
+ * hidden-roles checkbox, or the debounced search box) navigates the page to a new
+ * query string via `router.replace` — no "Apply" button. The URL stays the source
+ * of truth (shareable / reload-safe) and the server re-runs the query, so the
+ * query, never the UI, remains the scope boundary. A soft nav keeps scroll
+ * position and only re-renders the table.
  *
- * Free-text search, the gap/overview-age selects, and the hidden-roles toggle are
- * native named inputs that submit directly. Reuses the #972 `RosterFacet`
- * typeahead; the org-unit hierarchy is shown as a "Department / division" facet
- * with divisions indented under their parent, plus a separate "Centers" facet
- * (centers have no parent-dept FK, so they can't nest).
+ * Reuses the #972 `RosterFacet` typeahead; the org-unit hierarchy is a
+ * "Department / division" facet with divisions indented under their parent, plus a
+ * separate "Centers" facet (centers have no parent-dept FK, so they can't nest).
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 
 import { RosterFacet, type FacetOption } from "@/components/center/center-roster-facets";
-import { Button } from "@/components/ui/button";
 import type {
   DataQualityFacets,
   DataQualityGapFilter,
@@ -26,6 +25,8 @@ import type {
 } from "@/lib/api/data-quality";
 
 const BASE = "/edit/data-quality";
+/** Debounce the free-text search so typing doesn't fire a request per keystroke. */
+const SEARCH_DEBOUNCE_MS = 350;
 
 export type DataQualityFiltersProps = {
   facets: DataQualityFacets;
@@ -39,16 +40,26 @@ export type DataQualityFiltersProps = {
   includeHidden: boolean;
 };
 
-function makeToggle(
-  set: ReadonlySet<string>,
-  setSet: (s: ReadonlySet<string>) => void,
-): (value: string) => void {
-  return (value: string) => {
-    const next = new Set(set);
-    if (next.has(value)) next.delete(value);
-    else next.add(value);
-    setSet(next);
-  };
+type FilterState = {
+  roles: ReadonlySet<string>;
+  unitSet: ReadonlySet<string>;
+  query: string;
+  gap: DataQualityGapFilter;
+  overviewAge: OverviewAgeFilter;
+  hide: boolean;
+};
+
+function hrefFor(s: FilterState): string {
+  const p = new URLSearchParams();
+  if (s.query) p.set("q", s.query);
+  for (const r of s.roles) p.append("type", r);
+  for (const u of s.unitSet) p.append("unit", u);
+  if (s.gap !== "all") p.set("gap", s.gap);
+  if (s.overviewAge !== "all") p.set("overviewAge", s.overviewAge);
+  if (s.hide) p.set("hidden", "0");
+  // No `page` → any filter change resets to the first page.
+  const qs = p.toString();
+  return qs ? `${BASE}?${qs}` : BASE;
 }
 
 export function DataQualityFilters({
@@ -60,8 +71,67 @@ export function DataQualityFilters({
   overviewAge,
   includeHidden,
 }: DataQualityFiltersProps) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+
+  // Local state is the source of truth for the controls; every change navigates.
   const [selRoles, setSelRoles] = useState<ReadonlySet<string>>(new Set(roleCategories));
   const [selUnits, setSelUnits] = useState<ReadonlySet<string>>(new Set(units));
+  const [qDraft, setQDraft] = useState(q);
+  const [gapVal, setGapVal] = useState<DataQualityGapFilter>(gap);
+  const [ageVal, setAgeVal] = useState<OverviewAgeFilter>(overviewAge);
+  const [hide, setHide] = useState(!includeHidden); // checkbox checked = hide
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const current = (): FilterState => ({
+    roles: selRoles,
+    unitSet: selUnits,
+    query: qDraft,
+    gap: gapVal,
+    overviewAge: ageVal,
+    hide,
+  });
+
+  const apply = (over: Partial<FilterState>) => {
+    const href = hrefFor({ ...current(), ...over });
+    startTransition(() => router.replace(href, { scroll: false }));
+  };
+
+  const toggleRole = (value: string) => {
+    const next = new Set(selRoles);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    setSelRoles(next);
+    apply({ roles: next });
+  };
+  const toggleUnit = (value: string) => {
+    const next = new Set(selUnits);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    setSelUnits(next);
+    apply({ unitSet: next });
+  };
+
+  const onSearchChange = (value: string) => {
+    setQDraft(value);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => apply({ query: value }), SEARCH_DEBOUNCE_MS);
+  };
+  const flushSearch = () => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    apply({ query: qDraft });
+  };
+
+  const clearAll = () => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    setSelRoles(new Set());
+    setSelUnits(new Set());
+    setQDraft("");
+    setGapVal("all");
+    setAgeVal("all");
+    setHide(false);
+    startTransition(() => router.replace(BASE, { scroll: false }));
+  };
 
   // Person-type options (counts come from the loader).
   const roleOptions: FacetOption[] = facets.roleCategories;
@@ -81,18 +151,26 @@ export function DataQualityFilters({
 
   const centerOptions: FacetOption[] = facets.centers;
 
-  const toggleRole = makeToggle(selRoles, setSelRoles);
-  const toggleUnit = makeToggle(selUnits, setSelUnits);
-
   return (
-    <form method="get" action={BASE} className="w-full" data-testid="dq-filter-form">
+    <form
+      onSubmit={(e) => {
+        e.preventDefault(); // Enter in the search box applies immediately.
+        flushSearch();
+      }}
+      className="w-full"
+      data-testid="dq-filter-form"
+    >
       <div className="mb-4 flex items-center gap-2">
-        <Button type="submit" variant="outline" size="sm">
-          Apply filters
-        </Button>
-        <a href={BASE} className="text-muted-foreground text-xs hover:underline">
+        <span className="text-muted-foreground text-xs" aria-live="polite">
+          {isPending ? "Updating…" : "Filters apply automatically"}
+        </span>
+        <button
+          type="button"
+          onClick={clearAll}
+          className="text-muted-foreground ml-auto text-xs hover:underline"
+        >
           Clear
-        </a>
+        </button>
       </div>
 
       <div className="mb-4 flex flex-col gap-1">
@@ -102,8 +180,8 @@ export function DataQualityFilters({
         <input
           id="dq-q"
           type="search"
-          name="q"
-          defaultValue={q}
+          value={qDraft}
+          onChange={(e) => onSearchChange(e.target.value)}
           placeholder="e.g. Harrington or rharrington"
           className="border-input bg-background h-9 rounded-md border px-3 text-sm"
         />
@@ -115,8 +193,12 @@ export function DataQualityFilters({
         </label>
         <select
           id="dq-gap"
-          name="gap"
-          defaultValue={gap}
+          value={gapVal}
+          onChange={(e) => {
+            const v = e.target.value as DataQualityGapFilter;
+            setGapVal(v);
+            apply({ gap: v });
+          }}
           className="border-input bg-background h-9 rounded-md border px-3 text-sm"
         >
           <option value="all">Any</option>
@@ -132,8 +214,12 @@ export function DataQualityFilters({
         </label>
         <select
           id="dq-overview-age"
-          name="overviewAge"
-          defaultValue={overviewAge}
+          value={ageVal}
+          onChange={(e) => {
+            const v = e.target.value as OverviewAgeFilter;
+            setAgeVal(v);
+            apply({ overviewAge: v });
+          }}
           className="border-input bg-background h-9 rounded-md border px-3 text-sm"
         >
           <option value="all">Any</option>
@@ -149,21 +235,15 @@ export function DataQualityFilters({
         <input
           id="dq-hidden"
           type="checkbox"
-          name="hidden"
-          value="0"
-          defaultChecked={!includeHidden}
+          checked={hide}
+          onChange={(e) => {
+            setHide(e.target.checked);
+            apply({ hide: e.target.checked });
+          }}
           className="size-4"
         />
         Hide students &amp; alumni
       </label>
-
-      {/* Facet selections submit as repeated params via these hidden inputs. */}
-      {[...selRoles].map((v) => (
-        <input key={`r-${v}`} type="hidden" name="type" value={v} />
-      ))}
-      {[...selUnits].map((v) => (
-        <input key={`u-${v}`} type="hidden" name="unit" value={v} />
-      ))}
 
       <RosterFacet
         title="Person type"
