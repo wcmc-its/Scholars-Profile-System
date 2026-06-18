@@ -742,19 +742,16 @@ export async function loadDataQualityFacets(client: DataQualityClient): Promise<
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
-  // Division names are unique only WITHIN a department (e.g. both Medicine and
-  // Pediatrics have a "Cardiology"). Disambiguate a non-unique name with its parent
-  // department so the rows aren't indistinguishable in the facet — especially under
-  // search, where the parent dept may be filtered out and the indent loses meaning.
+  // Show each division's parent department in its label, so every division is
+  // self-identifying — division names are unique only within a department (both
+  // Medicine and Pediatrics have a "Cardiology"), and under search the parent dept
+  // row may be filtered out, leaving the indent meaningless.
   const deptNameByCode = new Map(deptRows.map((d) => [d.code, d.name] as const));
-  const divNameCounts = new Map<string, number>();
-  for (const d of divRows) divNameCounts.set(d.name, (divNameCounts.get(d.name) ?? 0) + 1);
 
   const divByDept = new Map<string, DataQualityFacetOption[]>();
   for (const d of divRows) {
     const parent = deptNameByCode.get(d.deptCode);
-    const ambiguous = (divNameCounts.get(d.name) ?? 0) > 1;
-    const label = ambiguous && parent ? `${d.name} (${parent})` : d.name;
+    const label = parent ? `${d.name} (${parent})` : d.name;
     const arr = divByDept.get(d.deptCode) ?? [];
     arr.push({ value: `div:${d.code}`, label, count: divCount.get(d.code) ?? 0 });
     divByDept.set(d.deptCode, arr);
