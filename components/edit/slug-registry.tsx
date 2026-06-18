@@ -57,6 +57,8 @@ export type SlugRegistryProps = {
   administratorsTab?: number | null;
   /** Forwarded to the sub-nav: `null` hides the "Method Families" tab. */
   methodsTab?: number | null;
+  /** Forwarded to the sub-nav: `null` hides the "Data quality" tab. */
+  dataQualityTab?: number | null;
   /** Link back to the viewer's own self-edit surface; `null` when none. */
   selfEditHref?: string | null;
   /** Forwarded to the sub-nav: show the "Units" tab (true for a superuser). */
@@ -83,6 +85,7 @@ export function SlugRegistry({
   pendingSlugRequests,
   administratorsTab,
   methodsTab,
+  dataQualityTab,
   selfEditHref,
   unitsTab,
 }: SlugRegistryProps) {
@@ -120,6 +123,7 @@ export function SlugRegistry({
         pendingSlugRequests={pendingSlugRequests}
         administratorsTab={administratorsTab}
         methodsTab={methodsTab}
+        dataQualityTab={dataQualityTab}
         selfEditHref={selfEditHref}
       />
 

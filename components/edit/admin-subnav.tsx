@@ -27,6 +27,7 @@ export type AdminSubnavActive =
   | "slugs"
   | "administrators"
   | "methods"
+  | "data-quality"
   /** The viewer's own self-edit surface (`/edit`), shown as the active right-end
    *  tab when a superuser / comms_steward is on their own profile. */
   | "self";
@@ -36,6 +37,7 @@ export function AdminSubnav({
   pendingSlugRequests,
   administratorsTab,
   methodsTab,
+  dataQualityTab,
   selfEditHref,
   superuserSurfaces = true,
   profilesTab = false,
@@ -51,6 +53,11 @@ export function AdminSubnav({
    *  is flag-gated + role-gated (`isMethodsTabVisible`). A number shows it
    *  (passed `0` — no badge), mirroring `administratorsTab`. */
   methodsTab?: number | null;
+  /** `null`/omitted hides the "Data quality" tab — the dashboard is flag- +
+   *  role-gated (`isDataQualityTabVisible`; the `/edit/units` page additionally
+   *  shows it to a unit Owner/Curator with grants). A number shows it (passed
+   *  `0` — no badge), mirroring `methodsTab`. */
+  dataQualityTab?: number | null;
   /** Link back to the viewer's own self-edit surface (`/edit`), right-aligned.
    *  `null`/omitted when the viewer has no profile of their own (a staff
    *  superuser), so the link never lands on a 404. Ignored when `active="self"`
@@ -112,6 +119,14 @@ export function AdminSubnav({
             id="methods"
             label="Method Families"
             active={active === "methods"}
+          />
+        )}
+        {dataQualityTab !== null && dataQualityTab !== undefined && (
+          <AdminTab
+            href="/edit/data-quality"
+            id="data-quality"
+            label="Data quality"
+            active={active === "data-quality"}
           />
         )}
         {active === "self" ? (

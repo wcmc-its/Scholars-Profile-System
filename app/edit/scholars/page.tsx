@@ -25,6 +25,7 @@ import { getEffectiveEditSession, impersonationEnabled } from "@/lib/auth/effect
 import { db } from "@/lib/db";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { requireSuperuserGet } from "@/lib/edit/authz";
+import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
@@ -135,6 +136,7 @@ export default async function EditScholarsPage({
       pendingSlugRequests={pendingSlugRequests}
       administratorsTab={superuserSurfaces && isAdministratorsTabEnabled() ? 0 : null}
       methodsTab={isMethodsTabVisible(session) ? 0 : null}
+      dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
       selfEditHref={selfEditHref}
       canImpersonate={impersonationEnabled() && session.isSuperuser}
       viewerCwid={session.cwid}

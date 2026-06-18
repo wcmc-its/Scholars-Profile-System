@@ -932,6 +932,16 @@ export class AppStack extends Stack {
         SELF_EDIT_ADMINISTRATORS_TAB: "on",
         SELF_EDIT_ED_ADMINS_IMPORT: "off",
         SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY: "off",
+        // Data Quality dashboard (`/edit/data-quality`, docs/data-quality-dashboard-spec.md):
+        // a read-only, prominence-sorted list of scholars + their profile gaps
+        // (missing headshot/overview, pending COI suggestions) for stewards
+        // (superuser/comms_steward → all scholars) and unit Owners/Curators (→ their
+        // units). Read via isDataQualityDashboardEnabled() (=== "on"); when off the
+        // route 404s and the sub-nav tab is hidden — ships dark. App-only, no reindex.
+        // STAGING-FIRST: on in staging to soak, off in prod until sign-off. The
+        // headshot column is populated by the weekly etl:headshot step (EtlStack);
+        // until its first run, headshot cells render "— (not checked)".
+        EDIT_DATA_QUALITY_DASHBOARD: env === "staging" ? "on" : "off",
         // #746 — self-edit "Not mine" → ReCiter gold-standard reject.
         // STAGING-FIRST rollout: ON in staging, OFF in prod until the staging
         // soak completes (prod flips in a follow-up). While off, "Not mine?"

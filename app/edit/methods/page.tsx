@@ -31,6 +31,7 @@ import { isCommsStewardEnabled, isMethodsTabVisible } from "@/lib/auth/comms-ste
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
+import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { isMethodsLensSensitiveGateOn } from "@/lib/profile/methods-lens-flags";
 
@@ -102,6 +103,7 @@ export default async function MethodFamiliesPage() {
         pendingSlugRequests={pendingSlugRequests}
         administratorsTab={administratorsTab}
         methodsTab={isMethodsTabVisible(session) ? 0 : null}
+        dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
         selfEditHref={selfEditHref}
         superuserSurfaces={superuserSurfaces}
         // A comms_steward is a global profile + unit-content editor (comms-
