@@ -487,7 +487,7 @@ export default function DocsPage() {
               <tr>
                 <td>Research areas, subareas, Impact score, synopsis</td>
                 <td>ReciterAI (in-house)</td>
-                <td>Weekly (taxonomy roughly annual)</td>
+                <td>Impact &amp; synopsis nightly; areas &amp; subareas weekly; taxonomy periodic</td>
                 <td>Not hand-editable; report a systematic error</td>
               </tr>
               <tr>
@@ -782,20 +782,46 @@ export default function DocsPage() {
           several areas, a single paper is commonly associated with more than one. The areas shown on
           a scholar&apos;s profile reflect the balance of their published work.
         </p>
+        <p>
+          <strong>A worked example.</strong> Take a 2024 paper, &ldquo;Single-cell profiling of aging
+          T cells in the tumor microenvironment&rdquo; &mdash; we&apos;ll follow it through{" "}
+          <Link href="#methods" className={LINK}>
+            methods
+          </Link>{" "}
+          and{" "}
+          <Link href="#impact" className={LINK}>
+            the Impact score
+          </Link>{" "}
+          below as well. It is read against every research area at once and clears the bar for three:{" "}
+          <em>Aging &amp; Geroscience</em> most strongly, then <em>Immunology</em>, and{" "}
+          <em>Cancer Biology</em> more loosely. All three are kept; there is no single
+          &ldquo;primary&rdquo; area, because the work genuinely sits across them. Within Aging &amp;
+          Geroscience it is then placed into finer subareas &mdash; here <em>Immune Aging</em> as the
+          best fit, with <em>Cellular Senescence</em> secondary &mdash; and a paper that fits no
+          subarea cleanly is left unassigned rather than forced into one.
+        </p>
         <Callout variant="warn" heading="An internal score you never see">
           <p>
-            Each publication-to-area pairing carries a relevance score used only to rank publications
-            within a research area. It is never shown. The only score you see in a publication
-            context is the Impact score (&ldquo;Impact: NN&rdquo;).
+            Each publication-to-area pairing carries a <em>relevance</em> score from 0 to 1 &mdash; in
+            the example, roughly 0.85 for Aging &amp; Geroscience, 0.78 for Immunology, and 0.42 for
+            Cancer Biology. It measures how central the paper is to <em>that</em> area, a different
+            question from the Impact score&apos;s &ldquo;how notable is this paper overall.&rdquo; A
+            paper can be highly relevant to an area yet modest in Impact, or the reverse. Relevance is
+            used only to order publications within a research area &mdash; combined with Impact, so a
+            paper ranks high on an area page when it is both central to the area and notable &mdash;
+            and it is never shown. The only score you see in a publication context is the Impact score
+            (&ldquo;Impact: NN&rdquo;).
           </p>
         </Callout>
         <p>
-          <strong>Freshness.</strong> The taxonomy (the set of research areas itself) recomputes on a
-          longer, roughly annual cycle, but your publications are classified into the current
-          taxonomy as they are ingested on the nightly pipeline, so an individual paper does not wait
-          a year to receive areas, and your profile updates automatically as new work is added. An
-          area can shift when the taxonomy is rebuilt; that is expected. A publication with no
-          abstract is classified from title, MeSH, and RePORTER terms. A genuinely wrong area is a
+          <strong>Freshness.</strong> The taxonomy (the set of research areas itself) is stable
+          between rebuilds and is recomputed only periodically &mdash; when the field has shifted
+          enough to warrant it, not on a fixed clock. Your publications, though, are classified into
+          the current taxonomy on a weekly run as new work is ingested, so an individual paper does
+          not wait for a taxonomy rebuild to receive its areas, and your profile keeps up as you
+          publish. An area can shift when the taxonomy is next rebuilt; that is expected.
+          Classification reads the paper&apos;s plain-language synopsis together with its abstract; a
+          paper without an abstract is still classified from its synopsis. A genuinely wrong area is a
           ReciterAI matter; report a systematic error.
         </p>
 
@@ -816,33 +842,139 @@ export default function DocsPage() {
           a technique only a handful of labs use ranks higher than one everyone shares.
         </p>
         <p>
+          <strong>The same paper, once more.</strong> From our example&apos;s abstract, ReciterAI
+          picks out <em>single-cell RNA sequencing</em>, the <em>10x Genomics</em> platform, and{" "}
+          <em>CITE-seq</em>, and ignores the routine qPCR validation step &mdash; a commodity staple
+          that doesn&apos;t distinguish one lab from another. &ldquo;scRNA-seq&rdquo; and
+          &ldquo;single-cell RNA sequencing&rdquo; collapse into one entry, filed under a broader{" "}
+          <em>single-cell genomics</em> capability family. Each method then carries a distinctiveness
+          weight set by how many WCM labs use it: single-cell RNA-seq is now common enough to sit
+          mid-pack, whereas a technique only three or four labs use would rank near the top. On the
+          scholar&apos;s own profile, their methods are ordered by how much they themselves use each
+          one.
+        </p>
+        <p>
           Because this is drawn from a scholar&apos;s own publications, it reflects demonstrated,
-          hands-on use rather than self-reported interests, and it refreshes automatically as new
-          work is published.
+          hands-on use rather than self-reported interests, and it is refreshed as new work is
+          published.
         </p>
 
         <h2 id="impact">The Impact score</h2>
         <p>
           The Impact score is a 0&ndash;100 number ReciterAI assigns to a publication, shown as
-          &ldquo;Impact: NN&rdquo;. It blends the publication&apos;s citation signal (from iCite), a
-          journal or venue signal, and recency.
+          &ldquo;Impact: NN&rdquo;. It weighs three things about the paper &mdash; its citation
+          signal (the iCite citation count, plus the paper&apos;s NIH percentile and Relative
+          Citation Ratio once those exist), the standing of the journal it appeared in, and how
+          recent it is &mdash; and a calibrated model combines them into a single number by comparing
+          the paper against a fixed ladder of reference points (described below). It is not a
+          hand-tuned arithmetic formula but a judgment the model makes against that ladder, which is
+          why two papers with comparable evidence land at comparable scores.
         </p>
         <Callout variant="key" heading="The misconception to correct first">
           <p>
-            The Impact score describes the paper, not your role on it. It is not author-relative
-            (first, middle, and senior author on the same paper all see the same number) and it is
-            not field-normalized. Author Position conveys your role; Impact conveys
-            the paper&apos;s standing.
+            The Impact score describes the paper, not your role on it. It is not author-relative:
+            first, middle, and senior author on the same paper all see the same number. Author
+            Position conveys your role; Impact conveys the paper&apos;s standing. It is field-aware
+            rather than field-normalized &mdash; one of its inputs, the Relative Citation Ratio, is
+            itself field-adjusted, and the model is tuned not to favor any one kind of research (see
+            below) &mdash; but it is still not a literal cross-field ranking, so a number in
+            cardiology and a number in a rare disease are not strictly comparable.
+          </p>
+        </Callout>
+        <h3>What the score is for &mdash; and what it isn&apos;t</h3>
+        <p>
+          The Impact score has a deliberately limited job. Inside Scholars it is used mainly to help
+          the application decide <em>which of your own publications to surface</em> &mdash; on the
+          home-page showcase, in your profile&apos;s highlights, on a research-area page. It is an
+          input to that choice, not a verdict on you, and the aim of surfacing is egalitarian: to
+          make sure every researcher&apos;s strongest work gets its day in the sun, rather than
+          letting a few famous papers crowd everyone else out. It is <strong>not</strong> a ranking
+          of scholars, and it is not used to evaluate people for promotion, funding, or effort.
+        </p>
+        <p>
+          It is also a <em>leading</em> indicator. Field-normalized citation metrics like the NIH
+          percentile and the Relative Citation Ratio (RCR) need two to three years of accumulated
+          citations to settle, so for a paper published this month they do not yet exist. The Impact
+          score reads what is already available &mdash; the venue, the abstract, and the earliest
+          citation signal &mdash; to estimate within the same week where the paper is likely to land,
+          and it folds the percentile and RCR in later, as they mature. That lets you and your
+          department act on new work without waiting years for the citation record to catch up.
+        </p>
+        <p>
+          What it does <em>not</em> claim is to measure quality, rigor, or importance. It tracks
+          attention and standing &mdash; how much the wider literature is engaging with a paper, in
+          what venue, how recently. A careful negative result, a foundational methods paper, or a
+          study in a small field can matter enormously and still carry a modest score, and a heavily
+          cited but incremental paper can carry a high one. Read it as &ldquo;how visible and
+          well-placed is this paper,&rdquo; not &ldquo;how good is this science.&rdquo;
+        </p>
+        <h3>How to read the number</h3>
+        <p>
+          The model scores against a fixed ladder of about two hundred reference points spanning all
+          of biomedicine, so the same number means the same thing in any field. The bands are
+          demanding: preliminary or underpowered work sits in the low tier (a letter to the editor
+          anchors at 8, a single-patient case report near 12); solid but incremental studies fall in
+          the 30s and 40s; the 50s and 60s already denote strong contributions with clear influence;
+          and the 70s and 80s are major, practice- or field-shaping work. So a score that looks modest
+          is not a poor grade &mdash; a paper in the 60s is, by this rubric, a strong and influential
+          one.
+        </p>
+        <Callout variant="note" heading="High scores are rare by design">
+          <p>
+            The top of the ladder is held for paradigm-shifting, field-defining work &mdash; the
+            discovery of the DNA double helix anchors at 99, penicillin at 97, CRISPR&ndash;Cas9
+            genome editing at 93 &mdash; so the scale is demanding and the model is sparing with high
+            numbers. There is no fixed ceiling for a real paper, but very high scores are uncommon by
+            design. The practical effect is that a number which looks middling can still mark one of a
+            researcher&apos;s strongest papers, so read it against a scholar&apos;s own body of work
+            rather than against a notional 100.
           </p>
         </Callout>
         <p>
+          That restraint is also what makes the score useful for choosing what to feature. A
+          field-normalized percentile can label many of a prolific researcher&apos;s papers as
+          top-percentile at once &mdash; gratifying, but little help when the task is to pick the few
+          that best represent them. Because the Impact score spreads work out instead of crowding the
+          top, it can separate a researcher&apos;s most impactful papers from their merely solid ones
+          &mdash; which is exactly what the surfaces it feeds need.
+        </p>
+        <p>
+          <strong>It does not favor basic over clinical research, or the reverse.</strong> The model
+          is explicitly calibrated for parity: the ladder rates clinical trials, health-services
+          research, and implementation work on the same terms as bench science, and the scorer runs a
+          counterfactual check &mdash; would this same evidence score higher attached to a
+          basic-science paper? &mdash; and corrects itself when the answer is yes. Clinical,
+          implementation, and health-services work can reach the same heights as bench discovery.
+        </p>
+        <p>
           <strong>Which publications are scored.</strong> The scoring scope is full-time WCM faculty
-          only: ReciterAI scores publications authored by a full-time WCM faculty member, and the
-          Impact then appears on that publication wherever it shows, including on a co-author&apos;s
-          or trainee&apos;s view. A publication with no full-time WCM faculty author is outside the
-          scope and is not scored. Publication type is weighted: Academic Articles at full weight;
-          Reviews and Case Reports down-weighted, so they need a higher score to surface; Letters and
-          Editorials hard-excluded.
+          only: ReciterAI scores the substantive research articles (from 2020 onward) that have at
+          least one full-time WCM faculty author, and the Impact then appears on that publication
+          wherever it shows, including on a co-author&apos;s or trainee&apos;s view. A publication
+          with no full-time WCM faculty author is outside the scope and is not scored. Publication{" "}
+          <em>type</em> matters separately, when the showcase surfaces decide what to feature &mdash;
+          Reviews and Case Reports are down-weighted there and Letters and Editorials excluded
+          &mdash; but that is a surfacing rule, not part of the Impact score itself (see{" "}
+          <Link href="#showcase" className={LINK}>
+            Spotlight
+          </Link>
+          ).
+        </p>
+        <p>
+          <strong>The same worked example.</strong> Take the 2024 single-cell paper we traced under{" "}
+          <Link href="#research-areas" className={LINK}>
+            research areas
+          </Link>{" "}
+          and{" "}
+          <Link href="#methods" className={LINK}>
+            methods
+          </Link>{" "}
+          above, first-authored by a WCM faculty member in a leading journal. Because it is only
+          months old it has no NIH percentile or RCR yet, so the model works from the venue, the
+          abstract, and its first handful of citations and assigns <strong>Impact: 84</strong> &mdash;
+          a high score, which the model assigns sparingly. That same 84 appears on the paper everywhere
+          &mdash; on the first author&apos;s profile, on a middle co-author&apos;s, on a
+          trainee&apos;s &mdash; because it describes the paper, not any one author.
         </p>
         <p>
           <strong>How often it updates.</strong> Impact scores and synopses refresh nightly, on the
@@ -916,8 +1048,11 @@ export default function DocsPage() {
         <h2 id="showcase">Spotlight &amp; Selected research</h2>
         <p>
           The showcase surfaces are chosen by a model, not by you. There is no &ldquo;feature this
-          paper&rdquo; control. They share one formula, the ReciterAI Impact score combined with
-          recency, plus surface-specific filters.
+          paper&rdquo; control. They share one formula &mdash; the ReciterAI Impact score multiplied
+          by author position, publication type, and recency &mdash; plus surface-specific filters. The
+          publication-type factor is where Reviews and Case Reports are down-weighted and Letters,
+          Editorials, and Errata are excluded entirely, so a paper&apos;s type can keep it off these
+          surfaces even when its Impact is high.
         </p>
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-[680px]">
@@ -969,6 +1104,24 @@ export default function DocsPage() {
           work, or its type is down-weighted. The same paper can be featured on one surface and not
           another, because the filters differ.
         </p>
+        <Callout variant="note" heading="A representative selection, not a complete list">
+          <p>
+            Read these surfaces as a <em>representative selection</em> of a scholar&apos;s work
+            &mdash; a curated highlight, not a complete or proportional inventory. Most feature only
+            research articles from 2020 onward on which the scholar is <em>first or senior (last)
+            author</em> &mdash; co-first and co-senior authors count too, since equal-contribution
+            authorship is tracked upstream. That is a deliberate signal-to-noise choice: a faculty
+            member&apos;s first-
+            and senior-author papers are the ones they led or supervised, so restricting to them
+            gives a truer picture of what a scholar drives than a feed that also pulled in every
+            large-consortium paper they were a middle author on. The cost is real &mdash; it leaves
+            out some work that genuinely reflects expertise, such as key collaborations where the
+            scholar contributed without leading &mdash; but it keeps the highlighted set focused
+            rather than crowded. The selection is curated by design and is not meant to be
+            exhaustive: every paper attributed to a scholar, in any author position, still appears in
+            full on their profile and in search.
+          </p>
+        </Callout>
         <h3>Who appears on these surfaces</h3>
         <p>
           Because these surfaces highlight ongoing research, they draw from people in active research
@@ -1045,11 +1198,11 @@ export default function DocsPage() {
         <h2 id="glossary">Glossary</h2>
         <dl className="mt-4 space-y-5">
           {[
-            { term: "Impact score", def: "A 0–100 score ReciterAI assigns to a publication from its citation signal (iCite), journal signal, and recency. Publication-level, not author-relative or field-normalized. Shown as “Impact: NN”; the same number for every co-author." },
+            { term: "Impact score", def: "A 0–100 score ReciterAI assigns to a publication: a calibrated model weighs its citation signal (iCite count, plus NIH percentile and RCR once they exist), journal standing, and recency against a fixed ladder of ~200 reference points. Publication-level and not author-relative — the same number for every co-author. Field-aware but not a literal cross-field ranking. Used mainly to help decide which of a scholar’s papers to surface; not a ranking of people. High scores are rare by design — the scale is demanding and the 90–100 band is reserved for historic landmarks — so a mid-range score can still mark a top paper. Shown as “Impact: NN”." },
             { term: "Author Position", def: "Your place in a publication’s author list (first / middle / senior). This, not Impact, conveys your role on a paper." },
             { term: "ReCiter", def: "WCM’s author-disambiguation engine. Decides which publications are yours, from PubMed. Runs nightly." },
             { term: "ReCiter Publication Manager", def: "The curation interface at reciter.weill.cornell.edu where a publication’s attribution is corrected. A misattributed paper is rejected here; a missing one is added here." },
-            { term: "ReciterAI", def: "WCM’s pipeline that derives a publication’s research areas, Impact score, and one-line synopsis. Impact and synopsis refresh nightly; the research-area taxonomy recomputes roughly annually." },
+            { term: "ReciterAI", def: "WCM’s pipeline that derives a publication’s research areas, Impact score, and one-line synopsis. Impact and synopsis refresh nightly; research areas and subareas are assigned weekly; the research-area taxonomy is rebuilt periodically." },
             { term: "Research areas (and subareas)", def: "WCM’s AI-derived map of what scholars work on: broad research areas such as Cancer Biology, each with finer subareas. ReciterAI derives them from publications, not from MeSH or a fixed list, and scores how strongly each paper relates to each area. Distinct from the MeSH keywords that power search." },
             { term: "Self-edit interface", def: "Where a scholar edits their overview, hides or restores publications, and submits data corrections (Request a change), which route to the owning office." },
             { term: "Profile URL (slug)", def: "A profile’s web address — the short scholars.weill.cornell.edu/<slug> and the longer /scholars/<slug> both work and lead to the same page. The slug is derived automatically from the scholar’s preferred name (e.g. jane-smith); a later namesake gets a number (jane-smith-2) and the earlier profile keeps the plain form — it is not a ranking. The address is stable: if it changes, the old one permanently redirects, so existing links keep working. A custom address — still based on the scholar’s name — can be set by a Scholars administrator." },
