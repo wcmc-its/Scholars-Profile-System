@@ -76,8 +76,9 @@ export const OVERVIEW_SYSTEM_PROMPT = [
   "  colleague could equally claim. Such sentences state no fact about THIS person —",
   "  omit them rather than reach for them to fill space.",
   "- Ground every specific in the FACTS only: a publication's synopsis,",
-  "  impactJustification, topicRationale, or title; a `methods` family (its `name`",
-  "  or its `examples`); a `facultyMetrics` number; an `activeGrants` entry. Prefer",
+  "  impactJustification, topicRationale, or title; a `methods` family (its `name`,",
+  "  its `examples`, or an `exemplarContexts` entry's per-paper usage snippet); a",
+  "  `facultyMetrics` number; an `activeGrants` entry. Prefer",
   "  one concrete, true specific over three vague topic labels. You may foreground",
   "  the scholar's research focus, distinctive methods/platforms, and the scale of",
   "  their work — but only as far as these FACTS support it.",
@@ -88,8 +89,11 @@ export const OVERVIEW_SYSTEM_PROMPT = [
   "  NOT. Use ONLY what the FACTS contain.",
   "  1. NEVER name a tool, method, software, instrument, dataset, assay, model",
   "     system, platform, algorithm, or acronym unless that exact name appears in",
-  "     FACTS — in a `methods` entry (its `name` or `examples`) or verbatim in a",
-  "     publication `title`. If a real contribution is described in FACTS but not",
+  "     FACTS — in a `methods` entry (its `name`, `examples`, or an `exemplarContexts`",
+  "     entry's name) or verbatim in a publication `title`. An `exemplarContexts`",
+  "     snippet is extracted paper text describing how that exemplar tool was used;",
+  "     you MAY ground a description of the tool on it, but only name the tool if its",
+  "     name is itself in FACTS. If a real contribution is described in FACTS but not",
   "     named there, describe what it does; do NOT supply a name or invent an acronym.",
   "  2. NEVER state a numeric metric — an h-index, a citation / publication / author",
   "     count, years, or any figure — unless it appears in FACTS (`facultyMetrics`,",
@@ -413,6 +417,11 @@ export function buildGroundingReference(facts: OverviewFacts): string {
     for (const m of facts.methods) {
       const ex = m.examples && m.examples.length > 0 ? ` — examples: ${m.examples.join("; ")}` : "";
       lines.push(`- ${m.name}${m.category ? ` [${m.category}]` : ""}${ex}`);
+      // #1119 — per-exemplar usage snippets are extracted paper text (grounded):
+      // a description of how an exemplar tool is used may draw on these.
+      for (const c of m.exemplarContexts ?? []) {
+        lines.push(`    usage (${c.name}): ${c.context}`);
+      }
     }
   } else {
     lines.push(

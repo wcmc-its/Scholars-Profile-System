@@ -148,7 +148,7 @@ describe("buildOverviewUserPrompt — element emphasis", () => {
   it("keeps Methods in the emphasis line when facts.methods is non-empty", () => {
     const factsWithMethods: OverviewFacts = {
       ...FACTS,
-      methods: [{ name: "AAV vectors", category: "vector platform", examples: ["AAV9"] }],
+      methods: [{ name: "AAV vectors", category: "vector platform", examples: ["AAV9"], exemplarContexts: [] }],
     };
     const prompt = buildOverviewUserPrompt(
       factsWithMethods,
@@ -349,7 +349,16 @@ describe("buildOverviewUserPrompt — no-representative-publications directive (
 /** A rich facts fixture exercising every grounding source the reference renders. */
 const RICH_FACTS: OverviewFacts = {
   ...FACTS,
-  methods: [{ name: "AAV gene-therapy vectors", category: "vector", examples: ["AAVrh.10", "AAV9"] }],
+  methods: [
+    {
+      name: "AAV gene-therapy vectors",
+      category: "vector",
+      examples: ["AAVrh.10", "AAV9"],
+      exemplarContexts: [
+        { name: "AAVrh.10", context: "AAVrh.10 delivered the CLN2 transgene to the CNS via intrathecal infusion" },
+      ],
+    },
+  ],
   representativePublications: [
     {
       pmid: "1",
@@ -399,6 +408,8 @@ describe("buildGroundingReference (#742 fact-checker reference)", () => {
     // method names + their examples
     expect(ref).toContain("AAV gene-therapy vectors");
     expect(ref).toContain("AAVrh.10");
+    // #1119 — per-exemplar usage snippet is rendered as grounded text
+    expect(ref).toContain("usage (AAVrh.10): AAVrh.10 delivered the CLN2 transgene");
     // publication title + its distilled finding (the synopsis-blindness fix)
     expect(ref).toContain("Twenty-Year Survival of CLN2 Gene Therapy");
     expect(ref).toContain("60-90% systemic distribution");
