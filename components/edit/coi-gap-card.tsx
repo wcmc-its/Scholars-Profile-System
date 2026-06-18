@@ -141,10 +141,8 @@ function lastNameOf(full: string): string {
  *  Self vs co-author is conveyed in TEXT — the row's subject tag + the accessible
  *  label — never by color. A small key names the two swatches. The leading
  *  `coi-hl-*` token is a stable hook for tests; the visual is the tint utilities. */
-const HL_ORG =
-  "coi-hl-org rounded-[4px] bg-apollo-amber-tint text-apollo-amber px-1 font-medium whitespace-nowrap";
-const HL_PERSON =
-  "coi-hl-person rounded-[4px] bg-apollo-slate-tint text-apollo-slate px-1 font-medium whitespace-nowrap";
+const HL_ORG = "coi-hl-org bg-apollo-amber-tint rounded-[2px] px-0.5 whitespace-nowrap";
+const HL_PERSON = "coi-hl-person bg-apollo-slate-tint rounded-[2px] px-0.5 whitespace-nowrap";
 
 /** Marks for a single rendered clause/statement. */
 function MarkedText({
