@@ -66,15 +66,15 @@ export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
   // steward / unit admin doesn't get redundant rows for surfaces the roster
   // already reaches.
   if (v.isSuperuser) {
-    return [{ id: "manage-profiles", label: "Manage profiles", href: "/edit/scholars" }];
+    return [{ id: "manage-profiles", label: "Admin", href: "/edit/scholars" }];
   }
 
   const links: ConsoleLink[] = [];
   if (v.canManageMethods) {
-    links.push({ id: "methods", label: "Method Families", href: "/edit/methods" });
+    links.push({ id: "methods", label: "Method families", href: "/edit/methods" });
   }
   if (v.managesUnits) {
-    links.push({ id: "units", label: "Units you manage", href: "/edit/units" });
+    links.push({ id: "units", label: "Org Units", href: "/edit/units" });
   }
   return links;
 }

@@ -84,7 +84,7 @@ export function AdminSubnav({
           <AdminTab href="/edit/scholars" id="profiles" label="Profiles" active={active === "profiles"} />
         )}
         {unitsTab && (
-          <AdminTab href="/edit/units" id="units" label="Units" active={active === "units"} />
+          <AdminTab href="/edit/units" id="units" label="Org Units" active={active === "units"} />
         )}
         {superuserSurfaces && pendingSlugRequests !== null && (
           <AdminTab
@@ -117,7 +117,7 @@ export function AdminSubnav({
           <AdminTab
             href="/edit/methods"
             id="methods"
-            label="Method Families"
+            label="Method families"
             active={active === "methods"}
           />
         )}

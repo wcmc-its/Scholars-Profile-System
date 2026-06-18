@@ -81,10 +81,10 @@ describe("AccountMenu — without a scholar row (D5.3)", () => {
 });
 
 describe("AccountMenu — role-aware console links", () => {
-  it("comms_steward with no profile (dwd2001) → Method Families link, no Edit/View", () => {
+  it("comms_steward with no profile (dwd2001) → Method families link, no Edit/View", () => {
     mockProbe({
       scholar: null,
-      consoleLinks: [{ id: "methods", label: "Method Families", href: "/edit/methods" }],
+      consoleLinks: [{ id: "methods", label: "Method families", href: "/edit/methods" }],
     });
     render(<AccountMenu scholar={null} />);
     // No scholar row → trigger still falls back to "Account".
@@ -93,7 +93,7 @@ describe("AccountMenu — role-aware console links", () => {
 
     const methods = screen.getByTestId("account-menu-console-methods");
     expect(methods.getAttribute("href")).toBe("/edit/methods");
-    expect(methods.textContent).toContain("Method Families");
+    expect(methods.textContent).toContain("Method families");
 
     // The console section renders even without a profile — the whole point.
     expect(screen.queryByTestId("account-menu-edit")).toBeNull();
@@ -101,11 +101,11 @@ describe("AccountMenu — role-aware console links", () => {
     expect(screen.getByTestId("account-menu-signout")).toBeTruthy();
   });
 
-  it("superuser → a single 'Manage profiles' link to the roster", () => {
+  it("superuser → a single 'Admin' link to the roster", () => {
     const sue = { slug: "sue-admin", preferredName: "Sue Admin" };
     mockProbe({
       scholar: sue,
-      consoleLinks: [{ id: "manage-profiles", label: "Manage profiles", href: "/edit/scholars" }],
+      consoleLinks: [{ id: "manage-profiles", label: "Admin", href: "/edit/scholars" }],
     });
     render(<AccountMenu scholar={sue} />);
     fireEvent.click(screen.getByLabelText("Account menu"));
@@ -116,9 +116,9 @@ describe("AccountMenu — role-aware console links", () => {
     expect(screen.queryByTestId("account-menu-console-units")).toBeNull();
   });
 
-  it("unit Owner/Curator → 'Units you manage' link", () => {
+  it("unit Owner/Curator → 'Org Units' link", () => {
     mockProbe({
-      consoleLinks: [{ id: "units", label: "Units you manage", href: "/edit/units" }],
+      consoleLinks: [{ id: "units", label: "Org Units", href: "/edit/units" }],
     });
     render(<AccountMenu scholar={null} />);
     fireEvent.click(screen.getByLabelText("Account menu"));
@@ -127,11 +127,11 @@ describe("AccountMenu — role-aware console links", () => {
     expect(units.getAttribute("href")).toBe("/edit/units");
   });
 
-  it("steward AND unit admin → both rows, Method Families before Units", () => {
+  it("steward AND unit admin → both rows, Method families before Org Units", () => {
     mockProbe({
       consoleLinks: [
-        { id: "methods", label: "Method Families", href: "/edit/methods" },
-        { id: "units", label: "Units you manage", href: "/edit/units" },
+        { id: "methods", label: "Method families", href: "/edit/methods" },
+        { id: "units", label: "Org Units", href: "/edit/units" },
       ],
     });
     render(<AccountMenu scholar={null} />);
