@@ -122,15 +122,15 @@ describe("loadDataQualityFacets — hierarchy + counts", () => {
     expect(facets.roleCategories[0].label.length).toBeGreaterThan(0);
 
     // Departments carry dept:CODE values + counts, with child divisions (div:CODE).
-    // A division name shared across departments ("Cardiology") is disambiguated by
-    // its parent; a unique name ("Neonatology") is left plain.
+    // Every division shows its parent department in the label so it is
+    // self-identifying (and same-named divisions across departments are distinct).
     const med = facets.departments.find((d) => d.value === "dept:MED")!;
     expect(med).toMatchObject({ label: "Medicine", count: 8 });
     expect(med.divisions).toEqual([{ value: "div:CARD", label: "Cardiology (Medicine)", count: 4 }]);
     const ped = facets.departments.find((d) => d.value === "dept:PED")!;
     expect(ped.divisions).toEqual([
       { value: "div:PCARD", label: "Cardiology (Pediatrics)", count: 2 },
-      { value: "div:NEO", label: "Neonatology", count: 0 }, // no count aggregate → 0
+      { value: "div:NEO", label: "Neonatology (Pediatrics)", count: 0 }, // no count aggregate → 0
     ]);
 
     // Centers: center:CODE + active-membership count.
