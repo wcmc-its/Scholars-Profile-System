@@ -367,7 +367,10 @@ export const OVERVIEW_VERIFY_SYSTEM_PROMPT = [
   "  in ALLOWED METHOD / TOOL NAMES (a name or one of its examples) and not inside a",
   '  PUBLICATION TITLE. Do NOT flag generic, UN-named descriptions ("deep learning",',
   '  "enzyme kinetics", "time-lapse imaging", "claims-based analysis") — only proper',
-  "  names / acronyms.",
+  "  names / acronyms. A proper name that appears ONLY inside a TOOL USAGE DESCRIPTION is",
+  "  NOT an allowed name (those snippets often mention OTHER tools incidentally); only the",
+  "  names on the ALLOWED METHOD / TOOL NAMES list (a name or one of its examples) count —",
+  "  so flag a tool/model/algorithm name the draft took from a usage description.",
   "- number: any figure — h-index, a count, a year, a percentage, a statistic — not present",
   '  in ALLOWED NUMBERS. Invented quantitative findings (e.g. a "60-90%" result) are the',
   "  single most important thing to catch.",
@@ -417,11 +420,22 @@ export function buildGroundingReference(facts: OverviewFacts): string {
     for (const m of facts.methods) {
       const ex = m.examples && m.examples.length > 0 ? ` — examples: ${m.examples.join("; ")}` : "";
       lines.push(`- ${m.name}${m.category ? ` [${m.category}]` : ""}${ex}`);
-      // #1119 — per-exemplar usage snippets are extracted paper text (grounded):
-      // a description of how an exemplar tool is used may draw on these.
+    }
+    // #1119 — per-exemplar usage snippets, in a SEPARATE block (NOT under ALLOWED
+    // NAMES, so the verifier never treats an incidentally-mentioned proper noun in
+    // the snippet text as an allow-listed name). The snippet is grounded text the
+    // draft may DESCRIBE from, but it does NOT add to the allowed-names list above.
+    const usageLines: string[] = [];
+    for (const m of facts.methods) {
       for (const c of m.exemplarContexts ?? []) {
-        lines.push(`    usage (${c.name}): ${c.context}`);
+        usageLines.push(`- ${c.name}: ${c.context}`);
       }
+    }
+    if (usageLines.length > 0) {
+      lines.push(
+        "TOOL USAGE DESCRIPTIONS (extracted publication text describing HOW an exemplar tool above is used — a description may be grounded on these; they do NOT add any new ALLOWED NAME: a tool/model/gene/disease named only inside a usage description is NOT thereby allowed):",
+        ...usageLines,
+      );
     }
   } else {
     lines.push(

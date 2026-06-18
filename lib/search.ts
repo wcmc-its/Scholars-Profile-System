@@ -584,6 +584,21 @@ export const PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS: ReadonlyArray<string> = [
 export const PEOPLE_ABSTRACTS_BOOST = 0.3;
 
 /**
+ * #1119 — boost for the `methodContext` tool-usage prose on the people index when
+ * SEARCH_PEOPLE_METHOD_CONTEXT is on. Like `publicationAbstracts`, this lives in a
+ * scoring-only `should` clause — NOT in the cross_fields/msm `must` ladder — because
+ * it is a multi-sentence prose blob that would otherwise let a term landing only in
+ * usage prose satisfy minimum-should-match for the whole group and ADMIT an
+ * off-topic scholar (the same reason abstracts are excluded; #1056/#1090). It can
+ * nudge ranking but never admit a doc on its own. Modestly above the abstracts boost
+ * (the text is curated usage language, more specific than a raw abstract).
+ */
+export const PEOPLE_METHOD_CONTEXT_BOOST = 0.5;
+/** Topic-shape counterpart of {@link PEOPLE_METHOD_CONTEXT_BOOST} (raised, like the
+ *  topic abstracts boost), still scoring-only. */
+export const PEOPLE_TOPIC_METHOD_CONTEXT_BOOST = 0.8;
+
+/**
  * Minimum-should-match expression for the restructured people query
  * (issue #259 §1.1, loosened in v2.2). Reads as: for ≤2 analyzed tokens
  * require all; for >2, allow up to 34% missing. Tokens are post-analysis

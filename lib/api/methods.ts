@@ -274,7 +274,10 @@ export async function getFamilyToolUsage(
   const rows = await prisma.scholarFamily.findMany({
     where: { supercategory, familyLabel, scholar: { deletedAt: null, status: "active" } },
     orderBy: [{ pmidCount: "desc" }],
-    select: { exemplarContexts: true },
+    // exemplarTools is the order-PRESERVING JSON array (salience-ranked); iterate it
+    // for tool order rather than exemplarContexts' object keys, which Aurora MySQL
+    // re-sorts by key on storage (#1119 review). roleCategory drives the role gate.
+    select: { exemplarTools: true, exemplarContexts: true, scholar: { select: { roleCategory: true } } },
     take: 200,
   });
 
@@ -282,12 +285,20 @@ export async function getFamilyToolUsage(
   const seen = new Set<string>();
   for (const r of rows) {
     if (out.length >= FAMILY_TOOL_USAGE_CAP) break;
-    const raw = r.exemplarContexts;
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
-    for (const [tool, context] of Object.entries(raw as Record<string, unknown>)) {
+    // Drop hidden identity classes (doctoral_student / affiliate_alumni): they are
+    // soft-deleted + excluded by deletedAt above, but keep the gate so a hidden
+    // scholar's usage snippet never surfaces if a row ever survives the join
+    // (mirrors getFamilyScholarRows — #1119 review).
+    if (!isPubliclyDisplayed(r.scholar?.roleCategory ?? null)) continue;
+    const ctx =
+      r.exemplarContexts && typeof r.exemplarContexts === "object" && !Array.isArray(r.exemplarContexts)
+        ? (r.exemplarContexts as Record<string, unknown>)
+        : {};
+    const tools = Array.isArray(r.exemplarTools) ? (r.exemplarTools as unknown[]).map(String) : [];
+    for (const tool of tools) {
       if (out.length >= FAMILY_TOOL_USAGE_CAP) break;
       const t = tool.trim();
-      const c = typeof context === "string" ? context.trim() : "";
+      const c = typeof ctx[t] === "string" ? (ctx[t] as string).trim() : "";
       if (!t || !c) continue;
       const key = t.toLowerCase();
       if (seen.has(key)) continue;

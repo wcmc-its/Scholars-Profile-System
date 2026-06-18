@@ -58,6 +58,8 @@ vi.mock("@/lib/search", () => ({
     "publicationMesh^0.5",
   ],
   PEOPLE_ABSTRACTS_BOOST: 0.3,
+  PEOPLE_METHOD_CONTEXT_BOOST: 0.5,
+  PEOPLE_TOPIC_METHOD_CONTEXT_BOOST: 0.8,
   PEOPLE_RESTRUCTURED_MSM: "2<-34%",
   PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS: [
     "preferredName^1",

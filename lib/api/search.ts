@@ -51,6 +51,8 @@ import {
   MESH_ESCALATION_THRESHOLD,
   MESH_MIN_MATCHED_FORM_LEN,
   PEOPLE_ABSTRACTS_BOOST,
+  PEOPLE_METHOD_CONTEXT_BOOST,
+  PEOPLE_TOPIC_METHOD_CONTEXT_BOOST,
   PEOPLE_DEPT_LEADERSHIP_CHAIR_WEIGHT,
   PEOPLE_DEPT_LEADERSHIP_CHIEF_WEIGHT,
   PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE,
@@ -1096,24 +1098,28 @@ export async function searchPeople(opts: {
   // never reaches the topic/default branch — e.g. a pure name-template query —
   // does not spread a ladder it doesn't use; this preserves the prior
   // per-branch evaluation (a name query never referenced these constants).
-  // #1119 — the sibling method-CONTEXT boost (`SEARCH_PEOPLE_METHOD_CONTEXT`) adds
-  // the index-time `methodContext` usage-snippet field to the SAME ladders, so a
-  // usage query ranks on the real language of the work. Independent flag (it can
-  // ship/flip separately from methodFamily). Same analyzer + cross_fields group, so
-  // msm accounting is unchanged. PROSE → boosted MODESTLY (below methodFamily) so
-  // generic words don't out-rank a label/name hit (#1056/#1090). Reindex-then-flip.
   const methodBoostOn = resolvePeopleMethodFamilyBoost();
+  const peopleTopicFields = (): string[] =>
+    methodBoostOn
+      ? [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS, "methodFamily^4"]
+      : [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS];
+  const peopleDefaultFields = (): string[] =>
+    methodBoostOn
+      ? [...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS, "methodFamily^3"]
+      : [...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS];
+
+  // #1119 — the sibling method-CONTEXT boost (`SEARCH_PEOPLE_METHOD_CONTEXT`). The
+  // `methodContext` field is a multi-sentence usage-prose blob, so — UNLIKE the
+  // short controlled-vocab `methodFamily` — it must NOT join the cross_fields/msm
+  // `must` ladder: a term landing only in usage prose would satisfy
+  // minimum-should-match for the whole group and admit an off-topic scholar (the
+  // exact reason `publicationAbstracts` is excluded from these ladders; #1056/#1090).
+  // It rides a scoring-only `should` match clause instead — nudging rank, never
+  // admitting a doc. Independent flag (ships/flips separately from methodFamily);
+  // reindex-then-flip + soak. Built lazily so a name-only query never references it.
   const methodContextBoostOn = resolvePeopleMethodContextBoost();
-  const peopleTopicFields = (): string[] => [
-    ...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS,
-    ...(methodBoostOn ? ["methodFamily^4"] : []),
-    ...(methodContextBoostOn ? ["methodContext^2"] : []),
-  ];
-  const peopleDefaultFields = (): string[] => [
-    ...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS,
-    ...(methodBoostOn ? ["methodFamily^3"] : []),
-    ...(methodContextBoostOn ? ["methodContext^1.5"] : []),
-  ];
+  const methodContextShould = (query: string, boost: number): Record<string, unknown>[] =>
+    methodContextBoostOn ? [{ match: { methodContext: { query, boost } } }] : [];
 
   // Issue #311 / SPEC §6.1.4 — name-template should-clauses, reused by the name
   // template (#309) and as the name half of the hybrid template. The cwid^100
@@ -1238,6 +1244,8 @@ export async function searchPeople(opts: {
                 },
               },
             },
+            // #1119 — methodContext is scoring-only here too (topic-raised boost).
+            ...methodContextShould(contentQuery, PEOPLE_TOPIC_METHOD_CONTEXT_BOOST),
           ],
         },
       }
@@ -1268,6 +1276,8 @@ export async function searchPeople(opts: {
                 },
               },
             },
+            // #1119 — methodContext scoring-only should (cannot admit; #1056/#1090).
+            ...methodContextShould(trimmed, PEOPLE_METHOD_CONTEXT_BOOST),
           ],
         },
       };

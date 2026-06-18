@@ -138,17 +138,22 @@ async function rankExemplarForPmids(
   return { pubs: pubsRanked, total: renderable.length, methodContext: null };
 }
 
-/** #1119 — pick the family's representative tool-usage snippet: the first entry of
- *  the highest-pubCount visible row's `exemplar_contexts` (insertion order = the
- *  artifact's salience-ranked exemplar order). null when the flag is off or none. */
+/** #1119 — pick the family's representative tool-usage snippet: the top-pubCount
+ *  visible row's FIRST exemplar tool (by the order-preserving `exemplar_tools`
+ *  ARRAY — salience-ranked) that has a snippet. The `exemplar_contexts` OBJECT key
+ *  order is unreliable (Aurora MySQL re-sorts JSON keys on storage, #1119 review),
+ *  so order off the array, not the object. null when the flag is off or none. */
 function pickMethodContext(
-  rows: { exemplarContexts: unknown }[],
+  rows: { exemplarTools: unknown; exemplarContexts: unknown }[],
 ): { tool: string; context: string } | null {
   if (!isMethodsLensToolContextOn()) return null;
   for (const r of rows) {
     const raw = r.exemplarContexts;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
-    for (const [tool, context] of Object.entries(raw as Record<string, unknown>)) {
+    const ctx = raw as Record<string, unknown>;
+    const tools = Array.isArray(r.exemplarTools) ? (r.exemplarTools as unknown[]).map(String) : [];
+    for (const tool of tools) {
+      const context = ctx[tool];
       if (typeof context === "string" && context.length > 0) return { tool, context };
     }
   }
@@ -185,7 +190,13 @@ export async function loadMethodExemplar(
       familyLabel: label,
       scholar: { deletedAt: null, status: "active" },
     },
-    select: { supercategory: true, familyLabel: true, pmids: true, exemplarContexts: true },
+    select: {
+      supercategory: true,
+      familyLabel: true,
+      pmids: true,
+      exemplarTools: true,
+      exemplarContexts: true,
+    },
     orderBy: { pmidCount: "desc" },
   });
   const visible = familyRows.filter((r) =>

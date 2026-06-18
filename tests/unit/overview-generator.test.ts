@@ -408,8 +408,15 @@ describe("buildGroundingReference (#742 fact-checker reference)", () => {
     // method names + their examples
     expect(ref).toContain("AAV gene-therapy vectors");
     expect(ref).toContain("AAVrh.10");
-    // #1119 — per-exemplar usage snippet is rendered as grounded text
-    expect(ref).toContain("usage (AAVrh.10): AAVrh.10 delivered the CLN2 transgene");
+    // #1119 — per-exemplar usage snippet is rendered as grounded text, in its OWN
+    // block (NOT under ALLOWED METHOD / TOOL NAMES, so the verifier can't treat an
+    // incidental proper noun in the snippet as an allow-listed name).
+    expect(ref).toContain("TOOL USAGE DESCRIPTIONS");
+    expect(ref).toContain("AAVrh.10 delivered the CLN2 transgene");
+    // the usage line sits AFTER the allowed-names header, in its own section
+    expect(ref.indexOf("TOOL USAGE DESCRIPTIONS")).toBeGreaterThan(
+      ref.indexOf("ALLOWED METHOD / TOOL NAMES"),
+    );
     // publication title + its distilled finding (the synopsis-blindness fix)
     expect(ref).toContain("Twenty-Year Survival of CLN2 Gene Therapy");
     expect(ref).toContain("60-90% systemic distribution");
