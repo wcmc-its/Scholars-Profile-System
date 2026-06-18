@@ -85,6 +85,7 @@ describe("loadDataQualityFacets — hierarchy + counts", () => {
       // divCode
       return Promise.resolve([
         { divCode: "CARD", _count: { _all: 4 } },
+        { divCode: "PCARD", _count: { _all: 2 } },
         { divCode: null, _count: { _all: 99 } },
       ]);
     });
@@ -98,6 +99,7 @@ describe("loadDataQualityFacets — hierarchy + counts", () => {
       division: {
         findMany: vi.fn().mockResolvedValue([
           { code: "CARD", name: "Cardiology", deptCode: "MED" },
+          { code: "PCARD", name: "Cardiology", deptCode: "PED" }, // same name, different parent
           { code: "NEO", name: "Neonatology", deptCode: "PED" },
         ]),
       },
@@ -120,12 +122,16 @@ describe("loadDataQualityFacets — hierarchy + counts", () => {
     expect(facets.roleCategories[0].label.length).toBeGreaterThan(0);
 
     // Departments carry dept:CODE values + counts, with child divisions (div:CODE).
+    // A division name shared across departments ("Cardiology") is disambiguated by
+    // its parent; a unique name ("Neonatology") is left plain.
     const med = facets.departments.find((d) => d.value === "dept:MED")!;
     expect(med).toMatchObject({ label: "Medicine", count: 8 });
-    expect(med.divisions).toEqual([{ value: "div:CARD", label: "Cardiology", count: 4 }]);
-    // A division with no count aggregate defaults to 0.
+    expect(med.divisions).toEqual([{ value: "div:CARD", label: "Cardiology (Medicine)", count: 4 }]);
     const ped = facets.departments.find((d) => d.value === "dept:PED")!;
-    expect(ped.divisions).toEqual([{ value: "div:NEO", label: "Neonatology", count: 0 }]);
+    expect(ped.divisions).toEqual([
+      { value: "div:PCARD", label: "Cardiology (Pediatrics)", count: 2 },
+      { value: "div:NEO", label: "Neonatology", count: 0 }, // no count aggregate → 0
+    ]);
 
     // Centers: center:CODE + active-membership count.
     expect(facets.centers).toEqual([{ value: "center:MCC", label: "Meyer Cancer Center", count: 7 }]);
