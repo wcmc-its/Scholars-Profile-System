@@ -2,15 +2,12 @@
  * `/edit/scholar/[cwid]` — the scholar admin surface (#356 Phase 7 C6,
  * UI-SPEC § `/edit/scholar/[cwid]`).
  *
- * Server Component. Three authorization gates run in order:
- *
- *   1. **No session** → SAML-login redirect with `?return=` carrying the
- *      requested URL so the user lands back here after sign-in.
- *   2. **`session.cwid === cwid`** → render exactly `/edit` (mode='self').
- *   3. **`session.isSuperuser`** → render the superuser surface.
- *   4. Otherwise → the visible 403 page (UI-SPEC § States row 2). The
- *      `edit_authz_denied` line lands first via `requireSuperuserGet` so
- *      mid-session deauthorisation (SPEC edge case 15) is logged.
+ * Server Component. Authorization runs via the shared five-gate resolver
+ * `resolveScholarEditAccess` — self → proxy (#779) → unit-admin (Amendment 4) →
+ * comms_steward / superuser, otherwise the visible 403 page (UI-SPEC § States
+ * row 2). The `/history` sibling reuses the same resolver so the two never
+ * drift. The `edit_authz_denied` line lands first via `requireSuperuserGet` so
+ * mid-session deauthorisation (SPEC edge case 15) is logged.
  *
  * The route reads suppression-OFF (via `loadEditContext`), so the GET-time
  * superuser re-check closes the data-exposure window for a user who just
@@ -23,21 +20,12 @@ import { notFound, redirect } from "next/navigation";
 import { EditPage, visibleAttrKeys } from "@/components/edit/edit-page";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { loadEditContext } from "@/lib/api/edit-context";
-import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
-import { getSession } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
-import { requireSuperuserGet } from "@/lib/edit/authz";
-import {
-  checkProxyConflictingRole,
-  isGrantedProxy,
-  type ProxyLookup,
-} from "@/lib/edit/proxy-authz";
+import { resolveScholarEditAccess } from "@/lib/edit/scholar-edit-access";
 import {
   listUnitAdminEditorsForScholar,
-  resolveEditableUnitViaUnitAdmin,
   type UnitAdminEditorsLookup,
-  type UnitScholarLookup,
 } from "@/lib/edit/unit-scholar-authz";
 import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
@@ -61,106 +49,46 @@ export default async function EditScholarPage({
 }) {
   const { cwid: targetCwid } = await params;
 
-  // RAW session existence check + SAML redirect (invariant 4): the login gate
-  // turns on whether a real human is signed in, never the impersonation overlay.
-  const raw = await getSession();
-  if (!raw) {
-    redirect(`/api/auth/saml/login?return=/edit/scholar/${encodeURIComponent(targetCwid)}`);
+  // Authorization — the shared five-gate scholar-editor rule (self / proxy /
+  // unit-admin / comms_steward / superuser → else a logged 403), resolved once
+  // by `resolveScholarEditAccess` and reused verbatim by the `/history` sibling
+  // so the two never drift. The bare route (no `pathSuffix`) drives the login
+  // `?return=` and the `edit_authz_denied` log path. The identity, impersonation
+  // (#637 / IS-1), proxy (#779), and Amendment-4 unit-admin reasoning all live
+  // in the resolver's doc comment.
+  const access = await resolveScholarEditAccess(targetCwid);
+  if (access.kind === "redirect") {
+    redirect(access.to);
   }
-
-  // Authorization identity resolves via the effective seam, mirroring the write
-  // path (`lib/edit/request.ts`). While impersonating target T, `session.cwid`
-  // is T and `session.isSuperuser` re-derives from T — so /edit/scholar/T is
-  // self mode and /edit/scholar/U (U≠T) 403s because effective(T) is not a
-  // superuser (#637). Non-impersonating: effective == raw, byte-identical.
-  const session = await getEffectiveEditSession();
-  if (!session) {
-    // Defensive — `raw` is already non-null, so this branch is unreachable.
-    redirect(`/api/auth/saml/login?return=/edit/scholar/${encodeURIComponent(targetCwid)}`);
+  if (access.kind === "forbidden") {
+    return <ForbiddenEditPage targetCwid={targetCwid} />;
   }
+  const { session, isSelf, isProxy, isUnitAdmin, unit } = access;
 
-  const isSelf = session.cwid === targetCwid;
-
-  // Scholar-assigned proxy editor (#779 / scholar-proxy-spec.md). A granted,
-  // conflict-free proxy reaches EXACTLY their granted scholar's edit surface.
-  // Keyed on the RAW identity and only when NOT impersonating (`raw.cwid ===
-  // session.cwid`) — a #637 "View as" overlay must never confer the proxy path
-  // (IS-1). A proxy is NOT a superuser, so it remains subject to the
-  // soft-deleted-404 and #536 hidden-class-404 guards below (IS-9).
-  let isProxy = false;
-  if (!isSelf && !session.isSuperuser && raw.cwid === session.cwid) {
-    if (await isGrantedProxy(raw.cwid, targetCwid, db.read as unknown as ProxyLookup)) {
-      const conflict = await checkProxyConflictingRole(
-        raw.cwid,
-        db.read as unknown as ProxyLookup,
-        // Reuse the live verdict already resolved for this (non-impersonating)
-        // cwid instead of a second LDAPS round-trip.
-        async () => session.isSuperuser,
-      );
-      isProxy = conflict.ok;
-    }
-  }
-
-  // Org-unit administrator as profile editor (Amendment 4 / scholar-proxy-unit-
-  // admin-amendment.md). An owner/curator of a unit the scholar belongs to
-  // reaches the scholar's edit surface. Keyed on the RAW identity and only when
-  // NOT impersonating (`raw.cwid === session.cwid`) and not already self/proxy —
-  // a #637 "View as" overlay must never confer it (IS-1). A unit admin is NOT a
-  // superuser, so it remains subject to the soft-deleted-404 and #536
-  // hidden-class-404 guards below. The conferring unit's display name feeds the
-  // "via {unit} administrator" banner.
-  let isUnitAdmin = false;
+  // Resolve the conferring unit's display name for the "via {unit} administrator"
+  // banner — present only in unit-admin mode (`unit` is non-null exactly then).
+  // #1104 — the unit can now be a center (behind UNIT_ADMIN_CENTER_PROXY),
+  // resolved just like a department / division.
   let unitAdminBanner:
     | { unitKind: "department" | "division" | "center"; unitName: string }
     | null = null;
-  if (!isSelf && !isProxy && !session.isSuperuser && raw.cwid === session.cwid) {
-    const unit = await resolveEditableUnitViaUnitAdmin(
-      raw.cwid,
-      targetCwid,
-      db.read as unknown as UnitScholarLookup,
-    );
-    if (unit) {
-      isUnitAdmin = true;
-      // #1104 — the conferring unit can now be a center (behind
-      // UNIT_ADMIN_CENTER_PROXY); resolve its display name for the banner just
-      // as a department / division name is resolved.
-      const named =
-        unit.kind === "department"
-          ? await db.read.department.findUnique({
+  if (unit) {
+    const named =
+      unit.kind === "department"
+        ? await db.read.department.findUnique({
+            where: { code: unit.code },
+            select: { name: true },
+          })
+        : unit.kind === "center"
+          ? await db.read.center.findUnique({
               where: { code: unit.code },
               select: { name: true },
             })
-          : unit.kind === "center"
-            ? await db.read.center.findUnique({
-                where: { code: unit.code },
-                select: { name: true },
-              })
-            : await db.read.division.findUnique({
-                where: { code: unit.code },
-                select: { name: true },
-              });
-      unitAdminBanner = { unitKind: unit.kind, unitName: named?.name ?? unit.code };
-    }
-  }
-
-  // A comms_steward is a global profile editor (comms-steward-profile-editing-
-  // spec.md §4b) — superuser parity on the profile MINUS slug + admin/unit
-  // governance, enforced field-by-field at the write routes. So a steward
-  // reaches any scholar's edit surface like a superuser does; the editor renders
-  // in the restricted `comms_steward` mode below.
-  if (!isSelf && !isProxy && !isUnitAdmin && !session.isCommsSteward) {
-    // GET-time superuser re-check — emits one `edit_authz_denied` line with
-    // reason="not_superuser_get" when the actor is not a superuser. The
-    // helper guarantees the two routes (this one and /edit/publication/[pmid])
-    // don't drift on the denial-log shape.
-    const denial = requireSuperuserGet({
-      session,
-      path: `/edit/scholar/${targetCwid}`,
-      targetId: targetCwid,
-    });
-    if (denial !== null) {
-      return <ForbiddenEditPage targetCwid={targetCwid} />;
-    }
+          : await db.read.division.findUnique({
+              where: { code: unit.code },
+              select: { name: true },
+            });
+    unitAdminBanner = { unitKind: unit.kind, unitName: named?.name ?? unit.code };
   }
 
   // #836 — the manual-Highlights editor and the COI-gap advisory load for the
