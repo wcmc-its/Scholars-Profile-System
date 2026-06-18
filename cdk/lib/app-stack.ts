@@ -1020,6 +1020,21 @@ export class AppStack extends Stack {
         // nightly etl:coi-gap source has seeded data in that env. Prod takes
         // effect only on an approval-gated `cdk deploy Sps-App-prod`.
         SELF_EDIT_COI_GAP_HINT: "on",
+        // #1102/#1103/#1104/#1105 — Cancer-Center / org-unit features (merged
+        // 2026-06-18, PRs #1108/#1109/#1110/#1111). Staging-on for soak;
+        // prod-off/armed (flip on the next approval-gated Sps-App-prod deploy):
+        //   EDIT_UNIT_ROSTER_EXPORT    (#1102) center roster CSV on the /edit Members tab
+        //   PROFILE_CENTER_AFFILIATION (#1103) "Centers" card on the scholar profile
+        //                              (center name renders now; program label/type
+        //                              fill in once #906's classification load runs)
+        //   UNIT_ADMIN_CENTER_PROXY    (#1104) center owner/curator proxy-edit (Amendment 4, D1)
+        //   CENTER_PROGRAM_PAGES       (#1105) per-program pages + leader. The schema
+        //                              migration was applied by the CD migrate step on
+        //                              the edbb70eb deploy, so the loader's new columns exist.
+        EDIT_UNIT_ROSTER_EXPORT: env === "staging" ? "on" : "off",
+        PROFILE_CENTER_AFFILIATION: env === "staging" ? "on" : "off",
+        UNIT_ADMIN_CENTER_PROXY: env === "staging" ? "on" : "off",
+        CENTER_PROGRAM_PAGES: env === "staging" ? "on" : "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
