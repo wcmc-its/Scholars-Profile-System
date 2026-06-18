@@ -3,14 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, Search } from "lucide-react";
 
-export type FacetOption = {
-  value: string;
-  label: string;
-  count: number;
-  /** Optional nesting depth (0/undefined = top level). Each level adds a left
-   *  indent so a child option reads as nested under the one above it. */
-  indent?: number;
-};
+export type FacetOption = { value: string; label: string; count: number };
 
 /**
  * One facet group in the center-roster sidebar (#552 follow-on). Multi-select
@@ -94,7 +87,6 @@ export function RosterFacet({
                 onClick={() => onToggle(o.value)}
                 disabled={disabled}
                 aria-pressed={isSelected}
-                style={o.indent ? { paddingInlineStart: `${o.indent}rem` } : undefined}
                 className={`flex w-full items-start gap-2 text-left text-[13px] ${
                   disabled
                     ? "cursor-default opacity-40"

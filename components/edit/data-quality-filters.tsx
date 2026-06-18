@@ -136,14 +136,16 @@ export function DataQualityFilters({
   // Person-type options (counts come from the loader).
   const roleOptions: FacetOption[] = facets.roleCategories;
 
-  // Department/division options: each department followed by its indented child
-  // divisions, so the flat list reads as a hierarchy (order is preserved).
+  // Department + division options as a FLAT list (each department followed by its
+  // divisions, order preserved). Divisions are NOT indented: their label already
+  // carries the parent department ("Cardiology (Medicine)"), and indentation would
+  // wrongly imply nesting under whatever row sits above them under search.
   const unitOptions = useMemo<FacetOption[]>(() => {
     const out: FacetOption[] = [];
     for (const dep of facets.departments) {
       out.push({ value: dep.value, label: dep.label, count: dep.count });
       for (const div of dep.divisions) {
-        out.push({ value: div.value, label: div.label, count: div.count, indent: 1 });
+        out.push({ value: div.value, label: div.label, count: div.count });
       }
     }
     return out;
