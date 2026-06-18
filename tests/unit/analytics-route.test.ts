@@ -153,7 +153,8 @@ describe("VALID_EVENTS allow-list", () => {
     expect(VALID_EVENTS.has("home_method_category_click")).toBe(true);
     expect(VALID_EVENTS.has("home_methods_explore_all_click")).toBe(true);
     expect(VALID_EVENTS.has("search_nav_watchdog")).toBe(true);
-    expect(VALID_EVENTS.size).toBe(11);
+    expect(VALID_EVENTS.has("search_mesh_restrict")).toBe(true);
+    expect(VALID_EVENTS.size).toBe(12);
   });
 });
 
