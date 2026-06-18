@@ -121,9 +121,12 @@ describe("DataQualityFilters — auto-apply", () => {
     expect(replace).toHaveBeenLastCalledWith("/edit/data-quality", { scroll: false });
   });
 
-  it("indents division options structurally under their parent department", () => {
+  it("renders departments and divisions as a flat (non-indented) list", () => {
     renderFilters();
-    expect(screen.getByText("Cardiology").closest("button")!.style.paddingInlineStart).toBe("1rem");
-    expect(screen.getByText("Medicine").closest("button")!.style.paddingInlineStart).toBe("");
+    // No facet option carries an indent — divisions are disambiguated by their
+    // parent in the label instead, so nothing implies false nesting under search.
+    for (const btn of document.querySelectorAll<HTMLButtonElement>("button[aria-pressed]")) {
+      expect(btn.style.paddingInlineStart).toBe("");
+    }
   });
 });
