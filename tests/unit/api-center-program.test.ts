@@ -55,7 +55,11 @@ vi.mock("@/lib/external-leaders", () => ({
   },
 }));
 
-import { getCenterProgram, isProgramPageEligible } from "@/lib/api/centers";
+import {
+  getCenterProgram,
+  getCenterPrograms,
+  isProgramPageEligible,
+} from "@/lib/api/centers";
 
 /** scholar.findMany routes one active row per requested cwid (none dormant). */
 function routeScholarFindMany(args?: { where?: { cwid?: { in?: string[] } } }) {
@@ -197,5 +201,24 @@ describe("getCenterProgram (#1105)", () => {
   it("returns null leader when neither cwid nor external fallback resolves", async () => {
     const detail = await getCenterProgram("meyer-cancer-center", "CB");
     expect(detail!.leader).toBeNull();
+  });
+});
+
+describe("getCenterPrograms (#1105 — center 'Programs' nav)", () => {
+  it("returns the page-eligible programs in taxonomy order, excluding ZY", async () => {
+    mockCenterProgramFindMany.mockResolvedValueOnce([
+      { code: "CB", label: "Cancer Biology" },
+      { code: "CGE", label: "Cancer Genetics & Epigenetics" },
+      { code: "ZY", label: "Non-aligned Clinical" },
+      { code: "CT", label: "Cancer Therapeutics" },
+    ]);
+    const programs = await getCenterPrograms("MEYER");
+    expect(programs.map((p) => p.code)).toEqual(["CB", "CGE", "CT"]);
+    expect(programs.find((p) => p.code === "CB")!.label).toBe("Cancer Biology");
+  });
+
+  it("returns [] for a center with no program taxonomy", async () => {
+    mockCenterProgramFindMany.mockResolvedValueOnce([]);
+    expect(await getCenterPrograms("OTHER")).toEqual([]);
   });
 });

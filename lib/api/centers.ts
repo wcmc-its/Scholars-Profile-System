@@ -260,6 +260,24 @@ export function isProgramPageEligible(code: string | null | undefined): boolean 
 }
 
 /**
+ * #1105 — the center's page-eligible programs (the `CenterProgram` taxonomy
+ * minus the excluded ZY catch-all), ordered, for the "Programs" nav on the
+ * center page. Eligibility mirrors the program route (`getCenterProgram`), so
+ * every link resolves to a real page. Tab-independent (taxonomy, not the
+ * member roster), so the nav is stable across the Scholars/Publications tabs.
+ */
+export async function getCenterPrograms(
+  centerCode: string,
+): Promise<Array<{ code: string; label: string }>> {
+  const rows = await prisma.centerProgram.findMany({
+    where: { centerCode },
+    orderBy: { sortOrder: "asc" },
+    select: { code: true, label: true },
+  });
+  return rows.filter((r) => isProgramPageEligible(r.code));
+}
+
+/**
  * #552 Phase 4 — the public roster is either a flat, paginated list (centers
  * with no program taxonomy, today's behavior) or a single page of all active
  * members grouped under program-label headers (programmed centers). The two
