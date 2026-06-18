@@ -73,6 +73,7 @@ vi.mock("@/lib/api/methods", () => ({
   getFamilyScholars: (...a: unknown[]) => mockGetFamilyScholars(...a),
   getDistinctScholarCountForFamily: (...a: unknown[]) => mockGetDistinctScholarCountForFamily(...a),
   getRepresentativePubsForFamily: (...a: unknown[]) => mockGetRepresentativePubsForFamily(...a),
+  getFamilyToolUsage: () => Promise.resolve([]),
 }));
 
 vi.mock("@/lib/export/scholar-export-flags", () => ({

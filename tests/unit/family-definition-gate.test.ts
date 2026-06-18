@@ -43,6 +43,7 @@ vi.mock("@/lib/profile/methods-lens-flags", () => ({
   isMethodsLensEnabled: () => mockLensEnabled(),
   isMethodsLensSensitiveGateOn: () => mockSensitiveGateOn(),
   isMethodsFamilyDefinitionsOn: () => mockDefinitionsOn(),
+  isMethodsLensToolContextOn: () => false,
   isMethodPagesEnabled: () => true,
   isMethodsFamilyRosterFallbackOn: () => false,
 }));

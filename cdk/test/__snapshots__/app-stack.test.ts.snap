@@ -516,6 +516,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "METHODS_LENS_TOOL_CONTEXT",
+                "Value": "off",
+              },
+              {
                 "Name": "METHODS_LENS_FAMILY_SYNONYMS",
                 "Value": "off",
               },
@@ -3695,6 +3699,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "METHODS_LENS_FAMILY_DEFINITIONS",
                 "Value": "on",
+              },
+              {
+                "Name": "METHODS_LENS_TOOL_CONTEXT",
+                "Value": "off",
               },
               {
                 "Name": "METHODS_LENS_FAMILY_SYNONYMS",

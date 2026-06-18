@@ -95,6 +95,26 @@ export function isMethodsFamilyDefinitionsOn(): boolean {
 }
 
 /**
+ * #1119 — surfaces the ReciterAI tool-usage CONTEXT snippets (the best per-paper
+ * "how this tool was used" sentence, ingested into `scholar_family.exemplar_contexts`
+ * and `scholar_tool.sample_context`) across the public Methods surfaces: a
+ * per-exemplar-tool hover on the profile Methods panel, a "How researchers use
+ * these tools" strip on the family page, and the search method-badge exemplar
+ * hover. Default OFF: the columns are populated by the ETL unconditionally, but
+ * nothing renders — and the cached profile/family payloads do not even CARRY the
+ * snippet text — until this flips, mirroring the #879 definition rollout. Every
+ * surface ALSO inherits the existing #800/#801 family-overlay public-visibility
+ * gate (`isFamilyPubliclyVisible`), so a suppressed/sensitive family never leaks a
+ * snippet. The snippets are EXTRACTED publication text (grounding-eligible for the
+ * overview generator) but render here as plain text only. Wire in BOTH `.env.local`
+ * AND the per-env `environment:` block in cdk/lib/app-stack.ts per the flag-parity
+ * rule.
+ */
+export function isMethodsLensToolContextOn(): boolean {
+  return process.env.METHODS_LENS_TOOL_CONTEXT === "on";
+}
+
+/**
  * #962 — the center-roster "Methods & tools" multi-select facet + per-member
  * tool chips on the GROUPED center roster. ADDITIONALLY gated on
  * METHODS_LENS_ENABLED (the `scholar_family` substrate): if the methods lens is

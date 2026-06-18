@@ -45,7 +45,7 @@ vi.mock("@/lib/api/manual-layer", () => ({
 
 import { loadMethodExemplar, loadTopicExemplar } from "@/lib/api/method-exemplar";
 
-const EMPTY = { pubs: [], total: 0 };
+const EMPTY = { pubs: [], total: 0, methodContext: null };
 
 const pub = (over: Record<string, unknown>) => ({
   title: "Paper",

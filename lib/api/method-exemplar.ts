@@ -22,6 +22,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import type { EvidencePub } from "@/lib/api/result-evidence";
 import { isFamilyPubliclyVisible, loadFamilyOverlayGate } from "@/lib/api/methods-overlay";
+import { isMethodsLensToolContextOn } from "@/lib/profile/methods-lens-flags";
 import {
   isAuthorHidden,
   loadPublicationSuppressions,
@@ -33,11 +34,18 @@ import {
   type ExemplarCandidate,
 } from "@/lib/api/method-exemplar-rank";
 
-/** Up to N representative papers + the renderable-candidate total ("+N more"). */
-export type ExemplarResult = { pubs: EvidencePub[]; total: number };
+/** Up to N representative papers + the renderable-candidate total ("+N more").
+ *  #1119 — `methodContext` carries the family's best per-paper tool-usage snippet
+ *  ("how researchers use <tool>"), populated only for a method match when
+ *  METHODS_LENS_TOOL_CONTEXT is on; null otherwise (and always for topic). */
+export type ExemplarResult = {
+  pubs: EvidencePub[];
+  total: number;
+  methodContext: { tool: string; context: string } | null;
+};
 
 /** The null-equivalent empty result (no candidate / nothing renderable). */
-const EMPTY_EXEMPLAR: ExemplarResult = { pubs: [], total: 0 };
+const EMPTY_EXEMPLAR: ExemplarResult = { pubs: [], total: 0, methodContext: null };
 
 /** Top-N representative papers shown in the disclosure stack. */
 const EXEMPLAR_LIMIT = 3;
@@ -125,7 +133,26 @@ async function rankExemplarForPmids(
   // `pubs` = the top-N for the disclosure stack.
   const renderable = filterRenderableExemplars(candidates);
   const pubsRanked = rankMethodExemplarList(renderable, new Date().getFullYear(), EXEMPLAR_LIMIT);
-  return { pubs: pubsRanked, total: renderable.length };
+  // methodContext is a family-level concern resolved by the method loader; the
+  // shared tail (also used by the topic loader) leaves it null.
+  return { pubs: pubsRanked, total: renderable.length, methodContext: null };
+}
+
+/** #1119 — pick the family's representative tool-usage snippet: the first entry of
+ *  the highest-pubCount visible row's `exemplar_contexts` (insertion order = the
+ *  artifact's salience-ranked exemplar order). null when the flag is off or none. */
+function pickMethodContext(
+  rows: { exemplarContexts: unknown }[],
+): { tool: string; context: string } | null {
+  if (!isMethodsLensToolContextOn()) return null;
+  for (const r of rows) {
+    const raw = r.exemplarContexts;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    for (const [tool, context] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof context === "string" && context.length > 0) return { tool, context };
+    }
+  }
+  return null;
 }
 
 /**
@@ -158,13 +185,16 @@ export async function loadMethodExemplar(
       familyLabel: label,
       scholar: { deletedAt: null, status: "active" },
     },
-    select: { supercategory: true, familyLabel: true, pmids: true },
+    select: { supercategory: true, familyLabel: true, pmids: true, exemplarContexts: true },
     orderBy: { pmidCount: "desc" },
   });
   const visible = familyRows.filter((r) =>
     isFamilyPubliclyVisible(r.supercategory, r.familyLabel, gate),
   );
   if (visible.length === 0) return EMPTY_EXEMPLAR;
+
+  // #1119 — the family's representative tool-usage snippet (flag-gated inside).
+  const methodContext = pickMethodContext(visible);
 
   // (2) Candidate pmids — union across the matching public rows (a label can in
   // principle recur under two supercategories; both public here), bounded.
@@ -177,7 +207,8 @@ export async function loadMethodExemplar(
     if (pmidSet.size >= MAX_CANDIDATES) break;
   }
 
-  return rankExemplarForPmids(id, Array.from(pmidSet));
+  const result = await rankExemplarForPmids(id, Array.from(pmidSet));
+  return { ...result, methodContext };
 }
 
 /**
