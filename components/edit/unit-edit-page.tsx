@@ -21,6 +21,7 @@
  * restore it). The `retire` panel renders normally so they can Restore; every
  * other panel shows a "Retired — restore to edit" notice instead of its editor.
  */
+import { CenterProgramCard } from "@/components/edit/center-program-card";
 import { CenterRosterCard } from "@/components/edit/center-roster-card";
 import { CenterTypeCard } from "@/components/edit/center-type-card";
 import { EditShell } from "@/components/edit/edit-shell";
@@ -41,6 +42,7 @@ type AttrKey =
   | "url"
   | "leader"
   | "roster"
+  | "programs"
   | "access"
   | "slug"
   | "center-type"
@@ -66,6 +68,13 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   { key: "url", label: "Website", visible: () => true },
   { key: "leader", label: "Leadership", visible: () => true },
   { key: "roster", label: "Members", visible: (ctx) => hasRoster(ctx) },
+  // #1117 — per-program leaders + description; only for a center with a program
+  // taxonomy (the Cancer-Center-only gate is data-driven, like the roster fields).
+  {
+    key: "programs",
+    label: "Programs",
+    visible: (ctx) => ctx.unit.unitType === "center" && (ctx.programs?.length ?? 0) > 0,
+  },
   { key: "access", label: "Access", visible: (ctx) => isOwnerPlus(ctx.actorRole) },
   { key: "slug", label: "Profile URL", visible: (ctx) => isSuperuser(ctx.actorRole) },
   {
@@ -197,6 +206,11 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
       }
       // A department has no roster row in its rail — unreachable.
       return null;
+    case "programs":
+      // #1117 — only surfaced for a center with a program taxonomy.
+      return (
+        <CenterProgramCard centerCode={ctx.unit.code} programs={ctx.programs ?? []} />
+      );
     case "slug":
       return (
         <UnitSlugCard

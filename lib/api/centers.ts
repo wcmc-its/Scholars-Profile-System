@@ -601,18 +601,21 @@ export type ProgramLeader = {
 export type CenterProgramDetail = {
   center: { code: string; name: string; slug: string };
   program: { code: string; label: string; description: string | null };
-  leader: ProgramLeader | null;
+  /** #1117 — the program's leaders, in display order. A program may be co-led,
+   *  so this is a list (empty when no leader is set or none resolve). */
+  leaders: ProgramLeader[];
   /** Active members of THIS program, shaped for `PersonRow`. */
   members: CenterMemberHit[];
   scholarCount: number;
 };
 
 /**
- * #1105 — assemble the dedicated page for a single center program, modeled on
- * `getDivision`. Resolves the center by slug, the program by code (the `ZY`
+ * #1105/#1117 — assemble the dedicated page for a single center program, modeled
+ * on `getDivision`. Resolves the center by slug, the program by code (the `ZY`
  * "Non-aligned Clinical" catch-all and any other excluded code are NOT pages →
- * null), the single program leader (`leaderCwid` → WCM scholar, else the
- * `lib/external-leaders.ts` fallback keyed `<centerCode>:<programCode>`), and
+ * null), the program's leaders (#1117 — 0..N `CenterProgramLeader` rows, each
+ * `cwid` → WCM scholar, else the `lib/external-leaders.ts` fallback keyed
+ * `<centerCode>:<programCode>`; unresolvable cwids are dropped), and
  * the program's ACTIVE members (reusing the §3.3 `getCenterMembers` grouping,
  * filtered to this program). Returns null when the center/program doesn't exist,
  * the center is whole-unit-suppressed (#540, via `getCenter`), or the code is
@@ -632,49 +635,60 @@ export async function getCenterProgram(
   const center = await getCenter(centerSlug);
   if (!center) return null;
 
-  const program = (await prisma.centerProgram.findUnique({
+  const program = await prisma.centerProgram.findUnique({
     where: { centerCode_code: { centerCode: center.code, code } },
-    select: { code: true, label: true, description: true, leaderCwid: true, leaderInterim: true },
-  })) as {
-    code: string;
-    label: string;
-    description: string | null;
-    leaderCwid: string | null;
-    leaderInterim: boolean;
-  } | null;
+    select: {
+      code: true,
+      label: true,
+      description: true,
+      leaders: {
+        orderBy: [{ sortOrder: "asc" }, { cwid: "asc" }],
+        select: { cwid: true, interim: true },
+      },
+    },
+  });
   if (!program) return null;
 
-  // Leader — `leaderCwid` resolves to a WCM scholar (profile-linked) or, failing
-  // that, the external-leader fallback keyed `<centerCode>:<programCode>`.
-  let leader: ProgramLeader | null = null;
-  if (program.leaderCwid && program.leaderCwid !== "") {
-    const scholar = await prisma.scholar.findUnique({
-      where: { cwid: program.leaderCwid },
+  // Leaders (#1117) — 0..N rows in display order. Each `cwid` resolves to a WCM
+  // scholar (profile-linked) or the external-leader fallback keyed
+  // `<centerCode>:<programCode>` (used only when that entry names THIS cwid).
+  // A cwid that resolves to neither is dropped — never fabricate a name.
+  let leaders: ProgramLeader[] = [];
+  if (program.leaders.length > 0) {
+    const scholars = await prisma.scholar.findMany({
+      where: { cwid: { in: program.leaders.map((l) => l.cwid) } },
       select: { cwid: true, preferredName: true, slug: true, primaryTitle: true },
     });
-    if (scholar) {
-      leader = {
-        cwid: scholar.cwid,
-        preferredName: scholar.preferredName,
-        slug: scholar.slug,
-        primaryTitle: scholar.primaryTitle,
-        identityImageEndpoint: identityImageEndpoint(scholar.cwid),
-        isInterim: program.leaderInterim,
-      };
-    }
-  }
-  if (!leader) {
+    const scholarByCwid = new Map(scholars.map((s) => [s.cwid, s]));
     const ext = EXTERNAL_LEADERS[`${center.code}:${code}`];
-    if (ext) {
-      leader = {
-        cwid: ext.cwid,
-        preferredName: ext.name,
-        slug: null,
-        primaryTitle: ext.primaryTitle,
-        identityImageEndpoint: identityImageEndpoint(ext.cwid),
-        isInterim: program.leaderInterim,
-      };
-    }
+    leaders = program.leaders.flatMap((row): ProgramLeader[] => {
+      const scholar = scholarByCwid.get(row.cwid);
+      if (scholar) {
+        return [
+          {
+            cwid: scholar.cwid,
+            preferredName: scholar.preferredName,
+            slug: scholar.slug,
+            primaryTitle: scholar.primaryTitle,
+            identityImageEndpoint: identityImageEndpoint(scholar.cwid),
+            isInterim: row.interim,
+          },
+        ];
+      }
+      if (ext && ext.cwid === row.cwid) {
+        return [
+          {
+            cwid: ext.cwid,
+            preferredName: ext.name,
+            slug: null,
+            primaryTitle: ext.primaryTitle,
+            identityImageEndpoint: identityImageEndpoint(ext.cwid),
+            isInterim: row.interim,
+          },
+        ];
+      }
+      return [];
+    });
   }
 
   // Members of THIS program — reuse the §3.3 grouped roster and pluck this
@@ -688,7 +702,7 @@ export async function getCenterProgram(
   return {
     center: { code: center.code, name: center.name, slug: center.slug },
     program: { code: program.code, label: program.label, description: program.description },
-    leader,
+    leaders,
     members,
     scholarCount: members.length,
   };

@@ -1020,22 +1020,41 @@ model CenterProgram {
   code       String @db.VarChar(16)
   label      String @db.VarChar(255)
   sortOrder  Int    @default(0) @map("sort_order")
-  /// #1105 — per-program page fields. A program's dedicated page
+  /// #1105/#1117 — per-program page fields. A program's dedicated page
   /// (`/centers/[slug]/programs/[code]`, flag `CENTER_PROGRAM_PAGES`) renders a
-  /// LeaderCard from `leaderCwid` (resolving to a WCM scholar, or the
-  /// `lib/external-leaders.ts` fallback keyed `<centerCode>:<programCode>`) and a
-  /// prose `description`. All three are manually owned (no ETL writes them) and
-  /// null/false by default, so the feature ships dark.
-  leaderCwid    String?  @map("leader_cwid") @db.VarChar(32)
-  /// Interim/acting qualifier for the program leader — renders "Interim Leader".
-  leaderInterim Boolean  @default(false) @map("leader_interim")
-  description   String?  @map("description") @db.Text
+  /// prose `description` and its leaders (the `CenterProgramLeader` children — a
+  /// program may be co-led, #1117). `description` is manually owned (no ETL
+  /// writes it) and null by default, so the feature ships dark.
+  description String?  @map("description") @db.Text
 
-  center  Center             @relation(fields: [centerCode], references: [code], onDelete: Cascade)
+  center  Center                @relation(fields: [centerCode], references: [code], onDelete: Cascade)
   members CenterMembership[]
+  /// #1117 — the program's leaders (0..N). Replaces the single
+  /// `leaderCwid`/`leaderInterim` columns (#1105), which could carry only one.
+  leaders CenterProgramLeader[]
 
   @@id([centerCode, code])
   @@map("center_program")
+}
+
+/// #1117 — a center program's leader. A Meyer Cancer Center program is often
+/// co-led, so leaders are rows here (0..N) rather than a single
+/// `CenterProgram.leaderCwid` column. Each `cwid` resolves to a WCM scholar
+/// (profile-linked) or the external-leader fallback (`lib/external-leaders.ts`);
+/// `interim` renders the "Interim Leader" qualifier; `sortOrder` is the display
+/// order. Manually owned (no ETL writes these), so the feature ships dark behind
+/// `CENTER_PROGRAM_PAGES`.
+model CenterProgramLeader {
+  centerCode  String  @map("center_code")  @db.VarChar(64)
+  programCode String  @map("program_code") @db.VarChar(16)
+  cwid        String  @db.VarChar(32)
+  interim     Boolean @default(false)
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  program CenterProgram @relation(fields: [centerCode, programCode], references: [centerCode, code], onDelete: Cascade)
+
+  @@id([centerCode, programCode, cwid])
+  @@map("center_program_leader")
 }
 
 /// Research vs clinical membership flavor — a Cancer-Center concept (#552). Set

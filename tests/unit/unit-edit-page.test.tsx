@@ -38,6 +38,9 @@ vi.mock("@/components/edit/unit-roster-card", () => ({
 vi.mock("@/components/edit/center-roster-card", () => ({
   CenterRosterCard: () => <div data-testid="panel-center-roster" />,
 }));
+vi.mock("@/components/edit/center-program-card", () => ({
+  CenterProgramCard: () => <div data-testid="panel-center-program" />,
+}));
 
 import { UnitEditPage } from "@/components/edit/unit-edit-page";
 import type { UnitActorRole, UnitEditContext } from "@/lib/api/unit-edit-context";
@@ -49,6 +52,7 @@ function ctx(over: {
   siblings?: UnitEditContext["siblingDivisions"];
   access?: UnitEditContext["access"];
   suppression?: UnitEditContext["unit"]["suppression"];
+  programs?: UnitEditContext["programs"];
 }): UnitEditContext {
   const unitType = over.unitType ?? "department";
   return {
@@ -71,7 +75,7 @@ function ctx(over: {
     },
     access: over.access ?? null,
     roster: null,
-    programs: unitType === "center" ? [] : null,
+    programs: over.programs ?? (unitType === "center" ? [] : null),
     siblingDivisions: over.siblings ?? null,
     actorRole: over.actorRole ?? "curator",
     actorCwid: "act001",
@@ -111,6 +115,22 @@ describe("UnitEditPage — rail filtering", () => {
   it("a manual division shows roster; an ED division does not", () => {
     render(<UnitEditPage ctx={ctx({ unitType: "division", actorRole: "curator", source: "manual" })} />);
     expect(railKeys()).toContain("roster");
+  });
+
+  it("a center with a program taxonomy shows the Programs tab (#1117); empty hides it", () => {
+    const withPrograms = ctx({
+      unitType: "center",
+      actorRole: "curator",
+      programs: [{ code: "CB", label: "Cancer Biology", sortOrder: 10, description: null, leaders: [] }],
+    });
+    render(<UnitEditPage ctx={withPrograms} attr="programs" />);
+    expect(railKeys()).toContain("programs");
+    expect(screen.getByTestId("panel-center-program")).toBeTruthy();
+  });
+
+  it("a center with NO programs hides the Programs tab", () => {
+    render(<UnitEditPage ctx={ctx({ unitType: "center", actorRole: "curator" })} />);
+    expect(railKeys()).not.toContain("programs");
   });
 
   it("an ED division has no roster row", () => {

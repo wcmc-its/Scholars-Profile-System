@@ -16,6 +16,14 @@ describe("isAllowedRevalidatePath", () => {
     expect(isAllowedRevalidatePath("/departments/medicine/divisions/cardiology")).toBe(true);
   });
 
+  it("allows center + center-program-page paths (#540 / #1117)", () => {
+    expect(isAllowedRevalidatePath("/centers/meyer-cancer-center")).toBe(true);
+    expect(isAllowedRevalidatePath("/centers/meyer-cancer-center/programs/CB")).toBe(true);
+    // not a bare /programs and not a deeper path
+    expect(isAllowedRevalidatePath("/centers/meyer-cancer-center/programs")).toBe(false);
+    expect(isAllowedRevalidatePath("/centers/meyer-cancer-center/programs/CB/extra")).toBe(false);
+  });
+
   it("rejects an unknown exact path", () => {
     expect(isAllowedRevalidatePath("/edit")).toBe(false);
     expect(isAllowedRevalidatePath("/api/edit/field")).toBe(false);

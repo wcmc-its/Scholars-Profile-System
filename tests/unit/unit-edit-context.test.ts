@@ -37,7 +37,13 @@ type Opts = {
     startDate?: Date | null;
     endDate?: Date | null;
   }>;
-  centerPrograms?: Array<{ code: string; label: string; sortOrder: number }>;
+  centerPrograms?: Array<{
+    code: string;
+    label: string;
+    sortOrder: number;
+    description: string | null;
+    leaders: Array<{ cwid: string; interim: boolean; sortOrder: number }>;
+  }>;
   divisionMembers?: Array<{ cwid: string; source: string }>;
 };
 
@@ -289,10 +295,17 @@ describe("loadUnitEditContext — center", () => {
               endDate: null,
             },
           ],
-          // Provided in DB-sorted order (the mock doesn't apply orderBy).
+          // Provided in DB-sorted order (the mock doesn't apply orderBy). #1117 —
+          // each program carries its description + leader join rows.
           centerPrograms: [
-            { code: "CB", label: "Cancer Biology", sortOrder: 10 },
-            { code: "CT", label: "Cancer Therapeutics", sortOrder: 40 },
+            {
+              code: "CB",
+              label: "Cancer Biology",
+              sortOrder: 10,
+              description: "Cancer biology.",
+              leaders: [{ cwid: "dir001", interim: false, sortOrder: 0 }],
+            },
+            { code: "CT", label: "Cancer Therapeutics", sortOrder: 40, description: null, leaders: [] },
           ],
           scholars: [{ cwid: "dir001", preferredName: "Dr Director", primaryTitle: "MD" }],
         }),
@@ -317,10 +330,19 @@ describe("loadUnitEditContext — center", () => {
         endDate: null,
       },
     ]);
-    // #552 — the center program taxonomy rides along (sorted by sortOrder).
+    // #552/#1117 — the program taxonomy rides along (sorted by sortOrder) with
+    // each program's description + resolved leaders.
     expect(ctx!.programs).toEqual([
-      { code: "CB", label: "Cancer Biology", sortOrder: 10 },
-      { code: "CT", label: "Cancer Therapeutics", sortOrder: 40 },
+      {
+        code: "CB",
+        label: "Cancer Biology",
+        sortOrder: 10,
+        description: "Cancer biology.",
+        leaders: [
+          { cwid: "dir001", name: "Dr Director", title: "MD", interim: false, sortOrder: 0 },
+        ],
+      },
+      { code: "CT", label: "Cancer Therapeutics", sortOrder: 40, description: null, leaders: [] },
     ]);
   });
 });

@@ -199,6 +199,9 @@ export async function reflectUnitChange(params: {
   parentDeptSlug?: string;
   /** For a center slug change: the previous slug whose URL flips. */
   previousSlug?: string | null;
+  /** #1117 — for a center program edit (leaders/description), the program code
+   *  whose dedicated page `/centers/{slug}/programs/{code}` must also flush. */
+  programCode?: string;
 }): Promise<void> {
   const paths: string[] = ["/browse"];
   if (params.unitKind === "department") {
@@ -214,6 +217,10 @@ export async function reflectUnitChange(params: {
     paths.push(`/centers/${params.unitSlug}`);
     if (params.previousSlug && params.previousSlug !== params.unitSlug) {
       paths.push(`/centers/${params.previousSlug}`);
+    }
+    // #1117 — the program's own ISR page renders the leaders/description.
+    if (params.programCode) {
+      paths.push(`/centers/${params.unitSlug}/programs/${params.programCode}`);
     }
   }
   revalidatePaths(paths);

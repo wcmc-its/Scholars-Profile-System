@@ -121,8 +121,23 @@ export type UnitEditContext = {
   }> | null;
   /** The center's program taxonomy (#552), present for a center (empty when the
    *  center has none — the roster editor hides Type + Program then). null for a
-   *  department or division. */
-  programs: ReadonlyArray<{ code: string; label: string; sortOrder: number }> | null;
+   *  department or division. #1117 widens each program with its prose
+   *  `description` and ordered `leaders` (0..N — a program may be co-led) for the
+   *  program editor; `name`/`title` resolve a leader cwid to a WCM scholar (null
+   *  when the cwid is an external leader with no scholar row). */
+  programs: ReadonlyArray<{
+    code: string;
+    label: string;
+    sortOrder: number;
+    description: string | null;
+    leaders: ReadonlyArray<{
+      cwid: string;
+      name: string | null;
+      title: string | null;
+      interim: boolean;
+      sortOrder: number;
+    }>;
+  }> | null;
   /** Present on a department only — its child divisions for the sub-rail. */
   siblingDivisions: ReadonlyArray<{
     code: string;
@@ -325,8 +340,16 @@ export async function loadUnitEditContext(
     endDate: Date | null;
   };
   let rosterRows: RosterRow[] = [];
-  // A center's program taxonomy (#552) — empty for centers that don't use it.
-  let programs: Array<{ code: string; label: string; sortOrder: number }> | null = null;
+  // A center's program taxonomy (#552) + #1117 per-program leaders/description.
+  // Raw rows are resolved into the public `programs` shape after the name batch.
+  type ProgramRowRaw = {
+    code: string;
+    label: string;
+    sortOrder: number;
+    description: string | null;
+    leaders: Array<{ cwid: string; interim: boolean; sortOrder: number }>;
+  };
+  let programRowsRaw: ProgramRowRaw[] | null = null;
   if (hasRoster) {
     if (unitType === "center") {
       rosterRows = await client.centerMembership.findMany({
@@ -341,12 +364,20 @@ export async function loadUnitEditContext(
         },
         orderBy: { cwid: "asc" },
       });
-      const programRows = await client.centerProgram.findMany({
+      programRowsRaw = await client.centerProgram.findMany({
         where: { centerCode: code },
-        select: { code: true, label: true, sortOrder: true },
+        select: {
+          code: true,
+          label: true,
+          sortOrder: true,
+          description: true,
+          leaders: {
+            select: { cwid: true, interim: true, sortOrder: true },
+            orderBy: [{ sortOrder: "asc" }, { cwid: "asc" }],
+          },
+        },
         orderBy: [{ sortOrder: "asc" }, { label: "asc" }],
       });
-      programs = programRows;
     } else {
       const rows = await client.divisionMembership.findMany({
         where: { divisionCode: code },
@@ -373,6 +404,8 @@ export async function loadUnitEditContext(
       ...(leaderCwid ? [leaderCwid] : []),
       ...accessRows.map((r) => r.cwid),
       ...rosterRows.map((r) => r.cwid),
+      // #1117 — program-leader cwids, so the program editor shows names.
+      ...(programRowsRaw ?? []).flatMap((p) => p.leaders.map((l) => l.cwid)),
     ],
     client,
   );
@@ -401,6 +434,25 @@ export async function loadUnitEditContext(
         programCode: r.programCode,
         startDate: r.startDate ? r.startDate.toISOString().slice(0, 10) : null,
         endDate: r.endDate ? r.endDate.toISOString().slice(0, 10) : null,
+      }))
+    : null;
+
+  // #1117 — resolve each program's leader cwids to display names for the editor.
+  // A leader cwid that isn't a WCM scholar (external leader) stays name/title
+  // null; the card re-resolves it client-side like the access/roster cards do.
+  const programs = programRowsRaw
+    ? programRowsRaw.map((p) => ({
+        code: p.code,
+        label: p.label,
+        sortOrder: p.sortOrder,
+        description: p.description,
+        leaders: p.leaders.map((l) => ({
+          cwid: l.cwid,
+          name: nameMap.get(l.cwid)?.name ?? null,
+          title: nameMap.get(l.cwid)?.title ?? null,
+          interim: l.interim,
+          sortOrder: l.sortOrder,
+        })),
       }))
     : null;
 
