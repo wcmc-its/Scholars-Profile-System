@@ -1789,6 +1789,232 @@ export class EtlStack extends Stack {
     }
 
     // ------------------------------------------------------------------
+    // ED email-visibility bridge — on-prem LDAP → S3 → RDS (#443).
+    //
+    // `etl:ed:export-email-visibility` reads the WCM Enterprise Directory
+    // release codes over LDAPS (`edprovider.weill.cornell.edu:636`) and writes
+    // `{cwid,emailVisibility}` NDJSON to
+    // s3://wcmc-reciterai-artifacts/ed/email-visibility/bridge.ndjson;
+    // `etl:ed:import-email-visibility` reads that object and writes
+    // Scholar.emailVisibility in Aurora. Historically the export ran WCM-side
+    // (an operator laptop on the WCM network) because the Sps app VPC has no
+    // on-prem route — the #443 blocker. WCM networking has since stood up
+    // TGW-attached VPCs (scholars-dev / scholars-prod, see envConfig.edExportVpc)
+    // whose private `app` subnets reach the on-prem LDAP host, so the export can
+    // run unattended and the bridge becomes a scheduled two-step chain:
+    //   export  (in edExportVpc — needs LDAP + S3, NOT the DB)
+    //     → import (in the Sps VPC — needs S3 + the in-VPC Aurora, NOT LDAP).
+    //
+    // Both steps reuse the shared ETL task def (same image, same injected
+    // SCHOLARS_LDAP_* + DATABASE_URL secrets); per-step differentiation is the
+    // command override + the network placement. The export's awsvpc ENI lands in
+    // the imported VPC's app subnets even though the task launches on the Sps ECS
+    // cluster — ECS places the ENI in whatever subnets the network config names,
+    // independent of the cluster's own VPC (verified 2026-06-18 by a cross-VPC
+    // run-task that bound LDAPS + searched 2440 org units from scholars-dev). The
+    // export writes via the task role's IAM credentials, so the role gains a
+    // narrow PutObject grant on the ed/* prefix below (it already had GetObject
+    // for the import). Creation-gated on `edEmailVisibilityBridgeEnabled` (like
+    // the curated backup): staging builds + schedules it; prod creates nothing
+    // until scholars-prod is verified end-to-end and the flag flips. See
+    // docs/onprem-ed-export-runbook.md.
+    // ------------------------------------------------------------------
+    if (envConfig.edEmailVisibilityBridgeEnabled) {
+      const edVpcCfg = envConfig.edExportVpc;
+      // Import the externally-created VPC by attributes (no context lookup, so
+      // synth stays deterministic without account creds). Only the private app
+      // subnets are referenced — they carry the TGW (on-prem) + NAT routes.
+      const edExportVpc = ec2.Vpc.fromVpcAttributes(this, "EdExportVpc", {
+        vpcId: edVpcCfg.vpcId,
+        availabilityZones: [...edVpcCfg.availabilityZones],
+        privateSubnetIds: [...edVpcCfg.appSubnetIds],
+      });
+      const edExportSubnets: ec2.SubnetSelection = {
+        subnets: edVpcCfg.appSubnetIds.map((id, i) =>
+          ec2.Subnet.fromSubnetId(this, `EdExportSubnet${i}`, id),
+        ),
+      };
+      // Dedicated egress-only SG in the imported VPC. allowAllOutbound covers
+      // the task's egress: LDAPS :636 to on-prem via the TGW, plus ECR / Secrets
+      // Manager / S3 / CloudWatch Logs over :443 and DNS :53 via the app subnets'
+      // NAT. No ingress — a batch task accepts no inbound connections.
+      const edExportSg = new ec2.SecurityGroup(this, "EdExportSg", {
+        vpc: edExportVpc,
+        description: `SPS ED email-visibility export task egress (${env}).`,
+        allowAllOutbound: true,
+      });
+
+      // The export writes the NDJSON via the task role's IAM credentials, so the
+      // role needs PutObject on exactly the ed/* prefix (it already has
+      // GetObject for the import). Scoped to ed/*; the rest of the shared
+      // artifacts bucket stays read-only to this role.
+      taskRole.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["s3:PutObject"],
+          resources: ["arn:aws:s3:::wcmc-reciterai-artifacts/ed/*"],
+        }),
+      );
+
+      // One bridge step: an EcsRunTask `.sync` with the same retry + SNS-catch
+      // shape as the cadence steps, but with caller-supplied network placement.
+      const buildBridgeStep = (
+        idSuffix: string,
+        npmScript: string,
+        subnets: ec2.SubnetSelection,
+        securityGroups: ec2.ISecurityGroup[],
+      ): tasks.EcsRunTask => {
+        const task = new tasks.EcsRunTask(this, `Task${idSuffix}`, {
+          integrationPattern: sfn.IntegrationPattern.RUN_JOB,
+          cluster: ecsCluster,
+          taskDefinition: this.etlTaskDefinition,
+          launchTarget: new tasks.EcsFargateLaunchTarget({
+            platformVersion: ecs.FargatePlatformVersion.LATEST,
+          }),
+          assignPublicIp: false,
+          subnets,
+          securityGroups,
+          containerOverrides: [
+            {
+              containerDefinition: etlContainer,
+              command: ["npm", "run", npmScript],
+            },
+          ],
+          // LDAP bind + a few-thousand-row search + S3 put (or S3 get + DB
+          // upsert) is seconds of work; 30 min is generous over cold start and
+          // well under the weekly cadence so a wedged run can't stack.
+          taskTimeout: sfn.Timeout.duration(Duration.minutes(30)),
+        });
+        task.addRetry({
+          errors: ["States.TaskFailed", "States.Timeout"],
+          maxAttempts: 1,
+          backoffRate: 2,
+          interval: Duration.minutes(1),
+        });
+        task.addCatch(
+          new tasks.SnsPublish(this, `Notify${idSuffix}`, {
+            topic: this.failureTopic,
+            subject: `SPS ED email-visibility bridge ${env} -- ${idSuffix} failed`,
+            message: sfn.TaskInput.fromObject({
+              env,
+              step: idSuffix,
+              stateMachine: sfn.JsonPath.stateMachineName,
+              execution: sfn.JsonPath.executionName,
+              error: sfn.JsonPath.stringAt("$.error"),
+            }),
+          }).next(
+            new sfn.Fail(this, `Fail${idSuffix}`, { cause: `${idSuffix} failed` }),
+          ),
+          { errors: ["States.ALL"], resultPath: "$.error" },
+        );
+        return task;
+      };
+
+      // Step 1: export in the on-prem-reachable VPC (LDAP + S3, no DB).
+      const edExportTask = buildBridgeStep(
+        "EdEmailVisibilityExport",
+        "etl:ed:export-email-visibility",
+        edExportSubnets,
+        [edExportSg],
+      );
+      // Step 2: import in the Sps VPC (S3 + in-VPC Aurora, no LDAP). A failed
+      // export Catches to a Fail above, so the import only runs on a fresh file.
+      const edImportTask = buildBridgeStep(
+        "EdEmailVisibilityImport",
+        "etl:ed:import-email-visibility",
+        { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        [etlSecurityGroup],
+      );
+      edExportTask.next(edImportTask);
+
+      const edBridgeLogGroup = new logs.LogGroup(
+        this,
+        "EdEmailVisibilityBridgeSmLogGroup",
+        {
+          logGroupName: `/aws/states/ed-email-visibility-${env}`,
+          retention: logRetention,
+          removalPolicy: RemovalPolicy.RETAIN,
+        },
+      );
+      const edBridgeStateMachine = new sfn.StateMachine(
+        this,
+        "EdEmailVisibilityBridgeStateMachine",
+        {
+          stateMachineName: `scholars-ed-email-visibility-${env}`,
+          stateMachineType: sfn.StateMachineType.STANDARD,
+          definitionBody: sfn.DefinitionBody.fromChainable(edExportTask),
+          timeout: Duration.hours(1),
+          logs: {
+            destination: edBridgeLogGroup,
+            level: sfn.LogLevel.ERROR,
+            includeExecutionData: false,
+          },
+          tracingEnabled: true,
+        },
+      );
+
+      // Weekly, Sunday 05:00 UTC — a quiet slot ahead of the 06:00 curated
+      // backup / 07:00 nightly / 08:00 weekly cadences. Email-visibility release
+      // codes change slowly, so weekly is ample. enabled:true — the whole block
+      // is already creation-gated on the flag, so reaching here means this env
+      // should run it.
+      const edBridgeRule = new events.Rule(
+        this,
+        "EdEmailVisibilityBridgeScheduleRule",
+        {
+          ruleName: `sps-ed-email-visibility-${env}`,
+          description: `SPS ED email-visibility bridge -- weekly Sun 05:00 UTC (${env}). #443.`,
+          schedule: events.Schedule.cron({
+            minute: "0",
+            hour: "5",
+            weekDay: "SUN",
+          }),
+          enabled: true,
+        },
+      );
+      edBridgeRule.addTarget(
+        new eventsTargets.SfnStateMachine(edBridgeStateMachine, {
+          input: events.RuleTargetInput.fromObject({}),
+          retryAttempts: 0,
+        }),
+      );
+
+      // Cadence alarm — absence is the load-bearing signal (a silently disabled
+      // rule or IAM gap means emailVisibility quietly goes stale). No execution
+      // started across a trailing 7-day window => alarm. 1 * 7d = 604800s, at the
+      // CloudWatch <=604800 ceiling (same shape as the weekly cadence alarm). The
+      // per-step Catch above already notifies on a failed run; this owns absence.
+      const edBridgeCadenceAlarm = new cloudwatch.Alarm(
+        this,
+        "EdEmailVisibilityBridgeCadenceAlarm",
+        {
+          alarmName: `sps-ed-email-visibility-cadence-${env}`,
+          alarmDescription: `SPS ED email-visibility bridge (${env}) -- cadence missed (no execution started in ~1 week). Next: confirm the weekly rule is enabled + the on-prem TGW path is up; run the bridge via run-task to bridge the gap. See docs/onprem-ed-export-runbook.md.`,
+          metric: new cloudwatch.Metric({
+            namespace: "AWS/States",
+            metricName: "ExecutionsStarted",
+            statistic: cloudwatch.Stats.SUM,
+            period: Duration.days(7),
+            dimensionsMap: {
+              StateMachineArn: edBridgeStateMachine.stateMachineArn,
+            },
+          }),
+          evaluationPeriods: 1,
+          threshold: 1,
+          comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+          treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+        },
+      );
+      edBridgeCadenceAlarm.addAlarmAction(alarmAction);
+
+      new CfnOutput(this, "EdEmailVisibilityBridgeStateMachineArn", {
+        value: edBridgeStateMachine.stateMachineArn,
+        description:
+          "SPS ED email-visibility bridge state machine ARN (#443; export@edExportVpc → import@SpsVpc).",
+      });
+    }
+
+    // ------------------------------------------------------------------
     // Outputs. Surface the SNS topic ARN (B23 subscribes PagerDuty),
     // each state-machine ARN (operator runbook uses them in
     // start-execution / describe-execution calls), and the ETL task

@@ -5217,6 +5217,12 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "Ref": "CurationBackupBucketE5A802A9",
       },
     },
+    "EdEmailVisibilityBridgeStateMachineArn": {
+      "Description": "SPS ED email-visibility bridge state machine ARN (#443; export@edExportVpc → import@SpsVpc).",
+      "Value": {
+        "Ref": "EdEmailVisibilityBridgeStateMachineB7173A01",
+      },
+    },
     "EtlFailureTopicArn": {
       "Description": "SPS ETL failure SNS topic ARN (B23 subscribes PagerDuty).",
       "Value": {
@@ -6884,6 +6890,447 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::IAM::Policy",
     },
+    "EdEmailVisibilityBridgeCadenceAlarmA35F6990": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS ED email-visibility bridge (staging) -- cadence missed (no execution started in ~1 week). Next: confirm the weekly rule is enabled + the on-prem TGW path is up; run the bridge via run-task to bridge the gap. See docs/onprem-ed-export-runbook.md.",
+        "AlarmName": "sps-ed-email-visibility-cadence-staging",
+        "ComparisonOperator": "LessThanThreshold",
+        "Dimensions": [
+          {
+            "Name": "StateMachineArn",
+            "Value": {
+              "Ref": "EdEmailVisibilityBridgeStateMachineB7173A01",
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "ExecutionsStarted",
+        "Namespace": "AWS/States",
+        "Period": 604800,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "breaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EdEmailVisibilityBridgeScheduleRule3606505E": {
+      "Properties": {
+        "Description": "SPS ED email-visibility bridge -- weekly Sun 05:00 UTC (staging). #443.",
+        "Name": "sps-ed-email-visibility-staging",
+        "ScheduleExpression": "cron(0 5 ? * SUN *)",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Ref": "EdEmailVisibilityBridgeStateMachineB7173A01",
+            },
+            "Id": "Target0",
+            "Input": "{}",
+            "RetryPolicy": {
+              "MaximumRetryAttempts": 0,
+            },
+            "RoleArn": {
+              "Fn::GetAtt": [
+                "EdEmailVisibilityBridgeStateMachineEventsRoleFFF3A946",
+                "Arn",
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
+    "EdEmailVisibilityBridgeSmLogGroupA7BF3C8E": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/states/ed-email-visibility-staging",
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "EdEmailVisibilityBridgeStateMachineB7173A01": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "EdEmailVisibilityBridgeStateMachineRoleDefaultPolicyF8BEE3BC",
+        "EdEmailVisibilityBridgeStateMachineRoleFB8036C5",
+      ],
+      "Properties": {
+        "DefinitionString": {
+          "Fn::Join": [
+            "",
+            [
+              "{"StartAt":"TaskEdEmailVisibilityExport","States":{"TaskEdEmailVisibilityExport":{"Next":"TaskEdEmailVisibilityImport","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":60,"MaxAttempts":1,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEdEmailVisibilityExport"}],"Type":"Task","TimeoutSeconds":1800,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-08cab06d3084fba41","subnet-07ffed73356c01f6c"],"SecurityGroups":["",
+              {
+                "Fn::GetAtt": [
+                  "EdExportSg72D4CEF3",
+                  "GroupId",
+                ],
+              },
+              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed:export-email-visibility"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskEdEmailVisibilityImport":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":60,"MaxAttempts":1,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEdEmailVisibilityImport"}],"Type":"Task","TimeoutSeconds":1800,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["",
+              {
+                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
+              },
+              "","",
+              {
+                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
+              },
+              ""],"SecurityGroups":["",
+              {
+                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
+              },
+              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed:import-email-visibility"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyEdEmailVisibilityImport":{"Next":"FailEdEmailVisibilityImport","Type":"Task","Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"staging","step":"EdEmailVisibilityImport","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ED email-visibility bridge staging -- EdEmailVisibilityImport failed"}},"FailEdEmailVisibilityImport":{"Type":"Fail","Cause":"EdEmailVisibilityImport failed"},"NotifyEdEmailVisibilityExport":{"Next":"FailEdEmailVisibilityExport","Type":"Task","Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"staging","step":"EdEmailVisibilityExport","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ED email-visibility bridge staging -- EdEmailVisibilityExport failed"}},"FailEdEmailVisibilityExport":{"Type":"Fail","Cause":"EdEmailVisibilityExport failed"}},"TimeoutSeconds":3600}",
+            ],
+          ],
+        },
+        "LoggingConfiguration": {
+          "Destinations": [
+            {
+              "CloudWatchLogsLogGroup": {
+                "LogGroupArn": {
+                  "Fn::GetAtt": [
+                    "EdEmailVisibilityBridgeSmLogGroupA7BF3C8E",
+                    "Arn",
+                  ],
+                },
+              },
+            },
+          ],
+          "IncludeExecutionData": false,
+          "Level": "ERROR",
+        },
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "EdEmailVisibilityBridgeStateMachineRoleFB8036C5",
+            "Arn",
+          ],
+        },
+        "StateMachineName": "scholars-ed-email-visibility-staging",
+        "StateMachineType": "STANDARD",
+        "TracingConfiguration": {
+          "Enabled": true,
+        },
+      },
+      "Type": "AWS::StepFunctions::StateMachine",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "EdEmailVisibilityBridgeStateMachineEventsRoleDefaultPolicy142486A9": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "states:StartExecution",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "EdEmailVisibilityBridgeStateMachineB7173A01",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EdEmailVisibilityBridgeStateMachineEventsRoleDefaultPolicy142486A9",
+        "Roles": [
+          {
+            "Ref": "EdEmailVisibilityBridgeStateMachineEventsRoleFFF3A946",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "EdEmailVisibilityBridgeStateMachineEventsRoleFFF3A946": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "events.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EdEmailVisibilityBridgeStateMachineRoleDefaultPolicyF8BEE3BC": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecs:RunTask",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        2,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        3,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        4,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        0,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlTaskDefinition32654FF8",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    "/",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlTaskDefinition32654FF8",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ecs:StopTask",
+                "ecs:DescribeTasks",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskRoleD514E3A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskExecutionRoleC745E2CD",
+                    "Arn",
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "events:PutTargets",
+                "events:PutRule",
+                "events:DescribeRule",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogDelivery",
+                "logs:GetLogDelivery",
+                "logs:UpdateLogDelivery",
+                "logs:DeleteLogDelivery",
+                "logs:ListLogDeliveries",
+                "logs:PutResourcePolicy",
+                "logs:DescribeResourcePolicies",
+                "logs:DescribeLogGroups",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "xray:PutTraceSegments",
+                "xray:PutTelemetryRecords",
+                "xray:GetSamplingRules",
+                "xray:GetSamplingTargets",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EdEmailVisibilityBridgeStateMachineRoleDefaultPolicyF8BEE3BC",
+        "Roles": [
+          {
+            "Ref": "EdEmailVisibilityBridgeStateMachineRoleFB8036C5",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "EdEmailVisibilityBridgeStateMachineRoleFB8036C5": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "states.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EdExportSg72D4CEF3": {
+      "Properties": {
+        "GroupDescription": "SPS ED email-visibility export task egress (staging).",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "VpcId": "vpc-02c4dd698f3e3869c",
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
     "EtlFailureTopic8361D0D0": {
       "Properties": {
         "DisplayName": "SPS ETL failures (staging)",
@@ -8027,6 +8474,11 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                   ],
                 ],
               },
+            },
+            {
+              "Action": "s3:PutObject",
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::wcmc-reciterai-artifacts/ed/*",
             },
           ],
           "Version": "2012-10-17",

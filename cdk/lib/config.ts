@@ -208,6 +208,39 @@ export interface SpsEnvConfig {
    */
   readonly curationBackupScheduleEnabled: boolean;
   /**
+   * The externally-created, TGW-attached VPC that on-prem-reachable ETL tasks
+   * run in — specifically the ED LDAP → S3 email-visibility export (#443).
+   * Created out-of-band by WCM networking (NOT by our CDK): staging →
+   * `scholars-dev`, prod → `scholars-prod`. Its private `app` subnets route
+   * 140.251/16 + 157.139/16 + 10/8 to the on-prem Transit Gateway and forward
+   * weill.cornell.edu DNS to the on-prem resolvers, so a Fargate task placed
+   * there reaches `edprovider.weill.cornell.edu:636` — which the Sps app VPC
+   * cannot (it is not TGW-attached). Only the private app subnets are listed
+   * (they carry the TGW + NAT routes; the public dmz subnets do not). Imported
+   * by attributes (no context lookup) so synth stays deterministic without
+   * account creds. Used only when {@link edEmailVisibilityBridgeEnabled} is true.
+   */
+  readonly edExportVpc: {
+    readonly vpcId: string;
+    readonly availabilityZones: readonly string[];
+    readonly appSubnetIds: readonly string[];
+  };
+  /**
+   * Whether the weekly ED email-visibility bridge is created + scheduled: a
+   * two-step Step Functions chain that runs `etl:ed:export-email-visibility`
+   * (LDAP→S3) in {@link edExportVpc}, then `etl:ed:import-email-visibility`
+   * (S3→RDS) in the Sps VPC — replacing the manual WCM-side export the #443
+   * on-prem-routing gap forced. A DEDICATED, creation-gating flag (like
+   * {@link curationBackupScheduleEnabled}): `true` in staging (the on-prem TGW
+   * path is proven there — verified 2026-06-18 with a real in-VPC LDAPS bind),
+   * `false` in prod until scholars-prod is verified end-to-end and the runbook
+   * is reviewed. Gating CREATION (not just the rule's Enabled flag) keeps the
+   * imported-VPC security group, the state machine, and the ed/* PutObject
+   * grant out of prod entirely until the flag flips. See
+   * docs/onprem-ed-export-runbook.md.
+   */
+  readonly edEmailVisibilityBridgeEnabled: boolean;
+  /**
    * Fargate CPU units for the ETL task family. Tunable per-step via
    * `Overrides.ContainerOverrides[].Cpu`; this is the base allocation.
    */
@@ -311,6 +344,15 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // #1032 — daily curated-tables logical backup; enabled in staging (the
     // backup is live + verified here). Read-only + tiny, so safe from launch.
     curationBackupScheduleEnabled: true,
+    // #443 — staging runs the ED email-visibility bridge in scholars-dev, whose
+    // on-prem LDAP reach is proven (2026-06-18: in-VPC LDAPS bind + 2440-unit
+    // search). Only the two private `app` subnets (TGW + NAT routes) are listed.
+    edExportVpc: {
+      vpcId: "vpc-02c4dd698f3e3869c",
+      availabilityZones: ["us-east-1a", "us-east-1b"],
+      appSubnetIds: ["subnet-08cab06d3084fba41", "subnet-07ffed73356c01f6c"],
+    },
+    edEmailVisibilityBridgeEnabled: true,
     // #485 — search:index OOM-killed at 2048 MiB building the full corpus
     // (178k+ pubs). 8 GB + the NODE_OPTIONS heap cap (EtlStack) clears it;
     // 2 vCPU also speeds the build, easing throttle pressure on the node.
@@ -383,6 +425,16 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // prod (deploy + first verify run) then flip this to true. See
     // docs/curation-backup-runbook.md § Prod.
     curationBackupScheduleEnabled: false,
+    // #443 — prod's on-prem-reachable VPC is scholars-prod. Wired but NOT yet
+    // activated: edEmailVisibilityBridgeEnabled stays false until the
+    // scholars-prod path is verified end-to-end (the same in-VPC bind probe as
+    // staging) and the runbook is reviewed; flipping it then creates the bridge.
+    edExportVpc: {
+      vpcId: "vpc-0b8006fee120df6bc",
+      availabilityZones: ["us-east-1a", "us-east-1b"],
+      appSubnetIds: ["subnet-069dc77801ee2d8f3", "subnet-0ceec7bb2f059e162"],
+    },
+    edEmailVisibilityBridgeEnabled: false,
     // #485 — match staging's 8 GB headroom for the search:index corpus build
     // (paired with the NODE_OPTIONS heap cap in EtlStack). Prod's 2-node
     // m6g.large.search domain already handles the bulk write rate.

@@ -191,6 +191,51 @@ describe("EtlStack", () => {
           ),
         ).toBe(false);
       });
+
+      it("prod does NOT create the ED email-visibility bridge (edEmailVisibilityBridgeEnabled=false until scholars-prod is verified; #443)", () => {
+        const rules = template.findResources("AWS::Events::Rule");
+        expect(
+          Object.values(rules).some(
+            (r) => r.Properties?.Name === "sps-ed-email-visibility-prod",
+          ),
+        ).toBe(false);
+        const sms = template.findResources("AWS::StepFunctions::StateMachine");
+        expect(
+          Object.values(sms).some(
+            (s) =>
+              s.Properties?.StateMachineName ===
+              "scholars-ed-email-visibility-prod",
+          ),
+        ).toBe(false);
+        // No imported-VPC export SG leaks into prod.
+        const sgs = template.findResources("AWS::EC2::SecurityGroup");
+        expect(
+          Object.values(sgs).some((s) =>
+            String(s.Properties?.GroupDescription ?? "").includes(
+              "ED email-visibility export",
+            ),
+          ),
+        ).toBe(false);
+        // The ed/* GetObject grant (the import-side read) already exists in
+        // prod; assert the WRITE half -- s3:PutObject on ed/* -- does NOT, since
+        // the export is not created here.
+        const policies = template.findResources("AWS::IAM::Policy");
+        const hasEdPut = Object.values(policies).some((p) => {
+          const stmts =
+            (p.Properties?.PolicyDocument?.Statement as
+              | Array<{ Action?: unknown; Resource?: unknown }>
+              | undefined) ?? [];
+          return stmts.some((s) => {
+            const res = Array.isArray(s.Resource) ? s.Resource : [s.Resource];
+            const act = Array.isArray(s.Action) ? s.Action : [s.Action];
+            return (
+              res.includes("arn:aws:s3:::wcmc-reciterai-artifacts/ed/*") &&
+              act.includes("s3:PutObject")
+            );
+          });
+        });
+        expect(hasEdPut).toBe(false);
+      });
     });
 
     describe("State machines (D2 -- Choice on $.startFrom)", () => {
@@ -1243,12 +1288,12 @@ describe("EtlStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled + cdnReconcileScheduleEnabled + curationBackupScheduleEnabled all true)", () => {
+    it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled + cdnReconcileScheduleEnabled + curationBackupScheduleEnabled + edEmailVisibilityBridgeEnabled all true)", () => {
       const rules = template.findResources("AWS::Events::Rule");
       // 3 cadence rules + the #595 heartbeat rule + the #393 reconciler rule +
-      // the #353 cdn reconciler rule + the #1032 curated-tables backup rule; all
-      // enabled in staging.
-      expect(Object.keys(rules)).toHaveLength(7);
+      // the #353 cdn reconciler rule + the #1032 curated-tables backup rule +
+      // the #443 ED email-visibility bridge rule; all enabled in staging.
+      expect(Object.keys(rules)).toHaveLength(8);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });
@@ -1279,6 +1324,60 @@ describe("EtlStack", () => {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: "sps-curation-backup-cadence-staging",
       });
+    });
+
+    it("staging schedules the ED email-visibility bridge (#443): weekly rule → 2-step SM (export@scholars-dev → import@Sps-VPC), export SG in the on-prem VPC, scoped ed/* PutObject grant", () => {
+      // Weekly rule, Sunday 05:00 UTC, enabled in staging.
+      template.hasResourceProperties("AWS::Events::Rule", {
+        Name: "sps-ed-email-visibility-staging",
+        ScheduleExpression: "cron(0 5 ? * SUN *)",
+        State: "ENABLED",
+      });
+      // The bridge state machine exists.
+      template.hasResourceProperties("AWS::StepFunctions::StateMachine", {
+        StateMachineName: "scholars-ed-email-visibility-staging",
+      });
+      // Its definition runs BOTH halves of the bridge.
+      const def = getStateMachineDefinitionText(
+        template,
+        "scholars-ed-email-visibility-staging",
+      );
+      expect(def).toMatch(/etl:ed:export-email-visibility/);
+      expect(def).toMatch(/etl:ed:import-email-visibility/);
+      // The export step's ENI is placed in scholars-dev's two private app
+      // subnets (the on-prem-reachable VPC), with the dedicated EdExportSg --
+      // NOT the Sps etl SG. (The import half runs in the Sps VPC.)
+      expect(def).toMatch(/subnet-08cab06d3084fba41/);
+      expect(def).toMatch(/subnet-07ffed73356c01f6c/);
+      expect(def).toMatch(/EdExportSg/);
+      // The export SG lives in the imported scholars-dev VPC, egress-only.
+      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+        VpcId: "vpc-02c4dd698f3e3869c",
+        GroupDescription:
+          "SPS ED email-visibility export task egress (staging).",
+      });
+      // A cadence alarm guards against silent schedule death.
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: "sps-ed-email-visibility-cadence-staging",
+      });
+      // The export writes via the task role: a PutObject grant scoped to exactly
+      // the ed/* prefix is present (narrow -- s3:PutObject only, no wildcard).
+      const policies = template.findResources("AWS::IAM::Policy");
+      const hasScopedEdPut = Object.values(policies).some((p) => {
+        const stmts =
+          (p.Properties?.PolicyDocument?.Statement as
+            | Array<{ Action?: unknown; Resource?: unknown }>
+            | undefined) ?? [];
+        return stmts.some((s) => {
+          const res = Array.isArray(s.Resource) ? s.Resource : [s.Resource];
+          const act = Array.isArray(s.Action) ? s.Action : [s.Action];
+          return (
+            res.includes("arn:aws:s3:::wcmc-reciterai-artifacts/ed/*") &&
+            act.includes("s3:PutObject")
+          );
+        });
+      });
+      expect(hasScopedEdPut).toBe(true);
     });
 
     it("staging ETL task definition uses 2048 cpu / 8192 MiB (#485 search:index OOM)", () => {
