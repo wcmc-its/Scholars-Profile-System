@@ -27,7 +27,7 @@ import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Org Units — Scholars Profile Console",
+  title: "Org units — Scholars Profile Console",
   robots: { index: false, follow: false },
 };
 
@@ -101,7 +101,7 @@ export default async function EditUnitsPage() {
       />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
-        <h1 className="mb-1 text-xl font-semibold">Org Units</h1>
+        <h1 className="mb-1 text-xl font-semibold">Org units</h1>
         <p className="text-muted-foreground mb-6 text-sm">
           Departments, divisions, and centers you can edit — their description, leadership, and (for
           centers) roster. Select one to edit it.

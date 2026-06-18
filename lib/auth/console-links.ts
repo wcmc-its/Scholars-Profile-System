@@ -74,7 +74,7 @@ export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
     links.push({ id: "methods", label: "Method families", href: "/edit/methods" });
   }
   if (v.managesUnits) {
-    links.push({ id: "units", label: "Org Units", href: "/edit/units" });
+    links.push({ id: "units", label: "Org units", href: "/edit/units" });
   }
   return links;
 }

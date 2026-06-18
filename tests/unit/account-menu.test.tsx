@@ -116,9 +116,9 @@ describe("AccountMenu — role-aware console links", () => {
     expect(screen.queryByTestId("account-menu-console-units")).toBeNull();
   });
 
-  it("unit Owner/Curator → 'Org Units' link", () => {
+  it("unit Owner/Curator → 'Org units' link", () => {
     mockProbe({
-      consoleLinks: [{ id: "units", label: "Org Units", href: "/edit/units" }],
+      consoleLinks: [{ id: "units", label: "Org units", href: "/edit/units" }],
     });
     render(<AccountMenu scholar={null} />);
     fireEvent.click(screen.getByLabelText("Account menu"));
@@ -127,11 +127,11 @@ describe("AccountMenu — role-aware console links", () => {
     expect(units.getAttribute("href")).toBe("/edit/units");
   });
 
-  it("steward AND unit admin → both rows, Method families before Org Units", () => {
+  it("steward AND unit admin → both rows, Method families before Org units", () => {
     mockProbe({
       consoleLinks: [
         { id: "methods", label: "Method families", href: "/edit/methods" },
-        { id: "units", label: "Org Units", href: "/edit/units" },
+        { id: "units", label: "Org units", href: "/edit/units" },
       ],
     });
     render(<AccountMenu scholar={null} />);
