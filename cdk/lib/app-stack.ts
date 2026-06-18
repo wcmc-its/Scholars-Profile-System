@@ -1168,6 +1168,13 @@ export class AppStack extends Stack {
         // --exclusively Sps-App-prod` activates it, the facet stays invisible until
         // the prod publications index is reindexed (search:index:publications).
         SEARCH_PUB_DEPARTMENT_FILTER: "on",
+        // #396 -- Publications-tab "Show only MeSH-tagged matches" filter.
+        // NO reindex prereq (unlike SEARCH_PUB_DEPARTMENT_FILTER above):
+        // `meshDescriptorUi` is already indexed, so the `exists` predicate is
+        // exact the moment the flag flips. App-only; gated additionally on
+        // `?searchMode=mesh-only` so a stale URL is inert when off.
+        // STAGING-FIRST: on for staging, off for prod (separate gated flip).
+        SEARCH_PUB_MESH_ONLY_FILTER: env === "staging" ? "on" : "off",
         // #824 sec4c -- People-tab method-family ranking boost. Same
         // reindex-then-flip shape as SEARCH_PUB_DEPARTMENT_FILTER above: the
         // people index must be rebuilt so docs carry the `methodFamily` rollup

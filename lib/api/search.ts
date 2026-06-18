@@ -193,6 +193,14 @@ export type PublicationsFilters = {
    *  publications co-authored between a known mentor and a mentee in any of
    *  the chosen programs. Empty array (or undefined) disables the filter. */
   mentoringPrograms?: MentoringProgramKey[];
+  /** Show only publications tagged with ≥1 MeSH descriptor (#396). When true,
+   *  `searchPublications` adds a HARD `{ exists: { field: "meshDescriptorUi" } }`
+   *  clause to the main `query.bool.filter` (NOT the post_filter / user-axis
+   *  set), so the result set, total, badge, and all facet counts consistently
+   *  reflect mesh-only. Only honored when `SEARCH_PUB_MESH_ONLY_FILTER` is on
+   *  (the route/page drop it otherwise, so a stale `?searchMode=mesh-only` is
+   *  inert). */
+  meshOnly?: boolean;
 };
 
 export type PeopleHit = {
@@ -2847,6 +2855,18 @@ export async function searchPublications(opts: {
       : { match_none: {} }
     : null;
 
+  // Issue #396 — "Show only MeSH-tagged matches". A HARD query filter (placed
+  // in `query.bool.filter` below, NOT `userAxisFilters`/`post_filter`): the
+  // countOnly badge path reads only `query`, and the facet aggs are top-level
+  // (scoped by `query`), so restricting here makes the tab badge, total, hits,
+  // AND every facet count consistently mesh-only. `meshDescriptorUi` is an
+  // OMIT-on-empty keyword field, so `exists` is an exact "has ≥1 MeSH term"
+  // predicate. Gating already happened upstream (the route/page only set
+  // `meshOnly` when the flag is on), so a null clause here keeps the body
+  // byte-identical when off.
+  const meshOnlyClause =
+    filters.meshOnly === true ? { exists: { field: "meshDescriptorUi" } } : null;
+
   // Same split as searchPeople: all axes here are user-controlled, so they
   // all go in post_filter; the main query carries only the multi_match.
   // This lets each per-facet agg compute excluding-self counts without
@@ -2959,6 +2979,12 @@ export async function searchPublications(opts: {
       // only; adding msm there would break the §7.2 byte-identical
       // guarantee.
       ...(queryShape === "concept_expanded" ? { minimum_should_match: 1 } : {}),
+      // Issue #396 — "Show only MeSH-tagged matches" HARD filter. Spread
+      // conditionally so the body is BYTE-IDENTICAL when the filter is off
+      // (the `filter` key is absent). Lives in the main `query.bool` (not
+      // post_filter) so the countOnly badge, total, hits, and all top-level
+      // facet aggs are restricted consistently.
+      ...(meshOnlyClause ? { filter: [meshOnlyClause] } : {}),
     },
   };
 

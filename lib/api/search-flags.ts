@@ -569,6 +569,29 @@ export function resolvePublicationDepartmentFilter(): boolean {
 }
 
 /**
+ * Issue #396 — Publications-tab "Show only MeSH-tagged matches" filter. When
+ * on AND the request carries `?searchMode=mesh-only`, `searchPublications`
+ * adds a HARD query filter `{ exists: { field: "meshDescriptorUi" } }` to the
+ * main `query.bool.filter`, restricting the result set, the total, the tab
+ * badge, and every facet count to publications that carry ≥1 MeSH descriptor.
+ * The /search page renders a "Show only MeSH-tagged matches" toggle in the
+ * Publications facet rail and a MeSH-aware count line / empty state.
+ *
+ * UNLIKE the reindex-then-flip flags above (`SEARCH_PUB_DEPARTMENT_FILTER`,
+ * `SEARCH_PEOPLE_METHOD_FAMILY`), this needs NO reindex: `meshDescriptorUi` is
+ * already indexed (`lib/search.ts` field def; `lib/search-index-docs.ts`
+ * builder, OMIT-on-empty so `exists` is exact). Only the query predicate + UI
+ * are gated; the field has shipped on the publications index for releases.
+ *
+ * Deliberately a `=== "on"` default-off gate so the feature ships inert.
+ * Activation requires BOTH the flag on AND `?searchMode=mesh-only` present, so
+ * a stale URL param is inert when the flag is off.
+ */
+export function resolvePublicationMeshOnlyFilter(): boolean {
+  return process.env.SEARCH_PUB_MESH_ONLY_FILTER === "on";
+}
+
+/**
  * Issue #824 §4c — People-tab method-family ranking boost. When on, the people
  * query adds the `methodFamily` field (a per-scholar rollup of overlay-visible
  * method-family labels + their exemplar-tool names) to the multi_match boost
