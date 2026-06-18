@@ -180,7 +180,21 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // preserves the original `year` default so behaviour is unchanged.
   const pubImpactFlag = (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on";
   const emptyPubDefault = pubImpactFlag ? "recency" : "year";
-  const sort = rawSort ?? (q === "" && type === "publications" ? emptyPubDefault : "relevance");
+  // Issue #1106 — empty-query "Browse" has no relevance signal: searchPeople
+  // issues a `match_all`, so every hit scores equally under `_score` and
+  // "Relevance" surfaces an arbitrary (index-order) ranking under a label
+  // that promises one. Mirror the pub-tab flip above and default the people
+  // tab to last-name A–Z when q="" — deterministic and consistent with the
+  // A–Z directory strip already shown in browse mode. Relevance remains the
+  // default the moment a query is present; an explicit ?sort= still wins.
+  const emptyPeopleDefault = "lastname";
+  const sort =
+    rawSort ??
+    (q === ""
+      ? type === "publications"
+        ? emptyPubDefault
+        : emptyPeopleDefault
+      : "relevance");
 
   const showAZ = q === "" && type === "people";
   // Issue #294 PR-5 — time the taxonomy resolver. `taxonomyMatchMs` is null
