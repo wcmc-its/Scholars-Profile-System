@@ -21,15 +21,22 @@
  * cascade lives in getEffectiveUnitRole" contract referenced from
  * `app/api/edit/grant/route.ts`). It does NOT re-implement the cascade.
  *
- * ── Membership model (Amendment 4 D1, resolved 2026-06-08) ──────────────────
+ * ── Membership model (Amendment 4 D1, resolved 2026-06-08; revised #1104) ────
  * `S` is a member of unit `U` when `U` is:
  *   • S's department  — `Scholar.deptCode` (ED/LDAP-authoritative, not
  *     `field_override`-able);
  *   • S's LDAP-primary division — `Scholar.divCode`;
  *   • a division S is on the **roster** of — a `DivisionMembership` row
  *     (`cwid = S`). D1 INCLUDES the manual roster.
- * Centers are **excluded** (D1) — `CenterMembership` is never consulted and no
- * `center` lookup is ever issued, so a center admin gains nothing here.
+ *   • (#1104, flag-gated) a center S is a **current member** of — a
+ *     `CenterMembership` row (`cwid = S`) whose dated window is active per
+ *     `isCenterMembershipActive`. D1 originally EXCLUDED centers; #1104 revises
+ *     that to admit them ONLY behind `UNIT_ADMIN_CENTER_PROXY`
+ *     (`lib/edit/unit-admin-center-proxy.ts`, default off → prod dark). With the
+ *     flag off, `CenterMembership` is never consulted and no `center` lookup is
+ *     ever issued, so a center admin gains nothing — the dept/division behavior
+ *     is unchanged. Lapsed / pending (not-yet-started) memberships are date-
+ *     filtered out and confer nothing.
  * The dept→division cascade applies: an owner/curator of a division's **parent
  * department** reaches scholars in that division (the parent is resolved from
  * `Division.deptCode`; an orphan roster code with no `Division` row simply does
@@ -69,9 +76,17 @@
  * slug / visibility / unit structure), every edit writes a non-repudiable B03
  * audit row (`actor_cwid = A`), and the roster addition is itself audited. This
  * must be carried into ADR-005 Amendment 4 § Threat model as an accepted risk.
+ *
+ * #1104 extends the SAME accepted risk to centers (behind UNIT_ADMIN_CENTER_PROXY):
+ * a center owner/curator can add an arbitrary scholar to their `CenterMembership`
+ * roster (curator-editable) and gain the same bounded `overview`/own-pub-hide
+ * access — but ONLY while that membership is date-current (`isCenterMembershipActive`),
+ * so a lapsed or pending add confers nothing. Same bounded/traceable mitigations.
  */
 import type { EditSession } from "@/lib/auth/superuser";
 import { getEffectiveUnitRole, type UnitAdminLookup } from "@/lib/edit/authz";
+import { isCenterMembershipActive } from "@/lib/api/centers";
+import { isUnitAdminCenterProxyEnabled } from "@/lib/edit/unit-admin-center-proxy";
 
 /**
  * Minimal Prisma surface this predicate reads. Composes `UnitAdminLookup` (so
@@ -99,16 +114,30 @@ export type UnitScholarLookup = UnitAdminLookup & {
       select: { code: true; deptCode: true };
     }) => Promise<Array<{ code: string; deptCode: string }>>;
   };
+  /**
+   * #1104 — current center memberships for the scholar. Read ONLY when
+   * `UNIT_ADMIN_CENTER_PROXY` is on; the dated bounds drive the
+   * `isCenterMembershipActive` filter (lapsed / pending memberships confer
+   * nothing).
+   */
+  centerMembership: {
+    findMany: (args: {
+      where: { cwid: string };
+      select: { centerCode: true; startDate: true; endDate: true };
+    }) => Promise<Array<{ centerCode: string; startDate: Date | null; endDate: Date | null }>>;
+  };
 };
 
 /**
  * The membership unit through which a unit administrator may edit a scholar — a
- * `department` or `division` the scholar belongs to. Returned by
- * {@link resolveEditableUnitViaUnitAdmin} so callers can attribute the edit (the
- * P2 B03 audit `afterValues` carries the code; the page banner resolves the
- * display name). `kind` is never `center` — centers are excluded (D1).
+ * `department` or `division` the scholar belongs to, or (#1104, behind
+ * `UNIT_ADMIN_CENTER_PROXY`) a `center` the scholar is a current member of.
+ * Returned by {@link resolveEditableUnitViaUnitAdmin} so callers can attribute
+ * the edit (the P2 B03 audit `afterValues` carries the code; the page banner
+ * resolves the display name). `kind` is `center` only when the flag is on (D1
+ * revised by #1104; centers stay excluded while the flag is off).
  */
-export type EditableUnit = { kind: "department" | "division"; code: string };
+export type EditableUnit = { kind: "department" | "division" | "center"; code: string };
 
 /**
  * Resolve THE unit through which `adminCwid` may edit `scholarCwid`'s profile —
@@ -155,8 +184,27 @@ export async function resolveEditableUnitViaUnitAdmin(
   if (scholar.divCode) divisionCodes.add(scholar.divCode);
   for (const row of rosterRows) divisionCodes.add(row.divisionCode);
 
-  // Nobody can reach a scholar with no department and no divisions via this path.
-  if (!scholar.deptCode && divisionCodes.size === 0) return null;
+  // #1104 — current center memberships (only when the flag is on; otherwise the
+  // set is empty and no `CenterMembership` read is issued, so dept/division
+  // behavior is unchanged and centers confer nothing). Lapsed / pending rows are
+  // date-filtered out via `isCenterMembershipActive`.
+  const centerCodes = new Set<string>();
+  if (isUnitAdminCenterProxyEnabled()) {
+    const today = new Date().toISOString().slice(0, 10);
+    const centerRows = await db.centerMembership.findMany({
+      where: { cwid: scholarCwid },
+      select: { centerCode: true, startDate: true, endDate: true },
+    });
+    for (const row of centerRows) {
+      if (isCenterMembershipActive(row.startDate, row.endDate, today)) {
+        centerCodes.add(row.centerCode);
+      }
+    }
+  }
+
+  // Nobody can reach a scholar with no department, no divisions, and no current
+  // center membership via this path.
+  if (!scholar.deptCode && divisionCodes.size === 0 && centerCodes.size === 0) return null;
 
   // Resolve each division's parent department for the cascade. An orphan roster
   // code with no `Division` row stays absent from the map → `parentDeptCode:
@@ -203,6 +251,17 @@ export async function resolveEditableUnitViaUnitAdmin(
     }
   }
 
+  // #1104 — center membership (current members only; `centerCodes` is empty when
+  // the flag is off). No cascade for a center (centers have no parent in the
+  // dept→division hierarchy). An owner/curator of a center the scholar is a
+  // current member of reaches their `overview` + own-pub hide.
+  for (const code of centerCodes) {
+    const role = await getEffectiveUnitRole(session, { kind: "center", code }, db);
+    if (role === "owner" || role === "curator") {
+      return { kind: "center", code };
+    }
+  }
+
   return null;
 }
 
@@ -229,8 +288,9 @@ export async function canEditScholarViaUnit(
 // org-unit administrator who can edit them. There is no single-actor short-cut
 // here — `loadManageableUnits` / `getEffectiveUnitRole` both key on one actor's
 // cwid — so this resolver re-uses the SAME membership derivation (deptCode +
-// divCode + roster, dept→division cascade, centers excluded — D1) and then does
-// ONE `unit_admin` scan over the scholar's membership units. It is a *listing*,
+// divCode + roster, dept→division cascade; plus, behind UNIT_ADMIN_CENTER_PROXY,
+// current center memberships — #1104) and then does ONE `unit_admin` scan over
+// the scholar's membership units. It is a *listing*,
 // never an authorization gate: every write path still calls the forward
 // predicate, so a stale or over-broad entry here can never confer edit access.
 // ───────────────────────────────────────────────────────────────────────────
@@ -268,9 +328,26 @@ export type UnitAdminEditorsLookup = {
       select: { code: true; name: true };
     }) => Promise<Array<{ code: string; name: string }>>;
   };
+  /** #1104 — current center memberships (read ONLY when UNIT_ADMIN_CENTER_PROXY
+   *  is on; date-filtered to current members via `isCenterMembershipActive`). */
+  centerMembership: {
+    findMany: (args: {
+      where: { cwid: string };
+      select: { centerCode: true; startDate: true; endDate: true };
+    }) => Promise<Array<{ centerCode: string; startDate: Date | null; endDate: Date | null }>>;
+  };
+  /** #1104 — center display names for the listed center-conferring rows. */
+  center: {
+    findMany: (args: {
+      where: { code: { in: string[] } };
+      select: { code: true; name: true };
+    }) => Promise<Array<{ code: string; name: string }>>;
+  };
   unitAdmin: {
     findMany: (args: {
-      where: { OR: Array<{ entityType: "department" | "division"; entityId: { in: string[] } }> };
+      where: {
+        OR: Array<{ entityType: "department" | "division" | "center"; entityId: { in: string[] } }>;
+      };
       select: { cwid: true; entityType: true; entityId: true; role: true };
     }) => Promise<
       Array<{
@@ -290,11 +367,12 @@ export type UnitAdminEditorsLookup = {
  * `adminCwid` is a real WCM person who often has no `Scholar` row (administrative
  * staff), so the display name is resolved client-side from the directory — only
  * the unit NAME (Scholars-DB-sourced) is resolved here. `conferringUnitKind` is
- * never `center` (centers are excluded — D1).
+ * `center` only when `UNIT_ADMIN_CENTER_PROXY` is on (#1104; centers stay
+ * excluded — D1 — while the flag is off).
  */
 export type UnitAdminEditor = {
   adminCwid: string;
-  conferringUnitKind: "department" | "division";
+  conferringUnitKind: "department" | "division" | "center";
   conferringUnitCode: string;
   conferringUnitName: string;
   role: "owner" | "curator";
@@ -306,19 +384,21 @@ export type UnitAdminEditor = {
  *
  * Membership is derived exactly as the forward resolver does (department
  * `Scholar.deptCode`, LDAP-primary division `Scholar.divCode`, roster
- * `DivisionMembership`, dept→division cascade via `Division.deptCode`; centers
- * excluded). Each `unit_admin` row is attributed to the scholar's membership
- * unit: a division row → that division; a department row that is the scholar's
- * OWN department → that department; a department row that is only the PARENT of
- * one of the scholar's divisions → the CHILD division (mirroring the forward
+ * `DivisionMembership`, dept→division cascade via `Division.deptCode`; plus,
+ * behind `UNIT_ADMIN_CENTER_PROXY`, current `CenterMembership` rows — #1104).
+ * Each `unit_admin` row is attributed to the scholar's membership unit: a
+ * division row → that division; a department row that is the scholar's OWN
+ * department → that department; a department row that is only the PARENT of one
+ * of the scholar's divisions → the CHILD division (mirroring the forward
  * resolver's cascade naming and the "via {unit} administrator" banner, so this
- * list never disagrees with what the admin sees in their own session).
+ * list never disagrees with what the admin sees in their own session); a center
+ * row → that center (no cascade).
  *
  * Dedupes (admin, unit) to the highest role (owner > curator). Fail-closed:
  * empty `scholarCwid` (no DB hit), a missing or soft-deleted scholar, or a
- * scholar with no department and no divisions ⇒ `[]` (no `unit_admin` query). A
- * thrown DB error propagates. This is a display listing only — authorization is
- * always the forward predicate's job.
+ * scholar with no department, no divisions, and no current center membership ⇒
+ * `[]` (no `unit_admin` query). A thrown DB error propagates. This is a display
+ * listing only — authorization is always the forward predicate's job.
  */
 export async function listUnitAdminEditorsForScholar(
   scholarCwid: string,
@@ -341,8 +421,26 @@ export async function listUnitAdminEditorsForScholar(
   if (scholar.divCode) divisionCodes.add(scholar.divCode);
   for (const row of rosterRows) divisionCodes.add(row.divisionCode);
 
-  // Nobody can reach a scholar with no department and no divisions via this path.
-  if (!scholar.deptCode && divisionCodes.size === 0) return [];
+  // #1104 — current center memberships (only when the flag is on; empty set + no
+  // `CenterMembership` read otherwise, so the listing is byte-identical to today
+  // for dept/division scholars). Lapsed / pending rows are date-filtered out.
+  const centerCodes = new Set<string>();
+  if (isUnitAdminCenterProxyEnabled()) {
+    const today = new Date().toISOString().slice(0, 10);
+    const centerRows = await db.centerMembership.findMany({
+      where: { cwid: scholarCwid },
+      select: { centerCode: true, startDate: true, endDate: true },
+    });
+    for (const row of centerRows) {
+      if (isCenterMembershipActive(row.startDate, row.endDate, today)) {
+        centerCodes.add(row.centerCode);
+      }
+    }
+  }
+
+  // Nobody can reach a scholar with no department, no divisions, and no current
+  // center membership via this path.
+  if (!scholar.deptCode && divisionCodes.size === 0 && centerCodes.size === 0) return [];
 
   // Resolve each division's parent department (for the cascade) and display name
   // in one batched read. An orphan roster code with no `Division` row simply has
@@ -366,12 +464,19 @@ export async function listUnitAdminEditorsForScholar(
   if (scholar.deptCode) deptCodes.add(scholar.deptCode);
   for (const parent of parentByDivision.values()) deptCodes.add(parent);
 
-  // ONE scan over the scholar's membership units. (Either `deptCodes` or
-  // `divisionCodes` is non-empty here — the no-units case returned above.)
-  const orClauses: Array<{ entityType: "department" | "division"; entityId: { in: string[] } }> = [];
+  // ONE scan over the scholar's membership units. (At least one of `deptCodes`,
+  // `divisionCodes`, or `centerCodes` is non-empty here — the no-units case
+  // returned above.)
+  const orClauses: Array<{
+    entityType: "department" | "division" | "center";
+    entityId: { in: string[] };
+  }> = [];
   if (deptCodes.size > 0) orClauses.push({ entityType: "department", entityId: { in: [...deptCodes] } });
   if (divisionCodes.size > 0)
     orClauses.push({ entityType: "division", entityId: { in: [...divisionCodes] } });
+  // #1104 — center clause only when the flag yielded current memberships.
+  if (centerCodes.size > 0)
+    orClauses.push({ entityType: "center", entityId: { in: [...centerCodes] } });
 
   const rows = await db.unitAdmin.findMany({
     where: { OR: orClauses },
@@ -380,7 +485,7 @@ export async function listUnitAdminEditorsForScholar(
 
   type Attributed = {
     adminCwid: string;
-    kind: "department" | "division";
+    kind: "department" | "division" | "center";
     code: string;
     role: "owner" | "curator";
   };
@@ -410,9 +515,13 @@ export async function listUnitAdminEditorsForScholar(
           }
         }
       }
+    } else if (r.entityType === "center") {
+      // #1104 — center rows are requested only when the flag yielded current
+      // memberships; attribute to the center itself (no cascade). Defensive
+      // `has` check mirrors the division branch (drop any row outside the set).
+      if (!centerCodes.has(r.entityId)) continue;
+      consider({ adminCwid: r.cwid, kind: "center", code: r.entityId, role: r.role });
     }
-    // `center` rows are never requested (the OR is department/division only) and
-    // are ignored defensively if one ever appears.
   }
 
   // Department names need a batched lookup (division names came from the read
@@ -429,12 +538,30 @@ export async function listUnitAdminEditorsForScholar(
     for (const d of depts) deptName.set(d.code, d.name);
   }
 
+  // #1104 — center names need a batched lookup too; a pruned center falls back
+  // to its code, exactly like a pruned department.
+  const centerNameCodes = [
+    ...new Set([...best.values()].filter((a) => a.kind === "center").map((a) => a.code)),
+  ];
+  const centerName = new Map<string, string>();
+  if (centerNameCodes.length > 0) {
+    const centers = await db.center.findMany({
+      where: { code: { in: centerNameCodes } },
+      select: { code: true, name: true },
+    });
+    for (const c of centers) centerName.set(c.code, c.name);
+  }
+
   const result: UnitAdminEditor[] = [...best.values()].map((a) => ({
     adminCwid: a.adminCwid,
     conferringUnitKind: a.kind,
     conferringUnitCode: a.code,
     conferringUnitName:
-      a.kind === "department" ? (deptName.get(a.code) ?? a.code) : (divisionName.get(a.code) ?? a.code),
+      a.kind === "department"
+        ? (deptName.get(a.code) ?? a.code)
+        : a.kind === "center"
+          ? (centerName.get(a.code) ?? a.code)
+          : (divisionName.get(a.code) ?? a.code),
     role: a.role,
   }));
 

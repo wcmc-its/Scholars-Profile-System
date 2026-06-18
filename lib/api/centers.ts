@@ -9,6 +9,7 @@
  */
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
+import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
 import { extractLastNameSort } from "@/lib/name-sort";
 import type {
@@ -95,6 +96,103 @@ export async function loadActiveCenterMemberCwids(
   return scholars.map((s) => s.cwid);
 }
 
+/**
+ * #1103 — one ACTIVE center membership of a single scholar, for the reverse
+ * "Centers" card on the profile (the inverse of the center-page roster). The
+ * card links `name` → `/centers/<slug>`. `programLabel` / `membershipType` are
+ * populated only when the membership row carries them (all legacy rows are
+ * null) — the card omits them silently otherwise.
+ */
+export type ScholarCenterAffiliation = {
+  code: string;
+  slug: string;
+  /** Curated official name, falling back to `Center.name` (resolver contract,
+   *  symmetric with org-unit-names). */
+  name: string;
+  programLabel: string | null;
+  membershipType: CenterMembershipType | null;
+};
+
+/**
+ * Reverse query for #1103: the ACTIVE center memberships of one scholar, for
+ * the profile "Centers" card. Mirrors the public roster's gating exactly — only
+ * rows active per § 3.3 (`isCenterMembershipActive`) survive, so a pending or
+ * lapsed membership NEVER shows. A retired (whole-unit-suppressed) center is
+ * dropped too, matching `getCenter`'s 404. Ordered by `Center.sortOrder` then
+ * name, the same order the centers directory uses.
+ *
+ * PRISMA-SOURCED ONLY — this adds no search-index/browse-facet key (#1074/#1076).
+ */
+export async function getScholarCenterAffiliations(
+  cwid: string,
+): Promise<ScholarCenterAffiliation[]> {
+  const today = todayIso();
+  const memberships = (await prisma.centerMembership.findMany({
+    where: { cwid },
+    select: {
+      centerCode: true,
+      membershipType: true,
+      startDate: true,
+      endDate: true,
+      center: {
+        select: {
+          code: true,
+          slug: true,
+          name: true,
+          officialName: true,
+          sortOrder: true,
+        },
+      },
+      program: { select: { label: true } },
+    },
+  })) as Array<{
+    centerCode: string;
+    membershipType: CenterMembershipType | null;
+    startDate: Date | null;
+    endDate: Date | null;
+    center: {
+      code: string;
+      slug: string;
+      name: string;
+      officialName: string | null;
+      sortOrder: number;
+    } | null;
+    program: { label: string } | null;
+  }>;
+
+  // §3.3 active filter — non-negotiable. Drop pending/lapsed and any orphaned
+  // row whose center join is missing.
+  const active = memberships.filter(
+    (m) =>
+      m.center !== null &&
+      isCenterMembershipActive(m.startDate, m.endDate, today),
+  );
+  if (active.length === 0) return [];
+
+  // #540 — drop retired (whole-unit-suppressed) centers, mirroring getCenter's
+  // 404 so the card never links to a 404 page.
+  const codes = Array.from(new Set(active.map((m) => m.centerCode)));
+  const suppressedFlags = await Promise.all(
+    codes.map(async (code) => [code, await isUnitSuppressed("center", code, prisma)] as const),
+  );
+  const suppressed = new Set(
+    suppressedFlags.filter(([, isHidden]) => isHidden).map(([code]) => code),
+  );
+
+  return active
+    .filter((m) => !suppressed.has(m.centerCode))
+    .map((m) => ({
+      code: m.center!.code,
+      slug: m.center!.slug,
+      name: m.center!.officialName ?? m.center!.name,
+      programLabel: m.program?.label ?? null,
+      membershipType: m.membershipType,
+      sortOrder: m.center!.sortOrder,
+    }))
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+    .map(({ sortOrder: _sortOrder, ...rest }) => rest);
+}
+
 export type CenterDetail = {
   code: string;
   name: string;
@@ -142,9 +240,42 @@ export type CenterMemberHit = DepartmentFacultyHit & {
 
 /** A program section on the public roster (#552 § 6.2). */
 export type CenterMemberGroup = {
+  /** Program code, or null for the synthetic "Other" bucket (#1105 — the page
+   *  link is suppressed for null / excluded codes). */
+  code: string | null;
   label: string;
   members: CenterMemberHit[];
 };
+
+/**
+ * #1105 — program codes that never get a dedicated page. Meyer Cancer Center's
+ * `ZY` ("Non-aligned Clinical") is a catch-all bucket, not a real program, so it
+ * is excluded from page generation and from the center page's program links.
+ */
+export const PROGRAM_PAGE_EXCLUDED_CODES: ReadonlySet<string> = new Set(["ZY"]);
+
+/** #1105 — true when a program code is eligible for a dedicated page. */
+export function isProgramPageEligible(code: string | null | undefined): boolean {
+  return !!code && !PROGRAM_PAGE_EXCLUDED_CODES.has(code);
+}
+
+/**
+ * #1105 — the center's page-eligible programs (the `CenterProgram` taxonomy
+ * minus the excluded ZY catch-all), ordered, for the "Programs" nav on the
+ * center page. Eligibility mirrors the program route (`getCenterProgram`), so
+ * every link resolves to a real page. Tab-independent (taxonomy, not the
+ * member roster), so the nav is stable across the Scholars/Publications tabs.
+ */
+export async function getCenterPrograms(
+  centerCode: string,
+): Promise<Array<{ code: string; label: string }>> {
+  const rows = await prisma.centerProgram.findMany({
+    where: { centerCode },
+    orderBy: { sortOrder: "asc" },
+    select: { code: true, label: true },
+  });
+  return rows.filter((r) => isProgramPageEligible(r.code));
+}
 
 /**
  * #552 Phase 4 — the public roster is either a flat, paginated list (centers
@@ -445,13 +576,122 @@ export async function getCenterMembers(
       .filter((h): h is CenterMemberHit => Boolean(h));
     if (members.length > 0) {
       members.forEach((h) => placed.add(h.cwid));
-      groups.push({ label: p.label, members });
+      groups.push({ code: p.code, label: p.label, members });
     }
   }
   const other = hits.filter((h) => !placed.has(h.cwid));
-  if (other.length > 0) groups.push({ label: "Other", members: other });
+  if (other.length > 0) groups.push({ code: null, label: "Other", members: other });
 
   return { mode: "grouped", groups, total };
+}
+
+/** #1105 — a program leader for the program page hero (LeaderCard shape). */
+export type ProgramLeader = {
+  cwid: string;
+  preferredName: string;
+  /** Profile slug, or null for an external leader (no WCM scholar to link). */
+  slug: string | null;
+  primaryTitle: string | null;
+  identityImageEndpoint: string;
+  /** Interim/acting qualifier — renders "Interim Leader". */
+  isInterim: boolean;
+};
+
+/** #1105 — a dedicated per-program page detail. */
+export type CenterProgramDetail = {
+  center: { code: string; name: string; slug: string };
+  program: { code: string; label: string; description: string | null };
+  leader: ProgramLeader | null;
+  /** Active members of THIS program, shaped for `PersonRow`. */
+  members: CenterMemberHit[];
+  scholarCount: number;
+};
+
+/**
+ * #1105 — assemble the dedicated page for a single center program, modeled on
+ * `getDivision`. Resolves the center by slug, the program by code (the `ZY`
+ * "Non-aligned Clinical" catch-all and any other excluded code are NOT pages →
+ * null), the single program leader (`leaderCwid` → WCM scholar, else the
+ * `lib/external-leaders.ts` fallback keyed `<centerCode>:<programCode>`), and
+ * the program's ACTIVE members (reusing the §3.3 `getCenterMembers` grouping,
+ * filtered to this program). Returns null when the center/program doesn't exist,
+ * the center is whole-unit-suppressed (#540, via `getCenter`), or the code is
+ * excluded. The route additionally gates the whole surface behind
+ * `CENTER_PROGRAM_PAGES`.
+ *
+ * Membership is sourced DIRECTLY from Prisma (via `getCenterMembers`), NEVER
+ * from the search index — per #1074/#1076 no `centerProgram:` key exists there.
+ */
+export async function getCenterProgram(
+  centerSlug: string,
+  code: string,
+): Promise<CenterProgramDetail | null> {
+  if (!isProgramPageEligible(code)) return null;
+
+  // `getCenter` enforces the #540 whole-unit-suppression 404 + resolves the slug.
+  const center = await getCenter(centerSlug);
+  if (!center) return null;
+
+  const program = (await prisma.centerProgram.findUnique({
+    where: { centerCode_code: { centerCode: center.code, code } },
+    select: { code: true, label: true, description: true, leaderCwid: true, leaderInterim: true },
+  })) as {
+    code: string;
+    label: string;
+    description: string | null;
+    leaderCwid: string | null;
+    leaderInterim: boolean;
+  } | null;
+  if (!program) return null;
+
+  // Leader — `leaderCwid` resolves to a WCM scholar (profile-linked) or, failing
+  // that, the external-leader fallback keyed `<centerCode>:<programCode>`.
+  let leader: ProgramLeader | null = null;
+  if (program.leaderCwid && program.leaderCwid !== "") {
+    const scholar = await prisma.scholar.findUnique({
+      where: { cwid: program.leaderCwid },
+      select: { cwid: true, preferredName: true, slug: true, primaryTitle: true },
+    });
+    if (scholar) {
+      leader = {
+        cwid: scholar.cwid,
+        preferredName: scholar.preferredName,
+        slug: scholar.slug,
+        primaryTitle: scholar.primaryTitle,
+        identityImageEndpoint: identityImageEndpoint(scholar.cwid),
+        isInterim: program.leaderInterim,
+      };
+    }
+  }
+  if (!leader) {
+    const ext = EXTERNAL_LEADERS[`${center.code}:${code}`];
+    if (ext) {
+      leader = {
+        cwid: ext.cwid,
+        preferredName: ext.name,
+        slug: null,
+        primaryTitle: ext.primaryTitle,
+        identityImageEndpoint: identityImageEndpoint(ext.cwid),
+        isInterim: program.leaderInterim,
+      };
+    }
+  }
+
+  // Members of THIS program — reuse the §3.3 grouped roster and pluck this
+  // program's group (active-gated, soft-delete-filtered already).
+  const roster = await getCenterMembers(center.code);
+  const members =
+    roster.mode === "grouped"
+      ? (roster.groups.find((g) => g.code === code)?.members ?? [])
+      : [];
+
+  return {
+    center: { code: center.code, name: center.name, slug: center.slug },
+    program: { code: program.code, label: program.label, description: program.description },
+    leader,
+    members,
+    scholarCount: members.length,
+  };
 }
 
 const PUB_PAGE_SIZE = 20;

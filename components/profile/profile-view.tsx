@@ -330,6 +330,44 @@ export async function ProfileView({ slug }: { slug: string }) {
               </SidebarCard>
             ) : null}
 
+            {/* #1103 — Centers card: the scholar's ACTIVE center memberships
+                (reverse of the center roster). Omitted entirely when there are
+                none (flag off ⇒ payload carries []). Each entry links to
+                /centers/<slug>; program label / Research|Clinical chip render
+                only when the membership row carries them (legacy rows are all
+                null and render name-only). */}
+            {profile.centers.length > 0 ? (
+              <SidebarCard title="Centers">
+                <ul className="flex flex-col gap-3">
+                  {profile.centers.map((c) => (
+                    <li key={c.code} className="leading-snug">
+                      <div className="font-semibold">
+                        <Link
+                          href={`/centers/${c.slug}`}
+                          className="hover:underline"
+                        >
+                          {c.name}
+                        </Link>
+                        {c.membershipType ? (
+                          <Badge
+                            variant="secondary"
+                            className="ml-2 align-middle capitalize"
+                          >
+                            {c.membershipType}
+                          </Badge>
+                        ) : null}
+                      </div>
+                      {c.programLabel ? (
+                        <div className="text-muted-foreground mt-0.5 text-xs">
+                          {c.programLabel}
+                        </div>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </SidebarCard>
+            ) : null}
+
             {profile.educations.length > 0 ? (
               <SidebarCard title="Education">
                 <ul className="flex flex-col gap-3">

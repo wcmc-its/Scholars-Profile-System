@@ -92,6 +92,31 @@ describe("CenterRosterCard — columns", () => {
   });
 });
 
+describe("CenterRosterCard — Export CSV affordance (#1102)", () => {
+  it("hides the export link when exportEnabled is false (flag off / default)", () => {
+    render(<CenterRosterCard {...base} members={[member({})]} programs={[]} />);
+    expect(screen.queryByTestId("center-roster-export-link")).toBeNull();
+  });
+
+  it("renders an Export CSV link to the per-center export route when enabled", () => {
+    render(<CenterRosterCard {...base} members={[member({})]} programs={[]} exportEnabled />);
+    const link = screen.getByTestId("center-roster-export-link") as HTMLAnchorElement;
+    expect(link.textContent).toMatch(/export csv/i);
+    // Active-only is the default toggle state → ?activeOnly=1.
+    expect(link.getAttribute("href")).toBe(
+      "/edit/center/meyer_cancer_center/export?activeOnly=1",
+    );
+  });
+
+  it("drops ?activeOnly=1 once the show-active-only toggle is turned off", () => {
+    render(<CenterRosterCard {...base} members={[member({})]} programs={[]} exportEnabled />);
+    fireEvent.click(screen.getByTestId("roster-show-active-only"));
+    expect(
+      screen.getByTestId("center-roster-export-link").getAttribute("href"),
+    ).toBe("/edit/center/meyer_cancer_center/export");
+  });
+});
+
 describe("CenterRosterCard — status + show-active-only", () => {
   const members = [
     member({ cwid: "act", name: "Active" }), // null dates → active

@@ -291,7 +291,7 @@ export type EditPageProps = {
   /** Unit-admin mode only (Amendment 4): the unit through which the viewer
    *  administers this scholar, for the "via {unit} administrator" banner.
    *  `null`/absent in every other mode. */
-  unitAdminBanner?: { unitKind: "department" | "division"; unitName: string } | null;
+  unitAdminBanner?: { unitKind: "department" | "division" | "center"; unitName: string } | null;
   /** Self mode only: whether to mount the live ReCiter pending-articles nudge
    *  (`SELF_EDIT_RECITER_PENDING_HINT`). True only for a genuine, non-impersonating
    *  self viewer with the flag on; when true the Publications card + Home teaser

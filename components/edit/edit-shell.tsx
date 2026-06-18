@@ -59,7 +59,7 @@ export type EditShellProps = {
   subRail?: React.ReactNode;
   /** Unit-admin mode only (Amendment 4): the unit through which the viewer
    *  administers this scholar, naming the "via {unit} administrator" banner. */
-  unitAdmin?: { unitKind: "department" | "division"; unitName: string };
+  unitAdmin?: { unitKind: "department" | "division" | "center"; unitName: string };
   children: React.ReactNode;
 };
 

@@ -51,6 +51,9 @@ export type CenterRosterCardProps = {
   programs: ReadonlyArray<CenterProgramOption>;
   /** Injectable for tests; defaults to today (YYYY-MM-DD). */
   today?: string;
+  /** #1102 — when true, render the "Export CSV" roster-download affordance
+   *  (the `EDIT_UNIT_ROSTER_EXPORT` flag, resolved server-side). */
+  exportEnabled?: boolean;
 };
 
 type Status = "active" | "pending" | "inactive";
@@ -66,7 +69,13 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function CenterRosterCard({ unitCode, members: initial, programs, today }: CenterRosterCardProps) {
+export function CenterRosterCard({
+  unitCode,
+  members: initial,
+  programs,
+  today,
+  exportEnabled = false,
+}: CenterRosterCardProps) {
   const now = today ?? todayIso();
   const hasPrograms = programs.length > 0;
 
@@ -189,14 +198,27 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
           </div>
         </div>
 
-        <label className="flex items-center gap-2 self-end text-sm">
-          <Checkbox
-            checked={showActiveOnly}
-            onCheckedChange={(c) => setShowActiveOnly(c === true)}
-            data-testid="roster-show-active-only"
-          />
-          Show active only
-        </label>
+        <div className="flex items-center justify-between gap-4">
+          {exportEnabled ? (
+            <a
+              href={`/edit/center/${encodeURIComponent(unitCode)}/export${showActiveOnly ? "?activeOnly=1" : ""}`}
+              className="text-apollo-slate text-sm hover:underline"
+              data-testid="center-roster-export-link"
+            >
+              Export CSV
+            </a>
+          ) : (
+            <span />
+          )}
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={showActiveOnly}
+              onCheckedChange={(c) => setShowActiveOnly(c === true)}
+              data-testid="roster-show-active-only"
+            />
+            Show active only
+          </label>
+        </div>
 
         {members.length === 0 ? (
           <p className="text-muted-foreground text-sm" data-testid="center-roster-empty">
