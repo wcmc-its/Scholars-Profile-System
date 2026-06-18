@@ -53,6 +53,7 @@ vi.mock("@/lib/api/profile", () => ({
     publications: [],
     grants: [],
     disclosures: [],
+    centers: [],
   })),
   getActiveScholarSlugs: vi.fn(async () => []),
   isSparseProfile: vi.fn(() => false),
