@@ -982,6 +982,10 @@ export async function loadEditContext(
     };
     for (const s of allSources) {
       if (s.status === "resolved") continue; // defensive — query already excludes it
+      // This surface is the scholar's OWN relationships only: a co-author's
+      // disclosure that rode along in a shared paper's statement is not theirs to
+      // act on, so it never crosses to the client. Keep `self` + `unknown`.
+      if (s.subjectType === "coauthor") continue;
       const sid = deriveSubjectId(s.subjectType, s.subjectMention, indexFor(s));
       const acted = s.status === "acknowledged" || s.status === "dismissed";
       const reason = acted ? (reasonOf(s) ?? null) : null;

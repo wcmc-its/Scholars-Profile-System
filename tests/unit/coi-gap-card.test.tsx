@@ -46,9 +46,10 @@ function mention(p: Partial<EditContextCoiGapMention> & Pick<EditContextCoiGapMe
 /**
  * A realistic high-confidence fixture spanning two papers:
  *  - PMID 41679681 (2026): self ("Altorki") names AstraZeneca + Roche.
- *  - PMID 40217113 (2025): co-author ("A Saxena") names AstraZeneca.
- * So AstraZeneca's org card mixes a self mention and a co-author mention — the
- * exact "mixed attribution under one decision" the redesign untangles.
+ *  - PMID 40217113 (2025): co-author ("A Saxena") names AstraZeneca — kept in the
+ *    fixture but NEVER surfaced: this surface is the scholar's OWN relationships,
+ *    so co-author-attributed mentions are filtered out.
+ * So AstraZeneca's org card shows only the scholar's own mention.
  */
 const MENTIONS: EditContextCoiGapMention[] = [
   mention({
@@ -164,11 +165,11 @@ describe("CoiGapCard #1112 redesign", () => {
     expect(screen.getByTestId("coi-gap-paper-card-41679681")).toBeTruthy();
   });
 
-  it("counter shows the high-confidence mention count in softened copy, excludes Medium", () => {
+  it("counter shows the high self-mention count in softened copy; excludes Medium + co-authors", () => {
     render(<CoiGapCard cwid="self01" mentions={[...MENTIONS, LOWER]} />);
-    // 3 high mentions (AZ-self, Roche-self, AZ-coauthor); each company counts.
-    // The Medium row is NOT counted.
-    expect(screen.getByTestId("coi-gap-summary").textContent).toBe("3 from your publications");
+    // 2 surfaced high mentions (AZ-self, Roche-self). The co-author (AZ) mention
+    // and the Medium row are both excluded.
+    expect(screen.getByTestId("coi-gap-summary").textContent).toBe("2 from your publications");
   });
 
   it("action buttons use the full canonical (dev) labels — no compact variants", () => {
@@ -190,38 +191,33 @@ describe("CoiGapCard #1112 redesign", () => {
   it("Organization-view summary line states the attribution split, year range, kinds", () => {
     render(<CoiGapCard cwid="self01" scholarName="Nasser Altorki" mentions={MENTIONS} />);
     const az = screen.getByTestId("coi-gap-org-summary-astrazeneca").textContent ?? "";
-    // One self, one co-author named AstraZeneca.
-    expect(az).toContain("1 attributed to Altorki, 1 to co-authors");
+    // Only the scholar's own mention is surfaced (the co-author one is filtered).
+    expect(az).toContain("1 attributed to Altorki");
+    expect(az).not.toContain("co-author");
     expect(az).toContain("grants");
   });
 
   it("marks ONLY the matched org + the single subject — never any other name (Org view)", () => {
     render(<CoiGapCard cwid="self01" mentions={MENTIONS} />);
-    const row = screen.getByTestId("coi-gap-org-row-c-az-co");
+    const row = screen.getByTestId("coi-gap-org-row-c-az-self");
     // The org chip is marked with the organization aria-label.
     const orgMark = within(row).getByLabelText("organization: AstraZeneca");
     expect(orgMark.textContent).toBe("AstraZeneca");
-    // The co-author subject is marked with a co-author aria-label.
-    const coMark = within(row).getByLabelText("co-author: A Saxena");
-    expect(coMark.textContent).toBe("A Saxena");
+    // The scholar's own subject is marked with a "you" aria-label.
+    const selfMark = within(row).getByLabelText("you");
+    expect(selfMark.textContent).toBe("Altorki");
     // Nothing else carries a highlight role: exactly 2 <mark> in the clause line.
     const clauseP = row.querySelector("p");
     expect(clauseP?.querySelectorAll("mark").length).toBe(2);
   });
 
-  it("self and co-author share ONE 'person' highlight; the distinction stays in the label", () => {
+  it("the subject uses the 'person' highlight, the org uses the 'company' highlight", () => {
     render(<CoiGapCard cwid="self01" mentions={MENTIONS} />);
-    // Self mention: a "you"-labelled person mark.
     const selfRow = screen.getByTestId("coi-gap-org-row-c-az-self");
     const selfMark = within(selfRow).getByLabelText("you");
     expect(selfMark.textContent).toBe("Altorki");
     expect(selfMark.className).toContain("coi-hl-person");
-    // Co-author mention: same person treatment, distinct label.
-    const coRow = screen.getByTestId("coi-gap-org-row-c-az-co");
-    const coMark = within(coRow).getByLabelText("co-author: A Saxena");
-    expect(coMark.className).toContain("coi-hl-person");
-    // An org mark uses the company treatment, not the person one.
-    expect(within(coRow).getByLabelText("organization: AstraZeneca").className).toContain(
+    expect(within(selfRow).getByLabelText("organization: AstraZeneca").className).toContain(
       "coi-hl-org",
     );
   });
@@ -263,23 +259,20 @@ describe("CoiGapCard #1112 redesign", () => {
     // Roche is a DIFFERENT company in the same paper → still Current.
     expect(screen.getByTestId("coi-gap-org-card-roche/genentech")).toBeTruthy();
     expect(screen.getByTestId("coi-gap-org-row-c-roche-self")).toBeTruthy();
-    // The AstraZeneca self row left Current; the AZ co-author row is untouched.
+    // The AstraZeneca self row left Current.
     expect(screen.queryByTestId("coi-gap-org-row-c-az-self")).toBeNull();
-    expect(screen.getByTestId("coi-gap-org-row-c-az-co")).toBeTruthy();
-    // Only that ONE candidate was POSTed — never Roche, never the co-author.
+    // Only that ONE candidate was POSTed — never Roche.
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "/api/edit/coi-gap/c-az-self/feedback",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "invalid" }) }),
     );
-    for (const id of ["c-roche-self", "c-az-co"]) {
-      expect(globalThis.fetch).not.toHaveBeenCalledWith(
-        `/api/edit/coi-gap/${id}/feedback`,
-        expect.anything(),
-      );
-    }
-    // Counter: 3 high mentions → 2 current, 1 set aside.
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      "/api/edit/coi-gap/c-roche-self/feedback",
+      expect.anything(),
+    );
+    // Counter: 2 surfaced high mentions → 1 current, 1 set aside.
     expect(screen.getByTestId("coi-gap-summary").textContent).toBe(
-      "2 from your publications · 1 set aside",
+      "1 from your publications · 1 set aside",
     );
   });
 
@@ -311,11 +304,6 @@ describe("CoiGapCard #1112 redesign", () => {
         expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "invalid" }) }),
       );
     }
-    // The co-author statement was NOT touched.
-    expect(globalThis.fetch).not.toHaveBeenCalledWith(
-      "/api/edit/coi-gap/c-az-co/feedback",
-      expect.anything(),
-    );
     // Statement leaves Current; whole paper gone from Current view.
     expect(screen.queryByTestId("coi-gap-paper-card-41679681")).toBeNull();
   });
@@ -377,19 +365,18 @@ describe("CoiGapCard #1112 redesign", () => {
       );
     });
 
-    it("a co-author statement shows the purple subject tag and full-label footer actions", () => {
+    it("a co-author-only statement is NOT surfaced (scholar's own relationships only)", () => {
       render(<CoiGapCard cwid="self01" mentions={MENTIONS} />);
       fireEvent.click(screen.getByTestId("coi-gap-groupby-paper"));
-      const card = screen.getByTestId("coi-gap-paper-card-40217113");
-      expect(within(card).getByText("co-author · A Saxena")).toBeTruthy();
-      // Full canonical labels in Paper footer (not the compact short forms).
-      expect(
-        screen.getByTestId("coi-gap-choice-invalid-40217113::coauthor:a saxena").textContent,
-      ).toBe("Not a valid suggestion");
+      // PMID 40217113 is a co-author ("A Saxena") statement → no card, no name.
+      expect(screen.queryByTestId("coi-gap-paper-card-40217113")).toBeNull();
+      expect(document.body.textContent ?? "").not.toContain("A Saxena");
+      expect(document.body.textContent ?? "").not.toContain("co-author");
     });
 
-    it("multi-subject statements split into independently-decidable blocks", () => {
-      // One statement (pmid 50000000) names BOTH the scholar and a co-author.
+    it("a mixed paper (self + co-author subjects) surfaces ONLY the self block", () => {
+      // One statement (pmid 50000000) names BOTH the scholar and a co-author; only
+      // the scholar's own block is surfaced (the co-author block is dropped).
       const multi: EditContextCoiGapMention[] = [
         mention({
           candidateId: "m-self",
@@ -418,18 +405,15 @@ describe("CoiGapCard #1112 redesign", () => {
       ];
       render(<CoiGapCard cwid="self01" mentions={multi} />);
       fireEvent.click(screen.getByTestId("coi-gap-groupby-paper"));
-      // Two blocks, each with its own footer actions.
-      expect(screen.getByTestId("coi-gap-paper-block-50000000::self")).toBeTruthy();
-      expect(screen.getByTestId("coi-gap-paper-block-50000000::coauthor:b lee")).toBeTruthy();
-      // Deciding the co-author block alone leaves the self block Current: the
-      // co-author block leaves the Current list, the self block stays actionable
-      // (the card collapses to its single remaining subject, still with choices).
-      fireEvent.click(screen.getByTestId("coi-gap-choice-invalid-50000000::coauthor:b lee"));
+      // Renders as a SINGLE-subject (self) statement — no co-author block/actions.
+      expect(screen.getByTestId("coi-gap-paper-card-50000000")).toBeTruthy();
+      expect(screen.getByTestId("coi-gap-paper-subject-50000000").textContent).toContain("you");
       expect(screen.queryByTestId("coi-gap-paper-block-50000000::coauthor:b lee")).toBeNull();
-      expect(screen.getByTestId("coi-gap-choices-50000000::self")).toBeTruthy();
-      // The co-author decision IS recorded — visible under the All filter.
-      fireEvent.click(screen.getByTestId("coi-gap-filter-all"));
-      expect(screen.getByTestId("coi-gap-acted-50000000::coauthor:b lee")).toBeTruthy();
+      expect(screen.queryByTestId("coi-gap-choices-50000000::coauthor:b lee")).toBeNull();
+      // Footer covers only the scholar's own company (Pfizer), not the co-author's.
+      expect(screen.getByTestId("coi-gap-paper-hint-50000000::self").textContent).toBe(
+        "Covers all 1 organization",
+      );
     });
   });
 

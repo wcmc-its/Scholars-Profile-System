@@ -230,10 +230,25 @@ function SubjectTag({
 
 const unitKeyOf = (m: EditContextCoiGapMention) => `${m.pmid}::${m.subjectId}`;
 
-export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [] }: CoiGapCardProps) {
+export function CoiGapCard({
+  cwid,
+  mode = "self",
+  scholarName = "",
+  mentions: mentionsProp = [],
+}: CoiGapCardProps) {
   const su = mode === "superuser";
   const backHref = su ? `/edit/scholar/${cwid}?attr=coi` : "/edit?attr=coi";
   const scholarLast = lastNameOf(scholarName) || (su ? "the scholar" : "you");
+
+  // This surface is about the SCHOLAR'S OWN relationships. A co-author's
+  // disclosure that merely rode along in a shared paper's statement is not the
+  // scholar's to act on, so it is never surfaced here — only `self` and
+  // `unknown` (subject-unclear) mentions are. (`edit-context` also excludes
+  // co-authors from the projection; this is defence-in-depth.)
+  const mentions = React.useMemo(
+    () => mentionsProp.filter((m) => m.subjectType !== "coauthor"),
+    [mentionsProp],
+  );
 
   // Sticky group-by (spec §2). SSR-safe: start with the default, then read
   // localStorage in an effect (no hydration mismatch).
@@ -560,19 +575,21 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
     const years = card.mentions.map((m) => m.year).filter((y): y is number => y != null);
     const minY = years.length ? Math.min(...years) : null;
     const maxY = years.length ? Math.max(...years) : null;
+    // Co-authors are filtered out upstream, so a mention is either the scholar's
+    // own (`self`) or subject-unclear (`unknown`).
     let selfC = 0;
-    let coC = 0;
     let unkC = 0;
     const kinds: string[] = [];
     for (const m of card.mentions) {
       if (m.subjectType === "self") selfC += 1;
-      else if (m.subjectType === "coauthor") coC += 1;
       else unkC += 1;
       for (const k of m.relationshipKinds) kinds.push(k);
     }
     const humanKinds = humanizeRelationshipKinds(kinds);
-    const attribution =
-      `${selfC} attributed to ${scholarLast}, ${coC} to co-authors` + (unkC > 0 ? `, ${unkC} unclear` : "");
+    const attrBits: string[] = [];
+    if (selfC > 0) attrBits.push(`${selfC} attributed to ${scholarLast}`);
+    if (unkC > 0) attrBits.push(`${unkC} unclear`);
+    const attribution = attrBits.join(", ");
     const yearRange = minY != null ? (minY === maxY ? `${minY}` : `${minY}–${maxY}`) : "";
     const summaryParts = [yearRange, attribution, humanKinds.join(" · ")].filter(Boolean);
 
@@ -1032,7 +1049,7 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", mentions = [
               Show {lowerUnitCount} lower-confidence match{lowerUnitCount === 1 ? "" : "es"}
             </summary>
             <p className="text-muted-foreground mt-1.5 text-xs">
-              These are weaker matches — often a co-author’s disclosure rather than {su ? "the scholar’s" : "your"} own.
+              These are weaker matches we’re less sure about.
             </p>
             <div className="mt-2 flex flex-col gap-3">
               {groupBy === "organization"

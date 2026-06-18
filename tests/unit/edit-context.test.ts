@@ -1309,7 +1309,7 @@ describe("loadEditContext — COI-gap flat mention projection (#1112)", () => {
     expect(new Set(ms.map((m) => `${m.pmid}::${m.subjectId}`))).toEqual(new Set(["40000001::self"]));
   });
 
-  it("a co-author mention gets subjectId 'coauthor:<normalized token>'", async () => {
+  it("a co-author mention is EXCLUDED from the projection (scholar's own relationships only)", async () => {
     const ctx = await loadM([
       mrow({
         id: "m-co",
@@ -1319,9 +1319,25 @@ describe("loadEditContext — COI-gap flat mention projection (#1112)", () => {
         subjectMention: "A Saxena",
       }),
     ]);
-    const m = ctx!.unmatchedPubmedCoiMentions[0];
-    expect(m.subjectType).toBe("coauthor");
-    expect(m.subjectId).toBe("coauthor:a saxena");
+    // A co-author's disclosure that merely rode along in a shared paper is not the
+    // scholar's to act on — it never crosses to the client.
+    expect(ctx!.unmatchedPubmedCoiMentions).toHaveLength(0);
+  });
+
+  it("a co-author mention alongside a self mention: only the self crosses to the client", async () => {
+    const ctx = await loadM([
+      mrow({ id: "m-self", normalizedEntity: "acme", entity: "Acme", subjectType: "self", subjectMention: "Dr Self" }),
+      mrow({
+        id: "m-co",
+        normalizedEntity: "globex",
+        entity: "Globex",
+        subjectType: "coauthor",
+        subjectMention: "A Saxena",
+      }),
+    ]);
+    const ms = ctx!.unmatchedPubmedCoiMentions;
+    expect(ms).toHaveLength(1);
+    expect(ms[0].candidateId).toBe("m-self");
   });
 
   it("two distinct UNKNOWN subjects in one paper get separate, stable subjectIds (never merged, never 'self')", async () => {
