@@ -356,6 +356,22 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "EDIT_UNIT_ROSTER_EXPORT",
+                "Value": "off",
+              },
+              {
+                "Name": "PROFILE_CENTER_AFFILIATION",
+                "Value": "off",
+              },
+              {
+                "Name": "UNIT_ADMIN_CENTER_PROXY",
+                "Value": "off",
+              },
+              {
+                "Name": "CENTER_PROGRAM_PAGES",
+                "Value": "off",
+              },
+              {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
                 "Value": "off",
               },
@@ -3518,6 +3534,22 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_COI_GAP_HINT",
+                "Value": "on",
+              },
+              {
+                "Name": "EDIT_UNIT_ROSTER_EXPORT",
+                "Value": "on",
+              },
+              {
+                "Name": "PROFILE_CENTER_AFFILIATION",
+                "Value": "on",
+              },
+              {
+                "Name": "UNIT_ADMIN_CENTER_PROXY",
+                "Value": "on",
+              },
+              {
+                "Name": "CENTER_PROGRAM_PAGES",
                 "Value": "on",
               },
               {
