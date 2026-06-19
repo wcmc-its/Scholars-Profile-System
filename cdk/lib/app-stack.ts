@@ -1035,6 +1035,11 @@ export class AppStack extends Stack {
         PROFILE_CENTER_AFFILIATION: env === "staging" ? "on" : "off",
         UNIT_ADMIN_CENTER_PROXY: env === "staging" ? "on" : "off",
         CENTER_PROGRAM_PAGES: env === "staging" ? "on" : "off",
+        // CLINICAL_TRIALS_SECTION — the profile "Clinical trials" section
+        // (#clinical-trials). Dark on prod; staging-on for soak. The profile
+        // payload returns [] when off, so this is safe to leave off even after
+        // the etl:clinical-trials backfill lands.
+        CLINICAL_TRIALS_SECTION: env === "staging" ? "on" : "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
