@@ -273,9 +273,13 @@ describe("OVERVIEW_SYSTEM_PROMPT — #742 naming rules", () => {
     expect(flat).toContain("do NOT supply a name or invent an acronym");
   });
 
-  it("fences numeric metrics (h-index, counts) to FACTS — no compute/recall", () => {
-    expect(flat).toContain("NEVER state a numeric metric");
-    expect(flat).toContain("Do NOT compute, estimate, or recall one.");
+  it("forbids h-index, author/citation counts, and impact scores in prose outright", () => {
+    expect(flat).toContain("NEVER state an h-index");
+    expect(flat).toContain("a publication's impact score");
+    // The only numbers permitted are the total publication count + the active-years span.
+    expect(flat).toContain("`publicationCount`");
+    expect(flat).toContain("`yearsActive`");
+    expect(flat).toContain("NEVER belong in a bio");
   });
 
   it("fences disease names, blocks funder→disease AND therapy→indication inference", () => {
@@ -422,8 +426,9 @@ describe("buildGroundingReference (#742 fact-checker reference)", () => {
     expect(ref).toContain("60-90% systemic distribution");
     // grant title (the grant-title-blindness fix)
     expect(ref).toContain("Gene Therapy for Alpha 1-Antitrypsin Deficiency");
-    // allowed numbers
-    expect(ref).toContain("h-index: 155");
+    // allowed numbers are pub-count / years only; the h-index is NOT listed as allowed
+    expect(ref).toContain("total publications");
+    expect(ref).not.toContain("h-index: 155");
     // the institution is declared always-valid so WCM is never flagged
     expect(ref).toContain("Weill Cornell Medicine");
     expect(ref).toMatch(/never flag/i);
@@ -432,9 +437,12 @@ describe("buildGroundingReference (#742 fact-checker reference)", () => {
     const ref = buildGroundingReference(FACTS); // FACTS.methods === []
     expect(ref).toContain("ALLOWED METHOD / TOOL NAMES: (none)");
   });
-  it("flags absence of an h-index rather than inviting one", () => {
-    const ref = buildGroundingReference(FACTS); // facultyMetrics null
-    expect(ref).toContain("must not state an h-index");
+  it("marks h-index / impact scores as FORBIDDEN metrics, never an allowed number", () => {
+    // Present regardless of whether facultyMetrics exists — the verifier must flag
+    // an h-index or impact score even when the value is real.
+    expect(buildGroundingReference(FACTS)).toContain("FORBIDDEN metrics");
+    expect(buildGroundingReference(RICH_FACTS)).toContain("FORBIDDEN metrics");
+    expect(buildGroundingReference(RICH_FACTS)).toContain("an h-index");
   });
 });
 
