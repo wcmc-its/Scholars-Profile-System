@@ -34,8 +34,12 @@ export default async function CenterRoute({
   const pageRaw = (Array.isArray(sp.page) ? sp.page[0] : sp.page) ?? "1";
   const page = Math.max(1, parseInt(pageRaw, 10) || 1);
   const tabRaw = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab;
-  const tab: "scholars" | "publications" =
-    tabRaw === "publications" ? "publications" : "scholars";
+  const tab: "scholars" | "publications" | "collaboration" =
+    tabRaw === "publications"
+      ? "publications"
+      : tabRaw === "collaboration"
+        ? "collaboration"
+        : "scholars";
   const sortRaw = Array.isArray(sp.sort) ? sp.sort[0] : sp.sort;
   return (
     <CenterPage

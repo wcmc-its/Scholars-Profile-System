@@ -372,6 +372,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "CENTER_COLLABORATION_NETWORK",
+                "Value": "off",
+              },
+              {
                 "Name": "CLINICAL_TRIALS_SECTION",
                 "Value": "off",
               },
@@ -3562,6 +3566,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "CENTER_PROGRAM_PAGES",
+                "Value": "on",
+              },
+              {
+                "Name": "CENTER_COLLABORATION_NETWORK",
                 "Value": "on",
               },
               {
