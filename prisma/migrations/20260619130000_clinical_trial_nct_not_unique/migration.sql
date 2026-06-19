@@ -1,0 +1,11 @@
+-- clinical_trial.nct_number is NOT unique.
+--
+-- #1136 added a UNIQUE index on nct_number, assuming one row per registered
+-- study. The institutional export (reciterdb.clinical_trials) registers some
+-- studies under multiple internal protocol numbers, so the same NCT legitimately
+-- appears on >1 clinical_trial row (24 NCTs shared by 2 protocols each at first
+-- load). The import full-replace hit `clinical_trial_nct_number_key` violations.
+-- Drop the unique index; nct_number is a secondary registry reference, not a key
+-- (nothing queries clinical_trial by nct_number — the NCT→enrichment join is done
+-- in-process at ETL time, and the profile reads via person_clinical_trial).
+ALTER TABLE `clinical_trial` DROP INDEX `clinical_trial_nct_number_key`;
