@@ -19,6 +19,7 @@ const {
   mockEducationFindMany,
   mockScholarFamilyFindMany,
   mockFamilySuppressionFindMany,
+  mockAppointmentFindMany,
 } = vi.hoisted(() => ({
   mockScholarFindUnique: vi.fn(),
   mockPubAuthorFindMany: vi.fn(),
@@ -30,6 +31,7 @@ const {
   mockEducationFindMany: vi.fn(),
   mockScholarFamilyFindMany: vi.fn(),
   mockFamilySuppressionFindMany: vi.fn(),
+  mockAppointmentFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -46,6 +48,8 @@ vi.mock("@/lib/db", () => ({
       // rollup (#799), #800-suppression applied.
       scholarFamily: { findMany: mockScholarFamilyFindMany },
       familySuppressionOverlay: { findMany: mockFamilySuppressionFindMany },
+      // #742 §7 — the merged "Titles & positions" candidate loader.
+      appointment: { findMany: mockAppointmentFindMany },
     },
   },
 }));
@@ -136,6 +140,7 @@ beforeEach(() => {
   mockEducationFindMany.mockResolvedValue([]);
   mockScholarFamilyFindMany.mockResolvedValue([]);
   mockFamilySuppressionFindMany.mockResolvedValue([]);
+  mockAppointmentFindMany.mockResolvedValue([]);
 });
 
 /** A `scholar_family.findMany` row, as the #799 rollup returns it. */
@@ -262,6 +267,45 @@ describe("assembleOverviewFacts — representative publications (distilled, sele
     });
     expect(facts?.representativePublications.map((p) => p.pmid)).toEqual(["1"]);
   });
+
+  // #742 §2.5 — with NO explicit snapshot, the durable three-state deltas re-apply
+  // on the default auto-set: an exclude drops a default pub, a pin adds a
+  // non-default (here middle-author) one.
+  it("applies durable deltas in the default path — excludes drop, pins add", async () => {
+    mockPubAuthorFindMany.mockResolvedValue([
+      { pmid: "1", isFirst: true, isLast: false },
+      { pmid: "2", isFirst: true, isLast: false },
+      { pmid: "9", isFirst: false, isLast: false }, // middle author — not default-selected
+    ]);
+    mockPublicationFindMany.mockResolvedValue([
+      pubRow("1", { impact: 90 }),
+      pubRow("2", { impact: 80 }),
+      pubRow("9", { impact: 50 }),
+    ]);
+    const facts = await assembleOverviewFacts("self01", undefined, {
+      deltas: {
+        pinned: { publication: ["9"] },
+        excluded: { publication: ["2"] },
+        publicationPositions: "led",
+        fundingRoles: "led",
+      },
+    });
+    expect(facts?.representativePublications.map((p) => p.pmid).sort()).toEqual(["1", "9"]);
+  });
+
+  it("re-filters a forged PINNED id against the candidate pool (delta path)", async () => {
+    mockPubAuthorFindMany.mockResolvedValue([{ pmid: "1", isFirst: true, isLast: false }]);
+    mockPublicationFindMany.mockResolvedValue([pubRow("1", { impact: 90 })]);
+    const facts = await assembleOverviewFacts("self01", undefined, {
+      deltas: {
+        pinned: { publication: ["evil999"] },
+        excluded: {},
+        publicationPositions: "led",
+        fundingRoles: "led",
+      },
+    });
+    expect(facts?.representativePublications.map((p) => p.pmid)).toEqual(["1"]);
+  });
 });
 
 describe("assembleOverviewFacts — funding (selection-driven)", () => {
@@ -380,7 +424,10 @@ describe("loadOverviewSourceOptions", () => {
 
     const opts = await loadOverviewSourceOptions("self01");
 
-    expect(opts.publications).toEqual([
+    // toMatchObject (subset): the loader now also emits the §5.1 additive fields
+    // (tier / reason / featured / recommendedRank / isLandmark) — assert the stable
+    // shape + defaultSelected, tolerate the additive enrichment.
+    expect(opts.publications).toMatchObject([
       {
         pmid: "1",
         title: "P1",
@@ -402,7 +449,7 @@ describe("loadOverviewSourceOptions", () => {
         defaultSelected: false,
       },
     ]);
-    expect(opts.funding).toEqual([
+    expect(opts.funding).toMatchObject([
       {
         id: "g1",
         role: "PI",
@@ -519,7 +566,7 @@ describe("assembleOverviewFacts — methods (scholar_family) & faculty metrics",
   it("source-options returns families as tools (maxConfidence 1) with defaultSelected", async () => {
     mockScholarFamilyFindMany.mockResolvedValue(FAMILIES);
     const opts = await loadOverviewSourceOptions("self01");
-    expect(opts.tools).toEqual([
+    expect(opts.tools).toMatchObject([
       {
         toolName: "AAV vectors",
         category: "vector platform",
@@ -543,7 +590,7 @@ describe("assembleOverviewFacts — methods (scholar_family) & faculty metrics",
   it("does NOT default-select a single-paper (pmid_count = 1) method family", async () => {
     mockScholarFamilyFindMany.mockResolvedValue([familyRow("long-tail method", "method", 1)]);
     const opts = await loadOverviewSourceOptions("self01");
-    expect(opts.tools).toEqual([
+    expect(opts.tools).toMatchObject([
       {
         toolName: "long-tail method",
         category: "method",

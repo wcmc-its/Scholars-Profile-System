@@ -27,11 +27,18 @@
 import { db } from "@/lib/db";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import {
+  applyDeltas,
   OVERVIEW_METHOD_PMID_FLOOR,
   OVERVIEW_SELECTION_MAX_ITEMS,
   OVERVIEW_SELECTION_MAX_TOOLS,
   type OverviewSelection,
+  type OverviewSelectionDeltas,
 } from "@/lib/edit/overview-params";
+import {
+  rankRepresentativePublications,
+  type RepresentativeRanked,
+  type RepresentativeTier,
+} from "@/lib/edit/overview-representative";
 
 /** How many parent topics the facts payload carries. */
 const TOPIC_LIMIT = 4;
@@ -119,7 +126,10 @@ export type OverviewFacts = {
   existingBio: { text: string; source: string } | null;
 };
 
-/** A drawer candidate publication (the light shape the Sources picker renders). */
+/** A drawer candidate publication (the light shape the Sources picker renders).
+ *  The `#742 §5.1` block is ADDITIVE — the Recommended ranking the three-state
+ *  drawer (PR-2) renders. `defaultSelected` stays the v3.1 default rule so the
+ *  current picker + generator behaviour is unchanged until the UI adopts §5.1. */
 export type OverviewSourcePublication = {
   pmid: string;
   title: string;
@@ -131,9 +141,20 @@ export type OverviewSourcePublication = {
   authorPosition: OverviewAuthorPosition | null;
   /** Whether this row is pre-checked when the drawer opens (the v3.1 default). */
   defaultSelected: boolean;
+  /** §5.1 position in the Recommended order (0-based). */
+  recommendedRank?: number;
+  /** §4.2 coarse weight — BACKEND framing only, never a user-facing number. */
+  tier?: RepresentativeTier;
+  /** Top impact-quantile work, protected from recency decay + coverage drop. */
+  isLandmark?: boolean;
+  /** In the §5.1 auto-set (the Feedstock tier the three-state UI features). */
+  featured?: boolean;
+  /** Numberless "why this?" copy (§3.2). */
+  reason?: string;
 };
 
-/** A drawer candidate funding award. */
+/** A drawer candidate funding award. `featured`/`reason` are the §5.1-era
+ *  additive fields; `defaultSelected` stays the current lead-role rule. */
 export type OverviewSourceFunding = {
   id: string;
   role: string;
@@ -142,6 +163,41 @@ export type OverviewSourceFunding = {
   award: string | null;
   endYear: number | null;
   defaultSelected: boolean;
+  /** Mirrors `defaultSelected` today (active lead-role award); a distinct field so
+   *  the three-state UI can read featured-ness uniformly across types. */
+  featured?: boolean;
+  reason?: string;
+};
+
+/** A drawer candidate "Titles & positions" record (#742 §7 merged type). Sourced
+ *  from the `appointment` table; the primary title also feeds the non-editable
+ *  scaffolding line, so the drawer dedupes it. Leadership-FK roles (chair /
+ *  director / chief / program leader) are layered in by the PR-2 UI. */
+export type OverviewSourceTitle = {
+  id: string;
+  title: string;
+  organization: string;
+  isPrimary: boolean;
+  isInterim: boolean;
+  /** No end date ⇒ a current appointment. */
+  isCurrent: boolean;
+  endYear: number | null;
+  /** Significant + current (or the primary title): the Feedstock tier. The
+   *  secondary / interim / end-dated tail is Available. */
+  featured: boolean;
+  reason: string;
+};
+
+/** A drawer candidate education record (#742 §7 — feedstock + a hide switch). */
+export type OverviewSourceEducation = {
+  id: string;
+  degree: string;
+  institution: string;
+  field: string | null;
+  year: number | null;
+  /** Terminal / professional degrees feature; minor certs drop to Available. */
+  featured: boolean;
+  reason: string;
 };
 
 /** The `GET /api/edit/overview/source-options` payload (v3.1 §4). `tools` carries
@@ -162,7 +218,14 @@ export type OverviewSourceOptions = {
     maxConfidence: number;
     /** Whether this family is pre-checked when the drawer opens (the #765 §2 floor). */
     defaultSelected: boolean;
+    /** §5.1-era additive: numberless "why this?" copy for the three-state UI. */
+    reason?: string;
   }[];
+  /** #742 §7 merged "Titles & positions" candidates. Additive (`?`) so existing
+   *  callers/fixtures are unaffected; the loader always populates it. */
+  titles?: OverviewSourceTitle[];
+  /** #742 §7 education candidates. Additive; the loader always populates it. */
+  education?: OverviewSourceEducation[];
 };
 
 /** Strip HTML tags + collapse whitespace — `existingBio.text` is plain text. */
@@ -443,6 +506,7 @@ async function loadTopicRationaleByPmid(
 export async function assembleOverviewFacts(
   cwid: string,
   selection?: OverviewSelection,
+  opts?: { deltas?: OverviewSelectionDeltas },
 ): Promise<OverviewFacts | null> {
   const scholar = await db.read.scholar.findUnique({
     where: { cwid },
@@ -496,10 +560,34 @@ export async function assembleOverviewFacts(
     selectedGrantIds = selection!.grantIds.filter((g) => candidateGrantSet.has(g));
     selectedToolNames = selection!.toolNames.filter((t) => candidateToolSet.has(t));
   } else {
+    // No explicit snapshot → the shared default rule, with the scholar's DURABLE
+    // three-state deltas (§2.5) re-applied on top: pins reach past the default,
+    // excludes veto. Each delta-resolved list is re-filtered to the candidate pool
+    // (a stale/forged pinned id simply matches nothing). When no deltas are stored
+    // the resolver is the identity, so this path is unchanged from before.
     const def = pickDefaultSelection(candidatePubs, funding, methodFamilies);
-    selectedPmids = def.pmids;
-    selectedGrantIds = def.grantIds;
-    selectedToolNames = def.toolNames;
+    const deltas = opts?.deltas;
+    if (deltas) {
+      selectedPmids = applyDeltas(
+        def.pmids,
+        deltas.pinned.publication,
+        deltas.excluded.publication,
+      ).filter((p) => candidatePmidSet.has(p));
+      selectedGrantIds = applyDeltas(
+        def.grantIds,
+        deltas.pinned.funding,
+        deltas.excluded.funding,
+      ).filter((g) => candidateGrantSet.has(g));
+      selectedToolNames = applyDeltas(
+        def.toolNames,
+        deltas.pinned.method,
+        deltas.excluded.method,
+      ).filter((t) => candidateToolSet.has(t));
+    } else {
+      selectedPmids = def.pmids;
+      selectedGrantIds = def.grantIds;
+      selectedToolNames = def.toolNames;
+    }
   }
   // Defensive caps (the route normalizes too): publications first within the
   // shared 25, tools within their own 10.
@@ -584,18 +672,158 @@ export async function assembleOverviewFacts(
   };
 }
 
+/** Highest-score PARENT topic (research area) per pmid — the coverage-pass key
+ *  for the §5.1 ranking (topic spread + per-area dedup). */
+async function loadPrimaryAreaByPmid(cwid: string, pmids: string[]): Promise<Map<string, string>> {
+  if (pmids.length === 0) return new Map();
+  const rows = await db.read.publicationTopic.findMany({
+    where: { cwid, pmid: { in: pmids } },
+    orderBy: { score: "desc" },
+    select: { pmid: true, parentTopicId: true },
+  });
+  const byPmid = new Map<string, string>();
+  for (const r of rows) if (!byPmid.has(r.pmid)) byPmid.set(r.pmid, r.parentTopicId);
+  return byPmid;
+}
+
+/** Run the candidate pubs through the §5.1 Recommended ranking (spread + landmark
+ *  floor + tiers + reasons), keyed by pmid for enrichment. The author-position
+ *  union is identical to the ranking module's, so it passes through directly. */
+async function rankCandidatePublications(
+  cwid: string,
+  candidatePubs: {
+    pmid: string;
+    impact: number | null;
+    year: number | null;
+    authorPosition: OverviewAuthorPosition | null;
+  }[],
+): Promise<Map<string, RepresentativeRanked>> {
+  const areaByPmid = await loadPrimaryAreaByPmid(
+    cwid,
+    candidatePubs.map((p) => p.pmid),
+  );
+  const ranked = rankRepresentativePublications(
+    candidatePubs.map((p) => ({
+      pmid: p.pmid,
+      impact: p.impact,
+      year: p.year,
+      authorPosition: p.authorPosition,
+      topicAreaId: areaByPmid.get(p.pmid) ?? null,
+    })),
+    { featuredLimit: REPRESENTATIVE_LIMIT },
+  );
+  return new Map(ranked.map((r) => [r.pmid, r]));
+}
+
+/** Significant leadership titles (§7 threshold) — chair / director / chief / etc. */
+const SIGNIFICANT_TITLE_RE =
+  /\b(chair|chief|director|president|dean|head|provost|principal|editor[-\s]?in[-\s]?chief)\b/i;
+
+/** "Titles & positions" candidates from the `appointment` table (#742 §7). The
+ *  primary title also drives the scaffolding line; it is still listed here (the
+ *  drawer dedupes it). Leadership-FK roles are layered in by the PR-2 UI. */
+async function loadOverviewTitleCandidates(cwid: string): Promise<OverviewSourceTitle[]> {
+  const rows = await db.read.appointment.findMany({
+    where: { cwid },
+    orderBy: [
+      { isPrimary: "desc" },
+      { endDate: { sort: "desc", nulls: "first" } },
+      { startDate: "desc" },
+    ],
+    select: {
+      id: true,
+      title: true,
+      organization: true,
+      startDate: true,
+      endDate: true,
+      isPrimary: true,
+      isInterim: true,
+    },
+  });
+  return rows.map((a) => {
+    const isCurrent = a.endDate === null;
+    const significant = SIGNIFICANT_TITLE_RE.test(a.title);
+    // Featured = the primary title, or a current, non-interim leadership role.
+    const featured = a.isPrimary || (isCurrent && !a.isInterim && significant);
+    const reason = a.isPrimary
+      ? "Your primary appointment"
+      : significant
+        ? isCurrent
+          ? "A leadership role"
+          : "A past leadership role"
+        : isCurrent
+          ? "A current appointment"
+          : "A past appointment";
+    return {
+      id: a.id,
+      title: a.title,
+      organization: a.organization,
+      isPrimary: a.isPrimary,
+      isInterim: a.isInterim,
+      isCurrent,
+      endYear: a.endDate ? a.endDate.getUTCFullYear() : null,
+      featured,
+      reason,
+    };
+  });
+}
+
+/** Terminal (doctoral) degrees — the strongest education signal. */
+const TERMINAL_DEGREE_RE =
+  /\b(ph\.?\s?d|m\.?\s?d|d\.?\s?o|d\.?\s?d\.?\s?s|d\.?\s?m\.?\s?d|pharm\.?\s?d|sc\.?\s?d|dr\.?\s?p\.?\s?h|d\.?\s?v\.?\s?m|j\.?\s?d|ed\.?\s?d|d\.?\s?n\.?\s?p|d\.?\s?phil|doctor)\b/i;
+/** Professional / graduate degrees that still feature when no doctorate applies. */
+const PROFESSIONAL_DEGREE_RE = /\b(m\.?\s?p\.?\s?h|m\.?\s?b\.?\s?a|m\.?\s?s|m\.?\s?a|m\.?\s?eng|master)\b/i;
+
+/** Education candidates (#742 §7) — terminal/professional degrees feature; minor
+ *  certificates / training entries drop to the Available tail. */
+async function loadOverviewEducationCandidates(cwid: string): Promise<OverviewSourceEducation[]> {
+  const rows = await db.read.education.findMany({
+    where: { cwid },
+    orderBy: { year: { sort: "desc", nulls: "last" } },
+    select: { id: true, degree: true, institution: true, field: true, year: true },
+  });
+  return rows.map((e) => {
+    const terminal = TERMINAL_DEGREE_RE.test(e.degree);
+    const professional = !terminal && PROFESSIONAL_DEGREE_RE.test(e.degree);
+    const featured = terminal || professional;
+    const reason = terminal
+      ? "Terminal degree"
+      : professional
+        ? "Professional degree"
+        : "Training / certificate";
+    return {
+      id: e.id,
+      degree: e.degree,
+      institution: e.institution,
+      field: e.field,
+      year: e.year,
+      featured,
+      reason,
+    };
+  });
+}
+
 /**
  * The Sources drawer candidate lists for `cwid` (v3.1 §4) — every scored pub,
  * every active award, and every method family, each flagged `defaultSelected`
  * per the shared default rule so the drawer's pre-checks match the server's
  * empty-selection behavior. `tools` is empty when the scholar has no #799
  * families, so the drawer's Methods section stays hidden then.
+ *
+ * #742 §5.1/§7 (additive): publications also carry the Recommended ranking
+ * (`tier` / `isLandmark` / `featured` / `reason` / `recommendedRank`), funding and
+ * methods carry a numberless `reason`, and the payload now includes `titles` and
+ * `education` candidate lists. None of this changes `defaultSelected` — the live
+ * default + generator behaviour is unchanged until the three-state UI (PR-2)
+ * adopts the §5.1 auto-set.
  */
 export async function loadOverviewSourceOptions(cwid: string): Promise<OverviewSourceOptions> {
-  const [candidatePubs, funding, methodFamilies] = await Promise.all([
+  const [candidatePubs, funding, methodFamilies, titles, education] = await Promise.all([
     loadScoredCandidatePublications(cwid),
     loadActiveFunding(cwid),
     loadScholarMethodFamilies(cwid),
+    loadOverviewTitleCandidates(cwid),
+    loadOverviewEducationCandidates(cwid),
   ]);
 
   const def = pickDefaultSelection(candidatePubs, funding, methodFamilies);
@@ -603,17 +831,27 @@ export async function loadOverviewSourceOptions(cwid: string): Promise<OverviewS
   const defaultGrants = new Set(def.grantIds);
   const defaultTools = new Set(def.toolNames);
 
+  const rankByPmid = await rankCandidatePublications(cwid, candidatePubs);
+
   return {
-    publications: candidatePubs.map((p) => ({
-      pmid: p.pmid,
-      title: p.title,
-      venue: p.venue,
-      year: p.year,
-      impact: p.impact,
-      isFirstOrLast: p.isFirstOrLast,
-      authorPosition: p.authorPosition,
-      defaultSelected: defaultPmids.has(p.pmid),
-    })),
+    publications: candidatePubs.map((p) => {
+      const r = rankByPmid.get(p.pmid);
+      return {
+        pmid: p.pmid,
+        title: p.title,
+        venue: p.venue,
+        year: p.year,
+        impact: p.impact,
+        isFirstOrLast: p.isFirstOrLast,
+        authorPosition: p.authorPosition,
+        defaultSelected: defaultPmids.has(p.pmid),
+        recommendedRank: r?.rank,
+        tier: r?.tier,
+        isLandmark: r?.isLandmark,
+        featured: r?.featured ?? defaultPmids.has(p.pmid),
+        reason: r?.reason,
+      };
+    }),
     funding: funding.map((f) => ({
       id: f.id,
       role: f.role,
@@ -622,16 +860,24 @@ export async function loadOverviewSourceOptions(cwid: string): Promise<OverviewS
       award: f.awardNumber ?? f.mechanism,
       endYear: f.endYear,
       defaultSelected: defaultGrants.has(f.id),
+      featured: defaultGrants.has(f.id),
+      reason: isLeadRole(f.role) ? "An active grant you lead" : "An active grant you're part of",
     })),
     // The drawer `tools[]` shape is unchanged (#886) — `examples` ride only in
-    // the FACTS grounding, not here, so the picker / route are untouched.
+    // the FACTS grounding, not here. `reason` is additive.
     tools: methodFamilies.map((t) => ({
       toolName: t.toolName,
       category: t.category,
       pmidCount: t.pmidCount,
       maxConfidence: t.maxConfidence,
       defaultSelected: defaultTools.has(t.toolName),
+      reason:
+        t.pmidCount >= OVERVIEW_METHOD_PMID_FLOOR
+          ? "A method recurring across your work"
+          : "A method in your work",
     })),
+    titles,
+    education,
   };
 }
 
