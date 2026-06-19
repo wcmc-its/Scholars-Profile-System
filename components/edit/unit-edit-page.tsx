@@ -31,6 +31,7 @@ import { UnitDescriptionCard } from "@/components/edit/unit-description-card";
 import { UnitUrlCard } from "@/components/edit/unit-url-card";
 import { UnitLeaderCard } from "@/components/edit/unit-leader-card";
 import { UnitRetireCard } from "@/components/edit/unit-retire-card";
+import { UnitFacultyExportCard } from "@/components/edit/unit-faculty-export-card";
 import { UnitRosterCard } from "@/components/edit/unit-roster-card";
 import { UnitSlugCard } from "@/components/edit/unit-slug-card";
 import type { RailItem } from "@/components/edit/attribute-rail";
@@ -61,13 +62,23 @@ const hasRoster = (ctx: UnitEditContext) =>
   ctx.unit.unitType === "center" ||
   (ctx.unit.unitType === "division" && ctx.unit.source === "manual");
 
+// A department / division has no curated roster, but when the roster-export flag
+// is on they get a read-only "Members" tab carrying the faculty CSV export.
+const hasFacultyExportTab = (ctx: UnitEditContext) =>
+  isUnitRosterExportEnabled() &&
+  (ctx.unit.unitType === "department" || ctx.unit.unitType === "division");
+
 /** The full attribute set; `visible` encodes the SPEC § attribute table. */
 const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   { key: "description", label: "Description", visible: () => true },
   // #1021 — same visibility as Description (curators / owners / superuser).
   { key: "url", label: "Website", visible: () => true },
   { key: "leader", label: "Leadership", visible: () => true },
-  { key: "roster", label: "Members", visible: (ctx) => hasRoster(ctx) },
+  {
+    key: "roster",
+    label: "Members",
+    visible: (ctx) => hasRoster(ctx) || hasFacultyExportTab(ctx),
+  },
   // #1117 — per-program leaders + description; only for a center with a program
   // taxonomy (the Cancer-Center-only gate is data-driven, like the roster fields).
   {
@@ -197,14 +208,38 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
       }
       if (ctx.unit.unitType === "division") {
         return (
-          <UnitRosterCard
-            entityType="division"
-            unitCode={ctx.unit.code}
-            members={ctx.roster ?? []}
+          <div className="flex flex-col gap-6">
+            {/* A manual division keeps its editable add/remove roster (PR-7c);
+                an ED division has none, so only the faculty export shows. */}
+            {hasRoster(ctx) && (
+              <UnitRosterCard
+                entityType="division"
+                unitCode={ctx.unit.code}
+                members={ctx.roster ?? []}
+              />
+            )}
+            {/* Faculty CSV export (count + link) — extends #1102 to divisions. */}
+            {hasFacultyExportTab(ctx) && (
+              <UnitFacultyExportCard
+                unitType="division"
+                code={ctx.unit.code}
+                source={ctx.unit.source}
+              />
+            )}
+          </div>
+        );
+      }
+      // A department has no curated roster — its Members tab is the read-only
+      // faculty CSV export (extends #1102 to departments).
+      if (ctx.unit.unitType === "department" && hasFacultyExportTab(ctx)) {
+        return (
+          <UnitFacultyExportCard
+            unitType="department"
+            code={ctx.unit.code}
+            source={ctx.unit.source}
           />
         );
       }
-      // A department has no roster row in its rail — unreachable.
       return null;
     case "programs":
       // #1117 — only surfaced for a center with a program taxonomy.
