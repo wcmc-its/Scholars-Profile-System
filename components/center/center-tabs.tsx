@@ -1,27 +1,35 @@
 /**
  * Underline-style tabs for the center page. §16: Scholars (default) +
  * Publications. The Grants tab is removed; the Spotlight surface above
- * carries the "what's notable here" affordance.
+ * carries the "what's notable here" affordance. #1137 adds an optional
+ * "Collaboration" tab (countless) for centers with a program taxonomy when the
+ * flag is on.
  */
 import Link from "next/link";
 import type { Route } from "next";
 
-type TabKey = "scholars" | "publications";
+type TabKey = "scholars" | "publications" | "collaboration";
 
 export function CenterTabs({
   active,
   basePath,
   scholarsCount,
   publicationsCount,
+  showCollaboration = false,
 }: {
   active: TabKey;
   basePath: string;
   scholarsCount: number;
   publicationsCount: number;
+  showCollaboration?: boolean;
 }) {
-  const tabs: { key: TabKey; label: string; count: number }[] = [
+  // `count: undefined` ⇒ a countless tab (never disabled, no count badge).
+  const tabs: { key: TabKey; label: string; count?: number }[] = [
     { key: "scholars", label: "Scholars", count: scholarsCount },
     { key: "publications", label: "Publications", count: publicationsCount },
+    ...(showCollaboration
+      ? [{ key: "collaboration" as const, label: "Collaboration" }]
+      : []),
   ];
 
   return (
@@ -50,9 +58,11 @@ export function CenterTabs({
         const content = (
           <>
             {t.label}
-            <span className="ml-1.5 text-[12px] text-[var(--color-text-tertiary)]">
-              {t.count.toLocaleString()}
-            </span>
+            {t.count !== undefined && (
+              <span className="ml-1.5 text-[12px] text-[var(--color-text-tertiary)]">
+                {t.count.toLocaleString()}
+              </span>
+            )}
           </>
         );
 

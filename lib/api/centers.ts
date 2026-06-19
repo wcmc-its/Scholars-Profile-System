@@ -97,6 +97,17 @@ export async function loadActiveCenterMemberCwids(
 }
 
 /**
+ * #1137 — does this center define a program taxonomy (≥1 `CenterProgram` row)?
+ * Drives the data-driven gate for the Collaboration tab (today only the Meyer
+ * Cancer Center qualifies), so "just the Cancer Center for now" needs no
+ * hardcoded center code. A cheap count — no row hydration.
+ */
+export async function centerHasPrograms(centerCode: string): Promise<boolean> {
+  const n = await prisma.centerProgram.count({ where: { centerCode } });
+  return n > 0;
+}
+
+/**
  * #1103 — one ACTIVE center membership of a single scholar, for the reverse
  * "Centers" card on the profile (the inverse of the center-page roster). The
  * card links `name` → `/centers/<slug>`. `programLabel` / `membershipType` are

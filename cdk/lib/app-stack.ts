@@ -1035,6 +1035,13 @@ export class AppStack extends Stack {
         PROFILE_CENTER_AFFILIATION: env === "staging" ? "on" : "off",
         UNIT_ADMIN_CENTER_PROXY: env === "staging" ? "on" : "off",
         CENTER_PROGRAM_PAGES: env === "staging" ? "on" : "off",
+        // CENTER_COLLABORATION_NETWORK (#1137) — the public "Collaboration" tab
+        // on the center page: an interactive, program-colored co-authorship
+        // graph + standalone-HTML export. ADDITIONALLY gated data-driven on the
+        // center having a CenterProgram taxonomy (today only the Meyer Cancer
+        // Center), so "just the Cancer Center for now" needs no hardcoded code.
+        // App-only, no reindex, no migration. Staging-on for soak; prod-off.
+        CENTER_COLLABORATION_NETWORK: env === "staging" ? "on" : "off",
         // CLINICAL_TRIALS_SECTION — the profile "Clinical trials" section
         // (#clinical-trials). Dark on prod; staging-on for soak. The profile
         // payload returns [] when off, so this is safe to leave off even after

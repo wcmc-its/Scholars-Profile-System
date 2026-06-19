@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { buildOrganizationJsonLd } from "@/lib/seo/jsonld";
 import {
+  centerHasPrograms,
   getCenter,
   getCenterMembers,
   getCenterPrograms,
@@ -9,7 +10,9 @@ import {
 } from "@/lib/api/centers";
 import { getSpotlightCardsForCenter } from "@/lib/api/spotlight";
 import { CenterMembersClient } from "@/components/center/center-members-client";
+import { CenterCollaborationTab } from "@/components/center/center-collaboration-tab";
 import { isCenterProgramPagesEnabled } from "@/lib/profile/methods-lens-flags";
+import { isCenterCollaborationNetworkEnabled } from "@/lib/center-collaboration/flags";
 import { CenterTabs } from "@/components/center/center-tabs";
 import { DeptPublicationsList } from "@/components/department/dept-publications-list";
 import { Spotlight } from "@/components/shared/spotlight";
@@ -26,7 +29,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 
-type Tab = "scholars" | "publications";
+type Tab = "scholars" | "publications" | "collaboration";
 
 export async function CenterPage({
   centerSlug,
@@ -75,6 +78,13 @@ export async function CenterPage({
   const programs = programPagesEnabled
     ? await getCenterPrograms(detail.code)
     : [];
+
+  // #1137 — Collaboration tab: flag on AND the center has a program taxonomy
+  // (data-driven → today only the Meyer Cancer Center). Skip the count query
+  // entirely when the flag is off.
+  const showCollaboration =
+    isCenterCollaborationNetworkEnabled() &&
+    (await centerHasPrograms(detail.code));
 
   const spotlightData = spotlightCards
     ? {
@@ -226,6 +236,7 @@ export async function CenterPage({
           basePath={basePath}
           scholarsCount={detail.scholarCount}
           publicationsCount={pubsCountResult.total}
+          showCollaboration={showCollaboration}
         />
 
         {tab === "scholars" && members && (
@@ -245,6 +256,10 @@ export async function CenterPage({
             sort={pubSort}
             basePath={basePath}
           />
+        )}
+
+        {tab === "collaboration" && showCollaboration && (
+          <CenterCollaborationTab centerSlug={detail.slug} />
         )}
       </div>
     </main>
