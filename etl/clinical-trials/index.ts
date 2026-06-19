@@ -1,5 +1,6 @@
 /**
- * Clinical Trials ETL — load each scholar's trials from reciterdb.
+ * Clinical Trials ETL (direct) — load each scholar's trials from reciterdb in a
+ * single in-process pass.
  *
  * Source of truth chain:
  *   institutional CTMS export → reciterdb.clinical_trials
@@ -11,278 +12,59 @@
  *
  * The institutional table already carries cwid, so — unlike etl/nih-profile —
  * no entity resolution is needed; trials arrive pre-linked. `role` is the one
- * derived field: a name-match of the scholar against the trial's `piName`
- * (PI vs Investigator), heuristic until a structured role lands upstream.
+ * derived field (name-match of the scholar against piName).
  *
- * Full-replace each run: the institutional export is a static snapshot, so we
- * rebuild both tables from whatever reciterdb currently holds. Small tables
- * (~10^3 rows); delete-all + insert-all is the simplest correct shape.
+ * Full-replace each run (the institutional export is a static snapshot).
  *
- * The enriched columns carry `enrichmentSource`/`enrichedAt` so a future fresher
- * third-party feed can replace the NCT join (step 2 below) without touching the
- * cwid spine or the profile UI.
+ * Requires reachability to BOTH reciterdb (read) and the Sps DB (write) from the
+ * one runner — true once the SPS↔WCM networking lands (#443). While that gap is
+ * open the in-VPC task can't reach reciterdb; use the export/import bridge
+ * (export.ts + import.ts) instead, which splits the read and write across the
+ * two reachable environments.
  *
  * Usage: `npm run etl:clinical-trials`
  */
 import { db } from "../../lib/db";
-import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
-
-const INSERT_BATCH = 1000;
-
-function chunks<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
-type InstitutionalRow = {
-  cwid: string | null;
-  nctNumber: string | null;
-  protocolNumber: string | null;
-  piName: string | null;
-  title: string | null;
-  protocolType: string | null;
-  firstOTADate: string | null;
-  firstCTADate: string | null;
-  statusDate: string | null;
-  principalSponsor: string | null;
-  overallCurrentStatus: string | null;
-};
-
-type EnrichedRow = {
-  nctNumber: string | null;
-  officialTitle: string | null;
-  briefTitle: string | null;
-  briefSummary: string | null;
-  studyType: string | null;
-  phases: string | null;
-  conditions: string | null;
-  meshTerms: string | null;
-  enrollment: number | string | null;
-};
-
-/** Parse the institutional varchar dates (typically "M/D/YY", sometimes
- *  "M/D/YYYY" or an ISO-ish string) into a Date, or null when unparseable.
- *  Two-digit years pivot at 50 (49→2049, 50→1950) — clinical-trial dates are
- *  contemporary, so this only matters for very old protocols. */
-function parseLooseDate(raw: string | null): Date | null {
-  if (!raw) return null;
-  const str = String(raw).trim();
-  if (!str) return null;
-  const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-  if (m) {
-    const mo = parseInt(m[1], 10);
-    const d = parseInt(m[2], 10);
-    let year = parseInt(m[3], 10);
-    if (year < 100) year += year < 50 ? 2000 : 1900;
-    const dt = new Date(Date.UTC(year, mo - 1, d));
-    return Number.isNaN(dt.getTime()) ? null : dt;
-  }
-  const dt = new Date(str);
-  return Number.isNaN(dt.getTime()) ? null : dt;
-}
-
-function cleanInt(raw: number | string | null): number | null {
-  if (raw === null || raw === undefined) return null;
-  const n = typeof raw === "number" ? raw : parseInt(String(raw).replace(/[^0-9]/g, ""), 10);
-  return Number.isFinite(n) ? n : null;
-}
-
-function nonEmpty(s: string | null | undefined): string | null {
-  const t = (s ?? "").trim();
-  return t.length > 0 ? t : null;
-}
-
-/** Lowercase, strip accents/punctuation, collapse whitespace → token list.
- *  Commas (used by "Last, First" forms) become spaces so order/format of the
- *  name doesn't matter to the match below. */
-function nameTokens(s: string | null): string[] {
-  return (s ?? "")
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^a-z,\s]/g, "")
-    .replace(/,/g, " ")
-    .split(/\s+/)
-    .filter(Boolean);
-}
-
-/** Heuristic PI test: the scholar's two longest name tokens (≈ first + last,
- *  order-independent, initials dropped) both appear in the trial's piName.
- *  Conservative — favours "Investigator" over a wrong "Principal Investigator". */
-function isLikelyPi(scholarName: string | null, piName: string | null): boolean {
-  if (!piName) return false;
-  const pi = new Set(nameTokens(piName));
-  if (pi.size === 0) return false;
-  const stoks = nameTokens(scholarName).filter((t) => t.length > 1);
-  if (stoks.length < 2) return false;
-  const [t1, t2] = [...stoks].sort((a, b) => b.length - a.length);
-  return pi.has(t1) && pi.has(t2);
-}
-
-type TrialBuild = {
-  protocolNumber: string;
-  nctNumber: string | null;
-  title: string;
-  status: string | null;
-  statusDate: Date | null;
-  protocolType: string | null;
-  studyType: string | null;
-  phase: string | null;
-  principalSponsor: string | null;
-  conditions: string | null;
-  meshTerms: string | null;
-  briefSummary: string | null;
-  enrollment: number | null;
-  firstOtaDate: Date | null;
-  firstCtaDate: Date | null;
-  enrichmentSource: string | null;
-  enrichedAt: Date | null;
-  source: string;
-  lastRefreshedAt: Date;
-};
-
-type LinkBuild = {
-  cwid: string;
-  protocolNumber: string;
-  role: string;
-  piNameRaw: string | null;
-  lastRefreshedAt: Date;
-};
+import { closeReciterPool } from "@/lib/sources/reciterdb";
+import { buildTrialsAndLinks, loadScholarNames, readReciterdbTables, replaceAll } from "./shared";
 
 async function main() {
   const start = Date.now();
   const now = new Date();
 
   try {
-    // 1. Our scholars — the FK target + the name source for role derivation.
-    //    Any-status: the FK only needs the row to exist; the profile read
-    //    (gated, active-only) is what actually decides display.
-    console.log("Loading scholars from Postgres...");
-    const scholars = await db.write.scholar.findMany({
-      select: { cwid: true, preferredName: true, fullName: true },
-    });
-    const scholarName = new Map<string, string>();
-    for (const s of scholars) scholarName.set(s.cwid, s.fullName || s.preferredName || "");
+    console.log("Loading scholars from the Sps DB...");
+    const scholarName = await loadScholarNames();
     console.log(`${scholarName.size} scholars in our DB.`);
 
-    // 2. Institutional spine + ClinicalTrials.gov enrichment from reciterdb.
     console.log("Loading clinical_trials + clinical_trials_enriched from reciterdb...");
-    let institutional: InstitutionalRow[] = [];
-    const enrichedByNct = new Map<string, EnrichedRow>();
-    await withReciterConnection(async (conn) => {
-      institutional = (await conn.query(`
-        SELECT cwid, nctNumber, protocolNumber, piName, title, protocolType,
-               firstOTADate, firstCTADate, statusDate, principalSponsor,
-               overallCurrentStatus
-        FROM clinical_trials
-      `)) as InstitutionalRow[];
-
-      const enriched = (await conn.query(`
-        SELECT nctNumber, officialTitle, briefTitle, briefSummary, studyType,
-               phases, conditions, meshTerms, enrollment
-        FROM clinical_trials_enriched
-      `)) as EnrichedRow[];
-      for (const e of enriched) {
-        const key = nonEmpty(e.nctNumber)?.toUpperCase();
-        if (key) enrichedByNct.set(key, e);
-      }
-    });
+    const { institutional, enriched } = await readReciterdbTables();
     console.log(
-      `Loaded ${institutional.length} institutional rows, ${enrichedByNct.size} enriched NCT rows.`,
+      `Loaded ${institutional.length} institutional rows, ${enriched.length} enriched rows.`,
     );
 
-    // 3. Build deduped trials (one per protocolNumber) + person links.
-    const trials = new Map<string, TrialBuild>();
-    const links = new Map<string, LinkBuild>(); // dedupe by "cwid|protocol"
-    let skippedNoProtocol = 0;
-    let skippedUnknownCwid = 0;
-    let enrichedHits = 0;
+    const { trials, links, stats } = buildTrialsAndLinks(institutional, enriched, scholarName, now);
+    console.log(
+      `Built ${stats.trials} trials (${stats.enrichedHits} institutional rows had NCT enrichment) ` +
+        `and ${stats.links} person links. ` +
+        `Skipped ${stats.skippedNoProtocol} rows w/o protocolNumber, ` +
+        `${stats.skippedUnknownCwid} w/ cwid not in our scholar set.`,
+    );
 
-    for (const r of institutional) {
-      const protocol = nonEmpty(r.protocolNumber);
-      if (!protocol) {
-        skippedNoProtocol++;
-        continue;
-      }
-      const cwid = nonEmpty(r.cwid);
-      if (!cwid || !scholarName.has(cwid)) {
-        skippedUnknownCwid++;
-        continue;
-      }
-
-      const nct = nonEmpty(r.nctNumber);
-      const enriched = nct ? enrichedByNct.get(nct.toUpperCase()) : undefined;
-      if (enriched) enrichedHits++;
-
-      // Build the trial once (first institutional row for a protocol wins for
-      // the trial-level fields; later rows only add investigator links).
-      if (!trials.has(protocol)) {
-        const title =
-          nonEmpty(enriched?.officialTitle) ||
-          nonEmpty(enriched?.briefTitle) ||
-          nonEmpty(r.title) ||
-          `Protocol ${protocol}`;
-        trials.set(protocol, {
-          protocolNumber: protocol,
-          nctNumber: nct,
-          title,
-          status: nonEmpty(r.overallCurrentStatus),
-          statusDate: parseLooseDate(r.statusDate),
-          protocolType: nonEmpty(r.protocolType),
-          studyType: nonEmpty(enriched?.studyType),
-          phase: nonEmpty(enriched?.phases),
-          principalSponsor: nonEmpty(r.principalSponsor),
-          conditions: nonEmpty(enriched?.conditions),
-          meshTerms: nonEmpty(enriched?.meshTerms),
-          briefSummary: nonEmpty(enriched?.briefSummary),
-          enrollment: cleanInt(enriched?.enrollment ?? null),
-          firstOtaDate: parseLooseDate(r.firstOTADate),
-          firstCtaDate: parseLooseDate(r.firstCTADate),
-          enrichmentSource: enriched ? "ClinicalTrials.gov" : null,
-          enrichedAt: enriched ? now : null,
-          source: "reciterdb.clinical_trials",
-          lastRefreshedAt: now,
-        });
-      }
-
-      const linkKey = `${cwid}|${protocol}`;
-      if (!links.has(linkKey)) {
-        links.set(linkKey, {
-          cwid,
-          protocolNumber: protocol,
-          role: isLikelyPi(scholarName.get(cwid) ?? null, r.piName)
-            ? "Principal Investigator"
-            : "Investigator",
-          piNameRaw: nonEmpty(r.piName),
-          lastRefreshedAt: now,
-        });
-      }
+    if (institutional.length > 0 && trials.length === 0) {
+      // We read rows but matched none — almost certainly a join/scholar-set
+      // problem, not a genuine empty source. Don't wipe good data on a fluke.
+      throw new Error(
+        `Refusing to full-replace: ${institutional.length} institutional rows read but 0 trials built.`,
+      );
     }
 
-    console.log(
-      `Built ${trials.size} trials (${enrichedHits} institutional rows had NCT enrichment) ` +
-        `and ${links.size} person links. ` +
-        `Skipped ${skippedNoProtocol} rows w/o protocolNumber, ` +
-        `${skippedUnknownCwid} w/ cwid not in our scholar set.`,
-    );
-
-    // 4. Full replace. Children first on delete, parents first on insert (FK).
     console.log("Replacing person_clinical_trial + clinical_trial...");
-    const delLinks = await db.write.personClinicalTrial.deleteMany({});
-    const delTrials = await db.write.clinicalTrial.deleteMany({});
-    console.log(`Deleted ${delLinks.count} old links, ${delTrials.count} old trials.`);
-
-    let insTrials = 0;
-    for (const batch of chunks([...trials.values()], INSERT_BATCH)) {
-      await db.write.clinicalTrial.createMany({ data: batch });
-      insTrials += batch.length;
-    }
-    let insLinks = 0;
-    for (const batch of chunks([...links.values()], INSERT_BATCH)) {
-      await db.write.personClinicalTrial.createMany({ data: batch });
-      insLinks += batch.length;
-    }
-    console.log(`Inserted ${insTrials} trials, ${insLinks} person links.`);
+    const r = await replaceAll(trials, links);
+    console.log(
+      `Deleted ${r.delLinks} old links, ${r.delTrials} old trials. ` +
+        `Inserted ${r.insTrials} trials, ${r.insLinks} person links.`,
+    );
   } finally {
     await closeReciterPool();
     await db.write.$disconnect();

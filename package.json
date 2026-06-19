@@ -75,6 +75,8 @@
     "etl:coi-gap": "tsx etl/coi-gap/index.ts",
     "etl:coi-gap:diagnose": "tsx etl/coi-gap/diagnose.ts",
     "etl:clinical-trials": "tsx etl/clinical-trials/index.ts",
+    "etl:clinical-trials:export": "tsx etl/clinical-trials/export.ts",
+    "etl:clinical-trials:import": "tsx etl/clinical-trials/import.ts",
     "etl:dynamodb:probe-synopsis": "tsx etl/dynamodb/probe-synopsis.ts",
     "etl:dynamodb": "tsx etl/dynamodb/index.ts",
     "etl:identity": "tsx etl/identity/index.ts",
