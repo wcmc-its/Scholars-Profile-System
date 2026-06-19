@@ -45,6 +45,17 @@ vi.mock("@/lib/edit/overview-facts", () => ({
   assembleOverviewFacts: mockAssembleFacts,
   hasSufficientFacts: mockHasSufficient,
 }));
+// #742 §2.5 — the route loads the scholar's durable selection deltas before
+// assembling facts; mocked to the default (no-delta) shape so the route's gates
+// are exercised in isolation (the assembler is mocked too).
+vi.mock("@/lib/edit/overview-selection-store", () => ({
+  loadOverviewSelectionDeltas: vi.fn(async () => ({
+    pinned: {},
+    excluded: {},
+    publicationPositions: "led",
+    fundingRoles: "led",
+  })),
+}));
 vi.mock("@/lib/edit/overview-generator", () => ({
   generateOverviewDraft: mockGenerateDraft,
   isOverviewGenerateEnabled: mockEnabled,

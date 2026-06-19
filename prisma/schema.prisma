@@ -113,6 +113,7 @@ model Scholar {
   nihProfiles          PersonNihProfile[]
   overviewGenerations  OverviewGeneration[]
   overviewProvenance   OverviewProvenance?
+  overviewSelection    OverviewSourceSelection?
   scholarTools         ScholarTool[]
   scholarFamilies      ScholarFamily[]
   department           Department?          @relation(fields: [deptCode], references: [code], onDelete: SetNull)
@@ -1670,6 +1671,25 @@ model OverviewProvenance {
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 
   @@map("overview_provenance")
+}
+
+/// The scholar's DURABLE source-selection deltas for the overview generator
+/// (#742 spec §2.5). One row per scholar, upserted from the Sources drawer. The
+/// three-state model stores DELTAS against a recomputed auto-set — not a snapshot
+/// of checked boxes — so `deltas` holds `{ pinned, excluded, publicationPositions,
+/// fundingRoles }` (the `OverviewSelectionDeltas` shape). Pins/excludes survive
+/// across runs and toggle changes; the auto-set is re-derived each generate and the
+/// deltas re-applied on top. In the main schema so the app role's existing DML
+/// covers it (cf. the #493 audit-grant gap); cascade-deleted with the scholar.
+model OverviewSourceSelection {
+  cwid          String   @id @db.VarChar(32)
+  deltas        Json // { pinned, excluded, publicationPositions, fundingRoles }
+  updatedByCwid String   @map("updated_by_cwid") @db.VarChar(32) // actor (self / proxy / admin)
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+
+  @@map("overview_source_selection")
 }
 
 /// Per-(scholar, tool) rollup of ReciterAI `TOOL#` method/instrument extractions

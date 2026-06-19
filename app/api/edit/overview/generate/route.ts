@@ -23,7 +23,12 @@ import { logEditDenial } from "@/lib/edit/authz";
 import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 import { assembleOverviewFacts, hasSufficientFacts } from "@/lib/edit/overview-facts";
 import { generateOverviewDraft, isOverviewGenerateEnabled } from "@/lib/edit/overview-generator";
-import { normalizeOverviewParams, normalizeOverviewSelection } from "@/lib/edit/overview-params";
+import {
+  isOverviewSelectionEmpty,
+  normalizeOverviewParams,
+  normalizeOverviewSelection,
+} from "@/lib/edit/overview-params";
+import { loadOverviewSelectionDeltas } from "@/lib/edit/overview-selection-store";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import { recordOverviewGenerateAttempt } from "@/lib/edit/rate-limit";
 import { type UnitScholarLookup } from "@/lib/edit/unit-scholar-authz";
@@ -106,7 +111,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
       return editRateLimited(rate.retryAfterSeconds);
     }
-    facts = await assembleOverviewFacts(entityId, selection);
+    // An explicit snapshot wins outright; otherwise fall to the scholar's DURABLE
+    // three-state deltas (§2.5) layered on the default auto-set.
+    const deltas = isOverviewSelectionEmpty(selection)
+      ? await loadOverviewSelectionDeltas(entityId)
+      : undefined;
+    facts = await assembleOverviewFacts(entityId, selection, { deltas });
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(500, "write_failed");

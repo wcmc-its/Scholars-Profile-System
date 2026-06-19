@@ -222,3 +222,150 @@ export function isOverviewSelectionEmpty(selection: OverviewSelection): boolean 
     selection.toolNames.length === 0
   );
 }
+
+// ---------------------------------------------------------------------------
+// #742 spec §2.5 — the THREE-STATE selection model (default / pinned-in /
+// excluded), stored as DELTAS against a live auto-set rather than a snapshot of
+// checked boxes. The auto-set (the Recommended featured set) is recomputed every
+// run; the deltas are durable and re-applied on top. The snapshot
+// `OverviewSelection` above is the RESOLVED product the assembler consumes — the
+// deltas + the recomputed auto-set produce it via `applyDeltas`.
+// ---------------------------------------------------------------------------
+
+/** The drawer's content types. Each keys its records by a stable id: `pmid`
+ *  (publications), grant id (funding), family label (methods), appointment/role
+ *  id (titles & positions), education-row id (education). */
+export type OverviewRecordType = "publication" | "funding" | "method" | "title" | "education";
+
+/** The §2.3 toggles — "led" (the default: work you drove) vs "all" (every
+ *  position/role). Surfaced only for publications and funding; the toggle changes
+ *  which candidates the auto-set draws from, not the deltas. */
+export type OverviewPositionMode = "led" | "all";
+
+/** A per-type bag of record ids. A missing type key means "no delta of this kind
+ *  for that type" — identical to an empty array. */
+export type OverviewRecordIds = Partial<Record<OverviewRecordType, string[]>>;
+
+/**
+ * The durable deltas a scholar has applied to their auto-set (§2.5). `pinned`
+ * forces records IN (the centrality override — "add merges into pin"); `excluded`
+ * forces records OUT (a persistent veto). Per-type, never global. The two toggles
+ * carry the §2.3 systematic-disagreement overrides. Everything else is "default".
+ */
+export type OverviewSelectionDeltas = {
+  pinned: OverviewRecordIds;
+  excluded: OverviewRecordIds;
+  publicationPositions: OverviewPositionMode;
+  fundingRoles: OverviewPositionMode;
+};
+
+/** Zero deltas — pure auto-set, both toggles on "led". `isOverviewSelectionDeltasEmpty`
+ *  of this is true, which the status line reads as "Using your recommended set". */
+export const DEFAULT_OVERVIEW_SELECTION_DELTAS: OverviewSelectionDeltas = {
+  pinned: {},
+  excluded: {},
+  publicationPositions: "led",
+  fundingRoles: "led",
+};
+
+/** Defensive ceiling on how many ids a single (type, kind) delta bag may carry —
+ *  the durable store and the request body are both untrusted, and the effective
+ *  selection is re-capped downstream anyway. Generous: a real scholar pins a
+ *  handful, not hundreds. */
+export const OVERVIEW_DELTA_MAX_PER_BAG = 100;
+
+const RECORD_TYPES: readonly OverviewRecordType[] = [
+  "publication",
+  "funding",
+  "method",
+  "title",
+  "education",
+];
+const POSITION_MODES: readonly OverviewPositionMode[] = ["led", "all"];
+
+/** Coerce an untrusted per-type id bag: each known type → a clean, de-duped,
+ *  capped string array; unknown keys dropped; non-arrays → omitted. */
+function normalizeRecordIds(raw: unknown): OverviewRecordIds {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const obj = raw as Record<string, unknown>;
+  const out: OverviewRecordIds = {};
+  for (const type of RECORD_TYPES) {
+    const ids = toStringArray(obj[type]).slice(0, OVERVIEW_DELTA_MAX_PER_BAG);
+    if (ids.length > 0) out[type] = ids;
+  }
+  return out;
+}
+
+/**
+ * Coerce an untrusted `deltas` value into a usable {@link OverviewSelectionDeltas}
+ * — the server trust boundary for the three-state model, mirroring
+ * {@link normalizeOverviewSelection}'s never-throws contract. Unknown toggle values
+ * fall back to "led"; id bags are filtered to known types, trimmed, de-duped, and
+ * capped. Ownership is NOT enforced here (the facts queries do that), so a forged
+ * id simply resolves against no candidate.
+ */
+export function normalizeOverviewSelectionDeltas(raw: unknown): OverviewSelectionDeltas {
+  const obj: Record<string, unknown> =
+    typeof raw === "object" && raw !== null && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  return {
+    pinned: normalizeRecordIds(obj.pinned),
+    excluded: normalizeRecordIds(obj.excluded),
+    publicationPositions: pickEnum(obj.publicationPositions, POSITION_MODES, "led"),
+    fundingRoles: pickEnum(obj.fundingRoles, POSITION_MODES, "led"),
+  };
+}
+
+/** True when the deltas diverge in NO way from the pure auto-set — no pins, no
+ *  excludes, both toggles default. The status line reads this as "auto" (§2.5). */
+export function isOverviewSelectionDeltasEmpty(deltas: OverviewSelectionDeltas): boolean {
+  const noIds = (bag: OverviewRecordIds) => RECORD_TYPES.every((t) => (bag[t]?.length ?? 0) === 0);
+  return (
+    deltas.publicationPositions === "led" &&
+    deltas.fundingRoles === "led" &&
+    noIds(deltas.pinned) &&
+    noIds(deltas.excluded)
+  );
+}
+
+/**
+ * Resolve ONE type's effective id list (§2.5): `(featured ∪ pinned) \ excluded`,
+ * de-duped, with the auto-set's order first and any pinned-but-not-featured ids
+ * appended (a pin reaches PAST the default, so it lands at the tail). Pure;
+ * exclude wins over pin when an id appears in both (a veto is stronger — an
+ * unlikely client state, resolved conservatively).
+ */
+export function applyDeltas(
+  featured: readonly string[],
+  pinned: readonly string[] = [],
+  excluded: readonly string[] = [],
+): string[] {
+  const excludeSet = new Set(excluded);
+  const pinSet = new Set(pinned);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const id of featured) {
+    if (excludeSet.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  for (const id of pinSet) {
+    if (excludeSet.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/** Divergence counts for the status line — "1 pinned · 2 hidden" (§2.5: counts
+ *  divergences, NOT records; never "9 of 25"). Numberless rendering is the UI's
+ *  job; this returns the raw counts. */
+export function summarizeOverviewDeltas(deltas: OverviewSelectionDeltas): {
+  pinned: number;
+  hidden: number;
+} {
+  const sum = (bag: OverviewRecordIds) =>
+    RECORD_TYPES.reduce((n, t) => n + (bag[t]?.length ?? 0), 0);
+  return { pinned: sum(deltas.pinned), hidden: sum(deltas.excluded) };
+}
