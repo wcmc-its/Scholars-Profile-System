@@ -64,6 +64,7 @@ beforeEach(() => {
   mocks.familySuppressionOverlayFindMany.mockResolvedValue([]);
   mocks.familySensitivityOverlayFindMany.mockResolvedValue([]);
   delete process.env.METHODS_LENS_ENABLED;
+  delete process.env.METHODS_LENS_PUB_MODAL;
   delete process.env.METHODS_LENS_PAGES;
   delete process.env.METHODS_LENS_SENSITIVE_GATE;
   delete process.env.PUBLICATION_CITING_BRIDGE;
@@ -414,6 +415,7 @@ describe("getPublicationDetail — method families (#917)", () => {
 
   it("de-dupes a family by (supercategory, familyLabel) across multiple WCM authors", async () => {
     process.env.METHODS_LENS_ENABLED = "on";
+    process.env.METHODS_LENS_PUB_MODAL = "on";
     process.env.METHODS_LENS_PAGES = "on";
     mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
     mocks.publicationAuthorFindMany.mockResolvedValue([
@@ -462,6 +464,7 @@ describe("getPublicationDetail — method families (#917)", () => {
 
   it("excludes a #800-suppressed family even when the pmid matches", async () => {
     process.env.METHODS_LENS_ENABLED = "on";
+    process.env.METHODS_LENS_PUB_MODAL = "on";
     process.env.METHODS_LENS_PAGES = "on";
     mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
     mocks.publicationAuthorFindMany.mockResolvedValue([{ cwid: "aaa1001" }]);
@@ -482,6 +485,7 @@ describe("getPublicationDetail — method families (#917)", () => {
 
   it("nulls the href when the Method pages surface is off", async () => {
     process.env.METHODS_LENS_ENABLED = "on";
+    process.env.METHODS_LENS_PUB_MODAL = "on";
     // METHODS_LENS_PAGES intentionally unset.
     mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
     mocks.publicationAuthorFindMany.mockResolvedValue([{ cwid: "aaa1001" }]);
@@ -501,8 +505,20 @@ describe("getPublicationDetail — method families (#917)", () => {
 
   it("returns [] when the paper has no confirmed WCM authors", async () => {
     process.env.METHODS_LENS_ENABLED = "on";
+    process.env.METHODS_LENS_PUB_MODAL = "on";
     mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
     mocks.publicationAuthorFindMany.mockResolvedValue([]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.methodFamilies).toEqual([]);
+    expect(mocks.scholarFamilyFindMany).not.toHaveBeenCalled();
+  });
+
+  it("returns [] when METHODS_LENS_PUB_MODAL is off even with the master lens on (#917 independent gate)", async () => {
+    process.env.METHODS_LENS_ENABLED = "on";
+    // METHODS_LENS_PUB_MODAL intentionally unset → the modal section is dark
+    // independently of the rest of the lens; no DB scan.
+    mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
+    mocks.publicationAuthorFindMany.mockResolvedValue([{ cwid: "aaa1001" }]);
     const r = await getPublicationDetail("12345");
     expect(r?.methodFamilies).toEqual([]);
     expect(mocks.scholarFamilyFindMany).not.toHaveBeenCalled();

@@ -1428,6 +1428,16 @@ export class AppStack extends Stack {
         //     -> flip staging-on here + cdk deploy Sps-App-staging to soak -> prod on.
         //     Wire in BOTH .env.local AND here per the flag-parity rule.
         METHODS_LENS_TOOL_CONTEXT: env === "staging" ? "on" : "off",
+        //   METHODS_LENS_PUB_MODAL -- #917. The publication-detail modal "Methods"
+        //     section (per-pmid method families, #800/#801-gated, linked to the
+        //     Method pages). The families data layer + UI shipped in #938; this
+        //     per-surface flag (like every other methods-lens surface) lets the modal
+        //     section roll out -- or be darked in prod -- INDEPENDENTLY of the rest of
+        //     the lens. ADDITIONALLY gated on METHODS_LENS_ENABLED in code. Render-only:
+        //     no DB/ETL/reindex dependency. STAGING ON (preserves the surface live since
+        //     #938 shipped dark behind the master flag), prod OFF until the gated lens
+        //     go-live. Wire in BOTH .env.local AND here per the flag-parity rule.
+        METHODS_LENS_PUB_MODAL: env === "staging" ? "on" : "off",
         //   METHODS_LENS_FAMILY_SYNONYMS -- method-family search synonyms. When on,
         //     matchQueryToTaxonomy ALSO matches a family against its curated lay-term /
         //     brand / acronym synonyms (lib/methods/family-synonyms.ts) via whole-word
