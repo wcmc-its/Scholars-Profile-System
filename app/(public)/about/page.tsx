@@ -14,7 +14,7 @@ export const dynamic = "force-static";
 export const revalidate = false;
 
 export const metadata: Metadata = {
-  title: "About: Scholars at WCM",
+  title: "About — Scholars at WCM",
   description:
     "How your Scholars profile is built, how to read it, and how to change the things that are yours to change: provenance, corrections, the Impact score, research areas, search, and the showcase surfaces.",
   alternates: { canonical: "/about" },
