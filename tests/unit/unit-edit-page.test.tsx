@@ -3,13 +3,28 @@
  * panel selection (#540 Phase 7). The three live cards are mocked to lightweight
  * stubs so the test isolates the router's `(unitType, actorRole, source)` logic.
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+
+const { mockRosterExportEnabled } = vi.hoisted(() => ({ mockRosterExportEnabled: vi.fn() }));
 
 // The shell's mobile RailSelect calls useRouter; stub the app-router context.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
 }));
+
+// The roster-export flag gates the dept/division "Members" tab; drive it per-test.
+vi.mock("@/lib/edit/unit-roster-export", () => ({
+  isUnitRosterExportEnabled: mockRosterExportEnabled,
+}));
+// Async server component (reads db.read) — stub to a sync panel in the router test.
+vi.mock("@/components/edit/unit-faculty-export-card", () => ({
+  UnitFacultyExportCard: () => <div data-testid="panel-faculty-export" />,
+}));
+
+beforeEach(() => {
+  mockRosterExportEnabled.mockReturnValue(false);
+});
 
 vi.mock("@/components/edit/unit-description-card", () => ({
   UnitDescriptionCard: () => <div data-testid="panel-description" />,
@@ -53,6 +68,7 @@ function ctx(over: {
   access?: UnitEditContext["access"];
   suppression?: UnitEditContext["unit"]["suppression"];
   programs?: UnitEditContext["programs"];
+  roster?: UnitEditContext["roster"];
 }): UnitEditContext {
   const unitType = over.unitType ?? "department";
   return {
@@ -74,7 +90,7 @@ function ctx(over: {
       suppression: over.suppression ?? null,
     },
     access: over.access ?? null,
-    roster: null,
+    roster: over.roster ?? null,
     programs: over.programs ?? (unitType === "center" ? [] : null),
     siblingDivisions: over.siblings ?? null,
     actorRole: over.actorRole ?? "curator",
@@ -136,6 +152,51 @@ describe("UnitEditPage — rail filtering", () => {
   it("an ED division has no roster row", () => {
     render(<UnitEditPage ctx={ctx({ unitType: "division", actorRole: "curator", source: "ED" })} />);
     expect(railKeys()).not.toContain("roster");
+  });
+
+  it("a department gets a Members tab (faculty export) when the export flag is on", () => {
+    mockRosterExportEnabled.mockReturnValue(true);
+    render(<UnitEditPage ctx={ctx({ unitType: "department", actorRole: "curator" })} attr="roster" />);
+    expect(railKeys()).toContain("roster");
+    expect(screen.getByTestId("panel-faculty-export")).toBeTruthy();
+  });
+
+  it("a department has NO Members tab when the export flag is off", () => {
+    mockRosterExportEnabled.mockReturnValue(false);
+    render(<UnitEditPage ctx={ctx({ unitType: "department", actorRole: "curator" })} />);
+    expect(railKeys()).not.toContain("roster");
+  });
+
+  it("an ED division gets the faculty-export Members tab (no editable roster) when on", () => {
+    mockRosterExportEnabled.mockReturnValue(true);
+    render(
+      <UnitEditPage
+        ctx={ctx({ unitType: "division", actorRole: "curator", source: "ED" })}
+        attr="roster"
+      />,
+    );
+    expect(railKeys()).toContain("roster");
+    expect(screen.getByTestId("panel-faculty-export")).toBeTruthy();
+    expect(screen.queryByTestId("panel-roster")).toBeNull();
+  });
+
+  it("a manual division shows BOTH the editable roster and the faculty export when on", () => {
+    mockRosterExportEnabled.mockReturnValue(true);
+    render(
+      <UnitEditPage
+        ctx={ctx({
+          unitType: "division",
+          actorRole: "curator",
+          source: "manual",
+          roster: [
+            { cwid: "m1", name: "M One", title: null, source: "manual-ui", membershipType: null, programCode: null, startDate: null, endDate: null },
+          ],
+        })}
+        attr="roster"
+      />,
+    );
+    expect(screen.getByTestId("panel-roster")).toBeTruthy();
+    expect(screen.getByTestId("panel-faculty-export")).toBeTruthy();
   });
 });
 
