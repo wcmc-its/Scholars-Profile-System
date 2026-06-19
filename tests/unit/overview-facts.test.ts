@@ -465,6 +465,26 @@ describe("assembleOverviewFacts — education (#742 §7, delta-filtered) & exist
     ]);
   });
 
+  it("features an internationally-recognized doctorate (MBBS), never silently dropping it", async () => {
+    mockEducationFindMany.mockResolvedValue([eduRow("e1", "MBBS", { year: 2004 })]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.education.map((e) => e.degree)).toEqual(["MBBS"]);
+  });
+
+  it("falls back to all rows when the classifier recognizes no featured degree (no deltas)", async () => {
+    mockEducationFindMany.mockResolvedValue([
+      eduRow("e1", "Diploma in Tropical Medicine", { year: 2003 }),
+      eduRow("e2", "Fellowship in Cardiology", { year: 2009 }),
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    // Neither row matches the terminal/professional heuristic → the defensive fallback
+    // emits every row rather than erasing education entirely.
+    expect(facts?.education.map((e) => e.degree)).toEqual([
+      "Diploma in Tropical Medicine",
+      "Fellowship in Cardiology",
+    ]);
+  });
+
   it("derives existingBio as plain text from the overview HTML, source 'vivo'", async () => {
     mockScholarFindUnique.mockResolvedValue(
       scholarRow({
@@ -530,6 +550,53 @@ describe("assembleOverviewFacts — titles (#742 §7, delta-filtered)", () => {
       "Attending Physician",
       "Director, Genomics Core",
     ]);
+  });
+
+  it("never duplicates the primary appointment into additional titles, even when its id is pinned", async () => {
+    mockAppointmentFindMany.mockResolvedValue([
+      apptRow("a0", "Associate Professor of Medicine", { isPrimary: true }),
+      apptRow("a1", "Chief, Division of Hematology"),
+    ]);
+    const facts = await assembleOverviewFacts("self01", undefined, {
+      deltas: { ...DEFAULT_DELTAS, pinned: { title: ["a0"] } },
+    });
+    // Primary rides only in facts.title; a pin on its id must not surface it here.
+    expect(facts?.titles.map((t) => t.title)).toEqual(["Chief, Division of Hematology"]);
+  });
+
+  it("drops a non-flagged appointment whose title equals scholar.primaryTitle (string-dedup backstop)", async () => {
+    mockScholarFindUnique.mockResolvedValue(
+      scholarRow({ primaryTitle: "Chief, Division of Hematology" }),
+    );
+    mockAppointmentFindMany.mockResolvedValue([
+      apptRow("a1", "Chief, Division of Hematology"), // featured, but string-equal to the primary
+      apptRow("a2", "Director, Genomics Core"),
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.titles.map((t) => t.title)).toEqual(["Director, Genomics Core"]);
+  });
+});
+
+describe("assembleOverviewFacts — explicit pub snapshot + title/education deltas (#742 §7, change b)", () => {
+  it("honors the explicit pub snapshot for publications while title deltas still bite", async () => {
+    mockPubAuthorFindMany.mockResolvedValue([
+      { pmid: "1", isFirst: true, isLast: false },
+      { pmid: "2", isFirst: true, isLast: false },
+    ]);
+    mockPublicationFindMany.mockResolvedValue([pubRow("1", { impact: 90 }), pubRow("2", { impact: 80 })]);
+    mockAppointmentFindMany.mockResolvedValue([
+      apptRow("a0", "Associate Professor of Medicine", { isPrimary: true }),
+      apptRow("a1", "Chief, Division of Hematology"),
+    ]);
+    const facts = await assembleOverviewFacts(
+      "self01",
+      { pmids: ["2"], grantIds: [], toolNames: [] },
+      { deltas: { ...DEFAULT_DELTAS, excluded: { title: ["a1"] } } },
+    );
+    // The explicit snapshot won for pubs (only pmid 2, not the default 1+2)...
+    expect(facts?.representativePublications.map((p) => p.pmid)).toEqual(["2"]);
+    // ...and the title delta still bit on the explicit path (a1 vetoed → no extra titles).
+    expect(facts?.titles).toEqual([]);
   });
 });
 
@@ -602,6 +669,34 @@ describe("loadOverviewSourceOptions", () => {
       },
     ]);
     expect(opts.tools).toEqual([]);
+  });
+
+  it("projects titles, education, and the resolved identity scaffold for the picker", async () => {
+    mockScholarFindUnique.mockResolvedValue(
+      scholarRow({ primaryTitle: "Professor of Medicine", primaryDepartment: "Medicine" }),
+    );
+    mockAppointmentFindMany.mockResolvedValue([
+      apptRow("a0", "Professor of Medicine", { isPrimary: true }),
+      apptRow("a1", "Chief, Division of Hematology"),
+    ]);
+    mockEducationFindMany.mockResolvedValue([
+      eduRow("e1", "M.D.", { year: 2005 }),
+      eduRow("e2", "Certificate in Quality Improvement", { year: 2012 }),
+    ]);
+    const opts = await loadOverviewSourceOptions("self01");
+    expect(opts.titles).toMatchObject([
+      { id: "a0", isPrimary: true, featured: true, reason: "Your primary appointment" },
+      { id: "a1", featured: true, reason: "A leadership role" },
+    ]);
+    expect(opts.education).toMatchObject([
+      { id: "e1", featured: true, reason: "Terminal degree" },
+      { id: "e2", featured: false, reason: "Training / certificate" },
+    ]);
+    expect(opts.identity).toEqual({
+      name: "Jane Smith",
+      primaryTitle: "Professor of Medicine",
+      primaryDepartment: "Medicine",
+    });
   });
 });
 

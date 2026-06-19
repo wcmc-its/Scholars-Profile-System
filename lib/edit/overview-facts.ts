@@ -234,6 +234,11 @@ export type OverviewSourceOptions = {
   titles?: OverviewSourceTitle[];
   /** #742 §7 education candidates. Additive; the loader always populates it. */
   education?: OverviewSourceEducation[];
+  /** Resolved identity for the Titles section's "Always shown" scaffold — the SAME
+   *  strings the generator grounds on (`scholar.preferredName` / `primaryTitle` /
+   *  `primaryDepartment`), so the scaffold can never misrepresent what anchors the
+   *  bio. Additive (`?`); the loader always populates it. */
+  identity?: { name: string; primaryTitle: string | null; primaryDepartment: string | null };
 };
 
 /** Strip HTML tags + collapse whitespace — `existingBio.text` is plain text. */
@@ -668,9 +673,19 @@ export async function assembleOverviewFacts(
     applyDeltas(featuredTitleIds, sourceDeltas?.pinned.title, sourceDeltas?.excluded.title),
   );
   // The primary title is the always-shown scaffolding line (`title`); never duplicate
-  // it into the additional-titles list.
+  // it into the additional-titles list. We drop it by both the appointment `isPrimary`
+  // flag AND a normalized string match against `scholar.primaryTitle`, since the two
+  // are distinct sources that can disagree (a flag may be missing while the role text
+  // matches) — and a pinned id bypasses the featured filter, so the string guard is the
+  // backstop.
+  const primaryTitleNorm = normalizeTitleForDedup(scholar.primaryTitle);
   const titles = titleCandidates
-    .filter((t) => !t.isPrimary && effectiveTitleIds.has(t.id))
+    .filter(
+      (t) =>
+        !t.isPrimary &&
+        effectiveTitleIds.has(t.id) &&
+        normalizeTitleForDedup(t.title) !== primaryTitleNorm,
+    )
     .map((t) => ({ title: t.title, organization: t.organization }));
 
   const featuredEducationIds = educationCandidates.filter((e) => e.featured).map((e) => e.id);
@@ -681,9 +696,24 @@ export async function assembleOverviewFacts(
       sourceDeltas?.excluded.education,
     ),
   );
-  const education = educationCandidates
+  let education = educationCandidates
     .filter((e) => effectiveEducationIds.has(e.id))
     .map((e) => ({ degree: e.degree, institution: e.institution, field: e.field, year: e.year }));
+  // Defensive empty-tier fallback: if the degree classifier recognized nothing as
+  // featured AND the scholar made no education choice, emit every row rather than
+  // silently drop all education — a degree string the heuristic doesn't yet know
+  // (an unusual international or historical credential) must never erase the section.
+  const hasEduDeltas =
+    (sourceDeltas?.pinned.education?.length ?? 0) > 0 ||
+    (sourceDeltas?.excluded.education?.length ?? 0) > 0;
+  if (education.length === 0 && !hasEduDeltas && educationCandidates.length > 0) {
+    education = educationCandidates.map((e) => ({
+      degree: e.degree,
+      institution: e.institution,
+      field: e.field,
+      year: e.year,
+    }));
+  }
 
   const hasMetrics =
     scholar.hIndex !== null ||
@@ -761,6 +791,11 @@ async function rankCandidatePublications(
   return new Map(ranked.map((r) => [r.pmid, r]));
 }
 
+/** Normalize a title for primary-title de-duplication (case / whitespace-insensitive). */
+function normalizeTitleForDedup(title: string | null): string {
+  return (title ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 /** Significant leadership titles (§7 threshold) — chair / director / chief / etc. */
 const SIGNIFICANT_TITLE_RE =
   /\b(chair|chief|director|president|dean|head|provost|principal|editor[-\s]?in[-\s]?chief)\b/i;
@@ -814,11 +849,17 @@ async function loadOverviewTitleCandidates(cwid: string): Promise<OverviewSource
   });
 }
 
-/** Terminal (doctoral) degrees — the strongest education signal. */
+/** Terminal (doctoral) degrees — the strongest education signal. Includes the
+ *  international medical-doctorate family (MBBS / MBChB / MBBCh / Bachelor of
+ *  Medicine) and DSc, common among internationally-trained faculty. */
 const TERMINAL_DEGREE_RE =
-  /\b(ph\.?\s?d|m\.?\s?d|d\.?\s?o|d\.?\s?d\.?\s?s|d\.?\s?m\.?\s?d|pharm\.?\s?d|sc\.?\s?d|dr\.?\s?p\.?\s?h|d\.?\s?v\.?\s?m|j\.?\s?d|ed\.?\s?d|d\.?\s?n\.?\s?p|d\.?\s?phil|doctor)\b/i;
-/** Professional / graduate degrees that still feature when no doctorate applies. */
-const PROFESSIONAL_DEGREE_RE = /\b(m\.?\s?p\.?\s?h|m\.?\s?b\.?\s?a|m\.?\s?s|m\.?\s?a|m\.?\s?eng|master)\b/i;
+  /\b(ph\.?\s?d|m\.?\s?d|d\.?\s?o|d\.?\s?d\.?\s?s|d\.?\s?m\.?\s?d|pharm\.?\s?d|sc\.?\s?d|d\.?\s?sc|dr\.?\s?p\.?\s?h|d\.?\s?v\.?\s?m|j\.?\s?d|ed\.?\s?d|d\.?\s?n\.?\s?p|d\.?\s?phil|m\.?\s?b\.?\s?b\.?\s?s|m\.?\s?b\.?\s?ch\.?\s?b|m\.?\s?b\.?\s?b\.?\s?ch|bachelor of medicine|doctor)\b/i;
+/** Professional / graduate degrees that still feature when no doctorate applies.
+ *  `m\.?\s?sc` / `sc\.?\s?m` are listed explicitly because the bare `m\.?\s?s`
+ *  alternative below fails the `\b` boundary on "MSc" / "ScM" (the trailing/leading
+ *  "c" abuts the match). */
+const PROFESSIONAL_DEGREE_RE =
+  /\b(m\.?\s?p\.?\s?h|m\.?\s?b\.?\s?a|m\.?\s?sc|sc\.?\s?m|m\.?\s?s|m\.?\s?a|m\.?\s?eng|master)\b/i;
 
 /** Education candidates (#742 §7) — terminal/professional degrees feature; minor
  *  certificates / training entries drop to the Available tail. */
@@ -864,7 +905,11 @@ async function loadOverviewEducationCandidates(cwid: string): Promise<OverviewSo
  * adopts the §5.1 auto-set.
  */
 export async function loadOverviewSourceOptions(cwid: string): Promise<OverviewSourceOptions> {
-  const [candidatePubs, funding, methodFamilies, titles, education] = await Promise.all([
+  const [scholar, candidatePubs, funding, methodFamilies, titles, education] = await Promise.all([
+    db.read.scholar.findUnique({
+      where: { cwid },
+      select: { preferredName: true, primaryTitle: true, primaryDepartment: true },
+    }),
     loadScoredCandidatePublications(cwid),
     loadActiveFunding(cwid),
     loadScholarMethodFamilies(cwid),
@@ -924,6 +969,11 @@ export async function loadOverviewSourceOptions(cwid: string): Promise<OverviewS
     })),
     titles,
     education,
+    identity: {
+      name: scholar?.preferredName ?? "",
+      primaryTitle: scholar?.primaryTitle ?? null,
+      primaryDepartment: scholar?.primaryDepartment ?? null,
+    },
   };
 }
 

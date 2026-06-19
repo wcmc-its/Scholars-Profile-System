@@ -275,10 +275,18 @@ export function OverviewIncludePicker({
   const methods = React.useMemo(() => buildMethods(options.tools), [options.tools]);
   const titles = React.useMemo(() => buildTitles(options.titles ?? []), [options.titles]);
   const education = React.useMemo(() => buildEducation(options.education ?? []), [options.education]);
-  const primaryTitle = React.useMemo(
-    () => (options.titles ?? []).find((t) => t.isPrimary) ?? null,
-    [options.titles],
-  );
+  // The "Always shown" scaffold — name · primary title · department — is sourced from
+  // the SAME identity strings the generator grounds on (not the appointment row), so it
+  // can never drift from what actually anchors the bio (#742 §2.2).
+  const identity = options.identity;
+  const scaffoldText = React.useMemo(() => {
+    if (!identity) return null;
+    const parts = [identity.name, identity.primaryTitle, identity.primaryDepartment].filter(
+      (x): x is string => Boolean(x),
+    );
+    return parts.length > 0 ? parts.join(" · ") : null;
+  }, [identity]);
+  const hasPrimaryTitle = Boolean(identity?.primaryTitle);
 
   // Count visible publications for the §2.5 thin-overview warning.
   const visiblePubs = publications.filter((r) => {
@@ -371,19 +379,21 @@ export function OverviewIncludePicker({
           disabled={disabled}
         />
       )}
-      {(primaryTitle || titles.length > 0) && (
+      {(hasPrimaryTitle || titles.length > 0) && (
         <Section
           spec={{
             type: "title",
             heading: "Titles & positions",
             subtitle:
-              "Leadership and named roles beyond your primary appointment. Hiding one keeps it out of this overview only.",
-            scaffold: primaryTitle ? (
-              <>
-                <span className="text-foreground">Always shown:</span> {primaryTitle.title}
-                {primaryTitle.organization ? ` · ${primaryTitle.organization}` : ""}
-              </>
-            ) : undefined,
+              titles.length > 0
+                ? "Leadership and named roles beyond your primary appointment. Hiding one keeps it out of this overview only."
+                : "Leadership and named roles beyond your primary appointment.",
+            scaffold:
+              hasPrimaryTitle && scaffoldText ? (
+                <>
+                  <span className="text-foreground">Always shown:</span> {scaffoldText}
+                </>
+              ) : undefined,
             records: titles,
             // Titles are stable run-to-run, so featured rows are exclude-only (no
             // pin-to-protect); the Available tail still offers add-and-pin.
@@ -600,6 +610,20 @@ function RecordRow({
           <IconButton
             label={pinned ? "Unpin" : "Pin"}
             active={pinned}
+            disabled={disabled}
+            onClick={onPin}
+            testid={`overview-source-pin-${type}-${record.id}`}
+          >
+            <Pin className="size-[17px]" />
+          </IconButton>
+        ) : pinned && record.bucket !== "featured" ? (
+          // A row ADDED from the Available tail in an exclude-only (non-pinnable)
+          // section: offer an Unpin so removing it returns to the default tier, rather
+          // than forcing the trailing X — which would mint a spurious exclude and
+          // inflate the "N hidden" count for a row the scholar only meant to un-add.
+          <IconButton
+            label="Unpin"
+            active
             disabled={disabled}
             onClick={onPin}
             testid={`overview-source-pin-${type}-${record.id}`}

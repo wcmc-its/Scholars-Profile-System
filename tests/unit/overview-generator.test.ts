@@ -17,6 +17,7 @@ import {
   OVERVIEW_SYSTEM_PROMPT,
   OVERVIEW_VERIFY_SYSTEM_PROMPT,
   parseUngrounded,
+  toModelFacts,
 } from "@/lib/edit/overview-generator";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import { DEFAULT_OVERVIEW_PARAMS, type OverviewParams } from "@/lib/edit/overview-params";
@@ -455,6 +456,23 @@ describe("buildGroundingReference (#742 fact-checker reference)", () => {
     expect(buildGroundingReference(FACTS)).toContain("FORBIDDEN metrics");
     expect(buildGroundingReference(RICH_FACTS)).toContain("FORBIDDEN metrics");
     expect(buildGroundingReference(RICH_FACTS)).toContain("an h-index");
+  });
+});
+
+describe("toModelFacts (#742 §7 — titles reach the model via ...rest)", () => {
+  const withTitles = {
+    ...FACTS,
+    titles: [{ title: "Chief, Division of Hematology", organization: "Weill Cornell Medicine" }],
+  };
+  it("carries titles into the projection while still withholding facultyMetrics", () => {
+    const projected = toModelFacts(withTitles);
+    expect(projected.titles).toEqual(withTitles.titles);
+    expect((projected as Record<string, unknown>).facultyMetrics).toBeUndefined();
+  });
+  it("serializes titles inside the FACTS block of the user prompt", () => {
+    const prompt = buildOverviewUserPrompt(withTitles, DEFAULT_OVERVIEW_PARAMS);
+    const block = prompt.slice(prompt.indexOf("<FACTS>"), prompt.indexOf("</FACTS>"));
+    expect(block).toContain("Chief, Division of Hematology");
   });
 });
 
