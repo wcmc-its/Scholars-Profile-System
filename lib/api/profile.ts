@@ -659,22 +659,30 @@ function ensureOwnerInChipWindow<T extends { cwid: string }>(
 }
 
 /** A trial we never display (withdrawn / never-enrolled). Checked before the
- *  active test below so "no longer available" doesn't count as "available". */
-function isWithdrawnTrialStatus(status: string | null): boolean {
+ *  active test below so "no longer available" doesn't count as "available".
+ *  The institutional `overallCurrentStatus` vocabulary (OPEN/CLOSED TO ACCRUAL,
+ *  IRB STUDY CLOSURE, SUSPENDED) has no withdrawn state, so this only matches the
+ *  ClinicalTrials.gov terms — kept for any future CTgov-sourced status.
+ *  @internal exported for tests. */
+export function isWithdrawnTrialStatus(status: string | null): boolean {
   const s = (status ?? "").toLowerCase();
   return s.includes("withdrawn") || s.includes("no longer available");
 }
 
-/** Coarse Active vs Completed split for the trial section, from the raw
- *  institutional status. Anything recruiting/enrolling/active counts as active;
- *  completed/terminated/suspended fall through to completed. */
-function isActiveTrialStatus(status: string | null): boolean {
+/** Coarse Active vs Completed split for the trial section, from the raw status.
+ *  The live source is the institutional `overallCurrentStatus` — "OPEN TO
+ *  ACCRUAL" is the only actively-enrolling state ("CLOSED TO ACCRUAL", "IRB STUDY
+ *  CLOSURE", "SUSPENDED" fall through to completed). The ClinicalTrials.gov terms
+ *  are also matched so an enriched/future CTgov status classifies correctly.
+ *  @internal exported for tests. */
+export function isActiveTrialStatus(status: string | null): boolean {
   const s = (status ?? "").toLowerCase();
   if (!s) return false;
   return (
-    s.includes("recruiting") || // covers "not yet recruiting"
+    s.includes("open to accrual") || // institutional: actively enrolling
+    s.includes("recruiting") || // ClinicalTrials.gov (covers "not yet recruiting")
     s.includes("enrolling") ||
-    s.includes("active") || // covers "active, not recruiting"
+    s.includes("active") || // CTgov "active, not recruiting"
     s.includes("available")
   );
 }
