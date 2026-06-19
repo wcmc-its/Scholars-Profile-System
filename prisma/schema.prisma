@@ -455,8 +455,10 @@ model ClinicalTrial {
   /// Internal institutional protocol id — always present; the natural key.
   protocolNumber   String    @id @map("protocol_number") @db.VarChar(64)
   /// ClinicalTrials.gov NCT id; null when the trial has no NCT registration
-  /// (then there is no enrichment row). Unique among non-null values.
-  nctNumber        String?   @unique @map("nct_number") @db.VarChar(32)
+  /// (then there is no enrichment row). NOT unique: the institutional export
+  /// registers some studies under multiple internal protocol numbers, so the
+  /// same NCT legitimately appears on >1 ClinicalTrial row.
+  nctNumber        String?   @map("nct_number") @db.VarChar(32)
   /// Best available title: enriched officialTitle → enriched briefTitle →
   /// institutional title.
   title            String    @db.Text

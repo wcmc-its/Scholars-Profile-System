@@ -78,6 +78,18 @@ export function nonEmpty(s: string | null | undefined): string | null {
   return t.length > 0 ? t : null;
 }
 
+/** Normalize an NCT id to canonical uppercase "NCT########", or null. The
+ *  institutional export uses the placeholder "NA" for ~1000 protocols with no
+ *  registration; anything that isn't a real NCT id (NA, N/A, blanks, junk) maps
+ *  to null so it never stores a bogus id, builds a broken ClinicalTrials.gov
+ *  link, or collides on the enrichment join. */
+export function cleanNct(raw: string | null): string | null {
+  const t = nonEmpty(raw);
+  if (!t) return null;
+  const up = t.toUpperCase();
+  return /^NCT\d+$/.test(up) ? up : null;
+}
+
 /** Lowercase, strip accents/punctuation, collapse whitespace → token list.
  *  Commas (used by "Last, First" forms) become spaces so order/format of the
  *  name doesn't matter to the match below. */
@@ -195,7 +207,7 @@ export function buildTrialsAndLinks(
 ): { trials: TrialBuild[]; links: LinkBuild[]; stats: BuildStats } {
   const enrichedByNct = new Map<string, EnrichedRow>();
   for (const e of enriched) {
-    const key = nonEmpty(e.nctNumber)?.toUpperCase();
+    const key = cleanNct(e.nctNumber);
     if (key) enrichedByNct.set(key, e);
   }
 
@@ -219,8 +231,8 @@ export function buildTrialsAndLinks(
     }
     const cwid = scholar.cwid; // canonical scholar.cwid (matches the FK case)
 
-    const nct = nonEmpty(r.nctNumber);
-    const enrichedRow = nct ? enrichedByNct.get(nct.toUpperCase()) : undefined;
+    const nct = cleanNct(r.nctNumber);
+    const enrichedRow = nct ? enrichedByNct.get(nct) : undefined;
     if (enrichedRow) enrichedHits++;
 
     // Build the trial once (first institutional row for a protocol wins for the

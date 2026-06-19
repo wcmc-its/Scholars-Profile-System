@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildTrialsAndLinks,
+  cleanNct,
   isLikelyPi,
   parseLooseDate,
   type EnrichedRow,
@@ -48,6 +49,20 @@ describe("parseLooseDate", () => {
     expect(parseLooseDate("")).toBeNull();
     expect(parseLooseDate(null)).toBeNull();
     expect(parseLooseDate("not a date")).toBeNull();
+  });
+});
+
+describe("cleanNct", () => {
+  it("canonicalizes real NCT ids to uppercase", () => {
+    expect(cleanNct("nct04487730")).toBe("NCT04487730");
+    expect(cleanNct(" NCT00001234 ")).toBe("NCT00001234");
+  });
+  it("maps placeholders and junk to null", () => {
+    expect(cleanNct("NA")).toBeNull();
+    expect(cleanNct("N/A")).toBeNull();
+    expect(cleanNct("")).toBeNull();
+    expect(cleanNct(null)).toBeNull();
+    expect(cleanNct("pending")).toBeNull();
   });
 });
 
@@ -131,6 +146,25 @@ describe("buildTrialsAndLinks", () => {
     expect(trials[0].title).toBe("Only institutional");
     expect(trials[0].enrichmentSource).toBeNull();
     expect(trials[0].enrichedAt).toBeNull();
+  });
+
+  it("treats the 'NA' nctNumber placeholder as null (no bogus id, no enrichment)", () => {
+    const institutional: InstitutionalRow[] = [
+      inst({ cwid: "abc1234", protocolNumber: "P-200", nctNumber: "NA", title: "Local only" }),
+    ];
+    const { trials } = buildTrialsAndLinks(institutional, [], scholars, NOW);
+    expect(trials[0].nctNumber).toBeNull();
+    expect(trials[0].enrichmentSource).toBeNull();
+  });
+
+  it("allows two protocols to share one real NCT (nctNumber is not unique)", () => {
+    const institutional: InstitutionalRow[] = [
+      inst({ cwid: "abc1234", protocolNumber: "P-301", nctNumber: "NCT04487730" }),
+      inst({ cwid: "def5678", protocolNumber: "P-302", nctNumber: "NCT04487730" }),
+    ];
+    const { trials } = buildTrialsAndLinks(institutional, [], scholars, NOW);
+    expect(trials).toHaveLength(2);
+    expect(trials.every((t) => t.nctNumber === "NCT04487730")).toBe(true);
   });
 
   it("matches UPPERCASE institutional cwids case-insensitively and stores the canonical (lowercase) cwid", () => {
