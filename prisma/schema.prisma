@@ -111,6 +111,7 @@ model Scholar {
   coiActivities        CoiActivity[]
   coiGapCandidates     CoiGapCandidate[]
   nihProfiles          PersonNihProfile[]
+  clinicalTrials       PersonClinicalTrial[]
   overviewGenerations  OverviewGeneration[]
   overviewProvenance   OverviewProvenance?
   scholarTools         ScholarTool[]
@@ -436,6 +437,79 @@ model PersonNihProfile {
   @@id([cwid, nihProfileId])
   @@index([cwid, isPreferred])
   @@map("person_nih_profile")
+}
+
+/// A clinical trial, deduplicated to one row per institutional protocol.
+///
+/// Spine: `reciterdb.clinical_trials` (institutional CTMS export — carries the
+/// cwid↔trial association and the always-present `protocolNumber`). Enrichment:
+/// `reciterdb.clinical_trials_enriched` (a ClinicalTrials.gov API v2 pull), joined
+/// on `nctNumber` when present. `enrichmentSource`/`enrichedAt` record where the
+/// detail came from — the seam where a fresher third-party feed replaces NCT
+/// without touching the cwid spine (`PersonClinicalTrial`) or the UI.
+///
+/// Populated by `npm run etl:clinical-trials` (full replace each run; the
+/// institutional table is a static snapshot until the next export lands).
+model ClinicalTrial {
+  /// Internal institutional protocol id — always present; the natural key.
+  protocolNumber   String    @id @map("protocol_number") @db.VarChar(64)
+  /// ClinicalTrials.gov NCT id; null when the trial has no NCT registration
+  /// (then there is no enrichment row). Unique among non-null values.
+  nctNumber        String?   @unique @map("nct_number") @db.VarChar(32)
+  /// Best available title: enriched officialTitle → enriched briefTitle →
+  /// institutional title.
+  title            String    @db.Text
+  /// Institutional `overallCurrentStatus` (e.g. Recruiting, Active not
+  /// recruiting, Completed, Terminated, Withdrawn). Drives the Active/Completed
+  /// split and the Withdrawn hide at render time.
+  status           String?   @db.VarChar(128)
+  statusDate       DateTime? @map("status_date") @db.Date
+  protocolType     String?   @map("protocol_type") @db.VarChar(64)
+  /// Enriched `studyType` (e.g. Interventional, Observational).
+  studyType        String?   @map("study_type") @db.VarChar(64)
+  /// Enriched `phases` (e.g. "Phase 2/Phase 3"); null for non-NCT or N/A.
+  phase            String?   @db.VarChar(64)
+  principalSponsor String?   @map("principal_sponsor") @db.VarChar(255)
+  /// Enriched conditions, '; '-joined as stored upstream.
+  conditions       String?   @db.Text
+  meshTerms        String?   @map("mesh_terms") @db.Text
+  briefSummary     String?   @map("brief_summary") @db.Text
+  enrollment       Int?
+  firstOtaDate     DateTime? @map("first_ota_date") @db.Date
+  firstCtaDate     DateTime? @map("first_cta_date") @db.Date
+  /// Where the enriched fields came from ("ClinicalTrials.gov" today; a vendor
+  /// name once the fresher feed lands). Null when only institutional data exists.
+  enrichmentSource String?   @map("enrichment_source") @db.VarChar(48)
+  enrichedAt       DateTime? @map("enriched_at")
+  source           String    @default("reciterdb.clinical_trials") @db.VarChar(48)
+  lastRefreshedAt  DateTime  @default(now()) @map("last_refreshed_at")
+
+  investigators PersonClinicalTrial[]
+
+  @@map("clinical_trial")
+}
+
+/// A scholar's association with a clinical trial (the cwid spine). One row per
+/// (cwid, protocolNumber) — a trial with several WCM investigators yields one
+/// `ClinicalTrial` and several of these. `role` is derived by name-matching the
+/// scholar against the institutional `piName` (PI vs Investigator) — heuristic
+/// until a structured role lands upstream.
+model PersonClinicalTrial {
+  cwid            String        @db.VarChar(32)
+  scholar         Scholar       @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  protocolNumber  String        @map("protocol_number") @db.VarChar(64)
+  trial           ClinicalTrial @relation(fields: [protocolNumber], references: [protocolNumber], onDelete: Cascade)
+  /// 'Principal Investigator' | 'Investigator'.
+  role            String        @db.VarChar(48)
+  /// Raw institutional `piName` for the trial, kept for audit/debugging of the
+  /// role heuristic.
+  piNameRaw       String?       @map("pi_name_raw") @db.VarChar(255)
+  lastRefreshedAt DateTime      @default(now()) @map("last_refreshed_at")
+
+  @@id([cwid, protocolNumber])
+  @@index([cwid])
+  @@index([protocolNumber])
+  @@map("person_clinical_trial")
 }
 
 /// Grants from InfoEd, filtered per spec line 125 (Confidential != 'Y',
