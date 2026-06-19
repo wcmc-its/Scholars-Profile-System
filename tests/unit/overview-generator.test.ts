@@ -20,7 +20,11 @@ import {
   toModelFacts,
 } from "@/lib/edit/overview-generator";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
-import { DEFAULT_OVERVIEW_PARAMS, type OverviewParams } from "@/lib/edit/overview-params";
+import {
+  DEFAULT_OVERVIEW_PARAMS,
+  OVERVIEW_MIN_PUBLICATIONS,
+  type OverviewParams,
+} from "@/lib/edit/overview-params";
 
 /** A minimal facts payload — only the FACTS-block serialization matters here.
  *  Has a topic, so it is NOT sparse (`hasSparseResearchSignal` is false). */
@@ -345,6 +349,40 @@ describe("buildOverviewUserPrompt — no-representative-publications directive (
     const prompt = buildOverviewUserPrompt(SPARSE_FACTS, params());
     expect(prompt).toContain("little structured research signal");
     expect(prompt).not.toContain("FACTS contains NO representative publications");
+  });
+});
+
+// #742 §2.3 — the thin-selection tier: a scholar with one or two representative
+// publications has real per-paper grounding but not enough for a full-length bio.
+// The drawer warns client-side (OVERVIEW_MIN_PUBLICATIONS); this mirrors it as a
+// server-side generator directive so the draft stays proportionately brief.
+describe("buildOverviewUserPrompt — thin-selection brevity directive (#742 §2.3)", () => {
+  const withPubs = (n: number): OverviewFacts => ({
+    ...FACTS,
+    representativePublications: Array.from({ length: n }, (_, i) => ({
+      pmid: String(i + 1),
+      title: `Paper ${i + 1}`,
+      venue: null,
+      year: null,
+      impact: null,
+      synopsis: null,
+      impactJustification: null,
+      topicRationale: null,
+      authorPosition: null,
+    })),
+  });
+
+  it("tells the model to stay brief when only one or two rep pubs are present", () => {
+    const prompt = buildOverviewUserPrompt(withPubs(2), params());
+    expect(prompt).toContain("FACTS contains only one or two representative publications");
+    // Neither the no-pubs middle tier (there ARE pubs) nor the fully-sparse branch.
+    expect(prompt).not.toContain("FACTS contains NO representative publications");
+    expect(prompt).not.toContain("little structured research signal");
+  });
+
+  it("omits the thin directive once the publication floor is met", () => {
+    const prompt = buildOverviewUserPrompt(withPubs(OVERVIEW_MIN_PUBLICATIONS), params());
+    expect(prompt).not.toContain("FACTS contains only one or two representative publications");
   });
 });
 
