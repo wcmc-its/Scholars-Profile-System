@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Source drawer — standalone preview</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3/dist/tabler-icons.min.css">
+<style>
+  :root{
+    --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --color-background-primary:#ffffff;
+    --color-background-secondary:#f5f5f4;
+    --color-border-tertiary:#e7e5e4;
+    --color-border-secondary:#d6d3d1;
+    --color-text-primary:#1c1917;
+    --color-text-secondary:#44403c;
+    --color-text-tertiary:#78716c;
+    --color-text-warning:#b45309;
+    --border-radius-lg:12px;
+    --border-radius-md:8px;
+  }
+  body{background:#fafaf9;margin:0;padding:24px;font-family:var(--font-sans);color:var(--color-text-primary);}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+  .preview-note{max-width:720px;margin:0 auto 10px;font:12px/1.5 var(--font-sans);color:#78716c;}
+  .preview-wrap{max-width:720px;margin:0 auto;}
+</style></head>
+<body>
+<div class="preview-note">Standalone preview — design-system tokens + Tabler icons supplied for local viewing. The fragment itself is unchanged.</div>
+<div class="preview-wrap">
+<div id="drw" style="font-family:var(--font-sans);padding:1rem 0;max-width:680px;">
+<h2 class="sr-only">Redesigned source-selection drawer: records have three states (default, pinned, hidden) stored as deltas against an auto-selected set; per-section toggles switch between led and all-position work; clicking "why this" reveals the human reason or tool-context evidence rather than a numeric score.</h2>
+
+<style>
+#drw .card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:1rem 1.25rem;}
+#drw .sec{margin-top:20px;}
+#drw .sech{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+#drw .sect{font-size:14px;font-weight:500;}
+#drw .subt{font-size:12.5px;color:var(--color-text-tertiary);margin:3px 0 4px;line-height:1.5;}
+#drw .rec{display:flex;gap:10px;align-items:flex-start;padding:11px 0;border-top:0.5px solid var(--color-border-tertiary);}
+#drw .recmain{flex:1;min-width:0;}
+#drw .rtitle{font-size:13.5px;color:var(--color-text-primary);line-height:1.4;}
+#drw .rmeta{font-size:12px;color:var(--color-text-tertiary);margin-top:2px;}
+#drw .pintag{display:none;color:#A32D2D;}
+#drw .rec.pinned .pintag{display:inline;}
+#drw .rec.pinned [data-act=pin]{color:#A32D2D;}
+#drw .ib{background:transparent;border:none;color:var(--color-text-tertiary);cursor:pointer;font-size:17px;padding:2px;line-height:1;}
+#drw .whybtn{background:transparent;border:none;color:var(--color-text-secondary);cursor:pointer;font-size:12px;padding:6px 0 0;display:inline-flex;align-items:center;gap:4px;}
+#drw .why{margin-top:8px;background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:9px 11px;font-size:12.5px;color:var(--color-text-secondary);line-height:1.5;}
+#drw .why .ev{font-style:italic;color:var(--color-text-primary);}
+#drw .undo{display:none;background:transparent;border:none;color:#A32D2D;cursor:pointer;font-size:12.5px;align-items:center;gap:4px;}
+#drw .rec.excluded .undo{display:inline-flex;}
+#drw .rec.excluded [data-act=pin],#drw .rec.excluded [data-act=exclude],#drw .rec.excluded .whybtn,#drw .rec.excluded .why{display:none;}
+#drw .rec.excluded .recmain{opacity:.42;}
+#drw .rec.excluded .rtitle{text-decoration:line-through;}
+#drw .hidden{display:none;}
+#drw .seg{display:inline-flex;border:0.5px solid var(--color-border-secondary);border-radius:999px;overflow:hidden;}
+#drw .seg button{background:transparent;border:none;font-size:12px;padding:5px 12px;cursor:pointer;color:var(--color-text-secondary);}
+#drw .seg button.on{background:#A32D2D;color:#fff;}
+#drw .more{font-size:12.5px;color:var(--color-text-tertiary);padding:11px 0 0;border-top:0.5px solid var(--color-border-tertiary);}
+#drw .more b{color:#A32D2D;cursor:pointer;font-weight:400;}
+#drw .prim{background:#A32D2D;color:#fff;border:none;border-radius:var(--border-radius-md);padding:9px 16px;font-size:14px;font-weight:500;cursor:pointer;}
+#drw .ghost{background:transparent;border:none;color:var(--color-text-tertiary);font-size:14px;cursor:pointer;}
+#drw .addbtn{background:transparent;border:none;color:#A32D2D;cursor:pointer;font-size:17px;padding:2px;}
+#drw .sortmenu{display:none;margin-top:8px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);overflow:hidden;}
+#drw .sortmenu.open{display:block;}
+#drw .sortmenu button{display:block;width:100%;text-align:left;background:transparent;border:none;border-top:0.5px solid var(--color-border-tertiary);padding:9px 12px;cursor:pointer;font-size:13px;color:var(--color-text-primary);}
+#drw .sortmenu button:first-child{border-top:none;}
+#drw .sortmenu button.on{background:var(--color-background-secondary);}
+#drw .sortmenu small{display:block;color:var(--color-text-tertiary);font-size:11.5px;margin-top:1px;}
+#drw .sortctl{background:transparent;border:0.5px solid var(--color-border-secondary);border-radius:999px;padding:5px 12px;font-size:12.5px;cursor:pointer;color:var(--color-text-secondary);display:inline-flex;align-items:center;gap:6px;}
+</style>
+
+<div class="card">
+  <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">
+    <span style="font-size:16px;font-weight:500;">Sources for your overview</span>
+    <span id="statusline" style="font-size:12.5px;color:var(--color-text-tertiary);margin-left:auto;">Using your recommended set</span>
+  </div>
+  <p style="font-size:12px;color:var(--color-text-tertiary);margin:6px 0 0;line-height:1.5;"><i class="ti ti-info-circle" style="font-size:13px;vertical-align:-2px;" aria-hidden="true"></i> Hiding a record affects only this overview — it stays in your profile. Pins and hides survive every regenerate.</p>
+  <p id="minwarn" class="hidden" style="font-size:12.5px;color:var(--color-text-warning);margin:8px 0 0;"><i class="ti ti-alert-triangle" style="font-size:13px;vertical-align:-2px;" aria-hidden="true"></i> This leaves fewer than 3 papers — the overview will be brief.</p>
+
+  <div class="sec" data-sec="pub">
+    <div class="sech">
+      <span class="sect">Publications</span>
+      <div class="seg" data-section="pub" style="margin-left:auto;">
+        <button class="on" data-act="seg" data-val="led">Led</button>
+        <button data-act="seg" data-val="all">All positions</button>
+      </div>
+    </div>
+    <p class="subt">Senior- and first-author work, weighted toward recent and landmark.</p>
+    <div style="margin-top:2px;">
+      <button class="sortctl" data-act="sort-open">Sorted: <span id="sortlabel">recommended</span> <i class="ti ti-chevron-down" style="font-size:12px;" aria-hidden="true"></i></button>
+      <div class="sortmenu" id="sortmenu">
+        <button class="on" data-act="sort-pick" data-label="recommended">recommended<small>your strongest led work · spread across your areas · landmarks kept regardless of age · duplicates merged</small></button>
+        <button data-act="sort-pick" data-label="most cited">most cited<small>career-defining work first, any age</small></button>
+        <button data-act="sort-pick" data-label="most recent">most recent<small>newest first</small></button>
+        <button data-act="sort-pick" data-label="your role">your role<small>senior- and first-author first</small></button>
+      </div>
+    </div>
+
+    <div class="rec pinned" data-type="pub" data-mid>
+      <button class="ib" data-act="pin" aria-label="Pin"><i class="ti ti-pin" aria-hidden="true"></i></button>
+      <div class="recmain">
+        <div class="rtitle">Genome-wide association study of coronary artery disease</div>
+        <div class="rmeta">Nature Genetics · middle author · 2018 · <span class="pintag">pinned</span></div>
+        <button class="whybtn" data-act="why">why this? <i class="ti ti-chevron-down" style="font-size:11px;" aria-hidden="true"></i></button>
+        <div class="why">You pinned this. It's middle-author, so it sits outside the auto-set — but it stays featured in every view, including "Led".</div>
+      </div>
+      <button class="ib" data-act="exclude" aria-label="Hide"><i class="ti ti-x" aria-hidden="true"></i></button>
+      <button class="undo" data-act="undo"><i class="ti ti-arrow-back-up" style="font-size:14px;" aria-hidden="true"></i> Undo</button>
+    </div>
+
+    <div class="rec" data-type="pub">
+      <button class="ib" data-act="pin" aria-label="Pin"><i class="ti ti-pin" aria-hidden="true"></i></button>
+      <div class="recmain">
+        <div class="rtitle">Apolipoprotein A-I infusions and cardiovascular outcomes after acute MI</div>
+        <div class="rmeta">NEJM · last author · 2024 · <span class="pintag">pinned</span></div>
+        <button class="whybtn" data-act="why">why this? <i class="ti ti-chevron-down" style="font-size:11px;" aria-hidden="true"></i></button>
+        <div class="why">Recent senior-author trial in a leading journal.</div>
+      </div>
+      <button class="ib" data-act="exclude" aria-label="Hide"><i class="ti ti-x" aria-hidden="true"></i></button>
+      <button class="undo" data-act="undo"><i class="ti ti-arrow-back-up" style="font-size:14px;" aria-hidden="true"></i> Undo</button>
+    </div>
+
+    <div class="rec" data-type="pub">
+      <button class="ib" data-act="pin" aria-label="Pin"><i class="ti ti-pin" aria-hidden="true"></i></button>
+      <div class="recmain">
+        <div class="rtitle">Rural health: a presidential advisory (AHA / ASA)</div>
+        <div class="rmeta">Circulation · first author · 2020 · <span class="pintag">pinned</span></div>
+        <button class="whybtn" data-act="why">why this? <i class="ti ti-chevron-down" style="font-size:11px;" aria-hidden="true"></i></button>
+        <div class="why">First-author national policy statement — anchors the health-policy thread.</div>
+      </div>
+      <button class="ib" data-act="exclude" aria-label="Hide"><i class="ti ti-x" aria-hidden="true"></i></button>
+      <button class="undo" data-act="undo"><i class="ti ti-arrow-back-up" style="font-size:14px;" aria-hidden="true"></i> Undo</button>
+    </div>
+
+    <div class="rec excluded" data-type="pub">
+      <button class="ib" data-act="pin" aria-label="Pin"><i class="ti ti-pin" aria-hidden="true"></i></button>
+      <div class="recmain">
+        <div class="rtitle">ApoA-I infusions and ischemic events after acute MI: AEGIS-II</div>
+        <div class="rmeta">JACC · last author · 2024</div>
+        <button class="whybtn" data-act="why">why this? <i class="ti ti-chevron-down" style="font-size:11px;" aria-hidden="true"></i></button>
+        <div class="why">Near-duplicate of a featured AEGIS-II paper.</div>
+      </div>
+      <button class="ib" data-act="exclude" aria-label="Hide"><i class="ti ti-x" aria-hidden="true"></i></button>
+      <button class="undo" data-act="undo"><i class="ti ti-arrow-back-up" style="font-size:14px;" aria-hidden="true"></i> Undo</button>
+    </div>
+
+    <div class="rec hidden" data-type="pub" data-mid>
+      <button class="addbtn" data-act="pin" aria-label="Add and pin"><i class="ti ti-plus" aria-hidden="true"></i></button>
+      <div class="recmain">
+        <div class="rtitle">Multi-omic atlas of cardiac fibrosis</div>
+        <div class="rmeta">middle author · 2022 · <span class="pintag">pinned</span> · revealed by "all positions"</div>
+      </div>
+    </div>
+    <div class="rec hidden" data-type="pub" data-mid>
+      <button class="addbtn" data-act="pin" aria-label="Add and pin"><i class="ti ti-plus" aria-hidden="true"></i></button>
+      <div class="recmain">
+        <div class="rtitle">Consortium analysis of lipid genetics and CAD risk</div>
+        <div class="rmeta">middle author · 2021 · <span class="pintag">pinned</span> · revealed by "all positions"</div>
+      </div>
+    </div>
+    <p class="more">+ 6 more featured papers — <b>show</b></p>
+  </div>
+
+  <div class="sec" data-sec="fund">
+    <div class="sech">
+      <span class="sect">Funding</span>
+      <div class="seg" data-section="fund" style="margin-left:auto;">
+        <button class="on" data-act="seg" data-val="led">Led</button>
+        <button data-act="seg" data-val="all">All roles</button>
+      </div>
+    </div>
+    <p class="subt">Grants you lead, active and recently completed.</p>
+    <p data-mid="keep" style="font-size:13px;color:var(--color-text-tertiary);padding:11px 0;border-top:0.5px solid var(--color-border-tertiary);margin:0;">No grants you lead are active. Switch to "all roles" to include co-investigator grants.</p>
+    <div class="rec hidden" data-type="fund" data-mid>
+      <button class="addbtn" data-act="pin" aria-label="Add and pin"><i class="ti ti-plus" aria-hidden="true"></i></button>
+      <div class="recmain">
+        <div class="rtitle">Mechanisms of HDL function in vascular disease (NHLBI)</div>
+        <div class="rmeta">co-investigator · active · <span class="pintag">pinned</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec" data-sec="meth">
+    <div class="sech"><span class="sect">Methods &amp; tools</span></div>
+    <p class="subt">Methods named across your papers, shown with how you used them.</p>
+    <div class="rec" data-type="meth">
+      <button class="ib" data-act="pin" aria-label="Pin"><i class="ti ti-pin" aria-hidden="true"></i></button>
+      <div class="recmain">
+        <div class="rtitle">Survival analysis methods</div>
+        <div class="rmeta">2 papers · <span class="pintag">pinned</span></div>
+        <button class="whybtn" data-act="why">show evidence <i class="ti ti-chevron-down" style="font-size:11px;" aria-hidden="true"></i></button>
+        <div class="why">From your 2024 NEJM paper: <span class="ev">"…modeled time-to-event MACE outcomes across the AEGIS-II cohort."</span></div>
+      </div>
+      <button class="ib" data-act="exclude" aria-label="Hide"><i class="ti ti-x" aria-hidden="true"></i></button>
+      <button class="undo" data-act="undo"><i class="ti ti-arrow-back-up" style="font-size:14px;" aria-hidden="true"></i> Undo</button>
+    </div>
+    <div class="rec" data-type="meth">
+      <button class="ib" data-act="pin" aria-label="Pin"><i class="ti ti-pin" aria-hidden="true"></i></button>
+      <div class="recmain">
+        <div class="rtitle">Clinical trial datasets</div>
+        <div class="rmeta">3 papers · <span class="pintag">pinned</span></div>
+        <button class="whybtn" data-act="why">show evidence <i class="ti ti-chevron-down" style="font-size:11px;" aria-hidden="true"></i></button>
+        <div class="why">From your AEGIS-II program: <span class="ev">"…pooled patient-level data across multiple randomized cohorts."</span></div>
+      </div>
+      <button class="ib" data-act="exclude" aria-label="Hide"><i class="ti ti-x" aria-hidden="true"></i></button>
+      <button class="undo" data-act="undo"><i class="ti ti-arrow-back-up" style="font-size:14px;" aria-hidden="true"></i> Undo</button>
+    </div>
+    <p class="more">+ 8 single-paper methods (echocardiography, medical imaging, transcatheter valve replacement…) — usually too thin to feature. <b>show</b></p>
+    <div class="rec hidden" data-type="meth" data-mid>
+      <button class="addbtn" data-act="pin" aria-label="Add and pin"><i class="ti ti-plus" aria-hidden="true"></i></button>
+      <div class="recmain">
+        <div class="rtitle">Echocardiography</div>
+        <div class="rmeta">1 paper · commodity method</div>
+      </div>
+    </div>
+    <div class="rec hidden" data-type="meth" data-mid>
+      <button class="addbtn" data-act="pin" aria-label="Add and pin"><i class="ti ti-plus" aria-hidden="true"></i></button>
+      <div class="recmain">
+        <div class="rtitle">Medical imaging</div>
+        <div class="rmeta">1 paper · commodity method</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec" data-sec="edu">
+    <div class="sech"><span class="sect">Education</span></div>
+    <p class="subt">Terminal and professional degrees. No ranking — included unless you hide one.</p>
+    <div class="rec" data-type="edu">
+      <div style="width:21px;"></div>
+      <div class="recmain"><div class="rtitle">MD — Stanford University School of Medicine</div></div>
+      <button class="ib" data-act="exclude" aria-label="Hide"><i class="ti ti-x" aria-hidden="true"></i></button>
+      <button class="undo" data-act="undo"><i class="ti ti-arrow-back-up" style="font-size:14px;" aria-hidden="true"></i> Undo</button>
+    </div>
+    <div class="rec" data-type="edu">
+      <div style="width:21px;"></div>
+      <div class="recmain"><div class="rtitle">BA, Biology — University of North Carolina</div></div>
+      <button class="ib" data-act="exclude" aria-label="Hide"><i class="ti ti-x" aria-hidden="true"></i></button>
+      <button class="undo" data-act="undo"><i class="ti ti-arrow-back-up" style="font-size:14px;" aria-hidden="true"></i> Undo</button>
+    </div>
+    <p class="more">+ 1 non-terminal credential (certificate…) — <b>show</b></p>
+    <div class="rec hidden" data-type="edu" data-mid>
+      <button class="addbtn" data-act="pin" aria-label="Add and pin"><i class="ti ti-plus" aria-hidden="true"></i></button>
+      <div class="recmain">
+        <div class="rtitle">Certificate, Clinical Research — Harvard Catalyst</div>
+        <div class="rmeta">non-terminal · <span class="pintag">pinned</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec" data-sec="titles">
+    <div class="sech"><span class="sect">Titles &amp; positions</span></div>
+    <p class="subt"><i class="ti ti-lock" style="font-size:12px;vertical-align:-1px;" aria-hidden="true"></i> Always shown: <b>Chair of Medicine</b> · Department of Medicine · Weill Cornell Medicine — your name, primary title, and department are required and can't be hidden.</p>
+    <p class="subt" style="margin-top:-1px;">Endowed chairs and significant leadership roles below. Your chair appointment is already in the line above, so it isn't repeated here.</p>
+
+    <div class="rec" data-type="titles">
+      <div style="width:21px;"></div>
+      <div class="recmain">
+        <div class="rtitle">The Bruce Webster Professor of Medicine</div>
+        <div class="rmeta">endowed chair · current</div>
+        <button class="whybtn" data-act="why">why this? <i class="ti ti-chevron-down" style="font-size:11px;" aria-hidden="true"></i></button>
+        <div class="why">An endowed / named chair — featured because it's a distinction, not routine scaffolding.</div>
+      </div>
+      <button class="ib" data-act="exclude" aria-label="Hide"><i class="ti ti-x" aria-hidden="true"></i></button>
+      <button class="undo" data-act="undo"><i class="ti ti-arrow-back-up" style="font-size:14px;" aria-hidden="true"></i> Undo</button>
+    </div>
+
+    <div class="rec" data-type="titles">
+      <div style="width:21px;"></div>
+      <div class="recmain">
+        <div class="rtitle">Director, Cardiovascular Research Institute</div>
+        <div class="rmeta">current</div>
+      </div>
+      <button class="ib" data-act="exclude" aria-label="Hide"><i class="ti ti-x" aria-hidden="true"></i></button>
+      <button class="undo" data-act="undo"><i class="ti ti-arrow-back-up" style="font-size:14px;" aria-hidden="true"></i> Undo</button>
+    </div>
+
+    <div class="rec" data-type="titles">
+      <div style="width:21px;"></div>
+      <div class="recmain">
+        <div class="rtitle">Editor-in-Chief, Circulation Research</div>
+        <div class="rmeta">2019–present</div>
+      </div>
+      <button class="ib" data-act="exclude" aria-label="Hide"><i class="ti ti-x" aria-hidden="true"></i></button>
+      <button class="undo" data-act="undo"><i class="ti ti-arrow-back-up" style="font-size:14px;" aria-hidden="true"></i> Undo</button>
+    </div>
+
+    <p class="more">+ 4 secondary &amp; routine roles (committee memberships, interim / secondary appointments…) — usually too routine to feature. <b>show</b></p>
+    <div class="rec hidden" data-type="titles" data-mid>
+      <button class="addbtn" data-act="pin" aria-label="Add and pin"><i class="ti ti-plus" aria-hidden="true"></i></button>
+      <div class="recmain">
+        <div class="rtitle">Interim Chief, Division of Cardiology</div>
+        <div class="rmeta">2018–2019 · interim · ended · <span class="pintag">pinned</span></div>
+      </div>
+    </div>
+    <div class="rec hidden" data-type="titles" data-mid>
+      <button class="addbtn" data-act="pin" aria-label="Add and pin"><i class="ti ti-plus" aria-hidden="true"></i></button>
+      <div class="recmain">
+        <div class="rtitle">Member, Promotions &amp; Tenure Committee</div>
+        <div class="rmeta">committee · routine · <span class="pintag">pinned</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:14px;align-items:center;margin-top:22px;padding-top:14px;border-top:0.5px solid var(--color-border-tertiary);">
+    <button class="prim">Done</button>
+    <button class="ghost" data-act="reset">Reset to recommended</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  var root=document.getElementById('drw');
+  function recompute(){
+    var pinned=root.querySelectorAll('.rec.pinned:not(.hidden)').length;
+    var hidden=root.querySelectorAll('.rec.excluded').length;
+    var bits=[];
+    if(pinned)bits.push(pinned+' pinned');
+    if(hidden)bits.push(hidden+' hidden');
+    document.getElementById('statusline').textContent='Using your recommended set'+(bits.length?' · '+bits.join(' · '):'');
+    var vis=[].slice.call(root.querySelectorAll('.rec[data-type=pub]')).filter(function(r){
+      return !r.classList.contains('excluded') && !r.classList.contains('hidden');
+    }).length;
+    document.getElementById('minwarn').classList.toggle('hidden', vis>=3);
+  }
+  root.querySelectorAll('.why').forEach(function(w){w.style.display='none';});
+  document.querySelectorAll('.more b').forEach(function(b){
+    b.addEventListener('click',function(){
+      var sec=b.closest('.sec');
+      sec.querySelectorAll('[data-mid]').forEach(function(m){m.classList.remove('hidden');});
+      b.closest('.more').style.display='none';
+      recompute();
+    });
+  });
+  root.addEventListener('click',function(e){
+    var t=e.target.closest('[data-act]'); if(!t)return;
+    var act=t.getAttribute('data-act');
+    var rec=t.closest('.rec');
+    if(act==='pin'&&rec){
+      if(rec.classList.contains('hidden')){rec.classList.remove('hidden');var btn=rec.querySelector('[data-act=pin]');btn.innerHTML='<i class="ti ti-pin" aria-hidden="true"></i>';btn.className='ib';}
+      rec.classList.toggle('pinned');recompute();
+    }else if(act==='exclude'&&rec){rec.classList.add('excluded');recompute();}
+    else if(act==='undo'&&rec){rec.classList.remove('excluded');recompute();}
+    else if(act==='why'){var p=t.parentNode.querySelector('.why');if(p)p.style.display=p.style.display==='none'?'block':'none';}
+    else if(act==='seg'){
+      var seg=t.closest('.seg');seg.querySelectorAll('button').forEach(function(b){b.classList.remove('on');});t.classList.add('on');
+      var sec=t.closest('.sec');var all=t.getAttribute('data-val')==='all';
+      sec.querySelectorAll('[data-mid]').forEach(function(m){
+        if(m.getAttribute('data-mid')==='keep'){m.style.display=all?'none':'';return;}
+        if(all)m.classList.remove('hidden');else{if(!m.classList.contains('pinned'))m.classList.add('hidden');}
+      });
+      recompute();
+    }
+    else if(act==='sort-open'){document.getElementById('sortmenu').classList.toggle('open');}
+    else if(act==='sort-pick'){
+      var menu=document.getElementById('sortmenu');menu.querySelectorAll('button').forEach(function(b){b.classList.remove('on');});t.classList.add('on');
+      document.getElementById('sortlabel').textContent=t.getAttribute('data-label');menu.classList.remove('open');
+    }
+    else if(act==='reset'){
+      root.querySelectorAll('.rec.pinned').forEach(function(r){r.classList.remove('pinned');});
+      root.querySelectorAll('.rec.excluded').forEach(function(r){r.classList.remove('excluded');});
+      root.querySelectorAll('.seg').forEach(function(s){s.querySelectorAll('button').forEach(function(b,i){b.classList.toggle('on',i===0);});});
+      root.querySelectorAll('[data-mid]').forEach(function(m){if(m.getAttribute('data-mid')==='keep')m.style.display='';else m.classList.add('hidden');});
+      recompute();
+    }
+  });
+  recompute();
+})();
+</script>
+</div>
+</div>
+</body></html>
