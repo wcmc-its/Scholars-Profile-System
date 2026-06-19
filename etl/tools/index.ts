@@ -44,11 +44,9 @@ import { createHash } from "node:crypto";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "../../lib/db";
+import { loadAllPublicationSuppressions } from "@/lib/api/manual-layer";
 import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
-import {
-  buildScholarToolWritesFromS3,
-  type ToolsArtifactSlice,
-} from "./scholar-tool-mapper-s3";
+import { buildScholarToolWritesFromS3, type ToolsArtifactSlice } from "./scholar-tool-mapper-s3";
 import {
   buildScholarFamilyWritesFromS3,
   type ScholarFamilyWrite,
@@ -66,8 +64,7 @@ const PREFIX = process.env.TOOLS_PREFIX ?? "tools";
 const REGION = process.env.AWS_DEFAULT_REGION ?? "us-east-1";
 const SOURCE = "Tools"; // etl_run.source — registered nightly in etl/freshness
 
-const dryRun =
-  process.argv.includes("--dry-run") || Boolean(process.env.SCHOLAR_TOOL_DRY_RUN);
+const dryRun = process.argv.includes("--dry-run") || Boolean(process.env.SCHOLAR_TOOL_DRY_RUN);
 
 // ---------------------------------------------------------------------------
 // Artifact / manifest types — mirror the A2 tools-a2-v1 manifest (ReciterAI#173).
@@ -241,9 +238,7 @@ async function main(): Promise<void> {
   const s3 = new S3Client({ region: REGION });
 
   // Step 1: manifest (source of truth).
-  const manifest: ToolsManifest = JSON.parse(
-    await fetchText(s3, `${PREFIX}/latest/manifest.json`),
-  );
+  const manifest: ToolsManifest = JSON.parse(await fetchText(s3, `${PREFIX}/latest/manifest.json`));
   log("manifest_fetched", {
     schema_version: manifest.schema_version,
     version: manifest.version,
@@ -386,8 +381,18 @@ async function main(): Promise<void> {
   });
   const ourCwidSet = new Set(ourScholars.map((s) => s.cwid));
 
+  // #1119 ADR-005 — load active publication suppressions once so the mappers never
+  // select a usage snippet sourced from a suppressed (dark or per-author-hidden)
+  // paper. ETL-cadence is the correct freshness model: the whole methods-lens
+  // projection refreshes on this run, not at render time.
+  const suppression = await loadAllPublicationSuppressions(db.read);
+  log("loaded_suppressions", {
+    dark_pmids: suppression.darkPmids.size,
+    pmids_with_hidden_authors: suppression.hiddenAuthorsByPmid.size,
+  });
+
   // Step 5: map.
-  const result = buildScholarToolWritesFromS3(artifact, { ourCwidSet, toolContext });
+  const result = buildScholarToolWritesFromS3(artifact, { ourCwidSet, toolContext, suppression });
   log("mapped", {
     rows: result.writes.length,
     skipped_out_of_scope_cwid: result.skippedMissingCwid,
@@ -403,6 +408,7 @@ async function main(): Promise<void> {
     ourCwidSet,
     familyDefById,
     toolContext,
+    suppression,
   });
   log("mapped_families", {
     rows: familyResult.writes.length,

@@ -558,3 +558,66 @@ describe("buildScholarFamilyWritesFromS3 — #1119 exemplar contexts", () => {
     expect(writes[0].exemplarContexts.wsPurity).toContain("tumor purity");
   });
 });
+
+describe("buildScholarFamilyWritesFromS3 — #1119 ADR-005 suppression", () => {
+  const tools = [
+    { canonical_tool_id: "tool_a", display_name: "CheXpert" },
+    { canonical_tool_id: "tool_b", display_name: "MIMIC-CXR" },
+  ];
+  const toolContext = buildToolContextIndex({
+    tool_a: {
+      "111":
+        "CheXpert labels chest radiographs across 14 observations using an uncertainty-aware policy",
+    },
+    tool_b: {
+      "222": "MIMIC-CXR is a large public dataset of chest radiographs with free-text reports",
+    },
+  });
+  const fam: Record<string, FacultyFamilyEntry[]> = {
+    aog: [
+      {
+        family_id: "fam_1",
+        label: "Chest radiograph models",
+        supercategory: "imaging_microscopy",
+        pub_count: 2,
+        exemplar_tool_ids: ["tool_a", "tool_b"],
+        pmids: ["111", "222"],
+      },
+    ],
+  };
+
+  it("omits a snippet whose source pmid is a whole-publication takedown (dark)", () => {
+    const { writes } = buildScholarFamilyWritesFromS3(artifact(fam, tools), {
+      ourCwidSet: new Set(["aog"]),
+      toolContext,
+      suppression: { darkPmids: new Set(["111"]), hiddenAuthorsByPmid: new Map() },
+    });
+    expect(writes[0].exemplarContexts.CheXpert).toBeUndefined(); // source pmid 111 is dark
+    expect(writes[0].exemplarContexts["MIMIC-CXR"]).toContain("public dataset");
+  });
+
+  it("omits a snippet whose source pmid is author-hidden FOR THIS scholar", () => {
+    const { writes } = buildScholarFamilyWritesFromS3(artifact(fam, tools), {
+      ourCwidSet: new Set(["aog"]),
+      toolContext,
+      suppression: {
+        darkPmids: new Set(),
+        hiddenAuthorsByPmid: new Map([["111", new Set(["aog"])]]),
+      },
+    });
+    expect(writes[0].exemplarContexts.CheXpert).toBeUndefined();
+    expect(writes[0].exemplarContexts["MIMIC-CXR"]).toContain("public dataset");
+  });
+
+  it("keeps a snippet hidden only for a DIFFERENT scholar (per-author scoping)", () => {
+    const { writes } = buildScholarFamilyWritesFromS3(artifact(fam, tools), {
+      ourCwidSet: new Set(["aog"]),
+      toolContext,
+      suppression: {
+        darkPmids: new Set(),
+        hiddenAuthorsByPmid: new Map([["111", new Set(["someone_else"])]]),
+      },
+    });
+    expect(writes[0].exemplarContexts.CheXpert).toContain("uncertainty-aware");
+  });
+});

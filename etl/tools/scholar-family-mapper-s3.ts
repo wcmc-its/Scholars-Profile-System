@@ -35,6 +35,7 @@
  *     tools[] index the sibling tool mapper joins on — that is what the lens
  *     renders ("CheXpert · MIMIC-CXR"). Names refresh on every full-replace run.
  */
+import type { PublicationSuppressions } from "@/lib/api/manual-layer";
 import type { ToolsArtifactSlice } from "./scholar-tool-mapper-s3";
 import { selectBestSnippet, type ToolContextIndex } from "./tool-context";
 
@@ -171,12 +172,14 @@ function resolveExemplarTools(raw: unknown, toolsById: Map<string, string>): str
  * back inside `selectBestSnippet` to any of the tool's snippets. A `seen` Set (not
  * an `in` check) avoids prototype-key pitfalls for unusual tool names.
  *
- * Two calibration levers apply here (see `docs/methodcontext-snippet-eval-findings.md`):
+ * Three calibration / safety levers apply here (see `docs/methodcontext-snippet-eval-findings.md`):
  *   - the opaque-tool GATE — `selectBestSnippet` returns null for a high-frequency
  *     tool (via `pubCountById`), so its snippet is omitted;
  *   - within-family DEDUPE — the same sentence is never shown for two exemplars of
  *     one family (a later exemplar whose best snippet duplicates an earlier one is
  *     collapsed). Returns `{}` when no exemplar yields a kept snippet.
+ *   - ADR-005 suppression — `excludePmid` drops any snippet whose source pmid is a
+ *     suppressed publication for this scholar, before scope + fallback.
  */
 function resolveExemplarContexts(
   raw: unknown,
@@ -184,6 +187,7 @@ function resolveExemplarContexts(
   pubCountById: Map<string, number>,
   toolContext: ToolContextIndex,
   scholarPmids: ReadonlySet<string>,
+  excludePmid?: (pmid: string) => boolean,
 ): Record<string, string> {
   if (!Array.isArray(raw)) return {};
   const out: Record<string, string> = {};
@@ -200,6 +204,7 @@ function resolveExemplarContexts(
       displayName: name,
       scholarPmids,
       toolPubCount: pubCountById.get(id),
+      excludePmid,
     });
     if (!best) continue;
     const norm = best.context.toLowerCase().replace(/\s+/g, " ").trim();
@@ -258,11 +263,16 @@ export function buildScholarFamilyWritesFromS3(
     /** #1119 — junk-filtered tool→snippet index. Omit (or a miss) leaves a row's
      *  exemplarContexts `{}` — benign and expected on a pre-v3 artifact. */
     toolContext?: ToolContextIndex;
+    /** #1119 ADR-005 — active publication suppressions (whole-pub takedowns +
+     *  per-author hides). When supplied, a snippet sourced from a pmid that is dark
+     *  or hidden for the scholar is never selected. Omit ⇒ no suppression filter. */
+    suppression?: PublicationSuppressions;
   },
 ): BuildScholarFamilyS3Result {
   const topN = opts.topNPerScholar ?? 50;
   const known = opts.knownSupercategories;
   const toolContext = opts.toolContext;
+  const suppression = opts.suppression;
 
   // Index canonical tools by id → display name, to resolve each family's
   // exemplar_tool_ids into the member-tool names the lens renders; and id → GLOBAL
@@ -299,6 +309,16 @@ export function buildScholarFamilyWritesFromS3(
       ? (rollup as { families: FacultyFamilyEntry[] }).families
       : [];
 
+    // #1119 ADR-005 — per-scholar suppression predicate for snippet selection:
+    // a source pmid is excluded when it is a whole-publication takedown (dark) or
+    // this scholar is author-hidden on it. Built once per scholar; references the
+    // shared maps (no per-family copy).
+    const excludePmid = suppression
+      ? (pmid: string) =>
+          suppression.darkPmids.has(pmid) ||
+          (suppression.hiddenAuthorsByPmid.get(pmid)?.has(cwid) ?? false)
+      : undefined;
+
     const byFamilyId = new Map<string, Accum>();
     for (const f of families) {
       const familyId = typeof f?.family_id === "string" ? f.family_id.trim() : "";
@@ -327,6 +347,7 @@ export function buildScholarFamilyWritesFromS3(
             pubCountById,
             toolContext,
             new Set(pmids),
+            excludePmid,
           )
         : {};
       const prev = byFamilyId.get(familyId);

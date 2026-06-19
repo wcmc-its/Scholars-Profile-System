@@ -253,4 +253,63 @@ describe("buildScholarToolWritesFromS3 — #1119 sample context", () => {
     );
     expect(writes[0].sampleContext).toContain("tumor purity");
   });
+
+  it("#1119 ADR-005: suppresses sampleContext when the source pmid is a whole-publication takedown", () => {
+    const toolContext = buildToolContextIndex({
+      tool_1: {
+        "111":
+          "wsPurity quantifies tumor purity within a digitally captured H&E stained histological slide",
+      },
+    });
+    const { writes } = buildScholarToolWritesFromS3(
+      artifact(
+        [
+          {
+            canonical_tool_id: "tool_1",
+            display_name: "wsPurity",
+            salience_tier: "B",
+            pub_count: 2,
+          },
+        ],
+        { aog: [{ canonical_tool_id: "tool_1", pub_count: 2 }] },
+      ),
+      {
+        ourCwidSet: new Set(["aog"]),
+        toolContext,
+        suppression: { darkPmids: new Set(["111"]), hiddenAuthorsByPmid: new Map() },
+      },
+    );
+    expect(writes[0].sampleContext).toBeNull();
+  });
+
+  it("#1119 ADR-005: a per-author hide does NOT affect the global sampleContext (dark-only)", () => {
+    const toolContext = buildToolContextIndex({
+      tool_1: {
+        "111":
+          "wsPurity quantifies tumor purity within a digitally captured H&E stained histological slide",
+      },
+    });
+    const { writes } = buildScholarToolWritesFromS3(
+      artifact(
+        [
+          {
+            canonical_tool_id: "tool_1",
+            display_name: "wsPurity",
+            salience_tier: "B",
+            pub_count: 2,
+          },
+        ],
+        { aog: [{ canonical_tool_id: "tool_1", pub_count: 2 }] },
+      ),
+      {
+        ourCwidSet: new Set(["aog"]),
+        toolContext,
+        suppression: {
+          darkPmids: new Set(),
+          hiddenAuthorsByPmid: new Map([["111", new Set(["aog"])]]),
+        },
+      },
+    );
+    expect(writes[0].sampleContext).toContain("tumor purity");
+  });
 });
