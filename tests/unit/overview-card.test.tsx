@@ -303,6 +303,15 @@ function isSourceOptionsGet(input: RequestInfo | URL, init?: RequestInit): boole
   return url.startsWith("/api/edit/overview/source-options") && method === "GET";
 }
 
+/** Is this the #742 §2.5 durable-deltas selection endpoint (GET on mount / PUT
+ *  on Done)? Routed away from `other()` so it never perturbs generate counters. */
+function isSelectionCall(input: RequestInfo | URL): boolean {
+  const url = typeof input === "string" ? input : input.toString();
+  return url.startsWith("/api/edit/overview/selection");
+}
+
+const EMPTY_DELTAS = { pinned: {}, excluded: {}, publicationPositions: "led", fundingRoles: "led" };
+
 /**
  * Mock fetch that routes the mount GET (generations) to a history payload and
  * any other call (the generate POST or the field POST) to `other`. Returns the
@@ -331,6 +340,9 @@ function stubFetchRouted(
       // an empty candidate set so tests that don't exercise the picker stay simple.
       if (isSourceOptionsGet(input, init)) {
         return jsonResponse({ ok: true, publications: [], funding: [], tools: [] });
+      }
+      if (isSelectionCall(input)) {
+        return jsonResponse({ ok: true, deltas: EMPTY_DELTAS });
       }
       return other();
     });

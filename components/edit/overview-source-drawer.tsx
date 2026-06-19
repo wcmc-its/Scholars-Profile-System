@@ -1,16 +1,18 @@
 /**
  * OverviewSourceDrawer — the "Sources" trigger row + the slide-out drawer that
- * holds the source picker (#742 v3.1 §3 / #875 §5). The trigger reads as a
- * sentence about what will ground the bio ("5 publications · 6 awards");
- * clicking it opens a right-hand sheet with the pickable checklists
- * ({@link OverviewIncludePicker}).
+ * holds the three-state source picker (#742 §2 / Phase 2). The trigger reads as a
+ * sentence about what will ground the bio ("5 publications · 6 awards"); clicking
+ * it opens a right-hand sheet with {@link OverviewIncludePicker}.
  *
- * #875 §5 — the drawer is now **buffered**. It holds a LOCAL copy of the
- * selection while open; **Done commits** it to the parent (calls
- * `onSelectionChange`); **Cancel / X / Escape / click-outside DISCARD** (close
- * without committing). This is a behavior change from the prior live-lifted
- * selection — the parent selection only updates on Done. The in-drawer live
- * budget counter reads the LOCAL buffer.
+ * #875 §5 — the drawer is **buffered**. It holds a LOCAL copy of the deltas while
+ * open; **Done commits** them to the parent (`onCommit`, which persists +
+ * re-resolves the generation selection); **Cancel / X / Escape / click-outside
+ * DISCARD**. The header status line and the picker read the LOCAL draft.
+ *
+ * The selection is now stored as DELTAS against the recommended auto-set, not a
+ * checkbox snapshot (§2.5): the status line counts *divergences*
+ * ("Using your recommended set · 1 pinned · 2 hidden"), never "9 of 25". **Reset
+ * to recommended** drops every pin / veto / toggle back to the pure auto-set.
  */
 "use client";
 
@@ -29,16 +31,19 @@ import {
 } from "@/components/ui/sheet";
 import type { OverviewSourceOptions } from "@/lib/edit/overview-facts";
 import {
-  OVERVIEW_SELECTION_MAX_ITEMS,
-  OVERVIEW_SELECTION_MAX_TOOLS,
-  type OverviewSelection,
+  DEFAULT_OVERVIEW_SELECTION_DELTAS,
+  summarizeOverviewDeltas,
+  type OverviewSelectionDeltas,
 } from "@/lib/edit/overview-params";
+import { resolveOverviewSelection } from "@/lib/edit/overview-resolve";
 
 type OverviewSourceDrawerProps = {
   /** The candidate lists; `null` until the source-options fetch resolves. */
   options: OverviewSourceOptions | null;
-  selection: OverviewSelection;
-  onSelectionChange: (next: OverviewSelection) => void;
+  /** The committed durable deltas (pins / vetoes / position toggles). */
+  deltas: OverviewSelectionDeltas;
+  /** Commit the edited deltas (the parent persists + re-resolves the selection). */
+  onCommit: (next: OverviewSelectionDeltas) => void;
   disabled?: boolean;
 };
 
@@ -46,48 +51,48 @@ function plural(n: number, singular: string): string {
   return `${n} ${singular}${n === 1 ? "" : "s"}`;
 }
 
-/** The trigger's one-line summary of the current (committed) selection. */
-function summarize(selection: OverviewSelection, showTools: boolean): string {
-  const parts = [
-    plural(selection.pmids.length, "publication"),
-    plural(selection.grantIds.length, "award"),
-  ];
-  if (showTools) parts.push(plural(selection.toolNames.length, "method"));
+/** The trigger's one-line summary of what the committed deltas resolve to. */
+function summarize(
+  options: OverviewSourceOptions,
+  deltas: OverviewSelectionDeltas,
+  showTools: boolean,
+): string {
+  const sel = resolveOverviewSelection(options, deltas);
+  const parts = [plural(sel.pmids.length, "publication"), plural(sel.grantIds.length, "award")];
+  if (showTools) parts.push(plural(sel.toolNames.length, "method"));
   return parts.join(" · ");
 }
 
-/** The combined live budget counter (§5): "14 of 25 papers + awards · 9 of 10
- *  methods", the methods band shown only when tools exist. */
-function budgetLabel(selection: OverviewSelection, showTools: boolean): string {
-  const items = selection.pmids.length + selection.grantIds.length;
-  let label = `${items} of ${OVERVIEW_SELECTION_MAX_ITEMS} papers + awards`;
-  if (showTools) {
-    label += ` · ${selection.toolNames.length} of ${OVERVIEW_SELECTION_MAX_TOOLS} methods`;
-  }
-  return label;
+/** The §2.5 status line — divergences from the auto-set, never a budget count. */
+function statusLine(deltas: OverviewSelectionDeltas): string {
+  const { pinned, hidden } = summarizeOverviewDeltas(deltas);
+  const bits: string[] = [];
+  if (pinned) bits.push(`${pinned} pinned`);
+  if (hidden) bits.push(`${hidden} hidden`);
+  return `Using your recommended set${bits.length ? ` · ${bits.join(" · ")}` : ""}`;
 }
 
 export function OverviewSourceDrawer({
   options,
-  selection,
-  onSelectionChange,
+  deltas,
+  onCommit,
   disabled = false,
 }: OverviewSourceDrawerProps) {
   const [open, setOpen] = React.useState(false);
   // The buffered local copy edited while the drawer is open; seeded from the
-  // committed selection each time the drawer opens, committed only on Done.
-  const [draft, setDraft] = React.useState<OverviewSelection>(selection);
+  // committed deltas each time it opens, committed only on Done.
+  const [draft, setDraft] = React.useState<OverviewSelectionDeltas>(deltas);
 
   const loaded = options !== null;
   const showTools = (options?.tools.length ?? 0) > 0;
 
   function openDrawer() {
-    setDraft(selection); // seed the buffer from the committed selection
+    setDraft(deltas); // seed the buffer from the committed deltas
     setOpen(true);
   }
 
   function commit() {
-    onSelectionChange(draft);
+    onCommit(draft);
     setOpen(false);
   }
 
@@ -105,7 +110,7 @@ export function OverviewSourceDrawer({
           <span className="min-w-0">
             <span className="block text-sm font-medium">Sources</span>
             <span className="text-muted-foreground block text-[13px]">
-              {loaded ? summarize(selection, showTools) : "Loading your sources…"}
+              {loaded && options ? summarize(options, deltas, showTools) : "Loading your sources…"}
             </span>
           </span>
         </span>
@@ -119,24 +124,25 @@ export function OverviewSourceDrawer({
           which DISCARD (just close, the buffer is dropped). Only Done commits. */}
       <Sheet open={open} onOpenChange={(next) => setOpen(next)}>
         <SheetContent side="right" className="sm:max-w-md" data-testid="overview-source-drawer">
-          <SheetHeader className="flex-row items-center justify-between pr-12">
+          <SheetHeader className="flex-row items-center justify-between gap-3 pr-12">
             <SheetTitle>Sources for your overview</SheetTitle>
             <span
-              className="bg-apollo-maroon/10 text-apollo-maroon rounded-md px-2.5 py-1 text-xs font-medium"
-              data-testid="overview-sources-counter"
+              className="text-muted-foreground shrink-0 text-[12.5px]"
+              data-testid="overview-sources-statusline"
             >
-              {budgetLabel(draft, showTools)}
+              {statusLine(draft)}
             </span>
           </SheetHeader>
           <SheetDescription className="sr-only">
-            Pick which publications, funding awards, and methods ground your generated overview.
+            Pin or hide which publications, funding awards, and methods ground your generated
+            overview. Hiding a record affects only this overview.
           </SheetDescription>
 
           <div className="flex-1 overflow-y-auto p-4">
             {options && (
               <OverviewIncludePicker
                 options={options}
-                selection={draft}
+                deltas={draft}
                 onChange={setDraft}
                 disabled={disabled}
               />
@@ -147,10 +153,11 @@ export function OverviewSourceDrawer({
             <Button
               type="button"
               variant="ghost"
-              onClick={() => setOpen(false)}
-              data-testid="overview-sources-cancel"
+              onClick={() => setDraft(DEFAULT_OVERVIEW_SELECTION_DELTAS)}
+              disabled={disabled}
+              data-testid="overview-sources-reset"
             >
-              Cancel
+              Reset to recommended
             </Button>
             <Button
               type="button"
