@@ -513,6 +513,15 @@ export default function DocsPage() {
                 <td>Request a change (routes to Sponsored Research); applied in InfoEd</td>
               </tr>
               <tr>
+                <td>Clinical trials</td>
+                <td>OnCore (clinical trial management system)</td>
+                <td>Nightly</td>
+                <td>
+                  Corrected at the OnCore source; attribution comes directly from OnCore, not
+                  ReCiter
+                </td>
+              </tr>
+              <tr>
                 <td>Graduate School appointment; student mentor/mentee</td>
                 <td>Jenzabar (Graduate School)</td>
                 <td>Nightly</td>
@@ -547,14 +556,6 @@ export default function DocsPage() {
         </div>
         <Callout variant="warn" heading="Citation source">
           <p>Scholars uses iCite as its only citation source. It does not use Scopus.</p>
-        </Callout>
-        <Callout variant="note" heading="Clinical trials">
-          <p>
-            A clinical-trials section, drawn from OnCore (WCM&apos;s clinical trial management
-            system), lists the studies you are tied to. Because trials in OnCore are already linked
-            to their investigators, attribution comes from OnCore directly rather than through
-            ReCiter, and corrections are made at the OnCore source.
-          </p>
         </Callout>
         <p>
           A few non-obvious behaviors this map explains. MeSH &ldquo;check tags&rdquo; (Humans, Male,
