@@ -258,3 +258,36 @@ describe("selectBestSnippet — #1119 calibration levers", () => {
     expect(selectBestSnippet(idx, "d", { displayName: "FooTool" })?.pmid).toBe("2");
   });
 });
+
+describe("selectBestSnippet — ADR-005 suppression (#1119 excludePmid)", () => {
+  const idx = buildToolContextIndex({
+    t: {
+      "1": "FooTool reconstructs full-length isoforms from linked-read sequencing data accurately", // longest, names tool
+      "2": "FooTool quantifies tumor purity from a stained histological slide", // shorter, names tool
+    },
+  });
+
+  it("drops a candidate whose source pmid is excluded, picking the next best", () => {
+    const best = selectBestSnippet(idx, "t", {
+      displayName: "FooTool",
+      excludePmid: (p) => p === "1",
+    });
+    expect(best?.pmid).toBe("2");
+  });
+
+  it("returns null when every survivor's source pmid is excluded", () => {
+    expect(
+      selectBestSnippet(idx, "t", { displayName: "FooTool", excludePmid: () => true }),
+    ).toBeNull();
+  });
+
+  it("excludes BEFORE the empty-scope fallback (a suppressed pmid cannot resurface)", () => {
+    // scholarPmids miss → would fall back to all survivors, but pmid 1 is excluded.
+    const best = selectBestSnippet(idx, "t", {
+      displayName: "FooTool",
+      scholarPmids: new Set(["999"]),
+      excludePmid: (p) => p === "1",
+    });
+    expect(best?.pmid).toBe("2");
+  });
+});

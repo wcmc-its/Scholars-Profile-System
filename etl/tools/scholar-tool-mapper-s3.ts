@@ -34,6 +34,7 @@
  *                     tool's snippets) — still tool-specific, paper-grounded text.
  *   - pmids         ← []     (Json NOT NULL needs a value; read by nothing)
  */
+import type { PublicationSuppressions } from "@/lib/api/manual-layer";
 import type { ScholarToolWrite } from "../dynamodb/scholar-tool-mapper";
 import { selectBestSnippet, type ToolContextIndex } from "./tool-context";
 
@@ -137,10 +138,19 @@ export function buildScholarToolWritesFromS3(
     /** #1119 — junk-filtered tool→snippet index. Omit (or a miss) leaves
      *  sampleContext null — benign and expected on a pre-v3 artifact. */
     toolContext?: ToolContextIndex;
+    /** #1119 ADR-005 — active publication suppressions. `sample_context` is the
+     *  tool's GLOBAL best snippet (no per-scholar pmid scope), so only a
+     *  whole-publication takedown (dark pmid) can be excluded here; per-author
+     *  hides are scholar-scoped and N/A to a global snippet. */
+    suppression?: PublicationSuppressions;
   },
 ): BuildScholarToolS3Result {
   const topN = opts.topNPerScholar ?? 30;
   const toolContext = opts.toolContext;
+  // Global snippet → exclude only whole-publication takedowns.
+  const excludePmid = opts.suppression
+    ? (pmid: string) => opts.suppression!.darkPmids.has(pmid)
+    : undefined;
 
   // Index canonical tools by id for the display_name / family / tier join.
   const toolsById = new Map<string, ToolsArtifactTool>();
@@ -188,6 +198,7 @@ export function buildScholarToolWritesFromS3(
           ? (selectBestSnippet(toolContext, id, {
               displayName: toolName,
               toolPubCount: rec?.pub_count,
+              excludePmid,
             })?.context ?? null)
           : null;
 

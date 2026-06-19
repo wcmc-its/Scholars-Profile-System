@@ -219,6 +219,12 @@ export type BestSnippet = { context: string; pmid: string };
  * and non-empty, restricts candidates to snippets from those papers (the family
  * path passes the family's member pmids); an empty intersection falls back to all
  * the tool's snippets. `displayName` drives the name-bias pass.
+ *
+ * #1119 ADR-005 — `excludePmid`, when supplied, drops candidate snippets whose
+ * SOURCE pmid is suppressed (whole-publication takedown or per-author hide for the
+ * scholar at hand). It is applied to the survivor set FIRST, so neither the
+ * scholar-pmid scope NOR the empty-intersection fallback can resurface a suppressed
+ * paper's sentence; if every survivor is excluded, the tool gets no snippet (null).
  */
 export function selectBestSnippet(
   index: ToolContextIndex,
@@ -230,6 +236,9 @@ export function selectBestSnippet(
      *  `MAX_PUB_COUNT_FOR_SNIPPET`, the snippet is suppressed (opaque-tool gate).
      *  Unknown/non-numeric ⇒ no gate. */
     toolPubCount?: number | null;
+    /** #1119 ADR-005 — returns true for a source pmid whose snippet must NOT be
+     *  surfaced (suppressed publication). Applied before scope + fallback. */
+    excludePmid?: (pmid: string) => boolean;
   },
 ): BestSnippet | null {
   // #1119 opaque-tool gate — a common, self-explanatory method's snippet is noise
@@ -237,8 +246,12 @@ export function selectBestSnippet(
   const pubCount = opts?.toolPubCount;
   if (typeof pubCount === "number" && pubCount > MAX_PUB_COUNT_FOR_SNIPPET) return null;
 
-  const survivors = index.byTool.get(toolId);
-  if (!survivors || survivors.length === 0) return null;
+  const all = index.byTool.get(toolId);
+  if (!all || all.length === 0) return null;
+
+  // #1119 ADR-005 — drop suppressed source pmids up front (covers scope + fallback).
+  const survivors = opts?.excludePmid ? all.filter((c) => !opts.excludePmid!(c.pmid)) : all;
+  if (survivors.length === 0) return null;
 
   let candidates = survivors;
   const scope = opts?.scholarPmids;
