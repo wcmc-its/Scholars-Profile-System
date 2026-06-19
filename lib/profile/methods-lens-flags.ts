@@ -115,6 +115,23 @@ export function isMethodsLensToolContextOn(): boolean {
 }
 
 /**
+ * #917 — the publication-detail modal "Methods" section (per-pmid method
+ * families, #799/#819, aggregated across the paper's confirmed WCM authors and
+ * #800/#801-gated). ADDITIONALLY gated on METHODS_LENS_ENABLED (the
+ * `scholar_family` substrate): off → `resolveMethodFamilies` short-circuits, the
+ * modal payload carries no families, and the section omits — no SEO/JSON side
+ * channel. The families data layer + UI shipped in #938; this per-surface flag
+ * (every other methods-lens surface already has one) only governs the modal
+ * surface, so it can roll out — or be darked in prod — INDEPENDENTLY of the rest
+ * of the lens. Render-only: no DB/ETL/reindex dependency (the bounded
+ * author-scoped lookup is unchanged). Wire in BOTH `.env.local` AND the per-env
+ * `environment:` block in cdk/lib/app-stack.ts per the flag-parity rule.
+ */
+export function isMethodsLensPubModalEnabled(): boolean {
+  return isMethodsLensEnabled() && process.env.METHODS_LENS_PUB_MODAL === "on";
+}
+
+/**
  * #962 — the center-roster "Methods & tools" multi-select facet + per-member
  * tool chips on the GROUPED center roster. ADDITIONALLY gated on
  * METHODS_LENS_ENABLED (the `scholar_family` substrate): if the methods lens is

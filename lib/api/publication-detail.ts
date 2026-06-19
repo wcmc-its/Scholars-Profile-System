@@ -11,7 +11,7 @@ import { withReciterConnection } from "@/lib/sources/reciterdb";
 import { normalizeMeshTerms } from "@/lib/api/profile";
 import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-layer";
 import {
-  isMethodsLensEnabled,
+  isMethodsLensPubModalEnabled,
   isMethodPagesEnabled,
 } from "@/lib/profile/methods-lens-flags";
 import {
@@ -146,7 +146,8 @@ function parsePmid(pmid: string): number | null {
  * #917 — method families attributed to ONE pmid, de-duped across every confirmed
  * WCM author of the paper (the modal has no cwid, so it aggregates exactly like
  * the Topics rows do). Mirrors the cross-scholar Method-page data layer
- * (`lib/api/methods.ts`): the master lens gate, the same `(deletedAt, status)`
+ * (`lib/api/methods.ts`): the per-surface #917 gate (which composes the master
+ * lens gate), the same `(deletedAt, status)`
  * active-scholar filter, the same in-JS `pmids[]` membership scan (no
  * `JSON_CONTAINS` anywhere in the codebase), and the SAME #800/#801 overlay gate
  * so a family the rest of the site hides can never leak through the modal.
@@ -157,8 +158,10 @@ function parsePmid(pmid: string): number | null {
 async function resolveMethodFamilies(
   pmid: string,
 ): Promise<PublicationDetailMethodFamily[]> {
-  // Master render gate — off (prod) → nothing renders, no side channel (#799).
-  if (!isMethodsLensEnabled()) return [];
+  // Per-surface render gate (#917) — composes the master lens gate, so off (prod,
+  // or master lens off) → nothing renders, no side channel (#799). Lets the modal
+  // Methods section roll out independently of the rest of the lens.
+  if (!isMethodsLensPubModalEnabled()) return [];
 
   // Confirmed WCM authors of this paper (LOCAL `publication_author`, indexed on
   // pmid). NULL cwid = non-WCM author; an unconfirmed authorship is not "theirs".

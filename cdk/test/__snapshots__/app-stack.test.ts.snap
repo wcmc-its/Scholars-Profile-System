@@ -536,6 +536,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "METHODS_LENS_PUB_MODAL",
+                "Value": "off",
+              },
+              {
                 "Name": "METHODS_LENS_FAMILY_SYNONYMS",
                 "Value": "off",
               },
@@ -3734,6 +3738,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "METHODS_LENS_TOOL_CONTEXT",
+                "Value": "on",
+              },
+              {
+                "Name": "METHODS_LENS_PUB_MODAL",
                 "Value": "on",
               },
               {
