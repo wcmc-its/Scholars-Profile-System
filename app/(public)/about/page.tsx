@@ -3,7 +3,7 @@ import Link from "next/link";
 import { DocsMobileNav, DocsToc, type NavGroup } from "@/components/docs/docs-toc";
 
 /**
- * /docs (v0) — single comprehensive documentation page, stakeholder-first +
+ * /docs (v0): single comprehensive documentation page, stakeholder-first +
  * shared reference, ported from the approved `scholars-documentation4.html`
  * mockup. Force-static, rendered inside the shared public header/footer; the
  * DocsToc sidebar is the only client piece (scroll-spy). The hybrid SPEC's
@@ -132,19 +132,19 @@ export default function DocsPage() {
           </p>
           <ul>
             <li>
-              <em>Where your data comes from</em> &mdash; authoritative source systems (PubMed, the
+              <em>Where your data comes from</em>: authoritative source systems (PubMed, the
               Enterprise Directory, InfoEd, NIH RePORTER, NYP, the Graduate School, the COI system)
               plus two in-house layers: ReCiter, which decides which publications are yours, and
               ReciterAI, which derives research areas, the Impact score, and synopses.
             </li>
             <li>
-              <em>How you correct it</em> &mdash; almost always at the source, not in Scholars.
+              <em>How you correct it</em>: almost always at the source, not in Scholars.
               Fixing the copy would not hold; the next refresh overwrites it. Your self-edit
               interface is where you submit those corrections, and it routes each one to the office
               that owns the field.
             </li>
             <li>
-              <em>What you control here</em> &mdash; a small, deliberate set: your overview text and
+              <em>What you control here</em> is a small, deliberate set: your overview text and
               which of your publications are shown.
             </li>
           </ul>
@@ -161,7 +161,22 @@ export default function DocsPage() {
           synopsis). Different systems, different jobs.
         </p>
 
-        {/* Top-level section directly under the page h1 — semantically an h2
+        <p>
+          <strong>Where Scholars goes beyond VIVO.</strong> Two things changed. First, you have
+          more control over your own profile. Through{" "}
+          <a href={PM} className={LINK}>
+            ReCiter Publication Manager
+          </a>{" "}
+          you decide which publications are attributed to you (confirm the ones that are yours,
+          reject the ones that aren&apos;t); on your profile you write your own overview, hide or
+          restore individual papers, and choose which of your papers appear as Selected highlights;
+          and you can request a name-based custom web address. Second, there are more ways for your
+          work and expertise to surface: representative papers in the home Spotlight, the research
+          areas you publish in, the specific methods and tools you are known for, and expert
+          listings that place you among the most active faculty in an area.
+        </p>
+
+        {/* Top-level section directly under the page h1, semantically an h2
             (clears the heading-order skip). Pinned to the smaller 18px/spacing
             of the page's h3 scale so the visual teaser hierarchy is unchanged;
             MAIN_CLASS sizes bare `h2` via a `[&_h2]` descendant variant whose
@@ -171,11 +186,6 @@ export default function DocsPage() {
         </h2>
         <div className="mt-3 max-w-[820px] overflow-hidden rounded-[10px] border border-border bg-[#fafbfc]">
           {[
-            {
-              href: "#impact",
-              q: "What does “Impact: 84” mean, and is it my impact?",
-              a: "No. It describes the publication, not your role on it; every co-author sees the same number.",
-            },
             {
               href: "#scholar",
               q: "Why is this paper on (or missing from) my profile?",
@@ -220,7 +230,7 @@ export default function DocsPage() {
 
         <hr className="mt-12 border-border" />
         <p className="mt-8 text-xs font-bold uppercase tracking-widest text-[#7d1c1c]">
-          Part 1 — by stakeholder
+          Part 1: by stakeholder
         </p>
         <h2 id="who">Which of these are you?</h2>
         <p>
@@ -274,7 +284,7 @@ export default function DocsPage() {
             ReCiter Publication Manager
           </a>{" "}
           to correct the attribution at the source so it does not come back; a <em>missing</em>{" "}
-          publication is added there too &mdash; by you or the library curation team, whoever gets
+          publication is added there too, by you or the library curation team, whoever gets
           to it first. Your name, department, title, funding, disclosures, and
           appointments are corrected at their source. Use Request a change in your self-edit
           interface, and it routes to the right office. Research areas, Impact, and synopsis are computed by
@@ -388,7 +398,7 @@ export default function DocsPage() {
 
         <hr className="mt-12 border-border" />
         <p className="mt-8 text-xs font-bold uppercase tracking-widest text-[#7d1c1c]">
-          Part 2 — shared reference
+          Part 2: shared reference
         </p>
 
         <h2 id="provenance">Where your data comes from</h2>
@@ -434,7 +444,7 @@ export default function DocsPage() {
                 <td>Primary department</td>
                 <td>ASMS (your primary appointment)</td>
                 <td>Nightly</td>
-                <td>Inferred from your primary appointment &mdash; not directly changeable</td>
+                <td>Inferred from your primary appointment, not directly changeable</td>
               </tr>
               <tr>
                 <td>Title</td>
@@ -492,7 +502,7 @@ export default function DocsPage() {
               </tr>
               <tr>
                 <td>Funding / grants</td>
-                <td>InfoEd — all sponsors (NIH RePORTER supplies federal abstract text)</td>
+                <td>InfoEd, all sponsors (NIH RePORTER supplies federal abstract text)</td>
                 <td>Nightly</td>
                 <td>Request a change (routes to Sponsored Research); applied in InfoEd</td>
               </tr>
@@ -598,8 +608,7 @@ export default function DocsPage() {
                   Add or confirm it at{" "}
                   <a href={PM} className={LINK}>
                     reciter.weill.cornell.edu
-                  </a>{" "}
-                  &mdash; you or the library curation team, whoever gets there first
+                  </a>, you or the library curation team, whoever gets there first
                 </td>
               </tr>
               <tr>
@@ -621,7 +630,7 @@ export default function DocsPage() {
                 <td>Your department, title, or affiliation</td>
                 <td>ASMS (your primary appointment)</td>
                 <td>
-                  Tied to your primary appointment &mdash; Request a change routes to the Office of
+                  Tied to your primary appointment; Request a change routes to the Office of
                   Faculty Affairs (a department admin can set a &ldquo;working title&rdquo; override
                   in the Web Directory)
                 </td>
@@ -630,7 +639,7 @@ export default function DocsPage() {
                 <td>A postdoc or fellow academic appointment</td>
                 <td>Faculty Affairs (by way of ASMS / Enterprise Directory)</td>
                 <td>
-                  Request a change &mdash; routed to ITS support, who fix a data-sync issue or
+                  Request a change, routed to ITS support, who fix a data-sync issue or
                   escalate a source correction to Faculty Affairs
                 </td>
               </tr>
@@ -675,14 +684,14 @@ export default function DocsPage() {
         </div>
 
         <h2 id="control">What you control</h2>
-        <p>Three things are yours to do directly, in your self-edit interface:</p>
+        <p>Four things are yours to do directly, in your self-edit interface:</p>
         <ul>
           <li>
-            <strong>Your overview text</strong> &mdash; the free-text statement about your work. You
+            <strong>Your overview text</strong>: the free-text statement about your work. You
             write it; it is not derived from anything.
           </li>
           <li>
-            <strong>Hide or restore a publication</strong> &mdash; if ReCiter attributed a paper that
+            <strong>Hide or restore a publication</strong>: if ReCiter attributed a paper that
             isn&apos;t yours, you can hide it as a quick near-term fix. Hiding is reversible and
             recorded, and is about your profile rather than search: it removes a paper from your
             profile, separate from whether it appears in search (
@@ -696,18 +705,23 @@ export default function DocsPage() {
             , which corrects the attribution at the source so it does not return on the next refresh.
           </li>
           <li>
-            <strong>Submit a data correction</strong> &mdash; for a field you cannot edit directly,
+            <strong>Submit a data correction</strong>: for a field you cannot edit directly,
             Request a change and it is routed to the office that owns the field.
           </li>
+          <li>
+            <strong>Choose your Selected highlights</strong>: the small set of papers featured on
+            your profile. By default these are chosen by Impact and recency; you can instead pick
+            them yourself.
+          </li>
         </ul>
-        <Callout variant="note" heading="Not a control — worth knowing">
+        <Callout variant="note" heading="Not a control, but worth knowing">
           <p>
-            You cannot edit Impact scores, research areas, or synopses (computed); you cannot pick which
-            papers are featured (algorithmic; see{" "}
+            You cannot edit Impact scores, research areas, or synopses; those are computed. You also
+            cannot pick what appears on the home-page showcase surfaces, which are algorithmic (see{" "}
             <Link href="#showcase" className={LINK}>
               Spotlight
             </Link>
-            ); and there is no &ldquo;pin this paper&rdquo; control.
+            ). What you can choose is your profile&apos;s Selected highlights, described above.
           </p>
         </Callout>
 
@@ -757,6 +771,14 @@ export default function DocsPage() {
         </p>
 
         <h2 id="research-areas">Research areas</h2>
+        <Callout variant="key" heading="Two axes: what, and how">
+          <p>
+            A scholar&apos;s work is described along two complementary axes. <em>Research areas</em>{" "}
+            capture <strong>what</strong> you study; <em>methods and tools</em> capture{" "}
+            <strong>how</strong> you study it. They are derived independently, shown as separate
+            sections, and together give a fuller picture than either alone.
+          </p>
+        </Callout>
         <p>
           Research areas are not self-selected, and they are not the same as the MeSH keywords that
           power search. Rather than borrowing a standard subject classification, ReciterAI reads
@@ -784,7 +806,7 @@ export default function DocsPage() {
         </p>
         <p>
           <strong>A worked example.</strong> Take a 2024 paper, &ldquo;Single-cell profiling of aging
-          T cells in the tumor microenvironment&rdquo; &mdash; we&apos;ll follow it through{" "}
+          T cells in the tumor microenvironment.&rdquo; We&apos;ll follow it through{" "}
           <Link href="#methods" className={LINK}>
             methods
           </Link>{" "}
@@ -796,26 +818,26 @@ export default function DocsPage() {
           <em>Aging &amp; Geroscience</em> most strongly, then <em>Immunology</em>, and{" "}
           <em>Cancer Biology</em> more loosely. All three are kept; there is no single
           &ldquo;primary&rdquo; area, because the work genuinely sits across them. Within Aging &amp;
-          Geroscience it is then placed into finer subareas &mdash; here <em>Immune Aging</em> as the
-          best fit, with <em>Cellular Senescence</em> secondary &mdash; and a paper that fits no
+          Geroscience it is then placed into finer subareas (here <em>Immune Aging</em> as the
+          best fit, with <em>Cellular Senescence</em> secondary), and a paper that fits no
           subarea cleanly is left unassigned rather than forced into one.
         </p>
         <Callout variant="warn" heading="An internal score you never see">
           <p>
-            Each publication-to-area pairing carries a <em>relevance</em> score from 0 to 1 &mdash; in
+            Each publication-to-area pairing carries a <em>relevance</em> score from 0 to 1: in
             the example, roughly 0.85 for Aging &amp; Geroscience, 0.78 for Immunology, and 0.42 for
             Cancer Biology. It measures how central the paper is to <em>that</em> area, a different
             question from the Impact score&apos;s &ldquo;how notable is this paper overall.&rdquo; A
             paper can be highly relevant to an area yet modest in Impact, or the reverse. Relevance is
-            used only to order publications within a research area &mdash; combined with Impact, so a
-            paper ranks high on an area page when it is both central to the area and notable &mdash;
+            used only to order publications within a research area (combined with Impact, so a
+            paper ranks high on an area page when it is both central to the area and notable),
             and it is never shown. The only score you see in a publication context is the Impact score
             (&ldquo;Impact: NN&rdquo;).
           </p>
         </Callout>
         <p>
           <strong>Freshness.</strong> The taxonomy (the set of research areas itself) is stable
-          between rebuilds and is recomputed only periodically &mdash; when the field has shifted
+          between rebuilds and is recomputed only periodically, when the field has shifted
           enough to warrant it, not on a fixed clock. Your publications, though, are classified into
           the current taxonomy on a weekly run as new work is ingested, so an individual paper does
           not wait for a taxonomy rebuild to receive its areas, and your profile keeps up as you
@@ -842,9 +864,34 @@ export default function DocsPage() {
           a technique only a handful of labs use ranks higher than one everyone shares.
         </p>
         <p>
+          <strong>How methods are organized.</strong> Behind each entry sits a four-level
+          structure, from most specific to most general:
+        </p>
+        <ul>
+          <li>
+            <strong>Raw mention</strong>: the exact phrase as it appeared in a paper, such as
+            &ldquo;scRNA-seq&rdquo; or &ldquo;single-cell RNA sequencing.&rdquo;
+          </li>
+          <li>
+            <strong>Canonical method</strong>: the single standard name those mentions resolve to
+            (&ldquo;single-cell RNA sequencing&rdquo;).
+          </li>
+          <li>
+            <strong>Family</strong>: the capability group of related techniques it belongs to
+            (&ldquo;single-cell genomics&rdquo;).
+          </li>
+          <li>
+            <strong>Supercategory</strong>: the broad domain above the family.
+          </li>
+        </ul>
+        <p>
+          A profile shows methods at the family level, expandable to the member tools, and search
+          and the methods pages use the same structure.
+        </p>
+        <p>
           <strong>The same paper, once more.</strong> From our example&apos;s abstract, ReciterAI
           picks out <em>single-cell RNA sequencing</em>, the <em>10x Genomics</em> platform, and{" "}
-          <em>CITE-seq</em>, and ignores the routine qPCR validation step &mdash; a commodity staple
+          <em>CITE-seq</em>, and ignores the routine qPCR validation step, a commodity staple
           that doesn&apos;t distinguish one lab from another. &ldquo;scRNA-seq&rdquo; and
           &ldquo;single-cell RNA sequencing&rdquo; collapse into one entry, filed under a broader{" "}
           <em>single-cell genomics</em> capability family. Each method then carries a distinctiveness
@@ -858,33 +905,30 @@ export default function DocsPage() {
           hands-on use rather than self-reported interests, and it is refreshed as new work is
           published.
         </p>
+        <p>
+          From a scholar&apos;s publications, a method is attributed to them only when they were
+          first or senior (last) author on the paper it was drawn from (grants are a separate
+          source). That is a deliberate choice to err toward under-attribution: it keeps the list to
+          methods the scholar themselves led, at the cost of occasionally omitting one they used as a
+          middle author on a large collaboration. We would rather show fewer, surer methods than
+          over-claim.
+        </p>
 
         <h2 id="impact">The Impact score</h2>
         <p>
           The Impact score is a 0&ndash;100 number ReciterAI assigns to a publication, shown as
-          &ldquo;Impact: NN&rdquo;. It weighs three things about the paper &mdash; its citation
+          &ldquo;Impact: NN&rdquo;. It weighs three things about the paper: its citation
           signal (the iCite citation count, plus the paper&apos;s NIH percentile and Relative
           Citation Ratio once those exist), the standing of the journal it appeared in, and how
-          recent it is &mdash; and a calibrated model combines them into a single number by comparing
+          recent it is. A calibrated model combines them into a single number by comparing
           the paper against a fixed ladder of reference points (described below). It is not a
           hand-tuned arithmetic formula but a judgment the model makes against that ladder, which is
           why two papers with comparable evidence land at comparable scores.
         </p>
-        <Callout variant="key" heading="The misconception to correct first">
-          <p>
-            The Impact score describes the paper, not your role on it. It is not author-relative:
-            first, middle, and senior author on the same paper all see the same number. Author
-            Position conveys your role; Impact conveys the paper&apos;s standing. It is field-aware
-            rather than field-normalized &mdash; one of its inputs, the Relative Citation Ratio, is
-            itself field-adjusted, and the model is tuned not to favor any one kind of research (see
-            below) &mdash; but it is still not a literal cross-field ranking, so a number in
-            cardiology and a number in a rare disease are not strictly comparable.
-          </p>
-        </Callout>
-        <h3>What the score is for &mdash; and what it isn&apos;t</h3>
+        <h3>What the score is for, and what it isn&apos;t</h3>
         <p>
           The Impact score has a deliberately limited job. Inside Scholars it is used mainly to help
-          the application decide <em>which of your own publications to surface</em> &mdash; on the
+          the application decide <em>which of your own publications to surface</em>: on the
           home-page showcase, in your profile&apos;s highlights, on a research-area page. It is an
           input to that choice, not a verdict on you, and the aim of surfacing is egalitarian: to
           make sure every researcher&apos;s strongest work gets its day in the sun, rather than
@@ -895,14 +939,14 @@ export default function DocsPage() {
           It is also a <em>leading</em> indicator. Field-normalized citation metrics like the NIH
           percentile and the Relative Citation Ratio (RCR) need two to three years of accumulated
           citations to settle, so for a paper published this month they do not yet exist. The Impact
-          score reads what is already available &mdash; the venue, the abstract, and the earliest
-          citation signal &mdash; to estimate within the same week where the paper is likely to land,
+          score reads what is already available (the venue, the abstract, and the earliest
+          citation signal) to estimate within the same week where the paper is likely to land,
           and it folds the percentile and RCR in later, as they mature. That lets you and your
           department act on new work without waiting years for the citation record to catch up.
         </p>
         <p>
           What it does <em>not</em> claim is to measure quality, rigor, or importance. It tracks
-          attention and standing &mdash; how much the wider literature is engaging with a paper, in
+          attention and standing: how much the wider literature is engaging with a paper, in
           what venue, how recently. A careful negative result, a foundational methods paper, or a
           study in a small field can matter enormously and still carry a modest score, and a heavily
           cited but incremental paper can carry a high one. Read it as &ldquo;how visible and
@@ -916,14 +960,14 @@ export default function DocsPage() {
           anchors at 8, a single-patient case report near 12); solid but incremental studies fall in
           the 30s and 40s; the 50s and 60s already denote strong contributions with clear influence;
           and the 70s and 80s are major, practice- or field-shaping work. So a score that looks modest
-          is not a poor grade &mdash; a paper in the 60s is, by this rubric, a strong and influential
+          is not a poor grade: a paper in the 60s is, by this rubric, a strong and influential
           one.
         </p>
         <Callout variant="note" heading="High scores are rare by design">
           <p>
-            The top of the ladder is held for paradigm-shifting, field-defining work &mdash; the
+            The top of the ladder is held for paradigm-shifting, field-defining work (the
             discovery of the DNA double helix anchors at 99, penicillin at 97, CRISPR&ndash;Cas9
-            genome editing at 93 &mdash; so the scale is demanding and the model is sparing with high
+            genome editing at 93), so the scale is demanding and the model is sparing with high
             numbers. There is no fixed ceiling for a real paper, but very high scores are uncommon by
             design. The practical effect is that a number which looks middling can still mark one of a
             researcher&apos;s strongest papers, so read it against a scholar&apos;s own body of work
@@ -933,17 +977,17 @@ export default function DocsPage() {
         <p>
           That restraint is also what makes the score useful for choosing what to feature. A
           field-normalized percentile can label many of a prolific researcher&apos;s papers as
-          top-percentile at once &mdash; gratifying, but little help when the task is to pick the few
+          top-percentile at once, which is gratifying but little help when the task is to pick the few
           that best represent them. Because the Impact score spreads work out instead of crowding the
-          top, it can separate a researcher&apos;s most impactful papers from their merely solid ones
-          &mdash; which is exactly what the surfaces it feeds need.
+          top, it can separate a researcher&apos;s most impactful papers from their merely solid ones,
+          which is exactly what the surfaces it feeds need.
         </p>
         <p>
           <strong>It does not favor basic over clinical research, or the reverse.</strong> The model
           is explicitly calibrated for parity: the ladder rates clinical trials, health-services
           research, and implementation work on the same terms as bench science, and the scorer runs a
-          counterfactual check &mdash; would this same evidence score higher attached to a
-          basic-science paper? &mdash; and corrects itself when the answer is yes. Clinical,
+          counterfactual check (would this same evidence score higher attached to a
+          basic-science paper?) and corrects itself when the answer is yes. Clinical,
           implementation, and health-services work can reach the same heights as bench discovery.
         </p>
         <p>
@@ -952,9 +996,9 @@ export default function DocsPage() {
           least one full-time WCM faculty author, and the Impact then appears on that publication
           wherever it shows, including on a co-author&apos;s or trainee&apos;s view. A publication
           with no full-time WCM faculty author is outside the scope and is not scored. Publication{" "}
-          <em>type</em> matters separately, when the showcase surfaces decide what to feature &mdash;
-          Reviews and Case Reports are down-weighted there and Letters and Editorials excluded
-          &mdash; but that is a surfacing rule, not part of the Impact score itself (see{" "}
+          <em>type</em> matters separately, when the showcase surfaces decide what to feature
+          (Reviews and Case Reports are down-weighted there and Letters and Editorials excluded),
+          but that is a surfacing rule, not part of the Impact score itself (see{" "}
           <Link href="#showcase" className={LINK}>
             Spotlight
           </Link>
@@ -971,10 +1015,10 @@ export default function DocsPage() {
           </Link>{" "}
           above, first-authored by a WCM faculty member in a leading journal. Because it is only
           months old it has no NIH percentile or RCR yet, so the model works from the venue, the
-          abstract, and its first handful of citations and assigns <strong>Impact: 84</strong> &mdash;
+          abstract, and its first handful of citations and assigns <strong>Impact: 84</strong>,
           a high score, which the model assigns sparingly. That same 84 appears on the paper everywhere
-          &mdash; on the first author&apos;s profile, on a middle co-author&apos;s, on a
-          trainee&apos;s &mdash; because it describes the paper, not any one author.
+          (on the first author&apos;s profile, on a middle co-author&apos;s, on a
+          trainee&apos;s) because it describes the paper, not any one author.
         </p>
         <p>
           <strong>How often it updates.</strong> Impact scores and synopses refresh nightly, on the
@@ -1003,19 +1047,19 @@ export default function DocsPage() {
                 <td>ReCiter score</td>
                 <td>Confidence that a publication is yours (attribution)</td>
                 <td>per (person, publication)</td>
-                <td>No — drives attribution behind the scenes</td>
+                <td>No (drives attribution behind the scenes)</td>
               </tr>
               <tr>
                 <td>Impact score</td>
                 <td>A publication&apos;s overall standing</td>
                 <td>per publication</td>
-                <td>Yes — &ldquo;Impact: NN&rdquo;</td>
+                <td>Yes (&ldquo;Impact: NN&rdquo;)</td>
               </tr>
               <tr>
                 <td>Research-area relevance score</td>
                 <td>How central a paper is to a research area</td>
                 <td>per (publication, research area)</td>
-                <td>No — internal ranking only</td>
+                <td>No (internal ranking only)</td>
               </tr>
             </tbody>
           </table>
@@ -1030,6 +1074,14 @@ export default function DocsPage() {
           use your exact wording, and exact MeSH-descriptor matches rank above free-text matches.
           When your query maps to a concept, the publications tab shows a resolver chip naming it,
           and you can escape into a literal-text search from that chip to match your words exactly.
+        </p>
+        <p>
+          Search has had considerable tuning, and it does more than match words. Some results are
+          entities rather than documents: when your query lands on a research area or on a method or
+          tool, Scholars surfaces that as its own result, so you can step straight onto its dedicated
+          page instead of paging through publications. The ranking is calibrated to favor exact
+          concept matches over loose stemmed ones, and to show the snippet of text that explains why
+          each result matched.
         </p>
         <p>
           If a publication of yours isn&apos;t turning up, the search index rebuilds nightly, so a
@@ -1047,12 +1099,17 @@ export default function DocsPage() {
 
         <h2 id="showcase">Spotlight &amp; Selected research</h2>
         <p>
-          The showcase surfaces are chosen by a model, not by you. There is no &ldquo;feature this
-          paper&rdquo; control. They share one formula &mdash; the ReciterAI Impact score multiplied
-          by author position, publication type, and recency &mdash; plus surface-specific filters. The
-          publication-type factor is where Reviews and Case Reports are down-weighted and Letters,
-          Editorials, and Errata are excluded entirely, so a paper&apos;s type can keep it off these
-          surfaces even when its Impact is high.
+          Most showcase surfaces are chosen by a model, not by you, and the home-page surfaces have
+          no &ldquo;feature this paper&rdquo; control. The exception is your profile&apos;s Selected
+          highlights, which you can curate yourself (see{" "}
+          <Link href="#control" className={LINK}>
+            What you control
+          </Link>
+          ). They share one formula
+          (the ReciterAI Impact score multiplied by author position, publication type, and recency)
+          plus surface-specific filters. The publication-type factor is where Reviews and Case
+          Reports are down-weighted and Letters, Editorials, and Errata are excluded entirely, so a
+          paper&apos;s type can keep it off these surfaces even when its Impact is high.
         </p>
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-[680px]">
@@ -1075,7 +1132,7 @@ export default function DocsPage() {
                 <td>Selected highlights</td>
                 <td>A scholar&apos;s profile</td>
                 <td>That scholar&apos;s most notable papers</td>
-                <td>Impact and recency, restricted to first- or senior-author papers; lighter recency weight</td>
+                <td>Impact and recency, restricted to first- or senior-author papers; lighter recency weight. A scholar may instead curate these manually.</td>
               </tr>
               <tr id="recent-contributions" className="scroll-mt-28 lg:scroll-mt-20">
                 <td>Recent contributions</td>
@@ -1106,17 +1163,17 @@ export default function DocsPage() {
         </p>
         <Callout variant="note" heading="A representative selection, not a complete list">
           <p>
-            Read these surfaces as a <em>representative selection</em> of a scholar&apos;s work
-            &mdash; a curated highlight, not a complete or proportional inventory. Most feature only
+            Read these surfaces as a <em>representative selection</em> of a scholar&apos;s work, a
+            curated highlight, not a complete or proportional inventory. Most feature only
             research articles from 2020 onward on which the scholar is <em>first or senior (last)
-            author</em> &mdash; co-first and co-senior authors count too, since equal-contribution
+            author</em>; co-first and co-senior authors count too, since equal-contribution
             authorship is tracked upstream. That is a deliberate signal-to-noise choice: a faculty
             member&apos;s first-
             and senior-author papers are the ones they led or supervised, so restricting to them
             gives a truer picture of what a scholar drives than a feed that also pulled in every
-            large-consortium paper they were a middle author on. The cost is real &mdash; it leaves
+            large-consortium paper they were a middle author on. The cost is real: it leaves
             out some work that genuinely reflects expertise, such as key collaborations where the
-            scholar contributed without leading &mdash; but it keeps the highlighted set focused
+            scholar contributed without leading, but it keeps the highlighted set focused
             rather than crowded. The selection is curated by design and is not meant to be
             exhaustive: every paper attributed to a scholar, in any author position, still appears in
             full on their profile and in search.
@@ -1137,7 +1194,7 @@ export default function DocsPage() {
         <h2 id="profile-url">Your profile URL</h2>
         <p>
           Every profile has a short, stable web address:{" "}
-          <code>scholars.weill.cornell.edu/&lt;your-name&gt;</code> &mdash; for example{" "}
+          <code>scholars.weill.cornell.edu/&lt;your-name&gt;</code>, for example{" "}
           <code>/jane-smith</code>. The longer form{" "}
           <code>/scholars/&lt;your-name&gt;</code> works too and leads to the same profile, so any
           link to you keeps working.
@@ -1152,16 +1209,16 @@ export default function DocsPage() {
         </p>
         <p>
           <strong>Your address is stable.</strong> If your preferred name later changes, or an
-          administrator sets a custom address for you, the old address keeps working &mdash; it
+          administrator sets a custom address for you, the old address keeps working; it
           permanently redirects to the new one, so existing links, citations, and bookmarks
           don&apos;t break.
         </p>
         <p>
-          <strong>Want a different address?</strong> Custom addresses aren&apos;t self-serve &mdash;
+          <strong>Want a different address?</strong> Custom addresses aren&apos;t self-serve;
           email the Scholars team (or open a Service Desk ticket) and say what you&apos;d like.
-          Addresses stay name-based, so ask for a variation of your first and last name &mdash; you
+          Addresses stay name-based, so ask for a variation of your first and last name; you
           can add a middle initial or a fuller form (for example <code>jane-q-smith</code>) when a
-          namesake already has the plain form. They aren&apos;t free-choice handles &mdash; you can&apos;t claim a word
+          namesake already has the plain form. They aren&apos;t free-choice handles; you can&apos;t claim a word
           like a research area or a department. An administrator reviews the request, sets your new
           address, and replies to your ticket when it&apos;s done, usually within a few business days;
           your old address keeps working and permanently redirects.
@@ -1198,14 +1255,14 @@ export default function DocsPage() {
         <h2 id="glossary">Glossary</h2>
         <dl className="mt-4 space-y-5">
           {[
-            { term: "Impact score", def: "A 0–100 score ReciterAI assigns to a publication: a calibrated model weighs its citation signal (iCite count, plus NIH percentile and RCR once they exist), journal standing, and recency against a fixed ladder of ~200 reference points. Publication-level and not author-relative — the same number for every co-author. Field-aware but not a literal cross-field ranking. Used mainly to help decide which of a scholar’s papers to surface; not a ranking of people. High scores are rare by design — the scale is demanding and the 90–100 band is reserved for historic landmarks — so a mid-range score can still mark a top paper. Shown as “Impact: NN”." },
+            { term: "Impact score", def: "A 0–100 score ReciterAI assigns to a publication: a calibrated model weighs its citation signal (iCite count, plus NIH percentile and RCR once they exist), journal standing, and recency against a fixed ladder of ~200 reference points. Publication-level and not author-relative: the same number for every co-author. Field-aware but not a literal cross-field ranking. Used mainly to help decide which of a scholar’s papers to surface; not a ranking of people. High scores are rare by design (the scale is demanding and the 90–100 band is reserved for historic landmarks), so a mid-range score can still mark a top paper. Shown as “Impact: NN”." },
             { term: "Author Position", def: "Your place in a publication’s author list (first / middle / senior). This, not Impact, conveys your role on a paper." },
             { term: "ReCiter", def: "WCM’s author-disambiguation engine. Decides which publications are yours, from PubMed. Runs nightly." },
             { term: "ReCiter Publication Manager", def: "The curation interface at reciter.weill.cornell.edu where a publication’s attribution is corrected. A misattributed paper is rejected here; a missing one is added here." },
             { term: "ReciterAI", def: "WCM’s pipeline that derives a publication’s research areas, Impact score, and one-line synopsis. Impact and synopsis refresh nightly; research areas and subareas are assigned weekly; the research-area taxonomy is rebuilt periodically." },
             { term: "Research areas (and subareas)", def: "WCM’s AI-derived map of what scholars work on: broad research areas such as Cancer Biology, each with finer subareas. ReciterAI derives them from publications, not from MeSH or a fixed list, and scores how strongly each paper relates to each area. Distinct from the MeSH keywords that power search." },
             { term: "Self-edit interface", def: "Where a scholar edits their overview, hides or restores publications, and submits data corrections (Request a change), which route to the owning office." },
-            { term: "Profile URL (slug)", def: "A profile’s web address — the short scholars.weill.cornell.edu/<slug> and the longer /scholars/<slug> both work and lead to the same page. The slug is derived automatically from the scholar’s preferred name (e.g. jane-smith); a later namesake gets a number (jane-smith-2) and the earlier profile keeps the plain form — it is not a ranking. The address is stable: if it changes, the old one permanently redirects, so existing links keep working. A custom address — still based on the scholar’s name — can be set by a Scholars administrator." },
+            { term: "Profile URL (slug)", def: "A profile’s web address: the short scholars.weill.cornell.edu/<slug> and the longer /scholars/<slug> both work and lead to the same page. The slug is derived automatically from the scholar’s preferred name (e.g. jane-smith); a later namesake gets a number (jane-smith-2) and the earlier profile keeps the plain form; it is not a ranking. The address is stable: if it changes, the old one permanently redirects, so existing links keep working. A custom address (still based on the scholar’s name) can be set by a Scholars administrator." },
             { term: "iCite", def: "The NIH tool Scholars uses as its only citation source. Scholars does not use Scopus." },
             { term: "InfoEd", def: "WCM’s grants system of record, for all sponsors. NIH RePORTER supplies federal abstract text and the portfolio link." },
             { term: "MeSH", def: "Medical Subject Headings, the NLM’s controlled vocabulary for indexing biomedical literature. Scholars search is MeSH-aware." },
