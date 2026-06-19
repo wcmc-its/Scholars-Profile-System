@@ -12,10 +12,12 @@ import { DEFAULT_OVERVIEW_SELECTION_DELTAS } from "@/lib/edit/overview-params";
 import { resolveOverviewSelection, selectionToDeltas } from "@/lib/edit/overview-resolve";
 
 const OPTIONS: OverviewSourceOptions = {
+  // Phase 2c — the resolver grounds pubs on the §5.1 `featured` auto-set, so a,b are
+  // featured and c is not (defaultSelected is retained but no longer drives pubs).
   publications: [
-    { pmid: "a", title: "A", venue: null, year: 2024, impact: 9, isFirstOrLast: true, authorPosition: "first", defaultSelected: true },
-    { pmid: "b", title: "B", venue: null, year: 2023, impact: 8, isFirstOrLast: true, authorPosition: "last", defaultSelected: true },
-    { pmid: "c", title: "C", venue: null, year: 2022, impact: 4, isFirstOrLast: false, authorPosition: "middle", defaultSelected: false },
+    { pmid: "a", title: "A", venue: null, year: 2024, impact: 9, isFirstOrLast: true, authorPosition: "first", defaultSelected: true, featured: true },
+    { pmid: "b", title: "B", venue: null, year: 2023, impact: 8, isFirstOrLast: true, authorPosition: "last", defaultSelected: true, featured: true },
+    { pmid: "c", title: "C", venue: null, year: 2022, impact: 4, isFirstOrLast: false, authorPosition: "middle", defaultSelected: false, featured: false },
   ],
   funding: [
     { id: "g1", role: "PI", funder: "NIH", title: "G1", award: null, endYear: 2027, defaultSelected: true },

@@ -31,6 +31,7 @@ import {
   OVERVIEW_METHOD_PMID_FLOOR,
   OVERVIEW_SELECTION_MAX_ITEMS,
   OVERVIEW_SELECTION_MAX_TOOLS,
+  type OverviewPositionMode,
   type OverviewSelection,
   type OverviewSelectionDeltas,
 } from "@/lib/edit/overview-params";
@@ -135,9 +136,10 @@ export type OverviewFacts = {
 };
 
 /** A drawer candidate publication (the light shape the Sources picker renders).
- *  The `#742 §5.1` block is ADDITIVE — the Recommended ranking the three-state
- *  drawer (PR-2) renders. `defaultSelected` stays the v3.1 default rule so the
- *  current picker + generator behaviour is unchanged until the UI adopts §5.1. */
+ *  Since the #742 Phase 2c flip the picker + client resolver drive off `featured`
+ *  (the §5.1 auto-set). `defaultSelected` is RETAINED — the v3.1 first/last-impact
+ *  rule — as a stable, back-compatible flag (and the loader still emits it), but it
+ *  no longer governs what the drawer pre-includes; `featured` does. */
 export type OverviewSourcePublication = {
   pmid: string;
   title: string;
@@ -578,33 +580,65 @@ export async function assembleOverviewFacts(
     selectedGrantIds = selection!.grantIds.filter((g) => candidateGrantSet.has(g));
     selectedToolNames = selection!.toolNames.filter((t) => candidateToolSet.has(t));
   } else {
-    // No explicit snapshot → the shared default rule, with the scholar's DURABLE
-    // three-state deltas (§2.5) re-applied on top: pins reach past the default,
-    // excludes veto. Each delta-resolved list is re-filtered to the candidate pool
-    // (a stale/forged pinned id simply matches nothing). When no deltas are stored
-    // the resolver is the identity, so this path is unchanged from before.
-    const def = pickDefaultSelection(candidatePubs, funding, methodFamilies);
+    // No explicit snapshot → the §5.1 LIVE auto-set (the flip): the model now
+    // grounds on the Recommended featured set, not the v3.1 first/last-impact rule.
+    // The scholar's DURABLE three-state deltas (§2.5) layer on top — pins reach past
+    // the auto-set AND survive the cap (ordered first), excludes veto. The led ⇄ all
+    // toggle (§2.2) re-filters the candidate POOL the auto-set ranks over. Each
+    // delta-resolved list is re-filtered to the FULL candidate pool (a stale/forged
+    // pinned id matches nothing; a pin of an off-position pub is still honored).
     const deltas = opts?.deltas;
-    if (deltas) {
-      selectedPmids = applyDeltas(
-        def.pmids,
-        deltas.pinned.publication,
-        deltas.excluded.publication,
-      ).filter((p) => candidatePmidSet.has(p));
-      selectedGrantIds = applyDeltas(
-        def.grantIds,
-        deltas.pinned.funding,
-        deltas.excluded.funding,
-      ).filter((g) => candidateGrantSet.has(g));
-      selectedToolNames = applyDeltas(
-        def.toolNames,
-        deltas.pinned.method,
-        deltas.excluded.method,
-      ).filter((t) => candidateToolSet.has(t));
-    } else {
-      selectedPmids = def.pmids;
-      selectedGrantIds = def.grantIds;
-      selectedToolNames = def.toolNames;
+    const pubMode = deltas?.publicationPositions ?? "led";
+    const fundMode = deltas?.fundingRoles ?? "led";
+
+    // Publications — the §5.1 featured set over the mode pool (the flip).
+    const rankByPmid = await rankCandidatePublications(cwid, candidatePubs, pubMode);
+    const defaultPmids = featuredPmidsInRankOrder(rankByPmid);
+    // Funding — lead-role default; `all` widens to every active award (§2.2).
+    const defaultGrantIds = funding.filter((f) => fundMode === "all" || f.isLead).map((f) => f.id);
+    // Tools — unchanged: the top of the tool budget above the #765 §2 pmid floor.
+    const defaultToolNames = methodFamilies
+      .filter((t) => t.pmidCount >= OVERVIEW_METHOD_PMID_FLOOR)
+      .map((t) => t.toolName)
+      .slice(0, OVERVIEW_SELECTION_MAX_TOOLS);
+
+    // Pins ahead of the auto-set (`pinsFirst`) so a deliberate pin SURVIVES the
+    // `slice(0, REPRESENTATIVE_LIMIT)` cap below instead of being evicted past the
+    // budget — the #742 §2.1 pin-loss fix (decision #3), mirroring the client resolver.
+    selectedPmids = applyDeltas(
+      defaultPmids,
+      deltas?.pinned.publication,
+      deltas?.excluded.publication,
+      { pinsFirst: true },
+    ).filter((p) => candidatePmidSet.has(p));
+    selectedGrantIds = applyDeltas(
+      defaultGrantIds,
+      deltas?.pinned.funding,
+      deltas?.excluded.funding,
+      { pinsFirst: true },
+    ).filter((g) => candidateGrantSet.has(g));
+    selectedToolNames = applyDeltas(
+      defaultToolNames,
+      deltas?.pinned.method,
+      deltas?.excluded.method,
+      { pinsFirst: true },
+    ).filter((t) => candidateToolSet.has(t));
+
+    // Surface (observability) when a scholar's pins ALONE exceed the publication
+    // budget — the cap below drops the lowest-ranked, so this flags the over-pin
+    // rather than letting it vanish silently (decision #3).
+    const pinnedPubCount = (deltas?.pinned.publication ?? []).filter((p) =>
+      candidatePmidSet.has(p),
+    ).length;
+    if (pinnedPubCount > REPRESENTATIVE_LIMIT) {
+      console.warn(
+        JSON.stringify({
+          event: "overview_pins_exceed_budget",
+          cwid,
+          pinnedPublications: pinnedPubCount,
+          budget: REPRESENTATIVE_LIMIT,
+        }),
+      );
     }
   }
   // Defensive caps (the route normalizes too): publications first within the
@@ -763,37 +797,69 @@ async function loadPrimaryAreaByPmid(cwid: string, pmids: string[]): Promise<Map
 }
 
 /** Run the candidate pubs through the §5.1 Recommended ranking (spread + landmark
- *  floor + tiers + reasons), keyed by pmid for enrichment. The author-position
- *  union is identical to the ranking module's, so it passes through directly. */
+ *  floor + tiers + reasons + near-dup dedup), keyed by pmid for enrichment AND for
+ *  the live auto-set (the flip). The `mode` re-filters the candidate POOL the
+ *  ranking spans (§2.2): `led` (default) = first/last-author work the scholar drove;
+ *  `all` = also middle-author. Pins reach any candidate regardless — they are
+ *  layered on top of this set by the caller — so the pool filter only shapes the
+ *  AUTO-set. The per-scholar impact quantiles (tiers / landmarks) are taken over the
+ *  filtered pool, the scholar's own distribution for that lens (decision #5). */
 async function rankCandidatePublications(
   cwid: string,
   candidatePubs: {
     pmid: string;
+    title: string;
     impact: number | null;
     year: number | null;
     authorPosition: OverviewAuthorPosition | null;
+    isFirstOrLast: boolean;
   }[],
+  mode: OverviewPositionMode = "led",
 ): Promise<Map<string, RepresentativeRanked>> {
+  const pool = mode === "all" ? candidatePubs : candidatePubs.filter((p) => p.isFirstOrLast);
+  if (pool.length === 0) return new Map();
   const areaByPmid = await loadPrimaryAreaByPmid(
     cwid,
-    candidatePubs.map((p) => p.pmid),
+    pool.map((p) => p.pmid),
   );
   const ranked = rankRepresentativePublications(
-    candidatePubs.map((p) => ({
+    pool.map((p) => ({
       pmid: p.pmid,
       impact: p.impact,
       year: p.year,
       authorPosition: p.authorPosition,
       topicAreaId: areaByPmid.get(p.pmid) ?? null,
+      // §2.4 — near-duplicate dedup key. No ReciterAI cluster id reaches SPS
+      // (decision #4), so this is the spec fallback: a normalized title + year
+      // collapses a paper indexed twice (preprint/published, paper + erratum) to a
+      // single featured slot. The byline's first author is NOT in this projection —
+      // only the scholar's own authorship row is loaded — so title+year is the
+      // available near-dup key, near-unique within one scholar's corpus. Landmarks
+      // are exempt from the collapse (handled inside the ranker).
+      clusterKey: clusterKeyForDedup(p.title, p.year),
     })),
     { featuredLimit: REPRESENTATIVE_LIMIT },
   );
   return new Map(ranked.map((r) => [r.pmid, r]));
 }
 
+/** The §5.1 featured (auto-set) pmids in Recommended (rank-ascending) order. */
+function featuredPmidsInRankOrder(rankByPmid: Map<string, RepresentativeRanked>): string[] {
+  return Array.from(rankByPmid.values())
+    .filter((r) => r.featured)
+    .sort((a, b) => a.rank - b.rank)
+    .map((r) => r.pmid);
+}
+
 /** Normalize a title for primary-title de-duplication (case / whitespace-insensitive). */
 function normalizeTitleForDedup(title: string | null): string {
   return (title ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** §2.4 near-duplicate cluster key (decision #4 fallback) — normalized title +
+ *  year. Reuses the title normalizer so it is case/whitespace-insensitive. */
+function clusterKeyForDedup(title: string, year: number | null): string {
+  return `${normalizeTitleForDedup(title)}|${year ?? ""}`;
 }
 
 /** Significant leadership titles (§7 threshold) — chair / director / chief / etc. */
@@ -922,7 +988,12 @@ export async function loadOverviewSourceOptions(cwid: string): Promise<OverviewS
   const defaultGrants = new Set(def.grantIds);
   const defaultTools = new Set(def.toolNames);
 
-  const rankByPmid = await rankCandidatePublications(cwid, candidatePubs);
+  // The drawer's `featured` flags are the §5.1 auto-set in the DEFAULT (led) mode —
+  // the publication tier the picker pre-includes and the client resolver grounds on
+  // (`overview-resolve.ts`). Middle-author work is ranked only when the scholar flips
+  // the led ⇄ all toggle (resolved server-side on generation), so here it is left
+  // un-featured and surfaces in the drawer's "all positions" tail for manual pinning.
+  const rankByPmid = await rankCandidatePublications(cwid, candidatePubs, "led");
 
   return {
     publications: candidatePubs.map((p) => {
