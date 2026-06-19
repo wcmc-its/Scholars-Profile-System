@@ -166,14 +166,21 @@ export async function readReciterdbTables(): Promise<{
   return { institutional, enriched };
 }
 
-/** cwid → display name, for FK validity (only existing scholars get links) and
- *  the role heuristic. Used by the direct ETL and the import half. */
-export async function loadScholarNames(): Promise<Map<string, string>> {
+/** lowercased cwid → { canonical cwid, display name }, for FK validity (only
+ *  existing scholars get links) and the role heuristic. Keyed lowercase because
+ *  the institutional `clinical_trials.cwid` is UPPERCASE (e.g. "BMW2002") while
+ *  `scholar.cwid` is lowercase; the scholar column collation is case-insensitive,
+ *  but this in-memory match is not, so we normalize. The value carries the
+ *  canonical `scholar.cwid` so the link FK is stored in the scholar's own case.
+ *  Used by the direct ETL and the import half. */
+export async function loadScholars(): Promise<Map<string, { cwid: string; name: string }>> {
   const scholars = await db.write.scholar.findMany({
     select: { cwid: true, preferredName: true, fullName: true },
   });
-  const m = new Map<string, string>();
-  for (const s of scholars) m.set(s.cwid, s.fullName || s.preferredName || "");
+  const m = new Map<string, { cwid: string; name: string }>();
+  for (const s of scholars) {
+    m.set(s.cwid.toLowerCase(), { cwid: s.cwid, name: s.fullName || s.preferredName || "" });
+  }
   return m;
 }
 
@@ -183,7 +190,7 @@ export async function loadScholarNames(): Promise<Map<string, string>> {
 export function buildTrialsAndLinks(
   institutional: InstitutionalRow[],
   enriched: EnrichedRow[],
-  scholarName: Map<string, string>,
+  scholars: Map<string, { cwid: string; name: string }>,
   now: Date,
 ): { trials: TrialBuild[]; links: LinkBuild[]; stats: BuildStats } {
   const enrichedByNct = new Map<string, EnrichedRow>();
@@ -204,11 +211,13 @@ export function buildTrialsAndLinks(
       skippedNoProtocol++;
       continue;
     }
-    const cwid = nonEmpty(r.cwid);
-    if (!cwid || !scholarName.has(cwid)) {
+    const cwidRaw = nonEmpty(r.cwid);
+    const scholar = cwidRaw ? scholars.get(cwidRaw.toLowerCase()) : undefined;
+    if (!scholar) {
       skippedUnknownCwid++;
       continue;
     }
+    const cwid = scholar.cwid; // canonical scholar.cwid (matches the FK case)
 
     const nct = nonEmpty(r.nctNumber);
     const enrichedRow = nct ? enrichedByNct.get(nct.toUpperCase()) : undefined;
@@ -250,9 +259,7 @@ export function buildTrialsAndLinks(
       links.set(linkKey, {
         cwid,
         protocolNumber: protocol,
-        role: isLikelyPi(scholarName.get(cwid) ?? null, r.piName)
-          ? "Principal Investigator"
-          : "Investigator",
+        role: isLikelyPi(scholar.name, r.piName) ? "Principal Investigator" : "Investigator",
         piNameRaw: nonEmpty(r.piName),
         lastRefreshedAt: now,
       });

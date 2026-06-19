@@ -26,7 +26,7 @@
  */
 import { db } from "../../lib/db";
 import { closeReciterPool } from "@/lib/sources/reciterdb";
-import { buildTrialsAndLinks, loadScholarNames, readReciterdbTables, replaceAll } from "./shared";
+import { buildTrialsAndLinks, loadScholars, readReciterdbTables, replaceAll } from "./shared";
 
 async function main() {
   const start = Date.now();
@@ -34,8 +34,8 @@ async function main() {
 
   try {
     console.log("Loading scholars from the Sps DB...");
-    const scholarName = await loadScholarNames();
-    console.log(`${scholarName.size} scholars in our DB.`);
+    const scholars = await loadScholars();
+    console.log(`${scholars.size} scholars in our DB.`);
 
     console.log("Loading clinical_trials + clinical_trials_enriched from reciterdb...");
     const { institutional, enriched } = await readReciterdbTables();
@@ -43,7 +43,7 @@ async function main() {
       `Loaded ${institutional.length} institutional rows, ${enriched.length} enriched rows.`,
     );
 
-    const { trials, links, stats } = buildTrialsAndLinks(institutional, enriched, scholarName, now);
+    const { trials, links, stats } = buildTrialsAndLinks(institutional, enriched, scholars, now);
     console.log(
       `Built ${stats.trials} trials (${stats.enrichedHits} institutional rows had NCT enrichment) ` +
         `and ${stats.links} person links. ` +
