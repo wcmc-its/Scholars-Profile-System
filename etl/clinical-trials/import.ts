@@ -34,7 +34,7 @@ import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { db } from "../../lib/db";
 import {
   buildTrialsAndLinks,
-  loadScholarNames,
+  loadScholars,
   replaceAll,
   type EnrichedRow,
   type InstitutionalRow,
@@ -130,8 +130,8 @@ async function main() {
     );
   }
 
-  const scholarName = await loadScholarNames();
-  const { trials, links, stats } = buildTrialsAndLinks(institutional, enriched, scholarName, now);
+  const scholars = await loadScholars();
+  const { trials, links, stats } = buildTrialsAndLinks(institutional, enriched, scholars, now);
   console.log(
     `Built ${stats.trials} trials (${stats.enrichedHits} had NCT enrichment) and ${stats.links} ` +
       `person links. Skipped ${stats.skippedNoProtocol} rows w/o protocolNumber, ` +

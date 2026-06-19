@@ -52,9 +52,11 @@ describe("parseLooseDate", () => {
 });
 
 describe("buildTrialsAndLinks", () => {
-  const scholarName = new Map<string, string>([
-    ["abc1234", "Jane Smith"],
-    ["def5678", "Robert Jones"],
+  // Keyed by LOWERCASED cwid; value carries the canonical scholar.cwid (see
+  // loadScholars). scholar.cwid is lowercase; clinical_trials.cwid is uppercase.
+  const scholars = new Map<string, { cwid: string; name: string }>([
+    ["abc1234", { cwid: "abc1234", name: "Jane Smith" }],
+    ["def5678", { cwid: "def5678", name: "Robert Jones" }],
   ]);
 
   it("dedupes one trial per protocol, links each investigator, derives role, merges enrichment", () => {
@@ -90,7 +92,7 @@ describe("buildTrialsAndLinks", () => {
       },
     ];
 
-    const { trials, links, stats } = buildTrialsAndLinks(institutional, enriched, scholarName, NOW);
+    const { trials, links, stats } = buildTrialsAndLinks(institutional, enriched, scholars, NOW);
 
     expect(stats.trials).toBe(1);
     expect(stats.links).toBe(2);
@@ -114,7 +116,7 @@ describe("buildTrialsAndLinks", () => {
       inst({ cwid: "abc1234", protocolNumber: null }), // no protocol
       inst({ cwid: "zzz9999", protocolNumber: "P-002" }), // unknown cwid
     ];
-    const { trials, links, stats } = buildTrialsAndLinks(institutional, [], scholarName, NOW);
+    const { trials, links, stats } = buildTrialsAndLinks(institutional, [], scholars, NOW);
     expect(trials).toHaveLength(0);
     expect(links).toHaveLength(0);
     expect(stats.skippedNoProtocol).toBe(1);
@@ -125,9 +127,22 @@ describe("buildTrialsAndLinks", () => {
     const institutional: InstitutionalRow[] = [
       inst({ cwid: "abc1234", protocolNumber: "P-003", title: "Only institutional" }),
     ];
-    const { trials } = buildTrialsAndLinks(institutional, [], scholarName, NOW);
+    const { trials } = buildTrialsAndLinks(institutional, [], scholars, NOW);
     expect(trials[0].title).toBe("Only institutional");
     expect(trials[0].enrichmentSource).toBeNull();
     expect(trials[0].enrichedAt).toBeNull();
+  });
+
+  it("matches UPPERCASE institutional cwids case-insensitively and stores the canonical (lowercase) cwid", () => {
+    // clinical_trials.cwid is uppercase (e.g. "ABC1234"); scholar.cwid is "abc1234".
+    const institutional: InstitutionalRow[] = [
+      inst({ cwid: "ABC1234", protocolNumber: "P-100", piName: "Smith, Jane" }),
+    ];
+    const { trials, links, stats } = buildTrialsAndLinks(institutional, [], scholars, NOW);
+    expect(stats.skippedUnknownCwid).toBe(0);
+    expect(trials).toHaveLength(1);
+    expect(links).toHaveLength(1);
+    expect(links[0].cwid).toBe("abc1234"); // canonical scholar.cwid, not the uppercase source
+    expect(links[0].role).toBe("Principal Investigator");
   });
 });
