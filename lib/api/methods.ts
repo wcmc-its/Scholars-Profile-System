@@ -37,6 +37,7 @@ import { TOP_SCHOLARS_ELIGIBLE_ROLES, isPubliclyDisplayed } from "@/lib/eligibil
 import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 import {
   isMethodsLensEnabled,
+  isMethodsLensToolContextOn,
   isMethodsFamilyRosterFallbackOn,
   isMethodsFamilyDefinitionsOn,
 } from "@/lib/profile/methods-lens-flags";
@@ -247,6 +248,65 @@ export async function getFamily(
     definition,
     definitionSource,
   };
+}
+
+/** A representative tool-usage snippet for the family page strip (#1119). */
+export type FamilyToolUsage = { tool: string; context: string };
+
+/** Cap on the family-page "How researchers use these tools" strip. */
+const FAMILY_TOOL_USAGE_CAP = 4;
+
+/**
+ * #1119 — up to {@link FAMILY_TOOL_USAGE_CAP} deduped "how researchers use <tool>"
+ * snippets for a family page's strip, drawn from `scholar_family.exemplar_contexts`
+ * across the family's (active, scholar-gated) rows, preferring the most prolific
+ * scholars (rows by `pmidCount` desc). Returns [] when METHODS_LENS_TOOL_CONTEXT is
+ * off (NO query — dark with no prod cost) or none resolve. The caller (the family
+ * page) has already passed the #800/#801 overlay gate via getFamily, so this is
+ * keyed on the same public (supercategory, familyLabel). Snippets are plain text.
+ */
+export async function getFamilyToolUsage(
+  supercategory: string,
+  familyLabel: string,
+): Promise<FamilyToolUsage[]> {
+  if (!isMethodsLensToolContextOn()) return [];
+
+  const rows = await prisma.scholarFamily.findMany({
+    where: { supercategory, familyLabel, scholar: { deletedAt: null, status: "active" } },
+    orderBy: [{ pmidCount: "desc" }],
+    // exemplarTools is the order-PRESERVING JSON array (salience-ranked); iterate it
+    // for tool order rather than exemplarContexts' object keys, which Aurora MySQL
+    // re-sorts by key on storage (#1119 review). roleCategory drives the role gate.
+    select: { exemplarTools: true, exemplarContexts: true, scholar: { select: { roleCategory: true } } },
+    take: 200,
+  });
+
+  const out: FamilyToolUsage[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (out.length >= FAMILY_TOOL_USAGE_CAP) break;
+    // Drop hidden identity classes (doctoral_student / affiliate_alumni): they are
+    // soft-deleted + excluded by deletedAt above, but keep the gate so a hidden
+    // scholar's usage snippet never surfaces if a row ever survives the join
+    // (mirrors getFamilyScholarRows — #1119 review).
+    if (!isPubliclyDisplayed(r.scholar?.roleCategory ?? null)) continue;
+    const ctx =
+      r.exemplarContexts && typeof r.exemplarContexts === "object" && !Array.isArray(r.exemplarContexts)
+        ? (r.exemplarContexts as Record<string, unknown>)
+        : {};
+    const tools = Array.isArray(r.exemplarTools) ? (r.exemplarTools as unknown[]).map(String) : [];
+    for (const tool of tools) {
+      if (out.length >= FAMILY_TOOL_USAGE_CAP) break;
+      const t = tool.trim();
+      const c = typeof ctx[t] === "string" ? (ctx[t] as string).trim() : "";
+      if (!t || !c) continue;
+      const key = t.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ tool: t, context: c });
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

@@ -44,6 +44,8 @@ vi.mock("@/lib/search", () => ({
     "publicationMesh^0.5",
   ],
   PEOPLE_ABSTRACTS_BOOST: 0.3,
+  PEOPLE_METHOD_CONTEXT_BOOST: 0.5,
+  PEOPLE_TOPIC_METHOD_CONTEXT_BOOST: 0.8,
   PEOPLE_RESTRUCTURED_MSM: "2<-34%",
   PUBLICATION_FIELD_BOOSTS: ["title^1"],
   searchClient: () => ({
@@ -144,6 +146,31 @@ describe("people-index restructured body — SPEC §12 PR-5 (#312)", () => {
     const should = innerBool.should[0] as { match: { publicationAbstracts: { query: string; boost: number } } };
     expect(should.match.publicationAbstracts.query).toBe("electronic health records");
     expect(should.match.publicationAbstracts.boost).toBe(0.3);
+  });
+
+  it("#1119: methodContext rides the scoring-only should, NEVER the msm must ladder", async () => {
+    process.env.SEARCH_PEOPLE_METHOD_CONTEXT = "on";
+    try {
+      await searchPeople({ q: "embryo ploidy time lapse", page: 0 });
+      const branch = multiMatchBranch(capturedBodies[0]);
+      const innerBool = branch.bool as {
+        must: Record<string, unknown>[];
+        should: Record<string, unknown>[];
+      };
+      // NOT in the cross_fields/msm must ladder (would let prose satisfy msm).
+      const mm = (innerBool.must[0] as { multi_match: Record<string, unknown> }).multi_match;
+      const fieldNames = (mm.fields as string[]).map((f) => f.split("^")[0]);
+      expect(fieldNames).not.toContain("methodContext");
+      // Present as a scoring-only should match, boost 0.5 (default body).
+      const ctxShould = innerBool.should.find(
+        (s) => (s as { match?: Record<string, unknown> }).match?.methodContext,
+      ) as { match: { methodContext: { query: string; boost: number } } } | undefined;
+      expect(ctxShould).toBeDefined();
+      expect(ctxShould!.match.methodContext.boost).toBe(0.5);
+      expect(ctxShould!.match.methodContext.query).toBe("embryo ploidy time lapse");
+    } finally {
+      delete process.env.SEARCH_PEOPLE_METHOD_CONTEXT;
+    }
   });
 
   it("empty query skips the multi_match branch entirely (match_all)", async () => {

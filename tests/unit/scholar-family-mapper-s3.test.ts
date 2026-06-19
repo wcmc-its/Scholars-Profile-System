@@ -12,6 +12,7 @@ import {
   type FacultyFamilyEntry,
 } from "@/etl/tools/scholar-family-mapper-s3";
 import type { ToolsArtifactSlice } from "@/etl/tools/scholar-tool-mapper-s3";
+import { buildToolContextIndex } from "@/etl/tools/tool-context";
 
 /** Build a minimal artifact slice from a per-cwid families list (+ optional tools[]). */
 function artifact(
@@ -56,6 +57,7 @@ describe("buildScholarFamilyWritesFromS3 — canonical mapping", () => {
         supercategory: "imaging_microscopy",
         pmidCount: 12,
         exemplarTools: ["CheXpert", "MIMIC-CXR"], // resolved from canonical_tool_id, NOT the raw ids
+        exemplarContexts: {}, // #1119 — no toolContext index supplied → {}
         pmids: [], // none in this fixture
         definition: null, // #879 — no familyDefById supplied → null
         definitionSource: null,
@@ -222,8 +224,18 @@ describe("buildScholarFamilyWritesFromS3 — ranking, cap, dedup", () => {
     const res = buildScholarFamilyWritesFromS3(
       artifact({
         aog: [
-          { family_id: "fam_old", label: "CRISPR screens", supercategory: "genomics", pub_count: 3 },
-          { family_id: "fam_new", label: "CRISPR screens", supercategory: "genomics", pub_count: 9 },
+          {
+            family_id: "fam_old",
+            label: "CRISPR screens",
+            supercategory: "genomics",
+            pub_count: 3,
+          },
+          {
+            family_id: "fam_new",
+            label: "CRISPR screens",
+            supercategory: "genomics",
+            pub_count: 9,
+          },
         ],
       }),
       { ourCwidSet: new Set(["aog"]) },
@@ -369,7 +381,13 @@ describe("buildScholarFamilyWritesFromS3 — #879 family definition join", () =>
         ourCwidSet: new Set(["aog"]),
         familyDefById: new Map([
           // em-dash kept verbatim (house style — no transform)
-          ["fam_1", { definition: "Pooled loss-of-function screens—including X.", definitionSource: "generated" }],
+          [
+            "fam_1",
+            {
+              definition: "Pooled loss-of-function screens—including X.",
+              definitionSource: "generated",
+            },
+          ],
           // fam_2 intentionally absent → its row stays null
         ]),
       },
@@ -395,11 +413,148 @@ describe("buildScholarFamilyWritesFromS3 — #879 family definition join", () =>
 
   it("never drops a family for a missing definition (a join miss is benign)", () => {
     const res = buildScholarFamilyWritesFromS3(
-      artifact({ aog: [{ family_id: "fam_1", label: "Keep me", supercategory: "s", pub_count: 7 }] }),
+      artifact({
+        aog: [{ family_id: "fam_1", label: "Keep me", supercategory: "s", pub_count: 7 }],
+      }),
       { ourCwidSet: new Set(["aog"]), familyDefById: new Map() },
     );
     expect(res.writes).toHaveLength(1);
     expect(res.skippedMissingFields).toBe(0);
     expect(res.writes[0].definition).toBeNull();
+  });
+});
+
+describe("buildScholarFamilyWritesFromS3 — #1119 exemplar contexts", () => {
+  it("resolves a best snippet per exemplar tool, keyed by display name, scoped to family pmids", () => {
+    const toolContext = buildToolContextIndex({
+      tool_a: {
+        "111":
+          "CheXpert labels chest radiographs across 14 observations using an uncertainty-aware policy",
+        "999": "an out-of-family paper that should be ignored by the pmid scope filter entirely",
+      },
+      tool_b: {
+        "222": "MIMIC-CXR is a large public dataset of chest radiographs with free-text reports",
+      },
+    });
+    const { writes } = buildScholarFamilyWritesFromS3(
+      artifact(
+        {
+          aog: [
+            {
+              family_id: "fam_0042",
+              label: "Chest radiograph models",
+              supercategory: "imaging_microscopy",
+              pub_count: 2,
+              exemplar_tool_ids: ["tool_a", "tool_b"],
+              pmids: ["111", "222"], // family member pmids → scope
+            },
+          ],
+        },
+        [
+          { canonical_tool_id: "tool_a", display_name: "CheXpert" },
+          { canonical_tool_id: "tool_b", display_name: "MIMIC-CXR" },
+        ],
+      ),
+      { ourCwidSet: new Set(["aog"]), toolContext },
+    );
+    expect(writes[0].exemplarContexts).toEqual({
+      CheXpert:
+        "CheXpert labels chest radiographs across 14 observations using an uncertainty-aware policy",
+      "MIMIC-CXR":
+        "MIMIC-CXR is a large public dataset of chest radiographs with free-text reports",
+    });
+    // pmid 999 (out of the family's pmids) was not chosen for CheXpert.
+    expect(writes[0].exemplarContexts.CheXpert).not.toContain("out-of-family");
+  });
+
+  it("yields {} when no toolContext index is supplied", () => {
+    const { writes } = buildScholarFamilyWritesFromS3(
+      artifact(
+        {
+          aog: [
+            {
+              family_id: "fam_1",
+              label: "F",
+              supercategory: "s",
+              pub_count: 1,
+              exemplar_tool_ids: ["tool_a"],
+              pmids: ["111"],
+            },
+          ],
+        },
+        [{ canonical_tool_id: "tool_a", display_name: "CheXpert" }],
+      ),
+      { ourCwidSet: new Set(["aog"]) },
+    );
+    expect(writes[0].exemplarContexts).toEqual({});
+  });
+
+  it("#1119 dedupe: never surfaces the same sentence for two exemplars of one family", () => {
+    const shared =
+      "Linked-read barcoded sequencing reconstructs full-length isoforms in a reference-free manner across samples";
+    const toolContext = buildToolContextIndex({
+      tool_a: { "111": shared },
+      tool_b: { "111": shared }, // identical best snippet
+    });
+    const { writes } = buildScholarFamilyWritesFromS3(
+      artifact(
+        {
+          aog: [
+            {
+              family_id: "fam_1",
+              label: "Long-read isoform assembly",
+              supercategory: "omics_profiling",
+              pub_count: 1,
+              exemplar_tool_ids: ["tool_a", "tool_b"],
+              pmids: ["111"],
+            },
+          ],
+        },
+        [
+          { canonical_tool_id: "tool_a", display_name: "cloudrnaSPAdes" },
+          { canonical_tool_id: "tool_b", display_name: "LoopSeq" },
+        ],
+      ),
+      { ourCwidSet: new Set(["aog"]), toolContext },
+    );
+    // Both exemplars are still listed in exemplarTools, but the duplicate snippet
+    // is kept only ONCE (first exemplar wins); the second is collapsed.
+    expect(writes[0].exemplarTools).toEqual(["cloudrnaSPAdes", "LoopSeq"]);
+    expect(Object.keys(writes[0].exemplarContexts)).toEqual(["cloudrnaSPAdes"]);
+    expect(writes[0].exemplarContexts.LoopSeq).toBeUndefined();
+  });
+
+  it("#1119 opaque gate: omits the snippet for a high-frequency tool, keeps it for a niche one", () => {
+    const toolContext = buildToolContextIndex({
+      tool_a: {
+        "1": "RNA-seq analysis of E. coli K12 revealed 447 differentially expressed genes overall",
+      },
+      tool_b: {
+        "1": "wsPurity quantifies tumor purity within a digitally captured H&E stained histological slide",
+      },
+    });
+    const { writes } = buildScholarFamilyWritesFromS3(
+      artifact(
+        {
+          aog: [
+            {
+              family_id: "fam_1",
+              label: "Transcriptomics",
+              supercategory: "omics_profiling",
+              pub_count: 1,
+              exemplar_tool_ids: ["tool_a", "tool_b"],
+              pmids: ["1"],
+            },
+          ],
+        },
+        [
+          { canonical_tool_id: "tool_a", display_name: "RNA-seq", pub_count: 900 }, // common → gated
+          { canonical_tool_id: "tool_b", display_name: "wsPurity", pub_count: 2 }, // niche → kept
+        ],
+      ),
+      { ourCwidSet: new Set(["aog"]), toolContext },
+    );
+    expect(writes[0].exemplarContexts["RNA-seq"]).toBeUndefined();
+    expect(writes[0].exemplarContexts.wsPurity).toContain("tumor purity");
   });
 });

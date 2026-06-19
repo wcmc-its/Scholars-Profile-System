@@ -77,6 +77,14 @@ export type VisibilityCardProps = {
    * suppression's reason is mandatory), and adjusts the inline copy.
    */
   mode?: "self" | "superuser";
+  /**
+   * Reframe the first-person copy to the scholar's name (#955 #10) for an editor
+   * who is NOT the scholar — a proxy / unit-admin. They drive the SAME `'self'`
+   * (`ownRow`) state machine the scholar does, so `mode` stays `'self'`; only the
+   * copy changes. Independent of `mode`: a superuser is already third-person via
+   * `mode='superuser'`.
+   */
+  thirdPerson?: boolean;
 };
 
 export function VisibilityCard({
@@ -84,6 +92,7 @@ export function VisibilityCard({
   suppression: initial,
   scholarName,
   mode = "self",
+  thirdPerson = false,
 }: VisibilityCardProps) {
   const router = useRouter();
   const [ownRow, setOwnRow] = React.useState<SuppressionRow | null>(initial.ownRow);
@@ -178,6 +187,10 @@ export function VisibilityCard({
   // ---- render --------------------------------------------------------------
 
   const isHidden = ownRow !== null || adminRow !== null;
+  // A superuser is third-person by definition (`mode='superuser'`); a proxy /
+  // unit-admin is third-person via the explicit `thirdPerson` flag while keeping
+  // the self state machine. Either way the COPY is third-person (#955 #10).
+  const showThirdPerson = thirdPerson || mode === "superuser";
 
   return (
     <>
@@ -185,7 +198,9 @@ export function VisibilityCard({
         slot="visibility-card"
         data-mode={mode}
         heading="Profile visibility"
-        owned={mode === "self"}
+        // The "Yours to edit" ownership cue is first-person — drop it for a
+        // proxy / unit-admin editing on the scholar's behalf (#955 #10).
+        owned={mode === "self" && !showThirdPerson}
         headerAction={
           <Badge
             variant="outline"
@@ -201,6 +216,8 @@ export function VisibilityCard({
                 ownRow,
                 adminRow,
                 pending,
+                thirdPerson,
+                scholarName,
                 onHide: () => setConfirmOpen(true),
                 onRevokeOwn: () => ownRow && revokeTarget(ownRow.id, "own"),
               })
@@ -224,17 +241,19 @@ export function VisibilityCard({
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title={
-          mode === "superuser"
+          showThirdPerson
             ? `Hide ${scholarName ?? "this scholar"}'s profile?`
             : "Hide your profile?"
         }
         description={
           mode === "superuser"
             ? "This scholar's profile will be removed from public view and search immediately. A reason is required for the audit log."
-            : "Your profile will be removed from public view and search immediately. You can make it visible again at any time."
+            : thirdPerson
+              ? `${scholarName ?? "This scholar"}'s profile will be removed from public view and search immediately. It can be made visible again at any time.`
+              : "Your profile will be removed from public view and search immediately. You can make it visible again at any time."
         }
         reasonMode={mode === "superuser" ? "required-text" : "optional-preset"}
-        confirmLabel={mode === "superuser" ? "Hide profile" : "Hide my profile"}
+        confirmLabel={showThirdPerson ? "Hide profile" : "Hide my profile"}
         confirmVariant="destructive"
         onConfirm={suppressTarget}
       />
@@ -243,26 +262,44 @@ export function VisibilityCard({
 }
 
 // ---------------------------------------------------------------------------
-// Self body — the Phase 6 state machine, copy unchanged.
+// Self body — the Phase 6 ownRow state machine. A proxy / unit-admin drives the
+// SAME machine on the scholar's behalf, so only the copy reframes to the
+// scholar's name (#955 #10 — `thirdPerson`); the first-person copy is byte-
+// identical when `thirdPerson` is false.
 // ---------------------------------------------------------------------------
 
 type SelfBodyArgs = {
   ownRow: SuppressionRow | null;
   adminRow: AdminRow | null;
   pending: boolean;
+  thirdPerson: boolean;
+  scholarName: string | undefined;
   onHide: () => void;
   onRevokeOwn: () => void;
 };
 
-function renderSelfBody({ ownRow, adminRow, pending, onHide, onRevokeOwn }: SelfBodyArgs) {
+function renderSelfBody({
+  ownRow,
+  adminRow,
+  pending,
+  thirdPerson,
+  scholarName,
+  onHide,
+  onRevokeOwn,
+}: SelfBodyArgs) {
+  // Possessive subject: "Your" (first-person) or the scholar's name (third).
+  const Poss = thirdPerson ? `${scholarName ?? "This scholar"}'s` : "Your";
+  const poss = thirdPerson ? `${scholarName ?? "this scholar"}'s` : "your";
+  const restoreNote = thirdPerson
+    ? "It can be made visible again at any time."
+    : "You can make it visible again at any time.";
   if (ownRow === null && adminRow === null) {
     return (
       <>
-        <p className="text-sm">Your profile is visible to the public.</p>
+        <p className="text-sm">{Poss} profile is visible to the public.</p>
         <p className="text-muted-foreground text-sm">
-          Hiding removes your whole profile from the public site and from search. Your name may still
-          appear in the WCM directory and on co-authors&apos; pages. You can make it visible again at
-          any time.
+          Hiding removes {poss} whole profile from the public site and from search. {Poss} name may
+          still appear in the WCM directory and on co-authors&apos; pages. {restoreNote}
         </p>
         <div>
           <Button
@@ -271,7 +308,7 @@ function renderSelfBody({ ownRow, adminRow, pending, onHide, onRevokeOwn }: Self
             onClick={onHide}
             data-testid="visibility-hide"
           >
-            Hide my profile
+            {thirdPerson ? "Hide profile" : "Hide my profile"}
           </Button>
         </div>
       </>
@@ -282,7 +319,7 @@ function renderSelfBody({ ownRow, adminRow, pending, onHide, onRevokeOwn }: Self
       <>
         <Alert variant="info">
           <AlertDescription>
-            Your profile is hidden. It is not visible to the public or in search.
+            {Poss} profile is hidden. It is not visible to the public or in search.
           </AlertDescription>
         </Alert>
         <div>
@@ -293,7 +330,7 @@ function renderSelfBody({ ownRow, adminRow, pending, onHide, onRevokeOwn }: Self
             disabled={pending}
             data-testid="visibility-revoke-self"
           >
-            {pending ? "Working…" : "Make my profile visible"}
+            {pending ? "Working…" : thirdPerson ? "Make profile visible" : "Make my profile visible"}
           </Button>
         </div>
       </>
@@ -303,7 +340,7 @@ function renderSelfBody({ ownRow, adminRow, pending, onHide, onRevokeOwn }: Self
     return (
       <Alert variant="info">
         <AlertDescription>
-          Your profile has been hidden by a site administrator. Contact the
+          {Poss} profile has been hidden by a site administrator. Contact the
           Scholars Profile team for help.
         </AlertDescription>
       </Alert>
@@ -314,11 +351,13 @@ function renderSelfBody({ ownRow, adminRow, pending, onHide, onRevokeOwn }: Self
     <>
       <Alert variant="info">
         <AlertDescription>
-          Your profile has been hidden by a site administrator. Contact the
+          {Poss} profile has been hidden by a site administrator. Contact the
           Scholars Profile team for help.
         </AlertDescription>
       </Alert>
-      <p className="text-sm">You have also hidden it yourself.</p>
+      <p className="text-sm">
+        {thirdPerson ? "It has also been hidden directly." : "You have also hidden it yourself."}
+      </p>
       <p className="text-sm text-muted-foreground">
         The profile stays hidden while the administrator hold remains.
       </p>
@@ -330,7 +369,7 @@ function renderSelfBody({ ownRow, adminRow, pending, onHide, onRevokeOwn }: Self
           disabled={pending}
           data-testid="visibility-revoke-own-hold"
         >
-          {pending ? "Working…" : "Remove my hold"}
+          {pending ? "Working…" : thirdPerson ? "Remove hold" : "Remove my hold"}
         </Button>
       </div>
     </>

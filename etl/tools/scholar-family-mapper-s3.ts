@@ -36,6 +36,7 @@
  *     renders ("CheXpert · MIMIC-CXR"). Names refresh on every full-replace run.
  */
 import type { ToolsArtifactSlice } from "./scholar-tool-mapper-s3";
+import { selectBestSnippet, type ToolContextIndex } from "./tool-context";
 
 /** One per-(scholar, family) entry in `faculty[<cwid>].families[]`. */
 export type FacultyFamilyEntry = {
@@ -60,6 +61,13 @@ export type ScholarFamilyWrite = {
   /** Resolved member-tool DISPLAY NAMES (canonical_tool_id → tools[].display_name),
    *  per-scholar ranked — what the lens shows ("CheXpert · MIMIC-CXR"). */
   exemplarTools: string[];
+  /** #1119 — best usage snippet per exemplar tool, keyed by the SAME DISPLAY NAME
+   *  as `exemplarTools` (so the lens/overview line them up 1:1), drawn from a paper
+   *  in this family's `pmids` (falling back to any of the tool's snippets) via the
+   *  A2 `tool_context.json` map. Only exemplars with a usable snippet appear; `{}`
+   *  when none do, or when no tool-context index was supplied. EXTRACTED paper text
+   *  (grounding-eligible, unlike `definition`) — injection-safe DATA in any prompt. */
+  exemplarContexts: Record<string, string>;
   /** #819 — distinct member PMIDs (digit strings), read from the artifact; backs
    *  the click-to-filter membership. `[]` on the pre-#175 artifact (no field). */
   pmids: string[];
@@ -129,6 +137,8 @@ type Accum = {
   pmidCount: number;
   exemplarTools: string[];
   pmids: string[];
+  /** #1119 — exemplar tool DISPLAY NAME → best usage snippet (see ScholarFamilyWrite). */
+  exemplarContexts: Record<string, string>;
 };
 
 /**
@@ -149,6 +159,53 @@ function resolveExemplarTools(raw: unknown, toolsById: Map<string, string>): str
       seen.add(name);
       out.push(name);
     }
+  }
+  return out;
+}
+
+/**
+ * #1119 — resolve each exemplar tool id to its best usage snippet, keyed by the
+ * tool DISPLAY NAME (the same key space as `resolveExemplarTools`, deduped
+ * first-wins so the two stay 1:1). Candidate snippets are scoped to this family's
+ * member pmids (the closest available "scholar's pmids for that tool"), falling
+ * back inside `selectBestSnippet` to any of the tool's snippets. A `seen` Set (not
+ * an `in` check) avoids prototype-key pitfalls for unusual tool names.
+ *
+ * Two calibration levers apply here (see `docs/methodcontext-snippet-eval-findings.md`):
+ *   - the opaque-tool GATE — `selectBestSnippet` returns null for a high-frequency
+ *     tool (via `pubCountById`), so its snippet is omitted;
+ *   - within-family DEDUPE — the same sentence is never shown for two exemplars of
+ *     one family (a later exemplar whose best snippet duplicates an earlier one is
+ *     collapsed). Returns `{}` when no exemplar yields a kept snippet.
+ */
+function resolveExemplarContexts(
+  raw: unknown,
+  toolsById: Map<string, string>,
+  pubCountById: Map<string, number>,
+  toolContext: ToolContextIndex,
+  scholarPmids: ReadonlySet<string>,
+): Record<string, string> {
+  if (!Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  const seen = new Set<string>();
+  const chosen = new Set<string>(); // normalized snippets already kept in this family
+  for (const v of raw) {
+    if (typeof v !== "string") continue;
+    const id = v.trim();
+    if (!id) continue;
+    const name = toolsById.get(id);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    const best = selectBestSnippet(toolContext, id, {
+      displayName: name,
+      scholarPmids,
+      toolPubCount: pubCountById.get(id),
+    });
+    if (!best) continue;
+    const norm = best.context.toLowerCase().replace(/\s+/g, " ").trim();
+    if (chosen.has(norm)) continue; // identical to a sibling exemplar's snippet → collapse
+    chosen.add(norm);
+    out[name] = best.context;
   }
   return out;
 }
@@ -198,18 +255,29 @@ export function buildScholarFamilyWritesFromS3(
      *  `families[]`. Omit (or a miss) leaves a row's definition null — benign and
      *  expected on a pre-v3 artifact; never a reason to drop a family. */
     familyDefById?: FamilyDefinitionIndex;
+    /** #1119 — junk-filtered tool→snippet index. Omit (or a miss) leaves a row's
+     *  exemplarContexts `{}` — benign and expected on a pre-v3 artifact. */
+    toolContext?: ToolContextIndex;
   },
 ): BuildScholarFamilyS3Result {
   const topN = opts.topNPerScholar ?? 50;
   const known = opts.knownSupercategories;
+  const toolContext = opts.toolContext;
 
   // Index canonical tools by id → display name, to resolve each family's
-  // exemplar_tool_ids into the member-tool names the lens renders.
+  // exemplar_tool_ids into the member-tool names the lens renders; and id → GLOBAL
+  // pub_count, the #1119 opaque-tool gate signal for the usage snippet.
   const toolsById = new Map<string, string>();
+  const pubCountById = new Map<string, number>();
   for (const t of artifact.tools ?? []) {
-    if (t && typeof t.canonical_tool_id === "string" && typeof t.display_name === "string") {
-      const name = t.display_name.trim();
-      if (name) toolsById.set(t.canonical_tool_id, name);
+    if (t && typeof t.canonical_tool_id === "string") {
+      if (typeof t.display_name === "string") {
+        const name = t.display_name.trim();
+        if (name) toolsById.set(t.canonical_tool_id, name);
+      }
+      if (typeof t.pub_count === "number" && Number.isFinite(t.pub_count)) {
+        pubCountById.set(t.canonical_tool_id, Math.max(0, Math.trunc(t.pub_count)));
+      }
     }
   }
 
@@ -251,14 +319,33 @@ export function buildScholarFamilyWritesFromS3(
 
       const exemplarTools = resolveExemplarTools(f?.exemplar_tool_ids, toolsById);
       const pmids = normalizePmids(f?.pmids);
+      // #1119 — scope the snippet search to this family's member pmids.
+      const exemplarContexts = toolContext
+        ? resolveExemplarContexts(
+            f?.exemplar_tool_ids,
+            toolsById,
+            pubCountById,
+            toolContext,
+            new Set(pmids),
+          )
+        : {};
       const prev = byFamilyId.get(familyId);
       if (!prev) {
-        byFamilyId.set(familyId, { familyLabel, supercategory, pmidCount, exemplarTools, pmids });
+        byFamilyId.set(familyId, {
+          familyLabel,
+          supercategory,
+          pmidCount,
+          exemplarTools,
+          pmids,
+          exemplarContexts,
+        });
       } else if (pmidCount > prev.pmidCount) {
-        // Same family_id appeared twice: keep the strongest count + its exemplars + pmids.
+        // Same family_id appeared twice: keep the strongest count + its exemplars,
+        // pmids, and contexts.
         prev.pmidCount = pmidCount;
         prev.exemplarTools = exemplarTools;
         prev.pmids = pmids;
+        prev.exemplarContexts = exemplarContexts;
       }
     }
 
@@ -299,6 +386,7 @@ export function buildScholarFamilyWritesFromS3(
         supercategory: e.supercategory,
         pmidCount: e.pmidCount,
         exemplarTools: e.exemplarTools,
+        exemplarContexts: e.exemplarContexts,
         pmids: e.pmids,
         definition: def?.definition ?? null,
         definitionSource: def?.definitionSource ?? null,

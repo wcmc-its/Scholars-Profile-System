@@ -50,6 +50,66 @@ function FamilyDefinitionTip({
   );
 }
 
+/**
+ * #1119 — the exemplar member-tool line ("CheXpert · MIMIC-CXR"). When a tool has
+ * a usage snippet (`exemplarContexts[name]`, populated only under
+ * METHODS_LENS_TOOL_CONTEXT — the server empties it otherwise, so the off-path
+ * renders byte-identically to the prior `join(" · ")`), its name becomes a Radix
+ * hover trigger showing "How <tool> was used: …". `relative z-10` + `type="button"`
+ * with no onClick keeps it independently hoverable ABOVE the #819 whole-row filter
+ * overlay, exactly like FamilyDefinitionTip. Snippet renders as PLAIN TEXT (React
+ * escapes it — no markup injection).
+ */
+function ExemplarToolsLine({
+  tools,
+  contexts,
+  className,
+}: {
+  tools: string[];
+  contexts: Record<string, string> | undefined;
+  className: string;
+}) {
+  // Defensive: a client payload built before #1119 (e.g. the #801 sensitive-reveal
+  // route) may omit the field. Flag-off (and any family with no resolved snippets)
+  // renders the plain dotted join exactly as before — one text node, no triggers.
+  const ctx = contexts ?? {};
+  const hasAnyContext = tools.some((t) => ctx[t]);
+  if (!hasAnyContext) {
+    return <div className={className}>{tools.join(" · ")}</div>;
+  }
+  return (
+    <div className={className}>
+      {tools.map((tool, i) => {
+        const context = ctx[tool];
+        return (
+          <span key={tool}>
+            {i > 0 ? " · " : null}
+            {context ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="hover:text-foreground relative z-10 underline decoration-dotted underline-offset-2"
+                    aria-label={`How ${tool} was used`}
+                  >
+                    {tool}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs font-sans text-sm leading-relaxed">
+                  <span className="font-medium">How {tool} was used</span>
+                  <span className="mt-1 block">{context}</span>
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              tool
+            )}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 // Resting budget for UNSELECTED method rows in the redesign panel (#1/#2).
 // Selected/pinned rows are budgeted INDEPENDENTLY (always all rendered), so a
 // 4-selected scholar shows 4 + UNSELECTED_INITIAL rows, not 6 total.
@@ -304,15 +364,15 @@ export function MethodsSection({
                       ) : null}
                     </div>
                     {f.exemplarTools.length > 0 ? (
-                      <div
+                      <ExemplarToolsLine
+                        tools={f.exemplarTools}
+                        contexts={f.exemplarContexts}
                         className={
                           isSelected
                             ? "mt-0.5 truncate font-mono text-xs text-[var(--color-facet-method-count)]"
                             : "text-muted-foreground mt-0.5 truncate font-mono text-xs"
                         }
-                      >
-                        {f.exemplarTools.join(" · ")}
-                      </div>
+                      />
                     ) : null}
                   </div>
                   <span
@@ -460,9 +520,11 @@ export function MethodsSection({
                   ) : null}
                 </div>
                 {f.exemplarTools.length > 0 ? (
-                  <div className="text-muted-foreground mt-0.5 font-mono text-xs">
-                    {f.exemplarTools.join(" · ")}
-                  </div>
+                  <ExemplarToolsLine
+                    tools={f.exemplarTools}
+                    contexts={f.exemplarContexts}
+                    className="text-muted-foreground mt-0.5 font-mono text-xs"
+                  />
                 ) : null}
               </div>
               {/* #819 — the count sits in the right-hand column, EXCEPT when this

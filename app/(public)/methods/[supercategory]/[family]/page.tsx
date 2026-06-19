@@ -6,6 +6,7 @@ import {
   getFamilyScholars,
   getDistinctScholarCountForFamily,
   getRepresentativePubsForFamily,
+  getFamilyToolUsage,
 } from "@/lib/api/methods";
 import { supercategoryLabel } from "@/lib/methods/supercategory-labels";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
@@ -64,7 +65,7 @@ export default async function FamilyPage({
   const resolved = await getFamily(supercategory, family);
   if (!resolved) notFound();
 
-  const [topScholars, scholarCount, representativePubs] = await Promise.all([
+  const [topScholars, scholarCount, representativePubs, toolUsage] = await Promise.all([
     getFamilyScholars(resolved.supercategory, resolved.familyLabel).catch(() => null),
     getDistinctScholarCountForFamily(resolved.supercategory, resolved.familyLabel).catch(
       () => 0,
@@ -74,6 +75,8 @@ export default async function FamilyPage({
       resolved.familyLabel,
       SPOTLIGHT_CARDS,
     ).catch(() => []),
+    // #1119 — "How researchers use these tools" strip ([] when the flag is off).
+    getFamilyToolUsage(resolved.supercategory, resolved.familyLabel).catch(() => []),
   ]);
 
   const scLabel = supercategoryLabel(resolved.supercategory);
@@ -199,6 +202,29 @@ export default async function FamilyPage({
           </div>
         )}
       </section>
+
+      {/* #1119 — "How researchers use these tools": a few representative, deduped
+          per-tool usage snippets from the family's scholar rows. Plain text;
+          present only when METHODS_LENS_TOOL_CONTEXT is on (the loader returns []
+          otherwise), inheriting getFamily's #800/#801 public-visibility gate. */}
+      {toolUsage.length > 0 && (
+        <section className="mb-10" aria-labelledby="tool-usage-heading">
+          <h2
+            id="tool-usage-heading"
+            className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]"
+          >
+            How researchers use these tools
+          </h2>
+          <ul className="mt-3 grid max-w-prose gap-3">
+            {toolUsage.map((u) => (
+              <li key={u.tool} className="text-sm leading-relaxed">
+                <span className="font-medium">{u.tool}</span>
+                <span className="text-muted-foreground"> — {u.context}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <Spotlight data={spotlightData} />
 

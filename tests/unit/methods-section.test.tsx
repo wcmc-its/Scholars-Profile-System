@@ -13,6 +13,7 @@ function makeFamilies(n: number): ScholarFamilyView[] {
     pmids: [`${i + 1}001`, `${i + 1}002`],
     definition: null,
     definitionSource: null,
+    exemplarContexts: {},
   }));
 }
 
@@ -38,6 +39,7 @@ describe("MethodsSection", () => {
             pmids: ["1", "2", "3", "4", "5"],
             definition: null,
             definitionSource: null,
+            exemplarContexts: {},
           },
         ]}
       />,
@@ -369,6 +371,7 @@ describe("MethodsSection — v2 budget / selected-zero / animation (#841)", () =
             pmids: ["9001"],
             definition: null,
             definitionSource: null,
+            exemplarContexts: {},
           },
         ]}
         selectedFamilyIds={[]}
@@ -448,6 +451,7 @@ describe("MethodsSection — #879 family definition hover", () => {
         pmids: ["1", "2"],
         definition: def,
         definitionSource: source,
+        exemplarContexts: {},
       },
     ];
   }
@@ -478,5 +482,50 @@ describe("MethodsSection — #879 family definition hover", () => {
     // The tooltip opens (definition appears) but carries NO AI disclaimer.
     await waitFor(() => expect(screen.getAllByText("A curated gloss.").length).toBeGreaterThan(0));
     expect(screen.queryAllByText("AI-generated definition")).toHaveLength(0);
+  });
+});
+
+// #1119 — per-exemplar-tool usage hover. When a tool has an `exemplarContexts`
+// snippet (server-populated only under METHODS_LENS_TOOL_CONTEXT), the tool name
+// becomes a hover trigger; tools without one stay plain text.
+describe("MethodsSection — #1119 per-tool usage hover", () => {
+  function withContext(contexts: Record<string, string>): ScholarFamilyView[] {
+    return [
+      {
+        familyId: "fam_1",
+        familyLabel: "Chest radiograph models",
+        supercategory: "imaging_microscopy",
+        pubCount: 12,
+        exemplarTools: ["CheXpert", "MIMIC-CXR"],
+        pmids: ["1", "2"],
+        definition: null,
+        definitionSource: null,
+        exemplarContexts: contexts,
+      },
+    ];
+  }
+
+  it("renders a hover trigger for a tool that has a usage snippet, plain text otherwise", async () => {
+    render(
+      <MethodsSection
+        families={withContext({ CheXpert: "labels chest radiographs across 14 observations" })}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "How CheXpert was used" });
+    expect(trigger).toBeTruthy();
+    // MIMIC-CXR has no snippet → no trigger for it.
+    expect(screen.queryByRole("button", { name: "How MIMIC-CXR was used" })).toBeNull();
+    fireEvent.focus(trigger);
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(/labels chest radiographs across 14 observations/).length,
+      ).toBeGreaterThan(0),
+    );
+  });
+
+  it("renders the plain dotted join when no tool has a snippet (flag-off path)", () => {
+    render(<MethodsSection families={withContext({})} />);
+    expect(screen.getByText("CheXpert · MIMIC-CXR")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /How .* was used/ })).toBeNull();
   });
 });

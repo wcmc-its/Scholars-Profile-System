@@ -95,9 +95,18 @@ export type OverviewFacts = {
   // --- methods (the scholar's #799 method families; `[]` when none) ---
   /** The selected method families — `name` is the family label, `category` its
    *  supercategory, and `examples` up to a few exemplar member-tool names the
-   *  model can ground concrete prose on (#886). Sourced from the live
-   *  `scholar_family` rollup, the same data the public Methods & tools panel shows. */
-  methods: { name: string; category: string | null; examples: string[] }[];
+   *  model can ground concrete prose on (#886). `exemplarContexts` (#1119) adds,
+   *  for the exemplars that have one, the tool's best per-paper usage sentence
+   *  (EXTRACTED publication text, grounding-eligible like `synopsis`) so the model
+   *  can describe what a tool actually does instead of citing a bare name. Sourced
+   *  from the live `scholar_family` rollup, the same data the public Methods panel
+   *  shows; all of it is injection-safe DATA, never instructions. */
+  methods: {
+    name: string;
+    category: string | null;
+    examples: string[];
+    exemplarContexts: { name: string; context: string }[];
+  }[];
   /** Faculty-scale framing from ReciterAI `FACULTY#` (C3 — null until ingested). */
   facultyMetrics: {
     firstAuthorCount: number | null;
@@ -343,6 +352,8 @@ async function loadScholarMethodFamilies(cwid: string): Promise<
     pmidCount: number;
     maxConfidence: number;
     examples: string[];
+    /** #1119 — best per-exemplar-tool usage snippet (name aligned to `examples`). */
+    exemplarContexts: { name: string; context: string }[];
   }[]
 > {
   const rows = await db.read.scholarFamily.findMany({
@@ -351,12 +362,17 @@ async function loadScholarMethodFamilies(cwid: string): Promise<
     // #879 D-19 LOCKED — do NOT add `definition` to this select. The generated
     // family definition is RENDER-ONLY and must never enter the overview/bio
     // generator's grounding (an LLM prompt). Family identity + counts only here.
+    //
+    // #1119 — `exemplarContexts` is the OPPOSITE case and IS selected: it is
+    // EXTRACTED real publication text (the tool-usage snippet), grounding-eligible
+    // like `synopsis`, not a generated gloss. Still injection-safe DATA downstream.
     select: {
       familyId: true,
       familyLabel: true,
       supercategory: true,
       pmidCount: true,
       exemplarTools: true,
+      exemplarContexts: true,
     },
   });
   if (rows.length === 0) return [];
@@ -373,13 +389,28 @@ async function loadScholarMethodFamilies(cwid: string): Promise<
 
   return rows
     .filter((r) => !suppressed.has(familyOverlayKey(r.supercategory, r.familyLabel)))
-    .map((r) => ({
-      toolName: r.familyLabel,
-      category: r.supercategory,
-      pmidCount: r.pmidCount,
-      maxConfidence: 1,
-      examples: Array.isArray(r.exemplarTools) ? (r.exemplarTools as unknown[]).map(String) : [],
-    }));
+    .map((r) => {
+      const examples = Array.isArray(r.exemplarTools)
+        ? (r.exemplarTools as unknown[]).map(String)
+        : [];
+      // #1119 — align the per-exemplar usage snippets to `examples` order, keeping
+      // only exemplars that resolved a snippet. The JSON is keyed by display name.
+      const ctx =
+        r.exemplarContexts && typeof r.exemplarContexts === "object" && !Array.isArray(r.exemplarContexts)
+          ? (r.exemplarContexts as Record<string, unknown>)
+          : {};
+      const exemplarContexts = examples
+        .map((name) => ({ name, context: typeof ctx[name] === "string" ? (ctx[name] as string) : null }))
+        .filter((e): e is { name: string; context: string } => e.context != null);
+      return {
+        toolName: r.familyLabel,
+        category: r.supercategory,
+        pmidCount: r.pmidCount,
+        maxConfidence: 1,
+        examples,
+        exemplarContexts,
+      };
+    });
 }
 
 /** Highest-score topic rationale per pmid for `cwid` ("why this work maps here"). */
@@ -514,7 +545,12 @@ export async function assembleOverviewFacts(
   // names so the model can ground concrete prose, not just the family label.
   const methods = methodFamilies
     .filter((t) => selectedToolSet.has(t.toolName))
-    .map((t) => ({ name: t.toolName, category: t.category, examples: t.examples }));
+    .map((t) => ({
+      name: t.toolName,
+      category: t.category,
+      examples: t.examples,
+      exemplarContexts: t.exemplarContexts,
+    }));
 
   const hasMetrics =
     scholar.hIndex !== null ||

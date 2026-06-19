@@ -144,6 +144,7 @@ function familyRow(
   supercategory: string,
   pmidCount: number,
   exemplarTools: string[] = [],
+  exemplarContexts: Record<string, string> = {},
 ) {
   return {
     familyId: `fam_${familyLabel.replace(/\s+/g, "_")}`,
@@ -151,6 +152,7 @@ function familyRow(
     supercategory,
     pmidCount,
     exemplarTools,
+    exemplarContexts,
   };
 }
 
@@ -433,12 +435,12 @@ describe("assembleOverviewFacts — methods (scholar_family) & faculty metrics",
     familyRow("PET imaging", "imaging", 12, ["[18F]FDG"]),
   ];
 
-  it("defaults to the scholar's top families, shaped methods as {name, category, examples}", async () => {
+  it("defaults to the scholar's top families, shaped methods as {name, category, examples, exemplarContexts}", async () => {
     mockScholarFamilyFindMany.mockResolvedValue(FAMILIES);
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.methods).toEqual([
-      { name: "AAV vectors", category: "vector platform", examples: ["AAV2", "AAV9"] },
-      { name: "PET imaging", category: "imaging", examples: ["[18F]FDG"] },
+      { name: "AAV vectors", category: "vector platform", examples: ["AAV2", "AAV9"], exemplarContexts: [] },
+      { name: "PET imaging", category: "imaging", examples: ["[18F]FDG"], exemplarContexts: [] },
     ]);
   });
 
@@ -450,7 +452,30 @@ describe("assembleOverviewFacts — methods (scholar_family) & faculty metrics",
       toolNames: ["PET imaging", "evil-tool"],
     });
     expect(facts?.methods).toEqual([
-      { name: "PET imaging", category: "imaging", examples: ["[18F]FDG"] },
+      { name: "PET imaging", category: "imaging", examples: ["[18F]FDG"], exemplarContexts: [] },
+    ]);
+  });
+
+  // #1119 — the per-exemplar usage snippet (keyed by display name in the JSON
+  // column) is attached to the methods facts, aligned to `examples`, keeping only
+  // exemplars that resolved a snippet.
+  it("attaches exemplar usage context, aligned to examples (grounding-eligible)", async () => {
+    mockScholarFamilyFindMany.mockResolvedValue([
+      familyRow("AAV vectors", "vector platform", 28, ["AAVrh.10", "AAV9"], {
+        "AAVrh.10": "AAVrh.10 delivered the transgene to the CNS via intrathecal injection in the trial",
+        // AAV9 has no snippet → must not appear
+      }),
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.methods).toEqual([
+      {
+        name: "AAV vectors",
+        category: "vector platform",
+        examples: ["AAVrh.10", "AAV9"],
+        exemplarContexts: [
+          { name: "AAVrh.10", context: "AAVrh.10 delivered the transgene to the CNS via intrathecal injection in the trial" },
+        ],
+      },
     ]);
   });
 
@@ -467,7 +492,7 @@ describe("assembleOverviewFacts — methods (scholar_family) & faculty metrics",
     ]);
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.methods).toEqual([
-      { name: "AAV vectors", category: "vector platform", examples: ["AAV2"] },
+      { name: "AAV vectors", category: "vector platform", examples: ["AAV2"], exemplarContexts: [] },
     ]);
     const opts = await loadOverviewSourceOptions("self01");
     expect(opts.tools.map((t) => t.toolName)).toEqual(["AAV vectors"]);
@@ -549,7 +574,7 @@ describe("assembleOverviewFacts — methods (scholar_family) & faculty metrics",
     // No explicit selection → default path → only the >=2 family flows to methods.
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.methods).toEqual([
-      { name: "frequent", category: "method", examples: ["tool-a"] },
+      { name: "frequent", category: "method", examples: ["tool-a"], exemplarContexts: [] },
     ]);
   });
 });

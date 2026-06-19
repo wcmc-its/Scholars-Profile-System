@@ -18,6 +18,7 @@ import {
   resolvePeopleConceptGrantAxis,
   resolvePeopleConceptPrecount,
   resolvePeopleMethodFamilyBoost,
+  resolvePeopleMethodContextBoost,
   resolveSearchShellStreaming,
 } from "@/lib/api/search-flags";
 
@@ -295,6 +296,34 @@ describe("resolvePeopleMethodFamilyBoost (#824 §4c)", () => {
     expect(resolvePeopleMethodFamilyBoost()).toBe(false);
     process.env.SEARCH_PEOPLE_METHOD_FAMILY = "";
     expect(resolvePeopleMethodFamilyBoost()).toBe(false);
+  });
+});
+
+describe("resolvePeopleMethodContextBoost (#1119)", () => {
+  const original = process.env.SEARCH_PEOPLE_METHOD_CONTEXT;
+
+  beforeEach(() => {
+    delete process.env.SEARCH_PEOPLE_METHOD_CONTEXT;
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_PEOPLE_METHOD_CONTEXT;
+    else process.env.SEARCH_PEOPLE_METHOD_CONTEXT = original;
+  });
+
+  it("defaults to false (off) when unset — reindex-then-flip, ships inert", () => {
+    expect(resolvePeopleMethodContextBoost()).toBe(false);
+  });
+
+  it("is on only for exactly 'on'", () => {
+    process.env.SEARCH_PEOPLE_METHOD_CONTEXT = "on";
+    expect(resolvePeopleMethodContextBoost()).toBe(true);
+  });
+
+  it("stays off for any other value (opt-in `=== \"on\"` semantics)", () => {
+    for (const v of ["ON", "true", ""]) {
+      process.env.SEARCH_PEOPLE_METHOD_CONTEXT = v;
+      expect(resolvePeopleMethodContextBoost()).toBe(false);
+    }
   });
 });
 

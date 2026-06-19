@@ -29,6 +29,7 @@ import {
   isMethodsLensEnabled,
   isMethodsLensSensitiveGateOn,
   isMethodsFamilyDefinitionsOn,
+  isMethodsLensToolContextOn,
 } from "@/lib/profile/methods-lens-flags";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import {
@@ -80,6 +81,11 @@ export type ScholarFamilyView = {
   supercategory: string;
   pubCount: number;
   exemplarTools: string[];
+  /** #1119 — best per-exemplar-tool usage snippet, keyed by the SAME display name
+   *  as `exemplarTools`. `{}` until the tools-a2-v3 rollup populates the column AND
+   *  the METHODS_LENS_TOOL_CONTEXT flag is on (kept out of the cached payload until
+   *  then, like `definition`). Plain extracted publication text; render as text. */
+  exemplarContexts: Record<string, string>;
   /** #819 — distinct member PMIDs (digit strings) backing the click-to-filter.
    *  `len === pubCount` upstream (ReciterAI#175); `[]` on a pre-#175 rollup. */
   pmids: string[];
@@ -160,6 +166,17 @@ export function aggregateKeywords(
 // the per-profile lens and the standalone pages apply ONE suppression/sensitivity
 // implementation. Imported above; behavior here is unchanged.
 
+/** Coerce a nullable Json column into a plain `Record<string, string>`, dropping
+ *  non-string values and own-prototype keys. #1119 `exemplar_contexts` shape. */
+function coerceStringRecord(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === "string" && v.length > 0) out[k] = v;
+  }
+  return out;
+}
+
 function toScholarFamilyView(
   r: {
     familyId: string;
@@ -167,6 +184,7 @@ function toScholarFamilyView(
     supercategory: string;
     pmidCount: number;
     exemplarTools: unknown;
+    exemplarContexts: unknown;
     pmids: unknown;
     definition: string | null;
     definitionSource: string | null;
@@ -176,6 +194,9 @@ function toScholarFamilyView(
   // still bake the copy into the cache; nulling it here keeps it out of the payload
   // until the flag flips (mirrors getFamily reading it only under the same gate).
   includeDefinition: boolean,
+  // #1119 — same reasoning for the tool-usage snippets: drop them from the cached
+  // payload entirely unless METHODS_LENS_TOOL_CONTEXT is on.
+  includeToolContext: boolean,
 ): ScholarFamilyView {
   return {
     familyId: r.familyId,
@@ -183,6 +204,8 @@ function toScholarFamilyView(
     supercategory: r.supercategory,
     pubCount: r.pmidCount,
     exemplarTools: Array.isArray(r.exemplarTools) ? (r.exemplarTools as string[]) : [],
+    // #1119 — keyed by display name; coerce defensively (nullable Json column).
+    exemplarContexts: includeToolContext ? coerceStringRecord(r.exemplarContexts) : {},
     // Coerce defensively: the column is nullable (pre-#175 rollup) and Json.
     pmids: Array.isArray(r.pmids) ? (r.pmids as unknown[]).map(String) : [],
     // #879 — render-only passthrough; null until the tools-a2-v3 rollup lands AND
@@ -212,6 +235,8 @@ async function partitionScholarFamilies(
 
   // #879 — gate the generated definition out of the (cached) payload unless on.
   const defsOn = isMethodsFamilyDefinitionsOn();
+  // #1119 — gate the tool-usage snippets out of the (cached) payload unless on.
+  const ctxOn = isMethodsLensToolContextOn();
 
   const rows = await prisma.scholarFamily.findMany({
     where: { cwid },
@@ -222,6 +247,7 @@ async function partitionScholarFamilies(
       supercategory: true,
       pmidCount: true,
       exemplarTools: true,
+      exemplarContexts: true,
       pmids: true,
       definition: true,
       definitionSource: true,
@@ -241,7 +267,7 @@ async function partitionScholarFamilies(
 
   if (!isMethodsLensSensitiveGateOn()) {
     return {
-      publicFamilies: visible.map((r) => toScholarFamilyView(r, defsOn)),
+      publicFamilies: visible.map((r) => toScholarFamilyView(r, defsOn, ctxOn)),
       sensitiveFamilies: [],
     };
   }
@@ -258,7 +284,7 @@ async function partitionScholarFamilies(
     (sensitiveKeys.has(familyOverlayKey(r.supercategory, r.familyLabel))
       ? sensitiveFamilies
       : publicFamilies
-    ).push(toScholarFamilyView(r, defsOn));
+    ).push(toScholarFamilyView(r, defsOn, ctxOn));
   }
   return { publicFamilies, sensitiveFamilies };
 }

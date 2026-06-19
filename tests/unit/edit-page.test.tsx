@@ -552,6 +552,48 @@ describe("EditPage router — self Profile URL request card (#497 PR-3, flag-gat
   });
 });
 
+describe("EditPage — proxy / unit-admin third-person parity (#955 #10)", () => {
+  // A proxy / unit-admin edits on the scholar's behalf, so copy-only cards render
+  // in third person exactly like a superuser does (the page passes them the same
+  // voice-derived mode). VisibilityCard is the exception — third-person COPY but
+  // the self (ownRow) state machine, because a proxy is a self-surrogate.
+  it.each(["proxy", "unit-admin"] as const)(
+    "Email tab reads in third person for a %s editor (parity with superuser)",
+    (mode) => {
+      render(<EditPage ctx={superuserCtx} mode={mode} attr="email" />);
+      expect(screen.getByTestId("email-usage-note").textContent).toBe(
+        "This is the contact email shown on Alex Other's public profile.",
+      );
+      expect(screen.getByTestId("email-download-policy").textContent).not.toMatch(/\byour\b/i);
+    },
+  );
+
+  it.each(["proxy", "unit-admin"] as const)(
+    "Home board reads third-person ('Profile completeness', not 'Complete your profile') for a %s editor",
+    (mode) => {
+      render(<EditPage ctx={superuserCtx} mode={mode} attr="home" />);
+      expect(screen.getByText("Profile completeness")).toBeTruthy();
+      expect(screen.queryByText("Complete your profile")).toBeNull();
+      expect(screen.queryByText("Yours to edit")).toBeNull();
+    },
+  );
+
+  it.each(["proxy", "unit-admin"] as const)(
+    "Visibility tab is third-person but keeps the self (ownRow) controls for a %s editor",
+    (mode) => {
+      render(<EditPage ctx={superuserCtx} mode={mode} attr="visibility" />);
+      // Third-person copy…
+      expect(screen.getByText(/Alex Other's profile is visible to the public/)).toBeTruthy();
+      expect(screen.getByTestId("visibility-hide").textContent).toBe("Hide profile");
+      // …but the SELF state machine (data-mode='self'): a proxy hides via the
+      // scholar's own row, never an admin hold.
+      expect(
+        document.querySelector('[data-slot="visibility-card"]')?.getAttribute("data-mode"),
+      ).toBe("self");
+    },
+  );
+});
+
 describe("EditPage router — superuser mode", () => {
   it("defaults to the Home completeness panel, shows the admin banner, and the superuser rail (Home + Profile URL at the top, Publications yes)", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" />);
