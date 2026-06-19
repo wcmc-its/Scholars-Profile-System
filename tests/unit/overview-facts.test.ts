@@ -1041,6 +1041,19 @@ describe("assembleOverviewFacts — methods (scholar_family) & faculty metrics",
     ]);
   });
 
+  // The "show evidence" reveal names the family's concrete exemplar tools so each
+  // row is specific, falling back to the generic phrasing only when a family has none.
+  it("names the exemplar tools in the tool reason; falls back when there are none", async () => {
+    mockScholarFamilyFindMany.mockResolvedValue([
+      familyRow("AAV vectors", "vector platform", 28, ["AAV2", "AAV9"]),
+      familyRow("frequent-no-examples", "method", 5),
+    ]);
+    const opts = await loadOverviewSourceOptions("self01");
+    const reasonByTool = Object.fromEntries(opts.tools.map((t) => [t.toolName, t.reason]));
+    expect(reasonByTool["AAV vectors"]).toBe("Includes AAV2, AAV9");
+    expect(reasonByTool["frequent-no-examples"]).toBe("A method recurring across your work");
+  });
+
   // #765 §2 / §7.4 — the pmid_count >= 2 default floor keeps the Methods rule
   // line ("ranked by how often each appears") honest. Single-paper long-tail
   // families are CANDIDATES (still selectable) but never default-selected.

@@ -180,14 +180,28 @@ describe("tiers + featuredLimit + reasons", () => {
     expect(out.filter((r) => r.featured)).toHaveLength(8);
   });
 
-  it("emits numberless reasons (no digits) and a landmark-specific phrase", () => {
+  it("singles out the strongest paper; secondary landmarks keep the landmark phrase; reasons stay numberless", () => {
     const corpus = [
-      cand({ pmid: "lm", impact: 100, year: 2012, authorPosition: "first" }),
-      ...Array.from({ length: 5 }, (_, i) => cand({ pmid: `x${i}`, impact: 10 + i, year: 2026 })),
+      // Two top-quantile landmarks; lm1 is newer so it ranks first (score tie → year desc).
+      // Filler is low-impact AND old, so its recency-decayed score stays below the
+      // landmarks' pinned 1.0 — keeping lm1 the unambiguous rank-0 standout.
+      cand({ pmid: "lm1", impact: 100, year: 2014, authorPosition: "first" }),
+      cand({ pmid: "lm2", impact: 95, year: 2013, authorPosition: "last" }),
+      ...Array.from({ length: 18 }, (_, i) => cand({ pmid: `x${i}`, impact: 10 + i, year: 2005 })),
     ];
     const out = rankRepresentativePublications(corpus, { nowYear: NOW });
-    expect(out.find((r) => r.pmid === "lm")!.reason).toMatch(/landmark/i);
+    // The single strongest paper is distinguished, not "A landmark you led" like the rest.
+    expect(out[0].pmid).toBe("lm1");
+    expect(out[0].reason).toMatch(/influential/i);
+    // A SECONDARY landmark still reads as a landmark (the standout phrase is unique).
+    expect(out.find((r) => r.pmid === "lm2")!.reason).toMatch(/landmark/i);
+    // Reasons remain numberless.
     expect(out.every((r) => !/\d/.test(r.reason))).toBe(true);
+  });
+
+  it("does NOT apply the standout phrase to a lone paper (needs ≥2 to be 'most')", () => {
+    const out = rankRepresentativePublications([cand({ pmid: "solo", impact: 90 })], { nowYear: NOW });
+    expect(out[0].reason).not.toMatch(/influential/i);
   });
 
   it("is deterministic — equal scores break ties by year then pmid", () => {

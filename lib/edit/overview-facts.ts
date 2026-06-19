@@ -1185,8 +1185,10 @@ export async function loadOverviewSourceOptions(cwid: string): Promise<OverviewS
       featured: defaultGrants.has(f.id),
       reason: isLeadRole(f.role) ? "An active grant you lead" : "An active grant you're part of",
     })),
-    // The drawer `tools[]` shape is unchanged (#886) — `examples` ride only in
-    // the FACTS grounding, not here. `reason` is additive.
+    // The drawer `tools[]` shape is unchanged (#886). `reason` (the "show evidence"
+    // reveal) names the family's concrete exemplar tools so each row is specific —
+    // e.g. "Includes 10x Chromium, Seurat" — instead of one repeated generic line;
+    // it falls back to the generic phrasing only when a family has no exemplars.
     tools: methodFamilies.map((t) => ({
       toolName: t.toolName,
       category: t.category,
@@ -1194,9 +1196,11 @@ export async function loadOverviewSourceOptions(cwid: string): Promise<OverviewS
       maxConfidence: t.maxConfidence,
       defaultSelected: defaultTools.has(t.toolName),
       reason:
-        t.pmidCount >= OVERVIEW_METHOD_PMID_FLOOR
-          ? "A method recurring across your work"
-          : "A method in your work",
+        t.examples.length > 0
+          ? `Includes ${t.examples.slice(0, 3).join(", ")}`
+          : t.pmidCount >= OVERVIEW_METHOD_PMID_FLOOR
+            ? "A method recurring across your work"
+            : "A method in your work",
     })),
     titles,
     education,
