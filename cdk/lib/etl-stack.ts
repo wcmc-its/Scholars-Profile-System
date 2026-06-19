@@ -410,6 +410,10 @@ export class EtlStack extends Stack {
             // #928 — etl:mentoring:import-citing reads the publication cited-by
             // bridge NDJSON (exported WCM-side) from here.
             "arn:aws:s3:::wcmc-reciterai-artifacts/citations/*",
+            // clinical-trials — etl:clinical-trials:import reads the trial bridge
+            // NDJSON (reciterdb exported from a reachable client) from here (#443
+            // workaround, same shape as the ed/ and mentoring/ bridges).
+            "arn:aws:s3:::wcmc-reciterai-artifacts/clinical-trials/*",
             "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
           ],
         }),
