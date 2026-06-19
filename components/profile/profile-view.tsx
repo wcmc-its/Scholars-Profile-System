@@ -18,6 +18,7 @@ import { ScrollFade } from "@/components/ui/scroll-fade";
 import { EditMyProfileButton } from "@/components/scholar/edit-my-profile-button";
 import { Suspense } from "react";
 import { GrantsSection } from "@/components/profile/grants-section";
+import { ClinicalTrialsSection } from "@/components/profile/clinical-trials-section";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { ProfilePubsCluster } from "@/components/profile/profile-pubs-cluster";
 import { PublicationRow } from "@/components/profile/publication-row";
@@ -155,6 +156,7 @@ export async function ProfileView({ slug }: { slug: string }) {
     .reduce((acc, y) => Math.max(acc, y), 0);
 
   const activeGrantCount = profile.grants.filter((g) => g.isActive).length;
+  const activeTrialCount = profile.clinicalTrials.filter((t) => t.isActive).length;
 
   return (
     <>
@@ -505,6 +507,21 @@ export async function ProfileView({ slug }: { slug: string }) {
               }
             >
               <GrantsSection grants={profile.grants} />
+            </Section>
+          ) : null}
+
+          {profile.clinicalTrials.length > 0 ? (
+            <Section
+              title="Clinical trials"
+              headingLg
+              count={
+                <>
+                  {profile.clinicalTrials.length} total
+                  {activeTrialCount > 0 ? ` · ${activeTrialCount} active` : ""}
+                </>
+              }
+            >
+              <ClinicalTrialsSection trials={profile.clinicalTrials} />
             </Section>
           ) : null}
 

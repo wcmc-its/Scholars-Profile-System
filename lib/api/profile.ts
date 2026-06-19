@@ -496,6 +496,35 @@ export type ProfilePayload = {
       isLowerConfidence: boolean;
     }>;
   }>;
+  /** Clinical trials the scholar is an investigator on. Sourced from
+   *  reciterdb (institutional spine + ClinicalTrials.gov enrichment) by
+   *  etl/clinical-trials. EMPTY unless CLINICAL_TRIALS_SECTION is on — the
+   *  section ships dark, so an unflagged env never surfaces trials even after
+   *  the ETL backfill. Withdrawn trials are dropped here, not stored away. */
+  clinicalTrials: Array<{
+    protocolNumber: string;
+    nctNumber: string | null;
+    title: string;
+    /** Raw institutional status (e.g. "Recruiting", "Completed"). */
+    status: string | null;
+    /** Coarse split for the Active/Completed grouping, derived from status. */
+    isActive: boolean;
+    /** YYYY-MM-DD, or null when the institutional status date didn't parse. */
+    statusDate: string | null;
+    /** Enriched study phase (e.g. "Phase 2/Phase 3"); null for non-NCT/N-A. */
+    phase: string | null;
+    studyType: string | null;
+    principalSponsor: string | null;
+    /** Derived role: 'Principal Investigator' | 'Investigator'. */
+    role: string;
+    conditions: string | null;
+    briefSummary: string | null;
+    enrollment: number | null;
+    /** Where the detail came from ("ClinicalTrials.gov" today); null when only
+     *  institutional data exists. Drives the data-vintage note + the
+     *  third-party swap-point. */
+    enrichmentSource: string | null;
+  }>;
   keywords: ProfileKeywords;
   /** #799 — family-primary Methods lens rows. Empty when the lens flag is off
    *  or the `scholar_family` rollup has no rows for this scholar (dormant until
@@ -629,6 +658,27 @@ function ensureOwnerInChipWindow<T extends { cwid: string }>(
   return next;
 }
 
+/** A trial we never display (withdrawn / never-enrolled). Checked before the
+ *  active test below so "no longer available" doesn't count as "available". */
+function isWithdrawnTrialStatus(status: string | null): boolean {
+  const s = (status ?? "").toLowerCase();
+  return s.includes("withdrawn") || s.includes("no longer available");
+}
+
+/** Coarse Active vs Completed split for the trial section, from the raw
+ *  institutional status. Anything recruiting/enrolling/active counts as active;
+ *  completed/terminated/suspended fall through to completed. */
+function isActiveTrialStatus(status: string | null): boolean {
+  const s = (status ?? "").toLowerCase();
+  if (!s) return false;
+  return (
+    s.includes("recruiting") || // covers "not yet recruiting"
+    s.includes("enrolling") ||
+    s.includes("active") || // covers "active, not recruiting"
+    s.includes("available")
+  );
+}
+
 export const getScholarFullProfileBySlug = cache(async (
   slug: string,
   now: Date = new Date(),
@@ -662,6 +712,12 @@ export const getScholarFullProfileBySlug = cache(async (
       },
       coiActivities: {
         orderBy: [{ activityGroup: "asc" }, { entity: "asc" }],
+      },
+      // Clinical trials (#clinical-trials). Always joined (a small, usually-empty
+      // relation); the payload is gated dark in the mapper below, so an env with
+      // CLINICAL_TRIALS_SECTION off returns [] even after the ETL backfill lands.
+      clinicalTrials: {
+        include: { trial: true },
       },
       // Issue #167 — surface the division name so the sidebar can render
       // "<Division> (<Department>)". Department display still comes from
@@ -1124,6 +1180,38 @@ export const getScholarFullProfileBySlug = cache(async (
         publications: pubs,
       };
     }),
+    // Clinical trials (#clinical-trials). Dark unless CLINICAL_TRIALS_SECTION is
+    // on: an unflagged env returns [] regardless of the table contents, so the
+    // ETL backfill can land before the flag flip without exposing the section.
+    // Withdrawn/never-enrolled trials are dropped; the rest sort active-first
+    // then by most recent status date.
+    clinicalTrials:
+      process.env.CLINICAL_TRIALS_SECTION === "on"
+        ? scholar.clinicalTrials
+            .filter((ct) => !isWithdrawnTrialStatus(ct.trial.status))
+            .map((ct) => ({
+              protocolNumber: ct.trial.protocolNumber,
+              nctNumber: ct.trial.nctNumber,
+              title: ct.trial.title,
+              status: ct.trial.status,
+              isActive: isActiveTrialStatus(ct.trial.status),
+              statusDate: ct.trial.statusDate
+                ? ct.trial.statusDate.toISOString().slice(0, 10)
+                : null,
+              phase: ct.trial.phase,
+              studyType: ct.trial.studyType,
+              principalSponsor: ct.trial.principalSponsor,
+              role: ct.role,
+              conditions: ct.trial.conditions,
+              briefSummary: ct.trial.briefSummary,
+              enrollment: ct.trial.enrollment,
+              enrichmentSource: ct.trial.enrichmentSource,
+            }))
+            .sort((a, b) => {
+              if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+              return (b.statusDate ?? "").localeCompare(a.statusDate ?? "");
+            })
+        : [],
     keywords,
     families,
     disclosures: scholar.coiActivities.map((c) => ({

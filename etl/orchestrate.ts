@@ -88,6 +88,11 @@ async function main() {
     // Reads SPS-DB only — not WCM-network-blocked — so it computes whatever its
     // inputs hold (zero candidates when statements haven't been ingested yet).
     ["COI-Gap", "etl/coi-gap/index.ts"],
+    // Clinical trials. Reads reciterdb (same WCM-network path as ReCiter), so
+    // it shares ReCiter's #443 connectivity dependency; full-replace and
+    // no-op-safe (0 rows when reciterdb is unreachable) like the other
+    // reciterdb sources, so it is safe in the chain on the same footing.
+    ["Clinical-Trials", "etl/clinical-trials/index.ts"],
     ["Hierarchy", "etl/hierarchy/index.ts"],
     ["Spotlight", "etl/spotlight/index.ts"],
     ["DynamoDB", "etl/dynamodb/index.ts"],

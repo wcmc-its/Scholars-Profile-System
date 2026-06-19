@@ -1945,6 +1945,25 @@ describe("AppStack", () => {
       expect(envByName.get("RECITER_REJECT_SEND")).toBe("on");
     });
 
+    it("activates the clinical-trials profile section in staging first (CLINICAL_TRIALS_SECTION=on, #clinical-trials)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appTaskDef = Object.values(taskDefs).find(
+        (r) => r.Properties?.Family === "sps-app-staging",
+      );
+      const appContainer = (
+        appTaskDef?.Properties?.ContainerDefinitions as
+          | Array<{
+              Name?: string;
+              Environment?: Array<{ Name?: string; Value?: string }>;
+            }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("CLINICAL_TRIALS_SECTION")).toBe("on");
+    });
+
     it("activates the Methods lens in staging first (METHODS_LENS_ENABLED + METHODS_LENS_SENSITIVE_GATE both ON, #799/#801)", () => {
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const appTaskDef = Object.values(taskDefs).find(

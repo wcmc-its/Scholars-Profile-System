@@ -372,6 +372,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "CLINICAL_TRIALS_SECTION",
+                "Value": "off",
+              },
+              {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
                 "Value": "off",
               },
@@ -3558,6 +3562,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "CENTER_PROGRAM_PAGES",
+                "Value": "on",
+              },
+              {
+                "Name": "CLINICAL_TRIALS_SECTION",
                 "Value": "on",
               },
               {
