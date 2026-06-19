@@ -970,7 +970,7 @@ describe("EtlStack", () => {
         expect(serialized).not.toMatch(/\*/);
       });
 
-      it("the ETL task role grants s3:GetObject scoped to exactly the spotlight + tools + ed + mentoring + citations prefixes + hierarchy bucket (no bare *, no ListBucket)", () => {
+      it("the ETL task role grants s3:GetObject scoped to exactly the spotlight + tools + ed + mentoring + citations + clinical-trials prefixes + hierarchy bucket (no bare *, no ListBucket)", () => {
         const policy = etlTaskRolePolicy();
         expect(policy).toBeDefined();
         const statements = policy?.Properties?.PolicyDocument
@@ -987,11 +987,13 @@ describe("EtlStack", () => {
         expect(Array.isArray(action) ? action : [action]).toEqual([
           "s3:GetObject",
         ]);
-        // object-scoped: the spotlight + tools + ed + mentoring + citations
-        // prefixes in the shared artifacts bucket + the whole dedicated hierarchy
-        // bucket. ed/* is the email-visibility bridge artifact; mentoring/* is the
-        // mentee co-pub bridge (#443, etl:mentoring:import-copubs); citations/* is
-        // the publication cited-by bridge (#928/#938). Order matches the policy.
+        // object-scoped: the spotlight + tools + ed + mentoring + citations +
+        // clinical-trials prefixes in the shared artifacts bucket + the whole
+        // dedicated hierarchy bucket. ed/* is the email-visibility bridge artifact;
+        // mentoring/* is the mentee co-pub bridge (#443, etl:mentoring:import-copubs);
+        // citations/* is the publication cited-by bridge (#928/#938);
+        // clinical-trials/* is the clinical-trials bridge (etl:clinical-trials:import).
+        // Order matches the policy.
         const resources = Array.isArray(s3Stmt?.Resource)
           ? (s3Stmt?.Resource as string[])
           : [s3Stmt?.Resource as string];
@@ -1001,6 +1003,7 @@ describe("EtlStack", () => {
           "arn:aws:s3:::wcmc-reciterai-artifacts/ed/*",
           "arn:aws:s3:::wcmc-reciterai-artifacts/mentoring/*",
           "arn:aws:s3:::wcmc-reciterai-artifacts/citations/*",
+          "arn:aws:s3:::wcmc-reciterai-artifacts/clinical-trials/*",
           "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
         ]);
       });
