@@ -26,6 +26,7 @@
  */
 import { db } from "@/lib/db";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
+import { isChairTitleFor } from "@/lib/leadership";
 import {
   applyDeltas,
   OVERVIEW_METHOD_PMID_FLOOR,
@@ -103,9 +104,10 @@ export type OverviewFacts = {
    *  appointment (#742 §7). The primary title is already in `title` (the always-shown
    *  scaffolding line), so it is deliberately omitted here; this carries the
    *  *additional* roles the scholar has not hidden. Sourced from the `appointment`
-   *  table (significance-thresholded), filtered by the scholar's `title` deltas.
-   *  Leadership-FK roles (chair / chief / director / program leader recorded on the
-   *  org-unit tables) are layered in by a follow-up. `[]` when there are none. */
+   *  table (significance-thresholded), filtered by the scholar's `title` deltas,
+   *  AND the org-unit leadership-FK roles (chair / chief / director / program leader
+   *  recorded on the department / division / center tables, §2.5), deduped against
+   *  the appointment + primary titles. `[]` when there are none. */
   titles: { title: string; organization: string }[];
 
   // --- methods (the scholar's #799 method families; `[]` when none) ---
@@ -180,9 +182,9 @@ export type OverviewSourceFunding = {
 };
 
 /** A drawer candidate "Titles & positions" record (#742 §7 merged type). Sourced
- *  from the `appointment` table; the primary title also feeds the non-editable
- *  scaffolding line, so the drawer dedupes it. Leadership-FK roles (chair /
- *  director / chief / program leader) are layered in by the PR-2 UI. */
+ *  from the `appointment` table plus the org-unit leadership-FK roles (chair /
+ *  chief / director / program leader, §2.5); the primary title also feeds the
+ *  non-editable scaffolding line, so the drawer dedupes it. */
 export type OverviewSourceTitle = {
   id: string;
   title: string;
@@ -866,28 +868,164 @@ function clusterKeyForDedup(title: string, year: number | null): string {
 const SIGNIFICANT_TITLE_RE =
   /\b(chair|chief|director|president|dean|head|provost|principal|editor[-\s]?in[-\s]?chief)\b/i;
 
-/** "Titles & positions" candidates from the `appointment` table (#742 §7). The
- *  primary title also drives the scaffolding line; it is still listed here (the
- *  drawer dedupes it). Leadership-FK roles are layered in by the PR-2 UI. */
-async function loadOverviewTitleCandidates(cwid: string): Promise<OverviewSourceTitle[]> {
-  const rows = await db.read.appointment.findMany({
-    where: { cwid },
-    orderBy: [
-      { isPrimary: "desc" },
-      { endDate: { sort: "desc", nulls: "first" } },
-      { startDate: "desc" },
-    ],
-    select: {
-      id: true,
-      title: true,
-      organization: true,
-      startDate: true,
-      endDate: true,
-      isPrimary: true,
-      isInterim: true,
+const WCM_ORG = "Weill Cornell Medicine";
+
+/** Prepend a unit noun ("Department of") to a bare unit name, unless the name
+ *  already opens with a unit noun (so "Department of Department of …" can't form). */
+function withUnitNoun(prefix: string, name: string): string {
+  const n = name.trim();
+  return /^(department|division|center|institute|school|college|program)\b/i.test(n)
+    ? n
+    : `${prefix} ${n}`;
+}
+
+/** Append " Program" to a program label unless it already carries the noun. */
+function asProgramName(label: string): string {
+  const l = label.trim();
+  return /\bprogram\b/i.test(l) ? l : `${l} Program`;
+}
+
+/** One synthesized FK-leadership title plus the unit context the dedup needs. */
+type FkLeadershipCandidate = {
+  candidate: OverviewSourceTitle;
+  /** A dept-chair role — gets the role-aware `isChairTitleFor` dedup (the ETL sets
+   *  `chairCwid` from a "Chairman …" appointment whose string won't match exactly). */
+  isDeptChair: boolean;
+  /** The unit name, for the chair dedup against appointment titles. */
+  unitName: string;
+};
+
+/** Build one FK-leadership candidate. Current leadership ⇒ featured (Feedstock). */
+function fkLeadershipCandidate(
+  id: string,
+  title: string,
+  organization: string,
+  isInterim: boolean,
+  opts: { isDeptChair?: boolean; unitName?: string } = {},
+): FkLeadershipCandidate {
+  return {
+    candidate: {
+      id,
+      title,
+      organization,
+      isPrimary: false,
+      isInterim,
+      isCurrent: true,
+      endYear: null,
+      featured: true,
+      reason: "A leadership role",
     },
-  });
-  return rows.map((a) => {
+    isDeptChair: opts.isDeptChair ?? false,
+    unitName: opts.unitName ?? "",
+  };
+}
+
+/**
+ * #742 §2.5 — leadership roles recorded on the org-unit FK tables, not (or not
+ * yet) in the appointment table: a department `chairCwid`, a division `chiefCwid`,
+ * a center `directorCwid` (+ interim), and `CenterProgramLeader` rows. These catch
+ * leadership set via `field_override` or missed by the appointment-title ETL (the
+ * Stewart case). Each query keys on the leader being THIS scholar, so an external
+ * leader (`lib/external-leaders.ts`, a non-WCM cwid) never matches. The synthesized
+ * titles are deduped against the appointment titles + primary title by the caller.
+ *
+ * NOTE: program leaders live in `CenterProgramLeader` (#1117 replaced the single
+ * `CenterProgram.leaderCwid` column), so a co-led program surfaces every leader.
+ */
+async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCandidate[]> {
+  const [departments, divisions, centers, programLeaders] = await Promise.all([
+    db.read.department.findMany({
+      where: { chairCwid: cwid },
+      select: { code: true, name: true, officialName: true },
+    }),
+    db.read.division.findMany({
+      where: { chiefCwid: cwid },
+      select: { code: true, name: true },
+    }),
+    db.read.center.findMany({
+      where: { directorCwid: cwid },
+      select: { code: true, name: true, officialName: true, leaderInterim: true },
+    }),
+    db.read.centerProgramLeader.findMany({
+      where: { cwid },
+      select: {
+        centerCode: true,
+        programCode: true,
+        interim: true,
+        program: { select: { label: true, center: { select: { name: true, officialName: true } } } },
+      },
+    }),
+  ]);
+
+  const out: FkLeadershipCandidate[] = [];
+  for (const d of departments) {
+    const name = d.officialName ?? d.name;
+    out.push(
+      fkLeadershipCandidate(
+        `fk:dept:${d.code}`,
+        `Chair, ${withUnitNoun("Department of", name)}`,
+        WCM_ORG,
+        false,
+        { isDeptChair: true, unitName: name },
+      ),
+    );
+  }
+  for (const v of divisions) {
+    out.push(
+      fkLeadershipCandidate(`fk:div:${v.code}`, `Chief, ${withUnitNoun("Division of", v.name)}`, WCM_ORG, false),
+    );
+  }
+  for (const c of centers) {
+    const name = c.officialName ?? c.name;
+    out.push(
+      fkLeadershipCandidate(
+        `fk:center:${c.code}`,
+        `${c.leaderInterim ? "Interim " : ""}Director, ${name}`,
+        WCM_ORG,
+        c.leaderInterim,
+      ),
+    );
+  }
+  for (const p of programLeaders) {
+    const centerName = p.program.center.officialName ?? p.program.center.name;
+    out.push(
+      fkLeadershipCandidate(
+        `fk:program:${p.centerCode}:${p.programCode}`,
+        `${p.interim ? "Interim " : ""}Leader, ${asProgramName(p.program.label)}`,
+        centerName,
+        p.interim,
+      ),
+    );
+  }
+  return out;
+}
+
+/** "Titles & positions" candidates from the `appointment` table (#742 §7),
+ *  augmented with the org-unit leadership-FK roles (§2.5). The primary title also
+ *  drives the scaffolding line; it is still listed here (the drawer dedupes it). */
+async function loadOverviewTitleCandidates(cwid: string): Promise<OverviewSourceTitle[]> {
+  const [rows, fkCandidates, scholar] = await Promise.all([
+    db.read.appointment.findMany({
+      where: { cwid },
+      orderBy: [
+        { isPrimary: "desc" },
+        { endDate: { sort: "desc", nulls: "first" } },
+        { startDate: "desc" },
+      ],
+      select: {
+        id: true,
+        title: true,
+        organization: true,
+        startDate: true,
+        endDate: true,
+        isPrimary: true,
+        isInterim: true,
+      },
+    }),
+    loadLeadershipFkCandidates(cwid),
+    db.read.scholar.findUnique({ where: { cwid }, select: { primaryTitle: true } }),
+  ]);
+  const appointments = rows.map((a) => {
     const isCurrent = a.endDate === null;
     const significant = SIGNIFICANT_TITLE_RE.test(a.title);
     // Featured = the primary title, or a current, non-interim leadership role.
@@ -913,6 +1051,28 @@ async function loadOverviewTitleCandidates(cwid: string): Promise<OverviewSource
       reason,
     };
   });
+
+  // §2.5 dedup — drop an FK-leadership title the appointments (or the primary title)
+  // already carry, so a chair recorded in BOTH places doesn't double. Exact
+  // normalized match covers the general case; a dept chair additionally gets the
+  // role-aware `isChairTitleFor` check, because `chairCwid` is derived from a
+  // "Chairman …" appointment whose text won't match the synthesized "Chair, …".
+  const apptTitles = appointments.map((a) => a.title);
+  const primaryTitle = scholar?.primaryTitle ?? null;
+  const takenNorm = new Set(apptTitles.map((t) => normalizeTitleForDedup(t)));
+  const primaryNorm = normalizeTitleForDedup(primaryTitle);
+  if (primaryNorm) takenNorm.add(primaryNorm);
+  const chairContexts = primaryTitle ? [...apptTitles, primaryTitle] : apptTitles;
+
+  const fkTitles = fkCandidates
+    .filter((fk) => {
+      if (takenNorm.has(normalizeTitleForDedup(fk.candidate.title))) return false;
+      if (fk.isDeptChair && chairContexts.some((t) => isChairTitleFor(t, fk.unitName))) return false;
+      return true;
+    })
+    .map((fk) => fk.candidate);
+
+  return [...appointments, ...fkTitles];
 }
 
 /** Terminal (doctoral) degrees — the strongest education signal. Includes the

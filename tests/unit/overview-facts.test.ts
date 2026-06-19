@@ -20,6 +20,10 @@ const {
   mockScholarFamilyFindMany,
   mockFamilySuppressionFindMany,
   mockAppointmentFindMany,
+  mockDepartmentFindMany,
+  mockDivisionFindMany,
+  mockCenterFindMany,
+  mockCenterProgramLeaderFindMany,
 } = vi.hoisted(() => ({
   mockScholarFindUnique: vi.fn(),
   mockPubAuthorFindMany: vi.fn(),
@@ -32,6 +36,10 @@ const {
   mockScholarFamilyFindMany: vi.fn(),
   mockFamilySuppressionFindMany: vi.fn(),
   mockAppointmentFindMany: vi.fn(),
+  mockDepartmentFindMany: vi.fn(),
+  mockDivisionFindMany: vi.fn(),
+  mockCenterFindMany: vi.fn(),
+  mockCenterProgramLeaderFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -50,6 +58,11 @@ vi.mock("@/lib/db", () => ({
       familySuppressionOverlay: { findMany: mockFamilySuppressionFindMany },
       // #742 §7 — the merged "Titles & positions" candidate loader.
       appointment: { findMany: mockAppointmentFindMany },
+      // #742 §2.5 — org-unit leadership-FK title augmentation.
+      department: { findMany: mockDepartmentFindMany },
+      division: { findMany: mockDivisionFindMany },
+      center: { findMany: mockCenterFindMany },
+      centerProgramLeader: { findMany: mockCenterProgramLeaderFindMany },
     },
   },
 }));
@@ -182,6 +195,10 @@ beforeEach(() => {
   mockScholarFamilyFindMany.mockResolvedValue([]);
   mockFamilySuppressionFindMany.mockResolvedValue([]);
   mockAppointmentFindMany.mockResolvedValue([]);
+  mockDepartmentFindMany.mockResolvedValue([]);
+  mockDivisionFindMany.mockResolvedValue([]);
+  mockCenterFindMany.mockResolvedValue([]);
+  mockCenterProgramLeaderFindMany.mockResolvedValue([]);
 });
 
 /** A `scholar_family.findMany` row, as the #799 rollup returns it. */
@@ -718,6 +735,97 @@ describe("assembleOverviewFacts — explicit pub snapshot + title/education delt
     // The explicit snapshot won for pubs (only pmid 2, not the default 1+2)...
     expect(facts?.representativePublications.map((p) => p.pmid)).toEqual(["2"]);
     // ...and the title delta still bit on the explicit path (a1 vetoed → no extra titles).
+    expect(facts?.titles).toEqual([]);
+  });
+});
+
+// #742 §2.5 — leadership recorded on the org-unit FK tables (chair / chief /
+// director / program leader), catching roles set via field_override or missed by
+// the appointment-title ETL. Each query keys on the scholar, deduped against the
+// appointment + primary titles.
+describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
+  it("surfaces a department chair recorded only on Department.chairCwid", async () => {
+    mockDepartmentFindMany.mockResolvedValue([{ code: "MED", name: "Medicine", officialName: null }]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.titles).toEqual([
+      { title: "Chair, Department of Medicine", organization: "Weill Cornell Medicine" },
+    ]);
+  });
+
+  it("uses the curated official name and surfaces an interim center director", async () => {
+    mockCenterFindMany.mockResolvedValue([
+      {
+        code: "meyer",
+        name: "Meyer Cancer Center",
+        officialName: "Sandra and Edward Meyer Cancer Center",
+        leaderInterim: true,
+      },
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.titles).toEqual([
+      {
+        title: "Interim Director, Sandra and Edward Meyer Cancer Center",
+        organization: "Weill Cornell Medicine",
+      },
+    ]);
+  });
+
+  it("surfaces a center program leader as 'Leader, <program> Program'", async () => {
+    mockCenterProgramLeaderFindMany.mockResolvedValue([
+      {
+        centerCode: "meyer",
+        programCode: "CB",
+        interim: false,
+        program: { label: "Cancer Biology", center: { name: "Meyer Cancer Center", officialName: null } },
+      },
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.titles).toEqual([
+      { title: "Leader, Cancer Biology Program", organization: "Meyer Cancer Center" },
+    ]);
+  });
+
+  it("dedups an FK chair the appointment table already confers (isChairTitleFor)", async () => {
+    mockAppointmentFindMany.mockResolvedValue([apptRow("a1", "Sanford I. Weill Chair of Medicine")]);
+    mockDepartmentFindMany.mockResolvedValue([{ code: "MED", name: "Medicine", officialName: null }]);
+    const facts = await assembleOverviewFacts("self01");
+    // The endowed appointment chair stays; the synthesized FK chair is deduped.
+    expect(facts?.titles.map((t) => t.title)).toEqual(["Sanford I. Weill Chair of Medicine"]);
+  });
+
+  it("dedups an FK division chief that exactly matches an appointment title", async () => {
+    mockAppointmentFindMany.mockResolvedValue([apptRow("a1", "Chief, Division of Hematology")]);
+    mockDivisionFindMany.mockResolvedValue([{ code: "HEME", name: "Hematology" }]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.titles.map((t) => t.title)).toEqual(["Chief, Division of Hematology"]);
+  });
+
+  it("scopes every leadership-FK query to the scholar (external leaders never match)", async () => {
+    await assembleOverviewFacts("self01");
+    expect(mockDepartmentFindMany.mock.calls[0][0].where).toEqual({ chairCwid: "self01" });
+    expect(mockDivisionFindMany.mock.calls[0][0].where).toEqual({ chiefCwid: "self01" });
+    expect(mockCenterFindMany.mock.calls[0][0].where).toEqual({ directorCwid: "self01" });
+    expect(mockCenterProgramLeaderFindMany.mock.calls[0][0].where).toEqual({ cwid: "self01" });
+  });
+
+  it("a scholar's FK roles can be vetoed and surface in the drawer candidates", async () => {
+    mockCenterFindMany.mockResolvedValue([
+      { code: "englander", name: "Englander Institute for Precision Medicine", officialName: null, leaderInterim: false },
+    ]);
+    // The drawer candidate carries the synthesized title, featured + non-primary.
+    const opts = await loadOverviewSourceOptions("self01");
+    expect(opts.titles).toEqual([
+      expect.objectContaining({
+        id: "fk:center:englander",
+        title: "Director, Englander Institute for Precision Medicine",
+        featured: true,
+        isPrimary: false,
+      }),
+    ]);
+    // And a veto on its id keeps it out of the grounded facts.
+    const facts = await assembleOverviewFacts("self01", undefined, {
+      deltas: { ...DEFAULT_DELTAS, excluded: { title: ["fk:center:englander"] } },
+    });
     expect(facts?.titles).toEqual([]);
   });
 });
