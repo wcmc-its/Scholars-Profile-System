@@ -79,6 +79,19 @@ describe("OverviewIncludePicker — tiers", () => {
     fireEvent.click(screen.getByTestId("overview-source-why-method-AAV vectors"));
     expect(screen.getByText(/delivered the transgene/)).toBeTruthy();
   });
+
+  it("names example single-paper methods in the '+ N more' copy", () => {
+    const opts = options({
+      tools: [
+        { toolName: "Survival analysis", category: null, pmidCount: 2, maxConfidence: 0.9, defaultSelected: true },
+        { toolName: "Echocardiography", category: null, pmidCount: 1, maxConfidence: 0.6, defaultSelected: false },
+      ],
+    });
+    render(<OverviewIncludePicker options={opts} deltas={deltas()} onChange={() => {}} />);
+    expect(screen.getByTestId("overview-source-section-method").textContent).toContain(
+      "(Echocardiography…)",
+    );
+  });
 });
 
 describe("OverviewIncludePicker — three-state actions", () => {
@@ -157,6 +170,35 @@ describe("OverviewIncludePicker — led ⇄ all toggle", () => {
     });
     render(<OverviewIncludePicker options={opts} deltas={deltas()} onChange={() => {}} />);
     expect(screen.getByTestId("overview-source-empty-led")).toBeTruthy();
+  });
+
+  it("keeps the only led grant visible (struck + Undo) when excluded — NOT the empty state", () => {
+    // Regression: the empty-led copy is about candidates, not the veto state.
+    render(
+      <OverviewIncludePicker
+        options={options()}
+        deltas={deltas({ excluded: { funding: ["g1"] } })}
+        onChange={() => {}}
+      />,
+    );
+    const row = screen.getByTestId("overview-source-row-funding-g1");
+    expect(row.getAttribute("data-state")).toBe("excluded");
+    expect(screen.getByTestId("overview-source-undo-funding-g1")).toBeTruthy();
+    expect(screen.queryByTestId("overview-source-empty-led")).toBeNull();
+  });
+
+  it("keeps an excluded middle-author paper reachable (struck + Undo) in 'led' mode", () => {
+    // Regression: an excluded mid-bucket record must not vanish with its Undo.
+    render(
+      <OverviewIncludePicker
+        options={options()}
+        deltas={deltas({ excluded: { publication: ["44"] } })}
+        onChange={() => {}}
+      />,
+    );
+    const row = screen.getByTestId("overview-source-row-publication-44");
+    expect(row.getAttribute("data-state")).toBe("excluded");
+    expect(screen.getByTestId("overview-source-undo-publication-44")).toBeTruthy();
   });
 });
 

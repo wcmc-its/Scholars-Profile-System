@@ -207,8 +207,8 @@ type SectionSpec = {
   whyLabel: string | null;
   /** The led ⇄ all position toggle, or null. */
   toggle: { mode: OverviewPositionMode; onMode: (m: OverviewPositionMode) => void; ledLabel: string; allLabel: string } | null;
-  /** "+ N more …" copy as a function of the hidden count. */
-  moreCopy: (n: number) => string;
+  /** "+ N more …" copy, given the hidden count + a few example record names. */
+  moreCopy: (n: number, examples: string[]) => string;
   /** A leading empty-state line (funding's "no grants you lead are active"). */
   emptyLed?: string;
 }
@@ -309,8 +309,10 @@ export function OverviewIncludePicker({
             pinnable: true,
             whyLabel: "show evidence",
             toggle: null,
-            moreCopy: (n) =>
-              `+ ${n} single-paper ${n === 1 ? "method" : "methods"} — usually too thin to feature. `,
+            moreCopy: (n, ex) =>
+              `+ ${n} single-paper ${n === 1 ? "method" : "methods"}${
+                ex.length ? ` (${ex.join(", ")}…)` : ""
+              } — usually too thin to feature. `,
           }}
           deltas={deltas}
           onChange={onChange}
@@ -352,8 +354,10 @@ function Section({
 
   const allMode = toggle?.mode === "all";
 
-  // A record is shown when it is pinned, featured, or its hidden bucket is revealed.
+  // A record is shown when it is excluded (so its struck row + Undo stay reachable
+  // regardless of tier), pinned, featured, or its hidden bucket is revealed.
   const shown = (r: RecordView): boolean => {
+    if (isExcluded(r.id)) return true;
     if (isPinned(r.id)) return true;
     if (r.bucket === "featured") return true;
     if (r.bucket === "more") return showMore;
@@ -364,11 +368,22 @@ function Section({
     ? sortPublications(records.filter(shown), sortState.value)
     : records.filter(shown);
 
-  // The "+ N more" tail: more-bucket records not pinned and not yet revealed.
-  const hiddenMore = records.filter((r) => r.bucket === "more" && !isPinned(r.id) && !showMore).length;
+  // The "+ N more" tail: more-bucket records not pinned, not vetoed, not revealed.
+  const hiddenMore = records.filter(
+    (r) => r.bucket === "more" && !isPinned(r.id) && !isExcluded(r.id) && !showMore,
+  ).length;
 
-  const hasFeaturedShown = records.some((r) => r.bucket === "featured" && !isExcluded(r.id));
-  const showEmptyLed = Boolean(spec.emptyLed) && !allMode && !hasFeaturedShown;
+  // The "no grants you lead" empty state is about CANDIDATES, not the current
+  // veto state: it shows only when the scholar has zero led (featured) records,
+  // never because they hid their only one (that record still renders, struck).
+  const hasLedCandidate = records.some((r) => r.bucket === "featured");
+  const showEmptyLed = Boolean(spec.emptyLed) && !allMode && !hasLedCandidate;
+
+  // A few example names for the "+ N more" copy — only string titles (methods).
+  const moreExamples = records
+    .filter((r) => r.bucket === "more" && !isPinned(r.id) && !isExcluded(r.id) && typeof r.title === "string")
+    .slice(0, 3)
+    .map((r) => r.title as string);
 
   return (
     <section className="mt-4" data-testid={`overview-source-section-${type}`}>
@@ -421,7 +436,7 @@ function Section({
 
       {hiddenMore > 0 && (
         <p className="text-muted-foreground border-apollo-border border-t pt-2.5 text-[13px]">
-          {spec.moreCopy(hiddenMore)}
+          {spec.moreCopy(hiddenMore, moreExamples)}
           <button
             type="button"
             onClick={() => setShowMore(true)}
