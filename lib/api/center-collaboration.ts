@@ -8,18 +8,28 @@
  * NOR an edge. Edges/rollups/filters are built in the browser from this payload
  * (`lib/center-collaboration/graph.ts`); this module is filter-agnostic.
  *
- * See `docs/cancer-center-collaboration-network-spec.md` §3–§5.
+ * Phase 2 (#1137) adds an optional grant co-investigator axis: when
+ * `includeGrantAxis` is set, the gated members' `Grant` rows are grouped by
+ * shared `awardNumber` into `awards`. The #160 grant-suppression gate is applied
+ * BEFORE grouping, so a suppressed grant can never form an edge — the
+ * load-bearing privacy task for the grant axis (handoff §5.6).
+ *
+ * See `docs/cancer-center-collaboration-network-spec.md` §3–§5 and
+ * `docs/grant-coinvestigator-axis-handoff.md` §7.
  */
 import { prisma } from "@/lib/db";
 import { isCenterMembershipActive } from "@/lib/api/centers";
+import { resolveActiveGrantSuppression } from "@/lib/api/manual-layer";
 import { extractLastNameSort } from "@/lib/name-sort";
 import {
   assignProgramColors,
   UNCLASSIFIED_COLOR,
   UNCLASSIFIED_LABEL,
 } from "@/lib/center-collaboration/graph";
+import { isUmbrellaAward } from "@/lib/center-collaboration/grants";
 import type {
   CenterCollaborationPayload,
+  CollabAward,
   CollabNode,
   CollabPaper,
   CollabProgram,
@@ -30,25 +40,30 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-const emptyPayload = (center: {
-  code: string;
-  name: string;
-}): CenterCollaborationPayload => ({
+const emptyPayload = (
+  center: { code: string; name: string },
+  grantAxis: boolean,
+): CenterCollaborationPayload => ({
   center,
   programs: [],
   nodes: [],
   papers: [],
+  awards: [],
+  grantAxis,
   generatedAt: new Date().toISOString(),
 });
 
 /**
  * Build the collaboration payload for a center by code. Returns `null` if the
  * center does not exist; an empty (nodes/papers `[]`) payload if it has no
- * active publicly-displayed members.
+ * active publicly-displayed members. Pass `includeGrantAxis` to additionally
+ * build the grant co-investigator groups (`awards`).
  */
 export async function buildCenterCollaboration(
   centerCode: string,
+  opts: { includeGrantAxis?: boolean } = {},
 ): Promise<CenterCollaborationPayload | null> {
+  const grantAxis = opts.includeGrantAxis ?? false;
   const center = await prisma.center.findUnique({
     where: { code: centerCode },
     select: { code: true, name: true },
@@ -74,7 +89,7 @@ export async function buildCenterCollaboration(
     }
   }
   const activeCwids = [...programByCwid.keys()];
-  if (activeCwids.length === 0) return emptyPayload(center);
+  if (activeCwids.length === 0) return emptyPayload(center, grantAxis);
 
   // 2. Public-display gate — identical to the public roster (drop dormant /
   //    soft-deleted). A scholar dropped here is dropped from nodes AND edges.
@@ -82,7 +97,7 @@ export async function buildCenterCollaboration(
     where: { cwid: { in: activeCwids }, deletedAt: null, status: "active" },
     select: { cwid: true, preferredName: true, slug: true },
   })) as Array<{ cwid: string; preferredName: string; slug: string | null }>;
-  if (scholars.length === 0) return emptyPayload(center);
+  if (scholars.length === 0) return emptyPayload(center, grantAxis);
 
   // Stable, legible node order: surname A–Z (preferredName is "Given … Last").
   scholars.sort(
@@ -179,11 +194,110 @@ export async function buildCenterCollaboration(
     programs.push(assignProgramColors([{ code: null, label: UNCLASSIFIED_LABEL }])[0]);
   }
 
+  // 8. Grant co-investigator groups (#1137 Phase 2) — only when the sub-flag is
+  //    on. Built over the SAME gated member set, with the #160 suppression gate
+  //    applied before grouping.
+  const awards = grantAxis
+    ? await buildAwards(memberCwids, indexByCwid, today)
+    : [];
+
   return {
     center,
     programs,
     nodes,
     papers,
+    awards,
+    grantAxis,
     generatedAt: new Date().toISOString(),
   };
+}
+
+/**
+ * Build the grant co-investigator groups for a set of gated members (#1137
+ * Phase 2). One award group per distinct sponsor `awardNumber` that ≥2 gated
+ * members share. The #160 grant-suppression gate (`resolveActiveGrantSuppression`)
+ * drops suppressed rows BEFORE grouping, so a member's hidden grant never forms
+ * an edge or reveals a tie. Active = any grouped row whose `endDate ≥ today`;
+ * `umbrella` flags center/training-mechanism or oversized awards (handoff §4).
+ */
+async function buildAwards(
+  memberCwids: string[],
+  indexByCwid: Map<string, number>,
+  today: string,
+): Promise<CollabAward[]> {
+  const grantRows = (await prisma.grant.findMany({
+    where: { cwid: { in: memberCwids } },
+    select: {
+      cwid: true,
+      externalId: true,
+      id: true,
+      awardNumber: true,
+      mechanism: true,
+      startDate: true,
+      endDate: true,
+    },
+  })) as Array<{
+    cwid: string;
+    externalId: string | null;
+    id: string;
+    awardNumber: string | null;
+    mechanism: string | null;
+    startDate: Date;
+    endDate: Date;
+  }>;
+  if (grantRows.length === 0) return [];
+
+  // #160/#481(b) — drop suppressed grant rows before grouping (per-investigator
+  // `externalId` keying). A suppressed row contributes to no award group, so a
+  // hidden grant can neither form an edge nor reveal a co-investigation tie.
+  const { suppressed } = await resolveActiveGrantSuppression(grantRows, prisma);
+
+  type AwardGroup = {
+    members: Set<number>;
+    mechanisms: Set<string | null>;
+    startYear: number | null;
+    endYear: number | null;
+    active: boolean;
+  };
+  const groups = new Map<string, AwardGroup>();
+  for (const r of grantRows) {
+    if (r.externalId !== null && suppressed.has(r.externalId)) continue;
+    const awardId = r.awardNumber;
+    if (!awardId) continue; // null award number can't form a join key (~0.2%)
+    const idx = indexByCwid.get(r.cwid);
+    if (idx === undefined) continue; // defensive: not a gated member
+    let g = groups.get(awardId);
+    if (!g) {
+      g = {
+        members: new Set<number>(),
+        mechanisms: new Set<string | null>(),
+        startYear: null,
+        endYear: null,
+        active: false,
+      };
+      groups.set(awardId, g);
+    }
+    g.members.add(idx);
+    g.mechanisms.add(r.mechanism);
+    const sy = r.startDate.getUTCFullYear();
+    const ey = r.endDate.getUTCFullYear();
+    if (g.startYear === null || sy < g.startYear) g.startYear = sy;
+    if (g.endYear === null || ey > g.endYear) g.endYear = ey;
+    if (r.endDate.toISOString().slice(0, 10) >= today) g.active = true;
+  }
+
+  const awards: CollabAward[] = [];
+  for (const [awardId, g] of groups) {
+    if (g.members.size < 2) continue; // an award needs ≥2 in-center members to tie
+    const m = [...g.members].sort((a, b) => a - b);
+    awards.push({
+      awardId,
+      m,
+      year: g.startYear,
+      endYear: g.endYear,
+      active: g.active,
+      umbrella: isUmbrellaAward([...g.mechanisms], m.length),
+    });
+  }
+  return awards;
 }

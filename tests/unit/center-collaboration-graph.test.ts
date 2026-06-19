@@ -151,7 +151,7 @@ describe("yearExtent", () => {
     expect(yearExtent(papers)).toEqual([2019, 2021]);
   });
   it("returns null when no paper has a year", () => {
-    expect(yearExtent([{ pmid: "x", year: null, m: [0, 1] }])).toBeNull();
+    expect(yearExtent([{ year: null, m: [0, 1] }])).toBeNull();
   });
 });
 

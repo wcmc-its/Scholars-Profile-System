@@ -21,7 +21,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { apiError } from "@/lib/api/error-response";
 import { prisma } from "@/lib/db";
 import { buildCenterCollaboration } from "@/lib/api/center-collaboration";
-import { isCenterCollaborationNetworkEnabled } from "@/lib/center-collaboration/flags";
+import {
+  isCenterCollaborationNetworkEnabled,
+  isCenterCollaborationGrantAxisEnabled,
+} from "@/lib/center-collaboration/flags";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +53,9 @@ export async function GET(
   });
   if (programCount === 0) return apiError("not_found", 404);
 
-  const payload = await buildCenterCollaboration(center.code);
+  const payload = await buildCenterCollaboration(center.code, {
+    includeGrantAxis: isCenterCollaborationGrantAxisEnabled(),
+  });
   if (!payload) return apiError("not_found", 404);
 
   return NextResponse.json(payload);

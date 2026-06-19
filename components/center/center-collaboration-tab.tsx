@@ -6,12 +6,14 @@
  * Fetches the whole graph payload once from the uncacheable route, lazily loads
  * `vis-network` (kept off the center page's initial bundle), and rebuilds the
  * DataSets in the browser on every control change via the pure helpers in
- * `lib/center-collaboration/graph.ts`. Controls: people↔program view, program
- * picker (one program at a time), min co-pubs, year range, person search,
- * hide-unconnected, labels, down-weight-large-papers, re-layout, export PNG /
- * standalone HTML. The layout freezes once it settles (no perpetual jiggle).
+ * `lib/center-collaboration/graph.ts`. Controls: people↔program view, an axis
+ * toggle (Publications / Grants / Both — #1137 Phase 2), program picker (one
+ * program at a time), min co-pubs, year range, person search, hide-unconnected,
+ * labels, down-weight-large-papers, re-layout, export PNG / standalone HTML. The
+ * layout freezes once it settles (no perpetual jiggle).
  *
- * See `docs/cancer-center-collaboration-network-spec.md` §6.
+ * See `docs/cancer-center-collaboration-network-spec.md` §6 and
+ * `docs/grant-coinvestigator-axis-handoff.md` §6.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -31,14 +33,44 @@ import {
   yearExtent,
   type EdgeBuildOptions,
 } from "@/lib/center-collaboration/graph";
+import {
+  awardYearExtent,
+  countUmbrellaExcluded,
+  filterAwards,
+  mergeAxisEdgesThresholded,
+  type Relationship,
+} from "@/lib/center-collaboration/grants";
 import type { CenterCollaborationPayload } from "@/lib/center-collaboration/types";
 
 type NodeItem = VisNode & { id: string | number };
 type EdgeItem = VisEdge & { id: string };
 type View = "people" | "program";
+/** Which relationship axis to draw: publications, grants, or both overlaid. */
+type Axis = "pubs" | "grants" | "both";
 
 const MEMBER_CAP = 25;
 const DEFAULT_MIN_YEAR = 2020;
+
+/**
+ * Edge colors for the "Both" overlay (handoff §6.2 option C): a pair that only
+ * publishes together is neutral gray, only co-funds is gold, and BOTH is green —
+ * the green ties are the analytically strongest collaborations.
+ */
+const EDGE_REL_COLOR: Record<Relationship, string> = {
+  pub: "#94a3b8", // slate — publications only
+  grant: "#E69F00", // gold — grants only
+  both: "#009E73", // green — both (strong ties)
+};
+
+/** Union of two optional `[lo, hi]` extents (for the "Both" axis year slider). */
+function unionExtent(
+  a: [number, number] | null,
+  b: [number, number] | null,
+): [number, number] | null {
+  if (!a) return b;
+  if (!b) return a;
+  return [Math.min(a[0], b[0]), Math.max(a[1], b[1])];
+}
 
 /** Default low year = 2020, clamped into the data's actual extent. */
 function defaultYearLo(extent: [number, number]): number {
@@ -51,6 +83,13 @@ export function CenterCollaborationTab({ centerSlug }: { centerSlug: string }) {
 
   // Controls
   const [view, setView] = useState<View>("people");
+  // Relationship axis (#1137 Phase 2). Only shown when the payload carries the
+  // grant axis (`grantAxis` sub-flag on); otherwise the tab is pubs-only Phase 1.
+  const [axis, setAxis] = useState<Axis>("pubs");
+  // Grant-axis filters. Both default ON: exclude umbrella/infrastructure awards
+  // (the §4 clique problem) and keep only currently-active awards.
+  const [excludeUmbrella, setExcludeUmbrella] = useState(true);
+  const [activeOnly, setActiveOnly] = useState(true);
   const [minCoPubs, setMinCoPubs] = useState(2);
   // Which program's network to show in the people view: a program key, or "all"
   // (every program at once, within-program edges only). Defaults to the first
@@ -85,11 +124,7 @@ export function CenterCollaborationTab({ centerSlug }: { centerSlug: string }) {
       .then((data) => {
         if (!alive) return;
         setPayload(data);
-        const ext = yearExtent(data.papers);
-        if (ext) {
-          setYearLo(defaultYearLo(ext));
-          setYearHi(ext[1]);
-        }
+        // Year bounds follow the active axis — set by the extent effect below.
         // Open on the first program (one program at a time).
         if (data.programs.length > 0) {
           setSelectedProgram(programKey(data.programs[0].code));
@@ -104,10 +139,24 @@ export function CenterCollaborationTab({ centerSlug }: { centerSlug: string }) {
     };
   }, [centerSlug]);
 
-  const extent = useMemo(
-    () => (payload ? yearExtent(payload.papers) : null),
-    [payload],
-  );
+  // Year extent follows the active axis: publications use the paper years, grants
+  // use the award spans, "both" the union — so the slider bounds always match.
+  const extent = useMemo(() => {
+    if (!payload) return null;
+    const pub = yearExtent(payload.papers);
+    const grant = awardYearExtent(payload.awards);
+    if (axis === "grants") return grant;
+    if (axis === "both") return unionExtent(pub, grant);
+    return pub;
+  }, [payload, axis]);
+  // Reset the year window to the axis default whenever the extent changes (load
+  // or axis switch). Keyed on `extent`, which only changes with payload/axis.
+  useEffect(() => {
+    if (extent) {
+      setYearLo(defaultYearLo(extent));
+      setYearHi(extent[1]);
+    }
+  }, [extent]);
   const fullYearRange =
     !extent || (yearLo === extent[0] && yearHi === extent[1]);
 
@@ -170,68 +219,153 @@ export function CenterCollaborationTab({ centerSlug }: { centerSlug: string }) {
 
   // --- build the vis nodes/edges for the current controls --------------------
   const computed = useMemo(() => {
-    if (!payload) {
-      return { nodes: [] as NodeItem[], edges: [] as EdgeItem[], omitted: 0, shown: 0 };
-    }
-    const opts: EdgeBuildOptions = {
-      yearRange: fullYearRange ? undefined : [yearLo, yearHi],
+    const empty = {
+      nodes: [] as NodeItem[],
+      edges: [] as EdgeItem[],
+      omitted: 0,
+      umbrellaExcluded: 0,
+      shown: 0,
+    };
+    if (!payload) return empty;
+
+    const wantPub = axis === "pubs" || axis === "both";
+    const wantGrant =
+      payload.grantAxis && (axis === "grants" || axis === "both");
+    const yearRange: [number | null, number | null] | undefined = fullYearRange
+      ? undefined
+      : [yearLo, yearHi];
+    const programOf = (idx: number) => payload.nodes[idx]?.programCode ?? null;
+
+    // People view never draws cross-program links (that's the Programs rollup);
+    // sizing + edges are within-program for both "one program" and "all".
+    const baseOpts: EdgeBuildOptions = {
       newman,
       maxMembersPerPaper: MEMBER_CAP,
-      // People view never draws cross-program links (that's the Programs rollup);
-      // sizing + edges are within-program for both "one program" and "all".
       withinProgramOnly: true,
-      programOf: (idx) => payload.nodes[idx]?.programCode ?? null,
+      programOf,
     };
-    const omitted = countOmittedHyperauthored(payload.papers, opts);
+    // Papers keep the builder's point-in-time year filter. Awards are pre-filtered
+    // here (umbrella / active / year-overlap), then fed with no further year filter.
+    const pubOpts: EdgeBuildOptions = { ...baseOpts, yearRange };
+    const filteredAwards = wantGrant
+      ? filterAwards(payload.awards, { excludeUmbrella, activeOnly, yearRange })
+      : [];
 
+    const omitted = wantPub
+      ? countOmittedHyperauthored(payload.papers, pubOpts)
+      : 0;
+    const umbrellaExcluded =
+      wantGrant && excludeUmbrella
+        ? countUmbrellaExcluded(payload.awards, { activeOnly, yearRange })
+        : 0;
+
+    // ---------------------------- PROGRAM ROLLUP ----------------------------
     if (view === "program") {
-      const { edges, internal } = buildProgramEdges(
-        payload.papers,
-        (idx) => payload.nodes[idx]?.programCode ?? null,
-        { yearRange: opts.yearRange },
-      );
+      const pub = wantPub
+        ? buildProgramEdges(payload.papers, programOf, { yearRange })
+        : { edges: [], internal: new Map<string, number>() };
+      const grant = wantGrant
+        ? buildProgramEdges(filteredAwards, programOf, {})
+        : { edges: [], internal: new Map<string, number>() };
+
       const visNodes: NodeItem[] = [];
       for (const p of payload.programs) {
         const key = programKey(p.code);
-        const internalCount = internal.get(key) ?? 0;
+        const pubInternal = pub.internal.get(key) ?? 0;
+        const grantInternal = grant.internal.get(key) ?? 0;
         visNodes.push({
           id: key,
           label: p.label,
           color: p.color,
           shape: "dot",
-          size: nodeRadius(internalCount, { rMin: 16, k: 2.4, rMax: 70 }),
-          title: `${p.label}\n${internalCount} within-program co-authored papers`,
+          size: nodeRadius(pubInternal + grantInternal, { rMin: 16, k: 2.4, rMax: 70 }),
+          title: programTitle(p.label, pubInternal, grantInternal, axis),
         });
       }
       const visibleKeys = new Set(visNodes.map((n) => n.id));
-      const visEdges: EdgeItem[] = edges
-        .filter(
-          (e) =>
-            e.weight >= minCoPubs && visibleKeys.has(e.a) && visibleKeys.has(e.b),
-        )
-        .map((e) => ({
-          id: `${e.a}|${e.b}`,
-          from: e.a,
-          to: e.b,
-          width: 1 + Math.min(12, e.weight / 3),
-          title: `${e.weight} cross-program co-authored papers`,
-        }));
-      return { nodes: visNodes, edges: visEdges, omitted, shown: visNodes.length };
+      const visEdges: EdgeItem[] =
+        axis === "both"
+          ? mergeAxisEdgesThresholded(pub.edges, grant.edges, minCoPubs)
+              .filter((e) => visibleKeys.has(e.a) && visibleKeys.has(e.b))
+              .map((e) => ({
+                id: `${e.a}|${e.b}`,
+                from: e.a,
+                to: e.b,
+                width: 1 + Math.min(12, Math.max(e.pubWeight, e.grantWeight) / 3),
+                color: EDGE_REL_COLOR[e.rel],
+                title: crossProgramTitle(e.pubWeight, e.grantWeight),
+              }))
+          : (axis === "grants" ? grant.edges : pub.edges)
+              .filter(
+                (e) =>
+                  e.weight >= minCoPubs &&
+                  visibleKeys.has(e.a) &&
+                  visibleKeys.has(e.b),
+              )
+              .map((e) => ({
+                id: `${e.a}|${e.b}`,
+                from: e.a,
+                to: e.b,
+                width: 1 + Math.min(12, e.weight / 3),
+                title:
+                  axis === "grants"
+                    ? `${e.weight} cross-program shared grant${e.weight === 1 ? "" : "s"}`
+                    : `${e.weight} cross-program co-authored papers`,
+              }));
+      return {
+        nodes: visNodes,
+        edges: visEdges,
+        omitted,
+        umbrellaExcluded,
+        shown: visNodes.length,
+      };
     }
 
-    // People view
-    const peopleEdges = buildPeopleEdges(payload.papers, opts).filter(
-      (e) => e.weight >= minCoPubs,
-    );
-    // Per-node co-author count from the SHOWN (thresholded) edges, so "hide
-    // unconnected" and node size stay consistent with what's actually drawn —
-    // a member whose only links fall below Min co-pubs is correctly unconnected,
-    // not a stray isolated dot that wrecks the auto-fit.
+    // ------------------------------ PEOPLE VIEW -----------------------------
+    // Per-node degree from the SHOWN (thresholded) edges, so "hide unconnected"
+    // and node size stay consistent with what's drawn. For "both", the threshold
+    // is applied AFTER merging both axes (mergeAxisEdgesThresholded) — identical
+    // to the program rollup — so a pub-heavy / single-grant pair still classifies
+    // as "both" (green) instead of being downgraded to a single-axis tie.
     const degree = new Array<number>(payload.nodes.length).fill(0);
-    for (const e of peopleEdges) {
-      degree[e.a] += 1;
-      degree[e.b] += 1;
+    type RawEdge = { a: number; b: number; width: number; color?: string; title: string };
+    let rawEdges: RawEdge[];
+    if (axis === "both") {
+      const pubAll = wantPub ? buildPeopleEdges(payload.papers, pubOpts) : [];
+      const grantAll = wantGrant ? buildPeopleEdges(filteredAwards, baseOpts) : [];
+      const merged = mergeAxisEdgesThresholded(pubAll, grantAll, minCoPubs);
+      for (const e of merged) {
+        degree[e.a] += 1;
+        degree[e.b] += 1;
+      }
+      rawEdges = merged.map((e) => ({
+        a: e.a,
+        b: e.b,
+        width: 1 + Math.min(8, e.strength),
+        color: EDGE_REL_COLOR[e.rel],
+        title: pairTitle(e.pubWeight, e.grantWeight),
+      }));
+    } else {
+      const edges = (
+        axis === "grants"
+          ? buildPeopleEdges(filteredAwards, baseOpts)
+          : buildPeopleEdges(payload.papers, pubOpts)
+      ).filter((e) => e.weight >= minCoPubs);
+      for (const e of edges) {
+        degree[e.a] += 1;
+        degree[e.b] += 1;
+      }
+      rawEdges = edges.map((e) => ({
+        a: e.a,
+        b: e.b,
+        width: 1 + Math.min(8, e.strength),
+        title:
+          axis === "grants"
+            ? `${e.weight} shared grant${e.weight === 1 ? "" : "s"}`
+            : `${e.weight} co-authored publication${e.weight === 1 ? "" : "s"}`,
+      }));
     }
+
     const visNodes: NodeItem[] = [];
     for (const n of payload.nodes) {
       const key = programKey(n.programCode);
@@ -243,23 +377,39 @@ export function CenterCollaborationTab({ centerSlug }: { centerSlug: string }) {
         color: programMeta.color.get(key) ?? "#9AA0A6",
         shape: "dot",
         size: nodeRadius(degree[n.i], { rMin: 6, k: 3, rMax: 30 }),
-        title: `${n.name}\n${programMeta.label.get(key) ?? "Unclassified"} · ${n.pubCount} publications · ${degree[n.i]} program co-author${degree[n.i] === 1 ? "" : "s"} shown`,
+        title: nodeTitle(
+          n.name,
+          programMeta.label.get(key) ?? "Unclassified",
+          n.pubCount,
+          degree[n.i],
+          axis,
+        ),
       });
     }
     const visibleIds = new Set(visNodes.map((n) => n.id));
-    const visEdges: EdgeItem[] = peopleEdges
+    const visEdges: EdgeItem[] = rawEdges
       .filter((e) => visibleIds.has(e.a) && visibleIds.has(e.b))
       .map((e) => ({
         id: `${e.a}-${e.b}`,
         from: e.a,
         to: e.b,
-        width: 1 + Math.min(8, e.strength),
-        title: `${e.weight} co-authored publication${e.weight === 1 ? "" : "s"}`,
+        width: e.width,
+        ...(e.color ? { color: e.color } : {}),
+        title: e.title,
       }));
-    return { nodes: visNodes, edges: visEdges, omitted, shown: visNodes.length };
+    return {
+      nodes: visNodes,
+      edges: visEdges,
+      omitted,
+      umbrellaExcluded,
+      shown: visNodes.length,
+    };
   }, [
     payload,
     view,
+    axis,
+    excludeUmbrella,
+    activeOnly,
     minCoPubs,
     selectedProgram,
     hideUnconnected,
@@ -306,6 +456,9 @@ export function CenterCollaborationTab({ centerSlug }: { centerSlug: string }) {
 
   const resetAll = useCallback(() => {
     setView("people");
+    setAxis("pubs");
+    setExcludeUmbrella(true);
+    setActiveOnly(true);
     setMinCoPubs(2);
     setSelectedProgram(
       payload && payload.programs.length > 0
@@ -316,11 +469,14 @@ export function CenterCollaborationTab({ centerSlug }: { centerSlug: string }) {
     setShowLabels(true);
     setNewman(false);
     setSearch("");
-    if (extent) {
-      setYearLo(defaultYearLo(extent));
-      setYearHi(extent[1]);
+    // Reset year to the publication extent (axis resets to "pubs"). Explicit so a
+    // Reset while already on the pubs axis still restores the default window.
+    const pubExtent = payload ? yearExtent(payload.papers) : null;
+    if (pubExtent) {
+      setYearLo(defaultYearLo(pubExtent));
+      setYearHi(pubExtent[1]);
     }
-  }, [extent, payload]);
+  }, [payload]);
 
   // Re-run the layout and re-frame (the data effect also does this on any
   // control change; this is the manual "shake / re-fit" button).
@@ -365,7 +521,11 @@ export function CenterCollaborationTab({ centerSlug }: { centerSlug: string }) {
   if (status === "error") {
     return <p className="py-10 text-sm text-[var(--color-text-tertiary)]">Could not load the collaboration network. Please try again.</p>;
   }
-  if (!payload || payload.nodes.length === 0 || payload.papers.length === 0) {
+  if (
+    !payload ||
+    payload.nodes.length === 0 ||
+    (payload.papers.length === 0 && payload.awards.length === 0)
+  ) {
     return (
       <p className="py-10 text-sm text-[var(--color-text-tertiary)]">
         Not enough co-authorship data yet to draw a collaboration network for this center.
@@ -394,8 +554,34 @@ export function CenterCollaborationTab({ centerSlug }: { centerSlug: string }) {
           ))}
         </div>
 
+        {/* Axis toggle (#1137 Phase 2) — only when the payload carries the grant axis. */}
+        {payload.grantAxis && (
+          <div className="inline-flex items-center gap-1.5">
+            <span className="text-xs text-[var(--color-text-tertiary)]">Ties:</span>
+            <div className="inline-flex overflow-hidden rounded border border-[var(--color-border)]">
+              {(["pubs", "grants", "both"] as Axis[]).map((a) => (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={() => setAxis(a)}
+                  title={
+                    a === "pubs"
+                      ? "Co-authorship ties (shared publications)"
+                      : a === "grants"
+                        ? "Co-investigation ties (shared grant awards)"
+                        : "Both axes overlaid — gray = publications only, gold = grants only, green = both"
+                  }
+                  className={`px-2.5 py-1 text-xs ${axis === a ? "bg-[var(--color-accent-slate)] text-white" : "bg-white text-[var(--color-text-secondary)]"}`}
+                >
+                  {a === "pubs" ? "Publications" : a === "grants" ? "Grants" : "Both"}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <label className={labelCls}>
-          Min co-pubs
+          {axis === "grants" ? "Min shared grants" : axis === "both" ? "Min shared" : "Min co-pubs"}
           <input
             type="range"
             min={1}
@@ -451,9 +637,27 @@ export function CenterCollaborationTab({ centerSlug }: { centerSlug: string }) {
             Labels
           </label>
         )}
-        <label className={labelCls} title="Down-weight large papers so a big consortium paper doesn't dominate the layout (Newman 1/(k-1)).">
+
+        {/* Grant-axis filters (#1137 Phase 2) — only on the grant / both axes. */}
+        {(axis === "grants" || axis === "both") && (
+          <>
+            <label
+              className={labelCls}
+              title="Exclude umbrella / infrastructure awards — center & training grants (P30/P50/U54/UL1…) that link many members who share funding but don't co-investigate."
+            >
+              <input type="checkbox" checked={excludeUmbrella} onChange={(e) => setExcludeUmbrella(e.target.checked)} />
+              Exclude center &amp; training grants
+            </label>
+            <label className={labelCls} title="Show only currently-active awards (end date in the future).">
+              <input type="checkbox" checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} />
+              Active grants only
+            </label>
+          </>
+        )}
+
+        <label className={labelCls} title="Down-weight large groups so a big consortium paper / award doesn't dominate the layout (Newman 1/(k-1)).">
           <input type="checkbox" checked={newman} onChange={(e) => setNewman(e.target.checked)} />
-          Down-weight large papers
+          Down-weight large {axis === "grants" ? "awards" : axis === "both" ? "groups" : "papers"}
         </label>
 
         <div className="ml-auto flex items-center gap-2">
@@ -506,6 +710,28 @@ export function CenterCollaborationTab({ centerSlug }: { centerSlug: string }) {
         })}
       </div>
 
+      {/* Edge key — the "Both" overlay colors edges by relationship type (§6.2 C). */}
+      {axis === "both" && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--color-text-tertiary)]">
+          <span>Edges:</span>
+          {(
+            [
+              ["both", "Publications + grants"],
+              ["grant", "Grants only"],
+              ["pub", "Publications only"],
+            ] as [Relationship, string][]
+          ).map(([rel, label]) => (
+            <span key={rel} className="inline-flex items-center gap-1.5">
+              <span
+                className="inline-block h-[3px] w-5 rounded-full"
+                style={{ backgroundColor: EDGE_REL_COLOR[rel] }}
+              />
+              {label}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Graph */}
       <div
         ref={containerRef}
@@ -513,18 +739,81 @@ export function CenterCollaborationTab({ centerSlug }: { centerSlug: string }) {
       />
 
       <p className="text-[11px] text-[var(--color-text-tertiary)]">
-        {computed.shown.toLocaleString()} {view === "people" ? "members" : "programs"} shown · node size = within-program
-        co-authors · edge thickness = shared publications
+        {computed.shown.toLocaleString()} {view === "people" ? "members" : "programs"} shown · node size ={" "}
+        {axis === "grants"
+          ? "within-program co-investigators"
+          : axis === "both"
+            ? "within-program collaborators"
+            : "within-program co-authors"}{" "}
+        · edge thickness ={" "}
+        {axis === "grants" ? "shared grants" : axis === "both" ? "tie strength" : "shared publications"}
         {view === "people" && (
           <> · links are within-program (cross-program collaboration is in the Programs view)</>
         )}
         {computed.omitted > 0 && (
           <> · {computed.omitted.toLocaleString()} paper{computed.omitted === 1 ? "" : "s"} with &gt;{MEMBER_CAP} center authors omitted from links</>
         )}
+        {computed.umbrellaExcluded > 0 && (
+          <> · {computed.umbrellaExcluded.toLocaleString()} umbrella award{computed.umbrellaExcluded === 1 ? "" : "s"} (P30/P50/UL1…) excluded</>
+        )}
         . Click a member to open their profile.
       </p>
     </div>
   );
+}
+
+/** People-view node tooltip — axis-aware (pubs show the publication count; the
+ *  grant/both axes describe co-investigators / collaborators). */
+function nodeTitle(
+  name: string,
+  program: string,
+  pubCount: number,
+  degree: number,
+  axis: Axis,
+): string {
+  if (axis === "grants") {
+    return `${name}\n${program} · ${degree} program co-investigator${degree === 1 ? "" : "s"} shown`;
+  }
+  if (axis === "both") {
+    return `${name}\n${program} · ${pubCount} publications · ${degree} collaborator${degree === 1 ? "" : "s"} shown`;
+  }
+  return `${name}\n${program} · ${pubCount} publications · ${degree} program co-author${degree === 1 ? "" : "s"} shown`;
+}
+
+/** People-view edge tooltip for the "Both" overlay — names whichever ties exist. */
+function pairTitle(pubWeight: number, grantWeight: number): string {
+  const parts: string[] = [];
+  if (pubWeight > 0)
+    parts.push(`${pubWeight} co-authored publication${pubWeight === 1 ? "" : "s"}`);
+  if (grantWeight > 0)
+    parts.push(`${grantWeight} shared grant${grantWeight === 1 ? "" : "s"}`);
+  return parts.join(" · ");
+}
+
+/** Program-rollup node tooltip — axis-aware within-program counts. */
+function programTitle(
+  label: string,
+  pubInternal: number,
+  grantInternal: number,
+  axis: Axis,
+): string {
+  if (axis === "grants") {
+    return `${label}\n${grantInternal} within-program shared grant${grantInternal === 1 ? "" : "s"}`;
+  }
+  if (axis === "both") {
+    return `${label}\n${pubInternal} within-program papers · ${grantInternal} within-program grants`;
+  }
+  return `${label}\n${pubInternal} within-program co-authored papers`;
+}
+
+/** Program-rollup edge tooltip for the "Both" overlay. */
+function crossProgramTitle(pubWeight: number, grantWeight: number): string {
+  const parts: string[] = [];
+  if (pubWeight > 0)
+    parts.push(`${pubWeight} cross-program paper${pubWeight === 1 ? "" : "s"}`);
+  if (grantWeight > 0)
+    parts.push(`${grantWeight} cross-program grant${grantWeight === 1 ? "" : "s"}`);
+  return parts.join(" · ");
 }
 
 function baseOptions(): Options {

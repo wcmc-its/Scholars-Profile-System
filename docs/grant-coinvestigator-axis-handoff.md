@@ -1,10 +1,25 @@
 # Grant co-investigator axis — research handoff (collaboration network Phase 2)
 
-**Status:** Research handoff for a future session · **Date:** 2026-06-19
+**Status:** ✅ IMPLEMENTED on `feat/center-collab-grant-axis` · research dated 2026-06-19
 **Parent:** `docs/cancer-center-collaboration-network-spec.md` (§10 Phase 2), issue #1137
 **Prereq:** Phase 1 (publication co-authorship) shipped — read that component first:
 `components/center/center-collaboration-tab.tsx`, `lib/center-collaboration/graph.ts`,
 `lib/api/center-collaboration.ts`.
+
+> **Implementation note (§9 decisions taken).** Built per this handoff's recommended
+> defaults: (1) **`awardNumber`** join key; (2) umbrella handling = **mechanism
+> exclude-list (`P30/P50/U54/UL1/S10/KL2/TL1`) OR member-count ≥ 12** — the floor
+> catches null-mechanism foundation umbrellas like PICI that the mechanism list
+> alone misses — plus Newman down-weighting; (3) **active-only default on**; (4)
+> **"Both" = option-C relationship color**; (5) node size = **co-investigator
+> degree**; (6) shipped behind a **separate sub-flag** `CENTER_COLLABORATION_GRANT_AXIS`
+> (staging-on/prod-off) so the axis soaks independently. The grant-visibility gate
+> (§5.6) uses `resolveActiveGrantSuppression`, dropping suppressed rows before
+> grouping. Pure helpers in `lib/center-collaboration/grants.ts`; no schema change,
+> no reindex. **Year filter uses span OVERLAP** (a grant active across the window
+> is kept), unlike the point-in-time paper filter. Re-run the §3/§4 probes against
+> the target env and complete the §8 render-verify (incl. a suppressed-grant
+> no-edge check) before flipping the prod flag.
 
 ---
 
