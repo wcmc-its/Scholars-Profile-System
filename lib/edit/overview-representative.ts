@@ -264,7 +264,10 @@ export function rankRepresentativePublications(
     tier: s.tier,
     isLandmark: s.landmark,
     featured: featured.has(s.c.pmid),
-    reason: s.reason,
+    // Single out the strongest paper so a corpus of landmarks doesn't read as one
+    // repeated "A landmark you led" line. The top-ranked landmark is THE standout;
+    // the rest keep their (recency / role / tier-graduated) reasons. Numberless.
+    reason: rank === 0 && s.landmark && scored.length >= 2 ? "Your most influential paper" : s.reason,
     score: s.score,
   }));
 }

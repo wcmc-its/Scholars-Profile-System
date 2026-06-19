@@ -42,6 +42,7 @@ import type {
   OverviewSourceTitle,
 } from "@/lib/edit/overview-facts";
 import {
+  OVERVIEW_MIN_PUBLICATIONS,
   OVERVIEW_SELECTION_MAX_ITEMS,
   type OverviewPositionMode,
   type OverviewRecordIds,
@@ -59,8 +60,9 @@ type OverviewIncludePickerProps = {
   disabled?: boolean;
 };
 
-/** The minimum visible publications below which the overview reads as thin (§2.5). */
-const MIN_PUBLICATIONS = 3;
+/** The minimum visible publications below which the overview reads as thin (§2.5) —
+ *  shared with the server-side generator guard (§2.3) so the two never drift. */
+const MIN_PUBLICATIONS = OVERVIEW_MIN_PUBLICATIONS;
 
 // ---------------------------------------------------------------------------
 // Delta bag helpers — immutable add / remove / toggle on the per-type id bags.

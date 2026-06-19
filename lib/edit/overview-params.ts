@@ -155,6 +155,13 @@ export const OVERVIEW_SELECTION_MAX_ITEMS = 25;
  *  the papers, which are the heavy grounding (decision 3 / §3.5). */
 export const OVERVIEW_SELECTION_MAX_TOOLS = 10;
 
+/** The §2.5 thin-overview floor: below this many resolved publications the overview
+ *  reads as thin, so the drawer warns (`overview-include-picker`) AND the generator
+ *  is told to keep the draft proportionately brief (§2.3 server-side guard) instead
+ *  of padding one or two papers into a full-length bio. Single source of truth for
+ *  both surfaces so they can never drift. */
+export const OVERVIEW_MIN_PUBLICATIONS = 3;
+
 /** The #765 §2 / §7.4 honesty floor: a method family is only default-selected
  *  when it appears in ≥ 2 publications. Most families have `pmid_count = 1`; a
  *  top-N-by-count default that surfaced single-paper long-tail families would

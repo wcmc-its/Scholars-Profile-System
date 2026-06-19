@@ -26,6 +26,7 @@ import { sanitizeOverviewHtml } from "@/lib/edit/validators";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import {
   OVERVIEW_ELEMENTS,
+  OVERVIEW_MIN_PUBLICATIONS,
   type OverviewLength,
   type OverviewParams,
   type OverviewTone,
@@ -285,6 +286,19 @@ export function buildOverviewUserPrompt(facts: OverviewFacts, params: OverviewPa
         "no basis for one. Write a brief overview from identity, the named topic AREAS (as " +
         "broad areas only), education, and funding (name the funder only, never what it " +
         "studies), then stop. Keep it short; do not pad to the word band.",
+    );
+  } else if (facts.representativePublications.length < OVERVIEW_MIN_PUBLICATIONS) {
+    // #742 §2.3 — a THIN selection (one or two representative publications) has real
+    // per-paper grounding but not enough for a full-length bio. The drawer warns the
+    // scholar of this client-side (`OVERVIEW_MIN_PUBLICATIONS`); mirror it server-side
+    // so the model writes proportionately instead of inflating one or two papers into a
+    // padded paragraph of generic framing.
+    lines.push(
+      "FACTS contains only one or two representative publications. Ground the overview on " +
+        "exactly those papers plus what else is concretely present (topic areas, education, " +
+        "funding by funder name) and keep it proportionately BRIEF — a few honest sentences " +
+        "is the correct length. Do NOT pad beyond what these few papers support, invent " +
+        "additional findings, or restate the word band; this directive overrides it.",
     );
   }
 
