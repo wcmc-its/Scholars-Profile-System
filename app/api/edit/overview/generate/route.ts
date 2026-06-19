@@ -23,11 +23,7 @@ import { logEditDenial } from "@/lib/edit/authz";
 import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 import { assembleOverviewFacts, hasSufficientFacts } from "@/lib/edit/overview-facts";
 import { generateOverviewDraft, isOverviewGenerateEnabled } from "@/lib/edit/overview-generator";
-import {
-  isOverviewSelectionEmpty,
-  normalizeOverviewParams,
-  normalizeOverviewSelection,
-} from "@/lib/edit/overview-params";
+import { normalizeOverviewParams, normalizeOverviewSelection } from "@/lib/edit/overview-params";
 import { loadOverviewSelectionDeltas } from "@/lib/edit/overview-selection-store";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import { recordOverviewGenerateAttempt } from "@/lib/edit/rate-limit";
@@ -111,11 +107,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
       return editRateLimited(rate.retryAfterSeconds);
     }
-    // An explicit snapshot wins outright; otherwise fall to the scholar's DURABLE
-    // three-state deltas (§2.5) layered on the default auto-set.
-    const deltas = isOverviewSelectionEmpty(selection)
-      ? await loadOverviewSelectionDeltas(entityId)
-      : undefined;
+    // The scholar's DURABLE three-state deltas (§2.5) are loaded on EVERY path. For
+    // publications / funding / methods an explicit posted snapshot still wins outright
+    // (assembleOverviewFacts ignores those deltas when the snapshot is non-empty); but
+    // titles & education (#742 §7) are NOT carried in the snapshot, so their deltas can
+    // only reach the facts through the durable store — hence the unconditional load.
+    const deltas = await loadOverviewSelectionDeltas(entityId);
     facts = await assembleOverviewFacts(entityId, selection, { deltas });
   } catch (err) {
     logEditFailure(PATH, err);

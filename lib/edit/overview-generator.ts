@@ -113,11 +113,15 @@ export const OVERVIEW_SYSTEM_PROMPT = [
   "     vector, antibody, drug, cell type, or target TREATS or is FOR — when only the",
   '     therapy/target is in FACTS, do NOT supply the disease it is for (e.g. do not',
   '     turn "anti-eosinophil gene therapy" into a named eosinophilic disease). Never',
-  "     infer a research subject from a funder, a department, a degree, or a mechanism.",
+  "     infer a research subject from a funder, a department, a degree, a leadership",
+  "     or administrative title, or a mechanism (a title grounds the ROLE string",
+  "     itself, used verbatim — it does NOT license naming a specialty or disease",
+  "     inside it as a research subject).",
   "  4. NEVER describe a grant's aim, hypothesis, model, or scientific goal unless",
   "     that `activeGrants` entry carries a `title` stating it. A grant with only a",
   '     funder and mechanism supports "is funded by <funder>" and nothing more.',
-  "- Use the name, title, department, and education strings EXACTLY as given in",
+  "- Use the name, title, any additional `titles`, department, and education strings",
+  "  EXACTLY as given in",
   "  FACTS. Do NOT expand or embellish them — do not add an eponym, an institute or",
   '  center name, or the word "Institute" / "Department" that the given string does',
   '  not contain (a department given as "Brain and Mind Research" must stay that; do',
@@ -457,6 +461,14 @@ export function buildGroundingReference(facts: OverviewFacts): string {
   lines.push(
     `DEPARTMENT: ${facts.department ?? "(none)"} — use this department string exactly; flag any added eponym / institute / center.`,
   );
+  if (facts.titles.length > 0) {
+    lines.push(
+      "ADDITIONAL TITLES (current leadership / administrative roles, allowed EXACTLY as given — flag any added eponym, institute, center, or invented role):",
+    );
+    for (const t of facts.titles) {
+      lines.push(`- ${t.title}${t.organization ? ` — ${t.organization}` : ""}`);
+    }
+  }
   if (facts.methods.length > 0) {
     lines.push(
       "ALLOWED METHOD / TOOL NAMES (these names and their listed examples are the ONLY named tools/methods/datasets/models/algorithms that may appear in the draft):",

@@ -231,3 +231,134 @@ describe("OverviewIncludePicker — publications sort", () => {
     expect(rows[0].getAttribute("data-testid")).toBe("overview-source-row-publication-11");
   });
 });
+
+describe("OverviewIncludePicker — titles & education (#742 §7)", () => {
+  const richOpts = () =>
+    options({
+      identity: {
+        name: "Jane Smith",
+        primaryTitle: "Associate Professor of Medicine",
+        primaryDepartment: "Medicine",
+      },
+      titles: [
+        { id: "a0", title: "Associate Professor of Medicine", organization: "Weill Cornell Medicine", isPrimary: true, isInterim: false, isCurrent: true, endYear: null, featured: true, reason: "Your primary appointment" },
+        { id: "a1", title: "Chief, Division of Hematology", organization: "Weill Cornell Medicine", isPrimary: false, isInterim: false, isCurrent: true, endYear: null, featured: true, reason: "A leadership role" },
+        { id: "a2", title: "Attending Physician", organization: "NewYork-Presbyterian", isPrimary: false, isInterim: false, isCurrent: true, endYear: null, featured: false, reason: "A current appointment" },
+      ],
+      education: [
+        { id: "e1", degree: "M.D.", institution: "Yale School of Medicine", field: null, year: 2005, featured: true, reason: "Terminal degree" },
+        { id: "e2", degree: "Certificate in Clinical Research", institution: "WCM", field: null, year: 2010, featured: false, reason: "Training / certificate" },
+      ],
+    });
+
+  it("renders the scaffold as name · primary title · department (the strings the bio grounds on)", () => {
+    render(<OverviewIncludePicker options={richOpts()} deltas={deltas()} onChange={() => {}} />);
+    const scaffold = screen.getByTestId("overview-source-scaffold-title");
+    expect(scaffold.textContent).toContain("Always shown");
+    expect(scaffold.textContent).toContain("Jane Smith · Associate Professor of Medicine · Medicine");
+    // The primary appointment is the scaffold, never a toggleable row.
+    expect(screen.queryByTestId("overview-source-row-title-a0")).toBeNull();
+  });
+
+  it("shows the Titles section (no scaffold) when there are roles but no resolved primary title", () => {
+    const opts = options({
+      identity: { name: "Jane Smith", primaryTitle: null, primaryDepartment: "Medicine" },
+      titles: [
+        { id: "a1", title: "Chief, Division of Hematology", organization: "Weill Cornell Medicine", isPrimary: false, isInterim: false, isCurrent: true, endYear: null, featured: true, reason: "A leadership role" },
+      ],
+    });
+    render(<OverviewIncludePicker options={opts} deltas={deltas()} onChange={() => {}} />);
+    expect(screen.getByTestId("overview-source-section-title")).toBeTruthy();
+    expect(screen.queryByTestId("overview-source-scaffold-title")).toBeNull();
+    expect(screen.getByTestId("overview-source-row-title-a1")).toBeTruthy();
+  });
+
+  it("renders a pre-excluded title struck-through with an Undo (not vanished)", () => {
+    render(
+      <OverviewIncludePicker
+        options={richOpts()}
+        deltas={deltas({ excluded: { title: ["a1"] } })}
+        onChange={() => {}}
+      />,
+    );
+    const row = screen.getByTestId("overview-source-row-title-a1");
+    expect(row.getAttribute("data-state")).toBe("excluded");
+    expect(screen.getByTestId("overview-source-undo-title-a1")).toBeTruthy();
+  });
+
+  it("gives a pinned Available title an Unpin (clean un-add, not a spurious hide)", () => {
+    const onChange = vi.fn();
+    render(
+      <OverviewIncludePicker
+        options={richOpts()}
+        deltas={deltas({ pinned: { title: ["a2"] } })}
+        onChange={onChange}
+      />,
+    );
+    // a2 is an Available (non-featured) row pinned in → exclude-only section, so it gets
+    // an Unpin control, and clicking it clears the pin rather than minting an exclude.
+    fireEvent.click(screen.getByTestId("overview-source-pin-title-a2"));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pinned: expect.not.objectContaining({ title: expect.anything() }),
+        excluded: expect.not.objectContaining({ title: expect.anything() }),
+      }),
+    );
+  });
+
+  it("renders a past-role title's 'until <year>' meta and suppresses a null education year", () => {
+    const opts = options({
+      identity: { name: "Jane Smith", primaryTitle: "Professor", primaryDepartment: "Medicine" },
+      titles: [
+        { id: "a3", title: "Former Director, Genomics Core", organization: "WCM", isPrimary: false, isInterim: false, isCurrent: false, endYear: 2019, featured: false, reason: "A past leadership role" },
+      ],
+      education: [
+        { id: "e3", degree: "M.D.", institution: "Some University", field: null, year: null, featured: true, reason: "Terminal degree" },
+      ],
+    });
+    render(<OverviewIncludePicker options={opts} deltas={deltas()} onChange={() => {}} />);
+    fireEvent.click(screen.getByTestId("overview-source-more-title"));
+    expect(screen.getByTestId("overview-source-row-title-a3").textContent).toContain("until 2019");
+    const eduRow = screen.getByTestId("overview-source-row-education-e3");
+    expect(eduRow.textContent).toContain("Some University");
+    expect(eduRow.textContent).not.toContain("null");
+  });
+
+  it("features the significant current role exclude-only (no pin); the rest sits behind '+ more'", () => {
+    render(<OverviewIncludePicker options={richOpts()} deltas={deltas()} onChange={() => {}} />);
+    expect(screen.getByTestId("overview-source-row-title-a1")).toBeTruthy();
+    expect(screen.getByTestId("overview-source-exclude-title-a1")).toBeTruthy();
+    expect(screen.queryByTestId("overview-source-pin-title-a1")).toBeNull();
+    expect(screen.queryByTestId("overview-source-row-title-a2")).toBeNull();
+    expect(screen.getByTestId("overview-source-more-title")).toBeTruthy();
+  });
+
+  it("excludes a featured title and adds an Available one (add-and-pin)", () => {
+    const onChange = vi.fn();
+    render(<OverviewIncludePicker options={richOpts()} deltas={deltas()} onChange={onChange} />);
+    fireEvent.click(screen.getByTestId("overview-source-exclude-title-a1"));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ excluded: expect.objectContaining({ title: ["a1"] }) }),
+    );
+    fireEvent.click(screen.getByTestId("overview-source-more-title"));
+    fireEvent.click(screen.getByTestId("overview-source-add-title-a2"));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ pinned: expect.objectContaining({ title: ["a2"] }) }),
+    );
+  });
+
+  it("features terminal/professional education exclude-only; the minor cert sits behind '+ more'", () => {
+    render(<OverviewIncludePicker options={richOpts()} deltas={deltas()} onChange={() => {}} />);
+    expect(screen.getByTestId("overview-source-row-education-e1")).toBeTruthy();
+    expect(screen.getByTestId("overview-source-exclude-education-e1")).toBeTruthy();
+    expect(screen.queryByTestId("overview-source-pin-education-e1")).toBeNull();
+    expect(screen.queryByTestId("overview-source-row-education-e2")).toBeNull();
+    expect(screen.getByTestId("overview-source-more-education")).toBeTruthy();
+  });
+
+  it("hides both sections when the scholar has no titles or education", () => {
+    render(<OverviewIncludePicker options={options()} deltas={deltas()} onChange={() => {}} />);
+    expect(screen.queryByTestId("overview-source-section-title")).toBeNull();
+    expect(screen.queryByTestId("overview-source-section-education")).toBeNull();
+  });
+});

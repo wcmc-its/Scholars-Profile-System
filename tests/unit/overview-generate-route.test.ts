@@ -17,6 +17,7 @@ const {
   mockRecordAttempt,
   mockGenerationCreate,
   mockAuthorizeOverviewWrite,
+  mockLoadDeltas,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockEnabled: vi.fn(),
@@ -26,7 +27,16 @@ const {
   mockRecordAttempt: vi.fn(),
   mockGenerationCreate: vi.fn(),
   mockAuthorizeOverviewWrite: vi.fn(),
+  mockLoadDeltas: vi.fn(),
 }));
+
+/** The no-delta shape the store returns when a scholar has no stored selection. */
+const NO_DELTAS = {
+  pinned: {},
+  excluded: {},
+  publicationPositions: "led" as const,
+  fundingRoles: "led" as const,
+};
 
 // readEditRequest resolves identity through the #637 effective-identity seam;
 // drive real == effective from the one knob (non-impersonating).
@@ -49,12 +59,7 @@ vi.mock("@/lib/edit/overview-facts", () => ({
 // assembling facts; mocked to the default (no-delta) shape so the route's gates
 // are exercised in isolation (the assembler is mocked too).
 vi.mock("@/lib/edit/overview-selection-store", () => ({
-  loadOverviewSelectionDeltas: vi.fn(async () => ({
-    pinned: {},
-    excluded: {},
-    publicationPositions: "led",
-    fundingRoles: "led",
-  })),
+  loadOverviewSelectionDeltas: mockLoadDeltas,
 }));
 vi.mock("@/lib/edit/overview-generator", () => ({
   generateOverviewDraft: mockGenerateDraft,
@@ -103,6 +108,7 @@ beforeEach(() => {
   mockRecordAttempt.mockResolvedValue({ allowed: true, count: 1, limit: 10 });
   mockGenerationCreate.mockResolvedValue({ id: "gen123" });
   mockAuthorizeOverviewWrite.mockResolvedValue({ ok: true, viaUnitAdminUnit: null });
+  mockLoadDeltas.mockResolvedValue(NO_DELTAS);
 });
 
 // The shape normalizeOverviewParams produces for a MISSING/garbage `params`:
@@ -239,6 +245,28 @@ describe("POST /api/edit/overview/generate", () => {
           createdByCwid: "self01",
         }),
       }),
+    );
+  });
+
+  it("loads the durable deltas and forwards them to the assembler on the empty-selection path", async () => {
+    await POST(post({ entityId: "self01" }));
+    expect(mockLoadDeltas).toHaveBeenCalledWith("self01");
+    expect(mockAssembleFacts).toHaveBeenCalledWith(
+      "self01",
+      { pmids: [], grantIds: [], toolNames: [] },
+      { deltas: NO_DELTAS },
+    );
+  });
+
+  it("STILL loads + forwards the deltas when an explicit snapshot is posted (title/education deltas must bite)", async () => {
+    // The pre-#742-Phase-2b route skipped the deltas load on the explicit path; titles
+    // & education are not carried in the snapshot, so the load must be unconditional.
+    await POST(post({ entityId: "self01", selection: { pmids: ["p1"] } }));
+    expect(mockLoadDeltas).toHaveBeenCalledWith("self01");
+    expect(mockAssembleFacts).toHaveBeenCalledWith(
+      "self01",
+      { pmids: ["p1"], grantIds: [], toolNames: [] },
+      { deltas: NO_DELTAS },
     );
   });
 
