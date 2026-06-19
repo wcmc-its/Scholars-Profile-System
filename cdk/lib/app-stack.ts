@@ -1042,6 +1042,15 @@ export class AppStack extends Stack {
         // Center), so "just the Cancer Center for now" needs no hardcoded code.
         // App-only, no reindex, no migration. Staging-on for soak; prod-off.
         CENTER_COLLABORATION_NETWORK: env === "staging" ? "on" : "off",
+        // CENTER_COLLABORATION_GRANT_AXIS (#1137 Phase 2) — the SECOND
+        // relationship axis on the same tab: grant co-investigation (members who
+        // share a sponsor awardNumber), with an axis toggle (Publications /
+        // Grants / Both). Sub-flag of CENTER_COLLABORATION_NETWORK — no effect
+        // unless the parent is also on. Separate so the grant axis can soak
+        // independently and ship dark to prod while the pub axis stays live. The
+        // #160 grant-suppression gate is applied before edge-building. App-only,
+        // no reindex, no migration. Staging-on for soak; prod-off.
+        CENTER_COLLABORATION_GRANT_AXIS: env === "staging" ? "on" : "off",
         // CLINICAL_TRIALS_SECTION — the profile "Clinical trials" section
         // (#clinical-trials). Dark on prod; staging-on for soak. The profile
         // payload returns [] when off, so this is safe to leave off even after

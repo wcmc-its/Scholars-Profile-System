@@ -36,16 +36,49 @@ export interface CollabNode {
 }
 
 /**
- * One co-authored paper: the set of member indices on it (length ≥ 2) and its
- * year. The browser builds both the people-edge set and the program-rollup edge
- * set from these, applying year/threshold filters live — so the server stays
- * filter-agnostic and the standalone export embeds exactly this.
+ * A relationship GROUP: a set of member indices that co-occur on one shared
+ * object (a paper, or a grant award) plus a representative year. The pure edge
+ * builders in `graph.ts` are group-agnostic — they consume `CollabGroup[]`, so
+ * the same people/program/rollup machinery serves both the publication axis
+ * (`CollabPaper`) and the grant-co-investigator axis (`CollabAward`, #1137 Phase 2).
  */
-export interface CollabPaper {
-  pmid: string;
-  year: number | null;
-  /** Indices into `nodes` (length ≥ 2, deduped). */
+export interface CollabGroup {
+  /** Indices into `nodes` (length ≥ 2, deduped, ascending). */
   m: number[];
+  /** Representative year for the (optional) year filter; `null` = undated. */
+  year: number | null;
+}
+
+/**
+ * One co-authored paper. The browser builds both the people-edge set and the
+ * program-rollup edge set from these, applying year/threshold filters live — so
+ * the server stays filter-agnostic and the standalone export embeds exactly this.
+ */
+export interface CollabPaper extends CollabGroup {
+  pmid: string;
+}
+
+/**
+ * One shared grant award (#1137 Phase 2): the set of members who appear on the
+ * same sponsor `awardNumber`. Edges are inferred by grouping per-investigator
+ * `Grant` rows on the shared award key — there is no native multi-PI edge. The
+ * grant-visibility suppression gate is applied server-side BEFORE grouping, so a
+ * suppressed grant can never form an edge.
+ */
+export interface CollabAward extends CollabGroup {
+  /** Shared award key (sponsor `awardNumber`). */
+  awardId: string;
+  /** `year` (from `CollabGroup`) = earliest project start year across grouped rows. */
+  /** Latest project end year across grouped rows (for active + year-overlap). */
+  endYear: number | null;
+  /** True when ≥1 grouped row is still active (`endDate ≥ today`). */
+  active: boolean;
+  /**
+   * True when this is an umbrella / infrastructure award — a center/training
+   * mechanism (P30/P50/U54/UL1…) or a member count above the umbrella floor (the
+   * §4 clique problem). Excluded by default, surfaced as a count, never silent.
+   */
+  umbrella: boolean;
 }
 
 /** The full on-demand graph payload for one center. */
@@ -55,6 +88,13 @@ export interface CenterCollaborationPayload {
   programs: CollabProgram[];
   nodes: CollabNode[];
   papers: CollabPaper[];
+  /**
+   * Grant co-investigator groups (#1137 Phase 2). Empty `[]` unless the grant-axis
+   * sub-flag is on; the loader applies the grant-suppression gate before building.
+   */
+  awards: CollabAward[];
+  /** Whether the grant axis is enabled — drives the axis toggle in the component. */
+  grantAxis: boolean;
   /** ISO timestamp the payload was built (stamped by the route). */
   generatedAt: string;
 }

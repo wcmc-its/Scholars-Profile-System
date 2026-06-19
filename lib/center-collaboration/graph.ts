@@ -6,9 +6,13 @@
  * rebuild the vis-network DataSets from the immutable payload (`papers` + `nodes`).
  * Server stays filter-agnostic; all year/threshold/rollup logic lives here.
  *
+ * The edge builders are GROUP-AGNOSTIC: they consume `CollabGroup[]` (member
+ * indices + a year), so the same machinery serves the publication axis (papers)
+ * and the grant co-investigator axis (awards, #1137 Phase 2 — see `grants.ts`).
+ *
  * See `docs/cancer-center-collaboration-network-spec.md` §5.1, §13.1–13.3.
  */
-import type { CollabPaper, CollabProgram } from "./types";
+import type { CollabGroup, CollabProgram } from "./types";
 
 /**
  * Okabe-Ito colorblind-safe qualitative palette. Programs take slots in
@@ -87,9 +91,9 @@ export interface EdgeBuildOptions {
 
 const DEFAULT_CAP = 25;
 
-/** Whether a paper falls inside the (optional) year range. */
+/** Whether a group's representative year falls inside the (optional) year range. */
 export function paperInYear(
-  p: CollabPaper,
+  p: CollabGroup,
   range?: [number | null, number | null],
 ): boolean {
   if (!range) return true;
@@ -117,7 +121,7 @@ export interface PeopleEdge {
  * ≥1 (filtered, uncapped) paper, weighted by shared-paper count.
  */
 export function buildPeopleEdges(
-  papers: CollabPaper[],
+  papers: CollabGroup[],
   opts: EdgeBuildOptions = {},
 ): PeopleEdge[] {
   const cap = opts.maxMembersPerPaper ?? DEFAULT_CAP;
@@ -168,7 +172,7 @@ export function programKey(code: string | null): string {
  * to size the program nodes. No member cap here — at most C(#programs, 2) edges.
  */
 export function buildProgramEdges(
-  papers: CollabPaper[],
+  papers: CollabGroup[],
   nodeProgram: (idx: number) => string | null,
   opts: EdgeBuildOptions = {},
 ): { edges: ProgramEdge[]; internal: Map<string, number> } {
@@ -208,7 +212,7 @@ export function buildProgramEdges(
  * (eligible for the "hide unconnected" toggle, §13.3).
  */
 export function computeCoPubCounts(
-  papers: CollabPaper[],
+  papers: CollabGroup[],
   nodeCount: number,
   opts: EdgeBuildOptions = {},
 ): number[] {
@@ -237,7 +241,7 @@ export function computeCoPubCounts(
 
 /** Count of filtered papers above the member cap (surfaced, never silent). */
 export function countOmittedHyperauthored(
-  papers: CollabPaper[],
+  papers: CollabGroup[],
   opts: EdgeBuildOptions = {},
 ): number {
   const cap = opts.maxMembersPerPaper ?? DEFAULT_CAP;
@@ -263,7 +267,7 @@ export function nodeRadius(
 }
 
 /** Min/max publication year across the co-authored papers (for the slider bounds). */
-export function yearExtent(papers: CollabPaper[]): [number, number] | null {
+export function yearExtent(papers: CollabGroup[]): [number, number] | null {
   let lo = Infinity;
   let hi = -Infinity;
   for (const p of papers) {
