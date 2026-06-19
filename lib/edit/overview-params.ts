@@ -331,29 +331,42 @@ export function isOverviewSelectionDeltasEmpty(deltas: OverviewSelectionDeltas):
 
 /**
  * Resolve ONE type's effective id list (§2.5): `(featured ∪ pinned) \ excluded`,
- * de-duped, with the auto-set's order first and any pinned-but-not-featured ids
- * appended (a pin reaches PAST the default, so it lands at the tail). Pure;
- * exclude wins over pin when an id appears in both (a veto is stronger — an
- * unlikely client state, resolved conservatively).
+ * de-duped, exclude winning over pin (a veto is stronger — an unlikely client
+ * state, resolved conservatively). Pure.
+ *
+ * Ordering is governed by `opts.pinsFirst`:
+ *   - **default (tail)** — the auto-set's order first, pinned-but-not-featured ids
+ *     appended (a pin reaches PAST the default, landing at the tail). Right for
+ *     UN-capped types (titles / education), where order is cosmetic.
+ *   - **pinsFirst** — surviving pins ahead of the auto-set, so a deliberate pin
+ *     SURVIVES a downstream `slice(0, N)` cap instead of being evicted past the
+ *     budget (#742 §2.1 decision #3, the pin-loss fix). Right for the capped types
+ *     (publications / funding share the 25-item budget; tools their own 10). This
+ *     mirrors the client resolver's pins-first order (`overview-resolve.ts`).
  */
 export function applyDeltas(
   featured: readonly string[],
   pinned: readonly string[] = [],
   excluded: readonly string[] = [],
+  opts: { pinsFirst?: boolean } = {},
 ): string[] {
   const excludeSet = new Set(excluded);
   const pinSet = new Set(pinned);
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const id of featured) {
-    if (excludeSet.has(id) || seen.has(id)) continue;
-    seen.add(id);
-    out.push(id);
-  }
-  for (const id of pinSet) {
-    if (excludeSet.has(id) || seen.has(id)) continue;
-    seen.add(id);
-    out.push(id);
+  const pushAll = (ids: Iterable<string>) => {
+    for (const id of ids) {
+      if (excludeSet.has(id) || seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+  };
+  if (opts.pinsFirst) {
+    pushAll(pinSet);
+    pushAll(featured);
+  } else {
+    pushAll(featured);
+    pushAll(pinSet);
   }
   return out;
 }

@@ -786,6 +786,7 @@ describe("OverviewCard — version history (Phase B)", () => {
             isFirstOrLast: true,
             authorPosition: "first",
             defaultSelected: true,
+            featured: true,
           })),
           funding: [1, 2].map((n) => ({
             id: `g${n}`,
@@ -920,6 +921,7 @@ describe("OverviewCard — editor empty-state", () => {
                 isFirstOrLast: true,
                 authorPosition: "first",
                 defaultSelected: true,
+                featured: true,
               },
               {
                 pmid: "2",
@@ -930,6 +932,7 @@ describe("OverviewCard — editor empty-state", () => {
                 isFirstOrLast: true,
                 authorPosition: "last",
                 defaultSelected: true,
+                featured: true,
               },
             ],
             funding: [
@@ -1007,6 +1010,7 @@ describe("OverviewCard — conditional hints", () => {
               isFirstOrLast: true,
               authorPosition: "first",
               defaultSelected: true,
+              featured: true,
             })),
             funding: [
               {

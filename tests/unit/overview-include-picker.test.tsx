@@ -18,14 +18,14 @@ import {
 function options(over: Partial<OverviewSourceOptions> = {}): OverviewSourceOptions {
   return {
     publications: [
-      // featured (first author, in the auto-set)
-      { pmid: "11", title: "Batten disease gene therapy", venue: "Sci Transl Med", year: 2024, impact: 92, isFirstOrLast: true, authorPosition: "first", defaultSelected: true, reason: "Recent first-author trial." },
+      // featured (first author, in the §5.1 auto-set)
+      { pmid: "11", title: "Batten disease gene therapy", venue: "Sci Transl Med", year: 2024, impact: 92, isFirstOrLast: true, authorPosition: "first", defaultSelected: true, featured: true, reason: "Recent first-author trial." },
       // featured (last author)
-      { pmid: "22", title: "PET biodistribution of AAV", venue: "Mol Ther", year: 2023, impact: 78, isFirstOrLast: true, authorPosition: "last", defaultSelected: true },
+      { pmid: "22", title: "PET biodistribution of AAV", venue: "Mol Ther", year: 2023, impact: 78, isFirstOrLast: true, authorPosition: "last", defaultSelected: true, featured: true },
       // "more" — first/last but NOT in the auto-set (behind "+ more")
-      { pmid: "33", title: "Vector serotype comparison", venue: "Hum Gene Ther", year: 2021, impact: 40, isFirstOrLast: true, authorPosition: "first", defaultSelected: false },
+      { pmid: "33", title: "Vector serotype comparison", venue: "Hum Gene Ther", year: 2021, impact: 40, isFirstOrLast: true, authorPosition: "first", defaultSelected: false, featured: false },
       // "mid" — middle author (behind "all positions")
-      { pmid: "44", title: "Parenchymal gene transfer review", venue: "Hum Gene Ther", year: 2022, impact: 61, isFirstOrLast: false, authorPosition: "middle", defaultSelected: false },
+      { pmid: "44", title: "Parenchymal gene transfer review", venue: "Hum Gene Ther", year: 2022, impact: 61, isFirstOrLast: false, authorPosition: "middle", defaultSelected: false, featured: false },
     ],
     funding: [
       { id: "g1", role: "PI", funder: "NIH/NINDS", title: "Batten gene therapy", award: "R01 NS-1", endYear: 2027, defaultSelected: true },
@@ -217,6 +217,26 @@ describe("OverviewIncludePicker — thin-overview warning", () => {
         onChange={() => {}}
       />,
     );
+    expect(screen.queryByTestId("overview-source-minwarn")).toBeNull();
+  });
+
+  it("warns when the selected papers exceed the budget (over-pin, §2.1 decision #3)", () => {
+    // 26 featured pubs → one past the 25-item budget; the cap would drop the lowest.
+    const pubs: OverviewSourceOptions["publications"] = Array.from({ length: 26 }, (_, i) => ({
+      pmid: `p${i}`,
+      title: `Paper ${i}`,
+      venue: null,
+      year: 2024,
+      impact: 90 - i,
+      isFirstOrLast: true,
+      authorPosition: "first",
+      defaultSelected: true,
+      featured: true,
+    }));
+    render(
+      <OverviewIncludePicker options={options({ publications: pubs })} deltas={deltas()} onChange={() => {}} />,
+    );
+    expect(screen.getByTestId("overview-source-maxwarn")).toBeTruthy();
     expect(screen.queryByTestId("overview-source-minwarn")).toBeNull();
   });
 });

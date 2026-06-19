@@ -60,6 +60,7 @@ import {
   loadOverviewSourceOptions,
   type OverviewFacts,
 } from "@/lib/edit/overview-facts";
+import { OVERVIEW_SELECTION_MAX_ITEMS } from "@/lib/edit/overview-params";
 
 /** A Prisma Decimal-like object (`.toNumber()`), as impactScore arrives. */
 function decimal(n: number) {
@@ -353,6 +354,127 @@ describe("assembleOverviewFacts — representative publications (distilled, sele
       },
     });
     expect(facts?.representativePublications.map((p) => p.pmid)).toEqual(["1"]);
+  });
+});
+
+// #742 Phase 2c — the §5.1 LIVE auto-set flip: the empty-selection default now grounds
+// on the Recommended featured set (coverage + dedup + landmark), not the v3.1
+// first/last-impact rule; the led ⇄ all toggle re-filters the pool; pins ride ahead of
+// the cap; clusterKey collapses near-duplicates.
+describe("assembleOverviewFacts — §5.1 live auto-set (Phase 2c flip)", () => {
+  it("grounds the default on the §5.1 featured set — topic spread drops a 3rd same-area paper", async () => {
+    // Three first-author scored pubs, all in ONE research area. The v3.1 rule would
+    // feature all three; the §5.1 coverage pass caps a dominant area at 2 (landmarks
+    // exempt), so the lowest-scoring same-area paper defers to the Available tail.
+    mockPubAuthorFindMany.mockResolvedValue([
+      { pmid: "p90", isFirst: true, isLast: false },
+      { pmid: "p80", isFirst: true, isLast: false },
+      { pmid: "p70", isFirst: true, isLast: false },
+    ]);
+    mockPublicationFindMany.mockResolvedValue([
+      pubRow("p90", { impact: 90, title: "Alpha study", year: 2024 }),
+      pubRow("p80", { impact: 80, title: "Beta study", year: 2024 }),
+      pubRow("p70", { impact: 70, title: "Gamma study", year: 2024 }),
+    ]);
+    mockPubTopicFindMany.mockResolvedValue([
+      { parentTopicId: "areaA", pmid: "p90", rationale: null, score: 0.9 },
+      { parentTopicId: "areaA", pmid: "p80", rationale: null, score: 0.9 },
+      { parentTopicId: "areaA", pmid: "p70", rationale: null, score: 0.9 },
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.representativePublications.map((p) => p.pmid)).toEqual(["p90", "p80"]);
+  });
+
+  it("led mode excludes middle-author work from the default; all mode includes it (§2.2)", async () => {
+    mockPubAuthorFindMany.mockResolvedValue([
+      { pmid: "first1", isFirst: true, isLast: false },
+      { pmid: "last1", isFirst: false, isLast: true },
+      { pmid: "mid1", isFirst: false, isLast: false }, // middle author, highest impact
+    ]);
+    mockPublicationFindMany.mockResolvedValue([
+      pubRow("mid1", { impact: 95, title: "Mid study", year: 2024 }),
+      pubRow("first1", { impact: 90, title: "First study", year: 2024 }),
+      pubRow("last1", { impact: 80, title: "Last study", year: 2024 }),
+    ]);
+    // led (default): the high-impact middle-author paper is NOT in the auto-set.
+    const led = await assembleOverviewFacts("self01");
+    expect(led?.representativePublications.map((p) => p.pmid)).toEqual(["first1", "last1"]);
+    // all: the toggle widens the candidate pool, so the middle-author paper features.
+    const all = await assembleOverviewFacts("self01", undefined, {
+      deltas: { ...DEFAULT_DELTAS, publicationPositions: "all" },
+    });
+    expect(all?.representativePublications.map((p) => p.pmid)).toEqual(["mid1", "first1", "last1"]);
+  });
+
+  it("orders a pin AHEAD of the auto-set so it survives the 25-item cap (pin-loss fix)", async () => {
+    const N = OVERVIEW_SELECTION_MAX_ITEMS; // 25
+    const authorships: { pmid: string; isFirst: boolean; isLast: boolean }[] = [];
+    const pubRows: ReturnType<typeof pubRow>[] = [];
+    for (let i = 1; i <= N; i++) {
+      const pmid = `f${String(i).padStart(2, "0")}`;
+      authorships.push({ pmid, isFirst: true, isLast: false });
+      // Distinct impacts (desc) and titles → a full, dedup-free 25-paper auto-set.
+      pubRows.push(pubRow(pmid, { impact: 100 - i, title: `Featured ${pmid}`, year: 2024 }));
+    }
+    // A middle-author candidate the scholar pins — a 26th record, past the budget.
+    authorships.push({ pmid: "pin1", isFirst: false, isLast: false });
+    pubRows.push(pubRow("pin1", { impact: 10, title: "Pinned mid", year: 2020 }));
+    mockPubAuthorFindMany.mockResolvedValue(authorships);
+    mockPublicationFindMany.mockResolvedValue(pubRows);
+
+    const facts = await assembleOverviewFacts("self01", undefined, {
+      deltas: { ...DEFAULT_DELTAS, pinned: { publication: ["pin1"] } },
+    });
+    const pmids = facts!.representativePublications.map((p) => p.pmid);
+    expect(pmids).toHaveLength(N); // still capped at 25
+    expect(pmids).toContain("pin1"); // the pin survived the cap (ordered ahead)
+    expect(pmids).not.toContain("f25"); // the lowest-ranked auto-set paper was evicted
+  });
+
+  it("collapses a near-duplicate (same normalized title + year) to one featured slot (§2.4)", async () => {
+    mockPubAuthorFindMany.mockResolvedValue([
+      { pmid: "dup1", isFirst: true, isLast: false },
+      { pmid: "dup2", isFirst: true, isLast: false },
+      { pmid: "other1", isFirst: true, isLast: false },
+    ]);
+    mockPublicationFindMany.mockResolvedValue([
+      pubRow("dup1", { impact: 90, title: "An atlas of urban metagenomes", year: 2024 }),
+      pubRow("other1", { impact: 80, title: "A distinct study", year: 2023 }),
+      // Same normalized title + year as dup1 (a preprint/published pair) → one cluster.
+      pubRow("dup2", { impact: 70, title: "An  ATLAS of Urban  Metagenomes", year: 2024 }),
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    const pmids = facts!.representativePublications.map((p) => p.pmid);
+    expect(pmids).toContain("dup1"); // the stronger of the pair features
+    expect(pmids).toContain("other1");
+    expect(pmids).not.toContain("dup2"); // the near-duplicate defers (dedup)
+  });
+
+  it("funding 'all' mode adds non-lead active awards to the default (§2.2)", async () => {
+    mockGrantFindMany.mockResolvedValue([
+      grantRow("g1", "PI", { title: "Lead grant" }),
+      grantRow("g2", "Co-I", { title: "Co-I grant" }),
+    ]);
+    const led = await assembleOverviewFacts("self01");
+    expect(led?.activeGrants.map((g) => g.role)).toEqual(["PI"]);
+    const all = await assembleOverviewFacts("self01", undefined, {
+      deltas: { ...DEFAULT_DELTAS, fundingRoles: "all" },
+    });
+    expect(all?.activeGrants.map((g) => g.role).sort()).toEqual(["Co-I", "PI"]);
+  });
+
+  it("loadOverviewSourceOptions marks the led auto-set featured; middle-author work is not", async () => {
+    mockPubAuthorFindMany.mockResolvedValue([
+      { pmid: "f1", isFirst: true, isLast: false },
+      { pmid: "m1", isFirst: false, isLast: false }, // higher impact, but middle author
+    ]);
+    mockPublicationFindMany.mockResolvedValue([
+      pubRow("f1", { impact: 90 }),
+      pubRow("m1", { impact: 95 }),
+    ]);
+    const opts = await loadOverviewSourceOptions("self01");
+    const featuredByPmid = Object.fromEntries(opts.publications.map((p) => [p.pmid, p.featured]));
+    expect(featuredByPmid).toEqual({ f1: true, m1: false });
   });
 });
 

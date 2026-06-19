@@ -42,6 +42,7 @@ import type {
   OverviewSourceTitle,
 } from "@/lib/edit/overview-facts";
 import {
+  OVERVIEW_SELECTION_MAX_ITEMS,
   type OverviewPositionMode,
   type OverviewRecordIds,
   type OverviewRecordType,
@@ -149,7 +150,10 @@ function pubRole(p: OverviewSourcePublication): string | null {
 
 function buildPublications(options: OverviewSourceOptions): RecordView[] {
   return options.publications.map((p) => {
-    const bucket: Bucket = p.defaultSelected ? "featured" : p.isFirstOrLast ? "more" : "mid";
+    // #742 Phase 2c flip — the featured tier is the §5.1 auto-set (`featured`), not
+    // the v3.1 `defaultSelected` rule. A first/last pub outside the auto-set drops to
+    // the "+ more" tail; middle-author work sits behind the "all positions" toggle.
+    const bucket: Bucket = p.featured ? "featured" : p.isFirstOrLast ? "more" : "mid";
     return {
       id: p.pmid,
       title: <PubTitle as="span" value={p.title} />,
@@ -312,6 +316,19 @@ export function OverviewIncludePicker({
         >
           <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
           This leaves fewer than {MIN_PUBLICATIONS} papers — the overview will be brief.
+        </p>
+      )}
+      {visiblePubs > OVERVIEW_SELECTION_MAX_ITEMS && (
+        // §2.1 decision #3 — pins ride ahead of the auto-set server-side, but the
+        // selection is still capped: warn when the chosen papers alone exceed the
+        // budget, since the lowest-ranked won't reach the overview.
+        <p
+          className="text-apollo-amber mt-1 flex items-center gap-1.5 text-xs"
+          data-testid="overview-source-maxwarn"
+        >
+          <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
+          That&rsquo;s more than {OVERVIEW_SELECTION_MAX_ITEMS} papers — only the top{" "}
+          {OVERVIEW_SELECTION_MAX_ITEMS} will ground this overview.
         </p>
       )}
 

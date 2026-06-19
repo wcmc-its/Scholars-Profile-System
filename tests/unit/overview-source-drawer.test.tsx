@@ -17,8 +17,8 @@ import {
 
 const OPTIONS: OverviewSourceOptions = {
   publications: [
-    { pmid: "11", title: "P1", venue: "Cell", year: 2024, impact: 90, isFirstOrLast: true, authorPosition: "first", defaultSelected: true },
-    { pmid: "33", title: "P3", venue: "Nature", year: 2021, impact: 50, isFirstOrLast: true, authorPosition: "first", defaultSelected: false },
+    { pmid: "11", title: "P1", venue: "Cell", year: 2024, impact: 90, isFirstOrLast: true, authorPosition: "first", defaultSelected: true, featured: true },
+    { pmid: "33", title: "P3", venue: "Nature", year: 2021, impact: 50, isFirstOrLast: true, authorPosition: "first", defaultSelected: false, featured: false },
   ],
   funding: [
     { id: "g1", role: "PI", funder: "NIH", title: "Proj 1", award: "R01 X", endYear: 2027, defaultSelected: true },

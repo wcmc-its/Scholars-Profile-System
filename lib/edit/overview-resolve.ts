@@ -45,9 +45,11 @@ function resolveIds(
   return out;
 }
 
-/** The resolved snapshot the generator consumes: the recommended auto-set
- *  (`defaultSelected`) with the scholar's pins layered in (first) and vetoes
- *  removed. With empty deltas this equals the pure default selection. */
+/** The resolved snapshot the generator consumes: the recommended auto-set with the
+ *  scholar's pins layered in (first) and vetoes removed. With empty deltas this
+ *  equals the pure auto-set. Publications use the §5.1 `featured` set (the #742
+ *  Phase 2c flip); funding + tools stay on their `defaultSelected` lead-role / pmid
+ *  default — only publications flipped to the §5.1 auto-set (decision #1). */
 export function resolveOverviewSelection(
   options: OverviewSourceOptions,
   deltas: OverviewSelectionDeltas,
@@ -55,7 +57,7 @@ export function resolveOverviewSelection(
   return {
     pmids: resolveIds(
       options.publications.map((p) => p.pmid),
-      options.publications.filter((p) => p.defaultSelected).map((p) => p.pmid),
+      options.publications.filter((p) => p.featured).map((p) => p.pmid),
       deltas.pinned.publication,
       deltas.excluded.publication,
     ),
@@ -105,7 +107,9 @@ export function selectionToDeltas(
 ): OverviewSelectionDeltas {
   const pub = diffType(
     options.publications.map((p) => p.pmid),
-    options.publications.filter((p) => p.defaultSelected).map((p) => p.pmid),
+    // Publications diff against the §5.1 `featured` auto-set (the Phase 2c flip), so
+    // a restored snapshot maps to deltas against the SAME baseline the resolver uses.
+    options.publications.filter((p) => p.featured).map((p) => p.pmid),
     selection.pmids,
   );
   const fund = diffType(
