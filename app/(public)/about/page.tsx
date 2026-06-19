@@ -132,9 +132,9 @@ export default function DocsPage() {
           </p>
           <ul>
             <li>
-              <em>Where your data comes from</em>: authoritative source systems (PubMed, the
-              Enterprise Directory, InfoEd, NIH RePORTER, NYP, the Graduate School, the COI system)
-              plus two in-house layers: ReCiter, which decides which publications are yours, and
+              <em>Where your data comes from</em>: authoritative source systems (PubMed, the WCM Web
+              Directory, the Enterprise Directory, ASMS, InfoEd, NIH RePORTER, NYP, the Graduate
+              School, and the COI system) plus two in-house layers: ReCiter, which decides which publications are yours, and
               ReciterAI, which derives research areas, the Impact score, and synopses.
             </li>
             <li>
@@ -163,16 +163,17 @@ export default function DocsPage() {
 
         <p>
           <strong>Where Scholars goes beyond VIVO.</strong> Two things changed. First, you have
-          more control over your own profile. Through{" "}
+          more control over your own profile. Publication attribution through{" "}
           <a href={PM} className={LINK}>
             ReCiter Publication Manager
           </a>{" "}
-          you decide which publications are attributed to you (confirm the ones that are yours,
-          reject the ones that aren&apos;t); on your profile you write your own overview, hide or
-          restore individual papers, and choose which of your papers appear as Selected highlights;
-          and you can request a name-based custom web address. Second, there are more ways for your
-          work and expertise to surface: representative papers in the home Spotlight, the research
-          areas you publish in, the specific methods and tools you are known for, and expert
+          &mdash; confirming the papers that are yours and rejecting the ones that aren&apos;t
+          &mdash; carried over from the VIVO era and works as it did before; what&apos;s new with
+          Scholars is profile-level self-service: you write your own overview, hide or restore
+          individual papers, choose which of your papers appear as Selected highlights, and can
+          request a name-based custom web address. Second, there are more ways for your work and
+          expertise to surface: representative papers in the home Spotlight, the research areas you
+          publish in, the specific methods and tools your published work draws on, and expert
           listings that place you among the most active faculty in an area.
         </p>
 
@@ -209,7 +210,7 @@ export default function DocsPage() {
             {
               href: "#center-admin",
               q: "How do I add or remove a member of my center?",
-              a: "A center Owner or Curator edits the roster in-app; center membership is the one thing Scholars itself owns.",
+              a: "A center Owner or Curator edits the roster in-app; center membership is the only shared institutional field Scholars itself owns.",
             },
             {
               href: "#profile-url",
@@ -242,7 +243,7 @@ export default function DocsPage() {
             { href: "#scholar", t: "A scholar (faculty)", d: "You have a profile and want it to be right." },
             { href: "#postdoc", t: "A postdoc or fellow", d: "An academic appointee who can appear as a scholar." },
             { href: "#dept-admin", t: "A department / division administrator", d: "You report on a unit’s output and field its faculty’s questions." },
-            { href: "#center-admin", t: "A center administrator", d: "You manage a center, the one thing Scholars itself owns." },
+            { href: "#center-admin", t: "A center administrator", d: "You manage a center — the only shared institutional data Scholars itself owns." },
           ].map((c) => (
             <Link
               key={c.href}
@@ -257,9 +258,11 @@ export default function DocsPage() {
 
         <h2 id="scholar">Scholar (faculty)</h2>
         <p>
-          Your profile is assembled for you automatically. Your name, title, and primary department
-          come from the Enterprise Directory (ED). Your publications are matched to you by ReCiter
-          from PubMed. Your funding comes from InfoEd, WCM&apos;s grants system of record for all
+          Your profile is assembled for you automatically. Your name comes from the WCM Web
+          Directory; your title from the Enterprise Directory (ED), usually following your primary
+          ASMS appointment, though a &ldquo;working title&rdquo; set in ED can override it; and your
+          primary department from ASMS, the system of record for your primary appointment. Your
+          publications are matched to you by ReCiter from PubMed. Your funding comes from InfoEd, WCM&apos;s grants system of record for all
           sponsors; for federally funded work, NIH RePORTER supplies the abstract text and the
           NIH-portfolio link. Disclosures come from the COI system, and a NewYork-Presbyterian
           position from NYP. Your research areas, the Impact numbers, and the synopses are computed by
@@ -375,8 +378,13 @@ export default function DocsPage() {
         <h2 id="center-admin">Center administrator</h2>
         <p>
           You are the one stakeholder with a Scholars-native data responsibility.{" "}
-          <strong>Center membership is the only field whose system of record is Scholars itself</strong>.{" "}
-          Center rosters are not held anywhere upstream, so they are maintained in this application,
+          <strong>
+            Center membership is the only <em>institutional</em> field whose system of record is
+            Scholars itself
+          </strong>{" "}
+          &mdash; your overview, publication-visibility choices, and Selected highlights are stored
+          here too, but those are an individual&apos;s own profile rather than shared data about the
+          institution. Center rosters are not held anywhere upstream, so they are maintained in this application,
           and they are self-serve for the right roles.
         </p>
         <p>
@@ -448,14 +456,12 @@ export default function DocsPage() {
               </tr>
               <tr>
                 <td>Title</td>
-                <td>ASMS (your primary appointment)</td>
+                <td>Enterprise Directory (usually from your ASMS appointment)</td>
                 <td>Nightly</td>
                 <td>
-                  Inferred from your primary appointment; a department admin can add a
-                  &ldquo;working title&rdquo; override in the{" "}
-                  <a href={WEB_DIR} className={LINK}>
-                    Web Directory
-                  </a>
+                  Usually follows your primary appointment; a department admin can set a
+                  &ldquo;working title&rdquo; override in the Enterprise Directory, which then takes
+                  precedence
                 </td>
               </tr>
               <tr>
@@ -532,12 +538,7 @@ export default function DocsPage() {
               </tr>
               <tr className="[&>td]:bg-[#f7f1f1]">
                 <td>Center membership</td>
-                <td>
-                  Scholars (this app){" "}
-                  <span className="ml-1 inline-block rounded-full bg-[#7d1c1c] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
-                    Scholars-owned
-                  </span>
-                </td>
+                <td>Scholars (this app) &mdash; the only institutional field Scholars owns</td>
                 <td>On edit</td>
                 <td>Edited in-app by a center Owner/Curator</td>
               </tr>
@@ -546,6 +547,14 @@ export default function DocsPage() {
         </div>
         <Callout variant="warn" heading="Citation source">
           <p>Scholars uses iCite as its only citation source. It does not use Scopus.</p>
+        </Callout>
+        <Callout variant="note" heading="Clinical trials">
+          <p>
+            A clinical-trials section, drawn from OnCore (WCM&apos;s clinical trial management
+            system), lists the studies you are tied to. Because trials in OnCore are already linked
+            to their investigators, attribution comes from OnCore directly rather than through
+            ReCiter, and corrections are made at the OnCore source.
+          </p>
         </Callout>
         <p>
           A few non-obvious behaviors this map explains. MeSH &ldquo;check tags&rdquo; (Humans, Male,
@@ -628,11 +637,11 @@ export default function DocsPage() {
               </tr>
               <tr>
                 <td>Your department, title, or affiliation</td>
-                <td>ASMS (your primary appointment)</td>
+                <td>ASMS (your primary appointment); title is carried by the Enterprise Directory</td>
                 <td>
                   Tied to your primary appointment; Request a change routes to the Office of
                   Faculty Affairs (a department admin can set a &ldquo;working title&rdquo; override
-                  in the Web Directory)
+                  in the Enterprise Directory)
                 </td>
               </tr>
               <tr>
@@ -822,17 +831,18 @@ export default function DocsPage() {
           best fit, with <em>Cellular Senescence</em> secondary), and a paper that fits no
           subarea cleanly is left unassigned rather than forced into one.
         </p>
-        <Callout variant="warn" heading="An internal score you never see">
+        <Callout variant="warn" heading="A second score, a click deeper">
           <p>
             Each publication-to-area pairing carries a <em>relevance</em> score from 0 to 1: in
             the example, roughly 0.85 for Aging &amp; Geroscience, 0.78 for Immunology, and 0.42 for
             Cancer Biology. It measures how central the paper is to <em>that</em> area, a different
             question from the Impact score&apos;s &ldquo;how notable is this paper overall.&rdquo; A
             paper can be highly relevant to an area yet modest in Impact, or the reverse. Relevance is
-            used only to order publications within a research area (combined with Impact, so a
-            paper ranks high on an area page when it is both central to the area and notable),
-            and it is never shown. The only score you see in a publication context is the Impact score
-            (&ldquo;Impact: NN&rdquo;).
+            used mainly to order publications within a research area (combined with Impact, so a
+            paper ranks high on an area page when it is both central to the area and notable). Unlike
+            Impact, it does not appear on publication cards or listings; it surfaces only when you
+            open a publication&apos;s detail view. So in everyday browsing the one score you see is
+            Impact (&ldquo;Impact: NN&rdquo;), with relevance available a click deeper.
           </p>
         </Callout>
         <p>
@@ -1032,6 +1042,7 @@ export default function DocsPage() {
           or is in a venue the citation source does not index.
         </p>
         <h3>The three scores in the system</h3>
+        <p>Three scores run in Scholars, and they differ in how visible they are to you:</p>
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-[640px]">
             <thead>
@@ -1059,7 +1070,7 @@ export default function DocsPage() {
                 <td>Research-area relevance score</td>
                 <td>How central a paper is to a research area</td>
                 <td>per (publication, research area)</td>
-                <td>No (internal ranking only)</td>
+                <td>Only in a publication&apos;s detail view</td>
               </tr>
             </tbody>
           </table>
@@ -1266,7 +1277,7 @@ export default function DocsPage() {
             { term: "iCite", def: "The NIH tool Scholars uses as its only citation source. Scholars does not use Scopus." },
             { term: "InfoEd", def: "WCM’s grants system of record, for all sponsors. NIH RePORTER supplies federal abstract text and the portfolio link." },
             { term: "MeSH", def: "Medical Subject Headings, the NLM’s controlled vocabulary for indexing biomedical literature. Scholars search is MeSH-aware." },
-            { term: "System of record (SOR)", def: "The authoritative system that owns a field. Scholars shows a copy and cannot override it; corrections happen at the SOR. Center membership is the only field whose SOR is Scholars itself." },
+            { term: "System of record (SOR)", def: "The authoritative system that owns a field. Scholars shows a copy and cannot override it; corrections happen at the SOR. Center membership is the only institutional field whose SOR is Scholars itself; a scholar’s own overview and visibility choices are stored in Scholars too, but those are personal profile data, not shared institutional records." },
             { term: "Roles (Superuser / Owner / Curator)", def: "Unit-scoped permissions for curating centers, divisions, and departments. Superuser is global and grants roles; Owner and Curator act on one unit. Every edit is audit-logged." },
             { term: "Spotlight / Selected research", def: "The home-page showcase of representative publications per subarea, selected by ReciterAI Impact within the subarea and refreshed weekly. Not scholar-curated." },
             { term: "Suppression", def: "Hiding a misattributed publication from a profile. A reversible, recorded near-term measure; the source-level fix is rejecting the paper in Publication Manager." },
