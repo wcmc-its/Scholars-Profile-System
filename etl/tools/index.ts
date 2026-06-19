@@ -35,10 +35,14 @@
  *   TOOLS_PREFIX   (default tools)
  *   SCHOLAR_TOOL_SOURCE  (ddb default | s3)
  *   SCHOLAR_TOOL_DRY_RUN (any value, or pass --dry-run) — load + diff, no write
+ *   SCHOLAR_TOOL_FORCE_REPLACE (set to "1", or pass --force) — bypass the
+ *     sha256 short-circuit and always full-replace (operator escape hatch,
+ *     mirrors MESH_FORCE_REPLACE in etl/mesh-descriptors)
  *
  * Usage:
  *   npm run etl:scholar-tool
  *   tsx etl/tools/index.ts --dry-run
+ *   tsx etl/tools/index.ts --force      # bypass short-circuit, force a rewrite
  */
 import { createHash } from "node:crypto";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
@@ -52,6 +56,7 @@ import {
   type ScholarFamilyWrite,
 } from "./scholar-family-mapper-s3";
 import { buildToolContextIndex, type ToolContextIndex } from "./tool-context";
+import { manifestContentSignature } from "./manifest-signature";
 
 // ---------------------------------------------------------------------------
 // Module-level env constants — AWS SDK default credential chain; never hardcode
@@ -65,6 +70,8 @@ const REGION = process.env.AWS_DEFAULT_REGION ?? "us-east-1";
 const SOURCE = "Tools"; // etl_run.source — registered nightly in etl/freshness
 
 const dryRun = process.argv.includes("--dry-run") || Boolean(process.env.SCHOLAR_TOOL_DRY_RUN);
+const forceReplace =
+  process.argv.includes("--force") || process.env.SCHOLAR_TOOL_FORCE_REPLACE === "1";
 
 // ---------------------------------------------------------------------------
 // Artifact / manifest types — mirror the A2 tools-a2-v1 manifest (ReciterAI#173).
@@ -128,7 +135,11 @@ async function recordRun(args: {
       completedAt: new Date(),
       rowsProcessed: args.rowsProcessed,
       errorMessage: args.errorMessage ?? null,
-      manifestSha256: args.manifest?.sha256 ?? null,
+      // Store the composite signature (all object shas), not just tools.json's
+      // top-level sha — so the next run's short-circuit detects a single-object
+      // republish (e.g. tool_context.json only, ReciterAI#238). Compared, never
+      // displayed; readable provenance stays in manifestTaxonomyVersion.
+      manifestSha256: args.manifest ? manifestContentSignature(args.manifest) : null,
       manifestTaxonomyVersion: args.manifest?.version ?? null,
     },
   });
@@ -250,16 +261,32 @@ async function main(): Promise<void> {
   });
 
   // Step 2: sha256 short-circuit — skip an unchanged artifact (write path only).
-  if (!dryRun) {
+  // Compare against the COMPOSITE signature over every manifest object's sha,
+  // not just tools.json's top-level sha, so a tool_context.json-only republish
+  // (ReciterAI#238) is NOT masked by an unchanged primary artifact. `--force` /
+  // SCHOLAR_TOOL_FORCE_REPLACE bypasses it entirely (operator escape hatch).
+  if (!dryRun && !forceReplace) {
+    const signature = manifestContentSignature(manifest);
     const lastRun = await db.write.etlRun.findFirst({
       where: { source: SOURCE, status: "success" },
       orderBy: { completedAt: "desc" },
     });
-    if (lastRun?.manifestSha256 === manifest.sha256) {
-      log("short_circuit", { sha256: manifest.sha256, version: manifest.version, rows: 0 });
+    if (lastRun?.manifestSha256 === signature) {
+      log("short_circuit", {
+        sha256: manifest.sha256,
+        signature_prefix: signature.slice(0, 12),
+        version: manifest.version,
+        rows: 0,
+      });
       await recordRun({ status: "success", rowsProcessed: 0, manifest });
       return;
     }
+  }
+  if (forceReplace) {
+    log("force_replace", {
+      reason: "SCHOLAR_TOOL_FORCE_REPLACE/--force",
+      version: manifest.version,
+    });
   }
 
   // Step 3: fetch the primary artifact by its manifest key, verify integrity.
