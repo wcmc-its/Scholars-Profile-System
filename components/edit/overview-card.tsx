@@ -55,9 +55,12 @@ import { Button } from "@/components/ui/button";
 import type { OverviewSourceOptions } from "@/lib/edit/overview-facts";
 import {
   DEFAULT_OVERVIEW_PARAMS,
+  DEFAULT_OVERVIEW_SELECTION_DELTAS,
   type OverviewParams,
   type OverviewSelection,
+  type OverviewSelectionDeltas,
 } from "@/lib/edit/overview-params";
+import { resolveOverviewSelection, selectionToDeltas } from "@/lib/edit/overview-resolve";
 import type { OverviewOrigin } from "@/lib/edit/overview-provenance";
 import { cn } from "@/lib/utils";
 
@@ -89,16 +92,6 @@ const HINT_SPARSE_SOURCES = "Limited sources may produce a generic draft.";
 
 /** A fresh, all-empty source selection (before the source-options load). */
 const EMPTY_SELECTION: OverviewSelection = { pmids: [], grantIds: [], toolNames: [] };
-
-/** The populated default selection from the source-options' `defaultSelected`
- *  flags (v3.1 — first/last-author scored pubs + PI funding; tools land in C3). */
-function selectionFromOptions(options: OverviewSourceOptions): OverviewSelection {
-  return {
-    pmids: options.publications.filter((p) => p.defaultSelected).map((p) => p.pmid),
-    grantIds: options.funding.filter((f) => f.defaultSelected).map((f) => f.id),
-    toolNames: options.tools.filter((t) => t.defaultSelected).map((t) => t.toolName),
-  };
-}
 
 /** Restore a persisted selection (#765 — "Use these settings") against the
  *  CURRENT candidate pool: drop any pmids / grantIds / toolNames the scholar's
@@ -510,7 +503,19 @@ function OverviewGeneratorArm({
   // from the populated default. Best-effort: a failed fetch leaves the drawer
   // disabled, not the editor — generation still defaults server-side.
   const [sourceOptions, setSourceOptions] = React.useState<OverviewSourceOptions | null>(null);
-  const [selection, setSelection] = React.useState<OverviewSelection>(EMPTY_SELECTION);
+  // The durable three-state deltas (#742 §2.5), loaded from + saved to
+  // `/api/edit/overview/selection`. The generation SNAPSHOT is derived from them.
+  const [deltas, setDeltas] = React.useState<OverviewSelectionDeltas>(
+    DEFAULT_OVERVIEW_SELECTION_DELTAS,
+  );
+
+  // The generation snapshot, DERIVED from the deltas applied to the recommended
+  // auto-set (`defaultSelected`); with no deltas it equals the pure default. The
+  // §6 hints, the generate POST, and the source-count readout all read this.
+  const selection = React.useMemo<OverviewSelection>(
+    () => (sourceOptions ? resolveOverviewSelection(sourceOptions, deltas) : EMPTY_SELECTION),
+    [sourceOptions, deltas],
+  );
 
   // The block is expanded when there is no saved bio, collapsed when one exists
   // (§8) — set once on mount from the initial saved value.
@@ -536,7 +541,6 @@ function OverviewGeneratorArm({
           tools: Array.isArray(data.tools) ? data.tools : [],
         };
         setSourceOptions(options);
-        setSelection(selectionFromOptions(options));
       } catch {
         // Swallow — the picker is a convenience; generation defaults server-side.
       }
@@ -545,6 +549,44 @@ function OverviewGeneratorArm({
       cancelled = true;
     };
   }, [cwid]);
+
+  // Load the scholar's durable selection deltas alongside the candidate lists.
+  // Best-effort: a failed read leaves the pure auto-set (the default deltas).
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/edit/overview/selection?cwid=${encodeURIComponent(cwid)}`,
+          { method: "GET" },
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { ok: true; deltas: OverviewSelectionDeltas };
+        if (!cancelled && data?.deltas) setDeltas(data.deltas);
+      } catch {
+        // Swallow — generation defaults to the auto-set server-side.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cwid]);
+
+  // Commit edited deltas: update local state AND persist them (best-effort — the
+  // resolved selection still drives this session's generation if the write fails).
+  const commitDeltas = React.useCallback(
+    (next: OverviewSelectionDeltas) => {
+      setDeltas(next);
+      void fetch(`/api/edit/overview/selection?cwid=${encodeURIComponent(cwid)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deltas: next }),
+      }).catch(() => {
+        // Swallow — durability is best-effort; the in-session selection holds.
+      });
+    },
+    [cwid],
+  );
 
   const busy = isGenerating || editor.isSaving;
   const reviewDraft = reviewHistory[reviewIndex] ?? null;
@@ -661,8 +703,8 @@ function OverviewGeneratorArm({
         params={params}
         setParams={setParams}
         sourceOptions={sourceOptions}
-        selection={selection}
-        setSelection={setSelection}
+        deltas={deltas}
+        onCommitDeltas={commitDeltas}
         showConflictHint={showConflictHint}
         showSparseHint={showSparseHint}
         conflictAwardCount={selection.grantIds.length}
@@ -720,8 +762,8 @@ function OverviewDraftBlock({
   params,
   setParams,
   sourceOptions,
-  selection,
-  setSelection,
+  deltas,
+  onCommitDeltas,
   showConflictHint,
   showSparseHint,
   conflictAwardCount,
@@ -736,8 +778,8 @@ function OverviewDraftBlock({
   params: OverviewParams;
   setParams: React.Dispatch<React.SetStateAction<OverviewParams>>;
   sourceOptions: OverviewSourceOptions | null;
-  selection: OverviewSelection;
-  setSelection: React.Dispatch<React.SetStateAction<OverviewSelection>>;
+  deltas: OverviewSelectionDeltas;
+  onCommitDeltas: (next: OverviewSelectionDeltas) => void;
   showConflictHint: boolean;
   showSparseHint: boolean;
   conflictAwardCount: number;
@@ -789,8 +831,8 @@ function OverviewDraftBlock({
 
           <OverviewSourceDrawer
             options={sourceOptions}
-            selection={selection}
-            onSelectionChange={setSelection}
+            deltas={deltas}
+            onCommit={onCommitDeltas}
             disabled={busy}
           />
 
@@ -828,13 +870,19 @@ function OverviewDraftBlock({
                           // Restore the steering params AND the source selection
                           // the draft was generated with (#765). The persisted
                           // selection rides inside gen.params (v3.1); split it out
-                          // so it never leaks into params state, and clamp it to
-                          // the current candidate pool in case the corpus changed.
+                          // so it never leaks into params state, clamp it to the
+                          // current candidate pool in case the corpus changed, then
+                          // map the snapshot back to deltas against today's auto-set
+                          // (§2.5 — kept non-defaults pin, dropped defaults veto).
                           const { selection: savedSelection, ...steering } = gen.params;
                           setParams(steering);
                           if (savedSelection && sourceOptions) {
-                            setSelection(
-                              clampSelectionToOptions(savedSelection, sourceOptions),
+                            onCommitDeltas(
+                              selectionToDeltas(
+                                sourceOptions,
+                                clampSelectionToOptions(savedSelection, sourceOptions),
+                                deltas,
+                              ),
                             );
                           }
                         }}

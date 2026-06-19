@@ -1,49 +1,49 @@
 /**
- * OverviewIncludePicker — the controlled checklists inside the Sources drawer
- * (#742 v3.1 §3.2 / #875 §5 + §7 the confidence layer). The scholar picks which
- * **publications**, **funding** awards, and **methods** (their #799 method
- * families, #886) ground their generated bio. A pure controlled surface: it owns no
- * fetch and no open state — the parent (`overview-source-drawer.tsx`) holds the
- * {@link OverviewSourceOptions} payload and the {@link OverviewSelection}; this
- * renders them and emits the next selection.
+ * OverviewIncludePicker — the three-state source picker inside the Sources drawer
+ * (#742 spec §2 / Phase 2). The scholar shapes which **publications**, **funding**
+ * awards, **methods**, **education**, and **titles & positions** ground their
+ * generated bio. A pure controlled surface: it owns no fetch and no open state —
+ * the parent ({@link "./overview-source-drawer"}) holds the
+ * {@link OverviewSourceOptions} payload and the {@link OverviewSelectionDeltas},
+ * and this renders them and emits the next deltas.
  *
- * #875 §7 confidence layer:
- *   - Each section carries a verbatim §7.1 rule line (the *reassurance*) next to
- *     a labeled sort dropdown (§5, the *mechanic*) — they coexist.
- *   - Per-section quick actions: All · None · Top N by score (respecting caps,
- *     and for Methods the #765 §2 pmid_count >= 2 floor).
- *   - Selected-first ordering: checked items stable-partition to the top.
- *   - The §7.2 whitelist is the ONLY per-item signal shown — publications: role ·
- *     year · impact NUMBER; awards: role · year; methods: publication count. No
- *     model prose (`context` / `impactJustification` / `synopsis`) ever renders.
+ * #742 §2.5 — the THREE-STATE model. Every record is exactly one of:
+ *   - **default** — in the recommended auto-set (the `defaultSelected` featured
+ *     tier) or absent from it (the Available tier), with no scholar override;
+ *   - **pinned-in** — forced in (the centrality override; "add merges into pin");
+ *   - **excluded** — forced out (a persistent veto; the record STAYS in the
+ *     profile, it just won't ground THIS overview).
+ * The scholar's overrides are stored as DELTAS against the auto-set, not a
+ * snapshot of checkboxes, so they survive every regenerate (the auto-set is
+ * recomputed each run and the deltas re-applied on top).
  *
- * Caps (v3.1 decision 3): publications + funding share a combined ceiling; at the
- * cap, unchecked boxes in those two sections disable. Tools carry their own
- * smaller ceiling. The server re-clamps both regardless (the trust boundary is
- * `normalizeOverviewSelection`).
+ * §4.3 — tiers / scores are BACKEND-ONLY and never render. The UI drives off the
+ * `reason` line, the featured/available split, and order. Each section's controls
+ * follow the §8 per-type set: publications / funding / methods get pin-to-protect
+ * AND exclude on featured rows; titles & education get exclude only (their
+ * auto-set is stable run-to-run); every Available-tail row gets "add and pin".
  *
- * The Methods section is **hidden entirely** when `options.tools` is empty (the
- * scholar has no method families), so the picker degrades cleanly for scholars
- * without a `scholar_family` rollup.
+ * The "led ⇄ all" toggle (publications, funding) flips which candidates the
+ * Available tail reveals (middle-author papers, co-investigator grants). It is
+ * carried in the deltas (`publicationPositions` / `fundingRoles`) so it is durable;
+ * the auto-set re-derivation it implies is wired server-side in a later phase.
  */
 "use client";
 
 import * as React from "react";
-import { ExternalLink, Search } from "lucide-react";
+import { ChevronDown, Pin, Plus, TriangleAlert, Undo2, X } from "lucide-react";
 
 import { PubTitle } from "@/components/publication/pub-html";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
 import type {
   OverviewSourceFunding,
   OverviewSourceOptions,
   OverviewSourcePublication,
 } from "@/lib/edit/overview-facts";
 import {
-  OVERVIEW_METHOD_PMID_FLOOR,
-  OVERVIEW_SELECTION_MAX_ITEMS,
-  OVERVIEW_SELECTION_MAX_TOOLS,
-  type OverviewSelection,
+  type OverviewPositionMode,
+  type OverviewRecordIds,
+  type OverviewRecordType,
+  type OverviewSelectionDeltas,
 } from "@/lib/edit/overview-params";
 import { cn } from "@/lib/utils";
 
@@ -51,471 +51,728 @@ type ToolOption = OverviewSourceOptions["tools"][number];
 
 type OverviewIncludePickerProps = {
   options: OverviewSourceOptions;
-  selection: OverviewSelection;
-  onChange: (next: OverviewSelection) => void;
+  deltas: OverviewSelectionDeltas;
+  onChange: (next: OverviewSelectionDeltas) => void;
   disabled?: boolean;
 };
 
-// §7.1 ranking rules — verbatim (Methods reuses the public Methods & tools copy).
-const RULE_PUBLICATIONS =
-  "Ranked by citation impact and recency, weighted toward senior-author work.";
-const RULE_FUNDING = "Ranked by your role and recency.";
-const RULE_METHODS =
-  "Inferred from methods named in your publications · ranked by how often each appears.";
+/** The minimum visible publications below which the overview reads as thin (§2.5). */
+const MIN_PUBLICATIONS = 3;
 
-/** Toggle `value` in `list` (add if checked + absent, remove if unchecked). */
-function toggle(list: string[], value: string, checked: boolean): string[] {
-  const has = list.includes(value);
-  if (checked === has) return list;
-  return checked ? [...list, value] : list.filter((v) => v !== value);
+// ---------------------------------------------------------------------------
+// Delta bag helpers — immutable add / remove / toggle on the per-type id bags.
+// ---------------------------------------------------------------------------
+
+function bagHas(bag: OverviewRecordIds, type: OverviewRecordType, id: string): boolean {
+  return (bag[type] ?? []).includes(id);
 }
 
-/** Stable-partition: pinned (selected) members first, original order preserved. */
-function selectedFirst<T>(rows: T[], isSelected: (row: T) => boolean): T[] {
-  const pinned: T[] = [];
-  const rest: T[] = [];
-  for (const row of rows) (isSelected(row) ? pinned : rest).push(row);
-  return [...pinned, ...rest];
+function bagAdd(bag: OverviewRecordIds, type: OverviewRecordType, id: string): OverviewRecordIds {
+  if (bagHas(bag, type, id)) return bag;
+  return { ...bag, [type]: [...(bag[type] ?? []), id] };
 }
 
-type PubSort = "impact" | "year";
+function bagRemove(bag: OverviewRecordIds, type: OverviewRecordType, id: string): OverviewRecordIds {
+  if (!bagHas(bag, type, id)) return bag;
+  const next = (bag[type] ?? []).filter((x) => x !== id);
+  const out = { ...bag };
+  if (next.length > 0) out[type] = next;
+  else delete out[type];
+  return out;
+}
+
+/** Pin / un-pin a record. Pinning also lifts any veto on it (a pin is an
+ *  inclusion; the two states are mutually exclusive in intent). */
+function togglePin(deltas: OverviewSelectionDeltas, type: OverviewRecordType, id: string): OverviewSelectionDeltas {
+  if (bagHas(deltas.pinned, type, id)) {
+    return { ...deltas, pinned: bagRemove(deltas.pinned, type, id) };
+  }
+  return {
+    ...deltas,
+    pinned: bagAdd(deltas.pinned, type, id),
+    excluded: bagRemove(deltas.excluded, type, id),
+  };
+}
+
+/** Veto a record (the X). Exclude wins over a stale pin, so we also drop it from
+ *  the pinned bag — the resolved state is unambiguous. */
+function exclude(deltas: OverviewSelectionDeltas, type: OverviewRecordType, id: string): OverviewSelectionDeltas {
+  return {
+    ...deltas,
+    excluded: bagAdd(deltas.excluded, type, id),
+    pinned: bagRemove(deltas.pinned, type, id),
+  };
+}
+
+/** Lift a veto (the Undo) — back to the record's default tier. */
+function undoExclude(deltas: OverviewSelectionDeltas, type: OverviewRecordType, id: string): OverviewSelectionDeltas {
+  return { ...deltas, excluded: bagRemove(deltas.excluded, type, id) };
+}
+
+// ---------------------------------------------------------------------------
+// Record view model — each section maps its options to a flat list of records
+// with a tier bucket; the renderer is type-agnostic.
+// ---------------------------------------------------------------------------
+
+/** featured = the recommended auto-set; more = additional eligible records behind
+ *  "+ N more"; mid = off-position records (middle author / co-I) behind the toggle. */
+type Bucket = "featured" | "more" | "mid";
+
+type RecordView = {
+  id: string;
+  /** The display title — a node so publications can use {@link PubTitle}. */
+  title: React.ReactNode;
+  meta: string[];
+  /** The §7.1 human reason ("why this?") — never a score. */
+  reason?: string;
+  /** Methods carry usage evidence shown under "show evidence". */
+  evidence?: string;
+  bucket: Bucket;
+  externalHref?: string;
+  /** Publication-only fields backing the §5 sort control (not rendered raw). */
+  impact?: number | null;
+  year?: number | null;
+  firstOrLast?: boolean;
+};
+
+function pubRole(p: OverviewSourcePublication): string | null {
+  return p.authorPosition === "first"
+    ? "first author"
+    : p.authorPosition === "last"
+      ? "last author"
+      : p.authorPosition === "middle"
+        ? "middle author"
+        : null;
+}
+
+function buildPublications(options: OverviewSourceOptions): RecordView[] {
+  return options.publications.map((p) => {
+    const bucket: Bucket = p.defaultSelected ? "featured" : p.isFirstOrLast ? "more" : "mid";
+    return {
+      id: p.pmid,
+      title: <PubTitle as="span" value={p.title} />,
+      meta: [p.venue ?? null, pubRole(p), p.year != null ? String(p.year) : null].filter(
+        (x): x is string => Boolean(x),
+      ),
+      reason: p.reason,
+      bucket,
+      externalHref: `https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`,
+      impact: p.impact,
+      year: p.year,
+      firstOrLast: p.isFirstOrLast,
+    };
+  });
+}
+
+function fundingMeta(f: OverviewSourceFunding): string[] {
+  return [f.role, f.endYear != null ? String(f.endYear) : "active"].filter(
+    (x): x is string => Boolean(x),
+  );
+}
+
+function buildFunding(options: OverviewSourceFunding[]): RecordView[] {
+  return options.map((f) => ({
+    id: f.id,
+    title: f.title ?? f.funder,
+    meta: fundingMeta(f),
+    reason: f.reason,
+    // Lead grants are the auto-set; co-investigator work sits behind "all roles".
+    bucket: f.defaultSelected ? "featured" : "mid",
+  }));
+}
+
+function buildMethods(options: ToolOption[]): RecordView[] {
+  return options.map((t) => ({
+    id: t.toolName,
+    title: t.toolName,
+    meta: [`${t.pmidCount} ${t.pmidCount === 1 ? "paper" : "papers"}`],
+    evidence: t.reason,
+    // Multi-paper methods are featured; single-paper long-tail sits behind "+ more".
+    bucket: t.defaultSelected ? "featured" : "more",
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Section descriptor — the per-type rules (§8 control set + copy).
+// ---------------------------------------------------------------------------
+
+type SectionSpec = {
+  type: OverviewRecordType;
+  heading: string;
+  subtitle?: React.ReactNode;
+  records: RecordView[];
+  /** Featured rows offer pin-to-protect (volatile types only). */
+  pinnable: boolean;
+  /** The "why this?" / "show evidence" reveal label, or null for no reveal. */
+  whyLabel: string | null;
+  /** The led ⇄ all position toggle, or null. */
+  toggle: { mode: OverviewPositionMode; onMode: (m: OverviewPositionMode) => void; ledLabel: string; allLabel: string } | null;
+  /** "+ N more …" copy as a function of the hidden count. */
+  moreCopy: (n: number) => string;
+  /** A leading empty-state line (funding's "no grants you lead are active"). */
+  emptyLed?: string;
+}
+
+// ---------------------------------------------------------------------------
 
 export function OverviewIncludePicker({
   options,
-  selection,
+  deltas,
   onChange,
   disabled = false,
 }: OverviewIncludePickerProps) {
-  const [query, setQuery] = React.useState("");
-  const [pubSort, setPubSort] = React.useState<PubSort>("impact");
-
-  const pmidSet = React.useMemo(() => new Set(selection.pmids), [selection.pmids]);
-  const grantSet = React.useMemo(() => new Set(selection.grantIds), [selection.grantIds]);
-  const toolSet = React.useMemo(() => new Set(selection.toolNames), [selection.toolNames]);
-
-  // Publications + funding share the combined budget; tools have their own.
-  const itemsSelected = selection.pmids.length + selection.grantIds.length;
-  const atItemCap = itemsSelected >= OVERVIEW_SELECTION_MAX_ITEMS;
-  const atToolCap = selection.toolNames.length >= OVERVIEW_SELECTION_MAX_TOOLS;
-
   const showTools = options.tools.length > 0;
+  const [pubSort, setPubSort] = React.useState<PubSortKey>("recommended");
 
-  // --- Publications: filter, sort, then selected-first. ---
-  const visiblePubs = React.useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const filtered = q
-      ? options.publications.filter(
-          (p) => p.title.toLowerCase().includes(q) || (p.venue ?? "").toLowerCase().includes(q),
-        )
-      : options.publications;
-    const sorted = [...filtered].sort((a, b) =>
-      pubSort === "impact"
-        ? (b.impact ?? -Infinity) - (a.impact ?? -Infinity)
-        : (b.year ?? -Infinity) - (a.year ?? -Infinity),
-    );
-    return selectedFirst(sorted, (p) => pmidSet.has(p.pmid));
-  }, [options.publications, query, pubSort, pmidSet]);
+  const publications = React.useMemo(() => buildPublications(options), [options]);
+  const funding = React.useMemo(() => buildFunding(options.funding), [options.funding]);
+  const methods = React.useMemo(() => buildMethods(options.tools), [options.tools]);
 
-  const visibleFunding = React.useMemo(
-    () => selectedFirst(options.funding, (f) => grantSet.has(f.id)),
-    [options.funding, grantSet],
-  );
-  const visibleTools = React.useMemo(
-    () => selectedFirst(options.tools, (t) => toolSet.has(t.toolName)),
-    [options.tools, toolSet],
-  );
+  // Count visible publications for the §2.5 thin-overview warning.
+  const visiblePubs = publications.filter((r) => {
+    if (bagHas(deltas.excluded, "publication", r.id)) return false;
+    if (bagHas(deltas.pinned, "publication", r.id)) return true;
+    return r.bucket === "featured";
+  }).length;
 
-  // --- Quick actions: All / None / Top N by score, respecting caps + floors. ---
-  // Combined budget for pubs+funding means the remaining room shifts per section.
-  function selectAllPubs() {
-    const room = OVERVIEW_SELECTION_MAX_ITEMS - selection.grantIds.length;
-    onChange({ ...selection, pmids: options.publications.slice(0, room).map((p) => p.pmid) });
-  }
-  function topNPubs() {
-    const room = OVERVIEW_SELECTION_MAX_ITEMS - selection.grantIds.length;
-    const top = [...options.publications]
-      .sort((a, b) => (b.impact ?? -Infinity) - (a.impact ?? -Infinity))
-      .slice(0, Math.min(10, room))
-      .map((p) => p.pmid);
-    onChange({ ...selection, pmids: top });
-  }
-  function clearPubs() {
-    onChange({ ...selection, pmids: [] });
-  }
-
-  function selectAllFunding() {
-    const room = OVERVIEW_SELECTION_MAX_ITEMS - selection.pmids.length;
-    onChange({ ...selection, grantIds: options.funding.slice(0, room).map((f) => f.id) });
-  }
-  function topNFunding() {
-    const room = OVERVIEW_SELECTION_MAX_ITEMS - selection.pmids.length;
-    // Funding arrives role-then-recency ordered; the top N is the leading slice.
-    onChange({
-      ...selection,
-      grantIds: options.funding.slice(0, Math.min(10, room)).map((f) => f.id),
-    });
-  }
-  function clearFunding() {
-    onChange({ ...selection, grantIds: [] });
-  }
-
-  function selectAllTools() {
-    onChange({
-      ...selection,
-      toolNames: options.tools.slice(0, OVERVIEW_SELECTION_MAX_TOOLS).map((t) => t.toolName),
-    });
-  }
-  function topNTools() {
-    // Top N by pmidCount, honoring the #765 §2 floor (>= 2 publications).
-    const top = [...options.tools]
-      .filter((t) => t.pmidCount >= OVERVIEW_METHOD_PMID_FLOOR)
-      .sort((a, b) => b.pmidCount - a.pmidCount)
-      .slice(0, OVERVIEW_SELECTION_MAX_TOOLS)
-      .map((t) => t.toolName);
-    onChange({ ...selection, toolNames: top });
-  }
-  function clearTools() {
-    onChange({ ...selection, toolNames: [] });
+  function setPositionMode(key: "publicationPositions" | "fundingRoles", mode: OverviewPositionMode) {
+    onChange({ ...deltas, [key]: mode });
   }
 
   return (
-    <div className="flex flex-col gap-5" data-testid="overview-include-picker">
-      {/* --- Publications --- */}
-      <section>
-        <SectionHeader
-          title="Publications"
-          rule={RULE_PUBLICATIONS}
-          sort={
-            <label className="flex items-center gap-1.5 text-xs">
-              <span className="text-muted-foreground">Sort:</span>
-              <select
-                value={pubSort}
-                disabled={disabled}
-                onChange={(e) => setPubSort(e.target.value as PubSort)}
-                className="border-apollo-border-strong bg-apollo-surface rounded px-1.5 py-0.5 text-xs"
-                data-testid="overview-source-pub-sort"
-                aria-label="Sort publications"
-              >
-                <option value="impact">Impact (high→low)</option>
-                <option value="year">Year (newest)</option>
-              </select>
-            </label>
-          }
-        />
-        <QuickActions
-          section="pub"
-          onAll={selectAllPubs}
-          onNone={clearPubs}
-          onTopN={topNPubs}
-          disabled={disabled}
-        />
-        <div className="border-apollo-border mb-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5">
-          <Search className="text-muted-foreground size-3.5" aria-hidden="true" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter your papers…"
-            disabled={disabled}
-            className="h-auto border-0 p-0 text-sm shadow-none focus-visible:ring-0"
-            data-testid="overview-source-search"
-            aria-label="Filter publications"
-          />
-        </div>
-        {visiblePubs.length === 0 ? (
-          <p className="text-muted-foreground py-1 text-xs">
-            {options.publications.length === 0
-              ? "No scored publications yet."
-              : "No papers match your filter."}
-          </p>
-        ) : (
-          <ul className="flex flex-col">
-            {visiblePubs.map((p) => (
-              <PublicationRow
-                key={p.pmid}
-                pub={p}
-                checked={pmidSet.has(p.pmid)}
-                disabled={disabled || (!pmidSet.has(p.pmid) && atItemCap)}
-                onToggle={(c) =>
-                  onChange({ ...selection, pmids: toggle(selection.pmids, p.pmid, c) })
-                }
-              />
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {/* --- Funding --- */}
-      <section className="border-apollo-border border-t pt-4">
-        <SectionHeader title="Funding" rule={RULE_FUNDING} />
-        <QuickActions
-          section="funding"
-          onAll={selectAllFunding}
-          onNone={clearFunding}
-          onTopN={topNFunding}
-          disabled={disabled}
-        />
-        {options.funding.length === 0 ? (
-          <p className="text-muted-foreground py-1 text-xs">No active awards.</p>
-        ) : (
-          <ul className="flex flex-col">
-            {visibleFunding.map((f) => (
-              <FundingRow
-                key={f.id}
-                funding={f}
-                checked={grantSet.has(f.id)}
-                disabled={disabled || (!grantSet.has(f.id) && atItemCap)}
-                onToggle={(c) =>
-                  onChange({ ...selection, grantIds: toggle(selection.grantIds, f.id, c) })
-                }
-              />
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {/* --- Methods (dark until C3 — hidden when there are no tools) --- */}
-      {showTools && (
-        <section
-          className="border-apollo-border border-t pt-4"
-          data-testid="overview-source-methods"
+    <div className="flex flex-col gap-1" data-testid="overview-include-picker">
+      <p className="text-muted-foreground text-xs leading-relaxed">
+        Hiding a record affects only this overview — it stays in your profile. Pins and hides survive
+        every regenerate.
+      </p>
+      {visiblePubs < MIN_PUBLICATIONS && (
+        <p
+          className="text-apollo-amber mt-1 flex items-center gap-1.5 text-xs"
+          data-testid="overview-source-minwarn"
         >
-          <div className="mb-1 flex items-start justify-between gap-2">
-            <SectionHeader title="Methods" rule={RULE_METHODS} inline />
-            <span
-              className={cn(
-                "shrink-0 rounded-md px-2 py-0.5 text-xs font-medium",
-                atToolCap
-                  ? "bg-apollo-maroon/10 text-apollo-maroon"
-                  : "bg-apollo-surface-2 text-muted-foreground",
-              )}
-              data-testid="overview-source-tools-counter"
-            >
-              {selection.toolNames.length} / {OVERVIEW_SELECTION_MAX_TOOLS}
-            </span>
-          </div>
-          <QuickActions
-            section="tool"
-            onAll={selectAllTools}
-            onNone={clearTools}
-            onTopN={topNTools}
+          <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
+          This leaves fewer than {MIN_PUBLICATIONS} papers — the overview will be brief.
+        </p>
+      )}
+
+      <Section
+        spec={{
+          type: "publication",
+          heading: "Publications",
+          subtitle: "Senior- and first-author work, weighted toward recent and landmark.",
+          records: publications,
+          pinnable: true,
+          whyLabel: "why this?",
+          toggle: {
+            mode: deltas.publicationPositions,
+            onMode: (m) => setPositionMode("publicationPositions", m),
+            ledLabel: "Led",
+            allLabel: "All positions",
+          },
+          moreCopy: (n) => `+ ${n} more featured ${n === 1 ? "paper" : "papers"} — `,
+        }}
+        deltas={deltas}
+        onChange={onChange}
+        disabled={disabled}
+        sortState={{ value: pubSort, set: setPubSort }}
+      />
+
+      <Section
+        spec={{
+          type: "funding",
+          heading: "Funding",
+          subtitle: "Grants you lead, active and recently completed.",
+          records: funding,
+          pinnable: true,
+          whyLabel: "why this?",
+          toggle: {
+            mode: deltas.fundingRoles,
+            onMode: (m) => setPositionMode("fundingRoles", m),
+            ledLabel: "Led",
+            allLabel: "All roles",
+          },
+          moreCopy: (n) => `+ ${n} more — `,
+          emptyLed: 'No grants you lead are active. Switch to "all roles" to include co-investigator grants.',
+        }}
+        deltas={deltas}
+        onChange={onChange}
+        disabled={disabled}
+      />
+
+      {showTools && (
+        <Section
+          spec={{
+            type: "method",
+            heading: "Methods & tools",
+            subtitle: "Methods named across your papers, shown with how you used them.",
+            records: methods,
+            pinnable: true,
+            whyLabel: "show evidence",
+            toggle: null,
+            moreCopy: (n) =>
+              `+ ${n} single-paper ${n === 1 ? "method" : "methods"} — usually too thin to feature. `,
+          }}
+          deltas={deltas}
+          onChange={onChange}
+          disabled={disabled}
+        />
+      )}
+      {/* Titles & positions and Education sections are deferred to Phase 2b: the
+          generator does not yet filter its title/education facts by these deltas
+          (and titles need the leadership-FK join), so a hide here would be inert.
+          Their candidate lists (`options.titles` / `options.education`) ride
+          through the source-options payload now, ready for that phase. */}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Section — header (toggle), subtitle, optional sort, the visible rows, the
+// "+ N more" reveal, and the toggle-revealed tail.
+// ---------------------------------------------------------------------------
+
+function Section({
+  spec,
+  deltas,
+  onChange,
+  disabled,
+  sortState,
+}: {
+  spec: SectionSpec;
+  deltas: OverviewSelectionDeltas;
+  onChange: (next: OverviewSelectionDeltas) => void;
+  disabled: boolean;
+  sortState?: { value: PubSortKey; set: (k: PubSortKey) => void };
+}) {
+  const [showMore, setShowMore] = React.useState(false);
+  const { type, records, toggle } = spec;
+
+  const isPinned = (id: string) => bagHas(deltas.pinned, type, id);
+  const isExcluded = (id: string) => bagHas(deltas.excluded, type, id);
+
+  const allMode = toggle?.mode === "all";
+
+  // A record is shown when it is pinned, featured, or its hidden bucket is revealed.
+  const shown = (r: RecordView): boolean => {
+    if (isPinned(r.id)) return true;
+    if (r.bucket === "featured") return true;
+    if (r.bucket === "more") return showMore;
+    return allMode; // "mid"
+  };
+
+  const visible = sortState
+    ? sortPublications(records.filter(shown), sortState.value)
+    : records.filter(shown);
+
+  // The "+ N more" tail: more-bucket records not pinned and not yet revealed.
+  const hiddenMore = records.filter((r) => r.bucket === "more" && !isPinned(r.id) && !showMore).length;
+
+  const hasFeaturedShown = records.some((r) => r.bucket === "featured" && !isExcluded(r.id));
+  const showEmptyLed = Boolean(spec.emptyLed) && !allMode && !hasFeaturedShown;
+
+  return (
+    <section className="mt-4" data-testid={`overview-source-section-${type}`}>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span className="text-foreground text-sm font-medium">{spec.heading}</span>
+        {toggle && (
+          <SegmentedToggle
+            mode={toggle.mode}
+            onMode={toggle.onMode}
+            ledLabel={toggle.ledLabel}
+            allLabel={toggle.allLabel}
             disabled={disabled}
+            section={type}
           />
-          <ul className="flex flex-col">
-            {visibleTools.map((t) => (
-              <ToolRow
-                key={t.toolName}
-                tool={t}
-                checked={toolSet.has(t.toolName)}
-                disabled={disabled || (!toolSet.has(t.toolName) && atToolCap)}
-                onToggle={(c) =>
-                  onChange({ ...selection, toolNames: toggle(selection.toolNames, t.toolName, c) })
-                }
+        )}
+      </div>
+      {spec.subtitle && (
+        <div className="text-muted-foreground mt-0.5 text-xs leading-relaxed">{spec.subtitle}</div>
+      )}
+      {sortState && (
+        <PublicationSort sort={sortState.value} onSort={sortState.set} disabled={disabled} />
+      )}
+
+      {showEmptyLed && (
+        <p
+          className="text-muted-foreground border-apollo-border mt-1 border-t pt-2.5 text-[13px]"
+          data-testid="overview-source-empty-led"
+        >
+          {spec.emptyLed}
+        </p>
+      )}
+
+      <ul className="flex flex-col">
+        {visible.map((r) => (
+          <RecordRow
+            key={r.id}
+            record={r}
+            type={type}
+            pinnable={spec.pinnable}
+            whyLabel={spec.whyLabel}
+            pinned={isPinned(r.id)}
+            excluded={isExcluded(r.id)}
+            disabled={disabled}
+            onPin={() => onChange(togglePin(deltas, type, r.id))}
+            onExclude={() => onChange(exclude(deltas, type, r.id))}
+            onUndo={() => onChange(undoExclude(deltas, type, r.id))}
+          />
+        ))}
+      </ul>
+
+      {hiddenMore > 0 && (
+        <p className="text-muted-foreground border-apollo-border border-t pt-2.5 text-[13px]">
+          {spec.moreCopy(hiddenMore)}
+          <button
+            type="button"
+            onClick={() => setShowMore(true)}
+            disabled={disabled}
+            className="text-apollo-maroon hover:underline"
+            data-testid={`overview-source-more-${type}`}
+          >
+            show
+          </button>
+        </p>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+function RecordRow({
+  record,
+  type,
+  pinnable,
+  whyLabel,
+  pinned,
+  excluded,
+  disabled,
+  onPin,
+  onExclude,
+  onUndo,
+}: {
+  record: RecordView;
+  type: OverviewRecordType;
+  pinnable: boolean;
+  whyLabel: string | null;
+  pinned: boolean;
+  excluded: boolean;
+  disabled: boolean;
+  onPin: () => void;
+  onExclude: () => void;
+  onUndo: () => void;
+}) {
+  const [whyOpen, setWhyOpen] = React.useState(false);
+  // "Included" rows (featured or pinned) get the pin/exclude controls; Available
+  // rows get a single "add and pin". Titles & education never pin a featured row.
+  const included = pinned || record.bucket === "featured";
+  const reveal = record.reason ?? record.evidence;
+
+  return (
+    <li
+      className={cn(
+        "border-apollo-border flex items-start gap-2.5 border-t py-2.5",
+        excluded && "[&_.recmain]:opacity-40",
+      )}
+      data-testid={`overview-source-row-${type}-${record.id}`}
+      data-state={excluded ? "excluded" : pinned ? "pinned" : "default"}
+    >
+      {/* Leading control */}
+      {excluded ? (
+        <span className="w-[21px] shrink-0" aria-hidden="true" />
+      ) : included ? (
+        pinnable ? (
+          <IconButton
+            label={pinned ? "Unpin" : "Pin"}
+            active={pinned}
+            disabled={disabled}
+            onClick={onPin}
+            testid={`overview-source-pin-${type}-${record.id}`}
+          >
+            <Pin className="size-[17px]" />
+          </IconButton>
+        ) : (
+          <span className="w-[21px] shrink-0" aria-hidden="true" />
+        )
+      ) : (
+        <IconButton
+          label="Add and pin"
+          active
+          disabled={disabled}
+          onClick={onPin}
+          testid={`overview-source-add-${type}-${record.id}`}
+        >
+          <Plus className="size-[17px]" />
+        </IconButton>
+      )}
+
+      <div className="recmain min-w-0 flex-1">
+        <div className={cn("text-[13.5px] leading-snug", excluded && "line-through")}>
+          {record.externalHref ? (
+            <span className="flex items-center gap-1.5">
+              {record.title}
+              <a
+                href={record.externalHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="View on PubMed"
+                className="text-[#185FA5]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLinkIcon />
+              </a>
+            </span>
+          ) : (
+            record.title
+          )}
+        </div>
+        {(record.meta.length > 0 || pinned) && (
+          <div className="text-muted-foreground mt-0.5 text-xs">
+            {record.meta.join(" · ")}
+            {pinned && (
+              <>
+                {record.meta.length > 0 ? " · " : ""}
+                <span className="text-apollo-maroon">pinned</span>
+              </>
+            )}
+          </div>
+        )}
+        {!excluded && whyLabel && reveal && (
+          <>
+            <button
+              type="button"
+              onClick={() => setWhyOpen((v) => !v)}
+              className="text-muted-foreground mt-1.5 inline-flex items-center gap-1 text-xs hover:underline"
+              aria-expanded={whyOpen}
+              data-testid={`overview-source-why-${type}-${record.id}`}
+            >
+              {whyLabel}
+              <ChevronDown
+                className={cn("size-3 transition-transform", whyOpen && "rotate-180")}
+                aria-hidden="true"
               />
-            ))}
-          </ul>
-        </section>
+            </button>
+            {whyOpen && (
+              <div className="bg-apollo-surface-2 text-muted-foreground mt-1.5 rounded-md px-2.5 py-2 text-xs leading-relaxed">
+                {record.evidence ? (
+                  <span className="text-foreground italic">{record.evidence}</span>
+                ) : (
+                  reveal
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Trailing control */}
+      {excluded ? (
+        <button
+          type="button"
+          onClick={onUndo}
+          disabled={disabled}
+          className="text-apollo-maroon inline-flex shrink-0 items-center gap-1 text-[12.5px]"
+          data-testid={`overview-source-undo-${type}-${record.id}`}
+        >
+          <Undo2 className="size-3.5" aria-hidden="true" /> Undo
+        </button>
+      ) : included ? (
+        <IconButton
+          label="Hide"
+          disabled={disabled}
+          onClick={onExclude}
+          testid={`overview-source-exclude-${type}-${record.id}`}
+        >
+          <X className="size-[17px]" />
+        </IconButton>
+      ) : null}
+    </li>
+  );
+}
+
+function IconButton({
+  label,
+  active = false,
+  disabled,
+  onClick,
+  testid,
+  children,
+}: {
+  label: string;
+  active?: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  testid: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "shrink-0 p-0.5 leading-none transition-colors disabled:opacity-40",
+        active ? "text-apollo-maroon" : "text-muted-foreground hover:text-foreground",
+      )}
+      data-testid={testid}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ExternalLinkIcon() {
+  // Inline to avoid importing the lucide ExternalLink purely for a 14px glyph.
+  return (
+    <svg
+      className="size-3.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Segmented led ⇄ all toggle (§2.3).
+// ---------------------------------------------------------------------------
+
+function SegmentedToggle({
+  mode,
+  onMode,
+  ledLabel,
+  allLabel,
+  disabled,
+  section,
+}: {
+  mode: OverviewPositionMode;
+  onMode: (m: OverviewPositionMode) => void;
+  ledLabel: string;
+  allLabel: string;
+  disabled: boolean;
+  section: string;
+}) {
+  return (
+    <span
+      className="border-apollo-border-strong ml-auto inline-flex overflow-hidden rounded-full border"
+      data-testid={`overview-source-toggle-${section}`}
+    >
+      {(
+        [
+          ["led", ledLabel],
+          ["all", allLabel],
+        ] as const
+      ).map(([value, label]) => (
+        <button
+          key={value}
+          type="button"
+          disabled={disabled}
+          onClick={() => onMode(value)}
+          aria-pressed={mode === value}
+          className={cn(
+            "px-3 py-1 text-xs transition-colors disabled:opacity-50",
+            mode === value ? "bg-apollo-maroon text-white" : "text-muted-foreground",
+          )}
+          data-testid={`overview-source-toggle-${section}-${value}`}
+        >
+          {label}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Publications sort control (§5) — reorders the visible featured rows only;
+// it never re-picks or drops a record. "Recommended" is the default.
+// ---------------------------------------------------------------------------
+
+type PubSortKey = "recommended" | "most cited" | "most recent" | "your role";
+
+const PUB_SORTS: { key: PubSortKey; subtitle: string }[] = [
+  {
+    key: "recommended",
+    subtitle:
+      "your strongest led work · spread across your areas · landmarks kept regardless of age · duplicates merged",
+  },
+  { key: "most cited", subtitle: "career-defining work first, any age" },
+  { key: "most recent", subtitle: "newest first" },
+  { key: "your role", subtitle: "senior- and first-author first" },
+];
+
+function PublicationSort({
+  sort,
+  onSort,
+  disabled,
+}: {
+  sort: PubSortKey;
+  onSort: (k: PubSortKey) => void;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="mt-1">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
+        className="border-apollo-border-strong text-muted-foreground inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12.5px]"
+        aria-expanded={open}
+        data-testid="overview-source-pub-sortctl"
+      >
+        Sorted: <span className="text-foreground">{sort}</span>
+        <ChevronDown className="size-3" aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="border-apollo-border-strong mt-2 overflow-hidden rounded-md border">
+          {PUB_SORTS.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              onClick={() => {
+                onSort(s.key);
+                setOpen(false);
+              }}
+              className={cn(
+                "border-apollo-border block w-full border-t px-3 py-2 text-left text-[13px] first:border-t-0",
+                s.key === sort && "bg-apollo-surface-2",
+              )}
+              data-testid={`overview-source-pub-sort-${s.key.replace(/\s+/g, "-")}`}
+            >
+              {s.key}
+              <small className="text-muted-foreground mt-px block text-[11.5px]">{s.subtitle}</small>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Rows — each shows ONLY the §7.2 whitelist signals.
-// ---------------------------------------------------------------------------
-
-/** Publication row (§7.2): authorship role · year · impact NUMBER. The title +
- *  venue stay as the item identity; no synopsis / impactJustification prose. */
-function PublicationRow({
-  pub,
-  checked,
-  disabled,
-  onToggle,
-}: {
-  pub: OverviewSourcePublication;
-  checked: boolean;
-  disabled: boolean;
-  onToggle: (checked: boolean) => void;
-}) {
-  const role =
-    pub.authorPosition === "first"
-      ? "first author"
-      : pub.authorPosition === "last"
-        ? "last author"
-        : null;
-  const signals = [role, pub.year != null ? String(pub.year) : null, pub.impact != null ? `impact ${pub.impact}` : null].filter(
-    Boolean,
-  );
-  return (
-    <li>
-      <label className="flex items-start gap-2.5 py-1.5">
-        <Checkbox
-          className="mt-0.5"
-          checked={checked}
-          disabled={disabled}
-          onCheckedChange={(c) => onToggle(c === true)}
-          data-testid={`overview-source-pub-${pub.pmid}`}
-        />
-        <span className="min-w-0">
-          <span className="flex items-center gap-1.5 text-sm">
-            <PubTitle as="span" value={pub.title} />
-            <a
-              href={`https://pubmed.ncbi.nlm.nih.gov/${pub.pmid}/`}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="View on PubMed"
-              className="text-[#185FA5]"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <ExternalLink className="size-3.5" />
-            </a>
-          </span>
-          <span className="text-muted-foreground text-xs">
-            {pub.venue ? `${pub.venue} · ` : ""}
-            {signals.join(" · ")}
-          </span>
-        </span>
-      </label>
-    </li>
-  );
-}
-
-/** Funding row (§7.2): role · year. The project title / funder stays as the
- *  item identity; no dollar amount surfaces. */
-function FundingRow({
-  funding,
-  checked,
-  disabled,
-  onToggle,
-}: {
-  funding: OverviewSourceFunding;
-  checked: boolean;
-  disabled: boolean;
-  onToggle: (checked: boolean) => void;
-}) {
-  const signals = [funding.role, funding.endYear != null ? String(funding.endYear) : null].filter(
-    Boolean,
-  );
-  return (
-    <li>
-      <label className="flex items-start gap-2.5 py-1.5">
-        <Checkbox
-          className="mt-0.5"
-          checked={checked}
-          disabled={disabled}
-          onCheckedChange={(c) => onToggle(c === true)}
-          data-testid={`overview-source-funding-${funding.id}`}
-        />
-        <span className="min-w-0">
-          <span className="block text-sm">{funding.title ?? funding.funder}</span>
-          <span className="text-muted-foreground text-xs">{signals.join(" · ")}</span>
-        </span>
-      </label>
-    </li>
-  );
-}
-
-/** Method row (§7.2): publication count only. The family label is the identity. */
-function ToolRow({
-  tool,
-  checked,
-  disabled,
-  onToggle,
-}: {
-  tool: ToolOption;
-  checked: boolean;
-  disabled: boolean;
-  onToggle: (checked: boolean) => void;
-}) {
-  return (
-    <li>
-      <label className="flex items-start gap-2.5 py-1.5">
-        <Checkbox
-          className="mt-0.5"
-          checked={checked}
-          disabled={disabled}
-          onCheckedChange={(c) => onToggle(c === true)}
-          data-testid={`overview-source-tool-${tool.toolName}`}
-        />
-        <span className="min-w-0">
-          <span className="block text-sm">{tool.toolName}</span>
-          <span className="text-muted-foreground text-xs">
-            {tool.pmidCount} {tool.pmidCount === 1 ? "publication" : "publications"}
-          </span>
-        </span>
-      </label>
-    </li>
-  );
-}
-
-/** All · None · Top 10 by score — the per-section quick actions. */
-function QuickActions({
-  section,
-  onAll,
-  onNone,
-  onTopN,
-  disabled,
-}: {
-  section: string;
-  onAll: () => void;
-  onNone: () => void;
-  onTopN: () => void;
-  disabled: boolean;
-}) {
-  const cls = "text-apollo-maroon text-xs font-medium hover:underline disabled:opacity-50";
-  return (
-    <div className="mb-2 flex items-center gap-3" data-testid={`overview-source-quick-${section}`}>
-      <button
-        type="button"
-        onClick={onAll}
-        disabled={disabled}
-        className={cls}
-        data-testid={`overview-source-all-${section}`}
-      >
-        All
-      </button>
-      <button
-        type="button"
-        onClick={onNone}
-        disabled={disabled}
-        className={cls}
-        data-testid={`overview-source-none-${section}`}
-      >
-        None
-      </button>
-      <button
-        type="button"
-        onClick={onTopN}
-        disabled={disabled}
-        className={cls}
-        data-testid={`overview-source-topn-${section}`}
-      >
-        Top 10 by score
-      </button>
-    </div>
-  );
-}
-
-/** A section header carrying the §7.1 rule line + an optional sort control. */
-function SectionHeader({
-  title,
-  rule,
-  sort,
-  inline = false,
-}: {
-  title: string;
-  rule: string;
-  sort?: React.ReactNode;
-  inline?: boolean;
-}) {
-  return (
-    <div className={cn(!inline && "mb-2")}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-foreground text-sm font-medium">{title}</span>
-        {sort}
-      </div>
-      <p className="text-muted-foreground text-xs" data-testid={`overview-source-rule-${title.toLowerCase()}`}>
-        {rule}
-      </p>
-    </div>
-  );
+/** Reorder shown publications per the active sort. "Recommended" preserves the
+ *  server order (the auto-set is already recommendation-ranked). Sorting only
+ *  reorders — membership (pins / excludes) is resolved before this runs (§5). */
+function sortPublications(records: RecordView[], sort: PubSortKey): RecordView[] {
+  if (sort === "recommended") return records;
+  const by = (rank: (r: RecordView) => number) =>
+    [...records].sort((a, b) => rank(b) - rank(a));
+  switch (sort) {
+    case "most cited":
+      return by((r) => r.impact ?? -Infinity);
+    case "most recent":
+      return by((r) => r.year ?? -Infinity);
+    case "your role":
+      // Senior / first author first, then by recency as the tiebreak.
+      return by((r) => (r.firstOrLast ? 1 : 0) * 1e6 + (r.year ?? 0));
+  }
 }
