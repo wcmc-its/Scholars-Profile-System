@@ -35,9 +35,11 @@ import { ChevronDown, Pin, Plus, TriangleAlert, Undo2, X } from "lucide-react";
 
 import { PubTitle } from "@/components/publication/pub-html";
 import type {
+  OverviewSourceEducation,
   OverviewSourceFunding,
   OverviewSourceOptions,
   OverviewSourcePublication,
+  OverviewSourceTitle,
 } from "@/lib/edit/overview-facts";
 import {
   type OverviewPositionMode,
@@ -192,6 +194,47 @@ function buildMethods(options: ToolOption[]): RecordView[] {
   }));
 }
 
+function titleMeta(t: OverviewSourceTitle): string[] {
+  // Organization, plus an end marker for a past role (current roles read clean).
+  return [t.organization, t.isCurrent ? null : t.endYear != null ? `until ${t.endYear}` : "past"].filter(
+    (x): x is string => Boolean(x),
+  );
+}
+
+/** Titles & positions — the primary appointment is the always-shown scaffolding
+ *  line (handled by the section), never a toggleable row, so it is filtered out
+ *  here. Significant current roles feature; the secondary / interim / past tail
+ *  sits behind "+ N more". */
+function buildTitles(options: OverviewSourceTitle[]): RecordView[] {
+  return options
+    .filter((t) => !t.isPrimary)
+    .map((t) => ({
+      id: t.id,
+      title: t.title,
+      meta: titleMeta(t),
+      reason: t.reason,
+      bucket: t.featured ? "featured" : "more",
+    }));
+}
+
+function educationTitle(e: OverviewSourceEducation): string {
+  return e.field ? `${e.degree}, ${e.field}` : e.degree;
+}
+
+/** Education — terminal / professional degrees feature; minor certificates and
+ *  training entries sit behind "+ N more". */
+function buildEducation(options: OverviewSourceEducation[]): RecordView[] {
+  return options.map((e) => ({
+    id: e.id,
+    title: educationTitle(e),
+    meta: [e.institution, e.year != null ? String(e.year) : null].filter(
+      (x): x is string => Boolean(x),
+    ),
+    reason: e.reason,
+    bucket: e.featured ? "featured" : "more",
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Section descriptor — the per-type rules (§8 control set + copy).
 // ---------------------------------------------------------------------------
@@ -200,6 +243,9 @@ type SectionSpec = {
   type: OverviewRecordType;
   heading: string;
   subtitle?: React.ReactNode;
+  /** A leading, non-toggleable line shown above the rows (titles' "Always shown"
+   *  primary appointment — it always grounds the bio, so it is never a row). */
+  scaffold?: React.ReactNode;
   records: RecordView[];
   /** Featured rows offer pin-to-protect (volatile types only). */
   pinnable: boolean;
@@ -227,6 +273,12 @@ export function OverviewIncludePicker({
   const publications = React.useMemo(() => buildPublications(options), [options]);
   const funding = React.useMemo(() => buildFunding(options.funding), [options.funding]);
   const methods = React.useMemo(() => buildMethods(options.tools), [options.tools]);
+  const titles = React.useMemo(() => buildTitles(options.titles ?? []), [options.titles]);
+  const education = React.useMemo(() => buildEducation(options.education ?? []), [options.education]);
+  const primaryTitle = React.useMemo(
+    () => (options.titles ?? []).find((t) => t.isPrimary) ?? null,
+    [options.titles],
+  );
 
   // Count visible publications for the §2.5 thin-overview warning.
   const visiblePubs = publications.filter((r) => {
@@ -319,11 +371,51 @@ export function OverviewIncludePicker({
           disabled={disabled}
         />
       )}
-      {/* Titles & positions and Education sections are deferred to Phase 2b: the
-          generator does not yet filter its title/education facts by these deltas
-          (and titles need the leadership-FK join), so a hide here would be inert.
-          Their candidate lists (`options.titles` / `options.education`) ride
-          through the source-options payload now, ready for that phase. */}
+      {(primaryTitle || titles.length > 0) && (
+        <Section
+          spec={{
+            type: "title",
+            heading: "Titles & positions",
+            subtitle:
+              "Leadership and named roles beyond your primary appointment. Hiding one keeps it out of this overview only.",
+            scaffold: primaryTitle ? (
+              <>
+                <span className="text-foreground">Always shown:</span> {primaryTitle.title}
+                {primaryTitle.organization ? ` · ${primaryTitle.organization}` : ""}
+              </>
+            ) : undefined,
+            records: titles,
+            // Titles are stable run-to-run, so featured rows are exclude-only (no
+            // pin-to-protect); the Available tail still offers add-and-pin.
+            pinnable: false,
+            whyLabel: "why this?",
+            toggle: null,
+            moreCopy: (n) => `+ ${n} more ${n === 1 ? "title" : "titles"} — `,
+          }}
+          deltas={deltas}
+          onChange={onChange}
+          disabled={disabled}
+        />
+      )}
+
+      {education.length > 0 && (
+        <Section
+          spec={{
+            type: "education",
+            heading: "Education",
+            subtitle:
+              "Terminal and professional degrees. Hiding one keeps it out of this overview only.",
+            records: education,
+            pinnable: false,
+            whyLabel: "why this?",
+            toggle: null,
+            moreCopy: (n) => `+ ${n} more — `,
+          }}
+          deltas={deltas}
+          onChange={onChange}
+          disabled={disabled}
+        />
+      )}
     </div>
   );
 }
@@ -402,6 +494,14 @@ function Section({
       </div>
       {spec.subtitle && (
         <div className="text-muted-foreground mt-0.5 text-xs leading-relaxed">{spec.subtitle}</div>
+      )}
+      {spec.scaffold && (
+        <p
+          className="text-muted-foreground border-apollo-border mt-1 border-t pt-2.5 text-[13px]"
+          data-testid={`overview-source-scaffold-${type}`}
+        >
+          {spec.scaffold}
+        </p>
       )}
       {sortState && (
         <PublicationSort sort={sortState.value} onSort={sortState.set} disabled={disabled} />

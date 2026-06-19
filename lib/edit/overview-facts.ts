@@ -98,6 +98,14 @@ export type OverviewFacts = {
     mechanism: string | null;
   }[];
   education: { degree: string; institution: string; field: string | null; year: number | null }[];
+  /** Significant CURRENT leadership / administrative titles BEYOND the primary
+   *  appointment (#742 §7). The primary title is already in `title` (the always-shown
+   *  scaffolding line), so it is deliberately omitted here; this carries the
+   *  *additional* roles the scholar has not hidden. Sourced from the `appointment`
+   *  table (significance-thresholded), filtered by the scholar's `title` deltas.
+   *  Leadership-FK roles (chair / chief / director / program leader recorded on the
+   *  org-unit tables) are layered in by a follow-up. `[]` when there are none. */
+  titles: { title: string; organization: string }[];
 
   // --- methods (the scholar's #799 method families; `[]` when none) ---
   /** The selected method families — `name` is the family label, `category` its
@@ -531,7 +539,8 @@ export async function assembleOverviewFacts(
     publicationCount,
     yearsActive,
     topics,
-    education,
+    educationCandidates,
+    titleCandidates,
   ] = await Promise.all([
     loadScoredCandidatePublications(cwid),
     loadActiveFunding(cwid),
@@ -539,7 +548,11 @@ export async function assembleOverviewFacts(
     countConfirmedPublications(cwid),
     assembleYearsActive(cwid),
     assembleTopics(cwid),
-    assembleEducation(cwid),
+    // Titles & education share the drawer's candidate loaders (the single source of
+    // truth with the Sources picker), so the bio's default featured set is exactly
+    // what the drawer marks "included".
+    loadOverviewEducationCandidates(cwid),
+    loadOverviewTitleCandidates(cwid),
   ]);
 
   // Resolve the effective selection. Explicit picks are ownership-filtered to the
@@ -640,6 +653,38 @@ export async function assembleOverviewFacts(
       exemplarContexts: t.exemplarContexts,
     }));
 
+  // Titles & education ground through the same three-state deltas (#742 §7) but are
+  // NOT part of the OverviewSelection snapshot, so they resolve here directly from the
+  // durable deltas — applied on EVERY path (explicit-snapshot or default) so a hide /
+  // add bites regardless of how the pubs were chosen. The default set is the
+  // candidates' "featured" tier (the rows the drawer shows as included); pins reach
+  // into the Available tail, excludes veto. Candidate order (relevance / recency) is
+  // preserved by filtering the candidate list rather than the delta-resolved id list.
+  const sourceDeltas = opts?.deltas;
+  const featuredTitleIds = titleCandidates
+    .filter((t) => t.featured && !t.isPrimary)
+    .map((t) => t.id);
+  const effectiveTitleIds = new Set(
+    applyDeltas(featuredTitleIds, sourceDeltas?.pinned.title, sourceDeltas?.excluded.title),
+  );
+  // The primary title is the always-shown scaffolding line (`title`); never duplicate
+  // it into the additional-titles list.
+  const titles = titleCandidates
+    .filter((t) => !t.isPrimary && effectiveTitleIds.has(t.id))
+    .map((t) => ({ title: t.title, organization: t.organization }));
+
+  const featuredEducationIds = educationCandidates.filter((e) => e.featured).map((e) => e.id);
+  const effectiveEducationIds = new Set(
+    applyDeltas(
+      featuredEducationIds,
+      sourceDeltas?.pinned.education,
+      sourceDeltas?.excluded.education,
+    ),
+  );
+  const education = educationCandidates
+    .filter((e) => effectiveEducationIds.has(e.id))
+    .map((e) => ({ degree: e.degree, institution: e.institution, field: e.field, year: e.year }));
+
   const hasMetrics =
     scholar.hIndex !== null ||
     scholar.firstAuthorCount !== null ||
@@ -666,6 +711,7 @@ export async function assembleOverviewFacts(
     yearsActive,
     activeGrants,
     education,
+    titles,
     methods,
     facultyMetrics,
     existingBio: existingBioText ? { text: existingBioText, source: "vivo" } : null,
@@ -939,21 +985,6 @@ async function assembleTopics(cwid: string): Promise<OverviewFacts["topics"]> {
     const label = labelById.get(id);
     return label ? [{ label, rationale: entry.rationale }] : [];
   });
-}
-
-/** Education rows, most-recent first (a null year sorts last). */
-async function assembleEducation(cwid: string): Promise<OverviewFacts["education"]> {
-  const rows = await db.read.education.findMany({
-    where: { cwid },
-    orderBy: { year: { sort: "desc", nulls: "last" } },
-    select: { degree: true, institution: true, field: true, year: true },
-  });
-  return rows.map((e) => ({
-    degree: e.degree,
-    institution: e.institution,
-    field: e.field,
-    year: e.year,
-  }));
 }
 
 /** UTC midnight today — the active-funding cutoff (`endDate >= today`). */

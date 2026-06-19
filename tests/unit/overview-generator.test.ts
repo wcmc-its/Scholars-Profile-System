@@ -33,6 +33,7 @@ const FACTS: OverviewFacts = {
   yearsActive: { first: 2005, last: 2024 },
   activeGrants: [],
   education: [],
+  titles: [],
   methods: [],
   facultyMetrics: null,
   existingBio: null,
@@ -436,6 +437,17 @@ describe("buildGroundingReference (#742 fact-checker reference)", () => {
   it("states when there are NO method families (so any named tool is a violation)", () => {
     const ref = buildGroundingReference(FACTS); // FACTS.methods === []
     expect(ref).toContain("ALLOWED METHOD / TOOL NAMES: (none)");
+  });
+  it("grounds additional titles (#742 §7) as identity strings, allowed exactly as given", () => {
+    const ref = buildGroundingReference({
+      ...FACTS,
+      titles: [{ title: "Chief, Division of Hematology", organization: "Weill Cornell Medicine" }],
+    });
+    expect(ref).toContain("ADDITIONAL TITLES");
+    expect(ref).toContain("Chief, Division of Hematology");
+  });
+  it("omits the ADDITIONAL TITLES block when there are no extra titles", () => {
+    expect(buildGroundingReference(FACTS)).not.toContain("ADDITIONAL TITLES");
   });
   it("marks h-index / impact scores as FORBIDDEN metrics, never an allowed number", () => {
     // Present regardless of whether facultyMetrics exists — the verifier must flag
