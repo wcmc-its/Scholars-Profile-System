@@ -511,21 +511,40 @@ describe("MethodsSection — #1119 per-tool usage hover", () => {
         families={withContext({ CheXpert: "labels chest radiographs across 14 observations" })}
       />,
     );
-    const trigger = screen.getByRole("button", { name: "How CheXpert was used" });
+    const trigger = screen.getByRole("button", { name: "Verbatim usage example for CheXpert" });
     expect(trigger).toBeTruthy();
     // MIMIC-CXR has no snippet → no trigger for it.
-    expect(screen.queryByRole("button", { name: "How MIMIC-CXR was used" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Verbatim usage example for MIMIC-CXR" }),
+    ).toBeNull();
     fireEvent.focus(trigger);
+    // Honest framing label + the snippet both render once the tooltip is open.
     await waitFor(() =>
-      expect(
-        screen.getAllByText(/labels chest radiographs across 14 observations/).length,
-      ).toBeGreaterThan(0),
+      expect(screen.getAllByText(/Verbatim, from the author's papers/i).length).toBeGreaterThan(0),
     );
+    expect(
+      screen.getAllByText(/labels chest radiographs across 14 observations/).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("mark-highlights the tool name where it appears verbatim in the snippet (#917 polish)", async () => {
+    render(
+      <MethodsSection
+        families={withContext({
+          CheXpert: "We trained CheXpert on 224k chest radiographs.",
+        })}
+      />,
+    );
+    fireEvent.focus(screen.getByRole("button", { name: "Verbatim usage example for CheXpert" }));
+    await waitFor(() => {
+      const marks = Array.from(document.querySelectorAll("mark")).map((m) => m.textContent);
+      expect(marks).toContain("CheXpert");
+    });
   });
 
   it("renders the plain dotted join when no tool has a snippet (flag-off path)", () => {
     render(<MethodsSection families={withContext({})} />);
     expect(screen.getByText("CheXpert · MIMIC-CXR")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /How .* was used/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Verbatim usage example/ })).toBeNull();
   });
 });

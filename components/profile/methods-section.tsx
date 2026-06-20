@@ -6,6 +6,7 @@ import { ArrowUpRight, EyeOff, Info, Square, SquareCheck, X } from "lucide-react
 
 import { MethodsHeading } from "@/components/profile/methods-heading";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { markTermInText } from "@/components/ui/mark-term";
 import type { ScholarFamilyView } from "@/lib/api/profile";
 import { methodFamilyPath } from "@/lib/method-url";
 
@@ -55,10 +56,13 @@ function FamilyDefinitionTip({
  * a usage snippet (`exemplarContexts[name]`, populated only under
  * METHODS_LENS_TOOL_CONTEXT — the server empties it otherwise, so the off-path
  * renders byte-identically to the prior `join(" · ")`), its name becomes a Radix
- * hover trigger showing "How <tool> was used: …". `relative z-10` + `type="button"`
- * with no onClick keeps it independently hoverable ABOVE the #819 whole-row filter
- * overlay, exactly like FamilyDefinitionTip. Snippet renders as PLAIN TEXT (React
- * escapes it — no markup injection).
+ * hover trigger. The tooltip frames the snippet honestly — "Verbatim, from the
+ * author's papers" (#917 polish, matching the publication modal) — and `<mark>`-
+ * highlights the tool where it appears in the sentence via `markTermInText`.
+ * `relative z-10` + `type="button"` with no onClick keeps it independently
+ * hoverable ABOVE the #819 whole-row filter overlay, exactly like
+ * FamilyDefinitionTip. The snippet is DATA: `markTermInText` builds React nodes
+ * (no `dangerouslySetInnerHTML`), so there is no markup-injection path.
  */
 function ExemplarToolsLine({
   tools,
@@ -90,14 +94,22 @@ function ExemplarToolsLine({
                   <button
                     type="button"
                     className="hover:text-foreground relative z-10 underline decoration-dotted underline-offset-2"
-                    aria-label={`How ${tool} was used`}
+                    aria-label={`Verbatim usage example for ${tool}`}
                   >
                     {tool}
                   </button>
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs font-sans text-sm leading-relaxed">
-                  <span className="font-medium">How {tool} was used</span>
-                  <span className="mt-1 block">{context}</span>
+                  <span className="text-background/60 mb-1 block text-[10px] font-medium tracking-wide uppercase">
+                    Verbatim, from the author&apos;s papers
+                  </span>
+                  <span className="block">
+                    {markTermInText(
+                      context,
+                      tool,
+                      "rounded-[2px] bg-background/25 px-0.5 font-semibold text-background not-italic",
+                    )}
+                  </span>
                 </TooltipContent>
               </Tooltip>
             ) : (
