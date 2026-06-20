@@ -65,8 +65,10 @@ describe("listOverviewGenerations", () => {
       {
         id: "gen1",
         model: "anthropic/claude-sonnet-4.5",
-        // a stored blob with an unknown enum + dirty instructions — normalization
-        // must coerce it to a usable OverviewParams.
+        // the dedicated column (#742) — an older v2 row whose blob predates versioning.
+        promptVersion: "v2",
+        // a stored blob with an unknown enum + dirty instructions + NO promptVersion —
+        // normalization must coerce it to a usable OverviewParams (version → default).
         params: {
           voice: "bogus",
           tone: "conversational",
@@ -83,12 +85,14 @@ describe("listOverviewGenerations", () => {
       {
         id: "gen1",
         model: "anthropic/claude-sonnet-4.5",
+        promptVersion: "v2", // the column passes through verbatim
         params: {
           voice: "third", // unknown enum -> default
           tone: "conversational",
           length: "extended",
           elements: ["methods"], // unknown key filtered
           instructions: "trim me", // trimmed
+          promptVersion: "v3", // blob had none -> normalized to the default
         },
         createdAt,
         text: "<p>Draft one.</p>",

@@ -64,6 +64,7 @@ import { buildScholarToolWrites } from "./scholar-tool-mapper";
 import { buildPublicationCoreWrites } from "./publication-core-mapper";
 import { CORE_CATALOG, CORE_CATALOG_SOURCE } from "./core-catalog";
 import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
+import { projectGrantOpportunities } from "./grant-opportunity-etl";
 
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
@@ -880,6 +881,22 @@ async function main() {
     console.log(`publication_core upserts complete: ${pubCoreRowsUpserted} rows.`);
 
     // ===================================================================
+    // Block 7: GRANT# → opportunity  (GrantRecs Phase 2)
+    // ===================================================================
+    // ReciterAI's pipeline_grants engine emits one GRANT# item per funding
+    // OPPORTUNITY (not an awarded grant). Project them into the `opportunity`
+    // table (idempotent upsert keyed on opportunity_id); the
+    // `scholars-opportunities` OpenSearch index is rebuilt from these rows by
+    // the search-index step. Pure map + paged scan live in
+    // ./grant-opportunity-etl.ts + ./grant-opportunity-mapper.ts.
+    console.log(`Scanning ${TABLE} for GRANT# records (paginated)...`);
+    const grantResult = await projectGrantOpportunities(ddb, db.write, {
+      table: TABLE,
+      log: (m) => console.log(`  ${m}`),
+    });
+    const opportunityRowsUpserted = grantResult.upserted;
+
+    // ===================================================================
     // Bookkeeping
     // ===================================================================
     const totalRowsProcessed =
@@ -888,6 +905,7 @@ async function main() {
       rows.length +
       impactRowsUpserted +
       scholarToolRowsInserted +
+      opportunityRowsUpserted +
       coreRowsUpserted +
       pubCoreRowsUpserted;
     await db.write.etlRun.update({
@@ -902,7 +920,7 @@ async function main() {
 
     const elapsed = Math.round((Date.now() - start) / 1000);
     console.log(
-      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}, publication_impact=${impactRowsUpserted}, core=${coreRowsUpserted}, publication_core=${pubCoreRowsUpserted}`,
+      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}, publication_impact=${impactRowsUpserted}, opportunity=${opportunityRowsUpserted}, core=${coreRowsUpserted}, publication_core=${pubCoreRowsUpserted}`,
     );
   } catch (err) {
     await db.write.etlRun.update({

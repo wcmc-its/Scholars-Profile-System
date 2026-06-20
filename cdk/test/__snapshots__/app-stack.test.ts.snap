@@ -408,6 +408,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "OVERVIEW_PROMPT_VERSION_DEFAULT",
+                "Value": "v3",
+              },
+              {
                 "Name": "FEEDBACK_BADGE_ENABLED",
                 "Value": "on",
               },
@@ -3611,6 +3615,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "OVERVIEW_FAITHFULNESS_PASS",
                 "Value": "off",
+              },
+              {
+                "Name": "OVERVIEW_PROMPT_VERSION_DEFAULT",
+                "Value": "v3",
               },
               {
                 "Name": "FEEDBACK_BADGE_ENABLED",

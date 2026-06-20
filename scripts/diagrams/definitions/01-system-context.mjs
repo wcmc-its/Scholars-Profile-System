@@ -11,14 +11,16 @@ const nodes = {
   infoed: { x: 50, y: 188, w: 310, h: 54, kind: "ext", title: "InfoEd", sub: ["MS SQL · grants (funding)"], chip: { tone: "nightly", text: "nightly" } },
   coi:    { x: 50, y: 248, w: 310, h: 54, kind: "ext", title: "COI Portal", sub: ["MySQL · disclosures"], chip: { tone: "nightly", text: "nightly" } },
   asms:   { x: 50, y: 308, w: 310, h: 54, kind: "ext", title: "ASMS", sub: ["MS SQL · education, degrees"], chip: { tone: "nightly", text: "nightly" } },
-  jenz:   { x: 50, y: 368, w: 310, h: 54, kind: "ext", title: "Jenzabar", sub: ["MS SQL · grad-school mentoring"], chip: { tone: "ondemand", text: "on-demand" } },
+  jenz:   { x: 50, y: 368, w: 310, h: 54, kind: "ext", title: "Jenzabar", sub: ["MS SQL · grad-school mentoring"], chip: { tone: "nightly", text: "nightly" } },
   hr:     { x: 50, y: 428, w: 310, h: 54, kind: "ext", title: "Human Resources", sub: ["employer / employee mentees"], chip: { tone: "planned", text: "planned" } },
-  rdb:    { x: 50, y: 488, w: 310, h: 54, kind: "ext", title: "ReciterDB", sub: ["MariaDB · publications, MeSH"], chip: { tone: "nightly", text: "nightly" } },
+  rdb:    { x: 50, y: 488, w: 310, h: 54, kind: "ext", title: "ReciterDB", sub: ["MariaDB · publications, MeSH, clinical trials"], chip: { tone: "nightly", text: "nightly" } },
   rai:    { x: 50, y: 548, w: 310, h: 54, kind: "ext", title: "ReciterAI", sub: ["DynamoDB + S3 · topics, spotlights"], chip: { tone: "weekly", text: "weekly" } },
+  onc:    { x: 50, y: 608, w: 310, h: 54, kind: "ext", title: "OnCore (CTMS)", sub: ["clinical-trial mgmt · investigators, status"], chip: { tone: "ondemand", text: "manual export" } },
   // ----- left: external (public HTTPS) -----
-  nih:    { x: 50, y: 668, w: 310, h: 54, kind: "ext", title: "NIH RePORTER", sub: ["HTTPS · grant enrichment"], chip: { tone: "ondemand", text: "on-demand" } },
-  nsf:    { x: 50, y: 728, w: 310, h: 54, kind: "ext", title: "NSF Awards", sub: ["HTTPS · federal awards"], chip: { tone: "ondemand", text: "on-demand" } },
-  mesh:   { x: 50, y: 788, w: 310, h: 54, kind: "ext", title: "NLM MeSH", sub: ["HTTPS · taxonomy"], chip: { tone: "annual", text: "annual" } },
+  ctgov:  { x: 50, y: 730, w: 310, h: 54, kind: "ext", title: "ClinicalTrials.gov", sub: ["HTTPS API v2 · NCT trial enrichment"], chip: { tone: "weekly", text: "weekly" } },
+  nih:    { x: 50, y: 790, w: 310, h: 54, kind: "ext", title: "NIH RePORTER", sub: ["HTTPS · grant enrichment"], chip: { tone: "ondemand", text: "on-demand" } },
+  nsf:    { x: 50, y: 850, w: 310, h: 54, kind: "ext", title: "NSF Awards", sub: ["HTTPS · federal awards"], chip: { tone: "ondemand", text: "on-demand" } },
+  mesh:   { x: 50, y: 910, w: 310, h: 54, kind: "ext", title: "NLM MeSH", sub: ["HTTPS · taxonomy"], chip: { tone: "annual", text: "annual" } },
   // ----- center: the platform -----
   etl:    { x: 536, y: 200, w: 312, h: 54, kind: "app", title: "ETL pipeline", sub: ["Step Functions · nightly / weekly / annual"] },
   aur:    { x: 536, y: 308, w: 150, h: 60, kind: "data", title: "Aurora MySQL", sub: ["canonical store"] },
@@ -33,8 +35,8 @@ const nodes = {
 };
 
 const groups = [
-  { x: 30, y: 96, w: 350, h: 516, kind: "ext", title: "WCM source systems" },
-  { x: 30, y: 636, w: 350, h: 216, kind: "ext", title: "External data (HTTPS)" },
+  { x: 30, y: 96, w: 350, h: 578, kind: "ext", title: "WCM source systems" },
+  { x: 30, y: 698, w: 350, h: 278, kind: "ext", title: "External data (HTTPS)" },
   { x: 506, y: 150, w: 372, h: 448, kind: "edge", title: "Scholars Profile System" },
   { x: 1012, y: 150, w: 346, h: 448, kind: "net", title: "Who it serves" },
 ];
@@ -47,6 +49,12 @@ const edges = [
   { p0: A(nodes.ed, "r"), p1: A(nodes.app, "l", 0.45), color: "violet", dash: true, label: "headshot · read-time", lp: { x: 488, y: 300 }, points: [{ x: 488, y: 155 }, { x: 488, y: 443 }] },
   // ASMS -> Enterprise Directory (source-to-source link), routed up the column's left channel.
   { p0: A(nodes.asms, "l"), p1: A(nodes.ed, "l"), color: "gray", w: 1.5, points: [{ x: 44, y: 335 }, { x: 44, y: 155 }] },
+  // Clinical-trial lineage (source-to-source, up the left channel like ASMS -> ED):
+  // OnCore's institutional export and the ClinicalTrials.gov NCT pull both stage into
+  // reciterdb tables (clinical_trials / clinical_trials_enriched) that the ETL reads.
+  // ClinicalTrials.gov is dashed — SPS never calls it; ReciterAI pulls it upstream.
+  { p0: A(nodes.onc, "l", 0.5), p1: A(nodes.rdb, "l", 0.7), color: "gray", w: 1.5, points: [{ x: 44, y: 635 }, { x: 44, y: 526 }] },
+  { p0: A(nodes.ctgov, "l", 0.5), p1: A(nodes.rdb, "l", 0.3), color: "gray", w: 1.5, dash: true, points: [{ x: 24, y: 757 }, { x: 24, y: 504 }] },
   { p0: A(nodes.etl, "b", 0.3), p1: A(nodes.aur, "t", 0.5), color: "teal" },
   { p0: A(nodes.etl, "b", 0.72), p1: A(nodes.os, "t", 0.5), color: "teal" },
   { p0: A(nodes.aur, "b", 0.5), p1: A(nodes.app, "t", 0.28), color: "gray", label: "read" },
@@ -58,7 +66,7 @@ const edges = [
   { p0: A(nodes.idp, "t", 0.5), p1: A(nodes.staff, "b", 0.5), color: "gray", label: "SSO" },
 ];
 
-export const spec = { id: "system-context", vb: [1380, 884], groups, nodes, edges };
+export const spec = { id: "system-context", vb: [1380, 988], groups, nodes, edges };
 
 export const meta = {
   nav: "① System context",
@@ -90,8 +98,12 @@ export const meta = {
   footnote:
     "<b>Headshots</b> load live at read time straight from the WCM directory " +
     "(<code>directory.weill.cornell.edu</code>) — never stored, never via the ETL. " +
-    "<b>On-demand</b> sources (Jenzabar, RePORTER, NSF) aren't on a Step Functions cadence yet; " +
+    "<b>On-demand</b> sources (RePORTER, NSF) aren't on a Step Functions cadence yet; " +
     "they run via the daily prototype chain. <b>Human Resources</b> (employer/employee mentees) is " +
-    "a planned source, not yet built.",
-  source: "docs/architecture-overview.md · cdk/lib/etl-stack.ts · lib/headshot.ts · ETL connectors in lib/sources/",
+    "a planned source, not yet built. <b>Clinical trials</b> originate in <b>OnCore</b> (the CTMS — a " +
+    "<b>manual</b> institutional export, static until the next export lands) and " +
+    "are enriched against the <b>ClinicalTrials.gov</b> registry (API v2); both stage into reciterdb " +
+    "tables (<code>clinical_trials</code> / <code>clinical_trials_enriched</code>, the latter pulled " +
+    "upstream by ReciterAI) that the nightly ETL reads — SPS never calls ClinicalTrials.gov directly.",
+  source: "docs/architecture-overview.md · cdk/lib/etl-stack.ts · lib/headshot.ts · ETL connectors in lib/sources/ · etl/clinical-trials/* · docs/clinical-trials-source-spec.md",
 };

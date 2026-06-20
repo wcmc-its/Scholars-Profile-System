@@ -28,6 +28,7 @@ scripts/diagrams/
     04-edge-topology-fork.mjs   # the NetScaler replace-vs-front decision (#502)
     05-app-internals.mjs        # C4 component view inside the Next.js app
   build.mjs            # validate → SVG → PNG → index.html
+  check-crossings.mjs  # dev linter: flags edges that tunnel THROUGH a foreign node box (run on demand)
   README.md
 ```
 

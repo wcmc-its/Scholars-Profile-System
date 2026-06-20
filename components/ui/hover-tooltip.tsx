@@ -17,12 +17,17 @@ import { useEffect, useRef, useState } from "react";
 
 export function HoverTooltip({
   text,
+  body,
   children,
   immediate = false,
   wide = false,
   placement = "top",
 }: {
   text: string;
+  /** Optional rich tooltip body rendered in place of `text` (e.g. a snippet with
+   *  the matched term `<mark>`-highlighted). `text` stays required as the plain
+   *  fallback / accessible string; pass both and `body` wins for the visual. */
+  body?: React.ReactNode;
   children: React.ReactNode;
   /** Show on mouse-enter with no 200ms delay. Always immediate on focus. */
   immediate?: boolean;
@@ -84,7 +89,7 @@ export function HoverTooltip({
               : "whitespace-nowrap")
           }
         >
-          {text}
+          {body ?? text}
           <span
             aria-hidden="true"
             className={

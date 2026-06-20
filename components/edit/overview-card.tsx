@@ -60,6 +60,11 @@ import {
   type OverviewSelection,
   type OverviewSelectionDeltas,
 } from "@/lib/edit/overview-params";
+import {
+  humanizeModelId,
+  type OverviewPromptVersionId,
+  type OverviewPromptVersionMeta,
+} from "@/lib/edit/overview-prompt-versions";
 import { resolveOverviewSelection, selectionToDeltas } from "@/lib/edit/overview-resolve";
 import type { OverviewOrigin } from "@/lib/edit/overview-provenance";
 import { cn } from "@/lib/utils";
@@ -156,6 +161,17 @@ export type OverviewCardProps = {
    * you". Mirrors the `mode` reframing the sibling cards already take.
    */
   mode?: "self" | "superuser";
+  /**
+   * #742 prompt versioning. `canSelectPromptVersion` (superuser / curator only)
+   * shows the version dropdown; a faculty owner never sees it and always generates
+   * on `defaultPromptVersion`. `promptVersions` are the selectable versions with
+   * their RESOLVED effective model (server-filled). `defaultPromptVersion` is the
+   * live default id (env rollback honored) — seeds the params so the value the
+   * client sends matches the server default.
+   */
+  canSelectPromptVersion?: boolean;
+  promptVersions?: OverviewPromptVersionMeta[];
+  defaultPromptVersion?: OverviewPromptVersionId;
 };
 
 export function OverviewCard({
@@ -165,6 +181,9 @@ export function OverviewCard({
   readOnly = false,
   generateEnabled = false,
   mode = "self",
+  canSelectPromptVersion = false,
+  promptVersions = [],
+  defaultPromptVersion,
 }: OverviewCardProps) {
   if (readOnly) return <OverviewReadOnlyCard initialHtml={initialHtml} />;
   return (
@@ -174,6 +193,9 @@ export function OverviewCard({
       previewHref={previewHref}
       generateEnabled={generateEnabled}
       mode={mode}
+      canSelectPromptVersion={canSelectPromptVersion}
+      promptVersions={promptVersions}
+      defaultPromptVersion={defaultPromptVersion}
     />
   );
 }
@@ -226,7 +248,14 @@ function OverviewReadOnlyCard({ initialHtml }: { initialHtml: string }) {
 
 type OverviewEditorCardProps = Pick<
   OverviewCardProps,
-  "cwid" | "initialHtml" | "previewHref" | "generateEnabled" | "mode"
+  | "cwid"
+  | "initialHtml"
+  | "previewHref"
+  | "generateEnabled"
+  | "mode"
+  | "canSelectPromptVersion"
+  | "promptVersions"
+  | "defaultPromptVersion"
 >;
 
 function OverviewEditorCard({
@@ -235,6 +264,9 @@ function OverviewEditorCard({
   previewHref,
   generateEnabled = false,
   mode = "self",
+  canSelectPromptVersion = false,
+  promptVersions = [],
+  defaultPromptVersion,
 }: OverviewEditorCardProps) {
   // The currently-published bio — the dirty baseline.
   const [savedHtml, setSavedHtml] = React.useState(initialHtml);
@@ -325,6 +357,9 @@ function OverviewEditorCard({
         generations={generations}
         refreshGenerations={refreshGenerations}
         previewHref={previewHref}
+        canSelectPromptVersion={canSelectPromptVersion}
+        promptVersions={promptVersions}
+        defaultPromptVersion={defaultPromptVersion}
       />
     </EditPanel>
   );
@@ -478,6 +513,9 @@ function OverviewGeneratorArm({
   generations,
   refreshGenerations,
   previewHref,
+  canSelectPromptVersion = false,
+  promptVersions = [],
+  defaultPromptVersion,
 }: {
   cwid: string;
   savedHtml: string;
@@ -485,11 +523,20 @@ function OverviewGeneratorArm({
   generations: OverviewGenerationItem[];
   refreshGenerations: () => Promise<void>;
   previewHref?: string;
+  canSelectPromptVersion?: boolean;
+  promptVersions?: OverviewPromptVersionMeta[];
+  defaultPromptVersion?: OverviewPromptVersionId;
 }) {
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [generateNotice, setGenerateNotice] = React.useState<string | null>(null);
   const [generateError, setGenerateError] = React.useState<string | null>(null);
-  const [params, setParams] = React.useState<OverviewParams>(DEFAULT_OVERVIEW_PARAMS);
+  // Seed the version from the server-resolved default so the value the client
+  // sends matches the live default (the route forces it anyway for an owner, but
+  // a superuser / curator's selector should open on the real default).
+  const [params, setParams] = React.useState<OverviewParams>(() => ({
+    ...DEFAULT_OVERVIEW_PARAMS,
+    promptVersion: defaultPromptVersion ?? DEFAULT_OVERVIEW_PARAMS.promptVersion,
+  }));
 
   // The draft currently under review (coral card). `null` = no draft proposed.
   // `reviewIndex` pages back through `reviewHistory` (newest first).
@@ -621,7 +668,13 @@ function OverviewGeneratorArm({
         body: JSON.stringify({ entityId: cwid, params, selection }),
       });
       const data = (await res.json()) as
-        | { ok: true; draft: string; model: string; generationId: string | null }
+        | {
+            ok: true;
+            draft: string;
+            model: string;
+            promptVersion: OverviewPromptVersionId;
+            generationId: string | null;
+          }
         | { ok: false; error: string };
       if (!res.ok || data.ok !== true) {
         // Editor untouched on any failure (G8) — only a notice or error appears.
@@ -702,6 +755,8 @@ function OverviewGeneratorArm({
         onToggle={() => setBlockOpen((o) => !o)}
         params={params}
         setParams={setParams}
+        canSelectPromptVersion={canSelectPromptVersion}
+        promptVersions={promptVersions}
         sourceOptions={sourceOptions}
         deltas={deltas}
         onCommitDeltas={commitDeltas}
@@ -761,6 +816,8 @@ function OverviewDraftBlock({
   onToggle,
   params,
   setParams,
+  canSelectPromptVersion,
+  promptVersions,
   sourceOptions,
   deltas,
   onCommitDeltas,
@@ -777,6 +834,8 @@ function OverviewDraftBlock({
   onToggle: () => void;
   params: OverviewParams;
   setParams: React.Dispatch<React.SetStateAction<OverviewParams>>;
+  canSelectPromptVersion: boolean;
+  promptVersions: OverviewPromptVersionMeta[];
   sourceOptions: OverviewSourceOptions | null;
   deltas: OverviewSelectionDeltas;
   onCommitDeltas: (next: OverviewSelectionDeltas) => void;
@@ -827,7 +886,13 @@ function OverviewDraftBlock({
 
       {open && (
         <div className="flex flex-col gap-4 px-4 pb-4" data-testid="overview-draft-block-body">
-          <OverviewGenerateControls value={params} onChange={setParams} disabled={busy} />
+          <OverviewGenerateControls
+            value={params}
+            onChange={setParams}
+            disabled={busy}
+            canSelectPromptVersion={canSelectPromptVersion}
+            promptVersions={promptVersions}
+          />
 
           <OverviewSourceDrawer
             options={sourceOptions}
@@ -848,8 +913,13 @@ function OverviewDraftBlock({
                     className="flex flex-wrap items-start justify-between gap-3"
                     data-testid={`overview-version-${gen.id}`}
                   >
-                    <span className="text-muted-foreground min-w-0 text-xs">
-                      {summarizeParams(gen.params)}
+                    <span className="text-muted-foreground flex min-w-0 flex-col">
+                      <span className="text-foreground text-xs">
+                        {(gen.promptVersion ?? gen.params.promptVersion) ?? ""}
+                        {(gen.promptVersion ?? gen.params.promptVersion) ? " · " : ""}
+                        {humanizeModelId(gen.model)}
+                      </span>
+                      <span className="text-xs">{summarizeParams(gen.params)}</span>
                     </span>
                     <div className="flex shrink-0 flex-wrap items-center gap-2">
                       <Button

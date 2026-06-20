@@ -366,6 +366,54 @@ model PublicationCiting {
   @@map("publication_citing")
 }
 
+/// GrantRecs Phase 2 — a single funding OPPORTUNITY (not an awarded grant),
+/// projected from ReciterAI's `GRANT#` DynamoDB record by the dynamodb ETL
+/// (`etl/dynamodb/index.ts` → `grant-opportunity-mapper.ts`). MySQL is the
+/// source of truth; the `scholars-opportunities` OpenSearch index is rebuilt
+/// from these rows. Standalone — no FK to Scholar/Topic; `primaryTopicId` is a
+/// soft slug reference into `topic.id`. `topicVector`/`appealByStage` are read
+/// whole at match time, never joined, so they stay JSON. See
+/// `2026-06-19-grantrecs-phase2-matching-engine-design.md` §5.
+model Opportunity {
+  opportunityId    String    @id @map("opportunity_id") @db.VarChar(128)
+  source           String    @db.VarChar(32)
+  sourceUrl        String    @map("source_url") @db.VarChar(512)
+  sponsor          String    @db.VarChar(255)
+  title            String    @db.Text
+  synopsis         String    @db.Text
+  status           String    @db.VarChar(32)
+  openDate         DateTime? @map("open_date") @db.Date
+  dueDate          DateTime? @map("due_date") @db.Date
+  eligibilityRaw   String    @map("eligibility_raw") @db.Text
+  /// Derived flags (`us_eligible`/`faculty_eligible`/`postdoc_eligible`/
+  /// `student_only`/`internal_limited_submission`) — see grant-opportunity-mapper.
+  eligibilityFlags Json      @map("eligibility_flags")
+  cfdaList         Json      @map("cfda_list")
+  mechanism        String?   @db.VarChar(16)
+  awardCeiling     BigInt?   @map("award_ceiling")
+  awardFloor       BigInt?   @map("award_floor")
+  estimatedFunding BigInt?   @map("estimated_funding")
+  numberOfAwards   Int?      @map("number_of_awards")
+  /// Soft reference to `topic.id` (slug); not an FK — a brand-new topic may not
+  /// be in the taxonomy yet.
+  primaryTopicId   String?   @map("primary_topic_id") @db.VarChar(128)
+  /// `[{ topic_id, score, rationale }]` — the opportunity's 68-topic vector.
+  topicVector      Json      @map("topic_vector")
+  /// `{ grad, postdoc, early, mid, senior }` ∈ 0..1 — career-stage appeal.
+  appealByStage    Json      @map("appeal_by_stage")
+  isResearch       Boolean   @map("is_research")
+  /// Optional MeSH descriptor UIs anchored to the opportunity's top topics.
+  meshDescriptorUi Json?     @map("mesh_descriptor_ui")
+  taxonomyVersion  String    @map("taxonomy_version") @db.VarChar(32)
+  ingestedAt       DateTime  @map("ingested_at")
+  lastRefreshedAt  DateTime  @default(now()) @map("last_refreshed_at")
+
+  @@index([status])
+  @@index([dueDate])
+  @@index([primaryTopicId])
+  @@map("opportunity")
+}
+
 /// Issue #195 — Per-CWID PhD program record sourced from ED's
 /// `weillCornellEduSORRoleRecord` class under `ou=students,ou=sors` filtered
 /// to `weillCornellEduDegreeCode=PHD`. Includes expired rows so alumni
@@ -1784,13 +1832,19 @@ model OverviewGeneration {
   cwid          String   @db.VarChar(32)
   text          String   @db.Text // sanitized HTML draft
   model         String   @db.VarChar(64) // gateway model string used
-  params        Json // { voice, tone, length, elements[], instructions }
+  // The PROMPT VERSION that generated this draft (#742, the versioning registry).
+  // A dedicated column (not buried in `params`) so A/B analysis can GROUP BY it —
+  // e.g. v3-vs-v2 edit-survival rates joined to overview_provenance. Nullable: rows
+  // written before versioning shipped stay NULL.
+  promptVersion String?  @map("prompt_version") @db.VarChar(32)
+  params        Json // { voice, tone, length, elements[], instructions, promptVersion }
   createdByCwid String   @map("created_by_cwid") @db.VarChar(32) // actor (self today)
   createdAt     DateTime @default(now()) @map("created_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 
   @@index([cwid, createdAt(sort: Desc)]) // the scholar's drafts, newest first
+  @@index([promptVersion, createdAt(sort: Desc)]) // "all v3 drafts, newest first" — A/B analysis
   @@map("overview_generation")
 }
 

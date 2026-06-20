@@ -507,7 +507,7 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
     expect(screen.getByText("MIMIC-CXR")).toBeDefined();
   });
 
-  it("exposes a tool's #1119 usage snippet via the hover tooltip (#917 Phase 2)", async () => {
+  it("exposes a tool's #1119 usage snippet via the hover tooltip, framed honestly (#917 Phase 2)", async () => {
     mockFetch(
       makePayload({
         methodFamilies: [
@@ -528,15 +528,50 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    // The tool name is the trigger; the "How <tool> was used: <context>" snippet
-    // is only in the DOM while the HoverTooltip is visible, so hover it first.
+    // The snippet is only in the DOM while the HoverTooltip is visible, so hover.
     const trigger = screen.getByText("STORK-A");
     fireEvent.mouseEnter(trigger.parentElement as HTMLElement);
+    // Honest framing (the tool name does not appear verbatim here → no mark).
     await waitFor(() =>
-      expect(
-        screen.getByText(/How STORK-A was used: a non-invasive/),
-      ).toBeDefined(),
+      expect(screen.getByText(/Verbatim, from the author's papers/i)).toBeDefined(),
     );
+    expect(
+      screen.getByText(/a non-invasive and automated method of embryo evaluation/),
+    ).toBeDefined();
+  });
+
+  it("mark-highlights the tool name where it appears verbatim in the snippet (#917 Phase 2)", async () => {
+    mockFetch(
+      makePayload({
+        methodFamilies: [
+          {
+            supercategory: "imaging",
+            familyLabel: "Confocal microscopy",
+            href: null,
+            tools: [
+              {
+                name: "corneal confocal microscope",
+                context:
+                  "A corneal confocal microscope was used to quantify nerve fibre density.",
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const trigger = screen.getByText("corneal confocal microscope");
+    fireEvent.mouseEnter(trigger.parentElement as HTMLElement);
+    // The occurrence inside the sentence is wrapped in a <mark>, preserving the
+    // snippet's own casing ("A corneal confocal microscope was used…").
+    await waitFor(() => {
+      const marks = Array.from(document.querySelectorAll("mark")).map(
+        (m) => m.textContent,
+      );
+      expect(marks).toContain("corneal confocal microscope");
+    });
   });
 });
 

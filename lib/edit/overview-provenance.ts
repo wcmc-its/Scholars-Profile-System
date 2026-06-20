@@ -50,6 +50,10 @@ export function computeOverviewOrigin(
 export interface OverviewGenerationSummary {
   id: string;
   model: string;
+  /** The prompt version that generated this draft (#742). Null for rows written
+   *  before versioning shipped; `params.promptVersion` carries the same value for
+   *  new rows, but this is the authoritative, queryable column. */
+  promptVersion: string | null;
   params: OverviewParams;
   createdAt: Date;
   text: string;
@@ -69,11 +73,19 @@ export async function listOverviewGenerations(
     where: { cwid },
     orderBy: { createdAt: "desc" },
     take: GENERATION_HISTORY_LIMIT,
-    select: { id: true, model: true, params: true, createdAt: true, text: true },
+    select: {
+      id: true,
+      model: true,
+      promptVersion: true,
+      params: true,
+      createdAt: true,
+      text: true,
+    },
   });
   return rows.map((row) => ({
     id: row.id,
     model: row.model,
+    promptVersion: row.promptVersion,
     params: normalizeOverviewParams(row.params),
     createdAt: row.createdAt,
     text: row.text,

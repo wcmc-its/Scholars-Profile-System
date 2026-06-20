@@ -1142,6 +1142,16 @@ export class AppStack extends Stack {
         // calls. Same TaskRoleBedrockPolicy; no new IAM. Flip per-env here + a manual
         // `cdk deploy --exclusively Sps-App-<env>`.
         OVERVIEW_FAITHFULNESS_PASS: "off",
+        // #742 -- the LIVE default prompt VERSION (overview-prompt-versioning-spec.md).
+        // "v3" is the keyword-rich narrative prompt and the new default for all
+        // generations in both envs. This env is the no-image-roll ROLLBACK lever:
+        // set it to "v2" + a manual `cdk deploy --exclusively Sps-App-<env>` to
+        // revert the default to the legacy concise prompt without touching code.
+        // An invalid / unset value falls back to the registry default (v3), so the
+        // generator is never broken by a typo (defaultPromptVersionId,
+        // lib/edit/overview-prompt-versions.ts). Superuser / curator can still pick
+        // either version per-generate regardless of this default.
+        OVERVIEW_PROMPT_VERSION_DEFAULT: "v3",
         // #538 -- site-wide feedback badge + /about/feedback form. When "on",
         // the badge renders on every page (except /about/feedback itself,
         // suppressed inside open Radix Dialogs) and the form route accepts

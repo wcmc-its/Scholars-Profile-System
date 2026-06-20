@@ -40,12 +40,16 @@ import {
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import {
   FUNDING_INDEX,
+  OPPORTUNITIES_INDEX,
   PEOPLE_INDEX,
   PUBLICATIONS_INDEX,
+  buildOpportunityDoc,
   fundingIndexMapping,
+  opportunitiesIndexMapping,
   peopleIndexMapping,
   publicationsIndexMapping,
   searchClient,
+  type OpportunityIndexRow,
 } from "@/lib/search";
 import {
   PEOPLE_INDEX_SELECT,
@@ -337,21 +341,22 @@ async function indexFunding(concreteIndex: string) {
   return docs.length;
 }
 
-type SourceType = "people" | "publications" | "funding";
+type SourceType = "people" | "publications" | "funding" | "opportunities";
 
 function parseSelected(argv: string[]): Set<SourceType> {
-  const all: SourceType[] = ["people", "publications", "funding"];
+  const all: SourceType[] = ["people", "publications", "funding", "opportunities"];
   const flagMap: Record<string, SourceType> = {
     "--people-only": "people",
     "--publications-only": "publications",
     "--funding-only": "funding",
+    "--opportunities-only": "opportunities",
   };
   const selected = new Set<SourceType>();
   for (const arg of argv) {
     if (arg in flagMap) selected.add(flagMap[arg]);
     else if (arg === "--help" || arg === "-h") {
       console.log(
-        "Usage: tsx etl/search-index/index.ts [--people-only] [--publications-only] [--funding-only]\n" +
+        "Usage: tsx etl/search-index/index.ts [--people-only] [--publications-only] [--funding-only] [--opportunities-only]\n" +
           "  Flags are additive; pass none to (re)index all three sources.\n" +
           "  Each selected source has its index dropped and recreated; unselected indices are left alone.",
       );
@@ -540,6 +545,47 @@ async function assertFundingIndexHealth(
   }
 }
 
+async function indexOpportunities(concreteIndex: string) {
+  const client = searchClient();
+  // GrantRecs Phase 2 — project research opportunities into their index. One doc
+  // per `opportunity` row; non-research rows are excluded at the source (the ETL
+  // mapper already drops them, but the filter is cheap insurance). The pure
+  // shaping (topic gate, _source re-rank payload) is buildOpportunityDoc.
+  const rows = (await prisma.opportunity.findMany({
+    where: { isResearch: true },
+    select: {
+      opportunityId: true,
+      title: true,
+      synopsis: true,
+      sponsor: true,
+      status: true,
+      mechanism: true,
+      eligibilityFlags: true,
+      cfdaList: true,
+      openDate: true,
+      dueDate: true,
+      primaryTopicId: true,
+      topicVector: true,
+      appealByStage: true,
+      meshDescriptorUi: true,
+      awardCeiling: true,
+      numberOfAwards: true,
+    },
+  })) as unknown as OpportunityIndexRow[];
+
+  if (rows.length === 0) return 0;
+
+  await bulkIndexDocs(
+    client,
+    concreteIndex,
+    rows.map((r) => buildOpportunityDoc(r)),
+    "Opportunities",
+  );
+  console.log(`  ...indexed ${rows.length} opportunities`);
+  await client.indices.refresh({ index: concreteIndex });
+  return rows.length;
+}
+
 async function main() {
   const selected = parseSelected(process.argv.slice(2));
   const counts: Partial<Record<SourceType, number>> = {};
@@ -591,6 +637,21 @@ async function main() {
     );
   }
 
+  if (selected.has("opportunities")) {
+    console.log(`Rebuilding ${OPPORTUNITIES_INDEX} via alias swap...`);
+    const { docsIndexed, newIndex, deleted } = await rebuildAliasedIndex({
+      client,
+      alias: OPPORTUNITIES_INDEX,
+      mapping: opportunitiesIndexMapping,
+      fillFn: indexOpportunities,
+    });
+    counts.opportunities = docsIndexed;
+    console.log(
+      `  ...swapped ${OPPORTUNITIES_INDEX} -> ${newIndex}` +
+        (deleted.length > 0 ? ` (pruned ${deleted.join(", ")})` : ""),
+    );
+  }
+
   console.log("Running smoke checks...");
   if (selected.has("people")) await assertPeopleIndexHealth(client);
   if (selected.has("publications")) await assertPublicationsIndexHealth(client);
@@ -601,6 +662,7 @@ async function main() {
   if (counts.people !== undefined) parts.push(`${counts.people} scholars`);
   if (counts.publications !== undefined) parts.push(`${counts.publications} publications`);
   if (counts.funding !== undefined) parts.push(`${counts.funding} funding projects`);
+  if (counts.opportunities !== undefined) parts.push(`${counts.opportunities} opportunities`);
   console.log(`Indexed ${parts.join(", ")}.`);
 }
 
