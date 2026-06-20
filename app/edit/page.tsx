@@ -37,6 +37,7 @@ import {
 } from "@/lib/edit/slug-request";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
 import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
+import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
 
 // /edit reads suppression-OFF + writes via /api/edit/*; the page must never
 // be cached (CloudFront also marks it CachingDisabled per cloudfront-cache-spec.md).
@@ -153,6 +154,9 @@ export default async function EditSelfPage({
   // GrantRecs Phase 3 (`SELF_EDIT_GRANT_RECS`) — gates the "Grants for me" rail
   // item + panel. Sync env read, like `slugRequestEnabled`.
   const grantRecsEnabled = isGrantRecsEnabled();
+  // #917 v5 (`EDIT_BIOSKETCH_GENERATE`) — gates the "NIH biosketch" Services rail
+  // item + panel. Sync env read, mirroring grantRecsEnabled.
+  const biosketchEnabled = isBiosketchGenerateEnabled();
 
   // Canonicalize a present-but-invalid `?attr` (T1.13): redirect to the bare
   // `/edit` rather than silently rendering the default panel behind a stale URL.
@@ -167,6 +171,7 @@ export default async function EditSelfPage({
     ctx.unmatchedPubmedCoi.length > 0 || ctx.unmatchedPubmedCoiReviewed.length > 0,
     ctx.highlights !== null,
     grantRecsEnabled,
+    biosketchEnabled,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect("/edit");
@@ -289,6 +294,7 @@ export default async function EditSelfPage({
       unitAdminEditors={unitAdminEditors}
       reciterPendingEnabled={reciterPendingEnabled}
       grantRecsEnabled={grantRecsEnabled}
+      biosketchEnabled={biosketchEnabled}
     />
   );
 }

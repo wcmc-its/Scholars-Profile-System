@@ -369,8 +369,9 @@ export async function generateBiosketch(
 
 /**
  * Whether the biosketch-generate feature is enabled (#917 v5). Off by default; the route
- * 404s and the `/edit/biosketch` affordance is hidden until ops flip it on. Mirrors
- * `isOverviewGenerateEnabled` STRUCTURALLY — but the CDK wires it staging-first
+ * 404s and the "NIH biosketch" item in the `/edit` Services rail (and its `?attr=biosketch`
+ * panel) is hidden until ops flip it on. Mirrors `isOverviewGenerateEnabled` /
+ * `isGrantRecsEnabled` STRUCTURALLY — but the CDK wires it staging-first
  * (`env === "staging" ? "on" : "off"`), since this is a brand-new surface.
  */
 export function isBiosketchGenerateEnabled(): boolean {
