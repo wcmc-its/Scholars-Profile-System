@@ -11,7 +11,7 @@
  * null-equivalent empty result is `{ pubs: [], total: 0 }`.
  * Prisma + manual-layer are mocked so this stays a fast unit test.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -146,6 +146,105 @@ describe("loadMethodExemplar — gating", () => {
     expect(await loadMethodExemplar("abc", "   ")).toEqual(EMPTY);
     expect(await loadMethodExemplar("", "F")).toEqual(EMPTY);
     expect(scholarFamilyFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("loadMethodExemplar — methodContext + #1158 sourcePmid", () => {
+  const prevFlag = process.env.METHODS_LENS_TOOL_CONTEXT;
+  beforeEach(() => {
+    process.env.METHODS_LENS_TOOL_CONTEXT = "on";
+  });
+  afterAll(() => {
+    if (prevFlag === undefined) delete process.env.METHODS_LENS_TOOL_CONTEXT;
+    else process.env.METHODS_LENS_TOOL_CONTEXT = prevFlag;
+  });
+
+  it("returns null methodContext when the flag is off", async () => {
+    process.env.METHODS_LENS_TOOL_CONTEXT = "off";
+    scholarFamilyFindMany.mockResolvedValue([
+      {
+        supercategory: "x",
+        familyLabel: "F",
+        pmids: ["1"],
+        exemplarTools: ["CheXpert"],
+        exemplarContexts: { CheXpert: "labels chest radiographs" },
+        exemplarContextPmids: { CheXpert: "33144353" },
+      },
+    ]);
+    publicationFindMany.mockResolvedValue([pub({ pmid: "1", title: "P1" })]);
+    const r = await loadMethodExemplar("abc", "F");
+    expect(r.methodContext).toBeNull();
+  });
+
+  it("picks the salience-first tool's snippet and its parallel sourcePmid (same key)", async () => {
+    scholarFamilyFindMany.mockResolvedValue([
+      {
+        supercategory: "x",
+        familyLabel: "F",
+        pmids: ["1"],
+        // array drives salience order; CheXpert first → its snippet/pmid win.
+        exemplarTools: ["CheXpert", "MIMIC-CXR"],
+        exemplarContexts: {
+          "MIMIC-CXR": "a dataset of chest radiographs",
+          CheXpert: "labels chest radiographs across 14 observations",
+        },
+        // keyed by the SAME tool display name, NOT positional.
+        exemplarContextPmids: { CheXpert: "33144353", "MIMIC-CXR": "30178031" },
+      },
+    ]);
+    publicationFindMany.mockResolvedValue([pub({ pmid: "1", title: "P1" })]);
+    const r = await loadMethodExemplar("abc", "F");
+    expect(r.methodContext).toEqual({
+      tool: "CheXpert",
+      context: "labels chest radiographs across 14 observations",
+      sourcePmid: "33144353",
+    });
+  });
+
+  it("returns sourcePmid:null when the chosen tool has a snippet but no pmid (back-compat / partial map)", async () => {
+    scholarFamilyFindMany.mockResolvedValue([
+      {
+        supercategory: "x",
+        familyLabel: "F",
+        pmids: ["1"],
+        exemplarTools: ["CheXpert"],
+        exemplarContexts: { CheXpert: "labels chest radiographs" },
+        exemplarContextPmids: null, // pre-#1158 row
+      },
+    ]);
+    publicationFindMany.mockResolvedValue([pub({ pmid: "1", title: "P1" })]);
+    const r = await loadMethodExemplar("abc", "F");
+    expect(r.methodContext).toEqual({
+      tool: "CheXpert",
+      context: "labels chest radiographs",
+      sourcePmid: null,
+    });
+  });
+
+  it("drops a non-digit / numeric / empty pmid value to null (only digit strings pass)", async () => {
+    scholarFamilyFindMany.mockResolvedValue([
+      {
+        supercategory: "x",
+        familyLabel: "F",
+        pmids: ["1"],
+        exemplarTools: ["CheXpert"],
+        exemplarContexts: { CheXpert: "labels chest radiographs" },
+        // numeric (not a string) and non-digit junk must both yield null.
+        exemplarContextPmids: { CheXpert: 33144353 },
+      },
+    ]);
+    publicationFindMany.mockResolvedValue([pub({ pmid: "1", title: "P1" })]);
+    const r = await loadMethodExemplar("abc", "F");
+    expect(r.methodContext?.sourcePmid).toBeNull();
+  });
+
+  it("requests exemplarContextPmids in the scholar_family select", async () => {
+    scholarFamilyFindMany.mockResolvedValue([]);
+    await loadMethodExemplar("abc", "F");
+    expect(scholarFamilyFindMany.mock.calls[0][0].select).toMatchObject({
+      exemplarContexts: true,
+      exemplarContextPmids: true,
+    });
   });
 });
 

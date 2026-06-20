@@ -86,6 +86,17 @@ export type ScholarFamilyView = {
    *  the METHODS_LENS_TOOL_CONTEXT flag is on (kept out of the cached payload until
    *  then, like `definition`). Plain extracted publication text; render as text. */
   exemplarContexts: Record<string, string>;
+  /** #1158 — parallel per-exemplar-tool source PMID (digit string), keyed by the
+   *  SAME display name as `exemplarContexts`. Lets the Methods provenance rail link
+   *  a usage snippet to the publication it was extracted from. `{}` until the
+   *  rollup populates the `exemplar_context_pmids` column AND the
+   *  METHODS_LENS_TOOL_CONTEXT flag is on (kept out of the cached payload until
+   *  then, exactly like `exemplarContexts`). A missing key = "no source link".
+   *  Optional on the type for back-compat: a pre-#1158 client payload (and the
+   *  reveal route, if it predates this) may omit it — `toScholarFamilyView` ALWAYS
+   *  emits a concrete map (`{}` or the coerced pmids), so it is never `undefined`
+   *  at runtime from this loader; consumers should still defend with `?? {}`. */
+  exemplarContextPmids?: Record<string, string>;
   /** #819 — distinct member PMIDs (digit strings) backing the click-to-filter.
    *  `len === pubCount` upstream (ReciterAI#175); `[]` on a pre-#175 rollup. */
   pmids: string[];
@@ -185,6 +196,7 @@ function toScholarFamilyView(
     pmidCount: number;
     exemplarTools: unknown;
     exemplarContexts: unknown;
+    exemplarContextPmids: unknown;
     pmids: unknown;
     definition: string | null;
     definitionSource: string | null;
@@ -206,6 +218,8 @@ function toScholarFamilyView(
     exemplarTools: Array.isArray(r.exemplarTools) ? (r.exemplarTools as string[]) : [],
     // #1119 — keyed by display name; coerce defensively (nullable Json column).
     exemplarContexts: includeToolContext ? coerceStringRecord(r.exemplarContexts) : {},
+    // #1158 — parallel pmid map (same key, same gate). NULL/non-object → {}.
+    exemplarContextPmids: includeToolContext ? coerceStringRecord(r.exemplarContextPmids) : {},
     // Coerce defensively: the column is nullable (pre-#175 rollup) and Json.
     pmids: Array.isArray(r.pmids) ? (r.pmids as unknown[]).map(String) : [],
     // #879 — render-only passthrough; null until the tools-a2-v3 rollup lands AND
@@ -248,6 +262,7 @@ async function partitionScholarFamilies(
       pmidCount: true,
       exemplarTools: true,
       exemplarContexts: true,
+      exemplarContextPmids: true,
       pmids: true,
       definition: true,
       definitionSource: true,

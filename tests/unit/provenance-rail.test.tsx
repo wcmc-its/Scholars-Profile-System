@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { ProvenanceRail, type ProvenanceRailItem } from "@/components/method/provenance-rail";
 
 const ITEM: ProvenanceRailItem = {
@@ -27,9 +27,46 @@ describe("ProvenanceRail", () => {
     expect(link.getAttribute("href")).toBe("/publications/33144353");
   });
 
-  it("omits the source link when no source is carried (e.g. a pre-#1158 row)", () => {
+  it("renders the source as a button (not a link) and fires onSelect when supplied (Surface A modal)", () => {
+    const onSelect = vi.fn();
+    render(
+      <ProvenanceRail
+        item={{
+          ...ITEM,
+          source: { label: "View source publication", onSelect },
+        }}
+      />,
+    );
+    // onSelect → an in-app <button>, not an anchor.
+    expect(screen.queryByRole("link")).toBeNull();
+    const btn = screen.getByRole("button", { name: /view source publication/i });
+    fireEvent.click(btn);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("prefers onSelect over href when both are present", () => {
+    const onSelect = vi.fn();
+    render(
+      <ProvenanceRail
+        item={{ ...ITEM, source: { href: "/publications/33144353", onSelect } }}
+      />,
+    );
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.getByRole("button", { name: /source publication/i })).toBeDefined();
+  });
+
+  it("omits the source control when no source is carried (e.g. a pre-#1158 row)", () => {
     render(<ProvenanceRail item={{ ...ITEM, source: null }} />);
     expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("renders no source paragraph for a degenerate source object (neither onSelect nor href)", () => {
+    const { container } = render(<ProvenanceRail item={{ ...ITEM, source: { label: "x" } }} />);
+    // No control AND no stray empty <p> wrapper for the source row.
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(container.querySelector("p.mt-2")).toBeNull();
   });
 
   it("uses the matched_span offsets when provided (#1166)", () => {
