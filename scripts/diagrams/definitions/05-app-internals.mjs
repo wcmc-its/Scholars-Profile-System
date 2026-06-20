@@ -16,11 +16,11 @@ const nodes = {
   pages:  { x: 64, y: 200, w: 430, h: 66, kind: "app", title: "Public pages — RSC / ISR", sub: ["scholars · topics · depts · centers", "browse · search · about"] },
   editui: { x: 986, y: 200, w: 430, h: 66, kind: "app", title: "/edit UI — RSC (staff)", sub: ["scholar · publication · unit editors", "slug-requests"] },
   // ---- API route handlers ----
-  searchapi: { x: 64, y: 308, w: 216, h: 56, kind: "net", title: "Search API", sub: ["/api/search · /suggest"] },
-  authapi:   { x: 296, y: 308, w: 216, h: 56, kind: "net", title: "Auth / SAML API", sub: ["/api/auth/* · session"] },
-  editapi:   { x: 528, y: 308, w: 216, h: 56, kind: "net", title: "Edit / write API", sub: ["/api/edit/* · grant · suppress"] },
-  dataapi:   { x: 760, y: 308, w: 216, h: 56, kind: "net", title: "Public-data API", sub: ["/api/scholars · publications"] },
-  opsapi:    { x: 992, y: 308, w: 216, h: 56, kind: "net", title: "Ops API", sub: ["/api/revalidate · health"] },
+  searchapi: { x: 64, y: 308, w: 216, h: 62, kind: "net", title: "Search API", sub: ["/api/search · /search/suggest"] },
+  authapi:   { x: 296, y: 308, w: 216, h: 62, kind: "net", title: "Auth / SAML API", sub: ["/api/auth/* · session", "impersonation (superuser)"] },
+  editapi:   { x: 528, y: 308, w: 216, h: 62, kind: "net", title: "Edit / write API", sub: ["/api/edit/* · grant · suppress", "overview · roster · slugs"] },
+  dataapi:   { x: 760, y: 308, w: 216, h: 62, kind: "net", title: "Public-data API", sub: ["/api/scholars · pubs · topics", "methods · centers · units · NIH"] },
+  opsapi:    { x: 992, y: 308, w: 216, h: 62, kind: "net", title: "Ops API", sub: ["/api/revalidate · health", "analytics · csp-report"] },
   // ---- internal libraries ----
   searchcli: { x: 64, y: 414, w: 200, h: 66, kind: "aws", title: "Search client", sub: ["lib/search"] },
   authn:     { x: 296, y: 414, w: 200, h: 66, kind: "aws", title: "AuthN", sub: ["SAML assertion + session"] },
@@ -73,9 +73,11 @@ export const meta = {
   dot: "#0ca678",
   blurb:
     "Inside the single Next.js container: the public pages and staff <b>/edit</b> UI (React Server " +
-    "Components), the <b>API route handlers</b> grouped by purpose, and the <b>internal libraries</b> " +
-    "they share — wired to Aurora (reader/writer), OpenSearch, the SAML IdP, and the WCM directory " +
-    "(LDAP authz + live headshots). <code>middleware.ts</code> gates every <code>/edit</code> path.",
+    "Components), the <b>API route handlers</b> grouped by purpose — the public-data surface now spans " +
+    "scholars, publications, topics, <b>methods</b>, <b>centers / units</b>, and <b>NIH portfolio</b> — and " +
+    "the <b>internal libraries</b> they share, wired to Aurora (reader/writer), OpenSearch, the SAML IdP, " +
+    "and the WCM directory (LDAP authz + live headshots). <code>middleware.ts</code> gates every " +
+    "<code>/edit</code> path.",
   legend: [
     { fill: "#e3faf3", stroke: "#0ca678", label: "Rendering (RSC) / middleware" },
     { fill: "#e7ecff", stroke: "#4263eb", label: "API route handler" },
@@ -83,5 +85,5 @@ export const meta = {
     { fill: "#fff4d6", stroke: "#f08c00", label: "Data store" },
     { fill: "#f1f3f5", stroke: "#adb5bd", label: "External system" },
   ],
-  source: "app/ (routes) · lib/db.ts · lib/search.ts · lib/edit/* · lib/headshot.ts · middleware.ts",
+  source: "app/api/* (route handlers: search · methods · centers · units · nih-portfolio · analytics · impersonation) · lib/db.ts · lib/search.ts · lib/edit/* · lib/headshot.ts · middleware.ts",
 };
