@@ -21,7 +21,26 @@ const OPP = {
   status: "open",
   axes: { topicAffinity: 0.7, stageAppeal: 0.8, meshOverlap: 0.1, deadlineProximity: 0.9 },
   defaultScore: 1.05,
+  mechanism: "R01",
+  awardCeiling: 500_000,
 };
+
+const DETAIL = {
+  synopsis: "Methods and tools for biomedical informatics and clinical data science.",
+  sourceUrl: "https://www.grants.gov/x",
+  eligibilityRaw: "Open to U.S. faculty",
+  numberOfAwards: 5,
+};
+
+/** Route both the list fetch and the per-card detail fetch off one mock. */
+const routedFetch = (results: unknown[], detail: unknown = DETAIL) =>
+  vi.fn().mockImplementation((url: string) =>
+    Promise.resolve(
+      String(url).includes("/api/opportunities/")
+        ? okJson(detail)
+        : okJson({ results }),
+    ),
+  );
 
 const okJson = (body: unknown) => ({ ok: true, json: async () => body }) as unknown as Response;
 
@@ -60,12 +79,15 @@ describe("GrantRecsCard", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => vi.unstubAllGlobals());
 
-  it("renders ranked opportunities with the distinct per-axis meters + sort chips", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okJson({ results: [OPP] })));
+  it("renders ranked opportunities with inline facts, distinct per-axis meters + sort chips", async () => {
+    vi.stubGlobal("fetch", routedFetch([OPP]));
     render(<GrantRecsCard cwid="thc2015" />);
 
     expect(await screen.findByText("Biomedical Informatics Research")).toBeTruthy();
     expect(screen.getByText("1.05")).toBeTruthy(); // default-blend fit
+    // inline at-a-glance facts: mechanism + award ceiling on the header line
+    expect(screen.getByText(/R01/)).toBeTruthy();
+    expect(screen.getByText(/up to \$500K/)).toBeTruthy();
     // distinct axes are surfaced as labelled meters
     for (const axis of ["topic", "stage", "mesh", "deadline"]) {
       expect(screen.getByText(axis)).toBeTruthy();
@@ -74,6 +96,22 @@ describe("GrantRecsCard", () => {
     expect(screen.getByText("Fit")).toBeTruthy();
     expect(screen.getByText("Deadline")).toBeTruthy();
     expect(screen.getByText("Stage")).toBeTruthy();
+  });
+
+  it("lazily loads the detail route on expand: synopsis, award count, and a link out", async () => {
+    const fetchMock = routedFetch([OPP]);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<GrantRecsCard cwid="thc2015" />);
+    await screen.findByText("Biomedical Informatics Research");
+
+    // no detail fetch until expanded
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/api/opportunities/"))).toBe(false);
+    fireEvent.click(screen.getByText("Details"));
+
+    expect(await screen.findByText(DETAIL.synopsis)).toBeTruthy();
+    expect(screen.getByText(/5 awards/)).toBeTruthy();
+    const link = screen.getByText("View opportunity ↗") as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe(DETAIL.sourceUrl);
   });
 
   it("re-fetches with the chosen sort when a chip is clicked", async () => {
