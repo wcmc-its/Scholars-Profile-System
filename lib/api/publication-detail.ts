@@ -12,6 +12,7 @@ import { normalizeMeshTerms } from "@/lib/api/profile";
 import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-layer";
 import {
   isMethodsLensPubModalEnabled,
+  isMethodsLensToolContextOn,
   isMethodPagesEnabled,
 } from "@/lib/profile/methods-lens-flags";
 import {
@@ -49,6 +50,20 @@ export type PublicationDetailCitingPub = {
 };
 
 /**
+ * #917 Phase 2 — one representative tool under a method family, with its #1119
+ * usage-context snippet. `name` is the exemplar-tool DISPLAY NAME
+ * (`scholar_family.exemplarTools`); `context` is the best snippet for that tool
+ * (`scholar_family.exemplarContexts[name]`), or null when the tool-context flag
+ * (`METHODS_LENS_TOOL_CONTEXT`) is off or no snippet exists. The name is part of
+ * the families surface (gated by `METHODS_LENS_PUB_MODAL`); only the snippet is
+ * tool-context-gated — the same flag split the rest of the Methods lens uses.
+ */
+export type PublicationDetailMethodTool = {
+  name: string;
+  context: string | null;
+};
+
+/**
  * #917 — one method family attributed to this pmid, aggregated across every
  * confirmed WCM author of the paper and de-duped by the stable
  * `(supercategory, familyLabel)` identity. Already #800-suppressed /
@@ -62,6 +77,10 @@ export type PublicationDetailMethodFamily = {
    *  Method pages are gated off (`METHODS_LENS_PAGES`) — the UI then renders the
    *  label as plain text instead of a dead link. */
   href: string | null;
+  /** #917 Phase 2 — the family's representative tools (`exemplarTools`, salience-
+   *  ordered) with their #1119 usage snippets. Empty when the family has no
+   *  exemplar tools; the UI then renders the family chip alone, as in Phase 1. */
+  tools: PublicationDetailMethodTool[];
 };
 
 export type PublicationDetailPayload = {
@@ -143,6 +162,45 @@ function parsePmid(pmid: string): number | null {
 }
 
 /**
+ * #917 Phase 2 — resolve a family row's representative tools (+ #1119 snippets)
+ * for the modal. `exemplarTools` is the salience-ordered display-name array;
+ * `exemplarContexts` is a `{ name: snippet }` object whose KEY ORDER is unreliable
+ * (Aurora MySQL re-sorts JSON keys), so we iterate the array and look snippets up
+ * by name. The snippet is gated on `METHODS_LENS_TOOL_CONTEXT` — off ⇒ tool names
+ * still render (they are part of the #917 families surface), but `context: null`.
+ */
+function resolveFamilyTools(
+  exemplarTools: unknown,
+  exemplarContexts: unknown,
+): PublicationDetailMethodTool[] {
+  const names = Array.isArray(exemplarTools)
+    ? exemplarTools.map((t) => String(t).trim()).filter(Boolean)
+    : [];
+  if (names.length === 0) return [];
+
+  const ctx =
+    isMethodsLensToolContextOn() &&
+    exemplarContexts &&
+    typeof exemplarContexts === "object" &&
+    !Array.isArray(exemplarContexts)
+      ? (exemplarContexts as Record<string, unknown>)
+      : null;
+
+  const seen = new Set<string>();
+  const out: PublicationDetailMethodTool[] = [];
+  for (const name of names) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const raw = ctx ? ctx[name] : undefined;
+    out.push({
+      name,
+      context: typeof raw === "string" && raw.length > 0 ? raw : null,
+    });
+  }
+  return out;
+}
+
+/**
  * #917 — method families attributed to ONE pmid, de-duped across every confirmed
  * WCM author of the paper (the modal has no cwid, so it aggregates exactly like
  * the Topics rows do). Mirrors the cross-scholar Method-page data layer
@@ -185,6 +243,8 @@ async function resolveMethodFamilies(
       familyLabel: true,
       familyId: true,
       pmids: true,
+      exemplarTools: true,
+      exemplarContexts: true,
     },
   });
   if (familyRows.length === 0) return [];
@@ -210,6 +270,11 @@ async function resolveMethodFamilies(
       href: linkable
         ? methodFamilyPath(row.supercategory, row.familyId, row.familyLabel)
         : null,
+      // #917 Phase 2 — the first-kept row's exemplar tools (same row the family
+      // identity is taken from). exemplar_tools is salience-ordered; the snippet
+      // is looked up off the ARRAY order, not the exemplar_contexts object keys
+      // (Aurora re-sorts JSON keys — #1119).
+      tools: resolveFamilyTools(row.exemplarTools, row.exemplarContexts),
     });
   }
 

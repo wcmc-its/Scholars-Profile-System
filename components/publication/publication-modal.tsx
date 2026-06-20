@@ -19,6 +19,7 @@ import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { methodologyHref } from "@/lib/methodology-anchors";
 import type {
   PublicationDetailMethodFamily,
+  PublicationDetailMethodTool,
   PublicationDetailPayload,
   PublicationDetailTopic,
 } from "@/lib/api/publication-detail";
@@ -628,8 +629,10 @@ function MeshSection({
  * #917 — method families (#799/#819) attributed to this pmid, aggregated across
  * the paper's WCM authors and already #800/#801-gated server-side. Labels link to
  * the cross-scholar Method pages when those are enabled (`href` set), else render
- * as plain text. Sparse like the synopsis: the whole section is omitted when the
- * paper has no surfaced family (or the Methods lens is off → empty array).
+ * as plain text. Phase 2 (#917) nests each family's representative tools beneath
+ * its chip (see {@link MethodToolsLine}). Sparse like the synopsis: the whole
+ * section is omitted when the paper has no surfaced family (or the Methods lens is
+ * off → empty array).
  */
 function MethodsSection({
   families,
@@ -640,28 +643,55 @@ function MethodsSection({
   return (
     <section>
       <SectionHeading>Methods</SectionHeading>
-      <ul className="mt-2 flex flex-wrap gap-1.5">
-        {families.map((f) =>
-          f.href ? (
-            <li key={`${f.supercategory}::${f.familyLabel}`}>
+      <ul className="mt-2 space-y-2">
+        {families.map((f) => (
+          <li key={`${f.supercategory}::${f.familyLabel}`}>
+            {f.href ? (
               <Link
                 href={f.href}
-                className="bg-muted rounded px-2 py-0.5 text-xs text-[var(--color-accent-slate)] hover:underline"
+                className="bg-muted inline-block rounded px-2 py-0.5 text-xs text-[var(--color-accent-slate)] hover:underline"
               >
                 {f.familyLabel}
               </Link>
-            </li>
-          ) : (
-            <li
-              key={`${f.supercategory}::${f.familyLabel}`}
-              className="bg-muted text-foreground/80 rounded px-2 py-0.5 text-xs"
-            >
-              {f.familyLabel}
-            </li>
-          ),
-        )}
+            ) : (
+              <span className="bg-muted text-foreground/80 inline-block rounded px-2 py-0.5 text-xs">
+                {f.familyLabel}
+              </span>
+            )}
+            {f.tools.length > 0 ? <MethodToolsLine tools={f.tools} /> : null}
+          </li>
+        ))}
       </ul>
     </section>
+  );
+}
+
+/**
+ * #917 Phase 2 — a family's representative tools (`exemplarTools`) beneath its
+ * chip, dot-separated. A tool carrying a #1119 usage snippet (server-gated on
+ * `METHODS_LENS_TOOL_CONTEXT`) becomes a HoverTooltip trigger ("How <tool> was
+ * used: …"), dotted-underlined to signal it; a tool with no snippet renders as
+ * plain muted text. The snippet is sourced from `scholar_family.exemplarContexts`
+ * and is representative of the author's usage, not paper-specific.
+ */
+function MethodToolsLine({ tools }: { tools: PublicationDetailMethodTool[] }) {
+  return (
+    <p className="text-muted-foreground mt-1 pl-2 text-xs">
+      {tools.map((tool, i) => (
+        <Fragment key={tool.name}>
+          {i > 0 ? <span aria-hidden="true"> · </span> : null}
+          {tool.context ? (
+            <HoverTooltip text={`How ${tool.name} was used: ${tool.context}`} wide>
+              <span className="decoration-muted-foreground/50 underline decoration-dotted underline-offset-2">
+                {tool.name}
+              </span>
+            </HoverTooltip>
+          ) : (
+            <span>{tool.name}</span>
+          )}
+        </Fragment>
+      ))}
+    </p>
   );
 }
 
