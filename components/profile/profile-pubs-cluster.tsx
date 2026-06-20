@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ProfilePublication, ScholarFamilyView, ScholarKeyword } from "@/lib/api/profile";
+import type { ScholarCoreUsage } from "@/lib/api/scholar-cores";
 import {
   ActiveFilterBanner,
   POSITION_BANNER_LABEL,
@@ -16,6 +17,7 @@ import {
 import { FilterBar } from "@/components/profile/filter-bar";
 import { computeFacetCounts } from "@/lib/profile/facet-counts";
 import { MethodsSection } from "@/components/profile/methods-section";
+import { CoresSection } from "@/components/profile/cores-section";
 import { PublicationsSection } from "@/components/profile/publications-section";
 import { TopicsSection } from "@/components/profile/topics-section";
 import { TopicsUpdatingPlaceholder } from "@/components/profile/topics-updating-placeholder";
@@ -39,6 +41,10 @@ type ProfilePubsClusterProps = {
   keywords: ScholarKeyword[];
   /** #799 — family-primary Methods lens rows; empty when the lens flag is off. */
   families: ScholarFamilyView[];
+  /** "Cores used" chips — WCM core facilities the scholar's publications
+   *  confirmed-used; empty when the cores lens flag is off (ships dark). Display
+   *  only — not part of the publication-filter facet state. */
+  cores: ScholarCoreUsage[];
   /** #801 — whether the sensitivity gate is on; gates the Methods lens's
    *  self/admin reveal fetch so a profile view makes no extra request when off. */
   sensitiveGateActive: boolean;
@@ -75,6 +81,7 @@ function ProfilePubsClusterInner({
   publications,
   keywords,
   families,
+  cores,
   sensitiveGateActive,
   familyFilterEnabled,
   methodPagesEnabled,
@@ -400,6 +407,12 @@ function ProfilePubsClusterInner({
         facetRedesignEnabled={facetRedesignEnabled}
         familyCounts={facetCounts?.family ?? null}
       />
+
+      {/* "Cores used" — display-only chip row of WCM core facilities the
+          scholar's publications confirmed-used. Renders null when empty (always,
+          while the cores lens flag is off). Not a publication-filter facet. */}
+      <CoresSection cores={cores} />
+
 
       {/* PROFILE_FACET_REDESIGN — the unified chip bar replaces the prose banner
           when the redesign is on; otherwise the existing banner renders verbatim.

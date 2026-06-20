@@ -471,6 +471,7 @@ export async function ProfileView({ slug }: { slug: string }) {
                   publications={profile.publications}
                   keywords={profile.keywords.keywords}
                   families={profile.families}
+                  cores={profile.cores}
                   sensitiveGateActive={isMethodsLensSensitiveGateOn()}
                   familyFilterEnabled={isMethodsLensFamilyFilterOn()}
                   methodPagesEnabled={isMethodPagesEnabled()}

@@ -31,6 +31,8 @@ import {
   isMethodsFamilyDefinitionsOn,
   isMethodsLensToolContextOn,
 } from "@/lib/profile/methods-lens-flags";
+import { isCoresLensEnabled } from "@/lib/profile/cores-lens-flag";
+import { loadScholarConfirmedCores, type ScholarCoreUsage } from "@/lib/api/scholar-cores";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import {
   getScholarCenterAffiliations,
@@ -530,6 +532,10 @@ export type ProfilePayload = {
    *  or the `scholar_family` rollup has no rows for this scholar (dormant until
    *  the SCHOLAR_TOOL_SOURCE=s3 cutover). */
   families: ScholarFamilyView[];
+  /** "Cores used" chips — WCM core facilities this scholar's publications
+   *  confirmed-used (CoreClaim-merged over `publication_core`). Empty when the
+   *  cores lens flag is off (ships dark) or no pair is effective-confirmed. */
+  cores: ScholarCoreUsage[];
   disclosures: Array<{
     entity: string | null;
     activityType: string | null;
@@ -879,6 +885,16 @@ export const getScholarFullProfileBySlug = cache(async (
       !suppressions.darkPmids.has(a.publication.pmid),
   );
 
+  // "Cores used" chips — the WCM core facilities this scholar's visible
+  // publications confirmed-used, read-merged with owner CoreClaim overrides.
+  // Gated: `[]` when the cores lens flag is off, so the feature ships dark and
+  // the (CloudFront-cached) profile payload carries no core data — and no DB
+  // read happens — until the flag flips. Keyed on `visibleAuthorships` so
+  // suppressed publications never count toward a core.
+  const cores = isCoresLensEnabled()
+    ? await loadScholarConfirmedCores(visibleAuthorships.map((a) => a.publication.pmid))
+    : [];
+
   // #160 — whole-entity suppressions. A hidden education / appointment / grant
   // drops from the profile (sidebars + funding section). Keyed on the stable
   // `externalId` (#352). A grant row is per-investigator, so suppressing it
@@ -1222,6 +1238,7 @@ export const getScholarFullProfileBySlug = cache(async (
         : [],
     keywords,
     families,
+    cores,
     disclosures: scholar.coiActivities.map((c) => ({
       entity: c.entity,
       activityType: c.activityType,
