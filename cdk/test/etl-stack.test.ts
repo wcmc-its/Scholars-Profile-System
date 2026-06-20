@@ -360,18 +360,17 @@ describe("EtlStack", () => {
         );
       });
 
-      // #608 -- the grant-enrichment sources (RePORTER / NSF / Jenzabar) are
-      // wired onto the WEEKLY machine (not nightly), ahead of its closing
-      // search:index/revalidate tail.
-      describe("#608 -- weekly machine runs the grant-enrichment sources", () => {
-        it("weekly runs etl:reporter, etl:nsf, and etl:jenzabar", () => {
+      // #608 -- RePORTER / NSF are wired onto the WEEKLY machine ahead of its
+      // closing search:index/revalidate tail. Jenzabar moved to the NIGHTLY
+      // machine (operator request) so grad-school mentoring chips refresh daily.
+      describe("#608 -- weekly runs RePORTER/NSF; Jenzabar runs nightly", () => {
+        it("weekly runs etl:reporter and etl:nsf", () => {
           const text = getStateMachineDefinitionText(
             template,
             "scholars-weekly-prod",
           );
           expect(text).toMatch(/"etl:reporter"/);
           expect(text).toMatch(/"etl:nsf"/);
-          expect(text).toMatch(/"etl:jenzabar"/);
         });
 
         it("RePORTER + NSF precede the weekly search:index (funding index carries the refreshed abstracts/keywords)", () => {
@@ -384,17 +383,28 @@ describe("EtlStack", () => {
           expect(text.indexOf("etl:reporter")).toBeGreaterThan(-1);
           expect(text.indexOf("etl:reporter")).toBeLessThan(idxSearch);
           expect(text.indexOf("etl:nsf")).toBeLessThan(idxSearch);
-          expect(text.indexOf("etl:jenzabar")).toBeLessThan(idxSearch);
         });
 
-        it("the grant sources do not leak onto the nightly machine", () => {
+        it("Jenzabar runs on the nightly machine, not the weekly one", () => {
+          const nightly = getStateMachineDefinitionText(
+            template,
+            "scholars-nightly-prod",
+          );
+          const weekly = getStateMachineDefinitionText(
+            template,
+            "scholars-weekly-prod",
+          );
+          expect(nightly).toMatch(/"etl:jenzabar"/);
+          expect(weekly).not.toMatch(/"etl:jenzabar"/);
+        });
+
+        it("RePORTER + NSF do not leak onto the nightly machine", () => {
           const text = getStateMachineDefinitionText(
             template,
             "scholars-nightly-prod",
           );
           expect(text).not.toMatch(/"etl:reporter"/);
           expect(text).not.toMatch(/"etl:nsf"/);
-          expect(text).not.toMatch(/"etl:jenzabar"/);
         });
       });
 

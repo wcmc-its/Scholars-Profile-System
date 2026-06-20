@@ -11,7 +11,7 @@ const nodes = {
   infoed: { x: 50, y: 188, w: 310, h: 54, kind: "ext", title: "InfoEd", sub: ["MS SQL · grants (funding)"], chip: { tone: "nightly", text: "nightly" } },
   coi:    { x: 50, y: 248, w: 310, h: 54, kind: "ext", title: "COI Portal", sub: ["MySQL · disclosures"], chip: { tone: "nightly", text: "nightly" } },
   asms:   { x: 50, y: 308, w: 310, h: 54, kind: "ext", title: "ASMS", sub: ["MS SQL · education, degrees"], chip: { tone: "nightly", text: "nightly" } },
-  jenz:   { x: 50, y: 368, w: 310, h: 54, kind: "ext", title: "Jenzabar", sub: ["MS SQL · grad-school mentoring"], chip: { tone: "planned", text: "nightly (planned)" } },
+  jenz:   { x: 50, y: 368, w: 310, h: 54, kind: "ext", title: "Jenzabar", sub: ["MS SQL · grad-school mentoring"], chip: { tone: "nightly", text: "nightly" } },
   hr:     { x: 50, y: 428, w: 310, h: 54, kind: "ext", title: "Human Resources", sub: ["employer / employee mentees"], chip: { tone: "planned", text: "planned" } },
   rdb:    { x: 50, y: 488, w: 310, h: 54, kind: "ext", title: "ReciterDB", sub: ["MariaDB · publications, MeSH, clinical trials"], chip: { tone: "nightly", text: "nightly" } },
   rai:    { x: 50, y: 548, w: 310, h: 54, kind: "ext", title: "ReciterAI", sub: ["DynamoDB + S3 · topics, spotlights"], chip: { tone: "weekly", text: "weekly" } },
@@ -99,9 +99,7 @@ export const meta = {
     "<b>Headshots</b> load live at read time straight from the WCM directory " +
     "(<code>directory.weill.cornell.edu</code>) — never stored, never via the ETL. " +
     "<b>On-demand</b> sources (RePORTER, NSF) aren't on a Step Functions cadence yet; " +
-    "they run via the daily prototype chain. <b>Jenzabar</b>'s nightly run is the goal but isn't live " +
-    "yet — the ETL exists, the schedule doesn't (nothing runs today). " +
-    "<b>Human Resources</b> (employer/employee mentees) is " +
+    "they run via the daily prototype chain. <b>Human Resources</b> (employer/employee mentees) is " +
     "a planned source, not yet built. <b>Clinical trials</b> originate in <b>OnCore</b> (the CTMS — a " +
     "<b>manual</b> institutional export, static until the next export lands) and " +
     "are enriched against the <b>ClinicalTrials.gov</b> registry (API v2); both stage into reciterdb " +
