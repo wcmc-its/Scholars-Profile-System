@@ -71,6 +71,9 @@ export function searchClient(): Client {
 export const PEOPLE_INDEX = "scholars-people";
 export const PUBLICATIONS_INDEX = "scholars-publications";
 export const FUNDING_INDEX = "scholars-funding";
+// GrantRecs Phase 2 — funding OPPORTUNITIES (not awarded grants), projected
+// from the `opportunity` MySQL table (itself fed by ReciterAI `GRANT#`).
+export const OPPORTUNITIES_INDEX = "scholars-opportunities";
 
 /**
  * Mapping for the people index. Note that authorship-weighted contributions
@@ -812,3 +815,147 @@ export const PUBLICATION_FIELD_BOOSTS: ReadonlyArray<string> = [
  * literal `"-0% 3<-25%"`, surgically fixing the 3-token boundary).
  */
 export const PUBLICATIONS_RESTRUCTURED_MSM = "2<-34%";
+
+/**
+ * GrantRecs Phase 2 — mapping for the `scholars-opportunities` index. One
+ * document per funding opportunity, projected from the `opportunity` MySQL row.
+ * Mirrors the funding index: `opportunity_text` analyzer for free text; hard
+ * filters (status / dates / eligibility / mechanism) as keyword/date/bool;
+ * `topicIds` as a coarse retrieval keyword array. The full `topicVector` and
+ * `appealByStage` ride along as NON-INDEXED `_source` payload (`enabled:false`)
+ * so the app-layer composite re-rank reads them without a second DB round-trip —
+ * the same trick as the publications index's `topicImpacts`. See spec §7.2.
+ */
+export const opportunitiesIndexMapping = {
+  settings: {
+    "index.max_result_window": 100000,
+    analysis: {
+      analyzer: {
+        opportunity_text: {
+          type: "custom" as const,
+          tokenizer: "standard",
+          filter: [
+            "lowercase",
+            "alnum_delimiter",
+            "flatten_graph",
+            "english_stop",
+            "english_stemmer",
+          ],
+        },
+      },
+      filter: {
+        alnum_delimiter: {
+          type: "word_delimiter_graph",
+          split_on_numerics: true,
+          preserve_original: true,
+          generate_word_parts: true,
+          generate_number_parts: true,
+        },
+        english_stop: { type: "stop", stopwords: "_english_" },
+        english_stemmer: { type: "stemmer", language: "english" },
+      },
+    },
+  },
+  mappings: {
+    properties: {
+      opportunityId: { type: "keyword" },
+      title: { type: "text", analyzer: "opportunity_text" },
+      synopsis: { type: "text", analyzer: "opportunity_text" },
+      sponsorText: { type: "text", analyzer: "opportunity_text" },
+
+      // Hard-filter axes.
+      status: { type: "keyword" },
+      mechanism: { type: "keyword" },
+      // Derived eligibility flags (us_eligible / faculty_eligible / ...).
+      eligibilityFlags: { type: "keyword" },
+      cfdaList: { type: "keyword" },
+      openDate: { type: "date" },
+      dueDate: { type: "date" },
+
+      // Topic retrieval — coarse candidate gate. `topicIds` = the opportunity's
+      // topics with score ≥ threshold (see buildOpportunityDoc); same field-name
+      // convention as the publications/funding `meshDescriptorUi` so one `terms`
+      // template hits them. Queried via `terms`, never a facet.
+      primaryTopicId: { type: "keyword" },
+      topicIds: { type: "keyword" },
+      meshDescriptorUi: { type: "keyword" },
+
+      // Sort/display scalars.
+      awardCeiling: { type: "long" },
+      numberOfAwards: { type: "integer" },
+      sponsor: { type: "keyword" },
+
+      // NON-INDEXED re-rank payload — returned in `_source`, never searched.
+      topicVector: { type: "object", enabled: false },
+      appealByStage: { type: "object", enabled: false },
+    },
+  },
+};
+
+/** Score threshold for promoting an opportunity topic into the coarse `topicIds` gate. */
+export const OPPORTUNITY_TOPIC_GATE = 0.3;
+
+/** A `topic_vector` entry as stored on the `opportunity` row. */
+export type OpportunityTopicScore = { topic_id: string; score: number; rationale?: string };
+
+/** The `opportunity` columns the index builder selects (Prisma row subset). */
+export type OpportunityIndexRow = {
+  opportunityId: string;
+  title: string;
+  synopsis: string;
+  sponsor: string;
+  status: string;
+  mechanism: string | null;
+  eligibilityFlags: unknown; // string[]
+  cfdaList: unknown; // string[]
+  openDate: Date | null;
+  dueDate: Date | null;
+  primaryTopicId: string | null;
+  topicVector: unknown; // OpportunityTopicScore[]
+  appealByStage: unknown; // { grad, postdoc, early, mid, senior }
+  meshDescriptorUi: unknown; // string[] | null
+  awardCeiling: bigint | null;
+  numberOfAwards: number | null;
+};
+
+function asStringArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+/**
+ * Pure: project one `opportunity` row to its OpenSearch document. Extracted so
+ * the field shaping (topic gate, date serialization, `_source` payload) is
+ * unit-testable without an indexer run.
+ */
+export function buildOpportunityDoc(
+  row: OpportunityIndexRow,
+  gate: number = OPPORTUNITY_TOPIC_GATE,
+): { id: string; doc: Record<string, unknown> } {
+  const topicVector = (Array.isArray(row.topicVector) ? row.topicVector : []) as OpportunityTopicScore[];
+  const topicIds = topicVector
+    .filter((t) => t && typeof t.topic_id === "string" && typeof t.score === "number" && t.score >= gate)
+    .map((t) => t.topic_id);
+
+  const doc: Record<string, unknown> = {
+    opportunityId: row.opportunityId,
+    title: row.title,
+    synopsis: row.synopsis,
+    sponsorText: row.sponsor,
+    sponsor: row.sponsor,
+    status: row.status,
+    mechanism: row.mechanism ?? undefined,
+    eligibilityFlags: asStringArray(row.eligibilityFlags),
+    cfdaList: asStringArray(row.cfdaList),
+    openDate: row.openDate ? row.openDate.toISOString() : undefined,
+    dueDate: row.dueDate ? row.dueDate.toISOString() : undefined,
+    primaryTopicId: row.primaryTopicId ?? undefined,
+    topicIds,
+    meshDescriptorUi: asStringArray(row.meshDescriptorUi),
+    awardCeiling: row.awardCeiling != null ? Number(row.awardCeiling) : undefined,
+    numberOfAwards: row.numberOfAwards ?? undefined,
+    // Non-indexed re-rank payload.
+    topicVector,
+    appealByStage: row.appealByStage && typeof row.appealByStage === "object" ? row.appealByStage : {},
+  };
+  return { id: row.opportunityId, doc };
+}
