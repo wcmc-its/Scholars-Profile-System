@@ -1147,6 +1147,18 @@ export class AppStack extends Stack {
         // calls. Same TaskRoleBedrockPolicy; no new IAM. Flip per-env here + a manual
         // `cdk deploy --exclusively Sps-App-<env>`.
         OVERVIEW_FAITHFULNESS_PASS: "off",
+        // #917 v5 -- the NIH-biosketch generator on the /edit surface. Default-off
+        // and staging-first: this is a NEW surface, so it stays "on" only in
+        // staging while it bakes, and "off" in prod until an approval-gated
+        // Sps-App-prod deploy flips it. Same Bedrock task role as the overview
+        // generator (no new IAM). Takes effect on a manual
+        // `cdk deploy --exclusively Sps-App-<env>`.
+        EDIT_BIOSKETCH_GENERATE: env === "staging" ? "on" : "off",
+        // #917 v5 -- post-generation faithfulness pass for the biosketch generator.
+        // OFF in both envs; present so it is operator-tunable later (mirrors
+        // OVERVIEW_FAITHFULNESS_PASS). Flip per-env here + a manual
+        // `cdk deploy --exclusively Sps-App-<env>`.
+        BIOSKETCH_FAITHFULNESS_PASS: "off",
         // #742 -- the LIVE default prompt VERSION (overview-prompt-versioning-spec.md).
         // "v3" is the keyword-rich narrative prompt and the new default for all
         // generations in both envs. This env is the no-image-roll ROLLBACK lever:

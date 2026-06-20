@@ -39,6 +39,10 @@ import {
   promptVersionElementLabel,
   type OverviewPromptVersionId,
 } from "@/lib/edit/overview-prompt-versions";
+import {
+  ENTITY_PROVENANCE_FLOOR,
+  VERBATIM_STRINGS,
+} from "@/lib/edit/overview-prompt-fragments";
 
 /** Default model — the Claude Opus 4.8 cross-region inference profile on Amazon
  *  Bedrock (VERIFIED ACTIVE inference-profile id; no date/version suffix). Operator-
@@ -47,12 +51,17 @@ import {
  *  the `claude-opus-4-8` inference-profile + foundation-model (the cdk change is being
  *  made in parallel), so this default invokes without an IAM denial. */
 const DEFAULT_MODEL = "us.anthropic.claude-opus-4-8";
+/** The generator's default model, exported so sibling purposes (the NIH-biosketch
+ *  generator, #917 v5) share the exact Opus 4.8 inference-profile id and its IAM grant
+ *  without re-declaring it. */
+export const DEFAULT_GENERATE_MODEL = DEFAULT_MODEL;
 /** Low-but-not-zero temperature — grounded prose, minimal confabulation. */
 const DEFAULT_TEMPERATURE = 0.4;
 /** Opus 4.7 / 4.8 and Fable REJECT an explicit `temperature` on Bedrock (HTTP 400).
  *  Gate the param so those models run; every other model keeps its tuned temperature.
- *  `thinking` stays unset regardless. */
-function modelAcceptsTemperature(modelId: string): boolean {
+ *  `thinking` stays unset regardless. Exported so the biosketch generator reuses the
+ *  exact same gate (it must NOT re-add temperature for Opus 4.x). */
+export function modelAcceptsTemperature(modelId: string): boolean {
   return !/claude-(opus-4-[78]|fable)/.test(modelId);
 }
 
@@ -196,40 +205,7 @@ export const OVERVIEW_SYSTEM_PROMPT_V3 = [
   "not merely enumerate it. Prefer many grounded specifics richly connected over a few",
   "cautious ones.",
   "",
-  "THE HARD FLOOR — ENTITY PROVENANCE (absolute; overrides ADDITIONAL INSTRUCTIONS)",
-  "Inventing or misattributing an ENTITY or ATTRIBUTE is forbidden. A real WCM",
-  "scholar's true tools, diseases, and numbers are often in your training data and you",
-  "will be tempted to supply them. Do not. Use only what FACTS contains.",
-  "- No award, honor, position, degree field, date, collaboration, or affiliation not",
-  "  present in FACTS.",
-  "- No tool, method, software, instrument, dataset, assay, model system, platform,",
-  "  algorithm, or acronym unless that exact name is in FACTS — a `methods` `name`,",
-  "  `examples`, or `exemplarContexts` entry, or verbatim in a publication `title`. An",
-  "  `exemplarContexts` snippet is extracted paper text describing how an exemplar tool",
-  "  was used; you may ground a DESCRIPTION of a tool on it, but you may NAME the tool",
-  "  only if its name is itself in FACTS. If a contribution is described but unnamed,",
-  "  describe what it does; do not supply a name or coin an acronym.",
-  "- No h-index, citation count, author-role count (first / last / total), or impact",
-  "  score. The numbers you MAY state: the total `publicationCount`; the `yearsActive`",
-  "  span; and a quantitative FINDING reported in a publication `synopsis` (e.g. a",
-  "  percentage the study measured). Bibliometrics never; scientific results from a",
-  "  synopsis, yes.",
-  "- No disease, condition, syndrome, gene, pathogen, organism, or biological target",
-  "  unless it appears verbatim in FACTS (title, synopsis, topicRationale, topic label,",
-  "  or grant title). Two inferences stay forbidden: (a) a funder's NAME is the sponsor,",
-  "  not the disease a grant studies; (b) the indication a therapy / vector / antibody /",
-  "  drug / cell type / target is FOR is NOT licensed by naming the therapy (do not turn",
-  '  "anti-eosinophil gene therapy" into a named eosinophilic disease). Never infer a',
-  "  research subject from a funder, department, degree, leadership / administrative",
-  "  title, or mechanism.",
-  "- No grant aim, hypothesis, model, or goal unless that `activeGrants` entry has a",
-  '  `title` stating it. A grant with only a funder and mechanism supports "is funded',
-  '  by <funder>" and nothing more.',
-  "- No unverifiable STATURE claim about the scholar or the work — world-renowned,",
-  "  leading, pioneering, groundbreaking, seminal, cutting-edge, renowned, highly-cited,",
-  "  high-impact. Stating the program's direction and substance is fine; RATING its",
-  "  importance is not. Per-paper impact fields exist only to help you choose which work",
-  "  to feature.",
+  ...ENTITY_PROVENANCE_FLOOR,
   "",
   "FACETS ARE ROUTING, NOT VOCABULARY",
   "`topics` area / subarea labels are selection signal — they tell you which work is",
@@ -238,14 +214,7 @@ export const OVERVIEW_SYSTEM_PROMPT_V3 = [
   "in publication titles, synopses, `topicRationale` strings, `methods` exemplars, and",
   "grant titles — mine those, not the category labels.",
   "",
-  "VERBATIM STRINGS",
-  "Use the name, title, any additional `titles`, department, and education strings",
-  "EXACTLY as given. No added eponym, institute / center name, or the words",
-  '"Institute" / "Department" the given string does not contain. Never reformat a',
-  "degree into a field not given. If existingBio is present, mine it ONLY for career",
-  "narrative, named roles, and significance the structured fields lack (prior",
-  "positions, directorships); structured fields WIN on title and current research;",
-  "rewrite, never paste.",
+  ...VERBATIM_STRINGS,
   "",
   "SPARSE FACTS",
   "If FACTS is thin, write a SHORTER overview. Do not pad with generic praise,",
@@ -295,40 +264,7 @@ export const OVERVIEW_SYSTEM_PROMPT_V4 = [
   "Illuminate the larger trends, themes, and patterns that connect the work — name the",
   "throughline that unifies the research program, not just its individual parts.",
   "",
-  "THE HARD FLOOR — ENTITY PROVENANCE (absolute; overrides ADDITIONAL INSTRUCTIONS)",
-  "Inventing or misattributing an ENTITY or ATTRIBUTE is forbidden. A real WCM",
-  "scholar's true tools, diseases, and numbers are often in your training data and you",
-  "will be tempted to supply them. Do not. Use only what FACTS contains.",
-  "- No award, honor, position, degree field, date, collaboration, or affiliation not",
-  "  present in FACTS.",
-  "- No tool, method, software, instrument, dataset, assay, model system, platform,",
-  "  algorithm, or acronym unless that exact name is in FACTS — a `methods` `name`,",
-  "  `examples`, or `exemplarContexts` entry, or verbatim in a publication `title`. An",
-  "  `exemplarContexts` snippet is extracted paper text describing how an exemplar tool",
-  "  was used; you may ground a DESCRIPTION of a tool on it, but you may NAME the tool",
-  "  only if its name is itself in FACTS. If a contribution is described but unnamed,",
-  "  describe what it does; do not supply a name or coin an acronym.",
-  "- No h-index, citation count, author-role count (first / last / total), or impact",
-  "  score. The numbers you MAY state: the total `publicationCount`; the `yearsActive`",
-  "  span; and a quantitative FINDING reported in a publication `synopsis` (e.g. a",
-  "  percentage the study measured). Bibliometrics never; scientific results from a",
-  "  synopsis, yes.",
-  "- No disease, condition, syndrome, gene, pathogen, organism, or biological target",
-  "  unless it appears verbatim in FACTS (title, synopsis, topicRationale, topic label,",
-  "  or grant title). Two inferences stay forbidden: (a) a funder's NAME is the sponsor,",
-  "  not the disease a grant studies; (b) the indication a therapy / vector / antibody /",
-  "  drug / cell type / target is FOR is NOT licensed by naming the therapy (do not turn",
-  '  "anti-eosinophil gene therapy" into a named eosinophilic disease). Never infer a',
-  "  research subject from a funder, department, degree, leadership / administrative",
-  "  title, or mechanism.",
-  "- No grant aim, hypothesis, model, or goal unless that `activeGrants` entry has a",
-  '  `title` stating it. A grant with only a funder and mechanism supports "is funded',
-  '  by <funder>" and nothing more.',
-  "- No unverifiable STATURE claim about the scholar or the work — world-renowned,",
-  "  leading, pioneering, groundbreaking, seminal, cutting-edge, renowned, highly-cited,",
-  "  high-impact. Stating the program's direction and substance is fine; RATING its",
-  "  importance is not. Per-paper impact fields exist only to help you choose which work",
-  "  to feature.",
+  ...ENTITY_PROVENANCE_FLOOR,
   "",
   "FACETS ARE ROUTING, NOT VOCABULARY",
   "`topics` area / subarea labels are selection signal — they tell you which work is",
@@ -337,14 +273,7 @@ export const OVERVIEW_SYSTEM_PROMPT_V4 = [
   "in publication titles, synopses, `topicRationale` strings, `methods` exemplars, and",
   "grant titles — mine those, not the category labels.",
   "",
-  "VERBATIM STRINGS",
-  "Use the name, title, any additional `titles`, department, and education strings",
-  "EXACTLY as given. No added eponym, institute / center name, or the words",
-  '"Institute" / "Department" the given string does not contain. Never reformat a',
-  "degree into a field not given. If existingBio is present, mine it ONLY for career",
-  "narrative, named roles, and significance the structured fields lack (prior",
-  "positions, directorships); structured fields WIN on title and current research;",
-  "rewrite, never paste.",
+  ...VERBATIM_STRINGS,
   "",
   "SPARSE FACTS",
   "If FACTS is thin, write a SHORTER overview. Do not pad with generic praise,",
@@ -797,13 +726,52 @@ const VERIFY_SYNOPSIS_NUMBER_EXCEPTION = [
   "impact score — remain NEVER permitted, even if a finding line mentions one.",
 ].join("\n");
 
+/**
+ * The clause appended to the verifier prompt for the NIH-biosketch purpose (v5 — the
+ * "(b)-relaxation"). A public overview FORBIDS stating what work means; a Contribution
+ * to Science exists to do exactly that. This clause turns significance ON — but only
+ * for an implication ANCHORED to a grounded finding — while keeping the entity floor
+ * absolute and adding the external-uptake ban. It is appended ONLY when
+ * `permitSignificance` is set, so the overview verifier (which never sets it) is
+ * byte-identical. The hardest over-reach surfaces are the FLOATING (unanchored)
+ * significance claim and external uptake dressed as significance.
+ */
+const VERIFY_SIGNIFICANCE_EXCEPTION = [
+  "",
+  "EXCEPTION — significance of a grounded finding (this generation PERMITS it): an",
+  "interpretation of what a GROUNDED finding MEANS, CHANGES, ENABLES, RULES OUT, REFRAMES,",
+  "or INFORMS — or the scholar's own grounded follow-on work — is GROUNDED and must NOT be",
+  "flagged, WHEN it is attached in the same sentence or clause to a specific finding present",
+  "in a PUBLICATION TITLE or a `finding:` line under PUBLICATIONS. Do not flag such an",
+  "anchored significance/implication claim as grant-aim, disease-target, or unsupported.",
+  "This relaxation NEVER widens entity provenance: a tool / model / dataset NAME, a disease /",
+  "gene / target, a NUMBER, or a described grant AIM not present in the reference stays a",
+  "violation even inside a significance sentence — significance CHARACTERIZES a grounded",
+  "finding; it never licenses a new entity. Three things this exception does NOT permit —",
+  "STILL flag them:",
+  "- superlative: an empty greatness / self-rating claim with no factual content",
+  '  ("seminal", "first to", "world-renowned", "highly-cited", "pioneering", "landmark",',
+  '  "leading expert") — category `superlative`.',
+  "- external-uptake: a claim about OTHER people's behavior or the field's reception of the",
+  '  work ("widely adopted", "shaped the field", "became the standard", "is widely cited",',
+  '  "influenced the field", "established the paradigm"). This is ungroundable from the',
+  "  scholar's own FACTS — category `external-uptake`.",
+  "- unanchored-significance: a FLOATING implication NOT attached to a specific grounded",
+  "  finding in the reference — category `unanchored-significance`.",
+].join("\n");
+
 /** The verifier system prompt for a version: the base contract, plus the synopsis-number
- *  exception when the version permits synopsis findings (keeps the faithfulness pass in
- *  step with the prompt floor). The bare const above is the no-exception (v2) baseline. */
-export function overviewVerifySystemPrompt(opts?: { permitSynopsisFindings?: boolean }): string {
-  return opts?.permitSynopsisFindings
-    ? `${OVERVIEW_VERIFY_SYSTEM_PROMPT}\n${VERIFY_SYNOPSIS_NUMBER_EXCEPTION}`
-    : OVERVIEW_VERIFY_SYSTEM_PROMPT;
+ *  exception when the version permits synopsis findings, plus the significance exception for
+ *  the NIH-biosketch purpose (#917 v5). Each is additive and order-stable, so the overview
+ *  callers (which set neither, or only `permitSynopsisFindings`) stay byte-identical. */
+export function overviewVerifySystemPrompt(opts?: {
+  permitSynopsisFindings?: boolean;
+  permitSignificance?: boolean;
+}): string {
+  let prompt = OVERVIEW_VERIFY_SYSTEM_PROMPT;
+  if (opts?.permitSynopsisFindings) prompt += `\n${VERIFY_SYNOPSIS_NUMBER_EXCEPTION}`;
+  if (opts?.permitSignificance) prompt += `\n${VERIFY_SIGNIFICANCE_EXCEPTION}`;
+  return prompt;
 }
 
 /**
@@ -816,7 +784,7 @@ export function overviewVerifySystemPrompt(opts?: { permitSynopsisFindings?: boo
  */
 export function buildGroundingReference(
   facts: OverviewFacts,
-  opts?: { permitSynopsisFindings?: boolean },
+  opts?: { permitSynopsisFindings?: boolean; permitSignificance?: boolean },
 ): string {
   const lines: string[] = [];
   lines.push(
@@ -874,6 +842,16 @@ export function buildGroundingReference(
         if (d) lines.push(`    finding: ${d}`);
       }
     }
+    if (opts?.permitSignificance) {
+      // #917 v5 — the biosketch purpose turns significance ON, but ONLY for an
+      // implication attached to one of these grounded findings. Name the anchor set
+      // explicitly so the verifier flags a floating (unanchored) significance claim.
+      lines.push(
+        "A claim about what one of the findings above MEANS, ENABLES, RULES OUT, INFORMS, or " +
+          "REFRAMES — stated in the same sentence as that finding — is GROUNDED. A significance " +
+          "claim with NO finding above to attach to is NOT grounded.",
+      );
+    }
   } else {
     lines.push(
       "PUBLICATION TITLES: (none) — there is NO per-paper grounding; the draft must not describe any specific finding, result, or named contribution.",
@@ -928,6 +906,36 @@ export function buildGroundingReference(
   }
   return lines.join("\n");
 }
+
+/**
+ * The reviser system prompt for the NIH-biosketch purpose (#917 v5). Same removal
+ * contract as the overview reviser, plus the load-bearing fix the handoff names
+ * HIGHEST-RISK: the verifier ALLOWING anchored significance is necessary but not
+ * sufficient — when a real entity/number violation shares a SENTENCE with an allowed
+ * significance clause, a reviser told to "narrow the sentence to its supported part"
+ * can collapse the significance with it. This reviser is told to excise only the
+ * flagged phrase and keep the grounded significance clause.
+ */
+export const BIOSKETCH_REVISE_SYSTEM_PROMPT = [
+  "You are editing an AI-written NIH-biosketch contribution to remove unsupported claims",
+  "flagged by a fact-checker. You are given the DRAFT and a list of UNGROUNDED SPANS",
+  "(verbatim substrings that are not supported by the source facts and must not appear).",
+  "Rewrite the contribution so that:",
+  "- every ungrounded span is removed — delete the unsupported phrase, or narrow the",
+  "  sentence to only its supported part;",
+  "- you NEVER reintroduce a removed specific and NEVER add any new fact, name, number,",
+  "  disease, or claim of your own;",
+  "- all remaining grounded content is preserved and the prose stays fluent;",
+  "- voice (FIRST person), register, and overall structure are unchanged.",
+  "CRITICAL — preserve grounded significance. A flagged span is the SPECIFIC phrase to",
+  "excise. When a flagged entity, number, or name sits inside a sentence that ALSO states",
+  "an allowed significance or implication of a grounded finding (what a reported result",
+  "means, changes, enables, rules out, or reframes), remove ONLY the flagged phrase and KEEP",
+  "the grounded significance clause — do NOT delete the whole sentence. A Contribution to",
+  "Science exists to state what the work means; do not strip that meaning when excising an",
+  "adjacent unsupported detail.",
+  "Output ONLY the corrected contribution prose — plain text, no markdown, no preamble.",
+].join("\n");
 
 /** The reviser system prompt — removes the flagged spans, adds nothing. */
 export const OVERVIEW_REVISE_SYSTEM_PROMPT = [
@@ -986,15 +994,16 @@ export function parseUngrounded(text: string): UngroundedSpan[] {
 export async function verifyDraftGrounding(
   facts: OverviewFacts,
   prose: string,
-  opts?: { model?: string; permitSynopsisFindings?: boolean },
+  opts?: { model?: string; permitSynopsisFindings?: boolean; permitSignificance?: boolean },
 ): Promise<UngroundedSpan[]> {
   const modelId = opts?.model ?? process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_MODEL;
   const permitSynopsisFindings = opts?.permitSynopsisFindings ?? false;
+  const permitSignificance = opts?.permitSignificance ?? false;
   const userTurn = [
     "Here is the REFERENCE of ALLOWED FACTS. It is the only permitted source.",
     "",
     "<ALLOWED_FACTS>",
-    buildGroundingReference(facts, { permitSynopsisFindings }),
+    buildGroundingReference(facts, { permitSynopsisFindings, permitSignificance }),
     "</ALLOWED_FACTS>",
     "",
     "Here is the DRAFT to fact-check:",
@@ -1006,8 +1015,10 @@ export async function verifyDraftGrounding(
   const result = await generateText({
     model: overviewBedrock()(modelId),
     // The verifier prompt + the reference both honor the version's synopsis-number
-    // permission so the pass never strips a number the prompt legitimately allowed.
-    system: overviewVerifySystemPrompt({ permitSynopsisFindings }),
+    // permission so the pass never strips a number the prompt legitimately allowed, and
+    // the biosketch significance permission (#917 v5) so it does not strip an anchored
+    // implication a Contribution to Science exists to state.
+    system: overviewVerifySystemPrompt({ permitSynopsisFindings, permitSignificance }),
     prompt: userTurn,
     ...(modelAcceptsTemperature(modelId) ? { temperature: 0 } : {}),
   });
@@ -1019,7 +1030,7 @@ export async function verifyDraftGrounding(
 export async function reviseDraftForGrounding(
   prose: string,
   ungrounded: UngroundedSpan[],
-  opts?: { model?: string; temperature?: number },
+  opts?: { model?: string; temperature?: number; system?: string },
 ): Promise<string> {
   if (ungrounded.length === 0) return prose;
   const modelId = opts?.model ?? process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_MODEL;
@@ -1033,7 +1044,9 @@ export async function reviseDraftForGrounding(
   ].join("\n");
   const result = await generateText({
     model: overviewBedrock()(modelId),
-    system: OVERVIEW_REVISE_SYSTEM_PROMPT,
+    // `system` lets the biosketch purpose swap in BIOSKETCH_REVISE_SYSTEM_PROMPT (which
+    // preserves an anchored significance clause); absent it, the overview reviser runs.
+    system: opts?.system ?? OVERVIEW_REVISE_SYSTEM_PROMPT,
     prompt: userTurn,
     ...(modelAcceptsTemperature(modelId) ? { temperature: opts?.temperature ?? 0.2 } : {}),
   });
@@ -1049,7 +1062,15 @@ export async function reviseDraftForGrounding(
 export async function groundOverviewDraft(
   facts: OverviewFacts,
   prose: string,
-  opts?: { model?: string; maxRevisions?: number; permitSynopsisFindings?: boolean },
+  opts?: {
+    model?: string;
+    maxRevisions?: number;
+    permitSynopsisFindings?: boolean;
+    /** #917 v5 — biosketch purpose: allow significance anchored to a grounded finding,
+     *  and use the significance-preserving reviser so an anchored implication is not
+     *  collapsed when an adjacent entity violation is excised. */
+    permitSignificance?: boolean;
+  },
 ): Promise<{ prose: string; removed: UngroundedSpan[] }> {
   const maxRevisions = opts?.maxRevisions ?? 2;
   const removed: UngroundedSpan[] = [];
@@ -1058,7 +1079,10 @@ export async function groundOverviewDraft(
     const ungrounded = await verifyDraftGrounding(facts, current, opts);
     if (ungrounded.length === 0) break;
     removed.push(...ungrounded);
-    current = await reviseDraftForGrounding(current, ungrounded, opts);
+    current = await reviseDraftForGrounding(current, ungrounded, {
+      model: opts?.model,
+      system: opts?.permitSignificance ? BIOSKETCH_REVISE_SYSTEM_PROMPT : undefined,
+    });
   }
   return { prose: current, removed };
 }

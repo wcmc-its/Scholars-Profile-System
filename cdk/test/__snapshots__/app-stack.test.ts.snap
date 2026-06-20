@@ -408,6 +408,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "EDIT_BIOSKETCH_GENERATE",
+                "Value": "off",
+              },
+              {
+                "Name": "BIOSKETCH_FAITHFULNESS_PASS",
+                "Value": "off",
+              },
+              {
                 "Name": "OVERVIEW_PROMPT_VERSION_DEFAULT",
                 "Value": "v4",
               },
@@ -3616,6 +3624,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "OVERVIEW_FAITHFULNESS_PASS",
+                "Value": "off",
+              },
+              {
+                "Name": "EDIT_BIOSKETCH_GENERATE",
+                "Value": "on",
+              },
+              {
+                "Name": "BIOSKETCH_FAITHFULNESS_PASS",
                 "Value": "off",
               },
               {

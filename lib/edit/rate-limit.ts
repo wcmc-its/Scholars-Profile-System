@@ -37,6 +37,11 @@ const DEFAULT_LIMIT = 20;
  *  rarely needs to redraft their bio a dozen times an hour. Env-tunable. */
 const DEFAULT_OVERVIEW_GENERATE_LIMIT = 10;
 
+/** Default per-cwid hourly cap for a NIH-biosketch generate (#917 v5). Same
+ *  reasoning as the overview cap — an LLM call (cost), and a scholar rarely
+ *  needs to redraft their biosketch a dozen times an hour. Env-tunable. */
+export const DEFAULT_BIOSKETCH_GENERATE_LIMIT = 10;
+
 /** The per-cwid hourly cap. Reads `SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT`; falls
  *  back to {@link DEFAULT_LIMIT} when unset or not a positive integer. */
 export function requestChangeRateLimit(): number {
@@ -50,6 +55,14 @@ export function requestChangeRateLimit(): number {
 export function overviewGenerateRateLimit(): number {
   const raw = Number(process.env.SELF_EDIT_OVERVIEW_GENERATE_RATE_LIMIT);
   return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_OVERVIEW_GENERATE_LIMIT;
+}
+
+/** The per-cwid hourly NIH-biosketch-generate cap (#917 v5). Reads
+ *  `EDIT_BIOSKETCH_GENERATE_RATE_LIMIT`; falls back to
+ *  {@link DEFAULT_BIOSKETCH_GENERATE_LIMIT} when unset or not a positive integer. */
+export function biosketchGenerateRateLimit(): number {
+  const raw = Number(process.env.EDIT_BIOSKETCH_GENERATE_RATE_LIMIT);
+  return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_BIOSKETCH_GENERATE_LIMIT;
 }
 
 /** Start of the UTC hour-window containing `now` (epoch-floored, so the boundary
@@ -117,4 +130,18 @@ export async function recordOverviewGenerateAttempt(
   now: Date = new Date(),
 ): Promise<RateLimitResult> {
   return recordAttempt(`ovgen:${cwid}`, overviewGenerateRateLimit(), now);
+}
+
+/**
+ * Per-cwid hourly rate limit for the NIH-biosketch-generate gateway call
+ * (#917 v5). The same fixed-window mechanism, in its own bucket — the key is
+ * namespaced `biosketch:${cwid}` so biosketch generations never share a counter
+ * with overview generations or request-change sends. The namespaced key fits the
+ * `cwid` VarChar(32) column.
+ */
+export async function recordBiosketchGenerateAttempt(
+  cwid: string,
+  now: Date = new Date(),
+): Promise<RateLimitResult> {
+  return recordAttempt(`biosketch:${cwid}`, biosketchGenerateRateLimit(), now);
 }
