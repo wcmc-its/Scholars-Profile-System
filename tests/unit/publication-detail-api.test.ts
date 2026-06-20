@@ -65,6 +65,7 @@ beforeEach(() => {
   mocks.familySensitivityOverlayFindMany.mockResolvedValue([]);
   delete process.env.METHODS_LENS_ENABLED;
   delete process.env.METHODS_LENS_PUB_MODAL;
+  delete process.env.METHODS_LENS_TOOL_CONTEXT;
   delete process.env.METHODS_LENS_PAGES;
   delete process.env.METHODS_LENS_SENSITIVE_GATE;
   delete process.env.PUBLICATION_CITING_BRIDGE;
@@ -499,7 +500,12 @@ describe("getPublicationDetail — method families (#917)", () => {
     ]);
     const r = await getPublicationDetail("12345");
     expect(r?.methodFamilies).toEqual([
-      { supercategory: "imaging", familyLabel: "Two-photon microscopy", href: null },
+      {
+        supercategory: "imaging",
+        familyLabel: "Two-photon microscopy",
+        href: null,
+        tools: [],
+      },
     ]);
   });
 
@@ -522,6 +528,76 @@ describe("getPublicationDetail — method families (#917)", () => {
     const r = await getPublicationDetail("12345");
     expect(r?.methodFamilies).toEqual([]);
     expect(mocks.scholarFamilyFindMany).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a family's exemplar tools with #1119 snippets when the tool-context flag is on (#917 Phase 2)", async () => {
+    process.env.METHODS_LENS_ENABLED = "on";
+    process.env.METHODS_LENS_PUB_MODAL = "on";
+    process.env.METHODS_LENS_TOOL_CONTEXT = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
+    mocks.publicationAuthorFindMany.mockResolvedValue([{ cwid: "aaa1001" }]);
+    mocks.scholarFamilyFindMany.mockResolvedValueOnce([
+      {
+        supercategory: "imaging",
+        familyLabel: "Confocal microscopy",
+        familyId: "fam_0100",
+        pmids: ["12345"],
+        // Salience-ordered array; the contexts OBJECT key order is unreliable, so
+        // the snippet must be looked up by name off the array order.
+        exemplarTools: ["STORK-A", "CheXpert"],
+        exemplarContexts: {
+          CheXpert: "a labeler for chest radiograph findings",
+          "STORK-A": "a non-invasive automated method of embryo evaluation",
+        },
+      },
+    ]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.methodFamilies[0].tools).toEqual([
+      { name: "STORK-A", context: "a non-invasive automated method of embryo evaluation" },
+      { name: "CheXpert", context: "a labeler for chest radiograph findings" },
+    ]);
+  });
+
+  it("emits tool names with null context when the tool-context flag is off (names are part of the #917 surface)", async () => {
+    process.env.METHODS_LENS_ENABLED = "on";
+    process.env.METHODS_LENS_PUB_MODAL = "on";
+    // METHODS_LENS_TOOL_CONTEXT intentionally unset → names render, snippets dark.
+    mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
+    mocks.publicationAuthorFindMany.mockResolvedValue([{ cwid: "aaa1001" }]);
+    mocks.scholarFamilyFindMany.mockResolvedValueOnce([
+      {
+        supercategory: "imaging",
+        familyLabel: "Confocal microscopy",
+        familyId: "fam_0100",
+        pmids: ["12345"],
+        exemplarTools: ["STORK-A"],
+        exemplarContexts: { "STORK-A": "a non-invasive automated method" },
+      },
+    ]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.methodFamilies[0].tools).toEqual([
+      { name: "STORK-A", context: null },
+    ]);
+  });
+
+  it("yields no tools for a family with no exemplar tools (chip-only, as in Phase 1)", async () => {
+    process.env.METHODS_LENS_ENABLED = "on";
+    process.env.METHODS_LENS_PUB_MODAL = "on";
+    process.env.METHODS_LENS_TOOL_CONTEXT = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
+    mocks.publicationAuthorFindMany.mockResolvedValue([{ cwid: "aaa1001" }]);
+    mocks.scholarFamilyFindMany.mockResolvedValueOnce([
+      {
+        supercategory: "imaging",
+        familyLabel: "Two-photon microscopy",
+        familyId: "fam_0100",
+        pmids: ["12345"],
+        exemplarTools: [],
+        exemplarContexts: {},
+      },
+    ]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.methodFamilies[0].tools).toEqual([]);
   });
 });
 

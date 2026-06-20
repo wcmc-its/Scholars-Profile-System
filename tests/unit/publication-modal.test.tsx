@@ -446,6 +446,7 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
             supercategory: "animal_cell_models",
             familyLabel: "CRISPR knockout",
             href: "/methods/animal-cell-models/crispr-knockout-fam_0042",
+            tools: [],
           },
         ],
       }),
@@ -468,6 +469,7 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
             supercategory: "imaging",
             familyLabel: "Two-photon microscopy",
             href: null,
+            tools: [],
           },
         ],
       }),
@@ -479,6 +481,62 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
     expect(
       screen.queryByRole("link", { name: "Two-photon microscopy" }),
     ).toBeNull();
+  });
+
+  it("renders a family's representative tools beneath its chip (#917 Phase 2)", async () => {
+    mockFetch(
+      makePayload({
+        methodFamilies: [
+          {
+            supercategory: "imaging",
+            familyLabel: "Confocal microscopy",
+            href: null,
+            tools: [
+              { name: "CheXpert", context: null },
+              { name: "MIMIC-CXR", context: null },
+            ],
+          },
+        ],
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.getByText("Confocal microscopy")).toBeDefined();
+    expect(screen.getByText("CheXpert")).toBeDefined();
+    expect(screen.getByText("MIMIC-CXR")).toBeDefined();
+  });
+
+  it("exposes a tool's #1119 usage snippet via the hover tooltip (#917 Phase 2)", async () => {
+    mockFetch(
+      makePayload({
+        methodFamilies: [
+          {
+            supercategory: "imaging",
+            familyLabel: "Confocal microscopy",
+            href: null,
+            tools: [
+              {
+                name: "STORK-A",
+                context: "a non-invasive and automated method of embryo evaluation",
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    // The tool name is the trigger; the "How <tool> was used: <context>" snippet
+    // is only in the DOM while the HoverTooltip is visible, so hover it first.
+    const trigger = screen.getByText("STORK-A");
+    fireEvent.mouseEnter(trigger.parentElement as HTMLElement);
+    await waitFor(() =>
+      expect(
+        screen.getByText(/How STORK-A was used: a non-invasive/),
+      ).toBeDefined(),
+    );
   });
 });
 
