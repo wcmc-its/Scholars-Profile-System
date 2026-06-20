@@ -270,7 +270,7 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus thirty additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus thirty-two additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
@@ -280,8 +280,10 @@ describe("EdgeStack", () => {
         // two #824 method routes (/api/methods/*/*/publications, /methods/*/*/scholars)
         // + the #866 `/api/profile/*` internal-viewer reveal behavior
         // + the #974 Phase 2 `/api/units/*/*/members` method-facet route
-        // + the #967 `/api/scholar/*/method-exemplar` representative-paper hover.
-        expect(cacheBehaviors).toHaveLength(30);
+        // + the #967 `/api/scholar/*/method-exemplar` representative-paper hover
+        // + the two GrantRecs Phase 2 matcher routes
+        // (/api/scholars/*/opportunities, /api/opportunities/*/researchers).
+        expect(cacheBehaviors).toHaveLength(32);
       });
 
       it("evaluates additional behaviors in the spec-defined order (static first, then uncacheable, then #634 query-keyed)", () => {
@@ -335,6 +337,12 @@ describe("EdgeStack", () => {
           // cache the download.
           "/scholars/*/co-pubs/export",
           "/scholars/*/co-pubs/*/export",
+          // GrantRecs Phase 2 matcher routes -- forward "Grants for me" (reads
+          // sort/weights/limit) + reverse "Find researchers" (admin, reads
+          // sort/stageLens/limit). AllViewer forwards the query past the
+          // cacheable default's allow-list. Precede `/scholars/*` (Group B).
+          "/api/scholars/*/opportunities",
+          "/api/opportunities/*/researchers",
           // -- #634 Group B -- query-keyed CACHEABLE pages (custom policy) --
           "/scholars/*",
           "/departments/*",
