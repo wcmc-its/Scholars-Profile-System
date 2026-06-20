@@ -20,6 +20,14 @@ import {
   isFamilyPubliclyVisible,
 } from "@/lib/api/methods-overlay";
 import { methodFamilyPath } from "@/lib/method-url";
+import {
+  claimKey,
+  isEffectiveConfirmed,
+  loadActiveCoreClaimsForPmids,
+} from "@/lib/api/core-merge";
+import { isCorePubModalEnabled, isCorePagesEnabled } from "@/lib/profile/cores-flags";
+import { corePath } from "@/lib/core-url";
+import type { ClaimStatus } from "@/lib/generated/prisma/client";
 
 const CITING_PUBS_CAP = 500;
 const CITING_PUBS_CSV_CAP = 50_000;
@@ -88,6 +96,24 @@ export type PublicationDetailMethodFamily = {
   tools: PublicationDetailMethodTool[];
 };
 
+/**
+ * One WCM core facility this pmid confirmed-used (the read-merge of any human
+ * `CoreClaim` over the engine `publication_core.status`). Already filtered to
+ * effective-confirmed by the time it reaches the payload, so the modal renders it
+ * verbatim. Empty array unless the pub-modal cores flag is on AND the paper has a
+ * confirmed core.
+ */
+export type PublicationDetailCore = {
+  coreId: string;
+  name: string;
+  /** Canonical facility name (e.g. "Citigroup Biomedical Imaging Center"), or
+   *  null when the catalog row has none. */
+  facility: string | null;
+  /** Precomputed `/cores/[coreId]` path, or null when the public core pages are
+   *  gated off (`CORE_PAGES`) — the UI then renders the name as plain text. */
+  href: string | null;
+};
+
 export type PublicationDetailPayload = {
   pub: {
     pmid: string;
@@ -123,6 +149,10 @@ export type PublicationDetailPayload = {
    *  authors), gated + suppression-filtered. Empty when the Methods lens is off
    *  or the paper has no surfaced family; the modal omits the section then. */
   methodFamilies: PublicationDetailMethodFamily[];
+  /** Core facilities this pmid confirmed-used (CoreClaim-merged). Empty when the
+   *  pub-modal cores flag (`CORE_PUB_MODAL`) is off or the paper has no confirmed
+   *  core; the modal omits the section then. */
+  cores: PublicationDetailCore[];
   /** Up to CITING_PUBS_CAP distinct citers from `analysis_nih_cites` joined to
    *  `analysis_summary_article` (the iCite-derived subset that reciterdb
    *  also has article metadata for), ordered by date desc. De-duped on the
@@ -306,6 +336,68 @@ async function resolveMethodFamilies(
     (a, b) =>
       a.supercategory.localeCompare(b.supercategory) ||
       a.familyLabel.localeCompare(b.familyLabel),
+  );
+}
+
+/**
+ * @internal Exported for unit tests. Pure: keep only the effective-confirmed
+ * (pub, core) rows (engine `confirmed` OR human `claimed`, minus `rejected`),
+ * attach the `/cores/[coreId]` link when `linkable`, and sort by core name.
+ */
+export function buildPublicationCores(
+  rows: ReadonlyArray<{ coreId: string; status: string; name: string; facility: string | null }>,
+  claimFor: (coreId: string) => ClaimStatus | null,
+  linkable: boolean,
+): PublicationDetailCore[] {
+  const out: PublicationDetailCore[] = [];
+  for (const row of rows) {
+    if (!isEffectiveConfirmed(row.status, claimFor(row.coreId))) continue;
+    out.push({
+      coreId: row.coreId,
+      name: row.name,
+      facility: row.facility,
+      href: linkable ? corePath(row.coreId) : null,
+    });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Core facilities attributed to ONE pmid — the engine's `publication_core` rows
+ * for the paper, read-merged with any human `CoreClaim` override (lib/api/
+ * core-merge.ts) and filtered to effective-confirmed. Mirrors `resolveMethodFamilies`:
+ * a per-surface render gate (`CORE_PUB_MODAL`) that returns `[]` when off so the
+ * modal payload carries no core data, and a precomputed `/cores/[coreId]` link that
+ * is null unless the public core pages are also enabled.
+ *
+ * Bounded: the read is keyed on the one pmid (publication_core PK is (pmid, coreId),
+ * so at most one row per core — no de-dup needed).
+ */
+async function resolvePublicationCores(
+  pmid: string,
+): Promise<PublicationDetailCore[]> {
+  if (!isCorePubModalEnabled()) return [];
+
+  const rows = await prisma.publicationCore.findMany({
+    where: { pmid },
+    select: {
+      coreId: true,
+      status: true,
+      core: { select: { name: true, facility: true } },
+    },
+  });
+  if (rows.length === 0) return [];
+
+  const claims = await loadActiveCoreClaimsForPmids([pmid]);
+  return buildPublicationCores(
+    rows.map((r) => ({
+      coreId: r.coreId,
+      status: r.status,
+      name: r.core.name,
+      facility: r.core.facility,
+    })),
+    (coreId) => claims.get(claimKey(pmid, coreId)) ?? null,
+    isCorePagesEnabled(),
   );
 }
 
@@ -507,8 +599,13 @@ export async function getPublicationDetail(
     }))
     .sort((a, b) => b.score - a.score);
 
-  // #917 — method families for this pmid (gated; [] when the lens is off).
-  const methodFamilies = await resolveMethodFamilies(pmid);
+  // #917 — method families for this pmid (gated; [] when the lens is off), and
+  // the core facilities for this pmid (gated; [] when CORE_PUB_MODAL is off).
+  // Independent reads — run concurrently.
+  const [methodFamilies, cores] = await Promise.all([
+    resolveMethodFamilies(pmid),
+    resolvePublicationCores(pmid),
+  ]);
 
   // Citing publications. With PUBLICATION_CITING_BRIDGE=on the in-VPC app serves
   // the pre-computed `publication_citing` bridge (#928); otherwise it queries WCM
@@ -589,6 +686,7 @@ export async function getPublicationDetail(
     },
     topics,
     methodFamilies,
+    cores,
     citingPubs,
     citingPubsTotal,
   };

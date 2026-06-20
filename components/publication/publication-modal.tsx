@@ -19,6 +19,7 @@ import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { highlightSnippet } from "@/components/method/highlight-snippet";
 import { methodologyHref } from "@/lib/methodology-anchors";
 import type {
+  PublicationDetailCore,
   PublicationDetailMethodFamily,
   PublicationDetailMethodTool,
   PublicationDetailPayload,
@@ -359,6 +360,7 @@ function ModalContent({
           <TopicsSection topics={topics} currentTopicSlug={currentTopicSlug} />
           <MeshSection meshTerms={pub.meshTerms} />
           <MethodsSection families={payload.methodFamilies} pmid={pub.pmid} />
+          <CoreFacilitiesSection cores={payload.cores} />
           <CitingPubsSection
             pmid={pub.pmid}
             citationCount={pub.citationCount}
@@ -664,6 +666,46 @@ function MethodsSection({
               </span>
             )}
             {f.tools.length > 0 ? <MethodToolsLine tools={f.tools} pmid={pmid} /> : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * Core facilities this publication confirmed-used (CoreClaim-merged). Display-only;
+ * each chip links to the public `/cores/[coreId]` page when those pages are enabled
+ * (`href` non-null), else renders as plain text. Omitted entirely when empty —
+ * which is always the case while the `CORE_PUB_MODAL` flag is off.
+ */
+function CoreFacilitiesSection({
+  cores,
+}: {
+  cores: PublicationDetailCore[];
+}) {
+  // Defensive: the modal is opened from many surfaces; tolerate a payload that
+  // predates the `cores` field (older mocks / cached responses) rather than crash
+  // the whole modal. Production's getPublicationDetail always sets it.
+  if (!cores || cores.length === 0) return null;
+  return (
+    <section>
+      <SectionHeading>Core facilities</SectionHeading>
+      <ul className="mt-2 flex flex-wrap gap-2">
+        {cores.map((c) => (
+          <li key={c.coreId}>
+            {c.href ? (
+              <Link
+                href={c.href}
+                className="bg-muted inline-block rounded px-2 py-0.5 text-xs text-[var(--color-accent-slate)] hover:underline"
+              >
+                {c.name}
+              </Link>
+            ) : (
+              <span className="bg-muted text-foreground/80 inline-block rounded px-2 py-0.5 text-xs">
+                {c.name}
+              </span>
+            )}
           </li>
         ))}
       </ul>
