@@ -90,7 +90,11 @@ export type AuditAction =
   /** a comms-steward cleared a Method-Family's review nag without changing its
    *  tier (sets `reviewedAt`/`reviewedByCwid` on `family_review_flag`).
    *  `targetEntityType='method_family'`. */
-  | "family_review";
+  | "family_review"
+  /** a core owner claimed/rejected a (publication, core) usage candidate (cores
+   *  inference); `targetEntityType='core'`, `targetEntityId` is the
+   *  `"{coreId}:{pmid}"` pair, before/after carry the claim status transition. */
+  | "core_claim";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -112,7 +116,10 @@ export type AuditEntityType =
   /** a method family targeted by a comms-steward tier/review action
    *  (`COMMS_STEWARD_ENABLED`); `targetEntityId` is the
    *  `supercategory:familyLabel` pair. */
-  | "method_family";
+  | "method_family"
+  /** a (publication, core-facility) usage claim/rejection by a core owner
+   *  (cores inference); `targetEntityId` is the `"{coreId}:{pmid}"` pair. */
+  | "core";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

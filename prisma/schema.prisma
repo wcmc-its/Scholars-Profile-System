@@ -1405,6 +1405,45 @@ model PublicationCore {
   @@map("publication_core")
 }
 
+/// Human decision on a (publication, core) candidate. `claimed` = the core owner
+/// confirms the publication used the core; `rejected` = a false positive. The
+/// engine statuses (candidate/confirmed/below_threshold) live on `publication_core`.
+enum ClaimStatus {
+  claimed
+  rejected
+}
+
+/// A core owner's durable claim/rejection over a publication's ETL-projected core
+/// usage — the ADR-005 manual-override pattern. A SEPARATE, ETL-immune table
+/// (Block 6 never writes it) keyed on the SAME stable (pmid, coreId) pair as
+/// `publication_core`, so the human decision survives the nightly rebuild by
+/// construction. No #352 stable-key risk: pmid and coreId are stable natural keys
+/// (contrast grant/education/appointment, whose uuid PKs regenerate each run).
+///
+/// Read-merged with precedence over `publication_core.status`
+/// (`lib/api/core-merge.ts`): an active `claimed` row shows as confirmed,
+/// `rejected` excludes the pair, a soft-revoked row (`revokedAt` set) reverts to
+/// the engine status. No FK to publication_core/core/publication — a claim may
+/// precede the projection or outlive a delete, the same ETL-immunity ADR-005 uses.
+model CoreClaim {
+  id        String      @id @default(uuid()) @db.VarChar(64)
+  pmid      String      @db.VarChar(32)
+  coreId    String      @map("core_id") @db.VarChar(32)
+  status    ClaimStatus @map("claim_status")
+  /// EFFECTIVE actor cwid (the impersonation target while "View as" is live, else
+  /// the real user) — same convention as FieldOverride.actorCwid. The immutable,
+  /// hashed B03 audit row holds the real human (`actor_cwid` + `impersonated_cwid`).
+  claimedBy String      @map("claimed_by") @db.VarChar(32)
+  claimedAt DateTime    @default(now()) @map("claimed_at")
+  note      String?     @db.Text
+  revokedBy String?     @map("revoked_by") @db.VarChar(32)
+  revokedAt DateTime?   @map("revoked_at") // soft-revoke → read-merge reverts to engine status
+
+  @@unique([pmid, coreId]) // one current decision per pair
+  @@index([coreId]) // per-core claim list
+  @@map("core_claim")
+}
+
 /// ReCiterAI publication scores per scholar+pmid pair (Q6 minimal projection).
 /// The other of the two fields that flow DynamoDB to MySQL.
 model PublicationScore {
@@ -1654,6 +1693,11 @@ enum EntityType {
   // mentor (before the colon) is the owner. Suppression-only — mentees are
   // never field_override or unit_admin targets.
   mentee
+  // + cores inference: a WCM core facility. `entityId` is the `core.id`. Used
+  // ONLY as a `unit_admin` target — a core owner is UnitAdmin(entityType=core,
+  // role=owner), Superuser-granted — so they can review/claim that core's
+  // candidate publications. Never a field_override or suppression target.
+  core
 }
 
 /// Per-unit administrator role (ADR-005 Amendment 1 § A1.2 / #540). One row
