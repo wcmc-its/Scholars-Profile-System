@@ -47,6 +47,15 @@ import {
 } from "@/lib/edit/overview-prompt-versions";
 import { isReciterRejectEnabled } from "@/lib/reciter/client";
 import { GrantRecsCard } from "@/components/edit/grant-recs-card";
+import { BiosketchTool } from "@/components/edit/biosketch-tool";
+
+/** The model the biosketch route will actually generate on — surfaced to the
+ *  privileged cost line in the Services panel. Resolution order matches
+ *  `generateBiosketch`. Read once at module load (this is a Server Component). */
+const BIOSKETCH_EFFECTIVE_MODEL =
+  process.env.BIOSKETCH_GENERATE_MODEL ??
+  process.env.OVERVIEW_GENERATE_MODEL ??
+  "us.anthropic.claude-opus-4-8";
 
 type AttrKey =
   | "home"
@@ -59,6 +68,7 @@ type AttrKey =
   | "publications"
   | "funding"
   | "grant-recs"
+  | "biosketch"
   | "appointments"
   | "education"
   | "coi"
@@ -104,6 +114,13 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // funding-opportunity recommendations. Self OR superuser (on the scholar's
   // behalf); never a proxy / unit-admin. Rail item appears only when the flag is on.
   { key: "grant-recs", label: "Grants for me", modes: ["self", "superuser"] },
+  // NIH biosketch generator (#917 v5, EDIT_BIOSKETCH_GENERATE) — owner-facing
+  // tool that drafts the narrative prose of a biosketch (Contributions to
+  // Science / Personal Statement) as a copy/export artifact. Self OR superuser
+  // (on the scholar's behalf); never a proxy / unit-admin. Grouped with
+  // "Grants for me" under the "Services" rail section. Rail item appears only
+  // when the flag is on.
+  { key: "biosketch", label: "NIH biosketch", modes: ["self", "superuser"] },
   { key: "appointments", label: "Appointments", modes: ["self", "superuser"] },
   { key: "education", label: "Education", modes: ["self", "superuser"] },
   // Mentees — suppressible (hide/show); corrections route to ITS Support.
@@ -195,6 +212,10 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "highlights",
   "visibility",
   "proxy-editors",
+  // "Services" group — owner-facing tools (#917 v5). Each item is flag-gated, so
+  // the "Services" header renders only when at least one tool is enabled.
+  "biosketch",
+  "grant-recs",
   // "From WCM systems" group — ordered per operator request. (Profile URL is
   // owned ⇒ joins "Yours to edit" only when the slug-request flag is on;
   // gated/read-only it leads the WCM group.)
@@ -206,12 +227,11 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "education",
   "publications",
   "funding",
-  "grant-recs",
   "mentees",
   "coi",
   "coi-gap",
 ];
-const SELF_RAIL_KIND: Record<AttrKey, "owned" | "sourced" | "readonly"> = {
+const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   home: "owned",
   overview: "owned",
   highlights: "owned",
@@ -220,7 +240,9 @@ const SELF_RAIL_KIND: Record<AttrKey, "owned" | "sourced" | "readonly"> = {
   "profile-url": "owned",
   publications: "sourced",
   funding: "sourced",
-  "grant-recs": "readonly",
+  // "Services" group (#917 v5) — owner-facing tools, distinct from sourced data.
+  "grant-recs": "service",
+  biosketch: "service",
   appointments: "sourced",
   education: "sourced",
   mentees: "sourced",
@@ -232,6 +254,7 @@ const SELF_RAIL_KIND: Record<AttrKey, "owned" | "sourced" | "readonly"> = {
 };
 const SELF_RAIL_GROUP = {
   owned: "Yours to edit",
+  service: "Services",
   sourced: "From WCM systems",
   readonly: "From WCM systems",
 } as const;
@@ -258,6 +281,7 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "proxy-editors",
   "funding",
   "grant-recs",
+  "biosketch",
   "appointments",
   "education",
   // Publications — now a superuser surface too (#836 follow-on); the scholar's
@@ -317,6 +341,10 @@ export type EditPageProps = {
    *  rail item + panel are surfaced. Computed by the server page (env flag) and
    *  threaded in like the other feature gates; self + superuser only. */
   grantRecsEnabled?: boolean;
+  /** #917 v5 (`EDIT_BIOSKETCH_GENERATE`): whether the "NIH biosketch" Services
+   *  rail item + panel are surfaced. Computed by the server page (env flag) and
+   *  threaded in like grantRecsEnabled; self + superuser only. */
+  biosketchEnabled?: boolean;
 };
 
 /**
@@ -332,6 +360,7 @@ export function visibleAttrKeys(
   hasCoiGap = false,
   hasHighlights = false,
   grantRecsEnabled = false,
+  biosketchEnabled = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
   return attrsForMode(mode)
@@ -341,6 +370,13 @@ export function visibleAttrKeys(
       (a) =>
         a.key !== "grant-recs" ||
         (grantRecsEnabled && (mode === "self" || isSuperuserLike(mode))),
+    )
+    // #917 v5 — "NIH biosketch" appears only when EDIT_BIOSKETCH_GENERATE is on,
+    // self / superuser only (never proxy / unit-admin), mirroring grant-recs.
+    .filter(
+      (a) =>
+        a.key !== "biosketch" ||
+        (biosketchEnabled && (mode === "self" || isSuperuserLike(mode))),
     )
     // The "From your publications" item only exists when there are candidates to
     // show — an empty panel is never surfaced, and an `?attr=coi-gap` with zero
@@ -368,6 +404,7 @@ export function EditPage({
   unitAdminBanner = null,
   reciterPendingEnabled = false,
   grantRecsEnabled = false,
+  biosketchEnabled = false,
 }: EditPageProps) {
   // "From your publications" is conditionally present: self OR superuser, and only
   // when the loader returned candidates (the loader per surface enforces who may
@@ -390,10 +427,15 @@ export function EditPage({
   // SELF_EDIT_GRANT_RECS is on (the server page computes the flag and threads it).
   const showGrantRecs =
     grantRecsEnabled && (mode === "self" || isSuperuserLike(mode));
+  // #917 v5 — the "NIH biosketch" Services item shows on self / superuser surfaces
+  // when EDIT_BIOSKETCH_GENERATE is on (the server page computes + threads it).
+  const showBiosketch =
+    biosketchEnabled && (mode === "self" || isSuperuserLike(mode));
   const visible = attrsForMode(mode)
     .filter((a) => a.key !== "coi-gap" || hasCoiGap)
     .filter((a) => a.key !== "highlights" || hasHighlights)
-    .filter((a) => a.key !== "grant-recs" || showGrantRecs);
+    .filter((a) => a.key !== "grant-recs" || showGrantRecs)
+    .filter((a) => a.key !== "biosketch" || showBiosketch);
   // A proxy (#779) and a unit admin (Amendment 4) reuse the SELF rail/cards on
   // the scholar's route (D4). Treated like self for layout; the distinct chrome
   // (banner, breadcrumb, no account menu) is the shell's job.
@@ -544,6 +586,17 @@ function renderPanel(
       // GrantRecs Phase 3 — the "Grants for me" panel. Client island fetching the
       // public forward route for the resolved cwid (self or superuser-target).
       return <GrantRecsCard cwid={cwid} />;
+    case "biosketch":
+      // #917 v5 — the "NIH biosketch" Services panel. The generate tool (client
+      // island) POSTs to /api/edit/biosketch/generate for the resolved cwid; the
+      // per-draft cost line shows to a privileged actor only (superuser / comms).
+      return (
+        <BiosketchTool
+          entityId={cwid}
+          canSeeCost={isSuperuserLike(mode)}
+          model={BIOSKETCH_EFFECTIVE_MODEL}
+        />
+      );
     case "home": {
       const hiddenPublications = ctx.publications.filter((p) => p.state !== "shown").length;
       const isHidden =

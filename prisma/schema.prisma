@@ -113,6 +113,7 @@ model Scholar {
   nihProfiles          PersonNihProfile[]
   clinicalTrials       PersonClinicalTrial[]
   overviewGenerations  OverviewGeneration[]
+  biosketchGenerations BiosketchGeneration[]
   overviewProvenance   OverviewProvenance?
   overviewSelection    OverviewSourceSelection?
   scholarTools         ScholarTool[]
@@ -1890,6 +1891,44 @@ model OverviewGeneration {
   @@index([cwid, createdAt(sort: Desc)]) // the scholar's drafts, newest first
   @@index([promptVersion, createdAt(sort: Desc)]) // "all v3 drafts, newest first" — A/B analysis
   @@map("overview_generation")
+}
+
+/// One NIH-biosketch generation (#917 v5, `docs/overview-generator-v5-handoff.md`).
+/// The biosketch generator is a PURPOSE beside the overview generator, not a prompt
+/// version — its output is a copy/export grant-application artifact (up to 5 char-capped
+/// Contributions to Science, OR one Personal Statement), NOT a saved profile field. Each
+/// successful generation is recorded best-effort for the same audit/reuse trail the
+/// overview generator keeps (regenerate-from-settings, prompt-revision telemetry, abuse
+/// review). It lives in the MAIN `scholars` schema, so the app role's existing
+/// `GRANT ... ON scholars.* TO app_rw` wildcard covers it — no separate-schema GRANT to
+/// add to the verify-db-grants golden list (ADR-009; cf. the canonical add-table
+/// migrations `add_opportunity_table` / `add_overview_source_selection`).
+model BiosketchGeneration {
+  id            String   @id @default(uuid()) @db.VarChar(64)
+  cwid          String   @db.VarChar(32)
+  // The artifact: "contributions" (up to 5 entries) or "personal_statement" (1 narrative).
+  mode          String   @db.VarChar(32)
+  // The generated entries — a JSON string[] of up to 5 char-capped, first-person, plain-text
+  // contributions, or one personal statement. Stored exactly as generated (1..5); never
+  // padded. Read back as an ordered set, never queried individually, so a JSON column (not
+  // child rows) is the right shape — cf. OverviewGeneration storing compound `params` as Json.
+  entries       Json
+  // Personal Statement only: the proposed project the statement was tailored to. NULL for
+  // contributions. Persisted so a regenerate/audit can see what aims it was framed toward.
+  projectTitle  String?  @map("project_title") @db.VarChar(300)
+  projectAims   String?  @map("project_aims") @db.Text
+  model         String   @db.VarChar(64) // gateway model string used
+  // The biosketch prompt revision (e.g. "v5") for future A/B — its own purpose, NOT an
+  // overview prompt-version id. Nullable.
+  promptVersion String?  @map("prompt_version") @db.VarChar(32)
+  params        Json // { mode, maxContributions, emphasis, instructions }
+  createdByCwid String   @map("created_by_cwid") @db.VarChar(32) // actor (self / proxy / curator)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+
+  @@index([cwid, createdAt(sort: Desc)]) // the scholar's biosketch drafts, newest first
+  @@map("biosketch_generation")
 }
 
 /// Provenance of the CURRENTLY PUBLISHED overview (#742 v2). One row per scholar,

@@ -1587,6 +1587,14 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("SELF_EDIT_OVERVIEW_GENERATE")).toBe("on");
       });
 
+      it("keeps the #917 v5 biosketch generator OFF in prod (EDIT_BIOSKETCH_GENERATE=off, staging-first; faithfulness pass off)", () => {
+        // New surface: default-off in prod, on in staging while it bakes. The
+        // faithfulness pass is off in both envs, present for later tuning.
+        const env = appContainerEnv();
+        expect(env.get("EDIT_BIOSKETCH_GENERATE")).toBe("off");
+        expect(env.get("BIOSKETCH_FAITHFULNESS_PASS")).toBe("off");
+      });
+
       it("ships the #443 interim superuser allowlist with the group CN left unset", () => {
         // The live LDAP superuser check can't reach the WCM directory yet, so
         // the allowlist confers the tier without LDAP and the group CN stays
@@ -2050,6 +2058,21 @@ describe("AppStack", () => {
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("SELF_EDIT_OVERVIEW_GENERATE")).toBe("on");
+    });
+
+    it("enables the #917 v5 biosketch generator in staging (EDIT_BIOSKETCH_GENERATE=on, staging-first; faithfulness pass off)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appContainer = (
+        Object.values(taskDefs).find((r) => r.Properties?.Family === "sps-app-staging")
+          ?.Properties?.ContainerDefinitions as
+          | Array<{ Name?: string; Environment?: Array<{ Name?: string; Value?: string }> }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("EDIT_BIOSKETCH_GENERATE")).toBe("on");
+      expect(envByName.get("BIOSKETCH_FAITHFULNESS_PASS")).toBe("off");
     });
 
     it("ships the ReCiter pending-suggestions nudge ON in staging (SELF_EDIT_RECITER_PENDING_HINT — live DynamoDB read for the soak)", () => {

@@ -22,7 +22,7 @@ import { ChevronRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-export type RailKind = "owned" | "sourced" | "readonly";
+export type RailKind = "owned" | "service" | "sourced" | "readonly";
 
 export type RailItem = {
   /** The `?attr=` value (e.g. "appointments"). */
