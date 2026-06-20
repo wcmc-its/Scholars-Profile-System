@@ -684,7 +684,10 @@ function CoreFacilitiesSection({
 }: {
   cores: PublicationDetailCore[];
 }) {
-  if (cores.length === 0) return null;
+  // Defensive: the modal is opened from many surfaces; tolerate a payload that
+  // predates the `cores` field (older mocks / cached responses) rather than crash
+  // the whole modal. Production's getPublicationDetail always sets it.
+  if (!cores || cores.length === 0) return null;
   return (
     <section>
       <SectionHeading>Core facilities</SectionHeading>
