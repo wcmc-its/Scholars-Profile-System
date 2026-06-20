@@ -61,6 +61,8 @@ import { resolveTopTopicByPmid } from "./top-topic-resolver";
 import { assertPublicationTopicPopulated } from "./publication-topic-guard";
 import { buildPublicationTopicWrites } from "./publication-topic-mapper";
 import { buildScholarToolWrites } from "./scholar-tool-mapper";
+import { buildPublicationCoreWrites } from "./publication-core-mapper";
+import { CORE_CATALOG, CORE_CATALOG_SOURCE } from "./core-catalog";
 import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
 import { projectGrantOpportunities } from "./grant-opportunity-etl";
 
@@ -128,6 +130,24 @@ type ImpactRecord = {
   impact_score?: number;
   justification?: string;
   model?: string;
+  [key: string]: unknown;
+};
+
+type CoreRecord = {
+  PK: string; // PUB#{pmid} — note: partition is the publication, not the core
+  SK: string; // CORE#{core_id}
+  pmid?: string | number;
+  core_id?: string;
+  likelihood?: number;
+  status?: string; // candidate | confirmed | below_threshold
+  scored_at?: string;
+  signal_coauthors?: unknown; // string[] of core-staff CWIDs
+  signal_ack?: boolean;
+  ack_alias?: string;
+  ack_snippet?: string;
+  llm_score?: number;
+  llm_rationale?: string;
+  author_affinity?: number;
   [key: string]: unknown;
 };
 
@@ -745,7 +765,123 @@ async function main() {
     }
 
     // ===================================================================
-    // Block 6: GRANT# → opportunity  (GrantRecs Phase 2)
+    // Block 6: PUB#/CORE# → core + publication_core  (cores inference, ReciterAI #245)
+    // ===================================================================
+    // The cores inference engine writes one item per (publication, core):
+    // PK=PUB#{pmid}, SK=CORE#{core_id}. The partition key is the publication, so
+    // this block filters on the SK prefix (begins_with(SK, "CORE#")) — the only
+    // block keyed off SK rather than PK.
+    //
+    // There is no DynamoDB catalog record for cores (cf. TAXONOMY# for topics), so
+    // the `core` catalog is seeded from the version-controlled CORE_CATALOG mirror
+    // of ReciterAI's config/core_dictionary.yaml, then publication_core.coreId is
+    // FK-guarded against it — the same Block 1 → Block 2 shape used for topics.
+    // Human claims live in the ADR-005 override layer (read-time precedence); the
+    // engine only ever sets candidate/confirmed here.
+    //
+    // No-ops cleanly when the engine hasn't published any CORE# items yet (the
+    // current pre-merge state): the scan returns zero rows and the block logs 0.
+
+    // Seed the core catalog (upsert; tiny + deterministic — one row today).
+    let coreRowsUpserted = 0;
+    for (const c of CORE_CATALOG) {
+      await db.write.core.upsert({
+        where: { id: c.id },
+        create: {
+          id: c.id,
+          name: c.name,
+          facility: c.facility,
+          source: CORE_CATALOG_SOURCE,
+          refreshedAt: new Date(),
+        },
+        update: {
+          name: c.name,
+          facility: c.facility,
+          source: CORE_CATALOG_SOURCE,
+          refreshedAt: new Date(),
+        },
+      });
+      coreRowsUpserted += 1;
+    }
+    const knownCores = await db.write.core.findMany({ select: { id: true } });
+    const knownCoreIds = new Set(knownCores.map((c) => c.id));
+    console.log(
+      `core catalog upserts complete: ${coreRowsUpserted} rows (${knownCoreIds.size} known core ids).`,
+    );
+
+    console.log(`Scanning ${TABLE} for CORE# records (begins_with SK, paginated)...`);
+    const coreItems: CoreRecord[] = [];
+    {
+      let lastKey: Record<string, unknown> | undefined;
+      do {
+        const resp = await ddb.send(
+          new ScanCommand({
+            TableName: TABLE,
+            FilterExpression: "begins_with(SK, :prefix)",
+            ExpressionAttributeValues: { ":prefix": "CORE#" },
+            ExclusiveStartKey: lastKey,
+          }),
+        );
+        for (const it of (resp.Items ?? []) as CoreRecord[]) coreItems.push(it);
+        lastKey = resp.LastEvaluatedKey;
+      } while (lastKey);
+    }
+    console.log(`Found ${coreItems.length} CORE# records.`);
+
+    // Pure, unit-tested per-record mapping + FK guards; see ./publication-core-mapper.ts.
+    const coreMap = buildPublicationCoreWrites(coreItems, { knownCoreIds, knownPmidSet });
+    console.log(
+      `publication_core candidates: ${coreMap.writes.length} (skipped: ` +
+        `${coreMap.skippedMissingCore} missing core, ` +
+        `${coreMap.skippedMissingPublication} missing publication, ` +
+        `${coreMap.skippedMissingFields} missing required fields, ` +
+        `${coreMap.skippedBelowThreshold} below threshold).`,
+    );
+
+    // Idempotent upsert keyed on (pmid, coreId). Same batch shape as Block 2.
+    let pubCoreRowsUpserted = 0;
+    const CORE_BATCH = 100;
+    for (let i = 0; i < coreMap.writes.length; i += CORE_BATCH) {
+      const chunk = coreMap.writes.slice(i, i + CORE_BATCH);
+      await Promise.all(
+        chunk.map((w) =>
+          db.write.publicationCore.upsert({
+            where: { pmid_coreId: { pmid: w.pmid, coreId: w.coreId } },
+            create: {
+              pmid: w.pmid,
+              coreId: w.coreId,
+              likelihood: w.likelihood,
+              status: w.status,
+              signalCoauthors: w.signalCoauthors,
+              signalAck: w.signalAck,
+              ackAlias: w.ackAlias,
+              ackSnippet: w.ackSnippet,
+              llmScore: w.llmScore,
+              llmRationale: w.llmRationale,
+              authorAffinity: w.authorAffinity,
+              scoredAt: w.scoredAt,
+            },
+            update: {
+              likelihood: w.likelihood,
+              status: w.status,
+              signalCoauthors: w.signalCoauthors,
+              signalAck: w.signalAck,
+              ackAlias: w.ackAlias,
+              ackSnippet: w.ackSnippet,
+              llmScore: w.llmScore,
+              llmRationale: w.llmRationale,
+              authorAffinity: w.authorAffinity,
+              scoredAt: w.scoredAt,
+            },
+          }),
+        ),
+      );
+      pubCoreRowsUpserted += chunk.length;
+    }
+    console.log(`publication_core upserts complete: ${pubCoreRowsUpserted} rows.`);
+
+    // ===================================================================
+    // Block 7: GRANT# → opportunity  (GrantRecs Phase 2)
     // ===================================================================
     // ReciterAI's pipeline_grants engine emits one GRANT# item per funding
     // OPPORTUNITY (not an awarded grant). Project them into the `opportunity`
@@ -769,7 +905,9 @@ async function main() {
       rows.length +
       impactRowsUpserted +
       scholarToolRowsInserted +
-      opportunityRowsUpserted;
+      opportunityRowsUpserted +
+      coreRowsUpserted +
+      pubCoreRowsUpserted;
     await db.write.etlRun.update({
       where: { id: run.id },
       data: { status: "success", completedAt: new Date(), rowsProcessed: totalRowsProcessed },
@@ -782,7 +920,7 @@ async function main() {
 
     const elapsed = Math.round((Date.now() - start) / 1000);
     console.log(
-      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}, publication_impact=${impactRowsUpserted}, opportunity=${opportunityRowsUpserted}`,
+      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}, publication_impact=${impactRowsUpserted}, opportunity=${opportunityRowsUpserted}, core=${coreRowsUpserted}, publication_core=${pubCoreRowsUpserted}`,
     );
   } catch (err) {
     await db.write.etlRun.update({
