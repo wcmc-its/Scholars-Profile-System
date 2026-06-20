@@ -666,13 +666,47 @@ function MethodsSection({
   );
 }
 
+/** Escape a string for safe interpolation into a RegExp (the tool name is data). */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * #917 Phase 2 — render `snippet` with each verbatim occurrence of `term`
+ * `<mark>`-highlighted, so the reader sees exactly where the tool is named in the
+ * sentence (the methods-panel-redesign idea). Case-insensitive; the highlighted
+ * text keeps the SNIPPET's own casing. When the term does not appear verbatim
+ * (e.g. an acronym the sentence spells out), the snippet renders plain — no mark.
+ */
+function highlightTermInSnippet(snippet: string, term: string): ReactNode {
+  const t = term.trim();
+  if (!t) return snippet;
+  // Capturing group → split keeps the matched substrings at odd indices.
+  const parts = snippet.split(new RegExp(`(${escapeRegExp(t)})`, "gi"));
+  if (parts.length === 1) return snippet; // no occurrence
+  return parts.map((part, i) =>
+    i % 2 === 1 ? (
+      <mark
+        key={i}
+        className="rounded-[2px] bg-white/20 px-0.5 font-medium text-white not-italic"
+      >
+        {part}
+      </mark>
+    ) : (
+      <Fragment key={i}>{part}</Fragment>
+    ),
+  );
+}
+
 /**
  * #917 Phase 2 — a family's representative tools (`exemplarTools`) beneath its
  * chip, dot-separated. A tool carrying a #1119 usage snippet (server-gated on
- * `METHODS_LENS_TOOL_CONTEXT`) becomes a HoverTooltip trigger ("How <tool> was
- * used: …"), dotted-underlined to signal it; a tool with no snippet renders as
- * plain muted text. The snippet is sourced from `scholar_family.exemplarContexts`
- * and is representative of the author's usage, not paper-specific.
+ * `METHODS_LENS_TOOL_CONTEXT`) becomes a HoverTooltip trigger, dotted-underlined
+ * to signal it; a tool with no snippet renders as plain muted text. The tooltip
+ * frames the snippet honestly — "Verbatim, from the author's papers" — because it
+ * is sourced from `scholar_family.exemplarContexts` and is representative of the
+ * author's usage, NOT necessarily this paper (the source pmid isn't carried yet —
+ * #1158). The matched term is `<mark>`-highlighted inside the sentence.
  */
 function MethodToolsLine({ tools }: { tools: PublicationDetailMethodTool[] }) {
   return (
@@ -681,7 +715,18 @@ function MethodToolsLine({ tools }: { tools: PublicationDetailMethodTool[] }) {
         <Fragment key={tool.name}>
           {i > 0 ? <span aria-hidden="true"> · </span> : null}
           {tool.context ? (
-            <HoverTooltip text={`How ${tool.name} was used: ${tool.context}`} wide>
+            <HoverTooltip
+              text={`Representative usage of ${tool.name}, verbatim from the author's papers: ${tool.context}`}
+              body={
+                <span className="block">
+                  <span className="mb-1 block text-[10px] font-medium tracking-wide text-white/60 uppercase">
+                    Verbatim, from the author&apos;s papers
+                  </span>
+                  <span>{highlightTermInSnippet(tool.context, tool.name)}</span>
+                </span>
+              }
+              wide
+            >
               <span className="decoration-muted-foreground/50 underline decoration-dotted underline-offset-2">
                 {tool.name}
               </span>
