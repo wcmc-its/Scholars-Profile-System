@@ -554,6 +554,17 @@ export class EdgeStack extends Stack {
       // swallow `/scholars/<slug>/co-pubs/export` and cache the download.
       ["/scholars/*/co-pubs/export", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       ["/scholars/*/co-pubs/*/export", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // GrantRecs Phase 2 — forward matcher ("Grants for me"). Reads
+      // `sort`/`weights`/`limit`; the cacheable default's query allow-list omits
+      // them, so unlisted the params would be stripped before the origin. AllViewer
+      // forwards the full query string. GET-only (a read); per-cwid + no cookies,
+      // so the personalization works on this uncached path. Same shape as
+      // `/api/scholars/*/popover-context`.
+      ["/api/scholars/*/opportunities", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // GrantRecs Phase 2 — reverse matcher ("Find researchers"). `force-dynamic`,
+      // superuser-gated; reads `sort`/`stageLens`/`limit`. CachingDisabled +
+      // AllViewer forwards the query string and never caches an admin response.
+      ["/api/opportunities/*/researchers", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
     ];
 
     // ------------------------------------------------------------------

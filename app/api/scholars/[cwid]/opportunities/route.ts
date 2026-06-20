@@ -1,10 +1,12 @@
 /**
  * GET /api/scholars/[cwid]/opportunities — GrantRecs Phase 2 forward matcher
- * ("Grants for me"). PUBLIC + CACHEABLE per-cwid (decision D): the match is
- * derived from already-public publications + opportunities, takes an explicit
- * cwid (no cookies), so CloudFront can cache it per-URL. Phase 3 renders it as
- * "Grants for me" by probing /api/auth/session then calling this for the
- * logged-in cwid.
+ * ("Grants for me"). PUBLIC per-cwid (decision D): the match is derived from
+ * already-public publications + opportunities and takes an explicit cwid with no
+ * cookies, so the personalization works regardless of the edge cache. The
+ * CloudFront behavior is CachingDisabled + AllViewer (so `sort`/`weights`/`limit`
+ * are forwarded, matching the other query-reading API routes); the edge does not
+ * cache, and we set a short browser `max-age`. Phase 3 renders it as "Grants for
+ * me" by probing /api/auth/session then calling this for the logged-in cwid.
  *
  * Response carries the DISTINCT axis vector per opportunity; `sort` + `weights`
  * re-order / re-blend at query time without re-running the match (spec §7.3/§8).
@@ -69,6 +71,6 @@ export async function GET(
 
   return NextResponse.json(
     { cwid, count: results.length, results },
-    { headers: { "Cache-Control": "public, s-maxage=900, stale-while-revalidate=3600" } },
+    { headers: { "Cache-Control": "public, max-age=300, stale-while-revalidate=3600" } },
   );
 }
