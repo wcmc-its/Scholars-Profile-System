@@ -553,8 +553,75 @@ describe("getPublicationDetail — method families (#917)", () => {
     ]);
     const r = await getPublicationDetail("12345");
     expect(r?.methodFamilies[0].tools).toEqual([
-      { name: "STORK-A", context: "a non-invasive automated method of embryo evaluation" },
-      { name: "CheXpert", context: "a labeler for chest radiograph findings" },
+      {
+        name: "STORK-A",
+        context: "a non-invasive automated method of embryo evaluation",
+        sourcePmid: null, // fixture carries no exemplarContextPmids (pre-#1158 row)
+      },
+      {
+        name: "CheXpert",
+        context: "a labeler for chest radiograph findings",
+        sourcePmid: null,
+      },
+    ]);
+  });
+
+  it("carries each snippet's source pmid from exemplarContextPmids, gated with the snippet (#1158)", async () => {
+    process.env.METHODS_LENS_ENABLED = "on";
+    process.env.METHODS_LENS_PUB_MODAL = "on";
+    process.env.METHODS_LENS_TOOL_CONTEXT = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
+    mocks.publicationAuthorFindMany.mockResolvedValue([{ cwid: "aaa1001" }]);
+    mocks.scholarFamilyFindMany.mockResolvedValueOnce([
+      {
+        supercategory: "imaging",
+        familyLabel: "Confocal microscopy",
+        familyId: "fam_0100",
+        pmids: ["12345"],
+        exemplarTools: ["STORK-A", "CheXpert"],
+        exemplarContexts: {
+          "STORK-A": "a non-invasive automated method of embryo evaluation",
+          CheXpert: "a labeler for chest radiograph findings",
+        },
+        // 1:1 with exemplarContexts by display name; one matches the viewed pmid.
+        exemplarContextPmids: { "STORK-A": "12345", CheXpert: "33144353" },
+      },
+    ]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.methodFamilies[0].tools).toEqual([
+      {
+        name: "STORK-A",
+        context: "a non-invasive automated method of embryo evaluation",
+        sourcePmid: "12345",
+      },
+      {
+        name: "CheXpert",
+        context: "a labeler for chest radiograph findings",
+        sourcePmid: "33144353",
+      },
+    ]);
+  });
+
+  it("drops the source pmid when the tool-context flag is off (no orphan link without a snippet) (#1158)", async () => {
+    process.env.METHODS_LENS_ENABLED = "on";
+    process.env.METHODS_LENS_PUB_MODAL = "on";
+    // METHODS_LENS_TOOL_CONTEXT intentionally unset → snippet AND source pmid dark.
+    mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
+    mocks.publicationAuthorFindMany.mockResolvedValue([{ cwid: "aaa1001" }]);
+    mocks.scholarFamilyFindMany.mockResolvedValueOnce([
+      {
+        supercategory: "imaging",
+        familyLabel: "Confocal microscopy",
+        familyId: "fam_0100",
+        pmids: ["12345"],
+        exemplarTools: ["STORK-A"],
+        exemplarContexts: { "STORK-A": "a non-invasive automated method" },
+        exemplarContextPmids: { "STORK-A": "12345" },
+      },
+    ]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.methodFamilies[0].tools).toEqual([
+      { name: "STORK-A", context: null, sourcePmid: null },
     ]);
   });
 
@@ -576,7 +643,7 @@ describe("getPublicationDetail — method families (#917)", () => {
     ]);
     const r = await getPublicationDetail("12345");
     expect(r?.methodFamilies[0].tools).toEqual([
-      { name: "STORK-A", context: null },
+      { name: "STORK-A", context: null, sourcePmid: null },
     ]);
   });
 

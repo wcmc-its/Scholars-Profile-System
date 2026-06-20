@@ -61,6 +61,11 @@ export type PublicationDetailCitingPub = {
 export type PublicationDetailMethodTool = {
   name: string;
   context: string | null;
+  /** #1158 — the PMID the `context` snippet was extracted from
+   *  (`scholar_family.exemplarContextPmids[name]`), or null when the tool-context
+   *  flag is off, the snippet is absent, or the row predates #1158 (back-compat).
+   *  Lets the modal say "from this paper" when it equals the viewed pmid. */
+  sourcePmid: string | null;
 };
 
 /**
@@ -172,6 +177,7 @@ function parsePmid(pmid: string): number | null {
 function resolveFamilyTools(
   exemplarTools: unknown,
   exemplarContexts: unknown,
+  exemplarContextPmids: unknown,
 ): PublicationDetailMethodTool[] {
   const names = Array.isArray(exemplarTools)
     ? exemplarTools.map((t) => String(t).trim()).filter(Boolean)
@@ -185,6 +191,15 @@ function resolveFamilyTools(
     !Array.isArray(exemplarContexts)
       ? (exemplarContexts as Record<string, unknown>)
       : null;
+  // #1158 — the parallel `{ name: pmid }` map (same flag gate as the snippet; a
+  // source link is meaningless without the snippet). Null on a pre-#1158 row.
+  const pmidMap =
+    ctx &&
+    exemplarContextPmids &&
+    typeof exemplarContextPmids === "object" &&
+    !Array.isArray(exemplarContextPmids)
+      ? (exemplarContextPmids as Record<string, unknown>)
+      : null;
 
   const seen = new Set<string>();
   const out: PublicationDetailMethodTool[] = [];
@@ -192,9 +207,13 @@ function resolveFamilyTools(
     if (seen.has(name)) continue;
     seen.add(name);
     const raw = ctx ? ctx[name] : undefined;
+    const context = typeof raw === "string" && raw.length > 0 ? raw : null;
+    // Only carry a source pmid alongside a real snippet.
+    const rawPmid = context && pmidMap ? pmidMap[name] : undefined;
     out.push({
       name,
-      context: typeof raw === "string" && raw.length > 0 ? raw : null,
+      context,
+      sourcePmid: typeof rawPmid === "string" && rawPmid.length > 0 ? rawPmid : null,
     });
   }
   return out;
@@ -245,6 +264,7 @@ async function resolveMethodFamilies(
       pmids: true,
       exemplarTools: true,
       exemplarContexts: true,
+      exemplarContextPmids: true,
     },
   });
   if (familyRows.length === 0) return [];
@@ -274,7 +294,11 @@ async function resolveMethodFamilies(
       // identity is taken from). exemplar_tools is salience-ordered; the snippet
       // is looked up off the ARRAY order, not the exemplar_contexts object keys
       // (Aurora re-sorts JSON keys — #1119).
-      tools: resolveFamilyTools(row.exemplarTools, row.exemplarContexts),
+      tools: resolveFamilyTools(
+        row.exemplarTools,
+        row.exemplarContexts,
+        row.exemplarContextPmids,
+      ),
     });
   }
 

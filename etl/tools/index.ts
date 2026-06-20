@@ -518,6 +518,7 @@ async function main(): Promise<void> {
         pmidCount: w.pmidCount,
         exemplarTools: w.exemplarTools,
         exemplarContexts: w.exemplarContexts,
+        exemplarContextPmids: w.exemplarContextPmids,
         pmids: w.pmids,
         definition: w.definition,
         definitionSource: w.definitionSource,

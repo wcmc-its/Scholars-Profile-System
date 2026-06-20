@@ -1,0 +1,12 @@
+-- #1158 — source PMID per exemplar-tool usage snippet (parallel to `exemplar_contexts`).
+--
+-- `selectBestSnippet` already chooses the source pmid for each #1119 snippet; the
+-- mapper discarded it (persisting only the sentence). This sibling map keys the
+-- pmid by the SAME exemplar-tool DISPLAY NAME as `exemplar_contexts`, e.g.
+-- `{ "STORK-A": "33144353" }`, so a snippet is traceable to its source publication
+-- and the pub modal can say "from this paper" when the source is the one viewed.
+--
+-- Nullable so the additive migration applies cleanly to the populated table (a
+-- MySQL/MariaDB JSON column takes no default); NULL until the next full-replace
+-- tools ETL backfills it. Readers treat a missing pmid as "no source link".
+ALTER TABLE `scholar_family` ADD COLUMN `exemplar_context_pmids` JSON NULL;
