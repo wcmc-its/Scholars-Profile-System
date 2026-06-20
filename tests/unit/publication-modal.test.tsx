@@ -77,6 +77,7 @@ function makePayload(
       },
     ],
     methodFamilies: [],
+    cores: [],
     citingPubs: [
       { pmid: "999", title: "Citation paper one", journal: "J1", year: 2025 },
       { pmid: "888", title: "Citation paper two", journal: "J2", year: 2024 },
@@ -606,6 +607,45 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
       );
       expect(marks).toContain("corneal confocal microscope");
     });
+  });
+});
+
+describe("PublicationModal — Core facilities section", { retry: 2 }, () => {
+  it("omits the Core facilities section when cores is empty", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.queryByRole("heading", { name: "Core facilities" })).toBeNull();
+  });
+
+  it("renders a core as a /cores link when href is set", async () => {
+    mockFetch(
+      makePayload({
+        cores: [
+          { coreId: "2", name: "Biomedical Imaging", facility: "CBIC", href: "/cores/2" },
+        ],
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.getByRole("heading", { name: "Core facilities" })).toBeDefined();
+    const link = screen.getByRole("link", { name: "Biomedical Imaging" });
+    expect(link.getAttribute("href")).toBe("/cores/2");
+  });
+
+  it("renders a core as plain text when href is null (core pages off)", async () => {
+    mockFetch(
+      makePayload({
+        cores: [{ coreId: "5", name: "Flow Cytometry", facility: null, href: null }],
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.getByText("Flow Cytometry")).toBeDefined();
+    expect(screen.queryByRole("link", { name: "Flow Cytometry" })).toBeNull();
   });
 });
 
