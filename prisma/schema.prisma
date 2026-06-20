@@ -2015,24 +2015,24 @@ model ScholarTool {
 /// `pub_count` is the per-scholar, C-tier-reconciled distinct-publication count
 /// computed upstream (read directly, never re-aggregated SPS-side).
 model ScholarFamily {
-  id                String   @id @default(uuid()) @db.VarChar(64)
-  cwid              String   @db.VarChar(32)
+  id                   String   @id @default(uuid()) @db.VarChar(64)
+  cwid                 String   @db.VarChar(32)
   /// A2 family id (e.g. "fam_0042"). NOT stable across A2 rebuilds — re-keyed on
   /// every full-replacement load; safe only as the (cwid, family_id) rebuild key.
-  familyId          String   @map("family_id") @db.VarChar(64)
+  familyId             String   @map("family_id") @db.VarChar(64)
   /// Display-grade family label from the A2 taxonomy (#799a — surfaced directly).
-  familyLabel       String   @map("family_label") @db.VarChar(255)
+  familyLabel          String   @map("family_label") @db.VarChar(255)
   /// One of the A2 supercategory ids (e.g. "animal_cell_models"). The #801 gating
   /// key and the #800 group key. Open set (drifted 13→14); guard, don't hard-enum.
-  supercategory     String   @db.VarChar(128)
+  supercategory        String   @db.VarChar(128)
   /// Per-scholar, C-reconciled distinct-publication count (drives ranking + the
   /// "All work" count). Read directly from the artifact; never re-aggregated.
-  pmidCount         Int      @map("pmid_count")
+  pmidCount            Int      @map("pmid_count")
   /// Up to ~3 representative member-tool DISPLAY NAMES (e.g. "CheXpert"),
   /// resolved at ETL time from the per-scholar `exemplar_tool_ids` via the
   /// canonical tools[] index — scholar_tool has no canonical id to join on, so
   /// the lens cannot resolve ids→names at read time. Refreshed every load.
-  exemplarTools     Json     @map("exemplar_tools")
+  exemplarTools        Json     @map("exemplar_tools")
   /// The distinct PMIDs that put this scholar in this family (#819 — the
   /// click-to-filter membership). Read directly from `faculty[].families[].pmids`
   /// in the A2 `tools.json` artifact (ReciterAI#175), where the invariant
@@ -2040,7 +2040,7 @@ model ScholarFamily {
   /// the lens filters the publication list client-side (like Topics' meshTerms),
   /// no endpoint. Nullable: the ALTER adds it to a possibly-populated table and a
   /// MySQL JSON column takes no default; the next full-replace ETL backfills it.
-  pmids             Json?
+  pmids                Json?
   /// #1119 — best per-(scholar-family, exemplar-tool) usage snippet, keyed by the
   /// exemplar tool DISPLAY NAME (parallel to `exemplar_tools`), e.g.
   /// `{ "STORK-A": "a non-invasive and automated method of embryo evaluation…" }`.
@@ -2052,10 +2052,20 @@ model ScholarFamily {
   /// DATA in any LLM prompt. Nullable: the ALTER adds it to a possibly-populated
   /// table (MySQL JSON takes no default); `{}` when no exemplar has a usable
   /// snippet; the next full-replace ETL backfills it.
-  exemplarContexts  Json?    @map("exemplar_contexts")
+  exemplarContexts     Json?    @map("exemplar_contexts")
+  /// #1158 — source PMID per exemplar-tool usage snippet, keyed by the SAME tool
+  /// DISPLAY NAME as `exemplar_contexts` (a parallel `{ "STORK-A": "33144353" }`
+  /// map). `selectBestSnippet` already chooses each snippet's source pmid at ETL
+  /// time; #1119 discarded it — this keeps it, so a snippet is traceable to the
+  /// publication it was extracted from (the rail/modal "Source publication"
+  /// affordance) and the pub modal can say "from THIS paper" when the source pmid
+  /// is the one being viewed. Nullable + back-compat: a pre-#1158 row (or a `{}`
+  /// contexts row) leaves it NULL, and every reader treats a missing pmid as "no
+  /// source link"; the next full-replace tools ETL backfills it.
+  exemplarContextPmids Json?    @map("exemplar_context_pmids")
   /// The `manifest.sha256` of the artifact this row was loaded from — lets a
   /// family-id renumber be detected per refresh (no semantic taxonomy_version).
-  sourceArtifactSha String?  @map("source_artifact_sha") @db.VarChar(64)
+  sourceArtifactSha    String?  @map("source_artifact_sha") @db.VarChar(64)
   /// #879 — generated 1–2 sentence capability gloss for the family, passthrough
   /// from the A2 taxonomy `families[].definition` (schema tools-a2-v3, ReciterAI).
   /// Family-level (identical across a family's scholar rows); denormalized here the
@@ -2064,12 +2074,12 @@ model ScholarFamily {
   /// overview generator reads a projection without it). Nullable: a pre-v3 artifact
   /// or a family with no generated gloss leaves it null; the next full-replace
   /// ETL backfills it.
-  definition        String?  @db.Text
+  definition           String?  @db.Text
   /// #879 — provenance for `definition`: "generated" when ReciterAI produced one,
   /// else null. The render layer gates the "AI-generated" disclaimer on
   /// `definition_source === "generated"`; stored raw (not coerced) like a tier.
-  definitionSource  String?  @map("definition_source") @db.VarChar(32)
-  refreshedAt       DateTime @default(now()) @map("refreshed_at")
+  definitionSource     String?  @map("definition_source") @db.VarChar(32)
+  refreshedAt          DateTime @default(now()) @map("refreshed_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 

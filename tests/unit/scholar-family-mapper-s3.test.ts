@@ -58,6 +58,7 @@ describe("buildScholarFamilyWritesFromS3 — canonical mapping", () => {
         pmidCount: 12,
         exemplarTools: ["CheXpert", "MIMIC-CXR"], // resolved from canonical_tool_id, NOT the raw ids
         exemplarContexts: {}, // #1119 — no toolContext index supplied → {}
+        exemplarContextPmids: {}, // #1158 — parallel source-pmid map, also {} here
         pmids: [], // none in this fixture
         definition: null, // #879 — no familyDefById supplied → null
         definitionSource: null,
@@ -465,6 +466,11 @@ describe("buildScholarFamilyWritesFromS3 — #1119 exemplar contexts", () => {
     });
     // pmid 999 (out of the family's pmids) was not chosen for CheXpert.
     expect(writes[0].exemplarContexts.CheXpert).not.toContain("out-of-family");
+    // #1158 — the source pmid of each kept snippet, keyed 1:1 by display name.
+    expect(writes[0].exemplarContextPmids).toEqual({
+      CheXpert: "111",
+      "MIMIC-CXR": "222",
+    });
   });
 
   it("yields {} when no toolContext index is supplied", () => {
@@ -487,6 +493,7 @@ describe("buildScholarFamilyWritesFromS3 — #1119 exemplar contexts", () => {
       { ourCwidSet: new Set(["aog"]) },
     );
     expect(writes[0].exemplarContexts).toEqual({});
+    expect(writes[0].exemplarContextPmids).toEqual({}); // #1158 — parallel map also empty
   });
 
   it("#1119 dedupe: never surfaces the same sentence for two exemplars of one family", () => {

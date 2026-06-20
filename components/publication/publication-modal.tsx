@@ -16,6 +16,7 @@ import { HelpCircle } from "lucide-react";
 import { CopyButton } from "@/components/publication/copy-button";
 import { PubJournal } from "@/components/publication/pub-html";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { highlightSnippet } from "@/components/method/highlight-snippet";
 import { methodologyHref } from "@/lib/methodology-anchors";
 import type {
   PublicationDetailMethodFamily,
@@ -357,7 +358,7 @@ function ModalContent({
           />
           <TopicsSection topics={topics} currentTopicSlug={currentTopicSlug} />
           <MeshSection meshTerms={pub.meshTerms} />
-          <MethodsSection families={payload.methodFamilies} />
+          <MethodsSection families={payload.methodFamilies} pmid={pub.pmid} />
           <CitingPubsSection
             pmid={pub.pmid}
             citationCount={pub.citationCount}
@@ -636,8 +637,12 @@ function MeshSection({
  */
 function MethodsSection({
   families,
+  pmid,
 }: {
   families: PublicationDetailMethodFamily[];
+  /** The pmid being viewed — lets {@link MethodToolsLine} say "from this paper"
+   *  when a snippet's source pmid matches it (#1158). */
+  pmid: string;
 }) {
   if (families.length === 0) return null;
   return (
@@ -658,43 +663,11 @@ function MethodsSection({
                 {f.familyLabel}
               </span>
             )}
-            {f.tools.length > 0 ? <MethodToolsLine tools={f.tools} /> : null}
+            {f.tools.length > 0 ? <MethodToolsLine tools={f.tools} pmid={pmid} /> : null}
           </li>
         ))}
       </ul>
     </section>
-  );
-}
-
-/** Escape a string for safe interpolation into a RegExp (the tool name is data). */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * #917 Phase 2 — render `snippet` with each verbatim occurrence of `term`
- * `<mark>`-highlighted, so the reader sees exactly where the tool is named in the
- * sentence (the methods-panel-redesign idea). Case-insensitive; the highlighted
- * text keeps the SNIPPET's own casing. When the term does not appear verbatim
- * (e.g. an acronym the sentence spells out), the snippet renders plain — no mark.
- */
-function highlightTermInSnippet(snippet: string, term: string): ReactNode {
-  const t = term.trim();
-  if (!t) return snippet;
-  // Capturing group → split keeps the matched substrings at odd indices.
-  const parts = snippet.split(new RegExp(`(${escapeRegExp(t)})`, "gi"));
-  if (parts.length === 1) return snippet; // no occurrence
-  return parts.map((part, i) =>
-    i % 2 === 1 ? (
-      <mark
-        key={i}
-        className="rounded-[2px] bg-white/20 px-0.5 font-medium text-white not-italic"
-      >
-        {part}
-      </mark>
-    ) : (
-      <Fragment key={i}>{part}</Fragment>
-    ),
   );
 }
 
@@ -703,26 +676,52 @@ function highlightTermInSnippet(snippet: string, term: string): ReactNode {
  * chip, dot-separated. A tool carrying a #1119 usage snippet (server-gated on
  * `METHODS_LENS_TOOL_CONTEXT`) becomes a HoverTooltip trigger, dotted-underlined
  * to signal it; a tool with no snippet renders as plain muted text. The tooltip
- * frames the snippet honestly — "Verbatim, from the author's papers" — because it
- * is sourced from `scholar_family.exemplarContexts` and is representative of the
- * author's usage, NOT necessarily this paper (the source pmid isn't carried yet —
- * #1158). The matched term is `<mark>`-highlighted inside the sentence.
+ * frames the snippet honestly: when the snippet's source pmid (#1158) is THIS
+ * paper, "Verbatim, from this paper"; otherwise it is representative of the
+ * author's usage across their work, "Verbatim, from the author's papers". The
+ * source pmid is server-resolved from `scholar_family.exemplarContextPmids` (null
+ * on a pre-#1158 row → the representative framing). The matched term is
+ * `<mark>`-highlighted inside the sentence. (A clickable source-publication
+ * click-through lives in the persistent provenance rail — #1167 — not this
+ * ephemeral, pointer-events-none tooltip.)
  */
-function MethodToolsLine({ tools }: { tools: PublicationDetailMethodTool[] }) {
+function MethodToolsLine({
+  tools,
+  pmid,
+}: {
+  tools: PublicationDetailMethodTool[];
+  pmid: string;
+}) {
   return (
     <p className="text-muted-foreground mt-1 pl-2 text-xs">
-      {tools.map((tool, i) => (
+      {tools.map((tool, i) => {
+        const fromThisPaper = tool.sourcePmid != null && tool.sourcePmid === pmid;
+        const eyebrow = fromThisPaper
+          ? "Verbatim, from this paper"
+          : "Verbatim, from the author's papers";
+        return (
         <Fragment key={tool.name}>
           {i > 0 ? <span aria-hidden="true"> · </span> : null}
           {tool.context ? (
             <HoverTooltip
-              text={`Representative usage of ${tool.name}, verbatim from the author's papers: ${tool.context}`}
+              text={
+                fromThisPaper
+                  ? `Usage of ${tool.name}, verbatim from this paper: ${tool.context}`
+                  : `Representative usage of ${tool.name}, verbatim from the author's papers: ${tool.context}`
+              }
               body={
                 <span className="block">
                   <span className="mb-1 block text-[10px] font-medium tracking-wide text-white/60 uppercase">
-                    Verbatim, from the author&apos;s papers
+                    {eyebrow}
                   </span>
-                  <span>{highlightTermInSnippet(tool.context, tool.name)}</span>
+                  <span>
+                    {highlightSnippet(
+                      tool.context,
+                      tool.name,
+                      undefined,
+                      "rounded-[2px] bg-white/20 px-0.5 font-medium text-white not-italic",
+                    )}
+                  </span>
                 </span>
               }
               wide
@@ -735,7 +734,8 @@ function MethodToolsLine({ tools }: { tools: PublicationDetailMethodTool[] }) {
             <span>{tool.name}</span>
           )}
         </Fragment>
-      ))}
+        );
+      })}
     </p>
   );
 }

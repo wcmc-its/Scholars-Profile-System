@@ -91,6 +91,10 @@ export type OpportunityCandidate = {
   topicVector: OpportunityTopicScore[];
   appealByStage: Partial<Record<CareerStage, number>>;
   meshDescriptorUi: string[];
+  /** At-a-glance card facts (Phase 3). Optional on the candidate so pure-unit
+   *  fixtures need not supply them; null-safe on the ranked result below. */
+  mechanism?: string | null;
+  awardCeiling?: number | null;
 };
 
 export type RankedOpportunity = {
@@ -101,6 +105,10 @@ export type RankedOpportunity = {
   status: string;
   axes: MatchAxes;
   defaultScore: number;
+  /** Phase 3 — surfaced inline on the "Grants for me" card header for
+   *  actionability (the funding mechanism + award ceiling). `null` when absent. */
+  mechanism: string | null;
+  awardCeiling: number | null;
 };
 
 export type RankSort = "fit" | "deadline" | "stage";
@@ -162,6 +170,8 @@ export function rankCandidates(
       status: c.status,
       axes,
       defaultScore: combineScore(axes, weights),
+      mechanism: c.mechanism ?? null,
+      awardCeiling: c.awardCeiling ?? null,
     });
   }
 
@@ -289,6 +299,8 @@ export async function matchOpportunitiesForScholar(
       topicVector: (Array.isArray(src.topicVector) ? src.topicVector : []) as OpportunityTopicScore[],
       appealByStage: (src.appealByStage ?? {}) as Partial<Record<CareerStage, number>>,
       meshDescriptorUi: Array.isArray(src.meshDescriptorUi) ? (src.meshDescriptorUi as string[]) : [],
+      mechanism: src.mechanism != null ? String(src.mechanism) : null,
+      awardCeiling: typeof src.awardCeiling === "number" ? src.awardCeiling : null,
     };
   });
 

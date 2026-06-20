@@ -37,11 +37,13 @@ import {
 /** Up to N representative papers + the renderable-candidate total ("+N more").
  *  #1119 — `methodContext` carries the family's best per-paper tool-usage snippet
  *  ("how researchers use <tool>"), populated only for a method match when
- *  METHODS_LENS_TOOL_CONTEXT is on; null otherwise (and always for topic). */
+ *  METHODS_LENS_TOOL_CONTEXT is on; null otherwise (and always for topic).
+ *  #1158 — `sourcePmid` is the publication the snippet was extracted from (digit
+ *  string), keyed off the SAME tool name; null when unknown / not yet populated. */
 export type ExemplarResult = {
   pubs: EvidencePub[];
   total: number;
-  methodContext: { tool: string; context: string } | null;
+  methodContext: { tool: string; context: string; sourcePmid: string | null } | null;
 };
 
 /** The null-equivalent empty result (no candidate / nothing renderable). */
@@ -138,14 +140,18 @@ async function rankExemplarForPmids(
   return { pubs: pubsRanked, total: renderable.length, methodContext: null };
 }
 
-/** #1119 — pick the family's representative tool-usage snippet: the top-pubCount
- *  visible row's FIRST exemplar tool (by the order-preserving `exemplar_tools`
- *  ARRAY — salience-ranked) that has a snippet. The `exemplar_contexts` OBJECT key
- *  order is unreliable (Aurora MySQL re-sorts JSON keys on storage, #1119 review),
- *  so order off the array, not the object. null when the flag is off or none. */
+/** #1119/#1158 — pick the family's representative tool-usage snippet: the
+ *  top-pubCount visible row's FIRST exemplar tool (by the order-preserving
+ *  `exemplar_tools` ARRAY — salience-ranked) that has a snippet. The
+ *  `exemplar_contexts` OBJECT key order is unreliable (Aurora MySQL re-sorts JSON
+ *  keys on storage, #1119 review), so order off the array, not the object — and the
+ *  parallel `exemplar_context_pmids` source lookup MUST use the SAME `tool` key
+ *  (object index), never positional, to stay 1:1 with the chosen snippet.
+ *  `sourcePmid` is returned only when the value is a non-empty digit string, else
+ *  null. null result when the flag is off or no row has a snippet. */
 function pickMethodContext(
-  rows: { exemplarTools: unknown; exemplarContexts: unknown }[],
-): { tool: string; context: string } | null {
+  rows: { exemplarTools: unknown; exemplarContexts: unknown; exemplarContextPmids: unknown }[],
+): { tool: string; context: string; sourcePmid: string | null } | null {
   if (!isMethodsLensToolContextOn()) return null;
   for (const r of rows) {
     const raw = r.exemplarContexts;
@@ -154,7 +160,16 @@ function pickMethodContext(
     const tools = Array.isArray(r.exemplarTools) ? (r.exemplarTools as unknown[]).map(String) : [];
     for (const tool of tools) {
       const context = ctx[tool];
-      if (typeof context === "string" && context.length > 0) return { tool, context };
+      if (typeof context === "string" && context.length > 0) {
+        // Parallel pmid map, keyed by the SAME tool display name (NOT positional).
+        const pmidRaw = r.exemplarContextPmids;
+        let sourcePmid: string | null = null;
+        if (pmidRaw && typeof pmidRaw === "object" && !Array.isArray(pmidRaw)) {
+          const v = (pmidRaw as Record<string, unknown>)[tool];
+          if (typeof v === "string" && /^\d+$/.test(v)) sourcePmid = v;
+        }
+        return { tool, context, sourcePmid };
+      }
     }
   }
   return null;
@@ -196,6 +211,7 @@ export async function loadMethodExemplar(
       pmids: true,
       exemplarTools: true,
       exemplarContexts: true,
+      exemplarContextPmids: true,
     },
     orderBy: { pmidCount: "desc" },
   });

@@ -69,6 +69,10 @@ export type ScholarFamilyWrite = {
    *  when none do, or when no tool-context index was supplied. EXTRACTED paper text
    *  (grounding-eligible, unlike `definition`) — injection-safe DATA in any prompt. */
   exemplarContexts: Record<string, string>;
+  /** #1158 — source PMID per exemplar-tool snippet, keyed by the SAME display name
+   *  as `exemplarContexts` (1:1), drawn from the same `selectBestSnippet` choice.
+   *  `{}` when no exemplar yields a kept snippet (mirrors `exemplarContexts`). */
+  exemplarContextPmids: Record<string, string>;
   /** #819 — distinct member PMIDs (digit strings), read from the artifact; backs
    *  the click-to-filter membership. `[]` on the pre-#175 artifact (no field). */
   pmids: string[];
@@ -140,6 +144,8 @@ type Accum = {
   pmids: string[];
   /** #1119 — exemplar tool DISPLAY NAME → best usage snippet (see ScholarFamilyWrite). */
   exemplarContexts: Record<string, string>;
+  /** #1158 — exemplar tool DISPLAY NAME → that snippet's source pmid (1:1 with `exemplarContexts`). */
+  exemplarContextPmids: Record<string, string>;
 };
 
 /**
@@ -188,9 +194,12 @@ function resolveExemplarContexts(
   toolContext: ToolContextIndex,
   scholarPmids: ReadonlySet<string>,
   excludePmid?: (pmid: string) => boolean,
-): Record<string, string> {
-  if (!Array.isArray(raw)) return {};
-  const out: Record<string, string> = {};
+): { contexts: Record<string, string>; pmids: Record<string, string> } {
+  if (!Array.isArray(raw)) return { contexts: {}, pmids: {} };
+  const contexts: Record<string, string> = {};
+  // #1158 — the source pmid `selectBestSnippet` already chose for each kept
+  // snippet, keyed by the SAME display name so it stays 1:1 with `contexts`.
+  const pmids: Record<string, string> = {};
   const seen = new Set<string>();
   const chosen = new Set<string>(); // normalized snippets already kept in this family
   for (const v of raw) {
@@ -210,9 +219,10 @@ function resolveExemplarContexts(
     const norm = best.context.toLowerCase().replace(/\s+/g, " ").trim();
     if (chosen.has(norm)) continue; // identical to a sibling exemplar's snippet → collapse
     chosen.add(norm);
-    out[name] = best.context;
+    contexts[name] = best.context;
+    pmids[name] = best.pmid;
   }
-  return out;
+  return { contexts, pmids };
 }
 
 /**
@@ -339,8 +349,9 @@ export function buildScholarFamilyWritesFromS3(
 
       const exemplarTools = resolveExemplarTools(f?.exemplar_tool_ids, toolsById);
       const pmids = normalizePmids(f?.pmids);
-      // #1119 — scope the snippet search to this family's member pmids.
-      const exemplarContexts = toolContext
+      // #1119 — scope the snippet search to this family's member pmids; #1158 — the
+      // same pass also yields each kept snippet's source pmid (1:1 with contexts).
+      const { contexts: exemplarContexts, pmids: exemplarContextPmids } = toolContext
         ? resolveExemplarContexts(
             f?.exemplar_tool_ids,
             toolsById,
@@ -349,7 +360,7 @@ export function buildScholarFamilyWritesFromS3(
             new Set(pmids),
             excludePmid,
           )
-        : {};
+        : { contexts: {}, pmids: {} };
       const prev = byFamilyId.get(familyId);
       if (!prev) {
         byFamilyId.set(familyId, {
@@ -359,14 +370,16 @@ export function buildScholarFamilyWritesFromS3(
           exemplarTools,
           pmids,
           exemplarContexts,
+          exemplarContextPmids,
         });
       } else if (pmidCount > prev.pmidCount) {
         // Same family_id appeared twice: keep the strongest count + its exemplars,
-        // pmids, and contexts.
+        // pmids, and contexts (+ their source pmids).
         prev.pmidCount = pmidCount;
         prev.exemplarTools = exemplarTools;
         prev.pmids = pmids;
         prev.exemplarContexts = exemplarContexts;
+        prev.exemplarContextPmids = exemplarContextPmids;
       }
     }
 
@@ -408,6 +421,7 @@ export function buildScholarFamilyWritesFromS3(
         pmidCount: e.pmidCount,
         exemplarTools: e.exemplarTools,
         exemplarContexts: e.exemplarContexts,
+        exemplarContextPmids: e.exemplarContextPmids,
         pmids: e.pmids,
         definition: def?.definition ?? null,
         definitionSource: def?.definitionSource ?? null,
