@@ -35,7 +35,7 @@ import { assembleOverviewFacts, type OverviewFacts } from "@/lib/edit/overview-f
 import {
   buildOverviewUserPrompt,
   generateOverviewDraft,
-  OVERVIEW_SYSTEM_PROMPT,
+  overviewSystemPromptFor,
 } from "@/lib/edit/overview-generator";
 import { DEFAULT_OVERVIEW_PARAMS } from "@/lib/edit/overview-params";
 
@@ -291,8 +291,10 @@ async function main(): Promise<void> {
       doc.push(`### Prompt (dry-run — not sent)`);
       doc.push("");
       doc.push("```text");
-      doc.push(`SYSTEM:`);
-      doc.push(OVERVIEW_SYSTEM_PROMPT);
+      doc.push(`SYSTEM (prompt version: ${DEFAULT_OVERVIEW_PARAMS.promptVersion}):`);
+      // Print the system prompt for the version the default params resolve to (the
+      // live default, currently v3) so the dry-run shows what generation actually sends.
+      doc.push(overviewSystemPromptFor(DEFAULT_OVERVIEW_PARAMS.promptVersion));
       doc.push("");
       doc.push(`USER:`);
       doc.push(buildOverviewUserPrompt(facts, DEFAULT_OVERVIEW_PARAMS));

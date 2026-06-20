@@ -29,6 +29,7 @@ const NORMALIZED_EMPTY = {
   length: DEFAULT_OVERVIEW_PARAMS.length,
   elements: [],
   instructions: "",
+  promptVersion: DEFAULT_OVERVIEW_PARAMS.promptVersion,
 };
 
 describe("normalizeOverviewParams — enum defaulting", () => {
@@ -147,6 +148,20 @@ describe("normalizeOverviewParams — never throws on garbage", () => {
     expect(out.voice).toBe(DEFAULT_OVERVIEW_PARAMS.voice);
     expect(out.elements).toEqual([]); // a non-array object is not iterable as elements
     expect(out.instructions).toBe("coerced");
+  });
+});
+
+describe("normalizeOverviewParams — promptVersion (#742)", () => {
+  it("keeps a known version id", () => {
+    expect(normalizeOverviewParams({ promptVersion: "v2" }).promptVersion).toBe("v2");
+    expect(normalizeOverviewParams({ promptVersion: "v3" }).promptVersion).toBe("v3");
+  });
+
+  it("falls back to the default for an unknown / missing / non-string version", () => {
+    const def = DEFAULT_OVERVIEW_PARAMS.promptVersion;
+    expect(normalizeOverviewParams({ promptVersion: "v99" }).promptVersion).toBe(def);
+    expect(normalizeOverviewParams({ promptVersion: 7 }).promptVersion).toBe(def);
+    expect(normalizeOverviewParams({}).promptVersion).toBe(def);
   });
 });
 

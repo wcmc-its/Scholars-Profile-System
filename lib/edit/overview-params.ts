@@ -13,9 +13,15 @@
  *
  * `normalizeOverviewParams` is the trust boundary: a request body's `params` is
  * never used as-is. Unknown enums fall back to the default, the element list is
- * filtered to known keys, and `instructions` is coerced + trimmed + clamped. It
- * never throws, so a garbage body normalizes to a usable shape rather than a 400.
+ * filtered to known keys, `instructions` is coerced + trimmed + clamped, and an
+ * unknown `promptVersion` falls back to the live default. It never throws, so a
+ * garbage body normalizes to a usable shape rather than a 400.
  */
+import {
+  defaultPromptVersionId,
+  isValidPromptVersionId,
+  type OverviewPromptVersionId,
+} from "@/lib/edit/overview-prompt-versions";
 
 /** Narrative voice — the bio's grammatical person. */
 export type OverviewVoice = "third" | "first";
@@ -42,6 +48,14 @@ export type OverviewParams = {
   elements: OverviewElement[];
   /** Optional free-text steering note — UNTRUSTED; trimmed, <= OVERVIEW_INSTRUCTIONS_MAX. */
   instructions: string;
+  /**
+   * Which PROMPT VERSION generates the draft (#742, the versioning registry in
+   * `overview-prompt-versions.ts`). A steering param so it persists in the
+   * generation history blob and "Regenerate from these settings" restores it. The
+   * generate route only honors a non-default value for a superuser / curator;
+   * faculty owners always generate on the live default.
+   */
+  promptVersion: OverviewPromptVersionId;
 };
 
 /** UI-facing labels for the element checkboxes, in display order. The generator
@@ -75,6 +89,7 @@ export const DEFAULT_OVERVIEW_PARAMS: OverviewParams = {
   length: "standard",
   elements: ["research_focus", "key_findings", "methods", "recent_work"],
   instructions: "",
+  promptVersion: defaultPromptVersionId(),
 };
 
 /** The known enum members, derived from the labels list / defaults so the
@@ -131,6 +146,11 @@ export function normalizeOverviewParams(raw: unknown): OverviewParams {
     length: pickEnum(obj.length, LENGTHS, DEFAULT_OVERVIEW_PARAMS.length),
     elements,
     instructions,
+    // Unknown / missing version → the live default. The route additionally
+    // downgrades a non-default value to the default for a non-privileged actor.
+    promptVersion: isValidPromptVersionId(obj.promptVersion)
+      ? obj.promptVersion
+      : defaultPromptVersionId(),
   };
 }
 

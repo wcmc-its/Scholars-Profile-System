@@ -15,9 +15,13 @@ import {
   isOverviewFaithfulnessPassEnabled,
   OVERVIEW_REVISE_SYSTEM_PROMPT,
   OVERVIEW_SYSTEM_PROMPT,
+  OVERVIEW_SYSTEM_PROMPT_V3,
   OVERVIEW_VERIFY_SYSTEM_PROMPT,
+  overviewSystemPromptFor,
+  overviewVerifySystemPrompt,
   parseUngrounded,
   toModelFacts,
+  versionPermitsSynopsisFindings,
 } from "@/lib/edit/overview-generator";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import {
@@ -25,6 +29,7 @@ import {
   OVERVIEW_MIN_PUBLICATIONS,
   type OverviewParams,
 } from "@/lib/edit/overview-params";
+import { defaultPromptVersionId } from "@/lib/edit/overview-prompt-versions";
 
 /** A minimal facts payload — only the FACTS-block serialization matters here.
  *  Has a topic, so it is NOT sparse (`hasSparseResearchSignal` is false). */
@@ -93,24 +98,127 @@ describe("buildOverviewUserPrompt — tone directive", () => {
   });
 });
 
-describe("buildOverviewUserPrompt — length band", () => {
-  it("short band names the 60–90 word numbers", () => {
+// The DEFAULT prompt version is v3 (raised bands), so `params()` (which spreads
+// DEFAULT_OVERVIEW_PARAMS) resolves to the v3 word bands. The v2 bands are asserted
+// in the "prompt version" block below.
+describe("buildOverviewUserPrompt — length band (v3 default)", () => {
+  it("short band names the 70–100 word numbers", () => {
     const prompt = buildOverviewUserPrompt(FACTS, params({ length: "short" }));
-    expect(prompt).toContain("60");
-    expect(prompt).toContain("90");
+    expect(prompt).toContain("70");
+    expect(prompt).toContain("100");
   });
 
-  it("standard band names the 120–160 word numbers (#742 tightened ceiling)", () => {
+  it("standard band names the raised 140–180 word numbers", () => {
     const prompt = buildOverviewUserPrompt(FACTS, params({ length: "standard" }));
+    expect(prompt).toContain("140");
+    expect(prompt).toContain("180");
+  });
+
+  it("extended band names the 190–240 word numbers", () => {
+    const prompt = buildOverviewUserPrompt(FACTS, params({ length: "extended" }));
+    expect(prompt).toContain("190");
+    expect(prompt).toContain("240");
+  });
+});
+
+// #742 prompt versioning — a version is a full bundle (system prompt + word bands +
+// theme labels). The default is v3; v2 is the legacy baseline, still selectable.
+describe("prompt versioning (#742)", () => {
+  it("DEFAULT_OVERVIEW_PARAMS + defaultPromptVersionId resolve to v3", () => {
+    expect(defaultPromptVersionId()).toBe("v3");
+    expect(DEFAULT_OVERVIEW_PARAMS.promptVersion).toBe("v3");
+  });
+
+  it("v2 keeps the legacy 120–160 standard band", () => {
+    const prompt = buildOverviewUserPrompt(FACTS, params({ promptVersion: "v2", length: "standard" }));
     expect(prompt).toContain("120");
     expect(prompt).toContain("160");
-    expect(prompt).not.toContain("180");
   });
 
-  it("extended band names the 200–260 word numbers", () => {
-    const prompt = buildOverviewUserPrompt(FACTS, params({ length: "extended" }));
-    expect(prompt).toContain("200");
-    expect(prompt).toContain("260");
+  it("v3 uses the raised 140–180 standard band", () => {
+    const prompt = buildOverviewUserPrompt(FACTS, params({ promptVersion: "v3", length: "standard" }));
+    expect(prompt).toContain("140");
+    expect(prompt).toContain("180");
+  });
+
+  it("renames the key_findings theme label only in v3 (key unchanged)", () => {
+    const v2 = buildOverviewUserPrompt(
+      FACTS,
+      params({ promptVersion: "v2", elements: ["key_findings"] }),
+    );
+    const v3 = buildOverviewUserPrompt(
+      FACTS,
+      params({ promptVersion: "v3", elements: ["key_findings"] }),
+    );
+    expect(v2).toContain("Key findings & significance");
+    expect(v2).not.toContain("Findings & their implications");
+    expect(v3).toContain("Findings & their implications");
+    expect(v3).not.toContain("Key findings & significance");
+  });
+
+  it("selects the matching system prompt per version", () => {
+    expect(overviewSystemPromptFor("v2")).toBe(OVERVIEW_SYSTEM_PROMPT);
+    expect(overviewSystemPromptFor("v3")).toBe(OVERVIEW_SYSTEM_PROMPT_V3);
+    expect(OVERVIEW_SYSTEM_PROMPT_V3).not.toBe(OVERVIEW_SYSTEM_PROMPT);
+  });
+
+  it("an unknown / missing version falls back to the default system prompt", () => {
+    expect(overviewSystemPromptFor(undefined)).toBe(overviewSystemPromptFor("v3"));
+  });
+
+  it("v3 permits synthesis and a synopsis-reported finding (the v3a relaxations)", () => {
+    const flat = OVERVIEW_SYSTEM_PROMPT_V3.replace(/\s+/g, " ");
+    expect(flat).toContain("You may synthesize.");
+    expect(flat).toContain("quantitative FINDING reported in a publication `synopsis`");
+    // The entity-provenance floor is still absolute.
+    expect(flat).toContain("THE HARD FLOOR — ENTITY PROVENANCE");
+  });
+});
+
+// #742 review finding (medium): the faithfulness pass must stay in step with the
+// version's floor — v3 permits a synopsis-stated number, so the pass must not strip it.
+describe("faithfulness pass — version-aware synopsis-number permission (#742)", () => {
+  const FACTS_WITH_SYNOPSIS: OverviewFacts = {
+    ...FACTS,
+    representativePublications: [
+      {
+        pmid: "1",
+        title: "CSF biodistribution of AAV vectors",
+        venue: null,
+        year: 2024,
+        impact: null,
+        synopsis: "AAV vectors delivered into CSF distribute 60-90% systemically.",
+        impactJustification: null,
+        topicRationale: null,
+        authorPosition: null,
+      },
+    ],
+  };
+
+  it("versionPermitsSynopsisFindings: v3 true, v2 false", () => {
+    expect(versionPermitsSynopsisFindings("v3")).toBe(true);
+    expect(versionPermitsSynopsisFindings("v2")).toBe(false);
+  });
+
+  it("the grounding reference admits synopsis findings only when permitted", () => {
+    const strict = buildGroundingReference(FACTS_WITH_SYNOPSIS);
+    const relaxed = buildGroundingReference(FACTS_WITH_SYNOPSIS, { permitSynopsisFindings: true });
+    // strict (v2): the hard "any percentage is a fabrication" rule, no synopsis carve-out.
+    expect(strict).toContain("is a fabrication");
+    expect(strict).not.toContain("a quantitative FINDING stated in a publication synopsis");
+    // relaxed (v3): the synopsis carve-out is present.
+    expect(relaxed).toContain("a quantitative FINDING stated in a publication synopsis");
+    // bibliometrics stay forbidden in BOTH.
+    expect(strict).toContain("FORBIDDEN metrics");
+    expect(relaxed).toContain("FORBIDDEN metrics");
+  });
+
+  it("the verifier prompt appends the synopsis-number exception only when permitted", () => {
+    expect(overviewVerifySystemPrompt()).toBe(OVERVIEW_VERIFY_SYSTEM_PROMPT);
+    const relaxed = overviewVerifySystemPrompt({ permitSynopsisFindings: true });
+    expect(relaxed.startsWith(OVERVIEW_VERIFY_SYSTEM_PROMPT)).toBe(true);
+    expect(relaxed).toContain("EXCEPTION — synopsis findings");
+    expect(relaxed).toContain("Bibliometrics");
   });
 });
 
