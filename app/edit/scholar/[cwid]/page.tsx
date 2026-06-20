@@ -29,6 +29,7 @@ import {
 } from "@/lib/edit/unit-scholar-authz";
 import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
+import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
 
@@ -165,6 +166,7 @@ export default async function EditScholarPage({
     // Medium-only group does not surface the item, so it is excluded here too.
     ctx.unmatchedPubmedCoi.length > 0 || ctx.unmatchedPubmedCoiReviewed.length > 0,
     ctx.highlights !== null,
+    isGrantRecsEnabled(),
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect(basePath);
@@ -230,6 +232,7 @@ export default async function EditScholarPage({
       unitAdminEditors={unitAdminEditors}
       unitAdminBanner={unitAdminBanner}
       reciterPendingEnabled={reciterPendingEnabled}
+      grantRecsEnabled={isGrantRecsEnabled()}
     />
   );
 }

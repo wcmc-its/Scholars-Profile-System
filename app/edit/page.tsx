@@ -36,6 +36,7 @@ import {
   loadLatestSlugRequest,
 } from "@/lib/edit/slug-request";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
+import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 
 // /edit reads suppression-OFF + writes via /api/edit/*; the page must never
 // be cached (CloudFront also marks it CachingDisabled per cloudfront-cache-spec.md).
@@ -149,6 +150,9 @@ export default async function EditSelfPage({
   // (Pending / Rejected / Just-approved) without a client round-trip. Sync (env)
   // so it's read before the parallel fan-out below, which it gates.
   const slugRequestEnabled = isSlugRequestEnabled();
+  // GrantRecs Phase 3 (`SELF_EDIT_GRANT_RECS`) — gates the "Grants for me" rail
+  // item + panel. Sync env read, like `slugRequestEnabled`.
+  const grantRecsEnabled = isGrantRecsEnabled();
 
   // Canonicalize a present-but-invalid `?attr` (T1.13): redirect to the bare
   // `/edit` rather than silently rendering the default panel behind a stale URL.
@@ -162,6 +166,7 @@ export default async function EditSelfPage({
     // Medium-only group does not surface the item, so it is excluded here too.
     ctx.unmatchedPubmedCoi.length > 0 || ctx.unmatchedPubmedCoiReviewed.length > 0,
     ctx.highlights !== null,
+    grantRecsEnabled,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect("/edit");
@@ -283,6 +288,7 @@ export default async function EditSelfPage({
       proxyEditors={proxyEditors}
       unitAdminEditors={unitAdminEditors}
       reciterPendingEnabled={reciterPendingEnabled}
+      grantRecsEnabled={grantRecsEnabled}
     />
   );
 }
