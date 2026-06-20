@@ -69,6 +69,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       generations: generations.map((g) => ({
         id: g.id,
         model: g.model,
+        promptVersion: g.promptVersion,
         params: g.params,
         createdAt: g.createdAt.toISOString(),
         text: g.text,

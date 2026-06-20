@@ -83,8 +83,9 @@ vi.mock("@/lib/db", () => ({
 
 import { POST } from "@/app/api/edit/overview/generate/route";
 
-const SELF = { cwid: "self01", isSuperuser: false };
-const ADMIN = { cwid: "adm001", isSuperuser: true };
+const SELF = { cwid: "self01", isSuperuser: false, isCommsSteward: false };
+const ADMIN = { cwid: "adm001", isSuperuser: true, isCommsSteward: false };
+const COMMS = { cwid: "com001", isSuperuser: false, isCommsSteward: true };
 
 function post(body: unknown): NextRequest {
   return new NextRequest("http://localhost/api/edit/overview/generate", {
@@ -104,7 +105,11 @@ beforeEach(() => {
   mockGetEditSession.mockResolvedValue(SELF);
   mockAssembleFacts.mockResolvedValue(FACTS);
   mockHasSufficient.mockReturnValue(true);
-  mockGenerateDraft.mockResolvedValue({ draft: "<p>Draft.</p>", model: "anthropic/claude-sonnet-4.5" });
+  mockGenerateDraft.mockResolvedValue({
+    draft: "<p>Draft.</p>",
+    model: "anthropic/claude-sonnet-4.5",
+    promptVersion: "v3",
+  });
   mockRecordAttempt.mockResolvedValue({ allowed: true, count: 1, limit: 10 });
   mockGenerationCreate.mockResolvedValue({ id: "gen123" });
   mockAuthorizeOverviewWrite.mockResolvedValue({ ok: true, viaUnitAdminUnit: null });
@@ -121,6 +126,7 @@ const NORMALIZED_EMPTY = {
   length: "standard",
   elements: [],
   instructions: "",
+  promptVersion: "v3", // #742 — the live default version
 };
 
 describe("POST /api/edit/overview/generate", () => {
@@ -231,16 +237,19 @@ describe("POST /api/edit/overview/generate", () => {
       ok: true,
       draft: "<p>Draft.</p>",
       model: "anthropic/claude-sonnet-4.5",
+      promptVersion: "v3",
       generationId: "gen123",
     });
     // the history row is written from the actor's cwid with the normalized params
-    // plus the (empty here) normalized source selection (v3.1).
+    // plus the (empty here) normalized source selection (v3.1), and the version is
+    // recorded in its dedicated column (#742).
     expect(mockGenerationCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           cwid: "self01",
           text: "<p>Draft.</p>",
           model: "anthropic/claude-sonnet-4.5",
+          promptVersion: "v3",
           params: { ...NORMALIZED_EMPTY, selection: { pmids: [], grantIds: [], toolNames: [] } },
           createdByCwid: "self01",
         }),
@@ -306,6 +315,7 @@ describe("POST /api/edit/overview/generate", () => {
       length: "extended",
       elements: ["methods"], // de-duped + unknown key filtered
       instructions: "keep it brief", // trimmed
+      promptVersion: "v3", // no version posted → default
     });
   });
 
@@ -320,5 +330,68 @@ describe("POST /api/edit/overview/generate", () => {
     const res = await POST(post({ entityId: "self01" }));
     expect(res.status).toBe(502);
     expect(await res.json()).toMatchObject({ error: "generation_failed" });
+  });
+
+  // #742 prompt-version gate: only a superuser / comms_steward / curator (unit-admin)
+  // may pick a NON-default version; a faculty owner (self) or proxy is forced to the
+  // live default, regardless of what the (untrusted) body requests.
+  describe("prompt version selection gate", () => {
+    it("downgrades a non-default version to the default for a faculty owner (self)", async () => {
+      await POST(post({ entityId: "self01", params: { promptVersion: "v2" } }));
+      expect(mockGenerateDraft).toHaveBeenCalledWith(
+        FACTS,
+        expect.objectContaining({ promptVersion: "v3" }),
+      );
+    });
+
+    it("honors a non-default version for a superuser", async () => {
+      mockGetEditSession.mockResolvedValue(ADMIN);
+      await POST(post({ entityId: "other9", params: { promptVersion: "v2" } }));
+      expect(mockGenerateDraft).toHaveBeenCalledWith(
+        FACTS,
+        expect.objectContaining({ promptVersion: "v2" }),
+      );
+    });
+
+    it("honors a non-default version for a comms_steward", async () => {
+      mockGetEditSession.mockResolvedValue(COMMS);
+      await POST(post({ entityId: "other9", params: { promptVersion: "v2" } }));
+      expect(mockGenerateDraft).toHaveBeenCalledWith(
+        FACTS,
+        expect.objectContaining({ promptVersion: "v2" }),
+      );
+    });
+
+    it("honors a non-default version for an org-unit curator (unit-admin)", async () => {
+      mockAuthorizeOverviewWrite.mockResolvedValue({
+        ok: true,
+        viaUnitAdminUnit: { kind: "department", code: "D1", name: "Medicine" },
+      });
+      await POST(post({ entityId: "other9", params: { promptVersion: "v2" } }));
+      expect(mockGenerateDraft).toHaveBeenCalledWith(
+        FACTS,
+        expect.objectContaining({ promptVersion: "v2" }),
+      );
+    });
+
+    it("persists the honored version in BOTH the column and the params blob (consistent)", async () => {
+      // A superuser honors v2; the column records result.promptVersion AND the blob
+      // carries the (downgraded-or-honored) effectiveParams version — both must be v2.
+      mockGetEditSession.mockResolvedValue(ADMIN);
+      mockGenerateDraft.mockResolvedValue({
+        draft: "<p>Draft.</p>",
+        model: "anthropic/claude-sonnet-4.5",
+        promptVersion: "v2",
+      });
+      await POST(post({ entityId: "other9", params: { promptVersion: "v2" } }));
+      expect(mockGenerationCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            promptVersion: "v2", // the dedicated column
+            params: expect.objectContaining({ promptVersion: "v2" }), // the restore blob
+          }),
+        }),
+      );
+    });
   });
 });

@@ -34,12 +34,27 @@ import {
   type OverviewTone,
   type OverviewVoice,
 } from "@/lib/edit/overview-params";
+import {
+  humanizeModelId,
+  promptVersionElementLabel,
+  type OverviewPromptVersionId,
+  type OverviewPromptVersionMeta,
+} from "@/lib/edit/overview-prompt-versions";
 import { cn } from "@/lib/utils";
 
 type OverviewGenerateControlsProps = {
   value: OverviewParams;
   onChange: (next: OverviewParams) => void;
   disabled?: boolean;
+  /**
+   * The selectable prompt versions (#742), each carrying its RESOLVED effective
+   * model (the server fills `model`). Only superuser / curator surfaces pass these
+   * with {@link canSelectPromptVersion} true; a faculty owner never sees the
+   * selector and always generates on the live default.
+   */
+  promptVersions?: OverviewPromptVersionMeta[];
+  /** Whether to render the version selector (superuser / curator only). */
+  canSelectPromptVersion?: boolean;
 };
 
 const VOICE_OPTIONS: { value: OverviewVoice; label: string }[] = [
@@ -61,7 +76,12 @@ export function OverviewGenerateControls({
   value,
   onChange,
   disabled = false,
+  promptVersions = [],
+  canSelectPromptVersion = false,
 }: OverviewGenerateControlsProps) {
+  const showVersionSelector = canSelectPromptVersion && promptVersions.length > 0;
+  const selectedVersion = promptVersions.find((v) => v.id === value.promptVersion);
+
   function toggleElement(key: OverviewElement, checked: boolean) {
     const present = value.elements.includes(key);
     if (checked === present) return;
@@ -76,6 +96,44 @@ export function OverviewGenerateControls({
 
   return (
     <div className="border-apollo-border bg-apollo-surface-2 flex flex-col gap-4 rounded-md border p-4">
+      {showVersionSelector && (
+        <fieldset className="flex flex-col gap-2" data-testid="overview-prompt-version-field">
+          <legend className="text-foreground mb-1 text-sm font-medium">Prompt version</legend>
+          <select
+            value={value.promptVersion}
+            disabled={disabled}
+            onChange={(e) =>
+              onChange({ ...value, promptVersion: e.target.value as OverviewPromptVersionId })
+            }
+            aria-label="Prompt version"
+            aria-describedby="overview-prompt-version-desc"
+            className={cn(
+              "border-apollo-border-strong bg-apollo-surface text-foreground w-fit rounded-md border px-3 py-1 text-sm",
+              disabled && "cursor-not-allowed opacity-60",
+            )}
+            data-testid="overview-prompt-version"
+          >
+            {promptVersions.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+          {selectedVersion?.description && (
+            <span id="overview-prompt-version-desc" className="text-muted-foreground text-xs">
+              {selectedVersion.description}
+            </span>
+          )}
+          {selectedVersion?.model && (
+            <span
+              className="text-muted-foreground text-xs"
+              data-testid="overview-prompt-version-model"
+            >
+              Model: {humanizeModelId(selectedVersion.model)}
+            </span>
+          )}
+        </fieldset>
+      )}
       <SegmentedField
         legend="Voice"
         name="overview-voice"
@@ -107,6 +165,9 @@ export function OverviewGenerateControls({
           {OVERVIEW_ELEMENTS.map(({ key, label }) => {
             const id = `overview-element-${key}`;
             const checked = value.elements.includes(key);
+            // The theme LABEL is version-scoped (v3 renames `key_findings`); the
+            // stored key is unchanged, so toggling is unaffected.
+            const displayLabel = promptVersionElementLabel(value.promptVersion, key, label);
             return (
               <label
                 key={key}
@@ -127,7 +188,7 @@ export function OverviewGenerateControls({
                   onCheckedChange={(c) => toggleElement(key, c === true)}
                   data-testid={`overview-element-${key}`}
                 />
-                {label}
+                {displayLabel}
               </label>
             );
           })}

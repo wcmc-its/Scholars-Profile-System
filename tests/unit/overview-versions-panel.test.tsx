@@ -13,12 +13,15 @@ import {
 } from "@/components/edit/overview-versions-panel";
 import { DEFAULT_OVERVIEW_PARAMS, type OverviewParams } from "@/lib/edit/overview-params";
 
+// PARAMS_A pins v2 (so its key_findings label reads "Key findings & significance");
+// PARAMS_B is v3 — together they cover both version label paths.
 const PARAMS_A: OverviewParams = {
   voice: "third",
   tone: "formal",
   length: "standard",
   elements: ["research_focus", "key_findings"],
   instructions: "",
+  promptVersion: "v2",
 };
 
 const PARAMS_B: OverviewParams = {
@@ -27,19 +30,22 @@ const PARAMS_B: OverviewParams = {
   length: "short",
   elements: [],
   instructions: "be brief",
+  promptVersion: "v3",
 };
 
 const GENERATIONS = [
   {
     id: "gen-1",
-    model: "openai/gpt",
+    model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    promptVersion: "v2",
     params: PARAMS_A,
     createdAt: "2026-06-01T12:00:00.000Z",
     text: "<p>First draft.</p>",
   },
   {
     id: "gen-2",
-    model: "google/gemini",
+    model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    promptVersion: "v3",
     params: PARAMS_B,
     createdAt: "2026-06-02T09:30:00.000Z",
     text: "<p>Second draft.</p>",
@@ -76,12 +82,24 @@ describe("OverviewVersionsPanel", () => {
         onUseSettings={vi.fn()}
       />,
     );
-    // Row 1: third/formal/standard + the two element labels.
+    // Row 1: third/formal/standard + the two element labels (v2 labelling).
     expect(
       screen.getByText("Third · Formal · Standard · Research focus, Key findings & significance"),
     ).toBeTruthy();
     // Row 2: no elements → just voice/tone/length.
     expect(screen.getByText("First · Conversational · Short")).toBeTruthy();
+  });
+
+  it("shows the prompt version + humanized model on each row (#742)", () => {
+    render(
+      <OverviewVersionsPanel generations={GENERATIONS} onLoad={vi.fn()} onUseSettings={vi.fn()} />,
+    );
+    // The metadata line concatenates timestamp · version · humanized model.
+    const row1 = screen.getByTestId("overview-version-gen-1").textContent ?? "";
+    expect(row1).toContain("v2");
+    expect(row1).toContain("Claude Sonnet 4.5");
+    const row2 = screen.getByTestId("overview-version-gen-2").textContent ?? "";
+    expect(row2).toContain("v3");
   });
 
   it("Load draft fires onLoad with the full generation row", () => {
@@ -139,11 +157,12 @@ describe("summarizeParams", () => {
     expect(summarizeParams(PARAMS_B)).toBe("First · Conversational · Short");
   });
 
-  it("renders the default params", () => {
+  it("renders the default params (v3 default — key_findings reads 'Findings & their implications')", () => {
     // #886 — Methods is default-on now that its source is the live scholar_family
     // rollup; the default set is the four core themes (methods sorts before recent).
+    // #742 — the default version is v3, which renames the key_findings theme label.
     expect(summarizeParams(DEFAULT_OVERVIEW_PARAMS)).toBe(
-      "Third · Formal · Standard · Research focus, Key findings & significance, Methods, Recent work",
+      "Third · Formal · Standard · Research focus, Findings & their implications, Methods, Recent work",
     );
   });
 });

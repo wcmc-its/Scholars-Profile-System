@@ -21,15 +21,18 @@ import {
   type OverviewParams,
   type OverviewSelection,
 } from "@/lib/edit/overview-params";
+import { humanizeModelId, promptVersionElementLabel } from "@/lib/edit/overview-prompt-versions";
 
 /** One history row, shaped to match the GET /api/edit/overview/generations
  *  contract (`createdAt` is the ISO string the route serializes). The generate
  *  route persists the source `selection` (v3.1) inside the same `params` JSON
  *  column, so it is surfaced here as an optional field for "Use these settings"
- *  to restore (#765). */
+ *  to restore (#765). `promptVersion` is the dedicated column (#742); null on rows
+ *  written before versioning shipped. */
 export type OverviewGenerationItem = {
   id: string;
   model: string;
+  promptVersion?: string | null;
   params: OverviewParams & { selection?: OverviewSelection };
   createdAt: string;
   text: string;
@@ -67,7 +70,11 @@ export function OverviewVersionsPanel({
           >
             <div className="flex min-w-0 flex-col gap-0.5">
               <span className="text-foreground text-sm">
-                {formatTimestamp(gen.createdAt)} · {gen.model}
+                {formatTimestamp(gen.createdAt)}
+                {(gen.promptVersion ?? gen.params.promptVersion)
+                  ? ` · ${gen.promptVersion ?? gen.params.promptVersion}`
+                  : ""}{" "}
+                · {humanizeModelId(gen.model)}
               </span>
               <span className="text-muted-foreground text-xs">{summarizeParams(gen.params)}</span>
             </div>
@@ -127,8 +134,13 @@ function capitalize(s: string): string {
  */
 export function summarizeParams(params: OverviewParams): string {
   const head = [params.voice, params.tone, params.length].map(capitalize).join(" · ");
+  // Theme labels are version-scoped (v3 renames `key_findings`), so a history row
+  // reads back the label the draft was actually generated with.
   const labels = params.elements
-    .map((key) => OVERVIEW_ELEMENTS.find((e) => e.key === key)?.label)
+    .map((key) => {
+      const fallback = OVERVIEW_ELEMENTS.find((e) => e.key === key)?.label;
+      return fallback ? promptVersionElementLabel(params.promptVersion, key, fallback) : undefined;
+    })
     .filter((label): label is string => Boolean(label));
   return labels.length > 0 ? `${head} · ${labels.join(", ")}` : head;
 }

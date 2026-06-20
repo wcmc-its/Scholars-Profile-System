@@ -24,6 +24,7 @@ import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 import { assembleOverviewFacts, hasSufficientFacts } from "@/lib/edit/overview-facts";
 import { generateOverviewDraft, isOverviewGenerateEnabled } from "@/lib/edit/overview-generator";
 import { normalizeOverviewParams, normalizeOverviewSelection } from "@/lib/edit/overview-params";
+import { defaultPromptVersionId } from "@/lib/edit/overview-prompt-versions";
 import { loadOverviewSelectionDeltas } from "@/lib/edit/overview-selection-store";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import { recordOverviewGenerateAttempt } from "@/lib/edit/rate-limit";
@@ -85,6 +86,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(403, authz.reason);
   }
 
+  // --- prompt versioning (#742, `overview-prompt-versioning-spec.md` §6). Only a
+  //     superuser / comms_steward (central) or an org-unit curator (unit-admin) may
+  //     pick a NON-default prompt version; a faculty owner (self) or a proxy always
+  //     generates on the live default. The owner's UI never sends a non-default, but
+  //     the body is untrusted, so downgrade defensively here. ---
+  const canSelectPromptVersion =
+    session.isSuperuser || session.isCommsSteward || authz.viaUnitAdminUnit !== null;
+  const effectiveParams =
+    canSelectPromptVersion || params.promptVersion === defaultPromptVersionId()
+      ? params
+      : { ...params, promptVersion: defaultPromptVersionId() };
+
   // --- per-scholar rate limit (DB write) + facts assembly (DB read). Both touch
   //     the database, so a DB error is a clean 500 here rather than an unhandled
   //     throw — matching /api/edit/field. The rate limit runs first (before the
@@ -129,7 +142,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   //     (SPEC G8). ---
   let result: Awaited<ReturnType<typeof generateOverviewDraft>>;
   try {
-    result = await generateOverviewDraft(facts, params);
+    result = await generateOverviewDraft(facts, effectiveParams);
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(502, "generation_failed");
@@ -147,9 +160,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         cwid: entityId,
         text: result.draft,
         model: result.model,
-        // Persist the steering controls + the source selection (v3.1) in the one
-        // Json column so "Regenerate from these settings" can restore both.
-        params: { ...params, selection },
+        // The version that actually generated — a dedicated column for A/B analysis
+        // (`GROUP BY prompt_version`); also mirrored inside `params` for restore.
+        promptVersion: result.promptVersion,
+        // Persist the steering controls (incl. promptVersion) + the source selection
+        // (v3.1) in the one Json column so "Regenerate from these settings" restores both.
+        params: { ...effectiveParams, selection },
         createdByCwid: session.cwid,
       },
       select: { id: true },
@@ -159,5 +175,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     logEditFailure(PATH, err);
   }
 
-  return editOk({ draft: result.draft, model: result.model, generationId });
+  return editOk({
+    draft: result.draft,
+    model: result.model,
+    promptVersion: result.promptVersion,
+    generationId,
+  });
 }

@@ -37,7 +37,14 @@ import type { EditContext } from "@/lib/api/edit-context";
 import type { ManageableUnit } from "@/lib/edit/manageable-units";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { profilePath } from "@/lib/profile-url";
-import { isOverviewGenerateEnabled } from "@/lib/edit/overview-generator";
+import {
+  isOverviewGenerateEnabled,
+  resolveEffectiveOverviewModel,
+} from "@/lib/edit/overview-generator";
+import {
+  defaultPromptVersionId,
+  listSelectablePromptVersions,
+} from "@/lib/edit/overview-prompt-versions";
 import { isReciterRejectEnabled } from "@/lib/reciter/client";
 
 type AttrKey =
@@ -600,15 +607,27 @@ function renderPanel(
           cwid={cwid}
           initialHtml={ctx.scholar.overview}
           previewHref={profilePath(ctx.scholar.slug)}
-          // The generator (#742) is offered to the same actors who may WRITE the
-          // bio here: the scholar (self) AND a superuser editing on their behalf
-          // (#844 made the superuser Overview editable, and the generate route +
-          // `authorizeOverviewWrite` already authorize a superuser, so the two
-          // surfaces agree). NOT widened to proxy / unit-admin — that's a
-          // separate governance call. Still gated behind the feature flag.
+          // The generator (#742) is offered to the actors who may WRITE the bio
+          // here: the scholar (self), a superuser / comms_steward, AND — since
+          // prompt versioning (`overview-prompt-versioning-spec.md` §6, D-E:
+          // widen-to-curators) — an org-unit curator (unit-admin). The generate
+          // route + `authorizeOverviewWrite` already authorize all of these, so the
+          // UI surface now agrees. Proxy stays excluded (governance: a proxy still
+          // gets the manual editor only). Still gated behind the feature flag.
           generateEnabled={
-            (mode === "self" || isSuperuserLike(mode)) && isOverviewGenerateEnabled()
+            (mode === "self" || isSuperuserLike(mode) || mode === "unit-admin") &&
+            isOverviewGenerateEnabled()
           }
+          // #742 prompt versioning — the version selector is exposed to superuser /
+          // comms_steward and to a curator (unit-admin), never to the faculty owner
+          // (self) or a proxy. The route re-enforces this server-side. The default
+          // version + each version's resolved effective model are server-computed.
+          canSelectPromptVersion={isSuperuserLike(mode) || mode === "unit-admin"}
+          promptVersions={listSelectablePromptVersions().map((v) => ({
+            ...v,
+            model: resolveEffectiveOverviewModel(v.id),
+          }))}
+          defaultPromptVersion={defaultPromptVersionId()}
           // #1077 follow-up — reframe the provenance note's "written by you" copy
           // for any third-person editor (superuser / proxy / unit-admin).
           mode={voiceMode}

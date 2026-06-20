@@ -1719,13 +1719,19 @@ model OverviewGeneration {
   cwid          String   @db.VarChar(32)
   text          String   @db.Text // sanitized HTML draft
   model         String   @db.VarChar(64) // gateway model string used
-  params        Json // { voice, tone, length, elements[], instructions }
+  // The PROMPT VERSION that generated this draft (#742, the versioning registry).
+  // A dedicated column (not buried in `params`) so A/B analysis can GROUP BY it —
+  // e.g. v3-vs-v2 edit-survival rates joined to overview_provenance. Nullable: rows
+  // written before versioning shipped stay NULL.
+  promptVersion String?  @map("prompt_version") @db.VarChar(32)
+  params        Json // { voice, tone, length, elements[], instructions, promptVersion }
   createdByCwid String   @map("created_by_cwid") @db.VarChar(32) // actor (self today)
   createdAt     DateTime @default(now()) @map("created_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 
   @@index([cwid, createdAt(sort: Desc)]) // the scholar's drafts, newest first
+  @@index([promptVersion, createdAt(sort: Desc)]) // "all v3 drafts, newest first" — A/B analysis
   @@map("overview_generation")
 }
 
