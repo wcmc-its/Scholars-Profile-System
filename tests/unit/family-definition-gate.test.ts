@@ -20,6 +20,7 @@ const {
   mockLensEnabled,
   mockSensitiveGateOn,
   mockDefinitionsOn,
+  mockToolContextOn,
 } = vi.hoisted(() => ({
   mockGroupBy: vi.fn(),
   mockFindFirst: vi.fn(),
@@ -29,6 +30,7 @@ const {
   mockLensEnabled: vi.fn(),
   mockSensitiveGateOn: vi.fn(),
   mockDefinitionsOn: vi.fn(),
+  mockToolContextOn: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -43,7 +45,7 @@ vi.mock("@/lib/profile/methods-lens-flags", () => ({
   isMethodsLensEnabled: () => mockLensEnabled(),
   isMethodsLensSensitiveGateOn: () => mockSensitiveGateOn(),
   isMethodsFamilyDefinitionsOn: () => mockDefinitionsOn(),
-  isMethodsLensToolContextOn: () => false,
+  isMethodsLensToolContextOn: () => mockToolContextOn(),
   isMethodPagesEnabled: () => true,
   isMethodsFamilyRosterFallbackOn: () => false,
 }));
@@ -69,6 +71,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockLensEnabled.mockReturnValue(true);
   mockSensitiveGateOn.mockReturnValue(false);
+  mockToolContextOn.mockReturnValue(false);
   mockSuppression.mockResolvedValue([]);
   mockSensitivity.mockResolvedValue([]);
   // groupBy is called for both [supercategory] and [familyLabel] (the latter
@@ -88,6 +91,8 @@ beforeEach(() => {
       supercategory: SC,
       pmidCount: 7,
       exemplarTools: ["U-Net"],
+      exemplarContexts: { "U-Net": "segments biomedical images end-to-end" },
+      exemplarContextPmids: { "U-Net": "28028643" },
       pmids: ["1", "2", "3", "4", "5", "6", "7"],
       definition: DEF,
       definitionSource: "generated",
@@ -130,5 +135,72 @@ describe("#879 loadScholarFamilies definition gate (profile.ts — the cached pa
     const families = await loadScholarFamilies("abc1234");
     expect(families[0].definition).toBe(DEF);
     expect(families[0].definitionSource).toBe("generated");
+  });
+});
+
+describe("#1158 loadScholarFamilies exemplarContextPmids gate (profile.ts — the cached payload)", () => {
+  it("OFF: nulls the pmid map (and contexts) even though the DB row has them (no cache bake-in)", async () => {
+    mockToolContextOn.mockReturnValue(false);
+    const families = await loadScholarFamilies("abc1234");
+    expect(families).toHaveLength(1);
+    expect(families[0].exemplarContexts).toEqual({});
+    expect(families[0].exemplarContextPmids).toEqual({});
+  });
+
+  it("ON: passes the parallel pmid map (keyed by tool display name) through to the view", async () => {
+    mockToolContextOn.mockReturnValue(true);
+    const families = await loadScholarFamilies("abc1234");
+    expect(families[0].exemplarContexts).toEqual({
+      "U-Net": "segments biomedical images end-to-end",
+    });
+    expect(families[0].exemplarContextPmids).toEqual({ "U-Net": "28028643" });
+  });
+
+  it("ON: coerces a null column to {} (pre-#1158 back-compat)", async () => {
+    mockToolContextOn.mockReturnValue(true);
+    mockFindMany.mockResolvedValueOnce([
+      {
+        familyId: FAM_ID,
+        familyLabel: LABEL,
+        supercategory: SC,
+        pmidCount: 7,
+        exemplarTools: ["U-Net"],
+        exemplarContexts: { "U-Net": "segments biomedical images end-to-end" },
+        exemplarContextPmids: null,
+        pmids: ["1"],
+        definition: DEF,
+        definitionSource: "generated",
+      },
+    ]);
+    const families = await loadScholarFamilies("abc1234");
+    expect(families[0].exemplarContextPmids).toEqual({});
+  });
+
+  it("ON: drops non-string (numeric) pmid values during coercion", async () => {
+    mockToolContextOn.mockReturnValue(true);
+    mockFindMany.mockResolvedValueOnce([
+      {
+        familyId: FAM_ID,
+        familyLabel: LABEL,
+        supercategory: SC,
+        pmidCount: 7,
+        exemplarTools: ["U-Net"],
+        exemplarContexts: { "U-Net": "segments biomedical images end-to-end" },
+        exemplarContextPmids: { "U-Net": 28028643 }, // numeric, must be dropped
+        pmids: ["1"],
+        definition: DEF,
+        definitionSource: "generated",
+      },
+    ]);
+    const families = await loadScholarFamilies("abc1234");
+    expect(families[0].exemplarContextPmids).toEqual({});
+  });
+
+  it("requests exemplarContextPmids in the scholar_family select", async () => {
+    await loadScholarFamilies("abc1234");
+    expect(mockFindMany.mock.calls[0][0].select).toMatchObject({
+      exemplarContexts: true,
+      exemplarContextPmids: true,
+    });
   });
 });

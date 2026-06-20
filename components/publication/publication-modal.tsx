@@ -16,6 +16,7 @@ import { HelpCircle } from "lucide-react";
 import { CopyButton } from "@/components/publication/copy-button";
 import { PubJournal } from "@/components/publication/pub-html";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { highlightSnippet } from "@/components/method/highlight-snippet";
 import { methodologyHref } from "@/lib/methodology-anchors";
 import type {
   PublicationDetailMethodFamily,
@@ -670,38 +671,6 @@ function MethodsSection({
   );
 }
 
-/** Escape a string for safe interpolation into a RegExp (the tool name is data). */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * #917 Phase 2 — render `snippet` with each verbatim occurrence of `term`
- * `<mark>`-highlighted, so the reader sees exactly where the tool is named in the
- * sentence (the methods-panel-redesign idea). Case-insensitive; the highlighted
- * text keeps the SNIPPET's own casing. When the term does not appear verbatim
- * (e.g. an acronym the sentence spells out), the snippet renders plain — no mark.
- */
-function highlightTermInSnippet(snippet: string, term: string): ReactNode {
-  const t = term.trim();
-  if (!t) return snippet;
-  // Capturing group → split keeps the matched substrings at odd indices.
-  const parts = snippet.split(new RegExp(`(${escapeRegExp(t)})`, "gi"));
-  if (parts.length === 1) return snippet; // no occurrence
-  return parts.map((part, i) =>
-    i % 2 === 1 ? (
-      <mark
-        key={i}
-        className="rounded-[2px] bg-white/20 px-0.5 font-medium text-white not-italic"
-      >
-        {part}
-      </mark>
-    ) : (
-      <Fragment key={i}>{part}</Fragment>
-    ),
-  );
-}
-
 /**
  * #917 Phase 2 — a family's representative tools (`exemplarTools`) beneath its
  * chip, dot-separated. A tool carrying a #1119 usage snippet (server-gated on
@@ -745,7 +714,14 @@ function MethodToolsLine({
                   <span className="mb-1 block text-[10px] font-medium tracking-wide text-white/60 uppercase">
                     {eyebrow}
                   </span>
-                  <span>{highlightTermInSnippet(tool.context, tool.name)}</span>
+                  <span>
+                    {highlightSnippet(
+                      tool.context,
+                      tool.name,
+                      undefined,
+                      "rounded-[2px] bg-white/20 px-0.5 font-medium text-white not-italic",
+                    )}
+                  </span>
                 </span>
               }
               wide

@@ -17,8 +17,11 @@ export type ProvenanceRailItem = {
    *  matching `term` within `sentence` (the #1119 interim — see highlightSnippet). */
   matchedSpan?: { start: number; end: number } | null;
   /** Source-publication click-through (`source_publication_id`); null when no
-   *  source pmid is carried (e.g. a pre-#1158 row). */
-  source?: { href: string; label?: string } | null;
+   *  source pmid is carried (e.g. a pre-#1158 row). Either an in-app action
+   *  (`onSelect`, e.g. Surface A opening the publication modal) OR a plain link
+   *  (`href`, e.g. Surface B / external forward-compat); `onSelect` wins when
+   *  both are present. `label` defaults to "Source publication". */
+  source?: { label?: string; href?: string; onSelect?: () => void } | null;
 };
 
 /**
@@ -63,15 +66,26 @@ export function ProvenanceRail({
           <p className="text-foreground/80 leading-snug">
             {highlightSnippet(item.sentence, item.term, item.matchedSpan)}
           </p>
-          {item.source ? (
+          {item.source && (item.source.onSelect || item.source.href) ? (
             <p className="mt-2">
-              <a
-                href={item.source.href}
-                className="inline-flex items-center gap-0.5 text-xs text-[var(--color-accent-slate)] hover:underline"
-              >
-                {item.source.label ?? "Source publication"}
-                <span aria-hidden="true"> →</span>
-              </a>
+              {item.source.onSelect ? (
+                <button
+                  type="button"
+                  onClick={item.source.onSelect}
+                  className="inline-flex items-center gap-0.5 text-xs text-[var(--color-accent-slate)] hover:underline"
+                >
+                  {item.source.label ?? "Source publication"}
+                  <span aria-hidden="true"> →</span>
+                </button>
+              ) : item.source.href ? (
+                <a
+                  href={item.source.href}
+                  className="inline-flex items-center gap-0.5 text-xs text-[var(--color-accent-slate)] hover:underline"
+                >
+                  {item.source.label ?? "Source publication"}
+                  <span aria-hidden="true"> →</span>
+                </a>
+              ) : null}
             </p>
           ) : null}
           {action ? <div className="mt-3">{action}</div> : null}
