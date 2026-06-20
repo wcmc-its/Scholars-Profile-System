@@ -23,12 +23,6 @@ export type CoreCatalogEntry = {
   name: string;
   /** Canonical facility name, e.g. "Citigroup Biomedical Imaging Center". */
   facility: string | null;
-  /**
-   * CWID of the designated core owner. NULL until designated via an SPS Superuser
-   * grant — owner designation + the unit-scoped RBAC role are a later piece (the
-   * ADR-005 claim layer); this carries the dictionary value through as a seam.
-   */
-  ownerCwid: string | null;
 };
 
 /** `core.source` value stamped on every seeded row. */
@@ -39,6 +33,5 @@ export const CORE_CATALOG: ReadonlyArray<CoreCatalogEntry> = [
     id: "2",
     name: "Biomedical Imaging",
     facility: "Citigroup Biomedical Imaging Center",
-    ownerCwid: null,
   },
 ];

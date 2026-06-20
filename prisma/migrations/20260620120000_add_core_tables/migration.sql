@@ -23,7 +23,6 @@ CREATE TABLE `core` (
     `id` VARCHAR(32) NOT NULL,
     `name` VARCHAR(255) NOT NULL,
     `facility` VARCHAR(255) NULL,
-    `owner_cwid` VARCHAR(32) NULL,
     `source` VARCHAR(64) NOT NULL,
     `refreshed_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 

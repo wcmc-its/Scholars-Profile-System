@@ -790,16 +790,12 @@ async function main() {
           id: c.id,
           name: c.name,
           facility: c.facility,
-          ownerCwid: c.ownerCwid,
           source: CORE_CATALOG_SOURCE,
           refreshedAt: new Date(),
         },
         update: {
           name: c.name,
           facility: c.facility,
-          // ownerCwid is intentionally NOT overwritten on update: once an owner is
-          // designated in SPS it must survive nightly catalog re-seeds. A null in
-          // the seed means "unspecified", not "clear the existing owner".
           source: CORE_CATALOG_SOURCE,
           refreshedAt: new Date(),
         },

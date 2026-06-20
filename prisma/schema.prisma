@@ -1306,11 +1306,9 @@ model Core {
   id          String   @id @db.VarChar(32) // dictionary core_id, e.g. "2" (Biomedical Imaging)
   name        String   @db.VarChar(255) // "Biomedical Imaging"
   facility    String?  @db.VarChar(255) // canonical facility name, e.g. "Citigroup Biomedical Imaging Center"
-  /// CWID of the designated core owner who reviews/claims this core's candidate
-  /// publications. NULL until designated. No FK to scholar: owner designation +
-  /// the unit-scoped RBAC role are a later piece (the ADR-005 claim layer); this
-  /// column is the forward-compatible seam carried over from the dictionary.
-  ownerCwid   String?  @map("owner_cwid") @db.VarChar(32)
+  // Ownership is NOT a column here: a core owner is modeled as a
+  // UnitAdmin(entityType="core", entityId=id, role=owner) row in the existing RBAC
+  // (Superuser-granted), the same machinery as department/division/center.
   source      String   @db.VarChar(64) // "reciterai-core-dictionary"
   refreshedAt DateTime @default(now()) @map("refreshed_at")
 
