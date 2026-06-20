@@ -714,6 +714,7 @@ model Publication {
   authors           PublicationAuthor[]
   publicationScores PublicationScore[]
   publicationTopics PublicationTopic[]
+  cores             PublicationCore[]
   grants            GrantPublication[]
   conflictStatement PublicationConflictStatement?
 
@@ -1290,6 +1291,72 @@ model PublicationTopic {
   @@index([cwid, year(sort: Desc)]) // profile most-recent feed (with D-16 dedup)
   @@index([parentTopicId, cwid]) // Top scholars chip row group-by
   @@map("publication_topic")
+}
+
+/// WCM core-facility catalog (Biomedical Imaging, Flow Cytometry, …).
+///
+/// Unlike `topic` — seeded from the DynamoDB `TAXONOMY#` record — there is NO
+/// DynamoDB catalog record for cores. The canonical source is ReciterAI's
+/// `config/core_dictionary.yaml` (the project's real IP: per-core aliases, staff
+/// CWIDs, owner). The cores ETL block seeds this table from the version-controlled
+/// `CORE_CATALOG` constant (`etl/dynamodb/core-catalog.ts`, a thin mirror of that
+/// dictionary) and then FK-guards `publication_core.coreId` against it — the same
+/// "populate catalog, then guard usage rows" flow as Block 1 (TAXONOMY# → topic).
+model Core {
+  id          String   @id @db.VarChar(32) // dictionary core_id, e.g. "2" (Biomedical Imaging)
+  name        String   @db.VarChar(255) // "Biomedical Imaging"
+  facility    String?  @db.VarChar(255) // canonical facility name, e.g. "Citigroup Biomedical Imaging Center"
+  /// CWID of the designated core owner who reviews/claims this core's candidate
+  /// publications. NULL until designated. No FK to scholar: owner designation +
+  /// the unit-scoped RBAC role are a later piece (the ADR-005 claim layer); this
+  /// column is the forward-compatible seam carried over from the dictionary.
+  ownerCwid   String?  @map("owner_cwid") @db.VarChar(32)
+  source      String   @db.VarChar(64) // "reciterai-core-dictionary"
+  refreshedAt DateTime @default(now()) @map("refreshed_at")
+
+  publications PublicationCore[]
+
+  @@map("core")
+}
+
+/// Projected (publication × core) usage candidates from ReciterAI's cores
+/// inference engine (ReciterAI PR #245). The engine writes one DynamoDB item per
+/// pair — PK=`PUB#{pmid}`, SK=`CORE#{core_id}` in the shared `reciterai` table —
+/// and `etl/dynamodb/index.ts` Block 6 projects them here for display + the
+/// per-core claim queue.
+///
+/// Keyed on (pmid, coreId) with NO scholar dimension: core usage is a property of
+/// the *publication*, not a (pub, scholar) pair (contrast `publication_topic`,
+/// which carries cwid). The scholar link is derived through the existing
+/// publication↔author relationship at read time.
+///
+/// `status` is the engine lifecycle (`candidate` | `confirmed` | `below_threshold`).
+/// Human claims/rejections are NOT written here — they live in the ADR-005
+/// manual-override layer and take read-time precedence, so a nightly ETL rebuild
+/// of this table never clobbers a curator's decision.
+model PublicationCore {
+  pmid            String   @db.VarChar(32)
+  coreId          String   @map("core_id") @db.VarChar(32)
+  likelihood      Decimal  @db.Decimal(5, 4) // 0-1 combined-signal likelihood
+  status          String   @db.VarChar(16) // candidate | confirmed | below_threshold (engine-set)
+  /// Core-staff CWIDs found on the byline (signal 2). JSON string array, e.g.
+  /// ["djb2001","jpd2001"]. Empty/absent when no staff co-author matched.
+  signalCoauthors Json?    @map("signal_coauthors")
+  signalAck       Boolean  @default(false) @map("signal_ack") // signal 3: a core alias matched in full text
+  ackAlias        String?  @map("ack_alias") @db.VarChar(255) // the matched alias, e.g. "CBIC"
+  ackSnippet      String?  @map("ack_snippet") @db.Text // surrounding full-text snippet (≤500 chars upstream)
+  llmScore        Int?     @map("llm_score") @db.SmallInt // signal 4: 1-10 dense triage score
+  llmRationale    String?  @map("llm_rationale") @db.Text // short LLM rationale
+  authorAffinity  Decimal? @map("author_affinity") @db.Decimal(5, 4) // 0-1 repeat-user prior (signal 1)
+  scoredAt        DateTime @map("scored_at") // engine `scored_at` ISO timestamp
+
+  publication Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)
+  core        Core        @relation(fields: [coreId], references: [id], onDelete: Cascade)
+
+  @@id([pmid, coreId])
+  @@index([coreId, likelihood(sort: Desc)]) // per-core claim queue, ranked by likelihood
+  @@index([coreId, status]) // per-core status filter (candidate queue vs confirmed)
+  @@map("publication_core")
 }
 
 /// ReCiterAI publication scores per scholar+pmid pair (Q6 minimal projection).
