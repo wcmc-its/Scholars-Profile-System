@@ -492,8 +492,8 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
             familyLabel: "Confocal microscopy",
             href: null,
             tools: [
-              { name: "CheXpert", context: null },
-              { name: "MIMIC-CXR", context: null },
+              { name: "CheXpert", context: null, sourcePmid: null },
+              { name: "MIMIC-CXR", context: null, sourcePmid: null },
             ],
           },
         ],
@@ -519,6 +519,7 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
               {
                 name: "STORK-A",
                 context: "a non-invasive and automated method of embryo evaluation",
+                sourcePmid: null,
               },
             ],
           },
@@ -540,6 +541,38 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
     ).toBeDefined();
   });
 
+  it("frames the snippet as 'from this paper' when its source pmid is the viewed paper (#1158)", async () => {
+    mockFetch(
+      makePayload({
+        // makePayload's pub.pmid is "12345"; a snippet sourced from it is "this paper".
+        methodFamilies: [
+          {
+            supercategory: "imaging",
+            familyLabel: "Confocal microscopy",
+            href: null,
+            tools: [
+              {
+                name: "STORK-A",
+                context: "a non-invasive and automated method of embryo evaluation",
+                sourcePmid: "12345",
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const trigger = screen.getByText("STORK-A");
+    fireEvent.mouseEnter(trigger.parentElement as HTMLElement);
+    await waitFor(() =>
+      expect(screen.getByText(/Verbatim, from this paper/i)).toBeDefined(),
+    );
+    // Must NOT use the representative framing when it is this paper.
+    expect(screen.queryByText(/from the author's papers/i)).toBeNull();
+  });
+
   it("mark-highlights the tool name where it appears verbatim in the snippet (#917 Phase 2)", async () => {
     mockFetch(
       makePayload({
@@ -553,6 +586,7 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
                 name: "corneal confocal microscope",
                 context:
                   "A corneal confocal microscope was used to quantify nerve fibre density.",
+                sourcePmid: null,
               },
             ],
           },
