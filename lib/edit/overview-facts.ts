@@ -26,6 +26,7 @@
  */
 import { db } from "@/lib/db";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
+import { scoreFundingImportance } from "@/lib/edit/funding-importance";
 import { isChairTitleFor } from "@/lib/leadership";
 import {
   applyDeltas,
@@ -362,15 +363,18 @@ async function loadScoredCandidatePublications(cwid: string): Promise<
   });
 }
 
-/** The scholar's active funding (end date today or later), most-recent-ending first. */
+/** The scholar's active funding (end date today or later), importance-sorted. */
 async function loadActiveFunding(cwid: string): Promise<
   {
     id: string;
     role: string;
     funder: string;
     title: string;
+    programType: string;
     mechanism: string | null;
+    nihIc: string | null;
     awardNumber: string | null;
+    isSubaward: boolean;
     endYear: number | null;
     isLead: boolean;
   }[]
@@ -384,21 +388,36 @@ async function loadActiveFunding(cwid: string): Promise<
       role: true,
       funder: true,
       title: true,
+      programType: true,
       mechanism: true,
+      nihIc: true,
       awardNumber: true,
+      isSubaward: true,
       endDate: true,
     },
   });
-  return rows.map((g) => ({
+  const mapped = rows.map((g) => ({
     id: g.id,
     role: g.role,
     funder: g.funder,
     title: g.title,
+    programType: g.programType,
     mechanism: g.mechanism,
+    nihIc: g.nihIc,
     awardNumber: g.awardNumber,
+    isSubaward: g.isSubaward,
     endYear: g.endDate.getUTCFullYear(),
     isLead: isLeadRole(g.role),
   }));
+  // Order by importance (NIH research > NIH center/training > foundation > industry
+  // > equipment, weighted by role) so the most important awards win the selection cap
+  // and lead the candidate list; tie-break by most-recent end year, nulls last. This
+  // changes ONLY the candidate ORDER — not which awards are returned, nor `isLead`.
+  return mapped.sort((a, b) => {
+    const byScore = scoreFundingImportance(b) - scoreFundingImportance(a);
+    if (byScore !== 0) return byScore;
+    return (b.endYear ?? -Infinity) - (a.endYear ?? -Infinity);
+  });
 }
 
 /**

@@ -108,7 +108,7 @@ beforeEach(() => {
   mockGenerateDraft.mockResolvedValue({
     draft: "<p>Draft.</p>",
     model: "anthropic/claude-sonnet-4.5",
-    promptVersion: "v3",
+    promptVersion: "v4",
   });
   mockRecordAttempt.mockResolvedValue({ allowed: true, count: 1, limit: 10 });
   mockGenerationCreate.mockResolvedValue({ id: "gen123" });
@@ -126,7 +126,7 @@ const NORMALIZED_EMPTY = {
   length: "standard",
   elements: [],
   instructions: "",
-  promptVersion: "v3", // #742 — the live default version
+  promptVersion: "v4", // #742 — the live default version
 };
 
 describe("POST /api/edit/overview/generate", () => {
@@ -237,7 +237,7 @@ describe("POST /api/edit/overview/generate", () => {
       ok: true,
       draft: "<p>Draft.</p>",
       model: "anthropic/claude-sonnet-4.5",
-      promptVersion: "v3",
+      promptVersion: "v4",
       generationId: "gen123",
     });
     // the history row is written from the actor's cwid with the normalized params
@@ -249,7 +249,7 @@ describe("POST /api/edit/overview/generate", () => {
           cwid: "self01",
           text: "<p>Draft.</p>",
           model: "anthropic/claude-sonnet-4.5",
-          promptVersion: "v3",
+          promptVersion: "v4",
           params: { ...NORMALIZED_EMPTY, selection: { pmids: [], grantIds: [], toolNames: [] } },
           createdByCwid: "self01",
         }),
@@ -315,7 +315,7 @@ describe("POST /api/edit/overview/generate", () => {
       length: "extended",
       elements: ["methods"], // de-duped + unknown key filtered
       instructions: "keep it brief", // trimmed
-      promptVersion: "v3", // no version posted → default
+      promptVersion: "v4", // no version posted → default
     });
   });
 
@@ -340,7 +340,7 @@ describe("POST /api/edit/overview/generate", () => {
       await POST(post({ entityId: "self01", params: { promptVersion: "v2" } }));
       expect(mockGenerateDraft).toHaveBeenCalledWith(
         FACTS,
-        expect.objectContaining({ promptVersion: "v3" }),
+        expect.objectContaining({ promptVersion: "v4" }),
       );
     });
 

@@ -13,6 +13,7 @@ import {
   OVERVIEW_INSTRUCTIONS_MAX,
   type OverviewParams,
 } from "@/lib/edit/overview-params";
+import type { OverviewPromptVersionMeta } from "@/lib/edit/overview-prompt-versions";
 
 function renderControls(overrides?: Partial<OverviewParams>) {
   const value: OverviewParams = { ...DEFAULT_OVERVIEW_PARAMS, ...overrides };
@@ -130,5 +131,37 @@ describe("OverviewGenerateControls — onChange", () => {
       true,
     );
     expect(screen.getByTestId("overview-voice-first").hasAttribute("disabled")).toBe(true);
+  });
+});
+
+describe("OverviewGenerateControls — prompt version selector (superuser / curator)", () => {
+  const versions: OverviewPromptVersionMeta[] = [
+    {
+      id: "v3",
+      label: "v3 — keyword-rich narrative",
+      description: "The keyword-rich narrative prompt.",
+      status: "default",
+      model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    },
+    {
+      id: "v2",
+      label: "v2 — concise (legacy)",
+      description: "The original concise prompt.",
+      status: "deprecated",
+    },
+  ];
+
+  it("renders the superuser/curator-only callout and the per-draft cost line", () => {
+    render(
+      <OverviewGenerateControls
+        value={{ ...DEFAULT_OVERVIEW_PARAMS, promptVersion: "v3" }}
+        onChange={vi.fn()}
+        canSelectPromptVersion
+        promptVersions={versions}
+      />,
+    );
+    expect(screen.getByText("Visible to superusers and curators only.")).toBeTruthy();
+    // The selected version (v3) carries a resolved model, so the cost line renders.
+    expect(screen.getByTestId("overview-prompt-version-cost").textContent).toContain("per draft");
   });
 });

@@ -92,7 +92,7 @@ describe("listOverviewGenerations", () => {
           length: "extended",
           elements: ["methods"], // unknown key filtered
           instructions: "trim me", // trimmed
-          promptVersion: "v3", // blob had none -> normalized to the default
+          promptVersion: "v4", // blob had none -> normalized to the default
         },
         createdAt,
         text: "<p>Draft one.</p>",

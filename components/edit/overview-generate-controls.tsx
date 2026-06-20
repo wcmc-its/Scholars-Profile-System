@@ -35,6 +35,7 @@ import {
   type OverviewVoice,
 } from "@/lib/edit/overview-params";
 import {
+  estimateDraftCostUsd,
   humanizeModelId,
   promptVersionElementLabel,
   type OverviewPromptVersionId,
@@ -99,6 +100,9 @@ export function OverviewGenerateControls({
       {showVersionSelector && (
         <fieldset className="flex flex-col gap-2" data-testid="overview-prompt-version-field">
           <legend className="text-foreground mb-1 text-sm font-medium">Prompt version</legend>
+          <span className="text-muted-foreground text-xs">
+            Visible to superusers and curators only.
+          </span>
           <select
             value={value.promptVersion}
             disabled={disabled}
@@ -130,6 +134,14 @@ export function OverviewGenerateControls({
               data-testid="overview-prompt-version-model"
             >
               Model: {humanizeModelId(selectedVersion.model)}
+            </span>
+          )}
+          {selectedVersion?.model && estimateDraftCostUsd(selectedVersion.model) != null && (
+            <span
+              className="text-muted-foreground text-xs"
+              data-testid="overview-prompt-version-cost"
+            >
+              ~${estimateDraftCostUsd(selectedVersion.model)!.toFixed(2)} per draft (estimate)
             </span>
           )}
         </fieldset>

@@ -16,6 +16,7 @@ import {
   OVERVIEW_REVISE_SYSTEM_PROMPT,
   OVERVIEW_SYSTEM_PROMPT,
   OVERVIEW_SYSTEM_PROMPT_V3,
+  OVERVIEW_SYSTEM_PROMPT_V4,
   OVERVIEW_VERIFY_SYSTEM_PROMPT,
   overviewSystemPromptFor,
   overviewVerifySystemPrompt,
@@ -98,10 +99,10 @@ describe("buildOverviewUserPrompt — tone directive", () => {
   });
 });
 
-// The DEFAULT prompt version is v3 (raised bands), so `params()` (which spreads
-// DEFAULT_OVERVIEW_PARAMS) resolves to the v3 word bands. The v2 bands are asserted
-// in the "prompt version" block below.
-describe("buildOverviewUserPrompt — length band (v3 default)", () => {
+// The DEFAULT prompt version is v4, which REUSES the v3 (raised) word bands, so
+// `params()` (which spreads DEFAULT_OVERVIEW_PARAMS) resolves to those bands. The v2
+// bands are asserted in the "prompt version" block below.
+describe("buildOverviewUserPrompt — length band (v4 default = v3 bands)", () => {
   it("short band names the 70–100 word numbers", () => {
     const prompt = buildOverviewUserPrompt(FACTS, params({ length: "short" }));
     expect(prompt).toContain("70");
@@ -122,11 +123,12 @@ describe("buildOverviewUserPrompt — length band (v3 default)", () => {
 });
 
 // #742 prompt versioning — a version is a full bundle (system prompt + word bands +
-// theme labels). The default is v3; v2 is the legacy baseline, still selectable.
+// theme labels). The default is v4; v3 is the A/B experimental and v2 the legacy
+// baseline, both still selectable.
 describe("prompt versioning (#742)", () => {
-  it("DEFAULT_OVERVIEW_PARAMS + defaultPromptVersionId resolve to v3", () => {
-    expect(defaultPromptVersionId()).toBe("v3");
-    expect(DEFAULT_OVERVIEW_PARAMS.promptVersion).toBe("v3");
+  it("DEFAULT_OVERVIEW_PARAMS + defaultPromptVersionId resolve to v4", () => {
+    expect(defaultPromptVersionId()).toBe("v4");
+    expect(DEFAULT_OVERVIEW_PARAMS.promptVersion).toBe("v4");
   });
 
   it("v2 keeps the legacy 120–160 standard band", () => {
@@ -163,7 +165,7 @@ describe("prompt versioning (#742)", () => {
   });
 
   it("an unknown / missing version falls back to the default system prompt", () => {
-    expect(overviewSystemPromptFor(undefined)).toBe(overviewSystemPromptFor("v3"));
+    expect(overviewSystemPromptFor(undefined)).toBe(overviewSystemPromptFor("v4"));
   });
 
   it("v3 permits synthesis and a synopsis-reported finding (the v3a relaxations)", () => {
@@ -172,6 +174,25 @@ describe("prompt versioning (#742)", () => {
     expect(flat).toContain("quantitative FINDING reported in a publication `synopsis`");
     // The entity-provenance floor is still absolute.
     expect(flat).toContain("THE HARD FLOOR — ENTITY PROVENANCE");
+  });
+
+  it("v4 adds the throughline/synthesis directive on top of all of v3's content", () => {
+    const v4 = OVERVIEW_SYSTEM_PROMPT_V4.replace(/\s+/g, " ");
+    // The one added directive (v4 = v3 + throughline).
+    expect(v4).toContain("throughline that unifies the research program");
+    // Still carries v3's content verbatim: the synthesis permission, a synopsis-finding,
+    // and a distinctive v3 phrase.
+    expect(v4).toContain("You may synthesize.");
+    expect(v4).toContain("quantitative FINDING reported in a publication `synopsis`");
+    expect(v4).toContain("THE HARD FLOOR — ENTITY PROVENANCE");
+    expect(v4).toContain("FACETS ARE ROUTING, NOT VOCABULARY");
+    // v3 does NOT carry the throughline line; v4 is a distinct prompt.
+    expect(OVERVIEW_SYSTEM_PROMPT_V3).not.toContain("throughline that unifies the research program");
+    expect(OVERVIEW_SYSTEM_PROMPT_V4).not.toBe(OVERVIEW_SYSTEM_PROMPT_V3);
+  });
+
+  it("selects the v4 system prompt for the v4 version", () => {
+    expect(overviewSystemPromptFor("v4")).toBe(OVERVIEW_SYSTEM_PROMPT_V4);
   });
 });
 

@@ -675,17 +675,20 @@ export class AppStack extends Stack {
     // the single action bedrock:InvokeModel (the generator uses generateText,
     // not streaming, so no InvokeModelWithResponseStream).
     //
-    // Scoped to the Claude Sonnet 4.x family, NOT a bare `*`:
+    // Scoped to the Claude Opus 4.8 and Sonnet 4.x families, NOT a bare `*`:
     //   - the us. cross-region INFERENCE PROFILE the model id resolves to
     //     (account-scoped), and
     //   - the underlying FOUNDATION MODELs (AWS-owned, empty account field)
     //     the profile routes to.
+    // Opus 4.8 is now the DEFAULT generate model and is granted here. Sonnet
+    // stays granted because the verify/revise critic pass and the
+    // OVERVIEW_GENERATE_MODEL rollback lever still run on Sonnet.
     // Region is `*` because a us. inference-profile call fans out across the
-    // US regions (us-east-1/-2, us-west-2); the family wildcard lets a
-    // 4.5 -> 4.6 bump via OVERVIEW_GENERATE_MODEL skip an IAM change while
-    // still excluding Opus/Haiku and every non-Anthropic provider. Contains
-    // no secretsmanager reference, so the "zero secretsmanager on the task
-    // role" assertion still holds.
+    // US regions (us-east-1/-2, us-west-2); the family wildcards let an
+    // intra-family bump (e.g. Sonnet 4.5 -> 4.6) via OVERVIEW_GENERATE_MODEL
+    // skip an IAM change while still excluding Haiku and every non-Anthropic
+    // provider. Contains no secretsmanager reference, so the "zero
+    // secretsmanager on the task role" assertion still holds.
     // ------------------------------------------------------------------
     new iam.Policy(this, "TaskRoleBedrockPolicy", {
       policyName: `sps-task-${env}-bedrock`,
@@ -695,6 +698,8 @@ export class AppStack extends Stack {
           effect: iam.Effect.ALLOW,
           actions: ["bedrock:InvokeModel"],
           resources: [
+            `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-opus-4-8*`,
+            "arn:aws:bedrock:*::foundation-model/anthropic.claude-opus-4-8*",
             `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-sonnet-4-*`,
             "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-*",
           ],
@@ -1151,7 +1156,7 @@ export class AppStack extends Stack {
         // generator is never broken by a typo (defaultPromptVersionId,
         // lib/edit/overview-prompt-versions.ts). Superuser / curator can still pick
         // either version per-generate regardless of this default.
-        OVERVIEW_PROMPT_VERSION_DEFAULT: "v3",
+        OVERVIEW_PROMPT_VERSION_DEFAULT: "v4",
         // #538 -- site-wide feedback badge + /about/feedback form. When "on",
         // the badge renders on every page (except /about/feedback itself,
         // suppressed inside open Radix Dialogs) and the form route accepts
