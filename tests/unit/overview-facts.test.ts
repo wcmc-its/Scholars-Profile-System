@@ -522,6 +522,29 @@ describe("assembleOverviewFacts — funding (selection-driven)", () => {
     });
     expect(facts?.activeGrants.map((g) => g.role)).toEqual(["Co-I"]);
   });
+
+  it("orders active funding by importance, not DB order (#742 scorer)", async () => {
+    // DB returns the less-important awards first; the loader must reorder so the
+    // NIH R01 PI leads, then the non-NIH NSF grant, then the industry contract.
+    mockGrantFindMany.mockResolvedValue([
+      grantRow("industry", "Co-I", {
+        funder: "Acme Therapeutics, Inc.",
+        mechanism: null,
+        awardNumber: null,
+      }),
+      grantRow("nsf", "Co-I", { funder: "NSF", mechanism: null, awardNumber: null }),
+      grantRow("r01", "PI", { funder: "NHLBI", mechanism: "R01" }),
+    ]);
+    const facts = await assembleOverviewFacts("self01", undefined, {
+      deltas: { ...DEFAULT_DELTAS, fundingRoles: "all" },
+    });
+    // `all` mode selects every active award; `activeGrants` preserves the sorted order.
+    expect(facts?.activeGrants.map((g) => g.funderLabel)).toEqual([
+      "NHLBI",
+      "NSF",
+      "Acme Therapeutics, Inc.",
+    ]);
+  });
 });
 
 describe("assembleOverviewFacts — topics", () => {
@@ -878,6 +901,8 @@ describe("loadOverviewSourceOptions", () => {
         defaultSelected: false,
       },
     ]);
+    // Funding is now importance-sorted: g1 (NIH R01 PI) outranks g2 (NSF Co-I,
+    // no mechanism) so the order below is the scorer's output, not incidental.
     expect(opts.funding).toMatchObject([
       {
         id: "g1",

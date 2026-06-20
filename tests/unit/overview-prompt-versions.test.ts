@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   defaultPromptVersionId,
+  estimateDraftCostUsd,
   humanizeModelId,
   isValidPromptVersionId,
   listSelectablePromptVersions,
@@ -27,7 +28,7 @@ afterEach(() => {
 describe("defaultPromptVersionId — rollback lever (OVERVIEW_PROMPT_VERSION_DEFAULT)", () => {
   it("returns the registry default when the env is unset", () => {
     expect(defaultPromptVersionId()).toBe(OVERVIEW_DEFAULT_PROMPT_VERSION);
-    expect(OVERVIEW_DEFAULT_PROMPT_VERSION).toBe("v3");
+    expect(OVERVIEW_DEFAULT_PROMPT_VERSION).toBe("v4");
   });
 
   it("honors a VALID env override (the no-image-roll rollback to v2)", () => {
@@ -37,7 +38,7 @@ describe("defaultPromptVersionId — rollback lever (OVERVIEW_PROMPT_VERSION_DEF
 
   it("falls back to the registry default for an INVALID env value", () => {
     vi.stubEnv("OVERVIEW_PROMPT_VERSION_DEFAULT", "v99");
-    expect(defaultPromptVersionId()).toBe("v3");
+    expect(defaultPromptVersionId()).toBe("v4");
   });
 });
 
@@ -52,10 +53,10 @@ describe("isValidPromptVersionId", () => {
 });
 
 describe("listSelectablePromptVersions", () => {
-  it("lists every registry version with display metadata, v3 first", () => {
+  it("lists every registry version with display metadata, v4 first", () => {
     const list = listSelectablePromptVersions();
     expect(list.map((v) => v.id)).toEqual(OVERVIEW_PROMPT_VERSION_IDS);
-    expect(list[0].id).toBe("v3");
+    expect(list[0].id).toBe("v4");
     for (const v of list) {
       expect(v.label.length).toBeGreaterThan(0);
       expect(v.description.length).toBeGreaterThan(0);
@@ -84,13 +85,17 @@ describe("resolveEffectiveOverviewModel — precedence", () => {
     expect(resolveEffectiveOverviewModel("v3")).toBe("us.anthropic.claude-sonnet-4-6-test-v1:0");
   });
 
-  it("falls back to the default Sonnet 4.x model when nothing is set", () => {
+  it("falls back to the default Opus 4.8 model when nothing is set", () => {
     vi.stubEnv("OVERVIEW_GENERATE_MODEL", undefined);
-    expect(resolveEffectiveOverviewModel("v3")).toContain("claude-sonnet-4");
+    expect(resolveEffectiveOverviewModel("v3")).toContain("claude-opus-4-8");
   });
 });
 
 describe("versionPermitsSynopsisFindings — keeps the faithfulness pass in step with the floor", () => {
+  it("is true for v4 (inherits v3's synopsis-finding permission)", () => {
+    expect(versionPermitsSynopsisFindings("v4")).toBe(true);
+  });
+
   it("is true for v3 (its floor permits a synopsis-reported finding)", () => {
     expect(versionPermitsSynopsisFindings("v3")).toBe(true);
   });
@@ -99,7 +104,25 @@ describe("versionPermitsSynopsisFindings — keeps the faithfulness pass in step
     expect(versionPermitsSynopsisFindings("v2")).toBe(false);
   });
 
-  it("an unknown / missing version resolves to the default (v3 → true)", () => {
+  it("an unknown / missing version resolves to the default (v4 → true)", () => {
     expect(versionPermitsSynopsisFindings(undefined)).toBe(true);
+  });
+});
+
+describe("estimateDraftCostUsd — display-only superuser cost estimate", () => {
+  it("returns ~$0.0325 for the Opus 4.8 inference profile", () => {
+    expect(estimateDraftCostUsd("us.anthropic.claude-opus-4-8")).toBeCloseTo(0.0325, 4);
+  });
+
+  it("returns the cheaper Sonnet estimate", () => {
+    // 5000/1e6 * 3 + 300/1e6 * 15 = 0.015 + 0.0045 = 0.0195
+    expect(estimateDraftCostUsd("us.anthropic.claude-sonnet-4-5-20250929-v1:0")).toBeCloseTo(
+      0.0195,
+      4,
+    );
+  });
+
+  it("returns null for an unrecognized model id", () => {
+    expect(estimateDraftCostUsd("openai/gpt")).toBeNull();
   });
 });

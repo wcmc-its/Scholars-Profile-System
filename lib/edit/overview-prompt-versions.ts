@@ -24,7 +24,7 @@
 import type { OverviewElement } from "@/lib/edit/overview-params";
 
 /** The known prompt-version ids. Extend as new versions are authored. */
-export type OverviewPromptVersionId = "v2" | "v3";
+export type OverviewPromptVersionId = "v2" | "v3" | "v4";
 
 /** A version's lifecycle status — drives ordering / labelling in the selector. */
 export type OverviewPromptVersionStatus = "default" | "experimental" | "deprecated";
@@ -70,24 +70,39 @@ export type OverviewPromptVersionMeta = {
 
 /**
  * The registry, keyed by id. Insertion order is the selector display order:
- * the live default first, the legacy baseline after it.
+ * the live default first, the experimental A/B next, the rollback baseline last.
  *
+ * - **v4** — v3's keyword-rich narrative plus an explicit charge to name the
+ *   throughline that unifies the research program (the larger trends, themes, and
+ *   patterns connecting the work). Same entity-grounding floor and word band as v3.
+ *   The new DEFAULT.
  * - **v3** — the keyword-rich narrative prompt (the v3a design doc). Connects the
  *   scholar's work into its natural threads, richer in discriminating terms,
- *   longer word band. The new DEFAULT.
- * - **v2** — the original concise, cautious prompt. Kept selectable as the A/B
- *   baseline and the rollback target (set `OVERVIEW_PROMPT_VERSION_DEFAULT=v2`).
+ *   longer word band. Demoted to the A/B experimental, still selectable.
+ * - **v2** — the original concise, cautious prompt. Kept selectable as the rollback
+ *   baseline (set `OVERVIEW_PROMPT_VERSION_DEFAULT=v2`).
  */
 export const OVERVIEW_PROMPT_VERSION_METAS: Record<
   OverviewPromptVersionId,
   OverviewPromptVersionMeta
 > = {
+  v4: {
+    id: "v4",
+    label: "v4 — synthesis & throughline",
+    description:
+      "v3's keyword-rich narrative plus an explicit charge to name the throughline that unifies the research program — the larger trends, themes, and patterns connecting the work. Same entity-grounding floor.",
+    status: "default",
+    elementLabels: {
+      key_findings: "Findings & their implications",
+    },
+    permitsSynopsisFindings: true,
+  },
   v3: {
     id: "v3",
     label: "v3 — keyword-rich narrative",
     description:
       "Connects the work into its natural threads with richer, more discriminating terms and a longer word band. Same entity-grounding floor.",
-    status: "default",
+    status: "experimental",
     elementLabels: {
       // Drop the importance-rating framing ("significance" is the one axis the
       // grounding floor bans) for scientific-implication framing.
@@ -114,7 +129,7 @@ export const OVERVIEW_PROMPT_VERSION_IDS = Object.keys(
 /** The registry's baseline default version — the constant fallback when no env
  *  override is set. The live default is {@link defaultPromptVersionId}, which lets
  *  an operator roll back without a code change. */
-export const OVERVIEW_DEFAULT_PROMPT_VERSION: OverviewPromptVersionId = "v3";
+export const OVERVIEW_DEFAULT_PROMPT_VERSION: OverviewPromptVersionId = "v4";
 
 /** Type guard: is `value` a known version id? */
 export function isValidPromptVersionId(value: unknown): value is OverviewPromptVersionId {
@@ -164,4 +179,27 @@ export function humanizeModelId(modelId: string): string {
   if (!m) return modelId;
   const family = m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase();
   return `Claude ${family} ${m[2]}.${m[3]}`;
+}
+
+/** Per-MILLION-token Bedrock list prices (USD), keyed by model-family fragment.
+ *  Display-only — drives the superuser cost estimate, never routing. */
+const MODEL_PRICE_PER_MTOK: { test: RegExp; input: number; output: number }[] = [
+  { test: /claude-opus/i, input: 5, output: 25 },
+  { test: /claude-sonnet/i, input: 3, output: 15 },
+  { test: /claude-haiku/i, input: 1, output: 5 },
+  { test: /claude-fable/i, input: 10, output: 50 },
+];
+/** Typical overview-draft token shape: profile facts in, short prose out. */
+const OVERVIEW_DRAFT_INPUT_TOKENS = 5000;
+const OVERVIEW_DRAFT_OUTPUT_TOKENS = 300;
+/** Best-effort USD estimate for ONE draft on `modelId`; null when the model is
+ *  unrecognized. A grounding (faithfulness) pass, when enabled, multiplies this
+ *  by roughly 3 (two extra Bedrock calls). */
+export function estimateDraftCostUsd(modelId: string): number | null {
+  const p = MODEL_PRICE_PER_MTOK.find((x) => x.test.test(modelId));
+  if (!p) return null;
+  return (
+    (OVERVIEW_DRAFT_INPUT_TOKENS / 1_000_000) * p.input +
+    (OVERVIEW_DRAFT_OUTPUT_TOKENS / 1_000_000) * p.output
+  );
 }
