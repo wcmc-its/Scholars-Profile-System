@@ -47,7 +47,11 @@ export type AuthzDenialReason =
   | "ed_locked"
   // ─── comms_steward Method-Family surface (comms-steward-methods-visibility-spec.md §3/§7) ───
   /** a Method-Family steward action by an actor who is neither comms_steward nor superuser */
-  | "not_comms_steward";
+  | "not_comms_steward"
+  // ─── cores inference (CORE_CLAIM) ───
+  /** a (publication, core) usage claim/reject by an actor who is neither an
+   *  owner/curator of that core (`UnitAdmin` entityType=core) nor a superuser */
+  | "not_core_owner";
 
 export type AuthzResult = { ok: true } | { ok: false; reason: AuthzDenialReason };
 
@@ -360,6 +364,57 @@ export async function getEffectiveUnitRole(
     if (row.role === "curator") best = "curator";
   }
   return best;
+}
+
+/**
+ * Minimal Prisma surface for a flat core-owner lookup (cores inference).
+ * Mock-friendly for unit tests, mirroring {@link UnitAdminLookup}.
+ */
+export type CoreOwnerLookup = {
+  unitAdmin: {
+    findUnique: (args: {
+      where: {
+        entityType_entityId_cwid: { entityType: "core"; entityId: string; cwid: string };
+      };
+      select: { role: true };
+    }) => Promise<{ role: "owner" | "curator" } | null>;
+  };
+};
+
+/**
+ * The actor's role on a core facility. A core owner is
+ * `UnitAdmin(entityType="core", entityId=coreId)`. Cores are flat — there is no
+ * dept→division cascade — so this is a single composite-key lookup. Superuser is
+ * NOT minted here (it's handled in {@link authorizeCoreClaim}) so the audit log
+ * records the role the actor actually held.
+ */
+export async function getCoreOwnerRole(
+  session: EditSession,
+  coreId: string,
+  db: CoreOwnerLookup,
+): Promise<EffectiveUnitRole> {
+  const row = await db.unitAdmin.findUnique({
+    where: {
+      entityType_entityId_cwid: { entityType: "core", entityId: coreId, cwid: session.cwid },
+    },
+    select: { role: true },
+  });
+  return row?.role ?? "none";
+}
+
+/**
+ * `POST /api/edit/core-claim`. An owner/curator of the core (or a Superuser) may
+ * claim/reject a (publication, core) usage candidate for THAT core. Pure given
+ * the looked-up role. No comms_steward parity — cores are a separate domain from
+ * profile-content stewardship.
+ */
+export function authorizeCoreClaim(
+  session: EditSession,
+  coreRole: EffectiveUnitRole,
+): AuthzResult {
+  if (session.isSuperuser) return ALLOW;
+  if (coreRole === "owner" || coreRole === "curator") return ALLOW;
+  return { ok: false, reason: "not_core_owner" };
 }
 
 /**
