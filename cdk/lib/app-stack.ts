@@ -1025,6 +1025,15 @@ export class AppStack extends Stack {
         // nightly etl:coi-gap source has seeded data in that env. Prod takes
         // effect only on an approval-gated `cdk deploy Sps-App-prod`.
         SELF_EDIT_COI_GAP_HINT: "on",
+        // SELF_EDIT_GRANT_RECS (GrantRecs Phase 3) — the owner-facing "Grants for
+        // me" rail item + panel on /edit (self) and /edit/scholar/[cwid]
+        // (superuser), surfacing the Phase-2 forward matcher
+        // (/api/scholars/[cwid]/opportunities). Read via isGrantRecsEnabled()
+        // (=== "on"); when off the grant-recs attribute is dropped from the rail
+        // and the valid-attr set, so the feature ships fully dark. OFF in both
+        // envs for now: the matcher only returns data once GRANT# opportunities
+        // are ingested + indexed in that env, so it stays dark until that lands.
+        SELF_EDIT_GRANT_RECS: "off",
         // #1102/#1103/#1104/#1105 — Cancer-Center / org-unit features (merged
         // 2026-06-18, PRs #1108/#1109/#1110/#1111). Staging-on for soak;
         // prod-off/armed (flip on the next approval-gated Sps-App-prod deploy):
