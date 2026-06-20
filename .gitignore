@@ -153,12 +153,15 @@ CLAUDE.md
 docs/superpowers/
 
 # Ad-hoc debug/probe scripts (kept locally, never committed)
-scripts/_apply-fix.cjs
+scripts/_*
 scripts/debug-*.ts
 scripts/probe-*.ts
 scripts/query-reciterdb.ts
 scripts/query-scholars.ts
 .screenshots/
+
+# Local-only dev auth route (uncommitted; double-gated, never shipped)
+app/api/auth/dev-login/
 
 # Reference material from WCM Operations (ServiceNow KB samples) — local only, never commit
 docs/sample docs from ServiceNow/
