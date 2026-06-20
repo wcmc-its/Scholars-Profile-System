@@ -1,0 +1,133 @@
+<style>
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+.cell{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:0;border-radius:8px;padding:8px 9px;cursor:pointer}
+.cell:hover{background:var(--color-background-secondary)}
+.cell.on{background:var(--color-background-info)}
+.rb{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--color-border-primary);flex:none;box-sizing:border-box}
+.cell.on .rb{border:4px solid var(--color-text-info)}
+.cinfo{flex:1;min-width:0}
+.cname{display:block;font-size:13.5px;font-weight:500;color:var(--color-text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell.on .cname{color:var(--color-text-info)}
+.cbar{display:block;height:3px;background:var(--color-border-tertiary);border-radius:999px;margin-top:5px;overflow:hidden;max-width:130px}
+.cbar>span{display:block;height:100%;background:var(--color-text-tertiary);border-radius:999px}
+.cell.on .cbar>span{background:var(--color-text-info)}
+.ccount{font-size:13px;font-family:var(--font-mono);color:var(--color-text-secondary);flex:none}
+.cell.on .ccount{color:var(--color-text-info)}
+.prow{padding:12px 4px;border-top:0.5px solid var(--color-border-tertiary)}
+.prow:first-child{border-top:0}
+.ptitle{font-size:14px;font-weight:500;color:var(--color-text-primary);line-height:1.4}
+.pmeta{font-size:12px;color:var(--color-text-tertiary);margin-top:3px}
+.psnip{display:none;font-size:13px;line-height:1.6;color:var(--color-text-secondary);margin-top:7px;padding-left:10px;border-left:2px solid var(--color-border-info)}
+mark{background:var(--color-background-info);color:var(--color-text-info);padding:0 3px;border-radius:3px}
+</style>
+
+<h2 class="sr-only">Reframed method-page section: a ranked, filterable strip of the specific cell lines this method resolves to, each with a usage count and a hover rail showing the verbatim sentence; selecting one filters the article list below and reveals a per–cell-line relevance snippet on each matching paper.</h2>
+
+<div style="background:var(--color-background-secondary);border-radius:var(--border-radius-lg);padding:1.1rem 1.2rem 1.4rem;">
+
+  <div style="margin-bottom:10px;">
+    <div style="font-size:18px;font-weight:500;color:var(--color-text-primary);">Specific cell lines used</div>
+    <div style="font-size:13px;color:var(--color-text-secondary);margin-top:2px;">The named cell lines this method resolves to across these papers · select one to filter the list below.</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,1fr) 236px;gap:18px;align-items:start;margin-bottom:1.4rem;">
+
+    <div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:5px 6px;">
+      <button class="cell" data-id="adipo" aria-pressed="false"><span class="rb" aria-hidden="true"></span><span class="cinfo"><span class="cname">3T3-L1 adipocytes</span><span class="cbar"><span style="width:100%"></span></span></span><span class="ccount">11</span></button>
+      <button class="cell" data-id="pre" aria-pressed="false"><span class="rb" aria-hidden="true"></span><span class="cinfo"><span class="cname">3T3-L1 preadipocytes</span><span class="cbar"><span style="width:73%"></span></span></span><span class="ccount">8</span></button>
+      <button class="cell" data-id="hek" aria-pressed="false"><span class="rb" aria-hidden="true"></span><span class="cinfo"><span class="cname">HEK293T cells</span><span class="cbar"><span style="width:45%"></span></span></span><span class="ccount">5</span></button>
+      <button class="cell" data-id="hep" aria-pressed="false"><span class="rb" aria-hidden="true"></span><span class="cinfo"><span class="cname">human hepatocyte cell line</span><span class="cbar"><span style="width:27%"></span></span></span><span class="ccount">3</span></button>
+      <button class="cell" data-id="ms1" aria-pressed="false"><span class="rb" aria-hidden="true"></span><span class="cinfo"><span class="cname">MS1 VEGF angiosarcoma cells</span><span class="cbar"><span style="width:27%"></span></span></span><span class="ccount">3</span></button>
+      <button class="cell" data-id="n9" aria-pressed="false"><span class="rb" aria-hidden="true"></span><span class="cinfo"><span class="cname">N9 microglial cells</span><span class="cbar"><span style="width:18%"></span></span></span><span class="ccount">2</span></button>
+      <button class="cell" data-id="thyroid" aria-pressed="false"><span class="rb" aria-hidden="true"></span><span class="cinfo"><span class="cname">human thyroid cell line</span><span class="cbar"><span style="width:18%"></span></span></span><span class="ccount">2</span></button>
+      <button onclick="sendPrompt('Show all cell lines used under immortalized cell lines')" style="display:flex;align-items:center;gap:6px;width:100%;background:none;border:0;cursor:pointer;color:var(--color-text-secondary);font-size:12.5px;padding:9px;border-top:0.5px solid var(--color-border-tertiary);margin-top:3px;"><i class="ti ti-chevron-down" aria-hidden="true"></i>6 more cell lines</button>
+    </div>
+
+    <div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:13px 14px;">
+      <div style="display:flex;align-items:center;gap:6px;color:var(--color-text-tertiary);font-size:11.5px;margin-bottom:8px;"><i class="ti ti-quote" aria-hidden="true"></i><span>Verbatim, from a paper using it</span></div>
+      <div id="rail-term" style="font-size:14px;font-weight:500;color:var(--color-text-primary);margin-bottom:8px;">3T3-L1 adipocytes</div>
+      <div id="rail-snip" style="font-size:13px;line-height:1.7;color:var(--color-text-secondary);">In conclusion, our data show that UHRF1 positively regulates <mark>3T3-L1</mark> adipogenesis and limits fibrosis by suppressing GPNMB and TGF-β signaling…</div>
+      <div style="border-top:0.5px solid var(--color-border-tertiary);margin:12px 0;"></div>
+      <button onclick="sendPrompt('Open the source publication for this snippet')" style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--color-text-info);background:none;border:0;padding:0;cursor:pointer;"><i class="ti ti-file-text" aria-hidden="true"></i><span>Source publication</span><i class="ti ti-arrow-up-right" aria-hidden="true"></i></button>
+    </div>
+
+  </div>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 8px;">
+    <span style="font-size:16px;font-weight:500;color:var(--color-text-primary);">Research articles using this method</span>
+    <select onchange="sendPrompt('Re-sort the article list by '+this.value)" style="width:auto;"><option>Newest</option><option>Most cited</option><option>Oldest</option></select>
+  </div>
+  <div id="results-line" style="font-size:13px;color:var(--color-text-secondary);margin:0 0 6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <span id="results-text">33 results</span><span id="results-chip" style="display:none;"></span>
+  </div>
+
+  <div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:4px 14px;">
+    <div class="prow" data-id="p1" data-cells="adipo"><div class="ptitle">The E3 ubiquitin-protein ligase UHRF1 promotes adipogenesis and limits fibrosis by suppressing GPNMB-mediated TGF-β signaling.</div><div class="pmeta">Scientific reports · 2024 · 7 citations</div><div class="psnip"></div></div>
+    <div class="prow" data-id="p2" data-cells="adipo"><div class="ptitle">Comprehensive Characterization of Protein Turnover by Comparative SILAC Labeling Analysis in 3T3-L1.</div><div class="pmeta">Journal of proteome research · 2023</div><div class="psnip"></div></div>
+    <div class="prow" data-id="p5" data-cells="hek"><div class="ptitle">Assessment of Residual Full-Length SV40 Large T Antigen in Clinical-Grade Adeno-Associated Virus Vectors Produced in 293T Cells.</div><div class="pmeta">Human gene therapy · 2023 · 6 citations</div><div class="psnip"></div></div>
+    <div class="prow" data-id="p6" data-cells="hep"><div class="ptitle">Retinoic Acid Receptor β Loss in Hepatocytes Increases Steatosis and Elevates the Integrated Stress Response in Alcohol-Associated Liver Disease.</div><div class="pmeta">International journal of molecular sciences · 2023 · 4 citations</div><div class="psnip"></div></div>
+    <div class="prow" data-id="p3" data-cells="adipo"><div class="ptitle">Proteomic profiling of metformin effects in 3T3-L1 adipocytes by SILAC-based quantification.</div><div class="pmeta">Proteomics · 2022 · 1 citation</div><div class="psnip"></div></div>
+    <div class="prow" data-id="p4" data-cells="pre ms1"><div class="ptitle">STAT1- and NFAT-independent amplification of purinoceptor function integrates cellular senescence with interleukin-6 production in preadipocytes.</div><div class="pmeta">British journal of pharmacology · 2022 · 4 citations</div><div class="psnip"></div></div>
+    <div class="prow" data-id="p7" data-cells="n9"><div class="ptitle">Effects of Suberoylanilide Hydroxamic Acid (SAHA) on the Inflammatory Response in Lipopolysaccharide-Induced N9 Microglial Cells.</div><div class="pmeta">Cureus · 2022</div><div class="psnip"></div></div>
+    <div class="prow" data-id="p8" data-cells="thyroid"><div class="ptitle">Exposure to Polybrominated Diphenyl Ether Flame Retardants Causes Deoxyribonucleic Acid Damage in Human Thyroid Cells In Vitro.</div><div class="pmeta">The Journal of surgical research · 2022</div><div class="psnip"></div></div>
+  </div>
+
+  <div style="display:flex;align-items:flex-start;gap:6px;padding:8px 2px 0;font-size:11.5px;color:var(--color-text-tertiary);line-height:1.5;">
+    <i class="ti ti-info-circle" style="margin-top:1px;" aria-hidden="true"></i><span>Hovering a cell line previews its sentence in the rail. Selecting one filters the list and shows the relevance sentence on each matching paper — a paper using two cell lines surfaces a different sentence under each.</span>
+  </div>
+</div>
+
+<script>
+(function(){
+  var PH="<em style='color:var(--color-text-tertiary)'>The verbatim sentence where this cell line appears would render here.</em>";
+  var SNIP={
+    p1:{adipo:"In conclusion, our data show that UHRF1 positively regulates <mark>3T3-L1</mark> adipogenesis and limits fibrosis by suppressing GPNMB and TGF-β signaling…"},
+    p4:{
+      pre:"We previously reported that SIRT1-depletion in <mark>3T3-L1 preadipocytes</mark> led to C-Myc activation, adipocyte hyperplasia, and dysregulated adipocyte metabolism.",
+      ms1:"Experiments in <mark>MS1 VEGF angiosarcoma cells</mark> and adipose tissue samples from obese mice complemented preadipocyte experiments."
+    },
+    p6:{hep:"Importantly, we demonstrate that in a <mark>human hepatocyte cell line</mark>, RARβ is required for the inhibitory effects of AC261066 on palmitate-induced lipid accumulation."}
+  };
+  var NAME={adipo:"3T3-L1 adipocytes",pre:"3T3-L1 preadipocytes",hek:"HEK293T cells",hep:"human hepatocyte cell line",ms1:"MS1 VEGF angiosarcoma cells",n9:"N9 microglial cells",thyroid:"human thyroid cell line"};
+  var NUM={adipo:11,pre:8,hek:5,hep:3,ms1:3,n9:2,thyroid:2};
+  var RAIL={adipo:SNIP.p1.adipo,pre:SNIP.p4.pre,hep:SNIP.p6.hep,ms1:SNIP.p4.ms1,hek:PH,n9:PH,thyroid:PH};
+
+  var railTerm=document.getElementById('rail-term'),railSnip=document.getElementById('rail-snip');
+  function setRail(id){railTerm.textContent=NAME[id];railSnip.innerHTML=RAIL[id]||PH;}
+
+  var cells=[].slice.call(document.querySelectorAll('.cell'));
+  var active=null;
+
+  function applyFilter(){
+    var shown=0;
+    document.querySelectorAll('.prow').forEach(function(r){
+      var cs=r.dataset.cells.split(' '),snip=r.querySelector('.psnip');
+      if(!active){r.style.display='';snip.style.display='none';snip.innerHTML='';}
+      else if(cs.indexOf(active)>=0){r.style.display='';shown++;snip.innerHTML=(SNIP[r.dataset.id]&&SNIP[r.dataset.id][active])||PH;snip.style.display='block';}
+      else{r.style.display='none';snip.style.display='none';}
+    });
+    var rt=document.getElementById('results-text'),chip=document.getElementById('results-chip');
+    if(!active){rt.textContent='33 results';chip.style.display='none';chip.innerHTML='';}
+    else{
+      rt.textContent=NUM[active]+' of 33 articles';chip.style.display='inline-flex';chip.innerHTML='';
+      var c=document.createElement('button');
+      c.style.cssText="display:inline-flex;align-items:center;gap:5px;background:var(--color-background-info);border:0;color:var(--color-text-info);border-radius:999px;padding:2px 9px;font-size:12px;cursor:pointer;";
+      c.innerHTML=NAME[active]+" <i class='ti ti-x' aria-hidden='true'></i>";
+      c.onclick=function(){select(active);};
+      chip.appendChild(c);
+    }
+  }
+  function select(id){
+    active=(active===id)?null:id;
+    cells.forEach(function(b){var on=b.dataset.id===active;b.classList.toggle('on',on);b.setAttribute('aria-pressed',on);});
+    if(active)setRail(active);
+    applyFilter();
+  }
+  cells.forEach(function(b){
+    var id=b.dataset.id;
+    b.addEventListener('click',function(){select(id);});
+    b.addEventListener('mouseenter',function(){setRail(id);});
+    b.addEventListener('focus',function(){setRail(id);});
+  });
+})();
+</script>

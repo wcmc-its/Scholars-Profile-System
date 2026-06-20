@@ -1,0 +1,66 @@
+<style>
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+.fchip{display:inline-flex;align-items:center;gap:6px;background:var(--color-background-primary);border:0.5px solid var(--color-border-secondary);color:var(--color-text-info);border-radius:999px;padding:3px 6px 3px 11px;font-size:12.5px;font-weight:500;cursor:pointer}
+.fchip:hover{background:var(--color-background-secondary)}
+.auth{display:inline-flex;align-items:center;gap:6px;border:0.5px solid var(--color-border-tertiary);border-radius:999px;padding:2px 9px 2px 2px;font-size:12px;color:var(--color-text-secondary)}
+.av{width:18px;height:18px;border-radius:50%;background:var(--color-background-info);color:var(--color-text-info);font-size:9px;display:inline-flex;align-items:center;justify-content:center;font-weight:500;flex:none}
+.xlink{display:inline-flex;align-items:center;gap:5px;background:none;border:0;color:var(--color-text-info);font-size:12px;cursor:pointer;padding:0}
+.xlink:hover{text-decoration:underline}
+mark{background:var(--color-background-info);color:var(--color-text-info);padding:0 3px;border-radius:3px}
+</style>
+
+<h2 class="sr-only">Article list for the immortalized cell lines method, filtered to MS1 VEGF angiosarcoma cells. One grounded match is shown with its verbatim relevance sentence, the cell line highlighted, and a cross-link noting the same paper also matches 3T3-L1 preadipocytes.</h2>
+
+<div style="background:var(--color-background-secondary);border-radius:var(--border-radius-lg);padding:1.1rem 1.2rem 1.3rem;">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--color-background-info);border-radius:var(--border-radius-md);padding:9px 11px;margin-bottom:14px;">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:var(--color-text-secondary);">
+      <span>Immortalized cell lines</span>
+      <i class="ti ti-chevron-right" style="font-size:13px;color:var(--color-text-tertiary);" aria-hidden="true"></i>
+      <button class="fchip" id="clear-chip">MS1 VEGF angiosarcoma cells <i class="ti ti-x" aria-hidden="true"></i></button>
+    </div>
+    <button class="xlink" id="back-all"><i class="ti ti-arrow-left" aria-hidden="true"></i>All cell lines</button>
+  </div>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 8px;">
+    <span style="font-size:16px;font-weight:500;color:var(--color-text-primary);">Articles using this cell line</span>
+    <select onchange="sendPrompt('Re-sort by '+this.value)" style="width:auto;"><option>Newest</option><option>Most cited</option></select>
+  </div>
+  <div style="font-size:13px;color:var(--color-text-secondary);margin:0 0 6px;">3 of 33 articles</div>
+
+  <div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px;">
+
+    <div style="font-size:14px;font-weight:500;color:var(--color-text-primary);line-height:1.4;">STAT1- and NFAT-independent amplification of purinoceptor function integrates cellular senescence with interleukin-6 production in preadipocytes.</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin:9px 0;">
+      <span class="auth"><span class="av">AA</span>Aisha Yaghoub Al-Malki</span>
+      <span class="auth"><span class="av">RC</span>Raphael Courjaret</span>
+      <span class="auth"><span class="av">MV</span>Muneera Vakayil</span>
+      <span class="auth"><span class="av">KM</span>Khaled Machaca</span>
+      <span class="auth"><span class="av">NM</span>Nayef A. Mazloum</span>
+    </div>
+    <div style="font-size:12px;color:var(--color-text-tertiary);">British journal of pharmacology · 2022 · PMID: 38321760 · 4 citations</div>
+
+    <div style="font-size:13px;line-height:1.6;color:var(--color-text-secondary);margin-top:10px;padding-left:10px;border-left:2px solid var(--color-border-info);">Experiments in <mark>MS1 VEGF angiosarcoma cells</mark> and adipose tissue samples from obese mice complemented preadipocyte experiments.</div>
+
+    <div style="margin-top:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <span style="font-size:11.5px;color:var(--color-text-tertiary);">Also matches:</span>
+      <button class="xlink" id="xlink-pre">3T3-L1 preadipocytes <i class="ti ti-arrow-right" aria-hidden="true"></i></button>
+    </div>
+
+    <div style="border-top:0.5px solid var(--color-border-tertiary);margin-top:14px;padding-top:12px;font-size:12.5px;color:var(--color-text-tertiary);display:flex;align-items:center;gap:6px;">
+      <i class="ti ti-dots" aria-hidden="true"></i><span>+ 2 more articles in the full extraction</span>
+    </div>
+  </div>
+
+  <button id="clear-btn" style="margin-top:12px;display:inline-flex;align-items:center;gap:6px;background:none;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);padding:7px 13px;font-size:13px;color:var(--color-text-primary);cursor:pointer;"><i class="ti ti-x" aria-hidden="true"></i>Clear filter · view all 33 articles</button>
+</div>
+
+<script>
+(function(){
+  function clear(){sendPrompt('Clear the cell line filter and show all 33 articles for immortalized cell lines');}
+  document.getElementById('clear-chip').addEventListener('click',clear);
+  document.getElementById('clear-btn').addEventListener('click',clear);
+  document.getElementById('back-all').addEventListener('click',function(){sendPrompt('Show all cell lines used under immortalized cell lines');});
+  document.getElementById('xlink-pre').addEventListener('click',function(){sendPrompt('Filter the immortalized cell lines article list to 3T3-L1 preadipocytes');});
+})();
+</script>
