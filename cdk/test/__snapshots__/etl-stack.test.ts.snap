@@ -3023,7 +3023,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Infoed"}],"Next":"TaskInfoed"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CoiGap"}],"Next":"TaskCoiGap"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskReciter","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
+              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Infoed"}],"Next":"TaskInfoed"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CoiGap"}],"Next":"TaskCoiGap"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarNightly"}],"Next":"TaskJenzabarNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskReciter","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -3143,7 +3143,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
               },
-              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:coi"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskCoiGap":{"Next":"TaskDynamodb","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCoiGap"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
+              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:coi"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskCoiGap":{"Next":"TaskJenzabarNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCoiGap"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -3163,7 +3163,27 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
               },
-              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:coi-gap"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskDynamodb":{"Next":"TaskIdentity","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyDynamodb"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
+              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:coi-gap"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskJenzabarNightly":{"Next":"TaskDynamodb","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyJenzabarNightly"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["",
+              {
+                "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
+              },
+              "","",
+              {
+                "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
+              },
+              ""],"SecurityGroups":["",
+              {
+                "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
+              },
+              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:jenzabar"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskDynamodb":{"Next":"TaskIdentity","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyDynamodb"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -3359,7 +3379,15 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"prod","step":"Dynamodb","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- Dynamodb failed"}},"FailDynamodb":{"Type":"Fail","Cause":"Dynamodb failed"},"NotifyCoiGap":{"Next":"FailCoiGap","Type":"Task","Resource":"arn:",
+              "","Message":{"env":"prod","step":"Dynamodb","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- Dynamodb failed"}},"FailDynamodb":{"Type":"Fail","Cause":"Dynamodb failed"},"NotifyJenzabarNightly":{"Next":"FailJenzabarNightly","Type":"Task","Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"prod","step":"JenzabarNightly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- JenzabarNightly failed"}},"FailJenzabarNightly":{"Type":"Fail","Cause":"JenzabarNightly failed"},"NotifyCoiGap":{"Next":"FailCoiGap","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -4548,7 +4576,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"WeeklyStateMachineStartFromChoice","States":{"WeeklyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Completeness"}],"Next":"TaskCompleteness"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"HeadshotPresence"}],"Next":"TaskHeadshotPresence"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Spotlight"}],"Next":"TaskSpotlight"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReporterWeekly"}],"Next":"TaskReporterWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NsfWeekly"}],"Next":"TaskNsfWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarWeekly"}],"Next":"TaskJenzabarWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"GatesWeekly"}],"Next":"TaskGatesWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NihProfileWeekly"}],"Next":"TaskNihProfileWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexWeekly"}],"Next":"TaskSearchIndexWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateWeekly"}],"Next":"TaskRevalidateWeekly"}],"Default":"TaskCompleteness"},"TaskCompleteness":{"Next":"TaskHeadshotPresence","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCompleteness"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
+              "{"StartAt":"WeeklyStateMachineStartFromChoice","States":{"WeeklyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Completeness"}],"Next":"TaskCompleteness"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"HeadshotPresence"}],"Next":"TaskHeadshotPresence"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Spotlight"}],"Next":"TaskSpotlight"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReporterWeekly"}],"Next":"TaskReporterWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NsfWeekly"}],"Next":"TaskNsfWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"GatesWeekly"}],"Next":"TaskGatesWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NihProfileWeekly"}],"Next":"TaskNihProfileWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexWeekly"}],"Next":"TaskSearchIndexWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateWeekly"}],"Next":"TaskRevalidateWeekly"}],"Default":"TaskCompleteness"},"TaskCompleteness":{"Next":"TaskHeadshotPresence","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCompleteness"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -4628,7 +4656,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
               },
-              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reporter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskNsfWeekly":{"Next":"TaskJenzabarWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyNsfWeekly"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
+              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reporter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskNsfWeekly":{"Next":"TaskGatesWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyNsfWeekly"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -4648,27 +4676,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
               },
-              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:nsf"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskJenzabarWeekly":{"Next":"TaskGatesWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyJenzabarWeekly"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
-              {
-                "Ref": "AWS::Partition",
-              },
-              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
-              {
-                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
-              },
-              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["",
-              {
-                "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
-              },
-              "","",
-              {
-                "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
-              },
-              ""],"SecurityGroups":["",
-              {
-                "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
-              },
-              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:jenzabar"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskGatesWeekly":{"Next":"TaskNihProfileWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyGatesWeekly"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
+              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:nsf"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskGatesWeekly":{"Next":"TaskNihProfileWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyGatesWeekly"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -4780,15 +4788,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"prod","step":"GatesWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- GatesWeekly failed"}},"FailGatesWeekly":{"Type":"Fail","Cause":"GatesWeekly failed"},"NotifyJenzabarWeekly":{"Next":"FailJenzabarWeekly","Type":"Task","Resource":"arn:",
-              {
-                "Ref": "AWS::Partition",
-              },
-              ":states:::sns:publish","Parameters":{"TopicArn":"",
-              {
-                "Ref": "EtlFailureTopic8361D0D0",
-              },
-              "","Message":{"env":"prod","step":"JenzabarWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- JenzabarWeekly failed"}},"FailJenzabarWeekly":{"Type":"Fail","Cause":"JenzabarWeekly failed"},"NotifyNsfWeekly":{"Next":"FailNsfWeekly","Type":"Task","Resource":"arn:",
+              "","Message":{"env":"prod","step":"GatesWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- GatesWeekly failed"}},"FailGatesWeekly":{"Type":"Fail","Cause":"GatesWeekly failed"},"NotifyNsfWeekly":{"Next":"FailNsfWeekly","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -9077,7 +9077,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Infoed"}],"Next":"TaskInfoed"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CoiGap"}],"Next":"TaskCoiGap"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskReciter","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
+              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Infoed"}],"Next":"TaskInfoed"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CoiGap"}],"Next":"TaskCoiGap"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarNightly"}],"Next":"TaskJenzabarNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskReciter","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -9197,7 +9197,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
               },
-              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:coi"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskCoiGap":{"Next":"TaskDynamodb","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCoiGap"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
+              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:coi"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskCoiGap":{"Next":"TaskJenzabarNightly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCoiGap"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -9217,7 +9217,27 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
               },
-              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:coi-gap"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskDynamodb":{"Next":"TaskIdentity","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyDynamodb"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
+              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:coi-gap"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskJenzabarNightly":{"Next":"TaskDynamodb","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyJenzabarNightly"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["",
+              {
+                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
+              },
+              "","",
+              {
+                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
+              },
+              ""],"SecurityGroups":["",
+              {
+                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
+              },
+              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:jenzabar"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskDynamodb":{"Next":"TaskIdentity","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyDynamodb"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -9413,7 +9433,15 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"staging","step":"Dynamodb","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- Dynamodb failed"}},"FailDynamodb":{"Type":"Fail","Cause":"Dynamodb failed"},"NotifyCoiGap":{"Next":"FailCoiGap","Type":"Task","Resource":"arn:",
+              "","Message":{"env":"staging","step":"Dynamodb","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- Dynamodb failed"}},"FailDynamodb":{"Type":"Fail","Cause":"Dynamodb failed"},"NotifyJenzabarNightly":{"Next":"FailJenzabarNightly","Type":"Task","Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"staging","step":"JenzabarNightly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- JenzabarNightly failed"}},"FailJenzabarNightly":{"Type":"Fail","Cause":"JenzabarNightly failed"},"NotifyCoiGap":{"Next":"FailCoiGap","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -10602,7 +10630,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"WeeklyStateMachineStartFromChoice","States":{"WeeklyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Completeness"}],"Next":"TaskCompleteness"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"HeadshotPresence"}],"Next":"TaskHeadshotPresence"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Spotlight"}],"Next":"TaskSpotlight"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReporterWeekly"}],"Next":"TaskReporterWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NsfWeekly"}],"Next":"TaskNsfWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarWeekly"}],"Next":"TaskJenzabarWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"GatesWeekly"}],"Next":"TaskGatesWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NihProfileWeekly"}],"Next":"TaskNihProfileWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexWeekly"}],"Next":"TaskSearchIndexWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateWeekly"}],"Next":"TaskRevalidateWeekly"}],"Default":"TaskCompleteness"},"TaskCompleteness":{"Next":"TaskHeadshotPresence","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCompleteness"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
+              "{"StartAt":"WeeklyStateMachineStartFromChoice","States":{"WeeklyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Completeness"}],"Next":"TaskCompleteness"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"HeadshotPresence"}],"Next":"TaskHeadshotPresence"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Spotlight"}],"Next":"TaskSpotlight"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReporterWeekly"}],"Next":"TaskReporterWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NsfWeekly"}],"Next":"TaskNsfWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"GatesWeekly"}],"Next":"TaskGatesWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"NihProfileWeekly"}],"Next":"TaskNihProfileWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexWeekly"}],"Next":"TaskSearchIndexWeekly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateWeekly"}],"Next":"TaskRevalidateWeekly"}],"Default":"TaskCompleteness"},"TaskCompleteness":{"Next":"TaskHeadshotPresence","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyCompleteness"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -10682,7 +10710,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
               },
-              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reporter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskNsfWeekly":{"Next":"TaskJenzabarWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyNsfWeekly"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
+              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reporter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskNsfWeekly":{"Next":"TaskGatesWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyNsfWeekly"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -10702,27 +10730,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
               },
-              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:nsf"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskJenzabarWeekly":{"Next":"TaskGatesWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyJenzabarWeekly"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
-              {
-                "Ref": "AWS::Partition",
-              },
-              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
-              {
-                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
-              },
-              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["",
-              {
-                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
-              },
-              "","",
-              {
-                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
-              },
-              ""],"SecurityGroups":["",
-              {
-                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
-              },
-              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:jenzabar"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskGatesWeekly":{"Next":"TaskNihProfileWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyGatesWeekly"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
+              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:nsf"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskGatesWeekly":{"Next":"TaskNihProfileWeekly","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyGatesWeekly"}],"Type":"Task","TimeoutSeconds":86400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -10834,15 +10842,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
-              "","Message":{"env":"staging","step":"GatesWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- GatesWeekly failed"}},"FailGatesWeekly":{"Type":"Fail","Cause":"GatesWeekly failed"},"NotifyJenzabarWeekly":{"Next":"FailJenzabarWeekly","Type":"Task","Resource":"arn:",
-              {
-                "Ref": "AWS::Partition",
-              },
-              ":states:::sns:publish","Parameters":{"TopicArn":"",
-              {
-                "Ref": "EtlFailureTopic8361D0D0",
-              },
-              "","Message":{"env":"staging","step":"JenzabarWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- JenzabarWeekly failed"}},"FailJenzabarWeekly":{"Type":"Fail","Cause":"JenzabarWeekly failed"},"NotifyNsfWeekly":{"Next":"FailNsfWeekly","Type":"Task","Resource":"arn:",
+              "","Message":{"env":"staging","step":"GatesWeekly","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- GatesWeekly failed"}},"FailGatesWeekly":{"Type":"Fail","Cause":"GatesWeekly failed"},"NotifyNsfWeekly":{"Next":"FailNsfWeekly","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },

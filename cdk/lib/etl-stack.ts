@@ -242,7 +242,7 @@ export class EtlStack extends Stack {
         ],
       },
       {
-        // #608 -- the weekly etl:jenzabar step reads PhD primary-mentor rows
+        // #608 -- the nightly etl:jenzabar step reads PhD primary-mentor rows
         // from the Jenzabar SQL Server via lib/sources/mssql-jenzabar.ts. The
         // etl/hierarchy secret's legacy "Jenzabar" wording is stale (hierarchy
         // now reads ReciterAI S3 via IAM), so Jenzabar gets its own stub.
@@ -750,6 +750,11 @@ export class EtlStack extends Stack {
       // step + the PubMed statements above), so external:false. Computes whatever
       // its inputs hold; zero candidates until the WCM statement path is flowing.
       { id: "CoiGap", npmScript: "etl:coi-gap", external: false },
+      // #608 mentoring source — moved from the weekly machine to nightly (operator
+      // request) so grad-school mentoring chips refresh within a day. Reads its own
+      // MSSQL credential (etl/jenzabar), external:true. Chips are ISR-only (not
+      // indexed), so it only needs to precede the closing revalidate.
+      { id: "JenzabarNightly", npmScript: "etl:jenzabar", external: true },
       // After the source ETLs (so a freshly matched publication is enriched the
       // same night) and before search:index (so the rebuilt index carries the
       // day's scores).
@@ -790,19 +795,17 @@ export class EtlStack extends Stack {
       { id: "HeadshotPresence", npmScript: "etl:headshot", external: false },
       { id: "Spotlight", npmScript: "etl:spotlight", external: true },
       // Grant-enrichment sources (#608). They key off the `grant` table that
-      // etl:infoed refreshes nightly; none needs 24h freshness, so they batch
+      // etl:infoed refreshes nightly; neither needs 24h freshness, so they batch
       // here weekly instead of weighting the nightly critical path. RePORTER +
       // NSF precede search:index so the funding index carries the refreshed
-      // abstracts/keywords; Jenzabar (mentoring chips, ISR-only -- not indexed)
-      // need only precede the closing revalidate. All three are full-scan, not
-      // new-rows-only: RePORTER's grant<->publication bridge and renewal-year
-      // applId/abstract updates accrue to EXISTING grants, so a delta scan
-      // would miss them. RePORTER reads ReciterDB (etl/reciter secret), Jenzabar
-      // reads its own MSSQL credential (etl/jenzabar), and NSF hits the public
-      // NSF Awards API (no credential -- NAT egress only, so external: false).
+      // abstracts/keywords. Both are full-scan, not new-rows-only: RePORTER's
+      // grant<->publication bridge and renewal-year applId/abstract updates accrue
+      // to EXISTING grants, so a delta scan would miss them. RePORTER reads
+      // ReciterDB (etl/reciter secret) and NSF hits the public NSF Awards API
+      // (no credential -- NAT egress only, so external: false). (Jenzabar moved to
+      // the nightly machine so mentoring chips refresh daily.)
       { id: "ReporterWeekly", npmScript: "etl:reporter", external: true },
       { id: "NsfWeekly", npmScript: "etl:nsf", external: false },
-      { id: "JenzabarWeekly", npmScript: "etl:jenzabar", external: true },
       // #658 -- the remaining grant/PI enrichers, completing the set. Both read
       // PUBLIC sources (Gates BMGF CSV; NIH RePORTER API) over NAT egress with no
       // credential -> external: false, no SecretsStack wiring. Gates (an NSF twin:
