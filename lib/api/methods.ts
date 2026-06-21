@@ -40,6 +40,7 @@ import {
   isMethodsLensToolContextOn,
   isMethodsFamilyRosterFallbackOn,
   isMethodsFamilyDefinitionsOn,
+  isMethodsLensCellLineEntitiesOn,
 } from "@/lib/profile/methods-lens-flags";
 import {
   loadFamilyOverlayGate,
@@ -307,6 +308,162 @@ export async function getFamilyToolUsage(
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// #1166 — Methods Surface B specific-cell-line discovery (the family_entity /
+// family_entity_usage tables). Institution-wide (per family, NOT per-scholar);
+// all readers return empty when METHODS_LENS_CELL_LINE_ENTITIES is off (NO query
+// — dark with no prod cost). The caller (the family page) has already passed the
+// #800/#801 overlay gate via getFamily, so these key on the same public
+// (supercategory, familyLabel).
+// ---------------------------------------------------------------------------
+
+/** One ranked cell line a family resolves to — a strip row / directory entry. */
+export type CellLineEntity = {
+  entityId: string;
+  label: string;
+  usageCount: number;
+  evidenced: boolean;
+  parentEntityId: string | null;
+  parentLabel: string | null;
+  parentDescriptor: string | null;
+};
+
+/**
+ * The specific cell lines a family resolves to, ranked by usage_count desc, for
+ * the Surface-B strip + directory. [] when the flag is off or none exist. The
+ * strip caps client-side; the directory shows all + nests by parent. The
+ * proportional bar = usageCount / max(usageCount) (computed client-side).
+ */
+export async function getFamilyCellLineEntities(
+  supercategory: string,
+  familyLabel: string,
+): Promise<CellLineEntity[]> {
+  if (!isMethodsLensCellLineEntitiesOn()) return [];
+  const rows = await prisma.familyEntity.findMany({
+    where: { supercategory, familyLabel },
+    orderBy: [{ usageCount: "desc" }, { entityLabel: "asc" }],
+    select: {
+      normalizedEntityId: true,
+      entityLabel: true,
+      usageCount: true,
+      evidenced: true,
+      parentEntityId: true,
+      parentLabel: true,
+      parentDescriptor: true,
+    },
+  });
+  return rows.map((r) => ({
+    entityId: r.normalizedEntityId,
+    label: r.entityLabel,
+    usageCount: r.usageCount,
+    evidenced: r.evidenced,
+    parentEntityId: r.parentEntityId,
+    parentLabel: r.parentLabel,
+    parentDescriptor: r.parentDescriptor,
+  }));
+}
+
+/** One per-(publication × entity) usage fact: the verbatim relevance sentence +
+ *  matched-span offsets for an exact `<mark>` (null span ⇒ term-match fallback). */
+export type CellLineUsageFact = {
+  pmid: string;
+  sentence: string;
+  matchedSpan: { start: number; end: number } | null;
+  centrality: number | null;
+};
+
+/**
+ * The per-(pub × entity) usage facts for ONE selected cell line in a family — the
+ * relevance snippet revealed on each filtered article row (and the pmid set the
+ * feed filters by). Ordered by centrality desc so the best sentence leads. [] when
+ * the flag is off or `entityId` is empty.
+ */
+export async function getFamilyCellLineUsageFacts(
+  supercategory: string,
+  familyLabel: string,
+  entityId: string,
+): Promise<CellLineUsageFact[]> {
+  if (!isMethodsLensCellLineEntitiesOn() || !entityId) return [];
+  const rows = await prisma.familyEntityUsage.findMany({
+    where: { supercategory, familyLabel, normalizedEntityId: entityId },
+    orderBy: [{ centralityScore: "desc" }, { pmid: "asc" }],
+    select: {
+      pmid: true,
+      usageSentence: true,
+      matchedSpanStart: true,
+      matchedSpanEnd: true,
+      centralityScore: true,
+    },
+  });
+  return rows.map((r) => ({
+    pmid: r.pmid,
+    sentence: r.usageSentence,
+    matchedSpan:
+      r.matchedSpanStart != null && r.matchedSpanEnd != null
+        ? { start: r.matchedSpanStart, end: r.matchedSpanEnd }
+        : null,
+    centrality: r.centralityScore != null ? Number(r.centralityScore) : null,
+  }));
+}
+
+/** A directory node: a parent GROUP of ≥2 nested forms, or a single top-level entity. */
+export type CellLineDirectoryNode =
+  | {
+      kind: "group";
+      parentEntityId: string;
+      parentLabel: string;
+      parentDescriptor: string | null;
+      usageCount: number; // sum across forms — drives group rank + a parent count
+      forms: CellLineEntity[];
+    }
+  | { kind: "entity"; entity: CellLineEntity };
+
+/**
+ * Group a flat ranked entity list into the directory's parent-nested shape (§5.6):
+ * entities sharing a `parentEntityId` collapse under one group (e.g. the two 3T3-L1
+ * forms under "3T3-L1 · mouse fibroblast line · 2 forms"); a parent that ends up
+ * with a single surviving form degrades to a flat entity (nesting one row is noise).
+ * Pure + rank-stable: groups sort by summed form usage, interleaved with singletons
+ * by usage_count desc, preserving the input order within ties. Build once from
+ * {@link getFamilyCellLineEntities}; the strip ignores it (flat top-N).
+ */
+export function groupCellLineDirectory(entities: CellLineEntity[]): CellLineDirectoryNode[] {
+  const groups = new Map<string, CellLineEntity[]>();
+  for (const e of entities) {
+    if (e.parentEntityId) {
+      const list = groups.get(e.parentEntityId) ?? [];
+      list.push(e);
+      groups.set(e.parentEntityId, list);
+    }
+  }
+  const nodes: CellLineDirectoryNode[] = [];
+  const consumed = new Set<string>();
+  for (const e of entities) {
+    if (consumed.has(e.entityId)) continue;
+    const siblings = e.parentEntityId ? groups.get(e.parentEntityId) : undefined;
+    if (e.parentEntityId && siblings && siblings.length >= 2) {
+      for (const s of siblings) consumed.add(s.entityId);
+      nodes.push({
+        kind: "group",
+        parentEntityId: e.parentEntityId,
+        parentLabel: e.parentLabel ?? e.label,
+        parentDescriptor: e.parentDescriptor,
+        usageCount: siblings.reduce((n, s) => n + s.usageCount, 0),
+        forms: siblings,
+      });
+    } else {
+      consumed.add(e.entityId);
+      nodes.push({ kind: "entity", entity: e });
+    }
+  }
+  const rank = (n: CellLineDirectoryNode) =>
+    n.kind === "group" ? n.usageCount : n.entity.usageCount;
+  return nodes
+    .map((n, i) => [n, i] as const)
+    .sort((a, b) => rank(b[0]) - rank(a[0]) || a[1] - b[1])
+    .map(([n]) => n);
 }
 
 // ---------------------------------------------------------------------------

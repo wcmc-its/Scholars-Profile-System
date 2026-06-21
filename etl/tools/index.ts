@@ -56,6 +56,10 @@ import {
   type ScholarFamilyWrite,
 } from "./scholar-family-mapper-s3";
 import { buildToolContextIndex, type ToolContextIndex } from "./tool-context";
+import {
+  buildFamilyEntityWritesFromS3,
+  type FamilyEntityArtifact,
+} from "./family-entity-mapper-s3";
 import { manifestContentSignature } from "./manifest-signature";
 
 // ---------------------------------------------------------------------------
@@ -90,8 +94,16 @@ interface ToolsManifest {
   sha256: string; // sha256 of the primary artifact (tools.json) bytes
   artifact_bytes: number;
   // "tools.json" | "faculty.json" | "families.json" | "tool_context.json" (#1119)
+  // | "entities.json" | "entity_context.json" (#1166)
   objects: Record<string, ManifestObject>;
-  counts?: { tools?: number; families?: number; faculty?: number; tool_context?: number };
+  counts?: {
+    tools?: number;
+    families?: number;
+    faculty?: number;
+    tool_context?: number;
+    entities?: number;
+    entity_context?: number;
+  };
 }
 
 function log(event: string, fields: Record<string, unknown> = {}): void {
@@ -399,6 +411,65 @@ async function main(): Promise<void> {
     });
   }
 
+  // #1166 — specific-entity layer (Methods Surface B). The sibling `entities.json`
+  // (the entity DIMENSION) + `entity_context.json` (the per-(pub × entity) FACTS)
+  // sidecars (tools-a2-v4). OPTIONAL + paired: a pre-v4 manifest (or a manifest
+  // missing either object) leaves the family_entity* tables untouched this run
+  // (benign). When present each is sha256-verified like the primary artifact —
+  // a mismatch fails the run rather than writing partial entity data.
+  let entityArtifact: FamilyEntityArtifact = { entities: [], entityContext: {} };
+  const entitiesObj = manifest.objects?.["entities.json"];
+  const entityCtxObj = manifest.objects?.["entity_context.json"];
+  if (!entitiesObj?.key || !entityCtxObj?.key) {
+    log("entity_layer_absent", {
+      reason: "manifest has no entities.json / entity_context.json object",
+      has_entities: Boolean(entitiesObj?.key),
+      has_entity_context: Boolean(entityCtxObj?.key),
+    });
+  } else {
+    const entBytes = await fetchBytes(s3, entitiesObj.key);
+    const ctxBytes = await fetchBytes(s3, entityCtxObj.key);
+    for (const [obj, b] of [
+      [entitiesObj, entBytes],
+      [entityCtxObj, ctxBytes],
+    ] as const) {
+      const d = sha256hex(b);
+      if (obj.sha256 && d !== obj.sha256) {
+        log("integrity_failed", {
+          key: obj.key,
+          expected_sha256: obj.sha256,
+          actual_sha256: d,
+          bytes: b.byteLength,
+        });
+        await recordRun({
+          status: "failed",
+          rowsProcessed: 0,
+          manifest,
+          errorMessage: `sha256 mismatch on ${obj.key}: expected ${obj.sha256}, got ${d}`,
+        });
+        process.exit(1);
+      }
+    }
+    const entParsed = JSON.parse(Buffer.from(entBytes).toString("utf-8")) as { entities?: unknown };
+    const ctxParsed = JSON.parse(Buffer.from(ctxBytes).toString("utf-8")) as {
+      entity_context?: unknown;
+    };
+    entityArtifact = {
+      entities: Array.isArray(entParsed.entities)
+        ? (entParsed.entities as FamilyEntityArtifact["entities"])
+        : [],
+      entityContext:
+        ctxParsed.entity_context && typeof ctxParsed.entity_context === "object"
+          ? (ctxParsed.entity_context as FamilyEntityArtifact["entityContext"])
+          : {},
+    };
+    log("entity_layer_loaded", {
+      entities: entityArtifact.entities.length,
+      entity_context_entities: Object.keys(entityArtifact.entityContext).length,
+      integrity_ok: true,
+    });
+  }
+
   // Step 4: FK scope — active in-scope scholars, same filter as the other ETL
   // projections (scholar_tool.cwid → scholar.cwid). Out-of-scope cwids in the
   // artifact are silently skipped (counted) rather than erroring the run.
@@ -463,6 +534,20 @@ async function main(): Promise<void> {
     ).length,
   });
 
+  // #1166 — entity DIMENSION + per-(pub × entity) FACTS from the same fetch. ADR-005
+  // suppression drops dark-pmid facts; `evidenced` is recomputed against survivors.
+  const entityResult = buildFamilyEntityWritesFromS3(entityArtifact, { suppression });
+  log("mapped_entities", {
+    entity_rows: entityResult.entityWrites.length,
+    usage_rows: entityResult.usageWrites.length,
+    evidenced_entities: entityResult.evidencedEntities,
+    // ADR-005 facts dropped (a dark/taken-down paper's sentence). Expected small.
+    suppressed_facts: entityResult.suppressedFacts,
+    // Facts whose entity id had no DIMENSION record — a producer-side join alarm.
+    orphan_facts: entityResult.orphanFacts,
+    skipped_malformed_entities: entityResult.skippedMalformedEntities,
+  });
+
   // Dry-run: diff against the live table and stop — never write, never record.
   if (dryRun) {
     await printDryRunDiff(result.writes);
@@ -470,6 +555,8 @@ async function main(): Promise<void> {
     log("dry_run_complete", {
       rows_would_write: result.writes.length,
       family_rows_would_write: familyResult.writes.length,
+      entity_rows_would_write: entityResult.entityWrites.length,
+      entity_usage_rows_would_write: entityResult.usageWrites.length,
     });
     return;
   }
@@ -529,9 +616,63 @@ async function main(): Promise<void> {
     familiesInserted += chunk.length;
   }
 
+  // #1166 — entity layer full-replacement (deleteMany then chunked createMany).
+  // FACTS first then DIMENSION (no FK either way; order is cosmetic). Identity is
+  // @@unique([supercategory, family_label, normalized_entity_id]) on the dimension;
+  // the uuid id is unstable so this is a rebuild, not an upsert. Stamp the artifact
+  // sha per row so a producer republish is detectable. An empty entityArtifact
+  // (pre-v4 manifest) clears the tables — intentional: no entity data ⇒ no rows.
+  await db.write.familyEntityUsage.deleteMany();
+  await db.write.familyEntity.deleteMany();
+  let entityRowsInserted = 0;
+  let usageRowsInserted = 0;
+  const ENTITY_BATCH = 1000;
+  for (let i = 0; i < entityResult.entityWrites.length; i += ENTITY_BATCH) {
+    const chunk = entityResult.entityWrites.slice(i, i + ENTITY_BATCH);
+    await db.write.familyEntity.createMany({
+      data: chunk.map((w) => ({
+        supercategory: w.supercategory,
+        familyLabel: w.familyLabel,
+        normalizedEntityId: w.normalizedEntityId,
+        entityLabel: w.entityLabel,
+        parentEntityId: w.parentEntityId,
+        parentLabel: w.parentLabel,
+        parentDescriptor: w.parentDescriptor,
+        entityRole: w.entityRole,
+        usageCount: w.usageCount,
+        evidenced: w.evidenced,
+        sourceArtifactSha: manifest.sha256,
+      })),
+      skipDuplicates: true,
+    });
+    entityRowsInserted += chunk.length;
+  }
+  for (let i = 0; i < entityResult.usageWrites.length; i += ENTITY_BATCH) {
+    const chunk = entityResult.usageWrites.slice(i, i + ENTITY_BATCH);
+    await db.write.familyEntityUsage.createMany({
+      data: chunk.map((w) => ({
+        supercategory: w.supercategory,
+        familyLabel: w.familyLabel,
+        normalizedEntityId: w.normalizedEntityId,
+        pmid: w.pmid,
+        usageSentence: w.usageSentence,
+        matchedSpanStart: w.matchedSpanStart,
+        matchedSpanEnd: w.matchedSpanEnd,
+        centralityScore:
+          w.centralityScore == null ? null : new Prisma.Decimal(w.centralityScore),
+        entityRole: w.entityRole,
+        sourceArtifactSha: manifest.sha256,
+      })),
+      skipDuplicates: true,
+    });
+    usageRowsInserted += chunk.length;
+  }
+
   log("write_complete", {
     rows: inserted,
     family_rows: familiesInserted,
+    entity_rows: entityRowsInserted,
+    entity_usage_rows: usageRowsInserted,
     version: manifest.version,
     sha256_prefix: manifest.sha256.slice(0, 12),
   });

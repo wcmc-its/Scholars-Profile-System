@@ -560,6 +560,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "METHODS_LENS_CELL_LINE_ENTITIES",
+                "Value": "off",
+              },
+              {
                 "Name": "CENTER_METHODS_FACET",
                 "Value": "off",
               },
@@ -3780,6 +3784,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "METHODS_LENS_FAMILY_SYNONYMS",
+                "Value": "on",
+              },
+              {
+                "Name": "METHODS_LENS_CELL_LINE_ENTITIES",
                 "Value": "on",
               },
               {
