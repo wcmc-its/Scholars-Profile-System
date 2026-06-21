@@ -28,8 +28,13 @@ import {
   BiosketchResultCard,
   type BiosketchGenerateResult,
 } from "@/components/edit/biosketch-result-card";
+import { BiosketchProgress } from "@/components/edit/biosketch-progress";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import {
+  readBiosketchStream,
+  type BiosketchProgressState,
+} from "@/lib/edit/biosketch-stream";
 import {
   DEFAULT_BIOSKETCH_PARAMS,
   normalizeBiosketchParams,
@@ -100,6 +105,8 @@ export function BiosketchTool({
   }));
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [isDebugLoading, setIsDebugLoading] = React.useState(false);
+  const [progress, setProgress] = React.useState<BiosketchProgressState | null>(null);
+  const [elapsedMs, setElapsedMs] = React.useState(0);
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<BiosketchGenerateResult | null>(null);
   const [generations, setGenerations] = React.useState<BiosketchGenerationItem[]>([]);
@@ -107,6 +114,16 @@ export function BiosketchTool({
   // Mirror the route's required-input gate so a request it would 400 never fires.
   const missing = missingPersonalStatementInputs(params);
   const disabled = isGenerating || missing.length > 0;
+
+  // Tick an elapsed counter while a generation runs (the liveness within a static phase). Reset on
+  // each run; cleared when generation ends.
+  React.useEffect(() => {
+    if (!isGenerating) return;
+    const started = Date.now();
+    setElapsedMs(0);
+    const id = window.setInterval(() => setElapsedMs(Date.now() - started), 1000);
+    return () => window.clearInterval(id);
+  }, [isGenerating]);
 
   const refreshGenerations = React.useCallback(async () => {
     try {
@@ -133,17 +150,30 @@ export function BiosketchTool({
     if (isGenerating || missing.length > 0) return;
     setIsGenerating(true);
     setError(null);
+    setResult(null);
+    // Reset the timer synchronously (the effect resets it too, but only after the first paint —
+    // without this a back-to-back run flashes the previous run's elapsed time for one frame).
+    setElapsedMs(0);
+    setProgress({ phase: "drafting", done: 0, total: 0 });
     try {
       const res = await fetch("/api/edit/biosketch/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ entityId, params }),
       });
-      const data = (await res.json().catch(() => null)) as
+      // A pre-stream rejection (4xx/5xx) is a BUFFERED JSON `editError`, not the NDJSON stream.
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setError(mapErrorToMessage(typeof data?.error === "string" ? data.error : ""));
+        return;
+      }
+      // 200 ⇒ the NDJSON progress stream. Advance the bar on each phase event; the final result
+      // line carries the same `{ ok }` payload the buffered response used to.
+      const data = (await readBiosketchStream(res, setProgress)) as
         | ({ ok: true } & BiosketchGenerateResult)
         | { ok: false; error: string }
         | null;
-      if (!res.ok || !data || data.ok !== true) {
+      if (!data || data.ok !== true) {
         const code = data && "error" in data && typeof data.error === "string" ? data.error : "";
         setError(mapErrorToMessage(code));
         return;
@@ -163,6 +193,7 @@ export function BiosketchTool({
       setError(FAILED);
     } finally {
       setIsGenerating(false);
+      setProgress(null);
     }
   }
 
@@ -277,6 +308,10 @@ export function BiosketchTool({
           before submitting it.
         </span>
       </div>
+
+      {isGenerating && progress && (
+        <BiosketchProgress state={progress} mode={params.mode} elapsedMs={elapsedMs} />
+      )}
 
       {error && (
         <Alert variant="destructive" data-testid="biosketch-error">

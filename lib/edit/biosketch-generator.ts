@@ -643,6 +643,16 @@ export type BiosketchResult = {
   sources: BiosketchContributionSources[] | null;
 };
 
+/** A phase-boundary progress event (#917 follow-up A). Emitted as `generateBiosketch` advances so
+ *  the route can stream a determinate progress bar. `faithfulness` carries `done/total` (one tick
+ *  per grounded contribution); the others are bare phase markers. `done` is the terminal event. */
+export type BiosketchProgress =
+  | { phase: "drafting" }
+  | { phase: "faithfulness"; done: number; total: number }
+  | { phase: "products" }
+  | { phase: "sources" }
+  | { phase: "done" };
+
 /** Lazily build a Bedrock client from the AWS credential chain (ECS task role in
  *  deployment, shell creds locally). Same provider the overview generator uses. */
 function biosketchBedrock() {
@@ -663,9 +673,24 @@ function biosketchBedrock() {
 export async function generateBiosketch(
   facts: OverviewFacts,
   params: BiosketchParams,
-  opts?: { model?: string; temperature?: number; faithfulnessPass?: boolean },
+  opts?: {
+    model?: string;
+    temperature?: number;
+    faithfulnessPass?: boolean;
+    /** #917 follow-up A — phase-boundary progress sink for the streamed UI (best-effort; a throw
+     *  in the sink must never break a generation, so it is always called defensively). */
+    onProgress?: (event: BiosketchProgress) => void;
+  },
 ): Promise<BiosketchResult> {
   const mode = params.mode;
+  // Best-effort progress emitter — a UI sink must never break the generation.
+  const onProgress = (event: BiosketchProgress) => {
+    try {
+      opts?.onProgress?.(event);
+    } catch {
+      // ignore — progress is cosmetic.
+    }
+  };
   const { id: versionId, systemPrompt } = resolveBiosketchPromptImpl(params.promptVersion);
   // v6 grounds impact on a bounded FACTS bibliometric block; v5 does not. The same flag
   // drives the model-facts projection (which pubs metrics the model sees) AND the
@@ -682,6 +707,7 @@ export async function generateBiosketch(
     opts?.temperature ??
     (Number(process.env.OVERVIEW_GENERATE_TEMPERATURE) || BIOSKETCH_DEFAULT_TEMPERATURE);
 
+  onProgress({ phase: "drafting" });
   const result = await generateText({
     model: biosketchBedrock()(modelId),
     system: systemPrompt,
@@ -703,6 +729,10 @@ export async function generateBiosketch(
     // permitSynopsisFindings keeps a synopsis-stated number; permitBibliometrics (v6/v7) keeps
     // a citation/RCR figure that IS present in FACTS (significance often quantifies).
     const prior = entries;
+    // Emit a faithfulness tick as EACH contribution finishes grounding — this is the increment
+    // that makes the bar feel alive during the longest phase of the fan-out.
+    let groundedCount = 0;
+    onProgress({ phase: "faithfulness", done: 0, total: prior.length });
     const grounded = await Promise.all(
       prior.map((entry) =>
         groundOverviewDraft(facts, entry.body, {
@@ -710,6 +740,10 @@ export async function generateBiosketch(
           permitSignificance: true,
           permitSynopsisFindings: true,
           permitBibliometrics: groundsImpact,
+        }).then((g) => {
+          groundedCount += 1;
+          onProgress({ phase: "faithfulness", done: groundedCount, total: prior.length });
+          return g;
         }),
       ),
     );
@@ -736,6 +770,7 @@ export async function generateBiosketch(
   // unmapped" (never blocks the generate).
   let products: BiosketchProducts | null = null;
   if (mode === "contributions" && entries.length > 0) {
+    onProgress({ phase: "products" });
     const selected = selectBiosketchProducts(facts, params);
     if (selected.related.length > 0 || selected.otherSignificant.length > 0) {
       products = selected;
@@ -764,6 +799,7 @@ export async function generateBiosketch(
   // against FACTS. A failure degrades to `null` (no Sources line), never blocks the generate.
   let sources: BiosketchContributionSources[] | null = null;
   if (mode === "contributions" && entries.length > 0 && facts.representativePublications.length > 0) {
+    onProgress({ phase: "sources" });
     try {
       const pubs = facts.representativePublications;
       const allowed = new Set(pubs.map((p) => p.pmid));
@@ -780,6 +816,7 @@ export async function generateBiosketch(
     }
   }
 
+  onProgress({ phase: "done" });
   return { mode, entries, model: modelId, removed, overflow, products, sources };
 }
 
