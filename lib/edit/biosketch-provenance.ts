@@ -11,7 +11,11 @@
  * Read-only — the write lives on `/api/edit/biosketch/generate`. Node-runtime only (Prisma).
  */
 import { db } from "@/lib/db";
-import { normalizeBiosketchParams, type BiosketchParams } from "@/lib/edit/biosketch-params";
+import {
+  normalizeBiosketchParams,
+  type BiosketchEntry,
+  type BiosketchParams,
+} from "@/lib/edit/biosketch-params";
 import type { BiosketchProducts } from "@/lib/edit/biosketch-products";
 import type { BiosketchContributionSources } from "@/lib/edit/biosketch-sources";
 
@@ -22,13 +26,14 @@ const BIOSKETCH_HISTORY_LIMIT = 20;
 export interface BiosketchGenerationSummary {
   id: string;
   mode: string;
-  /** The generated entries (1..5 contributions, or one statement). */
-  entries: string[];
+  /** The generated entries (1..5 contributions, or one statement) as `{ title, body }` (#917 v7).
+   *  `title` is the per-contribution heading (v7; `""` for v5 / v6 + Personal Statement). */
+  entries: BiosketchEntry[];
   /** Personal Statement project framing (or the optional contributions aims), when present. */
   projectTitle: string | null;
   projectAims: string | null;
   model: string;
-  /** The authoritative, queryable prompt-version column ("v5" / "v6"). */
+  /** The authoritative, queryable prompt-version column ("v5" / "v6" / "v7"). */
   promptVersion: string | null;
   /** Re-normalized steering params (the trust boundary, applied on read) — carries the
    *  `promptVersion` for "Use these settings" restore. */
@@ -44,8 +49,26 @@ export interface BiosketchGenerationSummary {
   createdAt: Date;
 }
 
-function coerceEntries(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((e): e is string => typeof e === "string") : [];
+/**
+ * Coerce a stored `entries` JSON value to `BiosketchEntry[]` (#917 v7). BACKWARD-COMPAT: rows
+ * written before v7 persisted entries as a plain `string[]`, so a bare string becomes
+ * `{ title: "", body: s }`; a new `{ title, body }` object is carried through (a missing/non-string
+ * title defaults to `""`). Anything else in the array is dropped.
+ */
+export function coerceEntries(value: unknown): BiosketchEntry[] {
+  if (!Array.isArray(value)) return [];
+  const out: BiosketchEntry[] = [];
+  for (const e of value) {
+    if (typeof e === "string") {
+      out.push({ title: "", body: e });
+    } else if (e && typeof e === "object" && !Array.isArray(e)) {
+      const o = e as { title?: unknown; body?: unknown };
+      if (typeof o.body === "string") {
+        out.push({ title: typeof o.title === "string" ? o.title : "", body: o.body });
+      }
+    }
+  }
+  return out;
 }
 
 function coerceProducts(value: unknown): BiosketchProducts | null {

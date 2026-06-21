@@ -35,10 +35,12 @@ import {
 } from "@/lib/edit/overview-prompt-fragments";
 import {
   biosketchCharCap,
+  type BiosketchEntry,
   type BiosketchMode,
   type BiosketchParams,
 } from "@/lib/edit/biosketch-params";
 import {
+  biosketchVersionEmitsTitle,
   biosketchVersionGroundsImpact,
   defaultBiosketchPromptVersionId,
   isValidBiosketchPromptVersionId,
@@ -355,12 +357,86 @@ export const BIOSKETCH_SYSTEM_PROMPT_V6 = [
   ...BIOSKETCH_CLOSING,
 ].join("\n");
 
+// ---------------------------------------------------------------------------
+// v7 (#917 follow-up C). Identical to v6 in every grounding/voice/impact rule — it ONLY adds a
+// short subject heading to each Contribution to Science (the NIH Common Form heading format), so a
+// reader can tell what each contribution is about at a glance. v6 stays byte-pinned; v7 reuses all
+// the v6 fragments and swaps in a TITLE rule + a title-aware OUTPUT block. The Personal Statement
+// is unchanged (it has no per-contribution heading).
+// ---------------------------------------------------------------------------
+
+const BIOSKETCH_TITLE_V7: string[] = [
+  "TITLE EACH CONTRIBUTION",
+  "Give every Contribution to Science a short subject HEADING — a noun phrase of at most ~80",
+  "characters naming what the body of work is ABOUT (its topic, disease, method, system, or",
+  "question). It is a label, not a sentence and not a boast: no verb is required, and the empty",
+  'superlatives banned above ("seminal," "pioneering," "landmark," …) are banned in the heading',
+  "too. The heading is drawn from the SAME FACTS as the contribution it sits above — never name a",
+  "tool, disease, gene, or result in the heading that is not in that contribution. Emit it on the",
+  'SAME line as the contribution number, with the exact prefix "TITLE:", then a blank line, then',
+  'the narrative paragraph. Example: "1. TITLE: Mechanisms of CAR-T resistance in B-cell lymphoma".',
+  "A Personal Statement has NO title line.",
+];
+
+const BIOSKETCH_OUTPUT_V7: string[] = [
+  "OUTPUT",
+  "- Mode = Contributions to Science: up to FIVE contributions, each a self-contained first-person",
+  "  paragraph in the ~1,200 to 1,800 character band (hard cap 2,000). Each MUST contain the four",
+  "  required elements above, including your explicit role. Plain prose, no headings or markdown",
+  "  inside an entry, no em or en dashes. Begin each contribution with its number and a period, then",
+  '  "TITLE:" and a short subject on that SAME line, then a blank line, then the narrative paragraph',
+  '  — i.e. "1. TITLE: <subject>" / blank line / "<paragraph>". Separate contributions with a blank',
+  "  line. The number of entries follows the FACTS — write fewer than five when the work supports",
+  "  fewer.",
+  "- Mode = Personal Statement: ONE first-person narrative, <=3,500 characters, tailored to the",
+  "  proposed project's aims given in the user turn, with NO title line. Frame your grounded",
+  "  throughline and relevant work toward fitness for THIS project; assert no qualification,",
+  "  experience, or skill not grounded in FACTS. Same role, four-element, significance, impact,",
+  "  superlative, reference, style, and entity rules. Do not number a Personal Statement.",
+];
+
+/** The composed biosketch **v7** system prompt — v6 + the per-contribution title heading. Reuses
+ *  every v6 fragment unchanged (so v6 stays byte-pinned) and swaps the OUTPUT block for the
+ *  title-aware variant. */
+export const BIOSKETCH_SYSTEM_PROMPT_V7 = [
+  ...BIOSKETCH_PREAMBLE_V6,
+  "",
+  ...BIOSKETCH_FACTS_NOTE,
+  "",
+  ...BIOSKETCH_THROUGHLINE,
+  "",
+  ...BIOSKETCH_ELEMENTS_V6,
+  "",
+  ...BIOSKETCH_SIGNIFICANCE_V6,
+  "",
+  ...ENTITY_PROVENANCE_FLOOR,
+  "",
+  ...BIOSKETCH_METHODS_NOTE,
+  "",
+  ...BIOSKETCH_FACETS,
+  "",
+  ...BIOSKETCH_REFERENCES_V6,
+  "",
+  ...VERBATIM_STRINGS,
+  "",
+  ...BIOSKETCH_LENGTH_V6,
+  "",
+  ...BIOSKETCH_STYLE_V6,
+  "",
+  ...BIOSKETCH_TITLE_V7,
+  "",
+  ...BIOSKETCH_OUTPUT_V7,
+  "",
+  ...BIOSKETCH_CLOSING,
+].join("\n");
+
 /** The prompt content per biosketch version. `generateBiosketch` selects by resolved version.
  *  Biosketch uses character caps (not word `lengthBands`), so the impl carries only the
  *  system prompt. */
 export const BIOSKETCH_PROMPT_IMPLS: Record<BiosketchPromptVersionId, { systemPrompt: string }> = {
   v5: { systemPrompt: BIOSKETCH_SYSTEM_PROMPT },
   v6: { systemPrompt: BIOSKETCH_SYSTEM_PROMPT_V6 },
+  v7: { systemPrompt: BIOSKETCH_SYSTEM_PROMPT_V7 },
 };
 
 /** Resolve the composed prompt for a (possibly untrusted) version id, falling back to the
@@ -458,32 +534,88 @@ function stripLeadingEnumerator(s: string): string {
 }
 
 /**
+ * Split a single contribution block into its `{ title, body }` (#917 v7). When `extractTitle`
+ * is on (a v7 generation) and the block opens with a `TITLE:` line, the heading becomes `title`
+ * and the remainder the `body`. The matched `TITLE:` line is ALWAYS consumed (never echoed into the
+ * body), so even a degraded entry — an empty heading, or a heading with no narrative — does not leak
+ * the literal `TITLE:` marker to the UI; a body-less result is dropped by the caller's
+ * `body.length > 0` filter. A block with no `TITLE:` line (v5 / v6, or a v7 the model didn't title)
+ * yields `title: ""` and the whole block as `body`.
+ */
+function splitContributionTitle(block: string, extractTitle: boolean): BiosketchEntry {
+  if (extractTitle) {
+    const m = block.match(/^TITLE:[ \t]*(.*?)[ \t]*(?:\r?\n|$)/i);
+    if (m) {
+      return { title: m[1].trim(), body: block.slice(m[0].length).trim() };
+    }
+  }
+  return { title: "", body: block.trim() };
+}
+
+/**
+ * Split UNNUMBERED model output into contribution blocks (#917 v7). When titles are expected and
+ * the model emitted `TITLE:` lines but dropped the leading numbers, segment on the `TITLE:` lines:
+ * a blank-line split would tear each titled contribution in two, because the v7 format puts a blank
+ * line between the title and the paragraph (and would also leak the `TITLE:` line as its own block).
+ * When no `TITLE:` line is present (v5 / v6, or a v7 that dropped titles too), fall back to the
+ * blank-line separation the numbered prompt's stragglers rely on.
+ */
+function segmentUnnumberedContributions(text: string, extractTitle: boolean): string[] {
+  if (extractTitle) {
+    const starts = [...text.matchAll(/(?:^|\n)[ \t]*TITLE:/gi)];
+    if (starts.length > 0) {
+      const blocks: string[] = [];
+      for (let i = 0; i < starts.length; i++) {
+        const startIdx = starts[i].index ?? 0;
+        const endIdx = i + 1 < starts.length ? (starts[i + 1].index ?? text.length) : text.length;
+        const block = text.slice(startIdx, endIdx).trim();
+        if (block.length > 0) blocks.push(block);
+      }
+      return blocks;
+    }
+  }
+  return text
+    .split(/\n\s*\n+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
  * Split the model's output into entries. Contributions mode: split on the numbered block
  * markers the prompt asks for ("1.", "2)", …); if the model omitted numbering, fall back to
  * blank-line separation. Personal Statement: the whole text is one entry (a stray leading
- * enumerator is stripped). Empty fragments are dropped. Exported for unit tests + the
- * validation harness.
+ * enumerator is stripped). Each entry is a `{ title, body }`: `title` is the v7 per-contribution
+ * heading (extracted only when `opts.extractTitle` is set — a v7 generation), otherwise `""`.
+ * Empty entries are dropped. Exported for unit tests + the validation harness.
  */
-export function parseBiosketchEntries(text: string, mode: BiosketchMode): string[] {
+export function parseBiosketchEntries(
+  text: string,
+  mode: BiosketchMode,
+  opts?: { extractTitle?: boolean },
+): BiosketchEntry[] {
   const trimmed = text.trim();
   if (trimmed.length === 0) return [];
   if (mode === "personal_statement") {
-    return [stripLeadingEnumerator(trimmed)].filter((s) => s.length > 0);
+    // A Personal Statement is one narrative with no heading.
+    const body = stripLeadingEnumerator(trimmed);
+    return body.length > 0 ? [{ title: "", body }] : [];
   }
+  const extractTitle = opts?.extractTitle ?? false;
   const markers = [...trimmed.matchAll(/(?:^|\n)[ \t]*(\d+)[.)][ \t]+/g)];
   if (markers.length === 0) {
-    return trimmed
-      .split(/\n\s*\n+/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+    return segmentUnnumberedContributions(trimmed, extractTitle)
+      .map((block) => splitContributionTitle(block, extractTitle))
+      .filter((e) => e.body.length > 0);
   }
-  const entries: string[] = [];
+  const entries: BiosketchEntry[] = [];
   for (let i = 0; i < markers.length; i++) {
     const m = markers[i];
     const start = (m.index ?? 0) + m[0].length;
     const end = i + 1 < markers.length ? (markers[i + 1].index ?? trimmed.length) : trimmed.length;
-    const body = trimmed.slice(start, end).trim();
-    if (body.length > 0) entries.push(body);
+    const block = trimmed.slice(start, end).trim();
+    if (block.length === 0) continue;
+    const entry = splitContributionTitle(block, extractTitle);
+    if (entry.body.length > 0) entries.push(entry);
   }
   return entries;
 }
@@ -493,7 +625,9 @@ export function parseBiosketchEntries(text: string, mode: BiosketchMode): string
  *  trimming mid-sentence would corrupt grounded prose; the UI surfaces the count instead). */
 export type BiosketchResult = {
   mode: BiosketchMode;
-  entries: string[];
+  /** Parsed entries as `{ title, body }` (#917 v7). `title` is the per-contribution heading
+   *  (v7 only; `""` for v5 / v6 and the Personal Statement). `body` is the narrative prose. */
+  entries: BiosketchEntry[];
   model: string;
   /** Spans the faithfulness pass removed (for transparency / audit), flattened across entries. */
   removed: UngroundedSpan[];
@@ -537,6 +671,8 @@ export async function generateBiosketch(
   // drives the model-facts projection (which pubs metrics the model sees) AND the
   // faithfulness pass (`permitBibliometrics`, so a grounded citation/RCR is not stripped).
   const groundsImpact = biosketchVersionGroundsImpact(versionId);
+  // v7 emits a per-contribution TITLE line the parser lifts into `entry.title`; v5 / v6 do not.
+  const extractTitle = biosketchVersionEmitsTitle(versionId);
   const modelId =
     opts?.model ??
     process.env.BIOSKETCH_GENERATE_MODEL ??
@@ -553,7 +689,7 @@ export async function generateBiosketch(
     ...(modelAcceptsTemperature(modelId) ? { temperature } : {}),
   });
 
-  let entries = parseBiosketchEntries(result.text, mode);
+  let entries = parseBiosketchEntries(result.text, mode, { extractTitle });
   // Defensive ceiling: never return more contributions than were requested (the prompt asks
   // for "up to N"; a model that over-produces is clamped, never padded).
   if (mode === "contributions") entries = entries.slice(0, params.maxContributions);
@@ -561,12 +697,15 @@ export async function generateBiosketch(
   const removed: UngroundedSpan[] = [];
   if (opts?.faithfulnessPass ?? isBiosketchFaithfulnessPassEnabled()) {
     // Per-entry verify→revise: each contribution is self-contained, so it is fact-checked
-    // against the FACTS on its own. permitSignificance keeps an anchored implication;
-    // permitSynopsisFindings keeps a synopsis-stated number; permitBibliometrics (v6) keeps
+    // against the FACTS on its own. The pass operates on the narrative BODY (the title is a
+    // short FACTS-drawn label, not graded prose); the title rides through unchanged and is
+    // re-attached to the revised body. permitSignificance keeps an anchored implication;
+    // permitSynopsisFindings keeps a synopsis-stated number; permitBibliometrics (v6/v7) keeps
     // a citation/RCR figure that IS present in FACTS (significance often quantifies).
+    const prior = entries;
     const grounded = await Promise.all(
-      entries.map((entry) =>
-        groundOverviewDraft(facts, entry, {
+      prior.map((entry) =>
+        groundOverviewDraft(facts, entry.body, {
           model: modelId,
           permitSignificance: true,
           permitSynopsisFindings: true,
@@ -574,14 +713,22 @@ export async function generateBiosketch(
         }),
       ),
     );
-    entries = grounded.map((g) => g.prose.trim()).filter((e) => e.length > 0);
+    entries = grounded
+      .map((g, i) => ({ title: prior[i].title, body: g.prose.trim() }))
+      .filter((e) => e.body.length > 0);
     for (const g of grounded) removed.push(...g.removed);
   }
 
   const cap = biosketchCharCap(mode);
+  // The character ceiling measures the BODY only — the title is a short heading, not part of the
+  // capped narrative.
   const overflow = entries
-    .map((e, index) => ({ index, chars: e.length }))
+    .map((e, index) => ({ index, chars: e.body.length }))
     .filter((o) => o.chars > cap);
+
+  // The product-mapping + source-attribution prompts reason over the contribution NARRATIVES, so
+  // they get the bodies (the title is just a label). Indices line up with `entries`.
+  const entryBodies = entries.map((e) => e.body);
 
   // #917 v6 — Products (Contributions mode only). Select pmids deterministically from the
   // scored facts, then one best-effort gateway call maps each to a contribution + a one-line
@@ -600,7 +747,7 @@ export async function generateBiosketch(
           const mapping = await generateText({
             model: biosketchBedrock()(modelId),
             system: PRODUCT_MAPPING_SYSTEM_PROMPT,
-            prompt: buildProductMappingPrompt(entries, uniqueToMap),
+            prompt: buildProductMappingPrompt(entryBodies, uniqueToMap),
             ...(modelAcceptsTemperature(modelId) ? { temperature: 0 } : {}),
           });
           products = applyProductMapping(selected, mapping.text, entries.length);
@@ -623,7 +770,7 @@ export async function generateBiosketch(
       const attribution = await generateText({
         model: biosketchBedrock()(modelId),
         system: SOURCE_ATTRIBUTION_SYSTEM_PROMPT,
-        prompt: buildSourceAttributionPrompt(entries, pubs),
+        prompt: buildSourceAttributionPrompt(entryBodies, pubs),
         ...(modelAcceptsTemperature(modelId) ? { temperature: 0 } : {}),
       });
       const parsed = parseSourceAttribution(attribution.text, allowed, entries.length);
