@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  appRoAuditGrantStatements,
+  appRoHostsQuery,
   appRwTightenStatements,
   buildDsn,
   buildMigrateDsn,
@@ -126,6 +128,44 @@ describe("appRwTightenStatements (ADR-009 Phase 3)", () => {
     const revoke = appRwTightenStatements("%")[0];
     expect(revoke).not.toMatch(/scholars_audit/);
     expect(revoke).toMatch(/ON `scholars`\.\* FROM/);
+  });
+});
+
+describe("appRoAuditGrantStatements (#917)", () => {
+  it("grants SELECT on the audit TABLE to app_ro at the given host", () => {
+    expect(appRoAuditGrantStatements("10.20.%")).toEqual([
+      "GRANT SELECT ON `scholars_audit`.`manual_edit_audit` TO 'app_ro'@'10.20.%'",
+    ]);
+  });
+
+  it("interpolates the discovered host (prod `%`)", () => {
+    expect(appRoAuditGrantStatements("%")[0]).toContain("TO 'app_ro'@'%'");
+  });
+
+  it("is SELECT-only — never a write privilege on the append-only log", () => {
+    const grant = appRoAuditGrantStatements("%")[0];
+    const privs = grant.slice("GRANT ".length, grant.indexOf(" ON "));
+    expect(privs).toBe("SELECT");
+    expect(privs).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|ALL PRIVILEGES)\b/);
+  });
+
+  it("scopes to the single audit table, not the whole `scholars_audit` schema", () => {
+    const grant = appRoAuditGrantStatements("%")[0];
+    expect(grant).toMatch(/ON `scholars_audit`\.`manual_edit_audit` TO/);
+    expect(grant).not.toMatch(/`scholars_audit`\.\* /);
+  });
+
+  it("matches the SELECT the verify pins for app-ro (conscious paired edit)", () => {
+    // The seeder grant and scripts/verify-db-grants.ts ROLES['app-ro'].golden must stay equal.
+    expect(appRoAuditGrantStatements("%")[0]).toBe(
+      "GRANT SELECT ON `scholars_audit`.`manual_edit_audit` TO 'app_ro'@'%'",
+    );
+  });
+});
+
+describe("appRoHostsQuery (#917 — host discovery)", () => {
+  it("reads the host pattern(s) app_ro exists at from mysql.user", () => {
+    expect(appRoHostsQuery()).toBe("SELECT host FROM mysql.user WHERE user = 'app_ro'");
   });
 });
 
