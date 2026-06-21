@@ -17,7 +17,7 @@
  *
  * Flag-gated behind `EDIT_BIOSKETCH_GENERATE` (off ⇒ 404), default-off and staging-first.
  */
-import { type NextRequest, type NextResponse } from "next/server";
+import { type NextRequest } from "next/server";
 
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
@@ -36,7 +36,7 @@ import { recordBiosketchGenerateAttempt } from "@/lib/edit/rate-limit";
 import { type UnitScholarLookup } from "@/lib/edit/unit-scholar-authz";
 import {
   editError,
-  editOk,
+  editOkStream,
   editRateLimited,
   logEditFailure,
   readEditRequest,
@@ -44,7 +44,10 @@ import {
 
 const PATH = "/api/edit/biosketch/generate";
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+// The generation is STREAMED (see `editOkStream`), so the handler resolves a
+// `Response` (the streamed body) for the generate path and `NextResponse` (a
+// buffered error) for the fast pre-checks — both are `Response`.
+export async function POST(request: NextRequest): Promise<Response> {
   // Flag first — a dormant feature 404s before doing any work.
   if (!isBiosketchGenerateEnabled()) return editError(404, "not_found");
 
@@ -136,71 +139,85 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // --- sparse-data gate: too little signal to draft without padding. ---
   if (!hasSufficientFacts(facts)) return editError(422, "insufficient_facts");
 
-  // --- generate. A gateway throw / timeout is a 502 and NEVER writes the DB. The faithfulness
-  //     pass is ON by default for this grant document (#917 v6 §5) — a single fabricated metric
-  //     in a grant submission dwarfs the ~3x cost — and can be force-disabled for debugging via
+  // --- generate (STREAMED). The fan-out (main draft → per-entry faithfulness → products →
+  //     sources) runs ~60-90s for a full Contributions draft, well past the CloudFront 30s
+  //     origin-read timeout; a buffered response would look idle to the CDN and 504 mid-flight
+  //     (the route still running, nothing logged). `editOkStream` keeps the connection warm
+  //     with heartbeats until the final JSON. A gateway throw becomes an `{ ok: false }` body
+  //     (status is already 200) and NEVER writes the DB; the client branches on `data.ok`.
+  //     The faithfulness pass is ON by default for this grant document (#917 v6 §5) — a single
+  //     fabricated metric dwarfs the ~3x cost — force-disable for debugging via
   //     `BIOSKETCH_FAITHFULNESS_PASS=off`. ---
-  let result: Awaited<ReturnType<typeof generateBiosketch>>;
-  try {
-    result = await generateBiosketch(facts, effectiveParams, {
-      faithfulnessPass: process.env.BIOSKETCH_FAITHFULNESS_PASS !== "off",
-    });
-  } catch (err) {
-    logEditFailure(PATH, err);
-    return editError(502, "generation_failed");
-  }
+  return editOkStream(
+    async () => {
+      const result = await generateBiosketch(facts, effectiveParams, {
+        faithfulnessPass: process.env.BIOSKETCH_FAITHFULNESS_PASS !== "off",
+      });
 
-  // --- history (audit/reuse). Record EVERY successful generation. Best-effort: the entries
-  //     are the product, the row is bookkeeping — a write hiccup must never lose the output,
-  //     so this is wrapped in its own try/catch and the route still returns 200 with
-  //     generationId=null. ---
-  let generationId: string | null = null;
-  try {
-    const row = await db.write.biosketchGeneration.create({
-      data: {
-        cwid: entityId,
+      // --- history (audit/reuse). Record EVERY successful generation. Best-effort: the
+      //     entries are the product, the row is bookkeeping — a write hiccup must never lose
+      //     the output, so this is wrapped in its own try/catch and the response still carries
+      //     the entries with generationId=null. ---
+      let generationId: string | null = null;
+      try {
+        const row = await db.write.biosketchGeneration.create({
+          data: {
+            cwid: entityId,
+            mode: result.mode,
+            entries: result.entries,
+            // Project title/aims: required for Personal Statement; optional steer for
+            // Contributions (#917 v6 — drives the "related" products bucket). Persisted
+            // whenever present so a "Use these settings" restore can recover them.
+            projectTitle:
+              effectiveParams.projectTitle.length > 0 ? effectiveParams.projectTitle : null,
+            projectAims: effectiveParams.aims.length > 0 ? effectiveParams.aims : null,
+            model: result.model,
+            // The RESOLVED (post-downgrade) version actually generated with.
+            promptVersion: effectiveParams.promptVersion,
+            // Persist the steering controls so "Use these settings" can restore them (incl. the
+            // resolved prompt version, mirroring the overview history row).
+            params: {
+              mode: effectiveParams.mode,
+              maxContributions: effectiveParams.maxContributions,
+              emphasis: effectiveParams.emphasis,
+              instructions: effectiveParams.instructions,
+              promptVersion: effectiveParams.promptVersion,
+            },
+            products: result.products ?? undefined,
+            sources: result.sources ?? undefined,
+            // Attribute the ACCOUNTABLE HUMAN, not the impersonated overlay: `realCwid` is the
+            // signed-in actor (the same identity written to `manual_edit_audit.actor_cwid`),
+            // and `impersonatedCwid` records the "View as" target when a superuser/steward
+            // generated through an overlay (null otherwise). Mirrors the audit-log columns so
+            // the history panel can answer "who ran this" even for a delegated draft.
+            createdByCwid: realCwid,
+            impersonatedCwid,
+          },
+          select: { id: true },
+        });
+        generationId = row.id;
+      } catch (err) {
+        logEditFailure(PATH, err);
+      }
+
+      return {
         mode: result.mode,
         entries: result.entries,
-        // Project title/aims: required for Personal Statement; optional steer for Contributions
-        // (#917 v6 — drives the "related" products bucket). Persisted whenever present so a
-        // "Use these settings" restore can recover them.
-        projectTitle: effectiveParams.projectTitle.length > 0 ? effectiveParams.projectTitle : null,
-        projectAims: effectiveParams.aims.length > 0 ? effectiveParams.aims : null,
         model: result.model,
-        // The RESOLVED (post-downgrade) version actually generated with.
+        // Surface the cap overflows + how many spans the faithfulness pass trimmed, so the
+        // privileged control can show "N over the 2,000-char cap" / "trimmed N unverifiable
+        // details" without re-deriving them client-side.
+        overflow: result.overflow,
+        removedCount: result.removed.length,
+        products: result.products,
+        sources: result.sources,
         promptVersion: effectiveParams.promptVersion,
-        // Persist the steering controls so "Use these settings" can restore them (incl. the
-        // resolved prompt version, mirroring the overview history row).
-        params: {
-          mode: effectiveParams.mode,
-          maxContributions: effectiveParams.maxContributions,
-          emphasis: effectiveParams.emphasis,
-          instructions: effectiveParams.instructions,
-          promptVersion: effectiveParams.promptVersion,
-        },
-        products: result.products ?? undefined,
-        sources: result.sources ?? undefined,
-        createdByCwid: session.cwid,
-      },
-      select: { id: true },
-    });
-    generationId = row.id;
-  } catch (err) {
-    logEditFailure(PATH, err);
-  }
-
-  return editOk({
-    mode: result.mode,
-    entries: result.entries,
-    model: result.model,
-    // Surface the cap overflows + how many spans the faithfulness pass trimmed, so the
-    // privileged control can show "N over the 2,000-char cap" / "trimmed N unverifiable
-    // details" without re-deriving them client-side.
-    overflow: result.overflow,
-    removedCount: result.removed.length,
-    products: result.products,
-    sources: result.sources,
-    promptVersion: effectiveParams.promptVersion,
-    generationId,
-  });
+        generationId,
+      };
+    },
+    (err) => {
+      logEditFailure(PATH, err);
+      return { error: "generation_failed" };
+    },
+  );
 }

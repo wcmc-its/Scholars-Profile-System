@@ -68,7 +68,26 @@ export default async function EditScholarHistoryPage({
     notFound();
   }
 
-  const entries = await loadScholarAuditHistory(targetCwid, db.read);
+  // The audit log lives in the separate `scholars_audit` database; the read role
+  // (`db.read` / `app_ro`) needs a SELECT grant on `manual_edit_audit` there.
+  // Until that grant is provisioned (a DBA step — `app_ro` is managed out-of-band,
+  // not by the bootstrap seeder), the SELECT is denied (MySQL errno 1142). Fail
+  // SOFT: render an honest "unavailable" notice instead of 500ing the whole page.
+  let entries: Awaited<ReturnType<typeof loadScholarAuditHistory>> = [];
+  let unavailable = false;
+  try {
+    entries = await loadScholarAuditHistory(targetCwid, db.read);
+  } catch (err) {
+    unavailable = true;
+    console.error(
+      JSON.stringify({
+        event: "scholar_history_read_failed",
+        path: "/edit/scholar/[cwid]/history",
+        cwid: targetCwid,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
 
   return (
     <ScholarHistoryView
@@ -76,6 +95,7 @@ export default async function EditScholarHistoryPage({
       scholarName={scholar.preferredName}
       entries={entries}
       windowDays={SCHOLAR_AUDIT_WINDOW_DAYS}
+      unavailable={unavailable}
     />
   );
 }

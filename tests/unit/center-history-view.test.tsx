@@ -112,4 +112,21 @@ describe("CenterHistoryView", () => {
     expect(screen.getByTestId("center-history-empty").textContent).toMatch(/No roster changes/);
     expect(screen.queryByTestId("center-history-table")).toBeNull();
   });
+
+  it("renders the unavailable notice (taking precedence over table + empty) when the read failed", () => {
+    render(
+      <CenterHistoryView
+        centerCode="meyer_cancer_center"
+        centerName="Meyer"
+        entries={[entry({ id: "1" })]}
+        windowDays={90}
+        unavailable
+      />,
+    );
+    expect(screen.getByTestId("center-history-unavailable").textContent).toMatch(
+      /temporarily unavailable/,
+    );
+    expect(screen.queryByTestId("center-history-table")).toBeNull();
+    expect(screen.queryByTestId("center-history-empty")).toBeNull();
+  });
 });

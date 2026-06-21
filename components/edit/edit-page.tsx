@@ -115,12 +115,13 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // funding-opportunity recommendations. Self OR superuser (on the scholar's
   // behalf); never a proxy / unit-admin. Rail item appears only when the flag is on.
   { key: "grant-recs", label: "Grants for me", modes: ["self", "superuser"] },
-  // NIH biosketch generator (#917 v5, EDIT_BIOSKETCH_GENERATE) — owner-facing
-  // tool that drafts the narrative prose of a biosketch (Contributions to
-  // Science / Personal Statement) as a copy/export artifact. Self OR superuser
-  // (on the scholar's behalf); never a proxy / unit-admin. Grouped with
-  // "Grants for me" under the "Services" rail section. Rail item appears only
-  // when the flag is on.
+  // NIH biosketch generator (#917 v5, EDIT_BIOSKETCH_GENERATE) — tool that drafts
+  // the narrative prose of a biosketch (Contributions to Science / Personal
+  // Statement) as a copy/export artifact. Visible to every actor the generate
+  // route authorizes (self, superuser, comms-steward, a granted proxy, an
+  // org-unit owner/curator — the shared `authorizeOverviewWrite`), so a delegate
+  // can draft it on the scholar's behalf. Grouped with "Grants for me" under the
+  // "Services" rail section. Rail item appears only when the flag is on.
   { key: "biosketch", label: "NIH biosketch", modes: ["self", "superuser"] },
   { key: "appointments", label: "Appointments", modes: ["self", "superuser"] },
   { key: "education", label: "Education", modes: ["self", "superuser"] },
@@ -346,7 +347,8 @@ export type EditPageProps = {
   grantRecsEnabled?: boolean;
   /** #917 v5 (`EDIT_BIOSKETCH_GENERATE`): whether the "NIH biosketch" Services
    *  rail item + panel are surfaced. Computed by the server page (env flag) and
-   *  threaded in like grantRecsEnabled; self + superuser only. */
+   *  threaded in like grantRecsEnabled. Surfaced to every actor the generate
+   *  route authorizes (self, superuser, comms-steward, proxy, unit-admin). */
   biosketchEnabled?: boolean;
 };
 
@@ -374,13 +376,13 @@ export function visibleAttrKeys(
         a.key !== "grant-recs" ||
         (grantRecsEnabled && (mode === "self" || isSuperuserLike(mode))),
     )
-    // #917 v5 — "NIH biosketch" appears only when EDIT_BIOSKETCH_GENERATE is on,
-    // self / superuser only (never proxy / unit-admin), mirroring grant-recs.
-    .filter(
-      (a) =>
-        a.key !== "biosketch" ||
-        (biosketchEnabled && (mode === "self" || isSuperuserLike(mode))),
-    )
+    // #917 v5 — "NIH biosketch" appears only when EDIT_BIOSKETCH_GENERATE is on.
+    // Visible to EVERY actor the generate route already authorizes (the shared
+    // `authorizeOverviewWrite`: self, superuser, comms-steward, a granted proxy,
+    // and an org-unit owner/curator). `attrsForMode` already keeps biosketch for
+    // all five surfaces, so the flag is the only remaining gate — unlike
+    // grant-recs, which stays self / superuser only.
+    .filter((a) => a.key !== "biosketch" || biosketchEnabled)
     // The "From your publications" item only exists when there are candidates to
     // show — an empty panel is never surfaced, and an `?attr=coi-gap` with zero
     // candidates canonicalizes away (the page redirects to bare /edit) rather
@@ -430,10 +432,12 @@ export function EditPage({
   // SELF_EDIT_GRANT_RECS is on (the server page computes the flag and threads it).
   const showGrantRecs =
     grantRecsEnabled && (mode === "self" || isSuperuserLike(mode));
-  // #917 v5 — the "NIH biosketch" Services item shows on self / superuser surfaces
-  // when EDIT_BIOSKETCH_GENERATE is on (the server page computes + threads it).
-  const showBiosketch =
-    biosketchEnabled && (mode === "self" || isSuperuserLike(mode));
+  // #917 v5 — the "NIH biosketch" Services item shows on every surface the
+  // generate route authorizes (self, superuser, comms-steward, proxy, unit-admin
+  // — the shared `authorizeOverviewWrite`), gated only by EDIT_BIOSKETCH_GENERATE
+  // (the server page computes + threads it). The cost line stays superuser-only
+  // and version selection stays superuser / unit-admin (see the panel render).
+  const showBiosketch = biosketchEnabled;
   const visible = attrsForMode(mode)
     .filter((a) => a.key !== "coi-gap" || hasCoiGap)
     .filter((a) => a.key !== "highlights" || hasHighlights)

@@ -37,6 +37,10 @@ export interface BiosketchGenerationSummary {
   products: BiosketchProducts | null;
   /** Per-contribution source PMIDs, or null. */
   sources: BiosketchContributionSources[] | null;
+  /** The accountable human who ran the generation (audit "who ran it"). */
+  createdByCwid: string;
+  /** The "View as" overlay target when generated through impersonation, else null. */
+  impersonatedCwid: string | null;
   createdAt: Date;
 }
 
@@ -93,6 +97,8 @@ export async function listBiosketchGenerations(
       params: true,
       products: true,
       sources: true,
+      createdByCwid: true,
+      impersonatedCwid: true,
       createdAt: true,
     },
   });
@@ -119,6 +125,8 @@ export async function listBiosketchGenerations(
       params,
       products: coerceProducts(row.products),
       sources: coerceSources(row.sources),
+      createdByCwid: row.createdByCwid,
+      impersonatedCwid: row.impersonatedCwid,
       createdAt: row.createdAt,
     };
   });

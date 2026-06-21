@@ -23,6 +23,9 @@ export type CenterHistoryViewProps = {
   entries: ReadonlyArray<CenterAuditEntry>;
   /** how many days the window spans (for the empty-state copy). */
   windowDays: number;
+  /** the audit read failed (e.g. the read role lacks SELECT on the audit table):
+   *  render an honest "unavailable" notice instead of an empty/"no changes" state. */
+  unavailable?: boolean;
 };
 
 const CHANGE_LABEL: Record<CenterAuditEntry["changeKind"], string> = {
@@ -70,6 +73,7 @@ export function CenterHistoryView({
   centerName,
   entries,
   windowDays,
+  unavailable = false,
 }: CenterHistoryViewProps) {
   return (
     <main
@@ -91,7 +95,12 @@ export function CenterHistoryView({
         {centerName} — roster changes in the last {windowDays} days. Read-only.
       </p>
 
-      {entries.length === 0 ? (
+      {unavailable ? (
+        <p className="text-muted-foreground mt-8" data-testid="center-history-unavailable">
+          Change history is temporarily unavailable. Please try again later or contact ITS Support
+          if this persists.
+        </p>
+      ) : entries.length === 0 ? (
         <p className="text-muted-foreground mt-8" data-testid="center-history-empty">
           No roster changes recorded in the last {windowDays} days.
         </p>

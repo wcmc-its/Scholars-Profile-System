@@ -52,7 +52,7 @@ vi.mock("@/components/edit/center-history-view", () => ({ CenterHistoryView: moc
 
 import EditCenterHistoryPage from "@/app/edit/center/[code]/history/page";
 
-type El = { type: unknown };
+type El = { type: unknown; props: Record<string, unknown> };
 const asEl = (v: unknown) => v as El;
 const params = (code: string) => Promise.resolve({ code });
 
@@ -103,5 +103,18 @@ describe("/edit/center/[code]/history — authorization", () => {
     const result = asEl(await EditCenterHistoryPage({ params: params("meyer_cancer_center") }));
     expect(result.type).toBe(mockView);
     expect(mockLoadHistory).toHaveBeenCalledWith("meyer_cancer_center", expect.anything());
+    expect(result.props.unavailable).toBe(false);
+  });
+
+  it("audit read failure → renders the view as unavailable, does not 500", async () => {
+    // The read role lacks SELECT on `scholars_audit.manual_edit_audit` until a DBA grant
+    // lands; the page must degrade to an honest notice rather than throwing.
+    mockGetEditSession.mockResolvedValue({ cwid: "cur01", isSuperuser: false });
+    mockLoadCtx.mockResolvedValue(CTX);
+    mockLoadHistory.mockRejectedValue(new Error("SELECT command denied ... manual_edit_audit"));
+    const result = asEl(await EditCenterHistoryPage({ params: params("meyer_cancer_center") }));
+    expect(result.type).toBe(mockView);
+    expect(result.props.unavailable).toBe(true);
+    expect(result.props.entries).toEqual([]);
   });
 });

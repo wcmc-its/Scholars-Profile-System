@@ -272,7 +272,8 @@ export function BiosketchGenerateControls({
             ~${cost.toFixed(2)} per draft (estimate)
           </span>
           <span className="text-muted-foreground text-xs">
-            A faithfulness pass, when enabled, costs roughly 3× this.
+            Every draft runs a faithfulness pass that fact-checks each line against
+            this scholar&rsquo;s records — about 3× the base estimate above.
           </span>
         </div>
       )}
