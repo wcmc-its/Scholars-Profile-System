@@ -40,9 +40,10 @@ describe("overview system prompts — byte-identity pins", () => {
     );
   });
 
-  it("v4 (OVERVIEW_SYSTEM_PROMPT_V4) is unchanged after fragment extraction", () => {
+  it("v4 (OVERVIEW_SYSTEM_PROMPT_V4) — pin regenerated for the #917 v6 §2 em-dash ban", () => {
+    // The em-dash directive was added to the v4 (live default) OUTPUT block; v2/v3 untouched.
     expect(sha(OVERVIEW_SYSTEM_PROMPT_V4)).toBe(
-      "0899f62fb144ea9fcd4d86c23143acb19f8d2191286be0e40c5cd6bb861dcb30",
+      "7c331c7714b39c9289758b603df47c2cc7efea85e1252cf27cf46652ec0e8589",
     );
   });
 

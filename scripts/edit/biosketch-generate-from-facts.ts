@@ -22,6 +22,7 @@ import { promises as fs } from "node:fs";
 
 import { generateBiosketch } from "@/lib/edit/biosketch-generator";
 import { normalizeBiosketchParams, type BiosketchMode } from "@/lib/edit/biosketch-params";
+import type { BiosketchProducts } from "@/lib/edit/biosketch-products";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import type { UngroundedSpan } from "@/lib/edit/overview-generator";
 
@@ -40,6 +41,7 @@ interface BiosketchDraftResult {
   entryChars?: number[];
   overflow?: { index: number; chars: number }[];
   removed?: UngroundedSpan[];
+  products?: BiosketchProducts | null;
   model?: string;
   error?: string;
 }
@@ -51,13 +53,16 @@ async function main(): Promise<void> {
   }
   const model = process.env.GEN_MODEL ?? "us.anthropic.claude-opus-4-8";
   const mode = (process.env.GEN_MODE ?? "contributions") as BiosketchMode;
+  // #917 v6 — the biosketch prompt version to validate ("v5" baseline / "v6" overhaul). An
+  // invalid/unset value normalizes to the live default (v6).
+  const promptVersion = process.env.GEN_VERSION;
   // Default ON for validation: the significance lens leans on the verify→revise loop to
   // keep anchored implications while stripping invented entities / superlatives.
   const faithfulnessPass = process.env.BIOSKETCH_FAITHFULNESS !== "off";
   const projectTitle = process.env.PROJECT_TITLE ?? "";
   const aims = process.env.PROJECT_AIMS ?? "";
 
-  const params = normalizeBiosketchParams({ mode, projectTitle, aims });
+  const params = normalizeBiosketchParams({ mode, projectTitle, aims, promptVersion });
 
   const recs = JSON.parse(await fs.readFile(file, "utf8")) as FactsRecord[];
   const results: BiosketchDraftResult[] = [];
@@ -78,6 +83,7 @@ async function main(): Promise<void> {
         entryChars: res.entries.map((e) => e.length),
         overflow: res.overflow,
         removed: res.removed,
+        products: res.products,
         model: res.model,
       });
       console.warn(

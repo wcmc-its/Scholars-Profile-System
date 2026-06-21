@@ -48,6 +48,7 @@ import {
 import { isReciterRejectEnabled } from "@/lib/reciter/client";
 import { GrantRecsCard } from "@/components/edit/grant-recs-card";
 import { BiosketchTool } from "@/components/edit/biosketch-tool";
+import { listSelectableBiosketchPromptVersions } from "@/lib/edit/biosketch-prompt-versions";
 
 /** The model the biosketch route will actually generate on — surfaced to the
  *  privileged cost line in the Services panel. Resolution order matches
@@ -212,10 +213,6 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "highlights",
   "visibility",
   "proxy-editors",
-  // "Services" group — owner-facing tools (#917 v5). Each item is flag-gated, so
-  // the "Services" header renders only when at least one tool is enabled.
-  "biosketch",
-  "grant-recs",
   // "From WCM systems" group — ordered per operator request. (Profile URL is
   // owned ⇒ joins "Yours to edit" only when the slug-request flag is on;
   // gated/read-only it leads the WCM group.)
@@ -230,6 +227,12 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "mentees",
   "coi",
   "coi-gap",
+  // "Services" group — owner-facing tools (#917 v5/v6), rendered LAST per operator
+  // request (#917 v6 §1). Each item is flag-gated, so the "Services" header renders
+  // only when at least one tool is enabled. Group order is first-appearance in this
+  // array (`attribute-rail.tsx` `groupItems`), so these two keys position the header.
+  "biosketch",
+  "grant-recs",
 ];
 const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   home: "owned",
@@ -587,14 +590,17 @@ function renderPanel(
       // public forward route for the resolved cwid (self or superuser-target).
       return <GrantRecsCard cwid={cwid} />;
     case "biosketch":
-      // #917 v5 — the "NIH biosketch" Services panel. The generate tool (client
+      // #917 v5/v6 — the "NIH biosketch" Services panel. The generate tool (client
       // island) POSTs to /api/edit/biosketch/generate for the resolved cwid; the
-      // per-draft cost line shows to a privileged actor only (superuser / comms).
+      // per-draft cost line + the prompt-version selector show to a privileged actor
+      // only (superuser / comms / unit-admin curator), matching the route gate.
       return (
         <BiosketchTool
           entityId={cwid}
           canSeeCost={isSuperuserLike(mode)}
           model={BIOSKETCH_EFFECTIVE_MODEL}
+          versions={listSelectableBiosketchPromptVersions()}
+          canSelectVersion={isSuperuserLike(mode) || mode === "unit-admin"}
         />
       );
     case "home": {

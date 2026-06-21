@@ -44,6 +44,7 @@
     "etl:ed:admins": "tsx etl/ed-admins/index.ts",
     "etl:ed:admins:probe": "tsx etl/ed-admins/probe.ts",
     "etl:reciter:probe": "tsx etl/reciter/probe.ts",
+    "etl:reciter:probe-nih": "tsx etl/reciter/probe-nih-cols.ts",
     "etl:reciter": "tsx etl/reciter/index.ts",
     "etl:reciter-refresh": "tsx etl/reciter-refresh/index.ts",
     "etl:reciter:coi-statements": "tsx etl/reciter/backfill-coi-statements.ts",

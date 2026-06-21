@@ -28,6 +28,7 @@ import {
   missingPersonalStatementInputs,
   normalizeBiosketchParams,
 } from "@/lib/edit/biosketch-params";
+import { defaultBiosketchPromptVersionId } from "@/lib/edit/biosketch-prompt-versions";
 import { normalizeOverviewSelection } from "@/lib/edit/overview-params";
 import { loadOverviewSelectionDeltas } from "@/lib/edit/overview-selection-store";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
@@ -42,10 +43,6 @@ import {
 } from "@/lib/edit/request";
 
 const PATH = "/api/edit/biosketch/generate";
-
-/** The biosketch prompt revision recorded with each generation (its own purpose, NOT an
- *  overview prompt-version id). Bumped when the BIOSKETCH_SYSTEM_PROMPT changes materially. */
-const BIOSKETCH_PROMPT_VERSION = "v5";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // Flag first — a dormant feature 404s before doing any work.
@@ -94,6 +91,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(403, authz.reason);
   }
 
+  // --- prompt-version gate (#917 v6). Only a superuser / comms-steward / unit-admin curator
+  //     may steer the biosketch prompt version; everyone else is silently downgraded to the
+  //     live default (the posted body is untrusted). Mirrors the overview generate route. ---
+  const canSelectBiosketchPromptVersion =
+    session.isSuperuser || session.isCommsSteward || authz.viaUnitAdminUnit !== null;
+  const effectiveParams =
+    canSelectBiosketchPromptVersion || params.promptVersion === defaultBiosketchPromptVersionId()
+      ? params
+      : { ...params, promptVersion: defaultBiosketchPromptVersionId() };
+
   // --- per-scholar rate limit (DB write) + facts assembly (DB read). The rate limit runs
   //     first (before the gateway call) so a burst can't run up cost; its bucket is keyed on
   //     the TARGET scholar (`entityId`) under a DISTINCT `biosketch:` namespace, so the cap
@@ -129,10 +136,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // --- sparse-data gate: too little signal to draft without padding. ---
   if (!hasSufficientFacts(facts)) return editError(422, "insufficient_facts");
 
-  // --- generate. A gateway throw / timeout is a 502 and NEVER writes the DB. ---
+  // --- generate. A gateway throw / timeout is a 502 and NEVER writes the DB. The faithfulness
+  //     pass is ON by default for this grant document (#917 v6 §5) — a single fabricated metric
+  //     in a grant submission dwarfs the ~3x cost — and can be force-disabled for debugging via
+  //     `BIOSKETCH_FAITHFULNESS_PASS=off`. ---
   let result: Awaited<ReturnType<typeof generateBiosketch>>;
   try {
-    result = await generateBiosketch(facts, params);
+    result = await generateBiosketch(facts, effectiveParams, {
+      faithfulnessPass: process.env.BIOSKETCH_FAITHFULNESS_PASS !== "off",
+    });
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(502, "generation_failed");
@@ -149,18 +161,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         cwid: entityId,
         mode: result.mode,
         entries: result.entries,
-        // Project title/aims are personal-statement-only; NULL for contributions.
-        projectTitle: params.mode === "personal_statement" ? params.projectTitle : null,
-        projectAims: params.mode === "personal_statement" ? params.aims : null,
+        // Project title/aims: required for Personal Statement; optional steer for Contributions
+        // (#917 v6 — drives the "related" products bucket). Persisted whenever present so a
+        // "Use these settings" restore can recover them.
+        projectTitle: effectiveParams.projectTitle.length > 0 ? effectiveParams.projectTitle : null,
+        projectAims: effectiveParams.aims.length > 0 ? effectiveParams.aims : null,
         model: result.model,
-        promptVersion: BIOSKETCH_PROMPT_VERSION,
-        // Persist the steering controls so "Regenerate from these settings" can restore them.
+        // The RESOLVED (post-downgrade) version actually generated with.
+        promptVersion: effectiveParams.promptVersion,
+        // Persist the steering controls so "Use these settings" can restore them (incl. the
+        // resolved prompt version, mirroring the overview history row).
         params: {
-          mode: params.mode,
-          maxContributions: params.maxContributions,
-          emphasis: params.emphasis,
-          instructions: params.instructions,
+          mode: effectiveParams.mode,
+          maxContributions: effectiveParams.maxContributions,
+          emphasis: effectiveParams.emphasis,
+          instructions: effectiveParams.instructions,
+          promptVersion: effectiveParams.promptVersion,
         },
+        products: result.products ?? undefined,
         createdByCwid: session.cwid,
       },
       select: { id: true },
@@ -179,6 +197,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // details" without re-deriving them client-side.
     overflow: result.overflow,
     removedCount: result.removed.length,
+    products: result.products,
+    promptVersion: effectiveParams.promptVersion,
     generationId,
   });
 }

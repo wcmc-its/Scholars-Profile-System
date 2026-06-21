@@ -85,6 +85,18 @@ export type OverviewFacts = {
     topicRationale: string | null;
     /** First / last / middle author, from `PublicationAuthor`. */
     authorPosition: OverviewAuthorPosition | null;
+    /** Scopus citation count (`Publication.citationCount`). #917 v6 — WITHHELD from
+     *  the public overview (`toModelFacts` drops it); surfaced only by the biosketch
+     *  projection as a grounded citation-magnitude signal. Optional: the loader always
+     *  populates it, but older fixtures / non-loader callers may omit it. */
+    citationCount?: number | null;
+    /** NIH iCite Relative Citation Ratio (`reciterdb.analysis_nih`). #917 v6 — the
+     *  field-normalized impact figure the biosketch may cite (judiciously); biosketch-only. */
+    relativeCitationRatio?: number | null;
+    /** NIH iCite percentile for the RCR. #917 v6 — biosketch-only. */
+    nihPercentile?: number | null;
+    /** NIH iCite cumulative citation count. #917 v6 — biosketch-only. */
+    citedByCount?: number | null;
   }[];
   /** Distinct confirmed-authorship pmid count (the whole corpus, not just scored). */
   publicationCount: number;
@@ -258,9 +270,13 @@ function htmlToPlainText(html: string): string {
     .trim();
 }
 
-/** Coerce a Prisma `Decimal | null` (impact score) to a plain number. */
-function decimalToNumber(value: { toNumber: () => number } | number | null): number | null {
-  if (value === null) return null;
+/** Coerce a Prisma `Decimal | null` (impact score, RCR, …) to a plain number. A missing
+ *  column (undefined) is treated as null, so a row that didn't select a Decimal field never
+ *  throws. */
+function decimalToNumber(
+  value: { toNumber: () => number } | number | null | undefined,
+): number | null {
+  if (value === null || value === undefined) return null;
   return typeof value === "number" ? value : value.toNumber();
 }
 
@@ -316,6 +332,10 @@ async function loadScoredCandidatePublications(cwid: string): Promise<
     impact: number | null;
     synopsis: string | null;
     impactJustification: string | null;
+    citationCount: number | null;
+    relativeCitationRatio: number | null;
+    nihPercentile: number | null;
+    citedByCount: number | null;
     authorPosition: OverviewAuthorPosition | null;
     isFirstOrLast: boolean;
   }[]
@@ -344,6 +364,13 @@ async function loadScoredCandidatePublications(cwid: string): Promise<
       impactScore: true,
       synopsis: true,
       impactJustification: true,
+      // #917 v6 -- NIH iCite bibliometrics for the biosketch impact grounding.
+      // Loaded here (read directly from MySQL, no reindex) but WITHHELD from the
+      // public overview projection; only `toBiosketchModelFacts` surfaces them.
+      citationCount: true,
+      relativeCitationRatio: true,
+      nihPercentile: true,
+      citedByCount: true,
     },
   });
 
@@ -357,6 +384,10 @@ async function loadScoredCandidatePublications(cwid: string): Promise<
       impact: decimalToNumber(r.impactScore),
       synopsis: r.synopsis,
       impactJustification: r.impactJustification,
+      citationCount: r.citationCount ?? null,
+      relativeCitationRatio: decimalToNumber(r.relativeCitationRatio),
+      nihPercentile: decimalToNumber(r.nihPercentile),
+      citedByCount: r.citedByCount ?? null,
       authorPosition: position,
       isFirstOrLast: position === "first" || position === "last",
     };
@@ -690,6 +721,10 @@ export async function assembleOverviewFacts(
       impactJustification: p.impactJustification,
       topicRationale: rationaleByPmid.get(p.pmid) ?? null,
       authorPosition: p.authorPosition,
+      citationCount: p.citationCount,
+      relativeCitationRatio: p.relativeCitationRatio,
+      nihPercentile: p.nihPercentile,
+      citedByCount: p.citedByCount,
     }));
 
   const activeGrants = funding
