@@ -21,7 +21,11 @@ import "dotenv/config";
 import { promises as fs } from "node:fs";
 
 import { generateBiosketch } from "@/lib/edit/biosketch-generator";
-import { normalizeBiosketchParams, type BiosketchMode } from "@/lib/edit/biosketch-params";
+import {
+  normalizeBiosketchParams,
+  type BiosketchEntry,
+  type BiosketchMode,
+} from "@/lib/edit/biosketch-params";
 import type { BiosketchProducts } from "@/lib/edit/biosketch-products";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import type { UngroundedSpan } from "@/lib/edit/overview-generator";
@@ -37,7 +41,7 @@ interface BiosketchDraftResult {
   cwid: string;
   label: string;
   mode?: BiosketchMode;
-  entries?: string[];
+  entries?: BiosketchEntry[];
   entryChars?: number[];
   overflow?: { index: number; chars: number }[];
   removed?: UngroundedSpan[];
@@ -53,8 +57,9 @@ async function main(): Promise<void> {
   }
   const model = process.env.GEN_MODEL ?? "us.anthropic.claude-opus-4-8";
   const mode = (process.env.GEN_MODE ?? "contributions") as BiosketchMode;
-  // #917 v6 — the biosketch prompt version to validate ("v5" baseline / "v6" overhaul). An
-  // invalid/unset value normalizes to the live default (v6).
+  // #917 v7 — the biosketch prompt version to validate ("v5" baseline / "v6" role+grounded-impact
+  // overhaul / "v7" adds titled contributions). An invalid/unset value normalizes to the live
+  // default (v7, steerable via BIOSKETCH_PROMPT_VERSION_DEFAULT).
   const promptVersion = process.env.GEN_VERSION;
   // Default ON for validation: the significance lens leans on the verify→revise loop to
   // keep anchored implications while stripping invented entities / superlatives.
@@ -80,7 +85,7 @@ async function main(): Promise<void> {
         label: r.label,
         mode: res.mode,
         entries: res.entries,
-        entryChars: res.entries.map((e) => e.length),
+        entryChars: res.entries.map((e) => e.body.length),
         overflow: res.overflow,
         removed: res.removed,
         products: res.products,

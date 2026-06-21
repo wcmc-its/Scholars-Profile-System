@@ -10,7 +10,7 @@
  * + the env-driven default resolver only.
  */
 
-export type BiosketchPromptVersionId = "v5" | "v6";
+export type BiosketchPromptVersionId = "v5" | "v6" | "v7";
 
 export type BiosketchPromptVersionStatus = "default" | "experimental" | "deprecated";
 
@@ -26,27 +26,44 @@ export type BiosketchPromptVersionMeta = {
   /**
    * #917 v6 — whether this version grounds impact on the FACTS bibliometrics (citation count /
    * NIH iCite RCR), relaxing the absolute external-uptake ban to a grounded conditional. v5 = no
-   * (bibliometrics fully banned); v6 = yes. Consumed server-side by the generator (which model-
-   * facts projection to use) and the faithfulness pass (`permitBibliometrics`).
+   * (bibliometrics fully banned); v6 / v7 = yes. Consumed server-side by the generator (which
+   * model-facts projection to use) and the faithfulness pass (`permitBibliometrics`).
    */
   groundsImpact?: boolean;
+  /**
+   * #917 v7 — whether this version emits a short per-contribution TITLE line the parser extracts
+   * into `BiosketchEntry.title` (the NIH "Contributions to Science" heading format). v5 / v6 = no
+   * (their output is title-less prose, parsed to an empty title); v7 = yes. Consumed server-side
+   * by the generator to gate title extraction in `parseBiosketchEntries`.
+   */
+  emitsTitle?: boolean;
 };
 
 /**
- * Insertion order = selector order (default first). v6 is the overhaul (role per contribution,
- * the four NIH elements, grounded impact, length band, em-dash ban); v5 is the prior baseline,
- * kept for A/B + as the rollback target.
+ * Insertion order = selector order (default first). v7 adds a short subject heading to each
+ * contribution (the NIH "Contributions to Science" heading format) on top of everything in v6;
+ * v6 is the role/four-elements/grounded-impact overhaul, kept selectable for A/B + as the
+ * one-step-back rollback target; v5 is the prior baseline.
  */
 export const BIOSKETCH_PROMPT_VERSION_METAS: Record<
   BiosketchPromptVersionId,
   BiosketchPromptVersionMeta
 > = {
+  v7: {
+    id: "v7",
+    label: "v7 — titled contributions",
+    description:
+      "Everything in v6, plus a short subject heading on each contribution (the NIH “Contributions to Science” heading format) so a reader can tell at a glance what each one is about. Same role, four NIH elements, grounded impact, length band, em-dash ban, and entity-grounding floor.",
+    status: "default",
+    groundsImpact: true,
+    emitsTitle: true,
+  },
   v6: {
     id: "v6",
     label: "v6 — role, four elements, grounded impact",
     description:
-      "Names the faculty member's specific role in each contribution, enforces the four NIH elements (problem, finding, influence, role), grounds impact on the publication's NIH iCite RCR / citation count when present, targets a fuller length band, and bans em dashes. Same entity-grounding floor.",
-    status: "default",
+      "Names the faculty member's specific role in each contribution, enforces the four NIH elements (problem, finding, influence, role), grounds impact on the publication's NIH iCite RCR / citation count when present, targets a fuller length band, and bans em dashes. Same entity-grounding floor. The one-step-back rollback target.",
+    status: "experimental",
     groundsImpact: true,
   },
   v5: {
@@ -64,7 +81,7 @@ export const BIOSKETCH_PROMPT_VERSION_IDS = Object.keys(
 ) as BiosketchPromptVersionId[];
 
 /** The compiled-in baseline default (the rollback target if the env lever is unset/invalid). */
-export const BIOSKETCH_DEFAULT_PROMPT_VERSION: BiosketchPromptVersionId = "v6";
+export const BIOSKETCH_DEFAULT_PROMPT_VERSION: BiosketchPromptVersionId = "v7";
 
 export function isValidBiosketchPromptVersionId(
   value: unknown,
@@ -94,4 +111,9 @@ export function listSelectableBiosketchPromptVersions(): BiosketchPromptVersionM
 /** Whether a version grounds impact on FACTS bibliometrics (#917 v6). */
 export function biosketchVersionGroundsImpact(id: BiosketchPromptVersionId): boolean {
   return BIOSKETCH_PROMPT_VERSION_METAS[id]?.groundsImpact === true;
+}
+
+/** Whether a version emits a per-contribution TITLE line the parser extracts (#917 v7). */
+export function biosketchVersionEmitsTitle(id: BiosketchPromptVersionId): boolean {
+  return BIOSKETCH_PROMPT_VERSION_METAS[id]?.emitsTitle === true;
 }

@@ -91,7 +91,11 @@ function post(body: unknown): NextRequest {
 const FACTS = { name: "Jane Smith" };
 const GEN_RESULT = {
   mode: "contributions" as const,
-  entries: ["First contribution.", "Second contribution."],
+  // #917 v7 — entries are { title, body }; v6/v7 contributions carry a (possibly empty) title.
+  entries: [
+    { title: "", body: "First contribution." },
+    { title: "", body: "Second contribution." },
+  ],
   model: "us.anthropic.claude-opus-4-8",
   removed: [],
   overflow: [],
@@ -140,7 +144,7 @@ describe("POST /api/edit/biosketch/generate", () => {
     mockGenerateBiosketch.mockResolvedValue({
       ...GEN_RESULT,
       mode: "personal_statement",
-      entries: ["My statement."],
+      entries: [{ title: "", body: "My statement." }],
     });
     const res = await POST(
       post({
@@ -250,7 +254,10 @@ describe("POST /api/edit/biosketch/generate", () => {
   it("200 returns the entries + mode + model + overflow + removedCount + generationId", async () => {
     mockGenerateBiosketch.mockResolvedValue({
       mode: "contributions",
-      entries: ["A.", "B."],
+      entries: [
+        { title: "First subject", body: "A." },
+        { title: "Second subject", body: "B." },
+      ],
       model: "us.anthropic.claude-opus-4-8",
       removed: [{ span: "seminal", category: "superlative", reason: "" }],
       overflow: [{ index: 0, chars: 2200 }],
@@ -260,7 +267,10 @@ describe("POST /api/edit/biosketch/generate", () => {
     expect(await res.json()).toMatchObject({
       ok: true,
       mode: "contributions",
-      entries: ["A.", "B."],
+      entries: [
+        { title: "First subject", body: "A." },
+        { title: "Second subject", body: "B." },
+      ],
       model: "us.anthropic.claude-opus-4-8",
       overflow: [{ index: 0, chars: 2200 }],
       removedCount: 1,
@@ -282,14 +292,14 @@ describe("POST /api/edit/biosketch/generate", () => {
           projectTitle: null,
           projectAims: null,
           model: "us.anthropic.claude-opus-4-8",
-          // #917 v6 — the RESOLVED default version (no env override in test → v6).
-          promptVersion: "v6",
+          // #917 v7 — the RESOLVED default version (no env override in test → v7).
+          promptVersion: "v7",
           params: {
             mode: "contributions",
             maxContributions: 3,
             emphasis: "",
             instructions: "",
-            promptVersion: "v6",
+            promptVersion: "v7",
           },
           // Audit: the accountable human (self here), no impersonation overlay.
           createdByCwid: "self01",

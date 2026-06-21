@@ -34,6 +34,7 @@ import {
   DEFAULT_BIOSKETCH_PARAMS,
   normalizeBiosketchParams,
   missingPersonalStatementInputs,
+  type BiosketchEntry,
   type BiosketchParams,
 } from "@/lib/edit/biosketch-params";
 import { type BiosketchProducts } from "@/lib/edit/biosketch-products";
@@ -67,7 +68,7 @@ export type BiosketchToolProps = {
 type BiosketchGenerationItem = {
   id: string;
   mode: BiosketchGenerateResult["mode"];
-  entries: string[];
+  entries: BiosketchEntry[];
   model: string;
   promptVersion?: string | null;
   params: BiosketchParams;

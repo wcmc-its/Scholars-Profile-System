@@ -93,29 +93,92 @@ describe("buildBiosketchUserPrompt", () => {
 });
 
 describe("parseBiosketchEntries", () => {
-  it("splits numbered contribution blocks", () => {
+  it("splits numbered contribution blocks into { title:'', body } without extractTitle", () => {
     const text = "1. First body of work.\n\n2. Second body of work.\n\n3. Third.";
     const entries = parseBiosketchEntries(text, "contributions");
-    expect(entries).toEqual(["First body of work.", "Second body of work.", "Third."]);
+    expect(entries).toEqual([
+      { title: "", body: "First body of work." },
+      { title: "", body: "Second body of work." },
+      { title: "", body: "Third." },
+    ]);
   });
 
   it("falls back to blank-line split when the model omitted numbering", () => {
     const text = "First paragraph.\n\nSecond paragraph.";
     expect(parseBiosketchEntries(text, "contributions")).toEqual([
-      "First paragraph.",
-      "Second paragraph.",
+      { title: "", body: "First paragraph." },
+      { title: "", body: "Second paragraph." },
     ]);
   });
 
-  it("treats a personal statement as one entry, stripping a stray enumerator", () => {
+  it("treats a personal statement as one title-less entry, stripping a stray enumerator", () => {
     expect(parseBiosketchEntries("1. My statement.", "personal_statement")).toEqual([
-      "My statement.",
+      { title: "", body: "My statement." },
     ]);
-    expect(parseBiosketchEntries("My statement.", "personal_statement")).toEqual(["My statement."]);
+    expect(parseBiosketchEntries("My statement.", "personal_statement")).toEqual([
+      { title: "", body: "My statement." },
+    ]);
   });
 
   it("drops empty input", () => {
     expect(parseBiosketchEntries("   ", "contributions")).toEqual([]);
+  });
+
+  it("extracts the v7 TITLE: heading when extractTitle is on", () => {
+    const text =
+      "1. TITLE: CAR-T resistance\n\nWe studied resistance.\n\n2. TITLE: AAV tropism\n\nWe mapped tropism.";
+    expect(parseBiosketchEntries(text, "contributions", { extractTitle: true })).toEqual([
+      { title: "CAR-T resistance", body: "We studied resistance." },
+      { title: "AAV tropism", body: "We mapped tropism." },
+    ]);
+  });
+
+  it("tolerates a v7 contribution that omitted its TITLE line (empty title, full body)", () => {
+    const text = "1. TITLE: Real one\n\nBody one.\n\n2. Body two with no title line.";
+    expect(parseBiosketchEntries(text, "contributions", { extractTitle: true })).toEqual([
+      { title: "Real one", body: "Body one." },
+      { title: "", body: "Body two with no title line." },
+    ]);
+  });
+
+  it("keeps a stray TITLE: line in the body when extractTitle is off (v5/v6)", () => {
+    const text = "1. TITLE: Should stay\n\nBody.";
+    expect(parseBiosketchEntries(text, "contributions")).toEqual([
+      { title: "", body: "TITLE: Should stay\n\nBody." },
+    ]);
+  });
+
+  it("does not treat a Personal Statement's leading TITLE as a heading", () => {
+    expect(
+      parseBiosketchEntries("TITLE: Nope\n\nStatement body.", "personal_statement", {
+        extractTitle: true,
+      }),
+    ).toEqual([{ title: "", body: "TITLE: Nope\n\nStatement body." }]);
+  });
+
+  it("segments UNNUMBERED v7 output on TITLE: lines (titles survive, one entry per contribution)", () => {
+    // The model dropped all numbering but kept the v7 TITLE: format. A blank-line split would tear
+    // each contribution in two (and leak the marker); segmenting on TITLE: keeps them whole.
+    const text =
+      "TITLE: CAR-T resistance\n\nWe studied resistance.\n\nTITLE: AAV tropism\n\nWe mapped tropism.";
+    const entries = parseBiosketchEntries(text, "contributions", { extractTitle: true });
+    expect(entries).toEqual([
+      { title: "CAR-T resistance", body: "We studied resistance." },
+      { title: "AAV tropism", body: "We mapped tropism." },
+    ]);
+    expect(entries.every((e) => !e.body.includes("TITLE:"))).toBe(true);
+  });
+
+  it("consumes the TITLE: marker even on a degraded entry — empty heading never leaks", () => {
+    expect(
+      parseBiosketchEntries("1. TITLE:\n\nBody text here.", "contributions", { extractTitle: true }),
+    ).toEqual([{ title: "", body: "Body text here." }]);
+  });
+
+  it("drops a degraded title-only entry (heading with no narrative) rather than leak it", () => {
+    expect(
+      parseBiosketchEntries("1. TITLE: Orphan heading", "contributions", { extractTitle: true }),
+    ).toEqual([]);
   });
 });
 

@@ -27,6 +27,16 @@ import {
 /** Which biosketch artifact to draft. */
 export type BiosketchMode = "contributions" | "personal_statement";
 
+/**
+ * One parsed biosketch entry (#917 v7). `title` is the short subject heading a v7 contribution
+ * carries (the NIH "Contributions to Science" heading format) — EMPTY for v5 / v6 contributions
+ * and for a Personal Statement, which has no heading. `body` is the narrative prose, and is what
+ * the character cap, the overflow check, and the faithfulness pass all key on (the title is a
+ * short label, not graded prose). Lives here (a client-safe module) so both the server generator
+ * and the client result card can share it.
+ */
+export type BiosketchEntry = { title: string; body: string };
+
 /** Up to five Contributions to Science (NIH 2026 format). The model writes FEWER when the
  *  scholar has fewer genuinely distinct bodies of work — the count is never padded. */
 export const BIOSKETCH_MAX_CONTRIBUTIONS = 5;

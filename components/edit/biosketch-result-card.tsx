@@ -21,7 +21,11 @@ import * as React from "react";
 import { Check, Copy, Download } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { biosketchCharCap, type BiosketchMode } from "@/lib/edit/biosketch-params";
+import {
+  biosketchCharCap,
+  type BiosketchEntry,
+  type BiosketchMode,
+} from "@/lib/edit/biosketch-params";
 import type { BiosketchProduct, BiosketchProducts } from "@/lib/edit/biosketch-products";
 import type { BiosketchContributionSources } from "@/lib/edit/biosketch-sources";
 import { cn } from "@/lib/utils";
@@ -34,7 +38,9 @@ function pubmedUrl(pmid: string): string {
 /** The success payload the `POST /api/edit/biosketch/generate` route returns. */
 export type BiosketchGenerateResult = {
   mode: BiosketchMode;
-  entries: string[];
+  /** Parsed entries as `{ title, body }` (#917 v7). `title` is the per-contribution heading
+   *  (v7 only; `""` for v5 / v6 + Personal Statement); `body` is the narrative prose. */
+  entries: BiosketchEntry[];
   model: string;
   overflow: { index: number; chars: number }[];
   removedCount: number;
@@ -73,10 +79,13 @@ export function BiosketchResultCard({ result }: { result: BiosketchGenerateResul
           .map((e, i) => {
             const pmids = sourcesByContribution.get(i + 1);
             const srcLine = pmids && pmids.length > 0 ? `\nSources: PMID ${pmids.join(", ")}` : "";
-            return `${i + 1}. ${e}${srcLine}`;
+            // v7 carries a per-contribution heading; emit "N. <title>" then the body when present,
+            // else the bare "N. <body>" (v5 / v6).
+            const head = e.title ? `${i + 1}. ${e.title}\n\n${e.body}` : `${i + 1}. ${e.body}`;
+            return `${head}${srcLine}`;
           })
           .join("\n\n")
-      : result.entries.join("\n\n");
+      : result.entries.map((e) => e.body).join("\n\n");
     const productsBody = result.products ? `\n\n${productsToText(result.products)}` : "";
     const body = `${entriesBody}${productsBody}`;
     const blob = new Blob([`${body}\n`], { type: "text/plain;charset=utf-8" });
@@ -133,7 +142,7 @@ export function BiosketchResultCard({ result }: { result: BiosketchGenerateResul
         {result.entries.map((entry, index) => {
           const over = overflowIndexes.has(index);
           return (
-            <BiosketchEntry
+            <BiosketchEntryItem
               key={index}
               index={index}
               entry={entry}
@@ -263,7 +272,7 @@ function BiosketchProductsSection({ products }: { products: BiosketchProducts })
   );
 }
 
-function BiosketchEntry({
+function BiosketchEntryItem({
   index,
   entry,
   cap,
@@ -272,17 +281,20 @@ function BiosketchEntry({
   sourcePmids,
 }: {
   index: number;
-  entry: string;
+  entry: BiosketchEntry;
   cap: number;
   over: boolean;
   showNumber: boolean;
   sourcePmids: string[];
 }) {
   const [copied, setCopied] = React.useState(false);
+  // Copy the heading with the body so a v7 contribution lands in the grant form with its title;
+  // a title-less (v5 / v6 / statement) entry copies just the prose.
+  const copyText = entry.title ? `${entry.title}\n\n${entry.body}` : entry.body;
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(entry);
+      await navigator.clipboard.writeText(copyText);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -308,7 +320,7 @@ function BiosketchEntry({
             )}
             data-testid={`biosketch-entry-count-${index}`}
           >
-            {entry.length.toLocaleString()}/{cap.toLocaleString()} characters
+            {entry.body.length.toLocaleString()}/{cap.toLocaleString()} characters
           </span>
           {over && (
             <span
@@ -330,11 +342,21 @@ function BiosketchEntry({
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>
+      {/* v7 per-contribution heading (the NIH "Contributions to Science" heading); absent for
+          v5 / v6 + Personal Statement, which carry an empty title. */}
+      {entry.title && (
+        <h3
+          className="text-foreground text-sm font-semibold"
+          data-testid={`biosketch-entry-title-${index}`}
+        >
+          {entry.title}
+        </h3>
+      )}
       <p
         className="text-foreground text-sm whitespace-pre-wrap"
         data-testid={`biosketch-entry-text-${index}`}
       >
-        {entry}
+        {entry.body}
       </p>
       {sourcePmids.length > 0 && (
         <p
