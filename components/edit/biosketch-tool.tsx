@@ -32,9 +32,13 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   DEFAULT_BIOSKETCH_PARAMS,
+  normalizeBiosketchParams,
   missingPersonalStatementInputs,
   type BiosketchParams,
 } from "@/lib/edit/biosketch-params";
+import { type BiosketchProducts } from "@/lib/edit/biosketch-products";
+import { type BiosketchPromptVersionMeta } from "@/lib/edit/biosketch-prompt-versions";
+import { humanizeModelId } from "@/lib/edit/overview-prompt-versions";
 
 // User-facing copy, kept as named constants (one place, asserted in tests).
 const SPARSE =
@@ -52,19 +56,63 @@ export type BiosketchToolProps = {
   canSeeCost: boolean;
   /** The resolved effective model id — drives the cost estimate display. */
   model: string;
+  /** #917 v6 — the selectable prompt versions (privileged actors only). */
+  versions?: BiosketchPromptVersionMeta[];
+  /** #917 v6 — whether the actor may steer the prompt version. */
+  canSelectVersion?: boolean;
 };
 
-export function BiosketchTool({ entityId, canSeeCost, model }: BiosketchToolProps) {
+/** One row of biosketch generation history (the `/api/edit/biosketch/generations` shape). */
+type BiosketchGenerationItem = {
+  id: string;
+  mode: BiosketchGenerateResult["mode"];
+  entries: string[];
+  model: string;
+  promptVersion?: string | null;
+  params: BiosketchParams;
+  products: BiosketchProducts | null;
+  createdAt: string;
+};
+
+export function BiosketchTool({
+  entityId,
+  canSeeCost,
+  model,
+  versions = [],
+  canSelectVersion = false,
+}: BiosketchToolProps) {
   const [params, setParams] = React.useState<BiosketchParams>(() => ({
     ...DEFAULT_BIOSKETCH_PARAMS,
   }));
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<BiosketchGenerateResult | null>(null);
+  const [generations, setGenerations] = React.useState<BiosketchGenerationItem[]>([]);
 
   // Mirror the route's required-input gate so a request it would 400 never fires.
   const missing = missingPersonalStatementInputs(params);
   const disabled = isGenerating || missing.length > 0;
+
+  const refreshGenerations = React.useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/edit/biosketch/generations?cwid=${encodeURIComponent(entityId)}`,
+      );
+      const data = (await res.json().catch(() => null)) as
+        | { ok: true; generations: BiosketchGenerationItem[] }
+        | { ok: false }
+        | null;
+      if (res.ok && data && data.ok === true && Array.isArray(data.generations)) {
+        setGenerations(data.generations);
+      }
+    } catch {
+      // History is a convenience; a failed refresh leaves the panel as-is.
+    }
+  }, [entityId]);
+
+  React.useEffect(() => {
+    void refreshGenerations();
+  }, [refreshGenerations]);
 
   async function generate() {
     if (isGenerating || missing.length > 0) return;
@@ -91,13 +139,35 @@ export function BiosketchTool({ entityId, canSeeCost, model }: BiosketchToolProp
         model: data.model,
         overflow: Array.isArray(data.overflow) ? data.overflow : [],
         removedCount: typeof data.removedCount === "number" ? data.removedCount : 0,
+        products: data.products ?? null,
         generationId: data.generationId ?? null,
       });
+      void refreshGenerations();
     } catch {
       setError(FAILED);
     } finally {
       setIsGenerating(false);
     }
+  }
+
+  /** Restore a history row's steering params (incl. prompt version) into the controls. */
+  function restoreSettings(gen: BiosketchGenerationItem) {
+    if (isGenerating) return;
+    setParams(normalizeBiosketchParams(gen.params));
+  }
+
+  /** Show a history row's entries + products as the current result (read-only view). */
+  function viewDraft(gen: BiosketchGenerationItem) {
+    if (isGenerating) return;
+    setResult({
+      mode: gen.mode,
+      entries: gen.entries,
+      model: gen.model,
+      overflow: [],
+      removedCount: 0,
+      products: gen.products,
+      generationId: gen.id,
+    });
   }
 
   return (
@@ -108,6 +178,8 @@ export function BiosketchTool({ entityId, canSeeCost, model }: BiosketchToolProp
         disabled={isGenerating}
         canSeeCost={canSeeCost}
         model={model}
+        versions={versions}
+        canSelectVersion={canSelectVersion}
       />
 
       <div className="flex flex-wrap items-center gap-3">
@@ -134,6 +206,58 @@ export function BiosketchTool({ entityId, canSeeCost, model }: BiosketchToolProp
       )}
 
       {result && <BiosketchResultCard result={result} />}
+
+      {generations.length > 0 && (
+        <details className="group" data-testid="biosketch-versions-panel">
+          <summary className="text-apollo-maroon w-fit cursor-pointer text-sm font-medium select-none">
+            Earlier biosketches ({generations.length})
+          </summary>
+          <ul className="border-apollo-border bg-apollo-surface-2 mt-3 flex flex-col gap-3 rounded-md border p-4">
+            {generations.map((gen) => (
+              <li
+                key={gen.id}
+                className="flex flex-wrap items-start justify-between gap-3"
+                data-testid={`biosketch-version-${gen.id}`}
+              >
+                <span className="text-muted-foreground flex min-w-0 flex-col">
+                  <span className="text-foreground text-xs">
+                    {(gen.promptVersion ?? gen.params.promptVersion) ?? ""}
+                    {(gen.promptVersion ?? gen.params.promptVersion) ? " · " : ""}
+                    {humanizeModelId(gen.model)}
+                  </span>
+                  <span className="text-xs">
+                    {gen.mode === "personal_statement"
+                      ? "Personal Statement"
+                      : `Contributions (${gen.entries.length})`}
+                  </span>
+                </span>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => viewDraft(gen)}
+                    disabled={isGenerating}
+                    data-testid={`biosketch-version-view-${gen.id}`}
+                  >
+                    View draft
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => restoreSettings(gen)}
+                    disabled={isGenerating}
+                    data-testid={`biosketch-version-use-settings-${gen.id}`}
+                  >
+                    Use these settings
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }

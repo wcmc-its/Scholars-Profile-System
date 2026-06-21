@@ -1587,12 +1587,14 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("SELF_EDIT_OVERVIEW_GENERATE")).toBe("on");
       });
 
-      it("keeps the #917 v5 biosketch generator OFF in prod (EDIT_BIOSKETCH_GENERATE=off, staging-first; faithfulness pass off)", () => {
-        // New surface: default-off in prod, on in staging while it bakes. The
-        // faithfulness pass is off in both envs, present for later tuning.
+      it("keeps the #917 v6 biosketch generator OFF in prod (EDIT_BIOSKETCH_GENERATE=off, staging-first; faithfulness pass ON; default version v6)", () => {
+        // New surface: default-off in prod, on in staging while it bakes. The #917 v6
+        // faithfulness pass is ON in both envs (grant document); the default prompt
+        // version is v6 in both envs (the generator stays dark in prod until the flag flips).
         const env = appContainerEnv();
         expect(env.get("EDIT_BIOSKETCH_GENERATE")).toBe("off");
-        expect(env.get("BIOSKETCH_FAITHFULNESS_PASS")).toBe("off");
+        expect(env.get("BIOSKETCH_FAITHFULNESS_PASS")).toBe("on");
+        expect(env.get("BIOSKETCH_PROMPT_VERSION_DEFAULT")).toBe("v6");
       });
 
       it("ships the #443 interim superuser allowlist with the group CN left unset", () => {
@@ -2060,7 +2062,7 @@ describe("AppStack", () => {
       expect(envByName.get("SELF_EDIT_OVERVIEW_GENERATE")).toBe("on");
     });
 
-    it("enables the #917 v5 biosketch generator in staging (EDIT_BIOSKETCH_GENERATE=on, staging-first; faithfulness pass off)", () => {
+    it("enables the #917 v6 biosketch generator in staging (EDIT_BIOSKETCH_GENERATE=on, staging-first; faithfulness pass on; default version v6)", () => {
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const appContainer = (
         Object.values(taskDefs).find((r) => r.Properties?.Family === "sps-app-staging")
@@ -2072,7 +2074,9 @@ describe("AppStack", () => {
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("EDIT_BIOSKETCH_GENERATE")).toBe("on");
-      expect(envByName.get("BIOSKETCH_FAITHFULNESS_PASS")).toBe("off");
+      // #917 v6 — faithfulness pass ON in both envs (grant document); default prompt version v6.
+      expect(envByName.get("BIOSKETCH_FAITHFULNESS_PASS")).toBe("on");
+      expect(envByName.get("BIOSKETCH_PROMPT_VERSION_DEFAULT")).toBe("v6");
     });
 
     it("ships the ReCiter pending-suggestions nudge ON in staging (SELF_EDIT_RECITER_PENDING_HINT — live DynamoDB read for the soak)", () => {

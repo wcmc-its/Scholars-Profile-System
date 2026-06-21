@@ -36,7 +36,12 @@ import {
   type BiosketchMode,
   type BiosketchParams,
 } from "@/lib/edit/biosketch-params";
+import {
+  type BiosketchPromptVersionId,
+  type BiosketchPromptVersionMeta,
+} from "@/lib/edit/biosketch-prompt-versions";
 import { estimateBiosketchCostUsd } from "@/lib/edit/overview-prompt-versions";
+import { cn } from "@/lib/utils";
 
 const MODE_OPTIONS: { value: BiosketchMode; label: string }[] = [
   { value: "contributions", label: "Contributions to Science" },
@@ -60,6 +65,10 @@ export type BiosketchGenerateControlsProps = {
   canSeeCost?: boolean;
   /** The resolved effective model id — drives the cost estimate. */
   model: string;
+  /** #917 v6 — the selectable prompt versions (superuser / curator only). */
+  versions?: BiosketchPromptVersionMeta[];
+  /** #917 v6 — whether to render the prompt-version selector (privileged actors only). */
+  canSelectVersion?: boolean;
 };
 
 export function BiosketchGenerateControls({
@@ -68,15 +77,53 @@ export function BiosketchGenerateControls({
   disabled = false,
   canSeeCost = false,
   model,
+  versions = [],
+  canSelectVersion = false,
 }: BiosketchGenerateControlsProps) {
   const isStatement = value.mode === "personal_statement";
   const cost = canSeeCost ? estimateBiosketchCostUsd(model, value.mode) : null;
+  const showVersionSelector = canSelectVersion && versions.length > 0;
+  const selectedVersion = versions.find((v) => v.id === value.promptVersion);
 
   return (
     <div
       className="border-apollo-border bg-apollo-surface-2 flex flex-col gap-4 rounded-md border p-4"
       data-slot="biosketch-generate-controls"
     >
+      {showVersionSelector && (
+        <fieldset className="flex flex-col gap-2" data-testid="biosketch-prompt-version-field">
+          <legend className="text-foreground mb-1 text-sm font-medium">Prompt version</legend>
+          <span className="text-muted-foreground text-xs">
+            Visible to superusers and curators only.
+          </span>
+          <select
+            value={value.promptVersion}
+            disabled={disabled}
+            onChange={(e) =>
+              onChange({ ...value, promptVersion: e.target.value as BiosketchPromptVersionId })
+            }
+            aria-label="Biosketch prompt version"
+            aria-describedby="biosketch-prompt-version-desc"
+            className={cn(
+              "border-apollo-border-strong bg-apollo-surface text-foreground w-fit rounded-md border px-3 py-1 text-sm",
+              disabled && "cursor-not-allowed opacity-60",
+            )}
+            data-testid="biosketch-prompt-version"
+          >
+            {versions.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+          {selectedVersion?.description && (
+            <span id="biosketch-prompt-version-desc" className="text-muted-foreground text-xs">
+              {selectedVersion.description}
+            </span>
+          )}
+        </fieldset>
+      )}
+
       <SegmentedField
         legend="Artifact"
         name="biosketch-mode"
@@ -95,6 +142,37 @@ export function BiosketchGenerateControls({
           disabled={disabled}
           onValueChange={(v) => onChange({ ...value, maxContributions: Number(v) })}
         />
+      )}
+
+      {!isStatement && (
+        <details className="flex flex-col gap-1.5" data-testid="biosketch-project-optional">
+          <summary className="text-foreground w-fit cursor-pointer text-sm font-medium select-none">
+            Proposed project{" "}
+            <span className="text-muted-foreground text-xs font-normal">
+              (optional — tailors the &ldquo;most related&rdquo; products)
+            </span>
+          </summary>
+          <div className="mt-2 flex flex-col gap-3">
+            <Input
+              id="biosketch-related-title"
+              value={value.projectTitle}
+              maxLength={BIOSKETCH_PROJECT_TITLE_MAX}
+              disabled={disabled}
+              placeholder="Proposed project title (optional)"
+              onChange={(e) => onChange({ ...value, projectTitle: e.target.value })}
+              data-testid="biosketch-related-title"
+            />
+            <Textarea
+              id="biosketch-related-aims"
+              value={value.aims}
+              maxLength={BIOSKETCH_AIMS_MAX}
+              disabled={disabled}
+              placeholder="Specific aims (optional) — the Products list will surface the work most related to these."
+              onChange={(e) => onChange({ ...value, aims: e.target.value })}
+              data-testid="biosketch-related-aims"
+            />
+          </div>
+        </details>
       )}
 
       {isStatement && (

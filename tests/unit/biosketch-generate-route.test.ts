@@ -264,8 +264,15 @@ describe("POST /api/edit/biosketch/generate", () => {
           projectTitle: null,
           projectAims: null,
           model: "us.anthropic.claude-opus-4-8",
-          promptVersion: "v5",
-          params: { mode: "contributions", maxContributions: 3, emphasis: "", instructions: "" },
+          // #917 v6 — the RESOLVED default version (no env override in test → v6).
+          promptVersion: "v6",
+          params: {
+            mode: "contributions",
+            maxContributions: 3,
+            emphasis: "",
+            instructions: "",
+            promptVersion: "v6",
+          },
           createdByCwid: "self01",
         }),
       }),

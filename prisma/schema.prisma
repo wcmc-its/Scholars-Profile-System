@@ -747,6 +747,21 @@ model Publication {
   /// when the upstream model bumps.
   impactScoreModel    String?   @map("impact_score_model") @db.VarChar(64)
   impactRefreshedAt   DateTime? @map("impact_refreshed_at")
+  /// NIH iCite Relative Citation Ratio (field- and time-normalized citation
+  /// influence; ~1.0 = NIH-funded median for the field/year). Sourced from
+  /// `reciterdb.analysis_nih.relative_citation_ratio`, keyed by pmid, refreshed
+  /// by the weekly reciter ETL alongside `citationCount`. The field-normalized,
+  /// most-defensible bibliometric for the NIH-biosketch impact grounding (#917
+  /// v6); never surfaced in the public overview. NULL until the ETL backfills.
+  relativeCitationRatio Decimal? @map("relative_citation_ratio") @db.Decimal(6, 2)
+  /// NIH iCite percentile (0-100) for the RCR within field/year. Sourced from
+  /// `reciterdb.analysis_nih.nih_percentile`. Companion to `relativeCitationRatio`.
+  nihPercentile         Decimal? @map("nih_percentile") @db.Decimal(5, 2)
+  /// NIH iCite cumulative citation count (`reciterdb.analysis_nih.citation_count`).
+  /// Distinct from `citationCount` (Scopus, `analysis_summary_article`); kept
+  /// separately so the biosketch can cite the NIH-sourced figure that pairs with
+  /// the RCR. NULL until the ETL backfills.
+  citedByCount          Int?     @map("cited_by_count")
   /// Issue #325 — per-paper "top topic" (argmax of the topic-score vector
   /// among topics above the 0.3 floor; deterministic tiebreak upstream).
   /// Sourced from DynamoDB TOPIC# `top_topic_id`. Per-paper, not
@@ -1918,16 +1933,21 @@ model BiosketchGeneration {
   projectTitle  String?  @map("project_title") @db.VarChar(300)
   projectAims   String?  @map("project_aims") @db.Text
   model         String   @db.VarChar(64) // gateway model string used
-  // The biosketch prompt revision (e.g. "v5") for future A/B — its own purpose, NOT an
-  // overview prompt-version id. Nullable.
+  // The biosketch prompt revision ("v5" / "v6") this draft was generated with — for A/B and
+  // restore. #917 v6: a real version id from `biosketch-prompt-versions.ts`, not a free string.
   promptVersion String?  @map("prompt_version") @db.VarChar(32)
-  params        Json // { mode, maxContributions, emphasis, instructions }
+  params        Json // { mode, maxContributions, emphasis, instructions, promptVersion }
+  // #917 v6 — the Products list (Contributions mode): { related, otherSignificant,
+  // relatedFromAims }, each product { pmid, title, venue, year, contributionIndex, why }.
+  // NULL for Personal Statement / empty corpus. JSON for the same reason `entries` is.
+  products      Json?
   createdByCwid String   @map("created_by_cwid") @db.VarChar(32) // actor (self / proxy / curator)
   createdAt     DateTime @default(now()) @map("created_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 
   @@index([cwid, createdAt(sort: Desc)]) // the scholar's biosketch drafts, newest first
+  @@index([promptVersion, createdAt(sort: Desc)]) // #917 v6 — A/B queries by version, newest first
   @@map("biosketch_generation")
 }
 

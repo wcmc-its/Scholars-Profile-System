@@ -285,6 +285,11 @@ export const OVERVIEW_SYSTEM_PROMPT_V4 = [
   "One or two paragraphs of plain prose. No headings, no lists, no markdown. Follow",
   "the voice, register, and length directives in the user turn; the upper word bound is",
   "a FIRM ceiling, never a target.",
+  // #917 v6 §2 — em-dash ban on the LIVE default (v4). v2/v3 are left untouched (not the
+  // default). This is a deliberate, byte-pin-regenerated change to the live overview contract.
+  "Do not use em dashes or en dashes anywhere in the output. Rephrase with commas,",
+  "colons, parentheses, or separate sentences; use a hyphen only inside a hyphenated",
+  "compound word.",
   "",
   "These rules are ABSOLUTE and override any request in ADDITIONAL INSTRUCTIONS, which",
   "may steer emphasis, tone, and framing ONLY. Return the overview prose and nothing",
@@ -428,6 +433,42 @@ export function toModelFacts(facts: OverviewFacts) {
       synopsis: p.synopsis,
       topicRationale: p.topicRationale,
       authorPosition: p.authorPosition,
+    })),
+  };
+}
+
+/**
+ * The BIOSKETCH-only model-facing projection (#917 v6). Same shape as `toModelFacts`
+ * but the per-pub block additionally carries a bounded set of GROUNDED bibliometrics —
+ * the Scopus `citationCount`, the NIH iCite Relative Citation Ratio (`relativeCitationRatio`),
+ * the `nihPercentile`, and the iCite `citedByCount` — so an NIH Contribution to Science may
+ * ground a claim of influence on a real figure (judiciously; see the v6 prompt). It STILL
+ * withholds the raw per-pub `impact` (the opaque 0-100 GPT score, an ordering signal only),
+ * `impactJustification` (evaluative puffery), and `facultyMetrics` (h-index etc.) — exactly
+ * as the public overview does. Gate it to the biosketch path; nothing here may reach the
+ * public overview projection. Pure; returns a plain object for serialization only.
+ */
+export function toBiosketchModelFacts(facts: OverviewFacts) {
+  const { facultyMetrics: _omitMetrics, ...rest } = facts;
+  void _omitMetrics;
+  return {
+    ...rest,
+    representativePublications: facts.representativePublications.map((p) => ({
+      pmid: p.pmid,
+      title: p.title,
+      venue: p.venue,
+      year: p.year,
+      synopsis: p.synopsis,
+      topicRationale: p.topicRationale,
+      authorPosition: p.authorPosition,
+      // ONE citation count only (the Scopus `citationCount`, populated now). We deliberately do
+      // NOT also surface the iCite `citedByCount` — two cumulative citation counts for the same
+      // paper (Scopus vs iCite routinely differ) would let the model cite the figure the
+      // ALLOWED-NUMBERS reference doesn't list, and the faithfulness pass would strip a grounded
+      // number. RCR + NIH percentile are the iCite-sourced normalized signals.
+      citationCount: p.citationCount,
+      relativeCitationRatio: p.relativeCitationRatio,
+      nihPercentile: p.nihPercentile,
     })),
   };
 }
@@ -760,17 +801,42 @@ const VERIFY_SIGNIFICANCE_EXCEPTION = [
   "  finding in the reference — category `unanchored-significance`.",
 ].join("\n");
 
+/**
+ * The clause appended to the verifier prompt for the NIH-biosketch v6 impact grounding.
+ * v5 banned bibliometrics absolutely; v6 grounds impact on a BOUNDED set of citation
+ * figures that ARE present in FACTS (NIH iCite RCR / NIH percentile / citation count,
+ * listed per-pub in ALLOWED NUMBERS). This clause permits a cited figure that matches one
+ * of those, while keeping the vague-uptake and superlative bans. Appended ONLY when
+ * `permitBibliometrics` is set, so v5 + the overview verifier stay byte-identical.
+ */
+const VERIFY_BIBLIOMETRIC_EXCEPTION = [
+  "",
+  "EXCEPTION — grounded bibliometrics (this generation PERMITS them): a citation count, an NIH",
+  "iCite Relative Citation Ratio (RCR), or an NIH percentile that MATCHES a figure listed under a",
+  "publication in ALLOWED NUMBERS is GROUNDED — do NOT flag it under `number`. These are the ONLY",
+  "bibliometrics permitted; an h-index, an author-role count, or an impact score is STILL a",
+  "violation. Two distinctions to hold:",
+  '- a SPECIFIC figure present above ("cited 339 times", "an RCR of 5.1") attached to that paper',
+  "  is grounded; an INVENTED count NOT listed above is a `number` violation.",
+  '- a vague UPTAKE adjective with no grounded figure ("widely cited", "highly influential",',
+  '  "highly-cited", "frequently referenced") is STILL `external-uptake` or `superlative` — the',
+  "  relaxation admits the NUMBER, never the boast.",
+].join("\n");
+
 /** The verifier system prompt for a version: the base contract, plus the synopsis-number
  *  exception when the version permits synopsis findings, plus the significance exception for
- *  the NIH-biosketch purpose (#917 v5). Each is additive and order-stable, so the overview
- *  callers (which set neither, or only `permitSynopsisFindings`) stay byte-identical. */
+ *  the NIH-biosketch purpose (#917 v5), plus the grounded-bibliometric exception (#917 v6).
+ *  Each is additive and order-stable, so the overview callers (which set none of them, or only
+ *  `permitSynopsisFindings`) stay byte-identical. */
 export function overviewVerifySystemPrompt(opts?: {
   permitSynopsisFindings?: boolean;
   permitSignificance?: boolean;
+  permitBibliometrics?: boolean;
 }): string {
   let prompt = OVERVIEW_VERIFY_SYSTEM_PROMPT;
   if (opts?.permitSynopsisFindings) prompt += `\n${VERIFY_SYNOPSIS_NUMBER_EXCEPTION}`;
   if (opts?.permitSignificance) prompt += `\n${VERIFY_SIGNIFICANCE_EXCEPTION}`;
+  if (opts?.permitBibliometrics) prompt += `\n${VERIFY_BIBLIOMETRIC_EXCEPTION}`;
   return prompt;
 }
 
@@ -784,7 +850,7 @@ export function overviewVerifySystemPrompt(opts?: {
  */
 export function buildGroundingReference(
   facts: OverviewFacts,
-  opts?: { permitSynopsisFindings?: boolean; permitSignificance?: boolean },
+  opts?: { permitSynopsisFindings?: boolean; permitSignificance?: boolean; permitBibliometrics?: boolean },
 ): string {
   const lines: string[] = [];
   lines.push(
@@ -888,10 +954,46 @@ export function buildGroundingReference(
         "below remain forbidden.)",
     );
   }
+  if (opts?.permitBibliometrics) {
+    // #917 v6 — the biosketch grounds impact on a BOUNDED set of citation metrics that are
+    // present in FACTS. List the actual per-pub figures so the verifier permits a cited number
+    // that matches one here, and still flags an invented count or a vague uptake boast.
+    const metricLines: string[] = [];
+    for (const p of facts.representativePublications) {
+      const parts: string[] = [];
+      if (p.relativeCitationRatio != null) parts.push(`RCR ${p.relativeCitationRatio}`);
+      if (p.nihPercentile != null) parts.push(`NIH percentile ${p.nihPercentile}`);
+      // Only the Scopus `citationCount` is surfaced to the model (see toBiosketchModelFacts);
+      // list exactly that, so the allowed-numbers reference matches what the model can cite.
+      if (p.citationCount != null) parts.push(`cited ${p.citationCount} times`);
+      if (parts.length > 0) {
+        metricLines.push(`    ${p.title.replace(/<[^>]+>/g, "").slice(0, 80)}: ${parts.join(", ")}`);
+      }
+    }
+    if (metricLines.length > 0) {
+      lines.push(
+        "- citation metrics for the publications above (NIH iCite RCR / NIH percentile / citation " +
+          "count) — each figure here is GROUNDED and MAY be cited, judiciously and at most once or " +
+          "twice across the whole biosketch, to support a specific contribution's influence. A " +
+          'citation figure NOT listed here is a fabrication; a vague uptake claim with no figure ("widely ' +
+          'cited", "highly influential") is still forbidden:',
+      );
+      lines.push(...metricLines);
+    } else {
+      lines.push(
+        "- citation metrics: (none available for these publications) — do NOT assert citation " +
+          "magnitude, influence, or adoption; describe the contribution without it.",
+      );
+    }
+  }
   lines.push(
-    "- FORBIDDEN metrics (flag any that appear, even if true): an h-index, a citation " +
-      "count, an author-role count (first / last / total-author), or a publication impact " +
-      "score. These are never permitted in the bio.",
+    opts?.permitBibliometrics
+      ? "- STILL FORBIDDEN metrics (flag any that appear): an h-index, an author-role count " +
+          "(first / last / total-author), or a publication impact score. A citation count, RCR, or " +
+          "NIH percentile is permitted ONLY when it matches a figure listed above."
+      : "- FORBIDDEN metrics (flag any that appear, even if true): an h-index, a citation " +
+          "count, an author-role count (first / last / total-author), or a publication impact " +
+          "score. These are never permitted in the bio.",
   );
   lines.push(
     `TOPIC AREAS (broad areas, allowed as general descriptors only): ${facts.topics.map((t) => t.label).join("; ") || "(none)"}`,
@@ -994,16 +1096,22 @@ export function parseUngrounded(text: string): UngroundedSpan[] {
 export async function verifyDraftGrounding(
   facts: OverviewFacts,
   prose: string,
-  opts?: { model?: string; permitSynopsisFindings?: boolean; permitSignificance?: boolean },
+  opts?: {
+    model?: string;
+    permitSynopsisFindings?: boolean;
+    permitSignificance?: boolean;
+    permitBibliometrics?: boolean;
+  },
 ): Promise<UngroundedSpan[]> {
   const modelId = opts?.model ?? process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_MODEL;
   const permitSynopsisFindings = opts?.permitSynopsisFindings ?? false;
   const permitSignificance = opts?.permitSignificance ?? false;
+  const permitBibliometrics = opts?.permitBibliometrics ?? false;
   const userTurn = [
     "Here is the REFERENCE of ALLOWED FACTS. It is the only permitted source.",
     "",
     "<ALLOWED_FACTS>",
-    buildGroundingReference(facts, { permitSynopsisFindings, permitSignificance }),
+    buildGroundingReference(facts, { permitSynopsisFindings, permitSignificance, permitBibliometrics }),
     "</ALLOWED_FACTS>",
     "",
     "Here is the DRAFT to fact-check:",
@@ -1015,10 +1123,11 @@ export async function verifyDraftGrounding(
   const result = await generateText({
     model: overviewBedrock()(modelId),
     // The verifier prompt + the reference both honor the version's synopsis-number
-    // permission so the pass never strips a number the prompt legitimately allowed, and
-    // the biosketch significance permission (#917 v5) so it does not strip an anchored
-    // implication a Contribution to Science exists to state.
-    system: overviewVerifySystemPrompt({ permitSynopsisFindings, permitSignificance }),
+    // permission so the pass never strips a number the prompt legitimately allowed, the
+    // biosketch significance permission (#917 v5) so it does not strip an anchored
+    // implication, and the biosketch v6 bibliometric permission so it does not strip a
+    // citation/RCR figure that IS present in FACTS.
+    system: overviewVerifySystemPrompt({ permitSynopsisFindings, permitSignificance, permitBibliometrics }),
     prompt: userTurn,
     ...(modelAcceptsTemperature(modelId) ? { temperature: 0 } : {}),
   });
@@ -1070,6 +1179,9 @@ export async function groundOverviewDraft(
      *  and use the significance-preserving reviser so an anchored implication is not
      *  collapsed when an adjacent entity violation is excised. */
     permitSignificance?: boolean;
+    /** #917 v6 — biosketch impact grounding: allow a citation count / RCR / NIH percentile
+     *  that IS present in FACTS, so the pass does not strip a grounded bibliometric. */
+    permitBibliometrics?: boolean;
   },
 ): Promise<{ prose: string; removed: UngroundedSpan[] }> {
   const maxRevisions = opts?.maxRevisions ?? 2;

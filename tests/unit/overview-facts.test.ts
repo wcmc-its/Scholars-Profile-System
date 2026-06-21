@@ -100,6 +100,11 @@ function pubRow(
     impactScore: decimal(opts.impact ?? 80),
     synopsis: opts.synopsis ?? `synopsis ${pmid}`,
     impactJustification: opts.impactJustification ?? `justification ${pmid}`,
+    // #917 v6 — NIH iCite bibliometrics (null/0 by default; biosketch-only on the facts).
+    citationCount: 0,
+    relativeCitationRatio: null,
+    nihPercentile: null,
+    citedByCount: null,
   };
 }
 
@@ -294,6 +299,10 @@ describe("assembleOverviewFacts — representative publications (distilled, sele
       impactJustification: "broad influence",
       topicRationale: "maps via metagenomic sequencing",
       authorPosition: "first",
+      citationCount: 0,
+      relativeCitationRatio: null,
+      nihPercentile: null,
+      citedByCount: null,
     });
     // The raw abstract is gone (decision 4).
     expect(pub).not.toHaveProperty("abstractExcerpt");

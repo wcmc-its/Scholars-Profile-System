@@ -18,6 +18,12 @@
  * return a precise 400, rather than silently degrading.
  */
 
+import {
+  defaultBiosketchPromptVersionId,
+  isValidBiosketchPromptVersionId,
+  type BiosketchPromptVersionId,
+} from "@/lib/edit/biosketch-prompt-versions";
+
 /** Which biosketch artifact to draft. */
 export type BiosketchMode = "contributions" | "personal_statement";
 
@@ -52,6 +58,10 @@ export type BiosketchParams = {
   emphasis: string;
   /** Optional free-text steering note — UNTRUSTED; trimmed, <= BIOSKETCH_INSTRUCTIONS_MAX. */
   instructions: string;
+  /** The biosketch prompt version to generate with (#917 v6). DERIVED from
+   *  `defaultBiosketchPromptVersionId()` on the default; a non-default value is honored only
+   *  for a privileged actor (the route downgrades others). Persisted for A/B + restore. */
+  promptVersion: BiosketchPromptVersionId;
 };
 
 /** The default a fresh biosketch panel opens with — and the fallback every unknown enum
@@ -63,6 +73,8 @@ export const DEFAULT_BIOSKETCH_PARAMS: BiosketchParams = {
   aims: "",
   emphasis: "",
   instructions: "",
+  // DERIVED, never a literal — so the cdk `BIOSKETCH_PROMPT_VERSION_DEFAULT` lever steers it.
+  promptVersion: defaultBiosketchPromptVersionId(),
 };
 
 const MODES: readonly BiosketchMode[] = ["contributions", "personal_statement"];
@@ -109,6 +121,11 @@ export function normalizeBiosketchParams(raw: unknown): BiosketchParams {
     aims: clampString(obj.aims, BIOSKETCH_AIMS_MAX),
     emphasis: clampString(obj.emphasis, BIOSKETCH_EMPHASIS_MAX),
     instructions: clampString(obj.instructions, BIOSKETCH_INSTRUCTIONS_MAX),
+    // Untrusted: a non-default version posted by an unprivileged actor is downgraded at the
+    // route; here we only guarantee a VALID id (unknown → the live default).
+    promptVersion: isValidBiosketchPromptVersionId(obj.promptVersion)
+      ? obj.promptVersion
+      : defaultBiosketchPromptVersionId(),
   };
 }
 

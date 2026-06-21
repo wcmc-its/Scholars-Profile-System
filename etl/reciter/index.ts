@@ -81,6 +81,17 @@ type JournalAbbrevRow = {
 
 type AbstractRow = { pmid: number; abstractVarchar: string | null };
 
+/** #917 v6 — NIH iCite bibliometrics from `reciterdb.analysis_nih` (keyed by pmid).
+ *  `relative_citation_ratio` is the field- and time-normalized influence figure used by
+ *  the NIH-biosketch impact grounding; `nih_percentile` and the iCite `citation_count`
+ *  pair with it. Columns confirmed via `DESCRIBE analysis_nih`. */
+type NihRow = {
+  pmid: number;
+  relative_citation_ratio: number | null;
+  nih_percentile: number | null;
+  citation_count: number | null;
+};
+
 type KeywordRow = { pmid: number; keyword: string; ui: string | null };
 type MeshKeyword = { ui: string | null; label: string };
 
@@ -321,6 +332,33 @@ async function main() {
     }
     console.log(`Got ${abstractByPmid.size} abstracts.`);
 
+    // #917 v6 — NIH iCite bibliometrics (RCR / NIH percentile / iCite citation count) for the
+    // same pmid set, from `reciterdb.analysis_nih`. Rides this weekly refresh so the biosketch
+    // impact grounding has the field-normalized figure. Best-effort per batch: a missing or
+    // empty `analysis_nih` simply leaves the columns null (the biosketch then grounds impact on
+    // the Scopus `citationCount` it already has), so a sparse source never breaks the run.
+    const nihByPmid = new Map<number, NihRow>();
+    for (const batch of chunks(distinctPmids, IN_BATCH)) {
+      try {
+        await withReciterConnection(async (conn) => {
+          const rows = (await conn.query(
+            `SELECT pmid, relative_citation_ratio, nih_percentile, citation_count
+             FROM analysis_nih
+             WHERE pmid IN (?)`,
+            [batch],
+          )) as NihRow[];
+          for (const n of rows) nihByPmid.set(Number(n.pmid), n);
+        });
+      } catch (err) {
+        console.warn(
+          `analysis_nih fetch failed for a batch (continuing without RCR for it): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    console.log(`Got ${nihByPmid.size} NIH iCite rows.`);
+
     // Issue #89 — full author list for the Word bibliography. We pull
     // structured per-rank rows from analysis_summary_author_list (which
     // has full first names like "Gregory A") so we can derive proper
@@ -441,6 +479,7 @@ async function main() {
 
     const pubRows = Array.from(articleByPmid.values()).map((a) => {
       const authorsString = authorsStringByPmid.get(Number(a.pmid)) ?? null;
+      const nih = nihByPmid.get(Number(a.pmid));
       return {
         pmid: String(a.pmid),
         title: a.articleTitle ?? `(untitled, pmid ${a.pmid})`,
@@ -450,6 +489,11 @@ async function main() {
         year: a.articleYear,
         publicationType: a.publicationTypeCanonical,
         citationCount: a.citationCountScopus ?? 0,
+        // #917 v6 — NIH iCite bibliometrics for the biosketch impact grounding (null when the
+        // pmid has no analysis_nih row yet). Spread into the upsert with the rest of pubRows.
+        relativeCitationRatio: nih?.relative_citation_ratio ?? null,
+        nihPercentile: nih?.nih_percentile ?? null,
+        citedByCount: nih?.citation_count ?? null,
         dateAddedToEntrez: parseDate(a.datePublicationAddedToEntrez),
         doi: a.doi,
         pmcid: a.pmcid,
