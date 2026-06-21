@@ -785,6 +785,49 @@ export class AppStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // #1163 cores claim writeback -- SPS's FIRST DynamoDB *write*.
+    //
+    // When a core owner confirms/rejects a publication's core-facility usage in
+    // the /edit/core/[coreId] review queue, lib/cores/claim-writeback.ts mirrors
+    // that status onto the engine's item in the shared `reciterai` table
+    // (PK PUB#{pmid} / SK CORE#{coreId}) so the next pipeline_cores run sees the
+    // human decision. SPS `core_claim` stays the authoritative store and the
+    // read-merge wins regardless, so a missing/denied grant only no-ops the
+    // mirror (best-effort, non-throwing).
+    //
+    // A custom *inline* policy, least-privilege:
+    //   - dynamodb:UpdateItem ONLY (the single UpdateCommand the writeback
+    //     issues -- both create-on-first-write and update; never
+    //     Put/Delete/BatchWrite/Scan), scoped to exactly table/reciterai. NOT
+    //     table.grantWriteData(), which would over-grant Put/Delete/BatchWrite.
+    //   - the same `${this.region}/${this.account}` reciterai ARN as the ETL
+    //     read grant (EtlTaskRoleReciterAiPolicy, etl-stack.ts) -- the reciterai
+    //     store is account-shared in THIS account. OPERATOR: if a future env
+    //     hosts reciterai cross-account, this ARN needs a cross-account
+    //     assume-role (same caveat as the ETL grant).
+    //
+    // Gated in code by CORE_CLAIM_WRITEBACK (default off; staging-first in the
+    // environment block below), so this grant can land ahead of go-live and a
+    // single `cdk deploy` brings grant + flag up together (no flip-before-grant
+    // window). Contains no secretsmanager reference, so the "zero secretsmanager
+    // on the task role" assertion still holds; app-stack.test.ts adds the
+    // matching scope assertion.
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "TaskRoleCoreClaimWritebackPolicy", {
+      policyName: `sps-task-${env}-reciterai-writeback`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["dynamodb:UpdateItem"],
+          resources: [
+            `arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`,
+          ],
+        }),
+      ],
+    });
+
+    // ------------------------------------------------------------------
     // Internal ALB security group.
     //
     // The public ALB's SG (albSecurityGroup) is owned by NetworkStack;
@@ -1541,6 +1584,30 @@ export class AppStack extends Stack {
         //     flag-parity rule; manual cdk deploy Sps-App-<env> required (CD only
         //     re-rolls the image).
         ORG_UNIT_METHODS_FACET: env === "staging" ? "on" : "off",
+        // Cores -- core-facility usage inference (publication_core substrate,
+        // ReciterAI pipeline_cores #245; SPS #1161/#1163/#1165/#1176). Three
+        // STANDALONE flags, all STAGING-FIRST, all default OFF until the engine
+        // + full-corpus run populate confirmed publication_core rows. Unlike the
+        // methods lens there is NO master "data" gate: the substrate is just an
+        // empty table until ETL Block 6 fills it, so each surface renders nothing
+        // (safe but pointless) while empty. Wire in BOTH .env.local AND here per
+        // the flag-parity rule; manual `cdk deploy Sps-App-<env>` required (CD
+        // only re-rolls the image).
+        //   CORE_PUB_MODAL -- #1176. The publication-detail modal "Core
+        //     facilities" section (per-pmid, effective-confirmed core_claim
+        //     merge). Render-only; omitted when the pub has no confirmed cores.
+        //   CORE_PAGES -- #1176. The public /cores/[coreId] pages (force-dynamic;
+        //     the route notFound()s while off, so no SEO/JSON side channel). When
+        //     CORE_PAGES is also on, the modal chips link to the core page.
+        //   CORE_CLAIM_WRITEBACK -- #1163. Gates the best-effort DynamoDB
+        //     UpdateItem mirror of an owner claim onto the reciterai item
+        //     (TaskRoleCoreClaimWritebackPolicy above -- grant + flag deploy
+        //     atomically, no flip-before-grant window). While off the claim still
+        //     lands in SPS core_claim (authoritative); only the engine-side
+        //     mirror no-ops.
+        CORE_PUB_MODAL: env === "staging" ? "on" : "off",
+        CORE_PAGES: env === "staging" ? "on" : "off",
+        CORE_CLAIM_WRITEBACK: env === "staging" ? "on" : "off",
         // Scholar-profile facet-filter redesign (PR-2). A BIG visual change to
         // the Topics/Methods facets + a unified filter bar, fully gated. ON in
         // staging to soak the real-data behavior (method rows + cross-facet
