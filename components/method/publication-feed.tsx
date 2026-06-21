@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { highlightSnippet } from "@/components/method/highlight-snippet";
+import { SnippetUsageBadge } from "@/components/method/snippet-usage-badge";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { usePublicationModal } from "@/components/publication/publication-modal";
@@ -356,6 +357,9 @@ function PubRow({ hit, entityTerm }: { hit: Hit; entityTerm: string | null }) {
           shared offset-aware helper (falls back to term-match when span is null). */}
       {hit.entityUsage && (
         <p className="mt-2 border-l-2 border-[var(--color-border-info)] pl-2.5 text-[13px] leading-relaxed text-muted-foreground">
+          {/* Default "How it was used"; WS-C downgrades generic mentions to
+              "Where it appears" once informativeness lands (ReciterAI #253). */}
+          <SnippetUsageBadge />
           {highlightSnippet(hit.entityUsage.sentence, entityTerm ?? "", hit.entityUsage.matchedSpan)}
         </p>
       )}
