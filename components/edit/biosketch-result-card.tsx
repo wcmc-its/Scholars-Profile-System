@@ -23,7 +23,13 @@ import { Check, Copy, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { biosketchCharCap, type BiosketchMode } from "@/lib/edit/biosketch-params";
 import type { BiosketchProduct, BiosketchProducts } from "@/lib/edit/biosketch-products";
+import type { BiosketchContributionSources } from "@/lib/edit/biosketch-sources";
 import { cn } from "@/lib/utils";
+
+/** PubMed URL for a pmid (the Sources line links each cited paper). */
+function pubmedUrl(pmid: string): string {
+  return `https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(pmid)}/`;
+}
 
 /** The success payload the `POST /api/edit/biosketch/generate` route returns. */
 export type BiosketchGenerateResult = {
@@ -34,6 +40,8 @@ export type BiosketchGenerateResult = {
   removedCount: number;
   /** #917 v6 — the Products list (Contributions mode), or null. */
   products: BiosketchProducts | null;
+  /** #917 v6 follow-up — per-contribution source PMIDs, or null. */
+  sources: BiosketchContributionSources[] | null;
   generationId: string | null;
 };
 
@@ -49,12 +57,25 @@ export function BiosketchResultCard({ result }: { result: BiosketchGenerateResul
     [result.overflow],
   );
   const isContributions = result.mode === "contributions";
+  // pmids each contribution (1-based) draws from, for the Sources line + export.
+  const sourcesByContribution = React.useMemo(() => {
+    const m = new Map<number, string[]>();
+    for (const s of result.sources ?? []) m.set(s.contributionIndex, s.pmids);
+    return m;
+  }, [result.sources]);
 
   function downloadAll() {
     // Number the contributions in the export; the single Personal Statement is
-    // emitted bare. Blank line between entries, trailing newline at the end.
+    // emitted bare. Blank line between entries, trailing newline at the end. Each
+    // contribution's Sources line (the pmids it draws from) rides under it.
     const entriesBody = isContributions
-      ? result.entries.map((e, i) => `${i + 1}. ${e}`).join("\n\n")
+      ? result.entries
+          .map((e, i) => {
+            const pmids = sourcesByContribution.get(i + 1);
+            const srcLine = pmids && pmids.length > 0 ? `\nSources: PMID ${pmids.join(", ")}` : "";
+            return `${i + 1}. ${e}${srcLine}`;
+          })
+          .join("\n\n")
       : result.entries.join("\n\n");
     const productsBody = result.products ? `\n\n${productsToText(result.products)}` : "";
     const body = `${entriesBody}${productsBody}`;
@@ -119,6 +140,7 @@ export function BiosketchResultCard({ result }: { result: BiosketchGenerateResul
               cap={cap}
               over={over}
               showNumber={isContributions}
+              sourcePmids={isContributions ? (sourcesByContribution.get(index + 1) ?? []) : []}
             />
           );
         })}
@@ -247,12 +269,14 @@ function BiosketchEntry({
   cap,
   over,
   showNumber,
+  sourcePmids,
 }: {
   index: number;
   entry: string;
   cap: number;
   over: boolean;
   showNumber: boolean;
+  sourcePmids: string[];
 }) {
   const [copied, setCopied] = React.useState(false);
 
@@ -312,6 +336,27 @@ function BiosketchEntry({
       >
         {entry}
       </p>
+      {sourcePmids.length > 0 && (
+        <p
+          className="text-muted-foreground text-xs"
+          data-testid={`biosketch-entry-sources-${index}`}
+        >
+          <span className="font-medium">Sources:</span>{" "}
+          {sourcePmids.map((pmid, i) => (
+            <React.Fragment key={pmid}>
+              {i > 0 && ", "}
+              <a
+                href={pubmedUrl(pmid)}
+                target="_blank"
+                rel="noreferrer"
+                className="text-apollo-maroon hover:underline"
+              >
+                PMID {pmid}
+              </a>
+            </React.Fragment>
+          ))}
+        </p>
+      )}
     </li>
   );
 }

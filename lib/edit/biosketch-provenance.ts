@@ -13,6 +13,7 @@
 import { db } from "@/lib/db";
 import { normalizeBiosketchParams, type BiosketchParams } from "@/lib/edit/biosketch-params";
 import type { BiosketchProducts } from "@/lib/edit/biosketch-products";
+import type { BiosketchContributionSources } from "@/lib/edit/biosketch-sources";
 
 /** How many recent biosketches the history panel surfaces (matches the overview cap). */
 const BIOSKETCH_HISTORY_LIMIT = 20;
@@ -34,6 +35,8 @@ export interface BiosketchGenerationSummary {
   params: BiosketchParams;
   /** The Products list (Contributions mode), or null. */
   products: BiosketchProducts | null;
+  /** Per-contribution source PMIDs, or null. */
+  sources: BiosketchContributionSources[] | null;
   createdAt: Date;
 }
 
@@ -50,6 +53,21 @@ function coerceProducts(value: unknown): BiosketchProducts | null {
     otherSignificant: v.otherSignificant,
     relatedFromAims: Boolean(v.relatedFromAims),
   };
+}
+
+function coerceSources(value: unknown): BiosketchContributionSources[] | null {
+  if (!Array.isArray(value)) return null;
+  const out: BiosketchContributionSources[] = [];
+  for (const s of value) {
+    const ss = s as Partial<BiosketchContributionSources>;
+    if (typeof ss.contributionIndex === "number" && Array.isArray(ss.pmids)) {
+      out.push({
+        contributionIndex: ss.contributionIndex,
+        pmids: ss.pmids.filter((p): p is string => typeof p === "string"),
+      });
+    }
+  }
+  return out.length > 0 ? out : null;
 }
 
 /**
@@ -74,6 +92,7 @@ export async function listBiosketchGenerations(
       promptVersion: true,
       params: true,
       products: true,
+      sources: true,
       createdAt: true,
     },
   });
@@ -99,6 +118,7 @@ export async function listBiosketchGenerations(
       promptVersion: row.promptVersion,
       params,
       products: coerceProducts(row.products),
+      sources: coerceSources(row.sources),
       createdAt: row.createdAt,
     };
   });

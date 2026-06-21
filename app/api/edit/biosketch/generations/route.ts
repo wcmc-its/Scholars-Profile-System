@@ -63,6 +63,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         promptVersion: g.promptVersion,
         params: g.params,
         products: g.products,
+        sources: g.sources,
         createdAt: g.createdAt.toISOString(),
       })),
     });

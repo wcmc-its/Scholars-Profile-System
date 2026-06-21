@@ -37,6 +37,7 @@ import {
   type BiosketchParams,
 } from "@/lib/edit/biosketch-params";
 import { type BiosketchProducts } from "@/lib/edit/biosketch-products";
+import { type BiosketchContributionSources } from "@/lib/edit/biosketch-sources";
 import { type BiosketchPromptVersionMeta } from "@/lib/edit/biosketch-prompt-versions";
 import { humanizeModelId } from "@/lib/edit/overview-prompt-versions";
 
@@ -71,6 +72,7 @@ type BiosketchGenerationItem = {
   promptVersion?: string | null;
   params: BiosketchParams;
   products: BiosketchProducts | null;
+  sources: BiosketchContributionSources[] | null;
   createdAt: string;
 };
 
@@ -140,6 +142,7 @@ export function BiosketchTool({
         overflow: Array.isArray(data.overflow) ? data.overflow : [],
         removedCount: typeof data.removedCount === "number" ? data.removedCount : 0,
         products: data.products ?? null,
+        sources: data.sources ?? null,
         generationId: data.generationId ?? null,
       });
       void refreshGenerations();
@@ -166,6 +169,7 @@ export function BiosketchTool({
       overflow: [],
       removedCount: 0,
       products: gen.products,
+      sources: gen.sources,
       generationId: gen.id,
     });
   }

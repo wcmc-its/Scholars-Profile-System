@@ -1941,6 +1941,10 @@ model BiosketchGeneration {
   // relatedFromAims }, each product { pmid, title, venue, year, contributionIndex, why }.
   // NULL for Personal Statement / empty corpus. JSON for the same reason `entries` is.
   products      Json?
+  // #917 v6 follow-up — per-contribution source PMIDs the draft draws from:
+  // [{ contributionIndex, pmids: [...] }]. NULL for Personal Statement / empty / attribution
+  // failure. Output traceability so a grounded claim can be checked against its source paper.
+  sources       Json?
   createdByCwid String   @map("created_by_cwid") @db.VarChar(32) // actor (self / proxy / curator)
   createdAt     DateTime @default(now()) @map("created_at")
 

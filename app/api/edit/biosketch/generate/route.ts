@@ -179,6 +179,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           promptVersion: effectiveParams.promptVersion,
         },
         products: result.products ?? undefined,
+        sources: result.sources ?? undefined,
         createdByCwid: session.cwid,
       },
       select: { id: true },
@@ -198,6 +199,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     overflow: result.overflow,
     removedCount: result.removed.length,
     products: result.products,
+    sources: result.sources,
     promptVersion: effectiveParams.promptVersion,
     generationId,
   });
