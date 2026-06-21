@@ -15,6 +15,8 @@
  * WITHOUT a `currentTopicSlug` (this is a method surface, not a topic surface).
  */
 import { useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { highlightSnippet } from "@/components/method/highlight-snippet";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { usePublicationModal } from "@/components/publication/publication-modal";
@@ -61,6 +63,9 @@ type Hit = {
     isFirst: boolean;
     isLast: boolean;
   }>;
+  /** #1166 — the per-(pub × entity) relevance sentence, present only when the feed
+   *  is filtered by a cell line (`?cellLine=`); revealed under the row. */
+  entityUsage?: { sentence: string; matchedSpan: { start: number; end: number } | null } | null;
 };
 
 type FeedResponse = {
@@ -76,6 +81,7 @@ export function FamilyPublicationFeed({
   supercategorySlug,
   familySegment,
   familyLabel,
+  cellLineLabels,
 }: {
   /** The supercategory URL slug segment (path part 1). */
   supercategorySlug: string;
@@ -83,7 +89,19 @@ export function FamilyPublicationFeed({
   familySegment: string;
   /** Resolved family label, used for the feed heading. */
   familyLabel: string;
+  /** #1166 — entity id → display label, so the `?cellLine=` context-bar chip can
+   *  name the active cell line. Absent (or unknown id) ⇒ no cell-line filter UI. */
+  cellLineLabels?: Record<string, string>;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // #1166 — the shared, URL-addressable cell-line filter (spec §6). Only honored
+  // when its label is known (the entity belongs to this family + the flag is on).
+  const cellLineId = searchParams.get("cellLine");
+  const cellLine = cellLineId && cellLineLabels?.[cellLineId] ? cellLineId : null;
+  const cellLineLabel = cellLine ? cellLineLabels![cellLine] : null;
+
   const [sort, setSort] = useState<Sort>("newest");
   const [filter, setFilter] = useState<Filter>("research_articles_only");
   const [page, setPage] = useState(1);
@@ -94,10 +112,10 @@ export function FamilyPublicationFeed({
       ? "Research articles using this method"
       : "All publications using this method";
 
-  // Reset pagination on sort / filter change.
+  // Reset pagination on sort / filter / cell-line change.
   useEffect(() => {
     setPage(1);
-  }, [sort, filter]);
+  }, [sort, filter, cellLine]);
 
   const { data, loading, error } = useFeedFetch({
     supercategorySlug,
@@ -105,9 +123,26 @@ export function FamilyPublicationFeed({
     sort,
     filter,
     page,
+    cellLine,
   });
 
-  const sortRowLabel = data ? `${data.total.toLocaleString()} results` : null;
+  // Filtered count is `total`; the family denominator is `totalResearchOnly`
+  // (research filter) / `totalAllTypes` (all) — for the "N of M articles" copy.
+  const denom = data ? (filter === "all" ? data.totalAllTypes : data.totalResearchOnly) : 0;
+  const sortRowLabel = data
+    ? cellLine
+      ? `${data.total.toLocaleString()} of ${denom.toLocaleString()} articles`
+      : `${data.total.toLocaleString()} results`
+    : null;
+
+  const clearCellLine = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("cellLine");
+    params.delete("page");
+    router.replace(params.toString() ? `${pathname}?${params.toString()}` : pathname, {
+      scroll: false,
+    });
+  };
 
   return (
     <section className="flex flex-col gap-4">
@@ -133,6 +168,30 @@ export function FamilyPublicationFeed({
         </div>
       </header>
 
+      {cellLine && cellLineLabel && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Filtered to</span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-background-info)] px-2.5 py-0.5 text-xs text-[var(--color-text-info)]">
+            {cellLineLabel}
+            <button
+              type="button"
+              onClick={clearCellLine}
+              aria-label={`Clear ${cellLineLabel} filter`}
+              className="hover:opacity-70"
+            >
+              ✕
+            </button>
+          </span>
+          <button
+            type="button"
+            onClick={clearCellLine}
+            className="text-xs text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+          >
+            Clear · view all articles
+          </button>
+        </div>
+      )}
+
       <FilterToggleRow
         data={data}
         filter={filter}
@@ -147,6 +206,7 @@ export function FamilyPublicationFeed({
         page={page}
         onPageChange={setPage}
         familyLabel={familyLabel}
+        entityTerm={cellLineLabel}
       />
     </section>
   );
@@ -201,6 +261,7 @@ function FeedSection({
   page,
   onPageChange,
   familyLabel,
+  entityTerm,
 }: {
   loading: boolean;
   error: string | null;
@@ -208,6 +269,7 @@ function FeedSection({
   page: number;
   onPageChange: (p: number) => void;
   familyLabel: string;
+  entityTerm: string | null;
 }) {
   // Skeleton only on first load (no data yet); keep prior rows visible during
   // sort / filter / page refetches (stale-while-revalidate).
@@ -241,7 +303,7 @@ function FeedSection({
     <>
       <ul className="divide-y divide-border">
         {data.hits.map((h) => (
-          <PubRow key={h.pmid} hit={h} />
+          <PubRow key={h.pmid} hit={h} entityTerm={entityTerm} />
         ))}
       </ul>
       <PaginationRow
@@ -254,7 +316,7 @@ function FeedSection({
   );
 }
 
-function PubRow({ hit }: { hit: Hit }) {
+function PubRow({ hit, entityTerm }: { hit: Hit; entityTerm: string | null }) {
   const { open: openModal } = usePublicationModal();
   const titleHtml = sanitizePubTitle(hit.title);
   return (
@@ -289,6 +351,14 @@ function PubRow({ hit }: { hit: Hit }) {
         doi={hit.doi}
         abstract={hit.abstract}
       />
+      {/* #1166 — the per-(pub × entity) relevance sentence, shown only on a
+          cell-line-filtered feed; the entity term is <mark>-highlighted via the
+          shared offset-aware helper (falls back to term-match when span is null). */}
+      {hit.entityUsage && (
+        <p className="mt-2 border-l-2 border-[var(--color-border-info)] pl-2.5 text-[13px] leading-relaxed text-muted-foreground">
+          {highlightSnippet(hit.entityUsage.sentence, entityTerm ?? "", hit.entityUsage.matchedSpan)}
+        </p>
+      )}
     </li>
   );
 }
@@ -299,12 +369,14 @@ function useFeedFetch({
   sort,
   filter,
   page,
+  cellLine,
 }: {
   supercategorySlug: string;
   familySegment: string;
   sort: Sort;
   filter: Filter;
   page: number;
+  cellLine: string | null;
 }): { data: FeedResponse | null; loading: boolean; error: string | null } {
   const [data, setData] = useState<FeedResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -324,6 +396,7 @@ function useFeedFetch({
     url.searchParams.set("sort", sort);
     url.searchParams.set("page", String(page));
     url.searchParams.set("filter", filter);
+    if (cellLine) url.searchParams.set("cellLine", cellLine);
 
     fetch(url.toString())
       .then((r) => {
@@ -343,7 +416,7 @@ function useFeedFetch({
     return () => {
       cancelled = true;
     };
-  }, [supercategorySlug, familySegment, sort, filter, page]);
+  }, [supercategorySlug, familySegment, sort, filter, page, cellLine]);
 
   return { data, loading, error };
 }

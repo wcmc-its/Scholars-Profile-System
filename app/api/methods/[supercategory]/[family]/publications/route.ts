@@ -57,6 +57,10 @@ const TIER_ALLOWLIST: ReadonlySet<string> = new Set(["strongly", "also"]);
 const SUPERCATEGORY_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 const FAMILY_SEGMENT_RE = /^[a-z0-9][a-z0-9_-]*$/;
 const MAX_PAGE = 500;
+// #1166 — a cell-line entity id is an opaque registry id: a canonical tool id
+// (`tool_000718`) or a minted parent id (`ent_<hex>`). Allow-list the shape so a
+// crafted value can never reach the query as anything but a bounded token.
+const ENTITY_ID_RE = /^(?:tool|ent)_[a-z0-9]{1,40}$/;
 
 export async function GET(
   request: NextRequest,
@@ -99,6 +103,15 @@ export async function GET(
   // URL is 1-indexed; service is 0-indexed; clamp to MAX_PAGE.
   const page = Math.min(pageNum, MAX_PAGE) - 1;
 
+  // #1166 Surface B — optional cell-line filter. Validated against the opaque-id
+  // shape; the loader additionally gates it on METHODS_LENS_CELL_LINE_ENTITIES and
+  // ignores an unknown id (empty feed), so a bad value is a 400 here, never a leak.
+  const entityIdRaw = sp.get("cellLine");
+  if (entityIdRaw !== null && !ENTITY_ID_RE.test(entityIdRaw)) {
+    return apiError("invalid cellLine", 400);
+  }
+  const entityId = entityIdRaw ?? undefined;
+
   // Resolve the family to its stable (supercategory, familyLabel) identity —
   // re-derives slugs over the live set, applies the overlay gate, null on miss.
   const resolved = await getFamily(supercategory, family);
@@ -109,7 +122,7 @@ export async function GET(
   const result = await getFamilyPublications(
     resolved.supercategory,
     resolved.familyLabel,
-    { sort, page, filter },
+    { sort, page, filter, entityId },
   );
   if (result === null) {
     return apiError("family not found", 404);

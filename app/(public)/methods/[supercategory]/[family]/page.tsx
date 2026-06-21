@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { buildDefinedTermJsonLd } from "@/lib/seo/jsonld";
@@ -7,12 +8,16 @@ import {
   getDistinctScholarCountForFamily,
   getRepresentativePubsForFamily,
   getFamilyToolUsage,
+  getFamilyCellLineEntities,
+  getFamilyCellLineRailPreviews,
+  groupCellLineDirectory,
 } from "@/lib/api/methods";
 import { supercategoryLabel } from "@/lib/methods/supercategory-labels";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
 import { Spotlight } from "@/components/shared/spotlight";
 import { FamilyPublicationLayout } from "@/components/method/family-publication-layout";
+import { CellLineDiscovery } from "@/components/method/cell-line-discovery";
 import type { SpotlightData } from "@/lib/api/spotlight";
 import {
   Breadcrumb,
@@ -65,19 +70,29 @@ export default async function FamilyPage({
   const resolved = await getFamily(supercategory, family);
   if (!resolved) notFound();
 
-  const [topScholars, scholarCount, representativePubs, toolUsage] = await Promise.all([
-    getFamilyScholars(resolved.supercategory, resolved.familyLabel).catch(() => null),
-    getDistinctScholarCountForFamily(resolved.supercategory, resolved.familyLabel).catch(
-      () => 0,
-    ),
-    getRepresentativePubsForFamily(
-      resolved.supercategory,
-      resolved.familyLabel,
-      SPOTLIGHT_CARDS,
-    ).catch(() => []),
-    // #1119 — "How researchers use these tools" strip ([] when the flag is off).
-    getFamilyToolUsage(resolved.supercategory, resolved.familyLabel).catch(() => []),
-  ]);
+  const [topScholars, scholarCount, representativePubs, toolUsage, cellLineEntities, railPreviews] =
+    await Promise.all([
+      getFamilyScholars(resolved.supercategory, resolved.familyLabel).catch(() => null),
+      getDistinctScholarCountForFamily(resolved.supercategory, resolved.familyLabel).catch(
+        () => 0,
+      ),
+      getRepresentativePubsForFamily(
+        resolved.supercategory,
+        resolved.familyLabel,
+        SPOTLIGHT_CARDS,
+      ).catch(() => []),
+      // #1119 — "How researchers use these tools" strip ([] when the flag is off).
+      getFamilyToolUsage(resolved.supercategory, resolved.familyLabel).catch(() => []),
+      // #1166 — specific cell lines + rail previews ([]/{} when the flag is off).
+      getFamilyCellLineEntities(resolved.supercategory, resolved.familyLabel).catch(() => []),
+      getFamilyCellLineRailPreviews(resolved.supercategory, resolved.familyLabel).catch(() => ({})),
+    ]);
+
+  // #1166 — when the family resolves to specific cell lines, the ranked strip +
+  // directory (Surface B §5.2/§5.6) REPLACE the #1119 tool-usage prose (§5.1 IA).
+  const hasCellLines = cellLineEntities.length > 0;
+  const directoryNodes = hasCellLines ? groupCellLineDirectory(cellLineEntities) : [];
+  const cellLineLabels = Object.fromEntries(cellLineEntities.map((e) => [e.entityId, e.label]));
 
   const scLabel = supercategoryLabel(resolved.supercategory);
 
@@ -203,27 +218,39 @@ export default async function FamilyPage({
         )}
       </section>
 
-      {/* #1119 — "How researchers use these tools": a few representative, deduped
-          per-tool usage snippets from the family's scholar rows. Plain text;
-          present only when METHODS_LENS_TOOL_CONTEXT is on (the loader returns []
-          otherwise), inheriting getFamily's #800/#801 public-visibility gate. */}
-      {toolUsage.length > 0 && (
-        <section className="mb-10" aria-labelledby="tool-usage-heading">
-          <h2
-            id="tool-usage-heading"
-            className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]"
-          >
-            How researchers use these tools
-          </h2>
-          <ul className="mt-3 grid max-w-prose gap-3">
-            {toolUsage.map((u) => (
-              <li key={u.tool} className="text-sm leading-relaxed">
-                <span className="font-medium">{u.tool}</span>
-                <span className="text-muted-foreground"> — {u.context}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {/* #1166 Surface B — the ranked "Specific cell lines used" strip + directory,
+          which REPLACE the #1119 tool-usage prose (§5.1 IA) when the family resolves
+          to specific cell-line entities. Both off ⇒ neither renders (byte-identical
+          to pre-#1119). Suspense: the discovery block reads `?cellLine=`/`?dir=`. */}
+      {hasCellLines ? (
+        <Suspense fallback={null}>
+          <CellLineDiscovery
+            entities={cellLineEntities}
+            railPreviews={railPreviews}
+            directoryNodes={directoryNodes}
+            familyLabel={resolved.familyLabel}
+            totalPapers={0}
+          />
+        </Suspense>
+      ) : (
+        toolUsage.length > 0 && (
+          <section className="mb-10" aria-labelledby="tool-usage-heading">
+            <h2
+              id="tool-usage-heading"
+              className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]"
+            >
+              How researchers use these tools
+            </h2>
+            <ul className="mt-3 grid max-w-prose gap-3">
+              {toolUsage.map((u) => (
+                <li key={u.tool} className="text-sm leading-relaxed">
+                  <span className="font-medium">{u.tool}</span>
+                  <span className="text-muted-foreground"> — {u.context}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )
       )}
 
       <Spotlight data={spotlightData} />
@@ -233,6 +260,7 @@ export default async function FamilyPage({
           supercategorySlug={resolved.supercategorySlug}
           familySegment={resolved.familySlug}
           familyLabel={resolved.familyLabel}
+          cellLineLabels={cellLineLabels}
         />
       </section>
     </main>
