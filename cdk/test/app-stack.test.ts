@@ -1531,6 +1531,49 @@ describe("AppStack", () => {
         );
       });
 
+      it("the cores claim-writeback grant is dynamodb:UpdateItem on table/reciterai only, never * or other writes (#1163)", () => {
+        // SPS's first DynamoDB write: lib/cores/claim-writeback.ts mirrors an
+        // owner claim onto the engine's reciterai item under THIS task role,
+        // gated by CORE_CLAIM_WRITEBACK. Least-privilege: a single UpdateItem
+        // (never Put/Delete/BatchWrite/Scan) scoped to exactly table/reciterai
+        // -- never a bare `*`. Mirrors the ETL reciterai grant's account-tokened
+        // ARN (EtlTaskRoleReciterAiPolicy).
+        const writebackPolicy = findTaskRolePolicies().find((p) =>
+          JSON.stringify(p.Properties?.PolicyDocument).includes(
+            "dynamodb:UpdateItem",
+          ),
+        );
+        expect(writebackPolicy).toBeDefined();
+        const statements = writebackPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        expect(statements).toHaveLength(1);
+        const stmt = statements![0];
+        expect(stmt.Action).toBe("dynamodb:UpdateItem");
+        // Exactly UpdateItem -- no over-grant from table.grantWriteData().
+        const actionSerialized = JSON.stringify(stmt.Action);
+        for (const forbidden of [
+          "PutItem",
+          "DeleteItem",
+          "BatchWriteItem",
+          "Scan",
+          "Query",
+        ]) {
+          expect(actionSerialized).not.toContain(forbidden);
+        }
+        const resources = (
+          Array.isArray(stmt.Resource) ? stmt.Resource : [stmt.Resource]
+        ) as unknown[];
+        for (const r of resources) expect(r).not.toBe("*");
+        expect(JSON.stringify(stmt.Resource)).toContain("table/reciterai");
+      });
+
+      it("ships the three cores flags OFF in prod — CORE_PUB_MODAL / CORE_PAGES / CORE_CLAIM_WRITEBACK (staging-first)", () => {
+        const env = appContainerEnv();
+        expect(env.get("CORE_PUB_MODAL")).toBe("off");
+        expect(env.get("CORE_PAGES")).toBe("off");
+        expect(env.get("CORE_CLAIM_WRITEBACK")).toBe("off");
+      });
+
       it("the app ships the request-change mailer OFF with the verified From set (#160 Phase 2)", () => {
         // Dormant by default: the endpoint 503s + the client mailto: fallback
         // stays in force until ops flip the flag post-verification.
