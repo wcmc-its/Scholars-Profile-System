@@ -24,6 +24,7 @@
  * `SessionData`, which needs neither `next/headers` nor LDAP.
  */
 import { isCommsSteward } from "@/lib/auth/comms-steward";
+import { isDeveloper } from "@/lib/auth/development";
 import { getSession } from "@/lib/auth/session-server";
 import { type SessionData, nowSeconds } from "@/lib/auth/session";
 import { type EditSession, isSuperuser } from "@/lib/auth/superuser";
@@ -85,6 +86,7 @@ export async function getEffectiveEditSession(): Promise<EditSession | null> {
     cwid,
     isSuperuser: await isSuperuser(cwid),
     isCommsSteward: await isCommsSteward(cwid),
+    isDeveloper: await isDeveloper(cwid),
   };
 }
 

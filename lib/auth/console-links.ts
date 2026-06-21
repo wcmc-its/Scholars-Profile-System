@@ -34,7 +34,7 @@
 /** One console destination the viewer may open, rendered as a dropdown row. */
 export type ConsoleLink = {
   /** Stable id — drives the React key, the row `data-testid`, and the icon map. */
-  id: "manage-profiles" | "methods" | "units";
+  id: "manage-profiles" | "methods" | "units" | "find-researchers";
   label: string;
   href: string;
 };
@@ -53,6 +53,12 @@ export type ConsoleLinkVerdicts = {
   /** The viewer holds ≥1 direct `unit_admin` grant
    *  (`loadManageableUnits(...).total > 0`). */
   managesUnits: boolean;
+  /** May open the GrantRecs "Find researchers" admin surface — a superuser OR a
+   *  `development`-role member (`isSuperuser || isDeveloper`, GrantRecs Phase 4).
+   *  Optional: omitted/`false` advertises nothing (default dark). Unlike the
+   *  other superuser surfaces, this one is NOT reachable from the Profiles
+   *  roster's `AdminSubnav`, so it gets its own row even for a superuser. */
+  canFindResearchers?: boolean;
 };
 
 /**
@@ -61,20 +67,33 @@ export type ConsoleLinkVerdicts = {
  * Returns `[]` for a plain scholar (no console section renders).
  */
 export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
+  const links: ConsoleLink[] = [];
+
   // A superuser collapses to the Profiles roster — its AdminSubnav already fans
-  // out to the rest. Return early so a superuser who also happens to be a
-  // steward / unit admin doesn't get redundant rows for surfaces the roster
-  // already reaches.
+  // out to the rest, so a superuser who also happens to be a steward / unit
+  // admin gets no redundant rows for surfaces the roster already reaches.
   if (v.isSuperuser) {
-    return [{ id: "manage-profiles", label: "Admin", href: "/edit/scholars" }];
+    links.push({ id: "manage-profiles", label: "Admin", href: "/edit/scholars" });
+  } else {
+    if (v.canManageMethods) {
+      links.push({ id: "methods", label: "Method families", href: "/edit/methods" });
+    }
+    if (v.managesUnits) {
+      links.push({ id: "units", label: "Org units", href: "/edit/units" });
+    }
   }
 
-  const links: ConsoleLink[] = [];
-  if (v.canManageMethods) {
-    links.push({ id: "methods", label: "Method families", href: "/edit/methods" });
+  // "Find researchers" (GrantRecs Phase 4) is its OWN row regardless of the
+  // superuser early-collapse: it is not one of the surfaces the Profiles
+  // roster's AdminSubnav reaches, so a superuser would otherwise have no
+  // clickable path to it. Available to superusers AND development-role members.
+  if (v.canFindResearchers) {
+    links.push({
+      id: "find-researchers",
+      label: "Find researchers",
+      href: "/edit/find-researchers",
+    });
   }
-  if (v.managesUnits) {
-    links.push({ id: "units", label: "Org units", href: "/edit/units" });
-  }
+
   return links;
 }

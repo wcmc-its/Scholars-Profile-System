@@ -170,6 +170,7 @@ describe("getEditSession", () => {
       cwid: "adm1001",
       isSuperuser: true,
       isCommsSteward: false,
+      isDeveloper: false,
     });
   });
 
@@ -180,6 +181,7 @@ describe("getEditSession", () => {
       cwid: "usr2002",
       isSuperuser: false,
       isCommsSteward: false,
+      isDeveloper: false,
     });
   });
 });

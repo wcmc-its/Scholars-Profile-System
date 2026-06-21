@@ -77,10 +77,21 @@ describe("GET /api/opportunities/[opportunityId]/researchers (reverse, admin-gat
     expect(rankResearchersForOpportunity).not.toHaveBeenCalled();
   });
 
-  it("403s for an authenticated non-superuser", async () => {
-    getEffectiveEditSession.mockResolvedValue({ cwid: "x", isSuperuser: false });
+  it("403s for an authenticated non-superuser who is not a developer", async () => {
+    getEffectiveEditSession.mockResolvedValue({ cwid: "x", isSuperuser: false, isDeveloper: false });
     const resp = await reverseGET(req("/api/opportunities/g:1/researchers"), { params: p({ opportunityId: "g:1" }) });
     expect(resp.status).toBe(403);
+    expect(rankResearchersForOpportunity).not.toHaveBeenCalled();
+  });
+
+  it("returns results for a development-role member who is not a superuser (Phase 4 gate)", async () => {
+    getEffectiveEditSession.mockResolvedValue({ cwid: "dev", isSuperuser: false, isDeveloper: true });
+    rankResearchersForOpportunity.mockResolvedValue([
+      { cwid: "bbb", slug: "b", axes: { topicFit: 4.2, stageAppeal: 0.5 }, topicContributions: [], defaultScore: 4.2 },
+    ]);
+    const resp = await reverseGET(req("/api/opportunities/g:1/researchers"), { params: p({ opportunityId: "g:1" }) });
+    expect(resp.status).toBe(200);
+    expect(rankResearchersForOpportunity).toHaveBeenCalledTimes(1);
   });
 
   it("returns results for a superuser and passes stageLens through", async () => {

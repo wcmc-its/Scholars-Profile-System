@@ -632,6 +632,18 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "",
               },
               {
+                "Name": "DEVELOPMENT_ENABLED",
+                "Value": "off",
+              },
+              {
+                "Name": "SCHOLARS_DEVELOPMENT_GROUP_CN",
+                "Value": "ITS:Library:Scholars/development-role",
+              },
+              {
+                "Name": "SCHOLARS_DEVELOPMENT_ALLOWLIST",
+                "Value": "",
+              },
+              {
                 "Name": "SECURITY_CSP_MODE",
                 "Value": "enforce",
               },
@@ -3894,6 +3906,18 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLARS_COMMS_STEWARD_ALLOWLIST",
                 "Value": "dwd2001",
+              },
+              {
+                "Name": "DEVELOPMENT_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_DEVELOPMENT_GROUP_CN",
+                "Value": "ITS:Library:Scholars/development-role",
+              },
+              {
+                "Name": "SCHOLARS_DEVELOPMENT_ALLOWLIST",
+                "Value": "",
               },
               {
                 "Name": "SECURITY_CSP_MODE",

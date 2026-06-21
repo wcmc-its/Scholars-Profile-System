@@ -1722,6 +1722,27 @@ export class AppStack extends Stack {
         COMMS_STEWARD_ENABLED: env === "staging" || env === "prod" ? "on" : "off",
         SCHOLARS_COMMS_STEWARD_GROUP_CN: "",
         SCHOLARS_COMMS_STEWARD_ALLOWLIST: env === "staging" ? "dwd2001" : "",
+        // `development` role (GrantRecs Phase 4 — the /edit/find-researchers
+        // reverse-matcher admin surface). The page + its data route admit
+        // `isSuperuser || isDeveloper`, so superusers always retain access; the
+        // dev role adds a non-superuser operator tier.
+        //   DEVELOPMENT_ENABLED -- master kill switch. While not "on",
+        //     isDeveloper() short-circuits to false BEFORE any directory work.
+        //     ENABLED for STAGING only; prod stays off until validated there
+        //     (flip to `env === "staging" || env === "prod"` via a reviewer-gated
+        //     `cdk deploy Sps-App-prod`).
+        //   SCHOLARS_DEVELOPMENT_GROUP_CN -- the ED group whose `member` list
+        //     confers the role: ITS:Library:Scholars/development-role (created
+        //     under ou=application security,ou=Groups; the subtree search from
+        //     ou=Groups reaches it). Set ACTIVE -- in-VPC LDAPS to WCM is
+        //     reachable, so the live group search resolves members. (The
+        //     superuser/comms-steward cns are still empty pending their own
+        //     cutover; this role uses the group as its live source of truth.)
+        //   SCHOLARS_DEVELOPMENT_ALLOWLIST -- interim no-LDAP allowlist; left
+        //     EMPTY since the group cn above is the live membership source.
+        DEVELOPMENT_ENABLED: env === "staging" ? "on" : "off",
+        SCHOLARS_DEVELOPMENT_GROUP_CN: "ITS:Library:Scholars/development-role",
+        SCHOLARS_DEVELOPMENT_ALLOWLIST: "",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
         // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
         // ships the policy as `Content-Security-Policy-Report-Only` (the

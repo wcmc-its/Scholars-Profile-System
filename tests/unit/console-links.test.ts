@@ -78,4 +78,40 @@ describe("buildConsoleLinks", () => {
     });
     expect(links).toEqual([]);
   });
+
+  // GrantRecs Phase 4 — "Find researchers" gets its OWN row (not reachable from
+  // the Profiles roster's AdminSubnav), available to superusers AND developers.
+  it("superuser with canFindResearchers → 'Admin' + 'Find researchers'", () => {
+    const links = buildConsoleLinks({
+      isSuperuser: true,
+      canManageMethods: false,
+      managesUnits: false,
+      canFindResearchers: true,
+    });
+    expect(links).toEqual([
+      { id: "manage-profiles", label: "Admin", href: "/edit/scholars" },
+      { id: "find-researchers", label: "Find researchers", href: "/edit/find-researchers" },
+    ]);
+  });
+
+  it("development-role member only (not a superuser) → just 'Find researchers'", () => {
+    const links = buildConsoleLinks({
+      isSuperuser: false,
+      canManageMethods: false,
+      managesUnits: false,
+      canFindResearchers: true,
+    });
+    expect(links).toEqual([
+      { id: "find-researchers", label: "Find researchers", href: "/edit/find-researchers" },
+    ]);
+  });
+
+  it("canFindResearchers omitted/false → no 'Find researchers' row (default dark)", () => {
+    const links = buildConsoleLinks({
+      isSuperuser: false,
+      canManageMethods: true,
+      managesUnits: false,
+    });
+    expect(links.map((l) => l.id)).toEqual(["methods"]);
+  });
 });
