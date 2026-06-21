@@ -9,16 +9,14 @@
  * route, not `/methods`. This rail's `?family=` is a within-supercategory-page
  * deep-link param (a different surface, a different flag — §OQ-9).
  *
- * Styling mirrors the subtopic rail's #172 selected state: 3px WCM-red left
- * border + warm-neutral fill on the active item, a `tabular-nums` publication
- * count on the right (stacked over a "pubs" caption so it never clips and reads
- * unambiguously in the narrow rail), plus a mono-middot `exemplarTools` line
- * (static display strings, NOT clickable — §3.6). Families arrive pre-sorted.
+ * This is now a thin adapter over the neutral <EntityRail> (shared with the family
+ * page's cell-line rail): it maps each FamilyRailItem onto the generic RailItem and
+ * supplies the family-specific copy. The visible/aria contract is unchanged — the
+ * visible number is `pubCount`, the (never-shown) `scholarCount` rides along only in
+ * the aria-label, exemplarTools render as a ` · `-joined descriptor line, and a row
+ * click fires onSelect(familyId). Families arrive pre-sorted.
  */
-import { useState, useMemo, useCallback } from "react";
-import { X } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { EntityRail, type RailItem } from "@/components/method/entity-rail";
 
 export type FamilyRailItem = {
   /** The opaque A2 family id (`fam_NNNN`) — the `?family=` deep-link value. */
@@ -43,110 +41,24 @@ export function FamilyRail({
   activeFamilyId: string | null;
   onSelect: (familyId: string | null) => void;
 }) {
-  const [filter, setFilter] = useState("");
-  const filterLower = filter.trim().toLowerCase();
-
-  const visible = useMemo(() => {
-    if (!filterLower) return families;
-    return families.filter((f) => f.familyLabel.toLowerCase().includes(filterLower));
-  }, [families, filterLower]);
-
-  const handleClick = useCallback(
-    (familyId: string) => {
-      onSelect(activeFamilyId === familyId ? null : familyId);
-    },
-    [activeFamilyId, onSelect],
-  );
+  const items: RailItem[] = families.map((f) => ({
+    id: f.familyId,
+    label: f.familyLabel,
+    descriptor: f.exemplarTools.length > 0 ? f.exemplarTools.join(" · ") : null,
+    count: f.pubCount,
+    countLabel: "pubs",
+    ariaLabel: `${f.pubCount.toLocaleString()} publications, ${f.scholarCount.toLocaleString()} scholars`,
+  }));
 
   return (
-    <aside className="w-full" aria-label="Method families">
-      <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        FAMILIES ({families.length})
-      </div>
-      <div className="relative mb-3">
-        <Input
-          type="text"
-          placeholder="Filter families…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="pr-8"
-        />
-        {filter.length > 0 && (
-          <button
-            type="button"
-            aria-label="Clear filter"
-            onClick={() => setFilter("")}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-          >
-            <X className="size-3.5" />
-          </button>
-        )}
-      </div>
-
-      {visible.length === 0 ? (
-        <div className="py-4 text-center text-sm italic text-muted-foreground">
-          No families match &ldquo;{filter}&rdquo;
-        </div>
-      ) : (
-        <ScrollArea className="h-full">
-          <ul className="flex flex-col">
-            {visible.map((f, i) => {
-              const isActive = activeFamilyId === f.familyId;
-              const showHairline = i > 0;
-              return (
-                <li key={f.familyId}>
-                  <button
-                    type="button"
-                    onClick={() => handleClick(f.familyId)}
-                    // #172 selected state: 3px WCM-red left border + warm neutral
-                    // fill + text weight. Unselected rows reserve the same gutter
-                    // via a transparent border so selection doesn't shift layout.
-                    className={`flex w-full items-start justify-between gap-2 rounded px-3 py-2.5 text-left border-l-[3px] ${
-                      showHairline ? "border-t border-t-[#f0f1f3]" : ""
-                    } ${
-                      isActive
-                        ? "border-l-[var(--color-primary-cornell-red)] bg-[#f5f4f0] font-semibold"
-                        : "border-l-transparent hover:bg-[#f5f6f8]"
-                    }`}
-                    aria-current={isActive ? "true" : undefined}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="line-clamp-2 text-base leading-snug">
-                        {f.familyLabel}
-                      </div>
-                      {f.exemplarTools.length > 0 && (
-                        // line-clamp-1 (NOT `truncate`): clips to one line with an
-                        // ellipsis but does NOT set white-space:nowrap. Inside the
-                        // rail's Radix ScrollArea (a shrink-to-fit `display:table`
-                        // viewport), a nowrap line expands the row to the full
-                        // un-truncated width and pushes the pubs count off the right
-                        // edge — the original "count clipped" bug. Wrappable content
-                        // keeps the row capped at the rail width so the count shows.
-                        <div className="mt-0.5 line-clamp-1 text-xs font-normal text-muted-foreground">
-                          {f.exemplarTools.join(" · ")}
-                        </div>
-                      )}
-                    </div>
-                    <span
-                      className={`shrink-0 text-right tabular-nums ${
-                        isActive ? "text-foreground" : "text-muted-foreground"
-                      }`}
-                      aria-label={`${f.pubCount.toLocaleString()} publications, ${f.scholarCount.toLocaleString()} scholars`}
-                    >
-                      <span className="block text-sm font-medium leading-none">
-                        {f.pubCount.toLocaleString()}
-                      </span>
-                      <span className="mt-0.5 block text-[10px] uppercase tracking-wide text-muted-foreground/80">
-                        pubs
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </ScrollArea>
-      )}
-    </aside>
+    <EntityRail
+      items={items}
+      activeId={activeFamilyId}
+      onSelect={onSelect}
+      railLabel="Method families"
+      headerText={`FAMILIES (${families.length})`}
+      filterPlaceholder="Filter families…"
+      noMatchNoun="families"
+    />
   );
 }

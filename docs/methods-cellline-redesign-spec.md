@@ -108,26 +108,28 @@ Worked example: *Immortalized cell lines*.
 
 ### 5.1 Information architecture
 
-Reorder the page so each block has exactly one job, eliminating the "three stacked sample blocks" smell:
+> **v2.1 — master-detail (supersedes the "stacked strip reorder" of v2 §5.1).** Rather than reframe-and-reorder a bespoke strip, Surface B adopts the **same master-detail layout the supercategory and subtopic pages already use** (`FamilyRail` + publication feed). The cell-line filter becomes a left rail sitting *directly beside the article list it controls* — which dissolves the "filter floats two sections above its results" problem instead of patching it, and gives Surface B visual + interaction parity with the rest of `/methods`.
+
+Page order:
 
 1. **Definition** (what the method is)
 2. **Top scholars** — *who* uses it
-3. **Specific cell lines used** — *what* it resolves to, **filterable** (replaces "How researchers use these tools")
-4. **Spotlight** — *curated* highlights (editorial picks)
-5. **Research articles using this method** — *everything*
+3. **Spotlight** — *curated* highlights, **shown only when the family is record-rich enough for curation to add signal** (≈ ≥12 papers and ≥3 curatable highlights). For sparse families it is **omitted entirely** — the article list *is* the highlight, and a 3-card strip above a short list reads as padding.
+4. **Publications** — a **master-detail** block: a **cell-line rail** (§5.2) on the left, the **article feed** (§5.4–5.7) on the right. *No selection is the default* (the full list); selecting a cell line filters the feed beside it.
 
-This resolves the redundancy: the reframed strip (algorithmic, filterable index) and Spotlight (hand-curated highlights) now do genuinely different jobs.
+The bespoke `cell-line-strip` and `cell-line-directory` components **retire**; the strip's ranking and the directory's search/sort/nesting all fold into the one rail. The innovation Surface B keeps is the **inline verbatim highlight** in the feed (§5.3) and the informativeness-labelled snippet ("How it was used" vs "Where it appears", §D5 / WS-C) — which applies on the supercategory feed too.
 
-### 5.2 "Specific cell lines used" strip (replaces the prose block)
+### 5.2 Cell-line rail (replaces the strip *and* the directory)
 
-The current "How researchers use these tools" block is keyed to *specific named cell lines* — that's its one unique contribution (the *what specifically* axis). Don't dissolve it into the paper list; reframe it.
+One rail, built on a generalized `RailItem` (the `FamilyRail` row shape): bold entity name, a muted descriptor line *beneath* it (e.g. "human embryonic kidney"), and a right-aligned usage count.
 
-- **Rename** the heading to "Specific cell lines used" with subtext: *"The named cell lines this method resolves to across these papers · select one to filter the list below."*
-- **Rank** entities by usage count (descending), with a faint proportional bar so the long tail is legible at a glance.
-- Each entity shows its **usage count**.
-- **Hover/focus** an entity → previews its verbatim sentence in the rail (§5.3).
-- **Select** an entity → filters the article list (§5.4).
-- A "N more cell lines" affordance opens the full directory (§5.6).
+- **Rank** by usage count (descending) — the rail is the index, so the dominant lines sit on top.
+- **Filter-within** box ("Filter cell lines…") — substring filter over entity names (subsumes the old directory's search).
+- **No "All" row** — no selection is the baseline (full list); selecting filters; clicking the active row clears. Mirrors the supercategory "All work" default.
+- **Evidenced gate (punch-list #1)** — a non-evidenced survivor renders as a **plain, non-interactive label**, never a clickable dead-end. (Most generics / 0-count rows are suppressed upstream by §7.1 / WS-B.)
+- **Surface-form merge vs. distinct lines** — the two cases the rail must never conflate:
+  - *Same line, different spellings* collapse to **one** row, optionally tagged "N forms" (e.g. "HMC-1 cells" / "human mast cell line HMC-1" / "cultured human mast cells (HMC-1)" → one HMC-1 row). §7.1a.
+  - *Related but distinct lines* stay **separate rows, never merged** — e.g. **HEK293 vs HEK293T** (293T carries the SV40 large-T antigen — a biologically distinct line with distinct uses). §7.1d.
 
 ### 5.3 Hover rail (reused from A)
 
@@ -147,14 +149,9 @@ A single paper can use multiple cell lines and therefore appear under multiple f
 
 Each filtered row that matches multiple entities shows an "Also matches: ‹entity› →" cross-link that switches the filter.
 
-### 5.6 "All cell lines" directory (expanded view)
+### 5.6 Directory — folded into the rail
 
-When a method resolves to many entities, the compact ranked strip isn't enough. The directory adds:
-
-- **Search-within** ("Filter cell lines…") — substring filter over entity names; collapses parent groups whose children all hide.
-- **Sort toggle** — "Most used" (find dominant lines) vs. "A–Z" (find a *known* line). The strip needs only "Most used"; the directory needs both.
-- **Parent nesting** — differentiation states of one line collapse under a parent (e.g. "3T3-L1" → "adipocytes" / "preadipocytes" as two forms). This is where nesting earns its place; in the 7-item strip it would be premature.
-- Selecting a row **collapses the directory and applies the filter** on the article list.
+v2 specified a separate "All cell lines" directory side-sheet. Under master-detail this is unnecessary: **the rail *is* the directory.** Search-within and ranking live in the rail (§5.2); parent nesting (surface-form variants of one line) collapses inline as "N forms". No separate expanded view, no side-sheet, no "N more" affordance. The optional **A–Z sort** is the one directory feature worth carrying into the rail as a toggle when an entity set is large.
 
 ### 5.7 Filtered article-list state
 
@@ -242,12 +239,12 @@ Key implications:
 
 ## 11. Suggested phasing
 
-- **Phase 1** — Rename + reframe the strip with counts and ranking; add the rail; replace the prose block; light rail; single-select filter with per-paper snippets; keep the baseline list. Apply A1–A7 to Surface A.
-- **Phase 2** — Directory as a side-sheet with search/sort/nesting; multi-membership cross-links; move filter + sort state into the URL.
-- **Phase 3** — Multi-select (OR), normalization tuning (D3), and centrality-based snippet selection (D5).
+- **Phase 1 (v2.1)** — Adopt the **master-detail layout** for cell-line families: generalize `FamilyRail` → `RailItem`, drive the article feed by the selected cell line (`?cellLine=`), retire `cell-line-strip` / `cell-line-directory`, gate Spotlight on record volume. Folds in punch-list **#1** (non-evidenced → plain label) and **#3** (real distinct-pmid total). UI-only, flag-dark, no data dependency. Apply A1–A7 to Surface A.
+- **Phase 2** — §7.1 / WS-B entity resolution (canonicalize surface forms, generics blocklist, 0-count suppression, guarded 293≠293T non-merge) + the `family_entity.is_generic` column; multi-membership cross-links; URL filter state (D4).
+- **Phase 3** — Multi-select (OR), normalization tuning (D3), and **§D5 / WS-C informativeness** snippet selection + the "How it was used" / "Where it appears" label (family **and** supercategory feeds).
 
 ## 12. Open questions
 
-- Does the cell-line strip pattern generalize to other "specific entity" axes on non–cell-line method pages (datasets, models, reagents), and should the component be built generically from the start?
+- ~~Does the cell-line strip pattern generalize to other "specific entity" axes…~~ **Resolved (v2.1):** the rail is built on a generalized `RailItem`, so the same master-detail rail already serves families (supercategory), subtopics, and cell-line entities — and extends to future entity axes (datasets, models, reagents) by feeding it a different `RailItem[]`.
 - For multi-membership, is there a cap on how many entities a single paper can advertise before the cross-link list needs truncation/overflow?
 - Should `centrality_score` be exposed anywhere in the UI (e.g. to order multiple candidate sentences), or stay an internal selection signal only?
