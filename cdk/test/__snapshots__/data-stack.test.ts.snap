@@ -671,7 +671,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "52e09bf33d1409cee8eda53a73d05ca78499a09ec96524b5a7b17efe936de608.zip",
+          "S3Key": "6e4c8667a258c7c2ae12fc90967452a761b99a87023a472fd428ff30cd7939b1.zip",
         },
         "Environment": {
           "Variables": {
@@ -1030,7 +1030,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
     "DbBootstrapSeederResource": {
       "DeletionPolicy": "Delete",
       "Properties": {
-        "Revision": "3",
+        "Revision": "4",
         "ServiceToken": {
           "Fn::GetAtt": [
             "DbBootstrapSeederProviderframeworkonEvent38589041",

@@ -57,10 +57,17 @@ export type RoleName = "app-ro" | "app-rw" | "sps_migrate" | "sps_bootstrap";
  *  golden tokens to get wrong). The grantee in `TO ...` is irrelevant: it is
  *  normalized away, so host patterns like `10.20.%` vs `%` never matter. */
 export const ROLES: Record<RoleName, { dsnEnv: string; golden: string[] }> = {
-  // app reads -- SELECT only.
+  // app reads -- SELECT only. Plus the #917 audit-table SELECT: the /edit history pages read
+  // `scholars_audit.manual_edit_audit` through the read path, so `app_ro` needs SELECT there.
+  // Issued by the master seeder (db-bootstrap-seed `runAppRoAuditGrant`, which targets app_ro's
+  // real host) -- a CONSCIOUS paired edit with that grant. SELECT-only, never write on the
+  // append-only log.
   "app-ro": {
     dsnEnv: "APP_RO_DSN",
-    golden: ["GRANT SELECT ON `scholars`.* TO `app_ro`@`%`"],
+    golden: [
+      "GRANT SELECT ON `scholars`.* TO `app_ro`@`%`",
+      "GRANT SELECT ON `scholars_audit`.`manual_edit_audit` TO `app_ro`@`%`",
+    ],
   },
   // runtime writer -- DML-only on `scholars`.* (ADR-009 Phase 3 tightened this:
   // the DDL now lives only in the deploy-time `sps_migrate` role, and the seeder

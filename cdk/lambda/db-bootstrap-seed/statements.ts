@@ -112,6 +112,33 @@ export function appRwTightenStatements(granteeHost: string): string[] {
   ];
 }
 
+/** The 24/7 runtime READER (#917). Like `app_rw` it is provisioned OUT-OF-BAND (manual DBA step) and
+ *  host-scoped per env — this seeder never CREATEs it. Its standing privilege is `SELECT ON
+ *  scholars.*`; it has NOTHING on `scholars_audit` until the audit grant below, which is what the
+ *  `/edit/.../history` pages need to read the audit log through the least-privilege read path. */
+export const APP_RO_USER = "app_ro";
+
+/** The append-only audit table inside {@link AUDIT_DB} the reader needs SELECT on. */
+export const AUDIT_TABLE = "manual_edit_audit";
+
+/** Discover the host pattern(s) the out-of-band `app_ro` user actually exists at, so the grant
+ *  targets the REAL user rather than a guessed host. `app_ro` may be `@'%'` (prod) or host-scoped
+ *  `@'10.20.%'` (staging, mirroring `app_rw`); granting to the wrong host would auto-create a
+ *  phantom `app_ro@<wrong-host>` (master has CREATE USER) and silently leave history broken. Reads
+ *  `mysql.user` — master-only, which is exactly the credential this seeder runs under. */
+export function appRoHostsQuery(): string {
+  return `SELECT host FROM mysql.user WHERE user = '${APP_RO_USER}'`;
+}
+
+/** Idempotent grant of SELECT on the audit table to `app_ro` at a specific (real, discovered) host.
+ *  A re-GRANT is a no-op in MySQL/Aurora, so the custom-resource re-assert every deploy is safe.
+ *  SELECT-only — never INSERT/UPDATE/DELETE on the append-only log (the reader must not mutate it). */
+export function appRoAuditGrantStatements(granteeHost: string): string[] {
+  return [
+    `GRANT SELECT ON \`${AUDIT_DB}\`.\`${AUDIT_TABLE}\` TO '${APP_RO_USER}'@'${granteeHost}'`,
+  ];
+}
+
 /** The DSN the bootstrap ECS task consumes as BOOTSTRAP_DSN. Alphanumeric
  *  password ⇒ no URL-encoding needed. No database segment: the task connects at
  *  server level to CREATE the audit database. */

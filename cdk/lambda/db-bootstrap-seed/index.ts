@@ -21,7 +21,13 @@ import {
 } from "@aws-sdk/client-secrets-manager";
 import { createConnection } from "mariadb";
 
-import { runAppRwTighten, runMigrateSeed, runSeed, type RequestType } from "./seed.js";
+import {
+  runAppRoAuditGrant,
+  runAppRwTighten,
+  runMigrateSeed,
+  runSeed,
+  type RequestType,
+} from "./seed.js";
 
 interface OnEventRequest {
   RequestType: RequestType;
@@ -127,6 +133,18 @@ export async function onEvent(event: OnEventRequest): Promise<OnEventResponse> {
         await conn.query(sql);
       },
       appRwGranteeHost,
+      log: (eventName, extra) =>
+        console.log(JSON.stringify({ event: eventName, ...extra })),
+    });
+    // #917: grant the read-only `app_ro` role SELECT on the audit table so the /edit history pages
+    // can read the audit log. SAME master connection; additive (read-only); discovers app_ro's real
+    // host(s) from mysql.user. No new master use beyond what this Lambda already holds.
+    await runAppRoAuditGrant({
+      requestType: event.RequestType,
+      query: async (sql) => {
+        await conn.query(sql);
+      },
+      queryRows: async (sql) => (await conn.query(sql)) as Array<{ host?: unknown }>,
       log: (eventName, extra) =>
         console.log(JSON.stringify({ event: eventName, ...extra })),
     });

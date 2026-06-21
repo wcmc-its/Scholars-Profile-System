@@ -135,16 +135,27 @@ describe("diffGrants / assertGrantsEqual", () => {
     expect(() => assertGrantsEqual("app-rw", appRwGolden, live)).toThrow(/EXCESS/);
   });
 
-  it("does not confuse `scholars` with the `scholars_audit` prefix", () => {
-    // app-ro golden is SELECT on `scholars`.*; a SELECT on `scholars_audit`.*
-    // must register as excess, not silently match the `scholars` golden token.
+  it("matches the app-ro golden exactly (scholars.* + the audit-table SELECT, #917)", () => {
+    const live = [
+      "GRANT USAGE ON *.* TO `app_ro`@`%`",
+      "GRANT SELECT ON `scholars`.* TO `app_ro`@`%`",
+      "GRANT SELECT ON `scholars_audit`.`manual_edit_audit` TO `app_ro`@`10.20.%`",
+    ];
+    expect(diffGrants(ROLES["app-ro"].golden, live)).toEqual({ excess: [], missing: [] });
+    expect(() => assertGrantsEqual("app-ro", ROLES["app-ro"].golden, live)).not.toThrow();
+  });
+
+  it("does not confuse the audit TABLE grant with a whole-`scholars_audit` wildcard (#917)", () => {
+    // app-ro is granted SELECT on the audit TABLE only; a SELECT on the whole
+    // `scholars_audit`.* is over-broad and must register as excess (and the
+    // specific table grant as missing), not silently match the table token.
     const live = [
       "GRANT SELECT ON `scholars`.* TO `app_ro`@`%`",
       "GRANT SELECT ON `scholars_audit`.* TO `app_ro`@`%`",
     ];
     expect(diffGrants(ROLES["app-ro"].golden, live)).toEqual({
       excess: ["scholars_audit.* SELECT"],
-      missing: [],
+      missing: ["scholars_audit.manual_edit_audit SELECT"],
     });
   });
 
@@ -216,6 +227,7 @@ describe("verifyRole (grantee-side SHOW GRANTS FOR CURRENT_USER)", () => {
     const conn = fakeConn([
       "GRANT USAGE ON *.* TO `app_ro`@`%`",
       "GRANT SELECT ON `scholars`.* TO `app_ro`@`%`",
+      "GRANT SELECT ON `scholars_audit`.`manual_edit_audit` TO `app_ro`@`%`",
     ]);
     await expect(verifyRole(conn, "app-ro")).resolves.toBeUndefined();
     expect(conn.calls).toEqual(["SHOW GRANTS FOR CURRENT_USER()"]);

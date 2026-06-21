@@ -243,6 +243,22 @@ ALTER TABLE `scholars_audit`.`manual_edit_audit`
 --   GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO '<app_user>'@'<host>';
 --   -- and explicitly NOTHING else: no UPDATE, no DELETE, no DROP, no ALTER.
 --
+-- READER (#917). The /edit history pages read this table through the read-only `app_ro` role,
+-- which therefore needs SELECT here (it has none otherwise -- least-privilege; the writer has
+-- INSERT only). That grant is NOT run by this script: it is issued by the master seeder custom
+-- resource (`cdk/lambda/db-bootstrap-seed` runAppRoAuditGrant), which discovers app_ro's real
+-- host. The equivalent manual statement, for reference, is:
+--
+--   GRANT SELECT ON `scholars_audit`.`manual_edit_audit` TO 'app_ro'@'<host>';
+--   -- SELECT-only: never INSERT/UPDATE/DELETE on the append-only log.
+--
+-- ROLLOUT ORDER (#917 — same paired-edit coupling as ADR-009 Phase 3). The verify-grants golden
+-- (scripts/verify-db-grants.ts ROLES['app-ro']) now REQUIRES this SELECT, and verify-grants runs
+-- fails-closed in the deploy.yml image-roll pipeline. So per env, run `cdk deploy Sps-Data-<env>`
+-- (fires the Revision-bumped seeder → this grant lands) BEFORE the image-roll deploy that carries
+-- the updated golden — otherwise verify-grants reports MISSING and the service is NOT rolled
+-- (recoverable: deploy DataStack, then re-run). Staging deploy.yml auto-runs on push-to-master.
+--
 -- Verify the grant is INSERT-only (#102 acceptance criterion):
 --
 --   SHOW GRANTS FOR '<app_user>'@'<host>';

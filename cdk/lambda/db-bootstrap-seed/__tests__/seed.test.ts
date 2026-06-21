@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  runAppRoAuditGrant,
   runAppRwTighten,
   runMigrateSeed,
   runSeed,
+  type AppRoAuditGrantDeps,
   type AppRwTightenDeps,
   type MigrateSeedDeps,
   type SeedDeps,
@@ -233,5 +235,98 @@ describe("runAppRwTighten (ADR-009 Phase 3)", () => {
       }),
     });
     await expect(runAppRwTighten(d)).rejects.toThrow(/Access denied/);
+  });
+});
+
+function auditGrantDeps(
+  overrides: Partial<AppRoAuditGrantDeps> = {},
+  hostRows: Array<{ host?: unknown }> = [{ host: "10.20.%" }],
+): AppRoAuditGrantDeps & {
+  queries: string[];
+  logs: Array<{ event: string; extra?: Record<string, unknown> }>;
+} {
+  const queries: string[] = [];
+  const logs: Array<{ event: string; extra?: Record<string, unknown> }> = [];
+  return {
+    requestType: "Create",
+    query: vi.fn(async (sql: string) => {
+      queries.push(sql);
+    }),
+    queryRows: vi.fn(async () => hostRows),
+    log: (event, extra) => logs.push({ event, extra }),
+    queries,
+    logs,
+    ...overrides,
+  };
+}
+
+describe("runAppRoAuditGrant (#917)", () => {
+  it("Create: discovers app_ro's host and grants SELECT on the audit table there", async () => {
+    const d = auditGrantDeps();
+    await runAppRoAuditGrant(d);
+    expect(d.queryRows).toHaveBeenCalledWith("SELECT host FROM mysql.user WHERE user = 'app_ro'");
+    expect(d.queries).toEqual([
+      "GRANT SELECT ON `scholars_audit`.`manual_edit_audit` TO 'app_ro'@'10.20.%'",
+    ]);
+    expect(d.logs[0]).toMatchObject({
+      event: "db_app_ro_audit_grant_ok",
+      extra: { hosts: ["10.20.%"] },
+    });
+  });
+
+  it("grants at EVERY host app_ro exists at (e.g. both `%` and a scoped host)", async () => {
+    const d = auditGrantDeps({}, [{ host: "%" }, { host: "10.20.%" }]);
+    await runAppRoAuditGrant(d);
+    expect(d.queries).toEqual([
+      "GRANT SELECT ON `scholars_audit`.`manual_edit_audit` TO 'app_ro'@'%'",
+      "GRANT SELECT ON `scholars_audit`.`manual_edit_audit` TO 'app_ro'@'10.20.%'",
+    ]);
+  });
+
+  it("skips with a warning (no grant) when app_ro does not exist yet — additive, never fails the deploy", async () => {
+    const d = auditGrantDeps({}, []);
+    await runAppRoAuditGrant(d);
+    expect(d.queries).toEqual([]);
+    expect(d.logs[0]).toMatchObject({ event: "db_app_ro_audit_grant_skipped_no_user" });
+  });
+
+  it("ignores malformed host rows (non-string / empty) defensively", async () => {
+    const d = auditGrantDeps({}, [{ host: 5 }, { host: "" }, { host: "%" }]);
+    await runAppRoAuditGrant(d);
+    expect(d.queries).toEqual([
+      "GRANT SELECT ON `scholars_audit`.`manual_edit_audit` TO 'app_ro'@'%'",
+    ]);
+  });
+
+  it("Delete: NO-OP — never reads mysql.user, never grants, never revokes a persisted grant", async () => {
+    const d = auditGrantDeps({ requestType: "Delete" });
+    await runAppRoAuditGrant(d);
+    expect(d.queryRows).not.toHaveBeenCalled();
+    expect(d.queries).toEqual([]);
+    expect(d.logs[0]).toMatchObject({ event: "db_app_ro_audit_grant_skipped_on_delete" });
+  });
+
+  it("fails-closed: a SQL error on the grant propagates", async () => {
+    const d = auditGrantDeps({
+      query: vi.fn(async () => {
+        throw new Error("Access denied for GRANT");
+      }),
+    });
+    await expect(runAppRoAuditGrant(d)).rejects.toThrow(/Access denied/);
+  });
+
+  it("tolerates ER_NO_SUCH_TABLE (1146): warn-skips so a fresh/DR deploy can't wedge", async () => {
+    // app_ro exists but `manual_edit_audit` isn't created yet (sps-db-bootstrap runs in a separate
+    // deploy stage) — the table-level GRANT 1146s; swallow it (self-heals next deploy).
+    const d = auditGrantDeps({
+      query: vi.fn(async () => {
+        throw Object.assign(new Error("Table 'scholars_audit.manual_edit_audit' doesn't exist"), {
+          errno: 1146,
+          code: "ER_NO_SUCH_TABLE",
+        });
+      }),
+    });
+    await expect(runAppRoAuditGrant(d)).resolves.toBeUndefined();
+    expect(d.logs.at(-1)).toMatchObject({ event: "db_app_ro_audit_grant_skipped_no_table" });
   });
 });

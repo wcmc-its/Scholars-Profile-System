@@ -352,7 +352,8 @@ export class DataStack extends Stack {
         // the seeded grant set (the handler is idempotent, so re-runs are safe).
         // "2": ADR-009 Phase 1 added the sps_migrate role to the seeder.
         // "3": ADR-009 Phase 3 revokes app_rw's `scholars`.* DDL (DML-only).
-        Revision: "3",
+        // "4": #917 grants app_ro SELECT on scholars_audit.manual_edit_audit (/edit history reads).
+        Revision: "4",
       },
     });
 
