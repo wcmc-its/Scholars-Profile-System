@@ -621,7 +621,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_DEVELOPMENT_GROUP_CN",
-                "Value": "",
+                "Value": "ITS:Library:Scholars/development-role",
               },
               {
                 "Name": "SCHOLARS_DEVELOPMENT_ALLOWLIST",
@@ -3856,11 +3856,11 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "DEVELOPMENT_ENABLED",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_DEVELOPMENT_GROUP_CN",
-                "Value": "",
+                "Value": "ITS:Library:Scholars/development-role",
               },
               {
                 "Name": "SCHOLARS_DEVELOPMENT_ALLOWLIST",

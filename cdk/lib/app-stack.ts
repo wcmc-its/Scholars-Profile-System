@@ -1645,26 +1645,25 @@ export class AppStack extends Stack {
         SCHOLARS_COMMS_STEWARD_GROUP_CN: "",
         SCHOLARS_COMMS_STEWARD_ALLOWLIST: env === "staging" ? "dwd2001" : "",
         // `development` role (GrantRecs Phase 4 — the /edit/find-researchers
-        // reverse-matcher admin surface). Mirrors the comms_steward trio and
-        // ships DARK in BOTH envs: the page + its data route are reachable by
-        // superusers immediately (the route admits `isSuperuser || isDeveloper`),
-        // and the dev role itself is dormant until enabled per env.
+        // reverse-matcher admin surface). The page + its data route admit
+        // `isSuperuser || isDeveloper`, so superusers always retain access; the
+        // dev role adds a non-superuser operator tier.
         //   DEVELOPMENT_ENABLED -- master kill switch. While not "on",
-        //     isDeveloper() short-circuits to false BEFORE any directory work,
-        //     so no non-superuser is admitted regardless of the allowlist below.
+        //     isDeveloper() short-circuits to false BEFORE any directory work.
+        //     ENABLED for STAGING only; prod stays off until validated there
+        //     (flip to `env === "staging" || env === "prod"` via a reviewer-gated
+        //     `cdk deploy Sps-App-prod`).
         //   SCHOLARS_DEVELOPMENT_GROUP_CN -- the ED group whose `member` list
-        //     confers the role (e.g. ITS:Library:Scholars/development-role). Left
-        //     UNSET like the superuser/steward group cns: the SPS VPC has no route
-        //     to the WCM directory yet, so the live group search fails closed.
-        //   SCHOLARS_DEVELOPMENT_ALLOWLIST -- interim comma-separated CWID
-        //     allowlist that confers the role WITHOUT LDAP (mirrors
-        //     SCHOLARS_SUPERUSER_CWIDS). The ONLY thing that confers the role to a
-        //     non-superuser in a deployed env today. >>> To light the role up per
-        //     env: flip DEVELOPMENT_ENABLED to "on" AND set this allowlist (or wire
-        //     the group cn once #443 LDAPS routing lands), via a manual
-        //     reviewer-gated `cdk deploy Sps-App-<env>`.
-        DEVELOPMENT_ENABLED: "off",
-        SCHOLARS_DEVELOPMENT_GROUP_CN: "",
+        //     confers the role: ITS:Library:Scholars/development-role (created
+        //     under ou=application security,ou=Groups; the subtree search from
+        //     ou=Groups reaches it). Set ACTIVE -- in-VPC LDAPS to WCM is
+        //     reachable, so the live group search resolves members. (The
+        //     superuser/comms-steward cns are still empty pending their own
+        //     cutover; this role uses the group as its live source of truth.)
+        //   SCHOLARS_DEVELOPMENT_ALLOWLIST -- interim no-LDAP allowlist; left
+        //     EMPTY since the group cn above is the live membership source.
+        DEVELOPMENT_ENABLED: env === "staging" ? "on" : "off",
+        SCHOLARS_DEVELOPMENT_GROUP_CN: "ITS:Library:Scholars/development-role",
         SCHOLARS_DEVELOPMENT_ALLOWLIST: "",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
         // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
