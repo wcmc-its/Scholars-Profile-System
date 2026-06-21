@@ -88,6 +88,7 @@ import {
   resolvePeopleMethodContextBoost,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
+  resolveSearchPeopleConceptHint,
   resolveSearchResultEvidence,
   type PubRecencyMode,
   type Scope,
@@ -949,6 +950,11 @@ export async function searchPeople(opts: {
   // emits the single typed `evidence` object per hit and bumps the overview
   // highlight fragment_size for the Case-D sentence trim.
   const resultEvidence = resolveSearchResultEvidence();
+  // People-tab "concepts" hint — when on, the evidence TAIL surfaces the
+  // scholar's top MeSH descriptors (`topMeshTerms`) instead of the sparse
+  // self-reported areas. Only relevant under `resultEvidence` (the evidence
+  // object is only built then). Flag-OFF ⇒ today's `areas` tail (no-op).
+  const conceptHint = resolveSearchPeopleConceptHint();
   const matchAwareSnippet = resolvePeopleMatchAwareSnippet() || resultEvidence;
   const matchAwareContext = matchAwareSnippet ? opts.matchAwareContext : undefined;
 
@@ -1872,6 +1878,10 @@ export async function searchPeople(opts: {
       // humanized-areas fallback can read the scholar's areas without a highlight
       // round-trip. Off ⇒ the field is not requested (today's `_source` shape).
       ...(matchAwareSnippet ? ["areasOfInterest"] : []),
+      // People-tab "concepts" hint — the scholar's top MeSH descriptor labels,
+      // requested only when SEARCH_PEOPLE_CONCEPT_HINT is on so the off path
+      // keeps today's `_source` shape (no extra field).
+      ...(conceptHint ? ["topMeshTerms"] : []),
     ],
     // OpenSearch's default cap of 10000 short-circuits the total counter
     // and would make the subhead read "10,000 publications" even when
@@ -1982,6 +1992,10 @@ export async function searchPeople(opts: {
       // is on (added to `_source` above); drives the topic-reason match and the
       // humanized-areas fallback.
       areasOfInterest?: string;
+      // People-tab "concepts" hint — the scholar's top MeSH descriptor labels
+      // by publication frequency. Present only when SEARCH_PEOPLE_CONCEPT_HINT
+      // is on (added to `_source` above); drives the `concepts` evidence tail.
+      topMeshTerms?: string[];
     };
     highlight?: Record<string, string[]>;
   };
@@ -2287,6 +2301,7 @@ export async function searchPeople(opts: {
     pubCount: number,
     hasProvenance: boolean,
     hl: Record<string, string[]> | undefined,
+    topMeshTerms: string[] | undefined,
   ): ResultEvidence => {
     const m = methodReasonByCwid.get(cwid);
     let topic: { label: string; id: string } | undefined;
@@ -2333,6 +2348,18 @@ export async function searchPeople(opts: {
       areas = { labels: labels.slice(0, AREAS_CAP), total: labels.length };
     }
 
+    // People-tab "concepts" hint — when on, surface the scholar's top MeSH
+    // descriptors (already freq-sorted in the index doc) instead of the sparse
+    // self-reported areas: build `concepts` (capped to AREAS_CAP) and NULL out
+    // `areas` so the tail (step 8a > 8b) picks concepts. Off ⇒ `concepts` stays
+    // null and `areas` is left untouched, so the tail is byte-identical to today.
+    let concepts: { labels: string[]; total: number } | null = null;
+    if (conceptHint) {
+      const terms = topMeshTerms ?? [];
+      if (terms.length > 0) concepts = { labels: terms.slice(0, AREAS_CAP), total: terms.length };
+      areas = null;
+    }
+
     return selectEvidence({
       nameHighlight: hl?.preferredName?.[0],
       bioHighlight: hl?.overview?.[0],
@@ -2343,6 +2370,7 @@ export async function searchPeople(opts: {
       // (a subset-only bio highlight loses to publication-mention evidence).
       query: contentQuery,
       areas,
+      concepts,
     });
   };
 
@@ -2412,6 +2440,7 @@ export async function searchPeople(opts: {
                 h._source.publicationCount,
                 prov != null,
                 hl,
+                h._source.topMeshTerms,
               ),
             }
           : {}),

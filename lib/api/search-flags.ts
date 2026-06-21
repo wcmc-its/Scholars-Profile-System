@@ -692,6 +692,26 @@ export function resolveSearchResultEvidence(): boolean {
 }
 
 /**
+ * People-tab "concepts" hint — replace the often-sparse self-reported
+ * research-areas hint (`areasOfInterest`) on the per-scholar row's identity line
+ * with the scholar's TOP MeSH descriptor labels (`topMeshTerms`, denser because
+ * it is derived from accepted/visible publications). Only the no-match TAIL of
+ * the evidence model changes (the `areas` slot becomes a `concepts` slot); the
+ * query-match kinds (name/method/topic/publications/selfDescription/affiliation)
+ * are untouched.
+ *
+ * App-only, NO reindex of the QUERY path (the `topMeshTerms` field is added to
+ * the people index doc, so a reindex is required to populate it, but the query
+ * derive is query-time). Default OFF (`SEARCH_PEOPLE_CONCEPT_HINT=on` enables) —
+ * an `=== "on"` opt-in gate. STAGING-FIRST. Flag-OFF ⇒ `searchPeople` keeps
+ * today's `areas` population and never sets `concepts`, so the evidence output
+ * is byte-identical to the `SEARCH_RESULT_EVIDENCE` path on master.
+ */
+export function resolveSearchPeopleConceptHint(): boolean {
+  return process.env.SEARCH_PEOPLE_CONCEPT_HINT === "on";
+}
+
+/**
  * Issue #1026 — surface soft-deleted active doctoral-student co-authors as
  * NON-LINKED author chips (name + headshot only) on publication chip surfaces
  * (search results, topic feeds, methods pages, home spotlight). Without this,
