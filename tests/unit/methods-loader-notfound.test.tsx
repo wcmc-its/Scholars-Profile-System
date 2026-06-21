@@ -39,6 +39,8 @@ const {
   mockGetFamilyScholars,
   mockGetDistinctScholarCountForFamily,
   mockGetRepresentativePubsForFamily,
+  mockGetDistinctPmidCountForFamily,
+  mockSpotlight,
   mockIsScholarListExportEnabled,
   mockSupercategoryLabel,
   mockNotFound,
@@ -51,6 +53,8 @@ const {
   mockGetFamilyScholars: vi.fn(),
   mockGetDistinctScholarCountForFamily: vi.fn(),
   mockGetRepresentativePubsForFamily: vi.fn(),
+  mockGetDistinctPmidCountForFamily: vi.fn(),
+  mockSpotlight: vi.fn(() => null),
   mockIsScholarListExportEnabled: vi.fn(),
   mockSupercategoryLabel: vi.fn(),
   mockNotFound: vi.fn(() => {
@@ -74,11 +78,11 @@ vi.mock("@/lib/api/methods", () => ({
   getDistinctScholarCountForFamily: (...a: unknown[]) => mockGetDistinctScholarCountForFamily(...a),
   getRepresentativePubsForFamily: (...a: unknown[]) => mockGetRepresentativePubsForFamily(...a),
   getFamilyToolUsage: () => Promise.resolve([]),
-  // #1166 — the FamilyPage now also fetches the cell-line entity layer (flag-gated,
-  // [] when off). Stub them so the loader's Promise.all resolves in the test.
+  // #1166 — the FamilyPage also fetches the cell-line entity layer + the family's
+  // distinct-pmid total (flag-gated; []/0 when off). Stub them so the loader's
+  // Promise.all resolves in the test.
   getFamilyCellLineEntities: () => Promise.resolve([]),
-  getFamilyCellLineRailPreviews: () => Promise.resolve({}),
-  groupCellLineDirectory: () => [],
+  getDistinctPmidCountForFamily: (...a: unknown[]) => mockGetDistinctPmidCountForFamily(...a),
 }));
 
 vi.mock("@/lib/export/scholar-export-flags", () => ({
@@ -97,11 +101,12 @@ vi.mock("@/components/scholar-export/scholar-list-export-button", () => ({
   ScholarListExportButton: () => null,
 }));
 vi.mock("@/components/topic/top-scholars-chip-row", () => ({ TopScholarsChipRow: () => null }));
-vi.mock("@/components/shared/spotlight", () => ({ Spotlight: () => null }));
+vi.mock("@/components/shared/spotlight", () => ({ Spotlight: mockSpotlight }));
 vi.mock("@/components/method/family-publication-layout", () => ({
   SupercategoryFamilyLayout: () => null,
   FamilyPublicationLayout: () => null,
 }));
+vi.mock("@/components/method/cell-line-rail", () => ({ CellLineRail: () => null }));
 vi.mock("@/components/ui/breadcrumb", () => ({
   Breadcrumb: () => null,
   BreadcrumbItem: () => null,
@@ -174,6 +179,7 @@ beforeEach(() => {
   mockGetFamilyScholars.mockResolvedValue(null);
   mockGetDistinctScholarCountForFamily.mockResolvedValue(0);
   mockGetRepresentativePubsForFamily.mockResolvedValue([]);
+  mockGetDistinctPmidCountForFamily.mockResolvedValue(0);
 });
 
 describe("SupercategoryPage loader — notFound() gating (§9 E1/E4)", () => {
@@ -251,6 +257,57 @@ describe("FamilyPage loader — notFound() gating (§9 E1/E2/E3)", () => {
     expect(mockNotFound).not.toHaveBeenCalled();
     expect(result.type).toBe("main");
     expect(mockGetFamily).toHaveBeenCalledWith("genomics-sequencing", "crispr-gene-editing-fam_1");
+  });
+});
+
+describe("FamilyPage — Spotlight volume gate (spec v2.1 §5.1)", () => {
+  // Recursively locate an element of `type` in a rendered element tree. The page
+  // is an async server component; `{cond && <Spotlight/>}` yields `false` (no
+  // element) when suppressed, so presence/absence is exactly what the gate asserts.
+  const findElement = (node: unknown, type: unknown): unknown => {
+    if (!node || typeof node !== "object") return null;
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const found = findElement(child, type);
+        if (found) return found;
+      }
+      return null;
+    }
+    const el = node as { type?: unknown; props?: { children?: unknown } };
+    if (el.type === type) return el;
+    return el.props?.children ? findElement(el.props.children, type) : null;
+  };
+
+  const pub = (i: number) => ({
+    pmid: `pmid_${i}`,
+    title: `Representative paper ${i}`,
+    journal: "J. Test",
+    year: 2024,
+    pubmedUrl: `https://pubmed.ncbi.nlm.nih.gov/pmid_${i}`,
+    doi: null,
+    authors: [],
+  });
+  const params = () => famParams("genomics-sequencing", "crispr-gene-editing-fam_1");
+
+  it("renders Spotlight when ≥3 cards AND distinct-pmid total ≥ 12", async () => {
+    mockGetRepresentativePubsForFamily.mockResolvedValue([pub(1), pub(2), pub(3)]);
+    mockGetDistinctPmidCountForFamily.mockResolvedValue(12);
+    const result = asElement(await FamilyPage({ params: params() }));
+    expect(findElement(result, mockSpotlight)).not.toBeNull();
+  });
+
+  it("suppresses Spotlight for a sparse family (distinct-pmid total < 12)", async () => {
+    mockGetRepresentativePubsForFamily.mockResolvedValue([pub(1), pub(2), pub(3)]);
+    mockGetDistinctPmidCountForFamily.mockResolvedValue(11);
+    const result = asElement(await FamilyPage({ params: params() }));
+    expect(findElement(result, mockSpotlight)).toBeNull();
+  });
+
+  it("suppresses Spotlight when fewer than 3 representative cards", async () => {
+    mockGetRepresentativePubsForFamily.mockResolvedValue([pub(1), pub(2)]);
+    mockGetDistinctPmidCountForFamily.mockResolvedValue(40);
+    const result = asElement(await FamilyPage({ params: params() }));
+    expect(findElement(result, mockSpotlight)).toBeNull();
   });
 });
 

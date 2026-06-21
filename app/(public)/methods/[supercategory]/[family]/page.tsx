@@ -9,15 +9,15 @@ import {
   getRepresentativePubsForFamily,
   getFamilyToolUsage,
   getFamilyCellLineEntities,
-  getFamilyCellLineRailPreviews,
-  groupCellLineDirectory,
+  getDistinctPmidCountForFamily,
 } from "@/lib/api/methods";
 import { supercategoryLabel } from "@/lib/methods/supercategory-labels";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
 import { Spotlight } from "@/components/shared/spotlight";
 import { FamilyPublicationLayout } from "@/components/method/family-publication-layout";
-import { CellLineDiscovery } from "@/components/method/cell-line-discovery";
+import { CellLineRail } from "@/components/method/cell-line-rail";
+import { ScrollFade } from "@/components/ui/scroll-fade";
 import type { SpotlightData } from "@/lib/api/spotlight";
 import {
   Breadcrumb,
@@ -70,28 +70,36 @@ export default async function FamilyPage({
   const resolved = await getFamily(supercategory, family);
   if (!resolved) notFound();
 
-  const [topScholars, scholarCount, representativePubs, toolUsage, cellLineEntities, railPreviews] =
-    await Promise.all([
-      getFamilyScholars(resolved.supercategory, resolved.familyLabel).catch(() => null),
-      getDistinctScholarCountForFamily(resolved.supercategory, resolved.familyLabel).catch(
-        () => 0,
-      ),
-      getRepresentativePubsForFamily(
-        resolved.supercategory,
-        resolved.familyLabel,
-        SPOTLIGHT_CARDS,
-      ).catch(() => []),
-      // #1119 — "How researchers use these tools" strip ([] when the flag is off).
-      getFamilyToolUsage(resolved.supercategory, resolved.familyLabel).catch(() => []),
-      // #1166 — specific cell lines + rail previews ([]/{} when the flag is off).
-      getFamilyCellLineEntities(resolved.supercategory, resolved.familyLabel).catch(() => []),
-      getFamilyCellLineRailPreviews(resolved.supercategory, resolved.familyLabel).catch(() => ({})),
-    ]);
+  const [
+    topScholars,
+    scholarCount,
+    representativePubs,
+    toolUsage,
+    cellLineEntities,
+    distinctPmidTotal,
+  ] = await Promise.all([
+    getFamilyScholars(resolved.supercategory, resolved.familyLabel).catch(() => null),
+    getDistinctScholarCountForFamily(resolved.supercategory, resolved.familyLabel).catch(() => 0),
+    getRepresentativePubsForFamily(
+      resolved.supercategory,
+      resolved.familyLabel,
+      SPOTLIGHT_CARDS,
+    ).catch(() => []),
+    // #1119 — "How researchers use these tools" strip ([] when the flag is off).
+    getFamilyToolUsage(resolved.supercategory, resolved.familyLabel).catch(() => []),
+    // #1166 — the family's specific cell lines ([] when the flag is off).
+    getFamilyCellLineEntities(resolved.supercategory, resolved.familyLabel).catch(() => []),
+    // #1166 punch #3 — the real distinct research-article total for the family
+    // (the feed's `totalResearchOnly` denominator), used for the rail copy + the
+    // Spotlight volume gate. 0 when the lens is off / family gated / no pmids.
+    getDistinctPmidCountForFamily(resolved.supercategory, resolved.familyLabel).catch(() => 0),
+  ]);
 
-  // #1166 — when the family resolves to specific cell lines, the ranked strip +
-  // directory (Surface B §5.2/§5.6) REPLACE the #1119 tool-usage prose (§5.1 IA).
+  // #1166 — when the family resolves to specific cell lines, the master-detail
+  // cell-line rail (Surface B §5.1) REPLACES the #1119 tool-usage prose: the rail
+  // sits in the left column of the publications section, driving the `?cellLine=`
+  // feed filter. When there are no cell lines, the #1119 prose renders instead.
   const hasCellLines = cellLineEntities.length > 0;
-  const directoryNodes = hasCellLines ? groupCellLineDirectory(cellLineEntities) : [];
   const cellLineLabels = Object.fromEntries(cellLineEntities.map((e) => [e.entityId, e.label]));
 
   const scLabel = supercategoryLabel(resolved.supercategory);
@@ -218,50 +226,69 @@ export default async function FamilyPage({
         )}
       </section>
 
-      {/* #1166 Surface B — the ranked "Specific cell lines used" strip + directory,
-          which REPLACE the #1119 tool-usage prose (§5.1 IA) when the family resolves
-          to specific cell-line entities. Both off ⇒ neither renders (byte-identical
-          to pre-#1119). Suspense: the discovery block reads `?cellLine=`/`?dir=`. */}
-      {hasCellLines ? (
-        <Suspense fallback={null}>
-          <CellLineDiscovery
-            entities={cellLineEntities}
-            railPreviews={railPreviews}
-            directoryNodes={directoryNodes}
-            familyLabel={resolved.familyLabel}
-            totalPapers={0}
-          />
-        </Suspense>
-      ) : (
-        toolUsage.length > 0 && (
-          <section className="mb-10" aria-labelledby="tool-usage-heading">
-            <h2
-              id="tool-usage-heading"
-              className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]"
-            >
-              How researchers use these tools
-            </h2>
-            <ul className="mt-3 grid max-w-prose gap-3">
-              {toolUsage.map((u) => (
-                <li key={u.tool} className="text-sm leading-relaxed">
-                  <span className="font-medium">{u.tool}</span>
-                  <span className="text-muted-foreground"> — {u.context}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )
+      {/* #1119 — "How researchers use these tools" prose, shown only when the family
+          does NOT resolve to specific cell lines. When it does (#1166 Surface B), the
+          cell-line rail in the publications section below takes the IA slot instead. */}
+      {!hasCellLines && toolUsage.length > 0 && (
+        <section className="mb-10" aria-labelledby="tool-usage-heading">
+          <h2
+            id="tool-usage-heading"
+            className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]"
+          >
+            How researchers use these tools
+          </h2>
+          <ul className="mt-3 grid max-w-prose gap-3">
+            {toolUsage.map((u) => (
+              <li key={u.tool} className="text-sm leading-relaxed">
+                <span className="font-medium">{u.tool}</span>
+                <span className="text-muted-foreground"> — {u.context}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
-      <Spotlight data={spotlightData} />
+      {/* Spotlight (§5.A) — render only when the family is substantial enough: a real
+          distinct-pmid total ≥ 12 AND at least 3 representative cards to fill the
+          grid. Below that threshold the surface reads as sparse, so it's suppressed. */}
+      {spotlightData && spotlightData.cards.length >= 3 && distinctPmidTotal >= 12 && (
+        <Spotlight data={spotlightData} />
+      )}
 
       <section id="publications" className="scroll-mt-20">
-        <FamilyPublicationLayout
-          supercategorySlug={resolved.supercategorySlug}
-          familySegment={resolved.familySlug}
-          familyLabel={resolved.familyLabel}
-          cellLineLabels={cellLineLabels}
-        />
+        {hasCellLines ? (
+          // #1166 Surface B — master-detail: the cell-line rail (left) drives the
+          // shared `?cellLine=` filter the feed (right) reads. Mirrors the
+          // supercategory layout's sticky-rail + cornell-red divider for parity.
+          <div className="mt-16">
+            <hr className="mb-10 border-border" />
+            <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
+              <div className="lg:w-[280px] lg:shrink-0 lg:self-start lg:sticky lg:top-[84px]">
+                <Suspense fallback={null}>
+                  <ScrollFade viewportClassName="lg:max-h-[calc(100vh-84px)] lg:overflow-y-auto">
+                    <CellLineRail entities={cellLineEntities} />
+                  </ScrollFade>
+                </Suspense>
+              </div>
+              <div className="min-w-0 flex-1 lg:border-l-[3px] lg:border-[var(--color-primary-cornell-red)] lg:pl-6">
+                <FamilyPublicationLayout
+                  supercategorySlug={resolved.supercategorySlug}
+                  familySegment={resolved.familySlug}
+                  familyLabel={resolved.familyLabel}
+                  cellLineLabels={cellLineLabels}
+                  embedded
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <FamilyPublicationLayout
+            supercategorySlug={resolved.supercategorySlug}
+            familySegment={resolved.familySlug}
+            familyLabel={resolved.familyLabel}
+            cellLineLabels={cellLineLabels}
+          />
+        )}
       </section>
     </main>
   );

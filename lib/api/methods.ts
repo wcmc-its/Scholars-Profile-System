@@ -835,6 +835,29 @@ export async function getDistinctScholarCountForFamily(
   return rows.length;
 }
 
+/**
+ * Distinct research-article pmid count for a family — the same value the feed shows
+ * as its `totalResearchOnly` denominator, computed at page-render time (the feed's
+ * loader computes it per fetch; this is the cheap render-time mirror). It is the
+ * DISTINCT count of the family's gated, #356-dark-filtered pmid union restricted to
+ * non-excluded publication types — NOT a sum of per-entity usage counts (those
+ * double-count across entities/forms). Drives the rail's "across N papers" copy and
+ * the Spotlight volume gate. Returns 0 when the lens is off, the family is gated, or
+ * `ScholarFamily.pmids` is unpopulated.
+ */
+export async function getDistinctPmidCountForFamily(
+  supercategory: string,
+  familyLabel: string,
+): Promise<number> {
+  if (!isMethodsLensEnabled()) return 0;
+  const gate = await loadFamilyOverlayGate();
+  const pmids = await collectFamilyPmids(supercategory, familyLabel, gate);
+  if (pmids.length === 0) return 0;
+  return prisma.publication.count({
+    where: { pmid: { in: pmids }, publicationType: { notIn: HARD_EXCLUDE_TYPES } },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Top-scholar chip rows (§3.1 / §5) — ranked by per-scholar pmidCount within
 // the FT-faculty PI carve. There is NO author_position grain at family level, so
