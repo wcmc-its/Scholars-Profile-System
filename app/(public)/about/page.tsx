@@ -317,7 +317,11 @@ export default function DocsPage() {
           </Link>
           ). A paper you co-authored with a full-time WCM faculty member is scored and appears with
           its Impact; a paper with no full-time WCM faculty author is outside the scope and is not
-          scored. That is scope, not a quality judgment.
+          scored. That is scope, a deliberate cost-and-scale choice, not a quality judgment (see{" "}
+          <Link href="#impact" className={LINK}>
+            why the scope stops there
+          </Link>
+          ).
         </p>
         <p>
           To correct your academic appointment, use Request a change in your self-edit interface.
@@ -1014,6 +1018,18 @@ export default function DocsPage() {
             Spotlight
           </Link>
           ).
+        </p>
+        <p>
+          <strong>Why the scope stops there.</strong> Enriching a publication is not free: ReciterAI
+          derives its plain-language synopsis, classifies it into research areas, extracts its
+          methods, and scores it, each step a chain of language-model passes, so the compute and the
+          pipeline overhead grow with every paper in the corpus. To keep that cost manageable for
+          now, ReciterAI runs this full enrichment only on publications with at least one full-time
+          WCM faculty author. It is purely a cost-and-scale measure, not a statement about whose work
+          counts: voluntary and affiliated faculty, postdocs, and other appointees are fully part of
+          Scholars, with their own profiles and a place in search and the Browse directory.
+          Depending on feedback, we may later widen the set of publications that receive the full
+          treatment.
         </p>
         <p>
           <strong>The same worked example.</strong> Take the 2024 single-cell paper we traced under{" "}
