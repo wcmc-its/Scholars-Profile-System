@@ -602,6 +602,11 @@ function renderPanel(
         <BiosketchTool
           entityId={cwid}
           canSeeCost={isSuperuserLike(mode)}
+          // The "View prompt & payload" debug affordance is STRICTLY superuser (the raw FACTS
+          // projection is internal data), narrower than canSeeCost — which also includes a
+          // comms-steward. `isSuperuser` here is the self-mode superuser tell (canBrowseProfiles);
+          // `mode === "superuser"` is the dedicated superuser surface for another scholar.
+          canDebug={mode === "superuser" || (mode === "self" && isSuperuser)}
           model={BIOSKETCH_EFFECTIVE_MODEL}
           versions={listSelectableBiosketchPromptVersions()}
           canSelectVersion={isSuperuserLike(mode) || mode === "unit-admin"}
