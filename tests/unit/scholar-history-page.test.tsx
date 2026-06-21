@@ -68,7 +68,7 @@ vi.mock("@/components/edit/scholar-history-view", () => ({ ScholarHistoryView: m
 
 import EditScholarHistoryPage from "@/app/edit/scholar/[cwid]/history/page";
 
-type El = { type: unknown };
+type El = { type: unknown; props: Record<string, unknown> };
 const asEl = (v: unknown) => v as El;
 const params = (cwid: string) => Promise.resolve({ cwid });
 const TARGET = "abc1001";
@@ -109,6 +109,18 @@ describe("/edit/scholar/[cwid]/history — authorization", () => {
     const result = asEl(await EditScholarHistoryPage({ params: params(TARGET) }));
     expect(result.type).toBe(mockView);
     expect(mockLoadHistory).toHaveBeenCalledWith(TARGET, expect.anything());
+    expect(result.props.unavailable).toBe(false);
+  });
+
+  it("audit read failure → renders the view as unavailable, does not 500", async () => {
+    // The read role lacks SELECT on `scholars_audit.manual_edit_audit` until a DBA grant
+    // lands; the page must degrade to an honest notice rather than throwing.
+    signedInAs(TARGET);
+    mockLoadHistory.mockRejectedValue(new Error("SELECT command denied ... manual_edit_audit"));
+    const result = asEl(await EditScholarHistoryPage({ params: params(TARGET) }));
+    expect(result.type).toBe(mockView);
+    expect(result.props.unavailable).toBe(true);
+    expect(result.props.entries).toEqual([]);
   });
 
   it("superuser (not self) → renders the view via the superuser gate", async () => {

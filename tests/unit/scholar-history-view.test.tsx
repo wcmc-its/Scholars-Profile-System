@@ -122,4 +122,23 @@ describe("ScholarHistoryView", () => {
     expect(screen.getByTestId("scholar-history-empty").textContent).toMatch(/No profile edits/);
     expect(screen.queryByTestId("scholar-history-table")).toBeNull();
   });
+
+  it("renders the unavailable notice (taking precedence over table + empty) when the read failed", () => {
+    // `unavailable` wins even if rows were passed: the audit read failed, so the page
+    // degrades to an honest notice rather than the table or a misleading "no edits".
+    render(
+      <ScholarHistoryView
+        cwid="abc1001"
+        scholarName="Jane"
+        entries={[entry({ id: "1" })]}
+        windowDays={90}
+        unavailable
+      />,
+    );
+    expect(screen.getByTestId("scholar-history-unavailable").textContent).toMatch(
+      /temporarily unavailable/,
+    );
+    expect(screen.queryByTestId("scholar-history-table")).toBeNull();
+    expect(screen.queryByTestId("scholar-history-empty")).toBeNull();
+  });
 });

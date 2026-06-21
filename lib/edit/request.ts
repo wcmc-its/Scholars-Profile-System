@@ -91,6 +91,69 @@ export function editRateLimited(retryAfterSeconds: number): NextResponse {
   );
 }
 
+/**
+ * A streamed `200` success for a SLOW producer. While `produce` runs, the
+ * connection is kept warm with whitespace heartbeats; on resolve the final
+ * `{ ok: true, ...payload }` body is written, on throw `{ ok: false, error }`.
+ *
+ * Why: the biosketch generation fans out to ~5 sequential gateway calls (main
+ * draft → per-entry faithfulness → products → sources) and runs 60-90s for a
+ * full Contributions draft — well past the CloudFront 30s origin-read timeout.
+ * A buffered response looks IDLE to the CDN for that whole window, so CloudFront
+ * 504s mid-flight while the route is still running (nothing logs server-side).
+ * Periodic heartbeat bytes reset the CDN/ALB idle timers, so any duration works
+ * with NO infra-timeout change. JSON tolerates leading whitespace, so the client
+ * still does `await res.json()` and branches on `data.ok` exactly as for a
+ * buffered {@link editError} — the HTTP status is always 200 here (headers are
+ * already sent once the first heartbeat flushes), so a failure is an
+ * `{ ok: false }` body, not a 5xx status.
+ */
+export function editOkStream(
+  produce: () => Promise<Record<string, unknown>>,
+  onError: (err: unknown) => { error: string },
+  opts?: { heartbeatMs?: number },
+): Response {
+  const heartbeatMs = opts?.heartbeatMs ?? 10_000;
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let finished = false;
+      // A bare newline is JSON-insignificant leading whitespace, so it keeps the
+      // connection alive without corrupting the body the client parses.
+      const beat = setInterval(() => {
+        if (finished) return;
+        try {
+          controller.enqueue(encoder.encode("\n"));
+        } catch {
+          // Controller already closed — nothing to keep alive.
+        }
+      }, heartbeatMs);
+      // Don't let the heartbeat timer hold the event loop open (matters under test).
+      (beat as unknown as { unref?: () => void }).unref?.();
+      try {
+        const payload = await produce();
+        controller.enqueue(encoder.encode(JSON.stringify({ ok: true, ...payload })));
+      } catch (err) {
+        const { error } = onError(err);
+        controller.enqueue(encoder.encode(JSON.stringify({ ok: false, error })));
+      } finally {
+        finished = true;
+        clearInterval(beat);
+        controller.close();
+      }
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      // `no-transform` keeps a proxy from gzip-buffering the heartbeats away.
+      "cache-control": "no-store, no-transform",
+      "x-accel-buffering": "no",
+    },
+  });
+}
+
 /** Whether impersonated edits are blocked at write time (#637 §3, default off). */
 function impersonationReadonly(): boolean {
   return process.env.IMPERSONATION_READONLY === "true";

@@ -3,8 +3,13 @@
  * test's mocking: the facts assembly, the generator, the rate-limit, and the authz
  * predicate are unit-tested elsewhere; here they are mocked so the test exercises the
  * route's gates only (flag, personal-statement required-inputs, authz, rate-limit,
- * scholar-not-found, sparse, success, persistence, 502). No network, no DB. The params
- * normalizer is NOT mocked — the required-input 400 depends on it.
+ * scholar-not-found, sparse, success, persistence, generation-failure). No network, no DB.
+ * The params normalizer is NOT mocked — the required-input 400 depends on it.
+ *
+ * The generate path is STREAMED (`editOkStream`): the response is a 200 stream whose body is
+ * produced asynchronously, so a test must `await res.json()` (drain the stream) BEFORE asserting
+ * on the generate/persist mocks — `await POST(...)` alone returns before the body is produced.
+ * A gateway failure is therefore an in-body `{ ok: false, error }` (status stays 200), not a 502.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -144,6 +149,7 @@ describe("POST /api/edit/biosketch/generate", () => {
       }),
     );
     expect(res.status).toBe(200);
+    await res.json(); // drain the stream so the generate + persist have run
     expect(mockGenerateBiosketch).toHaveBeenCalled();
     // Project title + aims persist to their dedicated columns for a personal statement.
     expect(mockGenerationCreate).toHaveBeenCalledWith(
@@ -173,13 +179,20 @@ describe("POST /api/edit/biosketch/generate", () => {
     );
   });
 
-  it("200 for an authorized non-self actor (superuser); history attributes the acting cwid", async () => {
+  it("200 for an authorized non-self actor (superuser); history attributes the accountable human", async () => {
     mockGetEditSession.mockResolvedValue(ADMIN);
     const res = await POST(post({ entityId: "other9" }));
     expect(res.status).toBe(200);
+    await res.json(); // drain the stream so the persist has run
+    // `createdByCwid` is the REAL signed-in actor (realCwid), not the target; with no
+    // impersonation overlay active, `impersonatedCwid` is null.
     expect(mockGenerationCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ cwid: "other9", createdByCwid: "adm001" }),
+        data: expect.objectContaining({
+          cwid: "other9",
+          createdByCwid: "adm001",
+          impersonatedCwid: null,
+        }),
       }),
     );
   });
@@ -224,11 +237,13 @@ describe("POST /api/edit/biosketch/generate", () => {
     expect(mockGenerateBiosketch).not.toHaveBeenCalled();
   });
 
-  it("502 generation_failed when the gateway throws (no DB write)", async () => {
+  it("generation_failed as an in-body error when the gateway throws (streamed 200, no DB write)", async () => {
     mockGenerateBiosketch.mockRejectedValue(new Error("gateway timeout"));
     const res = await POST(post({ entityId: "self01" }));
-    expect(res.status).toBe(502);
-    expect(await res.json()).toMatchObject({ error: "generation_failed" });
+    // The response committed a 200 stream before generation ran, so a gateway failure is an
+    // in-body { ok: false } the client branches on — not a 5xx status.
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: false, error: "generation_failed" });
     expect(mockGenerationCreate).not.toHaveBeenCalled();
   });
 
@@ -254,7 +269,10 @@ describe("POST /api/edit/biosketch/generate", () => {
   });
 
   it("persists a contributions row with null project fields + the steering params blob", async () => {
-    await POST(post({ entityId: "self01", params: { mode: "contributions", maxContributions: 3 } }));
+    const res = await POST(
+      post({ entityId: "self01", params: { mode: "contributions", maxContributions: 3 } }),
+    );
+    await res.json(); // drain the stream so the persist has run
     expect(mockGenerationCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -273,14 +291,17 @@ describe("POST /api/edit/biosketch/generate", () => {
             instructions: "",
             promptVersion: "v6",
           },
+          // Audit: the accountable human (self here), no impersonation overlay.
           createdByCwid: "self01",
+          impersonatedCwid: null,
         }),
       }),
     );
   });
 
   it("assembles facts with an empty selection + the durable deltas", async () => {
-    await POST(post({ entityId: "self01" }));
+    const res = await POST(post({ entityId: "self01" }));
+    await res.json(); // drain the stream so the detached generation settles within this test
     expect(mockLoadDeltas).toHaveBeenCalledWith("self01");
     expect(mockAssembleFacts).toHaveBeenCalledWith(
       "self01",

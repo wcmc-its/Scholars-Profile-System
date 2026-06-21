@@ -1,9 +1,10 @@
 /**
  * #917 v5 — the "NIH biosketch" `/edit` Services rail item gating.
  *
- * Covers the rail-gating rule in `visibleAttrKeys` (self/superuser only,
- * flag-gated — mirrors the grant-recs / coi-gap / highlights gating), and that
- * biosketch + grant-recs coexist as the two "Services" items. The panel render +
+ * Covers the rail-gating rule in `visibleAttrKeys` (flag-gated, then visible to
+ * every actor the generate route authorizes — self, superuser, comms-steward,
+ * proxy, unit-admin), and that biosketch + grant-recs coexist as the two
+ * "Services" items. The panel render +
  * the generator are tested in `biosketch-generator.test.ts` /
  * `biosketch-generate-route.test.ts`.
  *
@@ -19,14 +20,21 @@ describe("visibleAttrKeys — biosketch (Services) rail gating", () => {
     expect(visibleAttrKeys("self", false, false, false, false, false)).not.toContain("biosketch");
   });
 
-  it("shows biosketch on self + superuser when the flag is on", () => {
+  it("shows biosketch to every authorized editor when the flag is on", () => {
+    // The generate route authorizes self, superuser, comms-steward, a granted
+    // proxy, and an org-unit owner/curator (unit-admin) — the rail mirrors that.
     expect(visibleAttrKeys("self", false, false, false, false, true)).toContain("biosketch");
     expect(visibleAttrKeys("superuser", false, false, false, false, true)).toContain("biosketch");
+    expect(visibleAttrKeys("comms_steward", false, false, false, false, true)).toContain(
+      "biosketch",
+    );
+    expect(visibleAttrKeys("proxy", false, false, false, false, true)).toContain("biosketch");
+    expect(visibleAttrKeys("unit-admin", false, false, false, false, true)).toContain("biosketch");
   });
 
-  it("never shows biosketch to a proxy / unit-admin even with the flag on", () => {
-    expect(visibleAttrKeys("proxy", false, false, false, false, true)).not.toContain("biosketch");
-    expect(visibleAttrKeys("unit-admin", false, false, false, false, true)).not.toContain(
+  it("hides biosketch from a proxy / unit-admin when the flag is off", () => {
+    expect(visibleAttrKeys("proxy", false, false, false, false, false)).not.toContain("biosketch");
+    expect(visibleAttrKeys("unit-admin", false, false, false, false, false)).not.toContain(
       "biosketch",
     );
   });

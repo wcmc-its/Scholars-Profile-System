@@ -1945,7 +1945,14 @@ model BiosketchGeneration {
   // [{ contributionIndex, pmids: [...] }]. NULL for Personal Statement / empty / attribution
   // failure. Output traceability so a grounded claim can be checked against its source paper.
   sources       Json?
-  createdByCwid String   @map("created_by_cwid") @db.VarChar(32) // actor (self / proxy / curator)
+  // The ACCOUNTABLE HUMAN who ran the generation — the signed-in actor (self / superuser /
+  // comms-steward / proxy / unit-admin curator), the same identity written to
+  // `manual_edit_audit.actor_cwid`. NOT the impersonated overlay (see `impersonatedCwid`).
+  createdByCwid    String  @map("created_by_cwid") @db.VarChar(32)
+  // The "View as" overlay target when a superuser/steward generated through impersonation; NULL
+  // for a direct generation. Mirrors `manual_edit_audit.impersonated_cwid` so the history panel
+  // can attribute a delegated draft to the human who actually ran it.
+  impersonatedCwid String? @map("impersonated_cwid") @db.VarChar(32)
   createdAt     DateTime @default(now()) @map("created_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)

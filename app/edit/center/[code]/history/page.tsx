@@ -71,7 +71,25 @@ export default async function EditCenterHistoryPage({
     return <ForbiddenEditPage variant="unit" targetEntity={code} />;
   }
 
-  const entries = await loadCenterAuditHistory(code, db.read);
+  // The audit log lives in the separate `scholars_audit` database; the read role
+  // (`db.read` / `app_ro`) needs a SELECT grant on `manual_edit_audit` there.
+  // Until that grant is provisioned (a DBA step), the SELECT is denied (errno
+  // 1142). Fail SOFT: render an "unavailable" notice instead of 500ing.
+  let entries: Awaited<ReturnType<typeof loadCenterAuditHistory>> = [];
+  let unavailable = false;
+  try {
+    entries = await loadCenterAuditHistory(code, db.read);
+  } catch (err) {
+    unavailable = true;
+    console.error(
+      JSON.stringify({
+        event: "center_history_read_failed",
+        path: "/edit/center/[code]/history",
+        code,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
 
   return (
     <CenterHistoryView
@@ -79,6 +97,7 @@ export default async function EditCenterHistoryPage({
       centerName={ctx.unit.name}
       entries={entries}
       windowDays={CENTER_AUDIT_WINDOW_DAYS}
+      unavailable={unavailable}
     />
   );
 }

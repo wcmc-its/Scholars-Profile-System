@@ -64,6 +64,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         params: g.params,
         products: g.products,
         sources: g.sources,
+        // Audit "who ran it": the accountable human, plus the impersonation overlay (if any).
+        createdByCwid: g.createdByCwid,
+        impersonatedCwid: g.impersonatedCwid,
         createdAt: g.createdAt.toISOString(),
       })),
     });
