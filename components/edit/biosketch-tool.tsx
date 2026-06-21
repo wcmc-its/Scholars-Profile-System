@@ -19,7 +19,7 @@
 "use client";
 
 import * as React from "react";
-import { Sparkles } from "lucide-react";
+import { Braces, Sparkles } from "lucide-react";
 
 import {
   BiosketchGenerateControls,
@@ -49,6 +49,7 @@ const RATE_LIMITED =
 const MISSING_INPUTS =
   "Add a proposed project title and specific aims to draft a Personal Statement.";
 const FAILED = "We couldn't generate a biosketch just now. Please try again.";
+const DEBUG_FAILED = "We couldn't assemble the prompt payload just now. Please try again.";
 
 export type BiosketchToolProps = {
   /** The scholar the biosketch is generated for (self cwid or the delegated `[cwid]`). */
@@ -61,6 +62,12 @@ export type BiosketchToolProps = {
   versions?: BiosketchPromptVersionMeta[];
   /** #917 v6 — whether the actor may steer the prompt version. */
   canSelectVersion?: boolean;
+  /**
+   * #917 v6 follow-up B — whether to surface the "View prompt & payload" debug action.
+   * STRICTLY superuser (the raw FACTS projection is internal data), narrower than
+   * {@link canSeeCost}, which also includes a comms-steward.
+   */
+  canDebug?: boolean;
 };
 
 /** One row of biosketch generation history (the `/api/edit/biosketch/generations` shape). */
@@ -85,11 +92,13 @@ export function BiosketchTool({
   model,
   versions = [],
   canSelectVersion = false,
+  canDebug = false,
 }: BiosketchToolProps) {
   const [params, setParams] = React.useState<BiosketchParams>(() => ({
     ...DEFAULT_BIOSKETCH_PARAMS,
   }));
   const [isGenerating, setIsGenerating] = React.useState(false);
+  const [isDebugLoading, setIsDebugLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<BiosketchGenerateResult | null>(null);
   const [generations, setGenerations] = React.useState<BiosketchGenerationItem[]>([]);
@@ -156,6 +165,51 @@ export function BiosketchTool({
     }
   }
 
+  /**
+   * #917 v6 follow-up B (superuser only) — fetch the EXACT prompt + FACTS payload the generator
+   * would send to Bedrock for the CURRENT steering params, without spending a generation, and
+   * download it as JSON. The endpoint is superuser-gated server-side; the button is hidden for
+   * everyone else (`canDebug`). Errors surface in the shared error alert.
+   */
+  async function downloadDebugPayload() {
+    if (isDebugLoading || isGenerating) return;
+    setIsDebugLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/edit/biosketch/debug-payload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entityId, params }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | { ok: true; promptVersion?: string }
+        | { ok: false }
+        | null;
+      if (!res.ok || !data || data.ok !== true) {
+        setError(DEBUG_FAILED);
+        return;
+      }
+      const version = "promptVersion" in data && data.promptVersion ? data.promptVersion : "draft";
+      // Filename carries the cwid + version for traceability (a superuser comparing payloads
+      // across scholars / versions).
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `biosketch-prompt-${entityId}-${version}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError(DEBUG_FAILED);
+    } finally {
+      setIsDebugLoading(false);
+    }
+  }
+
   /** Restore a history row's steering params (incl. prompt version) into the controls. */
   function restoreSettings(gen: BiosketchGenerationItem) {
     if (isGenerating) return;
@@ -204,6 +258,19 @@ export function BiosketchTool({
               ? "Generate personal statement"
               : "Generate biosketch contributions"}
         </Button>
+        {canDebug && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={downloadDebugPayload}
+            disabled={isDebugLoading || isGenerating}
+            data-testid="biosketch-debug-payload"
+            title="Download the exact system prompt, user prompt, and FACTS payload these settings would send to the model (superusers only)."
+          >
+            <Braces className="size-4" />
+            {isDebugLoading ? "Preparing…" : "View prompt & payload"}
+          </Button>
+        )}
         <span className="text-muted-foreground text-sm">
           Drafted from your Scholars publications, topics, methods, and grants. Review every entry
           before submitting it.
