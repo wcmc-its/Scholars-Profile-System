@@ -2113,6 +2113,72 @@ model ScholarFamily {
   @@map("scholar_family")
 }
 
+/// #1166 — Methods Surface B specific-entity DIMENSION. One row per specific named
+/// entity (cell line) a method family resolves to — e.g. the "Immortalized cell
+/// lines" family resolves to "3T3-L1 adipocytes" (usage_count 4), "HEK293T cells"
+/// (3), etc. Loaded from the ReciterAI `entities.json` sidecar (tools-a2-v4) by
+/// `etl/tools/family-entity-mapper-s3.ts`. Keyed on the STABLE (supercategory,
+/// family_label) pair NOT family_id (A2 re-mints family_id every rebuild), exactly
+/// like FamilySuppressionOverlay. `usage_count` is STORED (= the entity's
+/// institution-wide pub_count) and NOT a groupBy over family_entity_usage, because
+/// the usage rows only cover pmids that have a usable sentence (a subset). Backs the
+/// ranked "Specific cell lines used" strip + the all-cell-lines directory (parent
+/// nesting via parent_entity_id). Full-replacement load (deleteMany + createMany).
+model FamilyEntity {
+  id                 String   @id @default(uuid()) @db.VarChar(64)
+  supercategory      String   @db.VarChar(128)
+  familyLabel        String   @map("family_label") @db.VarChar(255)
+  normalizedEntityId String   @map("normalized_entity_id") @db.VarChar(128)
+  entityLabel        String   @map("entity_label") @db.VarChar(255)
+  /// Parent line for directory nesting (e.g. the two 3T3-L1 forms under one
+  /// parent). Null if top-level. `parent_label` is the line core ("3T3-L1") for
+  /// the directory header; the descriptor ("mouse fibroblast line") is the
+  /// ReciterAI define-pass output and is null until that pass runs.
+  parentEntityId     String?  @map("parent_entity_id") @db.VarChar(128)
+  parentLabel        String?  @map("parent_label") @db.VarChar(255)
+  parentDescriptor   String?  @map("parent_descriptor") @db.VarChar(255)
+  /// Role/form variant (#1166-B, needs a widened extract prompt); null for now.
+  entityRole         String?  @map("entity_role") @db.VarChar(64)
+  /// Institution-wide distinct-publication count — the strip ranking number.
+  usageCount         Int      @map("usage_count")
+  /// is_evidenced (spec §7): whether >=1 usage sentence exists -> clickable affordance.
+  evidenced          Boolean  @default(false)
+  sourceArtifactSha  String?  @map("source_artifact_sha") @db.VarChar(64)
+  refreshedAt        DateTime @default(now()) @map("refreshed_at")
+
+  @@unique([supercategory, familyLabel, normalizedEntityId])
+  @@index([supercategory, familyLabel, usageCount(sort: Desc)])
+  @@index([parentEntityId])
+  @@map("family_entity")
+}
+
+/// #1166 — Methods Surface B per-(publication × entity) FACTS. One row per
+/// (entity, pmid) usage sentence, loaded from the ReciterAI `entity_context.json`
+/// sidecar. Backs the per-paper relevance snippet revealed when a cell line is
+/// selected (one paper using two cell lines surfaces a DIFFERENT sentence under
+/// each — the multi-membership the strip's whole justification rests on).
+/// `matched_span_*` are char offsets of the term in `usage_sentence` for an exact
+/// `<mark>` (SPS `highlightSnippet` prefers them; falls back to term-match when
+/// null). Same stable (supercategory, family_label) key; full-replacement load.
+model FamilyEntityUsage {
+  id                 String   @id @default(uuid()) @db.VarChar(64)
+  supercategory      String   @db.VarChar(128)
+  familyLabel        String   @map("family_label") @db.VarChar(255)
+  normalizedEntityId String   @map("normalized_entity_id") @db.VarChar(128)
+  pmid               String   @db.VarChar(16)
+  usageSentence      String   @map("usage_sentence") @db.Text
+  matchedSpanStart   Int?     @map("matched_span_start")
+  matchedSpanEnd     Int?     @map("matched_span_end")
+  centralityScore    Decimal? @map("centrality_score") @db.Decimal(6, 4)
+  entityRole         String?  @map("entity_role") @db.VarChar(64)
+  sourceArtifactSha  String?  @map("source_artifact_sha") @db.VarChar(64)
+  refreshedAt        DateTime @default(now()) @map("refreshed_at")
+
+  @@index([supercategory, familyLabel, normalizedEntityId])
+  @@index([pmid])
+  @@map("family_entity_usage")
+}
+
 /// #800 — editorial suppression overlay for the Methods lens: families that are
 /// too generic to be informative ("Observational study design", "Descriptive
 /// statistics") are hidden from the lens, the overview FACTS block, and any

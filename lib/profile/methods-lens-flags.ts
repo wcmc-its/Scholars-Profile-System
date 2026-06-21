@@ -209,3 +209,20 @@ export function isMethodFamilySynonymsEnabled(): boolean {
 export function isCenterProgramPagesEnabled(): boolean {
   return process.env.CENTER_PROGRAM_PAGES === "on";
 }
+
+/**
+ * #1166 — Methods Surface B specific-cell-line discovery on the method-family page:
+ * the ranked "Specific cell lines used" strip (replacing the tool-usage prose),
+ * the per-(publication × entity) relevance snippet on a filtered article, and the
+ * all-cell-lines directory (parent nesting). Reads the `family_entity` /
+ * `family_entity_usage` tables (loaded from the ReciterAI tools-a2-v4 entity
+ * sidecars by etl/tools). When off, the entity readers return empty (NO query —
+ * dark with no prod cost) and the page renders the existing tool-usage strip, so
+ * the surface is byte-identical to today until the data lands AND this flips.
+ * Every reader ALSO inherits the #800/#801 family-overlay public-visibility gate
+ * the caller already applied via getFamily. Wire in BOTH `.env.local` AND the
+ * per-env `environment:` block in cdk/lib/app-stack.ts per the flag-parity rule.
+ */
+export function isMethodsLensCellLineEntitiesOn(): boolean {
+  return process.env.METHODS_LENS_CELL_LINE_ENTITIES === "on";
+}

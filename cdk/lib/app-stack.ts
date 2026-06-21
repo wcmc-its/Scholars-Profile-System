@@ -1540,6 +1540,17 @@ export class AppStack extends Stack {
         //     staging-live -> synonyms soak there); PROD OFF (inert anyway until the
         //     methods-lens go-live flips METHODS_LENS_ENABLED in prod).
         METHODS_LENS_FAMILY_SYNONYMS: env === "staging" ? "on" : "off",
+        //   METHODS_LENS_CELL_LINE_ENTITIES -- #1166. Methods Surface B: the ranked
+        //     "Specific cell lines used" strip + per-(pub x entity) relevance snippet
+        //     + all-cell-lines directory on the method-family page, read from the
+        //     family_entity / family_entity_usage tables (loaded from the ReciterAI
+        //     tools-a2-v4 entity sidecars by etl:scholar-tool). When off, the readers
+        //     return [] (no query) and the page renders the existing tool-usage strip,
+        //     so it is byte-identical to today until the entity data lands AND this
+        //     flips. App-only: env-only flip via cdk deploy Sps-App-<env> after a
+        //     `etl:scholar-tool` backfill against a v4 manifest (CD only re-rolls the
+        //     image). STAGING ON (soak there); PROD OFF (no entity data + gated).
+        METHODS_LENS_CELL_LINE_ENTITIES: env === "staging" ? "on" : "off",
         //   CENTER_METHODS_FACET -- #962. The center-roster "Methods & tools"
         //     multi-select facet + per-member tool chips on the GROUPED center
         //     roster. ADDITIONALLY gated on METHODS_LENS_ENABLED in code (the
