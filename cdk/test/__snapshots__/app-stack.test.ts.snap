@@ -3917,7 +3917,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_DEVELOPMENT_ALLOWLIST",
-                "Value": "",
+                "Value": "flm4001",
               },
               {
                 "Name": "SECURITY_CSP_MODE",

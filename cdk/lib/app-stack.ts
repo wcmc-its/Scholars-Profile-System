@@ -1734,15 +1734,20 @@ export class AppStack extends Stack {
         //   SCHOLARS_DEVELOPMENT_GROUP_CN -- the ED group whose `member` list
         //     confers the role: ITS:Library:Scholars/development-role (created
         //     under ou=application security,ou=Groups; the subtree search from
-        //     ou=Groups reaches it). Set ACTIVE -- in-VPC LDAPS to WCM is
-        //     reachable, so the live group search resolves members. (The
-        //     superuser/comms-steward cns are still empty pending their own
-        //     cutover; this role uses the group as its live source of truth.)
-        //   SCHOLARS_DEVELOPMENT_ALLOWLIST -- interim no-LDAP allowlist; left
-        //     EMPTY since the group cn above is the live membership source.
+        //     ou=Groups reaches it). Set in anticipation of the live group
+        //     search, BUT that path is dormant today: the SPS app VPC has no
+        //     route to WCM LDAPS (#443) and the app task def carries no
+        //     SCHOLARS_LDAP_URL / bind password, so isDeveloper()'s openLdap()
+        //     fails closed before any search. Until directory routing lands the
+        //     allowlist below is the operative membership source.
+        //   SCHOLARS_DEVELOPMENT_ALLOWLIST -- interim no-LDAP allowlist, the
+        //     operative membership mechanism while the group search is dormant.
+        //     STAGING carries flm4001 (a real development-role group member) so
+        //     the surface is reachable to a non-superuser operator for testing;
+        //     prod stays empty (role off there anyway).
         DEVELOPMENT_ENABLED: env === "staging" ? "on" : "off",
         SCHOLARS_DEVELOPMENT_GROUP_CN: "ITS:Library:Scholars/development-role",
-        SCHOLARS_DEVELOPMENT_ALLOWLIST: "",
+        SCHOLARS_DEVELOPMENT_ALLOWLIST: env === "staging" ? "flm4001" : "",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
         // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
         // ships the policy as `Content-Security-Policy-Report-Only` (the
