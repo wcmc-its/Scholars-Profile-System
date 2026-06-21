@@ -154,6 +154,72 @@ describe("<ResultEvidence> — E2 areas treatment (handoff §5#1)", () => {
   });
 });
 
+describe("<ResultEvidence> — SEARCH_PEOPLE_CONCEPT_HINT concepts treatment", () => {
+  it("kind 'concepts' renders a 'TOPICS' hint with labels + '+N more'", () => {
+    renderEv({
+      kind: "concepts",
+      labels: ["Neoplasms", "Immunotherapy", "Melanoma", "T-Lymphocytes"],
+      total: 8,
+    });
+    expect(screen.getByText("TOPICS")).toBeTruthy();
+    expect(screen.getByText("Neoplasms")).toBeTruthy();
+    expect(screen.getByText("+4 more")).toBeTruthy();
+  });
+
+  it("no '+N more' when total equals the shown concept labels", () => {
+    renderEv({ kind: "concepts", labels: ["Neoplasms", "Melanoma"], total: 2 });
+    expect(screen.queryByText(/\+\d+ more/)).toBeNull();
+  });
+});
+
+describe("<ResultEvidence> — hasQuery gate on the empty match line", () => {
+  it("hasQuery=false: kind 'none' renders nothing", () => {
+    const { container } = render(<ResultEvidence evidence={{ kind: "none" }} hasQuery={false} />);
+    expect(container.textContent).toBe("");
+    expect(container.textContent).not.toContain("no specific match");
+  });
+
+  it("hasQuery=false: kind 'concepts' renders the hint WITHOUT the empty line", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "concepts", labels: ["Neoplasms", "Melanoma"], total: 5 }}
+        hasQuery={false}
+      />,
+    );
+    expect(container.textContent).not.toContain("no specific match");
+    expect(screen.getByText("TOPICS")).toBeTruthy();
+    expect(screen.getByText("Neoplasms")).toBeTruthy();
+    expect(screen.getByText("+3 more")).toBeTruthy();
+  });
+
+  it("hasQuery=false: kind 'areas' renders the hint WITHOUT the empty line", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "areas", labels: ["Lung Cancer"], total: 3 }}
+        hasQuery={false}
+      />,
+    );
+    expect(container.textContent).not.toContain("no specific match");
+    expect(screen.getByText("Areas")).toBeTruthy();
+  });
+
+  it("hasQuery=true: kind 'none' STILL renders the honest-empty line", () => {
+    const { container } = render(<ResultEvidence evidence={{ kind: "none" }} hasQuery />);
+    expect(container.textContent).toContain("no specific match");
+  });
+
+  it("hasQuery=true: kind 'concepts' renders the empty line ABOVE the hint", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "concepts", labels: ["Neoplasms"], total: 1 }}
+        hasQuery
+      />,
+    );
+    expect(container.textContent).toContain("no specific match");
+    expect(screen.getByText("TOPICS")).toBeTruthy();
+  });
+});
+
 describe("<ResultEvidence> — DOM guardrails (would have caught #1051)", () => {
   it("a raw under_score slug never reaches the DOM via areas", () => {
     // Even if a slug slipped through upstream, the renderer must not be the place

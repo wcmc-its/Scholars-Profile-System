@@ -204,6 +204,9 @@ export function PeopleResultCard({
   // via one precedence function, so render it through one component and IGNORE
   // the legacy priority chain below. Absent ⇒ fall through to today's chain.
   // The disclosure props drive the clickable rep-papers chevron + panel.
+  // The honest-empty match line only makes sense when a query is being matched;
+  // on the no-query Browse page the identity hints (areas/concepts) stand alone.
+  const hasQuery = (q ?? "").trim().length > 0;
   let snippetLine: ReactNode = null;
   if (hit.evidence) {
     snippetLine = (
@@ -213,6 +216,7 @@ export function PeopleResultCard({
         expanded={expanded}
         onToggle={onToggle}
         panelId={panelId}
+        hasQuery={hasQuery}
       />
     );
   } else {

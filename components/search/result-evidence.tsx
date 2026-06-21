@@ -48,12 +48,36 @@ function AreasHint({ labels, total }: { labels: string[]; total: number }) {
   );
 }
 
+// SEARCH_PEOPLE_CONCEPT_HINT — the "who is this" identity hint sourced from the
+// scholar's top MeSH concepts instead of the (sparse) self-reported areas.
+// Mirrors `AreasHint` byte-for-byte; only the eyebrow label differs ("TOPICS").
+function ConceptsHint({ labels, total }: { labels: string[]; total: number }) {
+  const more = total - labels.length;
+  return (
+    <div className="mt-2 flex min-w-0 items-baseline gap-2 rounded-md border border-[#e3e2dd] bg-[#f7f6f3] px-2.5 py-1.5 text-[12px] text-muted-foreground">
+      <span className="shrink-0 text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
+        TOPICS
+      </span>
+      <span className="min-w-0 truncate text-[#4a4a4a]">
+        {labels.map((label, i) => (
+          <span key={`${label}-${i}`}>
+            {i > 0 ? <span className="px-1.5 text-[#c9c4ba]">·</span> : null}
+            {label}
+          </span>
+        ))}
+        {more > 0 ? <span className="ml-1 font-semibold text-[#9a958a]">+{more} more</span> : null}
+      </span>
+    </div>
+  );
+}
+
 export function ResultEvidence({
   evidence,
   canExpand = false,
   expanded = false,
   onToggle,
   panelId,
+  hasQuery = true,
 }: {
   evidence: ResultEvidence;
   /** Rep-papers disclosure — when true and the evidence is a method/topic/
@@ -64,6 +88,11 @@ export function ResultEvidence({
   expanded?: boolean;
   onToggle?: () => void;
   panelId?: string;
+  /** True when there is an active query. The honest-empty match line ("— no
+   *  specific match for this query —") only makes sense when something was being
+   *  matched; on the no-query Browse page it is suppressed for the identity
+   *  kinds (areas/concepts/none), which carry no match snippet to hide. */
+  hasQuery?: boolean;
 }) {
   switch (evidence.kind) {
     case "method":
@@ -123,16 +152,26 @@ export function ResultEvidence({
           <HighlightedSnippet html={evidence.html} />
         </div>
       );
+    case "concepts":
+      // SEARCH_PEOPLE_CONCEPT_HINT — the top-MeSH identity hint. Same E2
+      // treatment as areas: an honest-empty match line ABOVE the hint when there
+      // is a query, the hint alone on the no-query Browse page.
+      return (
+        <>
+          {hasQuery ? <EmptyMatchLine /> : null}
+          <ConceptsHint labels={evidence.labels} total={evidence.total} />
+        </>
+      );
     case "areas":
       // E2 — honest-empty match line + the separate "Areas" identity hint.
       return (
         <>
-          <EmptyMatchLine />
+          {hasQuery ? <EmptyMatchLine /> : null}
           <AreasHint labels={evidence.labels} total={evidence.total} />
         </>
       );
     case "none":
-      return <EmptyMatchLine />;
+      return hasQuery ? <EmptyMatchLine /> : null;
     default:
       // Phase-2 stub kinds (fundingRole / awardAmount) are not produced on the
       // People tab yet; render nothing rather than guess a treatment.

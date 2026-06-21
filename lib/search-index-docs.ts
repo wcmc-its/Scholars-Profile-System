@@ -104,6 +104,33 @@ export function extractMeshLabels(raw: unknown): string[] {
 // importers and the snapshot test keep resolving it unchanged.
 export { extractMeshDescriptorUis };
 
+/** Cap on the people-doc `topMeshTerms` rollup (CONTRACT A — top 8 labels). */
+export const TOP_MESH_TERMS_LIMIT = 8;
+
+/**
+ * Reduce a per-label distinct-publication count map into the ordered
+ * `topMeshTerms` array carried on the people doc: the scholar's most frequent
+ * MeSH descriptor labels across their accepted/visible publications.
+ *
+ * Counting semantics match `lib/api/profile.ts`'s `aggregateKeywords` rollup —
+ * each label is counted once per distinct publication it appears on (the caller
+ * dedupes within a pub before incrementing). Ordering is count DESC then label
+ * ASC (locale-aware, same tiebreak as `aggregateKeywords`); the result is
+ * truncated to `TOP_MESH_TERMS_LIMIT`. An empty map yields `[]`, which the
+ * builder spreads as an OMIT (no field) — mirroring `publicationMeshUi`.
+ *
+ * Pure: same map → same array. Exported for unit testing without a DB.
+ */
+export function topMeshTermsFromCounts(counts: ReadonlyMap<string, number>): string[] {
+  return Array.from(counts.entries())
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return a[0].localeCompare(b[0]);
+    })
+    .slice(0, TOP_MESH_TERMS_LIMIT)
+    .map(([label]) => label);
+}
+
 // ---------------------------------------------------------------------------
 // Pure helpers — name slices for the OpenSearch completion suggester.
 // ---------------------------------------------------------------------------
@@ -637,6 +664,13 @@ export async function buildPeopleDoc(
   // field is applied below, so drive-by single-mention descriptors don't fire
   // the boost.
   const uiAgg = new Map<string, { distinctPubs: number; hasFirstOrLast: boolean }>();
+  // CONTRACT A — per-label distinct-publication frequency for the `topMeshTerms`
+  // rollup (the People-tab "TOPICS" identity hint). Counts each MeSH descriptor
+  // LABEL once per distinct publication it appears on (deduped within a pub),
+  // matching `lib/api/profile.ts`'s `aggregateKeywords` semantics. Built over the
+  // SAME suppression-filtered authorship set as `publicationMesh` below, so a
+  // hidden / dark pub never contributes a label.
+  const topMeshAgg = new Map<string, number>();
   // Issue #21 — collect each scholar's abstract texts (one copy per pmid;
   // duplicates can occur if the same publication shows up twice in a
   // listing, so dedupe).
@@ -668,7 +702,15 @@ export async function buildPeopleDoc(
     }
 
     const mesh = extractMeshLabels(a.publication.meshTerms);
+    // CONTRACT A — count each LABEL at most once per pub for `topMeshTerms`
+    // frequency (deduped within a pub, like `aggregateKeywords`). `termAgg`
+    // below intentionally keeps its existing per-occurrence accumulation.
+    const seenTopMeshThisPub = new Set<string>();
     for (const term of mesh) {
+      if (!seenTopMeshThisPub.has(term)) {
+        seenTopMeshThisPub.add(term);
+        topMeshAgg.set(term, (topMeshAgg.get(term) ?? 0) + 1);
+      }
       const cur = termAgg.get(term) ?? {
         distinctPubs: 0,
         hasFirstOrLast: false,
@@ -706,6 +748,11 @@ export async function buildPeopleDoc(
     if (agg.distinctPubs < 2 && !agg.hasFirstOrLast) continue;
     publicationMeshUi.push(ui);
   }
+
+  // CONTRACT A — top-8 MeSH descriptor labels by distinct-pub frequency
+  // (count DESC, then label ASC). OMIT-on-empty: scholars with no MeSH on any
+  // visible pub write nothing for this field (mirrors `publicationMeshUi`).
+  const topMeshTerms = topMeshTermsFromCounts(topMeshAgg);
 
   // Issue #233 — `hasActiveGrants` realigned onto NCE 12-month grace
   // semantics so the People-tab Activity facet, the PI facet, and the
@@ -981,6 +1028,11 @@ export async function buildPeopleDoc(
     deptDivKey: Array.from(new Set(deptDivKeys)),
     nameSuggest: nameSuggestInputs,
     areasOfInterest: aoi,
+    // CONTRACT A — top MeSH descriptor labels for the People-tab "TOPICS"
+    // identity hint (gated query-side by SEARCH_PEOPLE_CONCEPT_HINT). OMIT-on-
+    // empty: scholars with no MeSH on any visible pub write nothing for this
+    // field, so `_source` consumers distinguish "no signal" from "[]".
+    ...(topMeshTerms.length > 0 ? { topMeshTerms } : {}),
     overview: s.overview,
     publicationTitles: titleParts.join(" "),
     publicationMesh: meshParts.join(" "),

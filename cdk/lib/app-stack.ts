@@ -1333,6 +1333,14 @@ export class AppStack extends Stack {
         // derive). resolveSearchResultEvidence reads === "on". STAGING-FIRST soak:
         // on for staging, off for prod (handoff doc §8 -- flip prod after the soak).
         SEARCH_RESULT_EVIDENCE: env === "staging" ? "on" : "off",
+        // People-tab "concepts" hint -- replace the sparse self-reported
+        // research-areas hint on the scholar row's identity line with the
+        // scholar's top MeSH descriptor labels (topMeshTerms). Only the no-match
+        // TAIL of the evidence model changes (areas slot -> concepts slot); the
+        // query-match kinds are untouched. resolveSearchPeopleConceptHint reads
+        // === "on". APP-ONLY query derive, but the topMeshTerms index field needs
+        // a reindex to populate. STAGING-FIRST soak: on for staging, off for prod.
+        SEARCH_PEOPLE_CONCEPT_HINT: env === "staging" ? "on" : "off",
         // #295 / #723 -- funding-tab concept clause + result-SET gate field.
         // Enabled in both envs now that the funding index carries the descriptor
         // rollup. `fundedPubMeshUi` is the higher-fidelity gate (funded-pub MeSH)

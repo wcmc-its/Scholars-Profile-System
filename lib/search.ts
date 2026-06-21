@@ -182,6 +182,12 @@ export const peopleIndexMapping = {
       deptDivKey: { type: "keyword" },
       deptDivLabel: { type: "keyword" },
       areasOfInterest: { type: "text", analyzer: "scholar_text" },
+      // People-tab "concepts" identity hint (SEARCH_PEOPLE_CONCEPT_HINT) — the
+      // scholar's top MeSH descriptor labels, read from `_source` only (never
+      // queried/aggregated), so `keyword` like `publicationMeshUi`. Explicit
+      // (not dynamic-inferred) for parity with its sibling identity fields;
+      // applied on the next people rebuild via the alias-swap (no extra recreate).
+      topMeshTerms: { type: "keyword" },
       overview: { type: "text", analyzer: "scholar_text" },
       // Issue #310 / SPEC §6.1.5 — materialized inputs to the topic-shape
       // sparse-profile soft decay. The decay's "non-trivial" thresholds
