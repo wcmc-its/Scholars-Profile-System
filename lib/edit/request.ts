@@ -91,25 +91,33 @@ export function editRateLimited(retryAfterSeconds: number): NextResponse {
   );
 }
 
+/** A progress event a slow producer emits while it runs (#917 follow-up A). Free-form shape
+ *  (e.g. `{ phase, done, total }`) — serialized as one NDJSON `{"type":"progress",...}` line the
+ *  client renders as a determinate progress bar. */
+export type EditStreamProgress = Record<string, unknown>;
+
 /**
- * A streamed `200` success for a SLOW producer. While `produce` runs, the
- * connection is kept warm with whitespace heartbeats; on resolve the final
- * `{ ok: true, ...payload }` body is written, on throw `{ ok: false, error }`.
+ * A streamed `200` success for a SLOW producer, as **newline-delimited JSON (NDJSON)**. Each line
+ * is one JSON object: zero or more `{"type":"progress",...}` lines (whatever `produce` emits via its
+ * `emit` callback) followed by exactly one terminal `{"type":"result","ok":true,...}` (resolve) or
+ * `{"type":"result","ok":false,"error":...}` (throw). A bare blank line is an idle heartbeat the
+ * client ignores.
  *
- * Why: the biosketch generation fans out to ~5 sequential gateway calls (main
- * draft → per-entry faithfulness → products → sources) and runs 60-90s for a
- * full Contributions draft — well past the CloudFront 30s origin-read timeout.
- * A buffered response looks IDLE to the CDN for that whole window, so CloudFront
- * 504s mid-flight while the route is still running (nothing logs server-side).
- * Periodic heartbeat bytes reset the CDN/ALB idle timers, so any duration works
- * with NO infra-timeout change. JSON tolerates leading whitespace, so the client
- * still does `await res.json()` and branches on `data.ok` exactly as for a
- * buffered {@link editError} — the HTTP status is always 200 here (headers are
- * already sent once the first heartbeat flushes), so a failure is an
- * `{ ok: false }` body, not a 5xx status.
+ * Why a stream: the biosketch generation fans out to ~5 sequential gateway calls (main draft →
+ * per-entry faithfulness → products → sources) and runs 60-90s for a full Contributions draft —
+ * well past the CloudFront 30s origin-read timeout. A buffered response looks IDLE to the CDN for
+ * that whole window, so CloudFront 504s mid-flight while the route is still running (nothing logs
+ * server-side). The progress lines (and the blank-line heartbeat fallback for a long phase) reset
+ * the CDN/ALB idle timers, so any duration works with NO infra-timeout change.
+ *
+ * Why NDJSON (not a single tolerant-whitespace JSON body): the progress events ARE the point — the
+ * client reads the body incrementally (`res.body.getReader()`), parses each line, advances a
+ * progress bar on `progress`, and resolves on `result`. The HTTP status is always 200 (headers flush
+ * with the first line), so a gateway failure is an in-body `{"type":"result","ok":false}` line, not
+ * a 5xx — the client branches on the result line's `ok` exactly as for a buffered {@link editError}.
  */
 export function editOkStream(
-  produce: () => Promise<Record<string, unknown>>,
+  produce: (emit: (progress: EditStreamProgress) => void) => Promise<Record<string, unknown>>,
   onError: (err: unknown) => { error: string },
   opts?: { heartbeatMs?: number },
 ): Response {
@@ -118,8 +126,19 @@ export function editOkStream(
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let finished = false;
-      // A bare newline is JSON-insignificant leading whitespace, so it keeps the
-      // connection alive without corrupting the body the client parses.
+      const writeLine = (obj: Record<string, unknown>) => {
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+        } catch {
+          // Controller already closed — nothing to write.
+        }
+      };
+      // The producer's progress sink — one NDJSON line per event, ignored after the stream ends.
+      const emit = (progress: EditStreamProgress) => {
+        if (!finished) writeLine({ type: "progress", ...progress });
+      };
+      // A bare newline is an empty NDJSON line the client skips, so it keeps the connection alive
+      // through a long single phase (e.g. the ~10s main draft) without corrupting the body.
       const beat = setInterval(() => {
         if (finished) return;
         try {
@@ -131,11 +150,11 @@ export function editOkStream(
       // Don't let the heartbeat timer hold the event loop open (matters under test).
       (beat as unknown as { unref?: () => void }).unref?.();
       try {
-        const payload = await produce();
-        controller.enqueue(encoder.encode(JSON.stringify({ ok: true, ...payload })));
+        const payload = await produce(emit);
+        writeLine({ type: "result", ok: true, ...payload });
       } catch (err) {
         const { error } = onError(err);
-        controller.enqueue(encoder.encode(JSON.stringify({ ok: false, error })));
+        writeLine({ type: "result", ok: false, error });
       } finally {
         finished = true;
         clearInterval(beat);
@@ -146,8 +165,8 @@ export function editOkStream(
   return new Response(stream, {
     status: 200,
     headers: {
-      "content-type": "application/json; charset=utf-8",
-      // `no-transform` keeps a proxy from gzip-buffering the heartbeats away.
+      "content-type": "application/x-ndjson; charset=utf-8",
+      // `no-transform` keeps a proxy from gzip-buffering the progress lines away.
       "cache-control": "no-store, no-transform",
       "x-accel-buffering": "no",
     },

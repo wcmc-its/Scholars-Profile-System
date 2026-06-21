@@ -6,10 +6,12 @@
  * scholar-not-found, sparse, success, persistence, generation-failure). No network, no DB.
  * The params normalizer is NOT mocked — the required-input 400 depends on it.
  *
- * The generate path is STREAMED (`editOkStream`): the response is a 200 stream whose body is
- * produced asynchronously, so a test must `await res.json()` (drain the stream) BEFORE asserting
- * on the generate/persist mocks — `await POST(...)` alone returns before the body is produced.
- * A gateway failure is therefore an in-body `{ ok: false, error }` (status stays 200), not a 502.
+ * The generate path is STREAMED as NDJSON (`editOkStream`, #917 follow-up A): the body is zero or
+ * more `{"type":"progress",...}` lines then a final `{"type":"result",...}` line, produced
+ * asynchronously — so a test drains it with `drainStream(res)` (which parses + returns the result
+ * line) BEFORE asserting on the generate/persist mocks. A gateway failure is an in-body
+ * `{ ok: false, error }` result line (status stays 200), not a 502. A pre-stream rejection
+ * (4xx/5xx) is still a BUFFERED `editError`, read with `res.json()`.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -88,6 +90,32 @@ function post(body: unknown): NextRequest {
   });
 }
 
+/** Drain the NDJSON stream: read the whole body, parse every line, and return the terminal
+ *  `{"type":"result",...}` line (or null). Also exposes the progress lines for the wiring test. */
+async function drainStream(res: Response): Promise<{
+  result: Record<string, unknown> | null;
+  progress: Record<string, unknown>[];
+  /** Every parsed line in stream order — for asserting the progress-then-result invariant. */
+  all: Record<string, unknown>[];
+}> {
+  const text = await res.text();
+  const msgs = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .map((l) => JSON.parse(l) as Record<string, unknown>);
+  return {
+    result: msgs.filter((m) => m.type === "result").at(-1) ?? null,
+    progress: msgs.filter((m) => m.type === "progress"),
+    all: msgs,
+  };
+}
+
+/** Convenience: the result line only (the common case). */
+async function drainResult(res: Response): Promise<Record<string, unknown> | null> {
+  return (await drainStream(res)).result;
+}
+
 const FACTS = { name: "Jane Smith" };
 const GEN_RESULT = {
   mode: "contributions" as const,
@@ -153,7 +181,7 @@ describe("POST /api/edit/biosketch/generate", () => {
       }),
     );
     expect(res.status).toBe(200);
-    await res.json(); // drain the stream so the generate + persist have run
+    await drainResult(res); // drain the stream so the generate + persist have run
     expect(mockGenerateBiosketch).toHaveBeenCalled();
     // Project title + aims persist to their dedicated columns for a personal statement.
     expect(mockGenerationCreate).toHaveBeenCalledWith(
@@ -187,7 +215,7 @@ describe("POST /api/edit/biosketch/generate", () => {
     mockGetEditSession.mockResolvedValue(ADMIN);
     const res = await POST(post({ entityId: "other9" }));
     expect(res.status).toBe(200);
-    await res.json(); // drain the stream so the persist has run
+    await drainResult(res); // drain the stream so the persist has run
     // `createdByCwid` is the REAL signed-in actor (realCwid), not the target; with no
     // impersonation overlay active, `impersonatedCwid` is null.
     expect(mockGenerationCreate).toHaveBeenCalledWith(
@@ -247,7 +275,7 @@ describe("POST /api/edit/biosketch/generate", () => {
     // The response committed a 200 stream before generation ran, so a gateway failure is an
     // in-body { ok: false } the client branches on — not a 5xx status.
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: false, error: "generation_failed" });
+    expect(await drainResult(res)).toMatchObject({ ok: false, error: "generation_failed" });
     expect(mockGenerationCreate).not.toHaveBeenCalled();
   });
 
@@ -264,7 +292,7 @@ describe("POST /api/edit/biosketch/generate", () => {
     });
     const res = await POST(post({ entityId: "self01" }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({
+    expect(await drainResult(res)).toMatchObject({
       ok: true,
       mode: "contributions",
       entries: [
@@ -282,7 +310,7 @@ describe("POST /api/edit/biosketch/generate", () => {
     const res = await POST(
       post({ entityId: "self01", params: { mode: "contributions", maxContributions: 3 } }),
     );
-    await res.json(); // drain the stream so the persist has run
+    await drainResult(res); // drain the stream so the persist has run
     expect(mockGenerationCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -311,7 +339,7 @@ describe("POST /api/edit/biosketch/generate", () => {
 
   it("assembles facts with an empty selection + the durable deltas", async () => {
     const res = await POST(post({ entityId: "self01" }));
-    await res.json(); // drain the stream so the detached generation settles within this test
+    await drainResult(res); // drain the stream so the detached generation settles within this test
     expect(mockLoadDeltas).toHaveBeenCalledWith("self01");
     expect(mockAssembleFacts).toHaveBeenCalledWith(
       "self01",
@@ -324,6 +352,38 @@ describe("POST /api/edit/biosketch/generate", () => {
     mockGenerationCreate.mockRejectedValue(new Error("biosketch_generation insert failed"));
     const res = await POST(post({ entityId: "self01" }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: true, entries: GEN_RESULT.entries, generationId: null });
+    expect(await drainResult(res)).toMatchObject({
+      ok: true,
+      entries: GEN_RESULT.entries,
+      generationId: null,
+    });
+  });
+
+  it("streams the generator's progress events as NDJSON lines before the result (#917 A)", async () => {
+    mockGenerateBiosketch.mockImplementation(
+      async (
+        _facts: unknown,
+        _params: unknown,
+        opts: { onProgress?: (e: unknown) => void } | undefined,
+      ) => {
+        opts?.onProgress?.({ phase: "drafting" });
+        opts?.onProgress?.({ phase: "faithfulness", done: 1, total: 2 });
+        opts?.onProgress?.({ phase: "done" });
+        return GEN_RESULT;
+      },
+    );
+    const res = await POST(post({ entityId: "self01" }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/x-ndjson");
+    const { result, progress, all } = await drainStream(res);
+    expect(progress).toEqual([
+      { type: "progress", phase: "drafting" },
+      { type: "progress", phase: "faithfulness", done: 1, total: 2 },
+      { type: "progress", phase: "done" },
+    ]);
+    expect(result).toMatchObject({ type: "result", ok: true, entries: GEN_RESULT.entries });
+    // The protocol invariant: zero or more progress lines THEN exactly one terminal result line.
+    expect(all.at(-1)).toMatchObject({ type: "result" });
+    expect(all.filter((m) => m.type === "result")).toHaveLength(1);
   });
 });

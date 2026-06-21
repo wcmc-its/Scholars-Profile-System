@@ -139,19 +139,23 @@ export async function POST(request: NextRequest): Promise<Response> {
   // --- sparse-data gate: too little signal to draft without padding. ---
   if (!hasSufficientFacts(facts)) return editError(422, "insufficient_facts");
 
-  // --- generate (STREAMED). The fan-out (main draft → per-entry faithfulness → products →
-  //     sources) runs ~60-90s for a full Contributions draft, well past the CloudFront 30s
-  //     origin-read timeout; a buffered response would look idle to the CDN and 504 mid-flight
-  //     (the route still running, nothing logged). `editOkStream` keeps the connection warm
-  //     with heartbeats until the final JSON. A gateway throw becomes an `{ ok: false }` body
-  //     (status is already 200) and NEVER writes the DB; the client branches on `data.ok`.
-  //     The faithfulness pass is ON by default for this grant document (#917 v6 §5) — a single
-  //     fabricated metric dwarfs the ~3x cost — force-disable for debugging via
+  // --- generate (STREAMED as NDJSON). The fan-out (main draft → per-entry faithfulness →
+  //     products → sources) runs ~60-90s for a full Contributions draft, well past the CloudFront
+  //     30s origin-read timeout; a buffered response would look idle to the CDN and 504 mid-flight
+  //     (the route still running, nothing logged). `editOkStream` writes one `{"type":"progress"}`
+  //     line per phase boundary (driving the client's progress bar, #917 follow-up A) and a final
+  //     `{"type":"result",...}` line. A gateway throw becomes an in-body `{ ok: false }` result
+  //     line (status is already 200) and NEVER writes the DB; the client branches on the result
+  //     line's `ok`. The faithfulness pass is ON by default for this grant document (#917 v6 §5) —
+  //     a single fabricated metric dwarfs the ~3x cost — force-disable for debugging via
   //     `BIOSKETCH_FAITHFULNESS_PASS=off`. ---
   return editOkStream(
-    async () => {
+    async (emit) => {
       const result = await generateBiosketch(facts, effectiveParams, {
         faithfulnessPass: process.env.BIOSKETCH_FAITHFULNESS_PASS !== "off",
+        // Stream phase-boundary progress (drafting → faithfulness → products → sources → done) to
+        // the client's progress bar (#917 follow-up A). Best-effort; never affects the result.
+        onProgress: (event) => emit(event),
       });
 
       // --- history (audit/reuse). Record EVERY successful generation. Best-effort: the
