@@ -408,6 +408,51 @@ export async function getFamilyCellLineUsageFacts(
   }));
 }
 
+/** The best (highest-centrality) usage sentence for an entity — the strip's hover/
+ *  focus rail preview, with the source pmid for the "Source publication" link. */
+export type CellLineRailPreview = {
+  sentence: string;
+  matchedSpan: { start: number; end: number } | null;
+  pmid: string;
+};
+
+/**
+ * One rail-preview sentence per evidenced cell line in a family (the highest-
+ * centrality fact), keyed by entity id — so the strip can preview the verbatim
+ * sentence on hover/focus without a per-row fetch. The family's fact set is small,
+ * so this is one query reduced in JS. {} when the flag is off.
+ */
+export async function getFamilyCellLineRailPreviews(
+  supercategory: string,
+  familyLabel: string,
+): Promise<Record<string, CellLineRailPreview>> {
+  if (!isMethodsLensCellLineEntitiesOn()) return {};
+  const rows = await prisma.familyEntityUsage.findMany({
+    where: { supercategory, familyLabel },
+    orderBy: [{ centralityScore: "desc" }, { pmid: "asc" }],
+    select: {
+      normalizedEntityId: true,
+      usageSentence: true,
+      matchedSpanStart: true,
+      matchedSpanEnd: true,
+      pmid: true,
+    },
+  });
+  const out: Record<string, CellLineRailPreview> = {};
+  for (const r of rows) {
+    if (out[r.normalizedEntityId]) continue; // rows are centrality-desc → first wins
+    out[r.normalizedEntityId] = {
+      sentence: r.usageSentence,
+      matchedSpan:
+        r.matchedSpanStart != null && r.matchedSpanEnd != null
+          ? { start: r.matchedSpanStart, end: r.matchedSpanEnd }
+          : null,
+      pmid: r.pmid,
+    };
+  }
+  return out;
+}
+
 /** A directory node: a parent GROUP of ≥2 nested forms, or a single top-level entity. */
 export type CellLineDirectoryNode =
   | {
@@ -1080,6 +1125,11 @@ export type MethodPublicationHit = {
    *  Same shape the topic feed renders (`fetchWcmAuthorsForPmids`). `[]` when the
    *  publication has no confirmed WCM authors — the feed UI suppresses the row. */
   authors: WcmAuthorChip[];
+  /** #1166 Surface B — the per-(pub × entity) relevance sentence + matched-span
+   *  for this paper, present ONLY when the feed is filtered by a cell line
+   *  (`opts.entityId`); null/absent otherwise (the unfiltered baseline carries no
+   *  snippet, spec §5.4). Powers the on-demand snippet under each filtered row. */
+  entityUsage?: { sentence: string; matchedSpan: { start: number; end: number } | null } | null;
 };
 
 const PUB_SELECT = {
@@ -1187,7 +1237,17 @@ const METHOD_PUBLICATIONS_PAGE_SIZE = 20;
 export async function getFamilyPublications(
   supercategory: string,
   familyLabel: string,
-  opts: { sort: MethodPublicationSort; page?: number; filter?: MethodPublicationFilter },
+  opts: {
+    sort: MethodPublicationSort;
+    page?: number;
+    filter?: MethodPublicationFilter;
+    /** #1166 Surface B — when set (and the flag is on), the feed is restricted to
+     *  the papers using this specific cell line, and each hit carries its
+     *  per-(pub × entity) `entityUsage` snippet. The family-level `totalAllTypes`
+     *  / `totalResearchOnly` counts stay over the WHOLE family (the "N of 33"
+     *  denominator); `total` becomes the filtered count. */
+    entityId?: string;
+  },
 ): Promise<MethodPublicationsResult | null> {
   if (!isMethodsLensEnabled()) return null;
   const gate = await loadFamilyOverlayGate();
@@ -1209,6 +1269,19 @@ export async function getFamilyPublications(
     };
   }
 
+  // #1166 — entity filter: restrict the feed pmids to the selected cell line's
+  // papers (those with a usage sentence), intersected with the family's gated set,
+  // and carry the per-pmid snippet through. Family-level pmids (the denominator)
+  // stay unfiltered. No-op when no entityId / flag off → feedPmids === allPmids.
+  let feedPmids = allPmids;
+  let factByPmid: Map<string, CellLineUsageFact> | null = null;
+  if (opts.entityId && isMethodsLensCellLineEntitiesOn()) {
+    const facts = await getFamilyCellLineUsageFacts(supercategory, familyLabel, opts.entityId);
+    factByPmid = new Map(facts.map((f) => [f.pmid, f]));
+    const allow = new Set(allPmids);
+    feedPmids = facts.map((f) => f.pmid).filter((p) => allow.has(p));
+  }
+
   const typeWhere =
     filter === "research_articles_only"
       ? { publicationType: { notIn: HARD_EXCLUDE_TYPES } }
@@ -1224,14 +1297,16 @@ export async function getFamilyPublications(
   const skip = page * METHOD_PUBLICATIONS_PAGE_SIZE;
   const [rows, total, totalAllTypes, totalResearchOnly] = await prisma.$transaction([
     prisma.publication.findMany({
-      where: { pmid: { in: allPmids }, ...typeWhere },
+      where: { pmid: { in: feedPmids }, ...typeWhere },
       select: PUB_SELECT,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       orderBy: orderBy as any,
       skip,
       take: METHOD_PUBLICATIONS_PAGE_SIZE,
     }),
-    prisma.publication.count({ where: { pmid: { in: allPmids }, ...typeWhere } }),
+    // `total` tracks the (possibly entity-filtered) feed; the two family-level
+    // counts stay over the whole family for the "N of <family total>" denominator.
+    prisma.publication.count({ where: { pmid: { in: feedPmids }, ...typeWhere } }),
     prisma.publication.count({ where: { pmid: { in: allPmids } } }),
     prisma.publication.count({
       where: { pmid: { in: allPmids }, publicationType: { notIn: HARD_EXCLUDE_TYPES } },
@@ -1241,7 +1316,13 @@ export async function getFamilyPublications(
   const authorsByPmid = await fetchWcmAuthorsForPmids(rows.map((r) => r.pmid));
   void includeImpact;
   return {
-    hits: rows.map((r) => mapPublicationHit(r, authorsByPmid.get(r.pmid), includeImpact)),
+    hits: rows.map((r) => {
+      const hit = mapPublicationHit(r, authorsByPmid.get(r.pmid), includeImpact);
+      const fact = factByPmid?.get(r.pmid);
+      return fact
+        ? { ...hit, entityUsage: { sentence: fact.sentence, matchedSpan: fact.matchedSpan } }
+        : hit;
+    }),
     total,
     totalAllTypes,
     totalResearchOnly,

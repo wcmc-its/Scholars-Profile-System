@@ -32,19 +32,27 @@ export function FamilyPublicationLayout({
   supercategorySlug,
   familySegment,
   familyLabel,
+  cellLineLabels,
 }: {
   supercategorySlug: string;
   familySegment: string;
   familyLabel: string;
+  /** #1166 — entity id → label for the feed's `?cellLine=` context-bar chip. */
+  cellLineLabels?: Record<string, string>;
 }) {
   return (
     <div className="mt-16">
       <hr className="mb-10 border-border" />
-      <FamilyPublicationFeed
-        supercategorySlug={supercategorySlug}
-        familySegment={familySegment}
-        familyLabel={familyLabel}
-      />
+      {/* The feed reads `?cellLine=` via useSearchParams (#1166) — Suspense lets the
+          static shell emit and hydrate at request time (parity with the type-B layout). */}
+      <Suspense fallback={null}>
+        <FamilyPublicationFeed
+          supercategorySlug={supercategorySlug}
+          familySegment={familySegment}
+          familyLabel={familyLabel}
+          cellLineLabels={cellLineLabels}
+        />
+      </Suspense>
     </div>
   );
 }
