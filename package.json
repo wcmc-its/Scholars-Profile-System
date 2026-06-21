@@ -46,6 +46,8 @@
     "etl:reciter:probe": "tsx etl/reciter/probe.ts",
     "etl:reciter:probe-nih": "tsx etl/reciter/probe-nih-cols.ts",
     "etl:reciter": "tsx etl/reciter/index.ts",
+    "etl:reciter-rcr:export": "tsx etl/reciter-rcr/export.ts",
+    "etl:reciter-rcr:import": "tsx etl/reciter-rcr/import.ts",
     "etl:reciter-refresh": "tsx etl/reciter-refresh/index.ts",
     "etl:reciter:coi-statements": "tsx etl/reciter/backfill-coi-statements.ts",
     "etl:reciter:import-coi-statements": "tsx etl/reciter/import-coi-statements.ts",

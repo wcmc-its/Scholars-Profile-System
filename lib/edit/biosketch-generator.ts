@@ -52,6 +52,12 @@ import {
   selectBiosketchProducts,
   type BiosketchProducts,
 } from "@/lib/edit/biosketch-products";
+import {
+  buildSourceAttributionPrompt,
+  parseSourceAttribution,
+  SOURCE_ATTRIBUTION_SYSTEM_PROMPT,
+  type BiosketchContributionSources,
+} from "@/lib/edit/biosketch-sources";
 
 /** Low-but-not-zero temperature for non-Opus models — grounded prose, minimal confabulation.
  *  Opus 4.x rejects an explicit temperature (gated by `modelAcceptsTemperature`). */
@@ -497,6 +503,10 @@ export type BiosketchResult = {
    *  significant publications, deterministically selected then model-mapped to a contribution.
    *  `null` for Personal Statement, an empty corpus, or when no contributions were produced. */
   products: BiosketchProducts | null;
+  /** #917 v6 follow-up — the source PMIDs each contribution draws from (model-attributed,
+   *  verified against FACTS), for output traceability. `null` for Personal Statement / empty /
+   *  when attribution failed. */
+  sources: BiosketchContributionSources[] | null;
 };
 
 /** Lazily build a Bedrock client from the AWS credential chain (ECS task role in
@@ -602,7 +612,28 @@ export async function generateBiosketch(
     }
   }
 
-  return { mode, entries, model: modelId, removed, overflow, products };
+  // #917 v6 follow-up — per-contribution source PMIDs. One best-effort gateway call attributes
+  // each contribution to the candidate pmids it draws from; every returned pmid is verified
+  // against FACTS. A failure degrades to `null` (no Sources line), never blocks the generate.
+  let sources: BiosketchContributionSources[] | null = null;
+  if (mode === "contributions" && entries.length > 0 && facts.representativePublications.length > 0) {
+    try {
+      const pubs = facts.representativePublications;
+      const allowed = new Set(pubs.map((p) => p.pmid));
+      const attribution = await generateText({
+        model: biosketchBedrock()(modelId),
+        system: SOURCE_ATTRIBUTION_SYSTEM_PROMPT,
+        prompt: buildSourceAttributionPrompt(entries, pubs),
+        ...(modelAcceptsTemperature(modelId) ? { temperature: 0 } : {}),
+      });
+      const parsed = parseSourceAttribution(attribution.text, allowed, entries.length);
+      sources = parsed.length > 0 ? parsed : null;
+    } catch {
+      sources = null;
+    }
+  }
+
+  return { mode, entries, model: modelId, removed, overflow, products, sources };
 }
 
 /**

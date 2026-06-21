@@ -461,6 +461,12 @@ export function toBiosketchModelFacts(facts: OverviewFacts) {
       synopsis: p.synopsis,
       topicRationale: p.topicRationale,
       authorPosition: p.authorPosition,
+      // The GPT impact justification (why the paper is significant: novelty / methodology /
+      // influence / translational relevance). Biosketch-only: the public overview withholds it
+      // as puffery, but for a grant biosketch it helps the model judge what to emphasize. The
+      // output's superlative + external-uptake bans still strip any boast it might inspire, and
+      // buildGroundingReference lists it (under permitBibliometrics) so its specifics are grounded.
+      impactJustification: p.impactJustification,
       // ONE citation count only (the Scopus `citationCount`, populated now). We deliberately do
       // NOT also surface the iCite `citedByCount` — two cumulative citation counts for the same
       // paper (Scopus vs iCite routinely differ) would let the model cite the figure the
@@ -906,6 +912,13 @@ export function buildGroundingReference(
       lines.push(`- TITLE: ${p.title.replace(/<[^>]+>/g, "")}${p.year ? ` (${p.year})` : ""}`);
       for (const d of [p.synopsis, p.topicRationale]) {
         if (d) lines.push(`    finding: ${d}`);
+      }
+      // #917 v6 — the biosketch path (permitBibliometrics) also shows the model the GPT impact
+      // justification, so the verifier must treat its specifics as GROUNDED (else it would strip
+      // a significance point the model legitimately took from it). The superlative /
+      // external-uptake / number bans still apply, so a boast or invented figure is still flagged.
+      if (opts?.permitBibliometrics && p.impactJustification) {
+        lines.push(`    significance: ${p.impactJustification}`);
       }
     }
     if (opts?.permitSignificance) {
