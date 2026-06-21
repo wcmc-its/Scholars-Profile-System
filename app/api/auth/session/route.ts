@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session-server";
 import { isSuperuser } from "@/lib/auth/superuser";
 import { isCommsSteward, isMethodsTabVisible } from "@/lib/auth/comms-steward";
+import { isDeveloper } from "@/lib/auth/development";
 import { buildConsoleLinks, type ConsoleLink } from "@/lib/auth/console-links";
 import { impersonationActive } from "@/lib/auth/effective-identity";
 import {
@@ -110,18 +111,26 @@ export async function GET(): Promise<NextResponse> {
   // `canImpersonate` above. Fail-closed: a lookup error just drops that link.
   let consoleLinks: ConsoleLink[];
   if (superuser) {
+    // A superuser always reaches "Find researchers" (the route admits
+    // `isSuperuser || isDeveloper`), so it surfaces here without a dev-role
+    // lookup — the only extra dropdown row a superuser gets beyond "Admin".
     consoleLinks = buildConsoleLinks({
       isSuperuser: true,
       canManageMethods: false,
       managesUnits: false,
+      canFindResearchers: true,
     });
   } else {
     const commsSteward = await isCommsSteward(session.cwid).catch(() => false);
     const manageable = await loadManageableUnits(session.cwid, db.read).catch(() => null);
+    // GrantRecs Phase 4: the `development` role (flag-gated — short-circuits to
+    // false with NO directory call when `DEVELOPMENT_ENABLED` is off). Fail-closed.
+    const developer = await isDeveloper(session.cwid).catch(() => false);
     consoleLinks = buildConsoleLinks({
       isSuperuser: false,
       canManageMethods: isMethodsTabVisible({ isSuperuser: false, isCommsSteward: commsSteward }),
       managesUnits: manageable !== null && manageable.total > 0,
+      canFindResearchers: developer,
     });
   }
 

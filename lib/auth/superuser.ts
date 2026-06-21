@@ -24,6 +24,7 @@
  */
 import { cache } from "react";
 import { isCommsSteward } from "@/lib/auth/comms-steward";
+import { isDeveloper } from "@/lib/auth/development";
 import { getSuperuserAllowlist, getSuperuserConfig } from "@/lib/auth/config";
 import { getSession } from "@/lib/auth/session-server";
 import { DEFAULT_SEARCH_BASE, openLdap } from "@/lib/sources/ldap";
@@ -42,6 +43,16 @@ export interface EditSession {
   isSuperuser: boolean;
   /** Live `comms_steward` verdict (§3); a superuser is a superset of this. */
   isCommsSteward: boolean;
+  /**
+   * Live `development` verdict (GrantRecs Phase 4); a superuser is a superset of
+   * this. Gates ONLY the in-progress admin tooling (`/edit/find-researchers` and
+   * its data route) — no edit-authz predicate reads it, so unlike `isSuperuser` /
+   * `isCommsSteward` it is OPTIONAL: the synthetic `EditSession` shapes the field
+   * / unit authz helpers build need not carry a flag they never consume. The live
+   * resolvers (`getEditSession` / `getEffectiveEditSession`) always populate it,
+   * and the find-researchers gate only ever reads a session from those.
+   */
+  isDeveloper?: boolean;
 }
 
 /**
@@ -145,5 +156,6 @@ export async function getEditSession(): Promise<EditSession | null> {
     cwid: session.cwid,
     isSuperuser: await isSuperuser(session.cwid),
     isCommsSteward: await isCommsSteward(session.cwid),
+    isDeveloper: await isDeveloper(session.cwid),
   };
 }

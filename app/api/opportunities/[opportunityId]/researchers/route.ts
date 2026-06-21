@@ -1,8 +1,11 @@
 /**
  * GET /api/opportunities/[opportunityId]/researchers — GrantRecs Phase 2 reverse
- * matcher ("Find researchers for this opportunity"). ADMIN-ONLY: superuser
- * `/edit` gate (decision D); `force-dynamic` so it's never CloudFront-cached.
- * Phase 4 (Pub Manager) is the primary consumer; the engine lives here in SPS.
+ * matcher ("Find researchers for this opportunity"). ADMIN-ONLY: a superuser OR
+ * a `development`-role member may read it (GrantRecs Phase 4 widened the original
+ * superuser-only gate so the in-progress `/edit/find-researchers` admin surface
+ * can be opened to a scoped operator set without full superuser); `force-dynamic`
+ * so it's never CloudFront-cached. The SPS `/edit/find-researchers` page is the
+ * primary (and only) consumer; the engine lives here in SPS.
  *
  * Distinct axes (`topicFit` / `stageAppeal`); `stageLens` toggles the
  * stage-appropriateness blend, `sort` re-orders per axis (spec §7.4/§8).
@@ -24,8 +27,10 @@ export async function GET(
   { params }: { params: Promise<{ opportunityId: string }> },
 ): Promise<NextResponse> {
   const session = await getEffectiveEditSession();
-  if (!session || !session.isSuperuser) {
+  if (!session || !(session.isSuperuser || session.isDeveloper)) {
     // Empty body — no resource/permission leakage (mirrors /edit API guards).
+    // A superuser OR a development-role member passes (GrantRecs Phase 4); the
+    // page gate at /edit/find-researchers reads the same verdict.
     return new NextResponse(null, { status: 403 });
   }
 

@@ -9,6 +9,7 @@ import {
   EyeIcon,
   FlaskConicalIcon,
   type LucideIcon,
+  UserSearchIcon,
   UsersIcon,
 } from "lucide-react";
 
@@ -57,6 +58,7 @@ const CONSOLE_LINK_ICON: Record<ConsoleLink["id"], LucideIcon> = {
   "manage-profiles": UsersIcon,
   methods: FlaskConicalIcon,
   units: Building2Icon,
+  "find-researchers": UserSearchIcon,
 };
 
 export type AccountMenuProps = {
