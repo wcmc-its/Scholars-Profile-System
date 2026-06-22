@@ -217,6 +217,7 @@ export function PeopleResultCard({
         onToggle={onToggle}
         panelId={panelId}
         hasQuery={hasQuery}
+        slug={hit.slug}
       />
     );
   } else {

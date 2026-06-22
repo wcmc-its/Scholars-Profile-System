@@ -67,7 +67,10 @@ exports[`buildPeopleDoc — golden snapshots > captures a fully-populated schola
   "publicationTitles": "First paper First paper First paper First paper First paper First paper First paper First paper First paper First paper Second paper Second paper Second paper Second paper Second paper Second paper Second paper Second paper Second paper Second paper Third paper",
   "slug": "ann-researcher",
   "topMeshTerms": [
-    "Term Alpha",
+    {
+      "label": "Term Alpha",
+      "ui": "D001",
+    },
   ],
 }
 `;

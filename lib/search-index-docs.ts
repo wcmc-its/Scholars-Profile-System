@@ -104,13 +104,40 @@ export function extractMeshLabels(raw: unknown): string[] {
 // importers and the snapshot test keep resolving it unchanged.
 export { extractMeshDescriptorUis };
 
-/** Cap on the people-doc `topMeshTerms` rollup (CONTRACT A — top 8 labels). */
+/**
+ * Like {@link extractMeshLabels} but keeps the descriptor `ui` paired with each
+ * label, for the people-doc `topMeshTerms` rollup whose chips deep-link to a
+ * scholar's pubs pre-filtered by `?mesh=<ui>`. Selects labels by the SAME rule
+ * as `extractMeshLabels` (so `.map(p => p.label)` is identical), and carries the
+ * `{ ui, label }` object shape from `lib/api/profile.ts`'s `normalizeMeshTerms`.
+ * `ui` is null for a bare-string row or an object missing a valid `ui`.
+ */
+export function extractMeshTermPairs(raw: unknown): Array<{ ui: string | null; label: string }> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{ ui: string | null; label: string }> = [];
+  for (const item of raw) {
+    if (typeof item === "string") {
+      if (item.length > 0) out.push({ ui: null, label: item });
+    } else if (item && typeof item === "object" && "label" in item) {
+      const label = (item as { label: unknown }).label;
+      if (typeof label === "string" && label.length > 0) {
+        const uiRaw = (item as { ui?: unknown }).ui;
+        const ui = typeof uiRaw === "string" && uiRaw.length > 0 ? uiRaw : null;
+        out.push({ ui, label });
+      }
+    }
+  }
+  return out;
+}
+
+/** Cap on the people-doc `topMeshTerms` rollup (CONTRACT A — top 8 descriptors). */
 export const TOP_MESH_TERMS_LIMIT = 8;
 
 /**
- * Reduce a per-label distinct-publication count map into the ordered
+ * Reduce a per-label aggregate ({ count, ui }) map into the ordered
  * `topMeshTerms` array carried on the people doc: the scholar's most frequent
- * MeSH descriptor labels across their accepted/visible publications.
+ * MeSH descriptors (each with its `ui`, for deep-linking) across their
+ * accepted/visible publications.
  *
  * Counting semantics match `lib/api/profile.ts`'s `aggregateKeywords` rollup —
  * each label is counted once per distinct publication it appears on (the caller
@@ -121,14 +148,16 @@ export const TOP_MESH_TERMS_LIMIT = 8;
  *
  * Pure: same map → same array. Exported for unit testing without a DB.
  */
-export function topMeshTermsFromCounts(counts: ReadonlyMap<string, number>): string[] {
+export function topMeshTermsFromCounts(
+  counts: ReadonlyMap<string, { count: number; ui: string | null }>,
+): Array<{ ui: string | null; label: string }> {
   return Array.from(counts.entries())
     .sort((a, b) => {
-      if (b[1] !== a[1]) return b[1] - a[1];
+      if (b[1].count !== a[1].count) return b[1].count - a[1].count;
       return a[0].localeCompare(b[0]);
     })
     .slice(0, TOP_MESH_TERMS_LIMIT)
-    .map(([label]) => label);
+    .map(([label, agg]) => ({ ui: agg.ui, label }));
 }
 
 // ---------------------------------------------------------------------------
@@ -670,7 +699,7 @@ export async function buildPeopleDoc(
   // matching `lib/api/profile.ts`'s `aggregateKeywords` semantics. Built over the
   // SAME suppression-filtered authorship set as `publicationMesh` below, so a
   // hidden / dark pub never contributes a label.
-  const topMeshAgg = new Map<string, number>();
+  const topMeshAgg = new Map<string, { count: number; ui: string | null }>();
   // Issue #21 — collect each scholar's abstract texts (one copy per pmid;
   // duplicates can occur if the same publication shows up twice in a
   // listing, so dedupe).
@@ -701,16 +730,25 @@ export async function buildPeopleDoc(
       abstractParts.push(a.publication.abstract);
     }
 
-    const mesh = extractMeshLabels(a.publication.meshTerms);
+    // {ui,label} pairs — `.map(p => p.label)` is byte-identical to the former
+    // `extractMeshLabels(...)`, so `termAgg`/`mesh` behavior is unchanged; the
+    // pairs additionally carry the descriptor `ui` for the `topMeshTerms` rollup.
+    const meshPairs = extractMeshTermPairs(a.publication.meshTerms);
+    const mesh = meshPairs.map((p) => p.label);
     // CONTRACT A — count each LABEL at most once per pub for `topMeshTerms`
-    // frequency (deduped within a pub, like `aggregateKeywords`). `termAgg`
-    // below intentionally keeps its existing per-occurrence accumulation.
+    // frequency (deduped within a pub, like `aggregateKeywords`), carrying the
+    // first non-null `ui` seen for that label. `termAgg` below intentionally
+    // keeps its existing per-occurrence accumulation over the labels.
     const seenTopMeshThisPub = new Set<string>();
+    for (const { label, ui } of meshPairs) {
+      if (seenTopMeshThisPub.has(label)) continue;
+      seenTopMeshThisPub.add(label);
+      const agg = topMeshAgg.get(label) ?? { count: 0, ui: null };
+      agg.count += 1;
+      if (agg.ui === null && ui !== null) agg.ui = ui;
+      topMeshAgg.set(label, agg);
+    }
     for (const term of mesh) {
-      if (!seenTopMeshThisPub.has(term)) {
-        seenTopMeshThisPub.add(term);
-        topMeshAgg.set(term, (topMeshAgg.get(term) ?? 0) + 1);
-      }
       const cur = termAgg.get(term) ?? {
         distinctPubs: 0,
         hasFirstOrLast: false,

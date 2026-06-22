@@ -9,7 +9,8 @@ import { ResultEvidence } from "@/components/search/result-evidence";
 import { RepresentativePapers } from "@/components/search/match-reason";
 import type { ResultEvidence as Evidence } from "@/lib/api/result-evidence";
 
-const renderEv = (evidence: Evidence) => render(<ResultEvidence evidence={evidence} />);
+const renderEv = (evidence: Evidence, slug?: string) =>
+  render(<ResultEvidence evidence={evidence} slug={slug} />);
 
 describe("<ResultEvidence> — one render per kind", () => {
   it("method ⇒ Method badge + bold family, with NO exemplar-tool trail", () => {
@@ -155,20 +156,42 @@ describe("<ResultEvidence> — E2 areas treatment (handoff §5#1)", () => {
 });
 
 describe("<ResultEvidence> — SEARCH_PEOPLE_CONCEPT_HINT concepts treatment", () => {
-  it("kind 'concepts' renders a 'TOPICS' hint with labels + '+N more'", () => {
-    renderEv({
-      kind: "concepts",
-      labels: ["Neoplasms", "Immunotherapy", "Melanoma", "T-Lymphocytes"],
-      total: 8,
-    });
-    expect(screen.getByText("TOPICS")).toBeTruthy();
-    expect(screen.getByText("Neoplasms")).toBeTruthy();
-    expect(screen.getByText("+4 more")).toBeTruthy();
+  const items6 = [
+    { label: "Neoplasms", ui: "D009369" },
+    { label: "Immunotherapy", ui: "D007167" },
+    { label: "Melanoma", ui: "D008545" },
+    { label: "T-Lymphocytes", ui: "D013601" },
+    { label: "Antigens", ui: "D000941" },
+    { label: "Mutation", ui: "D009154" },
+  ];
+
+  it("a concept WITH a ui deep-links to the scholar's pubs filtered to it", () => {
+    renderEv({ kind: "concepts", items: items6.slice(0, 2), total: 2 }, "jane-smith");
+    const chip = screen.getByText("Neoplasms").closest("a");
+    expect(chip).not.toBeNull();
+    expect(chip!.getAttribute("href")).toBe("/jane-smith?mesh=D009369#publications");
   });
 
-  it("no '+N more' when total equals the shown concept labels", () => {
-    renderEv({ kind: "concepts", labels: ["Neoplasms", "Melanoma"], total: 2 });
-    expect(screen.queryByText(/\+\d+ more/)).toBeNull();
+  it("a concept with a null ui renders as a NON-link chip", () => {
+    renderEv({ kind: "concepts", items: [{ label: "Orphan Term", ui: null }], total: 1 }, "jane-smith");
+    expect(screen.getByText("Orphan Term").closest("a")).toBeNull();
+  });
+
+  it("folds overflow into an expanding '+N more' BUTTON (jsdom fallback = 4 chips)", () => {
+    renderEv({ kind: "concepts", items: items6, total: 6 }, "jane-smith");
+    // No layout in jsdom → fallback shows 4 chips, the other 2 behind "+N more".
+    const more = screen.getByRole("button", { name: /Show 2 more topics/ });
+    expect(more.tagName).toBe("BUTTON"); // expands the row; never a link
+  });
+
+  it("no '+N more' when all concepts fit the fallback (<= 4)", () => {
+    renderEv({ kind: "concepts", items: items6.slice(0, 3), total: 3 }, "jane-smith");
+    expect(screen.queryByRole("button", { name: /more topic/ })).toBeNull();
+  });
+
+  it("no 'TOPICS' label or boxed container — the tag glyph carries the meaning", () => {
+    renderEv({ kind: "concepts", items: items6.slice(0, 2), total: 2 }, "jane-smith");
+    expect(screen.queryByText("TOPICS")).toBeNull();
   });
 });
 
@@ -179,17 +202,23 @@ describe("<ResultEvidence> — hasQuery gate on the empty match line", () => {
     expect(container.textContent).not.toContain("no specific match");
   });
 
-  it("hasQuery=false: kind 'concepts' renders the hint WITHOUT the empty line", () => {
+  it("hasQuery=false: kind 'concepts' renders the chips WITHOUT the empty line", () => {
     const { container } = render(
       <ResultEvidence
-        evidence={{ kind: "concepts", labels: ["Neoplasms", "Melanoma"], total: 5 }}
+        evidence={{
+          kind: "concepts",
+          items: [
+            { label: "Neoplasms", ui: "D009369" },
+            { label: "Melanoma", ui: "D008545" },
+          ],
+          total: 2,
+        }}
         hasQuery={false}
+        slug="jane-smith"
       />,
     );
     expect(container.textContent).not.toContain("no specific match");
-    expect(screen.getByText("TOPICS")).toBeTruthy();
     expect(screen.getByText("Neoplasms")).toBeTruthy();
-    expect(screen.getByText("+3 more")).toBeTruthy();
   });
 
   it("hasQuery=false: kind 'areas' renders the hint WITHOUT the empty line", () => {
@@ -208,15 +237,16 @@ describe("<ResultEvidence> — hasQuery gate on the empty match line", () => {
     expect(container.textContent).toContain("no specific match");
   });
 
-  it("hasQuery=true: kind 'concepts' renders the empty line ABOVE the hint", () => {
+  it("hasQuery=true: kind 'concepts' renders the empty line ABOVE the chips", () => {
     const { container } = render(
       <ResultEvidence
-        evidence={{ kind: "concepts", labels: ["Neoplasms"], total: 1 }}
+        evidence={{ kind: "concepts", items: [{ label: "Neoplasms", ui: "D009369" }], total: 1 }}
         hasQuery
+        slug="jane-smith"
       />,
     );
     expect(container.textContent).toContain("no specific match");
-    expect(screen.getByText("TOPICS")).toBeTruthy();
+    expect(screen.getByText("Neoplasms")).toBeTruthy();
   });
 });
 

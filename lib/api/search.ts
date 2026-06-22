@@ -1992,10 +1992,12 @@ export async function searchPeople(opts: {
       // is on (added to `_source` above); drives the topic-reason match and the
       // humanized-areas fallback.
       areasOfInterest?: string;
-      // People-tab "concepts" hint — the scholar's top MeSH descriptor labels
-      // by publication frequency. Present only when SEARCH_PEOPLE_CONCEPT_HINT
-      // is on (added to `_source` above); drives the `concepts` evidence tail.
-      topMeshTerms?: string[];
+      // People-tab "concepts" hint — the scholar's top MeSH descriptors (with
+      // ui, for deep-linking) by publication frequency. Present only when
+      // SEARCH_PEOPLE_CONCEPT_HINT is on (added to `_source` above); drives the
+      // `concepts` evidence tail. The string[] arm tolerates a not-yet-reindexed
+      // index (old label-only docs) during the reindex window — coerced below.
+      topMeshTerms?: Array<{ ui: string | null; label: string }> | string[];
     };
     highlight?: Record<string, string[]>;
   };
@@ -2301,7 +2303,7 @@ export async function searchPeople(opts: {
     pubCount: number,
     hasProvenance: boolean,
     hl: Record<string, string[]> | undefined,
-    topMeshTerms: string[] | undefined,
+    topMeshTerms: Array<{ ui: string | null; label: string }> | string[] | undefined,
   ): ResultEvidence => {
     const m = methodReasonByCwid.get(cwid);
     let topic: { label: string; id: string } | undefined;
@@ -2350,13 +2352,18 @@ export async function searchPeople(opts: {
 
     // People-tab "concepts" hint — when on, surface the scholar's top MeSH
     // descriptors (already freq-sorted in the index doc) instead of the sparse
-    // self-reported areas: build `concepts` (capped to AREAS_CAP) and NULL out
-    // `areas` so the tail (step 8a > 8b) picks concepts. Off ⇒ `concepts` stays
-    // null and `areas` is left untouched, so the tail is byte-identical to today.
-    let concepts: { labels: string[]; total: number } | null = null;
+    // self-reported areas, and NULL out `areas` so the tail (step 8a > 8b) picks
+    // concepts. Off ⇒ `concepts` stays null and `areas` is left untouched, so the
+    // tail is byte-identical to today. The FULL set is sent (no cap here) — the
+    // client measures the row and folds the overflow into "+N more". Coerces the
+    // old label-only `string[]` shape from a not-yet-reindexed index (ui = null →
+    // the chip renders as a non-link) so the new app never crashes mid-rollout.
+    let concepts: { items: Array<{ label: string; ui: string | null }>; total: number } | null = null;
     if (conceptHint) {
-      const terms = topMeshTerms ?? [];
-      if (terms.length > 0) concepts = { labels: terms.slice(0, AREAS_CAP), total: terms.length };
+      const items = (topMeshTerms ?? [])
+        .map((t) => (typeof t === "string" ? { label: t, ui: null } : { label: t.label, ui: t.ui }))
+        .filter((t) => t.label.length > 0);
+      if (items.length > 0) concepts = { items, total: items.length };
       areas = null;
     }
 
