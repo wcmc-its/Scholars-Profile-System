@@ -142,6 +142,69 @@ export class EtlStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // ETL cadence VPC relocation (docs/etl-vpc-migration-handoff.md).
+    //
+    // The cadence task family reads on-prem LDAP + the 10.46.x source DBs
+    // (reachable only via the TGW) and writes Aurora / OpenSearch / the
+    // internal ALB (in the Sps VPC). The Sps VPC can't be TGW-attached
+    // (10.20/10.10 overlap), so when `etlCadenceVpcRelocated` is set the
+    // cadence steps run in the TGW-attached scholars-dev/prod VPC
+    // (envConfig.edExportVpc — the same import the ED bridge uses) and reach
+    // the datastores back in the Sps VPC over an intra-account VPC peering
+    // connection. OFF by default: the peering + datastore CIDR ingress must
+    // exist first, or the move regresses the (working) write side. The subnet
+    // selection + SG are built ONCE here and shared by every cadence step (the
+    // reconcilers + curated backup don't move — they only touch the Sps VPC's
+    // own datastores and stay on `etlSecurityGroup`).
+    // ------------------------------------------------------------------
+    const relocateCadence = envConfig.etlCadenceVpcRelocated;
+    let cadenceSubnets: ec2.SubnetSelection = {
+      subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+    };
+    let cadenceSecurityGroups: ec2.ISecurityGroup[] = [etlSecurityGroup];
+    if (relocateCadence) {
+      const cadVpcCfg = envConfig.edExportVpc;
+      // Import by attributes (no context lookup → synth stays deterministic
+      // without account creds). Distinct construct ids from the ED bridge's
+      // EdExportVpc/EdExportSubnet* so the two imports of the same real VPC
+      // don't collide.
+      const cadenceVpc = ec2.Vpc.fromVpcAttributes(this, "EtlCadenceVpc", {
+        vpcId: cadVpcCfg.vpcId,
+        availabilityZones: [...cadVpcCfg.availabilityZones],
+        privateSubnetIds: [...cadVpcCfg.appSubnetIds],
+      });
+      cadenceSubnets = {
+        subnets: cadVpcCfg.appSubnetIds.map((id, i) =>
+          ec2.Subnet.fromSubnetId(this, `EtlCadenceSubnet${i}`, id),
+        ),
+      };
+      // One egress-only SG for the whole cadence family. allowAllOutbound
+      // covers the TGW (on-prem + 10.46.x reads), the peer (Aurora/OpenSearch/
+      // ALB writes), and NAT (S3 / Secrets Manager / DynamoDB / public APIs).
+      // No ingress — a batch task accepts no inbound connections.
+      const cadenceSg = new ec2.SecurityGroup(this, "EtlCadenceSg", {
+        vpc: cadenceVpc,
+        description: `SPS ETL cadence task egress (${env}).`,
+        allowAllOutbound: true,
+      });
+      cadenceSecurityGroups = [cadenceSg];
+
+      // The relocated cadence reaches the internal ALB (etl:revalidate POST to
+      // /api/revalidate) from the scholars-dev CIDR over the peer, not the Sps
+      // ETL SG. Aurora (:3306) + OpenSearch (:443) CIDR ingress are added in
+      // DataStack (it owns those SGs); the ALB SG lives in AppStack, so we
+      // attach a standalone ingress here (same pattern as the rule above).
+      new ec2.CfnSecurityGroupIngress(this, "InternalAlbIngressFromEtlCadenceVpc", {
+        groupId: internalAlbSgId,
+        ipProtocol: "tcp",
+        fromPort: 80,
+        toPort: 80,
+        cidrIp: envConfig.etlPeerCidr,
+        description: `ETL cadence VPC ${envConfig.etlPeerCidr} to SPS internal ALB HTTP (${env}) -- /api/revalidate`,
+      });
+    }
+
+    // ------------------------------------------------------------------
     // ETL secrets, looked up by name (SecretsStack owns the stubs; values
     // are seeded out-of-band). Two classes:
     //
@@ -611,8 +674,10 @@ export class EtlStack extends Stack {
           platformVersion: ecs.FargatePlatformVersion.LATEST,
         }),
         assignPublicIp: false,
-        subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-        securityGroups: [etlSecurityGroup],
+        // Sps VPC by default; the scholars-dev/prod app subnets + cadence SG
+        // when relocated (docs/etl-vpc-migration-handoff.md).
+        subnets: cadenceSubnets,
+        securityGroups: cadenceSecurityGroups,
         containerOverrides: [
           {
             containerDefinition: etlContainer,
@@ -744,7 +809,17 @@ export class EtlStack extends Stack {
       // Seeds publication_conflict_statement for the COI-gap source below.
       { id: "ReciterCoiStatements", npmScript: "etl:reciter:coi-statements", external: true },
       { id: "Asms", npmScript: "etl:asms", external: true },
-      { id: "Infoed", npmScript: "etl:infoed", external: true },
+      // etl:infoed is EXCLUDED from the STAGING cadence (Paul, 2026-06-22).
+      // InfoEd is at 10.20.91.8, which overlaps the Sps VPC's own 10.20/16
+      // CIDR, so once the cadence relocates + peers, scholars-dev routes
+      // 10.20.91.8 into the Sps VPC (where InfoEd isn't) and blackholes it; its
+      // Catch→Fail would then abort the whole nightly. The Sps VPC can't reach
+      // it today either (on-prem, not TGW-attached), so dropping it on staging
+      // is safe now and necessary post-relocation. Prod keeps the step. Re-add
+      // once WCM re-IPs / NATs InfoEd off 10.20 (docs/etl-vpc-migration-handoff.md).
+      ...(env === "staging"
+        ? []
+        : [{ id: "Infoed", npmScript: "etl:infoed", external: true } as StepSpec]),
       { id: "Coi", npmScript: "etl:coi", external: true },
       // COI-gap recommendations — reads SPS-DB only (disclosed COI from the Coi
       // step + the PubMed statements above), so external:false. Computes whatever

@@ -93,6 +93,17 @@ export class DataStack extends Stack {
       ec2.Port.tcp(3306),
       "ETL Lambdas to Aurora writer/reader endpoints",
     );
+    // ETL cadence VPC relocation (docs/etl-vpc-migration-handoff.md): once the
+    // cadence runs in scholars-dev/prod and peers back, those tasks reach
+    // Aurora from the peer CIDR, not the Sps ETL SG. Additive — the Sps-SG rule
+    // above stays for the reconcilers + curated backup that don't move.
+    if (envConfig.etlCadenceVpcRelocated) {
+      auroraSecurityGroup.addIngressRule(
+        ec2.Peer.ipv4(envConfig.etlPeerCidr),
+        ec2.Port.tcp(3306),
+        "Relocated ETL cadence (scholars-dev/prod) to Aurora over the VPC peer",
+      );
+    }
     // The Secrets Manager RDS rotation Lambda's SG ingress is added by
     // `cluster.addRotationSingleUser()` below — CDK creates the Lambda + a
     // dedicated SG + the Aurora-SG ingress rule together, so we do not
@@ -117,6 +128,15 @@ export class DataStack extends Stack {
       ec2.Port.tcp(443),
       "ETL Lambdas to OpenSearch HTTPS (index writes + suggest)",
     );
+    // ETL cadence VPC relocation (see Aurora rule above): the relocated cadence
+    // writes the OpenSearch index from the peer CIDR.
+    if (envConfig.etlCadenceVpcRelocated) {
+      opensearchSecurityGroup.addIngressRule(
+        ec2.Peer.ipv4(envConfig.etlPeerCidr),
+        ec2.Port.tcp(443),
+        "Relocated ETL cadence (scholars-dev/prod) to OpenSearch over the VPC peer",
+      );
+    }
 
     // ------------------------------------------------------------------
     // Aurora MySQL Serverless v2.

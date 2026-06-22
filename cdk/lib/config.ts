@@ -241,6 +241,29 @@ export interface SpsEnvConfig {
    */
   readonly edEmailVisibilityBridgeEnabled: boolean;
   /**
+   * Whether the regular ETL cadence task family (nightly / weekly / annual +
+   * heartbeat) runs in {@link edExportVpc} (scholars-dev / scholars-prod,
+   * TGW-attached) instead of the Sps VPC, reaching Aurora / OpenSearch / the
+   * internal ALB back in the Sps VPC over an intra-account VPC peering
+   * connection. The ETL is two-sided — it reads on-prem LDAP + the 10.46.x
+   * source DBs (TGW-only) and writes the Sps-VPC datastores — and the Sps VPC
+   * cannot be TGW-attached (10.20/10.10 overlap), so the compute moves and
+   * peers back. **OFF in both envs** until that peering + the datastore CIDR
+   * ingress ({@link etlPeerCidr}) are in place and the source-reach probe
+   * passes from scholars-dev: the placement move regresses the
+   * (currently-working) write side if it lands first. Gating it here keeps the
+   * scholars-dev cadence SG + the CIDR ingress rules out of the template until
+   * an operator flips it. See docs/etl-vpc-migration-handoff.md.
+   */
+  readonly etlCadenceVpcRelocated: boolean;
+  /**
+   * CIDR of the TGW-attached ETL VPC ({@link edExportVpc}) that the Sps-side
+   * datastores (Aurora 3306, OpenSearch 443, internal ALB 80) admit once
+   * {@link etlCadenceVpcRelocated} is true: scholars-dev = `10.46.231.0/24`,
+   * scholars-prod = `10.46.230.0/24`. Referenced only when relocated.
+   */
+  readonly etlPeerCidr: string;
+  /**
    * Fargate CPU units for the ETL task family. Tunable per-step via
    * `Overrides.ContainerOverrides[].Cpu`; this is the base allocation.
    */
@@ -353,6 +376,12 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
       appSubnetIds: ["subnet-08cab06d3084fba41", "subnet-07ffed73356c01f6c"],
     },
     edEmailVisibilityBridgeEnabled: true,
+    // ETL cadence VPC relocation (docs/etl-vpc-migration-handoff.md) — OFF
+    // until the scholars-dev ↔ Sps-Network-staging peering + the datastore CIDR
+    // ingress exist and the source-reach probe passes from scholars-dev. Flip
+    // to true only after peering is up, or the cadence loses DB/index reach.
+    etlCadenceVpcRelocated: false,
+    etlPeerCidr: "10.46.231.0/24",
     // #485 — search:index OOM-killed at 2048 MiB building the full corpus
     // (178k+ pubs). 8 GB + the NODE_OPTIONS heap cap (EtlStack) clears it;
     // 2 vCPU also speeds the build, easing throttle pressure on the node.
@@ -435,6 +464,11 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
       appSubnetIds: ["subnet-069dc77801ee2d8f3", "subnet-0ceec7bb2f059e162"],
     },
     edEmailVisibilityBridgeEnabled: false,
+    // ETL cadence VPC relocation — OFF; replicate the staging peer-and-move on
+    // scholars-prod ↔ Sps-Network-prod and verify before flipping (prod ETL
+    // schedules are off anyway). See docs/etl-vpc-migration-handoff.md.
+    etlCadenceVpcRelocated: false,
+    etlPeerCidr: "10.46.230.0/24",
     // #485 — match staging's 8 GB headroom for the search:index corpus build
     // (paired with the NODE_OPTIONS heap cap in EtlStack). Prod's 2-node
     // m6g.large.search domain already handles the bulk write rate.
