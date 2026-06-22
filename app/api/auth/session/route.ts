@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session-server";
 import { isSuperuser } from "@/lib/auth/superuser";
+import { isDeveloper } from "@/lib/auth/development";
 import { isCommsSteward, isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { buildConsoleLinks, type ConsoleLink } from "@/lib/auth/console-links";
 import { isAccountConsoleNavRestructureEnabled } from "@/lib/auth/account-console-nav";
@@ -78,6 +79,7 @@ export async function GET(): Promise<NextResponse> {
         scholar: null,
         impersonating: null,
         canImpersonate: false,
+        canAccessFundingMatcher: false,
         consoleLinks: [],
         accountNavRestructure,
       },
@@ -99,6 +101,13 @@ export async function GET(): Promise<NextResponse> {
   // against the REAL cwid; `isSuperuser` is fail-closed, so a directory hiccup
   // just hides the superuser surfaces.
   const superuser = await isSuperuser(session.cwid).catch(() => false);
+
+  // GrantRecs Phase 4 — the top-nav "Researchers for funding" link is gated to the
+  // same audience as the tool: a superuser OR a development-role member. Pay the
+  // extra isDeveloper LDAPS only for non-superusers (a superuser already qualifies);
+  // isDeveloper is fail-closed and self-gated by DEVELOPMENT_ENABLED.
+  const developer = superuser ? false : await isDeveloper(session.cwid).catch(() => false);
+  const canAccessFundingMatcher = superuser || developer;
 
   // R1 — only a superuser may initiate impersonation, AND the feature must be
   // enabled. The flag-off short-circuit (mirrored from `impersonationActive`)
@@ -192,7 +201,15 @@ export async function GET(): Promise<NextResponse> {
   }
 
   return NextResponse.json(
-    { authenticated: true, scholar, impersonating, canImpersonate, consoleLinks, accountNavRestructure },
+    {
+      authenticated: true,
+      scholar,
+      impersonating,
+      canImpersonate,
+      canAccessFundingMatcher,
+      consoleLinks,
+      accountNavRestructure,
+    },
     { headers: noStore },
   );
 }

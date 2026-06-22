@@ -16,10 +16,12 @@
  * longer carries a Funding-matcher row.
  */
 import { redirect } from "next/navigation";
+import { Eye } from "lucide-react";
 
 import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { FindResearchers } from "@/components/edit/find-researchers";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { isAccountConsoleNavRestructureEnabled } from "@/lib/auth/account-console-nav";
 import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
@@ -100,6 +102,15 @@ export default async function FindResearchersPage() {
       />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
+        <Alert variant="info" className="mb-6" data-slot="funding-matcher-staff-banner">
+          <Eye className="size-4" />
+          <AlertDescription>
+            <p>
+              Available to research-development staff.
+              {session.isSuperuser ? " You’re viewing as a superuser for testing." : ""}
+            </p>
+          </AlertDescription>
+        </Alert>
         <FindResearchers unifiedNav={isAccountConsoleNavRestructureEnabled()} />
       </main>
     </div>
