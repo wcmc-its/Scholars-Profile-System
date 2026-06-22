@@ -13,6 +13,15 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+// The unified-nav flag mounts the real AccountMenu (a client island that probes
+// /api/auth/session). Stub it so the strip's right-end swap is tested in
+// isolation without a live fetch / Popover.
+vi.mock("@/components/site/account-menu", () => ({
+  AccountMenu: ({ context }: { context?: string }) => (
+    <div data-testid="account-menu-stub" data-context={context} />
+  ),
+}));
+
 import { AdminSubnav } from "@/components/edit/admin-subnav";
 
 describe("AdminSubnav", () => {
@@ -165,6 +174,28 @@ describe("AdminSubnav", () => {
     const self = screen.getByTestId("admin-subnav-self-edit");
     expect(self.tagName.toLowerCase()).toBe("a");
     expect(self.getAttribute("href")).toBe("/edit");
+  });
+
+  // account-dropdown-nav handoff, Workstream A — the unified-nav flag replaces the
+  // right-end "My Profile" tab with the account chip/dropdown (context="console").
+  it("flag on → mounts the account menu (console context) in place of the My Profile tab", () => {
+    process.env.ACCOUNT_CONSOLE_NAV_RESTRUCTURE = "on";
+    try {
+      render(<AdminSubnav active="self" pendingSlugRequests={null} methodsTab={0} selfEditHref="/edit" />);
+      expect(screen.queryByTestId("admin-subnav-self-edit")).toBeNull();
+      const stub = screen.getByTestId("account-menu-stub");
+      expect(stub.getAttribute("data-context")).toBe("console");
+      // The console tabs themselves are unaffected.
+      expect(screen.getByTestId("admin-tab-methods")).toBeTruthy();
+    } finally {
+      delete process.env.ACCOUNT_CONSOLE_NAV_RESTRUCTURE;
+    }
+  });
+
+  it("flag off (default) → keeps the classic My Profile tab, no account menu", () => {
+    render(<AdminSubnav active="self" pendingSlugRequests={null} methodsTab={0} />);
+    expect(screen.getByTestId("admin-subnav-self-edit").textContent).toBe("My Profile");
+    expect(screen.queryByTestId("account-menu-stub")).toBeNull();
   });
 
   // Data Quality dashboard tab (docs/data-quality-dashboard-spec.md).

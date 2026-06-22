@@ -206,13 +206,6 @@ export function EditShell({
         <main id="edit-detail" tabIndex={-1} aria-labelledby="panel-heading" className="min-w-0 scroll-mt-4">
           <RailSelect items={railItems} active={activeAttr} basePath={basePath} />
 
-          {mode === "self" && (
-            <p className="text-muted-foreground mt-4 mb-4 text-sm md:mt-0">
-              Changes here appear on your public profile. Most fields come from WCM systems — use{" "}
-              <span className="font-medium">Request a change</span> to fix those.
-            </p>
-          )}
-
           {/* Secondary links row (mockup parity, slate text). "View change
               history" (internal audit page, #955) sits beside "Preview Profile"
               (the public profile, external ↗). Shown alongside the account

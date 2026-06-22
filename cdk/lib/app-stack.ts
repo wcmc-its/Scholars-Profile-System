@@ -1214,6 +1214,16 @@ export class AppStack extends Stack {
         // prod until an approval-gated Sps-App-prod deploy flips it. Takes effect
         // on a manual `cdk deploy --exclusively Sps-App-<env>`.
         SELF_EDIT_RAIL_RESTRUCTURE: env === "staging" ? "on" : "off",
+        // ACCOUNT_CONSOLE_NAV_RESTRUCTURE -- the unified account dropdown + console
+        // nav (account-dropdown-nav handoff, Workstreams A + B). Reorders the menu
+        // to View -> Edit, relabels the superuser row "Admin" -> "Admin console"
+        // and the GrantRecs row "Find researchers" -> "Funding matcher", and mounts
+        // the account chip in the /edit AdminSubnav strip in place of the old
+        // "My Profile" tab. Presentational / navigation only -- no data changes.
+        // Default-off and staging-first: "on" in staging while it bakes, "off" in
+        // prod until an approval-gated Sps-App-prod deploy flips it. Takes effect
+        // on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        ACCOUNT_CONSOLE_NAV_RESTRUCTURE: env === "staging" ? "on" : "off",
         // #917 v6 -- post-generation faithfulness pass for the biosketch generator.
         // ON in BOTH envs: the biosketch is a grant document, and one fabricated
         // metric there dwarfs the ~3x cost (handoff §5). The route forces it on

@@ -318,11 +318,11 @@ const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string; subgroup?: string }> =
   "profile-url": { group: "Settings" },
 };
 
-// Per-group one-line descriptions for the restructured rail. The "Profile content"
-// key mirrors "Yours to edit" for the third-person (proxy / unit-admin) reframe.
+// Per-group one-line descriptions for the restructured rail, surfaced via an
+// info button beside the group header (see attribute-rail.tsx / group-info-button.tsx).
+// "Yours to edit" and its third-person "Profile content" reframe are
+// self-explanatory and carry no note.
 const RAIL_V2_GROUP_META: Record<string, { description?: string }> = {
-  "Yours to edit": { description: "Your profile content." },
-  "Profile content": { description: "The scholar’s profile content." },
   [RAIL_V2_WCM_GROUP]: {
     description: "Sourced from WCM. Show, hide, or flag here — corrections happen in the source system.",
   },

@@ -4,6 +4,7 @@ import { isSuperuser } from "@/lib/auth/superuser";
 import { isCommsSteward, isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { isDeveloper } from "@/lib/auth/development";
 import { buildConsoleLinks, type ConsoleLink } from "@/lib/auth/console-links";
+import { isAccountConsoleNavRestructureEnabled } from "@/lib/auth/account-console-nav";
 import { impersonationActive } from "@/lib/auth/effective-identity";
 import {
   resolveImpersonationDisplay,
@@ -66,6 +67,11 @@ export async function GET(): Promise<NextResponse> {
   const session = await getSession().catch(() => null);
   const noStore = { "cache-control": "no-store" };
 
+  // The unified account-dropdown + console-nav flag rides the probe to the
+  // client AccountMenu (it reorders View/Edit and renders the relabeled console
+  // rows). Also gates the buildConsoleLinks relabel below.
+  const accountNavRestructure = isAccountConsoleNavRestructureEnabled();
+
   if (!session) {
     return NextResponse.json(
       {
@@ -74,6 +80,7 @@ export async function GET(): Promise<NextResponse> {
         impersonating: null,
         canImpersonate: false,
         consoleLinks: [],
+        accountNavRestructure,
       },
       { headers: noStore },
     );
@@ -114,24 +121,30 @@ export async function GET(): Promise<NextResponse> {
     // A superuser always reaches "Find researchers" (the route admits
     // `isSuperuser || isDeveloper`), so it surfaces here without a dev-role
     // lookup — the only extra dropdown row a superuser gets beyond "Admin".
-    consoleLinks = buildConsoleLinks({
-      isSuperuser: true,
-      canManageMethods: false,
-      managesUnits: false,
-      canFindResearchers: true,
-    });
+    consoleLinks = buildConsoleLinks(
+      {
+        isSuperuser: true,
+        canManageMethods: false,
+        managesUnits: false,
+        canFindResearchers: true,
+      },
+      { unifiedNav: accountNavRestructure },
+    );
   } else {
     const commsSteward = await isCommsSteward(session.cwid).catch(() => false);
     const manageable = await loadManageableUnits(session.cwid, db.read).catch(() => null);
     // GrantRecs Phase 4: the `development` role (flag-gated — short-circuits to
     // false with NO directory call when `DEVELOPMENT_ENABLED` is off). Fail-closed.
     const developer = await isDeveloper(session.cwid).catch(() => false);
-    consoleLinks = buildConsoleLinks({
-      isSuperuser: false,
-      canManageMethods: isMethodsTabVisible({ isSuperuser: false, isCommsSteward: commsSteward }),
-      managesUnits: manageable !== null && manageable.total > 0,
-      canFindResearchers: developer,
-    });
+    consoleLinks = buildConsoleLinks(
+      {
+        isSuperuser: false,
+        canManageMethods: isMethodsTabVisible({ isSuperuser: false, isCommsSteward: commsSteward }),
+        managesUnits: manageable !== null && manageable.total > 0,
+        canFindResearchers: developer,
+      },
+      { unifiedNav: accountNavRestructure },
+    );
   }
 
   // The live overlay's target, if any. `impersonationActive` already folds in
@@ -188,7 +201,7 @@ export async function GET(): Promise<NextResponse> {
   }
 
   return NextResponse.json(
-    { authenticated: true, scholar, impersonating, canImpersonate, consoleLinks },
+    { authenticated: true, scholar, impersonating, canImpersonate, consoleLinks, accountNavRestructure },
     { headers: noStore },
   );
 }

@@ -20,6 +20,7 @@ function mockProbe(probe: Partial<ImpersonationProbe>): void {
     impersonating: null,
     canImpersonate: false,
     consoleLinks: [],
+    accountNavRestructure: false,
     ...probe,
   });
 }
@@ -151,5 +152,64 @@ describe("AccountMenu — role-aware console links", () => {
 
     expect(screen.queryAllByTestId(/^account-menu-console-/)).toHaveLength(0);
     expect(screen.getByTestId("account-menu-edit")).toBeTruthy();
+  });
+});
+
+// account-dropdown-nav handoff, Workstream A — the unified dropdown.
+describe("AccountMenu — unified dropdown (ACCOUNT_CONSOLE_NAV_RESTRUCTURE)", () => {
+  const order = () =>
+    screen
+      .getAllByTestId(/^account-menu-(view|edit)$/)
+      .map((el) => el.getAttribute("data-testid"));
+
+  it("flag off (classic) → Edit precedes View", () => {
+    const jane = { slug: "jane-smith", preferredName: "Jane Smith" };
+    mockProbe({ scholar: jane, accountNavRestructure: false });
+    render(<AccountMenu scholar={jane} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+    expect(order()).toEqual(["account-menu-edit", "account-menu-view"]);
+  });
+
+  it("public + flag on → View precedes Edit, no Back-to-Scholars row", () => {
+    const sue = { slug: "sue-admin", preferredName: "Sue Admin" };
+    mockProbe({
+      scholar: sue,
+      accountNavRestructure: true,
+      consoleLinks: [{ id: "manage-profiles", label: "Admin console", href: "/edit/scholars" }],
+    });
+    render(<AccountMenu scholar={sue} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+    expect(order()).toEqual(["account-menu-view", "account-menu-edit"]);
+    expect(screen.queryByTestId("account-menu-back-to-scholars")).toBeNull();
+    // The superuser roster row renders verbatim from the probe (relabeled server-side).
+    expect(screen.getByTestId("account-menu-console-manage-profiles").textContent).toContain(
+      "Admin console",
+    );
+  });
+
+  it("console context → View→Edit, a Back-to-Scholars link replaces the roster row, Funding matcher stays", () => {
+    const sue = { slug: "sue-admin", preferredName: "Sue Admin" };
+    mockProbe({
+      scholar: sue,
+      // No prop scholar is passed (the AdminSubnav mount omits it) — the chip and
+      // links come from the probe.
+      consoleLinks: [
+        { id: "manage-profiles", label: "Admin console", href: "/edit/scholars" },
+        { id: "find-researchers", label: "Funding matcher", href: "/edit/find-researchers" },
+      ],
+    });
+    render(<AccountMenu context="console" />);
+    // The chip falls back to the probe's scholar name.
+    expect(screen.getByText("Sue Admin")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Account menu"));
+
+    expect(order()).toEqual(["account-menu-view", "account-menu-edit"]);
+    expect(screen.getByTestId("account-menu-back-to-scholars").getAttribute("href")).toBe("/");
+    // The roster row is dropped (the Profiles tab covers it)…
+    expect(screen.queryByTestId("account-menu-console-manage-profiles")).toBeNull();
+    // …but Funding matcher stays (it has no AdminSubnav tab).
+    expect(screen.getByTestId("account-menu-console-find-researchers").textContent).toContain(
+      "Funding matcher",
+    );
   });
 });

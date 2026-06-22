@@ -420,6 +420,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "ACCOUNT_CONSOLE_NAV_RESTRUCTURE",
+                "Value": "off",
+              },
+              {
                 "Name": "BIOSKETCH_FAITHFULNESS_PASS",
                 "Value": "on",
               },
@@ -3701,6 +3705,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_RAIL_RESTRUCTURE",
+                "Value": "on",
+              },
+              {
+                "Name": "ACCOUNT_CONSOLE_NAV_RESTRUCTURE",
                 "Value": "on",
               },
               {

@@ -20,6 +20,9 @@
 import Link from "next/link";
 import { ChevronLeftIcon } from "lucide-react";
 
+import { AccountMenu } from "@/components/site/account-menu";
+import { isAccountConsoleNavRestructureEnabled } from "@/lib/auth/account-console-nav";
+
 export type AdminSubnavActive =
   | "profiles"
   | "units"
@@ -77,6 +80,12 @@ export function AdminSubnav({
    *  existing org unit's content (§3b), and a superuser jumps to any unit too. */
   unitsTab?: boolean;
 }) {
+  // When the unified account-dropdown flag is on, the account chip/dropdown
+  // replaces the right-end "My Profile" tab — profile actions move entirely into
+  // the menu (account-dropdown-nav handoff, Workstream A). The menu derives its
+  // scholar + rows from the `/api/auth/session` probe, so no scholar object needs
+  // threading through every console page that renders this strip.
+  const accountNavEnabled = isAccountConsoleNavRestructureEnabled();
   return (
     <div className="border-border border-b" data-slot="admin-subnav">
       <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
@@ -129,7 +138,9 @@ export function AdminSubnav({
             active={active === "data-quality"}
           />
         )}
-        {active === "self" ? (
+        {accountNavEnabled ? (
+          <AccountMenu context="console" />
+        ) : active === "self" ? (
           <span
             className="border-apollo-maroon ml-auto inline-block border-b-2 py-3 text-sm font-medium"
             aria-current="page"
