@@ -11,18 +11,28 @@ const matchOpportunitiesForScholar = vi.fn();
 const rankResearchersForOpportunity = vi.fn();
 const getEffectiveEditSession = vi.fn();
 const findUnique = vi.fn();
+const topicFindMany = vi.fn();
 
 vi.mock("@/lib/api/match-opportunities", async (orig) => {
   const actual = await orig<typeof import("@/lib/api/match-opportunities")>();
   return { ...actual, matchOpportunitiesForScholar: (...a: unknown[]) => matchOpportunitiesForScholar(...a) };
 });
-vi.mock("@/lib/api/match-researchers", () => ({
-  rankResearchersForOpportunity: (...a: unknown[]) => rankResearchersForOpportunity(...a),
-}));
+// Keep the real (pure) opportunityTopTopics; only stub the I/O-bound matcher.
+vi.mock("@/lib/api/match-researchers", async (orig) => {
+  const actual = await orig<typeof import("@/lib/api/match-researchers")>();
+  return { ...actual, rankResearchersForOpportunity: (...a: unknown[]) => rankResearchersForOpportunity(...a) };
+});
 vi.mock("@/lib/auth/effective-identity", () => ({
   getEffectiveEditSession: () => getEffectiveEditSession(),
 }));
-vi.mock("@/lib/db", () => ({ db: { read: { opportunity: { findUnique: (...a: unknown[]) => findUnique(...a) } } } }));
+vi.mock("@/lib/db", () => ({
+  db: {
+    read: {
+      opportunity: { findUnique: (...a: unknown[]) => findUnique(...a) },
+      topic: { findMany: (...a: unknown[]) => topicFindMany(...a) },
+    },
+  },
+}));
 
 import { GET as forwardGET } from "@/app/api/scholars/[cwid]/opportunities/route";
 import { GET as reverseGET } from "@/app/api/opportunities/[opportunityId]/researchers/route";
@@ -33,6 +43,7 @@ const p = <T,>(v: T) => Promise.resolve(v);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  topicFindMany.mockResolvedValue([]); // default: no labels unless a test sets them
 });
 
 describe("GET /api/scholars/[cwid]/opportunities (forward, public)", () => {
@@ -94,17 +105,40 @@ describe("GET /api/opportunities/[opportunityId]/researchers (reverse, admin-gat
     expect(rankResearchersForOpportunity).toHaveBeenCalledTimes(1);
   });
 
-  it("returns results for a superuser and passes stageLens through", async () => {
+  it("returns the view-model (card + matching-on chips + topic labels) and passes stageLens through", async () => {
     getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
     rankResearchersForOpportunity.mockResolvedValue([
-      { cwid: "aaa", slug: "a", axes: { topicFit: 9.7, stageAppeal: 0 }, topicContributions: [], defaultScore: 9.7 },
+      {
+        cwid: "aaa",
+        slug: "a",
+        careerStage: "early",
+        title: "Assistant Professor",
+        department: "Medicine",
+        axes: { topicFit: 9.7, stageAppeal: 0 },
+        topicContributions: [{ topicId: "t1", contribution: 9.7, pubCount: 3, minYear: 2021 }],
+        defaultScore: 9.7,
+      },
     ]);
+    findUnique.mockResolvedValue({
+      title: "Opp T",
+      mechanism: "R01",
+      dueDate: null,
+      sponsor: "NIH",
+      source: "grants_gov",
+      sourceUrl: "https://x",
+      status: "open",
+      topicVector: [{ topic_id: "t1", score: 0.8 }],
+    });
+    topicFindMany.mockResolvedValue([{ id: "t1", label: "Topic One" }]);
     const resp = await reverseGET(req("/api/opportunities/g:1/researchers?stageLens=1"), {
       params: p({ opportunityId: "g:1" }),
     });
     expect(resp.status).toBe(200);
     const body = await resp.json();
-    expect(body.results[0].axes).toMatchObject({ topicFit: 9.7, stageAppeal: 0 });
+    expect(body.results[0]).toMatchObject({ title: "Assistant Professor", department: "Medicine" });
+    expect(body.opportunity).toMatchObject({ title: "Opp T", mechanism: "R01", source: "grants_gov" });
+    expect(body.matchingOn).toEqual([{ topicId: "t1", label: "Topic One", score: 0.8 }]);
+    expect(body.topicLabels).toMatchObject({ t1: "Topic One" });
     expect(rankResearchersForOpportunity).toHaveBeenCalledWith("g:1", expect.objectContaining({ stageLens: true }));
   });
 });

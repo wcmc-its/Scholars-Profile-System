@@ -52,6 +52,9 @@ export type RankedScholar = {
   preferredName?: string;
   /** Career-stage bucket (for the stage filter + row blurb); null when undateable. */
   careerStage: CareerStage | null;
+  /** Denormalized display fields (attached post-ranking; not scoring inputs). */
+  title?: string | null;
+  department?: string | null;
   axes: { topicFit: number; stageAppeal: number };
   topicContributions: TopicContribution[];
   defaultScore: number;
@@ -135,7 +138,7 @@ export function rankResearchers(
 // ── I/O wrapper (integration-gated; needs MySQL) ───────────────────────────
 
 /** Top topics of an opportunity (score ≥ gate), as {topicId, weight}. */
-function opportunityTopTopics(topicVector: OpportunityTopicScore[], gate: number, k: number) {
+export function opportunityTopTopics(topicVector: OpportunityTopicScore[], gate: number, k: number) {
   return topicVector
     .filter((t) => t && typeof t.topic_id === "string" && typeof t.score === "number" && t.score >= gate)
     .sort((a, b) => b.score - a.score)
@@ -231,15 +234,20 @@ export async function rankResearchersForOpportunity(
     }),
   );
 
-  // Career stage per candidate (for the stageAppeal axis / lens).
+  // Career stage + display metadata per candidate. One query: stage feeds the
+  // stageAppeal axis; primaryTitle/primaryDepartment are denormalized on the
+  // scholar row (ED primary appointment) and attached post-ranking for the row.
   const cwids = [...new Set(topicResults.flatMap((tr) => tr.scholars.map((s) => s.cwid)))];
   const stageByCwid = new Map<string, CareerStage>();
+  const profileByCwid = new Map<string, { title: string | null; department: string | null }>();
   if (cwids.length > 0) {
     const scholars = await db.read.scholar.findMany({
       where: { cwid: { in: cwids } },
       select: {
         cwid: true,
         roleCategory: true,
+        primaryTitle: true,
+        primaryDepartment: true,
         appointments: { select: { startDate: true } },
         educations: { select: { year: true } },
       },
@@ -249,14 +257,21 @@ export async function rankResearchersForOpportunity(
         s.cwid,
         careerStageBucket({ roleCategory: s.roleCategory, appointments: s.appointments, educations: s.educations }, now),
       );
+      profileByCwid.set(s.cwid, { title: s.primaryTitle, department: s.primaryDepartment });
     }
   }
 
-  return rankResearchers(topicResults, {
+  const ranked = rankResearchers(topicResults, {
     appealByStage: (opp.appealByStage ?? {}) as Partial<Record<CareerStage, number>>,
     stageByCwid,
     stageLens: opts.stageLens,
     sort: opts.sort,
     limit: opts.limit,
   });
+  for (const r of ranked) {
+    const p = profileByCwid.get(r.cwid);
+    r.title = p?.title ?? null;
+    r.department = p?.department ?? null;
+  }
+  return ranked;
 }

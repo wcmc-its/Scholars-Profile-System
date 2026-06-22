@@ -1,40 +1,74 @@
 "use client";
 
 /**
- * GrantRecs Phase 4 — the "Find researchers" reverse-matcher admin tool.
+ * GrantRecs Phase 4 — the "Funding matcher" reverse-matcher admin tool (redesign).
  *
- * An admin enters an `opportunityId` and gets a ranked list of researchers from
- * `GET /api/opportunities/[opportunityId]/researchers` (the Phase 2 reverse
- * matcher, admin-gated to superuser OR development-role). The two engine axes —
- * `topicFit` and `stageAppeal` — stay DISTINCT columns alongside the
- * `defaultScore` blend; `stageLens` toggles the blend ("who could apply" vs.
- * "who would this suit") and `sort` re-orders server-side (no client-side axis
- * mutation). Each row expands to its per-topic `topicContributions`.
+ * An admin enters an `opportunityId` and gets a parsed opportunity card plus a
+ * ranked list of researchers from `GET /api/opportunities/[opportunityId]/researchers`
+ * (admin-gated to superuser OR development-role). That route now returns the full
+ * view-model: the opportunity card fields, the "matching on" topic chips, a
+ * slug→label map, and the ranked `results` (each carrying career stage, title /
+ * department, and per-topic publication evidence).
  *
- * Same-origin fetch: the page is server-gated (`/edit/find-researchers`) and the
- * route reads the viewer's SPS session cookie directly — no proxy, no token.
+ * Display calibration (topic fit 0–100, stage-fit badge, the fact-only row blurb)
+ * lives in `lib/match-display.ts`. The two engine axes — `topicFit` and
+ * `stageAppeal` — stay distinct; `stageLens` toggles the blend and `sort` re-orders
+ * server-side. Recommendations, not endorsements.
  *
- * The axis/score numbers have no fixed 0..1 range (they depend on the Variant-B
- * curve, the topic gate, and appeal-by-stage), so the bars are scaled RELATIVE
- * to the max in the current result set — a within-result visual aid, never an
- * absolute scale. Raw values are always shown.
+ * The opportunity picker, dept/career/funding filters, and CSV export land in
+ * follow-on slices; this one keeps the ID input.
  */
 import { useEffect, useState, type FormEvent } from "react";
+
+import type { CareerStage } from "@/lib/career-stage";
+import { researcherBlurb, stageFit, topicFitScores } from "@/lib/match-display";
+import { initials } from "@/lib/utils";
+
+type TopicContribution = {
+  topicId: string;
+  contribution: number;
+  pubCount: number;
+  minYear: number | null;
+};
 
 type RankedScholar = {
   cwid: string;
   slug: string;
   preferredName?: string;
+  careerStage: CareerStage | null;
+  title?: string | null;
+  department?: string | null;
   axes: { topicFit: number; stageAppeal: number };
-  topicContributions: { topicId: string; contribution: number }[];
+  topicContributions: TopicContribution[];
   defaultScore: number;
+};
+
+type OpportunityMeta = {
+  title: string | null;
+  mechanism: string | null;
+  dueDate: string | null;
+  sponsor: string | null;
+  source: string | null;
+  sourceUrl: string | null;
+  status: string | null;
+};
+
+type MatchingTopic = { topicId: string; label: string; score: number };
+
+type MatchView = {
+  opportunityId: string;
+  count: number;
+  opportunity: OpportunityMeta | null;
+  matchingOn: MatchingTopic[];
+  topicLabels: Record<string, string>;
+  results: RankedScholar[];
 };
 
 type Sort = "fit" | "stage";
 
 const SORT_TABS: ReadonlyArray<{ key: Sort; label: string }> = [
-  { key: "fit", label: "Fit" },
-  { key: "stage", label: "Stage" },
+  { key: "fit", label: "Blended fit" },
+  { key: "stage", label: "Stage fit" },
 ];
 
 const LIMITS: readonly number[] = [25, 50, 100];
@@ -42,22 +76,34 @@ const LIMITS: readonly number[] = [25, 50, 100];
 // Mirror the route's server-side validation so a malformed id never round-trips.
 const OPPORTUNITY_ID_RE = /^[a-zA-Z0-9_:.-]{1,128}$/;
 
+const SOURCE_LABELS: Record<string, string> = {
+  grants_gov: "Grants.gov",
+  nih_guide: "NIH Guide",
+  wcm_curated: "WCM curated list",
+};
+
+function sourceLabel(source: string | null): string | null {
+  if (!source) return null;
+  return SOURCE_LABELS[source] ?? source.replace(/_/g, " ");
+}
+
+function formatDue(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
 type Status =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "ok"; opportunityId: string; results: RankedScholar[] }
+  | { kind: "ok"; view: MatchView }
   | { kind: "error"; message: string };
 
 export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }) {
-  // The tool's name tracks the account-menu label so the dropdown and the page
-  // agree (account-dropdown-nav handoff, Workstream B): "Funding matcher" when
-  // the unified-nav flag is on, the legacy "Find researchers" when off. The
-  // submit button stays "Find researchers" — that's the action, not the name.
   const toolName = unifiedNav ? "Funding matcher" : "Find researchers";
   const [input, setInput] = useState("");
   const [inputError, setInputError] = useState<string | null>(null);
-  // The opportunityId of the last valid submit. Drives the fetch effect; control
-  // changes (sort / lens / limit) re-query only once a search has been run.
   const [submittedId, setSubmittedId] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>("fit");
   const [stageLens, setStageLens] = useState(false);
@@ -74,10 +120,6 @@ export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }
       return;
     }
     setInputError(null);
-    // A new object identity even when the id is unchanged would NOT re-run the
-    // effect (string compare), so re-submitting the same id intentionally does
-    // nothing; changing a control re-queries. To force a refetch of the same id,
-    // the controls are the lever.
     setSubmittedId(id);
   }
 
@@ -96,17 +138,10 @@ export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }
     })
       .then(async (r) => {
         if (r.ok) {
-          const data = (await r.json()) as { opportunityId: string; results?: RankedScholar[] };
-          if (active) {
-            setStatus({
-              kind: "ok",
-              opportunityId: data.opportunityId,
-              results: data.results ?? [],
-            });
-          }
+          const data = (await r.json()) as MatchView;
+          if (active) setStatus({ kind: "ok", view: data });
           return;
         }
-        // 400 carries a flat { error }; 403 has an empty body (admin gate).
         let message = "Something went wrong fetching researchers. Please try again.";
         if (r.status === 400) {
           const body = (await r.json().catch(() => null)) as { error?: string } | null;
@@ -208,6 +243,68 @@ export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }
   );
 }
 
+function OpportunityCard({
+  opportunityId,
+  opportunity,
+  matchingOn,
+}: {
+  opportunityId: string;
+  opportunity: OpportunityMeta | null;
+  matchingOn: MatchingTopic[];
+}) {
+  const due = formatDue(opportunity?.dueDate ?? null);
+  const src = sourceLabel(opportunity?.source ?? null);
+  const meta = [opportunity?.mechanism, due ? `Due ${due}` : null, opportunity?.sponsor].filter(
+    Boolean,
+  ) as string[];
+
+  return (
+    <div className="border-border mb-6 rounded-lg border bg-[var(--muted)]/40 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="border-border-strong rounded-md border px-2 py-0.5 font-mono text-xs text-foreground">
+          {opportunityId}
+        </span>
+        {src ? (
+          opportunity?.sourceUrl ? (
+            <a
+              href={opportunity.sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-muted-foreground inline-flex items-center gap-1 text-xs hover:text-[var(--color-accent-slate)] hover:underline"
+            >
+              Parsed from {src} <span aria-hidden>↗</span>
+            </a>
+          ) : (
+            <span className="text-muted-foreground text-xs">Parsed from {src}</span>
+          )
+        ) : null}
+      </div>
+
+      {opportunity?.title ? (
+        <h2 className="mt-2 text-lg font-semibold leading-snug">{opportunity.title}</h2>
+      ) : null}
+
+      {meta.length > 0 ? (
+        <div className="text-muted-foreground mt-1 text-sm">{meta.join(" · ")}</div>
+      ) : null}
+
+      {matchingOn.length > 0 ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-muted-foreground text-xs uppercase tracking-wide">Matching on</span>
+          {matchingOn.map((t) => (
+            <span
+              key={t.topicId}
+              className="border-border-strong rounded-full border bg-background px-2.5 py-0.5 text-xs text-foreground"
+            >
+              {t.label}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Results({
   status,
   sort,
@@ -231,171 +328,197 @@ function Results({
     return <div className="text-muted-foreground py-8 text-sm">{status.message}</div>;
   }
 
-  const { opportunityId, results } = status;
-  if (results.length === 0) {
-    return (
-      <div className="text-muted-foreground py-8 text-sm">
-        No researchers ranked for{" "}
-        <span className="font-mono text-foreground">{opportunityId}</span>. The opportunity
-        may not exist, or it may have no qualifying topics or eligible scholars.
-      </div>
-    );
-  }
-
-  // Per-column maxima for the relative bars (within this result set only).
-  const maxTopic = Math.max(...results.map((r) => r.axes.topicFit), 0);
-  const maxStage = Math.max(...results.map((r) => r.axes.stageAppeal), 0);
-  const maxScore = Math.max(...results.map((r) => r.defaultScore), 0);
+  const { opportunityId, opportunity, matchingOn, topicLabels, results } = status.view;
+  // 0–100 topic-fit scores are relative to the strongest match across the set.
+  const topicFits = topicFitScores(results.map((r) => r.axes.topicFit));
 
   return (
     <div>
-      <div className="mb-3 flex items-baseline justify-between gap-3">
-        <div className="text-muted-foreground text-sm">
-          {results.length} researcher{results.length === 1 ? "" : "s"} for{" "}
-          <span className="font-mono text-foreground">{opportunityId}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-xs">Sort</span>
-          {SORT_TABS.map(({ key, label }) => {
-            const active = sort === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setSort(key)}
-                aria-pressed={active}
-                className={
-                  active
-                    ? "inline-flex h-7 items-center rounded-full bg-[var(--color-accent-slate)] px-3 text-sm text-white"
-                    : "border-border-strong inline-flex h-7 items-center rounded-full border bg-background px-3 text-sm text-zinc-700 hover:border-[var(--color-accent-slate)] hover:text-[var(--color-accent-slate)] dark:text-zinc-200"
-                }
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <OpportunityCard
+        opportunityId={opportunityId}
+        opportunity={opportunity}
+        matchingOn={matchingOn}
+      />
 
-      <ul>
-        {results.map((r) => (
-          <li key={r.cwid}>
-            <ResearcherRow
-              r={r}
-              maxTopic={maxTopic}
-              maxStage={maxStage}
-              maxScore={maxScore}
-            />
-          </li>
-        ))}
-      </ul>
+      {results.length === 0 ? (
+        <div className="text-muted-foreground py-8 text-sm">
+          No researchers ranked for{" "}
+          <span className="font-mono text-foreground">{opportunityId}</span>. The opportunity
+          may not exist, or it may have no qualifying topics or eligible scholars.
+        </div>
+      ) : (
+        <>
+          <div className="mb-3 flex items-end justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold">Researchers for this opportunity</h3>
+              <p className="text-muted-foreground text-sm">
+                {results.length} matched · recommendations, not endorsements
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground text-xs">Sort</span>
+              {SORT_TABS.map(({ key, label }) => {
+                const active = sort === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setSort(key)}
+                    aria-pressed={active}
+                    className={
+                      active
+                        ? "inline-flex h-7 items-center rounded-full bg-[var(--color-accent-slate)] px-3 text-sm text-white"
+                        : "border-border-strong inline-flex h-7 items-center rounded-full border bg-background px-3 text-sm text-zinc-700 hover:border-[var(--color-accent-slate)] hover:text-[var(--color-accent-slate)] dark:text-zinc-200"
+                    }
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <ul>
+            {results.map((r, i) => (
+              <li key={r.cwid}>
+                <ResearcherRow
+                  r={r}
+                  rank={i + 1}
+                  topicFit={topicFits[i] ?? 0}
+                  topicLabels={topicLabels}
+                />
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }
 
 function ResearcherRow({
   r,
-  maxTopic,
-  maxStage,
-  maxScore,
+  rank,
+  topicFit,
+  topicLabels,
 }: {
   r: RankedScholar;
-  maxTopic: number;
-  maxStage: number;
-  maxScore: number;
+  rank: number;
+  topicFit: number;
+  topicLabels: Record<string, string>;
 }) {
   const [open, setOpen] = useState(false);
   const name = r.preferredName ?? r.slug ?? r.cwid;
   const contributions = [...r.topicContributions].sort((a, b) => b.contribution - a.contribution);
+  const top = contributions[0];
+  const blurb = researcherBlurb({
+    pubCount: top?.pubCount ?? 0,
+    minYear: top?.minYear ?? null,
+    topicLabel: top ? (topicLabels[top.topicId] ?? top.topicId) : "",
+    careerStage: r.careerStage,
+  });
+  const stage = stageFit(r.axes.stageAppeal, r.careerStage !== null);
 
   return (
-    <div className="border-t border-border py-3 first:border-t-0">
-      <div className="flex items-baseline justify-between gap-3">
-        <a
-          href={`/edit/scholar/${encodeURIComponent(r.cwid)}`}
-          className="text-base font-medium leading-snug text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+    <div className="border-t border-border py-4 first:border-t-0">
+      <div className="flex gap-3">
+        <div className="text-muted-foreground w-5 pt-1 text-right text-sm tabular-nums">{rank}</div>
+        <div
+          aria-hidden
+          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-slate)]/15 text-sm font-medium text-[var(--color-accent-slate)]"
         >
-          {name}
-        </a>
-        <span className="text-muted-foreground whitespace-nowrap font-mono text-xs">
-          {r.cwid}
-        </span>
-      </div>
+          {initials(name)}
+        </div>
 
-      <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1.5">
-        <ScoreMeter label="topic fit" value={r.axes.topicFit} max={maxTopic} />
-        <ScoreMeter label="stage appeal" value={r.axes.stageAppeal} max={maxStage} />
-        <ScoreMeter label="default score" value={r.defaultScore} max={maxScore} strong />
-      </div>
-
-      {contributions.length > 0 ? (
-        <>
-          <button
-            type="button"
-            onClick={() => setOpen((o) => !o)}
-            aria-expanded={open}
-            className="group mt-2 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)]"
-          >
-            <span
-              className={`text-muted-foreground inline-block w-3 text-[10px] transition-transform ${open ? "rotate-90" : ""}`}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <a
+              href={`/edit/scholar/${encodeURIComponent(r.cwid)}`}
+              className="text-base font-semibold leading-snug text-foreground underline-offset-4 hover:underline"
             >
-              ▶
-            </span>
-            <span className="group-hover:underline">
-              {contributions.length} topic{contributions.length === 1 ? "" : "s"}
-            </span>
-          </button>
-
-          {open ? (
-            <div className="mt-2 ml-4 border-l border-border pl-4">
-              <ul className="space-y-1">
-                {contributions.map((c) => (
-                  <li
-                    key={c.topicId}
-                    className="text-muted-foreground flex items-baseline justify-between gap-4 text-sm"
-                  >
-                    <span className="font-mono text-foreground">{c.topicId}</span>
-                    <span className="font-mono text-xs">{c.contribution.toFixed(2)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+              {name}
+            </a>
+            {r.title ? <span className="text-muted-foreground text-sm">{r.title}</span> : null}
+          </div>
+          {r.department ? (
+            <div className="text-muted-foreground text-sm">{r.department}</div>
           ) : null}
-        </>
-      ) : null}
+          {blurb ? <p className="mt-1.5 text-sm text-foreground/90">{blurb}</p> : null}
+
+          {contributions.length > 0 ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setOpen((o) => !o)}
+                aria-expanded={open}
+                className="group mt-2 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)]"
+              >
+                <span
+                  className={`text-muted-foreground inline-block w-3 text-[10px] transition-transform ${open ? "rotate-90" : ""}`}
+                >
+                  ▶
+                </span>
+                <span className="group-hover:underline">
+                  {contributions.length} topic{contributions.length === 1 ? "" : "s"}
+                </span>
+              </button>
+              {open ? (
+                <ul className="mt-2 ml-4 space-y-1 border-l border-border pl-4">
+                  {contributions.map((c) => (
+                    <li
+                      key={c.topicId}
+                      className="text-muted-foreground flex items-baseline justify-between gap-4 text-sm"
+                    >
+                      <span className="text-foreground">{topicLabels[c.topicId] ?? c.topicId}</span>
+                      <span className="font-mono text-xs">
+                        {c.pubCount > 0
+                          ? `${c.pubCount} paper${c.pubCount === 1 ? "" : "s"}${c.minYear ? ` since ${c.minYear}` : ""}`
+                          : c.contribution.toFixed(2)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+
+        <div className="w-40 shrink-0 space-y-3">
+          <div>
+            <div className="flex items-baseline justify-between">
+              <span className="text-muted-foreground text-xs uppercase tracking-wide">Topic fit</span>
+              <span className="text-sm font-semibold tabular-nums">{topicFit}</span>
+            </div>
+            <span className="bg-muted mt-1 block h-1.5 w-full overflow-hidden rounded-full">
+              <span
+                className="block h-1.5 rounded-full bg-[var(--color-accent-slate)]"
+                style={{ width: `${topicFit}%` }}
+              />
+            </span>
+          </div>
+          <div>
+            <div className="text-muted-foreground text-xs uppercase tracking-wide">Stage fit</div>
+            <StageBadge fit={stage} />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-/** A labelled score with a within-result relative bar. `max` of 0 hides the bar. */
-function ScoreMeter({
-  label,
-  value,
-  max,
-  strong = false,
-}: {
-  label: string;
-  value: number;
-  max: number;
-  strong?: boolean;
-}) {
-  const pct = max > 0 ? Math.max(0, Math.min(1, value / max)) * 100 : 0;
+function StageBadge({ fit }: { fit: ReturnType<typeof stageFit> }) {
+  const tone: Record<string, string> = {
+    strong: "bg-green-600/15 text-green-700 dark:text-green-400",
+    moderate: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+    weak: "bg-muted text-muted-foreground",
+    none: "bg-muted text-muted-foreground",
+  };
   return (
-    <div className="flex items-center gap-1.5" title={`${label}: ${value.toFixed(2)}`}>
-      <span className="text-muted-foreground w-24 text-[11px] uppercase tracking-wide">
-        {label}
-      </span>
-      <span className="bg-muted inline-block h-1.5 w-16 overflow-hidden rounded-full">
-        <span
-          className="block h-1.5 rounded-full bg-[var(--color-accent-slate)]"
-          style={{ width: `${pct}%` }}
-        />
-      </span>
-      <span
-        className={`font-mono text-xs ${strong ? "text-foreground font-semibold" : "text-muted-foreground"}`}
-      >
-        {value.toFixed(2)}
-      </span>
-    </div>
+    <span
+      className={`mt-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-sm font-medium ${tone[fit.tone]}`}
+    >
+      {fit.tone === "strong" ? <span aria-hidden>✓</span> : null}
+      {fit.label}
+    </span>
   );
 }
