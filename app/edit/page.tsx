@@ -38,6 +38,7 @@ import {
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
 import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
+import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
 
 // /edit reads suppression-OFF + writes via /api/edit/*; the page must never
 // be cached (CloudFront also marks it CachingDisabled per cloudfront-cache-spec.md).
@@ -157,6 +158,10 @@ export default async function EditSelfPage({
   // #917 v5 (`EDIT_BIOSKETCH_GENERATE`) — gates the "NIH biosketch" Services rail
   // item + panel. Sync env read, mirroring grantRecsEnabled.
   const biosketchEnabled = isBiosketchGenerateEnabled();
+  // `SELF_EDIT_RAIL_RESTRUCTURE` — switches the self rail to the restructured
+  // layout (floating Home, content-only "Yours to edit", "From WCM records" with
+  // Identity/Records sub-headers, "Tools", "Settings"). Presentational only.
+  const railRestructureEnabled = isRailRestructureEnabled();
 
   // Canonicalize a present-but-invalid `?attr` (T1.13): redirect to the bare
   // `/edit` rather than silently rendering the default panel behind a stale URL.
@@ -295,6 +300,7 @@ export default async function EditSelfPage({
       reciterPendingEnabled={reciterPendingEnabled}
       grantRecsEnabled={grantRecsEnabled}
       biosketchEnabled={biosketchEnabled}
+      railRestructureEnabled={railRestructureEnabled}
     />
   );
 }

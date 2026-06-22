@@ -5,7 +5,7 @@
  * tested elsewhere; this is the rail + routing + role-parity wiring.
  */
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
@@ -767,5 +767,52 @@ describe("EditPage router — superuser mode", () => {
     expect(screen.getByTestId("publications-filter")).toBeTruthy();
     // Reframed heading — not the first-person "My publications".
     expect(screen.queryByText("My publications")).toBeNull();
+  });
+});
+
+describe("EditPage rail — restructured layout (SELF_EDIT_RAIL_RESTRUCTURE)", () => {
+  // Scope assertions to the attribute rail's <nav>; HomePanel renders its own
+  // "Yours to edit" / "From WCM systems" section labels, so an unscoped getByText
+  // would collide.
+  const rail = () => within(screen.getByRole("navigation", { name: "Profile attributes" }));
+
+  it("regroups the self rail when the flag is on: floating Home, Tools, Settings, WCM sub-headers", () => {
+    render(
+      <EditPage ctx={ctx} mode="self" railRestructureEnabled grantRecsEnabled biosketchEnabled />,
+    );
+    const q = rail();
+    // Home floats at the top with a quiet "landing" tag.
+    expect(q.getByTestId("rail-home")).toBeTruthy();
+    expect(q.getByText("landing")).toBeTruthy();
+    // "Yours to edit" narrows to authored content (its description renders).
+    expect(q.getByText("Your profile content.")).toBeTruthy();
+    // "From WCM records" carries the two editability sub-headers.
+    expect(q.getByText("From WCM records")).toBeTruthy();
+    expect(q.getByText("Identity · read-only")).toBeTruthy();
+    expect(q.getByText("Records · hide, show, or flag")).toBeTruthy();
+    // Generators move under "Tools".
+    expect(q.getByText("Tools")).toBeTruthy();
+    expect(q.getByTestId("rail-biosketch")).toBeTruthy();
+    expect(q.getByTestId("rail-grant-recs")).toBeTruthy();
+    // The admin controls gather under a dedicated "Settings" group.
+    expect(q.getByText("Settings")).toBeTruthy();
+    expect(q.getByText("Profile administration.")).toBeTruthy();
+    expect(q.getByTestId("rail-visibility")).toBeTruthy();
+    expect(q.getByTestId("rail-proxy-editors")).toBeTruthy();
+    expect(q.getByTestId("rail-profile-url")).toBeTruthy();
+    // The classic group labels are gone in the restructured rail.
+    expect(q.queryByText("From WCM systems")).toBeNull();
+    expect(q.queryByText("Services")).toBeNull();
+  });
+
+  it("leaves the classic two-group rail intact when the flag is off (default)", () => {
+    render(<EditPage ctx={ctx} mode="self" grantRecsEnabled biosketchEnabled />);
+    const q = rail();
+    // Classic labels present; the restructured groups + the floating-Home tag are not.
+    expect(q.getByText("From WCM systems")).toBeTruthy();
+    expect(q.getByText("Services")).toBeTruthy();
+    expect(q.queryByText("Settings")).toBeNull();
+    expect(q.queryByText("From WCM records")).toBeNull();
+    expect(q.queryByText("landing")).toBeNull();
   });
 });

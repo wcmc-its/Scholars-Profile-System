@@ -263,6 +263,73 @@ const SELF_RAIL_GROUP = {
   readonly: "From WCM systems",
 } as const;
 
+// --- Restructured self rail (SELF_EDIT_RAIL_RESTRUCTURE) ----------------------
+// Same items as the classic self rail — only the order / grouping / labels move.
+// Home floats to the top; "Yours to edit" narrows to authored content (Overview,
+// Highlights); the sourced data gathers under one "From WCM records" header split
+// by two sub-labels (read-only Identity vs hide/show/flag Records); the generators
+// become "Tools"; and the administrative controls (Visibility, Profile editors,
+// Profile URL) move into a dedicated "Settings" group. Group order follows first
+// appearance in RAIL_V2_ORDER ("" floating → Yours to edit → From WCM records →
+// Tools → Settings).
+const RAIL_V2_WCM_GROUP = "From WCM records";
+const RAIL_V2_IDENTITY_SUBGROUP = "Identity · read-only";
+const RAIL_V2_RECORDS_SUBGROUP = "Records · hide, show, or flag";
+
+const RAIL_V2_ORDER: ReadonlyArray<AttrKey> = [
+  "home",
+  "overview",
+  "highlights",
+  "name-title",
+  "email",
+  "photo",
+  "appointments",
+  "education",
+  "publications",
+  "funding",
+  "mentees",
+  "coi",
+  "coi-gap",
+  "biosketch",
+  "grant-recs",
+  "visibility",
+  "proxy-editors",
+  "profile-url",
+];
+
+const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string; subgroup?: string }> = {
+  home: { group: "" },
+  overview: { group: "Yours to edit" },
+  highlights: { group: "Yours to edit" },
+  "name-title": { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_IDENTITY_SUBGROUP },
+  email: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_IDENTITY_SUBGROUP },
+  photo: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_IDENTITY_SUBGROUP },
+  appointments: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_RECORDS_SUBGROUP },
+  education: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_RECORDS_SUBGROUP },
+  publications: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_RECORDS_SUBGROUP },
+  funding: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_RECORDS_SUBGROUP },
+  mentees: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_RECORDS_SUBGROUP },
+  coi: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_RECORDS_SUBGROUP },
+  "coi-gap": { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_RECORDS_SUBGROUP },
+  biosketch: { group: "Tools" },
+  "grant-recs": { group: "Tools" },
+  visibility: { group: "Settings" },
+  "proxy-editors": { group: "Settings" },
+  "profile-url": { group: "Settings" },
+};
+
+// Per-group one-line descriptions for the restructured rail. The "Profile content"
+// key mirrors "Yours to edit" for the third-person (proxy / unit-admin) reframe.
+const RAIL_V2_GROUP_META: Record<string, { description?: string }> = {
+  "Yours to edit": { description: "Your profile content." },
+  "Profile content": { description: "The scholar’s profile content." },
+  [RAIL_V2_WCM_GROUP]: {
+    description: "Sourced from WCM. Show, hide, or flag here — corrections happen in the source system.",
+  },
+  Tools: { description: "Generators that produce an artifact to use elsewhere." },
+  Settings: { description: "Profile administration." },
+};
+
 /**
  * Superuser rail order — kept flat (no "Yours to edit" / "From WCM systems"
  * grouping: superuser editability differs from self, so those labels would
@@ -350,6 +417,12 @@ export type EditPageProps = {
    *  threaded in like grantRecsEnabled. Surfaced to every actor the generate
    *  route authorizes (self, superuser, comms-steward, proxy, unit-admin). */
   biosketchEnabled?: boolean;
+  /** `SELF_EDIT_RAIL_RESTRUCTURE`: when on, the self / proxy / unit-admin rail
+   *  uses the restructured layout (floating Home, content-only "Yours to edit",
+   *  "From WCM records" with Identity/Records sub-headers, "Tools", and a
+   *  "Settings" group for the admin controls). Off ⇒ the classic two-group rail.
+   *  Purely presentational; the superuser rail is unaffected either way. */
+  railRestructureEnabled?: boolean;
 };
 
 /**
@@ -410,6 +483,7 @@ export function EditPage({
   reciterPendingEnabled = false,
   grantRecsEnabled = false,
   biosketchEnabled = false,
+  railRestructureEnabled = false,
 }: EditPageProps) {
   // "From your publications" is conditionally present: self OR superuser, and only
   // when the loader returned candidates (the loader per surface enforces who may
@@ -459,7 +533,38 @@ export function EditPage({
 
   const railItems: RailItem[] =
     selfLike
-      ? SELF_RAIL_ORDER.flatMap((k) => {
+      ? railRestructureEnabled
+        ? RAIL_V2_ORDER.flatMap((k) => {
+            const a = visible.find((v) => v.key === k);
+            if (!a) return [];
+            const kind = railKindFor(k);
+            const placement = RAIL_V2_PLACEMENT[k];
+            // Reframe the authored-content group to third-person for a proxy /
+            // unit-admin editing on the scholar's behalf (mirrors the classic rail).
+            const group =
+              placement.group === "Yours to edit" && mode !== "self"
+                ? "Profile content"
+                : placement.group;
+            return [
+              {
+                key: a.key,
+                label: a.label,
+                readonly: a.readonly,
+                kind,
+                group,
+                subgroup: placement.subgroup,
+                // Home floats at the top of the rail with a quiet "landing" tag.
+                tag: a.key === "home" ? "landing" : undefined,
+                // "From your publications" nests under Conflicts of Interest.
+                child: a.key === "coi-gap",
+                // High-active count ONLY; 0 → undefined so a Reviewed-only history
+                // shows the item without a "0" badge.
+                count:
+                  a.key === "coi-gap" ? ctx.unmatchedPubmedCoi.length || undefined : undefined,
+              },
+            ];
+          })
+        : SELF_RAIL_ORDER.flatMap((k) => {
           const a = visible.find((v) => v.key === k);
           if (!a) return [];
           const kind = railKindFor(k);
@@ -516,6 +621,10 @@ export function EditPage({
             },
           ];
         });
+  // Per-group descriptions only apply to the restructured self rail; the classic
+  // rail and the superuser rail render header-only (undefined ⇒ no change).
+  const railGroupMeta =
+    selfLike && railRestructureEnabled ? RAIL_V2_GROUP_META : undefined;
   // Self edits at "/edit"; superuser and proxy edit a named scholar at
   // "/edit/scholar/<cwid>" (a proxy is never on their own /edit).
   const basePath = mode === "self" ? "/edit" : `/edit/scholar/${ctx.scholar.cwid}`;
@@ -532,6 +641,7 @@ export function EditPage({
       railItems={railItems}
       activeAttr={active.key}
       basePath={basePath}
+      railGroupMeta={railGroupMeta}
       previewHref={profilePath(ctx.scholar.slug)}
       // History visibility == edit access, so every mode gets the link; the
       // route is always `/edit/scholar/[cwid]/history` (self resolves via the

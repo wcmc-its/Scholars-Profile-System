@@ -32,6 +32,10 @@ export type EditShellProps = {
   railItems: ReadonlyArray<RailItem>;
   activeAttr: string;
   basePath: string;
+  /** Optional per-group descriptions for the attribute rail, keyed by group label
+   *  (forwarded to `AttributeRail`). Omit ⇒ header-only groups (the default for
+   *  the unit / sibling-division rails). */
+  railGroupMeta?: Record<string, { description?: string }>;
   /** "Preview Profile" target (the public profile by slug). */
   previewHref?: string;
   /** "View change history" target — the scholar's `/edit/scholar/[cwid]/history`
@@ -73,6 +77,7 @@ export function EditShell({
   railItems,
   activeAttr,
   basePath,
+  railGroupMeta,
   previewHref,
   historyHref,
   account,
@@ -189,7 +194,12 @@ export function EditShell({
           compact <select> at the top of the detail column replaces it. */}
       <div className="mx-auto grid max-w-[var(--max-content)] grid-cols-1 gap-6 px-6 py-8 md:grid-cols-[16rem_1fr]">
         <div className="hidden flex-col gap-3 md:flex">
-          <AttributeRail items={railItems} active={activeAttr} basePath={basePath} />
+          <AttributeRail
+            items={railItems}
+            active={activeAttr}
+            basePath={basePath}
+            groupMeta={railGroupMeta}
+          />
           {subRail}
         </div>
 
