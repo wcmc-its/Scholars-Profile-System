@@ -18,12 +18,23 @@
  * active item, a maroon (`--apollo-ring`) ring on the pale rail.
  */
 import Link from "next/link";
-import { ChevronRight, type LucideIcon } from "lucide-react";
+import { ChevronRight, HomeIcon, type LucideIcon } from "lucide-react";
 
 import { GroupInfoButton } from "@/components/edit/group-info-button";
 import { cn } from "@/lib/utils";
 
 export type RailKind = "owned" | "service" | "sourced" | "readonly";
+
+/**
+ * Leading-icon keys a rail item may carry. A STRING (not the component) so the
+ * item stays serializable across the server→client boundary — `railItems` is
+ * passed to the mobile `RailSelect`, a client component, and React Server
+ * Components cannot serialize a function/component prop. `RailLink` maps the key
+ * to the glyph.
+ */
+export type RailIconKey = "home";
+
+const RAIL_ICONS: Record<RailIconKey, LucideIcon> = { home: HomeIcon };
 
 export type RailItem = {
   /** The `?attr=` value (e.g. "appointments"). */
@@ -62,11 +73,13 @@ export type RailItem = {
    */
   tag?: string;
   /**
-   * Optional leading icon (the Home glyph on the floating landing item in the
-   * restructured rail). Rendered before the label and inherits the row's text
-   * color, so it reads on both the pale rail and the active maroon fill.
+   * Optional leading-icon key (e.g. "home" on the floating landing item in the
+   * restructured rail). A string, NOT a component, so the item stays serializable
+   * across the server→client boundary (see `RailIconKey`). `RailLink` resolves it
+   * to the glyph, which inherits the row's text color (reads on both the pale rail
+   * and the active maroon fill).
    */
-  icon?: LucideIcon;
+  icon?: RailIconKey;
 };
 
 export type AttributeRailProps = {
@@ -228,7 +241,7 @@ function RailLink({
 }) {
   const isActive = item.key === active;
   const kind: RailKind = item.kind ?? (item.readonly ? "readonly" : "owned");
-  const Icon = item.icon;
+  const Icon = item.icon ? RAIL_ICONS[item.icon] : undefined;
   return (
     <li>
       <Link
