@@ -8,18 +8,47 @@
  * into the "Confirmed" list. Kept deliberately simpler than coi-gap-card — cores
  * have no dual org/paper view and a binary (confirm/reject) decision.
  */
-import { useState } from "react";
-import { Check, ChevronRight, ExternalLink, X } from "lucide-react";
+import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { Check, ChevronRight, ExternalLink, Undo2, X } from "lucide-react";
 import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core-queue";
 
 type Decision = "claimed" | "rejected";
+type FilterKey = "all" | "ack" | "coauthored" | "llm";
+type SortKey = "likelihood" | "llm";
+
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "ack", label: "Acknowledged" },
+  { key: "coauthored", label: "Co-authored" },
+  { key: "llm", label: "LLM-flagged" },
+];
+
+/** Does a candidate match the active filter? `all` keeps everything. */
+function matchesFilter(row: CoreQueueRow, filter: FilterKey): boolean {
+  switch (filter) {
+    case "ack":
+      return row.signalAck || row.ackAlias !== null;
+    case "coauthored":
+      return row.coauthors.length > 0;
+    case "llm":
+      return row.llmScore !== null;
+    default:
+      return true;
+  }
+}
 
 export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue) {
   const [decided, setDecided] = useState<Map<string, Decision>>(new Map());
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Map<string, string>>(new Map());
+  const [filter, setFilter] = useState<FilterKey>("all");
+  const [sort, setSort] = useState<SortKey>("likelihood");
+  // Polite SR announcement of the last outcome — the success path is otherwise
+  // silent (the card swaps in place with no focus move), mirroring coi-gap-card.
+  const [announce, setAnnounce] = useState("");
 
-  async function decide(pmid: string, status: Decision) {
+  // Post a decision (claimed/rejected) or a revoke (undo) and reflect it locally.
+  async function send(pmid: string, status: Decision | "revoked") {
     setErrors((m) => {
       const next = new Map(m);
       next.delete(pmid);
@@ -40,7 +69,18 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
             : `HTTP ${res.status}`;
         throw new Error(error);
       }
-      setDecided((m) => new Map(m).set(pmid, status));
+      setDecided((m) => {
+        const next = new Map(m);
+        if (status === "revoked") next.delete(pmid);
+        else next.set(pmid, status);
+        return next;
+      });
+      const title = candidates.find((c) => c.pmid === pmid)?.title ?? "this publication";
+      setAnnounce(
+        status === "revoked"
+          ? "Undone."
+          : `${status === "claimed" ? "Confirmed" : "Rejected"} ${title}.`,
+      );
     } catch (err) {
       setErrors((m) => new Map(m).set(pmid, err instanceof Error ? err.message : "request failed"));
     } finally {
@@ -52,47 +92,75 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
     }
   }
 
-  const open = candidates.filter((c) => !decided.has(c.pmid));
-  const sessionConfirmed = candidates.filter((c) => decided.get(c.pmid) === "claimed");
-  const confirmedAll = [...sessionConfirmed, ...confirmed];
+  // Remaining review work (decided rows stay visible for undo but don't count).
+  const remaining = candidates.filter((c) => !decided.has(c.pmid)).length;
+  // Apply the filter (but always keep a just-decided row visible so undo stays
+  // reachable), then sort. Likelihood is the loader's order; LLM re-sorts by score.
+  const visible = candidates
+    .filter((c) => decided.has(c.pmid) || matchesFilter(c, filter))
+    .slice()
+    .sort((a, b) =>
+      sort === "llm" ? (b.llmScore ?? -1) - (a.llmScore ?? -1) : b.likelihood - a.likelihood,
+    );
 
   return (
     <div data-slot="core-claim-queue">
-      <h2 className="mb-3 flex items-baseline gap-2 text-[15px] font-semibold">
-        To review
-        <span className="text-muted-foreground text-sm font-normal tabular-nums">{open.length}</span>
-      </h2>
+      <div aria-live="polite" className="sr-only" data-testid="core-claim-live">
+        {announce}
+      </div>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="flex items-baseline gap-2 text-[15px] font-semibold">
+          To review
+          <span className="text-muted-foreground text-sm font-normal tabular-nums">{remaining}</span>
+        </h2>
+        {candidates.length > 0 ? (
+          <QueueControls filter={filter} onFilter={setFilter} sort={sort} onSort={setSort} />
+        ) : null}
+      </div>
 
-      {open.length === 0 ? (
+      {candidates.length > 0 ? (
+        <p className="text-muted-foreground mb-3 text-xs">
+          Shortcuts (focused card): <Kbd>a</Kbd> confirm · <Kbd>r</Kbd> reject · <Kbd>u</Kbd> undo ·{" "}
+          <Kbd>↑</Kbd>/<Kbd>↓</Kbd> move.
+        </p>
+      ) : null}
+
+      {candidates.length === 0 ? (
         <p className="text-muted-foreground rounded-lg border border-apollo-border border-dashed px-4 py-6 text-sm">
           Nothing to review — every candidate publication for this core has been confirmed or
           rejected.
         </p>
+      ) : visible.length === 0 ? (
+        <p className="text-muted-foreground rounded-lg border border-apollo-border border-dashed px-4 py-6 text-sm">
+          No candidates match this filter.
+        </p>
       ) : (
         <ul className="flex flex-col gap-3">
-          {open.map((row) => (
+          {visible.map((row) => (
             <li key={row.pmid}>
               <CandidateCard
                 row={row}
+                decided={decided.get(row.pmid)}
                 pending={pending.has(row.pmid)}
                 error={errors.get(row.pmid)}
-                onDecide={(status) => decide(row.pmid, status)}
+                onDecide={(status) => send(row.pmid, status)}
+                onUndo={() => send(row.pmid, "revoked")}
               />
             </li>
           ))}
         </ul>
       )}
 
-      {confirmedAll.length > 0 ? (
+      {confirmed.length > 0 ? (
         <section className="mt-8">
           <h2 className="mb-3 flex items-baseline gap-2 text-[15px] font-semibold">
             Confirmed
             <span className="text-muted-foreground text-sm font-normal tabular-nums">
-              {confirmedAll.length}
+              {confirmed.length}
             </span>
           </h2>
           <ul className="flex flex-col gap-2">
-            {confirmedAll.map((row) => (
+            {confirmed.map((row) => (
               <li
                 key={row.pmid}
                 className="text-muted-foreground flex items-baseline gap-2 text-sm"
@@ -109,20 +177,157 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
   );
 }
 
+function QueueControls({
+  filter,
+  onFilter,
+  sort,
+  onSort,
+}: {
+  filter: FilterKey;
+  onFilter: (f: FilterKey) => void;
+  sort: SortKey;
+  onSort: (s: SortKey) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex gap-1" role="group" aria-label="Filter candidates">
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            aria-pressed={filter === f.key}
+            onClick={() => onFilter(f.key)}
+            className={`rounded-full border px-2.5 py-0.5 text-xs ${
+              filter === f.key
+                ? "border-transparent bg-[var(--color-accent-slate)] text-white"
+                : "border-apollo-border text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+      <label className="text-muted-foreground flex items-center gap-1 text-xs">
+        <span className="sr-only">Sort by</span>
+        <select
+          value={sort}
+          onChange={(e) => onSort(e.target.value as SortKey)}
+          className="border-apollo-border rounded-md border bg-background px-2 py-0.5 text-xs"
+        >
+          <option value="likelihood">Likelihood</option>
+          <option value="llm">LLM score</option>
+        </select>
+      </label>
+    </div>
+  );
+}
+
+function Kbd({ children }: { children: ReactNode }) {
+  return (
+    <kbd className="border-apollo-border rounded border px-1 py-px font-mono text-[10px]">
+      {children}
+    </kbd>
+  );
+}
+
+// Focusable shell shared by the active and decided card states — carries the
+// keyboard contract (a/r/u + ↑/↓), firing only when the card itself is focused
+// (not a child button/link), so its inner controls keep their native behavior.
+const CARD_SHELL =
+  "rounded-lg border border-apollo-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-slate)]";
+
 function CandidateCard({
   row,
+  decided,
   pending,
   error,
   onDecide,
+  onUndo,
 }: {
   row: CoreQueueRow;
+  decided: Decision | undefined;
   pending: boolean;
   error: string | undefined;
   onDecide: (status: Decision) => void;
+  onUndo: () => void;
 }) {
+  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    if (e.target !== e.currentTarget) return; // only when the shell itself is focused
+    const k = e.key.toLowerCase();
+    if (k === "arrowdown" || k === "arrowup") {
+      e.preventDefault();
+      const li = e.currentTarget.closest("li");
+      const sibling = k === "arrowdown" ? li?.nextElementSibling : li?.previousElementSibling;
+      (sibling?.querySelector("[data-card]") as HTMLElement | null)?.focus();
+      return;
+    }
+    if (pending) return;
+    if (!decided && k === "a") {
+      e.preventDefault();
+      onDecide("claimed");
+    } else if (!decided && k === "r") {
+      e.preventDefault();
+      onDecide("rejected");
+    } else if (decided && k === "u") {
+      e.preventDefault();
+      onUndo();
+    }
+  }
+
+  if (decided) {
+    return (
+      <div
+        className={`${CARD_SHELL} flex items-center justify-between gap-3 p-4`}
+        data-card
+        data-pmid={row.pmid}
+        tabIndex={0}
+        role="group"
+        aria-label={`${decided === "claimed" ? "Confirmed" : "Rejected"}: ${row.title}`}
+        aria-keyshortcuts="u ArrowUp ArrowDown"
+        onKeyDown={onKeyDown}
+      >
+        <div className="flex min-w-0 items-center gap-2 text-sm">
+          {decided === "claimed" ? (
+            <Check className="size-4 shrink-0 text-emerald-600" aria-hidden />
+          ) : (
+            <X className="text-muted-foreground size-4 shrink-0" aria-hidden />
+          )}
+          <span className="text-muted-foreground shrink-0">
+            {decided === "claimed" ? "Confirmed" : "Rejected"}
+          </span>
+          <span className="text-foreground truncate">{row.title}</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {error ? (
+            <span className="text-xs text-red-600" role="alert">
+              Could not save: {error}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            disabled={pending}
+            onClick={onUndo}
+            className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm disabled:opacity-50"
+          >
+            <Undo2 className="size-3.5" aria-hidden /> Undo
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const likelihoodPct = Math.round(row.likelihood * 100);
   return (
-    <div className="rounded-lg border border-apollo-border p-4" data-pmid={row.pmid}>
+    <div
+      className={`${CARD_SHELL} p-4`}
+      data-card
+      data-pmid={row.pmid}
+      tabIndex={0}
+      role="group"
+      aria-label={`Candidate: ${row.title}`}
+      aria-keyshortcuts="a r ArrowUp ArrowDown"
+      onKeyDown={onKeyDown}
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h3 className="text-foreground text-[15px] font-medium">{row.title}</h3>

@@ -32,8 +32,10 @@ const PATH = "/api/edit/core-claim";
 /** A PMID is a non-empty run of digits, no leading zero (PubMed never mints one). */
 const PMID_PATTERN = /^[1-9][0-9]*$/;
 
-function isClaimStatus(value: unknown): value is "claimed" | "rejected" {
-  return value === "claimed" || value === "rejected";
+/** A decision (`claimed`/`rejected`) or `revoked` — the undo that soft-revokes
+ *  the current claim so the read-merge reverts to the engine status. */
+function isCoreClaimAction(value: unknown): value is "claimed" | "rejected" | "revoked" {
+  return value === "claimed" || value === "rejected" || value === "revoked";
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -49,7 +51,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (typeof coreId !== "string" || coreId.length === 0 || coreId.length > 32) {
     return editError(400, "invalid_core_id", "coreId");
   }
-  if (!isClaimStatus(status)) {
+  if (!isCoreClaimAction(status)) {
     return editError(400, "invalid_status", "status");
   }
   const noteValue =
@@ -77,11 +79,46 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(403, authz.reason);
   }
 
-  // --- idempotency: the same ACTIVE decision already exists → ok, no re-write ---
   const existing = await db.read.coreClaim.findUnique({
     where: { pmid_coreId: { pmid, coreId } },
     select: { status: true, revokedAt: true, note: true },
   });
+
+  // --- revoke (undo): soft-revoke the active claim so core-merge reverts the
+  //     pair to its engine status. No-op (ok) when there is no active claim. ---
+  if (status === "revoked") {
+    if (!existing || existing.revokedAt !== null) {
+      return editOk({ pmid, coreId, status, unchanged: true });
+    }
+    const ts = new Date();
+    try {
+      await db.write.$transaction(async (tx) => {
+        await tx.coreClaim.update({
+          where: { pmid_coreId: { pmid, coreId } },
+          data: { revokedBy: session.cwid, revokedAt: ts },
+        });
+        await appendAuditRow(tx, {
+          actorCwid: realCwid,
+          impersonatedCwid,
+          targetEntityType: "core",
+          targetEntityId: `${coreId}:${pmid}`,
+          action: "core_claim",
+          fieldsChanged: ["revoked"],
+          beforeValues: { status: existing.status, revoked: false },
+          afterValues: { revoked: true },
+          ts,
+          requestId,
+        });
+      });
+    } catch (err) {
+      logEditFailure(`${PATH}#revoke`, err);
+      return editError(500, "write_failed");
+    }
+    // No engine writeback on revoke — the nightly cores run re-derives the status.
+    return editOk({ pmid, coreId, status });
+  }
+
+  // --- idempotency: the same ACTIVE decision already exists → ok, no re-write ---
   if (
     existing &&
     existing.revokedAt === null &&
