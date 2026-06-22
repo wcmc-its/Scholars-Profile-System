@@ -143,4 +143,49 @@ describe("buildFamilyEntityWritesFromS3", () => {
     expect(r.skippedMalformedEntities).toBe(2);
     expect(r.entityWrites.map((e) => e.normalizedEntityId)).toEqual(["ok"]);
   });
+
+  it("maps WS-B / WS-C producer fields and reports their distribution (#1168)", () => {
+    const art: FamilyEntityArtifact = {
+      entities: [
+        { normalized_entity_id: "e_ok", entity_label: "HEK293T cells", supercategory: "animal_cell_models",
+          family_label: "Immortalized cell lines", usage_count: 5, dominant_kind: "organism_or_cells", is_generic: false },
+        { normalized_entity_id: "e_generic", entity_label: "macrophage cell line", supercategory: "animal_cell_models",
+          family_label: "Immortalized cell lines", usage_count: 2, dominant_kind: "organism_or_cells", is_generic: true },
+      ],
+      entityContext: {
+        e_ok: {
+          "11": [{ usage_sentence: "transfected HEK293T cells", span: [12, 24], centrality_score: 0.5,
+                   informativeness_score: 0.83, mention_class: "usage", sentence_complete: true, role: null }],
+          "12": [{ usage_sentence: "as seen in HEK293T cells", span: null, centrality_score: 0.2,
+                   informativeness_score: 0.31, mention_class: "mention", sentence_complete: false, role: null }],
+          "13": [{ usage_sentence: "an unknown class here", span: null, centrality_score: null,
+                   informativeness_score: null, mention_class: "other", sentence_complete: null, role: null }],
+        },
+      },
+    };
+    const r = buildFamilyEntityWritesFromS3(art);
+    // WS-B: generic flag + dominant_kind carried onto the dimension; generic kept, not dropped.
+    const gen = r.entityWrites.find((e) => e.normalizedEntityId === "e_generic")!;
+    expect(gen.isGeneric).toBe(true);
+    expect(gen.dominantKind).toBe("organism_or_cells");
+    expect(r.genericEntities).toBe(1);
+    // WS-C: informativeness + mention_class + sentence_complete on the fact.
+    const used = r.usageWrites.find((u) => u.pmid === "11")!;
+    expect([used.mentionClass, used.informativenessScore, used.sentenceComplete]).toEqual(["usage", 0.83, true]);
+    const mentioned = r.usageWrites.find((u) => u.pmid === "12")!;
+    expect([mentioned.mentionClass, mentioned.sentenceComplete]).toEqual(["mention", false]);
+    // An out-of-vocab mention_class maps to null (badge falls back to "used").
+    expect(r.usageWrites.find((u) => u.pmid === "13")!.mentionClass).toBeNull();
+    expect(r.mentionClassDist).toEqual({ usage: 1, mention: 1, unclassified: 1 });
+  });
+
+  it("defaults WS-B/WS-C fields when the producer omits them (pre-#252/#253 artifact)", () => {
+    const r = buildFamilyEntityWritesFromS3(artifact(), { suppression: noSuppression });
+    const e1 = r.entityWrites.find((e) => e.normalizedEntityId === "tool_1")!;
+    expect([e1.isGeneric, e1.dominantKind]).toEqual([false, null]);
+    const f = r.usageWrites.find((u) => u.pmid === "32991178")!;
+    expect([f.informativenessScore, f.mentionClass, f.sentenceComplete]).toEqual([null, null, null]);
+    expect(r.genericEntities).toBe(0);
+    expect(r.mentionClassDist).toEqual({ usage: 0, mention: 0, unclassified: 3 });
+  });
 });

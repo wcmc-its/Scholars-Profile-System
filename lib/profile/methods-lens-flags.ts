@@ -226,3 +226,26 @@ export function isCenterProgramPagesEnabled(): boolean {
 export function isMethodsLensCellLineEntitiesOn(): boolean {
   return process.env.METHODS_LENS_CELL_LINE_ENTITIES === "on";
 }
+
+/**
+ * #1168 — generalizes the Surface-B entity layer (the master-detail rail + the
+ * per-paper usage snippet) to ALL tool/method families, not just cell lines, and
+ * lights up the WS-C usage badge (mention_class → "How it was used" / "Where it
+ * appears"), WS-B generic soft-suppression (is_generic), and the dominant_kind
+ * rail noun. A SUPERSET of METHODS_LENS_CELL_LINE_ENTITIES: the entity readers
+ * serve data when EITHER flag is on, so the established cell-line surface keeps its
+ * own gate while this all-tools path soaks independently (flip on once the producer
+ * emits non-cell-line entity layers). Wire in BOTH `.env.local` AND the per-env
+ * `environment:` block in cdk/lib/app-stack.ts per the flag-parity rule.
+ */
+export function isMethodsLensEntityUsageOn(): boolean {
+  return process.env.METHODS_LENS_ENTITY_USAGE === "on";
+}
+
+/** True when the Surface-B entity layer should be served at all — under either the
+ *  cell-line gate or the generalized all-tools gate (#1168). The entity readers and
+ *  the page's rail-mount decision use this; the all-tools-only UI naming uses
+ *  {@link isMethodsLensEntityUsageOn} directly. */
+export function isMethodsLensEntityLayerOn(): boolean {
+  return isMethodsLensCellLineEntitiesOn() || isMethodsLensEntityUsageOn();
+}

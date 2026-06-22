@@ -1599,6 +1599,16 @@ export class AppStack extends Stack {
         //     `etl:scholar-tool` backfill against a v4 manifest (CD only re-rolls the
         //     image). STAGING ON (soak there); PROD OFF (no entity data + gated).
         METHODS_LENS_CELL_LINE_ENTITIES: env === "staging" ? "on" : "off",
+        //   METHODS_LENS_ENTITY_USAGE -- #1168. SUPERSET of the cell-line flag:
+        //     generalizes the same entity rail + per-paper usage snippet to ALL
+        //     tool/method families and lights up the WS-C badge (mention_class ->
+        //     "How it was used" / "Where it appears"), WS-B generic soft-suppression,
+        //     and the dominant_kind rail noun. Readers serve when EITHER flag is on.
+        //     OFF in both envs until the producer emits non-cell-line entity layers
+        //     (current artifact is all cell lines) -- flip on after a backfill +
+        //     `cdk deploy Sps-App-<env>`. App-only, no migration beyond the additive
+        //     entity columns. PROD OFF (gated).
+        METHODS_LENS_ENTITY_USAGE: "off",
         //   CENTER_METHODS_FACET -- #962. The center-roster "Methods & tools"
         //     multi-select facet + per-member tool chips on the GROUPED center
         //     roster. ADDITIONALLY gated on METHODS_LENS_ENABLED in code (the

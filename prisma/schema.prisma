@@ -2170,6 +2170,12 @@ model FamilyEntity {
   usageCount         Int      @map("usage_count")
   /// is_evidenced (spec §7): whether >=1 usage sentence exists -> clickable affordance.
   evidenced          Boolean  @default(false)
+  /// #1168 — WS-B generic flag (ReciterAI #252): a non-specific generic
+  /// ("macrophage cell line"). SOFT-suppressed in the UI, kept in the dimension.
+  isGeneric          Boolean  @default(false) @map("is_generic")
+  /// #1168 — the family's dominant entity `kind` (ReciterAI #260), copied per
+  /// entity; drives the rail-header noun via a static kind->noun map.
+  dominantKind       String?  @map("dominant_kind") @db.VarChar(32)
   sourceArtifactSha  String?  @map("source_artifact_sha") @db.VarChar(64)
   refreshedAt        DateTime @default(now()) @map("refreshed_at")
 
@@ -2197,6 +2203,13 @@ model FamilyEntityUsage {
   matchedSpanStart   Int?     @map("matched_span_start")
   matchedSpanEnd     Int?     @map("matched_span_end")
   centralityScore    Decimal? @map("centrality_score") @db.Decimal(6, 4)
+  /// #1168 — WS-C usage signal (ReciterAI #253): `informativeness_score` in [0,1]
+  /// + `mention_class` in {usage, mention} (-> snippet badge). Both null pre-#253.
+  informativenessScore Decimal? @map("informativeness_score") @db.Decimal(6, 4)
+  mentionClass       String?  @map("mention_class") @db.VarChar(32)
+  /// #254 — `usage_sentence` boundary-completeness hint (lets highlightSnippet
+  /// skip its ellipsis heuristic). Null pre-#254.
+  sentenceComplete   Boolean? @map("sentence_complete")
   entityRole         String?  @map("entity_role") @db.VarChar(64)
   sourceArtifactSha  String?  @map("source_artifact_sha") @db.VarChar(64)
   refreshedAt        DateTime @default(now()) @map("refreshed_at")

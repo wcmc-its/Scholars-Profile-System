@@ -18,6 +18,7 @@
  */
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { EntityRail, type RailItem } from "@/components/method/entity-rail";
+import { entityKindNoun } from "@/lib/methods/entity-kind-noun";
 import type { CellLineEntity } from "@/lib/api/methods";
 
 export function CellLineRail({ entities }: { entities: CellLineEntity[] }) {
@@ -26,6 +27,12 @@ export function CellLineRail({ entities }: { entities: CellLineEntity[] }) {
   const searchParams = useSearchParams();
 
   const active = searchParams.get("cellLine");
+
+  // #1168 — the rail noun comes from the family's dominant entity kind (all
+  // entities in a family share it), so a reagent/instrument/dataset family reads
+  // the right header instead of the cell-line-only "Cell lines" v1 shipped with.
+  const noun = entityKindNoun(entities[0]?.dominantKind);
+  const nounLower = noun.toLowerCase();
 
   const onSelect = (id: string | null) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -52,9 +59,11 @@ export function CellLineRail({ entities }: { entities: CellLineEntity[] }) {
       ariaLabel: e.evidenced
         ? `${e.label}, ${e.usageCount.toLocaleString()} papers`
         : `${e.label}, ${e.usageCount.toLocaleString()} papers (no verbatim evidence recorded)`,
-      // Punch #1 — only evidenced entities are selectable (an unevidenced one would
-      // filter the feed to zero results). Unevidenced rows are plain labels.
-      interactive: e.evidenced,
+      // Punch #1 / #1168 WS-B — only evidenced, non-generic entities are selectable.
+      // An unevidenced one would filter the feed to zero; a generic one ("macrophage
+      // cell line") is a non-specific bucket. Both render as plain, non-clickable
+      // rows (soft suppression — present in the list, not interactive).
+      interactive: e.evidenced && !e.isGeneric,
     };
   });
 
@@ -63,10 +72,10 @@ export function CellLineRail({ entities }: { entities: CellLineEntity[] }) {
       items={items}
       activeId={active}
       onSelect={onSelect}
-      railLabel="Cell lines"
-      headerText={`CELL LINES (${entities.length})`}
-      filterPlaceholder="Filter cell lines…"
-      noMatchNoun="cell lines"
+      railLabel={noun}
+      headerText={`${noun.toUpperCase()} (${entities.length})`}
+      filterPlaceholder={`Filter ${nounLower}…`}
+      noMatchNoun={nounLower}
     />
   );
 }

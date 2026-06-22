@@ -546,6 +546,9 @@ async function main(): Promise<void> {
     // Facts whose entity id had no DIMENSION record — a producer-side join alarm.
     orphan_facts: entityResult.orphanFacts,
     skipped_malformed_entities: entityResult.skippedMalformedEntities,
+    // #1168 — WS-B generic-vocab count (soft-suppressed) + WS-C mention-class coverage.
+    generic_entities: entityResult.genericEntities,
+    mention_class_dist: entityResult.mentionClassDist,
   });
 
   // Dry-run: diff against the live table and stop — never write, never record.
@@ -641,6 +644,8 @@ async function main(): Promise<void> {
         entityRole: w.entityRole,
         usageCount: w.usageCount,
         evidenced: w.evidenced,
+        isGeneric: w.isGeneric,
+        dominantKind: w.dominantKind,
         sourceArtifactSha: manifest.sha256,
       })),
       skipDuplicates: true,
@@ -661,6 +666,10 @@ async function main(): Promise<void> {
         centralityScore:
           w.centralityScore == null ? null : new Prisma.Decimal(w.centralityScore),
         entityRole: w.entityRole,
+        informativenessScore:
+          w.informativenessScore == null ? null : new Prisma.Decimal(w.informativenessScore),
+        mentionClass: w.mentionClass,
+        sentenceComplete: w.sentenceComplete,
         sourceArtifactSha: manifest.sha256,
       })),
       skipDuplicates: true,

@@ -40,7 +40,7 @@ import {
   isMethodsLensToolContextOn,
   isMethodsFamilyRosterFallbackOn,
   isMethodsFamilyDefinitionsOn,
-  isMethodsLensCellLineEntitiesOn,
+  isMethodsLensEntityLayerOn,
 } from "@/lib/profile/methods-lens-flags";
 import {
   loadFamilyOverlayGate,
@@ -319,7 +319,7 @@ export async function getFamilyToolUsage(
 // (supercategory, familyLabel).
 // ---------------------------------------------------------------------------
 
-/** One ranked cell line a family resolves to — a strip row / directory entry. */
+/** One ranked entity a family resolves to — a rail row / directory entry. */
 export type CellLineEntity = {
   entityId: string;
   label: string;
@@ -328,6 +328,10 @@ export type CellLineEntity = {
   parentEntityId: string | null;
   parentLabel: string | null;
   parentDescriptor: string | null;
+  /** #1168 — WS-B generic flag (soft-suppressed in the rail, like unevidenced). */
+  isGeneric: boolean;
+  /** #1168 — the family's dominant `kind` (#260); drives the rail-header noun. */
+  dominantKind: string | null;
 };
 
 /**
@@ -340,7 +344,7 @@ export async function getFamilyCellLineEntities(
   supercategory: string,
   familyLabel: string,
 ): Promise<CellLineEntity[]> {
-  if (!isMethodsLensCellLineEntitiesOn()) return [];
+  if (!isMethodsLensEntityLayerOn()) return [];
   const rows = await prisma.familyEntity.findMany({
     where: { supercategory, familyLabel },
     orderBy: [{ usageCount: "desc" }, { entityLabel: "asc" }],
@@ -352,6 +356,8 @@ export async function getFamilyCellLineEntities(
       parentEntityId: true,
       parentLabel: true,
       parentDescriptor: true,
+      isGeneric: true,
+      dominantKind: true,
     },
   });
   return rows.map((r) => ({
@@ -362,6 +368,8 @@ export async function getFamilyCellLineEntities(
     parentEntityId: r.parentEntityId,
     parentLabel: r.parentLabel,
     parentDescriptor: r.parentDescriptor,
+    isGeneric: r.isGeneric,
+    dominantKind: r.dominantKind,
   }));
 }
 
@@ -372,6 +380,9 @@ export type CellLineUsageFact = {
   sentence: string;
   matchedSpan: { start: number; end: number } | null;
   centrality: number | null;
+  /** #1168 — WS-C class (ReciterAI #253): "mention" ⇒ the snippet badge softens to
+   *  "Where it appears"; "usage"/null keeps the "How it was used" default. */
+  mentionClass: string | null;
 };
 
 /**
@@ -385,7 +396,7 @@ export async function getFamilyCellLineUsageFacts(
   familyLabel: string,
   entityId: string,
 ): Promise<CellLineUsageFact[]> {
-  if (!isMethodsLensCellLineEntitiesOn() || !entityId) return [];
+  if (!isMethodsLensEntityLayerOn() || !entityId) return [];
   const rows = await prisma.familyEntityUsage.findMany({
     where: { supercategory, familyLabel, normalizedEntityId: entityId },
     orderBy: [{ centralityScore: "desc" }, { pmid: "asc" }],
@@ -395,6 +406,7 @@ export async function getFamilyCellLineUsageFacts(
       matchedSpanStart: true,
       matchedSpanEnd: true,
       centralityScore: true,
+      mentionClass: true,
     },
   });
   return rows.map((r) => ({
@@ -405,6 +417,7 @@ export async function getFamilyCellLineUsageFacts(
         ? { start: r.matchedSpanStart, end: r.matchedSpanEnd }
         : null,
     centrality: r.centralityScore != null ? Number(r.centralityScore) : null,
+    mentionClass: r.mentionClass,
   }));
 }
 
@@ -426,7 +439,7 @@ export async function getFamilyCellLineRailPreviews(
   supercategory: string,
   familyLabel: string,
 ): Promise<Record<string, CellLineRailPreview>> {
-  if (!isMethodsLensCellLineEntitiesOn()) return {};
+  if (!isMethodsLensEntityLayerOn()) return {};
   const rows = await prisma.familyEntityUsage.findMany({
     where: { supercategory, familyLabel },
     orderBy: [{ centralityScore: "desc" }, { pmid: "asc" }],
@@ -1152,7 +1165,12 @@ export type MethodPublicationHit = {
    *  for this paper, present ONLY when the feed is filtered by a cell line
    *  (`opts.entityId`); null/absent otherwise (the unfiltered baseline carries no
    *  snippet, spec §5.4). Powers the on-demand snippet under each filtered row. */
-  entityUsage?: { sentence: string; matchedSpan: { start: number; end: number } | null } | null;
+  entityUsage?: {
+    sentence: string;
+    matchedSpan: { start: number; end: number } | null;
+    /** #1168 — WS-C badge: "appears" (generic mention) vs "used" (default). */
+    usage: "used" | "appears";
+  } | null;
 };
 
 const PUB_SELECT = {
@@ -1298,7 +1316,7 @@ export async function getFamilyPublications(
   // stay unfiltered. No-op when no entityId / flag off → feedPmids === allPmids.
   let feedPmids = allPmids;
   let factByPmid: Map<string, CellLineUsageFact> | null = null;
-  if (opts.entityId && isMethodsLensCellLineEntitiesOn()) {
+  if (opts.entityId && isMethodsLensEntityLayerOn()) {
     const facts = await getFamilyCellLineUsageFacts(supercategory, familyLabel, opts.entityId);
     factByPmid = new Map(facts.map((f) => [f.pmid, f]));
     const allow = new Set(allPmids);
@@ -1343,7 +1361,16 @@ export async function getFamilyPublications(
       const hit = mapPublicationHit(r, authorsByPmid.get(r.pmid), includeImpact);
       const fact = factByPmid?.get(r.pmid);
       return fact
-        ? { ...hit, entityUsage: { sentence: fact.sentence, matchedSpan: fact.matchedSpan } }
+        ? {
+            ...hit,
+            entityUsage: {
+              sentence: fact.sentence,
+              matchedSpan: fact.matchedSpan,
+              // WS-C (#253): a generic background mention softens to "Where it
+              // appears"; "usage"/null keeps the "How it was used" default.
+              usage: fact.mentionClass === "mention" ? "appears" : "used",
+            },
+          }
         : hit;
     }),
     total,
