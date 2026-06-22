@@ -52,7 +52,9 @@ describe("listOverviewGenerations", () => {
     await listOverviewGenerations("self01");
     expect(mockGenerationFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { cwid: "self01" },
+        // Only SUCCEEDED runs reach the history panel — failed attempts are persisted
+        // for the audit trail but never offered for reload/restore.
+        where: { cwid: "self01", status: "succeeded" },
         orderBy: { createdAt: "desc" },
         take: 20,
       }),
@@ -90,6 +92,7 @@ describe("listOverviewGenerations", () => {
           voice: "third", // unknown enum -> default
           tone: "conversational",
           length: "extended",
+          audience: "informed", // blob had none -> normalized to the default tier
           elements: ["methods"], // unknown key filtered
           instructions: "trim me", // trimmed
           promptVersion: "v4", // blob had none -> normalized to the default

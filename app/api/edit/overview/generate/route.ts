@@ -16,15 +16,24 @@
  * Flag-gated behind `SELF_EDIT_OVERVIEW_GENERATE` (off ⇒ 404), mirroring the
  * slug-request route's dormancy.
  */
-import { type NextRequest, type NextResponse } from "next/server";
+import { type NextRequest } from "next/server";
 
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 import { assembleOverviewFacts, hasSufficientFacts } from "@/lib/edit/overview-facts";
-import { generateOverviewDraft, isOverviewGenerateEnabled } from "@/lib/edit/overview-generator";
+import {
+  generateOverviewDraft,
+  isOverviewGenerateEnabled,
+  isOverviewGenerateStreamEnabled,
+  resolveEffectiveOverviewModel,
+  type OverviewProgress,
+} from "@/lib/edit/overview-generator";
 import { normalizeOverviewParams, normalizeOverviewSelection } from "@/lib/edit/overview-params";
-import { defaultPromptVersionId } from "@/lib/edit/overview-prompt-versions";
+import {
+  defaultPromptVersionId,
+  type OverviewPromptVersionId,
+} from "@/lib/edit/overview-prompt-versions";
 import { loadOverviewSelectionDeltas } from "@/lib/edit/overview-selection-store";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import { recordOverviewGenerateAttempt } from "@/lib/edit/rate-limit";
@@ -32,6 +41,7 @@ import { type UnitScholarLookup } from "@/lib/edit/unit-scholar-authz";
 import {
   editError,
   editOk,
+  editOkStream,
   editRateLimited,
   logEditFailure,
   readEditRequest,
@@ -39,7 +49,10 @@ import {
 
 const PATH = "/api/edit/overview/generate";
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
+// The generation can be STREAMED (see `editOkStream`), so the handler resolves a
+// `Response` (the streamed body) for the streamed generate path and `NextResponse`
+// (a buffered body) for the buffered path + the fast pre-checks — both are `Response`.
+export async function POST(request: NextRequest): Promise<Response> {
   // Flag first — a dormant feature 404s before doing any work (mirrors the
   // slug-request route).
   if (!isOverviewGenerateEnabled()) return editError(404, "not_found");
@@ -138,47 +151,124 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // --- sparse-data gate (SPEC G2): too little signal to draft without padding. ---
   if (!hasSufficientFacts(facts)) return editError(422, "insufficient_facts");
 
-  // --- generate. A gateway throw / timeout is a 502 and NEVER writes the DB
-  //     (SPEC G8). ---
-  let result: Awaited<ReturnType<typeof generateOverviewDraft>>;
-  try {
-    result = await generateOverviewDraft(facts, effectiveParams);
-  } catch (err) {
-    logEditFailure(PATH, err);
-    return editError(502, "generation_failed");
-  }
+  // --- persist (#742 Phase B + persist-every-run + audit parity). Record EVERY
+  //     attempt — success AND failure — so the audit/debug trail is complete; the
+  //     history panel filters to succeeded rows (`listOverviewGenerations`). Best-
+  //     effort: the draft is the product, the row is bookkeeping — a write hiccup
+  //     must never lose the draft, so this is its own try/catch and the route still
+  //     returns the draft with generationId=null. ---
+  const persistRun = async (
+    outcome:
+      | { ok: true; draft: string; model: string; promptVersion: OverviewPromptVersionId }
+      | { ok: false; error: string },
+  ): Promise<string | null> => {
+    try {
+      const row = await db.write.overviewGeneration.create({
+        data: {
+          cwid: entityId,
+          // A failed run has no draft; `status` / `error` carry the outcome.
+          text: outcome.ok ? outcome.draft : null,
+          status: outcome.ok ? "succeeded" : "failed",
+          error: outcome.ok ? null : outcome.error,
+          // On failure no run model resolved — record the version's effective model.
+          model: outcome.ok
+            ? outcome.model
+            : resolveEffectiveOverviewModel(effectiveParams.promptVersion),
+          // The version that actually generated — a dedicated column for A/B analysis
+          // (`GROUP BY prompt_version`); also mirrored inside `params` for restore.
+          promptVersion: outcome.ok ? outcome.promptVersion : effectiveParams.promptVersion,
+          // Persist the steering controls (incl. promptVersion + audience) + the source
+          // selection (v3.1) in the one Json column so "Regenerate from these settings"
+          // restores both.
+          params: { ...effectiveParams, selection },
+          // Attribute the ACCOUNTABLE HUMAN (`realCwid` = `manual_edit_audit.actor_cwid`),
+          // with the "View as" overlay target in `impersonatedCwid` — audit parity with
+          // `biosketch_generation` (NOT `session.cwid`, which is the effective/impersonated
+          // identity).
+          createdByCwid: realCwid,
+          impersonatedCwid,
+        },
+        select: { id: true },
+      });
+      return row.id;
+    } catch (err) {
+      logEditFailure(PATH, err);
+      return null;
+    }
+  };
 
-  // --- version history (#742 Phase B). Record EVERY successful draft so the
-  //     scholar can browse / reload / regenerate from it. Best-effort: the draft
-  //     is the product, the history row is bookkeeping — a write hiccup must
-  //     never lose the draft, so this is wrapped in its own try/catch and the
-  //     route still returns 200 with generationId=null. ---
-  let generationId: string | null = null;
-  try {
-    const row = await db.write.overviewGeneration.create({
-      data: {
-        cwid: entityId,
-        text: result.draft,
-        model: result.model,
-        // The version that actually generated — a dedicated column for A/B analysis
-        // (`GROUP BY prompt_version`); also mirrored inside `params` for restore.
-        promptVersion: result.promptVersion,
-        // Persist the steering controls (incl. promptVersion) + the source selection
-        // (v3.1) in the one Json column so "Regenerate from these settings" restores both.
-        params: { ...effectiveParams, selection },
-        createdByCwid: session.cwid,
-      },
-      select: { id: true },
+  // --- generate + persist, factored so the streamed and buffered paths run IDENTICAL
+  //     logic. A gateway throw is recorded as a failed run and surfaced as a discriminated
+  //     failure; this never throws. `onProgress` drives the streamed progress bar (no-op
+  //     on the buffered path). ---
+  const runGeneration = async (
+    onProgress?: (event: OverviewProgress) => void,
+  ): Promise<
+    | {
+        ok: true;
+        draft: string;
+        model: string;
+        promptVersion: OverviewPromptVersionId;
+        generationId: string | null;
+      }
+    | { ok: false; error: string }
+  > => {
+    let result: Awaited<ReturnType<typeof generateOverviewDraft>>;
+    try {
+      // Pass the progress sink ONLY on the streamed path — the buffered path keeps the
+      // original 2-arg call (no behavior change, no spurious opts object).
+      result = onProgress
+        ? await generateOverviewDraft(facts, effectiveParams, { onProgress })
+        : await generateOverviewDraft(facts, effectiveParams);
+    } catch (err) {
+      logEditFailure(PATH, err);
+      await persistRun({ ok: false, error: "generation_failed" });
+      return { ok: false, error: "generation_failed" };
+    }
+    const generationId = await persistRun({
+      ok: true,
+      draft: result.draft,
+      model: result.model,
+      promptVersion: result.promptVersion,
     });
-    generationId = row.id;
-  } catch (err) {
-    logEditFailure(PATH, err);
+    return {
+      ok: true,
+      draft: result.draft,
+      model: result.model,
+      promptVersion: result.promptVersion,
+      generationId,
+    };
+  };
+
+  // --- STREAMED path (sub-flag `SELF_EDIT_OVERVIEW_GENERATE_STREAM`). Emits NDJSON
+  //     progress lines (the determinate <OverviewProgress> bar, #917 follow-up A) plus
+  //     heartbeats that keep a slow Opus-4.8 draft from tripping the CloudFront origin-
+  //     read timeout. A gateway failure becomes an in-body `{ ok: false }` result line
+  //     (status already 200); the failed run is still persisted inside `runGeneration`. ---
+  if (isOverviewGenerateStreamEnabled()) {
+    return editOkStream(
+      async (emit) => {
+        const r = await runGeneration((event) => emit(event));
+        if (!r.ok) throw new Error(r.error);
+        return {
+          draft: r.draft,
+          model: r.model,
+          promptVersion: r.promptVersion,
+          generationId: r.generationId,
+        };
+      },
+      () => ({ error: "generation_failed" }),
+    );
   }
 
+  // --- BUFFERED path (default / un-flipped env). Unchanged response shape: a gateway
+  //     throw is a 502 (SPEC G8), every other outcome a single editOk JSON body. ---
+  const r = await runGeneration();
+  if (!r.ok) return editError(502, r.error);
   return editOk({
-    draft: result.draft,
-    model: result.model,
-    promptVersion: result.promptVersion,
-    generationId,
+    draft: r.draft,
+    model: r.model,
+    promptVersion: r.promptVersion,
+    generationId: r.generationId,
   });
 }

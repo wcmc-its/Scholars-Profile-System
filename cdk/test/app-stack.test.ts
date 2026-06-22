@@ -1630,6 +1630,15 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("SELF_EDIT_OVERVIEW_GENERATE")).toBe("on");
       });
 
+      it("keeps overview streaming OFF in prod but defaults the audience (SELF_EDIT_OVERVIEW_GENERATE_STREAM=off, OVERVIEW_AUDIENCE_DEFAULT=informed)", () => {
+        // The base generator is already live in prod; the streamed response SHAPE is a
+        // separate staging-first sub-flag, off in prod until an approval-gated deploy.
+        // The audience default ("informed") ships in both envs as the no-image-roll lever.
+        const env = appContainerEnv();
+        expect(env.get("SELF_EDIT_OVERVIEW_GENERATE_STREAM")).toBe("off");
+        expect(env.get("OVERVIEW_AUDIENCE_DEFAULT")).toBe("informed");
+      });
+
       it("keeps the #917 v6 biosketch generator OFF in prod (EDIT_BIOSKETCH_GENERATE=off, staging-first; faithfulness pass ON; default version v6)", () => {
         // New surface: default-off in prod, on in staging while it bakes. The #917 v6
         // faithfulness pass is ON in both envs (grant document); the default prompt
@@ -2103,6 +2112,21 @@ describe("AppStack", () => {
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("SELF_EDIT_OVERVIEW_GENERATE")).toBe("on");
+    });
+
+    it("streams the overview generator in staging + defaults the audience (SELF_EDIT_OVERVIEW_GENERATE_STREAM=on, OVERVIEW_AUDIENCE_DEFAULT=informed)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appContainer = (
+        Object.values(taskDefs).find((r) => r.Properties?.Family === "sps-app-staging")
+          ?.Properties?.ContainerDefinitions as
+          | Array<{ Name?: string; Environment?: Array<{ Name?: string; Value?: string }> }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("SELF_EDIT_OVERVIEW_GENERATE_STREAM")).toBe("on"); // staging-first sub-flag
+      expect(envByName.get("OVERVIEW_AUDIENCE_DEFAULT")).toBe("informed");
     });
 
     it("enables the #917 v6 biosketch generator in staging (EDIT_BIOSKETCH_GENERATE=on, staging-first; faithfulness pass on; default version v6)", () => {

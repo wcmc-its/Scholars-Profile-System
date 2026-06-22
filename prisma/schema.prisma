@@ -1890,15 +1890,31 @@ model RequestChangeRateLimit {
 model OverviewGeneration {
   id            String   @id @default(uuid()) @db.VarChar(64)
   cwid          String   @db.VarChar(32)
-  text          String   @db.Text // sanitized HTML draft
+  // The sanitized HTML draft. NULLABLE: a FAILED generation is now persisted too
+  // (status="failed") so EVERY attempt is recorded — a failed row has no draft.
+  // Successful rows are always non-null.
+  text          String?  @db.Text // sanitized HTML draft (NULL on a failed run)
   model         String   @db.VarChar(64) // gateway model string used
+  // Run outcome: "succeeded" (draft is in `text`) or "failed" (the gateway threw;
+  // `error` carries the code, `text` is NULL). Every attempt is recorded so the
+  // audit trail is complete; the history panel surfaces only "succeeded" rows.
+  status        String   @default("succeeded") @db.VarChar(16)
+  // The failure code for a "failed" run (e.g. "generation_failed"); NULL on success.
+  error         String?  @db.Text
   // The PROMPT VERSION that generated this draft (#742, the versioning registry).
   // A dedicated column (not buried in `params`) so A/B analysis can GROUP BY it —
   // e.g. v3-vs-v2 edit-survival rates joined to overview_provenance. Nullable: rows
   // written before versioning shipped stay NULL.
   promptVersion String?  @map("prompt_version") @db.VarChar(32)
   params        Json // { voice, tone, length, elements[], instructions, promptVersion }
-  createdByCwid String   @map("created_by_cwid") @db.VarChar(32) // actor (self today)
+  // The ACCOUNTABLE HUMAN who ran the generation — the signed-in actor (self / superuser /
+  // comms-steward / proxy / unit-admin), the same identity written to
+  // `manual_edit_audit.actor_cwid`. NOT the impersonated overlay (see `impersonatedCwid`).
+  createdByCwid String   @map("created_by_cwid") @db.VarChar(32)
+  // The "View as" overlay target when a superuser/steward generated through impersonation;
+  // NULL for a direct generation. Mirrors BiosketchGeneration + manual_edit_audit so a
+  // delegated draft is attributed to the human who actually ran it (audit parity).
+  impersonatedCwid String? @map("impersonated_cwid") @db.VarChar(32)
   createdAt     DateTime @default(now()) @map("created_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)

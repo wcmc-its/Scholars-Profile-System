@@ -11,6 +11,8 @@ import { NextRequest } from "next/server";
 const {
   mockGetEditSession,
   mockEnabled,
+  mockStreamEnabled,
+  mockResolveModel,
   mockAssembleFacts,
   mockHasSufficient,
   mockGenerateDraft,
@@ -21,6 +23,8 @@ const {
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockEnabled: vi.fn(),
+  mockStreamEnabled: vi.fn(),
+  mockResolveModel: vi.fn(),
   mockAssembleFacts: vi.fn(),
   mockHasSufficient: vi.fn(),
   mockGenerateDraft: vi.fn(),
@@ -64,6 +68,8 @@ vi.mock("@/lib/edit/overview-selection-store", () => ({
 vi.mock("@/lib/edit/overview-generator", () => ({
   generateOverviewDraft: mockGenerateDraft,
   isOverviewGenerateEnabled: mockEnabled,
+  isOverviewGenerateStreamEnabled: mockStreamEnabled,
+  resolveEffectiveOverviewModel: mockResolveModel,
 }));
 vi.mock("@/lib/edit/rate-limit", () => ({
   recordOverviewGenerateAttempt: mockRecordAttempt,
@@ -102,6 +108,8 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
   mockEnabled.mockReturnValue(true);
+  mockStreamEnabled.mockReturnValue(false);
+  mockResolveModel.mockReturnValue("anthropic/claude-sonnet-4.5");
   mockGetEditSession.mockResolvedValue(SELF);
   mockAssembleFacts.mockResolvedValue(FACTS);
   mockHasSufficient.mockReturnValue(true);
@@ -124,6 +132,7 @@ const NORMALIZED_EMPTY = {
   voice: "third",
   tone: "formal",
   length: "standard",
+  audience: "informed", // the live default audience tier
   elements: [],
   instructions: "",
   promptVersion: "v4", // #742 — the live default version
@@ -248,10 +257,14 @@ describe("POST /api/edit/overview/generate", () => {
         data: expect.objectContaining({
           cwid: "self01",
           text: "<p>Draft.</p>",
+          status: "succeeded",
+          error: null,
           model: "anthropic/claude-sonnet-4.5",
           promptVersion: "v4",
           params: { ...NORMALIZED_EMPTY, selection: { pmids: [], grantIds: [], toolNames: [] } },
+          // audit parity: the accountable human + the (null, non-impersonating) overlay.
           createdByCwid: "self01",
+          impersonatedCwid: null,
         }),
       }),
     );
@@ -313,6 +326,7 @@ describe("POST /api/edit/overview/generate", () => {
       voice: "first",
       tone: "conversational",
       length: "extended",
+      audience: "informed", // no audience posted → default
       elements: ["methods"], // de-duped + unknown key filtered
       instructions: "keep it brief", // trimmed
       promptVersion: "v4", // no version posted → default
@@ -325,11 +339,26 @@ describe("POST /api/edit/overview/generate", () => {
     expect(mockGenerateDraft).toHaveBeenCalledWith(FACTS, NORMALIZED_EMPTY);
   });
 
-  it("502 generation_failed when the gateway throws (no DB write)", async () => {
+  it("502 generation_failed when the gateway throws — and persists a FAILED run (buffered)", async () => {
     mockGenerateDraft.mockRejectedValue(new Error("gateway timeout"));
     const res = await POST(post({ entityId: "self01" }));
     expect(res.status).toBe(502);
     expect(await res.json()).toMatchObject({ error: "generation_failed" });
+    // persist-every-run: the failed attempt is recorded (text null, status "failed"),
+    // attributed to the real actor — a complete audit/debug trail.
+    expect(mockGenerationCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cwid: "self01",
+          text: null,
+          status: "failed",
+          error: "generation_failed",
+          model: "anthropic/claude-sonnet-4.5",
+          createdByCwid: "self01",
+          impersonatedCwid: null,
+        }),
+      }),
+    );
   });
 
   // #742 prompt-version gate: only a superuser / comms_steward / curator (unit-admin)
@@ -392,6 +421,61 @@ describe("POST /api/edit/overview/generate", () => {
           }),
         }),
       );
+    });
+  });
+
+  // Streamed path (SELF_EDIT_OVERVIEW_GENERATE_STREAM on) — the response is NDJSON;
+  // success is an in-body `result` line and a gateway throw is an in-body failure line
+  // (status stays 200), with the run still persisted (success or failed).
+  describe("streaming (SELF_EDIT_OVERVIEW_GENERATE_STREAM)", () => {
+    beforeEach(() => mockStreamEnabled.mockReturnValue(true));
+
+    async function resultLine(res: Response): Promise<Record<string, unknown> | undefined> {
+      const text = await res.text();
+      return text
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as Record<string, unknown>)
+        .find((m) => m.type === "result");
+    }
+
+    it("streams NDJSON with a terminal result line carrying the draft + a succeeded row", async () => {
+      const res = await POST(post({ entityId: "self01" }));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("application/x-ndjson");
+      expect(await resultLine(res)).toMatchObject({
+        ok: true,
+        draft: "<p>Draft.</p>",
+        generationId: "gen123",
+      });
+      expect(mockGenerationCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: "succeeded" }) }),
+      );
+    });
+
+    it("emits an in-body failure result (status 200) and persists a FAILED run on a gateway throw", async () => {
+      mockGenerateDraft.mockRejectedValue(new Error("gateway timeout"));
+      const res = await POST(post({ entityId: "self01" }));
+      expect(res.status).toBe(200); // NDJSON: failure is in-body, not a 5xx
+      expect(await resultLine(res)).toMatchObject({ ok: false, error: "generation_failed" });
+      expect(mockGenerationCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: "failed", text: null, error: "generation_failed" }),
+        }),
+      );
+    });
+
+    it("a pre-flight failure (rate limit) is still a buffered 429, not NDJSON", async () => {
+      mockRecordAttempt.mockResolvedValue({
+        allowed: false,
+        count: 11,
+        limit: 10,
+        retryAfterSeconds: 1800,
+      });
+      const res = await POST(post({ entityId: "self01" }));
+      expect(res.status).toBe(429);
+      expect(res.headers.get("content-type")).toContain("application/json");
     });
   });
 });

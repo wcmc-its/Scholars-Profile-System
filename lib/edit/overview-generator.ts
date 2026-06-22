@@ -27,6 +27,7 @@ import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import {
   OVERVIEW_ELEMENTS,
   OVERVIEW_MIN_PUBLICATIONS,
+  type OverviewAudience,
   type OverviewLength,
   type OverviewParams,
   type OverviewTone,
@@ -399,6 +400,56 @@ function toneDirective(tone: OverviewTone): string {
 }
 
 /**
+ * The AUDIENCE directive for the user turn — the technicality lever (the corrective
+ * to the "outputs are overly technical" report). Three tiers, least → most technical;
+ * `informed` is the default. It composes WITH the version's keyword-richness charge
+ * rather than fighting it: the specific, discriminating terms from FACTS stay (they
+ * are the grounding); the tier governs whether they are DEFINED, contextualized, or
+ * used bare. A pure framing directive (it changes phrasing, never which facts are
+ * stated), so it rides in the user turn under the system prompt's "additional
+ * instructions may steer emphasis, tone, and framing ONLY" clause — and it stays
+ * inside the grounding floor (it never asks the model to assert significance / praise
+ * the prompt's absolute rules ban; "importance" here means the grounded substance of
+ * what the work studies and found, not an evaluation of its impact).
+ */
+function audienceDirective(audience: OverviewAudience): string {
+  switch (audience) {
+    case "accessible":
+      return (
+        "Audience: a general, non-specialist reader — an intelligent adult with no " +
+        "training in the field, such as a patient, a family member, or a reporter. Avoid " +
+        "specialized vocabulary; when a technical term from FACTS is unavoidable, define it " +
+        "in a few plain words, and spell out acronyms on first use (for example, write " +
+        '"electronic health records (EHR)"). Lead with what this person studies and, where ' +
+        "FACTS make it clear, why that work matters in practical or clinical terms. Where " +
+        "FACTS include roles or recognitions, convey them in plain language rather than as a " +
+        "roll-call list. Aim for roughly a ninth-to-tenth-grade reading level: shorter " +
+        "sentences, active voice."
+      );
+    case "technical":
+      return (
+        "Audience: a working scientist, possibly in an adjacent field, assessing fit for " +
+        "collaboration. Use domain terminology freely without definition; name the specific " +
+        "methods, models, systems, cohorts, and subfields precisely, exactly as they appear " +
+        "in FACTS. Foreground the research questions, approaches, and distinctive " +
+        "contributions; keep biography and recognitions brief. A graduate or professional " +
+        "reading level with denser sentences is fine."
+      );
+    case "informed":
+    default:
+      return (
+        "Audience: a college-educated, scientifically literate reader who is NOT a " +
+        "specialist in this subfield — a graduate student surveying labs, a journalist, or a " +
+        "colleague from another department. Field terminology is allowed, but contextualize " +
+        "it on first use, and spell out any non-obvious acronym once. Convey both what the " +
+        "work studies and what it found or addresses (not the topics alone); light " +
+        "methodological specificity is welcome. Aim for roughly a college reading level with " +
+        "moderate sentence complexity."
+      );
+  }
+}
+
+/**
  * #778 — true when FACTS carry no research signal: no parent topics AND no
  * scored/representative publications. These thinnest-tier faculty are where the
  * model tends to pad with generic institutional filler (a "commitment to
@@ -500,6 +551,7 @@ export function buildOverviewUserPrompt(facts: OverviewFacts, params: OverviewPa
   const lines: string[] = [
     voiceDirective(params.voice),
     toneDirective(params.tone),
+    audienceDirective(params.audience),
     impl.lengthBands[params.length],
   ];
 
@@ -632,6 +684,11 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** A phase-boundary progress event the streaming generate route forwards as an
+ *  NDJSON `progress` line (#917 follow-up A, ported to overview). `drafting` = the
+ *  main gateway call; `faithfulness` = the optional grounding pass; `done` = finished. */
+export type OverviewProgress = { phase: "drafting" | "faithfulness" | "done" };
+
 /**
  * Generate a sanitized HTML overview draft from `facts`, steered by `params`. One
  * gateway call (no tools — the model writes only from FACTS), then prose → `<p>`
@@ -649,6 +706,15 @@ export async function generateOverviewDraft(
     faithfulnessPass?: boolean;
     /** Explicit version override (validation harness / tests); else `params.promptVersion`. */
     promptVersion?: OverviewPromptVersionId;
+    /**
+     * Optional phase-boundary progress sink (#917 follow-up A, ported to overview).
+     * The streaming generate route forwards each event as an NDJSON `progress` line
+     * driving the determinate `<OverviewProgress>` bar. No-op when the route runs the
+     * buffered path. Overview's fan-out is short — `drafting` (the one gateway call),
+     * then `faithfulness` only when the grounding pass runs (off by default), then
+     * `done` — so the bar is coarse; the elapsed timer + heartbeat carry liveness.
+     */
+    onProgress?: (event: OverviewProgress) => void;
   },
 ): Promise<{
   draft: string;
@@ -666,7 +732,9 @@ export async function generateOverviewDraft(
   const modelId = opts?.model ?? resolveEffectiveOverviewModel(versionId);
   const temperature =
     opts?.temperature ?? (Number(process.env.OVERVIEW_GENERATE_TEMPERATURE) || DEFAULT_TEMPERATURE);
+  const emit = opts?.onProgress ?? (() => {});
 
+  emit({ phase: "drafting" });
   const result = await generateText({
     model: overviewBedrock()(modelId),
     system: impl.systemPrompt,
@@ -681,6 +749,7 @@ export async function generateOverviewDraft(
   let prose = result.text;
   let removed: UngroundedSpan[] = [];
   if (opts?.faithfulnessPass ?? isOverviewFaithfulnessPassEnabled()) {
+    emit({ phase: "faithfulness" });
     // Pass the version's synopsis-finding permission so the faithfulness pass stays in
     // step with the prompt floor (v3 permits a synopsis-stated number; the pass must
     // not strip it). #742 review finding.
@@ -692,6 +761,7 @@ export async function generateOverviewDraft(
     removed = grounded.removed;
   }
 
+  emit({ phase: "done" });
   return {
     draft: sanitizeOverviewHtml(proseToParagraphHtml(prose)),
     model: modelId,
@@ -1219,6 +1289,18 @@ export async function groundOverviewDraft(
  */
 export function isOverviewGenerateEnabled(): boolean {
   return process.env.SELF_EDIT_OVERVIEW_GENERATE === "on";
+}
+
+/**
+ * Whether the generate route STREAMS its response as NDJSON (the determinate
+ * `<OverviewProgress>` bar + CDN idle-timeout protection) vs. the legacy buffered
+ * JSON. A SEPARATE sub-flag from `SELF_EDIT_OVERVIEW_GENERATE` because the base
+ * feature is already live in prod: flipping the response SHAPE there needs its own
+ * staging-first lever (staging-on / prod-off in cdk app-stack). Off ⇒ the route
+ * keeps returning the buffered `editOk` body, so an un-flipped env is unchanged.
+ */
+export function isOverviewGenerateStreamEnabled(): boolean {
+  return process.env.SELF_EDIT_OVERVIEW_GENERATE_STREAM === "on";
 }
 
 /**

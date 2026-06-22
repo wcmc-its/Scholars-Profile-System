@@ -99,6 +99,27 @@ describe("buildOverviewUserPrompt — tone directive", () => {
   });
 });
 
+describe("buildOverviewUserPrompt — audience directive (technicality lever)", () => {
+  it("informed (default) — contextualized field terminology, college level", () => {
+    const prompt = buildOverviewUserPrompt(FACTS, params({ audience: "informed" }));
+    expect(prompt).toContain("scientifically literate reader who is NOT a specialist");
+    expect(prompt).toContain("contextualize");
+  });
+
+  it("accessible — plain language, spell out acronyms, ~9th–10th-grade", () => {
+    const prompt = buildOverviewUserPrompt(FACTS, params({ audience: "accessible" }));
+    expect(prompt).toContain("general, non-specialist reader");
+    expect(prompt).toContain("spell out acronyms");
+    expect(prompt).toContain("ninth-to-tenth-grade");
+  });
+
+  it("technical — domain terminology used freely, name methods precisely", () => {
+    const prompt = buildOverviewUserPrompt(FACTS, params({ audience: "technical" }));
+    expect(prompt).toContain("domain terminology freely");
+    expect(prompt).toContain("methods, models, systems, cohorts");
+  });
+});
+
 // The DEFAULT prompt version is v4, which REUSES the v3 (raised) word bands, so
 // `params()` (which spreads DEFAULT_OVERVIEW_PARAMS) resolves to those bands. The v2
 // bands are asserted in the "prompt version" block below.

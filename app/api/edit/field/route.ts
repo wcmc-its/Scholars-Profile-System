@@ -290,7 +290,10 @@ async function handleScholarFieldEdit(params: {
             where: { id: sourceGenerationId },
             select: { cwid: true, text: true, model: true },
           });
-          if (generation && generation.cwid === entityId) {
+          // `text` is nullable (a FAILED generation stores NULL); a source pointer
+          // should only ever reference a succeeded draft, but guard defensively — a
+          // text-less generation can't have been saved verbatim, so it stays "authored".
+          if (generation && generation.cwid === entityId && generation.text !== null) {
             origin = computeOverviewOrigin(storedValue, generation.text);
             provenanceModel = generation.model;
             provenanceSource = sourceGenerationId;
