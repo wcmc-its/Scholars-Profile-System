@@ -30,6 +30,13 @@ export type FamilyRailItem = {
   pubCount: number;
   /** Up to ~3 representative member-tool display names (static exemplars). */
   exemplarTools: string[];
+  /** Count of evidenced, non-generic specific entities in this family (entity
+   *  layer). Drives the enriched "View full method page" signpost; undefined/0 →
+   *  plain copy. Optional so existing FamilyRail producers are unaffected. */
+  entityCount?: number;
+  /** Dominant entity-kind producer enum (e.g. "organism_or_cells"); fed to
+   *  entityKindNoun() for the signpost noun. */
+  entityKind?: string | null;
 };
 
 export function FamilyRail({

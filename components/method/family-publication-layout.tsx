@@ -22,6 +22,7 @@ import { FamilyScholarsRow } from "@/components/method/family-scholars-row";
 import { SupercategoryAllWorkFeed } from "@/components/method/supercategory-all-work-feed";
 import { ScrollFade } from "@/components/ui/scroll-fade";
 import { familySegmentFor, resolveFamilyParam } from "@/lib/method-url";
+import { entityKindNounForCount } from "@/lib/methods/entity-kind-noun";
 import type { MethodPublicationHit } from "@/lib/api/methods";
 
 // ---------------------------------------------------------------------------
@@ -149,6 +150,14 @@ function SupercategoryFamilyLayoutInner({
   // populated it — the panel stays a clean preview rather than guessing copy.
   const activeDefinition = activeMeta?.definition ?? null;
   const activeDefinitionSource = activeMeta?.definitionSource ?? null;
+  // Entity-layer signpost enrichment: the count + dominant kind ride on the rail
+  // item (families), NOT familyMeta, so resolve the active item by id. 0/undefined
+  // (layer off or family has no specific entities) → the plain "View full" link.
+  const activeFamilyItem = activeFamilyId
+    ? families.find((f) => f.familyId === activeFamilyId) ?? null
+    : null;
+  const activeEntityCount = activeFamilyItem?.entityCount ?? 0;
+  const activeEntityKind = activeFamilyItem?.entityKind ?? null;
 
   return (
     <div className="mt-16">
@@ -204,7 +213,13 @@ function SupercategoryFamilyLayoutInner({
                     )}`}
                     className="mt-1 inline-block text-sm text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
                   >
-                    View full {activeLabel} method page →
+                    View full {activeLabel} method page
+                    {activeEntityCount > 0
+                      ? ` — ${activeEntityCount.toLocaleString()} specific ${entityKindNounForCount(
+                          activeEntityKind,
+                          activeEntityCount,
+                        ).toLowerCase()} + per-paper usage →`
+                      : " →"}
                   </a>
                 )}
               </header>
