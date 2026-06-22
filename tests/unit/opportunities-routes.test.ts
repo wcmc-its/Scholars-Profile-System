@@ -11,6 +11,7 @@ const matchOpportunitiesForScholar = vi.fn();
 const rankResearchersForOpportunity = vi.fn();
 const getEffectiveEditSession = vi.fn();
 const findUnique = vi.fn();
+const opportunityFindMany = vi.fn();
 const topicFindMany = vi.fn();
 
 vi.mock("@/lib/api/match-opportunities", async (orig) => {
@@ -28,7 +29,10 @@ vi.mock("@/lib/auth/effective-identity", () => ({
 vi.mock("@/lib/db", () => ({
   db: {
     read: {
-      opportunity: { findUnique: (...a: unknown[]) => findUnique(...a) },
+      opportunity: {
+        findUnique: (...a: unknown[]) => findUnique(...a),
+        findMany: (...a: unknown[]) => opportunityFindMany(...a),
+      },
       topic: { findMany: (...a: unknown[]) => topicFindMany(...a) },
     },
   },
@@ -37,6 +41,7 @@ vi.mock("@/lib/db", () => ({
 import { GET as forwardGET } from "@/app/api/scholars/[cwid]/opportunities/route";
 import { GET as reverseGET } from "@/app/api/opportunities/[opportunityId]/researchers/route";
 import { GET as detailGET } from "@/app/api/opportunities/[opportunityId]/route";
+import { GET as listGET } from "@/app/api/opportunities/route";
 
 const req = (url: string) => new NextRequest(`http://localhost${url}`);
 const p = <T,>(v: T) => Promise.resolve(v);
@@ -44,6 +49,7 @@ const p = <T,>(v: T) => Promise.resolve(v);
 beforeEach(() => {
   vi.clearAllMocks();
   topicFindMany.mockResolvedValue([]); // default: no labels unless a test sets them
+  opportunityFindMany.mockResolvedValue([]);
 });
 
 describe("GET /api/scholars/[cwid]/opportunities (forward, public)", () => {
@@ -157,5 +163,59 @@ describe("GET /api/opportunities/[opportunityId] (detail)", () => {
     const body = await resp.json();
     expect(body.awardCeiling).toBe(500000);
     expect(body.estimatedFunding).toBe(3000000);
+  });
+});
+
+describe("GET /api/opportunities (browse list, admin-gated, curated-first)", () => {
+  it("403s when not a superuser or developer", async () => {
+    getEffectiveEditSession.mockResolvedValue(null);
+    const resp = await listGET(req("/api/opportunities"));
+    expect(resp.status).toBe(403);
+    expect(opportunityFindMany).not.toHaveBeenCalled();
+  });
+
+  it("excludes grants.gov by default and orders curated first", async () => {
+    getEffectiveEditSession.mockResolvedValue({ cwid: "dev", isSuperuser: false, isDeveloper: true });
+    opportunityFindMany.mockResolvedValue([
+      { opportunityId: "wcm_curated:z", title: "Zeta Prize", source: "wcm_curated" },
+      { opportunityId: "wcm_curated:a", title: "Alpha Prize", source: "wcm_curated" },
+    ]);
+    const resp = await listGET(req("/api/opportunities"));
+    expect(resp.status).toBe(200);
+    // default query excludes grants.gov
+    expect(opportunityFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ source: { not: "grants_gov" } }) }),
+    );
+    const body = await resp.json();
+    // curated tier, then alphabetical by title
+    expect(body.opportunities.map((o: { opportunityId: string }) => o.opportunityId)).toEqual([
+      "wcm_curated:a",
+      "wcm_curated:z",
+    ]);
+  });
+
+  it("folds in grants.gov when includeGrantsGov=1, with curated still first", async () => {
+    getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
+    opportunityFindMany.mockResolvedValue([
+      { opportunityId: "grants_gov:1", title: "AAA NOFO", source: "grants_gov" },
+      { opportunityId: "wcm_curated:x", title: "ZZZ Award", source: "wcm_curated" },
+    ]);
+    const resp = await listGET(req("/api/opportunities?includeGrantsGov=1"));
+    expect(resp.status).toBe(200);
+    // no source filter when including grants.gov
+    const callArg = opportunityFindMany.mock.calls[0][0] as { where: Record<string, unknown> };
+    expect(callArg.where.source).toBeUndefined();
+    const body = await resp.json();
+    // curated leads despite a later title, then grants.gov
+    expect(body.opportunities.map((o: { opportunityId: string }) => o.opportunityId)).toEqual([
+      "wcm_curated:x",
+      "grants_gov:1",
+    ]);
+  });
+
+  it("400s on an invalid limit", async () => {
+    getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
+    const resp = await listGET(req("/api/opportunities?limit=0"));
+    expect(resp.status).toBe(400);
   });
 });

@@ -565,6 +565,13 @@ export class EdgeStack extends Stack {
       // superuser-gated; reads `sort`/`stageLens`/`limit`. CachingDisabled +
       // AllViewer forwards the query string and never caches an admin response.
       ["/api/opportunities/*/researchers", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // GrantRecs slice 3 — opportunity browse list. `force-dynamic`, admin-gated;
+      // reads `q`/`includeGrantsGov`/`limit`. The `/api/opportunities/*/researchers`
+      // glob does NOT cover the bare collection path (no trailing slash), so this
+      // exact behavior is required or the query params are stripped at the edge.
+      // `/api/opportunities/<id>` (the public, cacheable detail GET) reads no query
+      // string, so it correctly stays on the cacheable default — unaffected.
+      ["/api/opportunities", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
     ];
 
     // ------------------------------------------------------------------
