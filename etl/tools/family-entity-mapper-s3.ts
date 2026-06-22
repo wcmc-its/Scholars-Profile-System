@@ -40,6 +40,8 @@ export type RawFamilyEntity = {
   entity_role?: unknown;
   usage_count?: unknown;
   evidenced?: unknown;
+  is_generic?: unknown; // WS-B (#252) — generic-vocabulary flag
+  dominant_kind?: unknown; // #260 — the family's dominant `kind`, copied per entity
 };
 
 /** One usage fact in `entity_context.json` (`entity_id → pmid → RawUsage[]`). */
@@ -48,6 +50,9 @@ export type RawUsage = {
   span?: unknown; // [start, end] | null
   centrality_score?: unknown;
   role?: unknown;
+  informativeness_score?: unknown; // WS-C (#253) — [0,1] sentence informativeness
+  mention_class?: unknown; // WS-C (#253) — {usage, mention}; drives the badge
+  sentence_complete?: unknown; // #254 — sentence-boundary completeness hint
 };
 export type RawEntityContext = Record<string, Record<string, RawUsage[]>>;
 
@@ -69,6 +74,8 @@ export type FamilyEntityWrite = {
   entityRole: string | null;
   usageCount: number;
   evidenced: boolean;
+  isGeneric: boolean;
+  dominantKind: string | null;
 };
 
 export type FamilyEntityUsageWrite = {
@@ -81,6 +88,9 @@ export type FamilyEntityUsageWrite = {
   matchedSpanEnd: number | null;
   centralityScore: number | null;
   entityRole: string | null;
+  informativenessScore: number | null;
+  mentionClass: string | null;
+  sentenceComplete: boolean | null;
 };
 
 export type BuildFamilyEntityS3Result = {
@@ -94,10 +104,32 @@ export type BuildFamilyEntityS3Result = {
   orphanFacts: number;
   /** Entities re-marked NOT evidenced because every fact was suppressed/absent. */
   evidencedEntities: number;
+  /** Entities flagged is_generic (WS-B); soft-suppressed in the UI, kept in the dimension. */
+  genericEntities: number;
+  /** Surviving facts by WS-C mention class — observability for #253 coverage. */
+  mentionClassDist: { usage: number; mention: number; unclassified: number };
 };
 
 function str(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
+}
+
+/** Strict boolean: only a literal `true` is true (missing/null/other ⇒ false). */
+function bool(v: unknown): boolean {
+  return v === true;
+}
+
+/** Tri-state boolean: preserves null when the producer omits the field. */
+function boolOrNull(v: unknown): boolean | null {
+  return typeof v === "boolean" ? v : null;
+}
+
+/** WS-C mention class — the producer emits a closed {usage, mention} enum; anything
+ *  else (or absent) maps to null, so the badge falls back to its "used" default. */
+const MENTION_CLASSES = new Set(["usage", "mention"]);
+function mentionClass(v: unknown): string | null {
+  const s = str(v).toLowerCase();
+  return MENTION_CLASSES.has(s) ? s : null;
 }
 
 /** A clamped, finite span pair, or null. Guards against malformed offsets. */
@@ -139,6 +171,7 @@ export function buildFamilyEntityWritesFromS3(
   // FACTS first — so `evidenced` can be recomputed against the survivors.
   const usageWrites: FamilyEntityUsageWrite[] = [];
   const evidencedIds = new Set<string>();
+  const mentionClassDist = { usage: 0, mention: 0, unclassified: 0 };
   let suppressedFacts = 0;
   let orphanFacts = 0;
   for (const [entityId, byPmid] of Object.entries(artifact.entityContext ?? {})) {
@@ -158,6 +191,7 @@ export function buildFamilyEntityWritesFromS3(
         const sentence = str(u.usage_sentence);
         if (!sentence) continue;
         const [start, end] = spanPair(u.span, sentence.length);
+        const mc = mentionClass(u.mention_class);
         usageWrites.push({
           supercategory: dim.supercategory,
           familyLabel: dim.familyLabel,
@@ -168,7 +202,11 @@ export function buildFamilyEntityWritesFromS3(
           matchedSpanEnd: end,
           centralityScore: num(u.centrality_score),
           entityRole: str(u.role) || null,
+          informativenessScore: num(u.informativeness_score),
+          mentionClass: mc,
+          sentenceComplete: boolOrNull(u.sentence_complete),
         });
+        mentionClassDist[mc === "usage" ? "usage" : mc === "mention" ? "mention" : "unclassified"] += 1;
         evidencedIds.add(entityId);
       }
     }
@@ -177,6 +215,7 @@ export function buildFamilyEntityWritesFromS3(
   // DIMENSION — recompute `evidenced` from the surviving facts.
   const entityWrites: FamilyEntityWrite[] = [];
   let skippedMalformedEntities = 0;
+  let genericEntities = 0;
   for (const e of artifact.entities ?? []) {
     const normalizedEntityId = str(e.normalized_entity_id);
     const entityLabel = str(e.entity_label);
@@ -189,6 +228,8 @@ export function buildFamilyEntityWritesFromS3(
       skippedMalformedEntities += 1;
       continue;
     }
+    const isGeneric = bool(e.is_generic);
+    if (isGeneric) genericEntities += 1;
     entityWrites.push({
       supercategory,
       familyLabel,
@@ -200,6 +241,8 @@ export function buildFamilyEntityWritesFromS3(
       entityRole: str(e.entity_role) || null,
       usageCount,
       evidenced: evidencedIds.has(normalizedEntityId),
+      isGeneric,
+      dominantKind: str(e.dominant_kind) || null,
     });
   }
 
@@ -210,5 +253,7 @@ export function buildFamilyEntityWritesFromS3(
     suppressedFacts,
     orphanFacts,
     evidencedEntities: evidencedIds.size,
+    genericEntities,
+    mentionClassDist,
   };
 }
