@@ -64,9 +64,14 @@ type Hit = {
     isFirst: boolean;
     isLast: boolean;
   }>;
-  /** #1166 — the per-(pub × entity) relevance sentence, present only when the feed
-   *  is filtered by a cell line (`?cellLine=`); revealed under the row. */
-  entityUsage?: { sentence: string; matchedSpan: { start: number; end: number } | null } | null;
+  /** #1166/#1168 — the per-(pub × entity) relevance sentence, present only when the
+   *  feed is filtered by an entity (`?cellLine=`); revealed under the row. `usage`
+   *  (WS-C #253) drives the badge: "appears" for a generic mention, else "used". */
+  entityUsage?: {
+    sentence: string;
+    matchedSpan: { start: number; end: number } | null;
+    usage: "used" | "appears";
+  } | null;
 };
 
 type FeedResponse = {
@@ -357,9 +362,9 @@ function PubRow({ hit, entityTerm }: { hit: Hit; entityTerm: string | null }) {
           shared offset-aware helper (falls back to term-match when span is null). */}
       {hit.entityUsage && (
         <p className="mt-2 border-l-2 border-[var(--color-border-info)] pl-2.5 text-[13px] leading-relaxed text-muted-foreground">
-          {/* Default "How it was used"; WS-C downgrades generic mentions to
-              "Where it appears" once informativeness lands (ReciterAI #253). */}
-          <SnippetUsageBadge />
+          {/* #1168 — WS-C (#253) drives the label: a generic background mention reads
+              "Where it appears"; a specific experimental use reads "How it was used". */}
+          <SnippetUsageBadge usage={hit.entityUsage.usage} />
           {highlightSnippet(hit.entityUsage.sentence, entityTerm ?? "", hit.entityUsage.matchedSpan)}
         </p>
       )}

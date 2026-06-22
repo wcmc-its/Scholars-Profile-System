@@ -13,6 +13,8 @@ function ent(p: Partial<CellLineEntity> & { entityId: string; label: string; usa
     parentEntityId: null,
     parentLabel: null,
     parentDescriptor: null,
+    isGeneric: false,
+    dominantKind: null,
     ...p,
   };
 }
