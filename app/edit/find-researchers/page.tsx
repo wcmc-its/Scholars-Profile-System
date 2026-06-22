@@ -10,17 +10,24 @@
  * Authorization is re-checked here on every GET, never cached; the page mirrors
  * the gate the data route (`/api/opportunities/[id]/researchers`) enforces, so
  * the route remains the real authorization boundary. `force-dynamic` + `noindex`,
- * mirroring the other `/edit/*` pages. This is a standalone, single-tool surface
- * (no AdminSubnav): a pure development-role user is not a full console citizen —
- * their entry point is the account-menu dropdown.
+ * mirroring the other `/edit/*` pages. The surface folds into the shared `/edit`
+ * console via `AdminSubnav` (its "Funding matcher" tab is the entry point — for
+ * superusers AND development-role members alike); the account-menu dropdown no
+ * longer carries a Funding-matcher row.
  */
 import { redirect } from "next/navigation";
 
+import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { FindResearchers } from "@/components/edit/find-researchers";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { isAccountConsoleNavRestructureEnabled } from "@/lib/auth/account-console-nav";
+import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { logEditDenial } from "@/lib/edit/authz";
+import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
+import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
+import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +58,20 @@ export default async function FindResearchersPage() {
     return <ForbiddenEditPage />;
   }
 
+  // Fold into the shared console (mirrors `/edit/methods` et al.). A superuser
+  // gets the full tab set; a pure development-role member (`superuserSurfaces`
+  // false) sees only the Funding matcher tab — which is always shown here since
+  // the page gate already proved `isSuperuser || isDeveloper`.
+  const superuserSurfaces = session.isSuperuser;
+  const pendingSlugRequests =
+    superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
+  const administratorsTab = superuserSurfaces && isAdministratorsTabEnabled() ? 0 : null;
+  const self = await db.read.scholar.findUnique({
+    where: { cwid: session.cwid },
+    select: { deletedAt: true },
+  });
+  const selfEditHref = self && self.deletedAt === null ? "/edit" : null;
+
   return (
     <div className="min-h-screen bg-[var(--background)]" data-slot="find-researchers-page">
       <header className="bg-apollo-bar text-white">
@@ -64,6 +85,19 @@ export default async function FindResearchersPage() {
           <span className="font-semibold">Scholars Profile Console</span>
         </div>
       </header>
+
+      <AdminSubnav
+        active="find-researchers"
+        pendingSlugRequests={pendingSlugRequests}
+        administratorsTab={administratorsTab}
+        methodsTab={isMethodsTabVisible(session) ? 0 : null}
+        dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
+        findResearchersTab={0}
+        selfEditHref={selfEditHref}
+        superuserSurfaces={superuserSurfaces}
+        profilesTab={session.isCommsSteward || session.isSuperuser}
+        unitsTab={session.isCommsSteward || session.isSuperuser}
+      />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
         <FindResearchers unifiedNav={isAccountConsoleNavRestructureEnabled()} />
