@@ -3,22 +3,19 @@
 /**
  * GrantRecs Phase 4 — the "Funding matcher" reverse-matcher admin tool (redesign).
  *
- * An admin enters an `opportunityId` and gets a parsed opportunity card plus a
- * ranked list of researchers from `GET /api/opportunities/[opportunityId]/researchers`
- * (admin-gated to superuser OR development-role). That route now returns the full
- * view-model: the opportunity card fields, the "matching on" topic chips, a
- * slug→label map, and the ranked `results` (each carrying career stage, title /
- * department, and per-topic publication evidence).
+ * Browse-first: the front door is a list of funding opportunities, led by the
+ * hand-curated WCM awards (`source = "wcm_curated"`) — the corpus's reason to
+ * exist, since those aren't widely known. Grants.gov NOFOs are off by default
+ * (a toggle folds them in). Selecting an opportunity drills into the reverse
+ * match: a parsed card + researchers ranked by topic fit and career-stage appeal
+ * (`GET /api/opportunities/[id]/researchers`, admin-gated). Recommendations, not
+ * endorsements.
  *
  * Display calibration (topic fit 0–100, stage-fit badge, the fact-only row blurb)
- * lives in `lib/match-display.ts`. The two engine axes — `topicFit` and
- * `stageAppeal` — stay distinct; `stageLens` toggles the blend and `sort` re-orders
- * server-side. Recommendations, not endorsements.
- *
- * The opportunity picker, dept/career/funding filters, and CSV export land in
- * follow-on slices; this one keeps the ID input.
+ * lives in `lib/match-display.ts`. Dept/career/funding filters + CSV export are a
+ * follow-on slice.
  */
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 
 import type { CareerStage } from "@/lib/career-stage";
 import { researcherBlurb, stageFit, topicFitScores } from "@/lib/match-display";
@@ -53,6 +50,16 @@ type OpportunityMeta = {
   status: string | null;
 };
 
+type OpportunityListItem = {
+  opportunityId: string;
+  title: string | null;
+  sponsor: string | null;
+  mechanism: string | null;
+  dueDate: string | null;
+  source: string | null;
+  status: string | null;
+};
+
 type MatchingTopic = { topicId: string; label: string; score: number };
 
 type MatchView = {
@@ -73,13 +80,10 @@ const SORT_TABS: ReadonlyArray<{ key: Sort; label: string }> = [
 
 const LIMITS: readonly number[] = [25, 50, 100];
 
-// Mirror the route's server-side validation so a malformed id never round-trips.
-const OPPORTUNITY_ID_RE = /^[a-zA-Z0-9_:.-]{1,128}$/;
-
 const SOURCE_LABELS: Record<string, string> = {
   grants_gov: "Grants.gov",
   nih_guide: "NIH Guide",
-  wcm_curated: "WCM curated list",
+  wcm_curated: "WCM curated",
 };
 
 function sourceLabel(source: string | null): string | null {
@@ -94,37 +98,192 @@ function formatDue(iso: string | null): string | null {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }) {
+  const toolName = unifiedNav ? "Funding matcher" : "Find researchers";
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  return (
+    <div>
+      <div className="mb-5">
+        <h1 className="text-2xl font-bold tracking-tight">{toolName}</h1>
+        <p className="text-muted-foreground mt-1 text-sm">
+          Browse funding opportunities — the hand-curated WCM awards first — and open one
+          to rank Weill Cornell researchers by topic fit and career-stage appeal.
+          Recommendations, not endorsements.
+        </p>
+      </div>
+
+      {selectedId === null ? (
+        <BrowseList onSelect={setSelectedId} />
+      ) : (
+        <MatchedView opportunityId={selectedId} onBack={() => setSelectedId(null)} />
+      )}
+    </div>
+  );
+}
+
+type BrowseStatus =
+  | { kind: "loading" }
+  | { kind: "ok"; opportunities: OpportunityListItem[] }
+  | { kind: "error"; message: string };
+
+function BrowseList({ onSelect }: { onSelect: (id: string) => void }) {
+  const [query, setQuery] = useState("");
+  const [includeGrantsGov, setIncludeGrantsGov] = useState(false);
+  const [status, setStatus] = useState<BrowseStatus>({ kind: "loading" });
+
+  useEffect(() => {
+    let active = true;
+    setStatus({ kind: "loading" });
+    const qs = new URLSearchParams({ limit: "200" });
+    if (includeGrantsGov) qs.set("includeGrantsGov", "1");
+    fetch(`/api/opportunities?${qs}`, { cache: "no-store", credentials: "same-origin" })
+      .then(async (r) => {
+        if (r.ok) {
+          const data = (await r.json()) as { opportunities?: OpportunityListItem[] };
+          if (active) setStatus({ kind: "ok", opportunities: data.opportunities ?? [] });
+          return;
+        }
+        if (active) {
+          setStatus({
+            kind: "error",
+            message:
+              r.status === 403
+                ? "You don't have access to the funding matcher."
+                : "Couldn't load opportunities. Please try again.",
+          });
+        }
+      })
+      .catch(() => {
+        if (active) setStatus({ kind: "error", message: "Couldn't load opportunities. Please try again." });
+      });
+    return () => {
+      active = false;
+    };
+  }, [includeGrantsGov]);
+
+  const all = status.kind === "ok" ? status.opportunities : [];
+  const q = query.trim().toLowerCase();
+  const shown = q
+    ? all.filter(
+        (o) =>
+          (o.title ?? "").toLowerCase().includes(q) || (o.sponsor ?? "").toLowerCase().includes(q),
+      )
+    : all;
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search funding opportunities"
+          aria-label="Search funding opportunities"
+          className="border-border h-9 w-80 rounded-md border bg-background px-3 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]"
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={includeGrantsGov}
+            onChange={(e) => setIncludeGrantsGov(e.target.checked)}
+            className="size-4 accent-[var(--color-accent-slate)]"
+          />
+          <span title="Off by default — the curated WCM awards are the focus; Grants.gov NOFOs are public and far more numerous.">
+            Include Grants.gov
+          </span>
+        </label>
+      </div>
+
+      {status.kind === "loading" ? (
+        <div className="text-muted-foreground py-8 text-sm">Loading opportunities…</div>
+      ) : status.kind === "error" ? (
+        <div className="text-muted-foreground py-8 text-sm">{status.message}</div>
+      ) : shown.length === 0 ? (
+        <div className="text-muted-foreground py-8 text-sm">
+          No opportunities match{q ? ` “${query.trim()}”` : ""}.
+        </div>
+      ) : (
+        <>
+          <p className="text-muted-foreground mb-2 text-xs">
+            {shown.length} opportunit{shown.length === 1 ? "y" : "ies"}
+          </p>
+          <ul>
+            {shown.map((o) => (
+              <li key={o.opportunityId}>
+                <OpportunityRow o={o} onSelect={onSelect} />
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+function OpportunityRow({
+  o,
+  onSelect,
+}: {
+  o: OpportunityListItem;
+  onSelect: (id: string) => void;
+}) {
+  const due = formatDue(o.dueDate);
+  const meta = [o.mechanism, due ? `Due ${due}` : null, o.sponsor].filter(Boolean) as string[];
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(o.opportunityId)}
+      className="block w-full border-t border-border py-3 text-left first:border-t-0 hover:bg-[var(--muted)]/40"
+    >
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="font-medium leading-snug text-foreground">{o.title ?? o.opportunityId}</span>
+        <SourceBadge source={o.source} />
+      </div>
+      {meta.length > 0 ? (
+        <div className="text-muted-foreground mt-0.5 text-sm">{meta.join(" · ")}</div>
+      ) : null}
+    </button>
+  );
+}
+
+function SourceBadge({ source }: { source: string | null }) {
+  const label = sourceLabel(source);
+  if (!label) return null;
+  const curated = source === "wcm_curated";
+  return (
+    <span
+      className={
+        curated
+          ? "shrink-0 rounded-full bg-[var(--color-accent-slate)]/15 px-2 py-0.5 text-xs font-medium text-[var(--color-accent-slate)]"
+          : "border-border-strong text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-xs"
+      }
+    >
+      {label}
+    </span>
+  );
+}
+
 type Status =
-  | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "ok"; view: MatchView }
   | { kind: "error"; message: string };
 
-export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }) {
-  const toolName = unifiedNav ? "Funding matcher" : "Find researchers";
-  const [input, setInput] = useState("");
-  const [inputError, setInputError] = useState<string | null>(null);
-  const [submittedId, setSubmittedId] = useState<string | null>(null);
+function MatchedView({
+  opportunityId,
+  onBack,
+}: {
+  opportunityId: string;
+  onBack: () => void;
+}) {
   const [sort, setSort] = useState<Sort>("fit");
   const [stageLens, setStageLens] = useState(false);
   const [limit, setLimit] = useState<number>(25);
-  const [status, setStatus] = useState<Status>({ kind: "idle" });
-
-  function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    const id = input.trim();
-    if (!OPPORTUNITY_ID_RE.test(id)) {
-      setInputError(
-        "Enter a valid opportunity ID (letters, digits, and _ : . - ; up to 128 characters).",
-      );
-      return;
-    }
-    setInputError(null);
-    setSubmittedId(id);
-  }
+  const [status, setStatus] = useState<Status>({ kind: "loading" });
 
   useEffect(() => {
-    if (submittedId === null) return;
     let active = true;
     setStatus({ kind: "loading" });
     const qs = new URLSearchParams({
@@ -132,7 +291,7 @@ export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }
       stageLens: stageLens ? "1" : "0",
       limit: String(limit),
     });
-    fetch(`/api/opportunities/${encodeURIComponent(submittedId)}/researchers?${qs}`, {
+    fetch(`/api/opportunities/${encodeURIComponent(opportunityId)}/researchers?${qs}`, {
       cache: "no-store",
       credentials: "same-origin",
     })
@@ -162,39 +321,20 @@ export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }
     return () => {
       active = false;
     };
-  }, [submittedId, sort, stageLens, limit]);
+  }, [opportunityId, sort, stageLens, limit]);
 
   return (
     <div>
-      <div className="mb-5">
-        <h1 className="text-2xl font-bold tracking-tight">{toolName}</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Enter a funding opportunity ID to rank Weill Cornell researchers by topic fit
-          and career-stage appeal — the reverse of a scholar&rsquo;s &ldquo;Grants for
-          me.&rdquo; Recommendations, not endorsements.
-        </p>
-      </div>
+      <button
+        type="button"
+        onClick={onBack}
+        className="mb-4 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)] hover:underline"
+      >
+        <span aria-hidden>←</span> Back to opportunities
+      </button>
 
-      <form onSubmit={onSubmit} className="mb-6 flex flex-wrap items-end gap-x-4 gap-y-3">
-        <div className="flex flex-col gap-1">
-          <label htmlFor="opportunityId" className="text-xs font-medium text-muted-foreground">
-            Opportunity ID
-          </label>
-          <input
-            id="opportunityId"
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="e.g. PA-25-303"
-            className="border-border h-9 w-72 rounded-md border bg-background px-3 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]"
-            aria-invalid={inputError !== null}
-            aria-describedby={inputError ? "opportunityId-error" : undefined}
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </div>
-
-        <label className="flex items-center gap-2 pb-2 text-sm">
+      <div className="mb-4 flex flex-wrap items-end gap-x-4 gap-y-3">
+        <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
             checked={stageLens}
@@ -205,7 +345,6 @@ export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }
             Weight by career-stage fit
           </span>
         </label>
-
         <div className="flex flex-col gap-1">
           <label htmlFor="limit" className="text-xs font-medium text-muted-foreground">
             Show
@@ -223,20 +362,7 @@ export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }
             ))}
           </select>
         </div>
-
-        <button
-          type="submit"
-          className="inline-flex h-9 items-center rounded-md bg-[var(--color-accent-slate)] px-4 text-sm font-medium text-white hover:opacity-90"
-        >
-          Find researchers
-        </button>
-      </form>
-
-      {inputError ? (
-        <div id="opportunityId-error" className="mb-4 text-sm text-[var(--apollo-maroon)]">
-          {inputError}
-        </div>
-      ) : null}
+      </div>
 
       <Results status={status} sort={sort} setSort={setSort} />
     </div>
@@ -314,13 +440,6 @@ function Results({
   sort: Sort;
   setSort: (s: Sort) => void;
 }) {
-  if (status.kind === "idle") {
-    return (
-      <div className="text-muted-foreground py-8 text-sm">
-        Enter an opportunity ID above to see ranked researchers.
-      </div>
-    );
-  }
   if (status.kind === "loading") {
     return <div className="text-muted-foreground py-8 text-sm">Ranking researchers…</div>;
   }
@@ -343,8 +462,8 @@ function Results({
       {results.length === 0 ? (
         <div className="text-muted-foreground py-8 text-sm">
           No researchers ranked for{" "}
-          <span className="font-mono text-foreground">{opportunityId}</span>. The opportunity
-          may not exist, or it may have no qualifying topics or eligible scholars.
+          <span className="font-mono text-foreground">{opportunityId}</span>. This opportunity may
+          have no qualifying topics, or no eligible scholars publish in them.
         </div>
       ) : (
         <>
