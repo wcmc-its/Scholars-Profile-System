@@ -18,8 +18,28 @@
 import { useEffect, useState } from "react";
 
 import type { CareerStage } from "@/lib/career-stage";
-import { researcherBlurb, stageFit, topicFitScores } from "@/lib/match-display";
+import {
+  buildResearcherCsv,
+  careerStageLabel,
+  researcherBlurb,
+  stageFit,
+  topicFitScores,
+  type ResearcherCsvInput,
+} from "@/lib/match-display";
 import { initials } from "@/lib/utils";
+
+const CAREER_STAGES: readonly CareerStage[] = ["grad", "postdoc", "early", "mid", "senior"];
+
+/** Trigger a client-side CSV download (the matcher is admin-only; no server hop). */
+function downloadCsv(filename: string, csv: string) {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 type TopicContribution = {
   topicId: string;
@@ -440,6 +460,13 @@ function Results({
   sort: Sort;
   setSort: (s: Sort) => void;
 }) {
+  // Hooks run unconditionally (before the loading/error returns). Selection is by
+  // cwid, so it survives a sort re-fetch (same people, re-ordered); it resets per
+  // opportunity because MatchedView remounts on each selection.
+  const [dept, setDept] = useState<string>("all");
+  const [stage, setStage] = useState<string>("all");
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+
   if (status.kind === "loading") {
     return <div className="text-muted-foreground py-8 text-sm">Ranking researchers…</div>;
   }
@@ -448,8 +475,62 @@ function Results({
   }
 
   const { opportunityId, opportunity, matchingOn, topicLabels, results } = status.view;
-  // 0–100 topic-fit scores are relative to the strongest match across the set.
-  const topicFits = topicFitScores(results.map((r) => r.axes.topicFit));
+  // 0–100 topic-fit scores are relative to the strongest match across the FULL set,
+  // keyed by cwid so a score doesn't shift when the view is filtered.
+  const fitArr = topicFitScores(results.map((r) => r.axes.topicFit));
+  const topicFitByCwid = new Map(results.map((r, i) => [r.cwid, fitArr[i] ?? 0]));
+
+  const departments = [
+    ...new Set(results.map((r) => r.department).filter((d): d is string => Boolean(d))),
+  ].sort((a, b) => a.localeCompare(b));
+  const stagesPresent = CAREER_STAGES.filter((s) => results.some((r) => r.careerStage === s));
+
+  const filtered = results.filter(
+    (r) =>
+      (dept === "all" || r.department === dept) &&
+      (stage === "all" || r.careerStage === stage),
+  );
+  const selectedCount = filtered.filter((r) => selected.has(r.cwid)).length;
+  const allSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.cwid));
+
+  function toggle(cwid: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(cwid)) next.delete(cwid);
+      else next.add(cwid);
+      return next;
+    });
+  }
+  function toggleAll() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (filtered.every((r) => prev.has(r.cwid))) filtered.forEach((r) => next.delete(r.cwid));
+      else filtered.forEach((r) => next.add(r.cwid));
+      return next;
+    });
+  }
+  function exportSelected() {
+    const rows: ResearcherCsvInput[] = filtered
+      .filter((r) => selected.has(r.cwid))
+      .map((r) => {
+        const top = [...r.topicContributions].sort((a, b) => b.contribution - a.contribution)[0];
+        return {
+          cwid: r.cwid,
+          name: r.preferredName ?? r.slug ?? r.cwid,
+          title: r.title ?? null,
+          department: r.department ?? null,
+          careerStage: r.careerStage,
+          topicFit: topicFitByCwid.get(r.cwid) ?? 0,
+          stageLabel: stageFit(r.axes.stageAppeal, r.careerStage !== null).label,
+          topTopicLabel: top ? (topicLabels[top.topicId] ?? top.topicId) : "",
+          topPubCount: top?.pubCount ?? 0,
+        };
+      });
+    downloadCsv(`researchers-${opportunityId.replace(/[^a-z0-9._-]+/gi, "_")}.csv`, buildResearcherCsv(rows));
+  }
+
+  const selectClass =
+    "border-border h-9 rounded-md border bg-background px-2 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]";
 
   return (
     <div>
@@ -467,15 +548,25 @@ function Results({
         </div>
       ) : (
         <>
-          <div className="mb-3 flex items-end justify-between gap-3">
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h3 className="text-base font-semibold">Researchers for this opportunity</h3>
               <p className="text-muted-foreground text-sm">
-                {results.length} matched · recommendations, not endorsements
+                {filtered.length}
+                {filtered.length !== results.length ? ` of ${results.length}` : ""} matched ·
+                recommendations, not endorsements
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-muted-foreground text-xs">Sort</span>
+              <button
+                type="button"
+                onClick={exportSelected}
+                disabled={selectedCount === 0}
+                className="border-border-strong inline-flex h-7 items-center gap-1 rounded-md border bg-background px-3 text-sm text-foreground hover:border-[var(--color-accent-slate)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <span aria-hidden>↓</span> Export ({selectedCount})
+              </button>
+              <span className="text-muted-foreground ml-1 text-xs">Sort</span>
               {SORT_TABS.map(({ key, label }) => {
                 const active = sort === key;
                 return (
@@ -497,18 +588,67 @@ function Results({
             </div>
           </div>
 
-          <ul>
-            {results.map((r, i) => (
-              <li key={r.cwid}>
-                <ResearcherRow
-                  r={r}
-                  rank={i + 1}
-                  topicFit={topicFits[i] ?? 0}
-                  topicLabels={topicLabels}
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <select
+              aria-label="Filter by department"
+              value={dept}
+              onChange={(e) => setDept(e.target.value)}
+              className={selectClass}
+            >
+              <option value="all">All departments</option>
+              {departments.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Filter by career stage"
+              value={stage}
+              onChange={(e) => setStage(e.target.value)}
+              className={selectClass}
+            >
+              <option value="all">Any career stage</option>
+              {stagesPresent.map((s) => (
+                <option key={s} value={s}>
+                  {careerStageLabel(s)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className="text-muted-foreground py-8 text-sm">
+              No researchers match the current filters.
+            </div>
+          ) : (
+            <>
+              <label className="text-muted-foreground flex items-center gap-2 border-b border-border py-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  className="size-4 accent-[var(--color-accent-slate)]"
+                  aria-label="Select all shown researchers"
                 />
-              </li>
-            ))}
-          </ul>
+                Select all ({filtered.length})
+              </label>
+              <ul>
+                {filtered.map((r, i) => (
+                  <li key={r.cwid}>
+                    <ResearcherRow
+                      r={r}
+                      rank={i + 1}
+                      topicFit={topicFitByCwid.get(r.cwid) ?? 0}
+                      topicLabels={topicLabels}
+                      selected={selected.has(r.cwid)}
+                      onToggle={() => toggle(r.cwid)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </>
       )}
     </div>
@@ -520,11 +660,15 @@ function ResearcherRow({
   rank,
   topicFit,
   topicLabels,
+  selected,
+  onToggle,
 }: {
   r: RankedScholar;
   rank: number;
   topicFit: number;
   topicLabels: Record<string, string>;
+  selected: boolean;
+  onToggle: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const name = r.preferredName ?? r.slug ?? r.cwid;
@@ -541,6 +685,13 @@ function ResearcherRow({
   return (
     <div className="border-t border-border py-4 first:border-t-0">
       <div className="flex gap-3">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggle}
+          className="mt-1 size-4 shrink-0 accent-[var(--color-accent-slate)]"
+          aria-label={`Select ${name}`}
+        />
         <div className="text-muted-foreground w-5 pt-1 text-right text-sm tabular-nums">{rank}</div>
         <div
           aria-hidden

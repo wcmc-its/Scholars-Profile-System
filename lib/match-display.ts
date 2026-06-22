@@ -8,6 +8,7 @@
  * ranges on staging (we now have 237 live opportunities to sample).
  */
 import type { CareerStage } from "@/lib/career-stage";
+import { toCsv } from "@/lib/csv";
 
 /**
  * Topic fit as a 0–100 score for display. Raw topicFit (Σ topicWeight·variantB)
@@ -71,4 +72,59 @@ export function researcherBlurb(input: {
   }
   if (input.careerStage) parts.push(STAGE_PHRASE[input.careerStage]);
   return parts.length ? `${parts.join("; ")}.` : "";
+}
+
+// Short labels for the career-stage filter dropdown + CSV (the blurb's STAGE_PHRASE
+// is prose — "graduate trainee" — too clunky for a control).
+const CAREER_STAGE_LABELS: Record<CareerStage, string> = {
+  grad: "Graduate",
+  postdoc: "Postdoc",
+  early: "Early career",
+  mid: "Mid career",
+  senior: "Senior",
+};
+
+export function careerStageLabel(stage: CareerStage | null): string {
+  return stage ? CAREER_STAGE_LABELS[stage] : "";
+}
+
+/** One researcher's row for the CSV export (selected rows in the matcher). */
+export type ResearcherCsvInput = {
+  cwid: string;
+  name: string;
+  title: string | null;
+  department: string | null;
+  careerStage: CareerStage | null;
+  topicFit: number;
+  stageLabel: string;
+  topTopicLabel: string;
+  topPubCount: number;
+};
+
+/** Build the export CSV for the selected researchers (escaping via lib/csv). */
+export function buildResearcherCsv(rows: readonly ResearcherCsvInput[]): string {
+  return toCsv(
+    [
+      "CWID",
+      "Name",
+      "Title",
+      "Department",
+      "Career stage",
+      "Topic fit",
+      "Stage fit",
+      "Top topic",
+      "Papers on top topic",
+    ],
+    rows.map((r) => [
+      r.cwid,
+      r.name,
+      r.title ?? "",
+      r.department ?? "",
+      careerStageLabel(r.careerStage),
+      r.topicFit,
+      r.stageLabel,
+      r.topTopicLabel,
+      r.topPubCount,
+    ]),
+  );
 }
