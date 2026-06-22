@@ -11,7 +11,11 @@ import { HeaderAuthSlot } from "@/components/site/header-auth-slot";
 
 /** Stub global fetch so the client-side /api/auth/session probe is deterministic. */
 function stubSessionProbe(
-  body: { authenticated: boolean; scholar?: { slug: string; preferredName: string } | null },
+  body: {
+    authenticated: boolean;
+    scholar?: { slug: string; preferredName: string } | null;
+    canAccessFundingMatcher?: boolean;
+  },
   ok = true,
 ) {
   vi.stubGlobal(
@@ -113,5 +117,27 @@ describe("HeaderAuthSlot — cached public page correction (#356 / CloudFront co
     render(<HeaderAuthSlot isAuthenticated={false} scholar={null} />);
     await screen.findByTestId("header-sign-in");
     expect(screen.queryByLabelText("Account menu")).toBeNull();
+  });
+});
+
+describe("HeaderAuthSlot — Researchers for funding link (GrantRecs Phase 4)", () => {
+  it("renders the gated link to /edit/find-researchers when the probe grants access", async () => {
+    stubSessionProbe({ authenticated: true, scholar: null, canAccessFundingMatcher: true });
+    render(<HeaderAuthSlot isAuthenticated={false} scholar={null} />);
+    const link = (await screen.findByText("Researchers for funding")) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("/edit/find-researchers");
+  });
+
+  it("does not render the link for a signed-in viewer without access", async () => {
+    stubSessionProbe({ authenticated: true, scholar: null, canAccessFundingMatcher: false });
+    render(<HeaderAuthSlot isAuthenticated={false} scholar={null} />);
+    await waitFor(() => expect(screen.getByLabelText("Account menu")).toBeTruthy());
+    expect(screen.queryByText("Researchers for funding")).toBeNull();
+  });
+
+  it("does not render the link for a signed-out visitor", async () => {
+    render(<HeaderAuthSlot isAuthenticated={false} scholar={null} />);
+    await screen.findByTestId("header-sign-in");
+    expect(screen.queryByText("Researchers for funding")).toBeNull();
   });
 });
