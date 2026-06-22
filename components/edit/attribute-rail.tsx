@@ -20,6 +20,7 @@
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 
+import { GroupInfoButton } from "@/components/edit/group-info-button";
 import { cn } from "@/lib/utils";
 
 export type RailKind = "owned" | "service" | "sourced" | "readonly";
@@ -70,9 +71,10 @@ export type AttributeRailProps = {
   basePath: string;
   /**
    * Optional per-group descriptions, keyed by the group label. When present the
-   * one-line note renders under the group header (e.g. "Profile administration."
-   * under "Settings"). Groups without an entry render header-only (back-compat for
-   * the unit / sibling-division rails, which pass nothing).
+   * one-line note is tucked behind an info button beside the group header
+   * (`GroupInfoButton`, e.g. "Profile administration." for "Settings"). Groups
+   * without an entry render header-only (back-compat for the unit /
+   * sibling-division rails, which pass nothing).
    */
   groupMeta?: Record<string, { description?: string }>;
 };
@@ -96,16 +98,12 @@ export function AttributeRail({ items, active, basePath, groupMeta }: AttributeR
           return (
             <div key={g.label || "__floating"} className="mb-2 last:mb-0">
               {!isFloating && (
-                <>
-                  <p className="text-muted-foreground px-2 py-1 text-xs font-semibold tracking-wide uppercase">
+                <div className="flex items-center gap-1 px-2 py-1">
+                  <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
                     {g.label}
                   </p>
-                  {description && (
-                    <p className="text-muted-foreground px-2 pb-1 text-[0.6875rem] leading-snug">
-                      {description}
-                    </p>
-                  )}
-                </>
+                  {description && <GroupInfoButton label={g.label} description={description} />}
+                </div>
               )}
               {subgroupBuckets(g.items).map((sg) => (
                 <div key={sg.label || "__nosub"}>

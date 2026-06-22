@@ -65,15 +65,29 @@ export type ConsoleLinkVerdicts = {
  * Build the ordered list of console links for a viewer from their role verdicts.
  * Pure — no env reads, no I/O — so the policy is unit-testable in isolation.
  * Returns `[]` for a plain scholar (no console section renders).
+ *
+ * `opts.unifiedNav` carries the `ACCOUNT_CONSOLE_NAV_RESTRUCTURE` flag (read by
+ * the caller — this function stays pure). When on it relabels the superuser
+ * roster row "Admin" → "Admin console" and the GrantRecs row "Find researchers"
+ * → "Funding matcher" (account-dropdown-nav handoff, Workstream B). Hrefs, ids,
+ * gating, and the Method families / Org units labels are unchanged.
  */
-export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
+export function buildConsoleLinks(
+  v: ConsoleLinkVerdicts,
+  opts?: { unifiedNav?: boolean },
+): ConsoleLink[] {
   const links: ConsoleLink[] = [];
+  const unifiedNav = opts?.unifiedNav ?? false;
 
   // A superuser collapses to the Profiles roster — its AdminSubnav already fans
   // out to the rest, so a superuser who also happens to be a steward / unit
   // admin gets no redundant rows for surfaces the roster already reaches.
   if (v.isSuperuser) {
-    links.push({ id: "manage-profiles", label: "Admin", href: "/edit/scholars" });
+    links.push({
+      id: "manage-profiles",
+      label: unifiedNav ? "Admin console" : "Admin",
+      href: "/edit/scholars",
+    });
   } else {
     if (v.canManageMethods) {
       links.push({ id: "methods", label: "Method families", href: "/edit/methods" });
@@ -90,7 +104,7 @@ export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
   if (v.canFindResearchers) {
     links.push({
       id: "find-researchers",
-      label: "Find researchers",
+      label: unifiedNav ? "Funding matcher" : "Find researchers",
       href: "/edit/find-researchers",
     });
   }

@@ -114,4 +114,38 @@ describe("buildConsoleLinks", () => {
     });
     expect(links.map((l) => l.id)).toEqual(["methods"]);
   });
+
+  // account-dropdown-nav handoff, Workstream B — the ACCOUNT_CONSOLE_NAV_RESTRUCTURE
+  // flag relabels the superuser + GrantRecs rows; ids / hrefs / gating are unchanged.
+  it("unifiedNav → 'Admin' becomes 'Admin console' and 'Find researchers' becomes 'Funding matcher'", () => {
+    const links = buildConsoleLinks(
+      { isSuperuser: true, canManageMethods: false, managesUnits: false, canFindResearchers: true },
+      { unifiedNav: true },
+    );
+    expect(links).toEqual([
+      { id: "manage-profiles", label: "Admin console", href: "/edit/scholars" },
+      { id: "find-researchers", label: "Funding matcher", href: "/edit/find-researchers" },
+    ]);
+  });
+
+  it("unifiedNav leaves the Method families / Org units labels unchanged", () => {
+    const links = buildConsoleLinks(
+      { isSuperuser: false, canManageMethods: true, managesUnits: true },
+      { unifiedNav: true },
+    );
+    expect(links).toEqual([
+      { id: "methods", label: "Method families", href: "/edit/methods" },
+      { id: "units", label: "Org units", href: "/edit/units" },
+    ]);
+  });
+
+  it("unifiedNav omitted → classic labels (flag off / prod default)", () => {
+    const links = buildConsoleLinks({
+      isSuperuser: true,
+      canManageMethods: false,
+      managesUnits: false,
+      canFindResearchers: true,
+    });
+    expect(links.map((l) => l.label)).toEqual(["Admin", "Find researchers"]);
+  });
 });

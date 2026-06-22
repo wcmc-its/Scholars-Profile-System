@@ -784,8 +784,10 @@ describe("EditPage rail — restructured layout (SELF_EDIT_RAIL_RESTRUCTURE)", (
     // Home floats at the top with a quiet "landing" tag.
     expect(q.getByTestId("rail-home")).toBeTruthy();
     expect(q.getByText("landing")).toBeTruthy();
-    // "Yours to edit" narrows to authored content (its description renders).
-    expect(q.getByText("Your profile content.")).toBeTruthy();
+    // "Yours to edit" narrows to authored content (header only now — its note was
+    // dropped; the group is self-explanatory).
+    expect(q.getByText("Yours to edit")).toBeTruthy();
+    expect(q.queryByText("Your profile content.")).toBeNull();
     // "From WCM records" carries the two editability sub-headers.
     expect(q.getByText("From WCM records")).toBeTruthy();
     expect(q.getByText("Identity · read-only")).toBeTruthy();
@@ -794,9 +796,12 @@ describe("EditPage rail — restructured layout (SELF_EDIT_RAIL_RESTRUCTURE)", (
     expect(q.getByText("Tools")).toBeTruthy();
     expect(q.getByTestId("rail-biosketch")).toBeTruthy();
     expect(q.getByTestId("rail-grant-recs")).toBeTruthy();
-    // The admin controls gather under a dedicated "Settings" group.
+    // The admin controls gather under a dedicated "Settings" group. The three
+    // described groups (WCM records / Tools / Settings) each tuck their note
+    // behind an info button rather than rendering it as plain text.
     expect(q.getByText("Settings")).toBeTruthy();
-    expect(q.getByText("Profile administration.")).toBeTruthy();
+    expect(q.queryByText("Profile administration.")).toBeNull();
+    expect(q.getAllByRole("button", { name: "About this group" })).toHaveLength(3);
     expect(q.getByTestId("rail-visibility")).toBeTruthy();
     expect(q.getByTestId("rail-proxy-editors")).toBeTruthy();
     expect(q.getByTestId("rail-profile-url")).toBeTruthy();
