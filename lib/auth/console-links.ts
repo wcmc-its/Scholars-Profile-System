@@ -19,8 +19,8 @@
  *
  * Policy (one entry per privileged role-entry-point, deduped):
  *   - **Superuser** → "Manage profiles" (`/edit/scholars`) only. The in-console
- *     `AdminSubnav` fans out from the roster to every other superuser surface
- *     (URL requests / Slug registry / Administrators / Method Families), so the
+ *     `AdminSubnav` fans out from the roster to every other surface (URL requests /
+ *     URL registry / Administrators / Method Families / Funding matcher), so the
  *     dropdown stays short — it routes them to the console, not to every tab.
  *   - **comms_steward** (not a superuser) → "Method Families" (`/edit/methods`).
  *   - **Unit Owner / Curator** (not a superuser) → "Units you manage"
@@ -34,7 +34,7 @@
 /** One console destination the viewer may open, rendered as a dropdown row. */
 export type ConsoleLink = {
   /** Stable id — drives the React key, the row `data-testid`, and the icon map. */
-  id: "manage-profiles" | "methods" | "units" | "find-researchers";
+  id: "manage-profiles" | "methods" | "units";
   label: string;
   href: string;
 };
@@ -53,12 +53,6 @@ export type ConsoleLinkVerdicts = {
   /** The viewer holds ≥1 direct `unit_admin` grant
    *  (`loadManageableUnits(...).total > 0`). */
   managesUnits: boolean;
-  /** May open the GrantRecs "Find researchers" admin surface — a superuser OR a
-   *  `development`-role member (`isSuperuser || isDeveloper`, GrantRecs Phase 4).
-   *  Optional: omitted/`false` advertises nothing (default dark). Unlike the
-   *  other superuser surfaces, this one is NOT reachable from the Profiles
-   *  roster's `AdminSubnav`, so it gets its own row even for a superuser. */
-  canFindResearchers?: boolean;
 };
 
 /**
@@ -68,9 +62,10 @@ export type ConsoleLinkVerdicts = {
  *
  * `opts.unifiedNav` carries the `ACCOUNT_CONSOLE_NAV_RESTRUCTURE` flag (read by
  * the caller — this function stays pure). When on it relabels the superuser
- * roster row "Admin" → "Admin console" and the GrantRecs row "Find researchers"
- * → "Funding matcher" (account-dropdown-nav handoff, Workstream B). Hrefs, ids,
- * gating, and the Method families / Org units labels are unchanged.
+ * roster row "Admin" → "Admin console" (account-dropdown-nav handoff, Workstream
+ * B). Hrefs, ids, gating, and the Method families / Org units labels are
+ * unchanged. The GrantRecs "Funding matcher" is no longer a dropdown row — it
+ * lives in the in-console `AdminSubnav` (`/edit/find-researchers`).
  */
 export function buildConsoleLinks(
   v: ConsoleLinkVerdicts,
@@ -95,18 +90,6 @@ export function buildConsoleLinks(
     if (v.managesUnits) {
       links.push({ id: "units", label: "Org units", href: "/edit/units" });
     }
-  }
-
-  // "Find researchers" (GrantRecs Phase 4) is its OWN row regardless of the
-  // superuser early-collapse: it is not one of the surfaces the Profiles
-  // roster's AdminSubnav reaches, so a superuser would otherwise have no
-  // clickable path to it. Available to superusers AND development-role members.
-  if (v.canFindResearchers) {
-    links.push({
-      id: "find-researchers",
-      label: unifiedNav ? "Funding matcher" : "Find researchers",
-      href: "/edit/find-researchers",
-    });
   }
 
   return links;

@@ -187,7 +187,7 @@ describe("AccountMenu — unified dropdown (ACCOUNT_CONSOLE_NAV_RESTRUCTURE)", (
     );
   });
 
-  it("console context → View→Edit, a Back-to-Scholars link replaces the roster row, Funding matcher stays", () => {
+  it("console context → View→Edit, a Back-to-Scholars link replaces the roster row; other role rows stay", () => {
     const sue = { slug: "sue-admin", preferredName: "Sue Admin" };
     mockProbe({
       scholar: sue,
@@ -195,7 +195,7 @@ describe("AccountMenu — unified dropdown (ACCOUNT_CONSOLE_NAV_RESTRUCTURE)", (
       // links come from the probe.
       consoleLinks: [
         { id: "manage-profiles", label: "Admin console", href: "/edit/scholars" },
-        { id: "find-researchers", label: "Funding matcher", href: "/edit/find-researchers" },
+        { id: "methods", label: "Method families", href: "/edit/methods" },
       ],
     });
     render(<AccountMenu context="console" />);
@@ -207,9 +207,9 @@ describe("AccountMenu — unified dropdown (ACCOUNT_CONSOLE_NAV_RESTRUCTURE)", (
     expect(screen.getByTestId("account-menu-back-to-scholars").getAttribute("href")).toBe("/");
     // The roster row is dropped (the Profiles tab covers it)…
     expect(screen.queryByTestId("account-menu-console-manage-profiles")).toBeNull();
-    // …but Funding matcher stays (it has no AdminSubnav tab).
-    expect(screen.getByTestId("account-menu-console-find-researchers").textContent).toContain(
-      "Funding matcher",
+    // …but other role destinations stay (no roster-tab equivalent for them here).
+    expect(screen.getByTestId("account-menu-console-methods").textContent).toContain(
+      "Method families",
     );
   });
 });

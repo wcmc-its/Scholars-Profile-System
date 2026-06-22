@@ -3,9 +3,10 @@
  * `slug-personalization-ui-spec.md` § 3.1; unified onto the self-edit surface in
  * `role-aware-navigation-entry-points-spec.md`). The maroon-underlined tab strip
  * under the black Apollo bar, linking the Profiles roster (`/edit/scholars`), the
- * Profile-URL request queue (`/edit/slug-requests`), the Slug registry,
- * Administrators, and Method Families. A pending-count pill sits on the "URL
- * requests" tab; "My Profile" anchors the right end.
+ * Profile-URL request queue (`/edit/slug-requests`), the URL registry,
+ * Administrators, Method Families, and the Funding matcher
+ * (`/edit/find-researchers`). A pending-count pill sits on the "URL requests"
+ * tab; "My Profile" anchors the right end.
  *
  * Originally only the superuser list pages rendered this. It now also renders on
  * the `/edit` self-edit surface for a superuser or comms_steward (via
@@ -31,6 +32,7 @@ export type AdminSubnavActive =
   | "administrators"
   | "methods"
   | "data-quality"
+  | "find-researchers"
   /** The viewer's own self-edit surface (`/edit`), shown as the active right-end
    *  tab when a superuser / comms_steward is on their own profile. */
   | "self";
@@ -41,6 +43,7 @@ export function AdminSubnav({
   administratorsTab,
   methodsTab,
   dataQualityTab,
+  findResearchersTab,
   selfEditHref,
   superuserSurfaces = true,
   profilesTab = false,
@@ -61,6 +64,11 @@ export function AdminSubnav({
    *  shows it to a unit Owner/Curator with grants). A number shows it (passed
    *  `0` — no badge), mirroring `methodsTab`. */
   dataQualityTab?: number | null;
+  /** `null`/omitted hides the "Funding matcher" tab (GrantRecs reverse-matcher,
+   *  `/edit/find-researchers`). A number shows it (passed `0` — no badge),
+   *  mirroring `methodsTab`. Gated on `isSuperuser || isDeveloper` by the caller,
+   *  so it shows for both audiences independently of `superuserSurfaces`. */
+  findResearchersTab?: number | null;
   /** Link back to the viewer's own self-edit surface (`/edit`), right-aligned.
    *  `null`/omitted when the viewer has no profile of their own (a staff
    *  superuser), so the link never lands on a 404. Ignored when `active="self"`
@@ -110,7 +118,7 @@ export function AdminSubnav({
           <AdminTab
             href="/edit/slugs"
             id="slugs"
-            label="Slug registry"
+            label="URL registry"
             active={active === "slugs"}
           />
         )}
@@ -136,6 +144,17 @@ export function AdminSubnav({
             id="data-quality"
             label="Data quality"
             active={active === "data-quality"}
+          />
+        )}
+        {/* GrantRecs reverse-matcher. Shown to superusers AND development-role
+            members (caller gates on `isSuperuser || isDeveloper`), so it does
+            NOT ride `superuserSurfaces` — its only entry point is now this bar. */}
+        {findResearchersTab !== null && findResearchersTab !== undefined && (
+          <AdminTab
+            href="/edit/find-researchers"
+            id="find-researchers"
+            label={accountNavEnabled ? "Funding matcher" : "Find researchers"}
+            active={active === "find-researchers"}
           />
         )}
         {accountNavEnabled ? (

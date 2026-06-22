@@ -9,7 +9,6 @@ import {
   EyeIcon,
   FlaskConicalIcon,
   type LucideIcon,
-  UserSearchIcon,
   UsersIcon,
 } from "lucide-react";
 
@@ -63,7 +62,6 @@ const CONSOLE_LINK_ICON: Record<ConsoleLink["id"], LucideIcon> = {
   "manage-profiles": UsersIcon,
   methods: FlaskConicalIcon,
   units: Building2Icon,
-  "find-researchers": UserSearchIcon,
 };
 
 export type AccountMenuProps = {
@@ -121,8 +119,8 @@ export function AccountMenu({
   // mounts when the flag is on); driven by the probe on the public header.
   const unified = isConsole || (probe?.accountNavRestructure ?? false);
   // In the console the per-role roster link is replaced by "Back to Scholars",
-  // so drop the manage-profiles row; other destinations (e.g. Funding matcher,
-  // which has no AdminSubnav tab) stay reachable.
+  // so drop the manage-profiles row; any remaining role destinations (Method
+  // Families / Units) stay reachable.
   const consoleRows = isConsole
     ? consoleLinks.filter((link) => link.id !== "manage-profiles")
     : consoleLinks;

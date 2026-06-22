@@ -128,10 +128,10 @@ export function SlugRegistry({
       />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
-        <h1 className="mb-1 text-xl font-semibold">Slug registry</h1>
+        <h1 className="mb-1 text-xl font-semibold">URL registry</h1>
         <p className="text-muted-foreground mb-6 text-sm">
           Who holds which profile URL — live, historical (redirecting), pinned by an override,
-          reserved route words, and requested. Check whether a slug is free before assigning it.
+          reserved route words, and requested. Check whether a URL is free before assigning it.
         </p>
 
         {/* Availability checker — the only client island on this page. */}

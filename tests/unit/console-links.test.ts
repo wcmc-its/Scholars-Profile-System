@@ -79,52 +79,28 @@ describe("buildConsoleLinks", () => {
     expect(links).toEqual([]);
   });
 
-  // GrantRecs Phase 4 — "Find researchers" gets its OWN row (not reachable from
-  // the Profiles roster's AdminSubnav), available to superusers AND developers.
-  it("superuser with canFindResearchers → 'Admin' + 'Find researchers'", () => {
-    const links = buildConsoleLinks({
-      isSuperuser: true,
-      canManageMethods: false,
-      managesUnits: false,
-      canFindResearchers: true,
-    });
-    expect(links).toEqual([
-      { id: "manage-profiles", label: "Admin", href: "/edit/scholars" },
-      { id: "find-researchers", label: "Find researchers", href: "/edit/find-researchers" },
-    ]);
-  });
-
-  it("development-role member only (not a superuser) → just 'Find researchers'", () => {
-    const links = buildConsoleLinks({
-      isSuperuser: false,
-      canManageMethods: false,
-      managesUnits: false,
-      canFindResearchers: true,
-    });
-    expect(links).toEqual([
-      { id: "find-researchers", label: "Find researchers", href: "/edit/find-researchers" },
-    ]);
-  });
-
-  it("canFindResearchers omitted/false → no 'Find researchers' row (default dark)", () => {
-    const links = buildConsoleLinks({
-      isSuperuser: false,
-      canManageMethods: true,
-      managesUnits: false,
-    });
-    expect(links.map((l) => l.id)).toEqual(["methods"]);
+  // GrantRecs "Funding matcher" is NO LONGER a dropdown row — it moved into the
+  // in-console AdminSubnav (`/edit/find-researchers`). The dropdown never carries it.
+  it("never surfaces a find-researchers / Funding-matcher row, for any viewer", () => {
+    const matrices = [
+      { isSuperuser: true, canManageMethods: false, managesUnits: false },
+      { isSuperuser: true, canManageMethods: true, managesUnits: true },
+      { isSuperuser: false, canManageMethods: true, managesUnits: true },
+    ];
+    for (const v of matrices) {
+      expect(buildConsoleLinks(v).some((l) => l.href === "/edit/find-researchers")).toBe(false);
+    }
   });
 
   // account-dropdown-nav handoff, Workstream B — the ACCOUNT_CONSOLE_NAV_RESTRUCTURE
-  // flag relabels the superuser + GrantRecs rows; ids / hrefs / gating are unchanged.
-  it("unifiedNav → 'Admin' becomes 'Admin console' and 'Find researchers' becomes 'Funding matcher'", () => {
+  // flag relabels the superuser roster row; ids / hrefs / gating are unchanged.
+  it("unifiedNav → 'Admin' becomes 'Admin console'", () => {
     const links = buildConsoleLinks(
-      { isSuperuser: true, canManageMethods: false, managesUnits: false, canFindResearchers: true },
+      { isSuperuser: true, canManageMethods: false, managesUnits: false },
       { unifiedNav: true },
     );
     expect(links).toEqual([
       { id: "manage-profiles", label: "Admin console", href: "/edit/scholars" },
-      { id: "find-researchers", label: "Funding matcher", href: "/edit/find-researchers" },
     ]);
   });
 
@@ -144,8 +120,7 @@ describe("buildConsoleLinks", () => {
       isSuperuser: true,
       canManageMethods: false,
       managesUnits: false,
-      canFindResearchers: true,
     });
-    expect(links.map((l) => l.label)).toEqual(["Admin", "Find researchers"]);
+    expect(links.map((l) => l.label)).toEqual(["Admin"]);
   });
 });
