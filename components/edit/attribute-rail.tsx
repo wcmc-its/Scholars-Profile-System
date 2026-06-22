@@ -48,6 +48,18 @@ export type RailItem = {
    * alert. Omit (or 0) to render no chip.
    */
   count?: number;
+  /**
+   * Optional sub-section header within a group (e.g. "Identity · read-only" vs
+   * "Records · hide, show, or flag" inside "From WCM records"). Consecutive items
+   * that share a `subgroup` render under one quiet sub-label; a change starts the
+   * next. Items without a `subgroup` render flush under the group header.
+   */
+  subgroup?: string;
+  /**
+   * Optional quiet right-aligned annotation (e.g. "landing" on Home). Muted, never
+   * an alert; coexists with the active chevron.
+   */
+  tag?: string;
 };
 
 export type AttributeRailProps = {
@@ -56,9 +68,16 @@ export type AttributeRailProps = {
   active: string;
   /** Base path the links hang off — "/edit" or "/edit/scholar/{cwid}". */
   basePath: string;
+  /**
+   * Optional per-group descriptions, keyed by the group label. When present the
+   * one-line note renders under the group header (e.g. "Profile administration."
+   * under "Settings"). Groups without an entry render header-only (back-compat for
+   * the unit / sibling-division rails, which pass nothing).
+   */
+  groupMeta?: Record<string, { description?: string }>;
 };
 
-export function AttributeRail({ items, active, basePath }: AttributeRailProps) {
+export function AttributeRail({ items, active, basePath, groupMeta }: AttributeRailProps) {
   const grouped = items.some((i) => i.group);
   // When the active item is a nested child, its parent (the nearest preceding
   // non-child item) stays highlighted so the tree position reads clearly.
@@ -69,24 +88,48 @@ export function AttributeRail({ items, active, basePath }: AttributeRailProps) {
       className="bg-apollo-rail border-apollo-rail-border rounded-md border p-2"
     >
       {grouped ? (
-        groupItems(items).map((g) => (
-          <div key={g.label} className="mb-2 last:mb-0">
-            <p className="text-muted-foreground px-2 py-1 text-xs font-semibold tracking-wide uppercase">
-              {g.label}
-            </p>
-            <ul className="flex flex-col gap-0.5">
-              {g.items.map((item) => (
-                <RailLink
-                  key={item.key}
-                  item={item}
-                  active={active}
-                  parentActive={item.key === activeParentKey}
-                  basePath={basePath}
-                />
+        groupItems(items).map((g) => {
+          // An empty group label is the floating leading block (e.g. Home): no
+          // header, just the item(s) at the top of the rail.
+          const isFloating = g.label === "";
+          const description = groupMeta?.[g.label]?.description;
+          return (
+            <div key={g.label || "__floating"} className="mb-2 last:mb-0">
+              {!isFloating && (
+                <>
+                  <p className="text-muted-foreground px-2 py-1 text-xs font-semibold tracking-wide uppercase">
+                    {g.label}
+                  </p>
+                  {description && (
+                    <p className="text-muted-foreground px-2 pb-1 text-[0.6875rem] leading-snug">
+                      {description}
+                    </p>
+                  )}
+                </>
+              )}
+              {subgroupBuckets(g.items).map((sg) => (
+                <div key={sg.label || "__nosub"}>
+                  {sg.label && (
+                    <p className="text-muted-foreground px-2.5 pt-2 pb-0.5 text-[0.6875rem]">
+                      {sg.label}
+                    </p>
+                  )}
+                  <ul className="flex flex-col gap-0.5">
+                    {sg.items.map((item) => (
+                      <RailLink
+                        key={item.key}
+                        item={item}
+                        active={active}
+                        parentActive={item.key === activeParentKey}
+                        basePath={basePath}
+                      />
+                    ))}
+                  </ul>
+                </div>
               ))}
-            </ul>
-          </div>
-        ))
+            </div>
+          );
+        })
       ) : (
         <>
           <p className="text-muted-foreground px-2 py-1 text-xs font-semibold tracking-wide uppercase">
@@ -139,6 +182,26 @@ function groupItems(items: ReadonlyArray<RailItem>): Array<{ label: string; item
     map.get(g)!.push(item);
   }
   return order.map((label) => ({ label, items: map.get(label)! }));
+}
+
+/**
+ * Split a group's items into consecutive runs by `subgroup`, preserving order.
+ * Items without a `subgroup` form a single unlabeled run. Used to draw the quiet
+ * "Identity · read-only" / "Records · hide, show, or flag" sub-labels inside one
+ * group without splitting it into separate top-level sections.
+ */
+function subgroupBuckets(items: RailItem[]): Array<{ label: string; items: RailItem[] }> {
+  const buckets: Array<{ label: string; items: RailItem[] }> = [];
+  for (const item of items) {
+    const label = item.subgroup ?? "";
+    const last = buckets[buckets.length - 1];
+    if (last && last.label === label) {
+      last.items.push(item);
+    } else {
+      buckets.push({ label, items: [item] });
+    }
+  }
+  return buckets;
 }
 
 function RailLink({
@@ -202,7 +265,19 @@ function RailLink({
           {kind === "sourced" && <span className="sr-only"> (sourced from WCM systems)</span>}
           {kind === "readonly" && <span className="sr-only"> (read-only, from WCM systems)</span>}
         </span>
-        {isActive && <ChevronRight className="size-4 shrink-0" aria-hidden />}
+        <span className="flex shrink-0 items-center gap-1.5">
+          {item.tag && (
+            <span
+              className={cn(
+                "text-[0.6875rem] font-normal",
+                isActive ? "text-apollo-maroon-foreground/80" : "text-muted-foreground",
+              )}
+            >
+              {item.tag}
+            </span>
+          )}
+          {isActive && <ChevronRight className="size-4 shrink-0" aria-hidden />}
+        </span>
       </Link>
     </li>
   );

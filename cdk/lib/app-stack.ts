@@ -1206,6 +1206,14 @@ export class AppStack extends Stack {
         // generator (no new IAM). Takes effect on a manual
         // `cdk deploy --exclusively Sps-App-<env>`.
         EDIT_BIOSKETCH_GENERATE: env === "staging" ? "on" : "off",
+        // SELF_EDIT_RAIL_RESTRUCTURE -- the restructured self-edit attribute rail
+        // (floating Home, content-only "Yours to edit", "From WCM records" with
+        // Identity/Records sub-headers, "Tools", and a "Settings" group for the
+        // admin controls). Presentational only -- same attributes, regrouped.
+        // Default-off and staging-first: "on" in staging while it bakes, "off" in
+        // prod until an approval-gated Sps-App-prod deploy flips it. Takes effect
+        // on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        SELF_EDIT_RAIL_RESTRUCTURE: env === "staging" ? "on" : "off",
         // #917 v6 -- post-generation faithfulness pass for the biosketch generator.
         // ON in BOTH envs: the biosketch is a grant document, and one fabricated
         // metric there dwarfs the ~3x cost (handoff §5). The route forces it on

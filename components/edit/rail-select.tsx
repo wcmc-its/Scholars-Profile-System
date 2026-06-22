@@ -42,15 +42,27 @@ export function RailSelect({
             </option>
           ))
         ) : (
-          groups.buckets.map((g) => (
-            <optgroup key={g.label} label={g.label}>
-              {g.items.map((it) => (
+          groups.buckets.map((g) =>
+            // The empty-label bucket is the floating leading block (e.g. Home):
+            // render it as bare option(s) rather than a blank-titled optgroup.
+            // Sub-headers are desktop-only — on mobile each group is one flat
+            // optgroup (a `<select>` can't nest), which is the expected fallback.
+            g.label === "" ? (
+              g.items.map((it) => (
                 <option key={it.key} value={it.key}>
                   {it.label}
                 </option>
-              ))}
-            </optgroup>
-          ))
+              ))
+            ) : (
+              <optgroup key={g.label} label={g.label}>
+                {g.items.map((it) => (
+                  <option key={it.key} value={it.key}>
+                    {it.label}
+                  </option>
+                ))}
+              </optgroup>
+            ),
+          )
         )}
       </select>
     </label>
