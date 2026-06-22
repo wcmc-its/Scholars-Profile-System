@@ -421,7 +421,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "ACCOUNT_CONSOLE_NAV_RESTRUCTURE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "BIOSKETCH_FAITHFULNESS_PASS",
