@@ -119,4 +119,46 @@ describe("SupercategoryFamilyLayout — canonical family-page signpost", () => {
     expect(screen.getByText(/View full Cancer cell lines method page/)).toBeTruthy();
     expect(screen.queryByText(DEFINITION)).toBeNull();
   });
+
+  // #1168 follow-up — the signpost advertises the family page's per-paper entity
+  // badges when the selected family has a specific-entity layer.
+  function renderWithEntities(entity: { entityCount?: number; entityKind?: string | null }) {
+    return render(
+      <SupercategoryFamilyLayout
+        supercategorySlug="animal-cell-models"
+        supercategoryLabel="Animal & cell models"
+        families={[{ ...families[0], ...entity }]}
+        familyMeta={baseMeta}
+        allWorkPubs={[]}
+      />,
+    );
+  }
+
+  it("enriches the signpost with the entity count + kind noun when entityCount > 0", () => {
+    mockGet.mockReturnValue("fam_0007");
+    renderWithEntities({ entityCount: 29, entityKind: "organism_or_cells" });
+    const link = screen.getByText(/View full Cancer cell lines method page/).closest("a");
+    // organism_or_cells → "Cell lines" → lowercased "cell lines".
+    expect(link?.textContent).toContain("29 specific cell lines + per-paper usage");
+    // The label stays the leading text node (a11y) and the href is unchanged.
+    expect(link?.getAttribute("href")).toBe(
+      "/methods/animal-cell-models/cancer-cell-lines-fam_0007",
+    );
+  });
+
+  it("uses the singular noun when exactly one specific entity", () => {
+    mockGet.mockReturnValue("fam_0007");
+    renderWithEntities({ entityCount: 1, entityKind: "organism_or_cells" });
+    const link = screen.getByText(/View full Cancer cell lines method page/).closest("a");
+    expect(link?.textContent).toContain("1 specific cell line + per-paper usage");
+    expect(link?.textContent).not.toContain("cell lines +");
+  });
+
+  it("keeps the plain signpost when entityCount is absent or 0", () => {
+    mockGet.mockReturnValue("fam_0007");
+    renderWithEntities({}); // entityCount undefined
+    const link = screen.getByText(/View full Cancer cell lines method page/).closest("a");
+    expect(link?.textContent).not.toContain("specific");
+    expect(link?.textContent).not.toContain("per-paper usage");
+  });
 });

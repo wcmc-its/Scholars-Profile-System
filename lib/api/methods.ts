@@ -373,6 +373,44 @@ export async function getFamilyCellLineEntities(
   }));
 }
 
+/**
+ * Per-family count of evidenced, non-generic specific entities for a supercategory,
+ * keyed by familyLabel — drives the supercategory page's "View full … method page"
+ * signpost (count + dominant-kind noun) so the per-paper entity badges on the family
+ * page are discoverable from the rollup. Counts only evidenced && !isGeneric: the
+ * same gate that makes an entity a clickable rail row. One grouped query; {} when the
+ * entity layer is off, so callers degrade to the plain signpost with no extra branch.
+ */
+export async function getSupercategoryFamilyEntitySummaries(
+  supercategory: string,
+): Promise<Record<string, { entityCount: number; entityKind: string | null }>> {
+  if (!isMethodsLensEntityLayerOn()) return {};
+  const rows = await prisma.familyEntity.groupBy({
+    by: ["familyLabel", "dominantKind"],
+    where: { supercategory, evidenced: true, isGeneric: false },
+    _count: { _all: true },
+  });
+  // A family can span several dominantKind groups; sum the counts and keep the
+  // largest group's kind as the dominant noun source (groupBy is unordered, so
+  // first-wins would be non-deterministic). `top` is internal, stripped at return.
+  const acc: Record<string, { entityCount: number; entityKind: string | null; top: number }> = {};
+  for (const r of rows) {
+    const n = r._count._all;
+    const cur = (acc[r.familyLabel] ??= { entityCount: 0, entityKind: null, top: 0 });
+    cur.entityCount += n;
+    if (n >= cur.top) {
+      cur.top = n;
+      cur.entityKind = r.dominantKind;
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(acc).map(([label, v]) => [
+      label,
+      { entityCount: v.entityCount, entityKind: v.entityKind },
+    ]),
+  );
+}
+
 /** One per-(publication × entity) usage fact: the verbatim relevance sentence +
  *  matched-span offsets for an exact `<mark>` (null span ⇒ term-match fallback). */
 export type CellLineUsageFact = {

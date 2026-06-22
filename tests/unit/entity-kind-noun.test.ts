@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { entityKindNoun } from "@/lib/methods/entity-kind-noun";
+import { entityKindNoun, entityKindNounForCount } from "@/lib/methods/entity-kind-noun";
 
 describe("entityKindNoun", () => {
   it("maps each producer kind to its rail noun", () => {
@@ -23,5 +23,24 @@ describe("entityKindNoun", () => {
     expect(entityKindNoun(undefined)).toBe("Entities");
     expect(entityKindNoun("nonsense")).toBe("Entities");
     expect(entityKindNoun("")).toBe("Entities");
+  });
+});
+
+describe("entityKindNounForCount", () => {
+  it("keeps the plural for any count !== 1", () => {
+    expect(entityKindNounForCount("organism_or_cells", 29)).toBe("Cell lines");
+    expect(entityKindNounForCount("organism_or_cells", 0)).toBe("Cell lines");
+    expect(entityKindNounForCount(null, 7)).toBe("Entities");
+  });
+
+  it("depluralizes the closed noun set when count === 1", () => {
+    expect(entityKindNounForCount("organism_or_cells", 1)).toBe("Cell line");
+    expect(entityKindNounForCount("reagent", 1)).toBe("Reagent");
+    expect(entityKindNounForCount("assay", 1)).toBe("Assay");
+    expect(entityKindNounForCount("model", 1)).toBe("Model");
+    // "ies" → "y", not a bare "s" drop.
+    expect(entityKindNounForCount(null, 1)).toBe("Entity");
+    // "Software" is uncountable (no trailing "s") → unchanged.
+    expect(entityKindNounForCount("software", 1)).toBe("Software");
   });
 });

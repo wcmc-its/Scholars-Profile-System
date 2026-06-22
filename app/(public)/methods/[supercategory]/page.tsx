@@ -5,6 +5,7 @@ import {
   getSupercategory,
   getSupercategoryRollup,
   getTopScholarsForSupercategory,
+  getSupercategoryFamilyEntitySummaries,
 } from "@/lib/api/methods";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import { isScholarListExportEnabled } from "@/lib/export/scholar-export-flags";
@@ -56,9 +57,12 @@ export default async function SupercategoryPage({
   const sc = await getSupercategory(supercategory);
   if (!sc) notFound();
 
-  const [rollup, topScholars] = await Promise.all([
+  const [rollup, topScholars, entitySummaries] = await Promise.all([
     getSupercategoryRollup(sc.id).catch(() => ({ families: [], allWorkPubs: [] })),
     getTopScholarsForSupercategory(sc.id).catch(() => null),
+    getSupercategoryFamilyEntitySummaries(sc.id).catch(
+      () => ({}) as Awaited<ReturnType<typeof getSupercategoryFamilyEntitySummaries>>,
+    ),
   ]);
   const { families, allWorkPubs } = rollup;
 
@@ -73,6 +77,10 @@ export default async function SupercategoryPage({
     scholarCount: f.scholarCount,
     pubCount: f.pubCount ?? 0,
     exemplarTools: f.exemplarTools,
+    // Entity-layer signpost data, joined by familyLabel (the family_entity key);
+    // undefined when the layer is off → the panel shows the plain "View full" link.
+    entityCount: entitySummaries[f.familyLabel]?.entityCount,
+    entityKind: entitySummaries[f.familyLabel]?.entityKind ?? null,
   }));
   const familyMeta: Record<
     string,

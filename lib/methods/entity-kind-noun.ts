@@ -33,3 +33,19 @@ export function entityKindNoun(dominantKind: string | null | undefined): string 
   if (!dominantKind) return "Entities";
   return KIND_NOUN[dominantKind] ?? "Entities";
 }
+
+/** Count-aware noun for inline copy like "29 specific cell lines" / "1 specific
+ *  cell line". Returns the plural unless count === 1, then depluralizes the closed
+ *  KIND_NOUN set ("Entities"→"Entity", "Cell lines"→"Cell line", trailing-s drop;
+ *  "Software" is uncountable → unchanged). Title-case; call sites lower-case it. */
+export function entityKindNounForCount(
+  dominantKind: string | null | undefined,
+  count: number,
+): string {
+  const plural = entityKindNoun(dominantKind);
+  if (count === 1) {
+    if (plural.endsWith("ies")) return `${plural.slice(0, -3)}y`;
+    if (plural.endsWith("s")) return plural.slice(0, -1);
+  }
+  return plural;
+}

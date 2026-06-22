@@ -82,6 +82,10 @@ vi.mock("@/lib/api/methods", () => ({
   // Promise.all resolves in the test.
   getFamilyCellLineEntities: () => Promise.resolve([]),
   getDistinctPmidCountForFamily: (...a: unknown[]) => mockGetDistinctPmidCountForFamily(...a),
+  // The supercategory loader also fetches the per-family entity summaries that
+  // drive the "View full method page" signpost (flag-gated; {} when off). Stub so
+  // the loader's Promise.all resolves.
+  getSupercategoryFamilyEntitySummaries: () => Promise.resolve({}),
 }));
 
 vi.mock("@/lib/export/scholar-export-flags", () => ({
