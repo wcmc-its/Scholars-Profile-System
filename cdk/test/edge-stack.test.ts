@@ -282,8 +282,9 @@ describe("EdgeStack", () => {
         // + the #974 Phase 2 `/api/units/*/*/members` method-facet route
         // + the #967 `/api/scholar/*/method-exemplar` representative-paper hover
         // + the two GrantRecs Phase 2 matcher routes
-        // (/api/scholars/*/opportunities, /api/opportunities/*/researchers).
-        expect(cacheBehaviors).toHaveLength(32);
+        // (/api/scholars/*/opportunities, /api/opportunities/*/researchers)
+        // + the GrantRecs slice-3 browse list (/api/opportunities).
+        expect(cacheBehaviors).toHaveLength(33);
       });
 
       it("evaluates additional behaviors in the spec-defined order (static first, then uncacheable, then #634 query-keyed)", () => {
@@ -343,6 +344,10 @@ describe("EdgeStack", () => {
           // cacheable default's allow-list. Precede `/scholars/*` (Group B).
           "/api/scholars/*/opportunities",
           "/api/opportunities/*/researchers",
+          // GrantRecs slice 3 -- opportunity browse list (admin, reads
+          // q/includeGrantsGov/limit). The `/*/researchers` glob does not cover
+          // the bare collection path, so it needs its own exact behavior.
+          "/api/opportunities",
           // -- #634 Group B -- query-keyed CACHEABLE pages (custom policy) --
           "/scholars/*",
           "/departments/*",
