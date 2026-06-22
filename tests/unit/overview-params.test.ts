@@ -27,6 +27,7 @@ const NORMALIZED_EMPTY = {
   voice: DEFAULT_OVERVIEW_PARAMS.voice,
   tone: DEFAULT_OVERVIEW_PARAMS.tone,
   length: DEFAULT_OVERVIEW_PARAMS.length,
+  audience: DEFAULT_OVERVIEW_PARAMS.audience,
   elements: [],
   instructions: "",
   promptVersion: DEFAULT_OVERVIEW_PARAMS.promptVersion,
@@ -66,6 +67,25 @@ describe("normalizeOverviewParams — enum defaulting", () => {
     expect(out.voice).toBe(DEFAULT_OVERVIEW_PARAMS.voice);
     expect(out.tone).toBe(DEFAULT_OVERVIEW_PARAMS.tone);
     expect(out.length).toBe(DEFAULT_OVERVIEW_PARAMS.length);
+  });
+});
+
+describe("normalizeOverviewParams — audience tier", () => {
+  it("defaults a missing audience to `informed` (the middle tier)", () => {
+    expect(normalizeOverviewParams({}).audience).toBe("informed");
+    expect(DEFAULT_OVERVIEW_PARAMS.audience).toBe("informed");
+  });
+
+  it("preserves each valid tier", () => {
+    expect(normalizeOverviewParams({ audience: "accessible" }).audience).toBe("accessible");
+    expect(normalizeOverviewParams({ audience: "informed" }).audience).toBe("informed");
+    expect(normalizeOverviewParams({ audience: "technical" }).audience).toBe("technical");
+  });
+
+  it("falls back to `informed` for an unknown / wrong-type audience", () => {
+    expect(normalizeOverviewParams({ audience: "layperson" }).audience).toBe("informed");
+    expect(normalizeOverviewParams({ audience: 42 }).audience).toBe("informed");
+    expect(normalizeOverviewParams({ audience: null }).audience).toBe("informed");
   });
 });
 

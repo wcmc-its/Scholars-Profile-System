@@ -408,6 +408,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SELF_EDIT_OVERVIEW_GENERATE_STREAM",
+                "Value": "off",
+              },
+              {
                 "Name": "OVERVIEW_FAITHFULNESS_PASS",
                 "Value": "off",
               },
@@ -434,6 +438,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
               {
                 "Name": "OVERVIEW_PROMPT_VERSION_DEFAULT",
                 "Value": "v4",
+              },
+              {
+                "Name": "OVERVIEW_AUDIENCE_DEFAULT",
+                "Value": "informed",
               },
               {
                 "Name": "FEEDBACK_BADGE_ENABLED",
@@ -3696,6 +3704,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SELF_EDIT_OVERVIEW_GENERATE_STREAM",
+                "Value": "on",
+              },
+              {
                 "Name": "OVERVIEW_FAITHFULNESS_PASS",
                 "Value": "off",
               },
@@ -3722,6 +3734,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "OVERVIEW_PROMPT_VERSION_DEFAULT",
                 "Value": "v4",
+              },
+              {
+                "Name": "OVERVIEW_AUDIENCE_DEFAULT",
+                "Value": "informed",
               },
               {
                 "Name": "FEEDBACK_BADGE_ENABLED",

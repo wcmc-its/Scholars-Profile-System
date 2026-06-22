@@ -1189,6 +1189,15 @@ export class AppStack extends Stack {
         // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`
         // (the CD pipeline re-rolls the image, never CDK).
         SELF_EDIT_OVERVIEW_GENERATE: "on",
+        // SELF_EDIT_OVERVIEW_GENERATE_STREAM -- stream the generate response as NDJSON
+        // (the determinate progress bar + CDN idle-timeout protection on a slow Opus-4.8
+        // draft) instead of the legacy buffered JSON. A SEPARATE sub-flag because the base
+        // generator is already live in prod: flipping the response SHAPE there needs its
+        // own staging-first lever. "on" in staging while it bakes, "off" in prod until an
+        // approval-gated Sps-App-prod deploy flips it; off ⇒ the buffered path, unchanged
+        // (isOverviewGenerateStreamEnabled, lib/edit/overview-generator.ts). Takes effect
+        // on a manual `cdk deploy --exclusively Sps-App-<env>`.
+        SELF_EDIT_OVERVIEW_GENERATE_STREAM: env === "staging" ? "on" : "off",
         // #742 -- post-generation faithfulness pass. OFF in both envs: the #742
         // validation gate showed the generator already grounds drafts on the FACTS
         // (including the ReciterAI distilled synopsis/justification it is designed to
@@ -1252,6 +1261,17 @@ export class AppStack extends Stack {
         // lib/edit/overview-prompt-versions.ts). Superuser / curator can still pick
         // either version per-generate regardless of this default.
         OVERVIEW_PROMPT_VERSION_DEFAULT: "v4",
+        // OVERVIEW_AUDIENCE_DEFAULT -- the LIVE default AUDIENCE tier for the overview
+        // generator (overview-params.ts): "accessible" | "informed" | "technical". The
+        // default is "informed" (prospective trainees / scientifically-literate
+        // non-specialists), a deliberate step down from the keyword-rich prompt's
+        // technical drift (the corrective to the "overly technical" reports) without going
+        // all the way to layperson. This env is the no-image-roll lever to shift the
+        // baseline: set "accessible" or "technical" + a manual `cdk deploy --exclusively
+        // Sps-App-<env>`. An invalid / unset value falls back to the registry default
+        // (informed) (defaultAudience, lib/edit/overview-params.ts). The editor can still
+        // pick any tier per-generate regardless of this default.
+        OVERVIEW_AUDIENCE_DEFAULT: "informed",
         // #538 -- site-wide feedback badge + /about/feedback form. When "on",
         // the badge renders on every page (except /about/feedback itself,
         // suppressed inside open Radix Dialogs) and the form route accepts

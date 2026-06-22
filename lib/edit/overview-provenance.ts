@@ -70,7 +70,10 @@ export async function listOverviewGenerations(
   cwid: string,
 ): Promise<OverviewGenerationSummary[]> {
   const rows = await db.read.overviewGeneration.findMany({
-    where: { cwid },
+    // Only SUCCEEDED runs reach the history/restore panel — failed attempts are now
+    // persisted too (audit/debug trail) but a draft-less, error-only row is not
+    // something the scholar can reload or regenerate from.
+    where: { cwid, status: "succeeded" },
     orderBy: { createdAt: "desc" },
     take: GENERATION_HISTORY_LIMIT,
     select: {
@@ -88,7 +91,9 @@ export async function listOverviewGenerations(
     promptVersion: row.promptVersion,
     params: normalizeOverviewParams(row.params),
     createdAt: row.createdAt,
-    text: row.text,
+    // `text` is now nullable (failed rows store NULL), but the status filter above
+    // guarantees these are succeeded rows with a draft; coerce defensively.
+    text: row.text ?? "",
   }));
 }
 

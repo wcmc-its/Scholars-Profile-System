@@ -26,8 +26,10 @@ import { SegmentedField } from "@/components/edit/segmented-field";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  OVERVIEW_AUDIENCES,
   OVERVIEW_ELEMENTS,
   OVERVIEW_INSTRUCTIONS_MAX,
+  type OverviewAudience,
   type OverviewElement,
   type OverviewLength,
   type OverviewParams,
@@ -72,6 +74,11 @@ const LENGTH_OPTIONS: { value: OverviewLength; label: string }[] = [
   { value: "standard", label: "Standard" },
   { value: "extended", label: "Extended" },
 ];
+// Audience tiers (least → most technical), derived from the canonical list so the
+// control and the prompt directive can never drift.
+const AUDIENCE_OPTIONS: { value: OverviewAudience; label: string }[] = OVERVIEW_AUDIENCES.map(
+  (a) => ({ value: a.key, label: a.label }),
+);
 
 export function OverviewGenerateControls({
   value,
@@ -82,6 +89,7 @@ export function OverviewGenerateControls({
 }: OverviewGenerateControlsProps) {
   const showVersionSelector = canSelectPromptVersion && promptVersions.length > 0;
   const selectedVersion = promptVersions.find((v) => v.id === value.promptVersion);
+  const selectedAudience = OVERVIEW_AUDIENCES.find((a) => a.key === value.audience);
 
   function toggleElement(key: OverviewElement, checked: boolean) {
     const present = value.elements.includes(key);
@@ -170,6 +178,21 @@ export function OverviewGenerateControls({
         disabled={disabled}
         onValueChange={(v) => onChange({ ...value, length: v as OverviewLength })}
       />
+      <div className="flex flex-col gap-1.5" data-testid="overview-audience-field">
+        <SegmentedField
+          legend="Audience"
+          name="overview-audience"
+          options={AUDIENCE_OPTIONS}
+          value={value.audience}
+          disabled={disabled}
+          onValueChange={(v) => onChange({ ...value, audience: v as OverviewAudience })}
+        />
+        {selectedAudience && (
+          <span className="text-muted-foreground text-xs" data-testid="overview-audience-hint">
+            {selectedAudience.hint}
+          </span>
+        )}
+      </div>
 
       <fieldset className="flex flex-col gap-2">
         <legend className="text-foreground mb-1 text-sm font-medium">Include &amp; emphasize</legend>

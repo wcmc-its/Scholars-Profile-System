@@ -29,6 +29,22 @@ export type OverviewVoice = "third" | "first";
 export type OverviewTone = "formal" | "neutral" | "conversational";
 /** Target length band (the hard 20k sanitizer cap still applies downstream). */
 export type OverviewLength = "short" | "standard" | "extended";
+/**
+ * Who the overview is written for — a framing dimension distinct from `tone`
+ * (register) and `length`. It steers TECHNICALITY: how much specialist vocabulary
+ * the prose assumes vs. explains, across three tiers from least to most technical:
+ *   - `accessible` — a general audience (a patient, family member, or reporter):
+ *     plain language, terms defined, acronyms spelled out (~9th–10th-grade level).
+ *   - `informed` — prospective trainees / scientifically-literate non-specialists
+ *     (the DEFAULT): field terms allowed but contextualized on first use.
+ *   - `technical` — research collaborators (working scientists): domain terminology
+ *     used freely, methods/models/cohorts named precisely.
+ * `informed` is the default — a deliberate step down from v3/v4's "keyword-rich"
+ * pull toward dense jargon (the corrective to the "overly technical" reports), while
+ * still conveying substance. Like the other steering enums it never licenses a fact
+ * not in FACTS; it changes HOW grounded facts are phrased, not WHICH are stated.
+ */
+export type OverviewAudience = "accessible" | "informed" | "technical";
 /** A theme the scholar can ask the draft to emphasize. */
 export type OverviewElement =
   | "research_focus"
@@ -45,6 +61,8 @@ export type OverviewParams = {
   voice: OverviewVoice;
   tone: OverviewTone;
   length: OverviewLength;
+  /** Who the draft is written for — steers technicality / jargon. Default `general`. */
+  audience: OverviewAudience;
   elements: OverviewElement[];
   /** Optional free-text steering note — UNTRUSTED; trimmed, <= OVERVIEW_INSTRUCTIONS_MAX. */
   instructions: string;
@@ -57,6 +75,46 @@ export type OverviewParams = {
    */
   promptVersion: OverviewPromptVersionId;
 };
+
+/** UI-facing labels + one-line hints for the audience control, ordered LEAST → MOST
+ *  technical. The default is the middle tier (`informed`), flagged in its hint. */
+export const OVERVIEW_AUDIENCES: { key: OverviewAudience; label: string; hint: string }[] = [
+  {
+    key: "accessible",
+    label: "General audience",
+    hint: "Accessible — a patient, family member, or reporter; plain language, terms defined",
+  },
+  {
+    key: "informed",
+    label: "Prospective trainees",
+    hint: "Informed (default) — scientifically literate non-specialists; terms contextualized",
+  },
+  {
+    key: "technical",
+    label: "Research collaborators",
+    hint: "Technical — working scientists; domain terminology used freely",
+  },
+];
+
+/** The known audience members, derived from the labels list so the normalizer and
+ *  the type stay in lockstep (mirrors VOICES / TONES / LENGTHS below). */
+const AUDIENCES: readonly OverviewAudience[] = OVERVIEW_AUDIENCES.map((a) => a.key);
+
+/** The baseline default audience — the middle `informed` tier (prospective trainees /
+ *  scientifically-literate non-specialists). A deliberate step down from the keyword-rich
+ *  default toward broader readability, without going all the way to layperson. */
+export const OVERVIEW_DEFAULT_AUDIENCE: OverviewAudience = "informed";
+
+/** The LIVE default audience. Reads `OVERVIEW_AUDIENCE_DEFAULT` (a per-env, no-code
+ *  rollback lever set in cdk app-stack, mirroring `OVERVIEW_PROMPT_VERSION_DEFAULT`)
+ *  and falls back to {@link OVERVIEW_DEFAULT_AUDIENCE}. On the client the non-public
+ *  env var is undefined, so this returns the constant; the route re-normalizes. */
+export function defaultAudience(): OverviewAudience {
+  const env = process.env.OVERVIEW_AUDIENCE_DEFAULT;
+  return AUDIENCES.includes(env as OverviewAudience)
+    ? (env as OverviewAudience)
+    : OVERVIEW_DEFAULT_AUDIENCE;
+}
 
 /** UI-facing labels for the element checkboxes, in display order. The generator
  *  reuses these labels verbatim in the "Emphasize these themes" directive. */
@@ -87,6 +145,7 @@ export const DEFAULT_OVERVIEW_PARAMS: OverviewParams = {
   voice: "third",
   tone: "formal",
   length: "standard",
+  audience: defaultAudience(),
   elements: ["research_focus", "key_findings", "methods", "recent_work"],
   instructions: "",
   promptVersion: defaultPromptVersionId(),
@@ -144,6 +203,8 @@ export function normalizeOverviewParams(raw: unknown): OverviewParams {
     voice: pickEnum(obj.voice, VOICES, DEFAULT_OVERVIEW_PARAMS.voice),
     tone: pickEnum(obj.tone, TONES, DEFAULT_OVERVIEW_PARAMS.tone),
     length: pickEnum(obj.length, LENGTHS, DEFAULT_OVERVIEW_PARAMS.length),
+    // Unknown / missing audience → the live default (`informed`, the middle tier).
+    audience: pickEnum(obj.audience, AUDIENCES, defaultAudience()),
     elements,
     instructions,
     // Unknown / missing version → the live default. The route additionally

@@ -33,7 +33,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Check, ChevronDown, Globe, Sparkles, TriangleAlert } from "lucide-react";
+import { Braces, Check, ChevronDown, Globe, Sparkles, TriangleAlert } from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
 import {
@@ -42,6 +42,7 @@ import {
 } from "@/components/edit/overview-draft-review-card";
 import { OverviewEditor } from "@/components/edit/overview-editor";
 import { OverviewGenerateControls } from "@/components/edit/overview-generate-controls";
+import { OverviewProgress } from "@/components/edit/overview-progress";
 import { OverviewProvenanceNote } from "@/components/edit/overview-provenance-note";
 import { OverviewSourceDrawer } from "@/components/edit/overview-source-drawer";
 import {
@@ -66,6 +67,11 @@ import {
   type OverviewPromptVersionMeta,
 } from "@/lib/edit/overview-prompt-versions";
 import { resolveOverviewSelection, selectionToDeltas } from "@/lib/edit/overview-resolve";
+import {
+  readOverviewStream,
+  type OverviewProgressState,
+  type OverviewStreamResult,
+} from "@/lib/edit/overview-stream";
 import type { OverviewOrigin } from "@/lib/edit/overview-provenance";
 import { cn } from "@/lib/utils";
 
@@ -89,6 +95,7 @@ const GENERATE_SPARSE =
 const GENERATE_RATE_LIMITED =
   "You've generated several drafts recently — please try again in a little while.";
 const GENERATE_FAILED = "We couldn't generate a draft just now. Please try again.";
+const GENERATE_DEBUG_FAILED = "Couldn't prepare the prompt payload. Please try again.";
 
 // #875 §6 — the two pre-generation conditional hints (verbatim from the spec).
 const HINT_EMPHASIS_CONFLICT =
@@ -172,6 +179,18 @@ export type OverviewCardProps = {
   canSelectPromptVersion?: boolean;
   promptVersions?: OverviewPromptVersionMeta[];
   defaultPromptVersion?: OverviewPromptVersionId;
+  /**
+   * Whether to show the superuser "View prompt & payload" debug affordance (the raw
+   * FACTS projection is internal data). STRICTLY superuser — set by `edit-page`,
+   * mirroring the biosketch tool's gate.
+   */
+  canDebug?: boolean;
+  /**
+   * Whether the generate route streams its response (`SELF_EDIT_OVERVIEW_GENERATE_STREAM`).
+   * When true the client reads NDJSON and drives the `<OverviewProgress>` bar; off ⇒ the
+   * buffered path (the prior behavior). Server-evaluated and passed in.
+   */
+  streamEnabled?: boolean;
 };
 
 export function OverviewCard({
@@ -184,6 +203,8 @@ export function OverviewCard({
   canSelectPromptVersion = false,
   promptVersions = [],
   defaultPromptVersion,
+  canDebug = false,
+  streamEnabled = false,
 }: OverviewCardProps) {
   if (readOnly) return <OverviewReadOnlyCard initialHtml={initialHtml} />;
   return (
@@ -196,6 +217,8 @@ export function OverviewCard({
       canSelectPromptVersion={canSelectPromptVersion}
       promptVersions={promptVersions}
       defaultPromptVersion={defaultPromptVersion}
+      canDebug={canDebug}
+      streamEnabled={streamEnabled}
     />
   );
 }
@@ -256,6 +279,8 @@ type OverviewEditorCardProps = Pick<
   | "canSelectPromptVersion"
   | "promptVersions"
   | "defaultPromptVersion"
+  | "canDebug"
+  | "streamEnabled"
 >;
 
 function OverviewEditorCard({
@@ -267,6 +292,8 @@ function OverviewEditorCard({
   canSelectPromptVersion = false,
   promptVersions = [],
   defaultPromptVersion,
+  canDebug = false,
+  streamEnabled = false,
 }: OverviewEditorCardProps) {
   // The currently-published bio — the dirty baseline.
   const [savedHtml, setSavedHtml] = React.useState(initialHtml);
@@ -360,6 +387,8 @@ function OverviewEditorCard({
         canSelectPromptVersion={canSelectPromptVersion}
         promptVersions={promptVersions}
         defaultPromptVersion={defaultPromptVersion}
+        canDebug={canDebug}
+        streamEnabled={streamEnabled}
       />
     </EditPanel>
   );
@@ -516,6 +545,8 @@ function OverviewGeneratorArm({
   canSelectPromptVersion = false,
   promptVersions = [],
   defaultPromptVersion,
+  canDebug = false,
+  streamEnabled = false,
 }: {
   cwid: string;
   savedHtml: string;
@@ -526,10 +557,19 @@ function OverviewGeneratorArm({
   canSelectPromptVersion?: boolean;
   promptVersions?: OverviewPromptVersionMeta[];
   defaultPromptVersion?: OverviewPromptVersionId;
+  canDebug?: boolean;
+  streamEnabled?: boolean;
 }) {
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [generateNotice, setGenerateNotice] = React.useState<string | null>(null);
   const [generateError, setGenerateError] = React.useState<string | null>(null);
+  // Streamed-generation progress (#917 follow-up A, ported). `progress` is non-null only
+  // while a streamed run is in flight; `elapsedMs` advances a 1s timer so the bar feels
+  // alive within a phase. `isDebugLoading` gates the superuser "View prompt & payload".
+  const [progress, setProgress] = React.useState<OverviewProgressState | null>(null);
+  const [elapsedMs, setElapsedMs] = React.useState(0);
+  const [isDebugLoading, setIsDebugLoading] = React.useState(false);
+  const elapsedTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   // Seed the version from the server-resolved default so the value the client
   // sends matches the live default (the route forces it anyway for an owner, but
   // a superuser / curator's selector should open on the real default).
@@ -654,11 +694,31 @@ function OverviewGeneratorArm({
     selection.grantIds.length > 0 && !params.elements.includes("grants_funding");
   const showSparseHint = selection.pmids.length <= 1 && selection.grantIds.length === 0;
 
+  // The elapsed-time counter that gives the streamed progress bar liveness within a
+  // single phase (a real timer, not a fake progress animation).
+  const startElapsedTimer = React.useCallback(() => {
+    const startedAt = Date.now();
+    setElapsedMs(0);
+    if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
+    elapsedTimerRef.current = setInterval(() => setElapsedMs(Date.now() - startedAt), 1000);
+  }, []);
+  const stopElapsedTimer = React.useCallback(() => {
+    if (elapsedTimerRef.current) {
+      clearInterval(elapsedTimerRef.current);
+      elapsedTimerRef.current = null;
+    }
+  }, []);
+  React.useEffect(() => stopElapsedTimer, [stopElapsedTimer]);
+
   async function generate() {
     if (busy) return;
     setIsGenerating(true);
     setGenerateError(null);
     setGenerateNotice(null);
+    if (streamEnabled) {
+      setProgress({ phase: "drafting" });
+      startElapsedTimer();
+    }
     try {
       const res = await fetch("/api/edit/overview/generate", {
         method: "POST",
@@ -667,18 +727,18 @@ function OverviewGeneratorArm({
         // server re-normalizes / ownership-filters it.
         body: JSON.stringify({ entityId: cwid, params, selection }),
       });
-      const data = (await res.json()) as
-        | {
-            ok: true;
-            draft: string;
-            model: string;
-            promptVersion: OverviewPromptVersionId;
-            generationId: string | null;
-          }
-        | { ok: false; error: string };
-      if (!res.ok || data.ok !== true) {
+      // The response is NDJSON when the stream flag is on AND generation actually ran
+      // (a pre-flight failure on the stream route is still a buffered JSON error), so
+      // branch on the content-type — both the streamed and buffered shapes then parse.
+      const isStream = (res.headers.get("content-type") ?? "").includes("application/x-ndjson");
+      const result: OverviewStreamResult | null = isStream
+        ? await readOverviewStream(res, (p) => setProgress(p))
+        : ((await res.json().catch(() => null)) as OverviewStreamResult | null);
+
+      if (!result || result.ok !== true || (!isStream && !res.ok)) {
         // Editor untouched on any failure (G8) — only a notice or error appears.
-        const code = "error" in data && typeof data.error === "string" ? data.error : "";
+        const code =
+          result && "error" in result && typeof result.error === "string" ? result.error : "";
         if (code === "insufficient_facts") {
           setGenerateNotice(GENERATE_SPARSE);
         } else if (code === "rate_limited") {
@@ -688,11 +748,15 @@ function OverviewGeneratorArm({
         }
         return;
       }
-      // Land the draft in the review card — NEVER the editor. Re-running appends
-      // a new draft to the front and keeps prior ones (cheap iteration).
+      // The stream result is loosely typed (Record); the buffered body is the same shape.
+      // Coerce the fields defensively.
+      const draftText = typeof result.draft === "string" ? result.draft : "";
+      const generationId = typeof result.generationId === "string" ? result.generationId : null;
+      // Land the draft in the review card — NEVER the editor. Re-running appends a new
+      // draft to the front and keeps prior ones (cheap iteration).
       const draft: OverviewReviewDraft = {
-        text: data.draft,
-        generationId: data.generationId,
+        text: draftText,
+        generationId,
         createdAt: new Date().toISOString(),
       };
       setReviewHistory((prev) => [draft, ...prev]);
@@ -703,6 +767,51 @@ function OverviewGeneratorArm({
       setGenerateError(GENERATE_FAILED);
     } finally {
       setIsGenerating(false);
+      setProgress(null);
+      stopElapsedTimer();
+    }
+  }
+
+  // Superuser-only: download the EXACT system prompt + user prompt + FACTS payload these
+  // settings would send to the model, WITHOUT spending a generation (parity with the
+  // biosketch "View prompt & payload" affordance). Errors surface in the generate-error slot.
+  async function downloadDebugPayload() {
+    if (busy || isDebugLoading) return;
+    setIsDebugLoading(true);
+    setGenerateError(null);
+    try {
+      const res = await fetch("/api/edit/overview/debug-payload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entityId: cwid, params }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | ({ ok: true; promptVersion?: string } & Record<string, unknown>)
+        | { ok: false }
+        | null;
+      if (!res.ok || !data || data.ok !== true) {
+        setGenerateError(GENERATE_DEBUG_FAILED);
+        return;
+      }
+      const version =
+        "promptVersion" in data && typeof data.promptVersion === "string"
+          ? data.promptVersion
+          : "draft";
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `overview-prompt-${cwid}-${version}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setGenerateError(GENERATE_DEBUG_FAILED);
+    } finally {
+      setIsDebugLoading(false);
     }
   }
 
@@ -768,6 +877,11 @@ function OverviewGeneratorArm({
         busy={busy}
         generations={generations}
         onLoadVersion={loadVersion}
+        canDebug={canDebug}
+        onDebug={downloadDebugPayload}
+        isDebugLoading={isDebugLoading}
+        progress={progress}
+        elapsedMs={elapsedMs}
       />
 
       {generateNotice && (
@@ -829,6 +943,11 @@ function OverviewDraftBlock({
   busy,
   generations,
   onLoadVersion,
+  canDebug,
+  onDebug,
+  isDebugLoading,
+  progress,
+  elapsedMs,
 }: {
   open: boolean;
   onToggle: () => void;
@@ -847,6 +966,12 @@ function OverviewDraftBlock({
   busy: boolean;
   generations: OverviewGenerationItem[];
   onLoadVersion: (gen: OverviewGenerationItem) => void;
+  canDebug: boolean;
+  onDebug: () => void;
+  isDebugLoading: boolean;
+  /** Non-null only while a STREAMED run is in flight — drives the progress bar. */
+  progress: OverviewProgressState | null;
+  elapsedMs: number;
 }) {
   return (
     <div
@@ -998,11 +1123,27 @@ function OverviewDraftBlock({
               <Sparkles className="size-4" />
               {isGenerating ? "Generating…" : "Generate a draft"}
             </Button>
+            {canDebug && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onDebug}
+                disabled={busy || isDebugLoading}
+                data-testid="overview-debug-payload"
+                title="Download the exact system prompt, user prompt, and FACTS payload these settings would send to the model (superusers only)."
+              >
+                <Braces className="size-4" />
+                {isDebugLoading ? "Preparing…" : "View prompt & payload"}
+              </Button>
+            )}
             <span className="text-muted-foreground text-sm">
               Draft from your Scholars publications, topics, and grants — you review it before
               anything reaches your overview.
             </span>
           </div>
+          {/* Streamed-generation progress bar (#917 follow-up A) — present only while a
+              streamed run is in flight; the buffered path leaves `progress` null. */}
+          {progress && <OverviewProgress state={progress} elapsedMs={elapsedMs} />}
         </div>
       )}
     </div>

@@ -39,6 +39,7 @@ import { identityImageEndpoint } from "@/lib/headshot";
 import { profilePath } from "@/lib/profile-url";
 import {
   isOverviewGenerateEnabled,
+  isOverviewGenerateStreamEnabled,
   resolveEffectiveOverviewModel,
 } from "@/lib/edit/overview-generator";
 import {
@@ -841,6 +842,12 @@ function renderPanel(
           // #1077 follow-up — reframe the provenance note's "written by you" copy
           // for any third-person editor (superuser / proxy / unit-admin).
           mode={voiceMode}
+          // The "View prompt & payload" debug affordance is STRICTLY superuser (the raw
+          // FACTS projection is internal data) — mirrors the biosketch tool's gate above.
+          canDebug={mode === "superuser" || (mode === "self" && isSuperuser)}
+          // Stream the generate response (progress bar + CDN idle-timeout protection) only
+          // where the sub-flag is on (staging-first); off ⇒ the buffered path, unchanged.
+          streamEnabled={isOverviewGenerateStreamEnabled()}
         />
       );
     case "highlights":
