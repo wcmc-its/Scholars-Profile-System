@@ -40,9 +40,30 @@ describe("rankResearchers — weighted topic union", () => {
   it("records per-topic contributions", () => {
     const bbb = rankResearchers(TOPICS, {}).find((r) => r.cwid === "bbb")!;
     expect(bbb.topicContributions).toEqual([
-      { topicId: "implementation_science", contribution: expect.closeTo(3.88) },
-      { topicId: "biostatistics", contribution: expect.closeTo(3.28) },
+      { topicId: "implementation_science", contribution: expect.closeTo(3.88), pubCount: 0, minYear: null },
+      { topicId: "biostatistics", contribution: expect.closeTo(3.28), pubCount: 0, minYear: null },
     ]);
+  });
+
+  it("carries per-topic pubCount/minYear evidence and the career-stage bucket through to the result", () => {
+    const topics: TopicResult[] = [
+      {
+        topicId: "implementation_science",
+        topicWeight: 1,
+        scholars: [{ cwid: "aaa", slug: "a", variantBScore: 5, pubCount: 18, minYear: 2021 }],
+      },
+    ];
+    const [r] = rankResearchers(topics, {
+      appealByStage: { early: 1 },
+      stageByCwid: new Map([["aaa", "early"]]),
+    });
+    expect(r.careerStage).toBe("early");
+    expect(r.topicContributions[0]).toMatchObject({ pubCount: 18, minYear: 2021 });
+  });
+
+  it("defaults careerStage to null when the scholar's stage is unknown", () => {
+    const [r] = rankResearchers(TOPICS, {});
+    expect(r.careerStage).toBeNull();
   });
 
   it("keeps stageAppeal distinct; default (lens off) ranks by topicFit only", () => {
