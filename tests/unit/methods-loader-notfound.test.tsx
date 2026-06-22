@@ -77,7 +77,6 @@ vi.mock("@/lib/api/methods", () => ({
   getFamilyScholars: (...a: unknown[]) => mockGetFamilyScholars(...a),
   getDistinctScholarCountForFamily: (...a: unknown[]) => mockGetDistinctScholarCountForFamily(...a),
   getRepresentativePubsForFamily: (...a: unknown[]) => mockGetRepresentativePubsForFamily(...a),
-  getFamilyToolUsage: () => Promise.resolve([]),
   // #1166 — the FamilyPage also fetches the cell-line entity layer + the family's
   // distinct-pmid total (flag-gated; []/0 when off). Stub them so the loader's
   // Promise.all resolves in the test.
