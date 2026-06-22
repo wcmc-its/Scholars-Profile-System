@@ -3889,7 +3889,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "METHODS_LENS_ENTITY_USAGE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "CENTER_METHODS_FACET",

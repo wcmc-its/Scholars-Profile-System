@@ -1604,11 +1604,13 @@ export class AppStack extends Stack {
         //     tool/method families and lights up the WS-C badge (mention_class ->
         //     "How it was used" / "Where it appears"), WS-B generic soft-suppression,
         //     and the dominant_kind rail noun. Readers serve when EITHER flag is on.
-        //     OFF in both envs until the producer emits non-cell-line entity layers
-        //     (current artifact is all cell lines) -- flip on after a backfill +
-        //     `cdk deploy Sps-App-<env>`. App-only, no migration beyond the additive
-        //     entity columns. PROD OFF (gated).
-        METHODS_LENS_ENTITY_USAGE: "off",
+        //     STAGING ON: today this is REDUNDANT with the cell-line flag's OR (the
+        //     entity layer is already served on staging), but it locks the entity
+        //     layer on independent of METHODS_LENS_CELL_LINE_ENTITIES and is the
+        //     prod-rollout rehearsal switch. The all-tools surface stays empty until
+        //     the producer emits non-cell-line entity layers + a backfill lands them.
+        //     PROD OFF (gated -- no prod entity data, flipped at go-live).
+        METHODS_LENS_ENTITY_USAGE: env === "staging" ? "on" : "off",
         //   CENTER_METHODS_FACET -- #962. The center-roster "Methods & tools"
         //     multi-select facet + per-member tool chips on the GROUPED center
         //     roster. ADDITIONALLY gated on METHODS_LENS_ENABLED in code (the
