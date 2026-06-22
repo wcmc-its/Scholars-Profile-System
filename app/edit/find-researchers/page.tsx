@@ -18,15 +18,22 @@ import { redirect } from "next/navigation";
 
 import { FindResearchers } from "@/components/edit/find-researchers";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { isAccountConsoleNavRestructureEnabled } from "@/lib/auth/account-console-nav";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { logEditDenial } from "@/lib/edit/authz";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = {
-  title: "Find researchers — Scholars Profile Console",
-  robots: { index: false, follow: false },
-};
+// The tab title tracks the account-menu label (account-dropdown-nav handoff,
+// Workstream B): "Funding matcher" when the unified-nav flag is on, the legacy
+// "Find researchers" when off — so the dropdown and this page never disagree.
+export function generateMetadata() {
+  const toolName = isAccountConsoleNavRestructureEnabled() ? "Funding matcher" : "Find researchers";
+  return {
+    title: `${toolName} — Scholars Profile Console`,
+    robots: { index: false, follow: false },
+  };
+}
 
 export default async function FindResearchersPage() {
   const session = await getEffectiveEditSession();
@@ -59,7 +66,7 @@ export default async function FindResearchersPage() {
       </header>
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
-        <FindResearchers />
+        <FindResearchers unifiedNav={isAccountConsoleNavRestructureEnabled()} />
       </main>
     </div>
   );

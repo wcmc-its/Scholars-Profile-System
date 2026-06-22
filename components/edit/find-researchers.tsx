@@ -48,7 +48,12 @@ type Status =
   | { kind: "ok"; opportunityId: string; results: RankedScholar[] }
   | { kind: "error"; message: string };
 
-export function FindResearchers() {
+export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }) {
+  // The tool's name tracks the account-menu label so the dropdown and the page
+  // agree (account-dropdown-nav handoff, Workstream B): "Funding matcher" when
+  // the unified-nav flag is on, the legacy "Find researchers" when off. The
+  // submit button stays "Find researchers" — that's the action, not the name.
+  const toolName = unifiedNav ? "Funding matcher" : "Find researchers";
   const [input, setInput] = useState("");
   const [inputError, setInputError] = useState<string | null>(null);
   // The opportunityId of the last valid submit. Drives the fetch effect; control
@@ -127,7 +132,7 @@ export function FindResearchers() {
   return (
     <div>
       <div className="mb-5">
-        <h1 className="text-2xl font-bold tracking-tight">Find researchers</h1>
+        <h1 className="text-2xl font-bold tracking-tight">{toolName}</h1>
         <p className="text-muted-foreground mt-1 text-sm">
           Enter a funding opportunity ID to rank Weill Cornell researchers by topic fit
           and career-stage appeal — the reverse of a scholar&rsquo;s &ldquo;Grants for
