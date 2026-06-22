@@ -273,15 +273,12 @@ const SELF_RAIL_GROUP = {
 // of section groupings; "Yours to edit" reframes to "Profile content" for anyone
 // editing on the scholar's behalf.
 // Home floats to the top; "Yours to edit" narrows to authored content (Overview,
-// Highlights); the sourced data gathers under one "From WCM records" header split
-// by two sub-labels (read-only Identity vs hide/show/flag Records); the generators
-// become "Tools"; and the administrative controls (Visibility, Profile editors,
-// Profile URL) move into a dedicated "Settings" group. Group order follows first
-// appearance in RAIL_V2_ORDER ("" floating → Yours to edit → From WCM records →
-// Tools → Settings).
+// Highlights); the sourced data gathers under one "From WCM records" header (no
+// sub-labels); the generators become "Tools"; and the administrative controls
+// (Visibility, Profile editors, Profile URL) move into a dedicated "Settings" group.
+// Group order follows first appearance in RAIL_V2_ORDER ("" floating → Yours to edit
+// → From WCM records → Tools → Settings).
 const RAIL_V2_WCM_GROUP = "From WCM records";
-const RAIL_V2_IDENTITY_SUBGROUP = "Identity · read-only";
-const RAIL_V2_RECORDS_SUBGROUP = "Records · hide, show, or flag";
 
 const RAIL_V2_ORDER: ReadonlyArray<AttrKey> = [
   "home",
@@ -304,20 +301,20 @@ const RAIL_V2_ORDER: ReadonlyArray<AttrKey> = [
   "profile-url",
 ];
 
-const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string; subgroup?: string }> = {
+const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string }> = {
   home: { group: "" },
   overview: { group: "Yours to edit" },
   highlights: { group: "Yours to edit" },
-  "name-title": { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_IDENTITY_SUBGROUP },
-  email: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_IDENTITY_SUBGROUP },
-  photo: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_IDENTITY_SUBGROUP },
-  appointments: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_RECORDS_SUBGROUP },
-  education: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_RECORDS_SUBGROUP },
-  publications: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_RECORDS_SUBGROUP },
-  funding: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_RECORDS_SUBGROUP },
-  mentees: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_RECORDS_SUBGROUP },
-  coi: { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_RECORDS_SUBGROUP },
-  "coi-gap": { group: RAIL_V2_WCM_GROUP, subgroup: RAIL_V2_RECORDS_SUBGROUP },
+  "name-title": { group: RAIL_V2_WCM_GROUP },
+  email: { group: RAIL_V2_WCM_GROUP },
+  photo: { group: RAIL_V2_WCM_GROUP },
+  appointments: { group: RAIL_V2_WCM_GROUP },
+  education: { group: RAIL_V2_WCM_GROUP },
+  publications: { group: RAIL_V2_WCM_GROUP },
+  funding: { group: RAIL_V2_WCM_GROUP },
+  mentees: { group: RAIL_V2_WCM_GROUP },
+  coi: { group: RAIL_V2_WCM_GROUP },
+  "coi-gap": { group: RAIL_V2_WCM_GROUP },
   biosketch: { group: "Tools" },
   "grant-recs": { group: "Tools" },
   visibility: { group: "Settings" },
@@ -563,10 +560,7 @@ export function EditPage({
             readonly: a.readonly,
             kind,
             group,
-            subgroup: placement.subgroup,
-            // Home floats at the top of the rail with a quiet "landing" tag + a
-            // leading Home glyph.
-            tag: a.key === "home" ? "landing" : undefined,
+            // Home floats at the top of the rail with a leading Home glyph.
             icon: a.key === "home" ? "home" : undefined,
             // "From your publications" nests under Conflicts of Interest.
             child: a.key === "coi-gap",

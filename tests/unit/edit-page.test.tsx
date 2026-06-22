@@ -797,18 +797,19 @@ describe("EditPage rail — restructured layout (SELF_EDIT_RAIL_RESTRUCTURE)", (
       <EditPage ctx={ctx} mode="self" railRestructureEnabled grantRecsEnabled biosketchEnabled />,
     );
     const q = rail();
-    // Home floats at the top with a quiet "landing" tag + a leading Home glyph.
+    // Home floats at the top with a leading Home glyph (the "landing" tag was removed).
     expect(q.getByTestId("rail-home")).toBeTruthy();
-    expect(q.getByText("landing")).toBeTruthy();
+    expect(q.queryByText("landing")).toBeNull();
     expect(q.getByTestId("rail-home-icon")).toBeTruthy();
     // "Yours to edit" narrows to authored content (header only now — its note was
     // dropped; the group is self-explanatory).
     expect(q.getByText("Yours to edit")).toBeTruthy();
     expect(q.queryByText("Your profile content.")).toBeNull();
-    // "From WCM records" carries the two editability sub-headers.
+    // "From WCM records" gathers the sourced data; the Identity / Records sub-headers
+    // were removed, so its items now sit flush under the one header.
     expect(q.getByText("From WCM records")).toBeTruthy();
-    expect(q.getByText("Identity · read-only")).toBeTruthy();
-    expect(q.getByText("Records · hide, show, or flag")).toBeTruthy();
+    expect(q.queryByText("Identity · read-only")).toBeNull();
+    expect(q.queryByText("Records · hide, show, or flag")).toBeNull();
     // Generators move under "Tools".
     expect(q.getByText("Tools")).toBeTruthy();
     expect(q.getByTestId("rail-biosketch")).toBeTruthy();

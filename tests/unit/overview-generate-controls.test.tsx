@@ -187,10 +187,15 @@ describe("OverviewGenerateControls — audience tier", () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ audience: "technical" }));
   });
 
-  it("surfaces each tier's full description as a hover tooltip (title)", () => {
+  it("wires each audience tier as a Radix tooltip trigger (description on hover)", () => {
     renderControls();
-    // The label wrapping the 'General' radio carries the verbose description as `title`.
-    const label = screen.getByTestId("overview-audience-accessible").closest("label");
-    expect(label?.getAttribute("title")).toContain("General audience");
+    // Radix Tooltip.Trigger (asChild) stamps `data-state` on the audience segment label,
+    // so it is a tooltip trigger; the description-less Voice control does NOT — proving the
+    // hover tooltip is wired only where there is a description. (The portaled tooltip text
+    // only mounts on hover, which jsdom can't drive without user-event, so we assert wiring.)
+    const audienceLabel = screen.getByTestId("overview-audience-accessible").closest("label");
+    expect(audienceLabel?.getAttribute("data-state")).toBeTruthy();
+    const voiceLabel = screen.getByTestId("overview-voice-third").closest("label");
+    expect(voiceLabel?.getAttribute("data-state")).toBeNull();
   });
 });
