@@ -7,7 +7,6 @@ import {
   getFamilyScholars,
   getDistinctScholarCountForFamily,
   getRepresentativePubsForFamily,
-  getFamilyToolUsage,
   getFamilyCellLineEntities,
   getDistinctPmidCountForFamily,
 } from "@/lib/api/methods";
@@ -74,7 +73,6 @@ export default async function FamilyPage({
     topScholars,
     scholarCount,
     representativePubs,
-    toolUsage,
     cellLineEntities,
     distinctPmidTotal,
   ] = await Promise.all([
@@ -85,8 +83,6 @@ export default async function FamilyPage({
       resolved.familyLabel,
       SPOTLIGHT_CARDS,
     ).catch(() => []),
-    // #1119 — "How researchers use these tools" strip ([] when the flag is off).
-    getFamilyToolUsage(resolved.supercategory, resolved.familyLabel).catch(() => []),
     // #1166 — the family's specific cell lines ([] when the flag is off).
     getFamilyCellLineEntities(resolved.supercategory, resolved.familyLabel).catch(() => []),
     // #1166 punch #3 — the real distinct research-article total for the family
@@ -96,9 +92,9 @@ export default async function FamilyPage({
   ]);
 
   // #1166 — when the family resolves to specific cell lines, the master-detail
-  // cell-line rail (Surface B §5.1) REPLACES the #1119 tool-usage prose: the rail
-  // sits in the left column of the publications section, driving the `?cellLine=`
-  // feed filter. When there are no cell lines, the #1119 prose renders instead.
+  // cell-line rail (Surface B §5.1) sits in the left column of the publications
+  // section, driving the `?cellLine=` feed filter. When there are no cell lines,
+  // the publications feed renders without the rail.
   const hasCellLines = cellLineEntities.length > 0;
   const cellLineLabels = Object.fromEntries(cellLineEntities.map((e) => [e.entityId, e.label]));
 
@@ -225,28 +221,6 @@ export default async function FamilyPage({
           </div>
         )}
       </section>
-
-      {/* #1119 — "How researchers use these tools" prose, shown only when the family
-          does NOT resolve to specific cell lines. When it does (#1166 Surface B), the
-          cell-line rail in the publications section below takes the IA slot instead. */}
-      {!hasCellLines && toolUsage.length > 0 && (
-        <section className="mb-10" aria-labelledby="tool-usage-heading">
-          <h2
-            id="tool-usage-heading"
-            className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]"
-          >
-            How researchers use these tools
-          </h2>
-          <ul className="mt-3 grid max-w-prose gap-3">
-            {toolUsage.map((u) => (
-              <li key={u.tool} className="text-sm leading-relaxed">
-                <span className="font-medium">{u.tool}</span>
-                <span className="text-muted-foreground"> — {u.context}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
 
       {/* Spotlight (§5.A) — render only when the family is substantial enough: a real
           distinct-pmid total ≥ 12 AND at least 3 representative cards to fill the
