@@ -86,8 +86,8 @@ describe("CoreClaimQueue", () => {
       />,
     );
     expect(screen.queryByText(/Repeat-user/)).toBeNull();
-    expect(screen.queryByText(/co-author/)).toBeNull();
-    expect(screen.queryByText(/Named:|Acknowledged/)).toBeNull();
+    expect(screen.queryByText(/core-staff co-author/)).toBeNull();
+    expect(screen.queryByText(/Named:|Acknowledged in text/)).toBeNull();
   });
 
   it("renders the synopsis and links resolved core-staff co-authors to their profile (Tier 2)", () => {
@@ -151,5 +151,86 @@ describe("CoreClaimQueue", () => {
     );
     // still reviewable — the Confirm button is still present
     expect(screen.getByRole("button", { name: /confirm/i })).toBeTruthy();
+  });
+
+  // --- Tier 3: undo / keyboard / filter / sort ---
+
+  it("undo posts a revoke and restores the actionable card (Tier 3)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
+    const undo = await screen.findByRole("button", { name: /undo/i });
+    fireEvent.click(undo);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse((fetchMock.mock.calls[1] as [string, { body: string }])[1].body)).toEqual({
+      pmid: "30418319",
+      coreId: "2",
+      status: "revoked",
+    });
+    // the card is actionable again
+    await waitFor(() => expect(screen.getByRole("button", { name: /confirm/i })).toBeTruthy());
+  });
+
+  it("confirms via the 'a' keyboard shortcut on the focused card (Tier 3)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+
+    fireEvent.keyDown(container.querySelector("[data-card]") as HTMLElement, { key: "a" });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, { body: string }])[1].body).status).toBe(
+      "claimed",
+    );
+  });
+
+  it("filters the visible candidates (Tier 3)", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "Acked paper", signalAck: true, ackAlias: "CBIC" }),
+          row({
+            pmid: "2",
+            title: "Bare paper",
+            signalAck: false,
+            ackAlias: null,
+            coauthors: [],
+            coauthorScholars: [],
+            llmScore: null,
+            authorAffinity: null,
+          }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    expect(screen.getByText("Acked paper")).toBeTruthy();
+    expect(screen.getByText("Bare paper")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Acknowledged" }));
+    expect(screen.getByText("Acked paper")).toBeTruthy();
+    expect(screen.queryByText("Bare paper")).toBeNull();
+  });
+
+  it("re-sorts by LLM score when selected (Tier 3)", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "High likelihood, low LLM", likelihood: 0.9, llmScore: 3 }),
+          row({ pmid: "2", title: "Low likelihood, high LLM", likelihood: 0.5, llmScore: 9 }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const titles = () =>
+      screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+    expect(titles()).toEqual(["High likelihood, low LLM", "Low likelihood, high LLM"]);
+
+    fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "llm" } });
+    expect(titles()).toEqual(["Low likelihood, high LLM", "High likelihood, low LLM"]);
   });
 });
