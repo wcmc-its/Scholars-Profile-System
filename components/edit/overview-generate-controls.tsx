@@ -75,10 +75,15 @@ const LENGTH_OPTIONS: { value: OverviewLength; label: string }[] = [
   { value: "extended", label: "Extended" },
 ];
 // Audience tiers (least → most technical), derived from the canonical list so the
-// control and the prompt directive can never drift.
-const AUDIENCE_OPTIONS: { value: OverviewAudience; label: string }[] = OVERVIEW_AUDIENCES.map(
-  (a) => ({ value: a.key, label: a.label }),
-);
+// control and the prompt directive can never drift. The short `label` rides the button;
+// the full `hint` becomes a hover/focus tooltip (`title`) on each segment.
+const AUDIENCE_OPTIONS: { value: OverviewAudience; label: string; title: string }[] =
+  OVERVIEW_AUDIENCES.map((a) => ({ value: a.key, label: a.label, title: a.hint }));
+
+// The compact uppercase section-label style shared by the panel's non-segmented labels
+// (version selector, emphasize, instructions) so they match the SegmentedField legends.
+const COMPACT_LABEL =
+  "text-muted-foreground mb-1 block text-[11px] font-semibold tracking-wide uppercase";
 
 export function OverviewGenerateControls({
   value,
@@ -89,7 +94,6 @@ export function OverviewGenerateControls({
 }: OverviewGenerateControlsProps) {
   const showVersionSelector = canSelectPromptVersion && promptVersions.length > 0;
   const selectedVersion = promptVersions.find((v) => v.id === value.promptVersion);
-  const selectedAudience = OVERVIEW_AUDIENCES.find((a) => a.key === value.audience);
 
   function toggleElement(key: OverviewElement, checked: boolean) {
     const present = value.elements.includes(key);
@@ -107,7 +111,7 @@ export function OverviewGenerateControls({
     <div className="border-apollo-border bg-apollo-surface-2 flex flex-col gap-4 rounded-md border p-4">
       {showVersionSelector && (
         <fieldset className="flex flex-col gap-2" data-testid="overview-prompt-version-field">
-          <legend className="text-foreground mb-1 text-sm font-medium">Prompt version</legend>
+          <legend className={COMPACT_LABEL}>Prompt version</legend>
           <span className="text-muted-foreground text-xs">
             Visible to superusers and curators only.
           </span>
@@ -154,48 +158,53 @@ export function OverviewGenerateControls({
           )}
         </fieldset>
       )}
-      <SegmentedField
-        legend="Voice"
-        name="overview-voice"
-        options={VOICE_OPTIONS}
-        value={value.voice}
-        disabled={disabled}
-        onValueChange={(v) => onChange({ ...value, voice: v as OverviewVoice })}
-      />
-      <SegmentedField
-        legend="Tone"
-        name="overview-tone"
-        options={TONE_OPTIONS}
-        value={value.tone}
-        disabled={disabled}
-        onValueChange={(v) => onChange({ ...value, tone: v as OverviewTone })}
-      />
-      <SegmentedField
-        legend="Length"
-        name="overview-length"
-        options={LENGTH_OPTIONS}
-        value={value.length}
-        disabled={disabled}
-        onValueChange={(v) => onChange({ ...value, length: v as OverviewLength })}
-      />
-      <div className="flex flex-col gap-1.5" data-testid="overview-audience-field">
+      {/* Compact 2x2 grid: Voice | Tone, then Length | Audience. Collapses to one
+          column on a narrow panel. Each control is the full-width connected `compact`
+          segmented bar; the audience tiers carry their full description as a tooltip. */}
+      <div
+        className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2"
+        data-testid="overview-generate-grid"
+      >
+        <SegmentedField
+          legend="Voice"
+          name="overview-voice"
+          options={VOICE_OPTIONS}
+          value={value.voice}
+          disabled={disabled}
+          compact
+          onValueChange={(v) => onChange({ ...value, voice: v as OverviewVoice })}
+        />
+        <SegmentedField
+          legend="Tone"
+          name="overview-tone"
+          options={TONE_OPTIONS}
+          value={value.tone}
+          disabled={disabled}
+          compact
+          onValueChange={(v) => onChange({ ...value, tone: v as OverviewTone })}
+        />
+        <SegmentedField
+          legend="Length"
+          name="overview-length"
+          options={LENGTH_OPTIONS}
+          value={value.length}
+          disabled={disabled}
+          compact
+          onValueChange={(v) => onChange({ ...value, length: v as OverviewLength })}
+        />
         <SegmentedField
           legend="Audience"
           name="overview-audience"
           options={AUDIENCE_OPTIONS}
           value={value.audience}
           disabled={disabled}
+          compact
           onValueChange={(v) => onChange({ ...value, audience: v as OverviewAudience })}
         />
-        {selectedAudience && (
-          <span className="text-muted-foreground text-xs" data-testid="overview-audience-hint">
-            {selectedAudience.hint}
-          </span>
-        )}
       </div>
 
       <fieldset className="flex flex-col gap-2">
-        <legend className="text-foreground mb-1 text-sm font-medium">Include &amp; emphasize</legend>
+        <legend className={COMPACT_LABEL}>Include &amp; emphasize</legend>
         <div className="flex flex-wrap gap-2">
           {OVERVIEW_ELEMENTS.map(({ key, label }) => {
             const id = `overview-element-${key}`;
@@ -231,7 +240,7 @@ export function OverviewGenerateControls({
       </fieldset>
 
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="overview-instructions" className="text-foreground text-sm font-medium">
+        <label htmlFor="overview-instructions" className={COMPACT_LABEL}>
           Additional instructions
         </label>
         <Textarea
@@ -239,6 +248,7 @@ export function OverviewGenerateControls({
           value={value.instructions}
           maxLength={OVERVIEW_INSTRUCTIONS_MAX}
           disabled={disabled}
+          rows={2}
           placeholder="e.g. mention my work on pediatric trials; keep it accessible to a general audience."
           onChange={(e) => onChange({ ...value, instructions: e.target.value })}
           data-testid="overview-instructions"

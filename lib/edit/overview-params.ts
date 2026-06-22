@@ -76,23 +76,25 @@ export type OverviewParams = {
   promptVersion: OverviewPromptVersionId;
 };
 
-/** UI-facing labels + one-line hints for the audience control, ordered LEAST → MOST
- *  technical. The default is the middle tier (`informed`), flagged in its hint. */
+/** The audience control, ordered LEAST → MOST technical (`informed` is the default,
+ *  middle tier). `label` is the short tier word shown on the compact segmented button
+ *  (General / Informed / Expert); `hint` is the full per-tier description, surfaced as a
+ *  hover/focus tooltip so the compact layout keeps the guidance without the vertical cost. */
 export const OVERVIEW_AUDIENCES: { key: OverviewAudience; label: string; hint: string }[] = [
   {
     key: "accessible",
-    label: "General audience",
-    hint: "Accessible — a patient, family member, or reporter; plain language, terms defined",
+    label: "General",
+    hint: "General audience — an intelligent adult with no training in the field (a patient, family member, or reporter): plain language, technical terms defined, acronyms spelled out.",
   },
   {
     key: "informed",
-    label: "Prospective trainees",
-    hint: "Informed (default) — scientifically literate non-specialists; terms contextualized",
+    label: "Informed",
+    hint: "Prospective trainees — a college-educated, scientifically literate reader who is not a specialist in this subfield (a grad student, journalist, or colleague from another department): field terms contextualized on first use.",
   },
   {
     key: "technical",
-    label: "Research collaborators",
-    hint: "Technical — working scientists; domain terminology used freely",
+    label: "Expert",
+    hint: "Research collaborators — a working scientist, possibly in an adjacent field: domain terminology used freely; methods, models, and cohorts named precisely.",
   },
 ];
 

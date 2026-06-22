@@ -165,3 +165,32 @@ describe("OverviewGenerateControls — prompt version selector (superuser / cura
     expect(screen.getByTestId("overview-prompt-version-cost").textContent).toContain("per draft");
   });
 });
+
+describe("OverviewGenerateControls — audience tier", () => {
+  it("renders a radio per audience tier with the short label", () => {
+    renderControls();
+    for (const id of [
+      "overview-audience-accessible",
+      "overview-audience-informed",
+      "overview-audience-technical",
+    ]) {
+      expect(screen.getByTestId(id)).toBeTruthy();
+    }
+    // Short labels ride the buttons (General / Informed / Expert).
+    expect(screen.getByText("General")).toBeTruthy();
+    expect(screen.getByText("Expert")).toBeTruthy();
+  });
+
+  it("selecting an audience tier calls onChange with the new audience", () => {
+    const { onChange } = renderControls({ audience: "informed" });
+    fireEvent.click(screen.getByTestId("overview-audience-technical"));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ audience: "technical" }));
+  });
+
+  it("surfaces each tier's full description as a hover tooltip (title)", () => {
+    renderControls();
+    // The label wrapping the 'General' radio carries the verbose description as `title`.
+    const label = screen.getByTestId("overview-audience-accessible").closest("label");
+    expect(label?.getAttribute("title")).toContain("General audience");
+  });
+});
