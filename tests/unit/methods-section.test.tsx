@@ -1,24 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ScholarFamilyView } from "@/lib/api/profile";
-
-// The redesigned MethodsSection (Surface A, #1167) consumes usePublicationModal()
-// unconditionally — the profile render path is always under
-// <PublicationModalProvider>. Mock the module so the hook resolves to a spy
-// `open` (no real provider / no modal fetch), and assert the source action calls
-// open(pmid).
-const openMock = vi.fn();
-vi.mock("@/components/publication/publication-modal", () => ({
-  usePublicationModal: () => ({ open: openMock, close: vi.fn(), state: null }),
-  PublicationModalProvider: ({ children }: { children: React.ReactNode }) => children,
-}));
-
-// Imported AFTER the mock so the component picks up the mocked hook.
 import { MethodsSection } from "@/components/profile/methods-section";
-
-beforeEach(() => {
-  openMock.mockClear();
-});
+import type { ScholarFamilyView } from "@/lib/api/profile";
 
 function makeFamilies(n: number): ScholarFamilyView[] {
   return Array.from({ length: n }, (_, i) => ({
@@ -31,20 +14,8 @@ function makeFamilies(n: number): ScholarFamilyView[] {
     definition: null,
     definitionSource: null,
     exemplarContexts: {},
-    exemplarContextPmids: {},
   }));
 }
-
-// The #1167 redesign rides PROFILE_FACET_REDESIGN (`facetRedesignEnabled`). The
-// flag-off path is the legacy renderer (covered in its own describe block below).
-// filterEnabled drives the checkbox-as-filter; onFamilyToggle is the toggle
-// callback.
-const REDESIGN = { facetRedesignEnabled: true } as const;
-const filterProps = {
-  facetRedesignEnabled: true,
-  filterEnabled: true,
-  onFamilyToggle: () => {},
-} as const;
 
 describe("MethodsSection", () => {
   it("renders family labels, dot-joined exemplar tools, and counts", () => {
@@ -69,17 +40,13 @@ describe("MethodsSection", () => {
             definition: null,
             definitionSource: null,
             exemplarContexts: {},
-            exemplarContextPmids: {},
           },
         ]}
       />,
     );
     expect(screen.getByText("Solo family")).toBeTruthy();
-    // The mono exemplar line (rendered INSIDE the row) uses " · " joins; with no
-    // exemplar tools none should be present. Scope to the row so the section's
-    // intro copy — which legitimately carries a "·" — isn't matched.
-    const row = screen.getByText("Solo family").closest("li") as HTMLElement;
-    expect(within(row).queryByText(/·/)).toBeNull();
+    // The mono exemplar line uses " · " joins; none should be present.
+    expect(screen.queryByText(/·/)).toBeNull();
   });
 
   it("renders nothing when there are no families", () => {
@@ -87,60 +54,16 @@ describe("MethodsSection", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("caps unselected families at 6 and shows a '+ N more' inline expand", () => {
-    render(<MethodsSection families={makeFamilies(11)} selectedFamilyIds={[]} {...filterProps} />);
-    expect(screen.getByText("Family 6")).toBeTruthy();
-    expect(screen.queryByText("Family 7")).toBeNull();
-    expect(screen.getByRole("button", { name: /\+ 5 more method families/ })).toBeTruthy();
+  it("caps at 8 families and shows a '+ N more' line for the remainder", () => {
+    render(<MethodsSection families={makeFamilies(11)} />);
+    expect(screen.getByText("Family 8")).toBeTruthy();
+    expect(screen.queryByText("Family 9")).toBeNull();
+    expect(screen.getByText("+ 3 more method families")).toBeTruthy();
   });
 
   it("uses the singular 'family' when exactly one is hidden", () => {
-    render(<MethodsSection families={makeFamilies(7)} selectedFamilyIds={[]} {...filterProps} />);
-    expect(screen.getByRole("button", { name: /\+ 1 more method family/ })).toBeTruthy();
-  });
-
-  it("renders the A2 disambiguating caption (clauses gated on live affordances)", () => {
-    render(
-      <MethodsSection
-        families={[
-          {
-            familyId: "fam_1",
-            familyLabel: "Chest radiograph models",
-            supercategory: "imaging_microscopy",
-            pubCount: 12,
-            exemplarTools: ["CheXpert"],
-            pmids: ["1"],
-            definition: null,
-            definitionSource: null,
-            exemplarContexts: { CheXpert: "CheXpert labels chest radiographs" },
-            exemplarContextPmids: {},
-          },
-        ]}
-        filterEnabled
-        onFamilyToggle={() => {}}
-        pagesEnabled
-        {...REDESIGN}
-      />,
-    );
-    expect(
-      screen.getByText(
-        /Tick the box to filter this profile in place\. Underlined terms have a usage example/,
-      ),
-    ).toBeTruthy();
-    expect(screen.getByText(/The pill opens that method's publications\./)).toBeTruthy();
-  });
-
-  // HIGH#2 — when the filter is NOT wired (METHODS_LENS_FAMILY_FILTER off), the
-  // "Tick the box" clause and the row toggle button must NOT render (no inert
-  // affordance / false instruction).
-  it("omits the 'Tick the box' clause and the row toggle when the filter is off", () => {
-    render(<MethodsSection families={makeFamilies(2)} {...REDESIGN} />);
-    expect(screen.queryByText(/Tick the box to filter/)).toBeNull();
-    expect(screen.queryByRole("button", { name: "Family 1" })).toBeNull();
-    // The checkbox glyph is suppressed too (display-only lens): the row's first
-    // element child is the content div, not a leading checkbox <svg>.
-    const row = screen.getByText("Family 1").closest("li") as HTMLElement;
-    expect(row.firstElementChild?.tagName).not.toBe("svg");
+    render(<MethodsSection families={makeFamilies(9)} />);
+    expect(screen.getByText("+ 1 more method family")).toBeTruthy();
   });
 });
 
@@ -201,82 +124,101 @@ describe("MethodsSection — #801 sensitive reveal", () => {
   });
 });
 
-describe("MethodsSection — A4 checkbox filter vs count+arrow pill", () => {
-  it("renders the row as a checkbox toggle that fires onFamilyToggle(familyId)", () => {
+describe("MethodsSection — #819 family click-to-filter", () => {
+  it("renders labels as static text when filtering is off (default)", () => {
+    render(<MethodsSection families={makeFamilies(2)} />);
+    expect(screen.queryByRole("button", { name: /Family 1/ })).toBeNull();
+    expect(screen.getByText("Family 1")).toBeTruthy();
+  });
+
+  it("renders labels as toggle buttons and fires onFamilyToggle(familyId) when enabled", () => {
     const onFamilyToggle = vi.fn();
     render(
       <MethodsSection
         families={makeFamilies(2)}
-        {...REDESIGN}
         filterEnabled
         selectedFamilyIds={[]}
         onFamilyToggle={onFamilyToggle}
       />,
     );
-    const row = screen.getByText("Family 1").closest("li") as HTMLElement;
-    // The whole-row toggle is a button labelled with the family name; clicking it
-    // filters in place (it does NOT navigate).
-    const toggle = within(row).getByRole("button", { name: "Family 1" });
-    expect(toggle.getAttribute("aria-pressed")).toBe("false");
-    fireEvent.click(toggle);
+    const btn = screen.getByRole("button", { name: /Family 1/ });
+    expect(btn.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(btn);
     expect(onFamilyToggle).toHaveBeenCalledWith("fam_1");
   });
 
-  it("reflects the selected family with aria-pressed and a SquareCheck + remove control", () => {
+  it("reflects the selected family with aria-pressed", () => {
     render(
       <MethodsSection
         families={makeFamilies(2)}
-        {...REDESIGN}
         filterEnabled
         selectedFamilyIds={["fam_2"]}
         onFamilyToggle={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: "Family 2" }).getAttribute("aria-pressed")).toBe(
+    expect(screen.getByRole("button", { name: /Family 2/ }).getAttribute("aria-pressed")).toBe(
       "true",
     );
-    expect(screen.getByRole("button", { name: "Family 1" }).getAttribute("aria-pressed")).toBe(
+    expect(screen.getByRole("button", { name: /Family 1/ }).getAttribute("aria-pressed")).toBe(
       "false",
     );
-    const selectedRow = screen.getByText("Family 2").closest("li") as HTMLElement;
-    expect(selectedRow.className).toContain("bg-[var(--color-facet-method-fill)]");
-    expect(within(selectedRow).getByRole("button", { name: /Remove Family 2 filter/ })).toBeTruthy();
   });
 
-  it("renders the count+arrow PILL as a navigation LINK (distinct from the filter toggle)", () => {
+  it("pulls the count into the selected pill and out of the row's count column", () => {
     render(
       <MethodsSection
         families={makeFamilies(2)}
-        {...REDESIGN}
+        filterEnabled
+        selectedFamilyIds={["fam_1"]}
+        onFamilyToggle={() => {}}
+      />,
+    );
+    // fam_1's count (100) rides INSIDE the selected pill (the toggle button)...
+    const selected = screen.getByRole("button", { name: /Family 1/ });
+    expect(within(selected).getByText("100")).toBeTruthy();
+    // ...while the unselected fam_2 keeps its count in the right-hand column, not
+    // inside its button.
+    const unselected = screen.getByRole("button", { name: /Family 2/ });
+    expect(within(unselected).queryByText("99")).toBeNull();
+    expect(screen.getByText("99")).toBeTruthy();
+  });
+});
+
+describe("MethodsSection — PROFILE_FACET_REDESIGN (flag on)", () => {
+  it("renders an unchecked Square + plain count when nothing is selected and no familyCounts", () => {
+    render(
+      <MethodsSection
+        families={makeFamilies(2)}
         filterEnabled
         selectedFamilyIds={[]}
         onFamilyToggle={() => {}}
-        pagesEnabled
+        facetRedesignEnabled
       />,
     );
     const row = screen.getByText("Family 1").closest("li") as HTMLElement;
-    // The pill is a navigating link to the family's publications page...
-    const pill = within(row).getByRole("link", { name: /Family 1/ });
-    expect(pill.getAttribute("href")).toContain("/methods/");
-    expect(within(pill).getByText("100")).toBeTruthy();
-    // ...separate from the filter toggle button on the same row.
+    // The whole row is a toggle button (aria-label = family label).
     expect(within(row).getByRole("button", { name: "Family 1" })).toBeTruthy();
+    expect(within(row).getByText("100")).toBeTruthy();
+    // Lucide Square (unchecked) is an <svg> in the row; no SquareCheck class.
+    expect(row.querySelector("svg")).toBeTruthy();
   });
 
-  it("renders a non-navigating count chip when METHODS_LENS_PAGES is off", () => {
+  it("shows a SquareCheck and a trailing remove (X) on the selected row", () => {
     render(
       <MethodsSection
         families={makeFamilies(2)}
-        {...REDESIGN}
         filterEnabled
-        selectedFamilyIds={[]}
+        selectedFamilyIds={["fam_1"]}
         onFamilyToggle={() => {}}
+        facetRedesignEnabled
       />,
     );
     const row = screen.getByText("Family 1").closest("li") as HTMLElement;
-    // No navigate link when pages are off — the count is a plain chip.
-    expect(within(row).queryByRole("link")).toBeNull();
-    expect(within(row).getByText("100")).toBeTruthy();
+    // Selected row carries the method-fill token and a remove control.
+    expect(row.className).toContain("bg-[var(--color-facet-method-fill)]");
+    expect(within(row).getByRole("button", { name: /Remove Family 1 filter/ })).toBeTruthy();
+    // At least two svgs: the SquareCheck indicator + the trailing X.
+    expect(row.querySelectorAll("svg").length).toBeGreaterThanOrEqual(2);
   });
 
   it("renders contextual '{in} of {total}' counts from familyCounts", () => {
@@ -287,10 +229,10 @@ describe("MethodsSection — A4 checkbox filter vs count+arrow pill", () => {
     render(
       <MethodsSection
         families={makeFamilies(2)}
-        {...REDESIGN}
         filterEnabled
         selectedFamilyIds={["fam_1"]}
         onFamilyToggle={() => {}}
+        facetRedesignEnabled
         familyCounts={familyCounts}
       />,
     );
@@ -311,10 +253,10 @@ describe("MethodsSection — A4 checkbox filter vs count+arrow pill", () => {
     render(
       <MethodsSection
         families={makeFamilies(2)}
-        {...REDESIGN}
         filterEnabled
         selectedFamilyIds={["fam_1"]}
         onFamilyToggle={() => {}}
+        facetRedesignEnabled
         familyCounts={familyCounts}
       />,
     );
@@ -323,21 +265,39 @@ describe("MethodsSection — A4 checkbox filter vs count+arrow pill", () => {
     expect(zeroRow.innerHTML).toContain("opacity-45");
     expect(within(zeroRow).getByText(/of 99/)).toBeTruthy();
   });
+
+  it("keeps the #824 browse-out link independently present on a flag-on row", () => {
+    render(
+      <MethodsSection
+        families={makeFamilies(2)}
+        filterEnabled
+        selectedFamilyIds={[]}
+        onFamilyToggle={() => {}}
+        pagesEnabled
+        facetRedesignEnabled
+      />,
+    );
+    const row = screen.getByText("Family 1").closest("li") as HTMLElement;
+    // The browse-out target is a separate link (the row toggle is a button), so
+    // it coexists with the whole-row toggle and stays its own click target.
+    expect(within(row).getByRole("link", { name: /Researchers using Family 1/ })).toBeTruthy();
+    expect(within(row).getByRole("button", { name: "Family 1" })).toBeTruthy();
+  });
 });
 
 describe("MethodsSection — v2 budget / selected-zero / animation (#841)", () => {
   const redesignProps = {
-    facetRedesignEnabled: true,
     filterEnabled: true,
     onFamilyToggle: () => {},
+    facetRedesignEnabled: true as const,
   };
 
   function rowsUl() {
     return screen.getByText("Family 1").closest("ul") as HTMLElement;
   }
 
-  // #1 — cap UNSELECTED rows at 6 in the resting panel.
-  it("#1 caps unselected rows at 6 in the resting panel", () => {
+  // #1 — cap UNSELECTED rows at 6 in the resting redesign panel.
+  it("#1 caps unselected rows at 6 in the resting redesign panel", () => {
     render(<MethodsSection families={makeFamilies(11)} selectedFamilyIds={[]} {...redesignProps} />);
     for (let i = 1; i <= 6; i++) expect(screen.getByText(`Family ${i}`)).toBeTruthy();
     expect(screen.queryByText("Family 7")).toBeNull();
@@ -377,6 +337,21 @@ describe("MethodsSection — v2 budget / selected-zero / animation (#841)", () =
     expect(screen.getByRole("button", { name: "Show fewer" })).toBeTruthy();
   });
 
+  it("#4 pagesEnabled adds no second navigating control in the redesign footer", () => {
+    render(
+      <MethodsSection
+        families={makeFamilies(11)}
+        selectedFamilyIds={[]}
+        pagesEnabled
+        {...redesignProps}
+      />,
+    );
+    // The footer disclosure is a button, not a link — the only navigate-away
+    // affordance is the heading's "Browse all methods", not the row footer.
+    expect(screen.queryByRole("link", { name: /more method families/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /\+ 5 more method families/ })).toBeTruthy();
+  });
+
   it("#5 introduces no nested scroll region on the rows", () => {
     render(<MethodsSection families={makeFamilies(11)} selectedFamilyIds={[]} {...redesignProps} />);
     expect(rowsUl().className).not.toMatch(/overflow-y-auto|overflow-scroll|max-h-/);
@@ -397,7 +372,6 @@ describe("MethodsSection — v2 budget / selected-zero / animation (#841)", () =
             definition: null,
             definitionSource: null,
             exemplarContexts: {},
-            exemplarContextPmids: {},
           },
         ]}
         selectedFamilyIds={[]}
@@ -439,15 +413,26 @@ describe("MethodsSection — v2 budget / selected-zero / animation (#841)", () =
     expect(dimZero.innerHTML).toContain("opacity-45");
   });
 
-  // #17 — rows carry the chip-fill transition.
-  it("#17 rows carry facet-chip-transition", () => {
-    render(
+  // #17 — redesign rows carry the chip-fill transition; flag-off rows do not.
+  it("#17 redesign rows carry facet-chip-transition (and flag-off rows do not)", () => {
+    const { rerender } = render(
       <MethodsSection families={makeFamilies(2)} selectedFamilyIds={["fam_1"]} {...redesignProps} />,
     );
     const sel = screen.getByText("Family 1").closest("li") as HTMLElement;
     const unsel = screen.getByText("Family 2").closest("li") as HTMLElement;
     expect(sel.className).toContain("facet-chip-transition");
     expect(unsel.className).toContain("facet-chip-transition");
+
+    rerender(
+      <MethodsSection
+        families={makeFamilies(2)}
+        filterEnabled
+        selectedFamilyIds={["fam_1"]}
+        onFamilyToggle={() => {}}
+      />,
+    );
+    const offRow = screen.getByText("Family 2").closest("li") as HTMLElement;
+    expect(offRow.className).not.toContain("facet-chip-transition");
   });
 });
 
@@ -467,7 +452,6 @@ describe("MethodsSection — #879 family definition hover", () => {
         definition: def,
         definitionSource: source,
         exemplarContexts: {},
-        exemplarContextPmids: {},
       },
     ];
   }
@@ -501,15 +485,11 @@ describe("MethodsSection — #879 family definition hover", () => {
   });
 });
 
-// #1167 / A1 — the persistent provenance rail. Hovering/focusing an evidenced
-// tool sets the rail item (eyebrow / term / verbatim sentence); the host retains
-// the last-hovered item (never blanks on mouse-leave). The source action opens
-// the in-app publication modal (Q-7) when a per-tool source pmid is carried.
-describe("MethodsSection — Surface A provenance rail (#1167)", () => {
-  function withContext(
-    contexts: Record<string, string>,
-    pmids: Record<string, string> = {},
-  ): ScholarFamilyView[] {
+// #1119 — per-exemplar-tool usage hover. When a tool has an `exemplarContexts`
+// snippet (server-populated only under METHODS_LENS_TOOL_CONTEXT), the tool name
+// becomes a hover trigger; tools without one stay plain text.
+describe("MethodsSection — #1119 per-tool usage hover", () => {
+  function withContext(contexts: Record<string, string>): ScholarFamilyView[] {
     return [
       {
         familyId: "fam_1",
@@ -521,200 +501,31 @@ describe("MethodsSection — Surface A provenance rail (#1167)", () => {
         definition: null,
         definitionSource: null,
         exemplarContexts: contexts,
-        exemplarContextPmids: pmids,
       },
     ];
   }
 
-  // The verbatim usage sentence carries the tool name (as real `usage_sentence`
-  // data does), so the rail can highlight the matched term in place (the #1119
-  // interim term-match; replaced by §7 offsets once #1166 emits them).
-  const SNIPPET = "CheXpert labels chest radiographs across 14 observations";
-
-  it("evidenced tools get a focusable dotted-underline trigger; un-evidenced tools are plain text", () => {
-    render(<MethodsSection families={withContext({ CheXpert: SNIPPET })} {...REDESIGN} />);
-    // CheXpert has a snippet → it is an interactive control...
-    expect(screen.getByRole("button", { name: /Usage example for CheXpert/ })).toBeTruthy();
-    // MIMIC-CXR has no snippet → no trigger, plain text only.
-    expect(screen.queryByRole("button", { name: /Usage example for MIMIC-CXR/ })).toBeNull();
-  });
-
-  it("renders the plain dotted join when no tool has a snippet (data flag off)", () => {
-    render(<MethodsSection families={withContext({})} {...REDESIGN} />);
-    expect(screen.getByText("CheXpert · MIMIC-CXR")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Usage example for/ })).toBeNull();
-  });
-
-  it("hovering an evidenced tool populates the rail (eyebrow / term / verbatim sentence, term marked)", () => {
-    const { container } = render(<MethodsSection families={withContext({ CheXpert: SNIPPET })} {...REDESIGN} />);
-    const rail = container.querySelector('[aria-live="polite"]') as HTMLElement;
-    // Before any interaction the rail shows a placeholder, not the snippet.
-    expect(rail.textContent).toMatch(/Hover an underlined tool/);
-
-    fireEvent.mouseEnter(screen.getByRole("button", { name: /Usage example for CheXpert/ }));
-
-    // Surface A eyebrow (NOT the modal / Surface B wording).
-    expect(within(rail).getByText("Verbatim, from this scholar's papers")).toBeTruthy();
-    // The term heads the rail and is marked in the sentence.
-    expect(within(rail).getAllByText("CheXpert").length).toBeGreaterThan(0);
-    expect(rail.textContent).toContain(SNIPPET);
-    expect(rail.querySelector("mark")?.textContent).toBe("CheXpert");
-  });
-
-  it("focusing an evidenced tool updates the rail identically (keyboard parity)", () => {
-    const { container } = render(<MethodsSection families={withContext({ CheXpert: SNIPPET })} {...REDESIGN} />);
-    const rail = container.querySelector('[aria-live="polite"]') as HTMLElement;
-    fireEvent.focus(screen.getByRole("button", { name: /Usage example for CheXpert/ }));
-    expect(within(rail).getByText("Verbatim, from this scholar's papers")).toBeTruthy();
-    expect(rail.textContent).toContain(SNIPPET);
-  });
-
-  it("retains the last-hovered item (never blanks on mouse-leave)", () => {
-    const { container } = render(<MethodsSection families={withContext({ CheXpert: SNIPPET })} {...REDESIGN} />);
-    const rail = container.querySelector('[aria-live="polite"]') as HTMLElement;
-    const trigger = screen.getByRole("button", { name: /Usage example for CheXpert/ });
-    fireEvent.mouseEnter(trigger);
-    expect(rail.textContent).toContain(SNIPPET);
-    // Leaving the tool must NOT blank the rail — it retains the last item.
-    fireEvent.mouseLeave(trigger);
-    expect(rail.textContent).toContain(SNIPPET);
-    expect(rail.textContent).not.toMatch(/Hover an underlined tool/);
-  });
-
-  it("swaps the rail to the newly-hovered tool's item", () => {
-    const { container } = render(
-      <MethodsSection
-        families={withContext({
-          CheXpert: SNIPPET,
-          "MIMIC-CXR": "a dataset of 377,110 chest radiographs",
-        })}
-        {...REDESIGN}
-      />,
-    );
-    const rail = container.querySelector('[aria-live="polite"]') as HTMLElement;
-    fireEvent.mouseEnter(screen.getByRole("button", { name: /Usage example for CheXpert/ }));
-    expect(rail.textContent).toContain(SNIPPET);
-    fireEvent.mouseEnter(screen.getByRole("button", { name: /Usage example for MIMIC-CXR/ }));
-    expect(rail.textContent).toContain("a dataset of 377,110 chest radiographs");
-    expect(rail.textContent).not.toContain(SNIPPET);
-  });
-
-  it("renders a source control when a per-tool source pmid is carried (#1158)", () => {
-    const { container } = render(
-      <MethodsSection
-        families={withContext({ CheXpert: SNIPPET }, { CheXpert: "33144353" })}
-        {...REDESIGN}
-      />,
-    );
-    const rail = container.querySelector('[aria-live="polite"]') as HTMLElement;
-    fireEvent.mouseEnter(screen.getByRole("button", { name: /Usage example for CheXpert/ }));
-    expect(within(rail).getByRole("button", { name: /view source publication/i })).toBeTruthy();
-  });
-
-  it("OMITS the source control when no source pmid is carried (pre-#1158 row)", () => {
-    const { container } = render(
-      <MethodsSection families={withContext({ CheXpert: SNIPPET }, {})} {...REDESIGN} />,
-    );
-    const rail = container.querySelector('[aria-live="polite"]') as HTMLElement;
-    fireEvent.mouseEnter(screen.getByRole("button", { name: /Usage example for CheXpert/ }));
-    expect(within(rail).queryByRole("button", { name: /source publication/i })).toBeNull();
-  });
-
-  it("clicking the source control opens the in-app publication modal with the source pmid (Q-7)", () => {
-    const { container } = render(
-      <MethodsSection
-        families={withContext({ CheXpert: SNIPPET }, { CheXpert: "33144353" })}
-        {...REDESIGN}
-      />,
-    );
-    const rail = container.querySelector('[aria-live="polite"]') as HTMLElement;
-    fireEvent.mouseEnter(screen.getByRole("button", { name: /Usage example for CheXpert/ }));
-    fireEvent.click(within(rail).getByRole("button", { name: /view source publication/i }));
-    expect(openMock).toHaveBeenCalledWith("33144353");
-  });
-
-  // HIGH#3 — the rail must stay in the DOM + a11y tree at ALL widths (it stacks
-  // below the list on mobile). A `hidden`/`sm:block` class would display:none it
-  // below 640px, making the snippet, source action, and aria-live announcement
-  // unreachable on mobile (a regression vs the prior tap tooltip).
-  it("keeps the provenance rail in the DOM at all widths (not display:none on mobile)", () => {
-    const { container } = render(<MethodsSection families={withContext({ CheXpert: SNIPPET })} {...REDESIGN} />);
-    const rail = container.querySelector('[aria-live="polite"]') as HTMLElement;
-    expect(rail).toBeTruthy();
-    expect(rail.className).not.toMatch(/(^|\s)hidden(\s|$)/);
-  });
-});
-
-// PROFILE_FACET_REDESIGN OFF (default / current prod) — the legacy renderer is
-// retained and must stay byte-identical to the pre-redesign output: the #819
-// filter pill, the #1119 "How <tool> was used" Radix tooltip, the flat 8-family
-// cap, and NO provenance rail.
-describe("MethodsSection — legacy (PROFILE_FACET_REDESIGN off)", () => {
-  function withCtx(contexts: Record<string, string>): ScholarFamilyView[] {
-    return [
-      {
-        familyId: "fam_1",
-        familyLabel: "Chest radiograph models",
-        supercategory: "imaging_microscopy",
-        pubCount: 12,
-        exemplarTools: ["CheXpert", "MIMIC-CXR"],
-        pmids: ["1", "2"],
-        definition: null,
-        definitionSource: null,
-        exemplarContexts: contexts,
-        exemplarContextPmids: {},
-      },
-    ];
-  }
-
-  it("renders family labels, dot-joined exemplar tools, and counts", () => {
-    render(<MethodsSection families={makeFamilies(2)} />);
-    expect(screen.getByText("Family 1")).toBeTruthy();
-    expect(screen.getByText("Tool 1A · Tool 1B")).toBeTruthy();
-    expect(screen.getByText("100")).toBeTruthy();
-    expect(screen.getByText("99")).toBeTruthy();
-  });
-
-  it("uses the legacy 'How <tool> was used' tooltip and renders NO provenance rail", () => {
-    const { container } = render(<MethodsSection families={withCtx({ CheXpert: "CheXpert labels chest radiographs" })} />);
-    // Legacy affordance: the Radix tooltip trigger, NOT the rail's "Usage example".
-    expect(screen.getByRole("button", { name: /How CheXpert was used/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Usage example for/ })).toBeNull();
-    // No persistent rail in the legacy layout.
-    expect(container.querySelector('[aria-live="polite"]')).toBeNull();
-  });
-
-  it("caps at 8 families and shows a '+ N more' line for the remainder", () => {
-    render(<MethodsSection families={makeFamilies(11)} />);
-    expect(screen.getByText("Family 8")).toBeTruthy();
-    expect(screen.queryByText("Family 9")).toBeNull();
-    expect(screen.getByText(/\+ 3 more method families/)).toBeTruthy();
-  });
-
-  it("renders labels as static text when filtering is off (default)", () => {
-    render(<MethodsSection families={makeFamilies(2)} />);
-    expect(screen.queryByRole("button", { name: "Family 1" })).toBeNull();
-    expect(screen.getByText("Family 1")).toBeTruthy();
-  });
-
-  it("renders the label as a toggle pill and pulls the count into it when selected", () => {
-    const onFamilyToggle = vi.fn();
+  it("renders a hover trigger for a tool that has a usage snippet, plain text otherwise", async () => {
     render(
       <MethodsSection
-        families={makeFamilies(2)}
-        filterEnabled
-        selectedFamilyIds={["fam_1"]}
-        onFamilyToggle={onFamilyToggle}
+        families={withContext({ CheXpert: "labels chest radiographs across 14 observations" })}
       />,
     );
-    const toggle = screen.getByRole("button", { name: /Family 1/ });
-    expect(toggle.getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(toggle);
-    expect(onFamilyToggle).toHaveBeenCalledWith("fam_1");
-    // The selected row's count rides inside the pill, so the right-hand count
-    // column is blank for that row (the count is inside the toggle button).
-    const selectedRow = screen.getByText("Family 1").closest("li") as HTMLElement;
-    expect(within(toggle).getByText("100")).toBeTruthy();
-    expect(within(selectedRow).getAllByText("100")).toHaveLength(1);
+    const trigger = screen.getByRole("button", { name: "How CheXpert was used" });
+    expect(trigger).toBeTruthy();
+    // MIMIC-CXR has no snippet → no trigger for it.
+    expect(screen.queryByRole("button", { name: "How MIMIC-CXR was used" })).toBeNull();
+    fireEvent.focus(trigger);
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(/labels chest radiographs across 14 observations/).length,
+      ).toBeGreaterThan(0),
+    );
+  });
+
+  it("renders the plain dotted join when no tool has a snippet (flag-off path)", () => {
+    render(<MethodsSection families={withContext({})} />);
+    expect(screen.getByText("CheXpert · MIMIC-CXR")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /How .* was used/ })).toBeNull();
   });
 });
