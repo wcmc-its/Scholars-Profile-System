@@ -9,7 +9,7 @@
  * have no dual org/paper view and a binary (confirm/reject) decision.
  */
 import { useState } from "react";
-import { Check, X } from "lucide-react";
+import { Check, ExternalLink, X } from "lucide-react";
 import type { CoreQueueRow, CoreReviewQueue } from "@/lib/api/core-queue";
 
 type Decision = "claimed" | "rejected";
@@ -132,6 +132,31 @@ function CandidateCard({
           {row.authorsString ? (
             <p className="text-muted-foreground mt-1 line-clamp-1 text-xs">{row.authorsString}</p>
           ) : null}
+          <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
+            {row.pubmedUrl ? (
+              <a
+                href={row.pubmedUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
+              >
+                PubMed <ExternalLink className="size-3" aria-hidden />
+              </a>
+            ) : null}
+            {row.doi ? (
+              <a
+                href={`https://doi.org/${row.doi}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
+              >
+                DOI <ExternalLink className="size-3" aria-hidden />
+              </a>
+            ) : null}
+            <span className="tabular-nums">
+              {row.citationCount} citation{row.citationCount === 1 ? "" : "s"}
+            </span>
+          </div>
         </div>
         <div className="flex shrink-0 gap-2">
           <button
@@ -153,13 +178,25 @@ function CandidateCard({
         </div>
       </div>
 
+      {row.llmRationale ? (
+        <p className="text-foreground mt-2.5 text-[13px] leading-snug">{row.llmRationale}</p>
+      ) : null}
+
+      {/* Per-signal breakdown: combined headline % + whichever of the 4 signals fired. */}
       <ul className="mt-3 flex flex-wrap gap-2" aria-label="evidence">
         <EvidenceChip label={`${likelihoodPct}% likely`} />
-        {row.ackAlias ? <EvidenceChip label={`Named: ${row.ackAlias}`} /> : null}
+        {row.authorAffinity !== null ? (
+          <EvidenceChip label={`Repeat-user ${Math.round(row.authorAffinity * 100)}%`} />
+        ) : null}
         {row.coauthors.length > 0 ? (
           <EvidenceChip
             label={`${row.coauthors.length} core-staff co-author${row.coauthors.length > 1 ? "s" : ""}`}
           />
+        ) : null}
+        {row.ackAlias ? (
+          <EvidenceChip label={`Named: ${row.ackAlias}`} />
+        ) : row.signalAck ? (
+          <EvidenceChip label="Acknowledged in text" />
         ) : null}
         {row.llmScore !== null ? <EvidenceChip label={`LLM ${row.llmScore}/10`} /> : null}
       </ul>
