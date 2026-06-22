@@ -23,6 +23,7 @@ import { ChevronLeftIcon } from "lucide-react";
 
 import { AccountMenu } from "@/components/site/account-menu";
 import { isAccountConsoleNavRestructureEnabled } from "@/lib/auth/account-console-nav";
+import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 
 export type AdminSubnavActive =
   | "profiles"
@@ -32,6 +33,7 @@ export type AdminSubnavActive =
   | "administrators"
   | "methods"
   | "data-quality"
+  | "cores"
   | "find-researchers"
   /** The viewer's own self-edit surface (`/edit`), shown as the active right-end
    *  tab when a superuser / comms_steward is on their own profile. */
@@ -145,6 +147,13 @@ export function AdminSubnav({
             label="Data quality"
             active={active === "data-quality"}
           />
+        )}
+        {/* Cores review-queue index (`/edit/core`). Superuser-facing — rides
+            `superuserSurfaces` like the other superuser tabs — and gated on the
+            same `CORE_PAGES` flag as the public core surfaces, so it stays dark
+            in any env where cores aren't live yet (staging-on / prod-off). */}
+        {superuserSurfaces && isCorePagesEnabled() && (
+          <AdminTab href="/edit/core" id="cores" label="Cores" active={active === "cores"} />
         )}
         {/* GrantRecs reverse-matcher — its only entry point is now this bar.
             Rides `superuserSurfaces` (every superuser console page passes it) so

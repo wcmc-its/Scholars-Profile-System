@@ -117,3 +117,40 @@ export async function getCorePage(
     publications,
   };
 }
+
+/** A catalog core for the index surfaces (`/cores`, `/edit/core`). */
+export interface CoreListItem {
+  id: string;
+  name: string;
+  facility: string | null;
+  /** True when the core has >=1 engine-confirmed `publication_core` row. Cheap
+   *  (one indexed `distinct` scan) and used to hide empty cores from the public
+   *  index. NOTE: this is the engine status only — the per-core page applies the
+   *  full CoreClaim merge, so its heading count can differ once curators claim or
+   *  reject rows. Here it is a presence flag, not a displayed count. */
+  hasConfirmedPublications: boolean;
+}
+
+/** Every catalog core in numeric-id order, each flagged for whether it has any
+ *  engine-confirmed publications. Used by both index surfaces. */
+export async function getCoreList(
+  client: Pick<typeof db.read, "core" | "publicationCore"> = db.read,
+): Promise<CoreListItem[]> {
+  const [cores, confirmed] = await Promise.all([
+    client.core.findMany({ select: { id: true, name: true, facility: true } }),
+    client.publicationCore.findMany({
+      where: { status: "confirmed" },
+      select: { coreId: true },
+      distinct: ["coreId"],
+    }),
+  ]);
+  const hasConfirmed = new Set(confirmed.map((r) => r.coreId));
+  return cores
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      facility: c.facility,
+      hasConfirmedPublications: hasConfirmed.has(c.id),
+    }))
+    .sort((a, b) => Number(a.id) - Number(b.id));
+}

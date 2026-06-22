@@ -4,7 +4,7 @@
  * effective-confirmed CoreClaim merge and the year-desc, pmid-desc ordering.
  */
 import { describe, expect, it } from "vitest";
-import { selectCorePublications } from "@/lib/api/cores";
+import { getCoreList, selectCorePublications } from "@/lib/api/cores";
 
 type Row = Parameters<typeof selectCorePublications>[0][number];
 
@@ -41,5 +41,32 @@ describe("selectCorePublications", () => {
       () => null,
     );
     expect(out).toEqual([]);
+  });
+});
+
+describe("getCoreList", () => {
+  // Minimal injected reader: the two reads getCoreList performs.
+  const reader = (
+    cores: Array<{ id: string; name: string; facility: string | null }>,
+    confirmedCoreIds: string[],
+  ) =>
+    ({
+      core: { findMany: async () => cores },
+      publicationCore: { findMany: async () => confirmedCoreIds.map((coreId) => ({ coreId })) },
+    }) as unknown as Parameters<typeof getCoreList>[0];
+
+  it("sorts by numeric id (not string) and flags cores with confirmed publications", async () => {
+    const out = await getCoreList(
+      reader(
+        [
+          { id: "10", name: "Microscopy", facility: "Microscopy Core" },
+          { id: "2", name: "Imaging", facility: "CBIC" },
+          { id: "1", name: "Bioinformatics", facility: null },
+        ],
+        ["2"], // only core 2 has confirmed pubs
+      ),
+    );
+    expect(out.map((c) => c.id)).toEqual(["1", "2", "10"]); // numeric, not "1","10","2"
+    expect(out.map((c) => c.hasConfirmedPublications)).toEqual([false, true, false]);
   });
 });
