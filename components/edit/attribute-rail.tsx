@@ -18,7 +18,7 @@
  * active item, a maroon (`--apollo-ring`) ring on the pale rail.
  */
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, type LucideIcon } from "lucide-react";
 
 import { GroupInfoButton } from "@/components/edit/group-info-button";
 import { cn } from "@/lib/utils";
@@ -61,6 +61,12 @@ export type RailItem = {
    * an alert; coexists with the active chevron.
    */
   tag?: string;
+  /**
+   * Optional leading icon (the Home glyph on the floating landing item in the
+   * restructured rail). Rendered before the label and inherits the row's text
+   * color, so it reads on both the pale rail and the active maroon fill.
+   */
+  icon?: LucideIcon;
 };
 
 export type AttributeRailProps = {
@@ -90,13 +96,19 @@ export function AttributeRail({ items, active, basePath, groupMeta }: AttributeR
       className="bg-apollo-rail border-apollo-rail-border rounded-md border p-2"
     >
       {grouped ? (
-        groupItems(items).map((g) => {
+        groupItems(items).map((g, groupIndex) => {
           // An empty group label is the floating leading block (e.g. Home): no
           // header, just the item(s) at the top of the rail.
           const isFloating = g.label === "";
           const description = groupMeta?.[g.label]?.description;
+          // Hairline rule between sections — restructured rail only (groupMeta is
+          // present only there); skipped before the first (floating Home) group.
+          const showDivider = groupMeta != null && groupIndex > 0;
           return (
             <div key={g.label || "__floating"} className="mb-2 last:mb-0">
+              {showDivider && (
+                <hr className="border-apollo-rail-border mx-1 mb-2 border-0 border-t" />
+              )}
               {!isFloating && (
                 <div className="flex items-center gap-1 px-2 py-1">
                   <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
@@ -216,6 +228,7 @@ function RailLink({
 }) {
   const isActive = item.key === active;
   const kind: RailKind = item.kind ?? (item.readonly ? "readonly" : "owned");
+  const Icon = item.icon;
   return (
     <li>
       <Link
@@ -243,6 +256,9 @@ function RailLink({
         )}
       >
         <span className="flex items-center gap-2">
+          {Icon && (
+            <Icon data-testid={`rail-${item.key}-icon`} className="size-4 shrink-0" aria-hidden />
+          )}
           {item.label}
           {item.count != null && item.count > 0 && (
             // Quiet "to review" count — a muted pill, deliberately NOT an alert
