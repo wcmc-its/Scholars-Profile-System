@@ -1301,6 +1301,20 @@ describe("EtlStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
+    it("excludes etl:infoed from the staging nightly cadence (10.20.91.8 CIDR overlap; docs/etl-vpc-migration-handoff.md), while prod keeps it", () => {
+      const stagingNightly = getStateMachineDefinitionText(
+        template,
+        "scholars-nightly-staging",
+      );
+      expect(stagingNightly).not.toMatch(/etl:infoed/);
+      // The exclusion is staging-only — prod's nightly still runs InfoEd.
+      const prodNightly = getStateMachineDefinitionText(
+        buildEtlStack("prod").template,
+        "scholars-nightly-prod",
+      );
+      expect(prodNightly).toMatch(/etl:infoed/);
+    });
+
     it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled + cdnReconcileScheduleEnabled + curationBackupScheduleEnabled + edEmailVisibilityBridgeEnabled all true)", () => {
       const rules = template.findResources("AWS::Events::Rule");
       // 3 cadence rules + the #595 heartbeat rule + the #393 reconciler rule +
