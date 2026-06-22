@@ -608,7 +608,9 @@ describe("EditPage router — superuser mode", () => {
     const home = screen.getByTestId("rail-home");
     const profileUrl = screen.getByTestId("rail-profile-url");
     const nameTitle = screen.getByTestId("rail-name-title");
-    expect(home.compareDocumentPosition(profileUrl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      home.compareDocumentPosition(profileUrl) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(
       profileUrl.compareDocumentPosition(nameTitle) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -724,8 +726,22 @@ describe("EditPage router — superuser mode", () => {
         manualPmids: [],
         aiPmids: ["100"],
         pickable: [
-          { pmid: "100", title: "A landmark study", journal: "Cell", year: 2024, impact: 90, publicationType: "Academic Article" },
-          { pmid: "200", title: "A follow-up", journal: "Nature", year: 2025, impact: 70, publicationType: "Review" },
+          {
+            pmid: "100",
+            title: "A landmark study",
+            journal: "Cell",
+            year: 2024,
+            impact: 90,
+            publicationType: "Academic Article",
+          },
+          {
+            pmid: "200",
+            title: "A follow-up",
+            journal: "Nature",
+            year: 2025,
+            impact: 70,
+            publicationType: "Review",
+          },
         ],
       },
     };
@@ -781,9 +797,10 @@ describe("EditPage rail — restructured layout (SELF_EDIT_RAIL_RESTRUCTURE)", (
       <EditPage ctx={ctx} mode="self" railRestructureEnabled grantRecsEnabled biosketchEnabled />,
     );
     const q = rail();
-    // Home floats at the top with a quiet "landing" tag.
+    // Home floats at the top with a quiet "landing" tag + a leading Home glyph.
     expect(q.getByTestId("rail-home")).toBeTruthy();
     expect(q.getByText("landing")).toBeTruthy();
+    expect(q.getByTestId("rail-home-icon")).toBeTruthy();
     // "Yours to edit" narrows to authored content (header only now — its note was
     // dropped; the group is self-explanatory).
     expect(q.getByText("Yours to edit")).toBeTruthy();
@@ -805,6 +822,9 @@ describe("EditPage rail — restructured layout (SELF_EDIT_RAIL_RESTRUCTURE)", (
     expect(q.getByTestId("rail-visibility")).toBeTruthy();
     expect(q.getByTestId("rail-proxy-editors")).toBeTruthy();
     expect(q.getByTestId("rail-profile-url")).toBeTruthy();
+    // Hairline rules separate the five sections (Home / Yours to edit / From WCM
+    // records / Tools / Settings) — four dividers.
+    expect(q.getAllByRole("separator")).toHaveLength(4);
     // The classic group labels are gone in the restructured rail.
     expect(q.queryByText("From WCM systems")).toBeNull();
     expect(q.queryByText("Services")).toBeNull();
@@ -819,6 +839,9 @@ describe("EditPage rail — restructured layout (SELF_EDIT_RAIL_RESTRUCTURE)", (
     expect(q.queryByText("Settings")).toBeNull();
     expect(q.queryByText("From WCM records")).toBeNull();
     expect(q.queryByText("landing")).toBeNull();
+    // No restructured chrome: no section dividers, no Home glyph.
+    expect(q.queryAllByRole("separator")).toHaveLength(0);
+    expect(q.queryByTestId("rail-home-icon")).toBeNull();
   });
 
   // The restructured rail unifies self and edit-for-others: a superuser editing
@@ -844,6 +867,9 @@ describe("EditPage rail — restructured layout (SELF_EDIT_RAIL_RESTRUCTURE)", (
     // "Yours to edit" reframes to the third-person form for edit-for-others.
     expect(q.getByText("Profile content")).toBeTruthy();
     expect(q.queryByText("Yours to edit")).toBeNull();
+    // Same Home glyph + section dividers as the self rail.
+    expect(q.getByTestId("rail-home-icon")).toBeTruthy();
+    expect(q.getAllByRole("separator").length).toBeGreaterThan(0);
     // Neither the classic self groups nor a flat (header-less) rail.
     expect(q.queryByText("From WCM systems")).toBeNull();
     expect(q.queryByText("Services")).toBeNull();

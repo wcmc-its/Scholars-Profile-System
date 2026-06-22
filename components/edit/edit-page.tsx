@@ -8,6 +8,8 @@
  * Which attributes appear (and whether editable) is the only thing that differs
  * by actor; the data contract and write calls are layout-independent.
  */
+import { HomeIcon } from "lucide-react";
+
 import { AppointmentsCard } from "@/components/edit/appointments-card";
 import { CoiCard } from "@/components/edit/coi-card";
 import { CoiGapCard } from "@/components/edit/coi-gap-card";
@@ -564,8 +566,10 @@ export function EditPage({
             kind,
             group,
             subgroup: placement.subgroup,
-            // Home floats at the top of the rail with a quiet "landing" tag.
+            // Home floats at the top of the rail with a quiet "landing" tag + a
+            // leading Home glyph.
             tag: a.key === "home" ? "landing" : undefined,
+            icon: a.key === "home" ? HomeIcon : undefined,
             // "From your publications" nests under Conflicts of Interest.
             child: a.key === "coi-gap",
             // High-active count ONLY; 0 → undefined so a Reviewed-only history
