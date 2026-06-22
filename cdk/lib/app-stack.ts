@@ -1756,9 +1756,10 @@ export class AppStack extends Stack {
         // dev role adds a non-superuser operator tier.
         //   DEVELOPMENT_ENABLED -- master kill switch. While not "on",
         //     isDeveloper() short-circuits to false BEFORE any directory work.
-        //     ENABLED for STAGING only; prod stays off until validated there
-        //     (flip to `env === "staging" || env === "prod"` via a reviewer-gated
-        //     `cdk deploy Sps-App-prod`).
+        //     ENABLED for staging + prod. Prod was validated on staging first
+        //     and promoted via a reviewer-gated `cdk deploy Sps-App-prod`; note
+        //     the flag is inert until the prod image carries the find-researchers
+        //     feature (#1185), so it ships with the next full prod release.
         //   SCHOLARS_DEVELOPMENT_GROUP_CN -- the ED group whose `member` list
         //     confers the role: ITS:Library:Scholars/development-role (created
         //     under ou=application security,ou=Groups; the subtree search from
@@ -1772,8 +1773,9 @@ export class AppStack extends Stack {
         //     operative membership mechanism while the group search is dormant.
         //     STAGING carries flm4001 (a real development-role group member) so
         //     the surface is reachable to a non-superuser operator for testing;
-        //     prod stays empty (role off there anyway).
-        DEVELOPMENT_ENABLED: env === "staging" ? "on" : "off",
+        //     prod stays empty: the role is on there, but its only members are
+        //     superusers (no non-superuser dev-role operator provisioned on prod).
+        DEVELOPMENT_ENABLED: env === "staging" || env === "prod" ? "on" : "off",
         SCHOLARS_DEVELOPMENT_GROUP_CN: "ITS:Library:Scholars/development-role",
         SCHOLARS_DEVELOPMENT_ALLOWLIST: env === "staging" ? "flm4001" : "",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
