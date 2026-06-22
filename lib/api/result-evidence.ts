@@ -78,8 +78,12 @@ export type ResultEvidence =
    *  matched" reason, but sourced from the scholar's TOP MeSH descriptors by
    *  publication frequency (denser than the often-sparse self-reported areas).
    *  Behind `SEARCH_PEOPLE_CONCEPT_HINT`; supersedes the `areas` hint when on.
-   *  Bounded by the caller; `total` drives "+N more". */
-  | { kind: "concepts"; labels: string[]; total: number }
+   *  Each item carries the MeSH descriptor `ui` so the chip can deep-link to the
+   *  scholar's publications pre-filtered to that concept (`?mesh=<ui>`); `ui` is
+   *  null for the rare label that didn't resolve to a descriptor (renders as a
+   *  non-link). The full set is sent; the client measures + folds to "+N more".
+   *  `total` (= items.length) drives the count. */
+  | { kind: "concepts"; items: Array<{ label: string; ui: string | null }>; total: number }
   /** Nothing renderable matched. Under E2 the card shows an honest-empty line. */
   | { kind: "none" }
   // ── Publications/Funding kinds (Phase 2 STUBS — handoff §5#3) ─────────────
@@ -323,11 +327,11 @@ export type SelectEvidenceInput = {
   /** Bounded research-areas hint (labels already capped to {@link AREAS_CAP},
    *  `total` is the full count). */
   areas?: { labels: string[]; total: number } | null;
-  /** Bounded top-MeSH-concepts hint (labels already capped by the caller,
-   *  `total` is the full count). When present + non-empty it supersedes `areas`
-   *  in the tail (step 8a above 8b). Behind `SEARCH_PEOPLE_CONCEPT_HINT`; absent
-   *  ⇒ today's `areas` tail (back-compat). */
-  concepts?: { labels: string[]; total: number } | null;
+  /** Top-MeSH-concepts hint — the FULL set of {label, ui} items (the client
+   *  measures + folds to "+N more"), `total` = items.length. When present +
+   *  non-empty it supersedes `areas` in the tail (step 8a above 8b). Behind
+   *  `SEARCH_PEOPLE_CONCEPT_HINT`; absent ⇒ today's `areas` tail (back-compat). */
+  concepts?: { items: Array<{ label: string; ui: string | null }>; total: number } | null;
 };
 
 /**
@@ -405,8 +409,8 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
   // 8a — concepts (top-MeSH who-is-this hint; supersedes areas when present,
   // behind SEARCH_PEOPLE_CONCEPT_HINT — the caller sets `concepts` and nulls
   // `areas` only when the flag is on, so off-flag this branch never fires)
-  if (input.concepts && input.concepts.labels.length > 0)
-    return { kind: "concepts", labels: input.concepts.labels, total: input.concepts.total };
+  if (input.concepts && input.concepts.items.length > 0)
+    return { kind: "concepts", items: input.concepts.items, total: input.concepts.total };
   // 8b — areas (legacy who-is-this hint; E2 renders it OUTSIDE the match slot)
   if (input.areas && input.areas.labels.length > 0)
     return { kind: "areas", labels: input.areas.labels, total: input.areas.total };

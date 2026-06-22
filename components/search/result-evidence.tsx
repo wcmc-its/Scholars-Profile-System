@@ -1,6 +1,7 @@
 import type { ResultEvidence } from "@/lib/api/result-evidence";
 import { MatchReason, MatchAwareReason } from "@/components/search/match-reason";
 import { HighlightedSnippet } from "@/components/search/highlight-snippet";
+import { ConceptChipRow } from "@/components/search/concept-chip-row";
 
 /**
  * #824 follow-up Phase 1 — the ONE renderer for the coherent search-result
@@ -48,29 +49,6 @@ function AreasHint({ labels, total }: { labels: string[]; total: number }) {
   );
 }
 
-// SEARCH_PEOPLE_CONCEPT_HINT — the "who is this" identity hint sourced from the
-// scholar's top MeSH concepts instead of the (sparse) self-reported areas.
-// Mirrors `AreasHint` byte-for-byte; only the eyebrow label differs ("TOPICS").
-function ConceptsHint({ labels, total }: { labels: string[]; total: number }) {
-  const more = total - labels.length;
-  return (
-    <div className="mt-2 flex min-w-0 items-baseline gap-2 rounded-md border border-[#e3e2dd] bg-[#f7f6f3] px-2.5 py-1.5 text-[12px] text-muted-foreground">
-      <span className="shrink-0 text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
-        TOPICS
-      </span>
-      <span className="min-w-0 truncate text-[#4a4a4a]">
-        {labels.map((label, i) => (
-          <span key={`${label}-${i}`}>
-            {i > 0 ? <span className="px-1.5 text-[#c9c4ba]">·</span> : null}
-            {label}
-          </span>
-        ))}
-        {more > 0 ? <span className="ml-1 font-semibold text-[#9a958a]">+{more} more</span> : null}
-      </span>
-    </div>
-  );
-}
-
 export function ResultEvidence({
   evidence,
   canExpand = false,
@@ -78,6 +56,7 @@ export function ResultEvidence({
   onToggle,
   panelId,
   hasQuery = true,
+  slug,
 }: {
   evidence: ResultEvidence;
   /** Rep-papers disclosure — when true and the evidence is a method/topic/
@@ -93,6 +72,10 @@ export function ResultEvidence({
    *  matched; on the no-query Browse page it is suppressed for the identity
    *  kinds (areas/concepts/none), which carry no match snippet to hide. */
   hasQuery?: boolean;
+  /** Scholar slug — used to build the `concepts` chip deep-links
+   *  (`/{slug}?mesh=<ui>#publications`). Required wherever a concepts evidence
+   *  can render (the People card always passes it). */
+  slug?: string;
 }) {
   switch (evidence.kind) {
     case "method":
@@ -153,13 +136,14 @@ export function ResultEvidence({
         </div>
       );
     case "concepts":
-      // SEARCH_PEOPLE_CONCEPT_HINT — the top-MeSH identity hint. Same E2
-      // treatment as areas: an honest-empty match line ABOVE the hint when there
-      // is a query, the hint alone on the no-query Browse page.
+      // SEARCH_PEOPLE_CONCEPT_HINT — the top-MeSH identity hint, a single-line
+      // fit-to-width row of deep-linking chips behind a tag glyph. Same E2
+      // treatment as areas: an honest-empty match line ABOVE the row when there
+      // is a query, the row alone on the no-query Browse page.
       return (
         <>
           {hasQuery ? <EmptyMatchLine /> : null}
-          <ConceptsHint labels={evidence.labels} total={evidence.total} />
+          <ConceptChipRow items={evidence.items} slug={slug ?? ""} />
         </>
       );
     case "areas":
