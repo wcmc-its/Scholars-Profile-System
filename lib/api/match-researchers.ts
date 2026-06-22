@@ -25,6 +25,10 @@ export type ScholarTopicScore = {
   slug: string;
   preferredName?: string;
   variantBScore: number;
+  /** Distinct first/last-author papers this scholar has in this topic (year ≥ floor). */
+  pubCount?: number;
+  /** Earliest contributing paper year for this scholar+topic (null if unknown). */
+  minYear?: number | null;
 };
 
 /** Per-topic ranked scholars + the topic's weight in the opportunity vector. */
@@ -34,12 +38,22 @@ export type TopicResult = {
   scholars: ScholarTopicScore[];
 };
 
+/** One topic's contribution to a researcher's fit, plus the evidence behind it. */
+export type TopicContribution = {
+  topicId: string;
+  contribution: number;
+  pubCount: number;
+  minYear: number | null;
+};
+
 export type RankedScholar = {
   cwid: string;
   slug: string;
   preferredName?: string;
+  /** Career-stage bucket (for the stage filter + row blurb); null when undateable. */
+  careerStage: CareerStage | null;
   axes: { topicFit: number; stageAppeal: number };
-  topicContributions: { topicId: string; contribution: number }[];
+  topicContributions: TopicContribution[];
   defaultScore: number;
 };
 
@@ -71,7 +85,7 @@ export function rankResearchers(
     slug: string;
     preferredName?: string;
     topicFit: number;
-    contributions: { topicId: string; contribution: number }[];
+    contributions: TopicContribution[];
   };
   const byCwid = new Map<string, Acc>();
 
@@ -82,7 +96,12 @@ export function rankResearchers(
         byCwid.get(s.cwid) ??
         { cwid: s.cwid, slug: s.slug, preferredName: s.preferredName, topicFit: 0, contributions: [] };
       acc.topicFit += contribution;
-      acc.contributions.push({ topicId: tr.topicId, contribution });
+      acc.contributions.push({
+        topicId: tr.topicId,
+        contribution,
+        pubCount: s.pubCount ?? 0,
+        minYear: s.minYear ?? null,
+      });
       byCwid.set(s.cwid, acc);
     }
   }
@@ -98,6 +117,7 @@ export function rankResearchers(
       cwid: acc.cwid,
       slug: acc.slug,
       preferredName: acc.preferredName,
+      careerStage: stage ?? null,
       axes: { topicFit: acc.topicFit, stageAppeal },
       topicContributions: acc.contributions,
       defaultScore,
@@ -164,7 +184,10 @@ export async function rankResearchersForOpportunity(
         },
       });
 
-      const byScholar = new Map<string, ScholarTopicScore>();
+      const byScholar = new Map<
+        string,
+        { entry: ScholarTopicScore; pmids: Set<string>; minYear: number | null }
+      >();
       for (const r of rows) {
         const rankable: RankablePublication = {
           pmid: r.publication.pmid,
@@ -179,13 +202,32 @@ export async function rankResearchersForOpportunity(
           isConfirmed: true,
         };
         const inc = scorePublication(rankable, "top_scholars", true, now);
-        const entry =
+        const slot =
           byScholar.get(r.scholar.cwid) ??
-          { cwid: r.scholar.cwid, slug: r.scholar.slug, preferredName: r.scholar.preferredName ?? undefined, variantBScore: 0 };
-        entry.variantBScore += inc;
-        byScholar.set(r.scholar.cwid, entry);
+          {
+            entry: {
+              cwid: r.scholar.cwid,
+              slug: r.scholar.slug,
+              preferredName: r.scholar.preferredName ?? undefined,
+              variantBScore: 0,
+            },
+            pmids: new Set<string>(),
+            minYear: null as number | null,
+          };
+        slot.entry.variantBScore += inc;
+        slot.pmids.add(r.publication.pmid);
+        if (r.year != null) slot.minYear = slot.minYear == null ? r.year : Math.min(slot.minYear, r.year);
+        byScholar.set(r.scholar.cwid, slot);
       }
-      return { topicId, topicWeight, scholars: [...byScholar.values()] };
+      return {
+        topicId,
+        topicWeight,
+        scholars: [...byScholar.values()].map((s) => ({
+          ...s.entry,
+          pubCount: s.pmids.size,
+          minYear: s.minYear,
+        })),
+      };
     }),
   );
 
