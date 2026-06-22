@@ -820,4 +820,44 @@ describe("EditPage rail — restructured layout (SELF_EDIT_RAIL_RESTRUCTURE)", (
     expect(q.queryByText("From WCM records")).toBeNull();
     expect(q.queryByText("landing")).toBeNull();
   });
+
+  // The restructured rail unifies self and edit-for-others: a superuser editing
+  // another scholar gets the SAME section groupings (not the flat superuser rail),
+  // with "Yours to edit" reframed to the third-person "Profile content".
+  it("applies the same restructured grouping to the superuser edit-for-others rail", () => {
+    render(
+      <EditPage
+        ctx={ctx}
+        mode="superuser"
+        attr="home"
+        railRestructureEnabled
+        grantRecsEnabled
+        biosketchEnabled
+      />,
+    );
+    const q = rail();
+    expect(q.getByText("From WCM records")).toBeTruthy();
+    expect(q.getByText("Tools")).toBeTruthy();
+    expect(q.getByText("Settings")).toBeTruthy();
+    // Same three info buttons (WCM records / Tools / Settings) as the self rail.
+    expect(q.getAllByRole("button", { name: "About this group" })).toHaveLength(3);
+    // "Yours to edit" reframes to the third-person form for edit-for-others.
+    expect(q.getByText("Profile content")).toBeTruthy();
+    expect(q.queryByText("Yours to edit")).toBeNull();
+    // Neither the classic self groups nor a flat (header-less) rail.
+    expect(q.queryByText("From WCM systems")).toBeNull();
+    expect(q.queryByText("Services")).toBeNull();
+  });
+
+  it("keeps the flat superuser rail (no section headers) when the flag is off", () => {
+    render(<EditPage ctx={ctx} mode="superuser" attr="home" grantRecsEnabled biosketchEnabled />);
+    const q = rail();
+    expect(q.getByTestId("rail-home")).toBeTruthy();
+    // The flat superuser rail carries no group headers at all.
+    expect(q.queryByText("Profile content")).toBeNull();
+    expect(q.queryByText("From WCM records")).toBeNull();
+    expect(q.queryByText("Tools")).toBeNull();
+    expect(q.queryByText("Settings")).toBeNull();
+    expect(q.queryByText("landing")).toBeNull();
+  });
 });

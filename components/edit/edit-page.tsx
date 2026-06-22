@@ -204,8 +204,10 @@ function attrsForMode(mode: EditMode): AttrDef[] {
  * Self-mode rail grouping + editability tier (vision-round T2.2). Leads with
  * what the scholar can actually change, then groups the rest under their system
  * of record so "what can I edit?" is answerable without clicking all nine items.
- * Superuser mode keeps a flat rail — its editability differs (Overview is
- * read-only, Profile URL is direct-set), so these self labels would mislead.
+ * In the CLASSIC layout (flag off) superuser mode keeps a flat rail — its
+ * editability differs (Overview is read-only, Profile URL is direct-set), so these
+ * self labels would mislead. The restructured rail (above) instead unifies every
+ * surface and reframes "Yours to edit" → "Profile content" for edit-for-others.
  */
 const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   // "Yours to edit" group (owned).
@@ -263,8 +265,12 @@ const SELF_RAIL_GROUP = {
   readonly: "From WCM systems",
 } as const;
 
-// --- Restructured self rail (SELF_EDIT_RAIL_RESTRUCTURE) ----------------------
-// Same items as the classic self rail — only the order / grouping / labels move.
+// --- Restructured rail (SELF_EDIT_RAIL_RESTRUCTURE) ---------------------------
+// Same items as the classic rails — only the order / grouping / labels move. When
+// the flag is on this layout applies to EVERY edit surface (self, proxy,
+// unit-admin, superuser, comms_steward) so self and edit-for-others share one set
+// of section groupings; "Yours to edit" reframes to "Profile content" for anyone
+// editing on the scholar's behalf.
 // Home floats to the top; "Yours to edit" narrows to authored content (Overview,
 // Highlights); the sourced data gathers under one "From WCM records" header split
 // by two sub-labels (read-only Identity vs hide/show/flag Records); the generators
@@ -324,7 +330,8 @@ const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string; subgroup?: string }> =
 // self-explanatory and carry no note.
 const RAIL_V2_GROUP_META: Record<string, { description?: string }> = {
   [RAIL_V2_WCM_GROUP]: {
-    description: "Sourced from WCM. Show, hide, or flag here — corrections happen in the source system.",
+    description:
+      "Sourced from WCM. Show, hide, or flag here — corrections happen in the source system.",
   },
   Tools: { description: "Generators that produce an artifact to use elsewhere." },
   Settings: { description: "Profile administration." },
@@ -441,31 +448,33 @@ export function visibleAttrKeys(
   biosketchEnabled = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
-  return attrsForMode(mode)
-    // GrantRecs Phase 3 — "Grants for me" appears only when SELF_EDIT_GRANT_RECS
-    // is on, and only on the self / superuser surfaces (never proxy / unit-admin).
-    .filter(
-      (a) =>
-        a.key !== "grant-recs" ||
-        (grantRecsEnabled && (mode === "self" || isSuperuserLike(mode))),
-    )
-    // #917 v5 — "NIH biosketch" appears only when EDIT_BIOSKETCH_GENERATE is on.
-    // Visible to EVERY actor the generate route already authorizes (the shared
-    // `authorizeOverviewWrite`: self, superuser, comms-steward, a granted proxy,
-    // and an org-unit owner/curator). `attrsForMode` already keeps biosketch for
-    // all five surfaces, so the flag is the only remaining gate — unlike
-    // grant-recs, which stays self / superuser only.
-    .filter((a) => a.key !== "biosketch" || biosketchEnabled)
-    // The "From your publications" item only exists when there are candidates to
-    // show — an empty panel is never surfaced, and an `?attr=coi-gap` with zero
-    // candidates canonicalizes away (the page redirects to bare /edit) rather
-    // than rendering an empty panel or 404-looping. (proxy drops it outright.)
-    .filter((a) => a.key !== "coi-gap" || hasCoiGap)
-    // #836 — Highlights appears only when the loader populated `ctx.highlights`
-    // (flag on + genuine self). Off ⇒ dropped from both the rail and the valid-
-    // attr set, so the feature is fully dark.
-    .filter((a) => a.key !== "highlights" || hasHighlights)
-    .map((a) => a.key);
+  return (
+    attrsForMode(mode)
+      // GrantRecs Phase 3 — "Grants for me" appears only when SELF_EDIT_GRANT_RECS
+      // is on, and only on the self / superuser surfaces (never proxy / unit-admin).
+      .filter(
+        (a) =>
+          a.key !== "grant-recs" ||
+          (grantRecsEnabled && (mode === "self" || isSuperuserLike(mode))),
+      )
+      // #917 v5 — "NIH biosketch" appears only when EDIT_BIOSKETCH_GENERATE is on.
+      // Visible to EVERY actor the generate route already authorizes (the shared
+      // `authorizeOverviewWrite`: self, superuser, comms-steward, a granted proxy,
+      // and an org-unit owner/curator). `attrsForMode` already keeps biosketch for
+      // all five surfaces, so the flag is the only remaining gate — unlike
+      // grant-recs, which stays self / superuser only.
+      .filter((a) => a.key !== "biosketch" || biosketchEnabled)
+      // The "From your publications" item only exists when there are candidates to
+      // show — an empty panel is never surfaced, and an `?attr=coi-gap` with zero
+      // candidates canonicalizes away (the page redirects to bare /edit) rather
+      // than rendering an empty panel or 404-looping. (proxy drops it outright.)
+      .filter((a) => a.key !== "coi-gap" || hasCoiGap)
+      // #836 — Highlights appears only when the loader populated `ctx.highlights`
+      // (flag on + genuine self). Off ⇒ dropped from both the rail and the valid-
+      // attr set, so the feature is fully dark.
+      .filter((a) => a.key !== "highlights" || hasHighlights)
+      .map((a) => a.key)
+  );
 }
 
 export function EditPage({
@@ -500,12 +509,10 @@ export function EditPage({
   // (flag on + self or superuser). The loader (per surface) enforces who may load
   // it — self on `/edit`, self or superuser on `/edit/scholar/[cwid]`, never a
   // proxy / unit-admin — so a non-null value here already implies an allowed actor.
-  const hasHighlights =
-    (mode === "self" || isSuperuserLike(mode)) && ctx.highlights !== null;
+  const hasHighlights = (mode === "self" || isSuperuserLike(mode)) && ctx.highlights !== null;
   // GrantRecs Phase 3 — "Grants for me" shows on self / superuser surfaces when
   // SELF_EDIT_GRANT_RECS is on (the server page computes the flag and threads it).
-  const showGrantRecs =
-    grantRecsEnabled && (mode === "self" || isSuperuserLike(mode));
+  const showGrantRecs = grantRecsEnabled && (mode === "self" || isSuperuserLike(mode));
   // #917 v5 — the "NIH biosketch" Services item shows on every surface the
   // generate route authorizes (self, superuser, comms-steward, proxy, unit-admin
   // — the shared `authorizeOverviewWrite`), gated only by EDIT_BIOSKETCH_GENERATE
@@ -531,40 +538,43 @@ export function EditPage({
   const railKindFor = (k: AttrKey): RailKind =>
     k === "profile-url" && mode === "self" && !slugRequestEnabled ? "readonly" : SELF_RAIL_KIND[k];
 
-  const railItems: RailItem[] =
-    selfLike
-      ? railRestructureEnabled
-        ? RAIL_V2_ORDER.flatMap((k) => {
-            const a = visible.find((v) => v.key === k);
-            if (!a) return [];
-            const kind = railKindFor(k);
-            const placement = RAIL_V2_PLACEMENT[k];
-            // Reframe the authored-content group to third-person for a proxy /
-            // unit-admin editing on the scholar's behalf (mirrors the classic rail).
-            const group =
-              placement.group === "Yours to edit" && mode !== "self"
-                ? "Profile content"
-                : placement.group;
-            return [
-              {
-                key: a.key,
-                label: a.label,
-                readonly: a.readonly,
-                kind,
-                group,
-                subgroup: placement.subgroup,
-                // Home floats at the top of the rail with a quiet "landing" tag.
-                tag: a.key === "home" ? "landing" : undefined,
-                // "From your publications" nests under Conflicts of Interest.
-                child: a.key === "coi-gap",
-                // High-active count ONLY; 0 → undefined so a Reviewed-only history
-                // shows the item without a "0" badge.
-                count:
-                  a.key === "coi-gap" ? ctx.unmatchedPubmedCoi.length || undefined : undefined,
-              },
-            ];
-          })
-        : SELF_RAIL_ORDER.flatMap((k) => {
+  const railItems: RailItem[] = railRestructureEnabled
+    ? RAIL_V2_ORDER.flatMap((k) => {
+        const a = visible.find((v) => v.key === k);
+        if (!a) return [];
+        const kind = railKindFor(k);
+        const placement = RAIL_V2_PLACEMENT[k];
+        // Reframe the authored-content group to third-person for a proxy /
+        // unit-admin editing on the scholar's behalf (mirrors the classic rail).
+        const group =
+          placement.group === "Yours to edit" && mode !== "self"
+            ? "Profile content"
+            : placement.group;
+        // The advisory's first-person label reframes for anyone editing on the
+        // scholar's behalf (superuser / comms_steward), mirroring the classic
+        // superuser rail.
+        const label =
+          a.key === "coi-gap" && mode !== "self" ? "From the scholar’s publications" : a.label;
+        return [
+          {
+            key: a.key,
+            label,
+            readonly: a.readonly,
+            kind,
+            group,
+            subgroup: placement.subgroup,
+            // Home floats at the top of the rail with a quiet "landing" tag.
+            tag: a.key === "home" ? "landing" : undefined,
+            // "From your publications" nests under Conflicts of Interest.
+            child: a.key === "coi-gap",
+            // High-active count ONLY; 0 → undefined so a Reviewed-only history
+            // shows the item without a "0" badge.
+            count: a.key === "coi-gap" ? ctx.unmatchedPubmedCoi.length || undefined : undefined,
+          },
+        ];
+      })
+    : selfLike
+      ? SELF_RAIL_ORDER.flatMap((k) => {
           const a = visible.find((v) => v.key === k);
           if (!a) return [];
           const kind = railKindFor(k);
@@ -578,9 +588,7 @@ export function EditPage({
               // the scholar's behalf, so reframe the owned rail group to the
               // third-person "Profile content" the home board uses (#955 #10).
               group:
-                mode !== "self" && kind === "owned"
-                  ? "Profile content"
-                  : SELF_RAIL_GROUP[kind],
+                mode !== "self" && kind === "owned" ? "Profile content" : SELF_RAIL_GROUP[kind],
               // "From your publications" nests under Conflicts of Interest (it
               // immediately follows "coi" in SELF_RAIL_ORDER) rather than reading
               // as a flat sibling — it is a sub-view of COI, not its own SOR.
@@ -589,10 +597,7 @@ export function EditPage({
               // The badge is the High-active count ONLY — Medium and Reviewed are
               // excluded — and 0 coerces to undefined so the item can appear for a
               // Reviewed-only history without showing a "0" badge.
-              count:
-                a.key === "coi-gap"
-                  ? ctx.unmatchedPubmedCoi.length || undefined
-                  : undefined,
+              count: a.key === "coi-gap" ? ctx.unmatchedPubmedCoi.length || undefined : undefined,
             },
           ];
         })
@@ -601,8 +606,7 @@ export function EditPage({
           if (!a) return [];
           // The COI-gap label is first-person ("From your publications"); reframe
           // it for a superuser viewing another scholar's advisory.
-          const label =
-            a.key === "coi-gap" ? "From the scholar’s publications" : a.label;
+          const label = a.key === "coi-gap" ? "From the scholar’s publications" : a.label;
           // Like the self rail, the advisory nests under Conflicts of Interest
           // (it immediately follows "coi" in SUPERUSER_RAIL_ORDER) rather than
           // reading as a flat sibling — it is a sub-view of COI, not its own SOR.
@@ -614,17 +618,14 @@ export function EditPage({
               child: a.key === "coi-gap",
               // High-active count ONLY (Medium + Reviewed excluded); 0 → undefined
               // so a Reviewed-only history shows the item without a "0" badge.
-              count:
-                a.key === "coi-gap"
-                  ? ctx.unmatchedPubmedCoi.length || undefined
-                  : undefined,
+              count: a.key === "coi-gap" ? ctx.unmatchedPubmedCoi.length || undefined : undefined,
             },
           ];
         });
-  // Per-group descriptions only apply to the restructured self rail; the classic
-  // rail and the superuser rail render header-only (undefined ⇒ no change).
-  const railGroupMeta =
-    selfLike && railRestructureEnabled ? RAIL_V2_GROUP_META : undefined;
+  // Per-group descriptions apply to the restructured rail on every edit surface
+  // (self / proxy / unit-admin / superuser / comms_steward); the classic self rail
+  // and the flat superuser rail render header-only (undefined ⇒ no change).
+  const railGroupMeta = railRestructureEnabled ? RAIL_V2_GROUP_META : undefined;
   // Self edits at "/edit"; superuser and proxy edit a named scholar at
   // "/edit/scholar/<cwid>" (a proxy is never on their own /edit).
   const basePath = mode === "self" ? "/edit" : `/edit/scholar/${ctx.scholar.cwid}`;
@@ -889,7 +890,9 @@ function renderPanel(
         />
       );
     case "funding":
-      return <FundingCard cwid={cwid} mode={voiceMode} scholarName={scholarName} grants={ctx.grants} />;
+      return (
+        <FundingCard cwid={cwid} mode={voiceMode} scholarName={scholarName} grants={ctx.grants} />
+      );
     case "appointments":
       return (
         <AppointmentsCard
@@ -901,7 +904,12 @@ function renderPanel(
       );
     case "education":
       return (
-        <EducationCard cwid={cwid} mode={voiceMode} scholarName={scholarName} educations={ctx.educations} />
+        <EducationCard
+          cwid={cwid}
+          mode={voiceMode}
+          scholarName={scholarName}
+          educations={ctx.educations}
+        />
       );
     case "mentees":
       return (
@@ -956,7 +964,11 @@ function renderPanel(
         return <ProfileUrlReadonlyPanel slug={ctx.scholar.slug} cwid={cwid} />;
       }
       return (
-        <SlugRequestCard cwid={cwid} currentSlug={ctx.scholar.slug} latestRequest={latestSlugRequest} />
+        <SlugRequestCard
+          cwid={cwid}
+          currentSlug={ctx.scholar.slug}
+          latestRequest={latestSlugRequest}
+        />
       );
     case "proxy-editors":
       // Self (the scholar) or superuser (on the scholar's behalf) manages the
