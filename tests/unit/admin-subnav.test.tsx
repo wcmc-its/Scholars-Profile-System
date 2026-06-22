@@ -115,27 +115,28 @@ describe("AdminSubnav", () => {
     expect(screen.getByTestId("admin-tab-methods").getAttribute("aria-current")).toBe("page");
   });
 
-  it("hides the Funding matcher tab when findResearchersTab is null/omitted", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} findResearchersTab={null} />);
-    expect(screen.queryByTestId("admin-tab-find-researchers")).toBeNull();
+  it("shows the Funding matcher tab on every superuser surface (rides superuserSurfaces)", () => {
+    // Default superuserSurfaces=true (a superuser-only page like Profiles).
     render(<AdminSubnav active="profiles" pendingSlugRequests={null} />);
-    expect(screen.queryByTestId("admin-tab-find-researchers")).toBeNull();
-  });
-
-  it("shows the Funding matcher tab (linking /edit/find-researchers) when findResearchersTab is 0", () => {
-    render(<AdminSubnav active="profiles" pendingSlugRequests={null} findResearchersTab={0} />);
     expect(screen.getByTestId("admin-tab-find-researchers").getAttribute("href")).toBe(
       "/edit/find-researchers",
     );
   });
 
-  it("shows the Funding matcher tab even when superuserSurfaces=false (dev-role parity)", () => {
+  it("hides the Funding matcher tab for a non-superuser, non-developer (comms_steward)", () => {
+    render(
+      <AdminSubnav active="methods" pendingSlugRequests={null} methodsTab={0} superuserSurfaces={false} />,
+    );
+    expect(screen.queryByTestId("admin-tab-find-researchers")).toBeNull();
+  });
+
+  it("shows the Funding matcher tab to a pure dev-role viewer via viewerIsDeveloper", () => {
     render(
       <AdminSubnav
         active="find-researchers"
         pendingSlugRequests={null}
-        findResearchersTab={0}
         superuserSurfaces={false}
+        viewerIsDeveloper
       />,
     );
     const tab = screen.getByTestId("admin-tab-find-researchers");

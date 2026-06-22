@@ -43,11 +43,11 @@ export function AdminSubnav({
   administratorsTab,
   methodsTab,
   dataQualityTab,
-  findResearchersTab,
   selfEditHref,
   superuserSurfaces = true,
   profilesTab = false,
   unitsTab = false,
+  viewerIsDeveloper = false,
 }: {
   active: AdminSubnavActive;
   pendingSlugRequests: number | null;
@@ -64,11 +64,6 @@ export function AdminSubnav({
    *  shows it to a unit Owner/Curator with grants). A number shows it (passed
    *  `0` — no badge), mirroring `methodsTab`. */
   dataQualityTab?: number | null;
-  /** `null`/omitted hides the "Funding matcher" tab (GrantRecs reverse-matcher,
-   *  `/edit/find-researchers`). A number shows it (passed `0` — no badge),
-   *  mirroring `methodsTab`. Gated on `isSuperuser || isDeveloper` by the caller,
-   *  so it shows for both audiences independently of `superuserSurfaces`. */
-  findResearchersTab?: number | null;
   /** Link back to the viewer's own self-edit surface (`/edit`), right-aligned.
    *  `null`/omitted when the viewer has no profile of their own (a staff
    *  superuser), so the link never lands on a 404. Ignored when `active="self"`
@@ -87,6 +82,11 @@ export function AdminSubnav({
   /** Show the "Units" tab (the `/edit/units` finder). A comms_steward edits any
    *  existing org unit's content (§3b), and a superuser jumps to any unit too. */
   unitsTab?: boolean;
+  /** Show the "Funding matcher" tab to a pure development-role viewer who is NOT
+   *  a superuser. Superusers already get it via `superuserSurfaces`; this is the
+   *  dev-role escape hatch on `/edit/find-researchers` (their only console page).
+   *  Default `false`. */
+  viewerIsDeveloper?: boolean;
 }) {
   // When the unified account-dropdown flag is on, the account chip/dropdown
   // replaces the right-end "My Profile" tab — profile actions move entirely into
@@ -146,10 +146,12 @@ export function AdminSubnav({
             active={active === "data-quality"}
           />
         )}
-        {/* GrantRecs reverse-matcher. Shown to superusers AND development-role
-            members (caller gates on `isSuperuser || isDeveloper`), so it does
-            NOT ride `superuserSurfaces` — its only entry point is now this bar. */}
-        {findResearchersTab !== null && findResearchersTab !== undefined && (
+        {/* GrantRecs reverse-matcher — its only entry point is now this bar.
+            Rides `superuserSurfaces` (every superuser console page passes it) so
+            superusers see it on every console surface; `viewerIsDeveloper` is the
+            escape hatch that also shows it to a pure development-role viewer on
+            its own page. Hidden for a comms_steward (neither superuser nor dev). */}
+        {(superuserSurfaces || viewerIsDeveloper) && (
           <AdminTab
             href="/edit/find-researchers"
             id="find-researchers"

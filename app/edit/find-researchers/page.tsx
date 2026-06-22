@@ -59,9 +59,9 @@ export default async function FindResearchersPage() {
   }
 
   // Fold into the shared console (mirrors `/edit/methods` et al.). A superuser
-  // gets the full tab set; a pure development-role member (`superuserSurfaces`
-  // false) sees only the Funding matcher tab — which is always shown here since
-  // the page gate already proved `isSuperuser || isDeveloper`.
+  // gets the full tab set (Funding matcher rides `superuserSurfaces`); a pure
+  // development-role member sees only the Funding matcher tab, shown via
+  // `viewerIsDeveloper` since `superuserSurfaces` is false for them.
   const superuserSurfaces = session.isSuperuser;
   const pendingSlugRequests =
     superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
@@ -92,7 +92,7 @@ export default async function FindResearchersPage() {
         administratorsTab={administratorsTab}
         methodsTab={isMethodsTabVisible(session) ? 0 : null}
         dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
-        findResearchersTab={0}
+        viewerIsDeveloper={session.isDeveloper}
         selfEditHref={selfEditHref}
         superuserSurfaces={superuserSurfaces}
         profilesTab={session.isCommsSteward || session.isSuperuser}
