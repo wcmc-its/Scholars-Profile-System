@@ -9,8 +9,8 @@
  * have no dual org/paper view and a binary (confirm/reject) decision.
  */
 import { useState } from "react";
-import { Check, ExternalLink, X } from "lucide-react";
-import type { CoreQueueRow, CoreReviewQueue } from "@/lib/api/core-queue";
+import { Check, ChevronRight, ExternalLink, X } from "lucide-react";
+import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core-queue";
 
 type Decision = "claimed" | "rejected";
 
@@ -178,6 +178,10 @@ function CandidateCard({
         </div>
       </div>
 
+      {row.synopsis ? (
+        <p className="text-muted-foreground mt-2 text-[13px] leading-snug">{row.synopsis}</p>
+      ) : null}
+
       {row.llmRationale ? (
         <p className="text-foreground mt-2.5 text-[13px] leading-snug">{row.llmRationale}</p>
       ) : null}
@@ -205,12 +209,90 @@ function CandidateCard({
         <p className="text-muted-foreground mt-2 line-clamp-2 text-xs italic">“{row.ackSnippet}”</p>
       ) : null}
 
+      <CoreStaffLine coauthorScholars={row.coauthorScholars} coauthors={row.coauthors} />
+
+      {row.abstract || row.fullAuthorsString || row.wcmAuthors.length > 0 ? (
+        <details className="group mt-2.5">
+          <summary className="text-muted-foreground hover:text-foreground inline-flex cursor-pointer items-center gap-1 text-xs select-none">
+            <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden />
+            Details
+          </summary>
+          <div className="mt-2 flex flex-col gap-3 border-l border-apollo-border pl-3">
+            {row.abstract ? (
+              <p className="text-muted-foreground text-xs leading-relaxed">{row.abstract}</p>
+            ) : null}
+            {row.fullAuthorsString ? (
+              <p className="text-muted-foreground text-xs">
+                <span className="font-medium text-foreground">Authors: </span>
+                {row.fullAuthorsString}
+              </p>
+            ) : null}
+            {row.wcmAuthors.length > 0 ? (
+              <p className="text-muted-foreground text-xs">
+                <span className="font-medium text-foreground">WCM authors: </span>
+                {row.wcmAuthors.map((s, i) => (
+                  <span key={s.cwid}>
+                    {i > 0 ? ", " : ""}
+                    <ScholarLink scholar={s} />
+                  </span>
+                ))}
+              </p>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
+
       {error ? (
         <p className="mt-2 text-xs text-red-600" role="alert">
           Could not save: {error}
         </p>
       ) : null}
     </div>
+  );
+}
+
+/** A core-staff co-author (signal 2): named + linked when resolved, else the bare CWID. */
+function CoreStaffLine({
+  coauthorScholars,
+  coauthors,
+}: {
+  coauthorScholars: QueueScholar[];
+  coauthors: string[];
+}) {
+  if (coauthors.length === 0) return null;
+  const resolved = new Set(coauthorScholars.map((s) => s.cwid));
+  const unresolved = coauthors.filter((c) => !resolved.has(c));
+  return (
+    <p className="text-muted-foreground mt-2 text-xs">
+      <span className="font-medium text-foreground">Core staff on byline: </span>
+      {coauthorScholars.map((s, i) => (
+        <span key={s.cwid}>
+          {i > 0 ? ", " : ""}
+          <ScholarLink scholar={s} />
+          {s.dept ? <span className="text-muted-foreground"> ({s.dept})</span> : null}
+        </span>
+      ))}
+      {unresolved.length > 0 ? (
+        <span>
+          {coauthorScholars.length > 0 ? ", " : ""}
+          {unresolved.join(", ")}
+        </span>
+      ) : null}
+    </p>
+  );
+}
+
+/** Link to a scholar's public profile (`/{slug}`), opening in a new tab. */
+function ScholarLink({ scholar }: { scholar: QueueScholar }) {
+  return (
+    <a
+      href={`/${scholar.slug}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-foreground hover:underline"
+    >
+      {scholar.name}
+    </a>
   );
 }
 
