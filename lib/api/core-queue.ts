@@ -31,11 +31,21 @@ export interface CoreQueueRow {
   status: string;
   /** Core-staff CWIDs on the byline (signal 2). */
   coauthors: string[];
+  /** True when a core alias matched in the full text (signal 3). */
+  signalAck: boolean;
   /** Matched full-text alias, e.g. "CBIC" (signal 3). */
   ackAlias: string | null;
   ackSnippet: string | null;
   /** 1-10 dense LLM triage score (signal 4). */
   llmScore: number | null;
+  /** Plain-language LLM reason for the score (signal 4). */
+  llmRationale: string | null;
+  /** 0-1 repeat-user prior (signal 1); null when never computed. */
+  authorAffinity: number | null;
+  /** Scopus citation count for the publication. */
+  citationCount: number;
+  pubmedUrl: string | null;
+  doi: string | null;
 }
 
 export interface CoreReviewQueue {
@@ -64,7 +74,7 @@ export function partitionCoreQueue(
   return { candidates, confirmed };
 }
 
-type QueueReader = Pick<typeof db.read, "core" | "publicationCore">;
+type QueueReader = Pick<typeof db.read, "core" | "publicationCore" | "coreClaim">;
 
 /**
  * Load the review queue for one core, or `null` when the core does not exist.
@@ -89,11 +99,22 @@ export async function loadCoreReviewQueue(
       likelihood: true,
       status: true,
       signalCoauthors: true,
+      signalAck: true,
       ackAlias: true,
       ackSnippet: true,
       llmScore: true,
+      llmRationale: true,
+      authorAffinity: true,
       publication: {
-        select: { title: true, journal: true, year: true, authorsString: true },
+        select: {
+          title: true,
+          journal: true,
+          year: true,
+          authorsString: true,
+          citationCount: true,
+          pubmedUrl: true,
+          doi: true,
+        },
       },
     },
   });
@@ -109,12 +130,19 @@ export async function loadCoreReviewQueue(
     coauthors: Array.isArray(r.signalCoauthors)
       ? (r.signalCoauthors as unknown[]).filter((c): c is string => typeof c === "string")
       : [],
+    signalAck: r.signalAck,
     ackAlias: r.ackAlias,
     ackSnippet: r.ackSnippet,
     llmScore: r.llmScore,
+    llmRationale: r.llmRationale,
+    // authorAffinity is a nullable Decimal — Number(null) is 0, so guard the null.
+    authorAffinity: r.authorAffinity == null ? null : Number(r.authorAffinity),
+    citationCount: r.publication.citationCount,
+    pubmedUrl: r.publication.pubmedUrl,
+    doi: r.publication.doi,
   }));
 
-  const claims = await loadActiveCoreClaimsByCore(coreId, db.read);
+  const claims = await loadActiveCoreClaimsByCore(coreId, client);
   const { candidates, confirmed } = partitionCoreQueue(queueRows, (pmid) => claims.get(pmid) ?? null);
   return { core, candidates, confirmed };
 }
