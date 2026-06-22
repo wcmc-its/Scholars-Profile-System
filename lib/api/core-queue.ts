@@ -18,6 +18,15 @@ import {
   loadActiveCoreClaimsByCore,
 } from "@/lib/api/core-merge";
 
+/** A WCM scholar resolved from a CWID, linkable to their public profile. */
+export interface QueueScholar {
+  cwid: string;
+  name: string;
+  slug: string;
+  /** Primary department, when known (core staff may have none). */
+  dept: string | null;
+}
+
 /** One row in the review queue — a publication + its core-usage evidence. */
 export interface CoreQueueRow {
   pmid: string;
@@ -25,12 +34,23 @@ export interface CoreQueueRow {
   journal: string | null;
   year: number | null;
   authorsString: string | null;
+  /** Full author list (the truncated `authorsString` drops the tail). */
+  fullAuthorsString: string | null;
   /** 0-1 combined-signal likelihood. */
   likelihood: number;
   /** The engine status (candidate | confirmed | below_threshold). */
   status: string;
   /** Core-staff CWIDs on the byline (signal 2). */
   coauthors: string[];
+  /** Core-staff co-authors (signal 2) resolved to named scholars; a subset of
+   *  `coauthors` — CWIDs with no Scholar row stay only in `coauthors`. */
+  coauthorScholars: QueueScholar[];
+  /** WCM scholars on the byline (potential core users), in author order. */
+  wcmAuthors: QueueScholar[];
+  /** Raw PubMed abstract, shown collapsed behind an expander. */
+  abstract: string | null;
+  /** One-line plain-language synopsis (issue #329), when present. */
+  synopsis: string | null;
   /** True when a core alias matched in the full text (signal 3). */
   signalAck: boolean;
   /** Matched full-text alias, e.g. "CBIC" (signal 3). */
@@ -74,7 +94,13 @@ export function partitionCoreQueue(
   return { candidates, confirmed };
 }
 
-type QueueReader = Pick<typeof db.read, "core" | "publicationCore" | "coreClaim">;
+type QueueReader = Pick<
+  typeof db.read,
+  "core" | "publicationCore" | "coreClaim" | "scholar" | "publicationAuthor"
+>;
+
+/** Cap WCM byline authors per card — mega-author papers would otherwise be a wall. */
+const WCM_AUTHORS_CAP = 12;
 
 /**
  * Load the review queue for one core, or `null` when the core does not exist.
@@ -111,6 +137,9 @@ export async function loadCoreReviewQueue(
           journal: true,
           year: true,
           authorsString: true,
+          fullAuthorsString: true,
+          abstract: true,
+          synopsis: true,
           citationCount: true,
           pubmedUrl: true,
           doi: true,
@@ -119,28 +148,91 @@ export async function loadCoreReviewQueue(
     },
   });
 
-  const queueRows: CoreQueueRow[] = rows.map((r) => ({
-    pmid: r.pmid,
-    title: r.publication.title,
-    journal: r.publication.journal,
-    year: r.publication.year,
-    authorsString: r.publication.authorsString,
-    likelihood: Number(r.likelihood),
-    status: r.status,
-    coauthors: Array.isArray(r.signalCoauthors)
+  // --- batched name resolution (one query each, not per row) ---
+  const coStaffCwids = new Set<string>();
+  for (const r of rows) {
+    if (Array.isArray(r.signalCoauthors)) {
+      for (const c of r.signalCoauthors) if (typeof c === "string") coStaffCwids.add(c);
+    }
+  }
+  const pmids = rows.map((r) => r.pmid);
+
+  // Core-staff co-authors (signal-2 CWIDs) → named scholars. CWIDs with no
+  // Scholar row simply don't appear here (the component falls back to the CWID).
+  const scholarById = new Map<string, QueueScholar>();
+  if (coStaffCwids.size > 0) {
+    const scholars = await client.scholar.findMany({
+      where: { cwid: { in: [...coStaffCwids] } },
+      select: { cwid: true, preferredName: true, slug: true, primaryDepartment: true },
+    });
+    for (const s of scholars) {
+      scholarById.set(s.cwid, {
+        cwid: s.cwid,
+        name: s.preferredName,
+        slug: s.slug,
+        dept: s.primaryDepartment,
+      });
+    }
+  }
+
+  // WCM scholars on each paper's byline (potential core users), in author order.
+  const wcmByPmid = new Map<string, QueueScholar[]>();
+  if (pmids.length > 0) {
+    const authors = await client.publicationAuthor.findMany({
+      where: { pmid: { in: pmids }, cwid: { not: null }, isConfirmed: true },
+      orderBy: { position: "asc" },
+      select: {
+        pmid: true,
+        cwid: true,
+        scholar: { select: { preferredName: true, slug: true, primaryDepartment: true } },
+      },
+    });
+    for (const a of authors) {
+      if (!a.cwid || !a.scholar) continue;
+      const list = wcmByPmid.get(a.pmid) ?? [];
+      if (list.length >= WCM_AUTHORS_CAP || list.some((w) => w.cwid === a.cwid)) continue;
+      list.push({
+        cwid: a.cwid,
+        name: a.scholar.preferredName,
+        slug: a.scholar.slug,
+        dept: a.scholar.primaryDepartment,
+      });
+      wcmByPmid.set(a.pmid, list);
+    }
+  }
+
+  const queueRows: CoreQueueRow[] = rows.map((r) => {
+    const coauthors = Array.isArray(r.signalCoauthors)
       ? (r.signalCoauthors as unknown[]).filter((c): c is string => typeof c === "string")
-      : [],
-    signalAck: r.signalAck,
-    ackAlias: r.ackAlias,
-    ackSnippet: r.ackSnippet,
-    llmScore: r.llmScore,
-    llmRationale: r.llmRationale,
-    // authorAffinity is a nullable Decimal — Number(null) is 0, so guard the null.
-    authorAffinity: r.authorAffinity == null ? null : Number(r.authorAffinity),
-    citationCount: r.publication.citationCount,
-    pubmedUrl: r.publication.pubmedUrl,
-    doi: r.publication.doi,
-  }));
+      : [];
+    return {
+      pmid: r.pmid,
+      title: r.publication.title,
+      journal: r.publication.journal,
+      year: r.publication.year,
+      authorsString: r.publication.authorsString,
+      fullAuthorsString: r.publication.fullAuthorsString,
+      abstract: r.publication.abstract,
+      synopsis: r.publication.synopsis,
+      likelihood: Number(r.likelihood),
+      status: r.status,
+      coauthors,
+      coauthorScholars: coauthors
+        .map((c) => scholarById.get(c))
+        .filter((s): s is QueueScholar => s !== undefined),
+      wcmAuthors: wcmByPmid.get(r.pmid) ?? [],
+      signalAck: r.signalAck,
+      ackAlias: r.ackAlias,
+      ackSnippet: r.ackSnippet,
+      llmScore: r.llmScore,
+      llmRationale: r.llmRationale,
+      // authorAffinity is a nullable Decimal — Number(null) is 0, so guard the null.
+      authorAffinity: r.authorAffinity == null ? null : Number(r.authorAffinity),
+      citationCount: r.publication.citationCount,
+      pubmedUrl: r.publication.pubmedUrl,
+      doi: r.publication.doi,
+    };
+  });
 
   const claims = await loadActiveCoreClaimsByCore(coreId, client);
   const { candidates, confirmed } = partitionCoreQueue(queueRows, (pmid) => claims.get(pmid) ?? null);

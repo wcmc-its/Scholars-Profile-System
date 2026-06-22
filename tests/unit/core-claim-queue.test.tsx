@@ -15,9 +15,14 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     journal: "NeuroImage",
     year: 2021,
     authorsString: "Ballon D, Dyke J",
+    fullAuthorsString: "Ballon D, Dyke J, Xiang J",
+    abstract: "We imaged the brain in detail.",
+    synopsis: "A faster MRI sequence.",
     likelihood: 0.82,
     status: "candidate",
     coauthors: ["djb2001"],
+    coauthorScholars: [{ cwid: "djb2001", name: "Doug Ballon", slug: "doug-ballon", dept: "Radiology" }],
+    wcmAuthors: [{ cwid: "jx2001", name: "Jenny Xiang", slug: "jenny-xiang", dept: "Genomics" }],
     signalAck: true,
     ackAlias: "CBIC",
     ackSnippet: "processed at the Citigroup Biomedical Imaging Center",
@@ -83,6 +88,33 @@ describe("CoreClaimQueue", () => {
     expect(screen.queryByText(/Repeat-user/)).toBeNull();
     expect(screen.queryByText(/co-author/)).toBeNull();
     expect(screen.queryByText(/Named:|Acknowledged/)).toBeNull();
+  });
+
+  it("renders the synopsis and links resolved core-staff co-authors to their profile (Tier 2)", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    expect(screen.getByText("A faster MRI sequence.")).toBeTruthy();
+    const staff = screen.getByRole("link", { name: "Doug Ballon" });
+    expect(staff.getAttribute("href")).toBe("/doug-ballon");
+    expect(screen.getByText(/\(Radiology\)/)).toBeTruthy();
+  });
+
+  it("shows an unresolved core-staff CWID as bare text (Tier 2 fallback)", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ coauthors: ["djb2001", "zzz9999"], coauthorScholars: row().coauthorScholars })]}
+        confirmed={[]}
+      />,
+    );
+    expect(screen.getByText(/zzz9999/)).toBeTruthy();
+  });
+
+  it("exposes abstract, full author list, and linked WCM authors in the details expander (Tier 2)", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    expect(screen.getByText("We imaged the brain in detail.")).toBeTruthy();
+    expect(screen.getByText(/Ballon D, Dyke J, Xiang J/)).toBeTruthy();
+    const wcm = screen.getByRole("link", { name: "Jenny Xiang" });
+    expect(wcm.getAttribute("href")).toBe("/jenny-xiang");
   });
 
   it("posts a claim and moves the row out of the review list on Confirm", async () => {

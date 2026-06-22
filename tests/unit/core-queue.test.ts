@@ -13,9 +13,14 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     journal: null,
     year: 2020,
     authorsString: null,
+    fullAuthorsString: null,
+    abstract: null,
+    synopsis: null,
     likelihood: 0.5,
     status: "candidate",
     coauthors: [],
+    coauthorScholars: [],
+    wcmAuthors: [],
     signalAck: false,
     ackAlias: null,
     ackSnippet: null,
@@ -96,17 +101,36 @@ describe("loadCoreReviewQueue mapping", () => {
       journal: "NeuroImage",
       year: 2021,
       authorsString: "Ballon D",
+      fullAuthorsString: "Ballon D, Dyke J, Xiang J",
+      abstract: "We imaged the brain.",
+      synopsis: "A new MRI sequence.",
       citationCount: 12,
       pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/30418319/",
       doi: "10.1/x",
     },
   });
 
-  const reader = (rows: ReturnType<typeof rawRow>[]) =>
+  // djb2001 is a known scholar (core staff); jpd2001 has no Scholar row.
+  const SCHOLARS = [
+    { cwid: "djb2001", preferredName: "Doug Ballon", slug: "doug-ballon", primaryDepartment: "Radiology" },
+  ];
+  // Two byline WCM authors for the paper, in position order.
+  const AUTHORS = [
+    { pmid: "30418319", cwid: "jpd2001", scholar: { preferredName: "Jonathan Dyke", slug: "jonathan-dyke", primaryDepartment: "Radiology" } },
+    { pmid: "30418319", cwid: "jx2001", scholar: { preferredName: "Jenny Xiang", slug: "jenny-xiang", primaryDepartment: "Genomics" } },
+  ];
+
+  const reader = (
+    rows: ReturnType<typeof rawRow>[],
+    scholars: typeof SCHOLARS = SCHOLARS,
+    authors: typeof AUTHORS = AUTHORS,
+  ) =>
     ({
       core: { findUnique: async () => ({ id: "2", name: "Imaging" }) },
       publicationCore: { findMany: async () => rows },
       coreClaim: { findMany: async () => [] },
+      scholar: { findMany: async () => scholars },
+      publicationAuthor: { findMany: async () => authors },
     }) as unknown as Parameters<typeof loadCoreReviewQueue>[1];
 
   it("maps the new Tier-1 fields through, coercing Decimals and filtering CWIDs", async () => {
@@ -120,6 +144,42 @@ describe("loadCoreReviewQueue mapping", () => {
     expect(r?.citationCount).toBe(12);
     expect(r?.pubmedUrl).toBe("https://pubmed.ncbi.nlm.nih.gov/30418319/");
     expect(r?.doi).toBe("10.1/x");
+  });
+
+  it("resolves core-staff co-authors to named scholars (Tier 2), leaving the rest as CWIDs", async () => {
+    const r = (await loadCoreReviewQueue("2", reader([rawRow()])))?.candidates[0];
+    // only djb2001 has a Scholar row; jpd2001 stays a bare CWID in `coauthors`.
+    expect(r?.coauthorScholars).toEqual([
+      { cwid: "djb2001", name: "Doug Ballon", slug: "doug-ballon", dept: "Radiology" },
+    ]);
+    expect(r?.coauthors).toContain("jpd2001");
+  });
+
+  it("attaches WCM byline authors in order + the publication detail fields (Tier 2)", async () => {
+    const r = (await loadCoreReviewQueue("2", reader([rawRow()])))?.candidates[0];
+    expect(r?.wcmAuthors.map((s) => s.name)).toEqual(["Jonathan Dyke", "Jenny Xiang"]);
+    expect(r?.abstract).toBe("We imaged the brain.");
+    expect(r?.synopsis).toBe("A new MRI sequence.");
+    expect(r?.fullAuthorsString).toBe("Ballon D, Dyke J, Xiang J");
+  });
+
+  it("dedupes a repeated WCM author and caps the list at WCM_AUTHORS_CAP (Tier 2)", async () => {
+    const dup = {
+      pmid: "30418319",
+      cwid: "dup001",
+      scholar: { preferredName: "Dup Author", slug: "dup", primaryDepartment: "Core" },
+    };
+    // 13 further distinct authors → 14 distinct total, well over the cap of 12.
+    const many = Array.from({ length: 13 }, (_, i) => ({
+      pmid: "30418319",
+      cwid: `aut${i}`,
+      scholar: { preferredName: `Author ${i}`, slug: `author-${i}`, primaryDepartment: "Core" },
+    }));
+    const r = (
+      await loadCoreReviewQueue("2", reader([rawRow()], SCHOLARS, [dup, dup, ...many]))
+    )?.candidates[0];
+    expect(r?.wcmAuthors).toHaveLength(12); // capped
+    expect(r?.wcmAuthors.filter((w) => w.cwid === "dup001")).toHaveLength(1); // deduped
   });
 
   it("keeps a null authorAffinity null (Number(null) would be 0)", async () => {
