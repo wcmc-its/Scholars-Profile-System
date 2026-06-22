@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { researcherBlurb, stageFit, topicFitScores } from "@/lib/match-display";
+import {
+  buildResearcherCsv,
+  careerStageLabel,
+  researcherBlurb,
+  stageFit,
+  topicFitScores,
+} from "@/lib/match-display";
 
 describe("topicFitScores", () => {
   it("scales relative to the strongest match (top → 100)", () => {
@@ -39,5 +45,39 @@ describe("researcherBlurb", () => {
     expect(
       researcherBlurb({ pubCount: 0, minYear: null, topicLabel: "x", careerStage: "mid" }),
     ).toBe("mid-career.");
+  });
+});
+
+describe("careerStageLabel", () => {
+  it("maps buckets to short labels and null to empty", () => {
+    expect(careerStageLabel("early")).toBe("Early career");
+    expect(careerStageLabel("grad")).toBe("Graduate");
+    expect(careerStageLabel(null)).toBe("");
+  });
+});
+
+describe("buildResearcherCsv", () => {
+  it("emits a header row and escapes commas in fields", () => {
+    const csv = buildResearcherCsv([
+      {
+        cwid: "abc1234",
+        name: "Elena Park",
+        title: "Assistant Professor",
+        department: "Hematology, Oncology",
+        careerStage: "early",
+        topicFit: 94,
+        stageLabel: "Strong",
+        topTopicLabel: "checkpoint inhibition",
+        topPubCount: 18,
+      },
+    ]);
+    const lines = csv.trim().split(/\r?\n/);
+    expect(lines[0]).toBe(
+      "CWID,Name,Title,Department,Career stage,Topic fit,Stage fit,Top topic,Papers on top topic",
+    );
+    expect(lines[1]).toContain("abc1234");
+    expect(lines[1]).toContain("Early career");
+    expect(lines[1]).toContain('"Hematology, Oncology"'); // comma → quoted
+    expect(lines[1]).toContain("94");
   });
 });
