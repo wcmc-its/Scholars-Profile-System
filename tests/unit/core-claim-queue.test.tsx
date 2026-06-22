@@ -233,4 +233,81 @@ describe("CoreClaimQueue", () => {
     fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "llm" } });
     expect(titles()).toEqual(["Low likelihood, high LLM", "High likelihood, low LLM"]);
   });
+
+  it("announces the outcome politely for screen readers (Tier 3)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    const live = screen.getByTestId("core-claim-live");
+    expect(live.getAttribute("aria-live")).toBe("polite");
+    expect(live.textContent).toBe(""); // silent until an action
+
+    fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
+    await waitFor(() =>
+      expect(live.textContent).toBe("Confirmed Advanced MRI of the brain."),
+    );
+  });
+
+  it("rejects via the 'r' shortcut and undoes via 'u' on the decided card (Tier 3)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    const card = () => container.querySelector("[data-card]") as HTMLElement;
+
+    fireEvent.keyDown(card(), { key: "r" });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, { body: string }])[1].body).status).toBe(
+      "rejected",
+    );
+
+    await screen.findByRole("button", { name: /undo/i });
+    fireEvent.keyDown(card(), { key: "u" });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse((fetchMock.mock.calls[1] as [string, { body: string }])[1].body).status).toBe(
+      "revoked",
+    );
+  });
+
+  it("ArrowDown moves roving focus to the next card (Tier 3)", () => {
+    const { container } = render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "First" }), row({ pmid: "2", title: "Second" })]}
+        confirmed={[]}
+      />,
+    );
+    const cards = container.querySelectorAll("[data-card]");
+    fireEvent.keyDown(cards[0] as HTMLElement, { key: "ArrowDown" });
+    expect((document.activeElement as HTMLElement)?.getAttribute("data-pmid")).toBe("2");
+  });
+
+  it("does NOT fire a shortcut typed into a child control (the shell-only guard) (Tier 3)", () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+
+    // 'a' typed while the Confirm button (a child) is focused must NOT claim.
+    fireEvent.keyDown(screen.getByRole("button", { name: /confirm/i }), { key: "a" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a just-decided row visible under a filter that would exclude it, so undo stays reachable (Tier 3)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    // a candidate that does NOT match the "Acknowledged" filter
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ signalAck: false, ackAlias: null })]}
+        confirmed={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
+    await screen.findByRole("button", { name: /undo/i });
+
+    fireEvent.click(screen.getByRole("button", { name: "Acknowledged" }));
+    // still shown via the decided-row override, so its Undo is reachable
+    expect(screen.getByRole("button", { name: /undo/i })).toBeTruthy();
+  });
 });

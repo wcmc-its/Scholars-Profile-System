@@ -43,6 +43,9 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
   const [errors, setErrors] = useState<Map<string, string>>(new Map());
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<SortKey>("likelihood");
+  // Polite SR announcement of the last outcome — the success path is otherwise
+  // silent (the card swaps in place with no focus move), mirroring coi-gap-card.
+  const [announce, setAnnounce] = useState("");
 
   // Post a decision (claimed/rejected) or a revoke (undo) and reflect it locally.
   async function send(pmid: string, status: Decision | "revoked") {
@@ -72,6 +75,12 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
         else next.set(pmid, status);
         return next;
       });
+      const title = candidates.find((c) => c.pmid === pmid)?.title ?? "this publication";
+      setAnnounce(
+        status === "revoked"
+          ? "Undone."
+          : `${status === "claimed" ? "Confirmed" : "Rejected"} ${title}.`,
+      );
     } catch (err) {
       setErrors((m) => new Map(m).set(pmid, err instanceof Error ? err.message : "request failed"));
     } finally {
@@ -96,6 +105,9 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
 
   return (
     <div data-slot="core-claim-queue">
+      <div aria-live="polite" className="sr-only" data-testid="core-claim-live">
+        {announce}
+      </div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 className="flex items-baseline gap-2 text-[15px] font-semibold">
           To review
@@ -269,6 +281,9 @@ function CandidateCard({
         data-card
         data-pmid={row.pmid}
         tabIndex={0}
+        role="group"
+        aria-label={`${decided === "claimed" ? "Confirmed" : "Rejected"}: ${row.title}`}
+        aria-keyshortcuts="u ArrowUp ArrowDown"
         onKeyDown={onKeyDown}
       >
         <div className="flex min-w-0 items-center gap-2 text-sm">
@@ -308,6 +323,9 @@ function CandidateCard({
       data-card
       data-pmid={row.pmid}
       tabIndex={0}
+      role="group"
+      aria-label={`Candidate: ${row.title}`}
+      aria-keyshortcuts="a r ArrowUp ArrowDown"
       onKeyDown={onKeyDown}
     >
       <div className="flex items-start justify-between gap-4">
