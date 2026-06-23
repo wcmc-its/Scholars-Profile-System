@@ -1202,13 +1202,16 @@ export type MethodPublicationHit = {
   /** #1166 Surface B — the per-(pub × entity) relevance sentence + matched-span
    *  for this paper, present ONLY when the feed is filtered by a cell line
    *  (`opts.entityId`); null/absent otherwise (the unfiltered baseline carries no
-   *  snippet, spec §5.4). Powers the on-demand snippet under each filtered row. */
-  entityUsage?: {
+   *  snippet, spec §5.4). Powers the on-demand snippet under each filtered row.
+   *  #1166-B — now an ORDERED list (best-first): a paper can carry multiple
+   *  usage sentences for one entity; the feed shows [0] inline + the rest under
+   *  "show more". Single-element for entities with one sentence. */
+  entityUsages?: Array<{
     sentence: string;
     matchedSpan: { start: number; end: number } | null;
     /** #1168 — WS-C badge: "appears" (generic mention) vs "used" (default). */
     usage: "used" | "appears";
-  } | null;
+  }>;
 };
 
 const PUB_SELECT = {
@@ -1353,12 +1356,22 @@ export async function getFamilyPublications(
   // and carry the per-pmid snippet through. Family-level pmids (the denominator)
   // stay unfiltered. No-op when no entityId / flag off → feedPmids === allPmids.
   let feedPmids = allPmids;
-  let factByPmid: Map<string, CellLineUsageFact> | null = null;
+  let factsByPmid: Map<string, CellLineUsageFact[]> | null = null;
   if (opts.entityId && isMethodsLensEntityLayerOn()) {
     const facts = await getFamilyCellLineUsageFacts(supercategory, familyLabel, opts.entityId);
-    factByPmid = new Map(facts.map((f) => [f.pmid, f]));
+    // #1166-B — group ALL facts per pmid, preserving the query's centrality-desc
+    // order (best-first). A pmid can now carry multiple usage sentences; the prior
+    // `new Map(facts.map(...))` was last-wins and would have surfaced the WORST one.
+    // pmids are deduped via the map keys.
+    factsByPmid = new Map();
     const allow = new Set(allPmids);
-    feedPmids = facts.map((f) => f.pmid).filter((p) => allow.has(p));
+    for (const f of facts) {
+      if (!allow.has(f.pmid)) continue;
+      const arr = factsByPmid.get(f.pmid);
+      if (arr) arr.push(f);
+      else factsByPmid.set(f.pmid, [f]);
+    }
+    feedPmids = [...factsByPmid.keys()];
   }
 
   const typeWhere =
@@ -1397,17 +1410,17 @@ export async function getFamilyPublications(
   return {
     hits: rows.map((r) => {
       const hit = mapPublicationHit(r, authorsByPmid.get(r.pmid), includeImpact);
-      const fact = factByPmid?.get(r.pmid);
-      return fact
+      const usageFacts = factsByPmid?.get(r.pmid);
+      return usageFacts?.length
         ? {
             ...hit,
-            entityUsage: {
-              sentence: fact.sentence,
-              matchedSpan: fact.matchedSpan,
+            entityUsages: usageFacts.map((f) => ({
+              sentence: f.sentence,
+              matchedSpan: f.matchedSpan,
               // WS-C (#253): a generic background mention softens to "Where it
               // appears"; "usage"/null keeps the "How it was used" default.
-              usage: fact.mentionClass === "mention" ? "appears" : "used",
-            },
+              usage: f.mentionClass === "mention" ? ("appears" as const) : ("used" as const),
+            })),
           }
         : hit;
     }),
