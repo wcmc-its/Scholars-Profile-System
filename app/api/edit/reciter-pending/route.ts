@@ -26,7 +26,12 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
-import { fetchSuggestedArticles, type ReciterSuggestion } from "@/lib/reciter/client";
+import {
+  fetchSuggestedArticles,
+  fetchSuggestedArticlesViaApi,
+  preferReciterApiSource,
+  type ReciterSuggestion,
+} from "@/lib/reciter/client";
 
 // Live ReCiter read, gated on the signed-in identity — never cache it.
 export const dynamic = "force-dynamic";
@@ -61,7 +66,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (targetCwid !== session.cwid && !session.isSuperuser) return empty();
 
   try {
-    const suggestions = await fetchSuggestedArticles(targetCwid);
+    // RECITER_PENDING_SOURCE=api ⇒ read from the engine's Feature Generator API
+    // (sidesteps the S3-offloaded Analysis read where the SPS task can reach the
+    // engine but not the offloaded object); otherwise the DynamoDB/S3 source.
+    const suggestions = preferReciterApiSource()
+      ? await fetchSuggestedArticlesViaApi(targetCwid)
+      : await fetchSuggestedArticles(targetCwid);
     return NextResponse.json(
       { suggestions },
       { headers: { "cache-control": "no-store" } },

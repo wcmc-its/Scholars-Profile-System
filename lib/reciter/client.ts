@@ -320,6 +320,40 @@ export function formatSuggestionAuthors(features: ReciterAuthorFeature[]): strin
 }
 
 /**
+ * Filter a candidate list to genuinely-uncurated suggestions and map to the card
+ * shape. KEEP iff score >= {@link SUGGESTED_ARTICLES_MIN_SCORE}, the pmid is NOT
+ * in `curated` (the GoldStandard known/rejected set — empty for the API source,
+ * which has no live cross-check), and userAssertion is not ACCEPTED/REJECTED.
+ * Sorted by score descending. Shared by the DynamoDB and engine-API sources.
+ */
+function articleFeaturesToSuggestions(
+  features: ReciterArticleFeature[],
+  curated: Set<string> = new Set(),
+): ReciterSuggestion[] {
+  const kept: ReciterSuggestion[] = [];
+  for (const a of features) {
+    const score = a.authorshipLikelihoodScore;
+    if (typeof score !== "number" || score < SUGGESTED_ARTICLES_MIN_SCORE) continue;
+    if (a.pmid == null) continue;
+    const pmid = String(a.pmid);
+    if (curated.has(pmid)) continue;
+    if (a.userAssertion === "ACCEPTED" || a.userAssertion === "REJECTED") continue;
+
+    kept.push({
+      pmid,
+      score: Math.round(score),
+      articleTitle: a.articleTitle ?? "",
+      authors: formatSuggestionAuthors(a.reCiterArticleAuthorFeatures ?? []),
+      journal: a.journalTitleVerbose || null,
+      datePublished: a.publicationDateDisplay || null,
+      isPreprint: a.publicationType?.publicationTypeCanonical === "Preprint",
+    });
+  }
+  kept.sort((x, y) => y.score - x.score);
+  return kept;
+}
+
+/**
  * Fetch the uid's live "suggested articles" by reading ReCiter's DynamoDB +
  * S3 directly (read-only IAM, NO api-key) and filtering to genuinely-uncurated
  * candidates.
@@ -383,32 +417,90 @@ export async function fetchSuggestedArticles(
       feature = body ? (JSON.parse(body) as ReciterFeature) : undefined;
     }
 
-    const features = feature?.reCiterArticleFeatures ?? [];
-    const kept: ReciterSuggestion[] = [];
-
-    for (const a of features) {
-      const score = a.authorshipLikelihoodScore;
-      if (typeof score !== "number" || score < SUGGESTED_ARTICLES_MIN_SCORE) continue;
-      if (a.pmid == null) continue;
-      const pmid = String(a.pmid);
-      if (curated.has(pmid)) continue;
-      if (a.userAssertion === "ACCEPTED" || a.userAssertion === "REJECTED") continue;
-
-      kept.push({
-        pmid,
-        score: Math.round(score),
-        articleTitle: a.articleTitle ?? "",
-        authors: formatSuggestionAuthors(a.reCiterArticleAuthorFeatures ?? []),
-        journal: a.journalTitleVerbose || null,
-        datePublished: a.publicationDateDisplay || null,
-        isPreprint: a.publicationType?.publicationTypeCanonical === "Preprint",
-      });
-    }
-
-    kept.sort((x, y) => y.score - x.score);
-    return kept;
+    return articleFeaturesToSuggestions(feature?.reCiterArticleFeatures ?? [], curated);
   } catch {
     // Timeout, non-2xx parse, network failure — degrade to hidden.
+    return [];
+  }
+}
+
+/**
+ * Engine-API timeout for the suggested-articles read. `analysisRefreshFlag=false`
+ * returns the CACHED analysis (no re-run), but the body can be a few MB — a
+ * generous-but-bounded ceiling for a non-blocking, client-mounted nudge.
+ */
+export const SUGGESTED_ARTICLES_API_TIMEOUT_MS = 12_000;
+
+/**
+ * Source selector: when `RECITER_PENDING_SOURCE=api`, the reciter-pending route
+ * reads suggestions from the ReCiter engine's Feature Generator API instead of
+ * ReCiter's DynamoDB/S3. Used where the SPS task can reach the engine but NOT
+ * the S3-offloaded Analysis object (the offloaded read fails silently → empty
+ * nudge). Default off (DynamoDB/S3 source). Flag-parity: wired per-env in CDK.
+ */
+export function preferReciterApiSource(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return env.RECITER_PENDING_SOURCE === "api";
+}
+
+/**
+ * Pull `reCiterArticleFeatures` from the Feature Generator response, tolerating
+ * its top-level shape (the engine returns the analysis either as the
+ * reCiterFeature object, a wrapper carrying it, or a single-element list).
+ */
+function extractArticleFeatures(json: unknown): ReciterArticleFeature[] {
+  if (Array.isArray(json)) return json.length ? extractArticleFeatures(json[0]) : [];
+  if (!json || typeof json !== "object") return [];
+  const obj = json as Record<string, unknown>;
+  if (Array.isArray(obj.reCiterArticleFeatures)) {
+    return obj.reCiterArticleFeatures as ReciterArticleFeature[];
+  }
+  const rf = obj.reCiterFeature as Record<string, unknown> | undefined;
+  if (rf && Array.isArray(rf.reCiterArticleFeatures)) {
+    return rf.reCiterArticleFeatures as ReciterArticleFeature[];
+  }
+  return [];
+}
+
+/**
+ * Engine-API source for the suggested-articles read. The Feature Generator
+ * endpoint returns `reCiterArticleFeatures` IN the HTTP response, so it
+ * sidesteps the S3-offloaded `Analysis` read that {@link fetchSuggestedArticles}
+ * depends on (the SPS task can reach the engine but not the offloaded object —
+ * the read otherwise degrades to an empty nudge). `analysisRefreshFlag=false`
+ * returns the CACHED analysis fast — NEVER the heavy synchronous re-run.
+ *
+ * Without the live GoldStandard cross-check we filter on the per-article
+ * `userAssertion` alone — ACCEPTED/REJECTED already encode prior curation, which
+ * for a curated scholar matches the DynamoDB path exactly. Degrades to `[]` on
+ * not-configured / non-2xx / timeout / parse error — this function NEVER throws.
+ *
+ * `opts.fetchImpl` injects a fake `fetch` for tests; production uses the global.
+ */
+export async function fetchSuggestedArticlesViaApi(
+  uid: string,
+  opts: { config?: ReciterApiConfig; timeoutMs?: number; fetchImpl?: typeof fetch } = {},
+): Promise<ReciterSuggestion[]> {
+  const config = opts.config ?? reciterApiConfig();
+  if (!config) return [];
+  const doFetch = opts.fetchImpl ?? fetch;
+
+  try {
+    const url = new URL("/reciter/feature-generator/by/uid", config.baseUrl);
+    url.searchParams.set("uid", uid);
+    // CRITICAL: false ⇒ return the cached analysis, never trigger the heavy
+    // synchronous re-run (that is `runFeatureGenerator`'s job, off the request path).
+    url.searchParams.set("analysisRefreshFlag", "false");
+
+    const res = await doFetch(url, {
+      method: "GET",
+      headers: { "api-key": config.apiKey },
+      signal: AbortSignal.timeout(opts.timeoutMs ?? SUGGESTED_ARTICLES_API_TIMEOUT_MS),
+    });
+    if (!res.ok) return [];
+    return articleFeaturesToSuggestions(extractArticleFeatures(await res.json()));
+  } catch {
     return [];
   }
 }

@@ -262,6 +262,17 @@ export class AppStack extends Stack {
       "EtlReciterSecret",
       `scholars/${env}/etl/reciter`,
     );
+    // ReCiter ENGINE REST API — base URL + ADMIN api-key (JSON keys
+    // RECITER_API_BASE_URL + RECITER_API_KEY). Same secret the ETL task already
+    // consumes for the #746 reject path; the app task reads it for the
+    // reciter-pending nudge's engine-API source (RECITER_PENDING_SOURCE=api),
+    // which fetches candidates over the Feature Generator HTTP API and so
+    // sidesteps the S3-offloaded Analysis read. Seed out-of-band.
+    const reciterApiSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "ReciterApiSecret",
+      `scholars/${env}/reciter-api`,
+    );
     // SAML IdP signing cert — the trust anchor for assertion-signature
     // verification (#466). Injected as SAML_IDP_CERT; a secret (not env) so
     // the 2026-08-19 IdP cert rollover is a value rotation, not a code
@@ -314,6 +325,7 @@ export class AppStack extends Stack {
       revalidateTokenSecret.secretArn,
       samlSpPrivateKeySecret.secretArn,
       etlReciterSecret.secretArn,
+      reciterApiSecret.secretArn,
       samlIdpCertSecret.secretArn,
       samlSpCertSecret.secretArn,
       sessionCookieSecret.secretArn,
@@ -1124,6 +1136,15 @@ export class AppStack extends Stack {
         // approval-gated Sps-App-prod deploy after the staging soak). The nudge only
         // renders for a genuine (non-impersonating) self viewer with this flag on.
         SELF_EDIT_RECITER_PENDING_HINT: env === "staging" ? "on" : "off",
+        // RECITER_PENDING_SOURCE — where the reciter-pending route reads
+        // candidates. "api" ⇒ the ReCiter engine's Feature Generator HTTP API
+        // (RECITER_API_BASE_URL/KEY above), which returns the candidate list in
+        // its response and so SIDESTEPS the S3-offloaded Analysis read that the
+        // default DynamoDB/S3 source needs (the SPS task reaches the engine but
+        // not the offloaded object → otherwise a silent empty nudge). "api" in
+        // staging; "off" (DynamoDB/S3 source) in prod. Both fall back to [] on
+        // any failure, so this is safe regardless of which source is selected.
+        RECITER_PENDING_SOURCE: env === "staging" ? "api" : "off",
         // #443 -- mentee co-publication BRIDGE. getMenteesForMentor's per-mentee
         // co-pub count + 3-pub preview is a LIVE WCM ReciterDB query the in-VPC
         // app can't reach, so it degrades to "temporarily unavailable" in
@@ -1871,6 +1892,14 @@ export class AppStack extends Stack {
           etlReciterSecret,
           "SCHOLARS_RECITERDB_PASSWORD",
         ),
+        // ReCiter engine REST API for the reciter-pending nudge's engine-API
+        // source (RECITER_PENDING_SOURCE=api). env-var name == the secret's JSON
+        // key; read by lib/reciter/client.ts reciterApiConfig().
+        RECITER_API_BASE_URL: ecs.Secret.fromSecretsManager(
+          reciterApiSecret,
+          "RECITER_API_BASE_URL",
+        ),
+        RECITER_API_KEY: ecs.Secret.fromSecretsManager(reciterApiSecret, "RECITER_API_KEY"),
       },
     });
 
