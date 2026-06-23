@@ -63,6 +63,9 @@ export function researcherBlurb(input: {
   minYear: number | null;
   topicLabel: string;
   careerStage: CareerStage | null;
+  /** Grant-history clause (optional; appended when the matcher supplies it). */
+  esiEligible?: boolean;
+  yearsSinceDegree?: number | null;
 }): string {
   const parts: string[] = [];
   if (input.pubCount > 0) {
@@ -71,6 +74,12 @@ export function researcherBlurb(input: {
     parts.push(`${input.pubCount} ${noun} on ${input.topicLabel}${since}`);
   }
   if (input.careerStage) parts.push(STAGE_PHRASE[input.careerStage]);
+  if (input.esiEligible) {
+    const yrs = input.yearsSinceDegree;
+    parts.push(
+      yrs != null ? `ESI-eligible (${yrs} yr${yrs === 1 ? "" : "s"} since terminal degree)` : "ESI-eligible",
+    );
+  }
   return parts.length ? `${parts.join("; ")}.` : "";
 }
 
@@ -88,6 +97,18 @@ export function careerStageLabel(stage: CareerStage | null): string {
   return stage ? CAREER_STAGE_LABELS[stage] : "";
 }
 
+// Funding status (mirrors FundingStatus in lib/api/match-researchers; redeclared
+// here so this client-safe module imports no server code).
+export type FundingStatus = "funded" | "unfunded";
+const FUNDING_STATUS_LABELS: Record<FundingStatus, string> = {
+  funded: "Currently funded",
+  unfunded: "Not currently funded",
+};
+
+export function fundingStatusLabel(status: FundingStatus | null | undefined): string {
+  return status ? FUNDING_STATUS_LABELS[status] : "";
+}
+
 /** One researcher's row for the CSV export (selected rows in the matcher). */
 export type ResearcherCsvInput = {
   cwid: string;
@@ -99,6 +120,8 @@ export type ResearcherCsvInput = {
   stageLabel: string;
   topTopicLabel: string;
   topPubCount: number;
+  esiEligible?: boolean;
+  fundingStatus?: FundingStatus | null;
 };
 
 /** Build the export CSV for the selected researchers (escaping via lib/csv). */
@@ -112,6 +135,8 @@ export function buildResearcherCsv(rows: readonly ResearcherCsvInput[]): string 
       "Career stage",
       "Topic fit",
       "Stage fit",
+      "ESI eligible",
+      "Funding status",
       "Top topic",
       "Papers on top topic",
     ],
@@ -123,6 +148,8 @@ export function buildResearcherCsv(rows: readonly ResearcherCsvInput[]): string 
       careerStageLabel(r.careerStage),
       r.topicFit,
       r.stageLabel,
+      r.esiEligible == null ? "" : r.esiEligible ? "Yes" : "No",
+      fundingStatusLabel(r.fundingStatus),
       r.topTopicLabel,
       r.topPubCount,
     ]),

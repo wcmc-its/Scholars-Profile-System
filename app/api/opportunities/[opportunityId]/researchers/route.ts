@@ -62,6 +62,7 @@ export async function GET(
     sort: sortRaw as ResearcherSort,
     stageLens,
     limit,
+    crossRef: true,
   });
 
   // View-model assembly for the redesigned screen: opportunity card fields, the

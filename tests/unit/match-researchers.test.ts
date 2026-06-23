@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { rankResearchers, type TopicResult } from "@/lib/api/match-researchers";
+import { deriveGrantSignals, rankResearchers, type TopicResult } from "@/lib/api/match-researchers";
 
 const TOPICS: TopicResult[] = [
   {
@@ -114,5 +114,98 @@ describe("rankResearchers — weighted topic union", () => {
 
   it("respects limit", () => {
     expect(rankResearchers(TOPICS, { limit: 2 })).toHaveLength(2);
+  });
+});
+
+describe("deriveGrantSignals — grant-history display signals", () => {
+  const NOW = new Date("2026-06-22T00:00:00Z");
+  const future = new Date("2027-01-01");
+  const past = new Date("2020-01-01");
+
+  it("funded when any award is currently active (any role)", () => {
+    const s = deriveGrantSignals(
+      { grants: [{ endDate: future, role: "Co-I", mechanism: null }], educations: [] },
+      NOW,
+    );
+    expect(s.fundingStatus).toBe("funded");
+  });
+
+  it("unfunded when every award has ended (or there are none)", () => {
+    expect(
+      deriveGrantSignals({ grants: [{ endDate: past, role: "PI", mechanism: "R01" }], educations: [] }, NOW)
+        .fundingStatus,
+    ).toBe("unfunded");
+    expect(deriveGrantSignals({ grants: [], educations: [] }, NOW).fundingStatus).toBe("unfunded");
+  });
+
+  it("still funded within the 12-month NCE grace (matches the profile's Active badge)", () => {
+    // Ended 4 months before NOW → past the end date but inside the canonical grace.
+    const recentlyEnded = new Date("2026-02-22");
+    expect(
+      deriveGrantSignals({ grants: [{ endDate: recentlyEnded, role: "PI", mechanism: "R01" }] }, NOW)
+        .fundingStatus,
+    ).toBe("funded");
+  });
+
+  it("ESI-eligible: within the 10yr window with no prior major PI award", () => {
+    const s = deriveGrantSignals(
+      { grants: [{ endDate: future, role: "Co-I", mechanism: "K08" }], educations: [{ year: 2020 }] },
+      NOW,
+    );
+    expect(s).toMatchObject({ esiEligible: true, yearsSinceDegree: 6 });
+  });
+
+  it("ESI forfeited by a prior R01-equivalent held as PI", () => {
+    const s = deriveGrantSignals(
+      { grants: [{ endDate: past, role: "PI", mechanism: "R01" }], educations: [{ year: 2020 }] },
+      NOW,
+    );
+    expect(s.esiEligible).toBe(false);
+  });
+
+  it("a major mechanism held only as co-I does NOT forfeit ESI", () => {
+    const s = deriveGrantSignals(
+      { grants: [{ endDate: past, role: "Co-I", mechanism: "U01" }], educations: [{ year: 2022 }] },
+      NOW,
+    );
+    expect(s.esiEligible).toBe(true);
+  });
+
+  it("not ESI-eligible past the window, and never when the degree year is unknown", () => {
+    expect(
+      deriveGrantSignals({ grants: [], educations: [{ year: 2005 }] }, NOW).esiEligible,
+    ).toBe(false); // 21 yrs out
+    const unknown = deriveGrantSignals({ grants: [], educations: [] }, NOW);
+    expect(unknown).toMatchObject({ esiEligible: false, yearsSinceDegree: null });
+  });
+
+  it("ESI clock uses the TERMINAL degree, not a later non-doctoral credential", () => {
+    // MD 2005 + a later MPH 2020: terminal = MD (21 yrs out) → NOT ESI-eligible,
+    // even though max(year) over all rows would wrongly read 6 yrs.
+    const s = deriveGrantSignals(
+      { grants: [], educations: [{ year: 2005, degree: "MD" }, { year: 2020, degree: "MPH" }] },
+      NOW,
+    );
+    expect(s).toMatchObject({ esiEligible: false, yearsSinceDegree: 21 });
+  });
+
+  it("dates from the latest doctorate for an MD-PhD; ignores a later master's", () => {
+    const s = deriveGrantSignals(
+      {
+        grants: [],
+        educations: [
+          { year: 2018, degree: "M.D." },
+          { year: 2021, degree: "Ph.D." },
+          { year: 2023, degree: "M.S." },
+        ],
+      },
+      NOW,
+    );
+    expect(s).toMatchObject({ esiEligible: true, yearsSinceDegree: 5 }); // 2026 − 2021
+  });
+
+  it("falls back to all education rows when no degree string parses as a doctorate", () => {
+    const s = deriveGrantSignals({ grants: [], educations: [{ year: 2022, degree: "Residency" }] }, NOW);
+    expect(s.yearsSinceDegree).toBe(4); // no doctorate → use the row we have
   });
 });

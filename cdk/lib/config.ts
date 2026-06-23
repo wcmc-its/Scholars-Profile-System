@@ -208,6 +208,23 @@ export interface SpsEnvConfig {
    */
   readonly curationBackupScheduleEnabled: boolean;
   /**
+   * Whether the standalone daily DynamoDB→MySQL projection (`etl:dynamodb`, the
+   * step that mirrors ReciterAI's `reciterai` table into the `opportunity` +
+   * scholar tables) runs on its OWN schedule, separate from the nightly cadence.
+   *
+   * `etl:dynamodb` is already a nightly step, but it sits AFTER `etl:ed`, which
+   * is blocked by the on-prem-routing gap (#443) — so the nightly aborts before
+   * reaching it and freshly-published opportunities 404 until someone re-projects
+   * by hand. This standalone schedule keeps the funding-matcher corpus fresh
+   * independent of the blocked nightly (#1218). A DEDICATED, creation-gating flag
+   * (like {@link curationBackupScheduleEnabled}): `true` in staging (the matcher
+   * is live there); `false` in prod until the prod corpus is published and the
+   * #443 fix lands — at which point the nightly reaches `etl:dynamodb` again and
+   * this stopgap can be retired. Gating CREATION (not just the rule's Enabled
+   * flag) keeps the extra state machine + rule + alarm out of prod entirely.
+   */
+  readonly opportunityProjectionScheduleEnabled: boolean;
+  /**
    * The externally-created, TGW-attached VPC that on-prem-reachable ETL tasks
    * run in — specifically the ED LDAP → S3 email-visibility export (#443).
    * Created out-of-band by WCM networking (NOT by our CDK): staging →
@@ -367,6 +384,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // #1032 — daily curated-tables logical backup; enabled in staging (the
     // backup is live + verified here). Read-only + tiny, so safe from launch.
     curationBackupScheduleEnabled: true,
+    // #1218 — daily standalone DynamoDB projection so the funding-matcher corpus
+    // stays fresh while the nightly is blocked at etl:ed (#443). On in staging
+    // (matcher is live here); idempotent upsert, so safe from launch.
+    opportunityProjectionScheduleEnabled: true,
     // #443 — staging runs the ED email-visibility bridge in scholars-dev, whose
     // on-prem LDAP reach is proven (2026-06-18: in-VPC LDAPS bind + 2440-unit
     // search). Only the two private `app` subnets (TGW + NAT routes) are listed.
@@ -454,6 +475,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // prod (deploy + first verify run) then flip this to true. See
     // docs/curation-backup-runbook.md § Prod.
     curationBackupScheduleEnabled: false,
+    // #1218 — standalone DynamoDB projection ships disabled on prod: the prod
+    // opportunity corpus isn't published yet and the matcher is dark there. Flip
+    // when the prod corpus lands (or leave off once #443 unblocks the nightly).
+    opportunityProjectionScheduleEnabled: false,
     // #443 — prod's on-prem-reachable VPC is scholars-prod. Wired but NOT yet
     // activated: edEmailVisibilityBridgeEnabled stays false until the
     // scholars-prod path is verified end-to-end (the same in-VPC bind probe as
