@@ -64,14 +64,15 @@ type Hit = {
     isFirst: boolean;
     isLast: boolean;
   }>;
-  /** #1166/#1168 — the per-(pub × entity) relevance sentence, present only when the
-   *  feed is filtered by an entity (`?entity=`); revealed under the row. `usage`
-   *  (WS-C #253) drives the badge: "appears" for a generic mention, else "used". */
-  entityUsage?: {
+  /** #1166/#1168/#1166-B — the per-(pub × entity) relevance sentences, present only
+   *  when the feed is filtered by an entity (`?entity=`); revealed under the row,
+   *  best-first. The first shows inline; the rest reveal under "+ N more usages".
+   *  `usage` (WS-C #253) drives each badge: "appears" for a generic mention, else "used". */
+  entityUsages?: Array<{
     sentence: string;
     matchedSpan: { start: number; end: number } | null;
     usage: "used" | "appears";
-  } | null;
+  }>;
 };
 
 type FeedResponse = {
@@ -325,6 +326,10 @@ function FeedSection({
 function PubRow({ hit, entityTerm }: { hit: Hit; entityTerm: string | null }) {
   const { open: openModal } = usePublicationModal();
   const titleHtml = sanitizePubTitle(hit.title);
+  const [usagesExpanded, setUsagesExpanded] = useState(false);
+  const usages = hit.entityUsages ?? [];
+  const shownUsages = usagesExpanded ? usages : usages.slice(0, 1);
+  const moreCount = usages.length - 1;
   return (
     <li className="py-4">
       <div className="line-clamp-2 font-semibold leading-snug">
@@ -357,16 +362,37 @@ function PubRow({ hit, entityTerm }: { hit: Hit; entityTerm: string | null }) {
         doi={hit.doi}
         abstract={hit.abstract}
       />
-      {/* #1166 — the per-(pub × entity) relevance sentence, shown only on a
-          cell-line-filtered feed; the entity term is <mark>-highlighted via the
-          shared offset-aware helper (falls back to term-match when span is null). */}
-      {hit.entityUsage && (
-        <p className="mt-2 border-l-2 border-[var(--color-border-info)] pl-2.5 text-[13px] leading-relaxed text-muted-foreground">
-          {/* #1168 — WS-C (#253) drives the label: a generic background mention reads
-              "Where it appears"; a specific experimental use reads "How it was used". */}
-          <SnippetUsageBadge usage={hit.entityUsage.usage} />
-          {highlightSnippet(hit.entityUsage.sentence, entityTerm ?? "", hit.entityUsage.matchedSpan)}
-        </p>
+      {/* #1166/#1166-B — the per-(pub × entity) relevance sentences, shown only on an
+          entity-filtered feed; the entity term is <mark>-highlighted via the shared
+          offset-aware helper (falls back to term-match when span is null). The best
+          sentence shows inline; any others reveal under "+ N more usages". */}
+      {usages.length > 0 && (
+        <div className="mt-2 space-y-1.5">
+          {shownUsages.map((u, i) => (
+            <p
+              key={i}
+              className="border-l-2 border-[var(--color-border-info)] pl-2.5 text-[13px] leading-relaxed text-muted-foreground"
+            >
+              {/* #1168 — WS-C (#253) drives the label: a generic background mention reads
+                  "Where it appears"; a specific experimental use reads "How it was used". */}
+              <SnippetUsageBadge usage={u.usage} />
+              {highlightSnippet(u.sentence, entityTerm ?? "", u.matchedSpan)}
+            </p>
+          ))}
+          {moreCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setUsagesExpanded((v) => !v)}
+              aria-expanded={usagesExpanded}
+              className="pl-2.5 text-xs font-medium text-[var(--color-accent-slate)] hover:underline"
+            >
+              {usagesExpanded
+                ? "Show fewer"
+                : `+ ${moreCount} more usage${moreCount === 1 ? "" : "s"}`}
+              <span aria-hidden="true">{usagesExpanded ? " ▴" : " ▾"}</span>
+            </button>
+          )}
+        </div>
       )}
     </li>
   );
