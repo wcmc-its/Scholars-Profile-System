@@ -891,8 +891,8 @@ function Byline({ row }: { row: CoreQueueRow }) {
 /** "Co-authored with …" — linked scholars (with dept) plus any bare CWIDs. */
 function CoauthorLead({ row }: { row: CoreQueueRow }) {
   const resolved = row.coauthorScholars;
-  const resolvedSet = new Set(resolved.map((s) => s.cwid));
-  const unresolved = row.coauthors.filter((c) => !resolvedSet.has(c));
+  const resolvedSet = new Set(resolved.map((s) => s.cwid.toLowerCase()));
+  const unresolved = row.coauthors.filter((c) => !resolvedSet.has(c.toLowerCase()));
   if (resolved.length === 0) {
     return (
       <>

@@ -169,20 +169,24 @@ export async function loadCoreReviewQueue(
 
   // Core-staff co-authors (signal-2 CWIDs) → named scholars. CWIDs with no
   // Scholar row simply don't appear here (the component falls back to the CWID).
-  const scholarById = new Map<string, QueueScholar>();
+  // CWIDs are compared case-insensitively across the app (auth/*, proxy-notification,
+  // ldap); the engine's signalCoauthors casing can differ from scholar.cwid, so key by
+  // lowercase and query both forms. Names also come from the byline join below — a
+  // core-staff co-author IS a byline author, so the name is present even when the
+  // direct scholar lookup misses.
+  const scholarByCwidLc = new Map<string, QueueScholar>();
+  const putScholar = (s: QueueScholar) => {
+    const key = s.cwid.toLowerCase();
+    if (!scholarByCwidLc.has(key)) scholarByCwidLc.set(key, s);
+  };
   if (coStaffCwids.size > 0) {
+    const lowered = [...coStaffCwids].map((c) => c.toLowerCase());
     const scholars = await client.scholar.findMany({
-      where: { cwid: { in: [...coStaffCwids] } },
+      where: { cwid: { in: [...coStaffCwids, ...lowered] } },
       select: { cwid: true, preferredName: true, slug: true, primaryDepartment: true },
     });
-    for (const s of scholars) {
-      scholarById.set(s.cwid, {
-        cwid: s.cwid,
-        name: s.preferredName,
-        slug: s.slug,
-        dept: s.primaryDepartment,
-      });
-    }
+    for (const s of scholars)
+      putScholar({ cwid: s.cwid, name: s.preferredName, slug: s.slug, dept: s.primaryDepartment });
   }
 
   // WCM scholars on each paper's byline (potential core users), in author order.
@@ -199,21 +203,26 @@ export async function loadCoreReviewQueue(
     });
     for (const a of authors) {
       if (!a.cwid || !a.scholar) continue;
-      const list = wcmByPmid.get(a.pmid) ?? [];
-      if (list.length >= WCM_AUTHORS_CAP || list.some((w) => w.cwid === a.cwid)) continue;
-      list.push({
+      const scholar: QueueScholar = {
         cwid: a.cwid,
         name: a.scholar.preferredName,
         slug: a.scholar.slug,
         dept: a.scholar.primaryDepartment,
-      });
+      };
+      // byline authors also resolve core-staff co-author CWIDs (case-insensitively)
+      putScholar(scholar);
+      const list = wcmByPmid.get(a.pmid) ?? [];
+      if (list.length >= WCM_AUTHORS_CAP || list.some((w) => w.cwid === a.cwid)) continue;
+      list.push(scholar);
       wcmByPmid.set(a.pmid, list);
     }
   }
 
   const queueRows: CoreQueueRow[] = rows.map((r) => {
     const coauthors = Array.isArray(r.signalCoauthors)
-      ? (r.signalCoauthors as unknown[]).filter((c): c is string => typeof c === "string")
+      ? (r.signalCoauthors as unknown[])
+          .filter((c): c is string => typeof c === "string")
+          .map((c) => c.toLowerCase())
       : [];
     return {
       pmid: r.pmid,
@@ -228,7 +237,7 @@ export async function loadCoreReviewQueue(
       status: r.status,
       coauthors,
       coauthorScholars: coauthors
-        .map((c) => scholarById.get(c))
+        .map((c) => scholarByCwidLc.get(c))
         .filter((s): s is QueueScholar => s !== undefined),
       wcmAuthors: wcmByPmid.get(r.pmid) ?? [],
       signalAck: r.signalAck,

@@ -158,13 +158,23 @@ describe("loadCoreReviewQueue mapping", () => {
     expect(r?.nihPercentile).toBe(89);
   });
 
-  it("resolves core-staff co-authors to named scholars (Tier 2), leaving the rest as CWIDs", async () => {
+  it("resolves a core-staff co-author via the byline even when absent from the direct scholar lookup (Tier 2)", async () => {
     const r = (await loadCoreReviewQueue("2", reader([rawRow()])))?.candidates[0];
-    // only djb2001 has a Scholar row; jpd2001 stays a bare CWID in `coauthors`.
-    expect(r?.coauthorScholars).toEqual([
-      { cwid: "djb2001", name: "Doug Ballon", slug: "doug-ballon", dept: "Radiology" },
-    ]);
-    expect(r?.coauthors).toContain("jpd2001");
+    // djb2001 resolves from the scholar lookup; jpd2001 isn't in that lookup but IS
+    // a byline author, so its name is present and resolved (not left as a CWID).
+    expect(r?.coauthorScholars.map((s) => s.name).sort()).toEqual(["Doug Ballon", "Jonathan Dyke"]);
+  });
+
+  it("resolves a core-staff CWID case-insensitively and leaves a truly-unknown one bare", async () => {
+    const raw = { ...rawRow(), signalCoauthors: ["DJB2001", "zzz9999"] };
+    const r = (
+      await loadCoreReviewQueue("2", reader([raw as unknown as ReturnType<typeof rawRow>]))
+    )?.candidates[0];
+    // uppercase engine CWID still matches the lowercase scholar row
+    expect(r?.coauthorScholars.map((s) => s.name)).toContain("Doug Ballon");
+    // a CWID with no scholar row and no byline match stays unresolved (lowercased)
+    expect(r?.coauthors).toContain("zzz9999");
+    expect(r?.coauthorScholars.some((s) => s.name.toLowerCase().includes("zzz"))).toBe(false);
   });
 
   it("attaches WCM byline authors in order + the publication detail fields (Tier 2)", async () => {
