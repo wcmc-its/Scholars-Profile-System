@@ -18,7 +18,7 @@
  * active item, a maroon (`--apollo-ring`) ring on the pale rail.
  */
 import Link from "next/link";
-import { ChevronRight, HomeIcon, type LucideIcon } from "lucide-react";
+import { ChevronRight, CornerDownRight, HomeIcon, type LucideIcon } from "lucide-react";
 
 import { GroupInfoButton } from "@/components/edit/group-info-button";
 import { cn } from "@/lib/utils";
@@ -251,24 +251,22 @@ function RailLink({
         className={cn(
           "flex min-h-11 items-center justify-between gap-2 rounded-md border-l-2 border-transparent px-3 py-2 text-sm transition-colors md:min-h-9",
           "focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
-          // Nested child ("From your publications"): indented, with a short
-          // connector elbow to its parent, and a touch smaller/quieter.
-          item.child &&
-            "relative pl-9 text-[0.9rem] before:absolute before:top-1/2 before:left-[1.15rem] before:h-px before:w-2 before:-translate-y-1/2 before:content-['']",
+          // Nested child ("From your publications"): indented and quieter, with a
+          // down-right arrow (below) standing in for the connector to its parent.
+          item.child && "pl-7 text-xs",
           isActive
-            ? cn(
-                "bg-apollo-maroon text-apollo-maroon-foreground focus-visible:ring-offset-apollo-maroon font-medium focus-visible:ring-white",
-                item.child && "before:bg-white/50",
-              )
+            ? "bg-apollo-maroon text-apollo-maroon-foreground focus-visible:ring-offset-apollo-maroon font-medium focus-visible:ring-white"
             : cn(
                 "text-foreground hover:bg-apollo-rail-hover hover:border-apollo-maroon focus-visible:ring-apollo-ring focus-visible:ring-offset-apollo-rail",
                 // Parent of the active child: subtle persistent highlight.
                 parentActive && "bg-apollo-rail-hover",
-                item.child && "before:bg-apollo-border-strong",
               ),
         )}
       >
         <span className="flex items-center gap-2">
+          {item.child && (
+            <CornerDownRight className="size-3.5 shrink-0 opacity-60" aria-hidden />
+          )}
           {Icon && (
             <Icon data-testid={`rail-${item.key}-icon`} className="size-4 shrink-0" aria-hidden />
           )}

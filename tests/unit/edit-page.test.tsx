@@ -474,7 +474,7 @@ describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)",
     expect(rail.textContent).toContain("From the scholar");
     // Nested UNDER Conflicts of Interest (like the self rail) — a sub-view, not a
     // flat sibling. The child marker is the indentation class.
-    expect(rail.className).toContain("pl-9");
+    expect(rail.className).toContain("pl-7");
   });
 
   it("does NOT surface coi-gap in superuser mode when there are no candidates", () => {
