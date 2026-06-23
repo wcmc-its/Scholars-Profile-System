@@ -1871,6 +1871,136 @@ export class EtlStack extends Stack {
     }
 
     // ------------------------------------------------------------------
+    // Standalone DynamoDB projection schedule (#1218 / handoff § Step 2).
+    //
+    // `etl:dynamodb` (DynamoDB → MySQL: topic, publication_impact, GRANT# →
+    // `opportunity`, cores) is nominally a nightly step, but it sits ~9 steps
+    // downstream of the chain head `etl:ed`, which fails whenever the on-prem TGW
+    // path is unreachable (#443) — so in practice the DynamoDB-sourced projections
+    // stop refreshing until a human fires a run-task (which is how the 802-item
+    // funding-opportunity corpus had to be loaded). DynamoDB is reached over NAT
+    // (no on-prem dependency), so this dedicated daily state machine runs the
+    // projection standalone, keeping the opportunity corpus + topic/impact data
+    // current regardless of the nightly chain or the cadence-VPC relocation
+    // (#1229). Whole block gated on the dedicated creation flag (like the curation
+    // backup): prod stays dark until its corpus is activated.
+    // ------------------------------------------------------------------
+    if (envConfig.dynamodbProjectionScheduleEnabled) {
+      const dynamodbProjectionTask = new tasks.EcsRunTask(this, "TaskDynamodbProjection", {
+        integrationPattern: sfn.IntegrationPattern.RUN_JOB,
+        cluster: ecsCluster,
+        taskDefinition: this.etlTaskDefinition,
+        launchTarget: new tasks.EcsFargateLaunchTarget({
+          platformVersion: ecs.FargatePlatformVersion.LATEST,
+        }),
+        assignPublicIp: false,
+        subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        securityGroups: [etlSecurityGroup],
+        containerOverrides: [
+          {
+            containerDefinition: etlContainer,
+            command: ["npm", "run", "etl:dynamodb"],
+          },
+        ],
+        // The full projection is ~3-4 min today; 30 min is generous headroom and
+        // well under the daily cadence so a wedged run can't stack on the next fire.
+        taskTimeout: sfn.Timeout.duration(Duration.minutes(30)),
+      });
+      dynamodbProjectionTask.addRetry({
+        errors: ["States.TaskFailed", "States.Timeout"],
+        maxAttempts: 1,
+        backoffRate: 2,
+        interval: Duration.minutes(1),
+      });
+      dynamodbProjectionTask.addCatch(
+        new tasks.SnsPublish(this, "NotifyDynamodbProjection", {
+          topic: this.failureTopic,
+          subject: `SPS DynamoDB projection ${env} -- run failed`,
+          message: sfn.TaskInput.fromObject({
+            env,
+            step: "DynamodbProjection",
+            stateMachine: sfn.JsonPath.stateMachineName,
+            execution: sfn.JsonPath.executionName,
+            error: sfn.JsonPath.stringAt("$.error"),
+          }),
+        }).next(
+          new sfn.Fail(this, "FailDynamodbProjection", {
+            cause: "DynamoDB projection run failed",
+          }),
+        ),
+        { errors: ["States.ALL"], resultPath: "$.error" },
+      );
+
+      const dynamodbProjectionSmLogGroup = new logs.LogGroup(
+        this,
+        "DynamodbProjectionSmLogGroup",
+        {
+          logGroupName: `/aws/states/dynamodb-projection-${env}`,
+          retention: logRetention,
+          removalPolicy: RemovalPolicy.RETAIN,
+        },
+      );
+      const dynamodbProjectionStateMachine = new sfn.StateMachine(
+        this,
+        "DynamodbProjectionStateMachine",
+        {
+          stateMachineName: `scholars-dynamodb-projection-${env}`,
+          stateMachineType: sfn.StateMachineType.STANDARD,
+          definitionBody: sfn.DefinitionBody.fromChainable(dynamodbProjectionTask),
+          timeout: Duration.minutes(35),
+          logs: {
+            destination: dynamodbProjectionSmLogGroup,
+            level: sfn.LogLevel.ERROR,
+            includeExecutionData: false,
+          },
+          tracingEnabled: true,
+        },
+      );
+
+      // Daily at 08:00 UTC -- after the 07:00 nightly attempt (which dies early
+      // at etl:ed today), so this picks up the freshest DynamoDB corpus.
+      const dynamodbProjectionRule = new events.Rule(this, "DynamodbProjectionScheduleRule", {
+        ruleName: `sps-dynamodb-projection-${env}`,
+        description: `SPS standalone DynamoDB projection (etl:dynamodb) -- daily 08:00 UTC (${env}). #1218.`,
+        schedule: events.Schedule.cron({ minute: "0", hour: "8" }),
+        enabled: true,
+      });
+      dynamodbProjectionRule.addTarget(
+        new eventsTargets.SfnStateMachine(dynamodbProjectionStateMachine, {
+          input: events.RuleTargetInput.fromObject({}),
+          retryAttempts: 0,
+        }),
+      );
+
+      // Cadence alarm -- a silently dead schedule (rule disabled, IAM gap) would
+      // let the opportunity corpus + topic/impact data rot unnoticed. Alarm if no
+      // execution started across two consecutive 1-day windows (~2 missed fires).
+      const dynamodbProjectionCadenceAlarm = new cloudwatch.Alarm(
+        this,
+        "DynamodbProjectionCadenceAlarm",
+        {
+          alarmName: `sps-dynamodb-projection-cadence-${env}`,
+          alarmDescription: `SPS DynamoDB projection (${env}) -- cadence missed (no execution started in ~2 days). Next: confirm the daily rule is enabled + the state-machine IAM is intact; run 'npm run etl:dynamodb' via run-task to bridge the gap.`,
+          metric: new cloudwatch.Metric({
+            namespace: "AWS/States",
+            metricName: "ExecutionsStarted",
+            statistic: cloudwatch.Stats.SUM,
+            period: Duration.days(1),
+            dimensionsMap: {
+              StateMachineArn: dynamodbProjectionStateMachine.stateMachineArn,
+            },
+          }),
+          evaluationPeriods: 2,
+          datapointsToAlarm: 2,
+          threshold: 1,
+          comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+          treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+        },
+      );
+      dynamodbProjectionCadenceAlarm.addAlarmAction(alarmAction);
+    }
+
+    // ------------------------------------------------------------------
     // ED email-visibility bridge — on-prem LDAP → S3 → RDS (#443).
     //
     // `etl:ed:export-email-visibility` reads the WCM Enterprise Directory

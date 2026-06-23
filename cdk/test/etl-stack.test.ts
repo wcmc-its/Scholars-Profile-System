@@ -192,6 +192,22 @@ describe("EtlStack", () => {
         ).toBe(false);
       });
 
+      it("prod does NOT create the standalone DynamoDB projection schedule (dynamodbProjectionScheduleEnabled=false until the prod corpus is activated; #1218)", () => {
+        const rules = template.findResources("AWS::Events::Rule");
+        expect(
+          Object.values(rules).some(
+            (r) => r.Properties?.Name === "sps-dynamodb-projection-prod",
+          ),
+        ).toBe(false);
+        const sms = template.findResources("AWS::StepFunctions::StateMachine");
+        expect(
+          Object.values(sms).some(
+            (s) =>
+              s.Properties?.StateMachineName === "scholars-dynamodb-projection-prod",
+          ),
+        ).toBe(false);
+      });
+
       it("prod does NOT create the ED email-visibility bridge (edEmailVisibilityBridgeEnabled=false until scholars-prod is verified; #443)", () => {
         const rules = template.findResources("AWS::Events::Rule");
         expect(
@@ -1315,12 +1331,13 @@ describe("EtlStack", () => {
       expect(prodNightly).toMatch(/etl:infoed/);
     });
 
-    it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled + cdnReconcileScheduleEnabled + curationBackupScheduleEnabled + edEmailVisibilityBridgeEnabled all true)", () => {
+    it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled + cdnReconcileScheduleEnabled + curationBackupScheduleEnabled + dynamodbProjectionScheduleEnabled + edEmailVisibilityBridgeEnabled all true)", () => {
       const rules = template.findResources("AWS::Events::Rule");
       // 3 cadence rules + the #595 heartbeat rule + the #393 reconciler rule +
       // the #353 cdn reconciler rule + the #1032 curated-tables backup rule +
-      // the #443 ED email-visibility bridge rule; all enabled in staging.
-      expect(Object.keys(rules)).toHaveLength(8);
+      // the #443 ED email-visibility bridge rule + the #1218 DynamoDB projection
+      // rule; all enabled in staging.
+      expect(Object.keys(rules)).toHaveLength(9);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });
@@ -1350,6 +1367,32 @@ describe("EtlStack", () => {
       // A cadence alarm guards against silent schedule death.
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         AlarmName: "sps-curation-backup-cadence-staging",
+      });
+    });
+
+    it("staging schedules the standalone DynamoDB projection (#1218): daily 08:00 rule → state machine running etl:dynamodb on the ETL task def + cadence alarm", () => {
+      // The rule fires daily at 08:00 UTC and is enabled in staging.
+      template.hasResourceProperties("AWS::Events::Rule", {
+        Name: "sps-dynamodb-projection-staging",
+        ScheduleExpression: "cron(0 8 * * ? *)",
+        State: "ENABLED",
+      });
+      // Its own state machine exists (Catch → SNS failure notification).
+      template.hasResourceProperties("AWS::StepFunctions::StateMachine", {
+        StateMachineName: "scholars-dynamodb-projection-staging",
+      });
+      // The step overrides the ETL container to run the projection script.
+      const sms = template.findResources("AWS::StepFunctions::StateMachine");
+      const projectionSm = Object.values(sms).find(
+        (s) =>
+          s.Properties?.StateMachineName === "scholars-dynamodb-projection-staging",
+      );
+      expect(projectionSm).toBeDefined();
+      const def = JSON.stringify(projectionSm?.Properties?.DefinitionString ?? "");
+      expect(def).toMatch(/etl:dynamodb/);
+      // A cadence alarm guards against silent schedule death.
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: "sps-dynamodb-projection-cadence-staging",
       });
     });
 
