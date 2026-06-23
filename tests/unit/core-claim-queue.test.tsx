@@ -65,13 +65,14 @@ describe("CoreClaimQueue", () => {
     expect(screen.getByText("42%")).toBeTruthy(); // affinity readout
   });
 
-  it("renders the LLM rationale, citation count, and PubMed/DOI links", () => {
+  it("shows the PMID verbatim (linked to PubMed), citation count, DOI, and rationale", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     expect(
       screen.getByText("Acknowledges the imaging core for confocal microscopy."),
     ).toBeTruthy();
     expect(screen.getByText("12 citations")).toBeTruthy();
-    const pubmed = screen.getByRole("link", { name: /pubmed/i });
+    // the PMID is shown verbatim and is the PubMed link
+    const pubmed = screen.getByRole("link", { name: /PMID 30418319/ });
     expect(pubmed.getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/30418319/");
     const doi = screen.getByRole("link", { name: /doi/i });
     expect(doi.getAttribute("href")).toBe("https://doi.org/10.1016/j.neuroimage.2021.001");
@@ -462,6 +463,40 @@ describe("CoreClaimQueue", () => {
     // "Ballon D" token links to Doug Ballon's profile
     const chip = screen.getByText("Ballon D");
     expect(chip.closest("a")?.getAttribute("href")).toBe("/doug-ballon");
+  });
+
+  it("downloads the queue as a CSV citation list with PMID + status columns", () => {
+    // jsdom's Blob has no .text(); capture the CSV via the constructor instead.
+    let csvText = "";
+    vi.stubGlobal(
+      "Blob",
+      class {
+        constructor(parts: string[]) {
+          csvText = parts.join("");
+        }
+      },
+    );
+    vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:x"), revokeObjectURL: vi.fn() });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "111", title: "A candidate" })]}
+        confirmed={[row({ pmid: "222", title: "A confirmed one", claimed: true })]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /download csv/i }));
+
+    expect(csvText).toContain("PMID,Title,Authors"); // header row
+    expect(csvText).toContain("111"); // candidate PMID
+    expect(csvText).toContain("To review");
+    expect(csvText).toContain("222"); // confirmed PMID
+    expect(csvText).toContain("Confirmed");
+    expect(csvText).toContain("PMID: 111."); // citation string
+    clickSpy.mockRestore();
   });
 });
 

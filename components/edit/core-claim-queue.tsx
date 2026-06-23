@@ -13,6 +13,7 @@ import {
   Check,
   CheckCheck,
   ChevronRight,
+  Download,
   ExternalLink,
   Quote,
   Repeat,
@@ -25,6 +26,7 @@ import {
 import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core-queue";
 import { sanitizePubmedHtml } from "@/lib/utils";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { toCsv } from "@/lib/csv";
 
 type Decision = "claimed" | "rejected";
 type FilterKey = "all" | "ack" | "coauthored" | "llm";
@@ -271,6 +273,55 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
     clearPending(pmid);
   }
 
+  // Download the queue (both lists) as a CSV citation list, reflecting the current
+  // session state. Client-side blob — the rows are already in hand, no API needed.
+  function downloadCsv() {
+    const headers = [
+      "PMID",
+      "Title",
+      "Authors",
+      "Journal",
+      "Year",
+      "DOI",
+      "Status",
+      "Likelihood",
+      "Citation",
+    ];
+    const statusOf = (pmid: string, base: "candidate" | "confirmed"): string => {
+      if (base === "confirmed") return revokedConfirmed.has(pmid) ? "Revoked" : "Confirmed";
+      const d = decided.get(pmid);
+      return d === "claimed" ? "Confirmed" : d === "rejected" ? "Rejected" : "To review";
+    };
+    const toRow = (r: CoreQueueRow, base: "candidate" | "confirmed") => {
+      const authors = r.fullAuthorsString ?? r.authorsString ?? "";
+      // plain Vancouver-ish citation string, PMID-anchored
+      const citation =
+        [authors, r.title, r.journal, r.year].filter(Boolean).join(". ") + `. PMID: ${r.pmid}.`;
+      return [
+        r.pmid,
+        r.title,
+        authors,
+        r.journal ?? "",
+        r.year ?? "",
+        r.doi ?? "",
+        statusOf(r.pmid, base),
+        r.likelihood.toFixed(3),
+        citation,
+      ];
+    };
+    const csv = toCsv(headers, [
+      ...candidates.map((r) => toRow(r, "candidate")),
+      ...confirmed.map((r) => toRow(r, "confirmed")),
+    ]);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `core-${core.id}-publications.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   // Remaining review work (decided rows stay visible for undo but don't count).
   const remaining = candidates.filter((c) => !decided.has(c.pmid)).length;
   // Apply the filter (but always keep a just-decided row visible so undo stays
@@ -294,16 +345,27 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
           To review
           <span className="text-muted-foreground text-sm font-normal tabular-nums">{remaining}</span>
         </h2>
-        {highConfidencePmids.length > 0 ? (
-          <button
-            type="button"
-            onClick={() => confirmHighConfidence(highConfidencePmids)}
-            className="border-border-strong text-foreground hover:border-[var(--color-accent-slate)] hover:text-[var(--color-accent-slate)] inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm disabled:opacity-50"
-          >
-            <CheckCheck className="size-4" aria-hidden /> Confirm {highConfidencePmids.length}{" "}
-            high-confidence
-          </button>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {highConfidencePmids.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => confirmHighConfidence(highConfidencePmids)}
+              className="border-border-strong text-foreground hover:border-[var(--color-accent-slate)] hover:text-[var(--color-accent-slate)] inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm disabled:opacity-50"
+            >
+              <CheckCheck className="size-4" aria-hidden /> Confirm {highConfidencePmids.length}{" "}
+              high-confidence
+            </button>
+          ) : null}
+          {candidates.length > 0 || confirmed.length > 0 ? (
+            <button
+              type="button"
+              onClick={downloadCsv}
+              className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm"
+            >
+              <Download className="size-4" aria-hidden /> Download CSV
+            </button>
+          ) : null}
+        </div>
       </div>
       {candidates.length > 0 ? (
         <div className="mb-2">
@@ -412,6 +474,7 @@ function ConfirmedRow({
         <Check className="size-3.5 shrink-0 translate-y-0.5 text-emerald-600" aria-hidden />
         <span className="text-foreground truncate">{row.title}</span>
         {row.year ? <span className="shrink-0 text-xs">· {row.year}</span> : null}
+        <span className="shrink-0 text-xs tabular-nums">· PMID {row.pmid}</span>
       </span>
       <span className="flex shrink-0 items-center gap-2">
         {error ? (
@@ -597,16 +660,19 @@ function CandidateCard({
           </p>
           <Byline row={row} />
           <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
+            {/* PMID shown verbatim (curators key off it); links to PubMed when present. */}
             {row.pubmedUrl ? (
               <a
                 href={row.pubmedUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
+                className="hover:text-foreground inline-flex items-center gap-1 tabular-nums hover:underline"
               >
-                PubMed <ExternalLink className="size-3" aria-hidden />
+                PMID {row.pmid} <ExternalLink className="size-3" aria-hidden />
               </a>
-            ) : null}
+            ) : (
+              <span className="tabular-nums">PMID {row.pmid}</span>
+            )}
             {row.doi ? (
               <a
                 href={`https://doi.org/${row.doi}`}
