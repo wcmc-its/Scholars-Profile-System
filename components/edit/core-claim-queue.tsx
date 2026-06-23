@@ -29,6 +29,8 @@ import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { toCsv } from "@/lib/csv";
 
 type Decision = "claimed" | "rejected";
+/** Which list the segmented control is showing (only when there's history). */
+type QueueView = "review" | "confirmed" | "rejected";
 type FilterKey = "all" | "ack" | "coauthored" | "llm";
 type SortKey = "likelihood" | "uncertain" | "strongest" | "llm";
 
@@ -123,12 +125,39 @@ function matchesFilter(row: CoreQueueRow, filter: FilterKey): boolean {
   }
 }
 
-export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue) {
+interface CoreClaimQueueProps {
+  core: CoreReviewQueue["core"];
+  candidates: CoreQueueRow[];
+  confirmed: CoreQueueRow[];
+  /** Previously-rejected pairs (server-loaded) for the Rejected tab. Optional so
+   *  the simple all-candidates render stays a single prop set. */
+  rejected?: CoreQueueRow[];
+}
+
+export function CoreClaimQueue({
+  core,
+  candidates,
+  confirmed,
+  rejected = [],
+}: CoreClaimQueueProps) {
   const [decided, setDecided] = useState<Map<string, Decision>>(new Map());
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Map<string, string>>(new Map());
   // Confirmed rows walked back this session — kept visible with an undo.
   const [revokedConfirmed, setRevokedConfirmed] = useState<Set<string>>(new Set());
+  // Rejected rows restored this session — kept visible with an undo (mirror of above).
+  const [restoredRejected, setRestoredRejected] = useState<Set<string>>(new Set());
+  // The active tab. Tabs only render when there's history (confirmed/rejected);
+  // land on the first non-empty list so a reviewer with no open work sees content.
+  const [view, setView] = useState<QueueView>(() =>
+    candidates.length > 0
+      ? "review"
+      : confirmed.length > 0
+        ? "confirmed"
+        : rejected.length > 0
+          ? "rejected"
+          : "review",
+  );
   const [filter, setFilter] = useState<FilterKey>("all");
   // Default to the most-uncertain band: the 96%s don't need a human, the 55–75%s do.
   const [sort, setSort] = useState<SortKey>("uncertain");
@@ -197,9 +226,9 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
   }
 
   // Bulk-confirm the high-confidence band in one click — clears the easy top so
-  // uncertain-first leaves the reviewer only what genuinely needs a call.
-  // ponytail: fans out the single-claim endpoint client-side; a bulk endpoint is
-  // the upgrade path if the band routinely runs to many hundreds.
+  // uncertain-first leaves the reviewer only what genuinely needs a call. One
+  // request to the bulk endpoint: the upsert + audit + writeback loop runs in a
+  // single server transaction (no client-side fan-out / partial-failure spray).
   async function confirmHighConfidence(pmids: string[]) {
     if (pmids.length === 0) return;
     if (
@@ -211,33 +240,34 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
       return;
     }
     setPending((s) => new Set([...s, ...pmids]));
-    const results = await Promise.allSettled(pmids.map((p) => postClaim(p, "claimed")));
-    const ok: string[] = [];
-    const failed: string[] = [];
-    results.forEach((r, i) => {
-      if (r.status === "fulfilled" && r.value.ok) ok.push(pmids[i]);
-      else failed.push(pmids[i]);
-    });
-    setDecided((m) => {
-      const next = new Map(m);
-      for (const p of ok) next.set(p, "claimed");
-      return next;
-    });
+    const res = await fetch("/api/edit/core-claim/bulk", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ coreId: core.id, pmids, status: "claimed" }),
+    }).catch(() => null);
+    const ok = res?.ok === true;
+    if (ok) {
+      setDecided((m) => {
+        const next = new Map(m);
+        for (const p of pmids) next.set(p, "claimed");
+        return next;
+      });
+    } else {
+      setErrors((m) => {
+        const next = new Map(m);
+        for (const p of pmids) next.set(p, "bulk confirm failed");
+        return next;
+      });
+    }
     setPending((s) => {
       const next = new Set(s);
       for (const p of pmids) next.delete(p);
       return next;
     });
-    if (failed.length > 0) {
-      setErrors((m) => {
-        const next = new Map(m);
-        for (const p of failed) next.set(p, "bulk confirm failed");
-        return next;
-      });
-    }
     setAnnounce(
-      `Confirmed ${ok.length} high-confidence publication${ok.length === 1 ? "" : "s"}.` +
-        (failed.length > 0 ? ` ${failed.length} could not be saved.` : ""),
+      ok
+        ? `Confirmed ${pmids.length} high-confidence publication${pmids.length === 1 ? "" : "s"}.`
+        : "Bulk confirm could not be saved.",
     );
   }
 
@@ -273,6 +303,41 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
     clearPending(pmid);
   }
 
+  // Restore a rejected row: a rejected pair always has a human 'rejected' claim
+  // (the engine has no rejected state), so the soft 'revoked' undo clears it on
+  // the server, reverting the pair to its engine status. Like the Confirmed-tab
+  // Revoke, the row stays here as a "Restored — …/Undo" line for the session; it
+  // re-files into the right list (To review / Confirmed) on the next page load.
+  async function restoreRejected(pmid: string, title: string) {
+    clearError(pmid);
+    markPending(pmid);
+    const result = await postClaim(pmid, "revoked");
+    if (result.ok) {
+      setRestoredRejected((s) => new Set(s).add(pmid));
+      setAnnounce(`Restored ${title}.`);
+    } else {
+      setError(pmid, result.error);
+    }
+    clearPending(pmid);
+  }
+
+  async function undoRestoreRejected(pmid: string) {
+    clearError(pmid);
+    markPending(pmid);
+    const result = await postClaim(pmid, "rejected");
+    if (result.ok) {
+      setRestoredRejected((s) => {
+        const next = new Set(s);
+        next.delete(pmid);
+        return next;
+      });
+      setAnnounce("Undone.");
+    } else {
+      setError(pmid, result.error);
+    }
+    clearPending(pmid);
+  }
+
   // Download the queue (both lists) as a CSV citation list, reflecting the current
   // session state. Client-side blob — the rows are already in hand, no API needed.
   function downloadCsv() {
@@ -287,12 +352,13 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
       "Likelihood",
       "Citation",
     ];
-    const statusOf = (pmid: string, base: "candidate" | "confirmed"): string => {
+    const statusOf = (pmid: string, base: "candidate" | "confirmed" | "rejected"): string => {
       if (base === "confirmed") return revokedConfirmed.has(pmid) ? "Revoked" : "Confirmed";
+      if (base === "rejected") return restoredRejected.has(pmid) ? "Restored" : "Rejected";
       const d = decided.get(pmid);
       return d === "claimed" ? "Confirmed" : d === "rejected" ? "Rejected" : "To review";
     };
-    const toRow = (r: CoreQueueRow, base: "candidate" | "confirmed") => {
+    const toRow = (r: CoreQueueRow, base: "candidate" | "confirmed" | "rejected") => {
       const authors = r.fullAuthorsString ?? r.authorsString ?? "";
       // plain Vancouver-ish citation string, PMID-anchored
       const citation =
@@ -312,6 +378,7 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
     const csv = toCsv(headers, [
       ...candidates.map((r) => toRow(r, "candidate")),
       ...confirmed.map((r) => toRow(r, "confirmed")),
+      ...rejected.map((r) => toRow(r, "rejected")),
     ]);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -334,6 +401,9 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
   const highConfidencePmids = candidates
     .filter((c) => !decided.has(c.pmid) && c.likelihood >= HIGH_CONFIDENCE_LIKELIHOOD)
     .map((c) => c.pmid);
+  // Tabs only earn their place once there's history to switch to; otherwise the
+  // queue is the single "To review" scroll it always was.
+  const hasHistory = confirmed.length > 0 || rejected.length > 0;
 
   return (
     <div data-slot="core-claim-queue">
@@ -341,12 +411,24 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
         {announce}
       </div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="flex items-baseline gap-2 text-[15px] font-semibold">
-          To review
-          <span className="text-muted-foreground text-sm font-normal tabular-nums">{remaining}</span>
-        </h2>
+        {hasHistory ? (
+          <ViewTabs
+            view={view}
+            onView={setView}
+            reviewCount={remaining}
+            confirmedCount={confirmed.length}
+            rejectedCount={rejected.length}
+          />
+        ) : (
+          <h2 className="flex items-baseline gap-2 text-[15px] font-semibold">
+            To review
+            <span className="text-muted-foreground text-sm font-normal tabular-nums">
+              {remaining}
+            </span>
+          </h2>
+        )}
         <div className="flex flex-wrap items-center gap-2">
-          {highConfidencePmids.length > 0 ? (
+          {view === "review" && highConfidencePmids.length > 0 ? (
             <button
               type="button"
               onClick={() => confirmHighConfidence(highConfidencePmids)}
@@ -356,7 +438,7 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
               high-confidence
             </button>
           ) : null}
-          {candidates.length > 0 || confirmed.length > 0 ? (
+          {candidates.length > 0 || confirmed.length > 0 || rejected.length > 0 ? (
             <button
               type="button"
               onClick={downloadCsv}
@@ -367,68 +449,125 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
           ) : null}
         </div>
       </div>
-      {candidates.length > 0 ? (
-        <div className="mb-2">
-          <QueueControls filter={filter} onFilter={setFilter} sort={sort} onSort={setSort} />
-        </div>
+
+      {view === "review" ? (
+        <>
+          {candidates.length > 0 ? (
+            <div className="mb-2">
+              <QueueControls filter={filter} onFilter={setFilter} sort={sort} onSort={setSort} />
+            </div>
+          ) : null}
+
+          {candidates.length > 0 ? (
+            <p className="text-muted-foreground mb-3 text-xs">
+              Shortcuts (focused card): <Kbd>a</Kbd> confirm · <Kbd>r</Kbd> reject · <Kbd>u</Kbd>{" "}
+              undo · <Kbd>↑</Kbd>/<Kbd>↓</Kbd> move.
+            </p>
+          ) : null}
+
+          {candidates.length === 0 ? (
+            <p className="text-muted-foreground rounded-lg border border-apollo-border border-dashed px-4 py-6 text-sm">
+              Nothing to review — every candidate publication for this core has been confirmed or
+              rejected.
+            </p>
+          ) : visible.length === 0 ? (
+            <p className="text-muted-foreground rounded-lg border border-apollo-border border-dashed px-4 py-6 text-sm">
+              No candidates match this filter.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {visible.map((row) => (
+                <li key={row.pmid}>
+                  <CandidateCard
+                    row={row}
+                    decided={decided.get(row.pmid)}
+                    pending={pending.has(row.pmid)}
+                    error={errors.get(row.pmid)}
+                    onDecide={(status) => send(row.pmid, status)}
+                    onUndo={() => send(row.pmid, "revoked")}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       ) : null}
 
-      {candidates.length > 0 ? (
-        <p className="text-muted-foreground mb-3 text-xs">
-          Shortcuts (focused card): <Kbd>a</Kbd> confirm · <Kbd>r</Kbd> reject · <Kbd>u</Kbd> undo ·{" "}
-          <Kbd>↑</Kbd>/<Kbd>↓</Kbd> move.
-        </p>
-      ) : null}
-
-      {candidates.length === 0 ? (
-        <p className="text-muted-foreground rounded-lg border border-apollo-border border-dashed px-4 py-6 text-sm">
-          Nothing to review — every candidate publication for this core has been confirmed or
-          rejected.
-        </p>
-      ) : visible.length === 0 ? (
-        <p className="text-muted-foreground rounded-lg border border-apollo-border border-dashed px-4 py-6 text-sm">
-          No candidates match this filter.
-        </p>
-      ) : (
-        <ul className="flex flex-col gap-3">
-          {visible.map((row) => (
-            <li key={row.pmid}>
-              <CandidateCard
-                row={row}
-                decided={decided.get(row.pmid)}
-                pending={pending.has(row.pmid)}
-                error={errors.get(row.pmid)}
-                onDecide={(status) => send(row.pmid, status)}
-                onUndo={() => send(row.pmid, "revoked")}
-              />
-            </li>
+      {view === "confirmed" ? (
+        <ul className="flex flex-col gap-1.5">
+          {confirmed.map((row) => (
+            <ConfirmedRow
+              key={row.pmid}
+              row={row}
+              revoked={revokedConfirmed.has(row.pmid)}
+              pending={pending.has(row.pmid)}
+              error={errors.get(row.pmid)}
+              onRevoke={() => revokeConfirmed(row.pmid, row.claimed, row.title)}
+              onUndo={() => undoRevokeConfirmed(row.pmid, row.claimed)}
+            />
           ))}
         </ul>
-      )}
-
-      {confirmed.length > 0 ? (
-        <section className="mt-8">
-          <h2 className="mb-3 flex items-baseline gap-2 text-[15px] font-semibold">
-            Confirmed
-            <span className="text-muted-foreground text-sm font-normal tabular-nums">
-              {confirmed.length}
-            </span>
-          </h2>
-          <ul className="flex flex-col gap-1.5">
-            {confirmed.map((row) => (
-              <ConfirmedRow
-                key={row.pmid}
-                row={row}
-                revoked={revokedConfirmed.has(row.pmid)}
-                pending={pending.has(row.pmid)}
-                error={errors.get(row.pmid)}
-                onRevoke={() => revokeConfirmed(row.pmid, row.claimed, row.title)}
-                onUndo={() => undoRevokeConfirmed(row.pmid, row.claimed)}
-              />
-            ))}
-          </ul>
-        </section>
       ) : null}
+
+      {view === "rejected" ? (
+        <ul className="flex flex-col gap-1.5">
+          {rejected.map((row) => (
+            <RejectedRow
+              key={row.pmid}
+              row={row}
+              restored={restoredRejected.has(row.pmid)}
+              pending={pending.has(row.pmid)}
+              error={errors.get(row.pmid)}
+              onRestore={() => restoreRejected(row.pmid, row.title)}
+              onUndo={() => undoRestoreRejected(row.pmid)}
+            />
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/** The segmented view switch (To review / Confirmed / Rejected), shown once the
+ *  queue has history. `aria-pressed` pills, matching the FILTERS affordance. */
+function ViewTabs({
+  view,
+  onView,
+  reviewCount,
+  confirmedCount,
+  rejectedCount,
+}: {
+  view: QueueView;
+  onView: (v: QueueView) => void;
+  reviewCount: number;
+  confirmedCount: number;
+  rejectedCount: number;
+}) {
+  const tabs: { key: QueueView; label: string; count: number; show: boolean }[] = [
+    { key: "review", label: "To review", count: reviewCount, show: true },
+    { key: "confirmed", label: "Confirmed", count: confirmedCount, show: confirmedCount > 0 },
+    { key: "rejected", label: "Rejected", count: rejectedCount, show: rejectedCount > 0 },
+  ];
+  return (
+    <div className="flex flex-wrap gap-1.5" role="group" aria-label="Queue view">
+      {tabs
+        .filter((t) => t.show)
+        .map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            aria-pressed={view === t.key}
+            onClick={() => onView(t.key)}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] ${
+              view === t.key
+                ? "border-transparent bg-[var(--color-accent-slate)] text-white"
+                : "border-apollo-border text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t.label}
+            <span className="tabular-nums opacity-80">{t.count}</span>
+          </button>
+        ))}
     </div>
   );
 }
@@ -489,6 +628,68 @@ function ConfirmedRow({
           className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-7 items-center gap-1 rounded-full border bg-background px-2.5 text-xs disabled:opacity-50"
         >
           <Undo2 className="size-3" aria-hidden /> Revoke
+        </button>
+      </span>
+    </li>
+  );
+}
+
+// A previously-rejected publication with an inline Restore — the mirror of
+// ConfirmedRow's Revoke. Restore soft-revokes the rejection (re-opens for review).
+function RejectedRow({
+  row,
+  restored,
+  pending,
+  error,
+  onRestore,
+  onUndo,
+}: {
+  row: CoreQueueRow;
+  restored: boolean;
+  pending: boolean;
+  error: string | undefined;
+  onRestore: () => void;
+  onUndo: () => void;
+}) {
+  if (restored) {
+    return (
+      <li className="text-muted-foreground flex items-center justify-between gap-2 text-sm">
+        <span className="flex min-w-0 items-baseline gap-2">
+          <Undo2 className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
+          <span className="truncate">Restored — {row.title}</span>
+        </span>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={onUndo}
+          className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-7 shrink-0 items-center gap-1 rounded-full border bg-background px-2.5 text-xs disabled:opacity-50"
+        >
+          <Undo2 className="size-3" aria-hidden /> Undo
+        </button>
+      </li>
+    );
+  }
+  return (
+    <li className="text-muted-foreground flex items-center justify-between gap-2 text-sm">
+      <span className="flex min-w-0 items-baseline gap-2">
+        <X className="text-muted-foreground size-3.5 shrink-0 translate-y-0.5" aria-hidden />
+        <span className="text-foreground truncate">{row.title}</span>
+        {row.year ? <span className="shrink-0 text-xs">· {row.year}</span> : null}
+        <span className="shrink-0 text-xs tabular-nums">· PMID {row.pmid}</span>
+      </span>
+      <span className="flex shrink-0 items-center gap-2">
+        {error ? (
+          <span className="text-xs text-red-600" role="alert">
+            Could not save: {error}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          disabled={pending}
+          onClick={onRestore}
+          className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-7 items-center gap-1 rounded-full border bg-background px-2.5 text-xs disabled:opacity-50"
+        >
+          <Undo2 className="size-3" aria-hidden /> Restore
         </button>
       </span>
     </li>
@@ -747,7 +948,7 @@ function CandidateCard({
         </ul>
       ) : null}
 
-      {row.abstract || row.fullAuthorsString || row.wcmAuthors.length > 0 ? (
+      {row.abstract || row.fullAuthorsString || row.wcmAuthors.length > 0 || row.meshTerms.length > 0 ? (
         <details className="group mt-2.5">
           <summary className="text-muted-foreground hover:text-foreground inline-flex cursor-pointer items-center gap-1 text-xs select-none">
             <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden />
@@ -778,6 +979,23 @@ function CandidateCard({
                   </span>
                 ))}
               </p>
+            ) : null}
+            {row.meshTerms.length > 0 ? (
+              <div className="text-muted-foreground text-xs">
+                <span className="font-medium text-foreground">MeSH</span>
+                <ul className="mt-1 flex flex-wrap gap-1.5">
+                  {row.meshTerms.map((m, i) => (
+                    // index keeps the key unique — normalizeMeshTerms doesn't dedupe,
+                    // so a malformed pub could carry two null-ui terms with one label.
+                    <li
+                      key={`${m.ui ?? m.label}::${i}`}
+                      className="bg-muted text-foreground/80 rounded px-2 py-0.5 text-xs"
+                    >
+                      {m.label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ) : null}
           </div>
         </details>

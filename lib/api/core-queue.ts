@@ -6,7 +6,10 @@
  * override read-merged over the engine status, see lib/api/core-merge.ts):
  *   - `candidates` — open engine candidates with no active claim, the review work
  *   - `confirmed`  — effective-confirmed (engine `confirmed` OR human `claimed`)
- * A rejected pair drops out of both lists. Both are ranked by likelihood desc.
+ *   - `rejected`   — effective-rejected (a human `rejected` claim; the engine has
+ *                    no rejected state). Surfaces the Rejected tab (#1239).
+ * An engine `below_threshold` row with no claim drops out of all three lists.
+ * All three are ranked by likelihood desc.
  *
  * The DB load is a thin wrapper; `partitionCoreQueue` is pure and unit-tested.
  */
@@ -17,6 +20,7 @@ import {
   isOpenCandidate,
   loadActiveCoreClaimsByCore,
 } from "@/lib/api/core-merge";
+import { normalizeMeshTerms } from "@/lib/api/profile";
 
 /** A WCM scholar resolved from a CWID, linkable to their public profile. */
 export interface QueueScholar {
@@ -73,33 +77,44 @@ export interface CoreQueueRow {
   relativeCitationRatio: number | null;
   /** NIH citation percentile (0-100), when computed. */
   nihPercentile: number | null;
+  /** Per-PMID MeSH terms ({ui, label}); `[]` when none. Shown as chips in Details. */
+  meshTerms: Array<{ ui: string | null; label: string }>;
 }
 
 export interface CoreReviewQueue {
   core: { id: string; name: string };
   candidates: CoreQueueRow[];
   confirmed: CoreQueueRow[];
+  /** Effective-rejected pairs (a human `rejected` claim) — the Rejected tab. */
+  rejected: CoreQueueRow[];
 }
 
 /**
- * Partition queue rows into open candidates vs effective-confirmed, applying the
- * CoreClaim override. Pure — `claimFor` resolves the active claim (or null) for a
- * pmid. Input order is preserved (the caller ranks by likelihood).
+ * Partition queue rows into open candidates / effective-confirmed / effective-
+ * rejected, applying the CoreClaim override. Pure — `claimFor` resolves the
+ * active claim (or null) for a pmid. Input order is preserved (the caller ranks
+ * by likelihood).
  */
 export function partitionCoreQueue(
   rows: ReadonlyArray<CoreQueueRow>,
   claimFor: (pmid: string) => ClaimStatus | null,
-): { candidates: CoreQueueRow[]; confirmed: CoreQueueRow[] } {
+): { candidates: CoreQueueRow[]; confirmed: CoreQueueRow[]; rejected: CoreQueueRow[] } {
   const candidates: CoreQueueRow[] = [];
   const confirmed: CoreQueueRow[] = [];
+  const rejected: CoreQueueRow[] = [];
   for (const row of rows) {
     const claim = claimFor(row.pmid);
     if (isOpenCandidate(row.status, claim)) candidates.push({ ...row, claimed: false });
     else if (effectiveCoreStatus(row.status, claim) === "confirmed")
       confirmed.push({ ...row, claimed: claim === "claimed" });
-    // an active 'rejected' claim excludes the pair from both lists
+    // Effective-rejected is ONLY ever a human `rejected` claim (the engine has no
+    // rejected state), so a claim always backs it → `claimed: true` drives the
+    // Rejected-tab restore (which posts the soft `revoked` undo).
+    else if (effectiveCoreStatus(row.status, claim) === "rejected")
+      rejected.push({ ...row, claimed: true });
+    // an engine `below_threshold` row with no claim falls through (not surfaced)
   }
-  return { candidates, confirmed };
+  return { candidates, confirmed, rejected };
 }
 
 type QueueReader = Pick<
@@ -153,6 +168,7 @@ export async function loadCoreReviewQueue(
           doi: true,
           relativeCitationRatio: true,
           nihPercentile: true,
+          meshTerms: true,
         },
       },
     },
@@ -258,10 +274,14 @@ export async function loadCoreReviewQueue(
           : Number(r.publication.relativeCitationRatio),
       nihPercentile:
         r.publication.nihPercentile == null ? null : Number(r.publication.nihPercentile),
+      meshTerms: normalizeMeshTerms(r.publication.meshTerms),
     };
   });
 
   const claims = await loadActiveCoreClaimsByCore(coreId, client);
-  const { candidates, confirmed } = partitionCoreQueue(queueRows, (pmid) => claims.get(pmid) ?? null);
-  return { core, candidates, confirmed };
+  const { candidates, confirmed, rejected } = partitionCoreQueue(
+    queueRows,
+    (pmid) => claims.get(pmid) ?? null,
+  );
+  return { core, candidates, confirmed, rejected };
 }

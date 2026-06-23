@@ -35,6 +35,7 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     claimed: false,
     relativeCitationRatio: null,
     nihPercentile: null,
+    meshTerms: [],
     ...over,
   };
 }
@@ -361,7 +362,7 @@ describe("CoreClaimQueue", () => {
 
   // --- bulk confirm / Confirmed-list revoke / verify-in-expander ---
 
-  it("bulk-confirms the high-confidence band (≥0.90) in one click", async () => {
+  it("bulk-confirms the high-confidence band (≥0.90) via one bulk POST", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn(() => true)); // accept the guard dialog
@@ -378,13 +379,31 @@ describe("CoreClaimQueue", () => {
     );
     const bulk = screen.getByRole("button", { name: /Confirm 2 high-confidence/ });
     fireEvent.click(bulk);
-    // only the two ≥0.90 rows are posted, each as a claim
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const posted = fetchMock.mock.calls.map(
-      (c) => JSON.parse((c as [string, { body: string }])[1].body) as { pmid: string; status: string },
+    // a SINGLE request to the bulk endpoint with just the two ≥0.90 pmids
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0] as [string, { body: string }];
+    expect(url).toBe("/api/edit/core-claim/bulk");
+    expect(JSON.parse(init.body)).toEqual({ coreId: "2", pmids: ["1", "2"], status: "claimed" });
+  });
+
+  it("surfaces the failure on the band and announces it when the bulk POST is refused", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "High A", likelihood: 0.96 })]}
+        confirmed={[]}
+      />,
     );
-    expect(posted.every((p) => p.status === "claimed")).toBe(true);
-    expect(posted.map((p) => p.pmid).sort()).toEqual(["1", "2"]);
+    fireEvent.click(screen.getByRole("button", { name: /Confirm 1 high-confidence/ }));
+    // the row stays reviewable with an error surfaced (not marked confirmed)
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("bulk confirm failed"));
+    expect(screen.getByRole("button", { name: /confirm$/i })).toBeTruthy();
+    expect(screen.getByTestId("core-claim-live").textContent).toBe(
+      "Bulk confirm could not be saved.",
+    );
   });
 
   it("revokes a human-claimed Confirmed row with 'revoked' and offers undo", async () => {
@@ -423,6 +442,108 @@ describe("CoreClaimQueue", () => {
     expect(
       JSON.parse((fetchMock.mock.calls[0] as [string, { body: string }])[1].body).status,
     ).toBe("rejected");
+  });
+
+  // --- segmented tabs (#1239): To review / Confirmed / Rejected ---
+
+  it("stays a single scroll (no tabs) when there is no confirmed/rejected history", () => {
+    render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
+    // the "To review" heading is present; no segmented view-switch group
+    expect(screen.queryByRole("group", { name: "Queue view" })).toBeNull();
+  });
+
+  it("lands on the Confirmed tab when there is no open review work", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[]}
+        confirmed={[row({ pmid: "9", title: "Done pub", claimed: true })]}
+      />,
+    );
+    // no candidates → default view is Confirmed, so the row shows without a click
+    expect(screen.getByRole("group", { name: "Queue view" })).toBeTruthy();
+    expect(screen.getByText("Done pub")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /revoke/i })).toBeTruthy();
+  });
+
+  it("lands on the Rejected tab when the only history is rejected items", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[]}
+        confirmed={[]}
+        rejected={[row({ pmid: "9", title: "Rejected only", claimed: true })]}
+      />,
+    );
+    // no candidates and no confirmed → default ladder falls through to Rejected
+    expect(screen.getByText("Rejected only")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /restore/i })).toBeTruthy();
+  });
+
+  it("shows previously-rejected items on the Rejected tab and restores via 'revoked'", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[row({ pmid: "1", title: "Open candidate" })]}
+        confirmed={[]}
+        rejected={[row({ pmid: "9", title: "Rejected pub", claimed: true })]}
+      />,
+    );
+    // default lands on To review (a candidate is present); the rejected row is hidden
+    expect(screen.queryByText("Rejected pub")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Rejected 1/ }));
+    expect(screen.getByText("Rejected pub")).toBeTruthy();
+
+    // Restore posts the soft 'revoked' undo and shows the restored affordance
+    fireEvent.click(screen.getByRole("button", { name: /restore/i }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, { body: string }])[1].body)).toEqual({
+      pmid: "9",
+      coreId: "2",
+      status: "revoked",
+    });
+    expect(await screen.findByText(/Restored — Rejected pub/)).toBeTruthy();
+  });
+
+  it("keeps a rejected row and surfaces an error when the restore POST is refused", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: "not_core_owner" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[]}
+        confirmed={[]}
+        rejected={[row({ pmid: "9", title: "Rejected pub", claimed: true })]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /restore/i }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("not_core_owner"),
+    );
+    // not restored — the Restore affordance is still present
+    expect(screen.getByRole("button", { name: /restore/i })).toBeTruthy();
+    expect(screen.queryByText(/Restored — Rejected pub/)).toBeNull();
+  });
+
+  it("renders MeSH terms as chips in the Details expander", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ meshTerms: [{ ui: "D001921", label: "Brain" }, { ui: null, label: "Neurons" }] }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    expect(screen.getByText("Brain")).toBeTruthy();
+    expect(screen.getByText("Neurons")).toBeTruthy();
   });
 
   it("suppresses a 0 on a just-published paper as 'No citations yet'", () => {
