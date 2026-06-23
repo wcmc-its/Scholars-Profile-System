@@ -60,10 +60,6 @@ export function HeaderAuthSlot({ isAuthenticated, scholar }: HeaderAuthSlotProps
   const [auth, setAuth] = useState<{ isAuthenticated: boolean; scholar: ScholarLite | null }>(
     { isAuthenticated, scholar },
   );
-  // GrantRecs Phase 4 — the "Researchers for funding" top-nav link. Gated client-
-  // side off the same probe (a superuser OR a development-role member); the header
-  // can't read roles server-side without breaking the public cache (see above).
-  const [canFunding, setCanFunding] = useState(false);
 
   useEffect(() => {
     // The server prop is correct on cookie-forwarding surfaces; only probe
@@ -78,12 +74,10 @@ export function HeaderAuthSlot({ isAuthenticated, scholar }: HeaderAuthSlotProps
           data: {
             authenticated?: boolean;
             scholar?: ScholarLite | null;
-            canAccessFundingMatcher?: boolean;
           } | null,
         ) => {
           if (!active || !data?.authenticated) return;
           setAuth({ isAuthenticated: true, scholar: data.scholar ?? null });
-          setCanFunding(Boolean(data.canAccessFundingMatcher));
         },
       )
       .catch(() => {
@@ -95,18 +89,7 @@ export function HeaderAuthSlot({ isAuthenticated, scholar }: HeaderAuthSlotProps
   }, [isAuthenticated]);
 
   return (
-    <>
-      {canFunding ? (
-        <Link
-          href="/edit/find-researchers"
-          prefetch={false}
-          className="text-sm font-medium text-white/85 transition-colors hover:text-white focus:text-white focus:outline-none"
-        >
-          Researchers for funding
-        </Link>
-      ) : null}
-      {auth.isAuthenticated ? <AccountMenu scholar={auth.scholar} /> : <SignInLink />}
-    </>
+    <>{auth.isAuthenticated ? <AccountMenu scholar={auth.scholar} /> : <SignInLink />}</>
   );
 }
 
