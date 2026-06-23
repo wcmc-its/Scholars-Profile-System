@@ -11,12 +11,10 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 import {
   fetchSuggestedArticles,
-  fetchSuggestedArticlesViaApi,
   formatSuggestionAuthors,
   isReciterRejectEnabled,
   isReciterApiConfigured,
   postGoldStandardReject,
-  preferReciterApiSource,
   reciterApiConfig,
   runFeatureGenerator,
   withRetry,
@@ -115,90 +113,6 @@ describe("runFeatureGenerator", () => {
     expect(url.searchParams.get("useGoldStandard")).toBe("AS_EVIDENCE");
     expect(calledInit().method).toBe("GET");
     expect((calledInit().headers as Record<string, string>)["api-key"]).toBe("admin-secret");
-  });
-});
-
-describe("preferReciterApiSource", () => {
-  it("is true only for the exact 'api' string", () => {
-    expect(preferReciterApiSource({ RECITER_PENDING_SOURCE: "api" })).toBe(true);
-    expect(preferReciterApiSource({ RECITER_PENDING_SOURCE: "off" })).toBe(false);
-    expect(preferReciterApiSource({})).toBe(false);
-  });
-});
-
-describe("fetchSuggestedArticlesViaApi", () => {
-  /** One reCiterArticleFeature as the FG response carries it. */
-  function feat(pmid: number, score: number, userAssertion = "NULL") {
-    return {
-      pmid,
-      authorshipLikelihoodScore: score,
-      userAssertion,
-      articleTitle: `Article ${pmid}`,
-      journalTitleVerbose: `Journal ${pmid}`,
-      publicationDateDisplay: "2025 May 28",
-      publicationType: { publicationTypeCanonical: "Academic Article" },
-      reCiterArticleAuthorFeatures: [{ rank: 1, firstName: "Ada", lastName: "Lovelace" }],
-    };
-  }
-  const jsonResponse = (body: unknown) =>
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify(body), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
-
-  it("GETs the cached FG analysis (analysisRefreshFlag=false) with the api-key header", async () => {
-    jsonResponse({ reCiterArticleFeatures: [feat(111, 55), feat(222, 92), feat(333, 73)] });
-
-    const out = await fetchSuggestedArticlesViaApi("abc123", { config: CONFIG });
-
-    const url = calledUrl();
-    expect(url.pathname).toBe("/reciter/feature-generator/by/uid");
-    expect(url.searchParams.get("uid")).toBe("abc123");
-    // CRITICAL: must NOT trigger the heavy synchronous re-run.
-    expect(url.searchParams.get("analysisRefreshFlag")).toBe("false");
-    expect(calledInit().method).toBe("GET");
-    expect((calledInit().headers as Record<string, string>)["api-key"]).toBe("admin-secret");
-    // score>=40, sorted desc; no GoldStandard cross-check needed.
-    expect(out.map((s) => s.pmid)).toEqual(["222", "333", "111"]);
-    expect(out[0]).toMatchObject({ score: 92, articleTitle: "Article 222" });
-  });
-
-  it("drops ACCEPTED/REJECTED (userAssertion-only filter) and sub-40 scores", async () => {
-    jsonResponse({
-      reCiterArticleFeatures: [
-        feat(111, 90, "ACCEPTED"), // already curated
-        feat(222, 88, "REJECTED"), // already curated
-        feat(333, 39), // below threshold
-        feat(444, 70), // genuinely new
-      ],
-    });
-    const out = await fetchSuggestedArticlesViaApi("abc123", { config: CONFIG });
-    expect(out.map((s) => s.pmid)).toEqual(["444"]);
-  });
-
-  it("tolerates the wrapped { reCiterFeature: {...} } and list response shapes", async () => {
-    jsonResponse({ reCiterFeature: { reCiterArticleFeatures: [feat(111, 80)] } });
-    expect((await fetchSuggestedArticlesViaApi("a", { config: CONFIG })).map((s) => s.pmid)).toEqual([
-      "111",
-    ]);
-
-    jsonResponse([{ reCiterArticleFeatures: [feat(222, 81)] }]);
-    expect((await fetchSuggestedArticlesViaApi("a", { config: CONFIG })).map((s) => s.pmid)).toEqual([
-      "222",
-    ]);
-  });
-
-  it("degrades to [] on a non-2xx, and never calls the engine when unconfigured", async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 502 }));
-    expect(await fetchSuggestedArticlesViaApi("a", { config: CONFIG })).toEqual([]);
-
-    fetchMock.mockClear();
-    expect(
-      await fetchSuggestedArticlesViaApi("a", { config: reciterApiConfig({}) ?? undefined }),
-    ).toEqual([]);
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

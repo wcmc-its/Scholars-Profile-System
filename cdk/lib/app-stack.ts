@@ -262,17 +262,6 @@ export class AppStack extends Stack {
       "EtlReciterSecret",
       `scholars/${env}/etl/reciter`,
     );
-    // ReCiter ENGINE REST API — base URL + ADMIN api-key (JSON keys
-    // RECITER_API_BASE_URL + RECITER_API_KEY). Same secret the ETL task already
-    // consumes for the #746 reject path; the app task reads it for the
-    // reciter-pending nudge's engine-API source (RECITER_PENDING_SOURCE=api),
-    // which fetches candidates over the Feature Generator HTTP API and so
-    // sidesteps the S3-offloaded Analysis read. Seed out-of-band.
-    const reciterApiSecret = secretsmanager.Secret.fromSecretNameV2(
-      this,
-      "ReciterApiSecret",
-      `scholars/${env}/reciter-api`,
-    );
     // SAML IdP signing cert — the trust anchor for assertion-signature
     // verification (#466). Injected as SAML_IDP_CERT; a secret (not env) so
     // the 2026-08-19 IdP cert rollover is a value rotation, not a code
@@ -325,7 +314,6 @@ export class AppStack extends Stack {
       revalidateTokenSecret.secretArn,
       samlSpPrivateKeySecret.secretArn,
       etlReciterSecret.secretArn,
-      reciterApiSecret.secretArn,
       samlIdpCertSecret.secretArn,
       samlSpCertSecret.secretArn,
       sessionCookieSecret.secretArn,
@@ -770,6 +758,14 @@ export class AppStack extends Stack {
     //     ReCiter runs).
     //   - s3:GetObject ONLY, scoped to the AnalysisOutput/* prefix of the
     //     reciter-dynamodb bucket -- never a bare `*`.
+    //   - kms:Decrypt ONLY, scoped to the single CMK that SSE-KMS-encrypts the
+    //     reciter-dynamodb bucket. The offloaded AnalysisOutput/<uid> objects
+    //     are encrypted with this key, so s3:GetObject ALONE returns
+    //     AccessDenied on a prolific scholar (whose analysis is offloaded) --
+    //     the read then silently degrades to [] and the nudge shows nothing.
+    //     The key policy delegates to the account root (no condition), so this
+    //     IAM grant is sufficient; the key's broad `Principal:*` Decrypt is
+    //     conditioned to kms:ViaService=rds and does NOT cover S3 reads.
     //
     // Read-only by construction; the #746 reject WRITE path is the engine HTTP
     // call gated separately. Contains no secretsmanager reference, so the "zero
@@ -792,6 +788,13 @@ export class AppStack extends Stack {
           effect: iam.Effect.ALLOW,
           actions: ["s3:GetObject"],
           resources: ["arn:aws:s3:::reciter-dynamodb/AnalysisOutput/*"],
+        }),
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["kms:Decrypt"],
+          resources: [
+            "arn:aws:kms:us-east-1:665083158573:key/6b9d182c-8abc-48a0-ac90-7c47b55c829a",
+          ],
         }),
       ],
     });
@@ -1136,15 +1139,6 @@ export class AppStack extends Stack {
         // approval-gated Sps-App-prod deploy after the staging soak). The nudge only
         // renders for a genuine (non-impersonating) self viewer with this flag on.
         SELF_EDIT_RECITER_PENDING_HINT: env === "staging" ? "on" : "off",
-        // RECITER_PENDING_SOURCE — where the reciter-pending route reads
-        // candidates. "api" ⇒ the ReCiter engine's Feature Generator HTTP API
-        // (RECITER_API_BASE_URL/KEY above), which returns the candidate list in
-        // its response and so SIDESTEPS the S3-offloaded Analysis read that the
-        // default DynamoDB/S3 source needs (the SPS task reaches the engine but
-        // not the offloaded object → otherwise a silent empty nudge). "api" in
-        // staging; "off" (DynamoDB/S3 source) in prod. Both fall back to [] on
-        // any failure, so this is safe regardless of which source is selected.
-        RECITER_PENDING_SOURCE: env === "staging" ? "api" : "off",
         // #443 -- mentee co-publication BRIDGE. getMenteesForMentor's per-mentee
         // co-pub count + 3-pub preview is a LIVE WCM ReciterDB query the in-VPC
         // app can't reach, so it degrades to "temporarily unavailable" in
@@ -1892,14 +1886,6 @@ export class AppStack extends Stack {
           etlReciterSecret,
           "SCHOLARS_RECITERDB_PASSWORD",
         ),
-        // ReCiter engine REST API for the reciter-pending nudge's engine-API
-        // source (RECITER_PENDING_SOURCE=api). env-var name == the secret's JSON
-        // key; read by lib/reciter/client.ts reciterApiConfig().
-        RECITER_API_BASE_URL: ecs.Secret.fromSecretsManager(
-          reciterApiSecret,
-          "RECITER_API_BASE_URL",
-        ),
-        RECITER_API_KEY: ecs.Secret.fromSecretsManager(reciterApiSecret, "RECITER_API_KEY"),
       },
     });
 
