@@ -91,15 +91,22 @@ export function HomePanel({
 }: HomePanelProps) {
   const headshot = useHeadshotProbe(identityImageEndpoint);
   const isAdmin = mode === "superuser";
+  // Live ReCiter pending suggestions, fetched client-side (zero fetch when the
+  // feature is off — the `enabled` gate). Unreviewed suggestions are an
+  // outstanding action on Publications, so they drive both the row's "to-do"
+  // marker and the completeness count below.
+  const pendingSuggestions = useReciterPendingSuggestions(cwid, reciterPendingEnabled);
+  const hasPendingSuggestions = pendingSuggestions.length > 0;
 
   // A real count over four essentials — not a percentage. An item counts only
   // when it is genuinely satisfied; while the headshot is still probing it does
-  // not count (so the number only ever ticks up, never down).
+  // not count (so the number only ever ticks up, never down). Publications
+  // counts only when pubs are shown AND no suggestions are left to review.
   const total = 4;
   const done =
     (hasBio ? 1 : 0) +
     (headshot === "present" ? 1 : 0) +
-    (totalPublications > 0 ? 1 : 0) +
+    (totalPublications > 0 && !hasPendingSuggestions ? 1 : 0) +
     1; // visibility — a choice is always set
 
   return (
@@ -127,8 +134,7 @@ export function HomePanel({
           hidden={hiddenPublications}
           isAdmin={isAdmin}
           name={preferredName}
-          reciterPendingEnabled={reciterPendingEnabled}
-          cwid={cwid}
+          pending={pendingSuggestions}
         />
       </ChecklistGroup>
 
@@ -559,19 +565,16 @@ function PublicationsItem({
   hidden,
   isAdmin,
   name,
-  reciterPendingEnabled,
-  cwid,
+  pending,
 }: {
   basePath: string;
   total: number;
   hidden: number;
   isAdmin: boolean;
   name: string;
-  /** Whether to mount the live pending-articles teaser loader (self/superuser + flag on). */
-  reciterPendingEnabled: boolean;
-  /** Target scholar's CWID — threaded to the teaser so a superuser reads the
-   *  target scholar's suggestions; omitted ⇒ the signed-in identity (self). */
-  cwid?: string;
+  /** Live ReCiter pending suggestions (already fetched by HomePanel; `[]` when
+   *  the feature is off or none are pending). */
+  pending: ReciterSuggestion[];
 }) {
   const subtitle =
     total === 0
@@ -581,15 +584,20 @@ function PublicationsItem({
         : isAdmin
           ? `${total} shown on ${name}'s profile`
           : `${total} shown on your profile`;
+  // Unreviewed suggestions are an outstanding action ⇒ the "to-do" marker (amber
+  // ring), even though publications are already shown. No pending ⇒ done when
+  // pubs exist, else info (nothing shown yet).
+  const hero = pending.length > 0 && pending[0].score >= 70 ? pending[0] : null;
+  const marker = pending.length > 0 ? "todo" : total > 0 ? "done" : "info";
   return (
     <ChecklistRow
       testId="home-item-publications"
-      marker={total > 0 ? "done" : "info"}
+      marker={marker}
       title="Publications"
       subtitle={subtitle}
       teaser={
-        reciterPendingEnabled ? (
-          <PublicationsSuggestionTeaserLoader cwid={cwid} />
+        pending.length > 0 ? (
+          <PublicationsSuggestionTeaser hero={hero} count={pending.length} />
         ) : null
       }
       // Both self and superuser now have a per-scholar Publications tab to
@@ -605,31 +613,17 @@ function PublicationsItem({
 }
 
 /**
- * Lazily fetch the target scholar's live ReCiter suggestions and render the
- * compact Publications-row teaser only when a high-confidence (≥70) hero exists.
- * Pass `cwid` to read a specific scholar (the superuser-parity case); omit it to
- * read the signed-in identity (self). Mounted only when `reciterPendingEnabled`
- * is true (self/superuser + flag on), so the dormant page makes ZERO fetch.
- * Renders nothing while loading / empty / sub-hero.
- */
-function PublicationsSuggestionTeaserLoader({ cwid }: { cwid?: string }) {
-  const suggestions = useReciterPendingSuggestions(cwid);
-  const hero =
-    suggestions.length > 0 && suggestions[0].score >= 70 ? suggestions[0] : null;
-  if (!hero) return null;
-  return <PublicationsSuggestionTeaser hero={hero} count={suggestions.length} />;
-}
-
-/**
  * The compact "pending in ReCiter" teaser shown beneath the Publications row's
- * subtitle when a high-confidence (≥70) hero suggestion exists: a small green
- * score chip + the truncated article title + a link into Publication Manager.
+ * subtitle whenever suggestions are pending: a link into Publication Manager,
+ * preceded by a green score chip + truncated title when a high-confidence (≥70)
+ * `hero` exists. `hero` is null when the top suggestion scores 40–69 — the count
+ * line still shows so the row's "to-do" marker always has an explanation.
  */
 function PublicationsSuggestionTeaser({
   hero,
   count,
 }: {
-  hero: ReciterSuggestion;
+  hero: ReciterSuggestion | null;
   count: number;
 }) {
   return (
@@ -637,12 +631,14 @@ function PublicationsSuggestionTeaser({
       data-testid="home-reciter-pending-teaser"
       className="mt-1.5 flex flex-col gap-1"
     >
-      <p className="flex min-w-0 items-center gap-1.5 text-[0.8rem]">
-        <span className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green inline-flex flex-none items-center rounded-full border px-1.5 py-0.5 text-[0.65rem] font-semibold tabular-nums">
-          {hero.score}
-        </span>
-        <span className="text-foreground truncate font-medium">{hero.articleTitle}</span>
-      </p>
+      {hero ? (
+        <p className="flex min-w-0 items-center gap-1.5 text-[0.8rem]">
+          <span className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green inline-flex flex-none items-center rounded-full border px-1.5 py-0.5 text-[0.65rem] font-semibold tabular-nums">
+            {hero.score}
+          </span>
+          <span className="text-foreground truncate font-medium">{hero.articleTitle}</span>
+        </p>
+      ) : null}
       <a
         href={PUBLICATION_MANAGER_URL}
         target="_blank"

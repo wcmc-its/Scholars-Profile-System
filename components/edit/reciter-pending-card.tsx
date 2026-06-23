@@ -279,14 +279,22 @@ const RECITER_PENDING_ENDPOINT = "/api/edit/reciter-pending";
  * read the signed-in identity (the self case). The route authorizes the supplied
  * cwid (a non-superuser may only read their own). Returns the suggestions (empty
  * until the fetch resolves) — the ReCiter engine read happens client-side so the
- * dormant page makes ZERO server round-trip: the loader is only ever rendered
- * when `reciterPendingEnabled` is true. Any non-2xx / parse / network failure
- * degrades silently to `[]` (the route itself also degrades to `[]`).
+ * dormant page makes ZERO server round-trip.
+ *
+ * `enabled` (default true) gates the fetch so the hook can be called
+ * unconditionally (Rules of Hooks) from a component that decides whether the
+ * feature is on — when false the hook makes ZERO fetch and stays `[]`. Any
+ * non-2xx / parse / network failure degrades silently to `[]` (the route itself
+ * also degrades to `[]`).
  */
-export function useReciterPendingSuggestions(cwid?: string): ReciterSuggestion[] {
+export function useReciterPendingSuggestions(
+  cwid?: string,
+  enabled: boolean = true,
+): ReciterSuggestion[] {
   const [suggestions, setSuggestions] = React.useState<ReciterSuggestion[]>([]);
 
   React.useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -309,7 +317,7 @@ export function useReciterPendingSuggestions(cwid?: string): ReciterSuggestion[]
     return () => {
       cancelled = true;
     };
-  }, [cwid]);
+  }, [cwid, enabled]);
 
   return suggestions;
 }
