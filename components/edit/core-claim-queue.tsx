@@ -9,12 +9,72 @@
  * have no dual org/paper view and a binary (confirm/reject) decision.
  */
 import { useState, type KeyboardEvent, type ReactNode } from "react";
-import { Check, ChevronRight, ExternalLink, Undo2, X } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  ExternalLink,
+  Quote,
+  Repeat,
+  Sparkles,
+  Undo2,
+  Users,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core-queue";
 
 type Decision = "claimed" | "rejected";
 type FilterKey = "all" | "ack" | "coauthored" | "llm";
-type SortKey = "likelihood" | "llm";
+type SortKey = "likelihood" | "uncertain" | "strongest" | "llm";
+
+type SignalKind = "ack" | "coauthor" | "llm" | "affinity";
+interface Signal {
+  kind: SignalKind;
+  /** 1–4 display strength. */
+  dots: number;
+  strength: string;
+}
+
+/** The four core-usage signals (ack, co-author, LLM, repeat-user). */
+const SIGNAL_COUNT = 4;
+const SIGNAL_ICON: Record<SignalKind, LucideIcon> = {
+  ack: Quote,
+  coauthor: Users,
+  llm: Sparkles,
+  affinity: Repeat,
+};
+/** Stable tie-break so equal-strength signals keep a deterministic order. */
+const KIND_ORDER: Record<SignalKind, number> = { ack: 0, coauthor: 1, llm: 2, affinity: 3 };
+const DOTS_LABEL = ["", "Weak", "Moderate", "Strong", "Very strong"] as const;
+const clampDots = (n: number) => Math.max(1, Math.min(4, n));
+
+/**
+ * Which of the four signals fired for a row, each scored to a 1–4 strength,
+ * strongest first. Pure — drives the card's "why this surfaced" rows.
+ * ponytail: strength is a display heuristic, not a calibrated probability — the
+ * engine's combined `likelihood` is the real number. Tune the bands here if the
+ * dots ever feel off; nothing downstream depends on them.
+ */
+export function buildSignals(row: CoreQueueRow): Signal[] {
+  const out: Signal[] = [];
+  if (row.signalAck || row.ackAlias) {
+    out.push({
+      kind: "ack",
+      dots: row.ackAlias ? 4 : 3,
+      strength: row.ackAlias ? "Direct" : "Strong",
+    });
+  }
+  if (row.coauthors.length > 0) out.push({ kind: "coauthor", dots: 3, strength: "Strong" });
+  if (row.llmScore !== null) {
+    const dots = clampDots(Math.round(row.llmScore / 2.5));
+    out.push({ kind: "llm", dots, strength: DOTS_LABEL[dots] });
+  }
+  if (row.authorAffinity !== null) {
+    const dots = row.authorAffinity >= 0.6 ? 2 : 1;
+    out.push({ kind: "affinity", dots, strength: dots === 2 ? "Moderate prior" : "Weak prior" });
+  }
+  return out.sort((a, b) => b.dots - a.dots || KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
+}
 
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "all", label: "All" },
@@ -22,6 +82,38 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "coauthored", label: "Co-authored" },
   { key: "llm", label: "LLM-flagged" },
 ];
+
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: "likelihood", label: "Likelihood (high → low)" },
+  { key: "uncertain", label: "Uncertain first" },
+  { key: "strongest", label: "Strongest signal" },
+  { key: "llm", label: "LLM score" },
+];
+
+/** Highest single-signal strength on a row (0 when nothing fired). */
+function maxSignalDots(row: CoreQueueRow): number {
+  return buildSignals(row).reduce((m, s) => Math.max(m, s.dots), 0);
+}
+
+/**
+ * Order two candidates for the chosen sort. Pure.
+ *   likelihood — engine confidence, high→low (default)
+ *   uncertain  — closest to 50/50 first, where a reviewer's call matters most
+ *   strongest  — by the single strongest signal, then likelihood
+ *   llm        — by dense LLM triage score
+ */
+export function compareBySort(sort: SortKey, a: CoreQueueRow, b: CoreQueueRow): number {
+  switch (sort) {
+    case "uncertain":
+      return Math.abs(a.likelihood - 0.5) - Math.abs(b.likelihood - 0.5);
+    case "strongest":
+      return maxSignalDots(b) - maxSignalDots(a) || b.likelihood - a.likelihood;
+    case "llm":
+      return (b.llmScore ?? -1) - (a.llmScore ?? -1);
+    default:
+      return b.likelihood - a.likelihood;
+  }
+}
 
 /** Does a candidate match the active filter? `all` keeps everything. */
 function matchesFilter(row: CoreQueueRow, filter: FilterKey): boolean {
@@ -99,9 +191,7 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
   const visible = candidates
     .filter((c) => decided.has(c.pmid) || matchesFilter(c, filter))
     .slice()
-    .sort((a, b) =>
-      sort === "llm" ? (b.llmScore ?? -1) - (a.llmScore ?? -1) : b.likelihood - a.likelihood,
-    );
+    .sort((a, b) => compareBySort(sort, a, b));
 
   return (
     <div data-slot="core-claim-queue">
@@ -190,14 +280,14 @@ function QueueControls({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="flex gap-1" role="group" aria-label="Filter candidates">
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter candidates">
         {FILTERS.map((f) => (
           <button
             key={f.key}
             type="button"
             aria-pressed={filter === f.key}
             onClick={() => onFilter(f.key)}
-            className={`rounded-full border px-2.5 py-0.5 text-xs ${
+            className={`rounded-full border px-3 py-1 text-[13px] ${
               filter === f.key
                 ? "border-transparent bg-[var(--color-accent-slate)] text-white"
                 : "border-apollo-border text-muted-foreground hover:text-foreground"
@@ -207,15 +297,18 @@ function QueueControls({
           </button>
         ))}
       </div>
-      <label className="text-muted-foreground flex items-center gap-1 text-xs">
+      <label className="text-muted-foreground flex items-center gap-1 text-[13px]">
         <span className="sr-only">Sort by</span>
         <select
           value={sort}
           onChange={(e) => onSort(e.target.value as SortKey)}
-          className="border-apollo-border rounded-md border bg-background px-2 py-0.5 text-xs"
+          className="border-apollo-border rounded-md border bg-background px-2 py-1 text-[13px]"
         >
-          <option value="likelihood">Likelihood</option>
-          <option value="llm">LLM score</option>
+          {SORTS.map((s) => (
+            <option key={s.key} value={s.key}>
+              Sort: {s.label}
+            </option>
+          ))}
         </select>
       </label>
     </div>
@@ -317,6 +410,7 @@ function CandidateCard({
   }
 
   const likelihoodPct = Math.round(row.likelihood * 100);
+  const signals = buildSignals(row);
   return (
     <div
       className={`${CARD_SHELL} p-4`}
@@ -387,34 +481,29 @@ function CandidateCard({
         <p className="text-muted-foreground mt-2 text-[13px] leading-snug">{row.synopsis}</p>
       ) : null}
 
-      {row.llmRationale ? (
-        <p className="text-foreground mt-2.5 text-[13px] leading-snug">{row.llmRationale}</p>
-      ) : null}
-
-      {/* Per-signal breakdown: combined headline % + whichever of the 4 signals fired. */}
-      <ul className="mt-3 flex flex-wrap gap-2" aria-label="evidence">
-        <EvidenceChip label={`${likelihoodPct}% likely`} />
-        {row.authorAffinity !== null ? (
-          <EvidenceChip label={`Repeat-user ${Math.round(row.authorAffinity * 100)}%`} />
-        ) : null}
-        {row.coauthors.length > 0 ? (
-          <EvidenceChip
-            label={`${row.coauthors.length} core-staff co-author${row.coauthors.length > 1 ? "s" : ""}`}
+      {/* Combined likelihood + the per-signal "why this surfaced" breakdown. */}
+      <div className="my-3 flex items-center gap-2.5">
+        <span className="text-muted-foreground text-[13px]">Combined likelihood</span>
+        <span className="bg-muted block h-1.5 flex-1 overflow-hidden rounded-full">
+          <span
+            className="block h-1.5 rounded-full bg-[var(--color-accent-slate)]"
+            style={{ width: `${likelihoodPct}%` }}
           />
-        ) : null}
-        {row.ackAlias ? (
-          <EvidenceChip label={`Named: ${row.ackAlias}`} />
-        ) : row.signalAck ? (
-          <EvidenceChip label="Acknowledged in text" />
-        ) : null}
-        {row.llmScore !== null ? <EvidenceChip label={`LLM ${row.llmScore}/10`} /> : null}
-      </ul>
+        </span>
+        <span className="text-sm font-medium tabular-nums">{likelihoodPct}%</span>
+      </div>
 
-      {row.ackSnippet ? (
-        <p className="text-muted-foreground mt-2 line-clamp-2 text-xs italic">“{row.ackSnippet}”</p>
+      <p className="text-muted-foreground text-xs">
+        Why this surfaced · {signals.length} of {SIGNAL_COUNT} signals fired
+      </p>
+
+      {signals.length > 0 ? (
+        <ul className="mt-1" aria-label="evidence">
+          {signals.map((s) => (
+            <SignalRow key={s.kind} signal={s} row={row} />
+          ))}
+        </ul>
       ) : null}
-
-      <CoreStaffLine coauthorScholars={row.coauthorScholars} coauthors={row.coauthors} />
 
       {row.abstract || row.fullAuthorsString || row.wcmAuthors.length > 0 ? (
         <details className="group mt-2.5">
@@ -456,34 +545,94 @@ function CandidateCard({
   );
 }
 
-/** A core-staff co-author (signal 2): named + linked when resolved, else the bare CWID. */
-function CoreStaffLine({
-  coauthorScholars,
-  coauthors,
-}: {
-  coauthorScholars: QueueScholar[];
-  coauthors: string[];
-}) {
-  if (coauthors.length === 0) return null;
-  const resolved = new Set(coauthorScholars.map((s) => s.cwid));
-  const unresolved = coauthors.filter((c) => !resolved.has(c));
+/** One fired signal as an evidence row: icon · lead (+ quote/sub) · strength dots. */
+function SignalRow({ signal, row }: { signal: Signal; row: CoreQueueRow }) {
+  const Icon = SIGNAL_ICON[signal.kind];
+  let lead: ReactNode;
+  let sub: ReactNode = null;
+  let quote: string | null = null;
+  switch (signal.kind) {
+    case "ack":
+      lead = row.ackAlias ? "Named in the acknowledgments" : "Acknowledged in text";
+      if (row.ackSnippet) quote = row.ackSnippet;
+      else if (row.ackAlias) sub = `Matched “${row.ackAlias}” in the full text`;
+      break;
+    case "coauthor":
+      lead = <CoauthorLead row={row} />;
+      if (row.coauthorScholars.length === 0) sub = "No Scholar profile yet — showing CWID";
+      break;
+    case "llm":
+      lead = `LLM triage · ${row.llmScore}/10`;
+      sub = row.llmRationale;
+      break;
+    case "affinity":
+      lead = "Repeat user of this core";
+      sub = `Prior confirmed pubs put author affinity at ${Math.round((row.authorAffinity ?? 0) * 100)}%`;
+      break;
+  }
   return (
-    <p className="text-muted-foreground mt-2 text-xs">
-      <span className="font-medium text-foreground">Core staff on byline: </span>
-      {coauthorScholars.map((s, i) => (
+    <li className="border-apollo-border grid grid-cols-[20px_minmax(0,1fr)_auto] items-start gap-2.5 border-t pt-2">
+      <Icon className="text-muted-foreground mt-0.5 size-4" aria-hidden />
+      <div className="min-w-0">
+        <div className="text-foreground text-[13px]">{lead}</div>
+        {quote ? (
+          <p className="border-border-strong text-muted-foreground mt-1 border-l-2 pl-2 text-xs italic">
+            “{quote}”
+          </p>
+        ) : sub ? (
+          <div className="text-muted-foreground mt-0.5 text-xs">{sub}</div>
+        ) : null}
+      </div>
+      <StrengthDots dots={signal.dots} strength={signal.strength} />
+    </li>
+  );
+}
+
+/** "Co-authored with …" — linked scholars (with dept) plus any bare CWIDs. */
+function CoauthorLead({ row }: { row: CoreQueueRow }) {
+  const resolved = row.coauthorScholars;
+  const resolvedSet = new Set(resolved.map((s) => s.cwid));
+  const unresolved = row.coauthors.filter((c) => !resolvedSet.has(c));
+  if (resolved.length === 0) {
+    return (
+      <>
+        Co-authored with core staff <span className="font-mono text-[12.5px]">{unresolved.join(", ")}</span>
+      </>
+    );
+  }
+  return (
+    <>
+      Co-authored with{" "}
+      {resolved.map((s, i) => (
         <span key={s.cwid}>
           {i > 0 ? ", " : ""}
           <ScholarLink scholar={s} />
           {s.dept ? <span className="text-muted-foreground"> ({s.dept})</span> : null}
         </span>
       ))}
-      {unresolved.length > 0 ? (
-        <span>
-          {coauthorScholars.length > 0 ? ", " : ""}
-          {unresolved.join(", ")}
-        </span>
-      ) : null}
-    </p>
+      {unresolved.length > 0 ? <span>, {unresolved.join(", ")}</span> : null}
+    </>
+  );
+}
+
+/** Four-dot strength meter with a label (e.g. "Strong"), right-aligned. */
+function StrengthDots({ dots, strength }: { dots: number; strength: string }) {
+  return (
+    <div className="flex flex-col items-end gap-0.5 whitespace-nowrap">
+      <span className="flex items-center gap-[3px]" aria-hidden>
+        {[0, 1, 2, 3].map((i) => (
+          <span
+            key={i}
+            className={`size-1.5 rounded-full border ${
+              i < dots
+                ? "border-muted-foreground bg-muted-foreground"
+                : "border-muted-foreground/40"
+            }`}
+          />
+        ))}
+      </span>
+      <span className="text-muted-foreground text-[11px]">{strength}</span>
+    </div>
   );
 }
 
@@ -498,13 +647,5 @@ function ScholarLink({ scholar }: { scholar: QueueScholar }) {
     >
       {scholar.name}
     </a>
-  );
-}
-
-function EvidenceChip({ label }: { label: string }) {
-  return (
-    <li className="border-apollo-border text-muted-foreground inline-flex items-center rounded-full border px-2 py-px text-[11px]">
-      {label}
-    </li>
   );
 }

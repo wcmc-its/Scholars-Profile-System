@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { CoreClaimQueue } from "@/components/edit/core-claim-queue";
+import { buildSignals, compareBySort, CoreClaimQueue } from "@/components/edit/core-claim-queue";
 import type { CoreQueueRow } from "@/lib/api/core-queue";
 
 function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
@@ -44,14 +44,19 @@ afterEach(() => {
 });
 
 describe("CoreClaimQueue", () => {
-  it("renders a candidate with its per-signal evidence breakdown", () => {
+  it("renders a candidate with its combined-likelihood bar and per-signal rows", () => {
     render(<CoreClaimQueue core={CORE} candidates={[row()]} confirmed={[]} />);
     expect(screen.getByText("Advanced MRI of the brain")).toBeTruthy();
-    expect(screen.getByText("82% likely")).toBeTruthy();
-    expect(screen.getByText("Repeat-user 42%")).toBeTruthy();
-    expect(screen.getByText("Named: CBIC")).toBeTruthy();
-    expect(screen.getByText("1 core-staff co-author")).toBeTruthy();
-    expect(screen.getByText("LLM 7/10")).toBeTruthy();
+    // combined-likelihood bar
+    expect(screen.getByText("Combined likelihood")).toBeTruthy();
+    expect(screen.getByText("82%")).toBeTruthy();
+    expect(screen.getByText(/4 of 4 signals fired/)).toBeTruthy();
+    // one row per fired signal
+    expect(screen.getByText("Named in the acknowledgments")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Doug Ballon" })).toBeTruthy(); // co-author row
+    expect(screen.getByText("LLM triage · 7/10")).toBeTruthy();
+    expect(screen.getByText("Repeat user of this core")).toBeTruthy();
+    expect(screen.getByText("Prior confirmed pubs put author affinity at 42%")).toBeTruthy();
   });
 
   it("renders the LLM rationale, citation count, and PubMed/DOI links", () => {
@@ -85,9 +90,9 @@ describe("CoreClaimQueue", () => {
         confirmed={[]}
       />,
     );
-    expect(screen.queryByText(/Repeat-user/)).toBeNull();
-    expect(screen.queryByText(/core-staff co-author/)).toBeNull();
-    expect(screen.queryByText(/Named:|Acknowledged in text/)).toBeNull();
+    expect(screen.queryByText(/Repeat user of this core/)).toBeNull();
+    expect(screen.queryByText(/Co-authored with/)).toBeNull();
+    expect(screen.queryByText(/Named in the acknowledgments|Acknowledged in text/)).toBeNull();
   });
 
   it("renders the synopsis and links resolved core-staff co-authors to their profile (Tier 2)", () => {
@@ -234,6 +239,24 @@ describe("CoreClaimQueue", () => {
     expect(titles()).toEqual(["Low likelihood, high LLM", "High likelihood, low LLM"]);
   });
 
+  it("re-sorts uncertain-first when selected", () => {
+    render(
+      <CoreClaimQueue
+        core={CORE}
+        candidates={[
+          row({ pmid: "1", title: "Very confident", likelihood: 0.97 }),
+          row({ pmid: "2", title: "Coin-flip", likelihood: 0.52 }),
+        ]}
+        confirmed={[]}
+      />,
+    );
+    const titles = () =>
+      screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+    expect(titles()).toEqual(["Very confident", "Coin-flip"]); // default: likelihood desc
+    fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: "uncertain" } });
+    expect(titles()).toEqual(["Coin-flip", "Very confident"]);
+  });
+
   it("announces the outcome politely for screen readers (Tier 3)", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
@@ -309,5 +332,55 @@ describe("CoreClaimQueue", () => {
     fireEvent.click(screen.getByRole("button", { name: "Acknowledged" }));
     // still shown via the decided-row override, so its Undo is reachable
     expect(screen.getByRole("button", { name: /undo/i })).toBeTruthy();
+  });
+});
+
+describe("buildSignals", () => {
+  it("returns only fired signals, scored and ordered strongest-first", () => {
+    const signals = buildSignals(row()); // all four fire
+    expect(signals.map((s) => s.kind)).toEqual(["ack", "coauthor", "llm", "affinity"]);
+    // alias ack is "Direct" (4); a repeat-user prior is capped low
+    expect(signals[0]).toMatchObject({ kind: "ack", dots: 4, strength: "Direct" });
+    expect(signals.at(-1)).toMatchObject({ kind: "affinity", dots: 1, strength: "Weak prior" });
+  });
+
+  it("omits a signal that did not fire", () => {
+    const signals = buildSignals(
+      row({ authorAffinity: null, coauthors: [], signalAck: false, ackAlias: null }),
+    );
+    expect(signals.map((s) => s.kind)).toEqual(["llm"]); // only the LLM score survives
+  });
+
+  it("downgrades an ack with no matched alias from Direct to Strong", () => {
+    const [ack] = buildSignals(row({ ackAlias: null, signalAck: true, coauthors: [] }));
+    expect(ack).toMatchObject({ kind: "ack", dots: 3, strength: "Strong" });
+  });
+});
+
+describe("compareBySort", () => {
+  it("strongest: a 4-dot direct ack outranks a higher-likelihood weak prior", () => {
+    const direct = row({
+      likelihood: 0.6,
+      ackAlias: "CBIC",
+      signalAck: true,
+      coauthors: [],
+      llmScore: null,
+      authorAffinity: null,
+    });
+    const weak = row({
+      likelihood: 0.95,
+      ackAlias: null,
+      signalAck: false,
+      coauthors: [],
+      llmScore: null,
+      authorAffinity: 0.3,
+    });
+    expect(compareBySort("strongest", direct, weak)).toBeLessThan(0);
+  });
+
+  it("uncertain: a coin-flip outranks a near-certain row", () => {
+    const sure = row({ likelihood: 0.98 });
+    const flip = row({ likelihood: 0.51 });
+    expect(compareBySort("uncertain", flip, sure)).toBeLessThan(0);
   });
 });
