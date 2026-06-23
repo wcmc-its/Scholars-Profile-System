@@ -65,7 +65,7 @@ type Hit = {
     isLast: boolean;
   }>;
   /** #1166/#1168 — the per-(pub × entity) relevance sentence, present only when the
-   *  feed is filtered by an entity (`?cellLine=`); revealed under the row. `usage`
+   *  feed is filtered by an entity (`?entity=`); revealed under the row. `usage`
    *  (WS-C #253) drives the badge: "appears" for a generic mention, else "used". */
   entityUsage?: {
     sentence: string;
@@ -95,7 +95,7 @@ export function FamilyPublicationFeed({
   familySegment: string;
   /** Resolved family label, used for the feed heading. */
   familyLabel: string;
-  /** #1166 — entity id → display label, so the `?cellLine=` context-bar chip can
+  /** #1166 — entity id → display label, so the `?entity=` context-bar chip can
    *  name the active cell line. Absent (or unknown id) ⇒ no cell-line filter UI. */
   cellLineLabels?: Record<string, string>;
 }) {
@@ -104,7 +104,7 @@ export function FamilyPublicationFeed({
   const searchParams = useSearchParams();
   // #1166 — the shared, URL-addressable cell-line filter (spec §6). Only honored
   // when its label is known (the entity belongs to this family + the flag is on).
-  const cellLineId = searchParams.get("cellLine");
+  const cellLineId = searchParams.get("entity");
   const cellLine = cellLineId && cellLineLabels?.[cellLineId] ? cellLineId : null;
   const cellLineLabel = cellLine ? cellLineLabels![cellLine] : null;
 
@@ -143,7 +143,7 @@ export function FamilyPublicationFeed({
 
   const clearCellLine = () => {
     const params = new URLSearchParams(searchParams.toString());
-    params.delete("cellLine");
+    params.delete("entity");
     params.delete("page");
     router.replace(params.toString() ? `${pathname}?${params.toString()}` : pathname, {
       scroll: false,
@@ -405,7 +405,7 @@ function useFeedFetch({
     url.searchParams.set("sort", sort);
     url.searchParams.set("page", String(page));
     url.searchParams.set("filter", filter);
-    if (cellLine) url.searchParams.set("cellLine", cellLine);
+    if (cellLine) url.searchParams.set("entity", cellLine);
 
     fetch(url.toString())
       .then((r) => {

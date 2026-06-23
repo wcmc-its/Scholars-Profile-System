@@ -93,7 +93,7 @@ export default async function FamilyPage({
 
   // #1166 — when the family resolves to specific cell lines, the master-detail
   // cell-line rail (Surface B §5.1) sits in the left column of the publications
-  // section, driving the `?cellLine=` feed filter. When there are no cell lines,
+  // section, driving the `?entity=` feed filter. When there are no cell lines,
   // the publications feed renders without the rail.
   const hasCellLines = cellLineEntities.length > 0;
   const cellLineLabels = Object.fromEntries(cellLineEntities.map((e) => [e.entityId, e.label]));
@@ -232,7 +232,7 @@ export default async function FamilyPage({
       <section id="publications" className="scroll-mt-20">
         {hasCellLines ? (
           // #1166 Surface B — master-detail: the cell-line rail (left) drives the
-          // shared `?cellLine=` filter the feed (right) reads. Mirrors the
+          // shared `?entity=` filter the feed (right) reads. Mirrors the
           // supercategory layout's sticky-rail + cornell-red divider for parity.
           <div className="mt-16">
             <hr className="mb-10 border-border" />

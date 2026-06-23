@@ -39,7 +39,7 @@ export function FamilyPublicationLayout({
   supercategorySlug: string;
   familySegment: string;
   familyLabel: string;
-  /** #1166 — entity id → label for the feed's `?cellLine=` context-bar chip. */
+  /** #1166 — entity id → label for the feed's `?entity=` context-bar chip. */
   cellLineLabels?: Record<string, string>;
   /** #1166 — when the layout is the RIGHT column of the family-page master-detail,
    *  the page supplies its own `mt-16`+`<hr>` wrapper, so suppress this one's to
@@ -47,7 +47,7 @@ export function FamilyPublicationLayout({
   embedded?: boolean;
 }) {
   const feed = (
-    // The feed reads `?cellLine=` via useSearchParams (#1166) — Suspense lets the
+    // The feed reads `?entity=` via useSearchParams (#1166) — Suspense lets the
     // static shell emit and hydrate at request time (parity with the type-B layout).
     <Suspense fallback={null}>
       <FamilyPublicationFeed
