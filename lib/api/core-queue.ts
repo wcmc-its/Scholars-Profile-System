@@ -66,6 +66,13 @@ export interface CoreQueueRow {
   citationCount: number;
   pubmedUrl: string | null;
   doi: string | null;
+  /** True when an active human claim (not just the engine) backs a confirmed row;
+   *  set by partitionCoreQueue. Drives the Confirmed-list revoke vs reject path. */
+  claimed: boolean;
+  /** iCite relative citation ratio (reciterdb.analysis_nih), when computed. */
+  relativeCitationRatio: number | null;
+  /** NIH citation percentile (0-100), when computed. */
+  nihPercentile: number | null;
 }
 
 export interface CoreReviewQueue {
@@ -87,8 +94,9 @@ export function partitionCoreQueue(
   const confirmed: CoreQueueRow[] = [];
   for (const row of rows) {
     const claim = claimFor(row.pmid);
-    if (isOpenCandidate(row.status, claim)) candidates.push(row);
-    else if (effectiveCoreStatus(row.status, claim) === "confirmed") confirmed.push(row);
+    if (isOpenCandidate(row.status, claim)) candidates.push({ ...row, claimed: false });
+    else if (effectiveCoreStatus(row.status, claim) === "confirmed")
+      confirmed.push({ ...row, claimed: claim === "claimed" });
     // an active 'rejected' claim excludes the pair from both lists
   }
   return { candidates, confirmed };
@@ -143,6 +151,8 @@ export async function loadCoreReviewQueue(
           citationCount: true,
           pubmedUrl: true,
           doi: true,
+          relativeCitationRatio: true,
+          nihPercentile: true,
         },
       },
     },
@@ -159,20 +169,24 @@ export async function loadCoreReviewQueue(
 
   // Core-staff co-authors (signal-2 CWIDs) → named scholars. CWIDs with no
   // Scholar row simply don't appear here (the component falls back to the CWID).
-  const scholarById = new Map<string, QueueScholar>();
+  // CWIDs are compared case-insensitively across the app (auth/*, proxy-notification,
+  // ldap); the engine's signalCoauthors casing can differ from scholar.cwid, so key by
+  // lowercase and query both forms. Names also come from the byline join below — a
+  // core-staff co-author IS a byline author, so the name is present even when the
+  // direct scholar lookup misses.
+  const scholarByCwidLc = new Map<string, QueueScholar>();
+  const putScholar = (s: QueueScholar) => {
+    const key = s.cwid.toLowerCase();
+    if (!scholarByCwidLc.has(key)) scholarByCwidLc.set(key, s);
+  };
   if (coStaffCwids.size > 0) {
+    const lowered = [...coStaffCwids].map((c) => c.toLowerCase());
     const scholars = await client.scholar.findMany({
-      where: { cwid: { in: [...coStaffCwids] } },
+      where: { cwid: { in: [...coStaffCwids, ...lowered] } },
       select: { cwid: true, preferredName: true, slug: true, primaryDepartment: true },
     });
-    for (const s of scholars) {
-      scholarById.set(s.cwid, {
-        cwid: s.cwid,
-        name: s.preferredName,
-        slug: s.slug,
-        dept: s.primaryDepartment,
-      });
-    }
+    for (const s of scholars)
+      putScholar({ cwid: s.cwid, name: s.preferredName, slug: s.slug, dept: s.primaryDepartment });
   }
 
   // WCM scholars on each paper's byline (potential core users), in author order.
@@ -189,21 +203,26 @@ export async function loadCoreReviewQueue(
     });
     for (const a of authors) {
       if (!a.cwid || !a.scholar) continue;
-      const list = wcmByPmid.get(a.pmid) ?? [];
-      if (list.length >= WCM_AUTHORS_CAP || list.some((w) => w.cwid === a.cwid)) continue;
-      list.push({
+      const scholar: QueueScholar = {
         cwid: a.cwid,
         name: a.scholar.preferredName,
         slug: a.scholar.slug,
         dept: a.scholar.primaryDepartment,
-      });
+      };
+      // byline authors also resolve core-staff co-author CWIDs (case-insensitively)
+      putScholar(scholar);
+      const list = wcmByPmid.get(a.pmid) ?? [];
+      if (list.length >= WCM_AUTHORS_CAP || list.some((w) => w.cwid === a.cwid)) continue;
+      list.push(scholar);
       wcmByPmid.set(a.pmid, list);
     }
   }
 
   const queueRows: CoreQueueRow[] = rows.map((r) => {
     const coauthors = Array.isArray(r.signalCoauthors)
-      ? (r.signalCoauthors as unknown[]).filter((c): c is string => typeof c === "string")
+      ? (r.signalCoauthors as unknown[])
+          .filter((c): c is string => typeof c === "string")
+          .map((c) => c.toLowerCase())
       : [];
     return {
       pmid: r.pmid,
@@ -218,7 +237,7 @@ export async function loadCoreReviewQueue(
       status: r.status,
       coauthors,
       coauthorScholars: coauthors
-        .map((c) => scholarById.get(c))
+        .map((c) => scholarByCwidLc.get(c))
         .filter((s): s is QueueScholar => s !== undefined),
       wcmAuthors: wcmByPmid.get(r.pmid) ?? [],
       signalAck: r.signalAck,
@@ -231,6 +250,14 @@ export async function loadCoreReviewQueue(
       citationCount: r.publication.citationCount,
       pubmedUrl: r.publication.pubmedUrl,
       doi: r.publication.doi,
+      // claimed is resolved per-row in partitionCoreQueue once claims are known.
+      claimed: false,
+      relativeCitationRatio:
+        r.publication.relativeCitationRatio == null
+          ? null
+          : Number(r.publication.relativeCitationRatio),
+      nihPercentile:
+        r.publication.nihPercentile == null ? null : Number(r.publication.nihPercentile),
     };
   });
 
