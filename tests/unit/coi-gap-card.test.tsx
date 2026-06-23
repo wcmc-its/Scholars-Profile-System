@@ -555,30 +555,29 @@ describe("CoiGapCard #1112 redesign", () => {
     );
   });
 
-  describe("#1245 — primary cards truncate behind a 'show more' disclosure", () => {
-    /** N distinct high-confidence companies (one paper each), org grouping. */
-    function distinctOrgs(n: number): EditContextCoiGapMention[] {
-      return Array.from({ length: n }, (_, i) => {
-        const name = `Org ${String.fromCharCode(65 + i)}`; // Org A, Org B, …
-        return mention({
-          candidateId: `c-org-${i}`,
-          pmid: `7000000${i}`,
-          organization: name.toLowerCase(),
-          organizationRaw: name,
-        });
-      });
+  describe("#1245 — example papers per organization truncate behind 'show more'", () => {
+    /** N distinct papers (mentions) for a SINGLE high-confidence organization. */
+    function orgWithPapers(n: number): EditContextCoiGapMention[] {
+      return Array.from({ length: n }, (_, i) =>
+        mention({
+          candidateId: `c-${i}`,
+          pmid: `9000000${i}`,
+          organization: "acme",
+          organizationRaw: "Acme Corp",
+        }),
+      );
     }
 
-    it("shows only the first 3 high-confidence orgs and hides the rest behind 'Show N more'", () => {
-      // 5 distinct high-confidence companies → 3 visible, 2 hidden.
-      render(<CoiGapCard cwid="self01" mentions={distinctOrgs(5)} />);
-      const more = screen.getByTestId("coi-gap-more");
-      expect(more.querySelector("summary")?.textContent).toContain("Show 2 more organizations");
+    it("shows only the first 3 example papers and hides the rest behind 'Show N more papers'", () => {
+      // One org with 5 papers → 3 shown, 2 behind the disclosure.
+      render(<CoiGapCard cwid="self01" mentions={orgWithPapers(5)} />);
+      const more = screen.getByTestId("coi-gap-org-more-acme");
+      expect(more.querySelector("summary")?.textContent).toContain("Show 2 more papers");
     });
 
-    it("does NOT render the disclosure when there are 3 or fewer high-confidence orgs", () => {
-      render(<CoiGapCard cwid="self01" mentions={distinctOrgs(3)} />);
-      expect(screen.queryByTestId("coi-gap-more")).toBeNull();
+    it("does NOT render the disclosure when an organization has 3 or fewer papers", () => {
+      render(<CoiGapCard cwid="self01" mentions={orgWithPapers(3)} />);
+      expect(screen.queryByTestId("coi-gap-org-more-acme")).toBeNull();
     });
   });
 });

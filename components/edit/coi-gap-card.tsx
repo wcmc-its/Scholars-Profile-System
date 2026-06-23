@@ -636,10 +636,23 @@ export function CoiGapCard({
           </p>
         )}
         <ul className="mt-2">
-          {card.mentions.map((m) => (
+          {card.mentions.slice(0, COI_GAP_PAPER_EXAMPLE_LIMIT).map((m) => (
             <OrgRow key={m.candidateId} m={m} />
           ))}
         </ul>
+        {card.mentions.length > COI_GAP_PAPER_EXAMPLE_LIMIT && (
+          <details data-testid={`coi-gap-org-more-${card.organization}`}>
+            <summary className="text-apollo-slate mt-1 cursor-pointer text-sm font-medium">
+              Show {card.mentions.length - COI_GAP_PAPER_EXAMPLE_LIMIT} more paper
+              {card.mentions.length - COI_GAP_PAPER_EXAMPLE_LIMIT === 1 ? "" : "s"}
+            </summary>
+            <ul className="mt-1">
+              {card.mentions.slice(COI_GAP_PAPER_EXAMPLE_LIMIT).map((m) => (
+                <OrgRow key={m.candidateId} m={m} />
+              ))}
+            </ul>
+          </details>
+        )}
         <div className="border-apollo-border mt-3 border-t pt-3">
           {currentIds.length === 0 ? (
             <SetAsideLine
@@ -1060,17 +1073,17 @@ export function CoiGapCard({
                 : `All caught up — nothing from ${voicePoss} publications right now.`}
             </p>
           ) : groupBy === "organization" ? (
-            <TruncatedCardList
-              cards={orgCards}
-              noun="organization"
-              renderCard={(c) => <OrgCardView key={c.organization} card={c} lower={false} />}
-            />
+            <div className="flex flex-col gap-3">
+              {orgCards.map((c) => (
+                <OrgCardView key={c.organization} card={c} lower={false} />
+              ))}
+            </div>
           ) : (
-            <TruncatedCardList
-              cards={paperCards}
-              noun="paper"
-              renderCard={(c) => <PaperCardView key={c.pmid} card={c} />}
-            />
+            <div className="flex flex-col gap-3">
+              {paperCards.map((c) => (
+                <PaperCardView key={c.pmid} card={c} />
+              ))}
+            </div>
           )}
         </div>
 
@@ -1174,35 +1187,9 @@ function ReassureChip({
   );
 }
 
-/** #1245 — show only the first few cards; the rest hide behind a native
- *  <details> disclosure (matches the lower-confidence section's pattern). */
-const COI_GAP_VISIBLE_LIMIT = 3;
-
-function TruncatedCardList<T>({
-  cards,
-  noun,
-  renderCard,
-}: {
-  cards: T[];
-  noun: string;
-  renderCard: (card: T) => React.ReactNode;
-}) {
-  const rest = cards.slice(COI_GAP_VISIBLE_LIMIT);
-  return (
-    <div className="flex flex-col gap-3">
-      {cards.slice(0, COI_GAP_VISIBLE_LIMIT).map(renderCard)}
-      {rest.length > 0 && (
-        <details data-testid="coi-gap-more">
-          <summary className="text-apollo-slate cursor-pointer text-sm font-medium">
-            Show {rest.length} more {noun}
-            {rest.length === 1 ? "" : "s"}
-          </summary>
-          <div className="mt-2 flex flex-col gap-3">{rest.map(renderCard)}</div>
-        </details>
-      )}
-    </div>
-  );
-}
+/** #1245 — on the organization tab, show up to this many example papers per
+ *  organization; the rest hide behind a native <details> disclosure. */
+const COI_GAP_PAPER_EXAMPLE_LIMIT = 3;
 
 /** A small muted "lower confidence" flag on each lower-confidence card. */
 function LowerFlag() {
