@@ -1485,14 +1485,17 @@ describe("AppStack", () => {
         expect(JSON.stringify(resource)).toContain(":distribution/");
       });
 
-      it("the ReCiter read grant is dynamodb:GetItem on Analysis/GoldStandard + s3:GetObject on AnalysisOutput/* only, never * (#746)", () => {
+      it("the ReCiter read grant is dynamodb:GetItem on Analysis/GoldStandard + s3:GetObject on AnalysisOutput/* + kms:Decrypt on the bucket CMK only, never * (#746)", () => {
         // Synth-time guard: the live "suggested articles" nudge
         // (lib/reciter/client.ts fetchSuggestedArticles) reads ReCiter's own
         // DynamoDB GoldStandard + Analysis tables and the offloaded
         // AnalysisOutput/<uid> S3 object under THIS task role -- read-only,
         // no api-key. Least-privilege: a keyed GetItem (never Scan/Query) on
-        // exactly the two tables, and s3:GetObject scoped to the
-        // AnalysisOutput/* prefix -- never a bare `*`.
+        // exactly the two tables, s3:GetObject scoped to the AnalysisOutput/*
+        // prefix, and kms:Decrypt scoped to the single CMK that SSE-KMS-encrypts
+        // the offloaded objects -- never a bare `*`. Without the kms:Decrypt the
+        // S3 read of a prolific (offloaded) scholar's analysis 403s and the
+        // nudge silently degrades to [].
         const reciterPolicy = findTaskRolePolicies().find((p) =>
           JSON.stringify(p.Properties?.PolicyDocument).includes(
             "AnalysisOutput/",
@@ -1501,7 +1504,7 @@ describe("AppStack", () => {
         expect(reciterPolicy).toBeDefined();
         const statements = reciterPolicy?.Properties?.PolicyDocument
           ?.Statement as Array<Record<string, unknown>> | undefined;
-        expect(statements).toHaveLength(2);
+        expect(statements).toHaveLength(3);
 
         // DynamoDB statement: GetItem only, scoped to Analysis + GoldStandard.
         const ddbStmt = statements!.find((s) =>
@@ -1528,6 +1531,17 @@ describe("AppStack", () => {
         expect(s3Resource).not.toBe("*");
         expect(s3Resource).toBe(
           "arn:aws:s3:::reciter-dynamodb/AnalysisOutput/*",
+        );
+
+        // KMS statement: Decrypt only, scoped to the single bucket CMK.
+        const kmsStmt = statements!.find((s) =>
+          JSON.stringify(s.Action).includes("kms:"),
+        )!;
+        expect(kmsStmt.Action).toBe("kms:Decrypt");
+        const kmsResource = kmsStmt.Resource as string;
+        expect(kmsResource).not.toBe("*");
+        expect(kmsResource).toBe(
+          "arn:aws:kms:us-east-1:665083158573:key/6b9d182c-8abc-48a0-ac90-7c47b55c829a",
         );
       });
 

@@ -2996,6 +2996,11 @@ service:
               "Effect": "Allow",
               "Resource": "arn:aws:s3:::reciter-dynamodb/AnalysisOutput/*",
             },
+            {
+              "Action": "kms:Decrypt",
+              "Effect": "Allow",
+              "Resource": "arn:aws:kms:us-east-1:665083158573:key/6b9d182c-8abc-48a0-ac90-7c47b55c829a",
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -6381,6 +6386,11 @@ service:
               "Action": "s3:GetObject",
               "Effect": "Allow",
               "Resource": "arn:aws:s3:::reciter-dynamodb/AnalysisOutput/*",
+            },
+            {
+              "Action": "kms:Decrypt",
+              "Effect": "Allow",
+              "Resource": "arn:aws:kms:us-east-1:665083158573:key/6b9d182c-8abc-48a0-ac90-7c47b55c829a",
             },
           ],
           "Version": "2012-10-17",

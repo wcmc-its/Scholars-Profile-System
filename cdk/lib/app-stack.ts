@@ -758,6 +758,14 @@ export class AppStack extends Stack {
     //     ReCiter runs).
     //   - s3:GetObject ONLY, scoped to the AnalysisOutput/* prefix of the
     //     reciter-dynamodb bucket -- never a bare `*`.
+    //   - kms:Decrypt ONLY, scoped to the single CMK that SSE-KMS-encrypts the
+    //     reciter-dynamodb bucket. The offloaded AnalysisOutput/<uid> objects
+    //     are encrypted with this key, so s3:GetObject ALONE returns
+    //     AccessDenied on a prolific scholar (whose analysis is offloaded) --
+    //     the read then silently degrades to [] and the nudge shows nothing.
+    //     The key policy delegates to the account root (no condition), so this
+    //     IAM grant is sufficient; the key's broad `Principal:*` Decrypt is
+    //     conditioned to kms:ViaService=rds and does NOT cover S3 reads.
     //
     // Read-only by construction; the #746 reject WRITE path is the engine HTTP
     // call gated separately. Contains no secretsmanager reference, so the "zero
@@ -780,6 +788,13 @@ export class AppStack extends Stack {
           effect: iam.Effect.ALLOW,
           actions: ["s3:GetObject"],
           resources: ["arn:aws:s3:::reciter-dynamodb/AnalysisOutput/*"],
+        }),
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["kms:Decrypt"],
+          resources: [
+            "arn:aws:kms:us-east-1:665083158573:key/6b9d182c-8abc-48a0-ac90-7c47b55c829a",
+          ],
         }),
       ],
     });
