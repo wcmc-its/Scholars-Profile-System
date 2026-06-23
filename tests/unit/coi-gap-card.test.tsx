@@ -554,4 +554,31 @@ describe("CoiGapCard #1112 redesign", () => {
       "Historically true, not currently valid",
     );
   });
+
+  describe("#1245 — primary cards truncate behind a 'show more' disclosure", () => {
+    /** N distinct high-confidence companies (one paper each), org grouping. */
+    function distinctOrgs(n: number): EditContextCoiGapMention[] {
+      return Array.from({ length: n }, (_, i) => {
+        const name = `Org ${String.fromCharCode(65 + i)}`; // Org A, Org B, …
+        return mention({
+          candidateId: `c-org-${i}`,
+          pmid: `7000000${i}`,
+          organization: name.toLowerCase(),
+          organizationRaw: name,
+        });
+      });
+    }
+
+    it("shows only the first 3 high-confidence orgs and hides the rest behind 'Show N more'", () => {
+      // 5 distinct high-confidence companies → 3 visible, 2 hidden.
+      render(<CoiGapCard cwid="self01" mentions={distinctOrgs(5)} />);
+      const more = screen.getByTestId("coi-gap-more");
+      expect(more.querySelector("summary")?.textContent).toContain("Show 2 more organizations");
+    });
+
+    it("does NOT render the disclosure when there are 3 or fewer high-confidence orgs", () => {
+      render(<CoiGapCard cwid="self01" mentions={distinctOrgs(3)} />);
+      expect(screen.queryByTestId("coi-gap-more")).toBeNull();
+    });
+  });
 });

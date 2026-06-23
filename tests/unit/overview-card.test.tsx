@@ -375,9 +375,9 @@ function postCall(f: FetchSpy): [string, RequestInit] {
   return call as unknown as [string, RequestInit];
 }
 
-/** #875 — the Draft-with-AI block is inline (no tabs). It is expanded by default
- *  when there is no saved bio, collapsed when one exists; tests that drive
- *  generation on an EXISTING bio must expand it first. */
+/** #875 — the Draft-with-AI block is inline (no tabs). #1246 — it is now
+ *  collapsed by default regardless of saved-bio state; tests that drive
+ *  generation or query the block body must expand it first. */
 function expandBlock() {
   const toggle = screen.queryByTestId("overview-draft-block-toggle");
   if (toggle && toggle.getAttribute("aria-expanded") === "false") {
@@ -394,6 +394,7 @@ describe("OverviewCard — generator affordance", () => {
 
   it("shows the fixed 'Generate a draft' button when enabled and the bio is empty", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     expect(screen.getByTestId("overview-generate")).toBeTruthy();
     expect(screen.getByTestId("overview-generate").textContent).toContain("Generate a draft");
   });
@@ -408,6 +409,7 @@ describe("OverviewCard — generator affordance", () => {
   it("POSTs to /api/edit/overview/generate with { entityId, params }", async () => {
     const f = stubGenerateOk("<p>A drafted overview.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_BANNER)).toBeTruthy());
     const [url, opts] = postCall(f);
@@ -425,6 +427,7 @@ describe("OverviewCard — generator affordance", () => {
   it("on 200 lands the draft in the review card, NOT the editor — Save stays disabled (clobber-safety)", async () => {
     stubGenerateOk("<p>A drafted overview.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     // Pristine empty bio → Save disabled before generating.
     expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByTestId("overview-generate"));
@@ -441,6 +444,7 @@ describe("OverviewCard — generator affordance", () => {
   it("Replace overwrites the editor with the draft and enables Save", async () => {
     stubGenerateOk("<p>A drafted overview.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await screen.findByTestId("overview-draft-replace");
     fireEvent.click(screen.getByTestId("overview-draft-replace"));
@@ -471,6 +475,7 @@ describe("OverviewCard — generator affordance", () => {
   it("Discard clears only the review card; the editor stays pristine", async () => {
     stubGenerateOk("<p>drafted.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await screen.findByTestId("overview-draft-discard");
     fireEvent.click(screen.getByTestId("overview-draft-discard"));
@@ -486,6 +491,7 @@ describe("OverviewCard — generator affordance", () => {
       return jsonResponse({ ok: true, draft: `<p>draft ${n}</p>`, model: "openai/gpt", generationId: `gen-${n}` });
     });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await screen.findByTestId("overview-draft-review-card");
     fireEvent.click(screen.getByTestId("overview-generate"));
@@ -516,6 +522,7 @@ describe("OverviewCard — generator affordance", () => {
   it("on 422 insufficient_facts shows the sparse-data message and leaves the editor unchanged", async () => {
     stubGenerateError(422, "insufficient_facts");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_SPARSE)).toBeTruthy());
     // No review card; editor untouched ⇒ still pristine ⇒ Save disabled.
@@ -527,6 +534,7 @@ describe("OverviewCard — generator affordance", () => {
   it("on 429 rate_limited shows the rate-limit message", async () => {
     stubGenerateError(429, "rate_limited");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_RATE_LIMITED)).toBeTruthy());
     expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
@@ -535,6 +543,7 @@ describe("OverviewCard — generator affordance", () => {
   it("on a 502 shows the inline generation error and leaves the editor unchanged (G8)", async () => {
     stubGenerateError(502, "generation_failed");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_FAILED)).toBeTruthy());
     expect(screen.queryByTestId("overview-draft-review-card")).toBeNull();
@@ -545,6 +554,7 @@ describe("OverviewCard — generator affordance", () => {
   it("on a network failure shows the inline generation error", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_FAILED)).toBeTruthy());
   });
@@ -692,6 +702,7 @@ describe("OverviewCard — version history (Phase B)", () => {
   it("Save sends sourceGenerationId after generate → Replace", async () => {
     const f = stubGenerateOk("<p>A drafted overview.</p>", "gen-new");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await screen.findByTestId("overview-draft-replace");
     fireEvent.click(screen.getByTestId("overview-draft-replace"));
@@ -739,6 +750,7 @@ describe("OverviewCard — version history (Phase B)", () => {
   it("hand-editing an accepted draft un-links provenance (saves as authored)", async () => {
     const f = stubGenerateOk("<p>A drafted overview.</p>", "gen-new");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await screen.findByTestId("overview-draft-replace");
     fireEvent.click(screen.getByTestId("overview-draft-replace"));
@@ -826,6 +838,7 @@ describe("OverviewCard — version history (Phase B)", () => {
     });
 
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     // Default selection (all default-selected) → 3 publications + 2 awards.
     expect(
       await screen.findByText(
@@ -852,12 +865,12 @@ describe("OverviewCard — version history (Phase B)", () => {
 // ---------------------------------------------------------------------------
 
 describe("OverviewCard — Draft-with-AI block", () => {
-  it("is expanded by default when there is no saved bio", () => {
+  it("is collapsed by default even when there is no saved bio (#1246)", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
     expect(screen.getByTestId("overview-draft-block-toggle").getAttribute("aria-expanded")).toBe(
-      "true",
+      "false",
     );
-    expect(screen.getByTestId("overview-draft-block-body")).toBeTruthy();
+    expect(screen.queryByTestId("overview-draft-block-body")).toBeNull();
   });
 
   it("is collapsed by default when a saved hand-written bio exists, showing a settings summary", () => {
@@ -882,6 +895,7 @@ describe("OverviewCard — Draft-with-AI block", () => {
 
   it("renders the Generate button BELOW the settings + sources (button last)", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     const body = screen.getByTestId("overview-draft-block-body");
     const voice = screen.getByTestId("overview-voice-third");
     const sources = screen.getByTestId("overview-sources-trigger");
@@ -1035,6 +1049,7 @@ describe("OverviewCard — conditional hints", () => {
   it("fires the emphasis-conflict hint when awards are selected but Grants & funding is off", async () => {
     stubSourceOptions({ pubs: 3, awardsSelected: true });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     const hint = await screen.findByTestId("overview-hint-emphasis-conflict");
     expect(hint.textContent).toContain(
       "awards are selected as sources but won't be mentioned directly — turn on Grants & funding to include them in the overview.",
@@ -1044,6 +1059,7 @@ describe("OverviewCard — conditional hints", () => {
   it("hides the conflict hint once Grants & funding is toggled on", async () => {
     stubSourceOptions({ pubs: 3, awardsSelected: true });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     await screen.findByTestId("overview-hint-emphasis-conflict");
     fireEvent.click(screen.getByTestId("overview-element-grants_funding"));
     await waitFor(() =>
@@ -1054,6 +1070,7 @@ describe("OverviewCard — conditional hints", () => {
   it("fires the sparse-sources hint when <=1 publication and 0 awards are selected", async () => {
     stubSourceOptions({ pubs: 1, awardsSelected: false });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     const hint = await screen.findByTestId("overview-hint-sparse-sources");
     expect(hint.textContent).toContain("Limited sources may produce a generic draft.");
     // Distinct from the post-422 server message.
@@ -1063,6 +1080,7 @@ describe("OverviewCard — conditional hints", () => {
   it("does NOT fire the sparse hint with multiple publications", async () => {
     stubSourceOptions({ pubs: 5, awardsSelected: false });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expandBlock();
     await screen.findByTestId("overview-generate");
     expect(screen.queryByTestId("overview-hint-sparse-sources")).toBeNull();
   });
