@@ -17,6 +17,8 @@ export type CareerStage = "grad" | "postdoc" | "early" | "mid" | "senior";
 
 export type CareerStageInput = {
   roleCategory: string | null | undefined;
+  /** Primary appointment title — its academic rank is the strongest faculty seniority signal. */
+  title?: string | null;
   appointments?: ReadonlyArray<{ startDate: Date | null }>;
   educations?: ReadonlyArray<{ year: number | null }>;
 };
@@ -50,8 +52,32 @@ export function yearsSinceTerminalDegree(input: CareerStageInput, now: Date): nu
   return now.getFullYear() - terminal;
 }
 
+/**
+ * Academic rank parsed from the title — the most reliable seniority signal for a
+ * full-time faculty member. Checked before tenure: a Professor who joined WCM
+ * recently has a short *appointment tenure* (→ wrongly "early") but is plainly
+ * senior. Order matters: "assistant"/"associate" must be tested before bare
+ * "professor". ponytail: covers WCM's Assistant/Associate/full Professor +
+ * Instructor/Lecturer; returns null (fall through to tenure/degree) for any title
+ * that doesn't name a rank.
+ */
+function facultyStageFromTitle(title: string | null | undefined): CareerStage | null {
+  const t = (title ?? "").toLowerCase();
+  if (!t) return null;
+  if (/\bassistant\s+professor\b/.test(t)) return "early";
+  if (/\bassociate\s+professor\b/.test(t)) return "mid";
+  if (/\bprofessor\b/.test(t)) return "senior";
+  if (/\b(?:instructor|lecturer)\b/.test(t)) return "early";
+  return null;
+}
+
 /** Split a full-time faculty member into early/mid/senior; default mid when undateable. */
 function facultyStage(input: CareerStageInput, now: Date): CareerStage {
+  // Academic rank first — appointment tenure misreads senior mid-career hires as
+  // "early" (short WCM tenure for a Professor who moved institutions), so the
+  // title rank takes precedence when present (#1218).
+  const byTitle = facultyStageFromTitle(input.title);
+  if (byTitle) return byTitle;
   const tenure = appointmentTenureYears(input, now);
   if (tenure !== null) {
     if (tenure < TENURE_EARLY_MAX_YEARS) return "early";
