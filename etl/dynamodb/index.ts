@@ -65,6 +65,7 @@ import { buildPublicationCoreWrites } from "./publication-core-mapper";
 import { CORE_CATALOG, CORE_CATALOG_SOURCE } from "./core-catalog";
 import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
 import { projectGrantOpportunities } from "./grant-opportunity-etl";
+import { guardedReplace } from "./projection-replace";
 
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
@@ -531,21 +532,23 @@ async function main() {
     console.log(`Built ${rows.length} topic_assignment rows.`);
 
     console.log("Resetting topic_assignment table...");
-    await db.write.topicAssignment.deleteMany();
-
     console.log(`Inserting ${rows.length}...`);
     const FACULTY_BATCH = 1000;
-    for (let i = 0; i < rows.length; i += FACULTY_BATCH) {
-      await db.write.topicAssignment.createMany({
-        data: rows.slice(i, i + FACULTY_BATCH).map((r) => ({
+    // Atomic, sanity-guarded rebuild (see guardedReplace): refuses an
+    // implausible shrink before deleting, and rolls back on a mid-load failure.
+    await guardedReplace({
+      table: "topic_assignment",
+      rows,
+      batchSize: FACULTY_BATCH,
+      pick: (client) => client.topicAssignment,
+      toData: (batch) =>
+        batch.map((r) => ({
           cwid: r.cwid,
           topic: r.topic,
           score: r.score,
           source: "ReCiterAI-DynamoDB",
         })),
-        skipDuplicates: true,
-      });
-    }
+    });
 
     // #742 v3.1 C3 — write the FACULTY# scale metrics onto scholar (update-only;
     // scholar rows are created by the ED ETL). Skip scholars with no non-null
@@ -738,13 +741,16 @@ async function main() {
       );
 
       console.log("Resetting scholar_tool table...");
-      await db.write.scholarTool.deleteMany();
-
       const TOOL_BATCH = 500;
-      for (let i = 0; i < toolResult.writes.length; i += TOOL_BATCH) {
-        const chunk = toolResult.writes.slice(i, i + TOOL_BATCH);
-        await db.write.scholarTool.createMany({
-          data: chunk.map((w) => ({
+      // Atomic, sanity-guarded rebuild (see guardedReplace): refuses an
+      // implausible shrink before deleting, and rolls back on a mid-load failure.
+      scholarToolRowsInserted = await guardedReplace({
+        table: "scholar_tool",
+        rows: toolResult.writes,
+        batchSize: TOOL_BATCH,
+        pick: (client) => client.scholarTool,
+        toData: (batch) =>
+          batch.map((w) => ({
             cwid: w.cwid,
             toolName: w.toolName,
             category: w.category,
@@ -753,10 +759,7 @@ async function main() {
             sampleContext: w.sampleContext,
             pmids: w.pmids,
           })),
-          skipDuplicates: true,
-        });
-        scholarToolRowsInserted += chunk.length;
-      }
+      });
       console.log(`scholar_tool inserts complete: ${scholarToolRowsInserted} rows.`);
     } else {
       console.log(
