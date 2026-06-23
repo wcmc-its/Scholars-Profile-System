@@ -66,6 +66,13 @@ export interface CoreQueueRow {
   citationCount: number;
   pubmedUrl: string | null;
   doi: string | null;
+  /** True when an active human claim (not just the engine) backs a confirmed row;
+   *  set by partitionCoreQueue. Drives the Confirmed-list revoke vs reject path. */
+  claimed: boolean;
+  /** iCite relative citation ratio (reciterdb.analysis_nih), when computed. */
+  relativeCitationRatio: number | null;
+  /** NIH citation percentile (0-100), when computed. */
+  nihPercentile: number | null;
 }
 
 export interface CoreReviewQueue {
@@ -87,8 +94,9 @@ export function partitionCoreQueue(
   const confirmed: CoreQueueRow[] = [];
   for (const row of rows) {
     const claim = claimFor(row.pmid);
-    if (isOpenCandidate(row.status, claim)) candidates.push(row);
-    else if (effectiveCoreStatus(row.status, claim) === "confirmed") confirmed.push(row);
+    if (isOpenCandidate(row.status, claim)) candidates.push({ ...row, claimed: false });
+    else if (effectiveCoreStatus(row.status, claim) === "confirmed")
+      confirmed.push({ ...row, claimed: claim === "claimed" });
     // an active 'rejected' claim excludes the pair from both lists
   }
   return { candidates, confirmed };
@@ -143,6 +151,8 @@ export async function loadCoreReviewQueue(
           citationCount: true,
           pubmedUrl: true,
           doi: true,
+          relativeCitationRatio: true,
+          nihPercentile: true,
         },
       },
     },
@@ -231,6 +241,14 @@ export async function loadCoreReviewQueue(
       citationCount: r.publication.citationCount,
       pubmedUrl: r.publication.pubmedUrl,
       doi: r.publication.doi,
+      // claimed is resolved per-row in partitionCoreQueue once claims are known.
+      claimed: false,
+      relativeCitationRatio:
+        r.publication.relativeCitationRatio == null
+          ? null
+          : Number(r.publication.relativeCitationRatio),
+      nihPercentile:
+        r.publication.nihPercentile == null ? null : Number(r.publication.nihPercentile),
     };
   });
 

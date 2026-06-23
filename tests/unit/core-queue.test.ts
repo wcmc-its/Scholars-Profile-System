@@ -30,6 +30,9 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     citationCount: 0,
     pubmedUrl: null,
     doi: null,
+    claimed: false,
+    relativeCitationRatio: null,
+    nihPercentile: null,
     ...over,
   };
 }
@@ -53,6 +56,8 @@ describe("partitionCoreQueue", () => {
     );
     expect(candidates).toHaveLength(0);
     expect(confirmed.map((r) => r.pmid)).toEqual(["2"]);
+    // engine-confirmed, no human claim → revoke path is 'rejected'
+    expect(confirmed[0]?.claimed).toBe(false);
   });
 
   it("a claimed candidate moves out of the queue into confirmed", () => {
@@ -62,6 +67,8 @@ describe("partitionCoreQueue", () => {
     );
     expect(candidates).toHaveLength(0);
     expect(confirmed.map((r) => r.pmid)).toEqual(["3"]);
+    // human claim → revoke path is the soft 'revoked'
+    expect(confirmed[0]?.claimed).toBe(true);
   });
 
   it("a rejected pair drops out of both lists", () => {
@@ -107,6 +114,8 @@ describe("loadCoreReviewQueue mapping", () => {
       citationCount: 12,
       pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/30418319/",
       doi: "10.1/x",
+      relativeCitationRatio: "2.1000",
+      nihPercentile: "89.0",
     },
   });
 
@@ -144,6 +153,9 @@ describe("loadCoreReviewQueue mapping", () => {
     expect(r?.citationCount).toBe(12);
     expect(r?.pubmedUrl).toBe("https://pubmed.ncbi.nlm.nih.gov/30418319/");
     expect(r?.doi).toBe("10.1/x");
+    // RCR/percentile (reciterdb.analysis_nih) coerced from Decimal strings
+    expect(r?.relativeCitationRatio).toBe(2.1);
+    expect(r?.nihPercentile).toBe(89);
   });
 
   it("resolves core-staff co-authors to named scholars (Tier 2), leaving the rest as CWIDs", async () => {

@@ -11,6 +11,7 @@
 import { useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   Check,
+  CheckCheck,
   ChevronRight,
   ExternalLink,
   Quote,
@@ -22,6 +23,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { CoreQueueRow, CoreReviewQueue, QueueScholar } from "@/lib/api/core-queue";
+import { sanitizePubmedHtml } from "@/lib/utils";
+import { HoverTooltip } from "@/components/ui/hover-tooltip";
 
 type Decision = "claimed" | "rejected";
 type FilterKey = "all" | "ack" | "coauthored" | "llm";
@@ -45,34 +48,20 @@ const SIGNAL_ICON: Record<SignalKind, LucideIcon> = {
 };
 /** Stable tie-break so equal-strength signals keep a deterministic order. */
 const KIND_ORDER: Record<SignalKind, number> = { ack: 0, coauthor: 1, llm: 2, affinity: 3 };
-const DOTS_LABEL = ["", "Weak", "Moderate", "Strong", "Very strong"] as const;
-const clampDots = (n: number) => Math.max(1, Math.min(4, n));
-
 /**
- * Which of the four signals fired for a row, each scored to a 1–4 strength,
- * strongest first. Pure — drives the card's "why this surfaced" rows.
- * ponytail: strength is a display heuristic, not a calibrated probability — the
- * engine's combined `likelihood` is the real number. Tune the bands here if the
- * dots ever feel off; nothing downstream depends on them.
+ * Which of the four signals fired for a row. Strength is FIXED PER SIGNAL TYPE —
+ * how much that *kind* of evidence should move a reviewer — NOT the model's
+ * self-score: ack = Direct (4), core-staff co-author = Strong (3),
+ * LLM read = Moderate (2) regardless of score, repeat-user prior = Weak (1).
+ * The raw value (8/10, 45%) rides along as a secondary readout in the meter.
+ * Pure; ordered strongest-first.
  */
 export function buildSignals(row: CoreQueueRow): Signal[] {
   const out: Signal[] = [];
-  if (row.signalAck || row.ackAlias) {
-    out.push({
-      kind: "ack",
-      dots: row.ackAlias ? 4 : 3,
-      strength: row.ackAlias ? "Direct" : "Strong",
-    });
-  }
+  if (row.signalAck || row.ackAlias) out.push({ kind: "ack", dots: 4, strength: "Direct" });
   if (row.coauthors.length > 0) out.push({ kind: "coauthor", dots: 3, strength: "Strong" });
-  if (row.llmScore !== null) {
-    const dots = clampDots(Math.round(row.llmScore / 2.5));
-    out.push({ kind: "llm", dots, strength: DOTS_LABEL[dots] });
-  }
-  if (row.authorAffinity !== null) {
-    const dots = row.authorAffinity >= 0.6 ? 2 : 1;
-    out.push({ kind: "affinity", dots, strength: dots === 2 ? "Moderate prior" : "Weak prior" });
-  }
+  if (row.llmScore !== null) out.push({ kind: "llm", dots: 2, strength: "Moderate" });
+  if (row.authorAffinity !== null) out.push({ kind: "affinity", dots: 1, strength: "Weak" });
   return out.sort((a, b) => b.dots - a.dots || KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
 }
 
@@ -89,6 +78,9 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: "strongest", label: "Strongest signal" },
   { key: "llm", label: "LLM score" },
 ];
+
+/** One-click bulk-confirm sweeps open candidates at or above this likelihood. */
+const HIGH_CONFIDENCE_LIKELIHOOD = 0.9;
 
 /** Highest single-signal strength on a row (0 when nothing fired). */
 function maxSignalDots(row: CoreQueueRow): number {
@@ -133,34 +125,57 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
   const [decided, setDecided] = useState<Map<string, Decision>>(new Map());
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Map<string, string>>(new Map());
+  // Confirmed rows walked back this session — kept visible with an undo.
+  const [revokedConfirmed, setRevokedConfirmed] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<FilterKey>("all");
-  const [sort, setSort] = useState<SortKey>("likelihood");
+  // Default to the most-uncertain band: the 96%s don't need a human, the 55–75%s do.
+  const [sort, setSort] = useState<SortKey>("uncertain");
   // Polite SR announcement of the last outcome — the success path is otherwise
   // silent (the card swaps in place with no focus move), mirroring coi-gap-card.
   const [announce, setAnnounce] = useState("");
 
-  // Post a decision (claimed/rejected) or a revoke (undo) and reflect it locally.
-  async function send(pmid: string, status: Decision | "revoked") {
+  const markPending = (pmid: string) => setPending((s) => new Set(s).add(pmid));
+  const clearPending = (pmid: string) =>
+    setPending((s) => {
+      const next = new Set(s);
+      next.delete(pmid);
+      return next;
+    });
+  const setError = (pmid: string, msg: string) => setErrors((m) => new Map(m).set(pmid, msg));
+  const clearError = (pmid: string) =>
     setErrors((m) => {
       const next = new Map(m);
       next.delete(pmid);
       return next;
     });
-    setPending((s) => new Set(s).add(pmid));
-    try {
-      const res = await fetch("/api/edit/core-claim", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ pmid, coreId: core.id, status }),
-      });
-      if (!res.ok) {
-        const data: unknown = await res.json().catch(() => ({}));
-        const error =
-          data && typeof data === "object" && typeof (data as { error?: unknown }).error === "string"
-            ? (data as { error: string }).error
-            : `HTTP ${res.status}`;
-        throw new Error(error);
-      }
+
+  // Low-level POST to the claim endpoint; returns ok/error, touches no state.
+  async function postClaim(
+    pmid: string,
+    status: Decision | "revoked",
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const res = await fetch("/api/edit/core-claim", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pmid, coreId: core.id, status }),
+    });
+    if (!res.ok) {
+      const data: unknown = await res.json().catch(() => ({}));
+      const error =
+        data && typeof data === "object" && typeof (data as { error?: unknown }).error === "string"
+          ? (data as { error: string }).error
+          : `HTTP ${res.status}`;
+      return { ok: false, error };
+    }
+    return { ok: true };
+  }
+
+  // Decide a candidate (claimed/rejected) or revoke that decision, reflected locally.
+  async function send(pmid: string, status: Decision | "revoked") {
+    clearError(pmid);
+    markPending(pmid);
+    const result = await postClaim(pmid, status);
+    if (result.ok) {
       setDecided((m) => {
         const next = new Map(m);
         if (status === "revoked") next.delete(pmid);
@@ -173,15 +188,87 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
           ? "Undone."
           : `${status === "claimed" ? "Confirmed" : "Rejected"} ${title}.`,
       );
-    } catch (err) {
-      setErrors((m) => new Map(m).set(pmid, err instanceof Error ? err.message : "request failed"));
-    } finally {
-      setPending((s) => {
+    } else {
+      setError(pmid, result.error);
+    }
+    clearPending(pmid);
+  }
+
+  // Bulk-confirm the high-confidence band in one click — clears the easy top so
+  // uncertain-first leaves the reviewer only what genuinely needs a call.
+  // ponytail: fans out the single-claim endpoint client-side; a bulk endpoint is
+  // the upgrade path if the band routinely runs to many hundreds.
+  async function confirmHighConfidence(pmids: string[]) {
+    if (pmids.length === 0) return;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Confirm ${pmids.length} high-confidence publication${pmids.length === 1 ? "" : "s"} for this core?`,
+      )
+    ) {
+      return;
+    }
+    setPending((s) => new Set([...s, ...pmids]));
+    const results = await Promise.allSettled(pmids.map((p) => postClaim(p, "claimed")));
+    const ok: string[] = [];
+    const failed: string[] = [];
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled" && r.value.ok) ok.push(pmids[i]);
+      else failed.push(pmids[i]);
+    });
+    setDecided((m) => {
+      const next = new Map(m);
+      for (const p of ok) next.set(p, "claimed");
+      return next;
+    });
+    setPending((s) => {
+      const next = new Set(s);
+      for (const p of pmids) next.delete(p);
+      return next;
+    });
+    if (failed.length > 0) {
+      setErrors((m) => {
+        const next = new Map(m);
+        for (const p of failed) next.set(p, "bulk confirm failed");
+        return next;
+      });
+    }
+    setAnnounce(
+      `Confirmed ${ok.length} high-confidence publication${ok.length === 1 ? "" : "s"}.` +
+        (failed.length > 0 ? ` ${failed.length} could not be saved.` : ""),
+    );
+  }
+
+  // Walk back a confirmed row: a human claim soft-revokes ("revoked"); an engine
+  // confirmation has no claim, so it needs a "rejected" override instead.
+  async function revokeConfirmed(pmid: string, wasClaimed: boolean, title: string) {
+    clearError(pmid);
+    markPending(pmid);
+    const result = await postClaim(pmid, wasClaimed ? "revoked" : "rejected");
+    if (result.ok) {
+      setRevokedConfirmed((s) => new Set(s).add(pmid));
+      setAnnounce(`Revoked ${title}.`);
+    } else {
+      setError(pmid, result.error);
+    }
+    clearPending(pmid);
+  }
+
+  async function undoRevokeConfirmed(pmid: string, wasClaimed: boolean) {
+    clearError(pmid);
+    markPending(pmid);
+    const result = await postClaim(pmid, wasClaimed ? "claimed" : "revoked");
+    if (result.ok) {
+      setRevokedConfirmed((s) => {
         const next = new Set(s);
         next.delete(pmid);
         return next;
       });
+      setAnnounce("Undone.");
+    } else {
+      setError(pmid, result.error);
     }
+    clearPending(pmid);
   }
 
   // Remaining review work (decided rows stay visible for undo but don't count).
@@ -192,6 +279,10 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
     .filter((c) => decided.has(c.pmid) || matchesFilter(c, filter))
     .slice()
     .sort((a, b) => compareBySort(sort, a, b));
+  // Open candidates the engine is most sure of — the one-click bulk-confirm band.
+  const highConfidencePmids = candidates
+    .filter((c) => !decided.has(c.pmid) && c.likelihood >= HIGH_CONFIDENCE_LIKELIHOOD)
+    .map((c) => c.pmid);
 
   return (
     <div data-slot="core-claim-queue">
@@ -203,10 +294,22 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
           To review
           <span className="text-muted-foreground text-sm font-normal tabular-nums">{remaining}</span>
         </h2>
-        {candidates.length > 0 ? (
-          <QueueControls filter={filter} onFilter={setFilter} sort={sort} onSort={setSort} />
+        {highConfidencePmids.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => confirmHighConfidence(highConfidencePmids)}
+            className="border-border-strong text-foreground hover:border-[var(--color-accent-slate)] hover:text-[var(--color-accent-slate)] inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-sm disabled:opacity-50"
+          >
+            <CheckCheck className="size-4" aria-hidden /> Confirm {highConfidencePmids.length}{" "}
+            high-confidence
+          </button>
         ) : null}
       </div>
+      {candidates.length > 0 ? (
+        <div className="mb-2">
+          <QueueControls filter={filter} onFilter={setFilter} sort={sort} onSort={setSort} />
+        </div>
+      ) : null}
 
       {candidates.length > 0 ? (
         <p className="text-muted-foreground mb-3 text-xs">
@@ -249,21 +352,83 @@ export function CoreClaimQueue({ core, candidates, confirmed }: CoreReviewQueue)
               {confirmed.length}
             </span>
           </h2>
-          <ul className="flex flex-col gap-2">
+          <ul className="flex flex-col gap-1.5">
             {confirmed.map((row) => (
-              <li
+              <ConfirmedRow
                 key={row.pmid}
-                className="text-muted-foreground flex items-baseline gap-2 text-sm"
-              >
-                <Check className="size-3.5 shrink-0 translate-y-0.5 text-emerald-600" aria-hidden />
-                <span className="text-foreground">{row.title}</span>
-                {row.year ? <span className="text-xs">· {row.year}</span> : null}
-              </li>
+                row={row}
+                revoked={revokedConfirmed.has(row.pmid)}
+                pending={pending.has(row.pmid)}
+                error={errors.get(row.pmid)}
+                onRevoke={() => revokeConfirmed(row.pmid, row.claimed, row.title)}
+                onUndo={() => undoRevokeConfirmed(row.pmid, row.claimed)}
+              />
             ))}
           </ul>
         </section>
       ) : null}
     </div>
+  );
+}
+
+// A confirmed publication with an inline Revoke (kept walk-back-able for the
+// session — the one thing this list needs to earn its place below the queue).
+function ConfirmedRow({
+  row,
+  revoked,
+  pending,
+  error,
+  onRevoke,
+  onUndo,
+}: {
+  row: CoreQueueRow;
+  revoked: boolean;
+  pending: boolean;
+  error: string | undefined;
+  onRevoke: () => void;
+  onUndo: () => void;
+}) {
+  if (revoked) {
+    return (
+      <li className="text-muted-foreground flex items-center justify-between gap-2 text-sm">
+        <span className="flex min-w-0 items-baseline gap-2">
+          <Undo2 className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
+          <span className="truncate">Revoked — {row.title}</span>
+        </span>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={onUndo}
+          className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-7 shrink-0 items-center gap-1 rounded-full border bg-background px-2.5 text-xs disabled:opacity-50"
+        >
+          <Undo2 className="size-3" aria-hidden /> Undo
+        </button>
+      </li>
+    );
+  }
+  return (
+    <li className="text-muted-foreground flex items-center justify-between gap-2 text-sm">
+      <span className="flex min-w-0 items-baseline gap-2">
+        <Check className="size-3.5 shrink-0 translate-y-0.5 text-emerald-600" aria-hidden />
+        <span className="text-foreground truncate">{row.title}</span>
+        {row.year ? <span className="shrink-0 text-xs">· {row.year}</span> : null}
+      </span>
+      <span className="flex shrink-0 items-center gap-2">
+        {error ? (
+          <span className="text-xs text-red-600" role="alert">
+            Could not save: {error}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          disabled={pending}
+          onClick={onRevoke}
+          className="border-border-strong text-muted-foreground hover:text-foreground inline-flex h-7 items-center gap-1 rounded-full border bg-background px-2.5 text-xs disabled:opacity-50"
+        >
+          <Undo2 className="size-3" aria-hidden /> Revoke
+        </button>
+      </span>
+    </li>
   );
 }
 
@@ -411,9 +576,11 @@ function CandidateCard({
 
   const likelihoodPct = Math.round(row.likelihood * 100);
   const signals = buildSignals(row);
+  // A 0 on a just-published paper isn't "0 citations", it's "not cited yet".
+  const recentlyPublished = row.year !== null && row.year >= new Date().getFullYear() - 1;
   return (
     <div
-      className={`${CARD_SHELL} p-4`}
+      className={`${CARD_SHELL} px-5 py-4`}
       data-card
       data-pmid={row.pmid}
       tabIndex={0}
@@ -428,9 +595,7 @@ function CandidateCard({
           <p className="text-muted-foreground mt-0.5 text-[13px]">
             {[row.journal, row.year].filter(Boolean).join(" · ") || "—"}
           </p>
-          {row.authorsString ? (
-            <p className="text-muted-foreground mt-1 line-clamp-1 text-xs">{row.authorsString}</p>
-          ) : null}
+          <Byline row={row} />
           <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
             {row.pubmedUrl ? (
               <a
@@ -452,9 +617,20 @@ function CandidateCard({
                 DOI <ExternalLink className="size-3" aria-hidden />
               </a>
             ) : null}
-            <span className="tabular-nums">
-              {row.citationCount} citation{row.citationCount === 1 ? "" : "s"}
-            </span>
+            {row.citationCount > 0 ? (
+              <span className="tabular-nums">
+                {row.citationCount} citation{row.citationCount === 1 ? "" : "s"}
+              </span>
+            ) : recentlyPublished ? (
+              <span>No citations yet{row.year ? ` · published ${row.year}` : ""}</span>
+            ) : (
+              <span className="tabular-nums">0 citations</span>
+            )}
+            {row.nihPercentile !== null ? (
+              <span className="tabular-nums">
+                RCR {row.relativeCitationRatio ?? "—"} ({row.nihPercentile}th pct)
+              </span>
+            ) : null}
           </div>
         </div>
         <div className="flex shrink-0 gap-2">
@@ -478,11 +654,11 @@ function CandidateCard({
       </div>
 
       {row.synopsis ? (
-        <p className="text-muted-foreground mt-2 text-[13px] leading-snug">{row.synopsis}</p>
+        <p className="text-muted-foreground mt-3 text-[13px] leading-snug">{row.synopsis}</p>
       ) : null}
 
       {/* Combined likelihood + the per-signal "why this surfaced" breakdown. */}
-      <div className="my-3 flex items-center gap-2.5">
+      <div className="my-4 flex items-center gap-2.5">
         <span className="text-muted-foreground text-[13px]">Combined likelihood</span>
         <span className="bg-muted block h-1.5 flex-1 overflow-hidden rounded-full">
           <span
@@ -513,7 +689,12 @@ function CandidateCard({
           </summary>
           <div className="mt-2 flex flex-col gap-3 border-l border-apollo-border pl-3">
             {row.abstract ? (
-              <p className="text-muted-foreground text-xs leading-relaxed">{row.abstract}</p>
+              // Stored abstracts carry inline PubMed markup (e.g. NaN<sub>3</sub>);
+              // sanitizePubmedHtml whitelists only i/em/b/strong/sub/sup.
+              <p
+                className="text-muted-foreground text-xs leading-relaxed"
+                dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(row.abstract) }}
+              />
             ) : null}
             {row.fullAuthorsString ? (
               <p className="text-muted-foreground text-xs">
@@ -551,6 +732,7 @@ function SignalRow({ signal, row }: { signal: Signal; row: CoreQueueRow }) {
   let lead: ReactNode;
   let sub: ReactNode = null;
   let quote: string | null = null;
+  let value: string | undefined; // raw secondary readout shown beneath the tier
   switch (signal.kind) {
     case "ack":
       lead = row.ackAlias ? "Named in the acknowledgments" : "Acknowledged in text";
@@ -562,16 +744,18 @@ function SignalRow({ signal, row }: { signal: Signal; row: CoreQueueRow }) {
       if (row.coauthorScholars.length === 0) sub = "No Scholar profile yet — showing CWID";
       break;
     case "llm":
-      lead = `LLM triage · ${row.llmScore}/10`;
+      lead = "LLM triage";
       sub = row.llmRationale;
+      value = `${row.llmScore}/10`;
       break;
     case "affinity":
       lead = "Repeat user of this core";
-      sub = `Prior confirmed pubs put author affinity at ${Math.round((row.authorAffinity ?? 0) * 100)}%`;
+      sub = "From the author's prior confirmed pubs with this core";
+      value = `${Math.round((row.authorAffinity ?? 0) * 100)}%`;
       break;
   }
   return (
-    <li className="border-apollo-border grid grid-cols-[20px_minmax(0,1fr)_auto] items-start gap-2.5 border-t pt-2">
+    <li className="border-apollo-border grid grid-cols-[20px_minmax(0,1fr)_auto] items-start gap-3 border-t pt-3">
       <Icon className="text-muted-foreground mt-0.5 size-4" aria-hidden />
       <div className="min-w-0">
         <div className="text-foreground text-[13px]">{lead}</div>
@@ -583,8 +767,58 @@ function SignalRow({ signal, row }: { signal: Signal; row: CoreQueueRow }) {
           <div className="text-muted-foreground mt-0.5 text-xs">{sub}</div>
         ) : null}
       </div>
-      <StrengthDots dots={signal.dots} strength={signal.strength} />
+      <StrengthDots dots={signal.dots} strength={signal.strength} value={value} />
     </li>
+  );
+}
+
+/**
+ * Author byline with the core-staff author(s) highlighted as a tinted, linked
+ * chip + tooltip — the connection back to the co-author evidence row below.
+ * ponytail: best-effort surname match against the flat `authorsString` (the data
+ * carries no per-author byline token; this mirrors how profile author-links are
+ * overlaid). Unresolved core-staff CWIDs aren't in the byline, so they show only
+ * in the evidence row.
+ */
+function Byline({ row }: { row: CoreQueueRow }) {
+  if (!row.authorsString) return null;
+  const staffBySurname = new Map<string, QueueScholar>();
+  for (const s of row.coauthorScholars) {
+    const surname = s.name.trim().split(/\s+/).pop();
+    if (surname) staffBySurname.set(surname.toLowerCase(), s);
+  }
+  if (staffBySurname.size === 0) {
+    return <p className="text-muted-foreground mt-1 text-xs">{row.authorsString}</p>;
+  }
+  const tokens = row.authorsString.split(", ");
+  return (
+    <p className="text-muted-foreground mt-1 text-xs">
+      {tokens.map((tok, i) => {
+        const lead = tok.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+        const staff = staffBySurname.get(lead);
+        return (
+          <span key={i}>
+            {i > 0 ? ", " : ""}
+            {staff ? (
+              <HoverTooltip
+                text={`${staff.name} — core staff${staff.dept ? `, ${staff.dept}` : ""}`}
+              >
+                <a
+                  href={`/${staff.slug}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-[var(--color-accent-slate)]/15 text-[var(--color-accent-slate)] rounded px-1 py-px font-medium"
+                >
+                  {tok}
+                </a>
+              </HoverTooltip>
+            ) : (
+              tok
+            )}
+          </span>
+        );
+      })}
+    </p>
   );
 }
 
@@ -615,11 +849,20 @@ function CoauthorLead({ row }: { row: CoreQueueRow }) {
   );
 }
 
-/** Four-dot strength meter with a label (e.g. "Strong"), right-aligned. */
-function StrengthDots({ dots, strength }: { dots: number; strength: string }) {
+/** Fixed-width strength meter: dots, the tier word, and an optional raw value,
+ *  vertically centered against the row and right-aligned. */
+function StrengthDots({
+  dots,
+  strength,
+  value,
+}: {
+  dots: number;
+  strength: string;
+  value?: string;
+}) {
   return (
-    <div className="flex flex-col items-end gap-0.5 whitespace-nowrap">
-      <span className="flex items-center gap-[3px]" aria-hidden>
+    <div className="flex w-20 flex-col items-end gap-1 self-center whitespace-nowrap text-right">
+      <span className="flex items-center gap-1" aria-hidden>
         {[0, 1, 2, 3].map((i) => (
           <span
             key={i}
@@ -631,7 +874,12 @@ function StrengthDots({ dots, strength }: { dots: number; strength: string }) {
           />
         ))}
       </span>
-      <span className="text-muted-foreground text-[11px]">{strength}</span>
+      <span className="text-muted-foreground text-[11px] leading-tight">{strength}</span>
+      {value ? (
+        <span className="text-muted-foreground/70 text-[11px] leading-tight tabular-nums">
+          {value}
+        </span>
+      ) : null}
     </div>
   );
 }
