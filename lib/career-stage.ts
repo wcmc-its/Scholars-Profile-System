@@ -26,7 +26,8 @@ const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
 // Faculty seniority thresholds (tunable knobs).
 const TENURE_EARLY_MAX_YEARS = 7; // appointment tenure < 7yr → early
 const TENURE_SENIOR_MIN_YEARS = 20; // appointment tenure > 20yr → senior
-const DEGREE_EARLY_MAX_YEARS = 10; // years-since-degree < 10yr → early (≈ NIH ESI window)
+/** Years-since-degree < this → early; also the NIH ESI window (10yr). Exported for the grant-history ESI check. */
+export const DEGREE_EARLY_MAX_YEARS = 10;
 const DEGREE_SENIOR_MIN_YEARS = 25; // years-since-degree > 25yr → senior
 
 /** Earliest (most senior) non-null appointment start, in years before `now`. */
@@ -40,7 +41,7 @@ function appointmentTenureYears(input: CareerStageInput, now: Date): number | nu
 }
 
 /** Years since the terminal (most recent) degree year, if any. */
-function yearsSinceTerminalDegree(input: CareerStageInput, now: Date): number | null {
+export function yearsSinceTerminalDegree(input: CareerStageInput, now: Date): number | null {
   const years = (input.educations ?? [])
     .map((e) => e.year)
     .filter((y): y is number => typeof y === "number" && Number.isFinite(y));

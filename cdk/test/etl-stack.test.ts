@@ -192,6 +192,22 @@ describe("EtlStack", () => {
         ).toBe(false);
       });
 
+      it("prod does NOT create the opportunity-projection schedule (opportunityProjectionScheduleEnabled=false until the prod corpus is published; #1218)", () => {
+        const rules = template.findResources("AWS::Events::Rule");
+        expect(
+          Object.values(rules).some(
+            (r) => r.Properties?.Name === "sps-opportunity-projection-prod",
+          ),
+        ).toBe(false);
+        const sms = template.findResources("AWS::StepFunctions::StateMachine");
+        expect(
+          Object.values(sms).some(
+            (s) =>
+              s.Properties?.StateMachineName === "scholars-opportunity-projection-prod",
+          ),
+        ).toBe(false);
+      });
+
       it("prod does NOT create the ED email-visibility bridge (edEmailVisibilityBridgeEnabled=false until scholars-prod is verified; #443)", () => {
         const rules = template.findResources("AWS::Events::Rule");
         expect(
@@ -1319,12 +1335,38 @@ describe("EtlStack", () => {
       const rules = template.findResources("AWS::Events::Rule");
       // 3 cadence rules + the #595 heartbeat rule + the #393 reconciler rule +
       // the #353 cdn reconciler rule + the #1032 curated-tables backup rule +
-      // the #443 ED email-visibility bridge rule; all enabled in staging.
-      expect(Object.keys(rules)).toHaveLength(8);
+      // the #443 ED email-visibility bridge rule + the #1218 opportunity-projection
+      // rule; all enabled in staging.
+      expect(Object.keys(rules)).toHaveLength(9);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });
       }
+    });
+
+    it("staging schedules the daily opportunity projection (#1218): daily rule → state machine running etl:dynamodb on the ETL task def", () => {
+      // Daily at 06:30 UTC, enabled in staging.
+      template.hasResourceProperties("AWS::Events::Rule", {
+        Name: "sps-opportunity-projection-staging",
+        ScheduleExpression: "cron(30 6 * * ? *)",
+        State: "ENABLED",
+      });
+      // Its own single-step state machine (Catch → SNS failure notification).
+      template.hasResourceProperties("AWS::StepFunctions::StateMachine", {
+        StateMachineName: "scholars-opportunity-projection-staging",
+      });
+      // The step overrides the ETL container to run the projection script.
+      const sms = template.findResources("AWS::StepFunctions::StateMachine");
+      const projectionSm = Object.values(sms).find(
+        (s) => s.Properties?.StateMachineName === "scholars-opportunity-projection-staging",
+      );
+      expect(projectionSm).toBeDefined();
+      const def = JSON.stringify(projectionSm?.Properties?.DefinitionString ?? "");
+      expect(def).toMatch(/etl:dynamodb/);
+      // A cadence alarm guards against silent schedule death.
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: "sps-opportunity-projection-cadence-staging",
+      });
     });
 
     it("staging schedules the daily curated-tables backup (#1032): daily rule → state machine running backup:curated on the ETL task def", () => {

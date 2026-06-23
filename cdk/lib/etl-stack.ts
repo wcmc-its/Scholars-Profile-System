@@ -1871,6 +1871,132 @@ export class EtlStack extends Stack {
     }
 
     // ------------------------------------------------------------------
+    // Standalone DynamoDB projection schedule — daily `etl:dynamodb` (#1218).
+    //
+    // `etl:dynamodb` mirrors ReciterAI's `reciterai` DynamoDB table into the
+    // `opportunity` + scholar tables. It is already a NIGHTLY step, but it sits
+    // after `etl:ed`, which the on-prem-routing gap (#443) blocks — so the nightly
+    // aborts before reaching it and newly-published opportunities 404 until an
+    // operator re-projects by hand (OPERATIONS-RUNBOOK § run-task). This standalone
+    // daily schedule runs just that one step so the funding-matcher corpus stays
+    // fresh independent of the blocked nightly. Idempotent upsert, so a double-run
+    // with the nightly (once #443 lands) is harmless; retire the stopgap then.
+    //
+    // Like the curated-tables backup above, the WHOLE block is creation-gated on
+    // `opportunityProjectionScheduleEnabled` (prod ships nothing until the prod
+    // corpus is published), not just the rule's Enabled flag. Reuses the 8 GB ETL
+    // task def + SG + private-egress subnets (same placement as the nightly step).
+    // ------------------------------------------------------------------
+    if (envConfig.opportunityProjectionScheduleEnabled) {
+      const projectionTask = new tasks.EcsRunTask(this, "TaskOpportunityProjection", {
+        integrationPattern: sfn.IntegrationPattern.RUN_JOB,
+        cluster: ecsCluster,
+        taskDefinition: this.etlTaskDefinition,
+        launchTarget: new tasks.EcsFargateLaunchTarget({
+          platformVersion: ecs.FargatePlatformVersion.LATEST,
+        }),
+        assignPublicIp: false,
+        subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        securityGroups: [etlSecurityGroup],
+        containerOverrides: [
+          {
+            containerDefinition: etlContainer,
+            command: ["npm", "run", "etl:dynamodb"],
+          },
+        ],
+        // A full reciterai scan + upsert; 1h is generous over cold start + the
+        // 10k-scholar/opportunity projection, and well under the daily cadence so
+        // a wedged run can't stack on the next fire.
+        taskTimeout: sfn.Timeout.duration(Duration.hours(1)),
+      });
+      projectionTask.addRetry({
+        errors: ["States.TaskFailed", "States.Timeout"],
+        maxAttempts: 1,
+        backoffRate: 2,
+        interval: Duration.minutes(1),
+      });
+      projectionTask.addCatch(
+        new tasks.SnsPublish(this, "NotifyOpportunityProjection", {
+          topic: this.failureTopic,
+          subject: `SPS opportunity projection ${env} -- run failed`,
+          message: sfn.TaskInput.fromObject({
+            env,
+            step: "OpportunityProjection",
+            stateMachine: sfn.JsonPath.stateMachineName,
+            execution: sfn.JsonPath.executionName,
+            error: sfn.JsonPath.stringAt("$.error"),
+          }),
+        }).next(
+          new sfn.Fail(this, "FailOpportunityProjection", {
+            cause: "opportunity projection run failed",
+          }),
+        ),
+        { errors: ["States.ALL"], resultPath: "$.error" },
+      );
+
+      const projectionSmLogGroup = new logs.LogGroup(this, "OpportunityProjectionSmLogGroup", {
+        logGroupName: `/aws/states/opportunity-projection-${env}`,
+        retention: logRetention,
+        removalPolicy: RemovalPolicy.RETAIN,
+      });
+      const opportunityProjectionStateMachine = new sfn.StateMachine(
+        this,
+        "OpportunityProjectionStateMachine",
+        {
+          stateMachineName: `scholars-opportunity-projection-${env}`,
+          stateMachineType: sfn.StateMachineType.STANDARD,
+          definitionBody: sfn.DefinitionBody.fromChainable(projectionTask),
+          timeout: Duration.minutes(65),
+          logs: {
+            destination: projectionSmLogGroup,
+            level: sfn.LogLevel.ERROR,
+            includeExecutionData: false,
+          },
+          tracingEnabled: true,
+        },
+      );
+
+      // Daily at 06:30 UTC -- after the curated-tables backup (06:00), before the
+      // nightly window (07:00); refreshes the corpus ahead of the workday.
+      const projectionRule = new events.Rule(this, "OpportunityProjectionScheduleRule", {
+        ruleName: `sps-opportunity-projection-${env}`,
+        description: `SPS opportunity projection (etl:dynamodb) -- daily 06:30 UTC (${env}). #1218.`,
+        schedule: events.Schedule.cron({ minute: "30", hour: "6" }),
+        enabled: true,
+      });
+      projectionRule.addTarget(
+        new eventsTargets.SfnStateMachine(opportunityProjectionStateMachine, {
+          input: events.RuleTargetInput.fromObject({}),
+          retryAttempts: 0,
+        }),
+      );
+
+      // Cadence alarm -- silent schedule death (rule disabled, IAM gap) would let
+      // the corpus go stale unnoticed. Alarm if no execution started across two
+      // consecutive 1-day windows (~2 missed daily fires); the Catch above owns
+      // failed runs, this owns absence.
+      const projectionCadenceAlarm = new cloudwatch.Alarm(this, "OpportunityProjectionCadenceAlarm", {
+        alarmName: `sps-opportunity-projection-cadence-${env}`,
+        alarmDescription: `SPS opportunity projection (${env}) -- cadence missed (no execution started in ~2 days). Next: confirm the daily rule is enabled and the state-machine IAM is intact; run 'npm run etl:dynamodb' via run-task to bridge the gap.`,
+        metric: new cloudwatch.Metric({
+          namespace: "AWS/States",
+          metricName: "ExecutionsStarted",
+          statistic: cloudwatch.Stats.SUM,
+          period: Duration.days(1),
+          dimensionsMap: {
+            StateMachineArn: opportunityProjectionStateMachine.stateMachineArn,
+          },
+        }),
+        evaluationPeriods: 2,
+        datapointsToAlarm: 2,
+        threshold: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+      });
+      projectionCadenceAlarm.addAlarmAction(alarmAction);
+    }
+
+    // ------------------------------------------------------------------
     // ED email-visibility bridge — on-prem LDAP → S3 → RDS (#443).
     //
     // `etl:ed:export-email-visibility` reads the WCM Enterprise Directory

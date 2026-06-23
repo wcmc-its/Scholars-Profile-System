@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildResearcherCsv,
   careerStageLabel,
+  fundingStatusLabel,
   researcherBlurb,
   stageFit,
   topicFitScores,
@@ -46,6 +47,21 @@ describe("researcherBlurb", () => {
       researcherBlurb({ pubCount: 0, minYear: null, topicLabel: "x", careerStage: "mid" }),
     ).toBe("mid-career.");
   });
+  it("appends an ESI clause with years when eligible, and omits it otherwise", () => {
+    expect(
+      researcherBlurb({
+        pubCount: 5,
+        minYear: 2022,
+        topicLabel: "gene therapy",
+        careerStage: "early",
+        esiEligible: true,
+        yearsSinceDegree: 4,
+      }),
+    ).toBe("5 publications on gene therapy since 2022; early-career; ESI-eligible (4 yrs since terminal degree).");
+    expect(
+      researcherBlurb({ pubCount: 1, minYear: null, topicLabel: "x", careerStage: null, esiEligible: false }),
+    ).toBe("1 publication on x.");
+  });
 });
 
 describe("careerStageLabel", () => {
@@ -53,6 +69,15 @@ describe("careerStageLabel", () => {
     expect(careerStageLabel("early")).toBe("Early career");
     expect(careerStageLabel("grad")).toBe("Graduate");
     expect(careerStageLabel(null)).toBe("");
+  });
+});
+
+describe("fundingStatusLabel", () => {
+  it("maps funding status to a label and nullish to empty", () => {
+    expect(fundingStatusLabel("funded")).toBe("Currently funded");
+    expect(fundingStatusLabel("unfunded")).toBe("Not currently funded");
+    expect(fundingStatusLabel(null)).toBe("");
+    expect(fundingStatusLabel(undefined)).toBe("");
   });
 });
 
@@ -67,17 +92,38 @@ describe("buildResearcherCsv", () => {
         careerStage: "early",
         topicFit: 94,
         stageLabel: "Strong",
+        esiEligible: true,
+        fundingStatus: "unfunded",
         topTopicLabel: "checkpoint inhibition",
         topPubCount: 18,
       },
     ]);
     const lines = csv.trim().split(/\r?\n/);
     expect(lines[0]).toBe(
-      "CWID,Name,Title,Department,Career stage,Topic fit,Stage fit,Top topic,Papers on top topic",
+      "CWID,Name,Title,Department,Career stage,Topic fit,Stage fit,ESI eligible,Funding status,Top topic,Papers on top topic",
     );
     expect(lines[1]).toContain("abc1234");
     expect(lines[1]).toContain("Early career");
     expect(lines[1]).toContain('"Hematology, Oncology"'); // comma → quoted
     expect(lines[1]).toContain("94");
+    expect(lines[1]).toContain("Yes"); // ESI eligible
+    expect(lines[1]).toContain("Not currently funded");
+  });
+  it("leaves ESI/funding cells blank when the matcher didn't supply them", () => {
+    const csv = buildResearcherCsv([
+      {
+        cwid: "x",
+        name: "N",
+        title: null,
+        department: null,
+        careerStage: null,
+        topicFit: 0,
+        stageLabel: "Unknown",
+        topTopicLabel: "",
+        topPubCount: 0,
+      },
+    ]);
+    // ...Unknown,,, ... → empty ESI + empty funding between Stage fit and Top topic.
+    expect(csv.trim().split(/\r?\n/)[1]).toContain("Unknown,,,");
   });
 });

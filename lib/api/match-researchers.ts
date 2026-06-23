@@ -10,9 +10,16 @@
  * The pure `rankResearchers` core carries the unit coverage; the async
  * `rankResearchersForOpportunity` wrapper is integration-gated (MySQL).
  */
-import { careerStageBucket, type CareerStage } from "@/lib/career-stage";
+import { topicAffinity } from "@/lib/api/match-opportunities";
+import {
+  careerStageBucket,
+  DEGREE_EARLY_MAX_YEARS,
+  yearsSinceTerminalDegree,
+  type CareerStage,
+} from "@/lib/career-stage";
 import { db } from "@/lib/db";
 import { TOP_SCHOLARS_ELIGIBLE_ROLES } from "@/lib/eligibility";
+import { isFundingActive } from "@/lib/funding-active";
 import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 import { scorePublication, type RankablePublication } from "@/lib/ranking";
 import { OPPORTUNITY_TOPIC_GATE, type OpportunityTopicScore } from "@/lib/search";
@@ -58,7 +65,78 @@ export type RankedScholar = {
   axes: { topicFit: number; stageAppeal: number };
   topicContributions: TopicContribution[];
   defaultScore: number;
+  /** Grant-history signals (attached post-ranking; absent when not loaded). */
+  esiEligible?: boolean;
+  /** Years since terminal degree; null when undateable. Feeds the ESI blurb clause. */
+  yearsSinceDegree?: number | null;
+  fundingStatus?: FundingStatus;
+  /** Cross-ref: this opportunity is among the scholar's top-N forward matches. */
+  inMyTopMatches?: boolean;
 };
+
+export type FundingStatus = "funded" | "unfunded";
+
+// NIH ESI is forfeited by a prior "substantial independent" award as PI. These are
+// the disqualifying NIH activity-code prefixes (R01-equivalents + major U/DP/RF).
+// ponytail: prefix list off NIH's ESI guidance; tune if curators flag false drops.
+const MAJOR_PI_MECHANISMS = ["R01", "R37", "R35", "RF1", "U01", "DP1", "DP2", "DP5", "R61"];
+// Lead roles — the ones that confer independence (for the ESI disqualification).
+const LEAD_GRANT_ROLES = new Set(["PI", "Co-PI", "MPI", "PI-Subaward"]);
+
+// NIH ESI is keyed to the TERMINAL research/clinical degree, not the most recent
+// credential — so a later MPH/cert/fellowship row must not reset the clock. Match
+// research/clinical doctorates; non-doctoral rows (master's, residency, fellowship)
+// are dropped before taking the latest year.
+// ponytail: degree-string regex, not a parser; falls back to all rows when nothing
+// matches (so master's-only / unparseable scholars still date). Tighten if curators
+// flag mis-classified doctorates.
+const TERMINAL_DEGREE_RE =
+  /\b(ph\.?\s?d|m\.?\s?d|d\.?\s?o|d\.?\s?v\.?\s?m|d\.?\s?d\.?\s?s|d\.?\s?m\.?\s?d|sc\.?\s?d|d\.?\s?sc|dr\.?\s?p\.?\s?h|d\.?\s?n\.?\s?p|pharm\.?\s?d|ed\.?\s?d)\b/i;
+
+export type GrantSignalInput = {
+  grants: ReadonlyArray<{ endDate: Date | null; role: string | null; mechanism: string | null }>;
+  educations?: ReadonlyArray<{ year: number | null; degree?: string | null }>;
+};
+
+export type GrantSignals = {
+  esiEligible: boolean;
+  yearsSinceDegree: number | null;
+  fundingStatus: FundingStatus;
+};
+
+/**
+ * Pure: derive grant-history display signals for one scholar.
+ * - `fundingStatus` = any award still active per the canonical `isFundingActive`
+ *   (end date + 12-month NCE grace), so it agrees with the profile's "Active
+ *   funding" badge. Any role counts. ponytail: literal "currently funded".
+ * - `esiEligible` = within the ESI window (years since the TERMINAL research/
+ *   clinical degree < DEGREE_EARLY_MAX_YEARS) AND no prior major independent award
+ *   held as PI. Unknown degree year → not eligible (we can't claim it).
+ */
+export function deriveGrantSignals(input: GrantSignalInput, now: Date): GrantSignals {
+  const grants = input.grants ?? [];
+  const isActive = (g: GrantSignalInput["grants"][number]) =>
+    g.endDate instanceof Date && !Number.isNaN(g.endDate.getTime()) && isFundingActive(g.endDate, now);
+  const isLead = (g: GrantSignalInput["grants"][number]) => LEAD_GRANT_ROLES.has((g.role ?? "").trim());
+
+  const fundingStatus: FundingStatus = grants.some(isActive) ? "funded" : "unfunded";
+
+  // ESI clock: latest TERMINAL degree year; fall back to all degrees when none of
+  // a scholar's education rows parse as a doctorate.
+  const educations = input.educations ?? [];
+  const terminal = educations.filter((e) => TERMINAL_DEGREE_RE.test(e.degree ?? ""));
+  const esiEducations = terminal.length > 0 ? terminal : educations;
+  const yearsSinceDegree = yearsSinceTerminalDegree(
+    { roleCategory: undefined, educations: esiEducations },
+    now,
+  );
+  const hasMajorPiAward = grants.some(
+    (g) => isLead(g) && MAJOR_PI_MECHANISMS.some((m) => (g.mechanism ?? "").toUpperCase().startsWith(m)),
+  );
+  const esiEligible =
+    yearsSinceDegree !== null && yearsSinceDegree < DEGREE_EARLY_MAX_YEARS && !hasMajorPiAward;
+  return { esiEligible, yearsSinceDegree, fundingStatus };
+}
 
 export type ResearcherSort = "fit" | "stage";
 
@@ -153,7 +231,15 @@ export function opportunityTopTopics(topicVector: OpportunityTopicScore[], gate:
  */
 export async function rankResearchersForOpportunity(
   opportunityId: string,
-  opts: { stageLens?: boolean; sort?: ResearcherSort; limit?: number; topK?: number; now?: Date } = {},
+  opts: {
+    stageLens?: boolean;
+    sort?: ResearcherSort;
+    limit?: number;
+    topK?: number;
+    now?: Date;
+    /** Attach `inMyTopMatches` (the cheap forward cross-ref). Off by default. */
+    crossRef?: boolean;
+  } = {},
 ): Promise<RankedScholar[]> {
   const now = opts.now ?? new Date();
   const opp = await db.read.opportunity.findUnique({
@@ -240,6 +326,7 @@ export async function rankResearchersForOpportunity(
   const cwids = [...new Set(topicResults.flatMap((tr) => tr.scholars.map((s) => s.cwid)))];
   const stageByCwid = new Map<string, CareerStage>();
   const profileByCwid = new Map<string, { title: string | null; department: string | null }>();
+  const signalsByCwid = new Map<string, GrantSignals>();
   if (cwids.length > 0) {
     const scholars = await db.read.scholar.findMany({
       where: { cwid: { in: cwids } },
@@ -249,7 +336,8 @@ export async function rankResearchersForOpportunity(
         primaryTitle: true,
         primaryDepartment: true,
         appointments: { select: { startDate: true } },
-        educations: { select: { year: true } },
+        educations: { select: { year: true, degree: true } },
+        grants: { select: { endDate: true, role: true, mechanism: true } },
       },
     });
     for (const s of scholars) {
@@ -258,6 +346,7 @@ export async function rankResearchersForOpportunity(
         careerStageBucket({ roleCategory: s.roleCategory, appointments: s.appointments, educations: s.educations }, now),
       );
       profileByCwid.set(s.cwid, { title: s.primaryTitle, department: s.primaryDepartment });
+      signalsByCwid.set(s.cwid, deriveGrantSignals({ grants: s.grants, educations: s.educations }, now));
     }
   }
 
@@ -272,6 +361,109 @@ export async function rankResearchersForOpportunity(
     const p = profileByCwid.get(r.cwid);
     r.title = p?.title ?? null;
     r.department = p?.department ?? null;
+    const sig = signalsByCwid.get(r.cwid);
+    if (sig) {
+      r.esiEligible = sig.esiEligible;
+      r.yearsSinceDegree = sig.yearsSinceDegree;
+      r.fundingStatus = sig.fundingStatus;
+    }
+  }
+
+  if (opts.crossRef && ranked.length > 0) {
+    const inTop = await opportunitiesInTopMatches(
+      opportunityId,
+      ranked.map((r) => r.cwid),
+      CROSSREF_TOP_N,
+      now,
+    );
+    for (const r of ranked) r.inMyTopMatches = inTop.has(r.cwid);
   }
   return ranked;
+}
+
+const CROSSREF_TOP_N = 10;
+
+/** The forward matcher's hard candidate gate: open/forecasted/continuous, not past due. */
+const OPEN_OPPORTUNITY_STATUSES = ["open", "forecasted", "continuous"];
+
+/** Build a topic_id→weight map from an opportunity's stored topic_vector JSON. */
+function vectorFromTopicScores(v: OpportunityTopicScore[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const t of v) {
+    if (t && typeof t.topic_id === "string" && typeof t.score === "number") m.set(t.topic_id, t.score);
+  }
+  return m;
+}
+
+/**
+ * Cheap forward cross-ref: which of `cwids` have `opportunityId` among their top-N
+ * "Grants for me" matches, by TOPIC AFFINITY ALONE — no OpenSearch retrieval, no
+ * stage/mesh axes. A MySQL-only proxy for "also surfaced under their own Grants for
+ * me", validated against the full forward matcher on a sample
+ * (scripts/funding-crossref-compare.ts).
+ *
+ * The candidate corpus is gated to the SAME status/deadline the real forward
+ * matcher requires (open/forecasted/continuous, not past due), so a closed or
+ * past-due viewed opportunity — reachable via the unfiltered browse list — can
+ * never be claimed as "in their Grants for me".
+ * ponytail: topic-only top-N over the open corpus. topicAffinity dominates the
+ * forward blend (weight 1.0; stage multiplies it), so this tracks the full rank
+ * closely. Residual: per-scholar stage/US eligibility flags aren't applied — a
+ * smaller divergence source than status/deadline; upgrade to the full matcher only
+ * if the comparison shows it diverging.
+ */
+export async function opportunitiesInTopMatches(
+  opportunityId: string,
+  cwids: string[],
+  topN = CROSSREF_TOP_N,
+  now: Date = new Date(),
+): Promise<Set<string>> {
+  const result = new Set<string>();
+  if (cwids.length === 0) return result;
+
+  // Open opportunity vectors once (tiny table) — same hard gate the forward matcher
+  // applies, so an ineligible viewed opp drops out of every scholar's candidate set.
+  // L2-normalization cancels in the per-scholar ranking, so raw weights are fine.
+  const opps = await db.read.opportunity.findMany({
+    where: {
+      status: { in: OPEN_OPPORTUNITY_STATUSES },
+      OR: [{ dueDate: null }, { dueDate: { gte: now } }, { status: "continuous" }],
+    },
+    select: { opportunityId: true, topicVector: true },
+  });
+  const oppVectors = opps.map((o) => ({
+    id: o.opportunityId,
+    vec: vectorFromTopicScores((Array.isArray(o.topicVector) ? o.topicVector : []) as OpportunityTopicScore[]),
+  }));
+
+  // One grouped query → each scholar's topic-weight vector (same source/floor as
+  // scholarTopicVector). topicAffinity is scale-invariant, so we skip normalizing.
+  const rows = await db.read.publicationTopic.groupBy({
+    by: ["cwid", "parentTopicId"],
+    where: {
+      cwid: { in: cwids },
+      year: { gte: RECITERAI_YEAR_FLOOR },
+      scholar: { deletedAt: null, status: "active" },
+    },
+    _sum: { score: true },
+  });
+  const byScholar = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    if (!r.cwid) continue;
+    const w = Number(r._sum.score ?? 0);
+    if (w <= 0) continue;
+    const m = byScholar.get(r.cwid) ?? new Map<string, number>();
+    m.set(r.parentTopicId, w);
+    byScholar.set(r.cwid, m);
+  }
+
+  for (const [cwid, vec] of byScholar) {
+    const ranked = oppVectors
+      .map((o) => ({ id: o.id, aff: topicAffinity(vec, o.vec) }))
+      .filter((x) => x.aff > 0)
+      .sort((a, b) => b.aff - a.aff)
+      .slice(0, topN);
+    if (ranked.some((x) => x.id === opportunityId)) result.add(cwid);
+  }
+  return result;
 }

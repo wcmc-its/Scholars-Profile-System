@@ -9767,6 +9767,411 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
+    "OpportunityProjectionCadenceAlarmBD21A783": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "EtlFailureTopic8361D0D0",
+          },
+        ],
+        "AlarmDescription": "SPS opportunity projection (staging) -- cadence missed (no execution started in ~2 days). Next: confirm the daily rule is enabled and the state-machine IAM is intact; run 'npm run etl:dynamodb' via run-task to bridge the gap.",
+        "AlarmName": "sps-opportunity-projection-cadence-staging",
+        "ComparisonOperator": "LessThanThreshold",
+        "DatapointsToAlarm": 2,
+        "Dimensions": [
+          {
+            "Name": "StateMachineArn",
+            "Value": {
+              "Ref": "OpportunityProjectionStateMachine96BFBB2C",
+            },
+          },
+        ],
+        "EvaluationPeriods": 2,
+        "MetricName": "ExecutionsStarted",
+        "Namespace": "AWS/States",
+        "Period": 86400,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "breaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "OpportunityProjectionScheduleRule38D372A5": {
+      "Properties": {
+        "Description": "SPS opportunity projection (etl:dynamodb) -- daily 06:30 UTC (staging). #1218.",
+        "Name": "sps-opportunity-projection-staging",
+        "ScheduleExpression": "cron(30 6 * * ? *)",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Ref": "OpportunityProjectionStateMachine96BFBB2C",
+            },
+            "Id": "Target0",
+            "Input": "{}",
+            "RetryPolicy": {
+              "MaximumRetryAttempts": 0,
+            },
+            "RoleArn": {
+              "Fn::GetAtt": [
+                "OpportunityProjectionStateMachineEventsRoleA1A29ABF",
+                "Arn",
+              ],
+            },
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
+    "OpportunityProjectionSmLogGroup0B113188": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/states/opportunity-projection-staging",
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "OpportunityProjectionStateMachine96BFBB2C": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "OpportunityProjectionStateMachineRoleDefaultPolicyCBE82D99",
+        "OpportunityProjectionStateMachineRoleE6B143BA",
+      ],
+      "Properties": {
+        "DefinitionString": {
+          "Fn::Join": [
+            "",
+            [
+              "{"StartAt":"TaskOpportunityProjection","States":{"TaskOpportunityProjection":{"End":true,"Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":60,"MaxAttempts":1,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyOpportunityProjection"}],"Type":"Task","TimeoutSeconds":3600,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["",
+              {
+                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
+              },
+              "","",
+              {
+                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
+              },
+              ""],"SecurityGroups":["",
+              {
+                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
+              },
+              ""]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:dynamodb"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyOpportunityProjection":{"Next":"FailOpportunityProjection","Type":"Task","Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"staging","step":"OpportunityProjection","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS opportunity projection staging -- run failed"}},"FailOpportunityProjection":{"Type":"Fail","Cause":"opportunity projection run failed"}},"TimeoutSeconds":3900}",
+            ],
+          ],
+        },
+        "LoggingConfiguration": {
+          "Destinations": [
+            {
+              "CloudWatchLogsLogGroup": {
+                "LogGroupArn": {
+                  "Fn::GetAtt": [
+                    "OpportunityProjectionSmLogGroup0B113188",
+                    "Arn",
+                  ],
+                },
+              },
+            },
+          ],
+          "IncludeExecutionData": false,
+          "Level": "ERROR",
+        },
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "OpportunityProjectionStateMachineRoleE6B143BA",
+            "Arn",
+          ],
+        },
+        "StateMachineName": "scholars-opportunity-projection-staging",
+        "StateMachineType": "STANDARD",
+        "TracingConfiguration": {
+          "Enabled": true,
+        },
+      },
+      "Type": "AWS::StepFunctions::StateMachine",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "OpportunityProjectionStateMachineEventsRoleA1A29ABF": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "events.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "OpportunityProjectionStateMachineEventsRoleDefaultPolicy5DDB67C6": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "states:StartExecution",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "OpportunityProjectionStateMachine96BFBB2C",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "OpportunityProjectionStateMachineEventsRoleDefaultPolicy5DDB67C6",
+        "Roles": [
+          {
+            "Ref": "OpportunityProjectionStateMachineEventsRoleA1A29ABF",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "OpportunityProjectionStateMachineRoleDefaultPolicyCBE82D99": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecs:RunTask",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        2,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        3,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        4,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlTaskDefinition32654FF8",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        0,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlTaskDefinition32654FF8",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    "/",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlTaskDefinition32654FF8",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ecs:StopTask",
+                "ecs:DescribeTasks",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskRoleD514E3A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskExecutionRoleC745E2CD",
+                    "Arn",
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "events:PutTargets",
+                "events:PutRule",
+                "events:DescribeRule",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogDelivery",
+                "logs:GetLogDelivery",
+                "logs:UpdateLogDelivery",
+                "logs:DeleteLogDelivery",
+                "logs:ListLogDeliveries",
+                "logs:PutResourcePolicy",
+                "logs:DescribeResourcePolicies",
+                "logs:DescribeLogGroups",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "xray:PutTraceSegments",
+                "xray:PutTelemetryRecords",
+                "xray:GetSamplingRules",
+                "xray:GetSamplingTargets",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "OpportunityProjectionStateMachineRoleDefaultPolicyCBE82D99",
+        "Roles": [
+          {
+            "Ref": "OpportunityProjectionStateMachineRoleE6B143BA",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "OpportunityProjectionStateMachineRoleE6B143BA": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "states.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
     "ReconcileCadenceAlarmDFE8B010": {
       "Properties": {
         "AlarmActions": [

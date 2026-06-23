@@ -21,9 +21,11 @@ import type { CareerStage } from "@/lib/career-stage";
 import {
   buildResearcherCsv,
   careerStageLabel,
+  fundingStatusLabel,
   researcherBlurb,
   stageFit,
   topicFitScores,
+  type FundingStatus,
   type ResearcherCsvInput,
 } from "@/lib/match-display";
 import { initials } from "@/lib/utils";
@@ -58,6 +60,10 @@ type RankedScholar = {
   axes: { topicFit: number; stageAppeal: number };
   topicContributions: TopicContribution[];
   defaultScore: number;
+  esiEligible?: boolean;
+  yearsSinceDegree?: number | null;
+  fundingStatus?: FundingStatus;
+  inMyTopMatches?: boolean;
 };
 
 type OpportunityMeta = {
@@ -465,6 +471,7 @@ function Results({
   // opportunity because MatchedView remounts on each selection.
   const [dept, setDept] = useState<string>("all");
   const [stage, setStage] = useState<string>("all");
+  const [funding, setFunding] = useState<string>("all");
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
 
   if (status.kind === "loading") {
@@ -485,10 +492,12 @@ function Results({
   ].sort((a, b) => a.localeCompare(b));
   const stagesPresent = CAREER_STAGES.filter((s) => results.some((r) => r.careerStage === s));
 
+  const fundingPresent = results.some((r) => r.fundingStatus != null);
   const filtered = results.filter(
     (r) =>
       (dept === "all" || r.department === dept) &&
-      (stage === "all" || r.careerStage === stage),
+      (stage === "all" || r.careerStage === stage) &&
+      (funding === "all" || r.fundingStatus === funding),
   );
   const selectedCount = filtered.filter((r) => selected.has(r.cwid)).length;
   const allSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.cwid));
@@ -522,6 +531,8 @@ function Results({
           careerStage: r.careerStage,
           topicFit: topicFitByCwid.get(r.cwid) ?? 0,
           stageLabel: stageFit(r.axes.stageAppeal, r.careerStage !== null).label,
+          esiEligible: r.esiEligible,
+          fundingStatus: r.fundingStatus ?? null,
           topTopicLabel: top ? (topicLabels[top.topicId] ?? top.topicId) : "",
           topPubCount: top?.pubCount ?? 0,
         };
@@ -615,6 +626,18 @@ function Results({
                 </option>
               ))}
             </select>
+            {fundingPresent ? (
+              <select
+                aria-label="Filter by funding status"
+                value={funding}
+                onChange={(e) => setFunding(e.target.value)}
+                className={selectClass}
+              >
+                <option value="all">Any funding status</option>
+                <option value="funded">{fundingStatusLabel("funded")}</option>
+                <option value="unfunded">{fundingStatusLabel("unfunded")}</option>
+              </select>
+            ) : null}
           </div>
 
           {filtered.length === 0 ? (
@@ -679,6 +702,8 @@ function ResearcherRow({
     minYear: top?.minYear ?? null,
     topicLabel: top ? (topicLabels[top.topicId] ?? top.topicId) : "",
     careerStage: r.careerStage,
+    esiEligible: r.esiEligible,
+    yearsSinceDegree: r.yearsSinceDegree,
   });
   const stage = stageFit(r.axes.stageAppeal, r.careerStage !== null);
 
@@ -712,6 +737,29 @@ function ResearcherRow({
           </div>
           {r.department ? (
             <div className="text-muted-foreground text-sm">{r.department}</div>
+          ) : null}
+          {r.fundingStatus || r.inMyTopMatches ? (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {r.fundingStatus ? (
+                <span
+                  className={
+                    r.fundingStatus === "funded"
+                      ? "rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                      : "rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-400"
+                  }
+                >
+                  {fundingStatusLabel(r.fundingStatus)}
+                </span>
+              ) : null}
+              {r.inMyTopMatches ? (
+                <span
+                  title="This opportunity also ranks among this researcher's own “Grants for me” matches."
+                  className="rounded-full bg-[var(--color-accent-slate)]/15 px-2 py-0.5 text-xs text-[var(--color-accent-slate)]"
+                >
+                  Also in their Grants for me
+                </span>
+              ) : null}
+            </div>
           ) : null}
           {blurb ? <p className="mt-1.5 text-sm text-foreground/90">{blurb}</p> : null}
 
