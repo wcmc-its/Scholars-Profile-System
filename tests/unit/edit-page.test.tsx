@@ -5,7 +5,7 @@
  * tested elsewhere; this is the rail + routing + role-parity wiring.
  */
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
@@ -670,18 +670,19 @@ describe("EditPage router — superuser mode", () => {
         headers: { "Content-Type": "application/json" },
       }),
     );
-    // The Draft-with-AI block opens (and the Generate button mounts) when the bio
-    // is empty — the real use case here: a superuser drafting a bio for an
-    // uncovered scholar. With a non-empty overview the block starts collapsed.
+    // The real use case here: a superuser drafting a bio for an uncovered
+    // scholar (empty overview).
     const noBio: EditContext = {
       ...superuserCtx,
       scholar: { ...superuserCtx.scholar, overview: "" },
     };
     try {
       render(<EditPage ctx={noBio} mode="superuser" attr="overview" />);
-      // generateEnabled=true ⇒ the Draft-with-AI block + Generate button render.
-      expect(screen.getByTestId("overview-generate")).toBeTruthy();
+      // #1246 — the Draft-with-AI block now starts collapsed regardless of bio
+      // state; expand it to reach the Generate button.
       expect(screen.getByTestId("overview-draft-block")).toBeTruthy();
+      fireEvent.click(screen.getByTestId("overview-draft-block-toggle"));
+      expect(screen.getByTestId("overview-generate")).toBeTruthy();
     } finally {
       fetchSpy.mockRestore();
       if (prev === undefined) delete process.env.SELF_EDIT_OVERVIEW_GENERATE;
