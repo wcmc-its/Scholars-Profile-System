@@ -11,11 +11,14 @@
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const { mockGetSession, mockIsEnabled, mockFetchSuggested } = vi.hoisted(() => ({
-  mockGetSession: vi.fn(),
-  mockIsEnabled: vi.fn(),
-  mockFetchSuggested: vi.fn(),
-}));
+const { mockGetSession, mockIsEnabled, mockFetchSuggested, mockFetchViaApi, mockPreferApi } =
+  vi.hoisted(() => ({
+    mockGetSession: vi.fn(),
+    mockIsEnabled: vi.fn(),
+    mockFetchSuggested: vi.fn(),
+    mockFetchViaApi: vi.fn(),
+    mockPreferApi: vi.fn(),
+  }));
 
 vi.mock("@/lib/auth/effective-identity", () => ({
   getEffectiveEditSession: mockGetSession,
@@ -25,6 +28,8 @@ vi.mock("@/lib/edit/reciter-pending-hint", () => ({
 }));
 vi.mock("@/lib/reciter/client", () => ({
   fetchSuggestedArticles: mockFetchSuggested,
+  fetchSuggestedArticlesViaApi: mockFetchViaApi,
+  preferReciterApiSource: mockPreferApi,
 }));
 
 import { GET } from "@/app/api/edit/reciter-pending/route";
@@ -51,6 +56,9 @@ describe("GET /api/edit/reciter-pending", () => {
     mockIsEnabled.mockReturnValue(true);
     mockGetSession.mockResolvedValue({ cwid: "self01", isSuperuser: false });
     mockFetchSuggested.mockResolvedValue([SUGGESTION]);
+    // Default source is DynamoDB/S3 (preferReciterApiSource false), matching prod.
+    mockPreferApi.mockReturnValue(false);
+    mockFetchViaApi.mockResolvedValue([SUGGESTION]);
   });
 
   it("returns { suggestions: [] } and does NOT read the session or engine when the flag is off", async () => {
@@ -100,6 +108,15 @@ describe("GET /api/edit/reciter-pending", () => {
     expect(await res.json()).toEqual({ suggestions: [] });
     expect(mockFetchSuggested).not.toHaveBeenCalledWith("other22");
     expect(mockFetchSuggested).not.toHaveBeenCalled();
+  });
+
+  it("reads the engine FG API (not DynamoDB/S3) when RECITER_PENDING_SOURCE=api", async () => {
+    mockPreferApi.mockReturnValue(true);
+    const res = await GET(req() as never);
+    expect(mockFetchViaApi).toHaveBeenCalledTimes(1);
+    expect(mockFetchViaApi).toHaveBeenCalledWith("self01");
+    expect(mockFetchSuggested).not.toHaveBeenCalled();
+    expect(await res.json()).toEqual({ suggestions: [SUGGESTION] });
   });
 
   it("never marks the response cacheable (no-store)", async () => {

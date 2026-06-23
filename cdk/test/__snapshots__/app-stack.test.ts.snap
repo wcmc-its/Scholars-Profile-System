@@ -392,6 +392,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "RECITER_PENDING_SOURCE",
+                "Value": "off",
+              },
+              {
                 "Name": "MENTORING_COPUB_BRIDGE",
                 "Value": "on",
               },
@@ -946,6 +950,36 @@ exports[`AppStack prod matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter:SCHOLARS_RECITERDB_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_API_BASE_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api:RECITER_API_BASE_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api:RECITER_API_KEY::",
                     ],
                   ],
                 },
@@ -2573,6 +2607,18 @@ service:
                       {
                         "Ref": "AWS::Partition",
                       },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/saml/idp-cert",
                     ],
                   ],
@@ -2844,6 +2890,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api-??????",
                   ],
                 ],
               },
@@ -3692,6 +3757,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "RECITER_PENDING_SOURCE",
+                "Value": "api",
+              },
+              {
                 "Name": "MENTORING_COPUB_BRIDGE",
                 "Value": "on",
               },
@@ -4246,6 +4315,36 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter:SCHOLARS_RECITERDB_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_API_BASE_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api:RECITER_API_BASE_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api:RECITER_API_KEY::",
                     ],
                   ],
                 },
@@ -5959,6 +6058,18 @@ service:
                       {
                         "Ref": "AWS::Partition",
                       },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/saml/idp-cert",
                     ],
                   ],
@@ -6230,6 +6341,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api-??????",
                   ],
                 ],
               },

@@ -660,13 +660,14 @@ describe("AppStack", () => {
     });
 
     describe("IAM role split (B06)", () => {
-      it("the app task-execution role policy lists exactly the ten app consumer secret ARNs (ADR-009: no migrate, no bootstrap)", () => {
+      it("the app task-execution role policy lists exactly the eleven app consumer secret ARNs (ADR-009: no migrate, no bootstrap)", () => {
         // No `*` resource on secretsmanager:* (Phase 1 hard rule).
-        // The ten ARNs are scholars/prod/db/app-rw, db/app-ro, opensearch/app,
+        // The eleven ARNs are scholars/prod/db/app-rw, db/app-ro, opensearch/app,
         // revalidate-token, session-cookie-key, the SAML SP private key,
         // etl/reciter (ReciterDB connection for funding/mentoring surfaces),
-        // saml/idp-cert (the IdP signing-cert trust anchor, #466),
-        // saml-sp/prod/cert (the SP public cert for metadata, #466), and
+        // reciter-api (ReCiter engine REST API for the reciter-pending nudge's
+        // engine-API source), saml/idp-cert (the IdP signing-cert trust anchor,
+        // #466), saml-sp/prod/cert (the SP public cert for metadata, #466), and
         // newrelic-license-key (the New Relic ingest key for the ADOT
         // collector's otlphttp/newrelic exporter, B24). ADR-009 moved
         // db/bootstrap to the deploy execution role and keeps db/migrate off
@@ -693,7 +694,7 @@ describe("AppStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        expect(resourceList).toHaveLength(10);
+        expect(resourceList).toHaveLength(11);
         // No `*` ever appears in the resource list.
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
@@ -1586,6 +1587,13 @@ describe("AppStack", () => {
         // Prod is armed but off: the live DynamoDB read is staging-on for the soak,
         // and prod flips only on the next approval-gated Sps-App-prod deploy.
         expect(appContainerEnv().get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("off");
+      });
+
+      it("keeps the reciter-pending source on DynamoDB/S3 in prod (RECITER_PENDING_SOURCE — 'api' is the staging-only engine workaround)", () => {
+        // "api" routes the nudge through the engine's Feature Generator API in
+        // staging (sidesteps the S3-offloaded Analysis read); prod stays on the
+        // default DynamoDB/S3 source ("off") until the staging soak is done.
+        expect(appContainerEnv().get("RECITER_PENDING_SOURCE")).toBe("off");
       });
 
       it("keeps the ReCiter 'Not mine' reject OFF in prod during the staging-first rollout (#746)", () => {
