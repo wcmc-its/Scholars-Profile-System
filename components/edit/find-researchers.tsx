@@ -68,12 +68,20 @@ type RankedScholar = {
 
 type OpportunityMeta = {
   title: string | null;
+  synopsis: string | null;
   mechanism: string | null;
+  openDate: string | null;
   dueDate: string | null;
   sponsor: string | null;
   source: string | null;
   sourceUrl: string | null;
   status: string | null;
+  eligibilityRaw: string | null;
+  cfdaList: string[];
+  awardCeiling: number | null;
+  awardFloor: number | null;
+  estimatedFunding: number | null;
+  numberOfAwards: number | null;
 };
 
 type OpportunityListItem = {
@@ -122,6 +130,21 @@ function formatDue(iso: string | null): string | null {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatMoney(n: number | null): string | null {
+  if (n == null || !Number.isFinite(n)) return null;
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+}
+
+/** "$100,000–$500,000" / "Up to $500,000" / "From $100,000" from the floor/ceiling pair. */
+function awardRange(floor: number | null, ceiling: number | null): string | null {
+  const lo = formatMoney(floor);
+  const hi = formatMoney(ceiling);
+  if (lo && hi) return lo === hi ? hi : `${lo}–${hi}`;
+  if (hi) return `Up to ${hi}`;
+  if (lo) return `From ${lo}`;
+  return null;
 }
 
 export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }) {
@@ -404,11 +427,25 @@ function OpportunityCard({
   opportunity: OpportunityMeta | null;
   matchingOn: MatchingTopic[];
 }) {
-  const due = formatDue(opportunity?.dueDate ?? null);
-  const src = sourceLabel(opportunity?.source ?? null);
-  const meta = [opportunity?.mechanism, due ? `Due ${due}` : null, opportunity?.sponsor].filter(
-    Boolean,
-  ) as string[];
+  const o = opportunity;
+  const src = sourceLabel(o?.source ?? null);
+  const open = formatDue(o?.openDate ?? null);
+  const due = formatDue(o?.dueDate ?? null);
+  const award = awardRange(o?.awardFloor ?? null, o?.awardCeiling ?? null);
+  const estimated = formatMoney(o?.estimatedFunding ?? null);
+  const cfda = o?.cfdaList?.length ? o.cfdaList.join(", ") : null;
+
+  // Compact subtitle under the title; the rest of the metadata lives in the grid.
+  const subtitle = [o?.sponsor, o?.mechanism, o?.status].filter(Boolean) as string[];
+
+  // Fact grid — only the cells we actually have a value for.
+  const facts: Array<{ label: string; value: string }> = [];
+  if (open) facts.push({ label: "Opens", value: open });
+  if (due) facts.push({ label: "Due", value: due });
+  if (award) facts.push({ label: "Award", value: award });
+  if (estimated) facts.push({ label: "Est. total funding", value: estimated });
+  if (o?.numberOfAwards != null) facts.push({ label: "Awards", value: `~${o.numberOfAwards}` });
+  if (cfda) facts.push({ label: "CFDA", value: cfda });
 
   return (
     <div className="border-border mb-6 rounded-lg border bg-[var(--muted)]/40 p-4">
@@ -417,9 +454,9 @@ function OpportunityCard({
           {opportunityId}
         </span>
         {src ? (
-          opportunity?.sourceUrl ? (
+          o?.sourceUrl ? (
             <a
-              href={opportunity.sourceUrl}
+              href={o.sourceUrl}
               target="_blank"
               rel="noreferrer"
               className="text-muted-foreground inline-flex items-center gap-1 text-xs hover:text-[var(--color-accent-slate)] hover:underline"
@@ -432,12 +469,38 @@ function OpportunityCard({
         ) : null}
       </div>
 
-      {opportunity?.title ? (
-        <h2 className="mt-2 text-lg font-semibold leading-snug">{opportunity.title}</h2>
+      {o?.title ? (
+        <h2 className="mt-2 text-lg font-semibold leading-snug">{o.title}</h2>
       ) : null}
 
-      {meta.length > 0 ? (
-        <div className="text-muted-foreground mt-1 text-sm">{meta.join(" · ")}</div>
+      {subtitle.length > 0 ? (
+        <div className="text-muted-foreground mt-1 text-sm">{subtitle.join(" · ")}</div>
+      ) : null}
+
+      {o?.synopsis ? (
+        <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-foreground/90">
+          {o.synopsis}
+        </p>
+      ) : null}
+
+      {facts.length > 0 ? (
+        <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
+          {facts.map((f) => (
+            <div key={f.label}>
+              <dt className="text-muted-foreground text-xs uppercase tracking-wide">{f.label}</dt>
+              <dd className="text-sm text-foreground">{f.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+
+      {o?.eligibilityRaw ? (
+        <div className="mt-3">
+          <span className="text-muted-foreground text-xs uppercase tracking-wide">Eligibility</span>
+          <p className="mt-0.5 whitespace-pre-line text-sm leading-relaxed text-foreground/90">
+            {o.eligibilityRaw}
+          </p>
+        </div>
       ) : null}
 
       {matchingOn.length > 0 ? (

@@ -73,12 +73,20 @@ export async function GET(
     where: { opportunityId },
     select: {
       title: true,
+      synopsis: true,
       mechanism: true,
+      openDate: true,
       dueDate: true,
       sponsor: true,
       source: true,
       sourceUrl: true,
       status: true,
+      eligibilityRaw: true,
+      cfdaList: true,
+      awardCeiling: true,
+      awardFloor: true,
+      estimatedFunding: true,
+      numberOfAwards: true,
       topicVector: true,
     },
   });
@@ -107,12 +115,22 @@ export async function GET(
   const opportunity = opp
     ? {
         title: opp.title,
+        synopsis: opp.synopsis,
         mechanism: opp.mechanism,
+        openDate: opp.openDate,
         dueDate: opp.dueDate,
         sponsor: opp.sponsor,
         source: opp.source,
         sourceUrl: opp.sourceUrl,
         status: opp.status,
+        eligibilityRaw: opp.eligibilityRaw,
+        cfdaList: Array.isArray(opp.cfdaList) ? (opp.cfdaList as string[]) : [],
+        // BigInt isn't JSON-serializable — widen the dollar amounts to Number
+        // (award sizes are well within Number's safe-integer range).
+        awardCeiling: opp.awardCeiling == null ? null : Number(opp.awardCeiling),
+        awardFloor: opp.awardFloor == null ? null : Number(opp.awardFloor),
+        estimatedFunding: opp.estimatedFunding == null ? null : Number(opp.estimatedFunding),
+        numberOfAwards: opp.numberOfAwards,
       }
     : null;
 

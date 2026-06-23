@@ -343,7 +343,10 @@ export async function rankResearchersForOpportunity(
     for (const s of scholars) {
       stageByCwid.set(
         s.cwid,
-        careerStageBucket({ roleCategory: s.roleCategory, appointments: s.appointments, educations: s.educations }, now),
+        careerStageBucket(
+          { roleCategory: s.roleCategory, title: s.primaryTitle, appointments: s.appointments, educations: s.educations },
+          now,
+        ),
       );
       profileByCwid.set(s.cwid, { title: s.primaryTitle, department: s.primaryDepartment });
       signalsByCwid.set(s.cwid, deriveGrantSignals({ grants: s.grants, educations: s.educations }, now));

@@ -102,3 +102,74 @@ describe("careerStageBucket — full_time_faculty split by tenure", () => {
     ).toBe("mid");
   });
 });
+
+describe("careerStageBucket — full_time_faculty rank from title (overrides short WCM tenure)", () => {
+  it("Professor → senior even with a recent WCM appointment (the senior-hire bug)", () => {
+    // The Beth McGinty case: a full Professor who joined WCM ~3yr ago. Tenure
+    // alone reads "early"; the academic rank in the title corrects it to senior.
+    expect(
+      careerStageBucket(
+        {
+          roleCategory: "full_time_faculty",
+          title: "Professor of Population Health Sciences",
+          appointments: [{ startDate: new Date("2023-01-01") }],
+        },
+        NOW,
+      ),
+    ).toBe("senior");
+  });
+
+  it("Associate Professor → mid (even with short tenure)", () => {
+    expect(
+      careerStageBucket(
+        {
+          roleCategory: "full_time_faculty",
+          title: "Associate Professor of Chemistry in Radiology",
+          appointments: [{ startDate: new Date("2024-01-01") }],
+        },
+        NOW,
+      ),
+    ).toBe("mid");
+  });
+
+  it("Assistant Professor → early", () => {
+    expect(
+      careerStageBucket(
+        { roleCategory: "full_time_faculty", title: "Assistant Professor of Medicine" },
+        NOW,
+      ),
+    ).toBe("early");
+  });
+
+  it("Instructor / Lecturer title → early", () => {
+    expect(
+      careerStageBucket({ roleCategory: "full_time_faculty", title: "Instructor in Pediatrics" }, NOW),
+    ).toBe("early");
+  });
+
+  it("Clinical/Research Professor and Professor Emeritus → senior", () => {
+    expect(
+      careerStageBucket({ roleCategory: "full_time_faculty", title: "Clinical Professor of Surgery" }, NOW),
+    ).toBe("senior");
+    expect(
+      careerStageBucket(
+        { roleCategory: "full_time_faculty", title: "Professor Emeritus of Neurology" },
+        NOW,
+      ),
+    ).toBe("senior");
+  });
+
+  it("falls back to tenure when the title names no rank", () => {
+    // "Member, …" names no academic rank → fall through to tenure (~4yr) → early.
+    expect(
+      careerStageBucket(
+        {
+          roleCategory: "full_time_faculty",
+          title: "Member, Sandra and Edward Meyer Cancer Center",
+          appointments: [{ startDate: new Date("2022-07-01") }],
+        },
+        NOW,
+      ),
+    ).toBe("early");
+  });
+});
