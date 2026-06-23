@@ -379,7 +379,6 @@ function OverviewEditorCard({
       />
       <OverviewGeneratorArm
         cwid={cwid}
-        savedHtml={savedHtml}
         editor={editor}
         generations={generations}
         refreshGenerations={refreshGenerations}
@@ -537,7 +536,6 @@ function useOverviewEditor({
 
 function OverviewGeneratorArm({
   cwid,
-  savedHtml,
   editor,
   generations,
   refreshGenerations,
@@ -549,7 +547,6 @@ function OverviewGeneratorArm({
   streamEnabled = false,
 }: {
   cwid: string;
-  savedHtml: string;
   editor: UseOverviewEditor;
   generations: OverviewGenerationItem[];
   refreshGenerations: () => Promise<void>;
@@ -604,9 +601,9 @@ function OverviewGeneratorArm({
     [sourceOptions, deltas],
   );
 
-  // The block is expanded when there is no saved bio, collapsed when one exists
-  // (§8) — set once on mount from the initial saved value.
-  const [blockOpen, setBlockOpen] = React.useState(() => savedHtml.trim().length === 0);
+  // Collapsed by default; the user expands "Draft with AI" only when they want
+  // to generate a draft (#1246).
+  const [blockOpen, setBlockOpen] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
