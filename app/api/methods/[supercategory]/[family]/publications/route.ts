@@ -106,9 +106,9 @@ export async function GET(
   // #1166 Surface B — optional cell-line filter. Validated against the opaque-id
   // shape; the loader additionally gates it on METHODS_LENS_CELL_LINE_ENTITIES and
   // ignores an unknown id (empty feed), so a bad value is a 400 here, never a leak.
-  const entityIdRaw = sp.get("cellLine");
+  const entityIdRaw = sp.get("entity");
   if (entityIdRaw !== null && !ENTITY_ID_RE.test(entityIdRaw)) {
-    return apiError("invalid cellLine", 400);
+    return apiError("invalid entity", 400);
   }
   const entityId = entityIdRaw ?? undefined;
 

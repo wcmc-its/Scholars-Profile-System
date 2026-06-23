@@ -4,7 +4,7 @@
  * #1166 Surface B — the master-detail cell-line rail on the method-family page, the
  * left column of the publications master-detail (the family-page analog of the
  * supercategory `FamilyRail`). Lists the specific cell lines the family resolves to,
- * usage_count-desc; selecting one sets the shared `?cellLine=<entityId>` filter that
+ * usage_count-desc; selecting one sets the shared `?entity=<entityId>` filter that
  * the publication feed reads (spec §6 — one shared, singular filter). No "All" row:
  * no selection ⇒ the full family list (the feed's default); clicking the active row
  * clears the filter back to the full list.
@@ -26,7 +26,7 @@ export function CellLineRail({ entities }: { entities: CellLineEntity[] }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const active = searchParams.get("cellLine");
+  const active = searchParams.get("entity");
 
   // #1168 — the rail noun comes from the family's dominant entity kind (all
   // entities in a family share it), so a reagent/instrument/dataset family reads
@@ -36,8 +36,8 @@ export function CellLineRail({ entities }: { entities: CellLineEntity[] }) {
 
   const onSelect = (id: string | null) => {
     const params = new URLSearchParams(searchParams.toString());
-    if (id === null) params.delete("cellLine");
-    else params.set("cellLine", id);
+    if (id === null) params.delete("entity");
+    else params.set("entity", id);
     // Reset the feed to page 1 on a filter change (mirrors the prior strip).
     params.delete("page");
     const qs = params.toString();
