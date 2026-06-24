@@ -993,6 +993,12 @@ export class AppStack extends Stack {
         OPENSEARCH_NODE: `https://${Fn.importValue(
           `Sps-Data-${env}-OpenSearchDomainEndpoint`,
         )}`,
+        // #353 -- CloudFront distribution id for the synchronous post-commit
+        // edge purge (lib/edit/revalidation.ts invalidateCloudFront). Populated
+        // in both envs; before this the var was unset so the purge no-opped.
+        // The web task role carries the matching cloudfront:CreateInvalidation
+        // grant (TaskRoleCloudFrontPolicy). Enable rides the #502 edge cutover.
+        SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID: envConfig.cloudFrontDistributionId,
         // SAML SP non-secret config (#466). Without these, getSamlEnv()'s
         // requireEnv throws on the first missing var and every SAML route
         // 503s ("SAML SP is not configured"); SP-initiated sign-in is dead.

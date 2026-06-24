@@ -292,6 +292,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID",
+                "Value": "E28NKDFXC7K2ZL",
+              },
+              {
                 "Name": "SAML_IDP_ENTITY_ID",
                 "Value": "https://login-proxy.weill.cornell.edu/idp",
               },
@@ -3595,6 +3599,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                     ],
                   ],
                 },
+              },
+              {
+                "Name": "SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID",
+                "Value": "E17NRWINXLP3B3",
               },
               {
                 "Name": "SAML_IDP_ENTITY_ID",
