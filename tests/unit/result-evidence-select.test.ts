@@ -45,20 +45,61 @@ describe("selectEvidence — precedence (handoff §4 principle 2)", () => {
     expect(ev).toEqual({ kind: "method", family: "Single-cell RNA sequencing", tools: ["scRNA-seq"] });
   });
 
-  it("topic (rank 3) beats pub:tagged and bio", () => {
+  it("pub:tagged (rank 3) now beats topic — a direct MeSH hit outranks the research area", () => {
+    // The reorder: a scholar with pubs tagged the query subject shows that direct
+    // match, NOT a (possibly unrelated parent) research-area badge.
     const ev = selectEvidence({
       topic: { label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" },
       pub: { tagged: { text: "5 of 9 publications tagged X", count: 5 } },
       bioHighlight: BIO_HL,
     });
-    expect(ev).toEqual({
-      kind: "topic",
-      label: "Single-cell & spatial biology",
-      id: "single_cell_spatial_biology",
-    });
+    expect(ev).toMatchObject({ kind: "publications", strength: "tagged" });
   });
 
-  it("pub:tagged (rank 4) beats bio (rank 5) — strong subject tag above a sentence; carries count", () => {
+  it("pub:concept also beats topic — the MeSH-expansion variant outranks research area too", () => {
+    const ev = selectEvidence({
+      topic: { label: "Immunology", id: "immunology" },
+      pub: { concept: { text: "via related concept X" } },
+    });
+    expect(ev).toMatchObject({ kind: "publications", strength: "concept" });
+  });
+
+  it("a full-query bio sentence beats topic — a query-literal 'why' over an area whose parent can look unrelated", () => {
+    // BIO_HL with no query ⇒ bioCoversQuery true ⇒ a FULL bio match, which now
+    // outranks the research-area topic.
+    const ev = selectEvidence({
+      topic: { label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" },
+      bioHighlight: BIO_HL,
+    });
+    expect(ev.kind).toBe("selfDescription");
+  });
+
+  it("a paper mention also beats topic — a title/abstract that literally mentions the term", () => {
+    const ev = selectEvidence({
+      topic: { label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" },
+      pub: { mention: { text: "1 of 9 publications mention “stem cells”", count: 1 } },
+    });
+    expect(ev).toMatchObject({ kind: "publications", strength: "mention" });
+  });
+
+  it("topic is the LAST real reason — beats a weak partial-bio, affiliation, and the identity hints", () => {
+    // partial-bio (subset-only highlight) is weaker than a curated area match.
+    const partial = selectEvidence({
+      topic: { label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" },
+      bioHighlight: "The <mark>stem</mark> of the issue.",
+      query: "stem cells",
+    });
+    expect(partial.kind).toBe("topic");
+    // topic still beats org-affiliation + the areas/concepts identity hints.
+    const overHints = selectEvidence({
+      topic: { label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" },
+      nameHighlight: AFFIL_HL,
+      areas: { labels: ["A"], total: 1 },
+    });
+    expect(overHints.kind).toBe("topic");
+  });
+
+  it("pub:tagged (rank 3) beats bio (rank 5) — strong subject tag above a sentence; carries count", () => {
     const ev = selectEvidence({
       pub: { tagged: { text: "25 of 373 publications tagged Melanoma", count: 25 } },
       bioHighlight: BIO_HL,
@@ -94,7 +135,7 @@ describe("selectEvidence — precedence (handoff §4 principle 2)", () => {
     });
   });
 
-  it("concept folds into the tagged tier (rank 4) — beats bio + mention, loses to tagged", () => {
+  it("concept folds into the tagged tier (rank 3) — beats topic + bio + mention, loses to tagged", () => {
     // concept above bio (matches the documented precedence + the legacy chain).
     // Concept carries no count/pubs (folded text variant).
     expect(selectEvidence({ pub: { concept: { text: "via related concept X" } }, bioHighlight: BIO_HL })).toEqual({

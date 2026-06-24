@@ -10,7 +10,7 @@ import { PersonPopover } from "@/components/scholar/person-popover";
 import { sanitizePubTitle } from "@/lib/utils";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { ExpandedGrant, expandLabel } from "@/components/funding/expanded-grant";
-import { highlightedTitleHtml } from "@/components/search/publication-result-row";
+import { highlightedTitleHtml } from "@/lib/search/highlight-title";
 import { MatchReason } from "@/components/search/match-reason";
 import { HighlightedSnippet } from "@/components/search/highlight-snippet";
 import { profilePath } from "@/lib/profile-url";

@@ -44,9 +44,9 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(mBtn).toBeTruthy();
     expect(mBtn?.getAttribute("aria-expanded")).toBe("false");
     // Item 1 — the whole cluster is the button: its accessible name carries the
-    // matched label PLUS the sr-only "representative papers" affordance.
+    // matched label PLUS the sr-only "key papers" affordance.
     expect(mBtn?.textContent).toMatch(/Flow cytometry/);
-    expect(mBtn?.textContent).toMatch(/representative papers/i);
+    expect(mBtn?.textContent).toMatch(/key papers/i);
 
     const { container: t } = render(
       <ResultEvidence
@@ -281,18 +281,18 @@ describe("<RepresentativePapers> — the disclosure stack", () => {
     { pmid: "3", title: "Third representative paper", year: 2022 },
   ];
 
-  it("renders the REP. PAPERS label + the (up to 3) italic titles with year", () => {
+  it("renders the KEY PAPERS label + the (up to 3) italic titles with year", () => {
     render(<RepresentativePapers papers={PAPERS} total={3} profileHref="/p/jane#publications" />);
-    expect(screen.getByText("Rep. papers")).toBeTruthy();
+    expect(screen.getByText("Key papers")).toBeTruthy();
     expect(screen.getByText("First representative paper")).toBeTruthy();
     expect(screen.getByText("Third representative paper")).toBeTruthy();
     expect(screen.getByText(/\(2024\)/)).toBeTruthy();
   });
 
-  it("uses the singular 'Rep. paper' label for a single paper", () => {
+  it("uses the singular 'Key paper' label for a single paper", () => {
     render(<RepresentativePapers papers={[PAPERS[0]]} total={1} profileHref="/p/jane#publications" />);
-    expect(screen.getByText("Rep. paper")).toBeTruthy();
-    expect(screen.queryByText("Rep. papers")).toBeNull();
+    expect(screen.getByText("Key paper")).toBeTruthy();
+    expect(screen.queryByText("Key papers")).toBeNull();
   });
 
   it("renders a '+N more in profile →' link to the profile when total exceeds the shown papers", () => {
@@ -308,7 +308,7 @@ describe("<RepresentativePapers> — the disclosure stack", () => {
 
   it("shows the loading placeholder while a lazy fetch is in flight (no papers yet)", () => {
     render(<RepresentativePapers papers={[]} total={0} profileHref="/p/jane#publications" status="loading" />);
-    expect(screen.getByText(/finding representative papers/i)).toBeTruthy();
+    expect(screen.getByText(/finding key papers/i)).toBeTruthy();
   });
 
   it("renders nothing once a fetch resolves with zero papers (never a dead block)", () => {
@@ -316,5 +316,20 @@ describe("<RepresentativePapers> — the disclosure stack", () => {
       <RepresentativePapers papers={[]} total={0} profileHref="/p/jane#publications" status="done" />,
     );
     expect(container.textContent).toBe("");
+  });
+
+  it("highlights a query match in a Key-paper title with the light-red pill (titleHtml)", () => {
+    // titleHtml carries <mark>s (OpenSearch for a tagged-pub match, or the topic/
+    // method term-wrap); the disclosure must style them like the Publications tab.
+    const { container } = render(
+      <RepresentativePapers
+        papers={[{ pmid: "1", title: "Stem cell biology", titleHtml: "<mark>Stem</mark> cell biology", year: 2024 }]}
+        total={1}
+        profileHref="/p/jane#publications"
+      />,
+    );
+    const mark = container.querySelector("mark");
+    expect(mark?.textContent).toBe("Stem");
+    expect(mark?.getAttribute("class")).toContain("bg-[#b31b1b]/10");
   });
 });

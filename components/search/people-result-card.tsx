@@ -118,11 +118,16 @@ export function PeopleResultCard({
   // expand, not on hover) so the cacheable results derive stays untouched and the
   // lookup runs only for a row the viewer actually opens. The query string
   // selects which loader the (shared) route uses: `?family=` / `?topic=`.
+  // Pass the active query so the loader surfaces + highlights title-matching
+  // "Key papers" first (relevant to the search, not just the scholar's top pub
+  // in the matched area). Empty on the no-query Browse page ⇒ pure impact rank.
+  const qParam = (q ?? "").trim();
+  const qSuffix = qParam ? `&q=${encodeURIComponent(qParam)}` : "";
   const exemplarQuery =
     hit.evidence?.kind === "method"
-      ? `family=${encodeURIComponent(hit.evidence.family)}`
+      ? `family=${encodeURIComponent(hit.evidence.family)}${qSuffix}`
       : hit.evidence?.kind === "topic"
-        ? `topic=${encodeURIComponent(hit.evidence.id)}`
+        ? `topic=${encodeURIComponent(hit.evidence.id)}${qSuffix}`
         : null;
   // #1119 — `methodContext` is the family's "how researchers use <tool>" snippet,
   // returned alongside the representative papers for a method match (null unless

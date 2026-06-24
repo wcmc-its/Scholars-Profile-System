@@ -7,7 +7,7 @@
  * post-it-yellow <mark> default (#20).
  */
 import { describe, expect, it } from "vitest";
-import { highlightedTitleHtml } from "@/components/search/publication-result-row";
+import { highlightedTitleHtml } from "@/lib/search/highlight-title";
 
 const PILL = "box-decoration-clone rounded-[3px] bg-[#b31b1b]/10 px-[3px]";
 const mark = (inner: string) => `<mark class="${PILL}">${inner}</mark>`;

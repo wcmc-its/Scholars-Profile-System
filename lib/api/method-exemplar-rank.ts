@@ -52,6 +52,44 @@ function citationsPerYear(c: ExemplarCandidate, currentYear: number): number {
   return c.citationCount / Math.max(1, currentYear - c.year + 1);
 }
 
+/** Significant query tokens for title relevance/highlight: lowercased, split on
+ *  non-alphanumeric, ≥2 chars, deduped (mirrors `bioCoversQuery`'s tokenizer). */
+export function queryTitleTokens(query: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of (query ?? "").toLowerCase().split(/[^a-z0-9]+/)) {
+    if (t.length >= 2 && !seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+  }
+  return out;
+}
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Wrap whole-word occurrences of any query token in a bare `<mark>` and report
+ * whether anything matched. Case-insensitive; word-bounded so "stem" highlights
+ * "stem" but not "system". The returned `html` carries only `<mark>` tags — the
+ * renderer styles them through the shared `highlightedTitleHtml` pill. ponytail:
+ * literal term match (titles are Aurora strings, no OpenSearch highlighter here);
+ * `matched: false` ⇒ caller keeps the plain sanitized title.
+ */
+export function markTitleQueryTerms(
+  title: string,
+  tokens: string[],
+): { html: string; matched: boolean } {
+  if (tokens.length === 0) return { html: title, matched: false };
+  const re = new RegExp(`\\b(${tokens.map(escapeRe).join("|")})\\b`, "gi");
+  let matched = false;
+  const html = title.replace(re, (m) => {
+    matched = true;
+    return `<mark>${m}</mark>`;
+  });
+  return { html, matched };
+}
+
 /**
  * Rank the candidate set and return the single best exemplar (handoff §7
  * `argmax`, lexicographic — each key breaks ties of the one above):
@@ -86,11 +124,30 @@ export function rankMethodExemplarList(
   candidates: ExemplarCandidate[],
   currentYear: number,
   limit = 3,
+  query?: string,
 ): EvidencePub[] {
   const pool = filterRenderableExemplars(candidates);
   if (pool.length === 0) return [];
 
+  // Query relevance ("Key papers" must be about the SEARCH term, not just the
+  // scholar's most-impactful pub in the matched area). With a query present, a
+  // paper whose TITLE contains a query term sorts FIRST (top key, above original-
+  // research) and its title is <mark>-wrapped for the disclosure highlight. No
+  // title hit ⇒ the existing impact ranking stands, so a scholar with no
+  // title-level match still shows their best paper in the matched area.
+  const tokens = query ? queryTitleTokens(query) : [];
+  const marks = new Map<string, { html: string; matched: boolean }>();
+  if (tokens.length > 0) {
+    for (const c of pool) marks.set(c.pmid, markTitleQueryTerms(c.title, tokens));
+  }
+
   pool.sort((a, b) => {
+    if (tokens.length > 0) {
+      const am = marks.get(a.pmid)!.matched ? 1 : 0;
+      const bm = marks.get(b.pmid)!.matched ? 1 : 0;
+      if (am !== bm) return bm - am;
+    }
+
     const ao = a.publicationType === ORIGINAL_RESEARCH_TYPE ? 1 : 0;
     const bo = b.publicationType === ORIGINAL_RESEARCH_TYPE ? 1 : 0;
     if (ao !== bo) return bo - ao;
@@ -112,11 +169,15 @@ export function rankMethodExemplarList(
     return a.pmid.localeCompare(b.pmid);
   });
 
-  return pool.slice(0, Math.max(0, limit)).map((c) => ({
-    pmid: c.pmid,
-    title: c.title,
-    year: c.year ?? null,
-  }));
+  return pool.slice(0, Math.max(0, limit)).map((c) => {
+    const m = marks.get(c.pmid);
+    return {
+      pmid: c.pmid,
+      title: c.title,
+      year: c.year ?? null,
+      ...(m?.matched ? { titleHtml: m.html } : {}),
+    };
+  });
 }
 
 /**

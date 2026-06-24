@@ -81,6 +81,7 @@ function toPmidArray(json: unknown): string[] {
 async function rankExemplarForPmids(
   cwid: string,
   pmids: string[],
+  query?: string,
 ): Promise<ExemplarResult> {
   if (pmids.length === 0) return EMPTY_EXEMPLAR;
 
@@ -134,7 +135,14 @@ async function rankExemplarForPmids(
   // matching what the profile would list), so "+N more" never over-promises;
   // `pubs` = the top-N for the disclosure stack.
   const renderable = filterRenderableExemplars(candidates);
-  const pubsRanked = rankMethodExemplarList(renderable, new Date().getFullYear(), EXEMPLAR_LIMIT);
+  // `query` (the active search term) surfaces + highlights title-matching papers
+  // first; absent ⇒ pure impact ranking (the pre-query-threading behaviour).
+  const pubsRanked = rankMethodExemplarList(
+    renderable,
+    new Date().getFullYear(),
+    EXEMPLAR_LIMIT,
+    query,
+  );
   // methodContext is a family-level concern resolved by the method loader; the
   // shared tail (also used by the topic loader) leaves it null.
   return { pubs: pubsRanked, total: renderable.length, methodContext: null };
@@ -184,6 +192,7 @@ function pickMethodContext(
 export async function loadMethodExemplar(
   cwid: string,
   familyLabel: string,
+  query?: string,
 ): Promise<ExemplarResult> {
   const id = cwid.trim();
   const label = familyLabel.trim();
@@ -234,7 +243,7 @@ export async function loadMethodExemplar(
     if (pmidSet.size >= MAX_CANDIDATES) break;
   }
 
-  const result = await rankExemplarForPmids(id, Array.from(pmidSet));
+  const result = await rankExemplarForPmids(id, Array.from(pmidSet), query);
   return { ...result, methodContext };
 }
 
@@ -250,6 +259,7 @@ export async function loadMethodExemplar(
 export async function loadTopicExemplar(
   cwid: string,
   parentTopicId: string,
+  query?: string,
 ): Promise<ExemplarResult> {
   const id = cwid.trim();
   const topicId = parentTopicId.trim();
@@ -271,5 +281,5 @@ export async function loadTopicExemplar(
     take: MAX_CANDIDATES,
   });
 
-  return rankExemplarForPmids(id, rows.map((r) => r.pmid));
+  return rankExemplarForPmids(id, rows.map((r) => r.pmid), query);
 }

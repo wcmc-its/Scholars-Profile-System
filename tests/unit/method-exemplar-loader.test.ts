@@ -280,6 +280,20 @@ describe("loadTopicExemplar — gating", () => {
     expect(publicationFindMany).not.toHaveBeenCalled();
   });
 
+  it("with a query, surfaces a title-matching pub first and highlights its title", async () => {
+    publicationTopicFindMany.mockResolvedValue([{ pmid: "1" }, { pmid: "2" }]);
+    publicationFindMany.mockResolvedValue([
+      pub({ pmid: "1", title: "Cardiac fibrosis", impactScore: 99 }),
+      pub({ pmid: "2", title: "Stem cell self-renewal", impactScore: 1 }),
+    ]);
+    const r = await loadTopicExemplar("abc", "t1", "stem cells");
+    // The title-matching pub (low impact) is surfaced first and carries titleHtml.
+    expect(r.pubs[0]?.pmid).toBe("2");
+    expect(r.pubs[0]?.titleHtml).toContain("<mark");
+    // The non-matching pub stays plain.
+    expect(r.pubs[1]?.titleHtml).toBeUndefined();
+  });
+
   it("returns {pubs:[],total:0} for a blank topic or cwid without touching the DB", async () => {
     expect(await loadTopicExemplar("abc", "  ")).toEqual(EMPTY);
     expect(await loadTopicExemplar("", "t1")).toEqual(EMPTY);

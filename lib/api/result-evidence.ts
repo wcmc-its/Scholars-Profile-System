@@ -9,11 +9,18 @@
  * Design (handoff §4):
  *   1. One typed `ResultEvidence` per result; the card never re-derives priority.
  *   2. Strongest-evidence-for-this-query precedence, defined once + tested:
- *        name → method → topic → publications:tagged → selfDescription (bio)
- *        → publications:mention → affiliation → areas → none
+ *        name → method → publications:tagged → publications:concept
+ *        → selfDescription (bio) → publications:mention → topic → affiliation
+ *        → concepts → areas → none
  *      Two strong/weak splits (§5.0C): `name` (strongest) floats above `method`
  *      while `affiliation` (weak/organizational) sinks just above empty; tagged
- *      pub sits ABOVE bio while a free-text mention sits BELOW it.
+ *      pub sits ABOVE bio while a free-text mention sits BELOW it. `topic` (the
+ *      research area) is demoted below ALL query-literal evidence — a direct
+ *      MeSH/method hit, a bio sentence, or a paper mention — because the area's
+ *      displayed PARENT label can read as unrelated (a "stem cells" subarea under
+ *      a "Gastroenterology" parent), so it must never mask a card that literally
+ *      shows the search term. It is still a real query match, so it stays above
+ *      org-affiliation + the identity hints — just the least self-evident one.
  *   3. Always bounded — every payload caps (tools ≤3, areas ≤4, one sentence).
  *   4. Cross-tab: Publications/Funding consume the SAME contract (their kinds are
  *      enumerated below as stubs so Phase 2 doesn't have to break the shape).
@@ -369,12 +376,12 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
   if (nameKind === "name") return { kind: "name", html: input.nameHighlight! };
   // 2 — method
   if (input.method) return { kind: "method", family: input.method.family, tools: input.method.tools };
-  // 3 — topic
-  if (input.topic) return { kind: "topic", label: input.topic.label, id: input.topic.id };
-  // 4 — publications, strong tier (above bio): tagged subject match, then the
-  // `concept` MeSH-expansion text variant — both fold into the tagged tier per
-  // the handoff precedence (`publications:tagged (+concept text variant)`), and
-  // both ranked the bio in the legacy chain.
+  // 3 — publications, strong tier: a DIRECT subject/MeSH hit (tagged), then the
+  // `concept` MeSH-expansion text variant. A direct query-MeSH match is more
+  // query-relevant than the scholar's self-reported research area (a `topic` can
+  // be an unrelated PARENT of the matched subarea — e.g. a "stem cells" subarea
+  // under a "Gastroenterology" parent), so BOTH now outrank `topic` below (moved
+  // up from rank 4). They still sit ABOVE bio, as before.
   if (input.pub?.tagged)
     return {
       kind: "publications",
@@ -384,15 +391,17 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
       count: input.pub.tagged.count,
     };
   if (input.pub?.concept) return { kind: "publications", strength: "concept", text: input.pub.concept.text };
-  // 5 — selfDescription (bio) — ONLY when the bio covered the WHOLE query (a
-  // FULL-query / single-token bio match still wins, as today). A partial-bio
-  // match falls through to 6 (pub.mention) so a real subset-only highlight never
-  // outranks publication-mention evidence (handoff decision 2).
+  // 4 — selfDescription (bio) — ONLY when the bio covered the WHOLE query (a
+  // FULL-query / single-token bio match still wins, as today). A query-literal
+  // bio sentence shows WHY this matched, so it now outranks the research-area
+  // `topic` below. A partial-bio match falls through to pub.mention so a real
+  // subset-only highlight never outranks publication-mention evidence (decision 2).
   if (input.bioHighlight && bioCoversQuery(input.bioHighlight, input.query ?? ""))
     return { kind: "selfDescription", html: firstMatchingSentence(input.bioHighlight) };
-  // 6 — publications:mention (free-text, weak — below a FULL bio match so
-  // "1 of 133 mention" never outranks a real overview sentence; handoff §5.0C —
-  // but a PARTIAL-only bio match has fallen through above and loses to this).
+  // 5 — publications:mention (free-text — a paper TITLE/abstract literally mentions
+  // the term; below a FULL bio match so "1 of 133 mention" never outranks a real
+  // overview sentence; handoff §5.0C — but a PARTIAL-only bio match has fallen
+  // through above and loses to this).
   if (input.pub?.mention)
     return {
       kind: "publications",
@@ -401,8 +410,15 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
       ...(input.pub.mention.pubs && input.pub.mention.pubs.length > 0 ? { pubs: input.pub.mention.pubs } : {}),
       count: input.pub.mention.count,
     };
-  // 6b — selfDescription (bio) — the partial-bio match that lost to pub.mention
-  // above still beats affiliation/areas/empty, so it falls here.
+  // 6 — topic (matched research area). Demoted below ALL query-literal evidence
+  // (MeSH tagged/concept, a full-query bio sentence, a paper mention): the area's
+  // displayed PARENT label can look unrelated, so it must never mask a card that
+  // literally shows the search term. Still above the weak subset-only bio match +
+  // org-affiliation + identity hints — it IS a real query match, just the least
+  // self-evident one.
+  if (input.topic) return { kind: "topic", label: input.topic.label, id: input.topic.id };
+  // 6b — selfDescription (bio) — the partial-bio match that lost to pub.mention +
+  // topic above still beats affiliation/areas/empty, so it falls here.
   if (input.bioHighlight) return { kind: "selfDescription", html: firstMatchingSentence(input.bioHighlight) };
   // 7 — affiliation (weak/organizational, just above empty)
   if (nameKind === "affiliation") return { kind: "affiliation", html: input.nameHighlight! };
