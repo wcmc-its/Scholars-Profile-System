@@ -33,6 +33,7 @@ function row(over: Partial<CoreQueueRow> = {}): CoreQueueRow {
     claimed: false,
     relativeCitationRatio: null,
     nihPercentile: null,
+    meshTerms: [],
     ...over,
   };
 }
@@ -71,13 +72,38 @@ describe("partitionCoreQueue", () => {
     expect(confirmed[0]?.claimed).toBe(true);
   });
 
-  it("a rejected pair drops out of both lists", () => {
-    const { candidates, confirmed } = partitionCoreQueue(
+  it("a rejected pair lands in the rejected list (backed by a human claim)", () => {
+    const { candidates, confirmed, rejected } = partitionCoreQueue(
       [row({ pmid: "4", status: "confirmed" })],
       claimMap([["4", "rejected"]]),
     );
     expect(candidates).toHaveLength(0);
     expect(confirmed).toHaveLength(0);
+    expect(rejected.map((r) => r.pmid)).toEqual(["4"]);
+    // a rejected pair always has an active human claim → claimed flag is set so
+    // the Rejected-tab restore knows to post the soft 'revoked' undo.
+    expect(rejected[0]?.claimed).toBe(true);
+  });
+
+  it("an engine below_threshold row with no claim is surfaced in no list", () => {
+    const { candidates, confirmed, rejected } = partitionCoreQueue(
+      [row({ pmid: "5", status: "below_threshold" })],
+      () => null,
+    );
+    expect(candidates).toHaveLength(0);
+    expect(confirmed).toHaveLength(0);
+    expect(rejected).toHaveLength(0);
+  });
+
+  it("a human rejection wins over a below_threshold engine row → rejected list", () => {
+    // the realistic case: the engine ranked it under the bar, a human rejected it.
+    // The claim takes precedence (core-merge), so it lands in rejected, not dropped.
+    const { rejected } = partitionCoreQueue(
+      [row({ pmid: "6", status: "below_threshold" })],
+      claimMap([["6", "rejected"]]),
+    );
+    expect(rejected.map((r) => r.pmid)).toEqual(["6"]);
+    expect(rejected[0]?.claimed).toBe(true);
   });
 
   it("preserves input (likelihood) order", () => {
@@ -116,6 +142,7 @@ describe("loadCoreReviewQueue mapping", () => {
       doi: "10.1/x",
       relativeCitationRatio: "2.1000",
       nihPercentile: "89.0",
+      meshTerms: [{ ui: "D001921", label: "Brain" }, { label: "Magnetic Resonance Imaging" }],
     },
   });
 
@@ -156,6 +183,11 @@ describe("loadCoreReviewQueue mapping", () => {
     // RCR/percentile (reciterdb.analysis_nih) coerced from Decimal strings
     expect(r?.relativeCitationRatio).toBe(2.1);
     expect(r?.nihPercentile).toBe(89);
+    // MeSH terms threaded through normalizeMeshTerms (a label without a ui → ui null)
+    expect(r?.meshTerms).toEqual([
+      { ui: "D001921", label: "Brain" },
+      { ui: null, label: "Magnetic Resonance Imaging" },
+    ]);
   });
 
   it("resolves a core-staff co-author via the byline even when absent from the direct scholar lookup (Tier 2)", async () => {

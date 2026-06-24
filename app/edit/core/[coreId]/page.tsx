@@ -91,6 +91,7 @@ export default async function EditCorePage({
           core={queue.core}
           candidates={queue.candidates}
           confirmed={queue.confirmed}
+          rejected={queue.rejected}
         />
       </main>
     </div>
