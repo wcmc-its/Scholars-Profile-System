@@ -58,6 +58,7 @@ import {
   PEOPLE_DEPT_LEADERSHIP_CHIEF_WEIGHT,
   PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE,
   PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS,
+  PEOPLE_METHOD_FAMILY_TAG_WEIGHT,
   PEOPLE_INDEX,
   PEOPLE_PROMINENCE_BASE_WEIGHT,
   PEOPLE_PROMINENCE_FACULTY_WEIGHT,
@@ -86,6 +87,7 @@ import {
   resolvePeopleConceptPrecount,
   resolvePeopleMatchAwareSnippet,
   resolvePeopleMethodFamilyBoost,
+  resolvePeopleMethodFamilyTier,
   resolvePeopleMethodContextBoost,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
@@ -1106,6 +1108,18 @@ export async function searchPeople(opts: {
   // does not spread a ladder it doesn't use; this preserves the prior
   // per-branch evaluation (a name query never referenced these constants).
   const methodBoostOn = resolvePeopleMethodFamilyBoost();
+  // #1269 — method-family TIER boost. Independent of the cross_fields recall
+  // boost (`methodBoostOn`) and of the snippet flag: reads the already-resolved
+  // family from `opts.matchAwareContext` (the route always computes it via
+  // `buildMatchAwareContext`, regardless of any flag), so a scholar tagged with
+  // the SEARCHED family gets a multiplicative bump over keyword/MeSH-only
+  // matches. Null unless the flag is on, the topic template runs, and the query
+  // resolved to a single family — then the `match_phrase` factor is omitted and
+  // the body is byte-identical to today.
+  const methodFamilyTierLabel =
+    resolvePeopleMethodFamilyTier() && applyTopicTemplate
+      ? opts.matchAwareContext?.methodFamily?.familyLabel?.trim() || null
+      : null;
   const peopleTopicFields = (): string[] =>
     methodBoostOn
       ? [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS, "methodFamily^4"]
@@ -1720,6 +1734,18 @@ export async function searchPeople(opts: {
         // (exact 1.5 / anchored-entry 1.3 / entry 1.15). Always-on when a
         // descriptor resolved, independent of the escalation gate above.
         weight: MESH_ATTRIBUTION_WEIGHT[meshTier],
+      });
+    }
+    // #1269 — explicit method-tag tier. A scholar whose `methodFamily` rollup
+    // contains the resolved family label (`match_phrase`, same `scholar_text`
+    // analyzer) is boosted above keyword/MeSH-only matches. Composes
+    // multiplicatively with the attribution boost above, so tagged+MeSH >
+    // tagged-only > MeSH-only > neither. Off ⇒ `methodFamilyTierLabel` is null
+    // and nothing is pushed.
+    if (methodFamilyTierLabel) {
+      scoreFunctions.push({
+        filter: { match_phrase: { methodFamily: methodFamilyTierLabel } },
+        weight: PEOPLE_METHOD_FAMILY_TAG_WEIGHT,
       });
     }
     scoreFunctions.push({

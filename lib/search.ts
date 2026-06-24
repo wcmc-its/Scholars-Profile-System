@@ -723,6 +723,21 @@ export const MESH_ATTRIBUTION_WEIGHT: Record<MeshMatchTier, number> = {
 };
 
 /**
+ * #1269 — multiplicative tier boost for scholars who have the searched method
+ * family EXPLICITLY tagged (Axis-2), applied in the topic-shape function_score
+ * alongside `MESH_ATTRIBUTION_WEIGHT`. The explicit tag is publication-derived
+ * (the A2 pipeline extracts the method from the scholar's own work), so it is a
+ * higher-precision "this scholar uses this method" signal than a bare MeSH
+ * descendant match — it should outrank keyword-only matches. Composes
+ * multiplicatively, so the four cases order as intended:
+ *   tagged + MeSH (×1.5·2.0=3.0) > tagged-only (×2.0) > MeSH-only (×1.5) > neither (×1).
+ * Calibration knob: raise toward a hard tier if a tagged scholar with modest
+ * pub-volume still sinks below prolific keyword-only matches; lower if it over-
+ * promotes. Gated by `SEARCH_PEOPLE_METHOD_FAMILY_TIER` (default OFF).
+ */
+export const PEOPLE_METHOD_FAMILY_TAG_WEIGHT = 2.0;
+
+/**
  * #726 — escalate concept-admission only when the lexical result is this sparse.
  * Above it the page stands on its own, so we keep count = lexical and don't
  * dilute common queries.
