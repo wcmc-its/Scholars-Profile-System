@@ -28,6 +28,51 @@ export function normalizeForMatch(s: string): string {
 }
 
 /**
+ * #1255 — normalize a label AND record where each token starts in the
+ * space-stripped result, so a matcher can require a query to align to a TOKEN
+ * BOUNDARY rather than land anywhere inside the string. `matchKey` is
+ * byte-identical to {@link normalizeForMatch} (same tokenization, joined); the
+ * boundaries are simply lost once the tokens are concatenated, so we capture
+ * them here. `tokenStarts` holds each token's start offset in `matchKey`
+ * (the first is always 0 when non-empty); empty input → `[]`.
+ */
+export function normalizeWithTokenStarts(s: string): {
+  matchKey: string;
+  tokenStarts: number[];
+} {
+  const tokens = s
+    .toLowerCase()
+    .replace(/\band\b/g, " ")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  const tokenStarts: number[] = [];
+  let offset = 0;
+  for (const t of tokens) {
+    tokenStarts.push(offset);
+    offset += t.length;
+  }
+  return { matchKey: tokens.join(""), tokenStarts };
+}
+
+/**
+ * #1255 — does the already-normalized `normalized` query match `matchKey`
+ * starting at a token boundary? Prefixes of a token count ("cardio" →
+ * "Cardio-oncology"), whole tokens count ("cancer" → "Breast Cancer"), and
+ * contiguous runs of tokens count ("gastroenterology hepatology" →
+ * "Gastroenterology, Hepatology & …") — but a match that begins mid-token does
+ * NOT ("aging" must not match inside "Medical Imaging"). Empty query never
+ * matches. `tokenStarts` comes from {@link normalizeWithTokenStarts}.
+ */
+export function matchesAtTokenBoundary(
+  matchKey: string,
+  tokenStarts: readonly number[],
+  normalized: string,
+): boolean {
+  if (!normalized) return false;
+  return tokenStarts.some((i) => matchKey.startsWith(normalized, i));
+}
+
+/**
  * Normalized contiguous word-windows (n-grams) of a query, for whole-word
  * synonym/alias matching. Tokenizes on the SAME rules as {@link normalizeForMatch}
  * (lowercase, drop standalone "and", split on non-alphanumerics), then joins every

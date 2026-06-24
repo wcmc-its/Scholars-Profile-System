@@ -48,6 +48,10 @@ import {
   resolveMeshDescriptor,
   suggestMeshConcepts,
 } from "@/lib/api/search-taxonomy";
+import {
+  matchesAtTokenBoundary,
+  normalizeWithTokenStarts,
+} from "@/lib/api/normalize";
 
 beforeEach(() => {
   mockTopicFindMany.mockReset().mockResolvedValue([]);
@@ -94,6 +98,47 @@ describe("normalizeForMatch", () => {
     expect(normalizeForMatch("command")).toBe("command");
     expect(normalizeForMatch("Anderson")).toBe("anderson");
     expect(normalizeForMatch("Brand")).toBe("brand");
+  });
+});
+
+describe("normalizeWithTokenStarts / matchesAtTokenBoundary (#1255)", () => {
+  it("records each token's start offset in the space-stripped key", () => {
+    expect(normalizeWithTokenStarts("Breast Cancer")).toEqual({
+      matchKey: "breastcancer",
+      tokenStarts: [0, 6],
+    });
+    // "&" is non-alphanumeric and drops out, like a space.
+    expect(normalizeWithTokenStarts("Aging & Geroscience")).toEqual({
+      matchKey: "aginggeroscience",
+      tokenStarts: [0, 5],
+    });
+    expect(normalizeWithTokenStarts("")).toEqual({ matchKey: "", tokenStarts: [] });
+  });
+
+  it("matches at a token boundary but not mid-token", () => {
+    const imaging = normalizeWithTokenStarts("Medical Imaging");
+    // The bug: "aging" is a substring of "imaging" but starts mid-token.
+    expect(
+      matchesAtTokenBoundary(imaging.matchKey, imaging.tokenStarts, "aging"),
+    ).toBe(false);
+
+    const aging = normalizeWithTokenStarts("Aging & Geroscience");
+    expect(
+      matchesAtTokenBoundary(aging.matchKey, aging.tokenStarts, "aging"),
+    ).toBe(true);
+  });
+
+  it("still allows token-prefix and whole-word matches", () => {
+    const cv = normalizeWithTokenStarts("Cardiovascular Disease");
+    // token-0 prefix
+    expect(matchesAtTokenBoundary(cv.matchKey, cv.tokenStarts, "cardio")).toBe(true);
+    const breast = normalizeWithTokenStarts("Breast Cancer");
+    // whole second token
+    expect(matchesAtTokenBoundary(breast.matchKey, breast.tokenStarts, "cancer")).toBe(
+      true,
+    );
+    // empty query never matches
+    expect(matchesAtTokenBoundary(breast.matchKey, breast.tokenStarts, "")).toBe(false);
   });
 });
 
@@ -403,6 +448,21 @@ describe("matchQueryToTaxonomy", () => {
     expect(r.state).toBe("matches");
     if (r.state !== "matches") return;
     expect(r.primary.id).toBe("gastroenterology_hepatology");
+  });
+
+  it("#1255 — 'aging' matches 'Aging & Geroscience' but not mid-word in 'Medical Imaging'", async () => {
+    mockTopicFindMany.mockResolvedValue([
+      { id: "aging_geroscience", label: "Aging & Geroscience" },
+      { id: "medical_imaging", label: "Medical Imaging" },
+    ]);
+    mockPubTopicGroupBy.mockResolvedValue([{ cwid: "c1" }]);
+
+    const r = await matchQueryToTaxonomy("aging");
+    expect(r.state).toBe("matches");
+    if (r.state !== "matches") return;
+    // "Medical Imaging" ("im-aging") must NOT match; only Aging & Geroscience does.
+    expect(r.primary.id).toBe("aging_geroscience");
+    expect(r.secondary).toHaveLength(0);
   });
 });
 
