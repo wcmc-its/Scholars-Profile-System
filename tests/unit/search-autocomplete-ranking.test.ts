@@ -3,6 +3,7 @@ import {
   capFill,
   chooseKindOrder,
   classifyQueryShape,
+  dedupeFirstByKey,
   plausibilityHits,
   promoteStartsWith,
   tiebreakPeople,
@@ -537,5 +538,22 @@ describe("#878 mesh-concept routing", () => {
     const order = chooseKindOrder("ambiguous", new Set(["person", "concept"]));
     expect(order).toContain("concept");
     expect(order).toContain("person");
+  });
+});
+
+describe("dedupeFirstByKey (#1257)", () => {
+  it("keeps the first item per key and drops later duplicates", () => {
+    const rows = [
+      { id: "a", label: "AMR & Stewardship" },
+      { id: "b", label: "amr & stewardship" }, // same label (case-insensitive), different id
+      { id: "c", label: "Sepsis" },
+    ];
+    const out = dedupeFirstByKey(rows, (r) => r.label.toLowerCase());
+    expect(out.map((r) => r.id)).toEqual(["a", "c"]);
+  });
+
+  it("returns all items, in order, when keys are unique", () => {
+    const rows = [{ k: "x" }, { k: "y" }, { k: "z" }];
+    expect(dedupeFirstByKey(rows, (r) => r.k)).toEqual(rows);
   });
 });

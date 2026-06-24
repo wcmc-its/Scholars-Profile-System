@@ -171,6 +171,37 @@ describe("matchQueryToTaxonomy", () => {
     );
   });
 
+  it("#1257 — collapses chip-row areas that share a display name", async () => {
+    // Two distinct subtopic records reuse the same display_name under different
+    // parents — the chip row should show one, not three.
+    mockTopicFindMany.mockResolvedValue([]);
+    mockSubtopicFindMany.mockResolvedValue([
+      {
+        id: "amr_steward_a",
+        label: "Antimicrobial Resistance & Stewardship",
+        displayName: "Antimicrobial Resistance & Stewardship",
+        parentTopicId: "infectious_disease",
+        parentTopic: { label: "Infectious Disease" },
+      },
+      {
+        id: "amr_steward_b",
+        label: "Antimicrobial Resistance & Stewardship",
+        displayName: "Antimicrobial Resistance & Stewardship",
+        parentTopicId: "critical_care",
+        parentTopic: { label: "Critical Care" },
+      },
+    ]);
+    mockPubTopicGroupBy.mockResolvedValue([{ cwid: "c1" }, { cwid: "c2" }]);
+
+    const r = await matchQueryToTaxonomy("antimicrobial resistance");
+    expect(r.state).toBe("matches");
+    if (r.state !== "matches") return;
+    const amr = r.areas.filter(
+      (a) => a.name === "Antimicrobial Resistance & Stewardship",
+    );
+    expect(amr).toHaveLength(1);
+  });
+
   it("ignores subtopic label content when displayName is set (precision over recall)", async () => {
     // Common keywords buried in long LLM-canonical labels should NOT trigger the
     // callout when the displayName doesn't carry them — keeps the surface signal-rich
