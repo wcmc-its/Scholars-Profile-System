@@ -828,3 +828,21 @@ export function resolvePeopleConceptPrecount(): boolean {
 export function resolvePeopleConceptGrantAxis(): boolean {
   return process.env.SEARCH_PEOPLE_CONCEPT_GRANT_AXIS === "on";
 }
+
+/**
+ * Decompose-and-resolve MeSH fallback. When ON, `resolveMeshDescriptor` — after the
+ * exact name / entry-term / curated-alias lookup misses — retries against the
+ * contiguous word-windows of the query (longest-first) and, on a hit, returns the
+ * descriptor at the new low `partial` confidence tier (admits/attributes beneath
+ * every verbatim tier; see `MESH_ADMIT_WEIGHT`). Lets a multi-concept or
+ * qualifier-laden query (e.g. "Liquid biopsy / circulating tumor DNA") reach its
+ * dominant descriptor instead of degrading to free-text.
+ *
+ * Default OFF (`=== "on"` opt-in): flag-off leaves `resolveMeshDescriptor`
+ * byte-identical to today (a miss returns null, no window pass). Guardrails live in
+ * the resolver: a single-token window resolves ONLY on an exact descriptor-NAME
+ * match, so a short/common word cannot mis-map (the "Seahorse → Smegmamorpha" trap).
+ */
+export function resolveMeshResolutionFallbackEnabled(): boolean {
+  return process.env.SEARCH_MESH_RESOLUTION_FALLBACK === "on";
+}

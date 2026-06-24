@@ -47,7 +47,10 @@ import {
   normalizedWindows,
 } from "@/lib/api/normalize";
 import { dedupeFirstByKey } from "@/lib/api/search-ranking";
-import { resolveSearchSuggestMeshConcept } from "@/lib/api/search-flags";
+import {
+  resolveSearchSuggestMeshConcept,
+  resolveMeshResolutionFallbackEnabled,
+} from "@/lib/api/search-flags";
 import {
   isMethodPagesEnabled,
   isMethodFamilySynonymsEnabled,
@@ -135,7 +138,14 @@ export type MeshResolution = {
   name: string;
   /** The exact surface form (verbatim) that drove the match. */
   matchedForm: string;
-  confidence: "exact" | "entry-term";
+  /**
+   * `exact`/`entry-term` = the whole query matched a descriptor name / NLM
+   * entry-term / curated alias. `partial` = the decompose-and-resolve fallback
+   * (`SEARCH_MESH_RESOLUTION_FALLBACK`): the whole query missed, but a contiguous
+   * word-window of it matched — an interpretation, ranked beneath every verbatim
+   * tier (see `MESH_ADMIT_WEIGHT`). `matchedForm` is then the matched window.
+   */
+  confidence: "exact" | "entry-term" | "partial";
   scopeNote: string | null;
   entryTerms: string[];
   /**
@@ -1270,24 +1280,91 @@ export async function resolveMeshDescriptor(
     return null;
   }
   const candidates = rankedDescriptorCandidates(map, normalized);
-  if (candidates.length === 0) return null;
+  if (candidates.length === 0) {
+    // The whole query matched nothing. When the fallback flag is on, retry against
+    // the query's contiguous word-windows (decompose-and-resolve). Off ⇒ null, exactly
+    // as before.
+    return resolveMeshResolutionFallbackEnabled()
+      ? resolveByWindowFallback(map, query)
+      : null;
+  }
 
   const winner = candidates[0];
-  return {
-    descriptorUi: winner.row.descriptorUi,
-    name: winner.row.name,
+  return buildMeshResolution(map, winner, {
     matchedForm: winner.matchedForm,
     confidence: winner.confidence,
-    scopeNote: winner.row.scopeNote,
-    entryTerms: winner.row.entryTerms,
-    curatedTopicAnchors: map.anchorsByUi.get(winner.row.descriptorUi) ?? [],
-    // §5.4.2 — populated via the unified read-path helper so the steady-state
-    // (post-eager-precompute) and the defensive lazy-fallback path go through
-    // a single implementation. Invariant: descendantUis[0] === descriptorUi.
-    descendantUis: getOrComputeDescendants(map, winner.row.descriptorUi),
     // #726 — more than one candidate descriptor normalized to this query key.
     ambiguous: candidates.length > 1,
+  });
+}
+
+/** Assemble a `MeshResolution` from a ranked candidate, with overridable
+ *  confidence/matchedForm/ambiguous (the fallback stamps `partial`). */
+function buildMeshResolution(
+  map: MeshMap,
+  cand: { row: DescriptorRow },
+  o: { matchedForm: string; confidence: MeshResolution["confidence"]; ambiguous: boolean },
+): MeshResolution {
+  return {
+    descriptorUi: cand.row.descriptorUi,
+    name: cand.row.name,
+    matchedForm: o.matchedForm,
+    confidence: o.confidence,
+    scopeNote: cand.row.scopeNote,
+    entryTerms: cand.row.entryTerms,
+    curatedTopicAnchors: map.anchorsByUi.get(cand.row.descriptorUi) ?? [],
+    // §5.4.2 — Invariant: descendantUis[0] === descriptorUi.
+    descendantUis: getOrComputeDescendants(map, cand.row.descriptorUi),
+    ambiguous: o.ambiguous,
   };
+}
+
+/**
+ * Decompose-and-resolve fallback (`SEARCH_MESH_RESOLUTION_FALLBACK`). Tokenize the
+ * query and try its contiguous word-windows against the SAME `byForm` index,
+ * LONGEST window first (most specific), left-to-right within a length. The first
+ * qualifying window wins; its descriptor is returned at `partial` confidence.
+ *
+ * Guardrails make a guess safe:
+ *   - A SINGLE-token window resolves ONLY on an exact descriptor-NAME match and ≥5
+ *     chars — so a short/common word can't latch onto a homonym or generic
+ *     descriptor (the measured "Seahorse → Smegmamorpha", "Patient → Patients",
+ *     "Calcium → Calcium" traps). Multi-token windows accept name OR entry-term.
+ *   - `ambiguous` is set when ≥2 windows of the winning length resolve to DIFFERENT
+ *     descriptors (the #726 floor then treats the admission conservatively).
+ */
+function resolveByWindowFallback(map: MeshMap, query: string): MeshResolution | null {
+  const tokens = query
+    .toLowerCase()
+    .replace(/\band\b/g, " ")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  if (tokens.length < 2) return null; // a 1-token query already went through the exact path
+
+  for (let size = tokens.length; size >= 1; size--) {
+    // All resolving windows at this length, left-to-right.
+    const hits: Array<{ row: DescriptorRow; matchedForm: string }> = [];
+    for (let i = 0; i + size <= tokens.length; i++) {
+      const surface = tokens.slice(i, i + size).join(" ");
+      const key = normalizeForMatch(surface);
+      if (key.length < (size === 1 ? 5 : 3)) continue;
+      const cands = rankedDescriptorCandidates(map, key);
+      if (cands.length === 0) continue;
+      const top = cands[0];
+      // Single-token windows: exact descriptor-NAME match only.
+      if (size === 1 && top.confidence !== "exact") continue;
+      hits.push({ row: top.row, matchedForm: surface });
+    }
+    if (hits.length === 0) continue;
+    const distinctUis = new Set(hits.map((h) => h.row.descriptorUi));
+    const winner = hits[0]; // leftmost at the longest matching length
+    return buildMeshResolution(
+      map,
+      { row: winner.row },
+      { matchedForm: winner.matchedForm, confidence: "partial", ambiguous: distinctUis.size > 1 },
+    );
+  }
+  return null;
 }
 
 /**

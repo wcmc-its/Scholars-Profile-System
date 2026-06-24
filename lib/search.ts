@@ -691,12 +691,19 @@ export const PEOPLE_TOPIC_ABSTRACTS_BOOST = 0.5;
  * weight just orders them by trust. `MESH_ATTRIBUTION_WEIGHT` graduates the
  * former flat ×1.5 attribution `function_score` by the same ladder.
  */
-export type MeshMatchTier = "exact" | "anchored-entry" | "entry";
+// `partial` (lowest, below `entry`) is the decompose-and-resolve fallback tier
+// (`SEARCH_MESH_RESOLUTION_FALLBACK`): the query did not match a descriptor
+// outright, but a contiguous word-window of it did. It is an interpretation, not a
+// verbatim match, so it admits/attributes beneath every real tier and never
+// reorders lexical hits (concept-only docs carry ~0 BM25, so the weight just
+// orders them by trust).
+export type MeshMatchTier = "exact" | "anchored-entry" | "entry" | "partial";
 
 export function meshMatchTier(
-  confidence: "exact" | "entry-term",
+  confidence: "exact" | "entry-term" | "partial",
   anchorCount: number,
 ): MeshMatchTier {
+  if (confidence === "partial") return "partial";
   if (confidence === "exact") return "exact";
   return anchorCount > 0 ? "anchored-entry" : "entry";
 }
@@ -705,12 +712,14 @@ export const MESH_ADMIT_WEIGHT: Record<MeshMatchTier, number> = {
   exact: 3,
   "anchored-entry": 1.5,
   entry: 0.7,
+  partial: 0.3,
 };
 
 export const MESH_ATTRIBUTION_WEIGHT: Record<MeshMatchTier, number> = {
   exact: 1.5,
   "anchored-entry": 1.3,
   entry: 1.15,
+  partial: 1.05,
 };
 
 /**
