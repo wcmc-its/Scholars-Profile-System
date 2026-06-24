@@ -41,6 +41,7 @@
 import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { normalizeForMatch, normalizedWindows } from "@/lib/api/normalize";
+import { dedupeFirstByKey } from "@/lib/api/search-ranking";
 import { resolveSearchSuggestMeshConcept } from "@/lib/api/search-flags";
 import {
   isMethodPagesEnabled,
@@ -679,7 +680,12 @@ export async function matchQueryToTaxonomy(
       b.similarity - a.similarity ||
       a.name.localeCompare(b.name),
   );
-  const methodMatches = enrichedMethods.slice(0, SECONDARY_CAP + 1);
+  // #1257 — collapse method/tool chips that share a display label, keeping the
+  // best-ranked representative per name (same rationale as the area chips).
+  const methodMatches = dedupeFirstByKey(
+    enrichedMethods,
+    (m) => m.name.toLowerCase(),
+  ).slice(0, SECONDARY_CAP + 1);
 
   const ranked = rank(enriched);
   // When ONLY Method matches exist (no Topic/Subtopic), there is no topic primary —
@@ -696,15 +702,20 @@ export async function matchQueryToTaxonomy(
   // then scholarCount desc, then name. Distinct from the card's `primary`
   // (scholarCount-first, #74). Capped at the inline-expand ceiling; totalMatched
   // is the full substring-match count for the "+N more" affordance. Topic-kind only.
-  const areas = enriched
-    .slice()
-    .sort(
-      (a, b) =>
-        b.similarity - a.similarity ||
-        b.scholarCount - a.scholarCount ||
-        a.name.localeCompare(b.name),
-    )
-    .slice(0, ROW_AREA_CAP);
+  const areas = dedupeFirstByKey(
+    enriched
+      .slice()
+      .sort(
+        (a, b) =>
+          b.similarity - a.similarity ||
+          b.scholarCount - a.scholarCount ||
+          a.name.localeCompare(b.name),
+      ),
+    // #1257 — distinct subtopic matches can share a display name (same label
+    // under different parents); keep the best-ranked representative per name so
+    // the chip row stops showing one subarea 3×.
+    (a) => a.name.toLowerCase(),
+  ).slice(0, ROW_AREA_CAP);
   const totalMatched = matched.length;
 
   return {

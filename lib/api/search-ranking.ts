@@ -426,6 +426,23 @@ export function promoteStartsWith<T>(
   return [...hits, ...rest];
 }
 
+/**
+ * #1257 — keep the first item per key, dropping later duplicates. Distinct
+ * taxonomy records can share a rendered display label (the same name/displayName
+ * under different parents); collapsing by that key stops the autocomplete
+ * dropdown and the search-results chip rows from repeating one subarea. The
+ * caller pre-orders the list so "first" is the best representative.
+ */
+export function dedupeFirstByKey<T>(items: T[], key: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const k = key(item);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 /** Test-only export — kept stable so equivalence tests don't drift. */
 export const _internal = {
   DEFAULT_KIND_ORDER,

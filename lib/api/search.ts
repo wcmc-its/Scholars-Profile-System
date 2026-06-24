@@ -39,6 +39,7 @@ import {
   capFill,
   chooseKindOrder,
   classifyQueryShape,
+  dedupeFirstByKey,
   plausibilityHits,
   promoteStartsWith,
   tiebreakPeople,
@@ -3875,16 +3876,23 @@ export async function suggestEntities(
     r.status === "fulfilled" ? r.value : fallback;
   const people = unwrap(peopleR, [] as Awaited<ReturnType<typeof suggestNames>>);
   const topics = unwrap(topicsR, [] as Array<{ id: string; label: string }>);
-  const subtopics = unwrap(
-    subtopicsR,
-    [] as Array<{
-      id: string;
-      label: string;
-      displayName: string | null;
-      shortDescription: string | null;
-      parentTopicId: string;
-      parentTopic: { label: string } | null;
-    }>,
+  // #1257 — distinct subtopic records reuse the same display_name under
+  // different parents; collapse to one row per rendered title (the label-asc
+  // fetch order makes "first wins" deterministic) so the dropdown stops
+  // repeating a subarea. Key matches subtopicToSuggestion's title fallback.
+  const subtopics = dedupeFirstByKey(
+    unwrap(
+      subtopicsR,
+      [] as Array<{
+        id: string;
+        label: string;
+        displayName: string | null;
+        shortDescription: string | null;
+        parentTopicId: string;
+        parentTopic: { label: string } | null;
+      }>,
+    ),
+    (s) => (s.displayName?.trim() || s.label?.trim() || s.id).toLowerCase(),
   );
   const departments = unwrap(
     departmentsR,
