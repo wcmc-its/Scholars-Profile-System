@@ -1364,6 +1364,18 @@ export class AppStack extends Stack {
         // never a 500). STAGING-FIRST: on for staging (people index reindexed
         // 2026-06-16), off for prod (prod go-live is a separate reindex + flip).
         SEARCH_PEOPLE_METHOD_FAMILY: env === "staging" ? "on" : "off",
+        // #1269 -- People-tab method-family TIER boost. A MULTIPLICATIVE
+        // function_score factor for scholars tagged with the SEARCHED family, so
+        // an explicitly method-tagged scholar outranks a keyword/MeSH-only match
+        // (the sibling SEARCH_PEOPLE_METHOD_FAMILY above is only an additive
+        // cross_fields nudge -- too weak to form a tier). READS the same
+        // `methodFamily` index field, so NO new reindex: staging is already
+        // ready (reindexed 2026-06-16, per above). resolvePeopleMethodFamilyTier
+        // reads === "on"; off => no factor pushed (body unchanged). STAGING-FIRST:
+        // on for staging (validate the #1269 spatial-transcriptomics repro), off
+        // for prod -- prod go-live pairs with SEARCH_PEOPLE_METHOD_FAMILY's own
+        // prod flip + reindex.
+        SEARCH_PEOPLE_METHOD_FAMILY_TIER: env === "staging" ? "on" : "off",
         // #1119 -- People-tab method-CONTEXT ranking boost (tool-usage snippet text
         // from ReciterAI tool_context). Same reindex-then-flip shape as
         // SEARCH_PEOPLE_METHOD_FAMILY. It is PROSE, so it must SOAK on staging
