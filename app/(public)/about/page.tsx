@@ -857,9 +857,10 @@ export default function DocsPage() {
           the current taxonomy on a weekly run as new work is ingested, so an individual paper does
           not wait for a taxonomy rebuild to receive its areas, and your profile keeps up as you
           publish. An area can shift when the taxonomy is next rebuilt; that is expected.
-          Classification reads the paper&apos;s plain-language synopsis together with its abstract; a
-          paper without an abstract is still classified from its synopsis. A genuinely wrong area is a
-          ReciterAI matter; report a systematic error.
+          Research-area scoring reads the paper&apos;s plain-language synopsis together with its
+          abstract; a paper without an abstract is still scored from its synopsis. Subarea assignment
+          instead reads the title together with the synopsis, not the abstract. A genuinely wrong area
+          is a ReciterAI matter; report a systematic error.
         </p>
 
         <h2 id="methods">Methods &amp; tools</h2>
