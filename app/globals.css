@@ -51,7 +51,7 @@
   --font-serif: 'Charter', 'Tiempos', 'Georgia', serif;
   /* Weights (only normal + semibold used in Phase 2 per UI-SPEC checker) */
   --weight-normal: 400;
-  --weight-semibold: 600;
+  --weight-semibold: 500;
   /* Spacing — 8-point grid with named 12px exception */
   --space-1: 4px;
   --space-2: 8px;

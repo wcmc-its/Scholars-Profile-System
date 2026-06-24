@@ -254,12 +254,12 @@ export function RepresentativePapers({
       <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
         {papers.length === 1 ? "Rep. paper" : "Rep. papers"}
       </div>
-      <ul className="mt-1 flex flex-col gap-1.5 text-[15px] leading-snug">
+      <ul className="mt-1 flex flex-col gap-1.5 text-[13px] leading-snug">
         {papers.map((p) => (
           // Bullet + hanging indent: the dot is its own flex item, so a title that
           // wraps aligns line 2 under the TITLE text (not the bullet); the dot
           // shares the title's line-height so it baselines with line 1. Titles are
-          // roman at 15px and NEVER truncate — the full article title always wraps.
+          // roman at 13px and NEVER truncate — the full article title always wraps.
           <li key={p.pmid} className="flex items-start gap-[6px] text-muted-foreground">
             <span aria-hidden className="shrink-0 leading-snug text-[#9a958a]">
               &bull;
@@ -284,7 +284,7 @@ export function RepresentativePapers({
         <Link
           href={profileHref}
           onClick={(e) => e.stopPropagation()}
-          className="relative z-10 mt-1 inline-block text-[12px] font-medium text-[#1f51a8] no-underline hover:underline"
+          className="relative z-10 mt-1.5 inline-block text-[12px] font-medium text-[#1f51a8] no-underline hover:underline"
         >
           +{more} more in profile →
         </Link>
