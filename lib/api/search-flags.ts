@@ -637,6 +637,27 @@ export function resolvePeopleMethodContextBoost(): boolean {
 }
 
 /**
+ * #1269 — People-tab method-family TIER boost. The sibling
+ * `SEARCH_PEOPLE_METHOD_FAMILY` boost adds `methodFamily` to the multi_match
+ * ladder (recall/admission); this adds a MULTIPLICATIVE topic-shape
+ * function_score factor (`PEOPLE_METHOD_FAMILY_TAG_WEIGHT`) for scholars whose
+ * `methodFamily` rollup contains the RESOLVED family label — so an explicitly
+ * method-tagged scholar ranks above a keyword/MeSH-only match (the #1269
+ * "Gudas outranks a tagged scholar" symptom).
+ *
+ * Independent lever from `SEARCH_PEOPLE_METHOD_FAMILY` (ships/flips separately,
+ * like `SEARCH_PEOPLE_METHOD_CONTEXT`), so the aggressive tier can be calibrated
+ * on its own. It READS the same `methodFamily` index field, so it requires the
+ * SAME reindex (no additional one) — flip only AFTER the people index carries
+ * `methodFamily`. Default OFF (`=== "on"`), reversible by clearing the flag.
+ * Flag-parity: when enabling, wire the env var in BOTH `.env.local` AND
+ * `cdk/lib/app-stack.ts` per environment.
+ */
+export function resolvePeopleMethodFamilyTier(): boolean {
+  return process.env.SEARCH_PEOPLE_METHOD_FAMILY_TIER === "on";
+}
+
+/**
  * #824 follow-up — match-aware People snippet. Replaces the per-scholar snippet
  * line — today a raw underscore-slug dump of `areasOfInterest` rendered with
  * mid-word bolding (e.g. "single_cell_spatial_biology cell_molecular_biology")
