@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   rankMethodExemplar,
   rankMethodExemplarList,
+  queryTitleTokens,
+  markTitleQueryTerms,
   type ExemplarCandidate,
 } from "@/lib/api/method-exemplar-rank";
 
@@ -143,5 +145,52 @@ describe("rankMethodExemplarList — top-N (rep-papers disclosure)", () => {
   it("maps each entry to {pmid,title,year}, normalizing an undated year to null", () => {
     const undated = cand({ pmid: "9", year: null, title: "Undated", publicationType: "Review" });
     expect(rankMethodExemplarList([undated], YEAR)).toEqual([{ pmid: "9", title: "Undated", year: null }]);
+  });
+});
+
+describe("rankMethodExemplarList — query relevance ('Key papers' must match the search)", () => {
+  it("surfaces a title-matching paper FIRST, above a higher-impact non-match", () => {
+    const hiImpactNoMatch = cand({ pmid: "imp", title: "Unrelated work", impactScore: 99, isFirstOrSenior: true });
+    const titleMatch = cand({ pmid: "hit", title: "Stem cell self-renewal", impactScore: 1 });
+    const top = rankMethodExemplarList([hiImpactNoMatch, titleMatch], YEAR, 3, "stem cells");
+    expect(top[0].pmid).toBe("hit");
+  });
+
+  it("marks the matched term in the returned titleHtml (whole-word, case-insensitive)", () => {
+    const top = rankMethodExemplarList([cand({ pmid: "1", title: "Stem Cell biology" })], YEAR, 3, "stem cells");
+    expect(top[0].titleHtml).toBe("<mark>Stem</mark> Cell biology");
+  });
+
+  it("leaves titleHtml unset for a non-matching paper (renders plain)", () => {
+    const top = rankMethodExemplarList([cand({ pmid: "1", title: "Cardiac fibrosis" })], YEAR, 3, "stem cells");
+    expect(top[0].titleHtml).toBeUndefined();
+  });
+
+  it("no query ⇒ pure impact ranking, no titleHtml (back-compat)", () => {
+    const top = rankMethodExemplarList([cand({ pmid: "1", title: "Stem cell work" })], YEAR);
+    expect(top[0].titleHtml).toBeUndefined();
+  });
+});
+
+describe("queryTitleTokens / markTitleQueryTerms (pure title-relevance helpers)", () => {
+  it("tokenizes lowercased, ≥2 chars, deduped", () => {
+    expect(queryTitleTokens("Stem Cells")).toEqual(["stem", "cells"]);
+    expect(queryTitleTokens("a 16S-rna a")).toEqual(["16s", "rna"]);
+  });
+
+  it("wraps whole-word matches only — 'stem' does not highlight 'system'", () => {
+    const { html, matched } = markTitleQueryTerms("Immune system mapping", queryTitleTokens("stem"));
+    expect(matched).toBe(false);
+    expect(html).toBe("Immune system mapping");
+  });
+
+  it("escapes regex metacharacters in a token (no ReDoS / no crash)", () => {
+    const { html } = markTitleQueryTerms("c++ growth", ["c++"]);
+    // '++' is escaped, so the literal token does not blow up the regex.
+    expect(typeof html).toBe("string");
+  });
+
+  it("empty token set ⇒ unchanged title, matched false", () => {
+    expect(markTitleQueryTerms("Anything", [])).toEqual({ html: "Anything", matched: false });
   });
 });

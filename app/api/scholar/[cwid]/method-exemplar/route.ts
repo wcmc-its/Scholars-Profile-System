@@ -4,14 +4,17 @@ import { resolveSearchResultEvidence } from "@/lib/api/search-flags";
 import { loadMethodExemplar, loadTopicExemplar } from "@/lib/api/method-exemplar";
 
 /**
- * GET /api/scholar/[cwid]/method-exemplar?family=<familyLabel>
- * GET /api/scholar/[cwid]/method-exemplar?topic=<parentTopicSlug>
+ * GET /api/scholar/[cwid]/method-exemplar?family=<familyLabel>[&q=<query>]
+ * GET /api/scholar/[cwid]/method-exemplar?topic=<parentTopicSlug>[&q=<query>]
  *
- * Lazy, on-hover resolve of the ONE representative paper for a search-result row
+ * Lazy, on-hover resolve of the representative papers for a search-result row
  * — `?family=` for a method-badge match, `?topic=` for a topic-badge match (the
- * §7 "one function, three callers"). The path keeps its historical `method-`
- * name because its CloudFront behavior already forwards the FULL query string
- * (AllViewer), so `?topic=` is served with NO edge change. Kept off the
+ * §7 "one function, three callers"). Optional `&q=` is the active search term:
+ * when present the loader surfaces + highlights title-matching papers first, so
+ * the disclosure's "Key papers" are about the search, not just the scholar's
+ * most-impactful pub in the area. The path keeps its historical `method-` name
+ * because its CloudFront behavior already forwards the FULL query string
+ * (AllViewer), so `?topic=` / `&q=` are served with NO edge change. Kept off the
  * search-results derive so the cacheable page isn't tainted and the per-row pub
  * lookups only run when a row is actually hovered/focused.
  *
@@ -41,13 +44,14 @@ export async function GET(
   const sp = request.nextUrl.searchParams;
   const family = sp.get("family")?.trim();
   const topic = sp.get("topic")?.trim();
+  const query = sp.get("q")?.trim() || undefined;
 
   try {
     let result: { pubs: unknown[]; total: number } = EMPTY;
     if (family) {
-      result = await loadMethodExemplar(cwid, family);
+      result = await loadMethodExemplar(cwid, family, query);
     } else if (topic) {
-      result = await loadTopicExemplar(cwid, topic);
+      result = await loadTopicExemplar(cwid, topic, query);
     }
     return NextResponse.json(result, { headers: NO_STORE });
   } catch {

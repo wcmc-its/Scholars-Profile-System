@@ -51,8 +51,8 @@ function mockFetch(payload: { pubs: unknown[]; total: number }) {
   return fn;
 }
 
-/** The chevron disclosure button (its aria-label mentions representative papers). */
-const chevron = () => screen.getByRole("button", { name: /representative papers/i });
+/** The chevron disclosure button (its accessible name mentions "key papers"). */
+const chevron = () => screen.getByRole("button", { name: /key papers/i });
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -98,8 +98,10 @@ describe("PeopleResultCard — method/topic rep-papers disclosure (click)", () =
     fireEvent.click(chevron()); // close
     fireEvent.click(chevron()); // re-open
     expect(fetchFn).toHaveBeenCalledTimes(1);
+    // The active query rides along as `&q=` so the loader can prefer + highlight
+    // title-matching papers.
     expect(fetchFn.mock.calls[0][0]).toBe(
-      "/api/scholar/abc1234/method-exemplar?family=Confocal%20microscopy",
+      "/api/scholar/abc1234/method-exemplar?family=Confocal%20microscopy&q=confocal%20microscopy",
     );
   });
 
@@ -109,8 +111,8 @@ describe("PeopleResultCard — method/topic rep-papers disclosure (click)", () =
 
     fireEvent.click(chevron());
     // once the fetch resolves empty, the chevron disappears.
-    await waitFor(() => expect(screen.queryByRole("button", { name: /representative papers/i })).toBeNull());
-    expect(screen.queryByText(/Rep\. papers/i)).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("button", { name: /key papers/i })).toBeNull());
+    expect(screen.queryByText(/Key papers/i)).toBeNull();
   });
 
   it("fetches with ?topic= and reveals for topic evidence", async () => {
@@ -130,7 +132,7 @@ describe("PeopleResultCard — method/topic rep-papers disclosure (click)", () =
     fireEvent.click(chevron());
     await waitFor(() => expect(screen.getByText(/A single-cell atlas of the cortex/)).toBeTruthy());
     expect(fetchFn.mock.calls[0][0]).toBe(
-      "/api/scholar/abc1234/method-exemplar?topic=single_cell_spatial_biology",
+      "/api/scholar/abc1234/method-exemplar?topic=single_cell_spatial_biology&q=confocal%20microscopy",
     );
   });
 });
@@ -173,7 +175,7 @@ describe("PeopleResultCard — non-method/topic evidence never fetches a method-
         })}
       />,
     );
-    expect(screen.queryByRole("button", { name: /representative papers/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /key papers/i })).toBeNull();
     await Promise.resolve();
     expect(fetchFn).not.toHaveBeenCalled();
   });

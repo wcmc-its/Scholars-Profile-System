@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { ChevronDown, FileText, Shapes, Waypoints, Wrench } from "lucide-react";
 import { PubTitle } from "@/components/publication/pub-html";
-import { HighlightedSnippet } from "@/components/search/highlight-snippet";
+import { highlightedTitleHtml } from "@/lib/search/highlight-title";
 import type { EvidencePub } from "@/lib/api/result-evidence";
 
 /**
@@ -67,7 +67,7 @@ function DisclosureRow({
           accessible name; this appends an explicit affordance so a screen reader
           announces what the disclosure reveals, while `aria-expanded` carries the
           state. */}
-      <span className="sr-only"> representative papers</span>
+      <span className="sr-only"> key papers</span>
       <ChevronDown
         aria-hidden
         strokeWidth={2}
@@ -241,7 +241,7 @@ export function RepresentativePapers({
     return (
       <div id={panelId} className="mt-1.5 pl-[1px] text-[12px] leading-snug">
         <span aria-hidden className="text-[#9a958a]">
-          finding representative papers&hellip;
+          finding key papers&hellip;
         </span>
       </div>
     );
@@ -252,7 +252,7 @@ export function RepresentativePapers({
   return (
     <div id={panelId} className="mt-1.5 pl-[1px]">
       <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
-        {papers.length === 1 ? "Rep. paper" : "Rep. papers"}
+        {papers.length === 1 ? "Key paper" : "Key papers"}
       </div>
       <ul className="mt-1 flex flex-col gap-1.5 text-[13px] leading-snug">
         {papers.map((p) => (
@@ -266,12 +266,16 @@ export function RepresentativePapers({
             </span>
             <span className="min-w-0">
               {/* #946 — PubMed titles can carry markup (<i>, <sub>, …); render
-                  through the sanctioned PubTitle (with a <mark>-aware variant when
-                  the literal query appeared in the title), never raw. */}
+                  through the sanctioned path, never raw. When the query appeared
+                  in the title (`titleHtml` carries <mark>s, from OpenSearch for a
+                  tagged-pub match or the term-wrap for a topic/method exemplar),
+                  style them with the SAME light-red pill as the Publications tab
+                  (highlightedTitleHtml). Otherwise the plain sanitized title. */}
               {p.titleHtml ? (
-                <span className="text-[#4a4a4a]">
-                  <HighlightedSnippet html={p.titleHtml} />
-                </span>
+                <span
+                  className="text-[#4a4a4a]"
+                  dangerouslySetInnerHTML={{ __html: highlightedTitleHtml(p.titleHtml) }}
+                />
               ) : (
                 <PubTitle as="span" value={p.title} className="text-[#4a4a4a]" />
               )}
