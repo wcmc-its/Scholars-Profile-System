@@ -40,7 +40,12 @@
  */
 import { cache } from "react";
 import { prisma } from "@/lib/db";
-import { normalizeForMatch, normalizedWindows } from "@/lib/api/normalize";
+import {
+  matchesAtTokenBoundary,
+  normalizeForMatch,
+  normalizeWithTokenStarts,
+  normalizedWindows,
+} from "@/lib/api/normalize";
 import { dedupeFirstByKey } from "@/lib/api/search-ranking";
 import { resolveSearchSuggestMeshConcept } from "@/lib/api/search-flags";
 import {
@@ -202,6 +207,9 @@ type EntityCandidate = {
   name: string;
   /** Match haystack — Topic.label or Subtopic.label, normalized. */
   matchKey: string;
+  /** #1255 — token start offsets in `matchKey`, so a query must align to a
+   *  token boundary instead of matching mid-word ("aging" ⊄ "imaging"). */
+  tokenStarts: number[];
   parentTopicId: string | null;
   parentTopicLabel: string | null;
   /** Issue #709 — area description (Topic/Subtopic.description) for the popover. */
@@ -258,13 +266,14 @@ const loadEntityCandidates = cache(async (): Promise<EntityCandidate[]> => {
 
   const out: EntityCandidate[] = [];
   for (const t of topics) {
-    const key = normalizeForMatch(t.label);
+    const { matchKey: key, tokenStarts } = normalizeWithTokenStarts(t.label);
     if (!key) continue;
     out.push({
       entityType: "parentTopic",
       id: t.id,
       name: t.label,
       matchKey: key,
+      tokenStarts,
       parentTopicId: null,
       parentTopicLabel: null,
       description: t.description ?? null,
@@ -276,13 +285,14 @@ const loadEntityCandidates = cache(async (): Promise<EntityCandidate[]> => {
   }
   for (const s of subtopics) {
     const display = s.displayName?.trim() || s.label;
-    const matchKey = normalizeForMatch(display);
+    const { matchKey, tokenStarts } = normalizeWithTokenStarts(display);
     if (!matchKey) continue;
     out.push({
       entityType: "subtopic",
       id: s.id,
       name: display,
       matchKey,
+      tokenStarts,
       parentTopicId: s.parentTopicId,
       parentTopicLabel: s.parentTopic?.label ?? null,
       description: s.description ?? null,
@@ -342,7 +352,7 @@ async function loadMethodCandidates(): Promise<EntityCandidate[]> {
     if (!isFamilyPubliclyVisible(r.supercategory, r.familyLabel, gate)) continue;
     visibleSupercategories.add(r.supercategory);
 
-    const matchKey = normalizeForMatch(r.familyLabel);
+    const { matchKey, tokenStarts } = normalizeWithTokenStarts(r.familyLabel);
     if (!matchKey) continue;
     const familyId = r._min.familyId ?? "";
     out.push({
@@ -351,6 +361,7 @@ async function loadMethodCandidates(): Promise<EntityCandidate[]> {
       id: `family:${familyOverlayKey(r.supercategory, r.familyLabel)}`,
       name: r.familyLabel,
       matchKey,
+      tokenStarts,
       parentTopicId: null,
       parentTopicLabel: null,
       // The family's supercategory description doubles as the one-line descriptor.
@@ -367,13 +378,14 @@ async function loadMethodCandidates(): Promise<EntityCandidate[]> {
 
   for (const sc of visibleSupercategories) {
     const label = supercategoryLabel(sc);
-    const matchKey = normalizeForMatch(label);
+    const { matchKey, tokenStarts } = normalizeWithTokenStarts(label);
     if (!matchKey) continue;
     out.push({
       entityType: "supercategory",
       id: `supercategory:${sc}`,
       name: label,
       matchKey,
+      tokenStarts,
       parentTopicId: null,
       parentTopicLabel: null,
       description: supercategoryDescription(sc),
@@ -597,7 +609,11 @@ export async function matchQueryToTaxonomy(
 
   const matchedAll = all
     .map((c) => {
-      const canonical = c.matchKey.includes(normalized);
+      // #1255 — token-boundary match, not a raw substring: a short common query
+      // like "aging" must not match mid-word inside "Medical Imaging", while
+      // prefix ("cardio" -> "Cardiovascular Disease") and whole-word or
+      // multi-token matches still hold.
+      const canonical = matchesAtTokenBoundary(c.matchKey, c.tokenStarts, normalized);
       const synonym =
         !canonical &&
         queryWindows !== null &&
