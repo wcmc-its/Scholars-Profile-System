@@ -3786,7 +3786,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB",
-                "Value": "on",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_PUB_HIGHLIGHT",

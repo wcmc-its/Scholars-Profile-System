@@ -1334,9 +1334,14 @@ export class AppStack extends Stack {
         // People reason line (`... tagged HIV -- incl. "<title>" (2024)`). Adds a
         // `top_hits` sub-agg to the SAME bounded reason-count publications agg
         // (no people-index field, no reindex); inert unless MATCH_EXPLAIN is on.
-        // resolvePeopleSnippetRepresentativePub reads === "on". STAGING-FIRST:
-        // soak on staging before prod parity.
-        SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB: env === "staging" ? "on" : "off",
+        // resolvePeopleSnippetRepresentativePub reads === "on". Turned OFF on
+        // staging too (was staging-on): the `top_hits` sub-agg is the most
+        // expensive part of the reason-count agg and drove the broad-concept
+        // /search ~10s hang -- the streamed People render tails past the 7s
+        // #1017 nav watchdog. PR #1278 caps the agg wall-time app-side; this
+        // drops the sub-agg and brings staging to prod parity. Flip back to a
+        // staging soak once #1278 has landed and been measured.
+        SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB: "off",
         SEARCH_PUB_HIGHLIGHT: "on",
         SEARCH_PUB_MATCH_PROVENANCE: "on",
         // #837 -- Publications-tab Department facet. Unlike the three above this
