@@ -464,6 +464,66 @@ describe("matchQueryToTaxonomy", () => {
     expect(r.primary.id).toBe("aging_geroscience");
     expect(r.secondary).toHaveLength(0);
   });
+
+  it("#1258 — folds a curated MeSH topic anchor in as a synonym match (longevity → Aging & Geroscience)", async () => {
+    _resetMeshMapForTests();
+    // The research area exists as a parent topic, but its name does NOT contain
+    // the query — so without the anchor fold-in there is zero name match.
+    mockTopicFindMany.mockResolvedValue([
+      { id: "aging_geroscience", label: "Aging & Geroscience", description: null },
+    ]);
+    // "longevity" (D008136) resolves to a descriptor whose curated anchor is that area.
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D008136",
+        name: "Longevity",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: new Date("2024-01-01"),
+        localPubCoverage: null,
+        treeNumbers: ["G07.345.500"],
+      },
+    ]);
+    mockMeshAnchorFindMany.mockResolvedValue([
+      { descriptorUi: "D008136", parentTopicId: "aging_geroscience" },
+    ]);
+    mockPubTopicGroupBy.mockResolvedValue([{ cwid: "c1" }]);
+
+    const r = await matchQueryToTaxonomy("longevity");
+    expect(r.state).toBe("matches");
+    if (r.state !== "matches") return;
+    expect(r.areas.map((a) => a.id)).toContain("aging_geroscience");
+    const area = r.areas.find((a) => a.id === "aging_geroscience")!;
+    expect(area.href).toBe("/topics/aging_geroscience");
+    expect(area.scholarCount).toBe(1);
+  });
+
+  it("#1258 negative — anchor whose id matches no parentTopic candidate stays state:none (no name match)", async () => {
+    _resetMeshMapForTests();
+    mockTopicFindMany.mockResolvedValue([
+      { id: "aging_geroscience", label: "Aging & Geroscience", description: null },
+    ]);
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D000999",
+        name: "Unrelated Concept",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: new Date("2024-01-01"),
+        localPubCoverage: null,
+        treeNumbers: ["Z99.999.999"],
+      },
+    ]);
+    // Anchor IS present (so the fold-in loop runs), but points at a topic id that
+    // is NOT among the candidates (a stale/non-area anchor) — must not fabricate a
+    // match. Exercises the fold-in's miss path, not just an empty-anchor short-circuit.
+    mockMeshAnchorFindMany.mockResolvedValue([
+      { descriptorUi: "D000999", parentTopicId: "no_such_topic" },
+    ]);
+
+    const r = await matchQueryToTaxonomy("unrelated concept");
+    expect(r.state).toBe("none");
+  });
 });
 
 describe("resolveMeshDescriptor (§1.5)", () => {
