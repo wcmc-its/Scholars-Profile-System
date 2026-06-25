@@ -415,6 +415,13 @@ export type ProfilePayload = {
    *  division). Used by the sidebar to render "<Division> (<Department>)"
    *  when present, falling back to department-only when null. */
   division: string | null;
+  /** #1266 — formatted leadership-role lines (Chair / Chief / Center Director /
+   *  Program Leader), in that order; empty when the scholar holds none. Sourced
+   *  from Department.chairCwid / Division.chiefCwid / Center.directorCwid +
+   *  CenterProgramLeader rows and rendered beneath `primaryTitle`. Center and
+   *  program lines are curated and sparse, so they appear only where curation
+   *  exists. */
+  leadershipTitles: string[];
   email: string | null;
   /** email-visibility-spec § Cache-safety. True when PROFILE_EMAIL_RELEASE_GATE
    *  is on and the scholar has an email that was WITHHELD from `email` above
@@ -788,6 +795,7 @@ export const getScholarFullProfileBySlug = cache(async (
     families,
     manualHighlightPmids,
     centers,
+    leadershipTitles,
   ] = await Promise.all([
       // The effective `overview` merges a manual `field_override` over the ETL
       // column at read time (#356, lib/api/manual-layer.ts). A self-edited bio is
@@ -873,6 +881,51 @@ export const getScholarFullProfileBySlug = cache(async (
       isProfileCenterAffiliationEnabled()
         ? getScholarCenterAffiliations(scholar.cwid)
         : Promise.resolve([] as ScholarCenterAffiliation[]),
+      // #1266 — leadership-role title lines (Chair / Chief / Center Director /
+      // Program Leader), rendered beneath the academic rank. Point lookups on the
+      // already-populated FK columns; each returns 0-1 rows for almost every
+      // scholar. Chair/Chief come from the ED ETL (populated); Center director and
+      // CenterProgramLeader are curated and sparse, so those lines appear only
+      // where curation exists — an empty array renders nothing.
+      // ponytail: centerProgramLeader.cwid is unindexed but the table is tiny; add
+      // @@index([cwid]) only if profile-load latency ever flags it.
+      Promise.all([
+        prisma.department.findMany({
+          where: { chairCwid: scholar.cwid },
+          select: { name: true, officialName: true },
+        }),
+        prisma.division.findMany({
+          where: { chiefCwid: scholar.cwid },
+          select: { name: true },
+        }),
+        prisma.center.findMany({
+          where: { directorCwid: scholar.cwid },
+          select: { name: true, officialName: true, leaderInterim: true },
+        }),
+        prisma.centerProgramLeader.findMany({
+          where: { cwid: scholar.cwid },
+          select: {
+            interim: true,
+            program: {
+              select: {
+                label: true,
+                center: { select: { name: true, officialName: true } },
+              },
+            },
+          },
+        }),
+      ]).then(([chairDepts, chiefDivs, dirCenters, progLeads]) => [
+        ...chairDepts.map((d) => `Chair, ${d.officialName ?? d.name}`),
+        ...chiefDivs.map((d) => `Chief, ${d.name}`),
+        ...dirCenters.map(
+          (c) =>
+            `${c.leaderInterim ? "Interim Director" : "Director"}, ${c.officialName ?? c.name}`,
+        ),
+        ...progLeads.map(
+          (l) =>
+            `${l.interim ? "Interim Leader" : "Leader"}, ${l.program.label} (${l.program.center.officialName ?? l.program.center.name})`,
+        ),
+      ]),
     ]);
 
   // #356 — publication suppression. A publication this scholar has hidden
@@ -1094,6 +1147,7 @@ export const getScholarFullProfileBySlug = cache(async (
       scholar.division && scholar.division.name !== "Administration"
         ? scholar.division.name
         : null,
+    leadershipTitles,
     // email-visibility-spec § A + Cache-safety — this payload is rendered into
     // the CloudFront PATH-cached profile page, so it MUST be viewer-independent.
     // Bake only the cache-safe email: when the gate is on, `public` survives and

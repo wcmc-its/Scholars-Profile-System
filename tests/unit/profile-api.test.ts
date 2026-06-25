@@ -56,6 +56,11 @@ vi.mock("@/lib/db", () => ({
     personNihProfile: {
       findFirst: vi.fn(async () => null),
     },
+    // #1266 — leadership reader lookups; default empty (no leadership roles).
+    department: { findMany: vi.fn(async () => []) },
+    division: { findMany: vi.fn(async () => []) },
+    center: { findMany: vi.fn(async () => []) },
+    centerProgramLeader: { findMany: vi.fn(async () => []) },
     $queryRawUnsafe: vi.fn(async () => []),
   },
 }));
