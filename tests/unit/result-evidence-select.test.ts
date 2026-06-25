@@ -24,7 +24,10 @@ const BIO_HL = "The lab studies <mark>RNA</mark> regulatory pathways.";
 const base: SelectEvidenceInput = {};
 
 describe("selectEvidence — precedence (handoff §4 principle 2)", () => {
-  it("name (rank 1) beats method/topic/everything", () => {
+  it("name match is NOT surfaced as a snippet (#1267) — falls through to real evidence", () => {
+    // The card already shows the name as its heading, so a name-only snippet just
+    // repeats it. A name match now falls through to the strongest OTHER evidence
+    // (here: method).
     const ev = selectEvidence({
       nameHighlight: NAME_WITH_ORG_HL,
       method: { family: "Flow cytometry", tools: ["FACS"] },
@@ -33,7 +36,7 @@ describe("selectEvidence — precedence (handoff §4 principle 2)", () => {
       bioHighlight: BIO_HL,
       areas: { labels: ["A"], total: 1 },
     });
-    expect(ev.kind).toBe("name");
+    expect(ev.kind).toBe("method");
   });
 
   it("method (rank 2) beats topic and pub:tagged", () => {
