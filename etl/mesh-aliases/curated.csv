@@ -39,3 +39,37 @@ Targeted protein degradation (PROTAC),D000094243,"Proteolysis Targeting Chimera.
 Total joint arthroplasty,D019643,"Arthroplasty, Replacement. Hero "Try:" chip lay-term; no NLM surface-form match (search-resolution audit 2026-06)."
 Value-based care,D000093683,"Value-Based Health Care. Hero "Try:" chip lay-term; no NLM surface-form match (search-resolution audit 2026-06)."
 siRNA therapeutics,D034741,"RNA, Small Interfering. Hero "Try:" chip lay-term; no NLM surface-form match (search-resolution audit 2026-06)."
+healthspan,D000375,#1258 lay-term alias -> Aging
+lupus,D008180,"#1258 lay-term alias -> Lupus Erythematosus, Systemic"
+AI in medicine,D001185,#1258 lay-term alias -> Artificial Intelligence
+wearables,D000076251,#1258 lay-term alias -> Wearable Electronic Devices
+ICU,D007362,#1258 lay-term alias -> Intensive Care Units
+disease surveillance,D062665,#1258 lay-term alias -> Epidemiological Monitoring
+IBD,D015212,#1258 lay-term alias -> Inflammatory Bowel Diseases
+CAR-T,D000076962,"#1258 lay-term alias -> Receptors, Chimeric Antigen"
+social determinants,D064890,#1258 lay-term alias -> Social Determinants of Health
+SDOH,D064890,#1258 lay-term alias -> Social Determinants of Health
+blood disorders,D006402,#1258 lay-term alias -> Hematologic Diseases
+COVID,D000086382,#1258 lay-term alias -> COVID-19
+prenatal,D011295,#1258 lay-term alias -> Prenatal Care
+neonatal,D007231,"#1258 lay-term alias -> Infant, Newborn"
+residency training,D007396,#1258 lay-term alias -> Internship and Residency
+diabetes,D003920,#1258 lay-term alias -> Diabetes Mellitus
+gut bacteria,D000069196,#1258 lay-term alias -> Gastrointestinal Microbiome
+Alzheimer's,D000544,#1258 lay-term alias -> Alzheimer Disease
+Parkinson's,D010300,#1258 lay-term alias -> Parkinson Disease
+ALS,D000690,#1258 lay-term alias -> Amyotrophic Lateral Sclerosis
+nutrition,D052756,#1258 lay-term alias -> Nutritional Sciences
+dental,D003813,#1258 lay-term alias -> Dentistry
+ENT,D010036,#1258 lay-term alias -> Otolaryngology
+ear nose throat,D010036,#1258 lay-term alias -> Otolaryngology
+respiratory,D012140,#1258 lay-term alias -> Respiratory Tract Diseases
+MRI,D008279,#1258 lay-term alias -> Magnetic Resonance Imaging
+imaging,D003952,#1258 lay-term alias -> Diagnostic Imaging
+single cell,D059010,#1258 lay-term alias -> Single-Cell Analysis
+circadian,D002940,#1258 lay-term alias -> Circadian Rhythm
+addiction,D016739,"#1258 lay-term alias -> Behavior, Addictive"
+alcohol use,D000437,#1258 lay-term alias -> Alcoholism
+perioperative,D019990,#1258 lay-term alias -> Perioperative Care
+clinical trials,D002986,#1258 lay-term alias -> Clinical Trials as Topic
+IVF,D005307,#1258 lay-term alias -> Fertilization in Vitro
