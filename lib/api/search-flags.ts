@@ -350,6 +350,27 @@ export function resolvePeopleSnippetRepresentativePub(): boolean {
   return process.env.SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB === "on";
 }
 
+/**
+ * Search reason-from-doc — serve the People "N of M publications tagged
+ * {concept}" reason count from the precomputed people-doc field
+ * `meshSubtreeCounts` (D-exact) instead of a per-request publications-index
+ * aggregation. When ON and the query resolved to a concept, the broad-concept
+ * search issues ZERO publications-index reason queries on the initial render
+ * (the count is an O(1) `_source` lookup), removing the cluster load that
+ * saturates the search thread pool at ~10 concurrent. The mention-only branch and
+ * the lazy on-the-fly key paper still issue cheap runtime queries.
+ *
+ * REINDEX PREREQ: the people index must be rebuilt so docs carry
+ * `meshSubtreeCounts` before this serves a non-zero count; a not-yet-reindexed
+ * cluster degrades to count 0 (the per-hit reason falls through to the concept
+ * fallback), never a 500. Layered on top of `SEARCH_PEOPLE_MATCH_EXPLAIN` (inert
+ * when that is off — there is no reason line to source). Default OFF both envs
+ * (staging-first parity A/B, instant rollback); `=on` to enable.
+ */
+export function resolvePeopleReasonFromDoc(): boolean {
+  return process.env.SEARCH_PEOPLE_REASON_FROM_DOC === "on";
+}
+
 export type GenericTermMode = "off" | "resolve" | "on";
 
 /**

@@ -1337,6 +1337,18 @@ export class AppStack extends Stack {
         // resolvePeopleSnippetRepresentativePub reads === "on". STAGING-FIRST:
         // soak on staging before prod parity.
         SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB: env === "staging" ? "on" : "off",
+        // search reason-from-doc -- serve the People "N of M publications tagged
+        // {concept}" reason count from the precomputed people-doc field
+        // `meshSubtreeCounts` (O(1) `_source` lookup) instead of a per-request
+        // publications-index aggregation, taking that agg off the search path so
+        // broad-concept searches stop saturating the OpenSearch thread pool under
+        // concurrency. resolvePeopleReasonFromDoc reads === "on". REINDEX PREREQ:
+        // the people index must be rebuilt with `meshSubtreeCounts` before this
+        // serves non-zero counts (a stale index degrades to the concept fallback,
+        // never a 500). Inert unless MATCH_EXPLAIN is on. DEFAULT OFF BOTH ENVS --
+        // staging-first parity A/B + instant rollback; flip on staging after the
+        // people reindex, then prod after its own reindex.
+        SEARCH_PEOPLE_REASON_FROM_DOC: "off",
         SEARCH_PUB_HIGHLIGHT: "on",
         SEARCH_PUB_MATCH_PROVENANCE: "on",
         // #837 -- Publications-tab Department facet. Unlike the three above this
