@@ -153,8 +153,14 @@ export function PeopleResultCardStreamed({
   reasonPromise: Promise<ReasonMap> | null;
   keyPaperConfig?: KeyPaperConfig | null;
 }) {
-  // No deferred reason (matchExplain off) — render the card directly.
-  if (reasonPromise === null) return <PeopleResultCard {...props} />;
+  // No deferred reason promise. Either matchExplain is off (keyPaperConfig also
+  // null → a plain card) OR reason-from-doc (D) already put the reason on the hit
+  // inline via the single list query, so there's no second-query map to stream.
+  // Either way route through the lazy wrapper so a doc-sourced reason still gets
+  // its key paper on viewport-enter (CardWithLazyKeyPaper no-ops when config null).
+  if (reasonPromise === null) {
+    return <CardWithLazyKeyPaper {...props} keyPaperConfig={keyPaperConfig} />;
+  }
   return (
     <Suspense fallback={<PeopleResultCard {...props} />}>
       <PatchedCard {...props} reasonPromise={reasonPromise} keyPaperConfig={keyPaperConfig} />

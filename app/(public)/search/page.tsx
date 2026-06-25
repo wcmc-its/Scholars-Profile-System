@@ -445,18 +445,28 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           matchAwareContext: buildMatchAwareContext(taxonomyMatch),
         }
       : null;
+  // Under reason-from-doc (D) the reason is a cheap O(1) lookup on the list
+  // query's OWN hits — so fold it into the list call (skipReasonAgg:false) and
+  // DROP the redundant second people-index query below. Pre-D the reason needed a
+  // slow publications-index agg, so B deferred it to a second call; with D that
+  // second call re-runs the people search just to read a field the list call
+  // already has — pure waste that doubled the OpenSearch load under concurrency.
+  const reasonFromDoc = resolvePeopleReasonFromDoc();
   const activePeoplePromise =
     peopleSearchOpts !== null
-      ? searchPeople({ ...peopleSearchOpts, skipReasonAgg: peopleMatchExplain })
+      ? searchPeople({
+          ...peopleSearchOpts,
+          skipReasonAgg: reasonFromDoc ? false : peopleMatchExplain,
+        })
       : null;
-  // The streamed reason map (cwid → reason/evidence). Only built when the reason
-  // line was deferred above. The agg here is deduped/cached (scaling fix C), so
-  // the second call's only extra cost is the fast People-index query. NOT awaited
-  // on the critical path — passed to the cards and unwrapped via `use()` so the
-  // list never blocks on it. `.catch` keeps an early rejection from surfacing as
-  // unhandled; the card's `use()` still sees the resolved value (empty on error).
+  // The streamed reason map (cwid → reason/evidence). NON-doc path only: D folds
+  // the reason into the list call above (no second query). On the legacy agg path
+  // it is deduped/cached (scaling fix C) and NOT awaited on the critical path —
+  // passed to the cards and unwrapped via `use()` so the list never blocks on it.
+  // `.catch` keeps an early rejection from surfacing as unhandled; the card's
+  // `use()` still sees the resolved value (empty on error).
   const activePeopleReasonPromise =
-    peopleSearchOpts !== null && peopleMatchExplain
+    peopleSearchOpts !== null && peopleMatchExplain && !reasonFromDoc
       ? searchPeople({ ...peopleSearchOpts, skipReasonAgg: false })
           .then(
             (r) =>
