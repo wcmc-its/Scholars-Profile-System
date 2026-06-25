@@ -636,6 +636,29 @@ export async function matchQueryToTaxonomy(
       return { ...c, similarity };
     })
     .filter((c): c is EntityCandidate & { similarity: number } => c !== null);
+
+  // #1258 — fold curated MeSH topic anchors in as synonym matches. The query
+  // resolved to a descriptor whose curated anchor IS a research area (e.g.
+  // "longevity" -> Aging & Geroscience). Inject those parentTopic candidates at
+  // similarity 1.0 so they flow through partition/rank/enrich/areas exactly like a
+  // curated method-family synonym hit — surfacing the area's chip with zero name
+  // match. Anchors are parentTopic ids; dedupe against name matches so a topic that
+  // also name-matched isn't doubled. ponytail: an already-matched topic keeps its
+  // existing entry (it already renders) — no re-ranking by anchor similarity.
+  const anchorTopicIds = new Set(meshResolution?.curatedTopicAnchors ?? []);
+  if (anchorTopicIds.size > 0) {
+    const seen = new Set(matchedAll.map((c) => `${c.entityType}:${c.id}`));
+    for (const c of all) {
+      if (
+        c.entityType === "parentTopic" &&
+        anchorTopicIds.has(c.id) &&
+        !seen.has(`parentTopic:${c.id}`)
+      ) {
+        matchedAll.push({ ...c, similarity: 1 });
+      }
+    }
+  }
+
   if (matchedAll.length === 0) return { state: "none", meshResolution };
 
   // #824 PR-2 — partition Topic-taxonomy matches (the #709 chip row + the existing
