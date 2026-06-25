@@ -708,11 +708,23 @@ export function meshMatchTier(
   return anchorCount > 0 ? "anchored-entry" : "entry";
 }
 
+// #1254 — concept-only ADMIT weights sit in a deliberate sub-BM25 band. A doc
+// admitted by concept expansion alone (no lexical hit) scores ONLY this constant
+// (the admit `terms` clause is constant-score), so it must stay small enough that
+// even after the per-doc prominence multiply (~8.7× for prolific funded faculty)
+// it can never outrank a genuine lexical match. Worst case: exact 0.1 ×
+// attribution 1.5 × productivity 1.2 × prominence 8.7 ≈ 1.6, which stays below a
+// real topic BM25 (≥2–3 over publicationTitles^6 / publicationMesh^4) × prominence.
+// The previous values (3 / 1.5 / 0.7 / 0.3) predated the #513 prominence multiply
+// and let prolific concept-only scholars float to the top labelled "no specific
+// match". Relative order (partial < entry < anchored-entry < exact) is preserved,
+// so the concept-only tail still self-orders by match trust. Admission/recall is
+// unchanged — this is ordering only.
 export const MESH_ADMIT_WEIGHT: Record<MeshMatchTier, number> = {
-  exact: 3,
-  "anchored-entry": 1.5,
-  entry: 0.7,
-  partial: 0.3,
+  exact: 0.1,
+  "anchored-entry": 0.05,
+  entry: 0.03,
+  partial: 0.01,
 };
 
 export const MESH_ATTRIBUTION_WEIGHT: Record<MeshMatchTier, number> = {
