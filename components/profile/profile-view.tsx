@@ -185,8 +185,9 @@ export async function ProfileView({ slug }: { slug: string }) {
               ) : null}
               {/* #1266 — leadership roles (Chair / Chief / Center Director /
                   Program Leader) beneath the academic rank; empty for scholars
-                  who hold none. */}
-              {profile.leadershipTitles.map((t) => (
+                  who hold none. `?? []` guards loosely-typed / older cached
+                  payloads that predate this field. */}
+              {(profile.leadershipTitles ?? []).map((t) => (
                 <div key={t} className="mt-0.5 text-sm text-zinc-700 dark:text-zinc-300">
                   {t}
                 </div>
