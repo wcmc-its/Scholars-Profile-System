@@ -387,6 +387,25 @@ export function parseReasonTopHits(
  * the count cap (`Math.min(count, pubCount)`) are unit-testable without a live
  * cluster.
  */
+/**
+ * Search reason-from-doc — the doc-sourced TAGGED count. Reads the resolved root
+ * concept's precomputed distinct-pub count out of a people hit's
+ * `_source.meshSubtreeCounts` map (an O(1) lookup that replaces the
+ * publications-index `tagged` filter agg). Returns 0 when the field is absent
+ * (a not-yet-reindexed doc) or the concept isn't present — so the per-hit reason
+ * degrades to the concept fallback, never to a wrong/throwing count. Pure, so the
+ * parity with the agg-derived count (same number → same `composeMatchReason`
+ * text) is unit-testable without a live cluster.
+ */
+export function taggedCountFromDoc(
+  meshSubtreeCounts: Record<string, number> | undefined,
+  resolvedConceptUi: string,
+): number {
+  if (!meshSubtreeCounts || resolvedConceptUi.length === 0) return 0;
+  const n = meshSubtreeCounts[resolvedConceptUi];
+  return typeof n === "number" && n > 0 ? n : 0;
+}
+
 export function composeMatchReason(args: {
   counts: { tagged: number; mention: number } | undefined;
   rep: { tagged?: RepresentativePub; mention?: RepresentativePub } | undefined;
@@ -866,6 +885,26 @@ export async function searchPeople(opts: {
    */
   meshDescriptorName?: string;
   /**
+   * Search reason-from-doc — the resolved ROOT concept descriptor UI
+   * (`meshResolution.descriptorUi`), used as the O(1) lookup key into each people
+   * hit's `_source.meshSubtreeCounts`. Present only when the query resolved to a
+   * concept. Distinct from `meshDescendantUis` (the subtree the publications agg
+   * filters on): the doc-sourced count is indexed by the root, so the subtree is
+   * never iterated at query time.
+   */
+  meshDescriptorUi?: string;
+  /**
+   * Search reason-from-doc — `SEARCH_PEOPLE_REASON_FROM_DOC` resolved by the
+   * route. When true (and `matchExplain` is on and a concept resolved), the tagged
+   * reason count is read from the precomputed people-doc `meshSubtreeCounts`
+   * field instead of the publications-index aggregation, which is then SKIPPED
+   * entirely — so the broad-concept initial render issues no publications-index
+   * query. A mention-only agg still fires when the tagged count is zero and a
+   * free-text mention is possible. Default false ⇒ behavior byte-identical to the
+   * publications-index agg path.
+   */
+  reasonFromDoc?: boolean;
+  /**
    * Issue #532 — `SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST` resolved at request
    * time by the route (`resolveDeptLeadershipBoost()`). When true, the
    * department-shape template wraps its body in a multiplicative
@@ -956,6 +995,13 @@ export async function searchPeople(opts: {
   // hit emission below are byte-identical to the pre-#702 shape.
   const matchExplain = opts.matchExplain === true;
   const representativePub = opts.representativePub === true;
+  // Search reason-from-doc — serve the tagged reason count from the people-doc
+  // `meshSubtreeCounts` field (O(1) lookup) rather than the publications-index
+  // agg. Active only when the flag is on AND the query resolved to a concept
+  // (`meshDescriptorUi` is the lookup key). Off ⇒ the existing agg path runs.
+  const resolvedConceptUi = opts.meshDescriptorUi ?? "";
+  const reasonFromDoc =
+    opts.reasonFromDoc === true && resolvedConceptUi.length > 0;
 
   // #824 follow-up — match-aware snippet. When on, `searchPeople` may derive a
   // method/topic reason and a humanized-areas fallback (all from query-time data,
@@ -1923,6 +1969,13 @@ export async function searchPeople(opts: {
       // requested only when SEARCH_PEOPLE_CONCEPT_HINT is on so the off path
       // keeps today's `_source` shape (no extra field).
       ...(conceptHint ? ["topMeshTerms"] : []),
+      // Search reason-from-doc — the precomputed per-concept distinct-pub counts,
+      // requested only when the flag is on, a concept resolved, AND this call
+      // actually builds the reason line (`!skipReasonAgg`). On B's fast first
+      // paint (`skipReasonAgg`) the field is unused, so it's not shipped; the off
+      // path keeps today's `_source` shape. The count is then an O(1) `_source`
+      // lookup instead of a publications-index agg.
+      ...(reasonFromDoc && opts.skipReasonAgg !== true ? ["meshSubtreeCounts"] : []),
     ],
     // OpenSearch's default cap of 10000 short-circuits the total counter
     // and would make the subhead read "10,000 publications" even when
@@ -2039,6 +2092,12 @@ export async function searchPeople(opts: {
       // `concepts` evidence tail. The string[] arm tolerates a not-yet-reindexed
       // index (old label-only docs) during the reindex window — coerced below.
       topMeshTerms?: Array<{ ui: string | null; label: string }> | string[];
+      // Search reason-from-doc — per-concept distinct-pub counts
+      // ({ [conceptDescriptorUi]: distinctPubs }). Present only when the flag is
+      // on AND a concept resolved (added to `_source` above). The tagged reason
+      // count is `meshSubtreeCounts[resolvedConceptUi] ?? 0`; a not-yet-reindexed
+      // doc lacks the field and degrades to 0 (concept fallback), never a 500.
+      meshSubtreeCounts?: Record<string, number>;
     };
     highlight?: Record<string, string[]>;
   };
@@ -2121,18 +2180,91 @@ export async function searchPeople(opts: {
   const runReasonAgg = resultEvidence
     ? contentShape
     : applyTopicTemplate && meshDescendantUis.length > 0 && provenanceParent.length > 0;
-  if (
+  // The shared eligibility predicate for BOTH the doc-sourced and the
+  // publications-index reason paths. (B's `skipReasonAgg` defers the reason line
+  // entirely on the fast first paint, regardless of which source feeds it.)
+  const reasonAggEligible =
     matchExplain &&
     contentQuery.length > 0 &&
     pageCwids.length > 0 &&
     runReasonAgg &&
-    // B — fast first paint: when the caller asked to defer the reason line, skip
-    // the inline publications-index agg entirely. `reasonCounts`/`reasonReps`
-    // stay empty, so the per-hit reason falls through to the non-pub evidence
-    // (method/topic/concept/areas/bio) with no new branches; the page streams
-    // the full reason in via a second, cache-deduped call.
-    opts.skipReasonAgg !== true
-  ) {
+    opts.skipReasonAgg !== true;
+  // Search reason-from-doc — serve the tagged count from `_source.meshSubtreeCounts`
+  // (O(1) lookup) and SKIP the publications-index tagged agg entirely. The
+  // mention-only agg fires ONLY when the tagged count is zero for some page cwid
+  // AND a free-text mention is possible — so a pure concept search issues NO
+  // publications-index query at all on the initial render.
+  if (reasonFromDoc && reasonAggEligible) {
+    // 1) Doc-sourced tagged counts. Cap is applied in `composeMatchReason`.
+    for (const h of r.hits.hits) {
+      reasonCounts.set(h._source.cwid, {
+        tagged: taggedCountFromDoc(h._source.meshSubtreeCounts, resolvedConceptUi),
+        mention: 0,
+      });
+    }
+    // 2) Mention-only fallback. The literal-query title/abstract scan can't be
+    //    precomputed (unbounded input), but it's the cheap symmetric scan and is
+    //    only worth running for cwids whose tagged count is 0 (the tagged branch
+    //    already wins otherwise — `composeMatchReason` prefers tagged). A mention
+    //    is "possible" only for a content-shaped query whose literal differs from
+    //    the resolved concept; reuse the same `contentShape` gate. NO tagged
+    //    filter, NO top_hits (key papers come lazily, §5).
+    const zeroTaggedCwids = pageCwids.filter(
+      (cwid) => (reasonCounts.get(cwid)?.tagged ?? 0) === 0,
+    );
+    if (contentShape && zeroTaggedCwids.length > 0) {
+      type MentionBucket = { key: string; mention?: { doc_count?: number } };
+      const buckets = await cachedReasonAgg<MentionBucket[]>(
+        // Distinct cache key from the legacy agg: mention-only, the zero-tagged
+        // subset, no descendant set, no rep-pub. So a doc-sourced search never
+        // shares a cache entry with the publications-index agg path.
+        reasonAggKey({
+          pageCwids: zeroTaggedCwids,
+          meshDescendantUis: [],
+          contentQuery,
+          representativePub: false,
+        }),
+        async () => {
+          const aggResp = await searchClient().search({
+            index: PUBLICATIONS_INDEX,
+            body: {
+              size: 0,
+              query: { bool: { filter: [{ terms: { wcmAuthorCwids: zeroTaggedCwids } }] } },
+              aggs: {
+                byAuthor: {
+                  terms: {
+                    field: "wcmAuthorCwids",
+                    include: zeroTaggedCwids,
+                    size: zeroTaggedCwids.length,
+                  },
+                  aggs: {
+                    mention: {
+                      filter: {
+                        multi_match: {
+                          query: contentQuery,
+                          fields: ["title", "abstract"],
+                          operator: "and",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            } as object,
+          });
+          return (
+            aggResp.body as {
+              aggregations?: { byAuthor?: { buckets?: MentionBucket[] } };
+            }
+          ).aggregations?.byAuthor?.buckets ?? [];
+        },
+      );
+      for (const b of buckets) {
+        const cur = reasonCounts.get(b.key) ?? { tagged: 0, mention: 0 };
+        reasonCounts.set(b.key, { tagged: cur.tagged, mention: b.mention?.doc_count ?? 0 });
+      }
+    }
+  } else if (reasonAggEligible) {
     // Issue #967 — fetch the strongest representative pub within a reason filter:
     // most recent, then most cited. Highlight is keyed to the LITERAL query (not
     // the filter), so the title shows the matched term when it appears; a

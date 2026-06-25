@@ -38,6 +38,7 @@ import {
   resolvePeopleMatchProvenance,
   resolvePeopleMatchExplain,
   resolvePeopleSnippetRepresentativePub,
+  resolvePeopleReasonFromDoc,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
@@ -426,6 +427,12 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           contentQuery,
           matchProvenance: resolvePeopleMatchProvenance(),
           meshDescriptorName: taxonomyMatch.meshResolution?.name,
+          // Search reason-from-doc — the resolved ROOT concept UI (the O(1)
+          // lookup key into the people doc's `meshSubtreeCounts`) + the flag.
+          // When on and a concept resolved, the tagged reason count is served
+          // from the precomputed doc field instead of the publications-index agg.
+          meshDescriptorUi: meshOff ? undefined : taxonomyMatch.meshResolution?.descriptorUi,
+          reasonFromDoc: resolvePeopleReasonFromDoc(),
           matchExplain: peopleMatchExplain,
           // Issue #967 — representative matching publication in the reason line.
           representativePub: resolvePeopleSnippetRepresentativePub(),
