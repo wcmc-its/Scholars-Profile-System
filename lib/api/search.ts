@@ -23,6 +23,7 @@ import { prisma } from "@/lib/db";
 import { profilePath } from "@/lib/profile-url";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { fetchAuthorBylineForPmids, fetchWcmAuthorsForPmids } from "@/lib/api/topics";
+import { cachedReasonAgg, reasonAggKey } from "@/lib/api/reason-agg-cache";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import {
   loadFamilyOverlayGate,
@@ -2138,67 +2139,77 @@ export async function searchPeople(opts: {
         },
       },
     };
-    const aggResp = await searchClient().search({
-      index: PUBLICATIONS_INDEX,
-      body: {
-        size: 0,
-        query: { bool: { filter: [{ terms: { wcmAuthorCwids: pageCwids } }] } },
-        aggs: {
-          byAuthor: {
-            terms: { field: "wcmAuthorCwids", include: pageCwids, size: pageCwids.length },
+    // C — reason-agg result cache. This aggregation is a pure function of
+    // `[pageCwids, meshDescendantUis, contentQuery, representativePub]`, so
+    // identical concurrent/repeat requests (pagination re-renders, the same
+    // broad concept searched by several users) recompute the same buckets. The
+    // module-level TTL + stale-while-revalidate + inflight-dedup (mirroring
+    // home.ts) collapses N concurrent misses for the same key to ONE OpenSearch
+    // round-trip, shedding the load that saturates the search thread pool. The
+    // CACHED unit is the parsed `buckets` array, not the raw response.
+    type ReasonAggBucket = {
+      key: string;
+      tagged?: { doc_count?: number } & ReasonTopHitsAgg;
+      mention?: { doc_count?: number } & ReasonTopHitsAgg;
+    };
+    const buckets = await cachedReasonAgg<ReasonAggBucket[]>(
+      reasonAggKey({ pageCwids, meshDescendantUis, contentQuery, representativePub }),
+      async () => {
+        const aggResp = await searchClient().search({
+          index: PUBLICATIONS_INDEX,
+          body: {
+            size: 0,
+            query: { bool: { filter: [{ terms: { wcmAuthorCwids: pageCwids } }] } },
             aggs: {
-              // The `tagged` sub-agg needs a resolved descriptor set; OMIT it when
-              // the query resolved to no concept (`meshDescendantUis` empty — the
-              // free-text mention path), so `tagged` stays 0/absent and only
-              // `mention` is computed.
-              ...(meshDescendantUis.length > 0
-                ? {
-                    tagged: {
-                      // A — the filter agg's intrinsic `doc_count` already IS the
-                      // distinct-pmid count: the publications index is one doc per
-                      // pmid (`_id = pmid`, etl/search-index/index.ts), so a
-                      // `cardinality(pmid)` sub-agg is redundant CPU. Read
-                      // `doc_count` directly below.
-                      filter: { terms: { meshDescriptorUi: meshDescendantUis } },
-                      aggs: {
-                        ...(representativePub ? { top: repPubTopHits } : {}),
+              byAuthor: {
+                terms: { field: "wcmAuthorCwids", include: pageCwids, size: pageCwids.length },
+                aggs: {
+                  // The `tagged` sub-agg needs a resolved descriptor set; OMIT it
+                  // when the query resolved to no concept (`meshDescendantUis`
+                  // empty — the free-text mention path), so `tagged` stays
+                  // 0/absent and only `mention` is computed.
+                  ...(meshDescendantUis.length > 0
+                    ? {
+                        tagged: {
+                          // A — the filter agg's intrinsic `doc_count` already IS
+                          // the distinct-pmid count: the publications index is one
+                          // doc per pmid (`_id = pmid`, etl/search-index/index.ts),
+                          // so a `cardinality(pmid)` sub-agg is redundant CPU. Read
+                          // `doc_count` directly below.
+                          filter: { terms: { meshDescriptorUi: meshDescendantUis } },
+                          aggs: {
+                            ...(representativePub ? { top: repPubTopHits } : {}),
+                          },
+                        },
+                      }
+                    : {}),
+                  mention: {
+                    filter: {
+                      multi_match: {
+                        query: contentQuery,
+                        fields: ["title", "abstract"],
+                        operator: "and",
                       },
                     },
-                  }
-                : {}),
-              mention: {
-                filter: {
-                  multi_match: {
-                    query: contentQuery,
-                    fields: ["title", "abstract"],
-                    operator: "and",
+                    // A — see `tagged` above: `doc_count` == distinct-pmid count
+                    // for a one-doc-per-pmid index, so the cardinality sub-agg is
+                    // dropped.
+                    aggs: {
+                      ...(representativePub ? { top: repPubTopHits } : {}),
+                    },
                   },
-                },
-                // A — see `tagged` above: `doc_count` == distinct-pmid count for a
-                // one-doc-per-pmid index, so the cardinality sub-agg is dropped.
-                aggs: {
-                  ...(representativePub ? { top: repPubTopHits } : {}),
                 },
               },
             },
-          },
-        },
-      } as object,
-    });
-    const buckets =
-      (
-        aggResp.body as {
-          aggregations?: {
-            byAuthor?: {
-              buckets?: Array<{
-                key: string;
-                tagged?: { doc_count?: number } & ReasonTopHitsAgg;
-                mention?: { doc_count?: number } & ReasonTopHitsAgg;
-              }>;
-            };
-          };
-        }
-      ).aggregations?.byAuthor?.buckets ?? [];
+          } as object,
+        });
+        return (
+          aggResp.body as {
+            aggregations?: { byAuthor?: { buckets?: ReasonAggBucket[] } };
+          }
+        ).aggregations?.byAuthor?.buckets ?? [];
+      },
+    );
     for (const b of buckets) {
       reasonCounts.set(b.key, {
         tagged: b.tagged?.doc_count ?? 0,
