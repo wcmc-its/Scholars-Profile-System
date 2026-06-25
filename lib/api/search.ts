@@ -923,6 +923,18 @@ export async function searchPeople(opts: {
     methodFamily?: { supercategory: string; familyLabel: string } | null;
     topics?: { slug: string; label: string }[];
   };
+  /**
+   * Scaling fix B — decouple the per-row pub-evidence reason line from the
+   * blocking People list render. When true, the publications-index reason
+   * aggregation is SKIPPED, so the hits return fast (the People index query
+   * only); the publication-count reason / `evidence.pub` is then absent and the
+   * per-hit reason falls through to method/topic/concept/areas/bio evidence —
+   * the SAME precedence, just without the agg-derived counts. The page paints
+   * the list on this fast call and streams the full reason line in a nested
+   * Suspense boundary via a second (cache-deduped) call with this OFF. Headless
+   * callers default to a full search (`false`).
+   */
+  skipReasonAgg?: boolean;
 }): Promise<PeopleSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -2113,7 +2125,13 @@ export async function searchPeople(opts: {
     matchExplain &&
     contentQuery.length > 0 &&
     pageCwids.length > 0 &&
-    runReasonAgg
+    runReasonAgg &&
+    // B — fast first paint: when the caller asked to defer the reason line, skip
+    // the inline publications-index agg entirely. `reasonCounts`/`reasonReps`
+    // stay empty, so the per-hit reason falls through to the non-pub evidence
+    // (method/topic/concept/areas/bio) with no new branches; the page streams
+    // the full reason in via a second, cache-deduped call.
+    opts.skipReasonAgg !== true
   ) {
     // Issue #967 — fetch the strongest representative pub within a reason filter:
     // most recent, then most cited. Highlight is keyed to the LITERAL query (not
