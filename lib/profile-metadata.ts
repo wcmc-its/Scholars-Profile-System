@@ -26,7 +26,14 @@ export async function buildProfileMetadata(slug: string): Promise<Metadata> {
   return {
     title: titleParts.join(" — "),
     description: description || `Scholar profile for ${profile.publishedName}`,
-    alternates: { canonical },
+    // `types` adds <link rel="alternate" type="application/ld+json"> so
+    // crawlers/linked-data clients can discover the machine-readable Person
+    // doc. Always the root `/{slug}/jsonld` form — that's where the route
+    // handler lives, independent of `PROFILE_CANONICAL`.
+    alternates: {
+      canonical,
+      types: { "application/ld+json": `/${profile.slug}/jsonld` },
+    },
     openGraph: {
       type: "profile",
       firstName,
