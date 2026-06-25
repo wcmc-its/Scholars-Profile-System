@@ -106,6 +106,10 @@ const EXPECTED_ENV_CONFIG: Readonly<Record<string, string>> = {
   // against the prod template below, so this entry now guards that prod stays
   // "ddb" until the prod cutover is signed off.
   SCHOLAR_TOOL_SOURCE: "ddb",
+  // #1258 — env-conditional like SCHOLAR_TOOL_SOURCE (staging "0.9", covered by
+  // the staging snapshot). Asserted against prod here to guard that the derived
+  // MeSH-anchor producer stays gated off (">1" kill-switch) until sign-off.
+  MESH_ANCHOR_SCORE_MIN: "2",
 };
 
 function getStateMachineDefinitionText(

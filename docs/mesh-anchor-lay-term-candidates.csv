@@ -1,0 +1,151 @@
+query_term,target_topic_id,candidate_mesh_descriptor,note
+longevity,aging_geroscience,Longevity,#1258 — already its own descriptor; anchor only
+healthspan,aging_geroscience,Aging,needs-alias (no NLM surface form)
+senescence,aging_geroscience,Cellular Senescence,
+lupus,autoimmune_rheumatologic_disease,Lupus Erythematosus Systemic,
+rheumatoid arthritis,autoimmune_rheumatologic_disease,Arthritis Rheumatoid,
+autoimmune disease,autoimmune_rheumatologic_disease,Autoimmune Diseases,overlap immunology_inflammation
+physician burnout,bioethics_medical_humanities,Burnout Professional,
+medical ethics,bioethics_medical_humanities,Ethics Medical,
+clinician wellbeing,bioethics_medical_humanities,?,needs-alias
+tissue engineering,biomedical_engineering,Tissue Engineering,
+biomedical devices,biomedical_engineering,?,needs-alias; overlap drug/medical-device
+clinical informatics,biomedical_informatics,Medical Informatics,
+health informatics,biomedical_informatics,Medical Informatics,
+AI in medicine,biomedical_informatics,Artificial Intelligence,overlap digital_health; needs-alias
+heart disease,cardiovascular_disease,Heart Diseases,
+heart attack,cardiovascular_disease,Myocardial Infarction,needs-alias (lay term)
+stroke,cardiovascular_disease,Stroke,overlap neuroscience_neurology
+hypertension,cardiovascular_disease,Hypertension,
+cardiology,cardiovascular_disease,Cardiology,
+eczema,dermatology_skin_disease,Eczema,
+psoriasis,dermatology_skin_disease,Psoriasis,
+acne,dermatology_skin_disease,Acne Vulgaris,
+telehealth,digital_health_telemedicine,Telemedicine,
+wearables,digital_health_telemedicine,Wearable Electronic Devices,
+remote monitoring,digital_health_telemedicine,?,needs-alias
+drug development,drug_discovery_pharmacology,Drug Discovery,
+pharmacology,drug_discovery_pharmacology,Pharmacology,
+emergency medicine,emergency_critical_care_medicine,Emergency Medicine,
+critical care,emergency_critical_care_medicine,Critical Care,
+ICU,emergency_critical_care_medicine,Intensive Care Units,overlap pulmonary_critical_care; needs-alias
+climate change,environmental_planetary_health,Climate Change,
+environmental health,environmental_planetary_health,Environmental Health,
+epidemiology,epidemiology_population_health,Epidemiology,
+disease surveillance,epidemiology_population_health,Epidemiological Monitoring,
+liver disease,gastroenterology_hepatology,Liver Diseases,
+IBD,gastroenterology_hepatology,Inflammatory Bowel Diseases,needs-alias
+hepatitis,gastroenterology_hepatology,Hepatitis,
+GI,gastroenterology_hepatology,Gastroenterology,needs-alias (ambiguous acronym — review)
+CRISPR,gene_cell_therapy,Gene Editing,overlap genetics_genomics; needs-alias
+gene therapy,gene_cell_therapy,Genetic Therapy,
+CAR-T,gene_cell_therapy,"Receptors, Chimeric Antigen",needs-alias; overlap hematology/immunology
+genomics,genetics_genomics_precision_medicine,Genomics,
+precision medicine,genetics_genomics_precision_medicine,Precision Medicine,
+genetic testing,genetics_genomics_precision_medicine,Genetic Testing,
+colorectal cancer,gi_cancer,Colorectal Neoplasms,
+colon cancer,gi_cancer,Colonic Neoplasms,needs-alias (lay)
+pancreatic cancer,gi_cancer,Pancreatic Neoplasms,
+global health,global_public_health,Global Health,
+ovarian cancer,gynecologic_oncology,Ovarian Neoplasms,
+cervical cancer,gynecologic_oncology,Uterine Cervical Neoplasms,
+cost-effectiveness,health_economics,Cost-Benefit Analysis,
+healthcare costs,health_economics,Health Care Costs,
+health disparities,health_equity_social_determinants,Healthcare Disparities,
+social determinants,health_equity_social_determinants,Social Determinants of Health,
+SDOH,health_equity_social_determinants,Social Determinants of Health,needs-alias (acronym)
+health policy,health_services_policy,Health Policy,
+health services research,health_services_policy,Health Services Research,
+anemia,hematology,Anemia,
+blood disorders,hematology,Hematologic Diseases,needs-alias
+immunology,immunology_inflammation,Allergy and Immunology,
+inflammation,immunology_inflammation,Inflammation,
+HIV,infectious_disease_immunology,HIV Infections,
+COVID,infectious_disease_immunology,COVID-19,needs-alias
+vaccines,infectious_disease_immunology,Vaccines,
+sepsis,infectious_disease_immunology,Sepsis,overlap emergency/critical-care
+antibiotics,infectious_disease_immunology,Anti-Bacterial Agents,
+pregnancy,maternal_child_health,Pregnancy,overlap womens_health
+prenatal,maternal_child_health,Prenatal Care,
+neonatal,maternal_child_health,"Infant, Newborn",overlap pediatrics_neonatology
+medical education,medical_education_workforce,Education Medical,
+residency training,medical_education_workforce,Internship and Residency,
+depression,mental_health_psychiatry,Depressive Disorder,
+anxiety,mental_health_psychiatry,Anxiety Disorders,
+psychiatry,mental_health_psychiatry,Psychiatry,
+PTSD,mental_health_psychiatry,"Stress Disorders, Post-Traumatic",needs-alias
+schizophrenia,mental_health_psychiatry,Schizophrenia,
+diabetes,metabolic_endocrine_disease,Diabetes Mellitus,
+obesity,metabolic_endocrine_disease,Obesity,overlap nutrition_metabolism
+thyroid,metabolic_endocrine_disease,Thyroid Diseases,
+endocrinology,metabolic_endocrine_disease,Endocrinology,
+microbiome,microbiome_research,Microbiota,
+gut bacteria,microbiome_research,Gastrointestinal Microbiome,needs-alias
+orthopedics,musculoskeletal_orthopedic_medicine,Orthopedics,
+arthritis,musculoskeletal_orthopedic_medicine,Arthritis,overlap autoimmune (RA)
+sports medicine,musculoskeletal_orthopedic_medicine,Sports Medicine,
+kidney disease,nephrology_renal_disease,Kidney Diseases,
+dialysis,nephrology_renal_disease,Renal Dialysis,
+nephrology,nephrology_renal_disease,Nephrology,
+brain tumor,neuro_oncology,Brain Neoplasms,needs-alias (lay)
+glioblastoma,neuro_oncology,Glioblastoma,
+Alzheimer's,neurodegenerative_disease,Alzheimer Disease,needs-alias (apostrophe/possessive)
+Parkinson's,neurodegenerative_disease,Parkinson Disease,needs-alias
+dementia,neurodegenerative_disease,Dementia,
+ALS,neurodegenerative_disease,Amyotrophic Lateral Sclerosis,needs-alias (acronym)
+neuroscience,neuroscience_neurology,Neurosciences,
+epilepsy,neuroscience_neurology,Epilepsy,
+nutrition,nutrition_metabolism,Nutritional Sciences,
+diet,nutrition_metabolism,Diet,
+eye,ophthalmology_vision_science,Eye,needs-alias
+glaucoma,ophthalmology_vision_science,Glaucoma,
+vision,ophthalmology_vision_science,Vision Ocular,
+dental,oral_craniofacial_health,Dentistry,needs-alias
+dentistry,oral_craniofacial_health,Dentistry,
+ENT,otolaryngology_head_neck,Otolaryngology,needs-alias (acronym)
+ear nose throat,otolaryngology_head_neck,Otolaryngology,needs-alias
+chronic pain,pain_management_anesthesiology,Chronic Pain,
+anesthesia,pain_management_anesthesiology,Anesthesia,
+palliative care,palliative_end_of_life_care,Palliative Care,
+hospice,palliative_end_of_life_care,Hospice Care,
+pathology,pathology_laboratory_medicine,Pathology,
+pediatrics,pediatrics_neonatology,Pediatrics,
+children's health,pediatrics_neonatology,Child Health,needs-alias
+primary care,primary_care_general_medicine,Primary Health Care,
+internal medicine,primary_care_general_medicine,Internal Medicine,
+prostate cancer,prostate_urologic_cancer,Prostatic Neoplasms,
+bladder cancer,prostate_urologic_cancer,Urinary Bladder Neoplasms,
+COPD,pulmonary_critical_care,Pulmonary Disease Chronic Obstructive,needs-alias (acronym)
+asthma,pulmonary_critical_care,Asthma,
+respiratory,pulmonary_critical_care,Respiratory Tract Diseases,
+radiology,radiology_medical_imaging,Radiology,
+MRI,radiology_medical_imaging,Magnetic Resonance Imaging,needs-alias (acronym)
+imaging,radiology_medical_imaging,Diagnostic Imaging,
+rehabilitation,rehabilitation_disability_medicine,Rehabilitation,
+physical therapy,rehabilitation_disability_medicine,Physical Therapy Modalities,
+core facilities,research_infrastructure_workforce,?,needs-alias
+single cell,single_cell_spatial_biology,Single-Cell Analysis,needs-alias
+spatial transcriptomics,single_cell_spatial_biology,?,needs-alias
+sleep,sleep_medicine_circadian_biology,Sleep,
+insomnia,sleep_medicine_circadian_biology,"Sleep Initiation and Maintenance Disorders",
+circadian,sleep_medicine_circadian_biology,Circadian Rhythm,
+sleep apnea,sleep_medicine_circadian_biology,Sleep Apnea Syndromes,
+stem cells,stem_cell_regenerative_medicine,Stem Cells,
+regenerative medicine,stem_cell_regenerative_medicine,Regenerative Medicine,
+addiction,substance_use_addiction_medicine,Behavior Addictive,overlap; lay umbrella term
+opioids,substance_use_addiction_medicine,Opioid-Related Disorders,needs-alias
+substance abuse,substance_use_addiction_medicine,Substance-Related Disorders,
+alcohol use,substance_use_addiction_medicine,Alcoholism,
+surgery,surgery_perioperative_medicine,"Surgery, Operative",very broad — review weighting
+perioperative,surgery_perioperative_medicine,Perioperative Care,
+systems biology,systems_biology,Systems Biology,
+clinical trials,translational_clinical_science,Clinical Trials as Topic,
+translational research,translational_clinical_science,Translational Research Biomedical,
+transplant,transplantation_medicine,Transplantation,needs-alias
+organ transplant,transplantation_medicine,Organ Transplantation,
+urology,urology_mens_health,Urology,
+men's health,urology_mens_health,Men's Health,needs-alias (apostrophe)
+women's health,womens_health_reproductive_medicine,Women's Health,needs-alias (apostrophe)
+fertility,womens_health_reproductive_medicine,Fertility,
+IVF,womens_health_reproductive_medicine,"Fertilization in Vitro",needs-alias (acronym)
+menopause,womens_health_reproductive_medicine,Menopause,

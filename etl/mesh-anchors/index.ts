@@ -5,9 +5,12 @@
  *
  *   1. Read curated CSV at etl/mesh-anchors/curated.csv.
  *   2. Compute derived anchors via one SQL aggregation over
- *      `publication.mesh_terms` × `publication_topic`, filtered by
- *      MESH_ANCHOR_THRESHOLD (default 0.30) and MESH_ANCHOR_MIN_SUPPORT
- *      (default 5).
+ *      `publication.mesh_terms` × `publication_topic`, restricted to papers
+ *      judged highly relevant to a topic (publication_topic.score ≥
+ *      MESH_ANCHOR_SCORE_MIN, default 0.9 — #1258). A descriptor anchors a
+ *      topic when its relevance-weighted share of that topic (relP) ≥
+ *      MESH_ANCHOR_THRESHOLD (default 0.30) over ≥ MESH_ANCHOR_MIN_SUPPORT
+ *      high-relevance papers.
  *   3. Truncate `mesh_curated_topic_anchor`, insert curated rows first,
  *      then insert derived rows whose (descriptor_ui, parent_topic_id)
  *      isn't already covered by a curated row. All inside one
@@ -17,13 +20,16 @@
  *      can be tuned from real data once §1.6 surfaces a consumer signal.
  *   5. Record the run in `etl_run` under source="MeshAnchor".
  *
- * Cadence: on demand. Not wired into etl/orchestrate.ts initially — until
- * §1.6 lands and reads the anchor data, the table doesn't change anything
- * user-visible. Add to orchestrate when §1.6 makes the data path hot.
+ * Cadence: in the nightly chain (etl/orchestrate.ts) after MeshCoverage, once
+ * #1258 made the derived anchors useful. Curated rows in the committed CSV
+ * always win over derived (confidence: curated > derived).
  *
  * Env:
- *   MESH_ANCHOR_THRESHOLD     (default 0.30; spec §1.4 — "≥30% co-occurrence")
- *   MESH_ANCHOR_MIN_SUPPORT   (default 5; minimum pub count per descriptor)
+ *   MESH_ANCHOR_SCORE_MIN     (default 0.9; min publication_topic.score for a
+ *                              paper to feed the derivation — #1258. Set >1 to
+ *                              disable derived anchors and ship curated-only.)
+ *   MESH_ANCHOR_THRESHOLD     (default 0.30; min relevance-weighted topic share)
+ *   MESH_ANCHOR_MIN_SUPPORT   (default 5; min high-relevance papers per anchor)
  *   MESH_ANCHOR_CURATED_PATH  (default etl/mesh-anchors/curated.csv)
  */
 import { readFileSync } from "node:fs";
@@ -35,6 +41,9 @@ import type { AnchorRow, DerivedRowRaw } from "./types";
 
 const THRESHOLD = parseFloat(process.env.MESH_ANCHOR_THRESHOLD ?? "0.30");
 const MIN_SUPPORT = parseInt(process.env.MESH_ANCHOR_MIN_SUPPORT ?? "5", 10);
+// #1258 — only papers ReciterAI judged highly relevant to a topic feed the
+// derivation. 0.9 ≈ top ~12% of publication_topic.score (range [0.30, 0.98]).
+const SCORE_MIN = parseFloat(process.env.MESH_ANCHOR_SCORE_MIN ?? "0.9");
 const CURATED_PATH =
   process.env.MESH_ANCHOR_CURATED_PATH ?? "etl/mesh-anchors/curated.csv";
 
@@ -55,35 +64,39 @@ async function recordRun(args: {
 }
 
 /**
- * Co-occurrence aggregation. One scan over `publication.mesh_terms` via
- * JSON_TABLE, joined to `publication_topic` deduped per (pmid, parent_topic).
+ * Relevance-weighted co-occurrence aggregation (#1258). One scan over
+ * `publication.mesh_terms` via JSON_TABLE, joined to `publication_topic`.
  *
- * Both numerator and denominator use DISTINCT pmid — co-authors on the
- * same paper both tagging the same parent topic count as one pmid, not
- * one per cwid.
+ * Only papers ReciterAI judged highly relevant to a topic feed the join:
+ * `pub_topics` keeps a (pmid, parent_topic) membership iff its strongest
+ * per-paper score (MAX over co-authors) ≥ SCORE_MIN. That relevance filter —
+ * not a precision threshold — is what makes the derived anchors trustworthy
+ * (validated against the #1258 curated set: a bare 0.30 co-occurrence gate
+ * reproduced ~1/137; this reproduces ~37/137 with far less noise).
  *
- * Ratio direction is `n(descriptor AND topic) / n(descriptor)` — "given
- * the descriptor, how often does this topic fire?" The reversed direction
- * (denominator = pubs with topic) would bias toward niche descriptors.
+ * `ratio` returned here is relP = the descriptor's relevance-weighted SHARE of
+ * a topic = relBoth(d,t) / Σ_t relBoth(d,t). Direction mirrors the old
+ * `n(d∩t)/n(d)` precision ("given the descriptor, how concentrated in this
+ * topic"), but weighted by relevance and computed only over high-relevance
+ * memberships. `n_both` is the high-relevance support count (the real
+ * min-support gate); `n_desc` stays the descriptor's all-publication total,
+ * kept for the percentile instrumentation and the Node-side defensive filter
+ * (n_desc ≥ n_both ≥ MIN_SUPPORT, so that filter stays a true no-op).
  *
  * MariaDB 10.6+ / MySQL 8.0+ for JSON_TABLE. Local dev: MariaDB 12.x.
  */
 async function loadDerivedRaw(): Promise<DerivedRowRaw[]> {
-  // $queryRaw with positional binds keeps the threshold/min-support
-  // server-side so the wire payload is small (only rows that clear both
-  // gates come back to Node).
+  // $queryRaw with positional binds keeps the score/relP/min-support gates
+  // server-side so only rows that clear them return to Node.
   //
-  // Coerce Prisma's Decimal / BigInt return types to number at this
-  // boundary: `ratio` arrives as Prisma.Decimal (division → DECIMAL in
-  // MariaDB), `n_both` and `n_desc` arrive as bigint. Both serialize
-  // poorly through JSON.stringify if left raw (Decimal → quoted string,
-  // bigint → TypeError). Coerce once here so DerivedRowRaw's declared
-  // `number` shape is honest.
+  // Coerce Prisma's Decimal / BigInt return types to number at this boundary:
+  // `ratio` arrives as Prisma.Decimal, `n_both`/`n_desc` as bigint — both
+  // serialize poorly through JSON.stringify if left raw.
   const raw = await db.write.$queryRaw<
     { descriptor_ui: string; parent_topic_id: string; ratio: unknown; n_both: unknown; n_desc: unknown }[]
   >`
     WITH pub_descriptors AS (
-      SELECT p.pmid, jt.ui AS descriptor_ui
+      SELECT DISTINCT p.pmid, jt.ui AS descriptor_ui
       FROM publication p
       CROSS JOIN JSON_TABLE(
         p.mesh_terms,
@@ -97,25 +110,34 @@ async function loadDerivedRaw(): Promise<DerivedRowRaw[]> {
       GROUP BY descriptor_ui
     ),
     pub_topics AS (
-      SELECT DISTINCT pmid, parent_topic_id
+      SELECT pmid, parent_topic_id, MAX(score) AS rel
       FROM publication_topic
+      GROUP BY pmid, parent_topic_id
+      HAVING MAX(score) >= ${SCORE_MIN}
     ),
     co AS (
       SELECT pd.descriptor_ui, pt.parent_topic_id,
-             COUNT(DISTINCT pd.pmid) AS n_both
+             COUNT(DISTINCT pd.pmid) AS n_both,
+             SUM(pt.rel) AS rel_both
       FROM pub_descriptors pd
       INNER JOIN pub_topics pt USING (pmid)
       GROUP BY pd.descriptor_ui, pt.parent_topic_id
+    ),
+    desc_rel_total AS (
+      SELECT descriptor_ui, SUM(rel_both) AS rel_desc_total
+      FROM co
+      GROUP BY descriptor_ui
     )
     SELECT co.descriptor_ui,
            co.parent_topic_id,
-           co.n_both / dt.n_desc AS ratio,
+           co.rel_both / drt.rel_desc_total AS ratio,
            co.n_both,
            dt.n_desc
     FROM co
+    INNER JOIN desc_rel_total drt USING (descriptor_ui)
     INNER JOIN descriptor_totals dt USING (descriptor_ui)
-    WHERE dt.n_desc >= ${MIN_SUPPORT}
-      AND co.n_both / dt.n_desc >= ${THRESHOLD}
+    WHERE co.n_both >= ${MIN_SUPPORT}
+      AND co.rel_both / drt.rel_desc_total >= ${THRESHOLD}
     ORDER BY co.descriptor_ui, ratio DESC
   `;
   return raw.map((r) => ({
@@ -211,6 +233,13 @@ async function main(): Promise<void> {
       `MESH_ANCHOR_MIN_SUPPORT must be a positive integer (got ${process.env.MESH_ANCHOR_MIN_SUPPORT})`,
     );
   }
+  // SCORE_MIN ≥ 0; a value > 1 is the intentional kill-switch (no paper clears
+  // it → zero derived rows → curated-only).
+  if (!Number.isFinite(SCORE_MIN) || SCORE_MIN < 0) {
+    throw new Error(
+      `MESH_ANCHOR_SCORE_MIN must be a non-negative number (got ${process.env.MESH_ANCHOR_SCORE_MIN})`,
+    );
+  }
 
   const curated = readCurated();
   console.log(
@@ -235,8 +264,7 @@ async function main(): Promise<void> {
   await replaceAnchors(anchors);
 
   const nDescStats = percentiles(descriptorTotals);
-  const ratios = derivedFiltered.map((r) => r.ratio);
-  const ratioStats = percentiles(ratios);
+  const relPStats = percentiles(derivedFiltered.map((r) => r.ratio));
   const curatedRows = anchors.filter((a) => a.confidence === "curated").length;
   const derivedRows = anchors.filter((a) => a.confidence === "derived").length;
 
@@ -246,14 +274,15 @@ async function main(): Promise<void> {
       curatedRows,
       derivedRows,
       derivedRowsAboveThreshold: derivedFiltered.length,
+      scoreMin: SCORE_MIN,
       threshold: THRESHOLD,
       minSupport: MIN_SUPPORT,
       nDescP50: nDescStats.p50,
       nDescP90: nDescStats.p90,
       nDescP99: nDescStats.p99,
-      ratioP50: ratioStats.p50,
-      ratioP90: ratioStats.p90,
-      ratioP99: ratioStats.p99,
+      relPP50: relPStats.p50,
+      relPP90: relPStats.p90,
+      relPP99: relPStats.p99,
       durationMs: Date.now() - startedAt,
     })}`,
   );

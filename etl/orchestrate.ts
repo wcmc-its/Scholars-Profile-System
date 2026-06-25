@@ -104,6 +104,11 @@ async function main() {
     // is fresh. No-op-safe: if ReCiter failed earlier this still updates
     // against the prior snapshot, which is at worst stale by one cycle.
     ["MeshCoverage", "etl/mesh-coverage/index.ts"],
+    // #1258 — derived descriptor→topic anchors mined from the MeSH terms of
+    // high-relevance papers (publication_topic.score ≥ MESH_ANCHOR_SCORE_MIN).
+    // Runs after the mesh_terms / publication_topic inputs are fresh; curated
+    // anchors in the committed CSV always win (confidence: curated > derived).
+    ["MeshAnchor", "etl/mesh-anchors/index.ts"],
   ] as const) {
     results.push(await step(source, file));
   }
