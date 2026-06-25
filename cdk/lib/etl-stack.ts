@@ -638,6 +638,12 @@ export class EtlStack extends Stack {
         // in prod until the staging soak completes; the EventBridge → Step
         // Function schedule is a follow-up.
         RECITER_REJECT_SEND: env === "staging" ? "on" : "off",
+        // #1258 — gate for the MeSH derived-anchor producer (etl:mesh-anchors).
+        // "0.9" mines descriptor→topic anchors from publication_topic.score ≥ 0.9
+        // papers; a value > 1 is the kill-switch (zero derived rows, curated-only).
+        // STAGING-FIRST: on in staging now, prod held at "2" until the staging
+        // soak signs off — then drop this override to enable prod.
+        MESH_ANCHOR_SCORE_MIN: env === "staging" ? "0.9" : "2",
         // Destination bucket for the `backup:curated` logical-dump step. The
         // task role is granted PutObject on exactly this bucket above; the
         // script defaults the key prefix to "sps-curation-backups".

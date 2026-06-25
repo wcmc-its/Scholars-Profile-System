@@ -1403,6 +1403,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "MESH_ANCHOR_SCORE_MIN",
+                "Value": "2",
+              },
+              {
                 "Name": "CURATION_BACKUP_BUCKET",
                 "Value": {
                   "Ref": "CurationBackupBucketE5A802A9",
@@ -7450,6 +7454,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "RECITER_REJECT_SEND",
                 "Value": "on",
+              },
+              {
+                "Name": "MESH_ANCHOR_SCORE_MIN",
+                "Value": "0.9",
               },
               {
                 "Name": "CURATION_BACKUP_BUCKET",
