@@ -25,6 +25,18 @@ import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
  * around JSON.stringify is required to set the right Content-Type for
  * the route handler's request.json() (see RESEARCH.md Pitfall 1).
  */
+/**
+ * Search reason-from-doc — the per-search config the card needs to lazily fetch
+ * the evidence-path key papers on first expand. `descriptorUis` is the resolved
+ * concept's subtree (empty for a free-text-only query); `contentQuery` drives the
+ * `<mark>` highlight. Null/absent ⇒ no lazy key paper (legacy inline path serves
+ * the key paper eagerly via the streamed wrapper instead).
+ */
+export type KeyPaperConfig = {
+  descriptorUis: string[];
+  contentQuery: string;
+};
+
 export type PeopleResultCardProps = {
   hit: PeopleHit;
   position: number;
@@ -35,6 +47,7 @@ export type PeopleResultCardProps = {
     personType: string[];
     activity: ActivityFilter[];
   };
+  keyPaperConfig?: KeyPaperConfig | null;
 };
 
 /**
@@ -90,6 +103,7 @@ export function PeopleResultCard({
   q,
   total,
   filters,
+  keyPaperConfig = null,
 }: PeopleResultCardProps) {
   function handleClick() {
     if (typeof navigator === "undefined" || !navigator.sendBeacon) return;
@@ -149,6 +163,37 @@ export function PeopleResultCard({
   const [exemplarStatus, setExemplarStatus] = useState<ExemplarFetchStatus>("idle");
   const exemplarFetched = useRef(false);
 
+  // Search reason-from-doc — under D the publications evidence arrives with an
+  // EMPTY `pubs` list (the up-front top_hits agg is gone), carrying only the count.
+  // So the top-3 key papers are fetched LAZILY on first expand — the SAME pattern
+  // as the method/topic exemplar above, with the same payoff: the per-card query
+  // runs only for a row the viewer actually opens (not eagerly for every visible
+  // card), which keeps the ambient OpenSearch load down under concurrency.
+  const wantsLazyKeyPaper =
+    keyPaperConfig != null &&
+    hit.evidence?.kind === "publications" &&
+    (hit.evidence.pubs?.length ?? 0) === 0 &&
+    (hit.evidence.count ?? 0) > 0;
+  const [keyPapers, setKeyPapers] = useState<EvidencePub[]>([]);
+  const [keyPaperStatus, setKeyPaperStatus] = useState<ExemplarFetchStatus>("idle");
+  const keyPaperFetched = useRef(false);
+
+  const ensureKeyPaper = useCallback(() => {
+    if (!wantsLazyKeyPaper || keyPaperFetched.current) return;
+    keyPaperFetched.current = true;
+    setKeyPaperStatus("loading");
+    const params = new URLSearchParams({
+      cwid: hit.cwid,
+      q: keyPaperConfig!.contentQuery,
+      descriptorUis: keyPaperConfig!.descriptorUis.join(","),
+    });
+    fetch(`/api/search/key-paper?${params.toString()}`)
+      .then((r) => (r.ok ? r.json() : { pubs: [] }))
+      .then((d: { pubs?: EvidencePub[] }) => setKeyPapers(d?.pubs ?? []))
+      .catch(() => setKeyPapers([]))
+      .finally(() => setKeyPaperStatus("done"));
+  }, [wantsLazyKeyPaper, hit.cwid, keyPaperConfig]);
+
   const ensureExemplar = useCallback(() => {
     if (!exemplarQuery || exemplarFetched.current) return;
     exemplarFetched.current = true;
@@ -166,31 +211,40 @@ export function PeopleResultCard({
       .finally(() => setExemplarStatus("done"));
   }, [hit.cwid, exemplarQuery]);
 
-  // publications kind: the representative papers are INLINE in the evidence
-  // (`evidence.pubs`) — no fetch. method/topic: the lazily-fetched `exemplar`.
+  // publications kind: representative papers are INLINE in the evidence
+  // (`evidence.pubs`) on the legacy agg path; under reason-from-doc they arrive
+  // empty and are fetched lazily on expand (`wantsLazyKeyPaper` → `keyPapers`).
+  // method/topic: the lazily-fetched `exemplar`.
   const inlinePubs =
     hit.evidence?.kind === "publications" ? (hit.evidence.pubs ?? []) : null;
   const isLazyExemplar = !!exemplarQuery;
-  const repPapers = inlinePubs ?? exemplar.pubs;
-  const repTotal =
-    inlinePubs != null
-      ? (hit.evidence?.kind === "publications" ? hit.evidence.count : undefined) ??
-        inlinePubs.length
+  const evidenceCount =
+    hit.evidence?.kind === "publications" ? hit.evidence.count : undefined;
+
+  const repPapers = wantsLazyKeyPaper
+    ? keyPapers
+    : (inlinePubs ?? exemplar.pubs);
+  const repTotal = wantsLazyKeyPaper
+    ? (evidenceCount ?? keyPapers.length)
+    : inlinePubs != null
+      ? (evidenceCount ?? inlinePubs.length)
       : exemplar.total;
 
   // A disclosure is offered when there is something to reveal. For inline pubs
-  // that is `pubs.length > 0`. For a lazy method/topic exemplar it is optimistic
-  // (`!!exemplarQuery`) until the fetch resolves; once it resolves with 0 papers
-  // we drop the chevron so there is never a dead control.
-  const canExpand =
-    inlinePubs != null
+  // that is `pubs.length > 0`. For a lazy method/topic exemplar OR a lazy key
+  // paper it is optimistic until the fetch resolves; once it resolves with 0
+  // papers we drop the chevron so there is never a dead control.
+  const canExpand = wantsLazyKeyPaper
+    ? !(keyPaperStatus === "done" && keyPapers.length === 0)
+    : inlinePubs != null
       ? inlinePubs.length > 0
       : isLazyExemplar && !(exemplarStatus === "done" && exemplar.pubs.length === 0);
 
   const onToggle = useCallback(() => {
     if (isLazyExemplar) ensureExemplar();
+    if (wantsLazyKeyPaper) ensureKeyPaper();
     setExpanded((v) => !v);
-  }, [isLazyExemplar, ensureExemplar]);
+  }, [isLazyExemplar, ensureExemplar, wantsLazyKeyPaper, ensureKeyPaper]);
 
   const deptLine = hit.divisionName
     ? `${hit.divisionName} · Department of ${hit.deptName ?? hit.primaryDepartment ?? ""}`.trim()
@@ -332,7 +386,13 @@ export function PeopleResultCard({
             papers={repPapers}
             total={repTotal}
             profileHref={profileHref}
-            status={isLazyExemplar ? exemplarStatus : "done"}
+            status={
+              isLazyExemplar
+                ? exemplarStatus
+                : wantsLazyKeyPaper
+                  ? keyPaperStatus
+                  : "done"
+            }
             panelId={panelId}
           />
         ) : null}

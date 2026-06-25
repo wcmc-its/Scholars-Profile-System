@@ -26,7 +26,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   if (!resolvePeopleReasonFromDoc()) {
-    return NextResponse.json({ pub: null });
+    return NextResponse.json({ pubs: [] });
   }
   const params = request.nextUrl.searchParams;
   const cwid = params.get("cwid") ?? "";
@@ -36,6 +36,6 @@ export async function GET(request: NextRequest) {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  const pub = await fetchKeyPaper({ cwid, descriptorUis, contentQuery });
-  return NextResponse.json({ pub: pub ?? null });
+  const pubs = await fetchKeyPaper({ cwid, descriptorUis, contentQuery });
+  return NextResponse.json({ pubs });
 }

@@ -1,7 +1,11 @@
 "use client";
 
 import { Suspense, use, useEffect, useRef, useState } from "react";
-import { PeopleResultCard, type PeopleResultCardProps } from "@/components/search/people-result-card";
+import {
+  PeopleResultCard,
+  type PeopleResultCardProps,
+  type KeyPaperConfig,
+} from "@/components/search/people-result-card";
 import type { PeopleHit, PeopleMatchReason, RepresentativePub } from "@/lib/api/search";
 import type { ResultEvidence } from "@/lib/api/result-evidence";
 
@@ -35,16 +39,10 @@ import type { ResultEvidence } from "@/lib/api/result-evidence";
 type ReasonPatch = { matchReason?: PeopleMatchReason; evidence?: ResultEvidence };
 type ReasonMap = Map<string, ReasonPatch>;
 
-/**
- * Search reason-from-doc — the per-search config the card needs to fetch a lazy
- * key paper. `descriptorUis` is the resolved concept's subtree (empty for a
- * free-text-only query); `contentQuery` drives the `<mark>` highlight. Null when
- * the doc-sourced reason path is off (the inline rep-pub serves the key paper).
- */
-export type KeyPaperConfig = {
-  descriptorUis: string[];
-  contentQuery: string;
-};
+// Search reason-from-doc — `KeyPaperConfig` now lives in `people-result-card`
+// (the card owns the lazy-on-expand fetch for the evidence path). Re-exported
+// here for the search page, which builds it and threads it through this wrapper.
+export type { KeyPaperConfig };
 
 function mergeHit(hit: PeopleHit, patch: ReasonPatch | undefined): PeopleHit {
   if (!patch) return hit;
@@ -83,7 +81,15 @@ function CardWithLazyKeyPaper({
 }: PeopleResultCardProps & { keyPaperConfig: KeyPaperConfig | null }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [pub, setPub] = useState<RepresentativePub | null>(null);
-  const wants = keyPaperConfig !== null && reasonWantsKeyPaper(props.hit.matchReason);
+  // Eager fetch ONLY for the LEGACY render path (`SEARCH_RESULT_EVIDENCE` off),
+  // where the key paper renders inline ("— incl. …") via `matchReason.pub`. On the
+  // evidence path the card owns a fetch-on-EXPAND for the disclosure (via
+  // `keyPaperConfig`), so we must not also eager-fetch here — that's the
+  // per-visible-card load the chevron lets us avoid.
+  const wants =
+    keyPaperConfig !== null &&
+    !props.hit.evidence &&
+    reasonWantsKeyPaper(props.hit.matchReason);
 
   useEffect(() => {
     if (!wants || pub) return;
@@ -97,8 +103,10 @@ function CardWithLazyKeyPaper({
       });
       fetch(`/api/search/key-paper?${params.toString()}`)
         .then((r) => (r.ok ? r.json() : null))
-        .then((data: { pub?: RepresentativePub | null } | null) => {
-          if (!cancelled && data?.pub) setPub(data.pub);
+        .then((data: { pubs?: RepresentativePub[] } | null) => {
+          // The legacy inline path shows ONE representative pub — take the top.
+          const first = data?.pubs?.[0];
+          if (!cancelled && first) setPub(first);
         })
         .catch(() => {});
     };
@@ -127,7 +135,7 @@ function CardWithLazyKeyPaper({
   const hit = pub ? patchKeyPaper(props.hit, pub) : props.hit;
   return (
     <div ref={ref}>
-      <PeopleResultCard {...props} hit={hit} />
+      <PeopleResultCard {...props} hit={hit} keyPaperConfig={keyPaperConfig} />
     </div>
   );
 }

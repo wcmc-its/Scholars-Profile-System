@@ -11,7 +11,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 // Capture the body `fetchKeyPaper` sends so we can assert the scholar + concept
-// scoping and the size-1 single-paper fetch.
+// scoping and the size-3 top-papers fetch.
 const captured: Array<Record<string, unknown>> = [];
 const keyPaperHit = {
   _source: { pmid: 42424242, title: "Glandular adenocarcinoma sequencing", year: 2023 },
@@ -48,22 +48,24 @@ import {
 } from "@/components/search/people-result-card-streamed";
 
 describe("fetchKeyPaper (lazy key paper)", () => {
-  it("returns the RepresentativePub shape with a highlighted title", async () => {
+  it("returns up to 3 RepresentativePubs with highlighted titles", async () => {
     captured.length = 0;
-    const pub = await fetchKeyPaper({
+    const pubs = await fetchKeyPaper({
       cwid: "abc1234",
       descriptorUis: ["Dadeno", "Dcyst"],
       contentQuery: "adenocarcinoma",
     });
-    expect(pub).toEqual({
-      pmid: "42424242",
-      title: "Glandular adenocarcinoma sequencing",
-      titleHtml: "Glandular <mark>adenocarcinoma</mark> sequencing",
-      year: 2023,
-    });
+    expect(pubs).toEqual([
+      {
+        pmid: "42424242",
+        title: "Glandular adenocarcinoma sequencing",
+        titleHtml: "Glandular <mark>adenocarcinoma</mark> sequencing",
+        year: 2023,
+      },
+    ]);
   });
 
-  it("scopes the query to ONE scholar and the resolved concept subtree, size 1", async () => {
+  it("scopes the query to ONE scholar and the resolved concept subtree, top 3", async () => {
     captured.length = 0;
     await fetchKeyPaper({
       cwid: "abc1234",
@@ -71,7 +73,7 @@ describe("fetchKeyPaper (lazy key paper)", () => {
       contentQuery: "adenocarcinoma",
     });
     const body = captured[0];
-    expect(body.size).toBe(1);
+    expect(body.size).toBe(3);
     const filter = (body.query as { bool: { filter: unknown[] } }).bool.filter;
     expect(filter).toContainEqual({ term: { wcmAuthorCwids: "abc1234" } });
     expect(filter).toContainEqual({ terms: { meshDescriptorUi: ["Dadeno", "Dcyst"] } });
@@ -85,16 +87,16 @@ describe("fetchKeyPaper (lazy key paper)", () => {
     expect(filter.some((f) => JSON.stringify(f).includes("multi_match"))).toBe(true);
   });
 
-  it("returns undefined when there is neither a concept nor a query (nothing to fetch)", async () => {
+  it("returns [] when there is neither a concept nor a query (nothing to fetch)", async () => {
     captured.length = 0;
-    const pub = await fetchKeyPaper({ cwid: "abc1234", descriptorUis: [], contentQuery: "" });
-    expect(pub).toBeUndefined();
+    const pubs = await fetchKeyPaper({ cwid: "abc1234", descriptorUis: [], contentQuery: "" });
+    expect(pubs).toEqual([]);
     expect(captured).toHaveLength(0); // no OpenSearch round-trip
   });
 
-  it("returns undefined when the cwid is empty", async () => {
-    const pub = await fetchKeyPaper({ cwid: "", descriptorUis: ["Dadeno"], contentQuery: "x" });
-    expect(pub).toBeUndefined();
+  it("returns [] when the cwid is empty", async () => {
+    const pubs = await fetchKeyPaper({ cwid: "", descriptorUis: ["Dadeno"], contentQuery: "x" });
+    expect(pubs).toEqual([]);
   });
 });
 
