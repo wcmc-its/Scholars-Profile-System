@@ -853,6 +853,16 @@ export class EtlStack extends Stack {
       // the sole scholar_tool writer once flipped to s3.
       { id: "Tools", npmScript: "etl:scholar-tool", external: true },
       { id: "MeshCoverageNightly", npmScript: "etl:mesh-coverage", external: false },
+      // #1258 — curated + derived descriptor→topic anchors. SPS-DB only (reads
+      // publication.mesh_terms × publication_topic), so external:false. Runs after
+      // MeshCoverage (mesh_terms fresh) and Dynamodb (publication_topic fresh).
+      // STAGING-ONLY for now: adding it to the prod nightly would load the 143
+      // curated lay-term anchors onto prod (the MESH_ANCHOR_SCORE_MIN=2 gate only
+      // suppresses *derived* rows, not curated), bypassing the soak. Add to prod
+      // once staging is verified — mirror of the infoed exclusion above.
+      ...(env === "staging"
+        ? [{ id: "MeshAnchorNightly", npmScript: "etl:mesh-anchors", external: false } as StepSpec]
+        : []),
       // #604 -- stamp publication_type='Retraction' on PubMed-retracted originals
       // ReCiter hasn't re-fetched yet. MUST run after Reciter (whose upsert
       // overwrites publication_type from ReciterDB) and before SearchIndex (so
