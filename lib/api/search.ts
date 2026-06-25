@@ -384,9 +384,18 @@ export function parseReasonTopHits(
  * `_source.meshSubtreeCounts` map (an O(1) lookup that replaces the
  * publications-index `tagged` filter agg). Returns 0 when the field is absent
  * (a not-yet-reindexed doc) or the concept isn't present — so the per-hit reason
- * degrades to the concept fallback, never to a wrong/throwing count. Pure, so the
- * parity with the agg-derived count (same number → same `composeMatchReason`
- * text) is unit-testable without a live cluster.
+ * degrades to the concept fallback, never to a wrong/throwing count.
+ *
+ * INTENTIONAL DIVERGENCE (NOT byte-identical to the legacy agg): the doc count is
+ * the EXACT full-subtree count. The legacy `tagged` agg filters on
+ * `meshResolution.descendantUis`, which `computeDescendants` truncates at
+ * DESCENDANT_HARD_CAP (200) for runtime cost. So for broad concepts with >200
+ * descendants (e.g. Neoplasms), the legacy agg UNDERCOUNTS — it only sees the
+ * first 200 descendants — while this lookup reflects the whole subtree (the
+ * builder folds every pub up its full, uncapped ancestor chain). The doc count is
+ * therefore ≥ the legacy capped count and is the correct value; precompute removes
+ * the reason the cap existed. The change is flag-gated (`SEARCH_PEOPLE_REASON_FROM_DOC`)
+ * and reversible. See tests/unit/search-people-reason-from-doc.test.ts.
  */
 export function taggedCountFromDoc(
   meshSubtreeCounts: Record<string, number> | undefined,

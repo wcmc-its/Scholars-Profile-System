@@ -365,7 +365,12 @@ export function resolvePeopleSnippetRepresentativePub(): boolean {
  * cluster degrades to count 0 (the per-hit reason falls through to the concept
  * fallback), never a 500. Layered on top of `SEARCH_PEOPLE_MATCH_EXPLAIN` (inert
  * when that is off — there is no reason line to source). Default OFF both envs
- * (staging-first parity A/B, instant rollback); `=on` to enable.
+ * (staging-first A/B, instant rollback); `=on` to enable.
+ *
+ * NOT count-identical to the legacy agg for BROAD concepts: the doc count is the
+ * exact full subtree; the legacy agg caps `descendantUis` at 200 and undercounts
+ * concepts with >200 descendants (e.g. Neoplasms). Flipping ON makes those counts
+ * go UP to their true value — intentional accuracy gain, see `taggedCountFromDoc`.
  */
 export function resolvePeopleReasonFromDoc(): boolean {
   return process.env.SEARCH_PEOPLE_REASON_FROM_DOC === "on";
