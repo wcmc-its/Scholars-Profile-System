@@ -1348,7 +1348,8 @@ export class AppStack extends Stack {
         // never a 500). Inert unless MATCH_EXPLAIN is on. DEFAULT OFF BOTH ENVS --
         // staging-first parity A/B + instant rollback; flip on staging after the
         // people reindex, then prod after its own reindex.
-        SEARCH_PEOPLE_REASON_FROM_DOC: "off",
+        // Staging reindex done 2026-06-25 (people v11 carries meshSubtreeCounts) → ON staging; prod off pending its own reindex.
+        SEARCH_PEOPLE_REASON_FROM_DOC: env === "staging" ? "on" : "off",
         SEARCH_PUB_HIGHLIGHT: "on",
         SEARCH_PUB_MATCH_PROVENANCE: "on",
         // #837 -- Publications-tab Department facet. Unlike the three above this
