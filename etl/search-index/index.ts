@@ -60,6 +60,7 @@ import {
   buildPublicationDoc,
   isRequireDisplayableAuthorEnabled,
   computePubCountBuckets,
+  loadMeshAncestorContext,
 } from "@/lib/search-index-docs";
 import { isRetryableBulkStatus, resolveBulkConfig } from "@/lib/search-index-bulk";
 import { rebuildAliasedIndex } from "./alias-swap";
@@ -188,6 +189,12 @@ async function indexPeople(concreteIndex: string) {
   // excludes #800-suppressed AND #801-sensitive families regardless of the
   // runtime sensitivity flag. Passed to every `buildPeopleDoc` below.
   const gate = await loadFamilyOverlayGate({ forceSensitive: true });
+  // D-exact (search reason-from-doc) — load the MeSH ancestor context ONCE per
+  // build (one whole-table read of `mesh_descriptor.tree_numbers`) and pass it to
+  // every `buildPeopleDoc` so each doc carries `meshSubtreeCounts`. The rebuild IS
+  // the backfill (full rebuild + atomic alias swap). Always loaded: the field is
+  // OMIT-on-empty and served behind a flag, so emitting it on every rebuild is safe.
+  const meshAncestors = await loadMeshAncestorContext(prisma);
   const scholars = await prisma.scholar.findMany({
     where: PEOPLE_INDEX_WHERE,
     select: PEOPLE_INDEX_SELECT,
@@ -208,7 +215,7 @@ async function indexPeople(concreteIndex: string) {
     if (!isPubliclyDisplayed(s.roleCategory)) continue;
     // #824 §4c — pass the public overlay gate so `buildPeopleDoc` emits the
     // `methodFamily` rollup (suppressed + sensitive families always excluded).
-    const doc = await buildPeopleDoc(s, prisma, sup, gate);
+    const doc = await buildPeopleDoc(s, prisma, sup, gate, meshAncestors);
     if (doc !== null) docs.push({ cwid: s.cwid, doc });
   }
 

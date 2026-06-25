@@ -85,6 +85,8 @@ import {
   buildPeopleDoc,
   buildPublicationDoc,
   isRequireDisplayableAuthorEnabled,
+  loadMeshAncestorContext,
+  type MeshAncestorContext,
 } from "@/lib/search-index-docs";
 
 /**
@@ -291,6 +293,7 @@ async function buildGrantOps(externalId: string): Promise<Op[]> {
 async function buildScholarOps(
   cwid: string,
   gate?: FamilyOverlayGate,
+  meshAncestors?: MeshAncestorContext,
 ): Promise<Op[]> {
   // PEOPLE_INDEX_WHERE excludes suppressed / deleted scholars at the query
   // layer. A suppressed scholar's findFirst returns null → we issue a
@@ -323,7 +326,14 @@ async function buildScholarOps(
   // scholar entry path loads its own.
   const overlayGate =
     gate ?? (await loadFamilyOverlayGate({ forceSensitive: true }));
-  const doc = await buildPeopleDoc(scholar, db.read, sup, overlayGate);
+  // D-exact (search reason-from-doc) — keep `meshSubtreeCounts` on the
+  // single-doc fast-path update so a per-scholar edit stays consistent with the
+  // nightly index rather than dropping the field until the next full rebuild
+  // (mirrors the overlay-gate threading above). Scholar-INDEPENDENT, so the
+  // fan-out loads it ONCE and threads it; the lone-scholar entry loads its own.
+  const ancestors =
+    meshAncestors ?? (await loadMeshAncestorContext(db.read));
+  const doc = await buildPeopleDoc(scholar, db.read, sup, overlayGate, ancestors);
   if (doc === null) {
     return [{ type: "delete", index: PEOPLE_INDEX, id: cwid }];
   }
@@ -373,8 +383,13 @@ async function buildPublicationOps(
   // (mirrors the nightly ETL's once-per-batch load) rather than re-scanning the
   // overlay tables per co-author.
   const gate = await loadFamilyOverlayGate({ forceSensitive: true });
+  // D-exact — load the MeSH ancestor context ONCE here (scholar-independent,
+  // like the gate) and thread it into every `buildScholarOps` in the fan-out so
+  // each affected people doc keeps `meshSubtreeCounts` consistent with the nightly
+  // index, without re-reading the descriptor table per co-author.
+  const meshAncestors = await loadMeshAncestorContext(db.read);
   const scholarOpsArrays = await Promise.all(
-    affectedCwids.map((c) => buildScholarOps(c, gate)),
+    affectedCwids.map((c) => buildScholarOps(c, gate, meshAncestors)),
   );
   for (const arr of scholarOpsArrays) ops.push(...arr);
   return ops;

@@ -27,6 +27,7 @@ const hoisted = vi.hoisted(() => ({
   mockDepartmentFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
   mockScholarFamilyFindMany: vi.fn(),
+  mockMeshDescriptorFindMany: vi.fn(),
   mockBulk: vi.fn(),
 }));
 
@@ -54,6 +55,12 @@ vi.mock("@/lib/db", () => ({
       // passes one). This suite doesn't exercise method families; the default
       // empty result keeps the rollup omit-on-empty.
       scholarFamily: { findMany: hoisted.mockScholarFamilyFindMany },
+      // D-exact (search reason-from-doc) — the reconciler loads the MeSH
+      // ancestor context (`loadMeshAncestorContext` reads `mesh_descriptor`) so a
+      // single-doc fast-path update keeps `meshSubtreeCounts`. This suite doesn't
+      // exercise MeSH subtree counts; the default empty descriptor set keeps it
+      // omit-on-empty.
+      meshDescriptor: { findMany: hoisted.mockMeshDescriptorFindMany },
     },
     // #393 — the reconciler sentinel stamp on a successful reflect.
     write: { suppression: { update: hoisted.mockSuppressionUpdate } },
@@ -161,6 +168,7 @@ beforeEach(() => {
   hoisted.mockDepartmentFindMany.mockResolvedValue([]);
   hoisted.mockDivisionFindMany.mockResolvedValue([]);
   hoisted.mockScholarFamilyFindMany.mockResolvedValue([]);
+  hoisted.mockMeshDescriptorFindMany.mockResolvedValue([]);
 });
 
 describe("reflectSearchSuppression — scholar suppress", () => {

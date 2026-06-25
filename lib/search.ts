@@ -188,6 +188,13 @@ export const peopleIndexMapping = {
       // but do not index: `object` + `enabled: false`. Applied on the next people
       // rebuild via the alias-swap (no extra recreate).
       topMeshTerms: { type: "object", enabled: false },
+      // D-exact (search reason-from-doc) — per-concept distinct-publication
+      // counts ({ [conceptDescriptorUi]: distinctPubs }) the People reason line
+      // reads from `_source` at query time, so the broad-concept search needs no
+      // publications-index reason agg. Source-only (never queried/aggregated):
+      // `object` + `enabled: false`. OMITTED on scholars with no MeSH-tagged pub.
+      // Served only when SEARCH_PEOPLE_REASON_FROM_DOC is on.
+      meshSubtreeCounts: { type: "object", enabled: false },
       overview: { type: "text", analyzer: "scholar_text" },
       // Issue #310 / SPEC §6.1.5 — materialized inputs to the topic-shape
       // sparse-profile soft decay. The decay's "non-trivial" thresholds

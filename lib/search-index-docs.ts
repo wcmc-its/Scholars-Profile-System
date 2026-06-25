@@ -37,6 +37,11 @@ import { isFamilyPubliclyVisible } from "@/lib/api/methods-overlay";
 import type { FamilyOverlayGate } from "@/lib/api/methods-overlay";
 import { isFundingActive } from "@/lib/api/search-funding";
 import { extractMeshDescriptorUis } from "@/lib/mesh-descriptor-uis";
+import {
+  buildMeshAncestorIndex,
+  ancestorUisFor,
+  type MeshAncestorIndex,
+} from "@/lib/mesh-tree-ancestors";
 import { extractLastNameSort } from "@/lib/name-sort";
 import { isCenterMembershipActive } from "@/lib/api/centers";
 import { isTrainingOnlyGrant } from "@/lib/grants/training-exclusions";
@@ -132,6 +137,48 @@ export function extractMeshTermPairs(raw: unknown): Array<{ ui: string | null; l
 
 /** Cap on the people-doc `topMeshTerms` rollup (CONTRACT A — top 8 descriptors). */
 export const TOP_MESH_TERMS_LIMIT = 8;
+
+/**
+ * D-exact (search reason-from-doc) — the MeSH ancestor context `buildPeopleDoc`
+ * needs to precompute `meshSubtreeCounts`. Carries the tree-number→UI ancestor
+ * index PLUS each descriptor's own tree numbers (so a pub's tagged descriptor can
+ * be expanded to its ancestor concepts). Loaded ONCE per index build by the ETL
+ * (mirroring the `gate` load) and passed to every `buildPeopleDoc`. When OMITTED,
+ * the builder never touches it and emits no `meshSubtreeCounts` field — so the
+ * produced doc is byte-identical to today for any caller that doesn't pass it.
+ */
+export type MeshAncestorContext = {
+  index: MeshAncestorIndex;
+  treeNumbersByUi: Map<string, string[]>;
+};
+
+/**
+ * Load the {@link MeshAncestorContext} from `mesh_descriptor.tree_numbers` — the
+ * SAME column `lib/api/search-taxonomy.ts` reads for the downward descendant walk.
+ * One whole-table read per index build; the people index has ~9k docs but only
+ * ~30k descriptors, so this is loaded once and shared across every `buildPeopleDoc`.
+ */
+export async function loadMeshAncestorContext(
+  client: Pick<PrismaClient, "meshDescriptor">,
+): Promise<MeshAncestorContext> {
+  const rows = await client.meshDescriptor.findMany({
+    select: { descriptorUi: true, treeNumbers: true },
+  });
+  const treeNumbersByUi = new Map<string, string[]>();
+  const indexRows: Array<{ ui: string; treeNumbers: string[] }> = [];
+  for (const r of rows) {
+    // `treeNumbers` is a JSON `string[]` column; defensively filter to strings
+    // (same contract the resolver applies in search-taxonomy.ts).
+    const tns = Array.isArray(r.treeNumbers)
+      ? (r.treeNumbers as unknown[]).filter(
+          (x): x is string => typeof x === "string" && x.length > 0,
+        )
+      : [];
+    treeNumbersByUi.set(r.descriptorUi, tns);
+    indexRows.push({ ui: r.descriptorUi, treeNumbers: tns });
+  }
+  return { index: buildMeshAncestorIndex(indexRows), treeNumbersByUi };
+}
 
 /**
  * Reduce a per-label aggregate ({ count, ui }) map into the ordered
@@ -674,9 +721,21 @@ export async function buildPeopleDoc(
   // want the rollup — the builder NEVER touches `client.scholarFamily` and never
   // emits the field, so the produced doc is byte-identical to today.
   gate?: FamilyOverlayGate,
+  // D-exact (search reason-from-doc) — OPTIONAL MeSH ancestor context. When
+  // provided (the ETL + live reconciler load it once via `loadMeshAncestorContext`
+  // and pass it), the builder emits `meshSubtreeCounts`: per-concept distinct-pub
+  // counts the People reason line reads with an O(1) lookup (no publications-index
+  // agg). When OMITTED — every existing test, any caller that doesn't want it —
+  // the field is never emitted and the doc is byte-identical to today.
+  meshAncestors?: MeshAncestorContext,
 ): Promise<Record<string, unknown> | null> {
   // Title-field repetition by authorship position.
   const titleParts: string[] = [];
+  // D-exact — per-concept distinct-publication counter. Keyed by ANCESTOR concept
+  // descriptor UI; each scholar pub increments a concept AT MOST ONCE (the
+  // per-pub union below), so a pub carrying two in-subtree descriptors counts once
+  // for their shared ancestor. Only populated when `meshAncestors` was passed.
+  const subtreeAgg = meshAncestors ? new Map<string, number>() : null;
   // Per-term aggregation for the min-evidence threshold.
   const termAgg = new Map<
     string,
@@ -763,11 +822,29 @@ export async function buildPeopleDoc(
     // Issue #310 — accumulate descriptor UIs in lock-step with the labels.
     // `extractMeshDescriptorUis` dedupes within a pub, so each UI counts once
     // per distinct pub here — the same distinct-pub semantics the threshold below uses.
-    for (const ui of extractMeshDescriptorUis(a.publication.meshTerms)) {
+    const pubMeshUis = extractMeshDescriptorUis(a.publication.meshTerms);
+    for (const ui of pubMeshUis) {
       const cur = uiAgg.get(ui) ?? { distinctPubs: 0, hasFirstOrLast: false };
       cur.distinctPubs += 1;
       if (kind === "firstOrLast") cur.hasFirstOrLast = true;
       uiAgg.set(ui, cur);
+    }
+
+    // D-exact — fold this pub's descriptors up to their ANCESTOR concepts and
+    // count each concept ONCE for this pub (the union below is the correctness
+    // crux: a pub tagged by two descriptors in the same subtree must count 1, not
+    // 2). Only runs when the ETL passed the ancestor context.
+    if (subtreeAgg && meshAncestors) {
+      const conceptsThisPub = new Set<string>();
+      for (const ui of pubMeshUis) {
+        const tns = meshAncestors.treeNumbersByUi.get(ui) ?? [];
+        for (const concept of ancestorUisFor(meshAncestors.index, ui, tns)) {
+          conceptsThisPub.add(concept);
+        }
+      }
+      for (const concept of conceptsThisPub) {
+        subtreeAgg.set(concept, (subtreeAgg.get(concept) ?? 0) + 1);
+      }
     }
   }
 
@@ -791,6 +868,14 @@ export async function buildPeopleDoc(
   // (count DESC, then label ASC). OMIT-on-empty: scholars with no MeSH on any
   // visible pub write nothing for this field (mirrors `publicationMeshUi`).
   const topMeshTerms = topMeshTermsFromCounts(topMeshAgg);
+
+  // D-exact — materialize the per-concept distinct-pub map for the People reason
+  // line. `meshSubtreeCounts[conceptUi]` = the scholar's distinct visible pubs
+  // with >= 1 descriptor in that concept's subtree (self-inclusive). The query
+  // path looks up the RESOLVED concept's UI in O(1) — no publications-index agg.
+  // OMIT-on-empty (and absent entirely when `meshAncestors` wasn't passed).
+  const meshSubtreeCounts: Record<string, number> | null =
+    subtreeAgg && subtreeAgg.size > 0 ? Object.fromEntries(subtreeAgg) : null;
 
   // Issue #233 — `hasActiveGrants` realigned onto NCE 12-month grace
   // semantics so the People-tab Activity facet, the PI facet, and the
@@ -1079,6 +1164,11 @@ export async function buildPeopleDoc(
     // with no surviving descriptor write nothing, so `_source` consumers and the
     // `terms` filter distinguish "no signal" from "[]".
     ...(publicationMeshUi.length > 0 ? { publicationMeshUi } : {}),
+    // D-exact (search reason-from-doc) — per-concept distinct-pub counts the
+    // People reason line reads at query time (O(1) lookup by resolved concept UI),
+    // taking the publications-index reason agg off the search path. OMIT-on-empty
+    // and absent unless the ETL passed the ancestor context.
+    ...(meshSubtreeCounts ? { meshSubtreeCounts } : {}),
     // Issue #310 / SPEC §6.1.5 — indexed inputs to the topic-shape sparse-profile
     // soft decay (×0.7). The decay's thresholds (overview length > 200, ≥3 AOI
     // terms) aren't expressible against the analyzed `overview` / `areasOfInterest`
