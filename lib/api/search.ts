@@ -2154,9 +2154,13 @@ export async function searchPeople(opts: {
               ...(meshDescendantUis.length > 0
                 ? {
                     tagged: {
+                      // A — the filter agg's intrinsic `doc_count` already IS the
+                      // distinct-pmid count: the publications index is one doc per
+                      // pmid (`_id = pmid`, etl/search-index/index.ts), so a
+                      // `cardinality(pmid)` sub-agg is redundant CPU. Read
+                      // `doc_count` directly below.
                       filter: { terms: { meshDescriptorUi: meshDescendantUis } },
                       aggs: {
-                        d: { cardinality: { field: "pmid" } },
                         ...(representativePub ? { top: repPubTopHits } : {}),
                       },
                     },
@@ -2170,8 +2174,9 @@ export async function searchPeople(opts: {
                     operator: "and",
                   },
                 },
+                // A — see `tagged` above: `doc_count` == distinct-pmid count for a
+                // one-doc-per-pmid index, so the cardinality sub-agg is dropped.
                 aggs: {
-                  d: { cardinality: { field: "pmid" } },
                   ...(representativePub ? { top: repPubTopHits } : {}),
                 },
               },
@@ -2187,8 +2192,8 @@ export async function searchPeople(opts: {
             byAuthor?: {
               buckets?: Array<{
                 key: string;
-                tagged?: { d?: { value?: number } } & ReasonTopHitsAgg;
-                mention?: { d?: { value?: number } } & ReasonTopHitsAgg;
+                tagged?: { doc_count?: number } & ReasonTopHitsAgg;
+                mention?: { doc_count?: number } & ReasonTopHitsAgg;
               }>;
             };
           };
@@ -2196,8 +2201,8 @@ export async function searchPeople(opts: {
       ).aggregations?.byAuthor?.buckets ?? [];
     for (const b of buckets) {
       reasonCounts.set(b.key, {
-        tagged: b.tagged?.d?.value ?? 0,
-        mention: b.mention?.d?.value ?? 0,
+        tagged: b.tagged?.doc_count ?? 0,
+        mention: b.mention?.doc_count ?? 0,
       });
       if (representativePub) {
         reasonReps.set(b.key, {

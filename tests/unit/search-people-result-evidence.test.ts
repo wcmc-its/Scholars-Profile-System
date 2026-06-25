@@ -235,7 +235,10 @@ const MENTION_BUCKET = [
   {
     key: "el1",
     mention: {
-      d: { value: 7 },
+      // A — the reason agg now reads the filter agg's intrinsic `doc_count`
+      // (distinct-pmid count for a one-doc-per-pmid index) instead of a
+      // redundant `cardinality(pmid)` sub-agg, so the mock carries `doc_count`.
+      doc_count: 7,
       top: {
         hits: {
           hits: [
