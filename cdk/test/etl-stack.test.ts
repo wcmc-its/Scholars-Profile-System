@@ -1335,6 +1335,22 @@ describe("EtlStack", () => {
       expect(prodNightly).toMatch(/etl:infoed/);
     });
 
+    it("includes etl:mesh-anchors in the staging nightly cadence (#1258), while prod excludes it until the soak", () => {
+      const stagingNightly = getStateMachineDefinitionText(
+        template,
+        "scholars-nightly-staging",
+      );
+      expect(stagingNightly).toMatch(/etl:mesh-anchors/);
+      // Staging-only — prod's nightly omits it so the curated lay-term anchors
+      // don't load on prod ahead of the soak (the SCORE_MIN=2 gate only stops
+      // derived rows, not curated).
+      const prodNightly = getStateMachineDefinitionText(
+        buildEtlStack("prod").template,
+        "scholars-nightly-prod",
+      );
+      expect(prodNightly).not.toMatch(/etl:mesh-anchors/);
+    });
+
     it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled + cdnReconcileScheduleEnabled + curationBackupScheduleEnabled + edEmailVisibilityBridgeEnabled all true)", () => {
       const rules = template.findResources("AWS::Events::Rule");
       // 3 cadence rules + the #595 heartbeat rule + the #393 reconciler rule +
