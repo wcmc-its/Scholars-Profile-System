@@ -23,6 +23,7 @@ import { prisma } from "@/lib/db";
 import { profilePath } from "@/lib/profile-url";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { fetchAuthorBylineForPmids, fetchWcmAuthorsForPmids } from "@/lib/api/topics";
+import { cachedReasonAgg, reasonAggKey } from "@/lib/api/reason-agg-cache";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import {
   loadFamilyOverlayGate,
@@ -922,6 +923,18 @@ export async function searchPeople(opts: {
     methodFamily?: { supercategory: string; familyLabel: string } | null;
     topics?: { slug: string; label: string }[];
   };
+  /**
+   * Scaling fix B — decouple the per-row pub-evidence reason line from the
+   * blocking People list render. When true, the publications-index reason
+   * aggregation is SKIPPED, so the hits return fast (the People index query
+   * only); the publication-count reason / `evidence.pub` is then absent and the
+   * per-hit reason falls through to method/topic/concept/areas/bio evidence —
+   * the SAME precedence, just without the agg-derived counts. The page paints
+   * the list on this fast call and streams the full reason line in a nested
+   * Suspense boundary via a second (cache-deduped) call with this OFF. Headless
+   * callers default to a full search (`false`).
+   */
+  skipReasonAgg?: boolean;
 }): Promise<PeopleSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -2112,7 +2125,13 @@ export async function searchPeople(opts: {
     matchExplain &&
     contentQuery.length > 0 &&
     pageCwids.length > 0 &&
-    runReasonAgg
+    runReasonAgg &&
+    // B — fast first paint: when the caller asked to defer the reason line, skip
+    // the inline publications-index agg entirely. `reasonCounts`/`reasonReps`
+    // stay empty, so the per-hit reason falls through to the non-pub evidence
+    // (method/topic/concept/areas/bio) with no new branches; the page streams
+    // the full reason in via a second, cache-deduped call.
+    opts.skipReasonAgg !== true
   ) {
     // Issue #967 — fetch the strongest representative pub within a reason filter:
     // most recent, then most cited. Highlight is keyed to the LITERAL query (not
@@ -2138,66 +2157,81 @@ export async function searchPeople(opts: {
         },
       },
     };
-    const aggResp = await searchClient().search({
-      index: PUBLICATIONS_INDEX,
-      body: {
-        size: 0,
-        query: { bool: { filter: [{ terms: { wcmAuthorCwids: pageCwids } }] } },
-        aggs: {
-          byAuthor: {
-            terms: { field: "wcmAuthorCwids", include: pageCwids, size: pageCwids.length },
+    // C — reason-agg result cache. This aggregation is a pure function of
+    // `[pageCwids, meshDescendantUis, contentQuery, representativePub]`, so
+    // identical concurrent/repeat requests (pagination re-renders, the same
+    // broad concept searched by several users) recompute the same buckets. The
+    // module-level TTL + stale-while-revalidate + inflight-dedup (mirroring
+    // home.ts) collapses N concurrent misses for the same key to ONE OpenSearch
+    // round-trip, shedding the load that saturates the search thread pool. The
+    // CACHED unit is the parsed `buckets` array, not the raw response.
+    type ReasonAggBucket = {
+      key: string;
+      tagged?: { doc_count?: number } & ReasonTopHitsAgg;
+      mention?: { doc_count?: number } & ReasonTopHitsAgg;
+    };
+    const buckets = await cachedReasonAgg<ReasonAggBucket[]>(
+      reasonAggKey({ pageCwids, meshDescendantUis, contentQuery, representativePub }),
+      async () => {
+        const aggResp = await searchClient().search({
+          index: PUBLICATIONS_INDEX,
+          body: {
+            size: 0,
+            query: { bool: { filter: [{ terms: { wcmAuthorCwids: pageCwids } }] } },
             aggs: {
-              // The `tagged` sub-agg needs a resolved descriptor set; OMIT it when
-              // the query resolved to no concept (`meshDescendantUis` empty — the
-              // free-text mention path), so `tagged` stays 0/absent and only
-              // `mention` is computed.
-              ...(meshDescendantUis.length > 0
-                ? {
-                    tagged: {
-                      filter: { terms: { meshDescriptorUi: meshDescendantUis } },
-                      aggs: {
-                        d: { cardinality: { field: "pmid" } },
-                        ...(representativePub ? { top: repPubTopHits } : {}),
+              byAuthor: {
+                terms: { field: "wcmAuthorCwids", include: pageCwids, size: pageCwids.length },
+                aggs: {
+                  // The `tagged` sub-agg needs a resolved descriptor set; OMIT it
+                  // when the query resolved to no concept (`meshDescendantUis`
+                  // empty — the free-text mention path), so `tagged` stays
+                  // 0/absent and only `mention` is computed.
+                  ...(meshDescendantUis.length > 0
+                    ? {
+                        tagged: {
+                          // A — the filter agg's intrinsic `doc_count` already IS
+                          // the distinct-pmid count: the publications index is one
+                          // doc per pmid (`_id = pmid`, etl/search-index/index.ts),
+                          // so a `cardinality(pmid)` sub-agg is redundant CPU. Read
+                          // `doc_count` directly below.
+                          filter: { terms: { meshDescriptorUi: meshDescendantUis } },
+                          aggs: {
+                            ...(representativePub ? { top: repPubTopHits } : {}),
+                          },
+                        },
+                      }
+                    : {}),
+                  mention: {
+                    filter: {
+                      multi_match: {
+                        query: contentQuery,
+                        fields: ["title", "abstract"],
+                        operator: "and",
                       },
                     },
-                  }
-                : {}),
-              mention: {
-                filter: {
-                  multi_match: {
-                    query: contentQuery,
-                    fields: ["title", "abstract"],
-                    operator: "and",
+                    // A — see `tagged` above: `doc_count` == distinct-pmid count
+                    // for a one-doc-per-pmid index, so the cardinality sub-agg is
+                    // dropped.
+                    aggs: {
+                      ...(representativePub ? { top: repPubTopHits } : {}),
+                    },
                   },
-                },
-                aggs: {
-                  d: { cardinality: { field: "pmid" } },
-                  ...(representativePub ? { top: repPubTopHits } : {}),
                 },
               },
             },
-          },
-        },
-      } as object,
-    });
-    const buckets =
-      (
-        aggResp.body as {
-          aggregations?: {
-            byAuthor?: {
-              buckets?: Array<{
-                key: string;
-                tagged?: { d?: { value?: number } } & ReasonTopHitsAgg;
-                mention?: { d?: { value?: number } } & ReasonTopHitsAgg;
-              }>;
-            };
-          };
-        }
-      ).aggregations?.byAuthor?.buckets ?? [];
+          } as object,
+        });
+        return (
+          aggResp.body as {
+            aggregations?: { byAuthor?: { buckets?: ReasonAggBucket[] } };
+          }
+        ).aggregations?.byAuthor?.buckets ?? [];
+      },
+    );
     for (const b of buckets) {
       reasonCounts.set(b.key, {
-        tagged: b.tagged?.d?.value ?? 0,
-        mention: b.mention?.d?.value ?? 0,
+        tagged: b.tagged?.doc_count ?? 0,
+        mention: b.mention?.doc_count ?? 0,
       });
       if (representativePub) {
         reasonReps.set(b.key, {

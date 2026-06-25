@@ -10,7 +10,7 @@ import { JournalFacet } from "@/components/search/journal-facet";
 import { AuthorFacet } from "@/components/search/author-facet";
 import { MeshOnlyToggle } from "@/components/search/mesh-only-toggle";
 import { ExportButton } from "@/components/search/export-button";
-import { PeopleResultCard } from "@/components/search/people-result-card";
+import { PeopleResultCardStreamed } from "@/components/search/people-result-card-streamed";
 import { PublicationResultRow } from "@/components/search/publication-result-row";
 import { ResultsGridFallback } from "@/components/search/result-skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -392,9 +392,18 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // The bare `.catch(() => {})` marks the promise handled so an early rejection
   // (before the Suspense child attaches its await) can't surface as an unhandled
   // rejection; the awaiting result component still receives the real value/error.
-  const activePeoplePromise =
+  // Scaling fix B — the per-row reason line ("N publications tagged …") is built
+  // by a SECOND OpenSearch agg over the 178k-doc pub index that, for broad
+  // concepts × prolific scholars, tails to 5–9s under load and blocks the
+  // streamed People list. Decouple it: the list paints on a fast call that SKIPS
+  // the reason agg (`skipReasonAgg`), and the full reason streams into the cards
+  // from a separate promise resolved in a nested Suspense boundary (`use()` in
+  // the card). The split only matters when `matchExplain` is on (otherwise no
+  // reason agg runs and `skipReasonAgg` is a no-op).
+  const peopleMatchExplain = resolvePeopleMatchExplain();
+  const peopleSearchOpts =
     type === "people"
-      ? searchPeople({
+      ? {
           q,
           page,
           sort: sort as PeopleSort,
@@ -417,14 +426,38 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           contentQuery,
           matchProvenance: resolvePeopleMatchProvenance(),
           meshDescriptorName: taxonomyMatch.meshResolution?.name,
-          matchExplain: resolvePeopleMatchExplain(),
+          matchExplain: peopleMatchExplain,
           // Issue #967 — representative matching publication in the reason line.
           representativePub: resolvePeopleSnippetRepresentativePub(),
           // #824 follow-up — match-aware snippet context (resolved method family +
           // matched topics) derived from the already-resolved taxonomyMatch. Inert
           // unless SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on (searchPeople gates it).
           matchAwareContext: buildMatchAwareContext(taxonomyMatch),
-        })
+        }
+      : null;
+  const activePeoplePromise =
+    peopleSearchOpts !== null
+      ? searchPeople({ ...peopleSearchOpts, skipReasonAgg: peopleMatchExplain })
+      : null;
+  // The streamed reason map (cwid → reason/evidence). Only built when the reason
+  // line was deferred above. The agg here is deduped/cached (scaling fix C), so
+  // the second call's only extra cost is the fast People-index query. NOT awaited
+  // on the critical path — passed to the cards and unwrapped via `use()` so the
+  // list never blocks on it. `.catch` keeps an early rejection from surfacing as
+  // unhandled; the card's `use()` still sees the resolved value (empty on error).
+  const activePeopleReasonPromise =
+    peopleSearchOpts !== null && peopleMatchExplain
+      ? searchPeople({ ...peopleSearchOpts, skipReasonAgg: false })
+          .then(
+            (r) =>
+              new Map(
+                r.hits.map((h) => [
+                  h.cwid,
+                  { matchReason: h.matchReason, evidence: h.evidence },
+                ]),
+              ),
+          )
+          .catch(() => new Map<string, PeopleReasonPatch>())
       : null;
   const activePubsPromise =
     type === "publications"
@@ -716,6 +749,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 concept={concept}
                 scopeHrefs={scopeHrefs}
                 resultPromise={activePeoplePromise!}
+                reasonPromise={activePeopleReasonPromise}
               />
             )}
           </React.Suspense>
@@ -884,6 +918,15 @@ function ModeTab({
  * ============================================================ */
 type PeopleResultData = Awaited<ReturnType<typeof searchPeople>>;
 type PubsResultData = Awaited<ReturnType<typeof searchPublications>>;
+// Scaling fix B — the deferred per-row reason patch streamed into the cards. The
+// list paints without it; the card's `use()` overlays it when the promise
+// resolves. Carries both the legacy `matchReason` and the `evidence.pub` reason
+// so the card patches whichever path is active (ResultEvidence vs legacy).
+type PeopleReasonPatch = {
+  matchReason: PeopleResultData["hits"][number]["matchReason"];
+  evidence: PeopleResultData["hits"][number]["evidence"];
+};
+type PeopleReasonMap = Map<string, PeopleReasonPatch>;
 
 // Module-level TTL cache for the dept/div/center reference rows (B5). The three
 // tables are tiny (~80 near-static rows) and change only on a nightly ETL
@@ -972,6 +1015,7 @@ async function PeopleResults({
   concept,
   scopeHrefs,
   resultPromise,
+  reasonPromise,
 }: {
   q: string;
   page: number;
@@ -985,8 +1029,14 @@ async function PeopleResults({
   concept: ConceptInfo | null;
   scopeHrefs: Record<Scope, string>;
   /** Perf streaming — the active full search, awaited here so this component
-   *  suspends and the page shell (header + tabs + counts) paints first. */
+   *  suspends and the page shell (header + tabs + counts) paints first. This
+   *  call SKIPS the reason agg (scaling fix B), so the list paints fast. */
   resultPromise: Promise<PeopleResultData>;
+  /** Scaling fix B — the deferred reason map (cwid → reason/evidence patch),
+   *  NOT awaited here. Passed to each card and unwrapped client-side via `use()`
+   *  inside a nested Suspense, so the slow reason line streams in after the list
+   *  paints. Null when `matchExplain` is off (no reason line to defer). */
+  reasonPromise: Promise<PeopleReasonMap> | null;
 }) {
   // Overlap the search round-trip with the dept/div label lookup.
   const [result, deptDivLabelMap] = await Promise.all([
@@ -1154,12 +1204,13 @@ async function PeopleResults({
           <ul className="flex flex-col">
             {result.hits.map((h, i) => (
               <li key={h.cwid}>
-                <PeopleResultCard
+                <PeopleResultCardStreamed
                   hit={h}
                   position={page * result.pageSize + i}
                   q={q}
                   total={result.total}
                   filters={{ deptDiv, personType, activity }}
+                  reasonPromise={reasonPromise}
                 />
               </li>
             ))}

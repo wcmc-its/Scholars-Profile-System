@@ -235,7 +235,10 @@ const MENTION_BUCKET = [
   {
     key: "el1",
     mention: {
-      d: { value: 7 },
+      // A — the reason agg now reads the filter agg's intrinsic `doc_count`
+      // (distinct-pmid count for a one-doc-per-pmid index) instead of a
+      // redundant `cardinality(pmid)` sub-agg, so the mock carries `doc_count`.
+      doc_count: 7,
       top: {
         hits: {
           hits: [
@@ -327,5 +330,28 @@ describe("searchPeople — free-text publications:mention evidence (#1)", () => 
     // No resolved descriptor ⇒ only `mention` is computed; `tagged` is absent.
     expect("tagged" in byAuthorAggs).toBe(false);
     expect("mention" in byAuthorAggs).toBe(true);
+  });
+
+  // Scaling fix B — `skipReasonAgg` defers the per-row reason line so the People
+  // list can paint without blocking on the slow publications-index agg. The fast
+  // call must NOT issue the agg, yet still return the hits.
+  it("skipReasonAgg true ⇒ NO publications-index reason agg, hits still returned", async () => {
+    process.env[EVIDENCE] = "on";
+    mockReasonAgg.mockReturnValue(MENTION_BUCKET);
+    const result = await searchPeople({
+      q: "16s rna",
+      relevanceMode: "v3",
+      matchExplain: true,
+      representativePub: true,
+      matchAwareContext: { methodFamily: null, topics: [] },
+      skipReasonAgg: true,
+    });
+    // The deferred fast path skips the publications-index round-trip entirely.
+    expect(
+      mockSearch.mock.calls.some(([a]) => (a as { index?: string })?.index === PUBLICATIONS_INDEX),
+    ).toBe(false);
+    // The list still gets its hits (the reason line streams in separately).
+    expect(result.hits.length).toBe(1);
+    expect(result.hits[0].cwid).toBe("el1");
   });
 });
