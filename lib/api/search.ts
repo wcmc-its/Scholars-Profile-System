@@ -465,14 +465,14 @@ export async function fetchKeyPaper(args: {
   descriptorUis: string[];
   /** The literal query, for the `<mark>` highlight and the free-text fallback filter. */
   contentQuery: string;
-}): Promise<RepresentativePub | undefined> {
+}): Promise<RepresentativePub[]> {
   const cwid = args.cwid?.trim();
   const contentQuery = args.contentQuery?.trim() ?? "";
   const descriptorUis = args.descriptorUis ?? [];
-  if (!cwid) return undefined;
+  if (!cwid) return [];
   // Need at least one way to identify a relevant pub: a resolved concept subtree
   // OR a literal query to scan. Neither ⇒ nothing to fetch.
-  if (descriptorUis.length === 0 && contentQuery.length === 0) return undefined;
+  if (descriptorUis.length === 0 && contentQuery.length === 0) return [];
 
   // The match predicate: the concept subtree when resolved, else the literal scan.
   const matchFilter =
@@ -494,11 +494,11 @@ export async function fetchKeyPaper(args: {
     descriptorUis.length > 0 ? [...descriptorUis].sort() : `q:${contentQuery}`,
   ]);
 
-  return cachedReasonAgg<RepresentativePub | undefined>(cacheKey, async () => {
+  return cachedReasonAgg<RepresentativePub[]>(cacheKey, async () => {
     const resp = await searchClient().search({
       index: PUBLICATIONS_INDEX,
       body: {
-        size: 1,
+        size: 3,
         _source: ["pmid", "title", "year"],
         query: {
           bool: {
@@ -528,9 +528,10 @@ export async function fetchKeyPaper(args: {
     });
     const hits =
       (resp.body as { hits?: { hits?: unknown[] } }).hits?.hits ?? [];
-    // Reuse the #967 single-hit parser by shaping the search hit into the same
-    // `{ top: { hits: { hits } } }` envelope it expects.
-    return parseReasonTopHit({ top: { hits: { hits: hits as never } } });
+    // Reuse the rep-papers array parser by shaping the search hits into the same
+    // `{ top: { hits: { hits } } }` envelope it expects. Up to 3, recency-first
+    // then citations (the query sort), so the disclosure shows the top papers.
+    return parseReasonTopHits({ top: { hits: { hits: hits as never } } }, 3);
   });
 }
 
