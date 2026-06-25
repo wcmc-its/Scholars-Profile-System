@@ -10,7 +10,10 @@ import { JournalFacet } from "@/components/search/journal-facet";
 import { AuthorFacet } from "@/components/search/author-facet";
 import { MeshOnlyToggle } from "@/components/search/mesh-only-toggle";
 import { ExportButton } from "@/components/search/export-button";
-import { PeopleResultCardStreamed } from "@/components/search/people-result-card-streamed";
+import {
+  PeopleResultCardStreamed,
+  type KeyPaperConfig,
+} from "@/components/search/people-result-card-streamed";
 import { PublicationResultRow } from "@/components/search/publication-result-row";
 import { ResultsGridFallback } from "@/components/search/result-skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -466,6 +469,22 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           )
           .catch(() => new Map<string, PeopleReasonPatch>())
       : null;
+  // Search reason-from-doc (lazy key papers, §5) — the config the streamed card
+  // needs to fetch a concept-tagged key paper on viewport-enter. Enabled only
+  // when the doc-sourced reason path is on (the inline rep-pub serves the key
+  // paper otherwise). `descriptorUis` is the SAME concept subtree the count used;
+  // `contentQuery` drives the `<mark>` highlight + the free-text fallback. Plain
+  // serializable object handed to the client card; no promise / no extra query
+  // here — the card fetches per-card, off the critical path.
+  const keyPaperConfig =
+    peopleSearchOpts !== null && peopleMatchExplain && resolvePeopleReasonFromDoc()
+      ? {
+          descriptorUis: meshOff
+            ? []
+            : (taxonomyMatch.meshResolution?.descendantUis ?? []),
+          contentQuery,
+        }
+      : null;
   const activePubsPromise =
     type === "publications"
       ? searchPublications({
@@ -757,6 +776,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 scopeHrefs={scopeHrefs}
                 resultPromise={activePeoplePromise!}
                 reasonPromise={activePeopleReasonPromise}
+                keyPaperConfig={keyPaperConfig}
               />
             )}
           </React.Suspense>
@@ -1023,6 +1043,7 @@ async function PeopleResults({
   scopeHrefs,
   resultPromise,
   reasonPromise,
+  keyPaperConfig,
 }: {
   q: string;
   page: number;
@@ -1044,6 +1065,9 @@ async function PeopleResults({
    *  inside a nested Suspense, so the slow reason line streams in after the list
    *  paints. Null when `matchExplain` is off (no reason line to defer). */
   reasonPromise: Promise<PeopleReasonMap> | null;
+  /** Search reason-from-doc (lazy key papers) — the per-card lazy key-paper
+   *  config, or null when the doc-sourced reason path is off. */
+  keyPaperConfig: KeyPaperConfig | null;
 }) {
   // Overlap the search round-trip with the dept/div label lookup.
   const [result, deptDivLabelMap] = await Promise.all([
@@ -1218,6 +1242,7 @@ async function PeopleResults({
                   total={result.total}
                   filters={{ deptDiv, personType, activity }}
                   reasonPromise={reasonPromise}
+                  keyPaperConfig={keyPaperConfig}
                 />
               </li>
             ))}

@@ -379,15 +379,6 @@ export function parseReasonTopHits(
 }
 
 /**
- * PLAN R4 / #967 — the per-scholar reason line. Strongest signal first:
- * pub-evidence count (tagged → mention) then the resolved-concept fallback.
- * When `rep` carries a representative pub for the firing pub-evidence branch
- * (`SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB`), it rides along as `pub`. The
- * concept fallback never carries a pub. Pure — extracted so the precedence and
- * the count cap (`Math.min(count, pubCount)`) are unit-testable without a live
- * cluster.
- */
-/**
  * Search reason-from-doc — the doc-sourced TAGGED count. Reads the resolved root
  * concept's precomputed distinct-pub count out of a people hit's
  * `_source.meshSubtreeCounts` map (an O(1) lookup that replaces the
@@ -406,6 +397,15 @@ export function taggedCountFromDoc(
   return typeof n === "number" && n > 0 ? n : 0;
 }
 
+/**
+ * PLAN R4 / #967 — the per-scholar reason line. Strongest signal first:
+ * pub-evidence count (tagged → mention) then the resolved-concept fallback.
+ * When `rep` carries a representative pub for the firing pub-evidence branch
+ * (`SEARCH_PEOPLE_SNIPPET_REPRESENTATIVE_PUB`), it rides along as `pub`. The
+ * concept fallback never carries a pub. Pure — extracted so the precedence and
+ * the count cap (`Math.min(count, pubCount)`) are unit-testable without a live
+ * cluster.
+ */
 export function composeMatchReason(args: {
   counts: { tagged: number; mention: number } | undefined;
   rep: { tagged?: RepresentativePub; mention?: RepresentativePub } | undefined;
@@ -430,6 +430,99 @@ export function composeMatchReason(args: {
   if (hasProvenance)
     return { icon: "concept", text: `via related concept ${provenanceParent}` };
   return undefined;
+}
+
+/**
+ * Search reason-from-doc (lazy key papers, §5) — fetch the single concept-tagged,
+ * `<mark>`-highlighted representative publication for ONE scholar, on demand.
+ *
+ * This replaces the old up-front batched `top_hits` over all 20 page authors:
+ * with the count now served from the people doc (D-exact), the initial concept
+ * render issues NO publications-index query; the key paper is fetched only for the
+ * cards the user actually views (the streamed card calls this on viewport-enter /
+ * expand), so a handful of tiny size-1 searches replace one 20-bucket aggregation.
+ *
+ * Scoped to one scholar via `wcmAuthorCwids`, filtered to the resolved concept's
+ * descendant set when present (the SAME subtree the count used), highlighting the
+ * literal `contentQuery` exactly like the inline rep-pub did. Returns the same
+ * `RepresentativePub` shape so the card patches it straight into the reason line.
+ * Deduped + TTL-cached by `(cwid, concept|contentQuery)` so re-views / re-searches
+ * are free; off the critical path, so a slow / failed fetch degrades to "no key
+ * paper," never a blocked render.
+ */
+export async function fetchKeyPaper(args: {
+  cwid: string;
+  /** The resolved concept's descendant UIs (the count's subtree); empty for a free-text-only query. */
+  descriptorUis: string[];
+  /** The literal query, for the `<mark>` highlight and the free-text fallback filter. */
+  contentQuery: string;
+}): Promise<RepresentativePub | undefined> {
+  const cwid = args.cwid?.trim();
+  const contentQuery = args.contentQuery?.trim() ?? "";
+  const descriptorUis = args.descriptorUis ?? [];
+  if (!cwid) return undefined;
+  // Need at least one way to identify a relevant pub: a resolved concept subtree
+  // OR a literal query to scan. Neither ⇒ nothing to fetch.
+  if (descriptorUis.length === 0 && contentQuery.length === 0) return undefined;
+
+  // The match predicate: the concept subtree when resolved, else the literal scan.
+  const matchFilter =
+    descriptorUis.length > 0
+      ? { terms: { meshDescriptorUi: descriptorUis } }
+      : {
+          multi_match: {
+            query: contentQuery,
+            fields: ["title", "abstract"],
+            operator: "and" as const,
+          },
+        };
+
+  // Cache key — the concept (stable across literal phrasing) when resolved, else
+  // the literal query. Distinct namespace from the page-level reason-agg keys.
+  const cacheKey = JSON.stringify([
+    "key-paper",
+    cwid,
+    descriptorUis.length > 0 ? [...descriptorUis].sort() : `q:${contentQuery}`,
+  ]);
+
+  return cachedReasonAgg<RepresentativePub | undefined>(cacheKey, async () => {
+    const resp = await searchClient().search({
+      index: PUBLICATIONS_INDEX,
+      body: {
+        size: 1,
+        _source: ["pmid", "title", "year"],
+        query: {
+          bool: {
+            filter: [{ term: { wcmAuthorCwids: cwid } }, matchFilter],
+          },
+        },
+        sort: [
+          { year: { order: "desc", missing: "_last" } },
+          { citationCount: { order: "desc", missing: "_last" } },
+        ],
+        // Highlight is keyed to the LITERAL query (not the concept filter), so a
+        // descriptor-tagged title with no literal term highlights nothing and the
+        // card renders plain text — identical to the inline rep-pub behavior.
+        ...(contentQuery.length > 0
+          ? {
+              highlight: {
+                fields: { title: { number_of_fragments: 0 } },
+                highlight_query: {
+                  multi_match: { query: contentQuery, fields: ["title"], operator: "or" },
+                },
+                pre_tags: ["<mark>"],
+                post_tags: ["</mark>"],
+              },
+            }
+          : {}),
+      } as object,
+    });
+    const hits =
+      (resp.body as { hits?: { hits?: unknown[] } }).hits?.hits ?? [];
+    // Reuse the #967 single-hit parser by shaping the search hit into the same
+    // `{ top: { hits: { hits } } }` envelope it expects.
+    return parseReasonTopHit({ top: { hits: { hits: hits as never } } });
+  });
 }
 
 /**
