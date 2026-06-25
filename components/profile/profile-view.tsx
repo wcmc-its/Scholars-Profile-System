@@ -169,6 +169,15 @@ export async function ProfileView({ slug }: { slug: string }) {
                   {profile.primaryTitle}
                 </div>
               ) : null}
+              {/* #1266 — leadership roles (Chair / Chief / Center Director /
+                  Program Leader) beneath the academic rank; empty for scholars
+                  who hold none. `?? []` guards loosely-typed / older cached
+                  payloads that predate this field. */}
+              {(profile.leadershipTitles ?? []).map((t) => (
+                <div key={t} className="mt-0.5 text-sm text-zinc-700 dark:text-zinc-300">
+                  {t}
+                </div>
+              ))}
               {profile.primaryDepartment ? (
                 <div className="text-muted-foreground mt-2 text-sm">
                   {/* Issue #167 — render "<Division> (<Department>)" when the
