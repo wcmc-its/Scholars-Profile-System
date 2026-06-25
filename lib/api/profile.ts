@@ -8,6 +8,7 @@
  */
 import { cache } from "react";
 import { prisma } from "@/lib/db";
+import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import {
   getEffectiveOverview,
   getSelectedHighlightPmids,
@@ -1303,6 +1304,32 @@ export async function getScholarOgData(slug: string): Promise<{
     },
   });
   return row ?? null;
+}
+
+/**
+ * Schema.org Person JSON-LD for a loaded profile. Single source of truth for
+ * the field mapping — consumed by the on-page <script type="application/ld+json">
+ * (components/profile/profile-view.tsx) and the standalone `/{slug}/jsonld`
+ * endpoint (app/(public)/[slug]/jsonld/route.ts) so the two can't drift.
+ */
+export function buildProfileJsonLd(
+  profile: ProfilePayload,
+): Record<string, unknown> {
+  return buildPersonJsonLd({
+    slug: profile.slug,
+    preferredName: profile.publishedName,
+    primaryTitle: profile.primaryTitle ?? null,
+    primaryDepartment: profile.primaryDepartment ?? null,
+    overview: profile.overview ?? null,
+    identityImageEndpoint: profile.identityImageEndpoint,
+    clinicalProfileUrl: profile.clinicalProfileUrl ?? null,
+    orcid: profile.orcid ?? null,
+    keywords: profile.keywords.keywords,
+    // #684 — bare (postnominal-free) name drives givenName/familyName +
+    // alternateName; the postnominal becomes honorificSuffix.
+    nameParts: profile.preferredName,
+    honorificSuffix: profile.postnominal ?? null,
+  });
 }
 
 /**
