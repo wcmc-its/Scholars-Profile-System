@@ -2138,7 +2138,21 @@ export async function searchPeople(opts: {
         },
       },
     };
-    const aggResp = await searchClient().search({
+    // Perf / #search-hang — this reason line is built by a SECOND
+    // publications-index request (a cardinality + optional top_hits per page
+    // author, scoped by the resolved concept's descendant set). For a broad MeSH
+    // concept ("Aging" et al.) the descendant set is huge, so the tagged
+    // cardinality tails to 5-9s under load and holds the streamed People render
+    // past the #1017 7s nav watchdog (the search-page hang). These counts are
+    // presentation-only ("N publications" reason line) — no effect on the result
+    // set or ranking — so we cap the request wall-time: on timeout (or any
+    // transport error) we skip the counts and the People list still paints,
+    // composeMatchReason degrading to no count. ponytail: a wall-time cap, not a
+    // per-query heuristic — calibrated below the fast-case render (~0.7s) and
+    // above it for the pathological one; tune via SEARCH_PEOPLE_REASON_AGG_TIMEOUT_MS.
+    const reasonAggTimeoutMs =
+      Number(process.env.SEARCH_PEOPLE_REASON_AGG_TIMEOUT_MS) || 1200;
+    const reasonAggRequest = {
       index: PUBLICATIONS_INDEX,
       body: {
         size: 0,
@@ -2179,21 +2193,36 @@ export async function searchPeople(opts: {
           },
         },
       } as object,
-    });
-    const buckets =
-      (
-        aggResp.body as {
-          aggregations?: {
-            byAuthor?: {
-              buckets?: Array<{
-                key: string;
-                tagged?: { d?: { value?: number } } & ReasonTopHitsAgg;
-                mention?: { d?: { value?: number } } & ReasonTopHitsAgg;
-              }>;
+    };
+    let buckets: Array<{
+      key: string;
+      tagged?: { d?: { value?: number } } & ReasonTopHitsAgg;
+      mention?: { d?: { value?: number } } & ReasonTopHitsAgg;
+    }> = [];
+    try {
+      const aggResp = await searchClient().search(reasonAggRequest, {
+        requestTimeout: reasonAggTimeoutMs,
+        maxRetries: 0,
+      });
+      buckets =
+        (
+          aggResp.body as {
+            aggregations?: {
+              byAuthor?: {
+                buckets?: Array<{
+                  key: string;
+                  tagged?: { d?: { value?: number } } & ReasonTopHitsAgg;
+                  mention?: { d?: { value?: number } } & ReasonTopHitsAgg;
+                }>;
+              };
             };
-          };
-        }
-      ).aggregations?.byAuthor?.buckets ?? [];
+          }
+        ).aggregations?.byAuthor?.buckets ?? [];
+    } catch {
+      // Timeout (or any transport error) on a presentation-only agg → skip the
+      // counts; the People list, totals, and ranking are unaffected.
+      buckets = [];
+    }
     for (const b of buckets) {
       reasonCounts.set(b.key, {
         tagged: b.tagged?.d?.value ?? 0,
