@@ -1477,11 +1477,12 @@ export async function searchPeople(opts: {
   // clause. Wrap it in a should that ALSO admits concept-tagged docs. A
   // concept-only doc (no lexical hit) scores ONLY this terms clause's constant
   // boost (MESH_ADMIT_WEIGHT[tier]); a genuine lexical hit scores BM25 over the
-  // high-evidence topic fields (publicationTitles^6, publicationMesh^4, …),
-  // which empirically runs well above the admit boosts (entry 0.7 … exact 3),
-  // so lexical sorts on top and the admit weights only order the concept-only
-  // tail by match-type trust (see docs/search-recall.md; the runtime order
-  // check is the gate). `must`, the facet aggs, and the count-only body all
+  // high-evidence topic fields (publicationTitles^6, publicationMesh^4, …).
+  // #1254 — the admit weights live in a sub-BM25 band (exact 0.1 … partial 0.01,
+  // see lib/search.ts) chosen so a concept-only doc cannot outrank a lexical hit
+  // even after the #513 prominence multiply; the weights only order the
+  // concept-only tail by match-type trust (see docs/search-recall.md; the runtime
+  // order check is the gate). `must`, the facet aggs, and the count-only body all
   // reference queryBranch, so this single mutation is reflected in every body
   // that carries the topic clause — the count-only badge and the full search
   // share the admitted set however the gate was sourced.

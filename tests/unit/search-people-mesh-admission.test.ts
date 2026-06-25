@@ -69,7 +69,7 @@ vi.mock("@/lib/search", () => ({
   PEOPLE_PROMINENCE_GRANT_WEIGHT: 0.5,
   PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE: "full_time_faculty",
   PUBLICATION_FIELD_BOOSTS: ["title^1"],
-  MESH_ADMIT_WEIGHT: { exact: 3, "anchored-entry": 1.5, entry: 0.7 },
+  MESH_ADMIT_WEIGHT: { exact: 0.1, "anchored-entry": 0.05, entry: 0.03 },
   MESH_ATTRIBUTION_WEIGHT: { exact: 1.5, "anchored-entry": 1.3, entry: 1.15 },
   MESH_ESCALATION_THRESHOLD: 50,
   MESH_MIN_MATCHED_FORM_LEN: 4,
@@ -261,7 +261,7 @@ describe("people-index MeSH concept admission — SPEC #726", () => {
       const wrapped = (must[0] as { bool: { minimum_should_match: number } }).bool;
       expect(wrapped.minimum_should_match).toBe(1);
       expect(admissionTerms(fullBody())).toEqual({
-        terms: { publicationMeshUi: DESCENDANTS, boost: 3 }, // exact admit weight
+        terms: { publicationMeshUi: DESCENDANTS, boost: 0.1 }, // exact admit weight
       });
     });
 
@@ -274,7 +274,7 @@ describe("people-index MeSH concept admission — SPEC #726", () => {
         meshMatchedFormLength: 7,
       });
       expect(admissionTerms(fullBody())).toEqual({
-        terms: { publicationMeshUi: DESCENDANTS, boost: 0.7 },
+        terms: { publicationMeshUi: DESCENDANTS, boost: 0.03 },
       });
     });
   });
@@ -332,7 +332,7 @@ describe("people-index MeSH concept admission — SPEC #726", () => {
       // The floor guards on ambiguity/length, never on anchor status — so an
       // unanchored entry-term on an empty page is exactly the case we admit.
       expect(admissionTerms(fullBody())).toEqual({
-        terms: { publicationMeshUi: DESCENDANTS, boost: 0.7 },
+        terms: { publicationMeshUi: DESCENDANTS, boost: 0.03 },
       });
     });
   });
@@ -371,7 +371,7 @@ describe("people-index MeSH concept admission — SPEC #726", () => {
       // The size:0 badge query (built AFTER the escalation mutation) counts the
       // same admitted predicate the full list would return.
       expect(admissionInMust(topicMustFromCount(countOnlyBody()))).toEqual({
-        terms: { publicationMeshUi: DESCENDANTS, boost: 3 },
+        terms: { publicationMeshUi: DESCENDANTS, boost: 0.1 },
       });
     });
 
