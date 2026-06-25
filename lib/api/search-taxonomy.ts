@@ -923,7 +923,16 @@ function getOrComputeDescendants(
 
 /**
  * Issue #259 / §5.4.2. Synchronously compute `[self, ...descendants]` from
- * the prefix index. Result invariants:
+ * the prefix index. This is the DOWNWARD tree-number walk (descriptors whose
+ * tree numbers are prefixed BY this concept's). Its UPWARD counterpart — a
+ * descriptor's ANCESTOR concepts (whose tree numbers PREFIX it) — lives in the
+ * dependency-free `@/lib/mesh-tree-ancestors`, shared with the people-doc ETL
+ * builder. The two directions use distinct index shapes (this one's sorted
+ * parallel-array prefix scan vs. the ancestor module's tree-number→UI map), so
+ * they are deliberately NOT merged; the shared contract is the dot-segment
+ * prefix semantics (`startsWith(`${tn}.`)`), kept identical in both.
+ *
+ * Result invariants:
  *   - First element is always `ui`.
  *   - Subsequent elements are descendant UIs in tree-number-walk order,
  *     deduped (a descendant reachable via two of `ui`'s tree numbers
