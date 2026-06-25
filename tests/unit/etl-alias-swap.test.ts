@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  cleanStaleNextVersion,
   DEFAULT_RETENTION,
   nextVersionName,
   pruneOldVersions,
@@ -275,6 +276,59 @@ describe("pruneOldVersions", () => {
   });
 });
 
+describe("cleanStaleNextVersion (orphaned-index guard)", () => {
+  it("is a no-op when the next-version index does not exist", async () => {
+    const { client, calls } = makeMockClient({ exists: false });
+    await cleanStaleNextVersion(
+      client as never,
+      "scholars-people",
+      "scholars-people-v4",
+    );
+    // Common path: only the existence probe runs; no alias re-read, no delete.
+    expect(calls.find((c) => c.method === "indices.delete")).toBeUndefined();
+    expect(calls.find((c) => c.method === "indices.getAlias")).toBeUndefined();
+  });
+
+  it("deletes a genuine orphan when the alias points at a different version", async () => {
+    const { client, calls } = makeMockClient({
+      exists: true,
+      getAlias: {
+        statusCode: 200,
+        body: { "scholars-people-v3": { aliases: { "scholars-people": {} } } },
+      },
+    });
+    await cleanStaleNextVersion(
+      client as never,
+      "scholars-people",
+      "scholars-people-v4",
+    );
+    const deletes = calls
+      .filter((c) => c.method === "indices.delete")
+      .map((c) => (c.args as { index: string }).index);
+    expect(deletes).toEqual(["scholars-people-v4"]);
+  });
+
+  // Load-bearing regression test: a blind delete would NOT throw and WOULD
+  // delete v4 -- which is the live alias target here, i.e. a search outage.
+  it("aborts (throws) and does NOT delete when the stale index is the live alias target", async () => {
+    const { client, calls } = makeMockClient({
+      exists: true,
+      getAlias: {
+        statusCode: 200,
+        body: { "scholars-people-v4": { aliases: { "scholars-people": {} } } },
+      },
+    });
+    await expect(
+      cleanStaleNextVersion(
+        client as never,
+        "scholars-people",
+        "scholars-people-v4",
+      ),
+    ).rejects.toThrow(/current target|concurrent/i);
+    expect(calls.find((c) => c.method === "indices.delete")).toBeUndefined();
+  });
+});
+
 describe("rebuildAliasedIndex", () => {
   it("orchestrates create -> fill -> swap -> prune in order", async () => {
     const { client, calls } = makeMockClient({
@@ -387,5 +441,43 @@ describe("rebuildAliasedIndex", () => {
       .filter((c) => c.method === "indices.delete")
       .map((c) => (c.args as { index: string }).index);
     expect(deletes).toContain("scholars-people-v3");
+  });
+
+  it("aborts before create() when the next-version index is already the live alias target", async () => {
+    const { client, calls } = makeMockClient({ exists: true });
+    // Top-of-rebuild reads alias -> v3 (so newIndex = v4); the guard's re-read
+    // sees alias -> v4, i.e. a concurrent reindex swapped it in between the two
+    // reads. A blind delete here would wipe the live target (search outage).
+    const topRead = {
+      statusCode: 200,
+      body: { "scholars-people-v3": { aliases: { "scholars-people": {} } } },
+    };
+    const guardReread = {
+      statusCode: 200,
+      body: { "scholars-people-v4": { aliases: { "scholars-people": {} } } },
+    };
+    let seen = false;
+    client.indices.getAlias = async (args: unknown) => {
+      calls.push({ method: "indices.getAlias", args });
+      const resp = seen ? guardReread : topRead;
+      seen = true;
+      return resp;
+    };
+
+    await expect(
+      rebuildAliasedIndex({
+        client: client as never,
+        alias: "scholars-people",
+        mapping: { settings: {} },
+        fillFn: async () => 1,
+      }),
+    ).rejects.toThrow(/current target|concurrent/i);
+
+    // Must NOT delete the live target, and must NOT have created (aborted first).
+    const deletes = calls
+      .filter((c) => c.method === "indices.delete")
+      .map((c) => (c.args as { index: string }).index);
+    expect(deletes).not.toContain("scholars-people-v4");
+    expect(calls.find((c) => c.method === "indices.create")).toBeUndefined();
   });
 });
