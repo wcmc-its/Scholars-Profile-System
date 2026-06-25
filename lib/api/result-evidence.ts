@@ -372,8 +372,11 @@ export function bioCoversQuery(bioHighlight: string, query: string): boolean {
 export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
   const nameKind = input.nameHighlight ? classifyNameHighlight(input.nameHighlight) : null;
 
-  // 1 — name (strongest)
-  if (nameKind === "name") return { kind: "name", html: input.nameHighlight! };
+  // 1 — name: intentionally NOT surfaced as a snippet (#1267). The card already
+  // prints the scholar's name as its heading, so a name-kind snippet just repeats
+  // it — useless to a searcher. A name-only match falls through to genuinely
+  // informative evidence below (method / pub / bio / topic / identity hints), or
+  // the honest-empty line. `nameKind` is still read by the rank-7 affiliation branch.
   // 2 — method
   if (input.method) return { kind: "method", family: input.method.family, tools: input.method.tools };
   // 3 — publications, strong tier: a DIRECT subject/MeSH hit (tagged), then the
