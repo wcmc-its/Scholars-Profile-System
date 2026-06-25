@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import { SidebarCard } from "@/components/profile/sidebar-card";
 import { ContactEmailReveal } from "@/components/profile/contact-email-reveal";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
@@ -24,6 +23,7 @@ import { ProfilePubsCluster } from "@/components/profile/profile-pubs-cluster";
 import { PublicationRow } from "@/components/profile/publication-row";
 import { PublicationsSection } from "@/components/profile/publications-section";
 import {
+  buildProfileJsonLd,
   getScholarFullProfileBySlug,
   isSparseProfile,
   type ProfilePayload,
@@ -86,21 +86,7 @@ export async function ProfileView({ slug }: { slug: string }) {
     }),
   );
 
-  const jsonLd = buildPersonJsonLd({
-    slug: profile.slug,
-    preferredName: profile.publishedName,
-    primaryTitle: profile.primaryTitle ?? null,
-    primaryDepartment: profile.primaryDepartment ?? null,
-    overview: profile.overview ?? null,
-    identityImageEndpoint: profile.identityImageEndpoint,
-    clinicalProfileUrl: profile.clinicalProfileUrl ?? null,
-    orcid: profile.orcid ?? null,
-    keywords: profile.keywords.keywords,
-    // #684 — bare (postnominal-free) name drives givenName/familyName +
-    // alternateName; the postnominal becomes honorificSuffix.
-    nameParts: profile.preferredName,
-    honorificSuffix: profile.postnominal ?? null,
-  });
+  const jsonLd = buildProfileJsonLd(profile);
 
   const sparse = isSparseProfile(profile);
   const activeAppointments = profile.appointments.filter((a) => a.isActive);
