@@ -181,6 +181,54 @@ export async function pruneOldVersions(
 }
 
 /**
+ * Defend against the orphaned-index trap before `indices.create`. A prior
+ * rebuild that was killed (SIGKILL / OOM / task timeout, or whose own
+ * catch-block delete itself failed) AFTER `create` but BEFORE the alias
+ * swapped leaves `newIndex` on disk while the alias still points at the prior
+ * version. The next run reads the same alias target, recomputes the SAME
+ * `nextVersionName`, and `create` throws `resource_already_exists_exception`
+ * -- OUTSIDE rebuildAliasedIndex's try/catch -- bricking every subsequent
+ * rebuild until an operator deletes the orphan by hand.
+ *
+ * We delete the stale index so `create` can proceed. But a BLIND delete is
+ * unsafe under a concurrent reindex: two processes that both read the alias at
+ * v{N} both target v{N+1}, so if the other process already created, filled and
+ * SWAPPED the alias onto v{N+1} between this run's top-of-rebuild
+ * `resolveAliasState` and here, the index we see is not an orphan -- it is the
+ * LIVE alias target, and deleting it points the alias at a tombstone (full
+ * search outage).
+ *
+ * Guard: re-read the alias's CURRENT target immediately before deleting (not
+ * the possibly-stale `state` captured at the top of rebuildAliasedIndex). If
+ * the stale index IS the live target, abort loudly -- a concurrent reindex is
+ * mid-flight -- rather than delete it. The re-read narrows the TOCTOU window to
+ * the two adjacent client calls below; it cannot be fully closed without a
+ * cross-process lock, but the rebuild is a single scheduled job so concurrent
+ * reindexes are already rare, and the narrowed window is the accepted residual.
+ */
+export async function cleanStaleNextVersion(
+  client: Client,
+  alias: string,
+  newIndex: string,
+): Promise<void> {
+  const exists = await client.indices.exists({ index: newIndex });
+  if (!exists.body) return; // nothing stale -- create() proceeds cleanly
+
+  // Re-read the alias target right now; do NOT trust the caller's earlier read.
+  const liveState = await resolveAliasState(client, alias);
+  if (liveState.kind === "alias" && liveState.currentIndex === newIndex) {
+    throw new Error(
+      `[alias-swap] refusing to delete ${newIndex}: it is the CURRENT target ` +
+        `of alias ${alias} -- a concurrent reindex swapped it in. Aborting ` +
+        `rebuild to avoid pointing ${alias} at a deleted index.`,
+    );
+  }
+
+  // Genuine orphan (alias points elsewhere / is absent / is a bare index).
+  await client.indices.delete({ index: newIndex });
+}
+
+/**
  * Orchestrates a full rebuild against an aliased index: create the new
  * version, fill it via the caller's `fillFn`, atomically swap the alias,
  * prune old versions. Returns the new concrete index name and the document
@@ -215,6 +263,10 @@ export async function rebuildAliasedIndex<T extends number = number>(args: {
   const { client, alias, mapping, fillFn, retain = DEFAULT_RETENTION } = args;
   const state = await resolveAliasState(client, alias);
   const newIndex = nextVersionName(alias, state);
+  // Clear a stale next-version orphan left by a killed prior run before
+  // create() can throw resource_already_exists_exception -- but never the live
+  // alias target (see cleanStaleNextVersion).
+  await cleanStaleNextVersion(client, alias, newIndex);
   await client.indices.create({ index: newIndex, body: mapping });
 
   // Guard the fill + swap as a single atomic unit from the alias's point of
