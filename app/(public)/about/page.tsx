@@ -262,9 +262,11 @@ export default function DocsPage() {
           Directory; your title from the Enterprise Directory (ED), usually following your primary
           ASMS appointment, though a &ldquo;working title&rdquo; set in ED can override it; and your
           primary department from ASMS, the system of record for your primary appointment. Your
-          publications are matched to you by ReCiter from PubMed. Your funding comes from InfoEd, WCM&apos;s grants system of record for all
-          sponsors; for federally funded work, NIH RePORTER supplies the abstract text and the
-          NIH-portfolio link. Disclosures come from the COI system, and a NewYork-Presbyterian
+          publications are matched to you by ReCiter from PubMed. Your funding comes from two
+          systems: InfoEd, WCM&apos;s grants system of record for active and recent awards across all
+          sponsors, and NIH RePORTER, which backfills federal grants InfoEd never held (those from a
+          prior institution and older WCM history); for federally funded work, RePORTER also supplies
+          the abstract text and the NIH-portfolio link. Disclosures come from the COI system, and a NewYork-Presbyterian
           position from NYP. Your research areas, the Impact numbers, and the synopses are computed by
           ReciterAI.
         </p>
@@ -512,7 +514,10 @@ export default function DocsPage() {
               </tr>
               <tr>
                 <td>Funding / grants</td>
-                <td>InfoEd, all sponsors (NIH RePORTER supplies federal abstract text)</td>
+                <td>
+                  InfoEd, all sponsors; NIH RePORTER backfills federal grants from a prior
+                  institution or older WCM history (and supplies federal abstract text)
+                </td>
                 <td>Nightly</td>
                 <td>Request a change (routes to Sponsored Research); applied in InfoEd</td>
               </tr>

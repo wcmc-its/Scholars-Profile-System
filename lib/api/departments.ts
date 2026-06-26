@@ -266,6 +266,7 @@ async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | n
         where: {
           scholar: { deptCode: dept.code, deletedAt: null, status: "active" },
           endDate: { gte: now },
+          source: { not: "RePORTER" }, // exclude individual RePORTER history
         },
         select: { externalId: true, id: true },
       })
@@ -459,7 +460,7 @@ async function getDepartmentFacultyUncached(
       }) as unknown as Promise<PubGroupRow[]>,
       prisma.grant.groupBy({
         by: ["cwid"],
-        where: { cwid: { in: cwids }, endDate: { gte: now } },
+        where: { cwid: { in: cwids }, endDate: { gte: now }, source: { not: "RePORTER" } },
         _count: { _all: true },
         orderBy: { cwid: "asc" },
       }) as unknown as Promise<GrantGroupRow[]>,

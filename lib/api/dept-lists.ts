@@ -154,10 +154,13 @@ async function getDeptGrantsListUncached(
   const sort: GrantSort = opts.sort ?? "most_recent";
   const now = new Date();
 
-  // Active grants only on this surface to match the stats line.
+  // Active grants only on this surface to match the stats line. Exclude
+  // source='RePORTER' (individual prior-institution/history rows, not
+  // WCM-administered awards) so they never enter unit rollups.
   const baseWhere = {
     scholar: { deptCode, deletedAt: null, status: "active" },
     endDate: { gte: now },
+    source: { not: "RePORTER" },
   };
 
   // Count distinct externalIds (grants) — fall back to count of rows when

@@ -161,7 +161,7 @@ async function buildHits(cwids: string[]): Promise<DepartmentFacultyHit[]> {
       ? Promise.resolve([] as GrantGroupRow[])
       : (prisma.grant.groupBy({
           by: ["cwid"],
-          where: { cwid: { in: rowCwids }, endDate: { gte: now } },
+          where: { cwid: { in: rowCwids }, endDate: { gte: now }, source: { not: "RePORTER" } },
           _count: { _all: true },
           orderBy: { cwid: "asc" },
         }) as unknown as Promise<GrantGroupRow[]>),

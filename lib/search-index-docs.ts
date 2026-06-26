@@ -430,7 +430,9 @@ export const PEOPLE_INDEX_SELECT = {
   department: { select: { name: true } },
   division: { select: { name: true } },
   topicAssignments: { orderBy: { score: "desc" } },
-  grants: true,
+  // Exclude source='RePORTER' — the person-doc grantCount + active-grant signals
+  // count WCM-administered awards only, not individual prior-institution history.
+  grants: { where: { source: { not: "RePORTER" } } },
   authorships: {
     // Issue #63 — drop Retraction / Erratum so retracted-paper titles
     // and MeSH don't pull a person into search results for unrelated

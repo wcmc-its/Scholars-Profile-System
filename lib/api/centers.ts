@@ -411,7 +411,7 @@ async function buildCenterMemberHits(
           _count: { pmid: true },
         }) as unknown as Promise<Array<{ cwid: string; _count: { pmid: number } }>>,
         prisma.grant.findMany({
-          where: { cwid: { in: cwids }, endDate: { gte: now } },
+          where: { cwid: { in: cwids }, endDate: { gte: now }, source: { not: "RePORTER" } },
           select: { cwid: true, externalId: true, id: true },
         }) as Promise<
           Array<{ cwid: string; externalId: string | null; id: string }>
@@ -1012,6 +1012,7 @@ export async function getCenterHighlights(
     where: {
       endDate: { gte: new Date() },
       cwid: { in: memberCwids },
+      source: { not: "RePORTER" }, // exclude individual RePORTER history
     },
     orderBy: [{ endDate: "desc" }],
     take: 12,
@@ -1119,6 +1120,7 @@ export async function getCenterGrantsList(
   const baseWhere = {
     endDate: { gte: new Date() },
     cwid: { in: memberCwids },
+    source: { not: "RePORTER" }, // exclude individual RePORTER history
   };
 
   const distinctRows = (await prisma.grant.findMany({
