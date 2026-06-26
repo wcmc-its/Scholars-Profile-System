@@ -112,9 +112,66 @@ changes cut it on the hot concept-People path (fix plan: `.planning/perf-audit.m
 > **#914, held** pending its prod prerequisites (`PROFILE_EMAIL_RELEASE_GATE` on in prod
 > first + a shared multi-task ISR cacheHandler). This is the single biggest site-wide win.
 
+### Search performance findings (2026-06-26)
+
+A round of `/search` measurement on staging (triggered by an operator hitting a ~30 s
+Publications search) produced three durable findings.
+
+**1. The reported 30 s was a post-deploy cold window, not steady-state cost — and the
+warm-up had a gap (fixed, #1297).** Staging runs a single app task, so each deploy briefly
+exposes one cold task. The startup warm-up (`lib/warmup.ts`, #695) was priming search with
+`countOnly: true`, which short-circuits past the facet aggregation, the Prisma hydration,
+**and** the taxonomy-enrich path — so a freshly-deployed task latched "warm" having never
+run a real faceted search, and the first post-deploy search still paid the cold cost
+(observed: staging ALB `TargetResponseTime` ~19.5 s clustered right after a deploy, nothing
+> 3 s after). #1297 changes the primers to a full faceted search. (Staging's single task
+still has a brief per-deploy window — #696, conditional 2-task — so point user-facing
+traffic at prod, which rode the same deploys with **zero** > 3 s ALB spikes.)
+
+**2. Under concurrency the binding cost is the taxonomy resolver (Aurora), not the
+OpenSearch facet aggregation.** A C-ramp of the Publications JSON API
+(`/api/search?type=publications&q=cancer`) split the per-request `Server-Timing`:
+
+| Component | C=1 (warm) | C=5 (concurrent) |
+|---|---|---|
+| `matchQueryToTaxonomy` | ~1.7 s | **~8.6 s** |
+| `searchPublications` (incl. facet aggs) | ~0.2 s | ~1.3 s |
+
+Total request p50: 2.0 s (C=1) → 5.0 s (C=3) → 8.4 s (C=5). The dominant, super-linear
+cost is **`matchQueryToTaxonomy`** (`lib/api/search-taxonomy.ts`), which is **Aurora-bound**:
+every request re-loads the full topic/subtopic candidate set (`loadEntityCandidates`,
+request-scoped-`cache()` only) and then runs **two `publicationTopic.groupBy` queries per
+matched candidate** (`getCounts`) — dozens of groupBys per broad query, uncached across
+requests. This is the **Aurora-side counterpart** to the OpenSearch reason-agg ceiling in
+[`search-people-concurrency-performance.md`](./search-people-concurrency-performance.md);
+both can bind independently, and the taxonomy resolver runs on **both** the People and
+Publications paths.
+
+**3. Two things this ruled in/out (both verified):**
+
+- **The app-tier vCPU bump did not fix it.** Doubling the staging task 0.5 → 1 vCPU
+  (`config.ts`, deployed task def rev 83) left C=3 p50 unchanged (4.8 → 5.0 s) and only
+  tightened the tail (C=3 p90 6.9 → 5.4 s). A null result on a CPU bump is itself the proof
+  the bottleneck is DB I/O, not CPU. Prod was **not** deployed (same reason).
+- **The Publications facet-split was investigated and parked.** A handoff
+  (`pub-tab-performance-handoff.md`) proposed splitting/caching the OpenSearch facet aggs
+  off the hit list; measurement shows the aggs are ~0.2 s, so the split optimizes the wrong
+  component. Code preserved at `origin/perf/pub-tab-facet-split` (`SEARCH_PUB_FACET_SPLIT`,
+  default-off, byte-identical) to revisit only if OpenSearch aggs ever become binding.
+
+**The real lever (documented, not built):** a cross-request cache of the taxonomy resolve.
+The per-candidate counts are ETL-cadence (safe to cache for minutes/hours) and the candidate
+load is query-independent, but the `#800/#801` method-family overlay gate must stay live —
+so the cache needs ETL-versioning or a short TTL, not a blunt freeze. Worth doing only if
+go-live concurrency makes it bind.
+
 ## Scaling characteristics
 
-- **App tier:** ECS Fargate, prod 1024 CPU / 2048 MiB per task. Target-tracking
+- **App tier:** ECS Fargate. Per-task sizing: **staging 1024 CPU / 2048 MiB** (bumped from
+  512/1024 and deployed 2026-06-26); **prod 2048 / 4096 in `config.ts` but the deployed task
+  def is still 1024 / 2048** pending a prod `cdk deploy` (sizing rides a task-def deploy, not
+  the CD image roll). The 2026-06-26 bump is a marginal-only mitigation for the Aurora-bound
+  taxonomy cost above — not a fix. Target-tracking
   autoscaling (#596) between min 2 (= `appDesiredCount`, AZ-spread) and max 6
   (= `appMaxCount`) on avg CPU (60%) and ALB request-count-per-target; the max and
   the thresholds are conservative placeholders pending the #554 load test. Rolling
@@ -159,6 +216,8 @@ moves the render path (a new heavy query, an ISR TTL change, an instance-size ch
 
 ---
 
-*Baseline last updated: 2026-06-12 — search origin-path optimizations (Section A/B, #913 /
-#922 / #924) recorded; per-surface latency cells still pending a production-traffic or
-load-test measurement run.*
+*Baseline last updated: 2026-06-26 — added § Search performance findings (taxonomy-resolver
+Aurora bottleneck under concurrency; cold-start warm-up gap → #1297; vCPU bump null result;
+facet-split parked) and app-tier sizing change. 2026-06-12: search origin-path optimizations
+(Section A/B, #913 / #922 / #924). Per-surface latency cells still pending a
+production-traffic or load-test measurement run.*
