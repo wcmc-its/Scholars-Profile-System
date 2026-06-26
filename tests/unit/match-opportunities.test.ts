@@ -13,6 +13,7 @@ import {
   deadlineProximity,
   meshOverlap,
   rankCandidates,
+  scholarTopicRowWeight,
   topicAffinity,
   type OpportunityCandidate,
 } from "@/lib/api/match-opportunities";
@@ -139,5 +140,26 @@ describe("rankCandidates — distinct axes + sortable", () => {
     const heavyB = meshHeavy.find((r) => r.opportunityId === "b")!;
     expect(heavyB.axes).toEqual(baseB.axes);
     expect(meshHeavy[0].opportunityId).toBe("b"); // mesh-heavy promotes b
+  });
+});
+
+describe("scholarTopicRowWeight (vector weighting §2.1/§2.4)", () => {
+  it("full weight for a current first/last-author paper", () => {
+    expect(scholarTopicRowWeight(2, 2026, "first", 2026)).toBeCloseTo(2);
+    expect(scholarTopicRowWeight(2, 2026, "last", 2026)).toBeCloseTo(2);
+  });
+  it("halves at one recency half-life (5y) and quarters at two", () => {
+    expect(scholarTopicRowWeight(1, 2021, "first", 2026)).toBeCloseTo(0.5);
+    expect(scholarTopicRowWeight(1, 2016, "first", 2026)).toBeCloseTo(0.25);
+  });
+  it("down-weights penultimate / middle vs first / last", () => {
+    expect(scholarTopicRowWeight(1, 2026, "penultimate", 2026)).toBeCloseTo(0.5);
+    expect(scholarTopicRowWeight(1, 2026, "middle", 2026)).toBeCloseTo(0.25); // unknown → middle
+    expect(scholarTopicRowWeight(1, 2026, null, 2026)).toBeCloseTo(0.25);
+  });
+  it("future-dated papers cap at full weight; non-positive base is zero", () => {
+    expect(scholarTopicRowWeight(1, 2030, "first", 2026)).toBeCloseTo(1); // age floored at 0
+    expect(scholarTopicRowWeight(0, 2026, "first", 2026)).toBe(0);
+    expect(scholarTopicRowWeight(-3, 2026, "first", 2026)).toBe(0);
   });
 });
