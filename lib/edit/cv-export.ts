@@ -18,7 +18,7 @@ import type { ProfilePayload } from "@/lib/api/profile";
 import type { MenteeChip } from "@/lib/api/mentoring";
 import {
   appendToLabelParagraph,
-  applyTableBorders,
+  applyTableStyling,
   fillGrid,
   fillTablePerEntry,
   findTable,
@@ -311,8 +311,9 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
     insertParagraphsAfter(t, (x) => x.startsWith("BIBLIOGRAPHY"), paras);
   }
 
-  // 12. Border every table (incl. cloned ones) to match the WCM output styling.
-  applyTableBorders(t);
+  // 12. Style every table (incl. cloned ones) to match CViche's WCM output:
+  //     D9D9D9 cell borders, shaded header row, vertical-centered, 4pt padding.
+  applyTableStyling(t);
 
   return serialize(t);
 }

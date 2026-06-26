@@ -255,6 +255,7 @@ const clinicalInput: CvInput = {
   ],
 };
 
+
 // ── (a) instruction box removed + (b) real headings survive ──────────────────
 
 describe("buildWcmCv — fills the official template", () => {
@@ -263,10 +264,12 @@ describe("buildWcmCv — fills the official template", () => {
     expect(allText(xml)).toContain("When preparing the WCM CV template");
   });
 
-  it("borders every table (tblBorders)", async () => {
+  it("styles tables like CViche (D9D9D9 cell borders, shaded header, centered)", async () => {
     const xml = await documentXml(clinicalInput);
-    expect(xml).toContain("<w:tblBorders>");
-    expect(xml).toContain('w:color="808080"');
+    expect(xml).toContain("<w:tcBorders>");
+    expect(xml).toContain('w:color="D9D9D9"'); // cell border color
+    expect(xml).toContain('w:fill="D9D9D9"'); // header-row shading
+    expect(xml).toContain('<w:vAlign w:val="center"/>'); // vertical-centered cells
   });
 
   it("preserves the template's real section headings", async () => {

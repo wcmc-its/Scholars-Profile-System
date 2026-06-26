@@ -278,30 +278,60 @@ export function removeNode(node: XNode | undefined): void {
   if (node && node.parentNode) node.parentNode.removeChild(node);
 }
 
-const BORDER_SIDES = ["top", "left", "bottom", "right", "insideH", "insideV"];
+const CELL_SIDES = ["top", "left", "bottom", "right"];
 
 /**
- * Add single-line borders to every table (matching CViche's output styling:
- * 0.5pt / size 4, gray `808080`, all sides + inside). The official template
- * ships borderless; this gives the filled CV the bordered look. Skips tables
- * that already declare `<w:tblBorders>`. Apply AFTER all fills so cloned tables
- * are covered too.
+ * Style every table to match CViche's output (the WCM faculty-CV house style;
+ * the official template ships borderless/unstyled): per-CELL single 0.5pt gray
+ * `D9D9D9` borders, a `D9D9D9` shaded header row, vertical-centered cells, and
+ * 4pt (80-twip) cell paragraph spacing. Apply AFTER all fills so cloned tables
+ * are covered. Idempotent — skips properties already present.
  */
-export function applyTableBorders(t: LoadedTemplate, color = "808080", size = "4"): void {
+export function applyTableStyling(t: LoadedTemplate, border = "D9D9D9", shade = "D9D9D9"): void {
+  const doc = t.doc;
   for (const tbl of allTables(t)) {
-    const tblPr = childrenByTag(tbl, "w:tblPr")[0];
-    if (!tblPr || childrenByTag(tblPr, "w:tblBorders").length > 0) continue;
-    const borders = t.doc.createElement("w:tblBorders");
-    for (const side of BORDER_SIDES) {
-      const b = t.doc.createElement(`w:${side}`);
-      b.setAttribute?.("w:val", "single");
-      b.setAttribute?.("w:sz", size);
-      b.setAttribute?.("w:space", "0");
-      b.setAttribute?.("w:color", color);
-      borders.appendChild(b);
-    }
-    // tblBorders must precede tblLayout in the CT_TblPr sequence.
-    const layout = childrenByTag(tblPr, "w:tblLayout")[0];
-    tblPr.insertBefore(borders, layout ?? null);
+    childrenByTag(tbl, "w:tr").forEach((tr, rowIdx) => {
+      for (const tc of childrenByTag(tr, "w:tc")) {
+        let tcPr = childrenByTag(tc, "w:tcPr")[0];
+        if (!tcPr) {
+          tcPr = doc.createElement("w:tcPr");
+          tc.insertBefore(tcPr, asArray(tc.childNodes)[0] ?? null);
+        }
+        // Cell borders (CT_TcPr order: tcBorders < shd < vAlign — append in that order).
+        if (childrenByTag(tcPr, "w:tcBorders").length === 0) {
+          const tcb = doc.createElement("w:tcBorders");
+          for (const side of CELL_SIDES) {
+            const b = doc.createElement(`w:${side}`);
+            b.setAttribute?.("w:val", "single");
+            b.setAttribute?.("w:sz", "4");
+            b.setAttribute?.("w:space", "0");
+            b.setAttribute?.("w:color", border);
+            tcb.appendChild(b);
+          }
+          tcPr.appendChild(tcb);
+        }
+        if (rowIdx === 0 && childrenByTag(tcPr, "w:shd").length === 0) {
+          const shd = doc.createElement("w:shd");
+          shd.setAttribute?.("w:val", "clear");
+          shd.setAttribute?.("w:color", "auto");
+          shd.setAttribute?.("w:fill", shade);
+          tcPr.appendChild(shd);
+        }
+        if (childrenByTag(tcPr, "w:vAlign").length === 0) {
+          const v = doc.createElement("w:vAlign");
+          v.setAttribute?.("w:val", "center");
+          tcPr.appendChild(v);
+        }
+        // 4pt cell paragraph spacing (pPr order: pStyle … spacing … rPr).
+        for (const p of childrenByTag(tc, "w:p")) {
+          const pPr = childrenByTag(p, "w:pPr")[0];
+          if (!pPr || childrenByTag(pPr, "w:spacing").length > 0) continue;
+          const sp = doc.createElement("w:spacing");
+          sp.setAttribute?.("w:before", "80");
+          sp.setAttribute?.("w:after", "80");
+          pPr.insertBefore(sp, childrenByTag(pPr, "w:rPr")[0] ?? null);
+        }
+      }
+    });
   }
 }
