@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { gatesGrantId, isNihAwardNumber, nsfAwardId, parseNihAward } from "@/lib/award-number";
+import {
+  coreProjectNum,
+  gatesGrantId,
+  isNihAwardNumber,
+  nsfAwardId,
+  parseNihAward,
+} from "@/lib/award-number";
 
 describe("parseNihAward", () => {
   it("parses a standard R01 with whitespace separator", () => {
@@ -48,6 +54,16 @@ describe("parseNihAward", () => {
     });
   });
 
+  it("tolerates multiple trailing annotation tokens (InfoEd '... -02 EW')", () => {
+    // Regression: the suffix group previously matched only one trailing token,
+    // so a space-separated annotation after the sequence suffix returned null.
+    expect(parseNihAward("5 R34 HL117352-02 EW")).toEqual({
+      mechanism: "R34",
+      nihIc: "NHLBI",
+      serial: "117352",
+    });
+  });
+
   it("tolerates 7-digit serials", () => {
     expect(parseNihAward("R01 CA1234567").serial).toBe("1234567");
   });
@@ -75,6 +91,26 @@ describe("parseNihAward", () => {
       nihIc: null,
       serial: "123456",
     });
+  });
+});
+
+describe("coreProjectNum", () => {
+  it("reconstructs the RePORTER core form (no flag, no spaces, no suffix)", () => {
+    expect(coreProjectNum("1R01 CA245678-01A1")).toBe("R01CA245678");
+    expect(coreProjectNum("K23 HL157640")).toBe("K23HL157640");
+    expect(coreProjectNum("UG3 HL154944-01A1")).toBe("UG3HL154944");
+  });
+
+  it("handles multiple trailing annotation tokens (InfoEd '... -02 EW')", () => {
+    // Regression: without this, the grant never joins reciterdb.grant_reporter_project
+    // and silently gets no abstract/keyword enrichment.
+    expect(coreProjectNum("5 R34 HL117352-02 EW")).toBe("R34HL117352");
+  });
+
+  it("returns null for non-NIH / empty input", () => {
+    expect(coreProjectNum("OCRA-2024-091")).toBeNull();
+    expect(coreProjectNum(null)).toBeNull();
+    expect(coreProjectNum("")).toBeNull();
   });
 });
 
