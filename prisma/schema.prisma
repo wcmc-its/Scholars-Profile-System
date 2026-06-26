@@ -405,6 +405,12 @@ model Opportunity {
   isResearch       Boolean   @map("is_research")
   /// Optional MeSH descriptor UIs anchored to the opportunity's top topics.
   meshDescriptorUi Json?     @map("mesh_descriptor_ui")
+  /// Prestige signal from ReciterAI (GRANT# contract v2):
+  /// `{ score, mechanism_tier, size_bucket, sponsor_tier, selectivity, label, rationale }`.
+  prestige         Json?     @map("prestige")
+  /// True for nomination-based honorific recognition (prize/medal/lectureship, or a
+  /// recognition "Award" with no NIH activity code) — excluded from recommendations.
+  isHonorific      Boolean?  @map("is_honorific")
   taxonomyVersion  String    @map("taxonomy_version") @db.VarChar(32)
   ingestedAt       DateTime  @map("ingested_at")
   lastRefreshedAt  DateTime  @default(now()) @map("last_refreshed_at")

@@ -31,6 +31,8 @@ function row(over: Partial<OpportunityIndexRow> = {}): OpportunityIndexRow {
     ],
     appealByStage: { grad: 0.2, postdoc: 0.6, early: 0.9, mid: 0.8, senior: 0.5 },
     meshDescriptorUi: ["D000074243"],
+    prestige: null,
+    isHonorific: null,
     awardCeiling: 500000n,
     numberOfAwards: 6,
     ...over,
@@ -68,5 +70,18 @@ describe("buildOpportunityDoc", () => {
     expect(doc.dueDate).toBeUndefined();
     expect(doc.awardCeiling).toBeUndefined();
     expect(doc.meshDescriptorUi).toEqual([]);
+  });
+
+  it("carries prestige (non-indexed) and indexes isHonorific as a boolean", () => {
+    const prestige = { score: 0.86, mechanism_tier: 0.85, label: "Flagship", rationale: "R01, NIH" };
+    const { doc } = buildOpportunityDoc(row({ prestige, isHonorific: true }));
+    expect(doc.prestige).toEqual(prestige);
+    expect(doc.isHonorific).toBe(true);
+  });
+
+  it("defaults isHonorific to false and omits prestige when absent", () => {
+    const { doc } = buildOpportunityDoc(row({ prestige: null, isHonorific: null }));
+    expect(doc.isHonorific).toBe(false);
+    expect(doc.prestige).toBeUndefined();
   });
 });

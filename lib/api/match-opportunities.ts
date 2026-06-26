@@ -274,6 +274,11 @@ export async function matchOpportunitiesForScholar(
     },
     { term: { eligibilityFlags: "us_eligible" } },
     { term: { eligibilityFlags: requiredEligibilityFlag(stage) } },
+    // Honorific gate (GRANT# contract v2): never recommend nomination-based prizes
+    // as "grants for you" — they're not applyable. `is_honorific` is the upstream
+    // data flag (supersedes the #1296 title heuristic). Absent/false ⇒ kept; only
+    // an explicit `true` is excluded. No-op until items are reprojected with the flag.
+    { bool: { must_not: { term: { isHonorific: true } } } },
   ];
   if (stage !== "grad") filters.push({ bool: { must_not: { term: { eligibilityFlags: "student_only" } } } });
 
