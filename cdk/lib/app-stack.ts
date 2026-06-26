@@ -1230,6 +1230,15 @@ export class AppStack extends Stack {
         // generator (no new IAM). Takes effect on a manual
         // `cdk deploy --exclusively Sps-App-<env>`.
         EDIT_BIOSKETCH_GENERATE: env === "staging" ? "on" : "off",
+        // EDIT_CV_EXPORT -- the "CV (WCM format)" generator on the /edit Tools
+        // section. NEW surface: staging-first, prod-dark until an approval-gated
+        // `cdk deploy --exclusively Sps-App-<env>`. Same Bedrock task role (M1
+        // reuses the overview generator) -- no new IAM.
+        EDIT_CV_EXPORT: env === "staging" ? "on" : "off",
+        // POPS physician-directory base (clinical CV enrichment, zero-persist, over
+        // NAT egress -- the public WCM physician-directory host, reachable from the
+        // Sps VPC unlike the 10.x internal sources).
+        POPS_BASE_URL: "http://pops.weillcornell.org",
         // SELF_EDIT_RAIL_RESTRUCTURE -- the restructured self-edit attribute rail
         // (floating Home, content-only "Yours to edit", "From WCM records" with
         // Identity/Records sub-headers, "Tools", and a "Settings" group for the

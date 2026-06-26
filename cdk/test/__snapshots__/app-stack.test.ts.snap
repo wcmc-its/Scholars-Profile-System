@@ -420,6 +420,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "EDIT_CV_EXPORT",
+                "Value": "off",
+              },
+              {
+                "Name": "POPS_BASE_URL",
+                "Value": "http://pops.weillcornell.org",
+              },
+              {
                 "Name": "SELF_EDIT_RAIL_RESTRUCTURE",
                 "Value": "off",
               },
@@ -3735,6 +3743,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "EDIT_BIOSKETCH_GENERATE",
                 "Value": "on",
+              },
+              {
+                "Name": "EDIT_CV_EXPORT",
+                "Value": "on",
+              },
+              {
+                "Name": "POPS_BASE_URL",
+                "Value": "http://pops.weillcornell.org",
               },
               {
                 "Name": "SELF_EDIT_RAIL_RESTRUCTURE",

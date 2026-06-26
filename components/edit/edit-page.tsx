@@ -49,6 +49,7 @@ import {
 import { isReciterRejectEnabled } from "@/lib/reciter/client";
 import { GrantRecsCard } from "@/components/edit/grant-recs-card";
 import { BiosketchTool } from "@/components/edit/biosketch-tool";
+import { CvTool } from "@/components/edit/cv-tool";
 import { listSelectableBiosketchPromptVersions } from "@/lib/edit/biosketch-prompt-versions";
 
 /** The model the biosketch route will actually generate on — surfaced to the
@@ -71,6 +72,7 @@ type AttrKey =
   | "funding"
   | "grant-recs"
   | "biosketch"
+  | "cv"
   | "appointments"
   | "education"
   | "coi"
@@ -124,6 +126,12 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // can draft it on the scholar's behalf. Grouped with "Grants for me" under the
   // "Services" rail section. Rail item appears only when the flag is on.
   { key: "biosketch", label: "NIH biosketch", modes: ["self", "superuser"] },
+  // CV (WCM format) generator (EDIT_CV_EXPORT) — exports the scholar's structured
+  // Scholars data (plus POPS enrichment for clinical faculty) as a Word `.docx` in
+  // the WCM faculty CV format. Same audience as biosketch (the shared
+  // `authorizeOverviewWrite`), so a delegate can generate it on the scholar's
+  // behalf. Grouped with the other Tools. Rail item appears only when the flag is on.
+  { key: "cv", label: "CV (WCM format)", modes: ["self", "superuser"] },
   { key: "appointments", label: "Appointments", modes: ["self", "superuser"] },
   { key: "education", label: "Education", modes: ["self", "superuser"] },
   // Mentees — suppressible (hide/show); corrections route to ITS Support.
@@ -237,6 +245,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   // array (`attribute-rail.tsx` `groupItems`), so these two keys position the header.
   "biosketch",
   "grant-recs",
+  "cv",
 ];
 const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   home: "owned",
@@ -250,6 +259,7 @@ const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   // "Services" group (#917 v5) — owner-facing tools, distinct from sourced data.
   "grant-recs": "service",
   biosketch: "service",
+  cv: "service",
   appointments: "sourced",
   education: "sourced",
   mentees: "sourced",
@@ -296,6 +306,7 @@ const RAIL_V2_ORDER: ReadonlyArray<AttrKey> = [
   "coi-gap",
   "biosketch",
   "grant-recs",
+  "cv",
   "visibility",
   "proxy-editors",
   "profile-url",
@@ -317,6 +328,7 @@ const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string }> = {
   "coi-gap": { group: RAIL_V2_WCM_GROUP },
   biosketch: { group: "Tools" },
   "grant-recs": { group: "Tools" },
+  cv: { group: "Tools" },
   visibility: { group: "Settings" },
   "proxy-editors": { group: "Settings" },
   "profile-url": { group: "Settings" },
@@ -358,6 +370,7 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "funding",
   "grant-recs",
   "biosketch",
+  "cv",
   "appointments",
   "education",
   // Publications — now a superuser surface too (#836 follow-on); the scholar's
@@ -422,6 +435,12 @@ export type EditPageProps = {
    *  threaded in like grantRecsEnabled. Surfaced to every actor the generate
    *  route authorizes (self, superuser, comms-steward, proxy, unit-admin). */
   biosketchEnabled?: boolean;
+  /** `EDIT_CV_EXPORT`: whether the "CV (WCM format)" Tools rail item + panel
+   *  surface. Computed by the server page (env flag) and threaded in like
+   *  biosketchEnabled. Surfaced to every actor the generate route authorizes
+   *  (self, superuser, comms-steward, proxy, unit-admin — the shared
+   *  `authorizeOverviewWrite`). */
+  cvEnabled?: boolean;
   /** `SELF_EDIT_RAIL_RESTRUCTURE`: when on, the self / proxy / unit-admin rail
    *  uses the restructured layout (floating Home, content-only "Yours to edit",
    *  "From WCM records" with Identity/Records sub-headers, "Tools", and a
@@ -444,6 +463,7 @@ export function visibleAttrKeys(
   hasHighlights = false,
   grantRecsEnabled = false,
   biosketchEnabled = false,
+  cvEnabled = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
   return (
@@ -466,6 +486,10 @@ export function visibleAttrKeys(
       // all five surfaces, so the flag is the only remaining gate — unlike
       // grant-recs, which stays self / superuser only.
       .filter((a) => a.key !== "biosketch" || biosketchEnabled)
+      // EDIT_CV_EXPORT — "CV (WCM format)" appears only when the flag is on. Same
+      // every-authorized-actor gate as biosketch (`attrsForMode` keeps "cv" for all
+      // five surfaces), so the flag is the only remaining filter.
+      .filter((a) => a.key !== "cv" || cvEnabled)
       // The "From your publications" item only exists when there are candidates to
       // show — an empty panel is never surfaced, and an `?attr=coi-gap` with zero
       // candidates canonicalizes away (the page redirects to bare /edit) rather
@@ -494,6 +518,7 @@ export function EditPage({
   reciterPendingEnabled = false,
   grantRecsEnabled = false,
   biosketchEnabled = false,
+  cvEnabled = false,
   railRestructureEnabled = false,
 }: EditPageProps) {
   // "From your publications" is conditionally present: self OR superuser, and only
@@ -524,11 +549,16 @@ export function EditPage({
   // (the server page computes + threads it). The cost line stays superuser-only
   // and version selection stays superuser / unit-admin (see the panel render).
   const showBiosketch = biosketchEnabled;
+  // EDIT_CV_EXPORT — the "CV (WCM format)" Tools item shows on every surface the
+  // generate route authorizes (the shared `authorizeOverviewWrite`), gated only by
+  // the flag (the server page computes + threads it), mirroring biosketch.
+  const showCv = cvEnabled;
   const visible = attrsForMode(mode)
     .filter((a) => a.key !== "coi-gap" || hasCoiGap)
     .filter((a) => a.key !== "highlights" || hasHighlights)
     .filter((a) => a.key !== "grant-recs" || showGrantRecs)
-    .filter((a) => a.key !== "biosketch" || showBiosketch);
+    .filter((a) => a.key !== "biosketch" || showBiosketch)
+    .filter((a) => a.key !== "cv" || showCv);
   // A proxy (#779) and a unit admin (Amendment 4) reuse the SELF rail/cards on
   // the scholar's route (D4). Treated like self for layout; the distinct chrome
   // (banner, breadcrumb, no account menu) is the shell's job.
@@ -725,6 +755,19 @@ function renderPanel(
           model={BIOSKETCH_EFFECTIVE_MODEL}
           versions={listSelectableBiosketchPromptVersions()}
           canSelectVersion={isSuperuserLike(mode) || mode === "unit-admin"}
+        />
+      );
+    case "cv":
+      // EDIT_CV_EXPORT — the "CV (WCM format)" Tools panel. The download tool
+      // (client island) POSTs to /api/edit/cv for the resolved cwid and streams a
+      // `.docx` attachment. Deterministic Scholars/POPS fill, so there is no
+      // per-run cost line or model selector — `canSeeCost`/`model` are accepted but
+      // unused by the card today, passed for parity with the biosketch tool.
+      return (
+        <CvTool
+          entityId={cwid}
+          canSeeCost={isSuperuserLike(mode)}
+          model={BIOSKETCH_EFFECTIVE_MODEL}
         />
       );
     case "home": {
