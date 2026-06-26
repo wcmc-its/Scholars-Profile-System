@@ -6,7 +6,8 @@
 > (C=5), while the **shared taxonomy resolver** `matchQueryToTaxonomy` was ~1.7 s / ~8.6 s —
 > i.e. the aggregation is cheap and the bottleneck is Aurora, not OpenSearch. **The
 > facet-split (§4.1/§4.2) was built behind `SEARCH_PUB_FACET_SPLIT` and then PARKED** (code at
-> `origin/perf/pub-tab-facet-split`, default-off) because it optimizes the wrong component.
+> `origin/perf/pub-tab-facet-split`, tag `parked/pub-tab-facet-split`, commit `927c35dd`,
+> default-off; tracked in **#1301**) because it optimizes the wrong component.
 > Read [`performance-baseline.md` § Search performance findings (2026-06-26)](./performance-baseline.md)
 > for the measurements and the real lever (a cross-request taxonomy cache). The §5 "what does
 > NOT transfer" analysis and the cost-surface map below remain accurate and useful.

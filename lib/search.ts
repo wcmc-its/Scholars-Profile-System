@@ -915,6 +915,9 @@ export const opportunitiesIndexMapping = {
       // Hard-filter axes.
       status: { type: "keyword" },
       mechanism: { type: "keyword" },
+      // Honorific recognition (prize/medal/…) — excluded from recommendations +
+      // prestige-ordered lists via `must_not term isHonorific:true`.
+      isHonorific: { type: "boolean" },
       // Derived eligibility flags (us_eligible / faculty_eligible / ...).
       eligibilityFlags: { type: "keyword" },
       cfdaList: { type: "keyword" },
@@ -937,6 +940,7 @@ export const opportunitiesIndexMapping = {
       // NON-INDEXED re-rank payload — returned in `_source`, never searched.
       topicVector: { type: "object", enabled: false },
       appealByStage: { type: "object", enabled: false },
+      prestige: { type: "object", enabled: false },
     },
   },
 };
@@ -963,6 +967,8 @@ export type OpportunityIndexRow = {
   topicVector: unknown; // OpportunityTopicScore[]
   appealByStage: unknown; // { grad, postdoc, early, mid, senior }
   meshDescriptorUi: unknown; // string[] | null
+  prestige: unknown; // { score, mechanism_tier, ... } | null
+  isHonorific: boolean | null;
   awardCeiling: bigint | null;
   numberOfAwards: number | null;
 };
@@ -1000,11 +1006,15 @@ export function buildOpportunityDoc(
     primaryTopicId: row.primaryTopicId ?? undefined,
     topicIds,
     meshDescriptorUi: asStringArray(row.meshDescriptorUi),
+    // Honorific flag — indexed so prestige-ordered / recommender reads can filter
+    // (`must_not term isHonorific:true`). Absent/null ⇒ false (not excluded).
+    isHonorific: row.isHonorific === true,
     awardCeiling: row.awardCeiling != null ? Number(row.awardCeiling) : undefined,
     numberOfAwards: row.numberOfAwards ?? undefined,
     // Non-indexed re-rank payload.
     topicVector,
     appealByStage: row.appealByStage && typeof row.appealByStage === "object" ? row.appealByStage : {},
+    prestige: row.prestige && typeof row.prestige === "object" ? row.prestige : undefined,
   };
   return { id: row.opportunityId, doc };
 }
