@@ -494,18 +494,76 @@ export async function fetchKeyPaper(args: {
     descriptorUis.length > 0 ? [...descriptorUis].sort() : `q:${contentQuery}`,
   ]);
 
+  // The admitted SET is the bool `filter` (author + concept/free-text) — UNCHANGED
+  // from before, so recall is identical. The new `should` injects a keyword-
+  // relevance BM25 `_score` (omitted when there is no literal query to score); it
+  // carries NO `minimum_should_match`, so it affects ORDER only, never admission.
+  const boolQuery = {
+    bool: {
+      filter: [{ term: { wcmAuthorCwids: cwid } }, matchFilter],
+      ...(contentQuery.length > 0
+        ? {
+            should: [
+              {
+                multi_match: {
+                  query: contentQuery,
+                  fields: ["title^2", "abstract"],
+                  operator: "or" as const,
+                },
+              },
+            ],
+          }
+        : {}),
+    },
+  };
+
+  // Issue #645 recency tilt, transferred from `searchPublications`. Wrap the bool
+  // in a `function_score` Gaussian decay on `year` so recency tilts `_score`
+  // (the primary sort) without overriding keyword relevance — honoring the owner's
+  // "recency over impact" call. Same params as the pub-tab (`resolvePubRecencyMode`).
+  // The gauss is gated by `exists: year` so missing-year docs don't float (under
+  // `gentle`'s additive `sum`, a neutral 1.0 would read as max freshness). When the
+  // mode is `off`, send the bare bool (no wrapper).
+  const recencyMode = resolvePubRecencyMode();
+  const recencyOriginYear = new Date().getUTCFullYear();
+  const recencyGauss = {
+    filter: { exists: { field: "year" } },
+    gauss: {
+      year: { origin: recencyOriginYear, offset: 2, scale: 8, decay: 0.5 },
+    },
+  };
+  const scoredQuery =
+    recencyMode === "off"
+      ? boolQuery
+      : recencyMode === "gentle"
+        ? {
+            // final = bm25 × (1 + W·gauss),  W = 2  → multiplier ∈ [1, 3]
+            function_score: {
+              query: boolQuery,
+              functions: [{ weight: 1 }, { ...recencyGauss, weight: 2 }],
+              score_mode: "sum",
+              boost_mode: "multiply",
+            },
+          }
+        : {
+            // `strong`: final = bm25 × gauss (no floor; damps old papers toward 0)
+            function_score: {
+              query: boolQuery,
+              functions: [recencyGauss],
+              score_mode: "multiply",
+              boost_mode: "multiply",
+            },
+          };
+
   return cachedReasonAgg<RepresentativePub[]>(cacheKey, async () => {
     const resp = await searchClient().search({
       index: PUBLICATIONS_INDEX,
       body: {
         size: 3,
         _source: ["pmid", "title", "year"],
-        query: {
-          bool: {
-            filter: [{ term: { wcmAuthorCwids: cwid } }, matchFilter],
-          },
-        },
+        query: scoredQuery,
         sort: [
+          { _score: { order: "desc" } },
           { year: { order: "desc", missing: "_last" } },
           { citationCount: { order: "desc", missing: "_last" } },
         ],
@@ -529,8 +587,9 @@ export async function fetchKeyPaper(args: {
     const hits =
       (resp.body as { hits?: { hits?: unknown[] } }).hits?.hits ?? [];
     // Reuse the rep-papers array parser by shaping the search hits into the same
-    // `{ top: { hits: { hits } } }` envelope it expects. Up to 3, recency-first
-    // then citations (the query sort), so the disclosure shows the top papers.
+    // `{ top: { hits: { hits } } }` envelope it expects. Up to 3, ranked by the
+    // query sort: keyword relevance + recency-tilt (`_score`) primary, then year
+    // (recency) as the first tiebreak, then citationCount (impact) as the last.
     return parseReasonTopHits({ top: { hits: { hits: hits as never } } }, 3);
   });
 }

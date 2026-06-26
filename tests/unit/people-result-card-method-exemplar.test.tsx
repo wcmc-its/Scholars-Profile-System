@@ -6,7 +6,8 @@
  *     is a real <button> sitting above the stretched overlay;
  *   - clicking the chevron fetches /api/scholar/[cwid]/method-exemplar ONCE and
  *     renders the up-to-3 representative papers ({ pubs, total } shape);
- *   - a row whose fetch resolves with 0 papers drops the chevron (no dead control);
+ *   - a method/topic row whose fetch resolves with 0 papers degrades to a profile
+ *     link (the badge guarantees the section exists), never a dead control;
  *   - non-method/non-topic evidence never fetches a method-exemplar.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -105,14 +106,34 @@ describe("PeopleResultCard — method/topic rep-papers disclosure (click)", () =
     );
   });
 
-  it("drops the chevron (no dead control) when the fetch resolves with 0 papers", async () => {
+  it("degrades to a profile link (not a dead control) when a METHOD fetch resolves with 0 papers", async () => {
     mockFetch({ pubs: [], total: 0 });
     render(<PeopleResultCard {...props} hit={methodHit} />);
 
     fireEvent.click(chevron());
-    // once the fetch resolves empty, the chevron disappears.
-    await waitFor(() => expect(screen.queryByRole("button", { name: /key papers/i })).toBeNull());
-    expect(screen.queryByText(/Key papers/i)).toBeNull();
+    // once the empty fetch resolves the panel shows a methods & tools profile link
+    // instead of retracting the chevron.
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /view their methods & tools/i })).toBeTruthy(),
+    );
+    expect(chevron()).toBeTruthy(); // chevron NOT dropped
+  });
+
+  it("degrades to a research-areas link when a TOPIC fetch resolves with 0 papers", async () => {
+    mockFetch({ pubs: [], total: 0 });
+    render(
+      <PeopleResultCard
+        {...props}
+        hit={makeHit({
+          evidence: { kind: "topic", label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" },
+        })}
+      />,
+    );
+
+    fireEvent.click(chevron());
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /view their research areas/i })).toBeTruthy(),
+    );
   });
 
   it("fetches with ?topic= and reveals for topic evidence", async () => {

@@ -230,12 +230,19 @@ export function RepresentativePapers({
   profileHref,
   status = "done",
   panelId,
+  fallback,
 }: {
   papers: EvidencePub[];
   total: number;
   profileHref: string;
   status?: ExemplarFetchStatus;
   panelId?: string;
+  /** When a method/topic exemplar fetch resolves with NO renderable paper (rare —
+   *  every family/topic pub is suppressed or non-renderable), degrade to this
+   *  profile-section link instead of retracting the chevron into a dead control;
+   *  the badge firing guarantees the scholar has the section. Undefined for the
+   *  publications key-paper path (its chevron is count-gated, so empty ⇒ nothing). */
+  fallback?: { href: string; label: string };
 }) {
   if (status === "loading" && papers.length === 0) {
     return (
@@ -246,7 +253,22 @@ export function RepresentativePapers({
       </div>
     );
   }
-  if (papers.length === 0) return null;
+  if (papers.length === 0) {
+    if (status === "done" && fallback) {
+      return (
+        <div id={panelId} className="mt-1.5 pl-[1px]">
+          <Link
+            href={fallback.href}
+            onClick={(e) => e.stopPropagation()}
+            className="relative z-10 inline-block text-[12px] font-medium text-[#1f51a8] no-underline hover:underline"
+          >
+            {fallback.label} →
+          </Link>
+        </div>
+      );
+    }
+    return null;
+  }
 
   const more = total - papers.length;
   return (

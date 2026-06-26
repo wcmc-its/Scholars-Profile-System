@@ -47,6 +47,15 @@ import {
   patchKeyPaper,
 } from "@/components/search/people-result-card-streamed";
 
+// With the default env (no SEARCH_PUB_RELEVANCE_RECENCY → "gentle"), `body.query`
+// is wrapped in a `function_score` whose `.query` holds the bool. Unwrap to the
+// bool whether or not the wrapper is present, so the admission assertions hold.
+type BoolQuery = { bool: { filter: unknown[]; should?: unknown[] } };
+const boolOf = (q: unknown): BoolQuery["bool"] => {
+  const wrapped = q as { function_score?: { query: BoolQuery } } & Partial<BoolQuery>;
+  return wrapped.function_score ? wrapped.function_score.query.bool : (q as BoolQuery).bool;
+};
+
 describe("fetchKeyPaper (lazy key paper)", () => {
   it("returns up to 3 RepresentativePubs with highlighted titles", async () => {
     captured.length = 0;
@@ -74,7 +83,7 @@ describe("fetchKeyPaper (lazy key paper)", () => {
     });
     const body = captured[0];
     expect(body.size).toBe(3);
-    const filter = (body.query as { bool: { filter: unknown[] } }).bool.filter;
+    const filter = boolOf(body.query).filter;
     expect(filter).toContainEqual({ term: { wcmAuthorCwids: "abc1234" } });
     expect(filter).toContainEqual({ terms: { meshDescriptorUi: ["Dadeno", "Dcyst"] } });
   });
@@ -82,9 +91,47 @@ describe("fetchKeyPaper (lazy key paper)", () => {
   it("falls back to a free-text scan when no concept resolved", async () => {
     captured.length = 0;
     await fetchKeyPaper({ cwid: "abc1234", descriptorUis: [], contentQuery: "16s rna" });
-    const filter = (captured[0].query as { bool: { filter: unknown[] } }).bool.filter;
+    const filter = boolOf(captured[0].query).filter;
     expect(filter).toContainEqual({ term: { wcmAuthorCwids: "abc1234" } });
     expect(filter.some((f) => JSON.stringify(f).includes("multi_match"))).toBe(true);
+  });
+
+  it("ranks by relevance (_score) first, then year, then citationCount", async () => {
+    captured.length = 0;
+    await fetchKeyPaper({
+      cwid: "abc1234",
+      descriptorUis: ["Dadeno"],
+      contentQuery: "adenocarcinoma",
+    });
+    const sort = captured[0].sort as Array<Record<string, unknown>>;
+    expect(sort[0]).toHaveProperty("_score");
+    expect((sort[0] as { _score: { order: string } })._score.order).toBe("desc");
+    expect(sort[1]).toHaveProperty("year");
+    expect(sort[2]).toHaveProperty("citationCount");
+  });
+
+  it("injects a keyword-relevance `should` multi_match on the content query", async () => {
+    captured.length = 0;
+    await fetchKeyPaper({
+      cwid: "abc1234",
+      descriptorUis: ["Dadeno"],
+      contentQuery: "adenocarcinoma",
+    });
+    const should = boolOf(captured[0].query).should ?? [];
+    expect(should.some((s) => JSON.stringify(s).includes("adenocarcinoma"))).toBe(true);
+    expect(should.some((s) => JSON.stringify(s).includes("multi_match"))).toBe(true);
+  });
+
+  it("wraps the query in a function_score recency tilt under the default (gentle) env", async () => {
+    captured.length = 0;
+    await fetchKeyPaper({
+      cwid: "abc1234",
+      descriptorUis: ["Dadeno"],
+      contentQuery: "adenocarcinoma",
+    });
+    const q = captured[0].query as { function_score?: { query: BoolQuery } };
+    expect(q.function_score).toBeDefined();
+    expect(q.function_score?.query.bool).toBeDefined();
   });
 
   it("returns [] when there is neither a concept nor a query (nothing to fetch)", async () => {
