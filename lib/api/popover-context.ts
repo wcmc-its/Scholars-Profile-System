@@ -73,7 +73,9 @@ export async function fetchPopoverHeader(
       _count: {
         select: {
           authorships: true,
-          grants: true,
+          // RePORTER-backfilled grants are individual history, not WCM-administered
+          // awards; exclude so the hover-card count matches the filtered unit lists.
+          grants: { where: { source: { not: "RePORTER" } } },
         },
       },
       topicAssignments: {
@@ -365,7 +367,7 @@ export async function fetchRecentActiveGrants(
   const cutoff = new Date(Date.now() - NCE_GRACE_MS);
   const rows = await prisma.grant
     .findMany({
-      where: { cwid, endDate: { gt: cutoff } },
+      where: { cwid, endDate: { gt: cutoff }, source: { not: "RePORTER" } },
       orderBy: [{ endDate: "desc" }, { startDate: "desc" }],
       take: limit + 1, // headroom to drop the hovered project
       select: {

@@ -226,7 +226,9 @@ async function buildAwards(
   today: string,
 ): Promise<CollabAward[]> {
   const grantRows = (await prisma.grant.findMany({
-    where: { cwid: { in: memberCwids } },
+    // Exclude source='RePORTER' — individual prior-institution/history rows are
+    // not WCM-administered awards and would corrupt the collaboration axis.
+    where: { cwid: { in: memberCwids }, source: { not: "RePORTER" } },
     select: {
       cwid: true,
       externalId: true,

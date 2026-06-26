@@ -82,6 +82,11 @@ async function main() {
     ["NSF", "etl/nsf/index.ts"],
     ["Gates", "etl/gates/index.ts"],
     ["NIH-Profile", "etl/nih-profile/index.ts"],
+    // RePORTER grant materialization. Runs after InfoEd (dedup needs its rows)
+    // and NIH-Profile (needs the resolved profile_ids), and before the search
+    // reindex below so new rows + their recency suppressions get indexed. A
+    // RePORTER outage must not fail the nightly — runScript isolates failures.
+    ["Reporter-Grants", "etl/reporter-grants/index.ts"],
     ["COI", "etl/coi/index.ts"],
     // COI-gap recommendations. Runs after both its inputs: the disclosed COI
     // (etl:coi, just above) and the PubMed statements (etl:reciter:coi-statements).

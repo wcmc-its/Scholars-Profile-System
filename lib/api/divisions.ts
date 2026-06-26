@@ -249,6 +249,7 @@ async function getDivisionUncached(
             where: {
               endDate: { gte: new Date() },
               cwid: { in: memberCwids },
+              source: { not: "RePORTER" }, // exclude individual RePORTER history
             },
             select: { externalId: true, id: true },
           })
@@ -442,7 +443,7 @@ async function getDivisionFacultyUncached(
           args: unknown,
         ) => Promise<Array<{ cwid: string; _count: { _all: number } }>>)({
           by: ["cwid"],
-          where: { cwid: { in: cwids } },
+          where: { cwid: { in: cwids }, source: { not: "RePORTER" } },
           _count: { _all: true },
           orderBy: { cwid: "asc" },
         }),
@@ -606,6 +607,7 @@ export async function getDivisionHighlights(divCode: string): Promise<DeptHighli
     where: {
       endDate: { gte: new Date() },
       cwid: { in: memberCwids },
+      source: { not: "RePORTER" }, // exclude individual RePORTER history
     },
     orderBy: [{ endDate: "desc" }],
     take: 12,
@@ -817,6 +819,7 @@ async function getDivisionGrantsListUncached(
   const baseWhere = {
     cwid: { in: memberCwids },
     endDate: { gte: now },
+    source: { not: "RePORTER" }, // exclude individual RePORTER history
   };
 
   const distinctRows = (await prisma.grant.findMany({
