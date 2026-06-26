@@ -448,11 +448,15 @@ export function visibleAttrKeys(
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
   return (
     attrsForMode(mode)
-      // GrantRecs Phase 3 — "Grants for me" appears only when SELF_EDIT_GRANT_RECS
-      // is on, and only on the self / superuser surfaces (never proxy / unit-admin).
+      // GrantRecs Phase 3 — "Grants for me" appears on the self / superuser surfaces
+      // (never proxy / unit-admin). A genuine superuser ALWAYS sees it as a QA lens,
+      // independent of SELF_EDIT_GRANT_RECS, so the recommendations can be inspected
+      // per scholar before the owner-facing flag is flipped on for users. Self /
+      // comms_steward still require the flag.
       .filter(
         (a) =>
           a.key !== "grant-recs" ||
+          mode === "superuser" ||
           (grantRecsEnabled && (mode === "self" || isSuperuserLike(mode))),
       )
       // #917 v5 — "NIH biosketch" appears only when EDIT_BIOSKETCH_GENERATE is on.
@@ -508,9 +512,12 @@ export function EditPage({
   // it — self on `/edit`, self or superuser on `/edit/scholar/[cwid]`, never a
   // proxy / unit-admin — so a non-null value here already implies an allowed actor.
   const hasHighlights = (mode === "self" || isSuperuserLike(mode)) && ctx.highlights !== null;
-  // GrantRecs Phase 3 — "Grants for me" shows on self / superuser surfaces when
-  // SELF_EDIT_GRANT_RECS is on (the server page computes the flag and threads it).
-  const showGrantRecs = grantRecsEnabled && (mode === "self" || isSuperuserLike(mode));
+  // GrantRecs Phase 3 — "Grants for me" shows on self / superuser surfaces. A genuine
+  // superuser ALWAYS sees it (QA lens, flag-independent) so the recommendations can be
+  // judged per scholar while the owner-facing SELF_EDIT_GRANT_RECS stays off for users;
+  // self / comms_steward still require the flag (the server page threads it).
+  const showGrantRecs =
+    mode === "superuser" || (grantRecsEnabled && (mode === "self" || isSuperuserLike(mode)));
   // #917 v5 — the "NIH biosketch" Services item shows on every surface the
   // generate route authorizes (self, superuser, comms-steward, proxy, unit-admin
   // — the shared `authorizeOverviewWrite`), gated only by EDIT_BIOSKETCH_GENERATE
