@@ -62,8 +62,16 @@ describe("isGrantRecsEnabled — SELF_EDIT_GRANT_RECS", () => {
 });
 
 describe("visibleAttrKeys — grant-recs rail gating", () => {
-  it("hides grant-recs when the flag is off", () => {
+  it("hides grant-recs from self / comms_steward when the flag is off", () => {
     expect(visibleAttrKeys("self", false, false, false, false)).not.toContain("grant-recs");
+    expect(visibleAttrKeys("comms_steward", false, false, false, false)).not.toContain(
+      "grant-recs",
+    );
+  });
+  it("shows grant-recs to a superuser even when the flag is off (QA lens)", () => {
+    // A genuine superuser always sees "Grants for me" so the recommendations can be
+    // inspected per scholar before SELF_EDIT_GRANT_RECS is flipped on for users.
+    expect(visibleAttrKeys("superuser", false, false, false, false)).toContain("grant-recs");
   });
   it("shows grant-recs on self + superuser when the flag is on", () => {
     expect(visibleAttrKeys("self", false, false, false, true)).toContain("grant-recs");
