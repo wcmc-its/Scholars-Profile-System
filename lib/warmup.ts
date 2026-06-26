@@ -110,8 +110,16 @@ export async function warmUp(): Promise<void> {
       matchQueryToTaxonomy(WARMUP_QUERY),
       getPeopleClassifierSets(),
       getMentoringPmidBuckets(),
-      searchPeople({ q: WARMUP_QUERY, countOnly: true }),
-      searchPublications({ q: WARMUP_QUERY, countOnly: true }),
+      // Full searches (NOT countOnly) so the pass actually exercises the heavy
+      // paths the FIRST real request would otherwise pay: the facet aggregation
+      // + Prisma author hydration on the pub tab, and the per-row reason agg on
+      // the people tab. `countOnly` short-circuits past exactly those, so a
+      // countOnly primer latched a "warm" task that had never run a real
+      // faceted search — the first user search after a deploy still paid that
+      // cold cost. These are heavier, but the pass runs out of the ALB rotation
+      // and is budget-bounded (a spill keeps populating caches post-latch).
+      searchPeople({ q: WARMUP_QUERY }),
+      searchPublications({ q: WARMUP_QUERY }),
       // Fill the home-page read cache (lib/api/home.ts) before the task joins
       // the ALB rotation, so the first user never pays the ~5.7s home render.
       getSpotlights(),
