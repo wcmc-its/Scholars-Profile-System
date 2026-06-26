@@ -31,6 +31,7 @@ import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-req
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
+import { isCvEnabled } from "@/lib/edit/cv-export";
 import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
@@ -170,6 +171,7 @@ export default async function EditScholarPage({
     ctx.highlights !== null,
     isGrantRecsEnabled(),
     isBiosketchGenerateEnabled(),
+    isCvEnabled(),
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect(basePath);
@@ -237,6 +239,7 @@ export default async function EditScholarPage({
       reciterPendingEnabled={reciterPendingEnabled}
       grantRecsEnabled={isGrantRecsEnabled()}
       biosketchEnabled={isBiosketchGenerateEnabled()}
+      cvEnabled={isCvEnabled()}
       railRestructureEnabled={isRailRestructureEnabled()}
     />
   );

@@ -1400,6 +1400,80 @@ function resolveByWindowFallback(map: MeshMap, query: string): MeshResolution | 
 }
 
 /**
+ * Extract ALL distinct MeSH descriptor UIs mentioned in a block of free text
+ * (opportunity title + synopsis) via the same `byForm` entry-term/name index
+ * `resolveMeshDescriptor` uses. Unlike that single-query resolver, this scans
+ * the text and collects every matching descriptor — the SPS-side flat-fill that
+ * populates the dead `opportunity.mesh_descriptor_ui` axis (0/831) from the
+ * opportunity's OWN text (never its topic_vector — that would be circular with
+ * topicAffinity).
+ *
+ * Greedy longest-match, left-to-right: at each position the longest window
+ * (≤4 tokens) that resolves wins and the cursor skips past it, so "breast
+ * cancer" matches D001943 once rather than "breast" + "cancer" separately.
+ * Single-token windows match on name OR entry-term but require ≥5 normalized
+ * chars (so "diabetes"/"melanoma" resolve while 1–4 char noise is dropped).
+ * ponytail: recall-favoring for flat-fill — the symmetric Jaccard axis tolerates
+ * an extra opp-side term (it only contributes when the scholar ALSO carries it),
+ * so over-extraction is benign here; precision-tightening (disease-facet, weighted
+ * vector) is the future §4 layer's job, not this 0/831 un-sticker.
+ * Fails closed to `[]` on a cold/failed vocab load. Order = first-mention;
+ * capped at `max`.
+ */
+export async function extractMeshUisFromText(
+  text: string,
+  { max = 12 }: { max?: number } = {},
+): Promise<string[]> {
+  if (!text) return [];
+  let map: MeshMap;
+  try {
+    map = await getMeshMap();
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "mesh_map_load_failed",
+        context: "extractMeshUisFromText",
+        message: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return [];
+  }
+  const tokens = text
+    .toLowerCase()
+    .replace(/\band\b/g, " ")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  const MAX_WINDOW = 4;
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  let i = 0;
+  while (i < tokens.length) {
+    let matchedLen = 0;
+    let matchedUi: string | null = null;
+    for (let size = Math.min(MAX_WINDOW, tokens.length - i); size >= 1; size--) {
+      const key = normalizeForMatch(tokens.slice(i, i + size).join(" "));
+      if (key.length < (size === 1 ? 5 : 3)) continue;
+      const cands = rankedDescriptorCandidates(map, key);
+      if (cands.length === 0) continue;
+      matchedLen = size;
+      matchedUi = cands[0].row.descriptorUi;
+      break; // longest window at this position wins
+    }
+    if (matchedUi) {
+      if (!seen.has(matchedUi)) {
+        seen.add(matchedUi);
+        ordered.push(matchedUi);
+        if (ordered.length >= max) break;
+      }
+      i += matchedLen; // greedy: skip the matched span
+    } else {
+      i += 1;
+    }
+  }
+  return ordered;
+}
+
+/**
  * #878 — a resolved MeSH-concept autocomplete candidate. Carries the descriptor
  * UI + canonical name plus how the typed query matched (`exact` name vs an
  * `entry-term`/alias synonym, and the verbatim `matchedForm` for the subtitle).

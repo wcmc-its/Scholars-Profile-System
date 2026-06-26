@@ -38,6 +38,7 @@ import {
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
 import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
+import { isCvEnabled } from "@/lib/edit/cv-export";
 import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
 
 // /edit reads suppression-OFF + writes via /api/edit/*; the page must never
@@ -158,6 +159,9 @@ export default async function EditSelfPage({
   // #917 v5 (`EDIT_BIOSKETCH_GENERATE`) — gates the "NIH biosketch" Services rail
   // item + panel. Sync env read, mirroring grantRecsEnabled.
   const biosketchEnabled = isBiosketchGenerateEnabled();
+  // `EDIT_CV_EXPORT` — gates the "CV (WCM format)" Tools rail item + panel. Sync
+  // env read, mirroring biosketchEnabled.
+  const cvEnabled = isCvEnabled();
   // `SELF_EDIT_RAIL_RESTRUCTURE` — switches the self rail to the restructured
   // layout (floating Home, content-only "Yours to edit", "From WCM records" with
   // Identity/Records sub-headers, "Tools", "Settings"). Presentational only.
@@ -177,6 +181,7 @@ export default async function EditSelfPage({
     ctx.highlights !== null,
     grantRecsEnabled,
     biosketchEnabled,
+    cvEnabled,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect("/edit");
@@ -300,6 +305,7 @@ export default async function EditSelfPage({
       reciterPendingEnabled={reciterPendingEnabled}
       grantRecsEnabled={grantRecsEnabled}
       biosketchEnabled={biosketchEnabled}
+      cvEnabled={cvEnabled}
       railRestructureEnabled={railRestructureEnabled}
     />
   );
