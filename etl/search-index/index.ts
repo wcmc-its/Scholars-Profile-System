@@ -31,6 +31,7 @@ import {
   loadAllPublicationSuppressions,
 } from "@/lib/api/manual-layer";
 import { loadFamilyOverlayGate } from "@/lib/api/methods-overlay";
+import { extractMeshUisFromText } from "@/lib/api/search-taxonomy";
 import {
   GRANT_INDEX_SELECT,
   GRANT_INDEX_WHERE,
@@ -552,6 +553,44 @@ async function assertFundingIndexHealth(
   }
 }
 
+async function assertOpportunitiesIndexHealth(
+  client: ReturnType<typeof searchClient>,
+): Promise<void> {
+  const total = await client.count({ index: OPPORTUNITIES_INDEX });
+  if (total.body.count === 0) {
+    throw new Error("[smoke] scholars-opportunities index is empty after indexOpportunities()");
+  }
+
+  // SPS-side MeSH flat-fill coverage — the direct guard against the 0/831
+  // silent-rot one layer down (a vocab-load or resolver regression would zero
+  // the field on every doc and re-deaden the axis). Soft-warn FIRST (per the
+  // flat-fill spec §8): warn at 0 and below 50% so a regression is visible
+  // without bricking the build; promote the 0-case to a throw once a green
+  // flat-fill + reindex cycle is established. `exists` counts docs with ≥1 UI
+  // (an empty array does not match), mirroring the funding-index smoke.
+  const withMeshUi = await client.count({
+    index: OPPORTUNITIES_INDEX,
+    body: { query: { exists: { field: "meshDescriptorUi" } } },
+  });
+  const pct = Math.round((100 * withMeshUi.body.count) / total.body.count);
+  if (withMeshUi.body.count === 0) {
+    console.warn(
+      `[smoke] scholars-opportunities: 0/${total.body.count} docs carry meshDescriptorUi — ` +
+        `MeSH flat-fill produced nothing (vocab load or resolver regression?)`,
+    );
+  } else if (pct < 50) {
+    console.warn(
+      `[smoke] scholars-opportunities: only ${withMeshUi.body.count}/${total.body.count} ` +
+        `(${pct}%) docs carry meshDescriptorUi (expected ≳70%)`,
+    );
+  } else {
+    console.log(
+      `[smoke] scholars-opportunities: ${withMeshUi.body.count}/${total.body.count} ` +
+        `(${pct}%) docs carry meshDescriptorUi`,
+    );
+  }
+}
+
 async function indexOpportunities(concreteIndex: string) {
   const client = searchClient();
   // GrantRecs Phase 2 — project research opportunities into their index. One doc
@@ -581,6 +620,20 @@ async function indexOpportunities(concreteIndex: string) {
   })) as unknown as OpportunityIndexRow[];
 
   if (rows.length === 0) return 0;
+
+  // SPS-side MeSH flat-fill: the opp side of meshOverlap is 0/831 because
+  // ReciterAI emits no MeSH. Derive descriptor UIs from the opportunity's OWN
+  // text (title + synopsis) via the entry-term lookup index, populating the
+  // existing meshDescriptorUi field so the dead flat axis fires. Text-derived
+  // (never from topic_vector — that would be circular with topicAffinity). Only
+  // fills when empty, so a future upstream producer's value still wins. In-memory
+  // after the first getMeshMap() load, so the per-row cost is a string scan.
+  for (const r of rows) {
+    const existing = Array.isArray(r.meshDescriptorUi) ? r.meshDescriptorUi : [];
+    if (existing.length === 0) {
+      r.meshDescriptorUi = await extractMeshUisFromText(`${r.title} ${r.synopsis ?? ""}`);
+    }
+  }
 
   await bulkIndexDocs(
     client,
@@ -663,6 +716,7 @@ async function main() {
   if (selected.has("people")) await assertPeopleIndexHealth(client);
   if (selected.has("publications")) await assertPublicationsIndexHealth(client);
   if (selected.has("funding")) await assertFundingIndexHealth(client);
+  if (selected.has("opportunities")) await assertOpportunitiesIndexHealth(client);
   console.log("Smoke checks passed.");
 
   const parts: string[] = [];
