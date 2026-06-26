@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { sanitizePubTitle } from "@/lib/utils";
 import type { ProfilePayload } from "@/lib/api/profile";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
@@ -392,13 +393,13 @@ function GrantRow({
             {isReporter ? (
               <>
                 {" · "}
-                <a
+                <Link
                   href="/about#provenance"
                   className="underline-offset-2 hover:underline"
                   title="Sourced from NIH RePORTER, not WCM-administered InfoEd records"
                 >
                   via NIH RePORTER
-                </a>
+                </Link>
               </>
             ) : null}
           </div>
