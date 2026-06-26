@@ -349,8 +349,13 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // ceiling proves the scaling path works without provisioning prod-sized
     // headroom. Revisit with #554 numbers.
     appMaxCount: 3,
-    appCpu: 512,
-    appMemoryMiB: 1024,
+    // 2026-06-26 — bumped 512→1024 (0.5→1 vCPU; memory follows to the Fargate
+    // minimum for 1024 CPU). A §6 concurrency load-test showed the app-tier CPU
+    // saturating on the per-request taxonomy resolve (matchQueryToTaxonomy,
+    // request-scoped-cache-only) well before OpenSearch — the 0.5 vCPU task was
+    // the binding constraint under ~3-5 concurrent searches.
+    appCpu: 1024,
+    appMemoryMiB: 2048,
     migrationTaskCpu: 512,
     migrationTaskMemoryMiB: 1024,
     // Staging's app user is `'app_rw'@'10.20.%'` (VPC-CIDR-scoped), confirmed
@@ -441,8 +446,13 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // queue saturates. Conservative placeholder; the true ceiling is a
     // function of the #554 RPS / CPU-per-task numbers (P0, Gate A).
     appMaxCount: 6,
-    appCpu: 1024,
-    appMemoryMiB: 2048,
+    // 2026-06-26 — bumped 1024→2048 (1→2 vCPU; memory follows to the Fargate
+    // minimum for 2048 CPU). Same per-request taxonomy-resolve CPU cost as
+    // staging (matchQueryToTaxonomy is request-scoped-cache-only); prod's higher
+    // go-live concurrency makes the app-tier CPU the likely binding constraint,
+    // so add headroom ahead of launch (mirrors the staging bump).
+    appCpu: 2048,
+    appMemoryMiB: 4096,
     migrationTaskCpu: 512,
     migrationTaskMemoryMiB: 1024,
     // Prod's app user is `'app_rw'@'%'` (the bootstrap GRANT + verify both

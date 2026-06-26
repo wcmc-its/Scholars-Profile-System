@@ -2229,14 +2229,16 @@ describe("AppStack", () => {
       expect(json).toContain("scholars/staging/saml/idp-cert");
     });
 
-    it("uses staging Fargate sizing 512 cpu / 1024 MiB on the app task definition", () => {
+    it("uses staging Fargate sizing 1024 cpu / 2048 MiB on the app task definition", () => {
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const appTaskDef = Object.values(taskDefs).find(
         (r) => r.Properties?.Family === "sps-app-staging",
       );
       expect(appTaskDef).toBeDefined();
-      expect(appTaskDef?.Properties?.Cpu).toBe("512");
-      expect(appTaskDef?.Properties?.Memory).toBe("1024");
+      // 2026-06-26 — bumped 512→1024 (0.5→1 vCPU) after a §6 load-test showed the
+      // per-request taxonomy resolve saturating the app-tier CPU under concurrency.
+      expect(appTaskDef?.Properties?.Cpu).toBe("1024");
+      expect(appTaskDef?.Properties?.Memory).toBe("2048");
     });
 
     it("grants the audit INSERT to `'app_rw'@'10.20.%'` on staging (#493 staging fix)", () => {
