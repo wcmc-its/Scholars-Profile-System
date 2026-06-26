@@ -149,8 +149,11 @@ what will land in their CV. It must **not** be added to the public Scholars prof
 - **Mechanism:** a small `GET /api/edit/cv/pops?cwid=` returning the typed `PopsEnrichment` (+ a
   per-field → CV-section map) for display; **same `authorizeOverviewWrite` gating** as the CV tool;
   reuses `fetchPops` (no new data path). **Never rendered under `app/(public)/scholars/...`.**
-- **Status:** v1.1 follow-up, layered on the base build (which already produces `fetchPops` + the CV
-  card). Not part of the in-flight base build.
+- **Status:** BUILT 2026-06-26 — `GET /api/edit/cv/pops` (reuses `fetchPops`, `authorizeOverviewWrite`,
+  flag-gated, `hasClinicalProfile`-gated) + an embedded `PopsPreview` in `cv-tool.tsx` (consent copy,
+  per-field→CV-section tags, renders nothing for non-clinical / empty POPS). Pure grouping helper
+  `buildPopsPreviewGroups` unit-tested (`tests/unit/cv-pops-preview.test.ts`). Live endpoint not yet
+  exercised through the running server (needs dev-login, same deferral as the POST route).
 
 ## 7. Architecture / data flow
 

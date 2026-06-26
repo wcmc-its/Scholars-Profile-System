@@ -24,8 +24,14 @@ import { Check, Download, Minus } from "lucide-react";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import type { PopsEnrichment } from "@/lib/edit/cv-export";
 
 const PATH = "/api/edit/cv";
+const POPS_PATH = "/api/edit/cv/pops";
+
+/** Consent/transparency copy for the live POPS preview (spec §6b). */
+const POPS_USAGE =
+  "These clinical credentials come from your WCM physician profile (POPS) and are used to fill your CV's board-certification, training, hospital-appointment, and honors sections. They're shown here so you can see what will be included — they are not added to your public Scholars profile.";
 
 // User-facing copy, kept as named constants (one place, asserted in tests).
 const NOT_AVAILABLE =
@@ -86,6 +92,23 @@ export type CvToolProps = {
 export function CvTool({ entityId }: CvToolProps) {
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Live POPS enrichment for the transparency preview (spec §6b). Best-effort:
+  // a failure or a non-clinical scholar simply renders no preview. /edit only —
+  // this data is never shown on the public profile.
+  const [pops, setPops] = React.useState<PopsEnrichment | null>(null);
+
+  React.useEffect(() => {
+    const ctrl = new AbortController();
+    fetch(`${POPS_PATH}?cwid=${encodeURIComponent(entityId)}`, { signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { pops?: PopsEnrichment | null } | null) => {
+        if (d?.pops) setPops(d.pops);
+      })
+      .catch(() => {
+        /* best-effort preview — stay silent on failure */
+      });
+    return () => ctrl.abort();
+  }, [entityId]);
 
   async function download() {
     if (isGenerating) return;
@@ -154,6 +177,8 @@ export function CvTool({ entityId }: CvToolProps) {
         </Alert>
       )}
 
+      {pops && <PopsPreview pops={pops} />}
+
       <div
         className="border-apollo-border bg-apollo-surface-2 flex flex-col gap-4 rounded-md border p-4"
         data-testid="cv-checklist"
@@ -177,6 +202,109 @@ export function CvTool({ entityId }: CvToolProps) {
         />
       </div>
     </EditPanel>
+  );
+}
+
+/** Pull a 4-digit year from an ISO/loose date string; "" when absent. */
+function popsYear(date: string | null): string {
+  if (!date) return "";
+  const m = /(\d{4})/.exec(date);
+  return m ? m[1]! : "";
+}
+
+/** "YYYY–YYYY", "YYYY–Present", "YYYY", or "" — never fabricates a date. */
+function popsRange(start: string | null, end: string | null): string {
+  const s = popsYear(start);
+  const e = popsYear(end) || (start && !end ? "Present" : "");
+  if (!s && !e) return "";
+  return s && e ? `${s}–${e}` : s || e;
+}
+
+export type PopsPreviewGroup = { label: string; section: string; items: string[] };
+
+/**
+ * Map a `PopsEnrichment` to the preview's display groups — each tagged with the
+ * CV section it feeds — dropping any group with no items. Pure (exported for the
+ * unit test). The `→ CV <section>` tags are presentation, so they live here, not
+ * in the API response.
+ */
+export function buildPopsPreviewGroups(pops: PopsEnrichment): PopsPreviewGroup[] {
+  return [
+    {
+      label: "Board certifications",
+      section: "Board Certification",
+      items: pops.boardCertifications.map((c) =>
+        c.specialty ? `${c.board} (${c.specialty})` : c.board,
+      ),
+    },
+    {
+      label: "Residency & fellowship training",
+      section: "Postdoctoral Training",
+      items: pops.training.map((t) => `${t.type} — ${t.institution}`),
+    },
+    {
+      label: "Hospital appointments",
+      section: "Positions / Affiliation",
+      items: pops.appointments.map((a) => {
+        const r = popsRange(a.start, a.end);
+        return r ? `${a.title}, ${a.institution} (${r})` : `${a.title}, ${a.institution}`;
+      }),
+    },
+    {
+      label: "Honors & awards",
+      section: "Honors and Awards",
+      items: pops.honors.map((h) => (h.date ? `${h.date} — ${h.name}` : h.name)),
+    },
+    {
+      label: "Degrees",
+      section: "Education",
+      items: pops.degrees.map(
+        (d) => `${d.degree}${d.year ? `, ${d.year}` : ""} — ${d.institution}`,
+      ),
+    },
+    {
+      label: "Clinical specialties",
+      section: "Clinical Activities",
+      items: pops.specialties.length > 0 ? [pops.specialties.join(", ")] : [],
+    },
+    { label: "NPI", section: "Licensure", items: pops.npi ? [pops.npi] : [] },
+  ].filter((g) => g.items.length > 0);
+}
+
+/**
+ * Live, read-only preview of the POPS (WCM physician-directory) data that will
+ * fill this scholar's CV — the §6b transparency surface. Each group is tagged
+ * with the CV section it feeds; renders nothing when POPS carries no usable data.
+ */
+function PopsPreview({ pops }: { pops: PopsEnrichment }) {
+  const groups = buildPopsPreviewGroups(pops);
+  if (groups.length === 0) return null;
+
+  return (
+    <div
+      className="border-apollo-border bg-apollo-surface-2 flex flex-col gap-3 rounded-md border p-4"
+      data-testid="cv-pops-preview"
+    >
+      <p className="text-foreground text-sm font-semibold">
+        Clinical credentials (from your WCM physician directory)
+      </p>
+      <p className="text-muted-foreground text-xs">{POPS_USAGE}</p>
+      <div className="flex flex-col gap-3">
+        {groups.map((g) => (
+          <div key={g.label} className="flex flex-col gap-1">
+            <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+              {g.label}{" "}
+              <span className="text-muted-foreground/70 normal-case">→ CV {g.section}</span>
+            </p>
+            <ul className="flex flex-col gap-1 text-sm">
+              {g.items.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
