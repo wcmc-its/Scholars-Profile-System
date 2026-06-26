@@ -1371,6 +1371,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "ddb",
               },
               {
+                "Name": "REPORTER_MATCH_V2",
+                "Value": "off",
+              },
+              {
                 "Name": "OPENSEARCH_NODE",
                 "Value": {
                   "Fn::Join": [
@@ -7422,6 +7426,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLAR_TOOL_SOURCE",
                 "Value": "s3",
+              },
+              {
+                "Name": "REPORTER_MATCH_V2",
+                "Value": "on",
               },
               {
                 "Name": "OPENSEARCH_NODE",

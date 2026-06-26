@@ -93,10 +93,42 @@ export function selectV2Cohort<T extends { cwid: string }>(
   return active.filter((s) => !profiledCwids.has(s.cwid));
 }
 
-/** A scholar can only be matched when they have ≥1 trusted PMID to discriminate
- *  candidates against. 0 trusted PMIDs ⇒ skip, no candidate row (§4.1, case #1). */
-export function hasDiscriminator(trustedPmidCount: number): boolean {
-  return trustedPmidCount > 0;
+/** A scholar can only be matched when they have ≥`min` trusted PMIDs to
+ *  discriminate candidates against. `min` defaults to 1 (any PMID); raise it via
+ *  REPORTER_MATCH_V2_MIN_PMIDS to trim the cohort to higher-yield scholars — the
+ *  matcher needs PMIDs anyway and auto-lock needs K≥3, so very-low-PMID scholars
+ *  rarely lock. `min` is floored at 1 so 0 trusted PMIDs always skips (§4.1,
+ *  case #1). Pure. */
+export function hasDiscriminator(trustedPmidCount: number, min = 1): boolean {
+  return trustedPmidCount >= Math.max(1, min);
+}
+
+/**
+ * Bound a single nightly run's RePORTER call volume (handoff #1 runtime guard).
+ * The full v2 cohort × ~3 RePORTER calls/scholar at 1 req/s runs many hours —
+ * too long for the nightly window. This slices a deterministic, day-rotating
+ * window of at most `maxPerRun` scholars: sort the cohort by cwid, then take the
+ * `dayOfYear % numWindows`-th contiguous block. Every scholar is covered over
+ * ceil(len/maxPerRun) nights with no persisted cursor. `maxPerRun ≤ 0`, or a
+ * cohort that already fits, ⇒ no bound (whole cohort). Pure.
+ *
+ * ponytail: cursor-free day-rotation, not a persisted cursor. A still-pending
+ * scholar is re-scanned on its next window turn (idempotent — just extra
+ * RePORTER calls). Upgrade path: a persisted EtlState cursor if exact resume
+ * (skip already-scanned) ever matters.
+ */
+export function selectRunWindow<T extends { cwid: string }>(
+  cohort: T[],
+  maxPerRunRaw: number,
+  dayOfYear: number,
+): T[] {
+  const maxPerRun = Math.trunc(maxPerRunRaw); // integer window; a fractional cap would misalign slices
+  if (maxPerRun <= 0 || cohort.length <= maxPerRun) return cohort;
+  const sorted = [...cohort].sort((a, b) => (a.cwid < b.cwid ? -1 : a.cwid > b.cwid ? 1 : 0));
+  const numWindows = Math.ceil(sorted.length / maxPerRun);
+  const windowIndex = ((dayOfYear % numWindows) + numWindows) % numWindows;
+  const start = windowIndex * maxPerRun;
+  return sorted.slice(start, start + maxPerRun);
 }
 
 /** What a ranked match implies for the candidate ledger, before reconciling with

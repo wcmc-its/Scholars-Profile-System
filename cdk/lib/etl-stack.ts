@@ -618,6 +618,15 @@ export class EtlStack extends Stack {
         // ReciterAI's legacy TOOL# deletion). Applied via cdk deploy
         // --exclusively Sps-Etl-<env>; run etl:scholar-tool after the deploy.
         SCHOLAR_TOOL_SOURCE: env === "staging" ? "s3" : "ddb",
+        // RePORTER grants v2 PMID-overlap matcher — step 0 of etl:reporter-grants.
+        // Resolves lateral recruits with no person_nih_profile row (name →
+        // candidate profile_ids → PMID overlap → auto-lock K≥3 / propose K=2). A
+        // per-run scholar cap (REPORTER_MATCH_V2_MAX_PER_RUN, code default 500)
+        // bounds the nightly RePORTER call volume; tune it once the staging cohort
+        // is sized. STAGING-FIRST: "on" in staging now, prod stays "off" until the
+        // staging soak signs off. Applied via cdk deploy --exclusively
+        // Sps-Etl-<env> (CD only rolls the image, never deploys infra).
+        REPORTER_MATCH_V2: env === "staging" ? "on" : "off",
         // OpenSearch domain endpoint (https://...) imported from DataStack;
         // the search-index step's lib/search.ts reads OPENSEARCH_NODE and
         // authenticates with the OPENSEARCH_USER/PASS secrets above. #447

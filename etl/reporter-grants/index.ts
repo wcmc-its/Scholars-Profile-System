@@ -52,6 +52,7 @@ import {
   hasDiscriminator,
   parseFirstLast,
   reconcileWithExisting,
+  selectRunWindow,
   selectV2Cohort,
   summarizeCandidateGrants,
 } from "./v2";
@@ -65,6 +66,25 @@ const SYSTEM_RECENCY = "system-recency";
  *  candidate generation, auto-lock + pending writes. Off ⇒ ETL is v1-only.
  *  Read the same way as other ETL flags (e.g. SELF_EDIT_ED_ADMINS_IMPORT). */
 const REPORTER_MATCH_V2_ENABLED = process.env.REPORTER_MATCH_V2 === "on";
+
+/** Runtime guard (handoff #1). Per-run cap on scholars scanned so the nightly v2
+ *  pass can't blow its window on the full cohort × ~3 RePORTER calls @ 1 req/s.
+ *  A day-rotating window (selectRunWindow) covers everyone over ceil(cohort/cap)
+ *  nights. Default 500 (≈ ≤30 min of RePORTER calls); tune
+ *  REPORTER_MATCH_V2_MAX_PER_RUN once the staging cohort is sized. 0/negative ⇒
+ *  no cap (whole cohort in one run). */
+const maxPerRunRaw = Number(process.env.REPORTER_MATCH_V2_MAX_PER_RUN ?? "500");
+const REPORTER_MATCH_V2_MAX_PER_RUN = Number.isFinite(maxPerRunRaw) ? maxPerRunRaw : 500;
+
+/** Minimum trusted PMIDs for a scholar to enter the matcher. Default 1 (any
+ *  PMID); raise REPORTER_MATCH_V2_MIN_PMIDS to trim to higher-yield scholars. */
+const minPmidsRaw = Number(process.env.REPORTER_MATCH_V2_MIN_PMIDS ?? "1");
+const REPORTER_MATCH_V2_MIN_PMIDS = Number.isFinite(minPmidsRaw) ? minPmidsRaw : 1;
+
+/** 1-based day of the year (UTC) — the rotation index for selectRunWindow. */
+function dayOfYear(d: Date): number {
+  return Math.floor((d.getTime() - Date.UTC(d.getUTCFullYear(), 0, 0)) / 86_400_000);
+}
 
 /** resolution_source stamped on a person_nih_profile row a v2 auto-lock creates,
  *  so the audit SQL can split v2 (pmid-overlap) grants from v1 (spec §12). */
@@ -102,9 +122,11 @@ async function runReporterMatchV2(): Promise<void> {
     (await db.write.personNihProfile.findMany({ select: { cwid: true } })).map((r) => r.cwid),
   );
   const cohort = selectV2Cohort(activeScholars, profiledCwids);
+  const runCohort = selectRunWindow(cohort, REPORTER_MATCH_V2_MAX_PER_RUN, dayOfYear(now));
   console.log(
     `  cohort: ${cohort.length} active scholars without a person_nih_profile row ` +
-      `(of ${activeScholars.length} active).`,
+      `(of ${activeScholars.length} active); this run scans ${runCohort.length} ` +
+      `(cap ${REPORTER_MATCH_V2_MAX_PER_RUN}/run, min ${REPORTER_MATCH_V2_MIN_PMIDS} trusted PMIDs).`,
   );
 
   let autoLocked = 0;
@@ -113,13 +135,13 @@ async function runReporterMatchV2(): Promise<void> {
   let errored = 0;
   let processed = 0;
 
-  for (const scholar of cohort) {
+  for (const scholar of runCohort) {
     const trustedRows = await db.write.publicationAuthor.findMany({
       where: { cwid: scholar.cwid, isConfirmed: true },
       select: { pmid: true },
     });
     const trustedPmids = new Set(trustedRows.map((r) => Number(r.pmid)));
-    if (!hasDiscriminator(trustedPmids.size)) {
+    if (!hasDiscriminator(trustedPmids.size, REPORTER_MATCH_V2_MIN_PMIDS)) {
       skippedNoPmids++;
       continue;
     }
