@@ -5,6 +5,7 @@ import {
   hasDiscriminator,
   parseFirstLast,
   reconcileWithExisting,
+  selectRunWindow,
   selectV2Cohort,
   summarizeCandidateGrants,
 } from "@/etl/reporter-grants/v2";
@@ -98,6 +99,46 @@ describe("hasDiscriminator (spec §11 #1 — 0 trusted PMIDs skipped)", () => {
     expect(hasDiscriminator(0)).toBe(false);
     expect(hasDiscriminator(1)).toBe(true);
     expect(hasDiscriminator(42)).toBe(true);
+  });
+
+  it("honors a higher min-PMID floor and never admits 0 (floor clamped to 1)", () => {
+    expect(hasDiscriminator(2, 3)).toBe(false);
+    expect(hasDiscriminator(3, 3)).toBe(true);
+    expect(hasDiscriminator(0, 0)).toBe(false); // min floored to 1
+    expect(hasDiscriminator(1, 0)).toBe(true);
+  });
+});
+
+describe("selectRunWindow (handoff #1 — per-run cap, day-rotating coverage)", () => {
+  const make = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ cwid: `c${String(i).padStart(2, "0")}` }));
+
+  it("returns the whole cohort when it fits the cap or the cap is disabled", () => {
+    const cohort = make(2);
+    expect(selectRunWindow(cohort, 5, 10)).toHaveLength(2);
+    expect(selectRunWindow(cohort, 0, 10)).toHaveLength(2); // 0 ⇒ no cap
+    expect(selectRunWindow(cohort, -1, 10)).toHaveLength(2);
+  });
+
+  it("covers every scholar exactly once over a full rotation, ≤ cap per run", () => {
+    const cohort = make(23);
+    const cap = 5;
+    const numWindows = Math.ceil(23 / cap); // 5
+    const seen = new Set<string>();
+    for (let day = 0; day < numWindows; day++) {
+      const run = selectRunWindow(cohort, cap, day);
+      expect(run.length).toBeLessThanOrEqual(cap);
+      for (const s of run) {
+        expect(seen.has(s.cwid)).toBe(false); // no dup within the cycle
+        seen.add(s.cwid);
+      }
+    }
+    expect(seen.size).toBe(23); // full coverage, no gaps
+  });
+
+  it("wraps deterministically (day N and day N+numWindows pick the same window)", () => {
+    const cohort = make(23);
+    expect(selectRunWindow(cohort, 5, 1)).toEqual(selectRunWindow(cohort, 5, 6));
   });
 });
 
