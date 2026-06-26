@@ -76,6 +76,7 @@ const ctx: EditContext = {
       externalId: "grant-1",
       title: "R01 Investigating Things",
       role: "PI",
+      source: "InfoEd",
       funderLabel: "NCI",
       startYear: 2024,
       endYear: 2027,

@@ -556,6 +556,7 @@ describe("loadEditContext — entity attributes (#160 appointments / education /
     externalId: "grant",
     title: "R01 Something",
     role: "PI",
+    source: "InfoEd",
     funder: "Legacy Funder String",
     primeSponsor: "NCI",
     primeSponsorRaw: null,

@@ -171,6 +171,8 @@ export type EditContextGrant = {
   externalId: string;
   title: string;
   role: string;
+  /** "InfoEd" (WCM-administered) | "RePORTER" (NIH RePORTER backfill, #1307). */
+  source: string;
   /** The funding-section sponsor label — mirrors the profile's derivation
    *  (`primeSponsor ?? canonicalizeSponsor(primeSponsorRaw)`), falling back to
    *  the legacy `funder` so the label is never empty. */
@@ -635,6 +637,7 @@ export async function loadEditContext(
         title: true,
         role: true,
         funder: true,
+        source: true,
         primeSponsor: true,
         primeSponsorRaw: true,
         startDate: true,
@@ -1149,6 +1152,7 @@ export async function loadEditContext(
       externalId: g.externalId,
       title: g.title,
       role: g.role,
+      source: g.source,
       funderLabel: g.primeSponsor ?? canonicalizeSponsor(g.primeSponsorRaw) ?? g.funder,
       // UTC year (not getFullYear, which is local) so it matches how the
       // profile renders grant dates (`toISOString().slice(0, 10)`).
