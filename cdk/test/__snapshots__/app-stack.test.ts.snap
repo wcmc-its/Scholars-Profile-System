@@ -539,6 +539,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_PUB_FACET_SPLIT",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_METHOD_FAMILY",
                 "Value": "off",
               },
@@ -3961,6 +3965,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PUB_MESH_ONLY_FILTER",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PUB_FACET_SPLIT",
                 "Value": "on",
               },
               {

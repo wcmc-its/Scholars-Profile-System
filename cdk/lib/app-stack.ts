@@ -1422,6 +1422,13 @@ export class AppStack extends Stack {
         // `?searchMode=mesh-only` so a stale URL is inert when off.
         // STAGING-FIRST: on for staging, off for prod (separate gated flip).
         SEARCH_PUB_MESH_ONLY_FILTER: env === "staging" ? "on" : "off",
+        // Pub-tab perf -- split the facet aggregation off the hit-list request
+        // (resolvePubFacetSplit): hits (Request A) + cached/time-capped facets
+        // (Request B) in parallel, so paginating/re-sorting a query reuses the
+        // page- and sort-invariant facet counts and pays only the cheap hit
+        // query. NO reindex prereq -- request-shape change only; flag-off is
+        // byte-identical. STAGING-FIRST: soak on staging before prod.
+        SEARCH_PUB_FACET_SPLIT: env === "staging" ? "on" : "off",
         // #824 sec4c -- People-tab method-family ranking boost. Same
         // reindex-then-flip shape as SEARCH_PUB_DEPARTMENT_FILTER above: the
         // people index must be rebuilt so docs carry the `methodFamily` rollup
