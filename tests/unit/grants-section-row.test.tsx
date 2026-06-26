@@ -35,6 +35,7 @@ const baseGrant: Grant = {
   title: "A study of test rendering for funding rows",
   role: "PI",
   funder: "NCI",
+  source: "InfoEd",
   startDate: "2023-01-01",
   endDate: "2028-12-31",
   isActive: true,
@@ -151,6 +152,19 @@ describe("GrantsSection row — Type pill", () => {
     };
     render(<GrantsSection grants={[g]} />);
     expect(screen.getByText("BioPharma Alliance")).toBeTruthy();
+  });
+});
+
+describe("GrantsSection row — RePORTER provenance marker", () => {
+  it("renders a 'via NIH RePORTER' marker when a member's source is RePORTER", () => {
+    const g: Grant = { ...baseGrant, source: "RePORTER" };
+    render(<GrantsSection grants={[g]} />);
+    expect(screen.getByText(/via NIH RePORTER/i)).toBeTruthy();
+  });
+
+  it("does not render the RePORTER marker for InfoEd-sourced grants", () => {
+    render(<GrantsSection grants={[baseGrant]} />);
+    expect(screen.queryByText(/via NIH RePORTER/i)).toBeNull();
   });
 });
 

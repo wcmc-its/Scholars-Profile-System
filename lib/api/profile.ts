@@ -467,6 +467,8 @@ export type ProfilePayload = {
     title: string;
     role: string;
     funder: string;
+    /** "InfoEd" (WCM-administered) | "RePORTER" (NIH RePORTER backfill, #1307). */
+    source: string;
     startDate: string;
     endDate: string;
     isActive: boolean;
@@ -1239,6 +1241,7 @@ export const getScholarFullProfileBySlug = cache(async (
         title: g.title,
         role: g.role,
         funder: g.funder,
+        source: g.source,
         startDate: g.startDate.toISOString().slice(0, 10),
         endDate: g.endDate.toISOString().slice(0, 10),
         isActive: isFundingActive(g.endDate, now),

@@ -45,6 +45,12 @@ export function FundingCard({ cwid, mode, scholarName, grants }: FundingCardProp
           >
             {g.isActive ? "Active" : "Past"}
           </Badge>
+          {g.source === "RePORTER" ? (
+            <>
+              {" · "}
+              <span className="text-muted-foreground">via NIH RePORTER</span>
+            </>
+          ) : null}
         </>
       )}
       copy={{
