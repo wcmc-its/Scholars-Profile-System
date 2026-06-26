@@ -1,21 +1,26 @@
 import { Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
+import type { SpsEnvConfig } from "../lib/config";
 import { EtlStack } from "../lib/etl-stack";
 import { NetworkStack } from "../lib/network-stack";
 import { makeFixture } from "./test-utils";
 
-function buildEtlStack(envName: "staging" | "prod"): {
+function buildEtlStack(
+  envName: "staging" | "prod",
+  envConfigOverride: Partial<SpsEnvConfig> = {},
+): {
   template: Template;
   stack: EtlStack;
 } {
   const fixture = makeFixture(envName);
+  const envConfig = { ...fixture.envConfig, ...envConfigOverride };
   const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
   });
   const appStack = new AppStack(fixture.app, `Sps-App-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     vpc: network.vpc,
     appSecurityGroup: network.appSecurityGroup,
     etlSecurityGroup: network.etlSecurityGroup,
@@ -23,7 +28,7 @@ function buildEtlStack(envName: "staging" | "prod"): {
   });
   const stack = new EtlStack(fixture.app, `Sps-Etl-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     vpc: network.vpc,
     etlSecurityGroup: network.etlSecurityGroup,
     ecsCluster: appStack.ecsCluster,
@@ -1516,6 +1521,60 @@ describe("EtlStack", () => {
       for (const resource of Object.values(groups)) {
         expect(resource.Properties?.RetentionInDays).toBe(30);
       }
+    });
+  });
+
+  // docs/etl-vpc-migration-handoff.md (shared-VPC plan) — both flags flipped on.
+  // The real lts-reciter vpcId/subnet/SG ids are config placeholders (pending
+  // networking, plan §12 Q1/Q2/Q9); the fixture supplies synthetic ids so the
+  // relocate wiring is testable.
+  describe("ETL cadence VPC relocation + peering (flags on)", () => {
+    const ETL_SG = "sg-staging-etl-test";
+    const SUBNETS = ["subnet-lts-a", "subnet-lts-b"];
+    const { template } = buildEtlStack("staging", {
+      etlVpcPeeringEnabled: true,
+      etlCadenceVpcRelocated: true,
+      etlComputeSecurityGroupId: ETL_SG,
+      etlComputeVpc: {
+        vpcId: "vpc-lts-reciter-test",
+        availabilityZones: ["us-east-1a", "us-east-1b"],
+        appSubnetIds: SUBNETS,
+      },
+    });
+
+    it("places cadence task ENIs in the lts-reciter (etlComputeVpc) subnets", () => {
+      // The cadence EcsRunTask steps render their placement subnets as literals
+      // in the state-machine definitions; a regression to edExportVpc/Sps subnets
+      // would drop these ids.
+      const sms = template.findResources("AWS::StepFunctions::StateMachine");
+      const allDefs = Object.values(sms)
+        .map((s) => JSON.stringify(s.Properties?.DefinitionString ?? ""))
+        .join("");
+      for (const subnet of SUBNETS) {
+        expect(allDefs).toContain(subnet);
+      }
+    });
+
+    it("imports the per-env ETL SG by id — creates no new cadence SecurityGroup (would cycle)", () => {
+      const sgs = template.findResources("AWS::EC2::SecurityGroup");
+      const cadenceSg = Object.values(sgs).find((r) =>
+        (r.Properties?.GroupDescription as string | undefined)?.includes(
+          "ETL cadence task egress",
+        ),
+      );
+      expect(cadenceSg).toBeUndefined();
+    });
+
+    it("admits the internal ALB :80 from the per-env ETL SG by reference (no CIDR, no owner id)", () => {
+      const ingress = template.findResources("AWS::EC2::SecurityGroupIngress");
+      const albRule = Object.values(ingress).find(
+        (r) =>
+          r.Properties?.FromPort === 80 &&
+          r.Properties?.SourceSecurityGroupId === ETL_SG,
+      );
+      expect(albRule).toBeDefined();
+      expect(albRule?.Properties?.CidrIp).toBeUndefined();
+      expect(albRule?.Properties?.SourceSecurityGroupOwnerId).toBeUndefined();
     });
   });
 });

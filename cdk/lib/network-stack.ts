@@ -133,5 +133,72 @@ export class NetworkStack extends Stack {
       value: this.albSecurityGroup.securityGroupId,
       description: "SPS load-balancer security group id",
     });
+
+    // ------------------------------------------------------------------
+    // ETL cadence VPC peering (docs/etl-vpc-migration-handoff.md, shared-VPC plan).
+    //
+    // The ETL cadence relocates into the shared TGW-attached lts-reciter-vpc01
+    // (envConfig.etlComputeVpc), which hosts BOTH envs' ETL, to read on-prem +
+    // 10.46.x sources, and reaches Aurora / OpenSearch / the internal ALB back
+    // here over an intra-account VPC peering connection. This stack owns the
+    // requester side:
+    //   - the peering connection itself. Same account + same region, so AWS
+    //     auto-accepts it on create — no manual accept step.
+    //   - the RETURN route on each Sps private subnet's route table
+    //     (etlPeerCidrs → pcx), so a datastore's reply to a relocated task
+    //     (10.46.x) goes to the peer instead of following the VPC's default
+    //     local/NAT path. (Aurora, OpenSearch, and the in-Sps ETL all live in
+    //     the `private` PRIVATE_WITH_EGRESS subnets here — there is no isolated
+    //     tier — so these are the only route tables that need the route.)
+    //
+    // The lts-reciter-side route (10.20/16 [staging] / 10.10/16 [prod] → this
+    // pcx) is added out-of-band in that VPC; it isn't ours to mutate from CDK.
+    //
+    // Gated on its OWN flag, separate from etlCadenceVpcRelocated, so the peer
+    // + the datastore ingress can go up and be probed from lts-reciter-vpc01
+    // BEFORE the cadence tasks move. resolveEnvConfig enforces relocated ⇒ peered.
+    // ------------------------------------------------------------------
+    if (envConfig.etlVpcPeeringEnabled) {
+      const peering = new ec2.CfnVPCPeeringConnection(
+        this,
+        "EtlCadenceVpcPeering",
+        {
+          vpcId: this.vpc.vpcId,
+          peerVpcId: envConfig.etlComputeVpc.vpcId,
+          // Same account + region → omit peerOwnerId/peerRegion (auto-accepted).
+          tags: [
+            {
+              key: "Name",
+              value: `sps-etl-cadence-peer-${envConfig.envName}`,
+            },
+          ],
+        },
+      );
+      const seenRouteTables = new Set<string>();
+      this.vpc.privateSubnets.forEach((subnet, i) => {
+        const routeTableId = subnet.routeTable.routeTableId;
+        if (seenRouteTables.has(routeTableId)) {
+          return;
+        }
+        seenRouteTables.add(routeTableId);
+        // One return route per (route table, lts-reciter placement CIDR). The
+        // route-table id is a CFN token (can't be a construct-id segment), so
+        // the id combines the dedup index with a slug of the literal CIDR —
+        // unique per pair even when etlPeerCidrs holds both subnets.
+        envConfig.etlPeerCidrs.forEach((cidr) => {
+          const cidrSlug = cidr.replace(/[./]/g, "_");
+          new ec2.CfnRoute(this, `EtlCadencePeerRoute${i}-${cidrSlug}`, {
+            routeTableId,
+            destinationCidrBlock: cidr,
+            vpcPeeringConnectionId: peering.ref,
+          });
+        });
+      });
+      new CfnOutput(this, "EtlCadenceVpcPeeringId", {
+        value: peering.ref,
+        description:
+          "ETL cadence VPC peering connection id (Sps ↔ lts-reciter-vpc01). Add the lts-reciter-side route 10.20/16 [staging] / 10.10/16 [prod] → this pcx out-of-band.",
+      });
+    }
   }
 }
