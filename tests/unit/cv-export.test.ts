@@ -258,9 +258,15 @@ const clinicalInput: CvInput = {
 // ── (a) instruction box removed + (b) real headings survive ──────────────────
 
 describe("buildWcmCv — fills the official template", () => {
-  it("removes the WCM instruction box", async () => {
+  it("keeps the WCM instruction box (template's own delete-on-completion guidance)", async () => {
     const xml = await documentXml(clinicalInput);
-    expect(allText(xml)).not.toContain("When preparing the WCM CV template");
+    expect(allText(xml)).toContain("When preparing the WCM CV template");
+  });
+
+  it("borders every table (tblBorders)", async () => {
+    const xml = await documentXml(clinicalInput);
+    expect(xml).toContain("<w:tblBorders>");
+    expect(xml).toContain('w:color="808080"');
   });
 
   it("preserves the template's real section headings", async () => {
@@ -304,7 +310,6 @@ describe("buildWcmCv — scholar data is injected", () => {
     expect(text).toContain("MIT"); // Education institution
     expect(text).toContain("Pat Lee"); // Current mentee
     expect(text).toContain("Director, Center for Aging Research"); // Leadership
-    expect(text).not.toContain("When preparing the WCM CV template");
   });
 });
 

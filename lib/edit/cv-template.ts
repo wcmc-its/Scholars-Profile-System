@@ -273,13 +273,35 @@ function anchorNextSibling(node: XNode): XNode | null {
   return i >= 0 && i + 1 < sibs.length ? sibs[i + 1]! : null;
 }
 
-/** Remove an element from its parent (e.g. the instruction box table). */
+/** Remove an element from its parent. */
 export function removeNode(node: XNode | undefined): void {
   if (node && node.parentNode) node.parentNode.removeChild(node);
 }
 
-/** Remove the WCM instruction box: the first table whose header text begins with
- *  "When preparing" (a 1×1 cell holding all the instructional bullets). */
-export function removeInstructionBox(t: LoadedTemplate): void {
-  removeNode(findTable(t, (h) => (h[0] ?? "").startsWith("When preparing")));
+const BORDER_SIDES = ["top", "left", "bottom", "right", "insideH", "insideV"];
+
+/**
+ * Add single-line borders to every table (matching CViche's output styling:
+ * 0.5pt / size 4, gray `808080`, all sides + inside). The official template
+ * ships borderless; this gives the filled CV the bordered look. Skips tables
+ * that already declare `<w:tblBorders>`. Apply AFTER all fills so cloned tables
+ * are covered too.
+ */
+export function applyTableBorders(t: LoadedTemplate, color = "808080", size = "4"): void {
+  for (const tbl of allTables(t)) {
+    const tblPr = childrenByTag(tbl, "w:tblPr")[0];
+    if (!tblPr || childrenByTag(tblPr, "w:tblBorders").length > 0) continue;
+    const borders = t.doc.createElement("w:tblBorders");
+    for (const side of BORDER_SIDES) {
+      const b = t.doc.createElement(`w:${side}`);
+      b.setAttribute?.("w:val", "single");
+      b.setAttribute?.("w:sz", size);
+      b.setAttribute?.("w:space", "0");
+      b.setAttribute?.("w:color", color);
+      borders.appendChild(b);
+    }
+    // tblBorders must precede tblLayout in the CT_TblPr sequence.
+    const layout = childrenByTag(tblPr, "w:tblLayout")[0];
+    tblPr.insertBefore(borders, layout ?? null);
+  }
 }

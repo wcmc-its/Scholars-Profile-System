@@ -18,13 +18,13 @@ import type { ProfilePayload } from "@/lib/api/profile";
 import type { MenteeChip } from "@/lib/api/mentoring";
 import {
   appendToLabelParagraph,
+  applyTableBorders,
   fillGrid,
   fillTablePerEntry,
   findTable,
   insertParagraphsAfter,
   loadTemplate,
   makeParagraph,
-  removeInstructionBox,
   serialize,
   setLabeledValue,
   tableAfterParagraph,
@@ -212,8 +212,8 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
   const t = await loadTemplate();
   const doc = t.doc;
 
-  // 1. Drop the instruction box; fill the signature block.
-  removeInstructionBox(t);
+  // 1. Fill the signature block (the WCM instruction box is kept, per the
+  //    template's own "delete this box on completion" guidance — left for the scholar).
   appendToLabelParagraph(doc, t, "Name:", p.publishedName);
   appendToLabelParagraph(doc, t, "Date of Preparation:", todayLong());
 
@@ -310,6 +310,9 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
     const paras = input.bibliography.map((pub, i) => makeParagraph(doc, citationRuns(i, pub, selected)));
     insertParagraphsAfter(t, (x) => x.startsWith("BIBLIOGRAPHY"), paras);
   }
+
+  // 12. Border every table (incl. cloned ones) to match the WCM output styling.
+  applyTableBorders(t);
 
   return serialize(t);
 }
