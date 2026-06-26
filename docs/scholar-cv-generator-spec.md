@@ -127,6 +127,31 @@ already present (dedup by institution+type/year).
   fetches it at generation over the internet (NAT egress); no ETL/proxy needed. (Notable since the
   Sps VPCs cannot reach WCM 10.x internal sources — POPS is the public physician-directory host.)
 
+## 6b. POPS data transparency — preview in /edit (NOT the public profile)
+
+**Requirement (user 2026-06-26):** the POPS-sourced clinical data the CV pulls must be **visible to
+the scholar in the `/edit` surface**, with plain-language copy on how it's used, so they can see
+what will land in their CV. It must **not** be added to the public Scholars profile.
+
+- **Where:** a read-only "Clinical credentials (from POPS)" preview inside the **CV (WCM format)**
+  tool card (default — co-located with where the data is used). Alternative: a standalone "Clinical"
+  card in the Tools rail (same data, own panel). Embedded is the lazy default; standalone if you
+  want it discoverable on its own.
+- **What it shows:** the fetched `PopsEnrichment` — board certifications, residency/fellowship
+  training, hospital appointments (with dates), honors, NPI, specialties — each tagged with the CV
+  section it feeds (F2 / C / D2·§9 / H / F1).
+- **Copy (verbatim intent):** "These clinical credentials come from your WCM physician profile
+  (POPS) and are used to fill your CV's board-certification, training, hospital-appointment, and
+  honors sections. They're shown here so you can see what will be included — they are **not** added
+  to your public Scholars profile."
+- **Empty / non-clinical:** scholars without `hasClinicalProfile` (or an empty POPS record) → show
+  nothing, or "No WCM physician (POPS) profile found."
+- **Mechanism:** a small `GET /api/edit/cv/pops?cwid=` returning the typed `PopsEnrichment` (+ a
+  per-field → CV-section map) for display; **same `authorizeOverviewWrite` gating** as the CV tool;
+  reuses `fetchPops` (no new data path). **Never rendered under `app/(public)/scholars/...`.**
+- **Status:** v1.1 follow-up, layered on the base build (which already produces `fetchPops` + the CV
+  card). Not part of the in-flight base build.
+
 ## 7. Architecture / data flow
 
 ```
