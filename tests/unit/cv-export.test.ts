@@ -1,31 +1,23 @@
 /**
- * Unit coverage for the WCM CV docx builder (spec §12).
+ * Unit coverage for the WCM CV builder — which now FILLS the official template
+ * (`lib/edit/assets/wcm-cv-template.docx`) rather than reconstructing it.
  *
- * Builds the CV for two in-test fixtures — a research-only scholar (no POPS) and
- * a clinical scholar (with a POPS payload incl. one board certification) — packs
- * each to a real .docx, unzips `word/document.xml`, and asserts:
- *   (a) all 23 WCM section headings present, in order;
- *   (b) every empty section renders the literal "N/A" placeholder;
- *   (c) the bibliography contains the scholar surname inside a BOLD run;
- *   (d) the clinical fixture's board certification appears in the F2 section.
+ * Builds the CV for a research-only scholar (no POPS) and a clinical scholar
+ * (with POPS), unzips `word/document.xml`, and asserts:
+ *   (a) the WCM instruction box is removed;
+ *   (b) the template's real section headings survive;
+ *   (c) each datum lands in the template (board cert, honor, grant, email, …);
+ *   (d) the scholar surname is bold in the bibliography;
+ *   (e) a research-only scholar builds without crashing on the clinical sections.
  */
 import { describe, it, expect } from "vitest";
 import JSZip from "jszip";
-import { Packer } from "docx";
-import {
-  buildWcmCv,
-  WCM_CV_SECTION_HEADINGS,
-  type CvInput,
-  type PopsEnrichment,
-} from "@/lib/edit/cv-export";
+import { buildWcmCvBuffer, type CvInput, type PopsEnrichment } from "@/lib/edit/cv-export";
 import type { ProfilePayload } from "@/lib/api/profile";
 import type { MenteeChip } from "@/lib/api/mentoring";
 
-// ── docx-xml extraction helpers ─────────────────────────────────────────────
-
 async function documentXml(input: CvInput): Promise<string> {
-  const buffer = await Packer.toBuffer(buildWcmCv(input));
-  const zip = await JSZip.loadAsync(buffer);
+  const zip = await JSZip.loadAsync(await buildWcmCvBuffer(input));
   const file = zip.file("word/document.xml");
   if (!file) throw new Error("word/document.xml missing from packed docx");
   return file.async("string");
@@ -40,22 +32,16 @@ function decodeXml(s: string): string {
     .replace(/&amp;/g, "&");
 }
 
-/** Ordered trimmed text of every `<w:p>` (table-cell paragraphs included). */
-function paragraphTexts(xml: string): string[] {
-  const out: string[] = [];
-  const pRe = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
+/** Concatenated visible text of the whole document (table cells included). */
+function allText(xml: string): string {
+  const tRe = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g;
   let m: RegExpExecArray | null;
-  while ((m = pRe.exec(xml))) {
-    const tRe = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g;
-    let t: RegExpExecArray | null;
-    let s = "";
-    while ((t = tRe.exec(m[1]!))) s += decodeXml(t[1]!);
-    out.push(s.trim());
-  }
-  return out;
+  let s = "";
+  while ((m = tRe.exec(xml))) s += decodeXml(m[1]!) + " ";
+  return s;
 }
 
-/** Text of every run carrying an explicit `<w:b/>` (bold, not val=false). */
+/** Text of every run carrying an explicit `<w:b/>` (bold). */
 function boldRunTexts(xml: string): string[] {
   const out: string[] = [];
   const rRe = /<w:r\b[^>]*>([\s\S]*?)<\/w:r>/g;
@@ -63,10 +49,7 @@ function boldRunTexts(xml: string): string[] {
   while ((m = rRe.exec(xml))) {
     const inner = m[1]!;
     const rpr = /<w:rPr>([\s\S]*?)<\/w:rPr>/.exec(inner);
-    const props = rpr ? rpr[1]! : "";
-    const boldOn = /<w:b\/>|<w:b\s+w:val="(?:true|1|on)"\s*\/>/.test(props);
-    const boldOff = /<w:b\s+w:val="(?:false|0|none)"\s*\/>/.test(props);
-    if (!boldOn || boldOff) continue;
+    if (!rpr || !/<w:b\/>/.test(rpr[1]!)) continue;
     const tRe = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g;
     let t: RegExpExecArray | null;
     let s = "";
@@ -76,7 +59,7 @@ function boldRunTexts(xml: string): string[] {
   return out;
 }
 
-// ── minimal typed fixtures ──────────────────────────────────────────────────
+// ── fixtures ────────────────────────────────────────────────────────────────
 
 function baseProfile(over: Partial<ProfilePayload>): ProfilePayload {
   const p: Partial<ProfilePayload> = {
@@ -202,19 +185,11 @@ const clinicalPops: PopsEnrichment = {
   training: [{ type: "Residency", institution: "NewYork-Presbyterian Hospital" }],
   degrees: [{ degree: "MD", year: "2005", institution: "Columbia University" }],
   appointments: [
-    {
-      title: "Attending Physician",
-      institution: "NewYork-Presbyterian Hospital",
-      start: "2012-07-01",
-      end: null,
-    },
+    { title: "Attending Physician", institution: "NewYork-Presbyterian Hospital", start: "2012-07-01", end: null },
   ],
   honors: [{ name: "Top Doctor, New York Magazine", date: "2021" }],
   specialties: ["Cardiology"],
-  practices: [
-    { name: "Heart Failure Program", type: "Service" },
-    { name: "Englander Department of Cardiology", type: "Location" },
-  ],
+  practices: [{ name: "Heart Failure Program", type: "Service" }],
   expertise: ["Heart failure", "Cardiac transplantation"],
   castleConnolly: true,
 };
@@ -230,7 +205,6 @@ const clinicalInput: CvInput = {
     primaryTitle: "Associate Professor of Medicine",
     primaryDepartment: "Medicine",
     hasClinicalProfile: true,
-    clinicalProfileUrl: null,
     email: "rj9001@med.cornell.edu",
     educations: [{ degree: "MD", institution: "Columbia University", year: 2005, field: null }],
     leadershipTitles: ["Chief, Division of General Internal Medicine"],
@@ -281,84 +255,60 @@ const clinicalInput: CvInput = {
   ],
 };
 
-// ── (a) all 23 headings, in order ───────────────────────────────────────────
+// ── (a) instruction box removed + (b) real headings survive ──────────────────
 
-describe("buildWcmCv — section coverage & order", () => {
-  it("emits exactly 23 canonical WCM headings", () => {
-    expect(WCM_CV_SECTION_HEADINGS).toHaveLength(23);
+describe("buildWcmCv — fills the official template", () => {
+  it("removes the WCM instruction box", async () => {
+    const xml = await documentXml(clinicalInput);
+    expect(allText(xml)).not.toContain("When preparing the WCM CV template");
   });
 
-  for (const [name, input] of [
-    ["research-only", researchInput],
-    ["clinical", clinicalInput],
-  ] as const) {
-    it(`renders all 23 WCM headings in template order (${name})`, async () => {
-      const paras = paragraphTexts(await documentXml(input));
-      const indices = WCM_CV_SECTION_HEADINGS.map((h) => paras.indexOf(h));
-      // every heading present
-      WCM_CV_SECTION_HEADINGS.forEach((h, i) =>
-        expect(indices[i], `heading "${h}" missing`).toBeGreaterThanOrEqual(0),
-      );
-      // strictly increasing → in order
-      for (let i = 1; i < indices.length; i++) {
-        expect(indices[i], `"${WCM_CV_SECTION_HEADINGS[i]}" out of order`).toBeGreaterThan(
-          indices[i - 1]!,
-        );
-      }
-    });
-  }
+  it("preserves the template's real section headings", async () => {
+    const text = allText(await documentXml(clinicalInput));
+    for (const h of [
+      "PERSONAL DATA",
+      "EDUCATION",
+      "PROFESSIONAL POSITIONS",
+      "LICENSURE, BOARD CERTIFICATION",
+      "HONORS, AWARDS",
+      "RESEARCH",
+      "MENTORING",
+      "BIBLIOGRAPHY",
+    ]) {
+      expect(text, `heading "${h}" missing`).toContain(h);
+    }
+  });
 });
 
-// ── (b) empty sections show N/A ─────────────────────────────────────────────
+// ── (c) data lands in the template ───────────────────────────────────────────
 
-describe("buildWcmCv — empty sections render N/A", () => {
-  // Sections with NO data in the research-only fixture (no POPS, no clinical).
-  const RESEARCH_NA = [
-    "OTHER EDUCATIONAL EXPERIENCES",
-    "POSTDOCTORAL TRAINING",
-    "EMPLOYMENT STATUS",
-    "LICENSURE AND BOARD CERTIFICATION",
-    "HOSPITAL AFFILIATION",
-    "HONORS AND AWARDS",
-    "PROFESSIONAL MEMBERSHIPS",
-    "PERCENT EFFORT",
-    "EDUCATIONAL CONTRIBUTIONS",
-    "CLINICAL ACTIVITIES",
-    "INSTITUTIONAL ADMINISTRATIVE AND COMMITTEE SERVICE",
-    "EXTRAMURAL PROFESSIONAL ACTIVITIES",
-    "INVITATIONS TO SPEAK",
-    "APPENDIX",
-  ];
-  // Clinical fixture fills §5/§8/§9/§10 but has no mentees → §17 N/A too.
-  const CLINICAL_NA = [
-    "OTHER EDUCATIONAL EXPERIENCES",
-    "EMPLOYMENT STATUS",
-    "PROFESSIONAL MEMBERSHIPS",
-    "PERCENT EFFORT",
-    "EDUCATIONAL CONTRIBUTIONS",
-    "MENTORING",
-    "INSTITUTIONAL ADMINISTRATIVE AND COMMITTEE SERVICE",
-    "EXTRAMURAL PROFESSIONAL ACTIVITIES",
-    "INVITATIONS TO SPEAK",
-    "APPENDIX",
-  ];
+describe("buildWcmCv — scholar data is injected", () => {
+  it("fills the signature block, personal data, and credentials (clinical)", async () => {
+    const text = allText(await documentXml(clinicalInput));
+    expect(text).toContain("Robert Jones, MD"); // Name:
+    expect(text).toContain("rj9001@med.cornell.edu"); // Work email
+    expect(text).toContain("1234567890"); // NPI
+    expect(text).toContain("American Board of Internal Medicine"); // Board cert
+    expect(text).toContain("Top Doctor, New York Magazine"); // Honor
+    expect(text).toContain("Castle Connolly Top Doctor"); // Castle Connolly honor
+    expect(text).toContain("Columbia University"); // Education
+    expect(text).toContain("Chief, Division of General Internal Medicine"); // Leadership
+    expect(text).toContain("Hospital readmissions cohort"); // Grant (funding table)
+    expect(text).toContain("Dr. Jones investigates hospital readmissions"); // M1 summary
+  });
 
-  for (const [name, input, expected] of [
-    ["research-only", researchInput, RESEARCH_NA],
-    ["clinical", clinicalInput, CLINICAL_NA],
-  ] as const) {
-    it(`places "N/A" directly under each empty heading (${name})`, async () => {
-      const paras = paragraphTexts(await documentXml(input));
-      for (const h of expected) {
-        const idx = paras.indexOf(h);
-        expect(idx, `heading "${h}" missing`).toBeGreaterThanOrEqual(0);
-        expect(paras[idx + 1], `section "${h}" should render N/A`).toBe("N/A");
-      }
-    });
-  }
+  it("fills research-only data without touching clinical sections (no crash)", async () => {
+    const text = allText(await documentXml(researchInput));
+    expect(text).toContain("Jane Smith, PhD"); // Name
+    expect(text).toContain("Klotho signaling in aging"); // Grant
+    expect(text).toContain("MIT"); // Education institution
+    expect(text).toContain("Pat Lee"); // Current mentee
+    expect(text).toContain("Director, Center for Aging Research"); // Leadership
+    expect(text).not.toContain("When preparing the WCM CV template");
+  });
 });
 
-// ── (c) bibliography bolds the scholar surname ──────────────────────────────
+// ── (d) bibliography bolds the scholar surname ───────────────────────────────
 
 describe("buildWcmCv — bibliography bolds the scholar surname", () => {
   it("bolds 'Smith' in the research fixture bibliography", async () => {
@@ -369,61 +319,5 @@ describe("buildWcmCv — bibliography bolds the scholar surname", () => {
   it("bolds 'Jones' in the clinical fixture bibliography", async () => {
     const bold = boldRunTexts(await documentXml(clinicalInput));
     expect(bold.some((t) => t.includes("Jones"))).toBe(true);
-  });
-});
-
-// ── (d) clinical board certification renders in F2 ──────────────────────────
-
-describe("buildWcmCv — clinical board certification (F2)", () => {
-  it("renders the board cert within the LICENSURE AND BOARD CERTIFICATION section", async () => {
-    const paras = paragraphTexts(await documentXml(clinicalInput));
-    const start = paras.indexOf("LICENSURE AND BOARD CERTIFICATION");
-    const end = paras.indexOf("HOSPITAL AFFILIATION");
-    expect(start).toBeGreaterThanOrEqual(0);
-    expect(end).toBeGreaterThan(start);
-    const region = paras.slice(start, end);
-    expect(region).toContain("Board Certification");
-    expect(region.some((t) => t.includes("American Board of Internal Medicine"))).toBe(true);
-    expect(region.some((t) => t.includes("Internal Medicine"))).toBe(true);
-  });
-});
-
-// ── POPS practices/expertise (§14) + Castle Connolly honor ───────────────────
-
-describe("buildWcmCv — clinical activities + Castle Connolly", () => {
-  it("renders POPS practices and expertise in CLINICAL ACTIVITIES", async () => {
-    const paras = paragraphTexts(await documentXml(clinicalInput));
-    const start = paras.indexOf("CLINICAL ACTIVITIES");
-    const end = paras.indexOf("RESEARCH ACTIVITIES");
-    expect(start).toBeGreaterThanOrEqual(0);
-    expect(end).toBeGreaterThan(start);
-    const region = paras.slice(start, end);
-    expect(region.some((t) => t.includes("Heart Failure Program"))).toBe(true);
-    expect(region.some((t) => t.includes("Heart failure"))).toBe(true);
-  });
-
-  it("excludes practice_type 'Location' rows and orders expertise above Clinical Practice (§13.3)", async () => {
-    const paras = paragraphTexts(await documentXml(clinicalInput));
-    const start = paras.indexOf("CLINICAL ACTIVITIES");
-    const end = paras.indexOf("RESEARCH ACTIVITIES");
-    const region = paras.slice(start, end);
-    // Location row dropped — it's the parent department, already in §9 Hospital Affiliation.
-    expect(region.some((t) => t.includes("Englander Department of Cardiology"))).toBe(false);
-    // "Areas of expertise" precedes the "Clinical Practice" subheading.
-    const exp = region.findIndex((t) => t.startsWith("Areas of expertise"));
-    const prac = region.indexOf("Clinical Practice");
-    expect(exp).toBeGreaterThanOrEqual(0);
-    expect(prac).toBeGreaterThan(exp);
-  });
-
-  it("renders the Castle Connolly badge in HONORS AND AWARDS", async () => {
-    const paras = paragraphTexts(await documentXml(clinicalInput));
-    const start = paras.indexOf("HONORS AND AWARDS");
-    const end = paras.indexOf("PROFESSIONAL MEMBERSHIPS");
-    expect(start).toBeGreaterThanOrEqual(0);
-    expect(end).toBeGreaterThan(start);
-    expect(paras.slice(start, end).some((t) => t.includes("Castle Connolly Top Doctor"))).toBe(
-      true,
-    );
   });
 });

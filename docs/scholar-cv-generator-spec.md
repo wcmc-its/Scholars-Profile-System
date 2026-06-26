@@ -14,10 +14,17 @@ clean structured data instead of parsing an arbitrary Word doc.
 
 ## 2. Locked decisions
 
-1. **Rendering — reconstruct the WCM layout in code with the `docx` lib** (already a dependency).
-   No new deps. Faithfully match WCM section order, table columns, and headings; **preserve the
-   scholar's surname bolded inside each citation** (parity with CViche). It is a code replica of
-   the template — if WCM revises the official template, the builder must be updated to match.
+1. **Rendering — FILL the official template `.docx`** (REVISED 2026-06-26; supersedes the original
+   "reconstruct in code" decision). A from-scratch reconstruction with the `docx` lib only
+   *approximated* the WCM format (paraphrased headings, wrong columns, no instruction box). CViche
+   itself achieves fidelity by loading the template and editing it
+   (`stage_6_word_template.py:966` `Document(template_path)`), so we do the same: bundle
+   `lib/edit/assets/wcm-cv-template.docx`, parse `word/document.xml` (jszip + `@xmldom/xmldom`),
+   inject data into its own tables/paragraphs, and re-zip. This inherits the template's exact
+   headings, subsections, columns, fonts, and prompts. The original bolding rationale for
+   "reconstruct" was wrong — run-level bold works fine when filling the template (the scholar's
+   surname is still bolded in each citation). Sections without data keep the template's blank
+   prompts for the scholar to complete. Updating to a future WCM template = swap the bundled file.
 2. **Research summary (M1) — generate anew** each time via the existing overview/Bedrock path
    (`lib/edit/overview-generator.ts`); inherits its anti-hallucination grounding.
 3. **Audience — same as biosketch:** `authorizeOverviewWrite` (self · superuser · granted proxy ·
@@ -53,8 +60,10 @@ template's own instruction box mandates (*sections must not be deleted; enter "N
 | Request preamble + download | `readEditRequest`, `editOk`, origin guard, 64KB cap | `lib/edit/request.ts` |
 
 A CV from structured data is **deterministic**, so we skip biosketch's NDJSON streaming,
-prompt-versioning, and Prisma persistence. Net new: a data→sections builder, a POPS fetch/mapper,
-a download card, and the standard edit-page registration.
+prompt-versioning, and Prisma persistence. Net new: the template-fill engine (`lib/edit/cv-template.ts`,
+OOXML edits via jszip + `@xmldom/xmldom`), the section→data mapping (`lib/edit/cv-export.ts`), the
+bundled template asset (`lib/edit/assets/wcm-cv-template.docx` + `outputFileTracingIncludes` so it
+ships in the standalone image), a POPS fetch/mapper, a download card, and edit-page registration.
 
 ## 5. Coverage matrix — WCM section → source → fill
 
