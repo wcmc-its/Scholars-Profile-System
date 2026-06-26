@@ -157,7 +157,9 @@ Publications paths.
   (`pub-tab-performance-handoff.md`) proposed splitting/caching the OpenSearch facet aggs
   off the hit list; measurement shows the aggs are ~0.2 s, so the split optimizes the wrong
   component. Code preserved at `origin/perf/pub-tab-facet-split` (`SEARCH_PUB_FACET_SPLIT`,
-  default-off, byte-identical) to revisit only if OpenSearch aggs ever become binding.
+  default-off, byte-identical), pinned by the immutable tag `parked/pub-tab-facet-split`
+  (commit `927c35dd`); tracked with its revisit trigger in **#1301** — revisit only if
+  OpenSearch aggs ever become binding.
 
 **The real lever (documented, not built):** a cross-request cache of the taxonomy resolve.
 The per-candidate counts are ETL-cadence (safe to cache for minutes/hours) and the candidate
