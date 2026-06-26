@@ -178,16 +178,22 @@ then the CV reads it from `ProfilePayload`.
 training model/rows (type, institution, specialty, dates) + a primary-affiliation field/row;
 (3) surface both in `ProfilePayload`. Then the CV builder's existing merge points consume them.
 
-**Merge design (per-person UNION, because POPS↔ASMS coverage doesn't nest):**
-- **§5 Postdoctoral Training:** ASMS (dated, specialty) UNION POPS (undated) → dedup by
-  normalised `type + institution`; **ASMS-first** on overlap (it has dates); POPS fills items/people
-  ASMS lacks. *(Flips the earlier "POPS-primary for C" — ASMS is now primary when present.)*
-- **§9 Hospital Affiliation / §6 Positions:** ASMS primary institution + NYP appointment UNION POPS
-  hospital appointments.
-- **Coverage:** ASMS covers WCM faculty (research + clinical); POPS covers clinical providers.
-  POPS-only (voluntary/NYP, not ASMS faculty) → POPS supplies it; ASMS-only (research faculty) →
-  ASMS supplies it; overlap deduped ASMS-first. The union is keyed per-person per-source so neither
-  "not everyone in POPS is in ASMS" nor the reverse drops anyone.
+**Empirical overlap (measured 2026-06-26, 120 ASMS clinical/NPI providers vs live POPS):** of 70
+also in POPS, ASMS had training for 67 (mean 2.13 entries), POPS for 1 (mean 0.01). POPS-only
+training = 0; POPS had an institution ASMS lacked in **1/70**. **POPS `training[]` is sparsely
+populated — aorlin is the exception, not the rule.** Also 50/120 (42%) of ASMS clinical providers
+aren't in POPS at all. Conclusion: ASMS `fc_doctoral_training` is the comprehensive, dated source;
+POPS training adds essentially nothing.
+
+**Merge design:**
+- **§5 Postdoctoral Training — ASMS-ONLY** (dated, specialty, comprehensive). Do NOT merge POPS
+  training — it's near-empty (1/70) and a per-person union is over-engineering for that edge case.
+  The currently-shipped code reads POPS training only because ASMS training isn't imported yet;
+  once `fc_doctoral_training` lands, **remove the POPS training path from §5**.
+- **§9 Hospital Affiliation / §6 Positions:** ASMS primary institution (`institution_id`) + NYP
+  appointment, plus POPS hospital appointments (POPS *appointments* ARE populated — unlike training).
+  A per-person union here is still justified; ASMS-first on the primary institution. *(Measure POPS
+  vs ASMS appointment coverage before finalizing — only training was measured.)*
 
 ## 7. Architecture / data flow
 
