@@ -459,6 +459,58 @@ export function composeMatchReason(args: {
  * are free; off the critical path, so a slow / failed fetch degrades to "no key
  * paper," never a blocked render.
  */
+/** Key-paper disclosure ranking knobs — the owner's 60/40 relevance/recency blend
+ *  (#1291 follow-up, replacing the relevance-first hard sort). Relevance is the
+ *  BM25 `_score` normalized to the fetched pool; recency is a half-life decay on
+ *  age; a small additive nudge lifts well-cited papers. All tunable here. */
+const KEY_PAPER_RELEVANCE_WEIGHT = 0.6;
+const KEY_PAPER_RECENCY_WEIGHT = 0.4;
+const KEY_PAPER_RECENCY_HALF_LIFE_YEARS = 8; // a paper N years old scores 0.5^(N/8) on recency
+const KEY_PAPER_IMPACT_MIN_CITATIONS = 50;
+const KEY_PAPER_IMPACT_BOOST = 0.05;
+/** How many keyword-ranked candidates to pull before the app-side blend re-rank. */
+const KEY_PAPER_CANDIDATE_POOL = 50;
+
+type KeyPaperHit = {
+  _score?: number | null;
+  _source?: { citationCount?: number | null; year?: number | null };
+};
+
+/**
+ * Re-rank a pool of key-paper candidates by the owner's blend:
+ *   blend = 0.6·relevanceNorm + 0.4·recency + (citationCount > 50 ? 0.05 : 0)
+ * `relevanceNorm` = the hit's BM25 `_score` over the pool max (0..1, so the 0.6
+ * weight is commensurate with the 0..1 recency term); `recency` = `0.5^(age/8)`.
+ * A pool with no keyword signal (maxScore 0 — a concept filter with no literal
+ * term matched) ranks purely by recency + the impact nudge. Pure + order-stable
+ * (tiebreak citationCount desc, then original position) so it's unit-testable; the
+ * caller shapes the top 3 via `parseReasonTopHits`. `nowYear` is injected (not
+ * read from the clock) so the ranking is deterministic under test.
+ */
+export function rankKeyPaperHitsByBlend(hits: KeyPaperHit[], nowYear: number): KeyPaperHit[] {
+  const maxScore = hits.reduce((m, h) => Math.max(m, h._score ?? 0), 0);
+  const blend = (h: KeyPaperHit): number => {
+    const rel = maxScore > 0 ? (h._score ?? 0) / maxScore : 0;
+    const year = h._source?.year ?? null;
+    const rec =
+      year != null
+        ? Math.pow(0.5, Math.max(0, nowYear - year) / KEY_PAPER_RECENCY_HALF_LIFE_YEARS)
+        : 0;
+    const impact =
+      (h._source?.citationCount ?? 0) > KEY_PAPER_IMPACT_MIN_CITATIONS ? KEY_PAPER_IMPACT_BOOST : 0;
+    return KEY_PAPER_RELEVANCE_WEIGHT * rel + KEY_PAPER_RECENCY_WEIGHT * rec + impact;
+  };
+  return hits
+    .map((h, i) => ({ h, i, s: blend(h) }))
+    .sort(
+      (a, b) =>
+        b.s - a.s ||
+        (b.h._source?.citationCount ?? 0) - (a.h._source?.citationCount ?? 0) ||
+        a.i - b.i,
+    )
+    .map((x) => x.h);
+}
+
 export async function fetchKeyPaper(args: {
   cwid: string;
   /** The resolved concept's descendant UIs (the count's subtree); empty for a free-text-only query. */
@@ -517,55 +569,21 @@ export async function fetchKeyPaper(args: {
     },
   };
 
-  // Issue #645 recency tilt, transferred from `searchPublications`. Wrap the bool
-  // in a `function_score` Gaussian decay on `year` so recency tilts `_score`
-  // (the primary sort) without overriding keyword relevance — honoring the owner's
-  // "recency over impact" call. Same params as the pub-tab (`resolvePubRecencyMode`).
-  // The gauss is gated by `exists: year` so missing-year docs don't float (under
-  // `gentle`'s additive `sum`, a neutral 1.0 would read as max freshness). When the
-  // mode is `off`, send the bare bool (no wrapper).
-  const recencyMode = resolvePubRecencyMode();
-  const recencyOriginYear = new Date().getUTCFullYear();
-  const recencyGauss = {
-    filter: { exists: { field: "year" } },
-    gauss: {
-      year: { origin: recencyOriginYear, offset: 2, scale: 8, decay: 0.5 },
-    },
-  };
-  const scoredQuery =
-    recencyMode === "off"
-      ? boolQuery
-      : recencyMode === "gentle"
-        ? {
-            // final = bm25 × (1 + W·gauss),  W = 2  → multiplier ∈ [1, 3]
-            function_score: {
-              query: boolQuery,
-              functions: [{ weight: 1 }, { ...recencyGauss, weight: 2 }],
-              score_mode: "sum",
-              boost_mode: "multiply",
-            },
-          }
-        : {
-            // `strong`: final = bm25 × gauss (no floor; damps old papers toward 0)
-            function_score: {
-              query: boolQuery,
-              functions: [recencyGauss],
-              score_mode: "multiply",
-              boost_mode: "multiply",
-            },
-          };
-
   return cachedReasonAgg<RepresentativePub[]>(cacheKey, async () => {
     const resp = await searchClient().search({
       index: PUBLICATIONS_INDEX,
       body: {
-        size: 3,
-        _source: ["pmid", "title", "year"],
-        query: scoredQuery,
+        // Pull a POOL of the most keyword-relevant candidates (the `year` tiebreak
+        // fills the no-keyword tail with recent concept-tagged pubs), then re-rank
+        // app-side by the 60/40 blend (`rankKeyPaperHitsByBlend`). `track_scores`
+        // so the BM25 `_score` is returned for the blend even though we sort.
+        size: KEY_PAPER_CANDIDATE_POOL,
+        track_scores: true,
+        _source: ["pmid", "title", "year", "citationCount"],
+        query: boolQuery,
         sort: [
           { _score: { order: "desc" } },
           { year: { order: "desc", missing: "_last" } },
-          { citationCount: { order: "desc", missing: "_last" } },
         ],
         // Highlight is keyed to the LITERAL query (not the concept filter), so a
         // descriptor-tagged title with no literal term highlights nothing and the
@@ -584,13 +602,12 @@ export async function fetchKeyPaper(args: {
           : {}),
       } as object,
     });
-    const hits =
-      (resp.body as { hits?: { hits?: unknown[] } }).hits?.hits ?? [];
-    // Reuse the rep-papers array parser by shaping the search hits into the same
-    // `{ top: { hits: { hits } } }` envelope it expects. Up to 3, ranked by the
-    // query sort: keyword relevance + recency-tilt (`_score`) primary, then year
-    // (recency) as the first tiebreak, then citationCount (impact) as the last.
-    return parseReasonTopHits({ top: { hits: { hits: hits as never } } }, 3);
+    const hits = (resp.body as { hits?: { hits?: unknown[] } }).hits?.hits ?? [];
+    // Re-rank the keyword-ranked pool by the owner's blend — 0.6·relevance +
+    // 0.4·recency + a small >50-citation nudge — then shape the top 3 via the
+    // shared parser (it preserves order).
+    const ranked = rankKeyPaperHitsByBlend(hits as KeyPaperHit[], new Date().getUTCFullYear());
+    return parseReasonTopHits({ top: { hits: { hits: ranked as never } } }, 3);
   });
 }
 
