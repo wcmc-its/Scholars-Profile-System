@@ -105,9 +105,19 @@ Matching can't beat a bad opp representation. Audit how opp `topicVector` /
 `meshDescriptorUi` are generated from NOFO text. This is the ceiling on
 everything else.
 
-**Where to start:** 2.4 + 2.1 (authorship/recency/IDF in the scholar vector) →
-2.3 + 2.2 (facet bucketing + MeSH tree overlap, both lookups, both feed the QA
-"why") → 2.7 (start logging now) → 2.5 only if gaps remain.
+### 2.9 Exclude / segregate honorific awards from the corpus `[lookup/data]`
+Not in the original list — surfaced by pilot run #1 (§3.5): **63% of the top
+recommendations are honorific prizes / medals / lectureships** (Shaw Prize, AACR
+awards, Kovalenko Medal…), not grants a PI applies to. They rank high because
+they are topically broad + prestigious. Filter them out of "funding
+opportunities" (by source/type, or a one-time classifier over the corpus), or
+give them a separate "honors" lane. **Single biggest precision win, and pure
+data/corpus work — no matching-algorithm change.**
+
+**Where to start (a priori):** 2.4 + 2.1 (authorship/recency/IDF in the scholar
+vector) → 2.3 + 2.2 (facet bucketing + MeSH tree overlap) → 2.7 (start logging).
+**After pilot #1 (§3.5), the empirical order is 2.9 (awards) → 2.2 (dead MeSH
+axis) → 2.3 (disease facet).**
 
 ---
 
@@ -212,6 +222,50 @@ Track B is mostly deterministic once grants are indexed (compute won-grant rank;
 no fan-out needed beyond the one-time indexing). Run them as two stages; the
 synthesis combines Track A's facet-failure histogram with Track B's recall to
 produce a single prioritized "fix these first" list that points back at §2.
+
+### 3.5 Pilot run #1 — first results (n=48, 2026-06-26)
+
+12 scholars (all full professors — the public people-search seeds established
+faculty, so **career-stage diversity is thin**, see caveats) × the matcher's
+top-4 recs = 48 pairs, each judged once by an LLM (Sonnet) **blind to the matcher
+score**, against the staging public routes (`/api/scholars/[cwid]/opportunities`,
+`/api/opportunities/[id]`).
+
+**Headline:** precision@4 = **65%** (rel ≥ 2), avg relevance 1.81/3 — but the
+headline *overstates usefulness*, because the corpus is the real problem:
+
+- **63% of recommendations (30/48) are honorific PRIZES/AWARDS**, not grants.
+  They often read as topically "plausible," inflating precision@N.
+- **Of the 17 bad recs (rel ≤ 1), 13 (76%) are these prizes.**
+- Strip them: only **18/48 (37%)** of slots are actionable grants, and just
+  **11/48 (23%)** are clean, actionable, *good* recs.
+- **But among the 18 actionable grants, precision is 78%** — topic matching works
+  fine when the corpus item is a real grant. The perceived weakness is corpus
+  pollution + the dead MeSH axis, not bad topic ranking.
+- **MeSH axis is 100% dead:** `meshOverlap = 0` on all 48 pairs.
+
+**Failure-cause histogram (the 17 bad recs; causes overlap):**
+
+| cause | count |
+|---|---|
+| is a prize, not a grant | 13 |
+| disease mismatch | 6 |
+| career-stage mismatch | 6 |
+| population mismatch | 4 |
+| method mismatch | 3 |
+
+Among **actionable grants only**, disease mismatch (6) is the top failure —
+validating the disease-facet lever (§2.3); stage mismatch nearly vanishes (1),
+i.e. the stage failures are mostly an artifact of early-career *awards*.
+
+**Reprioritized levers:** §2.9 (exclude awards) → §2.2 (fix/drop the dead MeSH
+axis) → §2.3 (disease facet). The shipped recency/authorship weighting (#1295)
+sharpens topic precision but does **not** address award pollution.
+
+**Caveats:** single-judge (no adversarial pass — pilot only); sample is 12 senior
+faculty in cancer/basic-science (search-seeded), **not** stratified by career
+stage, so the stage signal is biased; precision is on top-4 only. A v2 run should
+add the adversarial pass (§3.1.2) and a stratified, stage-diverse sample.
 
 ---
 
