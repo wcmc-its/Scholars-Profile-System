@@ -43,6 +43,8 @@ The reverse RD view `components/.../find-researchers.tsx` lists opportunities **
 
 ⚠️ This file is ALSO edited by the MeSH spec (mesh→meshTerm+meshDisease). Coordinate / sequence so the two don't collide on `MatchAxes`/`DEFAULT_WEIGHTS`/`combineScore`.
 
+> 🔁 **RANKING-MODEL UPDATE (owner decision 2026-06-26):** the *enabled* ranking effect is **prestige-FIT (a two-sided band dampener)**, NOT the magnitude boost in the bullets below — "trifle for a senior" and "unreachable for a junior" both get softly down-weighted (spec §4.2 + the new scholar-band §4.5). **This does NOT change the launch work**: at launch the effect is OFF (penalty/weight 0 = badge + magnitude-sort only), and the magnitude `axes.prestige` field below is still needed *for the prestige SORT + badge*. So land the bullets below as the weight-0 scaffolding; when you later enable the ranking effect (post Track-A eval), implement the **band-fit dampener + scholar-band (§4.5: funding-track + standing + rank, NOT career stage)** instead of the magnitude term. Producer needs NO change — band-fit consumes the same `prestige.score`.
+
 - `OpportunityCandidate` (~:93): add `prestige?: { score: number; ... }`, `isHonorific?: boolean`; read from the doc (~:301).
 - `MatchAxes` (~:21-31): add `prestige: number` (= `candidate.prestige?.score ?? 0`).
 - `DEFAULT_WEIGHTS` (~:28-31): add `prestige: 0` (launch weight 0 — badge+sort only).

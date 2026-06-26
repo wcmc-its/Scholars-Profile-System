@@ -12,12 +12,12 @@
 Capture, per opportunity, a **prestige score** ∈ [0,1] computed **upstream in ReciterAI** from four inputs (mechanism tier · award size · curated sponsor tier · selectivity), emitted on the `GRANT#` item with its sub-components for transparency. SPS uses it three ways (all chosen):
 
 1. **Display badge** — mechanism + ceiling + a prestige tier label on each rec.
-2. **Full ranking axis** — a weighted `prestige` term in the matcher, **guarded** so it can't override fit.
-3. **User-controlled sort** — a "Best fit ⇄ Prestige" toggle so the human picks the objective.
+2. **Prestige-FIT ranking (two-sided band, not "higher is better").** Prestige is matched to the scholar's own standing: an opp whose prestige sits far **below** the scholar's level (a $25k pilot for an established PI — a *trifle*) **or** far **above** it (a Breakthrough Prize / flagship P50 for a junior — *not ready*) is softly down-weighted; in-band opps are untouched. Implemented as a **multiplicative dampener** (§4.2) — it can only *suppress* mismatches, never boost, so it cannot override topical fit. Needs a scholar-side **prestige band** (§4.5), the other half of the signal.
+3. **User-controlled sort** — a "Best fit ⇄ Prestige" toggle. *Best fit* = the band-fit dampened ranking; *Prestige* = raw opp prestige magnitude (the research-development "show me the biggest grants" view, §5).
 
-**The guardrail that makes a full axis safe** (we just spent #1296 removing high-prestige-zero-fit honorific prizes — do not reintroduce that):
-- **Default sort = fit.** Prestige weight in the default blend starts **conservative (eval-tuned, may be 0 at launch)**; the user opts into prestige-weighting via the sort toggle.
-- **Topic-relevance floor.** The prestige term applies **only to opportunities above a minimum `topicAffinity`** — so prestige can reorder *relevant* grants but can never float an off-topic one up.
+**Why this is safe** (we just spent #1296 removing high-prestige-zero-fit honorific prizes — do not reintroduce that):
+- **Default sort = fit.** The dampener `penaltyWeight` starts **conservative (eval-tuned, may be 0 at launch)**; the user opts into magnitude ordering via the sort toggle.
+- **Dampener-only.** Prestige-fit is a multiplier **≤ 1**, so it can only sink out-of-band opps, never float one up — **no topic floor needed** (and nothing collides with `RankOptions.topicFloor`).
 - **Orthogonal to actionability.** Prestige ranks *among applyable* opportunities; it must not float honorific-but-unwinnable prizes. ⚠️ **This is NOT automatic.** The #1296 honorific exclusion is (a) unmerged, (b) forward-matcher-only, and (c) a title regex — and the reverse RD `find-researchers` view never calls the matcher, so a prestige sort there would float the curated prizes straight to the top. The curated corpus *is* the prize set and prestige scores it HIGH (top sponsor + purse), so the topic-relevance floor doesn't help (prizes clear topic affinity by design). **Required fix before any prestige surface ships:** make honorific-exclusion a *data property* — emit an `is_honorific` / `non_applyable` flag on the `GRANT#` item so every consumer (forward matcher, reverse browse, badge, sort) inherits it. Do not ship badge or sort until that flag is emitted and applied on all surfaces.
 
 ---
@@ -38,8 +38,8 @@ Adds to the `GRANT#` item (alongside `mesh_vector` from the companion spec).
 | `prestige` | object | ✅ | The block below. Always present for `is_research` opps. |
 | `prestige.score` | number [0,1] | ✅ | Composite (§3). The matcher axis input. |
 | `prestige.mechanism_tier` | number [0,1] | ✅ | Normalized mechanism/activity-code rank (§3.1). |
-| `prestige.size_bucket` | number [0,1] | ✅ | Log-scaled award ceiling (§3.2). `0` if unknown. |
-| `prestige.sponsor_tier` | number [0,1] | ✅ | Curated sponsor prominence (§3.3). Neutral `0.5` if sponsor not in the table. |
+| `prestige.size_bucket` | number [0,1] \| null | ⬜ | Fixed-anchor log of award ceiling (§3.2). `null` when the ceiling is unknown/unparseable — no-signal, dropped + renormalized; **never 0**. |
+| `prestige.sponsor_tier` | number [0,1] \| null | ⬜ | Curated sponsor prominence (§3.3). `null` in v1 (curated table deferred — §3.3 / §7.4); when built, neutral `0.5` if sponsor absent from the table. |
 | `prestige.selectivity` | number [0,1] \| null | ⬜ | `1 − award_rate` where sourced; `null` when unknown (§3.4). |
 | `prestige.label` | string | ✅ | Short human tier for the badge, e.g. `"Flagship"` / `"Major"` / `"Standard"` (§3.5). |
 | `prestige.rationale` | string | ⬜ | One line for the QA tab ("R01, $500k ceiling, NIH"). |
@@ -47,7 +47,7 @@ Adds to the `GRANT#` item (alongside `mesh_vector` from the companion spec).
 Rules:
 - `score` is on a fixed, documented scale (§3) so it's comparable across opps and stable across re-ingests. Do not rescale per-batch.
 - `selectivity = null` is honest-unknown — SPS treats it as "no signal," NOT as 0. **Never fabricate an award rate.**
-- Prestige is **opportunity-intrinsic** — it does NOT encode the scholar or their stage. Stage-appropriateness stays the matcher's existing `stage` axis (§4.2 / open decision #1).
+- The prestige **score** (§3) is **opportunity-intrinsic** — it does NOT encode the scholar. The scholar match happens at rank time: the §4.2 prestige-FIT band compares opp prestige to the scholar's *standing* band (§4.5), which is deliberately NOT career stage. Career-stage appropriateness stays the separate `stage` axis (§7.1 RESOLVED).
 
 ---
 
@@ -85,14 +85,18 @@ Bucketize `score`: e.g. `≥0.8 "Flagship"`, `≥0.55 "Major"`, else `"Standard"
 - `grant-opportunity-mapper.ts` / `grant-opportunity-etl.ts`: passthrough like `mesh_vector`.
 - Search-index doc (`lib/search.ts:988-1010`) + matcher read (`match-opportunities.ts:301`): surface `prestige` on the candidate.
 
-### 4.2 Ranking axis (the guarded "full axis")
-Extend `MatchAxes` (`match-opportunities.ts:21-31`), `MatchWeights` / `DEFAULT_WEIGHTS` (`:28-31`) and `combineScore` (`:74-79`) with a `prestige` term. **Gate prestige on topic relevance by MULTIPLYING it by `topicAffinity`** — the same continuous device the existing `stage` term already uses (`stage·topic`), not a hard floor:
+### 4.2 Prestige-fit dampener (the ranking effect)
+Add `prestigeFit ∈ [0,1]` to `MatchAxes` (`match-opportunities.ts:21-31`) — the **proximity of the opp's prestige to the scholar's band** (§4.5), NOT the opp's raw magnitude. Apply it as a **multiplicative dampener** on the rest of the blend (do NOT add a magnitude term — the two archetypes are about *suppressing* mismatches, not boosting prestige):
 ```
-combineScore = topic·1.0 + stage·0.5·topic + meshTerm·wMT + meshDisease·wMD + deadline·0.1 + weights.prestige·axes.prestige·axes.topicAffinity
+relevance     = topic·1.0 + stage·0.5·topic + meshTerm·wMT + meshDisease·wMD + deadline·0.1     // unchanged
+prestigeFit   = bandFit(oppPrestige, scholarBand)                                                 // §4.5, ∈[0,1], 1 = in band
+dampener      = 1 − weights.prestigePenalty·(1 − prestigeFit)                                     // ∈ [1−penalty, 1]
+combineScore  = relevance · dampener
 ```
-- This avoids a discontinuity (a hard `topicAffinity >= TOPIC_FLOOR` gate jumps `0 → weights.prestige·axes.prestige` at the threshold) and removes a second tunable. It also avoids colliding with the existing `RankOptions.topicFloor` hard-drop in `rankCandidates`. A near-zero-topic opp gets near-zero prestige contribution automatically; an off-topic prize can never float up.
-- `weights.prestige` is **eval-tuned and starts at 0** — launch as display + sort only, raise the default-blend weight only after the Track-A eval shows it doesn't hurt actionable-grant precision (open decision §7).
-- ⚠️ This change edits the SAME `MatchAxes` / `DEFAULT_WEIGHTS` / `combineScore` that the companion MeSH spec splits (`mesh` → `meshTerm` + `meshDisease`). Land them as ONE coordinated change (or strictly sequence) with a single source of truth for the weight vector — independent PRs will collide on the type and the literal.
+- **bandFit** is symmetric soft proximity: `bandFit = clamp01( 1 − max(0, |oppPrestige − scholarBand| − BAND) / SLOPE )` — full credit within a tolerance `BAND` of the scholar's level, linear decay beyond by `SLOPE`. (Asymmetry — punish "too lofty for a junior" harder than "too trifling for a senior" — is a tunable, open decision §7; you chose symmetric for v1.)
+- **Dampener, not a boost:** `dampener ≤ 1`, so an out-of-band opp is scaled *down* but a topically-excellent one can still out-rank a mediocre in-band one ("sinks but can still appear"). It can never lift an off-topic opp — hence no topic floor.
+- `weights.prestigePenalty` is **eval-tuned and starts at 0** (= dampener ≡ 1, display + sort only). Raise only after the Track-A eval shows band-fit doesn't hurt actionable-grant precision (§7).
+- ⚠️ This edits the SAME `MatchAxes` / `combineScore` the companion MeSH spec splits (`mesh` → `meshTerm` + `meshDisease`). Land them as ONE coordinated change (or strictly sequence) with a single source of truth for the axis/weight vector — independent PRs will collide on the type and the literal.
 
 ### 4.3 Display badge
 On `components/edit/grant-recs-card.tsx`: show `prestige.label` + `mechanism` + formatted ceiling (e.g. **"Flagship · R01 · up to $500k/yr"**). Tooltip = `prestige.rationale`. Render the prestige sub-bar alongside the existing topic/stage/mesh/deadline axis bars (but per [[project_topic_score_is_internal]], surface the *prestige* axis, not internal per-topic scores).
@@ -100,6 +104,22 @@ On `components/edit/grant-recs-card.tsx`: show `prestige.label` + `mechanism` + 
 ### 4.4 User-controlled sort
 A segmented control on the grant-recs view: **Best fit** (default, current `defaultScore` order) ⇄ **Prestige** (order by `prestige.score`, fit shown but secondary). **Reuse the existing sort abstraction** — the matcher has `RankSort` + a `SORT_KEY` map; add a `prestige` key there.
 ⚠️ **Correction (grounded):** the sort is **server-side, not client-side** — `grant-recs-card.tsx` fetches `?sort=${sort}&limit=25` with `useEffect` dep `[cwid, sort]`, so changing the chip **re-queries the server** and only the top-25-by-active-key are ever materialized client-side. The original "client-side over already-fetched recs, no refetch (like find-researchers.tsx)" claim is false for this view, and it self-contradicted "add a key to the server-side `SORT_KEY`." Pick one: **(a)** accept that a prestige sort re-queries and orders the server-side top-25 by prestige (simplest, consistent with the existing chips), or **(b)** raise/drop the `LIMIT` and convert all chips (Fit/Deadline/Stage/Prestige) to a genuine client-side re-sort over the full fetched set. (a) is the lazy default. Persist the choice in the view; default **Best fit**.
+
+### 4.5 Scholar prestige band — the other half (SPS-computed)
+
+The opp prestige score (§3) is half the signal; the dampener needs the **scholar's own standing** to know what's in-band. Compute `scholarBand ∈ [0,1]` on the **same scale** as opp prestige, from the three inputs you chose (**not** career stage — that stays the separate `stage` axis):
+
+```
+scholarBand = clamp01( Σ wᵢ·signalᵢ / Σ wᵢ )   over PRESENT signals only (convex combo, renormalize on unknowns — same rule as §3)
+  fundingTrack  (wF≈0.5) — the high-water mark of grants the scholar has HELD, scored on the SAME mechanism_tier scale as §3.1
+                          (held an R01/R35 → high; only pilots → low; none → drop the term). Source: Scholar.grants / Scholar.nihProfiles.
+  standing      (wP≈0.3) — normalized productivity/impact percentile (pub volume, citations, senior-authorship share).
+                          Source: the people index / existing impact metric. ⚠️ overlaps topic somewhat — keep it a percentile, not raw counts.
+  rank          (wR≈0.2) — faculty title → ordinal (Asst<Assoc<Full). Source: scholar primaryTitle/appointments; drop if missing/unparseable.
+```
+- **fundingTrack is the strongest "reachable prestige" evidence** (a junior who already holds an R01 has a high band despite a short clock — which is exactly why career stage is deliberately excluded here).
+- Honest-unknown: a scholar with no grant history drops `fundingTrack` and leans on standing+rank — do **not** floor them to 0 (that would over-suppress and mislabel early-but-strong scholars as "not ready").
+- **Where:** compute in `matchOpportunitiesForScholar` alongside `scholarTopicVector` / `scholarCareerStage` (load grants + title + standing there), or precompute on the people index (like the §6 MeSH-vector parity). Build-detail, eval-tune the weights.
 
 ---
 
@@ -111,17 +131,18 @@ Prestige matters **more to research-development staff** (strategic "what big gra
 
 1. ReciterAI emits `prestige` (+`mesh_vector`) to **staging** `reciterai` → `etl:dynamodb` re-project → reindex.
 2. Gate the prestige **axis weight** behind the same matcher flag (default off / weight 0); the **badge + sort** can ship on (low risk). Flag wired per-env in `cdk/lib/app-stack.ts`, regenerate the app-stack snapshot.
-3. **Eval (Track-A, `funding-matcher-accuracy-handoff.md` §4):** does a non-zero prestige weight change actionable-grant precision@N? Tune `weights.prestige` + `TOPIC_FLOOR` from the result before prod.
+3. **Eval (Track-A, `funding-matcher-accuracy-handoff.md` §4):** does a non-zero `prestigePenalty` change actionable-grant precision@N? Tune `prestigePenalty` + the band params (`BAND`, `SLOPE`) from the result before prod.
 4. **Health smoke:** extend the new opportunities-index smoke (companion spec §8) to also assert `> X%` of opps carry a non-null `prestige.score`.
 
 ## 7. Open decisions (sign-off before build)
 
-1. **Stage-relative prestige?** Should a K99/ESI award read as "Flagship *for a junior*" (prestige scaled by stage-fit), or stay stage-agnostic with the `stage` axis doing that work? (Affects §4.2.)
-2. **`weights.prestige` + `TOPIC_FLOOR` starting values** — eval-set, but pick launch defaults (recommend weight 0 = display+sort only at launch).
-3. **`label` thresholds** (§3.5).
-4. **Sponsor-tier table ownership + cadence** — who maintains it, how often (§3.3).
-5. **Scholar view vs RD view** — does prestige-sort lead in `find-researchers` and stay badge-only in `Grants for me`? (§5.)
-6. **Selectivity** — is any reliable award-rate source worth wiring, or ship with `selectivity: null` (the other three inputs) for v1?
+1. **Stage-relative prestige?** — **RESOLVED: No.** The band is *standing*-based (§4.5: funding track + productivity + rank), and the `stage` axis stays the separate career-clock signal. Deliberately excludes career stage.
+2. **`prestigePenalty` + `BAND` / `SLOPE` starting values** — eval-set; launch `prestigePenalty = 0` (badge + magnitude-sort only, no dampening) until Track-A clears it.
+3. **`label` thresholds** (§3.5) — provisional ≥0.8 Flagship / ≥0.55 Major; derive final cuts from the corpus histogram.
+4. **Sponsor-tier table ownership + cadence** (§3.3) — deferred in producer v1 (`sponsor_tier: null`, renormalized); ReciterAI-owned `config/sponsor_tiers.json` when built.
+5. **Scholar view vs RD view** — prestige-sort leads in `find-researchers` (RD), badge-only/quieter in scholar "Grants for me" (§5).
+6. **Selectivity** — ship `null` for v1 (no reliable award-rate source).
+7. **Band-fit specifics (§4.2/§4.5):** symmetric vs asymmetric penalty (v1 symmetric); the scholar-band `standing` metric source + weights `wF/wP/wR`; whether to precompute `scholarBand` on the people index vs per-request.
 
 ---
 
