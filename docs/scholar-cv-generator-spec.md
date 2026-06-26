@@ -155,6 +155,40 @@ what will land in their CV. It must **not** be added to the public Scholars prof
   `buildPopsPreviewGroups` unit-tested (`tests/unit/cv-pops-preview.test.ts`). Live endpoint not yet
   exercised through the running server (needs dev-login, same deferral as the POST route).
 
+## 6c. ASMS enrichment (primary affiliation + dated postdoc training) — INVESTIGATED, NOT BUILT
+
+ASMS source schema confirmed by live probe (`etl/asms/probe.ts`, 2026-06-26):
+
+- **`asms.dbo.fc_doctoral_training`** (16,551 rows) — postdoc/doctoral training: `person_id`,
+  `doctoral_training_type_id` (Residency/Fellowship/Internship lookup), `institution`, `specialty`,
+  **`date_from`/`date_to` + `year_from`/`year_to`**. → WCM §5 Postdoctoral Training **with dates**
+  (POPS training has none — so ASMS is the *better* source here).
+- **`asms.dbo.wcmc_person.institution_id` → `asms.dbo.wcmc_institution.title`** — primary
+  institutional affiliation. Also `fc_nyh_appointment*` (NYP), `fc_npi`. → WCM §9 Hospital Affiliation
+  / §6 Positions.
+
+**Gap:** the current ASMS ETL (`etl/asms/index.ts`) imports ONLY degree rows
+(`wcmc_person_school`, `grad_year IS NOT NULL`) into `Education`. Training + affiliation are not
+imported. ASMS is MSSQL reached by the nightly ETL — **not** reachable from the app at request time,
+so (unlike POPS's fetch-at-generation) ASMS data must flow through the ETL into Scholars tables,
+then the CV reads it from `ProfilePayload`.
+
+**To use ASMS** (upstream of the CV — own piece of work): (1) extend the ASMS ETL with two queries
+(`fc_doctoral_training` + its type lookup; `institution_id`→`wcmc_institution`); (2) schema — a
+training model/rows (type, institution, specialty, dates) + a primary-affiliation field/row;
+(3) surface both in `ProfilePayload`. Then the CV builder's existing merge points consume them.
+
+**Merge design (per-person UNION, because POPS↔ASMS coverage doesn't nest):**
+- **§5 Postdoctoral Training:** ASMS (dated, specialty) UNION POPS (undated) → dedup by
+  normalised `type + institution`; **ASMS-first** on overlap (it has dates); POPS fills items/people
+  ASMS lacks. *(Flips the earlier "POPS-primary for C" — ASMS is now primary when present.)*
+- **§9 Hospital Affiliation / §6 Positions:** ASMS primary institution + NYP appointment UNION POPS
+  hospital appointments.
+- **Coverage:** ASMS covers WCM faculty (research + clinical); POPS covers clinical providers.
+  POPS-only (voluntary/NYP, not ASMS faculty) → POPS supplies it; ASMS-only (research faculty) →
+  ASMS supplies it; overlap deduped ASMS-first. The union is keyed per-person per-source so neither
+  "not everyone in POPS is in ASMS" nor the reverse drops anyone.
+
 ## 7. Architecture / data flow
 
 ```
