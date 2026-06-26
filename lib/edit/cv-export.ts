@@ -43,6 +43,7 @@ export type {
   PopsDegree,
   PopsAppointment,
   PopsHonor,
+  PopsPractice,
 } from "./pops";
 
 /**
@@ -255,9 +256,7 @@ function buildAuthorRuns(
     const display = unwrapMarker(rawToken);
     // PubMed token format is "Lastname Initials" — surname is the first
     // whitespace-separated word; strip residual punctuation.
-    const surname = (display.split(/\s+/)[0] ?? "")
-      .replace(/[^\p{L}'-]/gu, "")
-      .toLowerCase();
+    const surname = (display.split(/\s+/)[0] ?? "").replace(/[^\p{L}'-]/gu, "").toLowerCase();
     runs.push(new TextRun({ text: display, bold: selectedLastNames.has(surname) }));
   });
   return runs;
@@ -301,9 +300,7 @@ function citationParagraph(
   ];
   if (pub.pmcid) {
     idRuns.push(new TextRun({ text: "; PMCID: " }));
-    idRuns.push(
-      hyperlinkRun(pub.pmcid, `https://www.ncbi.nlm.nih.gov/pmc/articles/${pub.pmcid}/`),
-    );
+    idRuns.push(hyperlinkRun(pub.pmcid, `https://www.ncbi.nlm.nih.gov/pmc/articles/${pub.pmcid}/`));
   }
   idRuns.push(new TextRun({ text: "." }));
 
@@ -353,7 +350,11 @@ function educationBody(p: ProfilePayload, pops: PopsEnrichment | null): Block[] 
     rows.push([degree || NA, institution || NA, yr || ""]);
   };
   for (const e of p.educations) {
-    add(e.field ? `${e.degree} (${e.field})` : e.degree, e.institution, e.year ? String(e.year) : "");
+    add(
+      e.field ? `${e.degree} (${e.field})` : e.degree,
+      e.institution,
+      e.year ? String(e.year) : "",
+    );
   }
   // POPS degrees corroborate / supplement (dedup by degree+institution).
   for (const d of pops?.degrees ?? []) add(d.degree, d.institution, d.year ?? "");
@@ -425,6 +426,8 @@ function hospitalAffiliationBody(pops: PopsEnrichment | null): Block[] {
 
 function honorsBody(pops: PopsEnrichment | null): Block[] {
   const rows = (pops?.honors ?? []).map((h) => [h.date ?? "", h.name || NA, NA]);
+  // Castle Connolly "Top Doctor" — a recognition POPS carries as a flag, no date.
+  if (pops?.castleConnolly) rows.push(["", "Castle Connolly Top Doctor", "Castle Connolly"]);
   if (rows.length === 0) return [];
   return [table(["Date", "Award", "Organization"], rows)];
 }
@@ -434,6 +437,19 @@ function clinicalActivitiesBody(p: ProfilePayload, pops: PopsEnrichment | null):
   const specialties = pops?.specialties ?? [];
   if (specialties.length > 0) {
     out.push(plain(`Clinical specialties: ${specialties.join("; ")}`));
+  }
+  // L1 Clinical Practice — named POPS practices/services.
+  const practices = pops?.practices ?? [];
+  if (practices.length > 0) {
+    out.push(subHeading("Clinical Practice"));
+    for (const pr of practices) {
+      out.push(plain(pr.type ? `${pr.name} (${pr.type})` : pr.name));
+    }
+  }
+  // Clinical expertise areas (problem_procedure).
+  const expertise = pops?.expertise ?? [];
+  if (expertise.length > 0) {
+    out.push(plain(`Areas of expertise: ${expertise.join("; ")}`));
   }
   if (p.clinicalProfileUrl) {
     out.push(
@@ -454,7 +470,9 @@ function researchActivitiesBody(summary: string): Block[] {
     .map((s) => s.replace(/\s+/g, " ").trim())
     .filter(Boolean);
   if (paras.length === 0) return [];
-  return paras.map((s) => new Paragraph({ children: [new TextRun({ text: s })], spacing: { after: 120 } }));
+  return paras.map(
+    (s) => new Paragraph({ children: [new TextRun({ text: s })], spacing: { after: 120 } }),
+  );
 }
 
 function researchSupportBody(p: ProfilePayload): Block[] {

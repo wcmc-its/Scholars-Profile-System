@@ -29,6 +29,11 @@ export interface PopsHonor {
   name: string;
   date: string | null;
 }
+// A named clinical practice/service (e.g. "Vitreoretinal and Macular Diseases").
+export interface PopsPractice {
+  name: string;
+  type: string | null;
+}
 export interface PopsEnrichment {
   npi: string | null;
   boardCertifications: PopsBoardCert[];
@@ -37,6 +42,12 @@ export interface PopsEnrichment {
   appointments: PopsAppointment[];
   honors: PopsHonor[];
   specialties: string[];
+  /** Named clinical practices/services — WCM §14 Clinical Activities (Practice). */
+  practices: PopsPractice[];
+  /** Clinical expertise areas (problem_procedure) — WCM §14 Clinical Activities. */
+  expertise: string[];
+  /** Castle Connolly "Top Doctor" recognition — surfaced as an honor when true. */
+  castleConnolly: boolean;
 }
 
 type Obj = Record<string, unknown>;
@@ -123,12 +134,21 @@ function mapProfile(p: Obj): PopsEnrichment {
     specialties: asArray(p.primary_specialties)
       .map((s) => str(s.name))
       .filter((s): s is string => !!s),
+    practices: asArray(p.practices)
+      .map((pr) => ({ name: str(pr.name) ?? "", type: str(pr.practice_type) }))
+      .filter((pr) => pr.name),
+    expertise: asArray(p.problem_procedure)
+      .map((pp) => str(pp.name))
+      .filter((s): s is string => !!s),
+    castleConnolly: coerceBool(p.has_castle_connolly_badge),
   };
 }
 
 export async function fetchPops(cwid: string): Promise<PopsEnrichment | null> {
   try {
-    const res = await fetch(`${POPS_BASE_URL}/providerbyshortname/${encodeURIComponent(cwid)}.json`);
+    const res = await fetch(
+      `${POPS_BASE_URL}/providerbyshortname/${encodeURIComponent(cwid)}.json`,
+    );
     if (!res.ok) return null;
     const json = (await res.json()) as { providerProfile?: unknown } | null;
     const profile = json?.providerProfile;

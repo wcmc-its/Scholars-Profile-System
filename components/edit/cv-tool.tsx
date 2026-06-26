@@ -253,7 +253,10 @@ export function buildPopsPreviewGroups(pops: PopsEnrichment): PopsPreviewGroup[]
     {
       label: "Honors & awards",
       section: "Honors and Awards",
-      items: pops.honors.map((h) => (h.date ? `${h.date} — ${h.name}` : h.name)),
+      items: [
+        ...pops.honors.map((h) => (h.date ? `${h.date} — ${h.name}` : h.name)),
+        ...(pops.castleConnolly ? ["Castle Connolly Top Doctor"] : []),
+      ],
     },
     {
       label: "Degrees",
@@ -266,6 +269,16 @@ export function buildPopsPreviewGroups(pops: PopsEnrichment): PopsPreviewGroup[]
       label: "Clinical specialties",
       section: "Clinical Activities",
       items: pops.specialties.length > 0 ? [pops.specialties.join(", ")] : [],
+    },
+    {
+      label: "Clinical practices",
+      section: "Clinical Activities",
+      items: pops.practices.map((pr) => (pr.type ? `${pr.name} (${pr.type})` : pr.name)),
+    },
+    {
+      label: "Areas of expertise",
+      section: "Clinical Activities",
+      items: pops.expertise.length > 0 ? [pops.expertise.join(", ")] : [],
     },
     { label: "NPI", section: "Licensure", items: pops.npi ? [pops.npi] : [] },
   ].filter((g) => g.items.length > 0);

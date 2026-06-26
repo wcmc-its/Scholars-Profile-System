@@ -10,6 +10,9 @@ const base: PopsEnrichment = {
   appointments: [],
   honors: [],
   specialties: [],
+  practices: [],
+  expertise: [],
+  castleConnolly: false,
 };
 
 describe("buildPopsPreviewGroups (§6b POPS transparency preview)", () => {
@@ -53,5 +56,19 @@ describe("buildPopsPreviewGroups (§6b POPS transparency preview)", () => {
       boardCertifications: [{ board: "ABIM", specialty: null }],
     });
     expect(groups[0]!.items).toEqual(["ABIM"]);
+  });
+
+  it("groups clinical practices, expertise, and the Castle Connolly honor", () => {
+    const groups = buildPopsPreviewGroups({
+      ...base,
+      practices: [{ name: "Heart Failure Program", type: "Service" }],
+      expertise: ["Heart failure", "Cardiac transplantation"],
+      castleConnolly: true,
+    });
+    const byLabel = Object.fromEntries(groups.map((g) => [g.label, g]));
+    expect(byLabel["Clinical practices"]!.items).toEqual(["Heart Failure Program (Service)"]);
+    expect(byLabel["Clinical practices"]!.section).toBe("Clinical Activities");
+    expect(byLabel["Areas of expertise"]!.items).toEqual(["Heart failure, Cardiac transplantation"]);
+    expect(byLabel["Honors & awards"]!.items).toEqual(["Castle Connolly Top Doctor"]);
   });
 });

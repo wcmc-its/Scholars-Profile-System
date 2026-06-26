@@ -209,7 +209,10 @@ const clinicalPops: PopsEnrichment = {
     },
   ],
   honors: [{ name: "Top Doctor, New York Magazine", date: "2021" }],
-  specialties: [],
+  specialties: ["Cardiology"],
+  practices: [{ name: "Heart Failure Program", type: "Service" }],
+  expertise: ["Heart failure", "Cardiac transplantation"],
+  castleConnolly: true,
 };
 
 const clinicalInput: CvInput = {
@@ -377,5 +380,31 @@ describe("buildWcmCv — clinical board certification (F2)", () => {
     expect(region).toContain("Board Certification");
     expect(region.some((t) => t.includes("American Board of Internal Medicine"))).toBe(true);
     expect(region.some((t) => t.includes("Internal Medicine"))).toBe(true);
+  });
+});
+
+// ── POPS practices/expertise (§14) + Castle Connolly honor ───────────────────
+
+describe("buildWcmCv — clinical activities + Castle Connolly", () => {
+  it("renders POPS practices and expertise in CLINICAL ACTIVITIES", async () => {
+    const paras = paragraphTexts(await documentXml(clinicalInput));
+    const start = paras.indexOf("CLINICAL ACTIVITIES");
+    const end = paras.indexOf("RESEARCH ACTIVITIES");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const region = paras.slice(start, end);
+    expect(region.some((t) => t.includes("Heart Failure Program"))).toBe(true);
+    expect(region.some((t) => t.includes("Heart failure"))).toBe(true);
+  });
+
+  it("renders the Castle Connolly badge in HONORS AND AWARDS", async () => {
+    const paras = paragraphTexts(await documentXml(clinicalInput));
+    const start = paras.indexOf("HONORS AND AWARDS");
+    const end = paras.indexOf("PROFESSIONAL MEMBERSHIPS");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(paras.slice(start, end).some((t) => t.includes("Castle Connolly Top Doctor"))).toBe(
+      true,
+    );
   });
 });

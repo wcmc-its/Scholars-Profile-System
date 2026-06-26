@@ -61,6 +61,15 @@ const AORLIN_PROFILE = {
   honors_and_awards:
     "<p><strong>January 2010</strong> Association of University Professors of Ophthalmology (AUPO) Residency Research Forum Award Recipient</p>",
   primary_specialties: [{ id: 654, name: "Ophthalmology", is_primary_specialty: true }],
+  practices: [
+    { id: "2531", name: "Vitreoretinal and Macular Diseases", practice_type: "Service", practice_locations: [] },
+    { id: "2524", name: "Comprehensive/General Ophthalmology Services", practice_type: "Service", practice_locations: [] },
+  ],
+  problem_procedure: [
+    { id: 8618, name: "Retina Degeneration", type: "expertise" },
+    { id: 8622, name: "Retinal Laser Photocoagulation", type: "expertise" },
+  ],
+  has_castle_connolly_badge: false,
 };
 
 function mockFetchJson(body: unknown, ok = true, status = 200) {
@@ -148,6 +157,16 @@ describe("fetchPops mapper", () => {
     expect(pops.npi).toBe("1720138498");
     expect(pops.specialties).toEqual(["Ophthalmology"]);
   });
+
+  it("maps practices, clinical expertise, and the Castle Connolly badge", async () => {
+    const pops = await loadAorlin();
+    expect(pops.practices).toEqual([
+      { name: "Vitreoretinal and Macular Diseases", type: "Service" },
+      { name: "Comprehensive/General Ophthalmology Services", type: "Service" },
+    ]);
+    expect(pops.expertise).toEqual(["Retina Degeneration", "Retinal Laser Photocoagulation"]);
+    expect(pops.castleConnolly).toBe(false);
+  });
 });
 
 describe("fetchPops resilience (never throws into the CV path)", () => {
@@ -172,5 +191,11 @@ describe("fetchPops resilience (never throws into the CV path)", () => {
     });
     const pops = await fetchPops("x");
     expect(pops?.honors).toEqual([{ date: null, name: "Lifetime Achievement, no date here" }]);
+  });
+
+  it("coerces the string-boolean Castle Connolly badge", async () => {
+    mockFetchJson({ providerProfile: { has_castle_connolly_badge: "True" } });
+    const pops = await fetchPops("x");
+    expect(pops?.castleConnolly).toBe(true);
   });
 });
