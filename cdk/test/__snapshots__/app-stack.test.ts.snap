@@ -1088,7 +1088,7 @@ service:
             ],
           },
         ],
-        "Cpu": "1024",
+        "Cpu": "2048",
         "ExecutionRoleArn": {
           "Fn::GetAtt": [
             "TaskExecutionRole250D2532",
@@ -1096,7 +1096,7 @@ service:
           ],
         },
         "Family": "sps-app-prod",
-        "Memory": "2048",
+        "Memory": "4096",
         "NetworkMode": "awsvpc",
         "RequiresCompatibilities": [
           "FARGATE",
@@ -4405,7 +4405,7 @@ service:
             ],
           },
         ],
-        "Cpu": "512",
+        "Cpu": "1024",
         "ExecutionRoleArn": {
           "Fn::GetAtt": [
             "TaskExecutionRole250D2532",
@@ -4413,7 +4413,7 @@ service:
           ],
         },
         "Family": "sps-app-staging",
-        "Memory": "1024",
+        "Memory": "2048",
         "NetworkMode": "awsvpc",
         "RequiresCompatibilities": [
           "FARGATE",
