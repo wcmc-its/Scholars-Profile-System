@@ -46,45 +46,47 @@ export async function CenterPage({
   if (!detail) notFound();
 
   const basePath = `/centers/${detail.slug}`;
+  const pubSort = (sort === "most_cited" ? "most_cited" : "newest") as PubSort;
+  // #1105 — program nav only when the flag is on (links never point at 404).
+  const programPagesEnabled = isCenterProgramPagesEnabled();
+  // #1137 — collaboration flag; the program-count query is skipped when off.
+  const collaborationFlag = isCenterCollaborationNetworkEnabled();
 
-  // §16: Spotlight + top research areas are page-level. Pubs count is needed
-  // for the Spotlight view-all link and the tab label.
-  const [topResearchAreas, spotlightCards] = await Promise.all([
+  // All viewer-independent loaders are cached (lib/api/swr-cache) and mutually
+  // independent once we have detail.code — fire them in one batch so their
+  // (cold-miss) DB scans overlap instead of stacking latency. Conditional
+  // loaders resolve to a cheap constant when their tab/flag is off. The page-0
+  // pubs result doubles as the always-needed count (stat + tab label + Spotlight
+  // view-all); the publications tab additionally loads the requested page/sort.
+  const [
+    topResearchAreas,
+    spotlightCards,
+    pubsCountResult,
+    pubsListMaybe,
+    members,
+    programs,
+    hasPrograms,
+  ] = await Promise.all([
     getCenterTopResearchAreas(detail.code),
     getSpotlightCardsForCenter(detail.code),
-  ]);
-  const pubsCountResult = await getCenterPublicationsList(detail.code, {
-    page: 0,
-    sort: "newest",
-  });
-
-  const pubSort = (sort === "most_cited" ? "most_cited" : "newest") as PubSort;
-  const pubsList =
+    getCenterPublicationsList(detail.code, { page: 0, sort: "newest" }),
     tab === "publications"
-      ? await getCenterPublicationsList(detail.code, {
+      ? getCenterPublicationsList(detail.code, {
           page: Math.max(0, page - 1),
           sort: pubSort,
         })
-      : pubsCountResult;
-
-  const members =
+      : Promise.resolve(null),
     tab === "scholars"
-      ? await getCenterMembers(detail.code, { page: Math.max(0, page - 1) })
-      : null;
+      ? getCenterMembers(detail.code, { page: Math.max(0, page - 1) })
+      : Promise.resolve(null),
+    programPagesEnabled ? getCenterPrograms(detail.code) : Promise.resolve([]),
+    collaborationFlag ? centerHasPrograms(detail.code) : Promise.resolve(false),
+  ]);
 
-  // #1105 — page-eligible programs for the "Programs" nav under the hero. Only
-  // when the program-pages flag is on (so links never point at notFound()).
-  const programPagesEnabled = isCenterProgramPagesEnabled();
-  const programs = programPagesEnabled
-    ? await getCenterPrograms(detail.code)
-    : [];
-
+  const pubsList = pubsListMaybe ?? pubsCountResult;
   // #1137 — Collaboration tab: flag on AND the center has a program taxonomy
-  // (data-driven → today only the Meyer Cancer Center). Skip the count query
-  // entirely when the flag is off.
-  const showCollaboration =
-    isCenterCollaborationNetworkEnabled() &&
-    (await centerHasPrograms(detail.code));
+  // (data-driven → today only the Meyer Cancer Center).
+  const showCollaboration = collaborationFlag && hasPrograms;
 
   const spotlightData = spotlightCards
     ? {

@@ -28,6 +28,7 @@
  *   - Department    → parent topic label   (which research area on this dept)
  */
 import { prisma } from "@/lib/db";
+import { cachedRead } from "@/lib/api/swr-cache";
 import { fetchWcmAuthorsForPmids, type WcmAuthorChip } from "@/lib/api/topics";
 import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-layer";
 import { loadActiveCenterMemberCwids } from "@/lib/api/centers";
@@ -502,7 +503,7 @@ export function getSpotlightCardsForDivision(
  * so we can't do a nested where. Centers without populated membership
  * return null (the surface omits).
  */
-export async function getSpotlightCardsForCenter(
+async function getSpotlightCardsForCenterUncached(
   centerCode: string,
 ): Promise<SpotlightCard[] | null> {
   // #552 Phase 4 — only active members (§ 3.3) seed the center's spotlight,
@@ -511,4 +512,13 @@ export async function getSpotlightCardsForCenter(
   const memberCwids = await loadActiveCenterMemberCwids(centerCode);
   if (memberCwids.length === 0) return null;
   return getSpotlightCardsForEntity({ cwid: { in: memberCwids } });
+}
+
+/** Cached: spotlight is a viewer-independent rollup over the center roster. */
+export function getSpotlightCardsForCenter(
+  centerCode: string,
+): Promise<SpotlightCard[] | null> {
+  return cachedRead(`center:spotlight:${centerCode}`, () =>
+    getSpotlightCardsForCenterUncached(centerCode),
+  );
 }
