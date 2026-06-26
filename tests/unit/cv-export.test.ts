@@ -210,7 +210,10 @@ const clinicalPops: PopsEnrichment = {
   ],
   honors: [{ name: "Top Doctor, New York Magazine", date: "2021" }],
   specialties: ["Cardiology"],
-  practices: [{ name: "Heart Failure Program", type: "Service" }],
+  practices: [
+    { name: "Heart Failure Program", type: "Service" },
+    { name: "Englander Department of Cardiology", type: "Location" },
+  ],
   expertise: ["Heart failure", "Cardiac transplantation"],
   castleConnolly: true,
 };
@@ -395,6 +398,20 @@ describe("buildWcmCv — clinical activities + Castle Connolly", () => {
     const region = paras.slice(start, end);
     expect(region.some((t) => t.includes("Heart Failure Program"))).toBe(true);
     expect(region.some((t) => t.includes("Heart failure"))).toBe(true);
+  });
+
+  it("excludes practice_type 'Location' rows and orders expertise above Clinical Practice (§13.3)", async () => {
+    const paras = paragraphTexts(await documentXml(clinicalInput));
+    const start = paras.indexOf("CLINICAL ACTIVITIES");
+    const end = paras.indexOf("RESEARCH ACTIVITIES");
+    const region = paras.slice(start, end);
+    // Location row dropped — it's the parent department, already in §9 Hospital Affiliation.
+    expect(region.some((t) => t.includes("Englander Department of Cardiology"))).toBe(false);
+    // "Areas of expertise" precedes the "Clinical Practice" subheading.
+    const exp = region.findIndex((t) => t.startsWith("Areas of expertise"));
+    const prac = region.indexOf("Clinical Practice");
+    expect(exp).toBeGreaterThanOrEqual(0);
+    expect(prac).toBeGreaterThan(exp);
   });
 
   it("renders the Castle Connolly badge in HONORS AND AWARDS", async () => {

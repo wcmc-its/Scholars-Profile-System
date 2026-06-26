@@ -438,18 +438,22 @@ function clinicalActivitiesBody(p: ProfilePayload, pops: PopsEnrichment | null):
   if (specialties.length > 0) {
     out.push(plain(`Clinical specialties: ${specialties.join("; ")}`));
   }
-  // L1 Clinical Practice — named POPS practices/services.
-  const practices = pops?.practices ?? [];
+  // Clinical expertise areas (problem_procedure) — above "Clinical Practice" so it doesn't
+  // read as nested under that subheading (spec §13.3).
+  const expertise = pops?.expertise ?? [];
+  if (expertise.length > 0) {
+    out.push(plain(`Areas of expertise: ${expertise.join("; ")}`));
+  }
+  // L1 Clinical Practice — named POPS practices/services. Drop practice_type "Location" rows:
+  // those are the parent department, already in §9 Hospital Affiliation (spec §13.3).
+  const practices = (pops?.practices ?? []).filter(
+    (pr) => (pr.type ?? "").toLowerCase() !== "location",
+  );
   if (practices.length > 0) {
     out.push(subHeading("Clinical Practice"));
     for (const pr of practices) {
       out.push(plain(pr.type ? `${pr.name} (${pr.type})` : pr.name));
     }
-  }
-  // Clinical expertise areas (problem_procedure).
-  const expertise = pops?.expertise ?? [];
-  if (expertise.length > 0) {
-    out.push(plain(`Areas of expertise: ${expertise.join("; ")}`));
   }
   if (p.clinicalProfileUrl) {
     out.push(

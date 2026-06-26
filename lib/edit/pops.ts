@@ -73,8 +73,11 @@ function decodeEntities(s: string): string {
   return s
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
-    .replace(/&#39;|&rsquo;/g, "'")
-    .replace(/&quot;/g, '"');
+    .replace(/&#39;|&rsquo;|&lsquo;/g, "'")
+    .replace(/&quot;|&ldquo;|&rdquo;/g, '"')
+    .replace(/&ndash;|&#8211;/gi, "–")
+    .replace(/&mdash;|&#8212;/gi, "—")
+    .replace(/&bull;|&#8226;|&#x2022;/gi, " ");
 }
 
 function stripTags(html: string): string {
@@ -87,16 +90,28 @@ function stripTags(html: string): string {
 const HONOR_DATE_RE =
   /^((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|\d{1,2}\/\d{4}|\d{4})\s+(.+)$/;
 
-// honors_and_awards is a single unstructured HTML string (`<p><strong>date</strong> award</p>`).
+// honors_and_awards is unstructured HTML in three real shapes: <p>-wrapped honors, bare <li>
+// lists with no <p>, and Word-paste lists that smuggle CSS into a sibling <p>/<style>. Prefer
+// <li> items when present (each = one honor — 27% of live entries are list-shaped with no <p>),
+// else <p> blocks, else split on <br>; an entry with none of these stays a single block.
+function honorBlocks(html: string): string[] {
+  const lis = html.match(/<li\b[^>]*>[\s\S]*?<\/li>/gi);
+  const ps = html.match(/<p\b[^>]*>[\s\S]*?<\/p>/gi);
+  return lis ?? ps ?? html.split(/<br\s*\/?>/i);
+}
+
+// Microsoft-Word paste leaks <style> CSS ("table.MsoNormalTable {…}", "Normal 0 false …").
+const WORD_JUNK_RE = /mso-|MsoNormal|panose|Normal\s+0\s+false|Style Definitions/i;
+
 function parseHonors(html: unknown): PopsHonor[] {
   if (typeof html !== "string" || !html.trim()) return [];
-  const blocks = html.match(/<p\b[^>]*>[\s\S]*?<\/p>/gi) ?? [html];
-  return blocks
+  return honorBlocks(html)
     .map(stripTags)
-    .filter(Boolean)
+    .filter((text) => Boolean(text) && !WORD_JUNK_RE.test(text))
     .map((text) => {
       const m = HONOR_DATE_RE.exec(text);
-      // ponytail: leading month-year / year only; complex entries keep the whole line as the name.
+      // ponytail: leading month-year / year only; comma-led/trailing/range dates and a single-line
+      // bullet list keep the whole text as the name (residual ceiling, spec §13.2).
       return m ? { name: m[2].trim(), date: m[1].trim() } : { name: text, date: null };
     });
 }

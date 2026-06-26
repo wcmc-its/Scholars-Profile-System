@@ -199,3 +199,38 @@ describe("fetchPops resilience (never throws into the CV path)", () => {
     expect(pops?.castleConnolly).toBe(true);
   });
 });
+
+describe("parseHonors hardening (spec §13.2)", () => {
+  it("splits <li> honor lists that have no <p> wrapper (no collapse)", async () => {
+    mockFetchJson({
+      providerProfile: {
+        honors_and_awards: "<ul><li>Distinguished Service Award, 2020</li><li>Teaching Award, 2021</li></ul>",
+      },
+    });
+    const pops = await fetchPops("x");
+    expect(pops?.honors).toEqual([
+      { date: null, name: "Distinguished Service Award, 2020" },
+      { date: null, name: "Teaching Award, 2021" },
+    ]);
+  });
+
+  it("drops Microsoft-Word paste CSS noise from honors", async () => {
+    mockFetchJson({
+      providerProfile: {
+        honors_and_awards:
+          '<p class="MsoNormal">Normal 0 false false false EN-US X-NONE X-NONE</p>' +
+          "<p>Lifetime Achievement Award</p>",
+      },
+    });
+    const pops = await fetchPops("x");
+    expect(pops?.honors).toEqual([{ date: null, name: "Lifetime Achievement Award" }]);
+  });
+
+  it("decodes &bull; bullets in honors", async () => {
+    mockFetchJson({
+      providerProfile: { honors_and_awards: "<p>&bull; Castle Connolly Top Doctor</p>" },
+    });
+    const pops = await fetchPops("x");
+    expect(pops?.honors).toEqual([{ date: null, name: "Castle Connolly Top Doctor" }]);
+  });
+});
