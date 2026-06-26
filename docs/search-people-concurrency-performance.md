@@ -1,7 +1,7 @@
 # `/search` People concept-search — performance findings
 
 **Scope:** why broad-concept People searches saturated under concurrency, what we changed, what the numbers say, and where the remaining ceiling is.
-**Last updated:** 2026-06-25.
+**Last updated:** 2026-06-26 (added §7 note on the shared Aurora-side taxonomy bottleneck).
 
 > TL;DR — The app-side query load is now minimal (one people-index query per concept search; the per-request publications aggregation is gone). On staging the optimization improved latency but did **not** clear the ~10-concurrent target — because staging OpenSearch is a single burstable `t3.medium` node and hits a **node-capacity wall at ~5 concurrent**, not because of the code. Production is a far larger cluster (`m6g.large.search ×2`, Multi-AZ). The remaining lever is cluster scale, not more app code.
 
@@ -62,6 +62,7 @@ Single-query latency improved markedly (C=1: 2.27 → 1.32 s). But C=10 stayed ~
 
 - **App code: effectively maxed.** One people-index query per concept search is the floor without precomputing concept-specific key papers (option "E"), which was **deliberately rejected** (it would make key papers scholar-level/lossy instead of concept-specific).
 - **Remaining lever: cluster scale.** If a **representative** cluster still saturates at C=10 after the 1-query fix, the fix is more/bigger data nodes — not more application changes.
+- **A second, Aurora-side bottleneck (found 2026-06-26).** A Publications-tab C-ramp isolated `matchQueryToTaxonomy` — the query→taxonomy resolver shared by **both** tabs — as the dominant cost under concurrency: ~8.6 s at C=5 vs ~1.3 s for the OpenSearch search+aggs, because it runs two `publicationTopic.groupBy` queries **per matched candidate** (`getCounts`), uncached across requests. That is an **Aurora** ceiling independent of the OpenSearch one above, and the People path pays it too. An app-CPU bump did **not** move it (proof it's DB I/O, not CPU); the lever is a cross-request taxonomy cache. Full detail: [`performance-baseline.md` § Search performance findings (2026-06-26)](./performance-baseline.md).
 - **What's unverified:** the C=10 number on the representative (prod-sized) cluster. Cheapest ways to get it without a production release: (a) re-run the staging load test now to quantify #1285 on the `t3.medium`; (b) temporarily resize staging to `m6g.large` and load-test the optimized path; (c) fold into the next planned prod release (prod is ~350 commits behind; deploying it is a large multi-feature release, and exercising the *fixed* path on prod additionally needs a prod people-reindex for `meshSubtreeCounts` + flipping `SEARCH_PEOPLE_REASON_FROM_DOC` on for prod).
 
 ## 8. Reusable load-test tooling
