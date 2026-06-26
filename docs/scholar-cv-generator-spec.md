@@ -190,10 +190,12 @@ POPS training adds essentially nothing.
   training — it's near-empty (1/70) and a per-person union is over-engineering for that edge case.
   The currently-shipped code reads POPS training only because ASMS training isn't imported yet;
   once `fc_doctoral_training` lands, **remove the POPS training path from §5**.
-- **§9 Hospital Affiliation / §6 Positions:** ASMS primary institution (`institution_id`) + NYP
-  appointment, plus POPS hospital appointments (POPS *appointments* ARE populated — unlike training).
-  A per-person union here is still justified; ASMS-first on the primary institution. *(Measure POPS
-  vs ASMS appointment coverage before finalizing — only training was measured.)*
+- **§9 Hospital Affiliation / §6 Positions — ASMS/Scholars-only** (user-confirmed 2026-06-26: POPS
+  has no appointments ASMS doesn't). ASMS primary institution (`institution_id`→`wcmc_institution`)
+  + the existing ED/NYP rows in `profile.appointments`. **Drop POPS appointments from the CV too.**
+- **Net:** POPS's CV role narrows to board certifications, NPI, honors, practices, expertise,
+  specialties, Castle Connolly. Everything dated/structural (training, appointments, affiliation)
+  comes from ASMS/Scholars. Full build plan: `docs/cv-asms-enrichment-handoff.md`.
 
 ## 7. Architecture / data flow
 
