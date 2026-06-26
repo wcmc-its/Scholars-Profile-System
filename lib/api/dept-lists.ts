@@ -14,6 +14,7 @@
  * 1-indexed from the URL and 0-indexed internally.
  */
 import { prisma } from "@/lib/db";
+import { cachedRead } from "@/lib/api/swr-cache";
 import { identityImageEndpoint } from "@/lib/headshot";
 import type { AuthorChip } from "@/components/publication/author-chip-row";
 import type {
@@ -45,7 +46,7 @@ export type DeptListGrantResult = {
   pageSize: number;
 };
 
-export async function getDeptPublicationsList(
+async function getDeptPublicationsListUncached(
   deptCode: string,
   opts: { page?: number; sort?: PubSort } = {},
 ): Promise<DeptListPubResult> {
@@ -145,7 +146,7 @@ export async function getDeptPublicationsList(
   return { hits, total, page, pageSize: PAGE_SIZE };
 }
 
-export async function getDeptGrantsList(
+async function getDeptGrantsListUncached(
   deptCode: string,
   opts: { page?: number; sort?: GrantSort } = {},
 ): Promise<DeptListGrantResult> {
@@ -300,3 +301,23 @@ export async function getDeptGrantsList(
 
   return { hits, total: sortedGroups.length, page, pageSize: PAGE_SIZE };
 }
+
+// --- Cached public wrappers (viewer-independent reads via lib/api/swr-cache;
+//     mirrors the center-page caching in lib/api/centers.ts). ---
+export const getDeptPublicationsList = (
+  deptCode: string,
+  opts: { page?: number; sort?: PubSort } = {},
+) =>
+  cachedRead(
+    `department:pubs:${deptCode}:${Math.max(0, opts.page ?? 0)}:${opts.sort ?? "newest"}`,
+    () => getDeptPublicationsListUncached(deptCode, opts),
+  );
+
+export const getDeptGrantsList = (
+  deptCode: string,
+  opts: { page?: number; sort?: GrantSort } = {},
+) =>
+  cachedRead(
+    `department:grants:${deptCode}:${Math.max(0, opts.page ?? 0)}:${opts.sort ?? "most_recent"}`,
+    () => getDeptGrantsListUncached(deptCode, opts),
+  );

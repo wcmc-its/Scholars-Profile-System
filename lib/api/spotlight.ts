@@ -487,14 +487,18 @@ async function getSpotlightCardsForEntity(
 export function getSpotlightCardsForDepartment(
   deptCode: string,
 ): Promise<SpotlightCard[] | null> {
-  return getSpotlightCardsForEntity({ deptCode });
+  return cachedRead(`department:spotlight:${deptCode}`, () =>
+    getSpotlightCardsForEntity({ deptCode }),
+  );
 }
 
 export function getSpotlightCardsForDivision(
   deptCode: string,
   divCode: string,
 ): Promise<SpotlightCard[] | null> {
-  return getSpotlightCardsForEntity({ deptCode, divCode });
+  return cachedRead(`division:spotlight:${deptCode}:${divCode}`, () =>
+    getSpotlightCardsForEntity({ deptCode, divCode }),
+  );
 }
 
 /**

@@ -51,10 +51,23 @@ export async function DivisionPage({
   if (!detail) notFound();
 
   const basePath = `/departments/${detail.parentDept.slug}/divisions/${detail.division.slug}`;
-  const spotlightCards = await getSpotlightCardsForDivision(
-    detail.parentDept.code,
-    detail.division.code,
-  );
+  // Spotlight + the active tab's list are mutually independent — fetch in one
+  // batch (all cached via lib/api/swr-cache) so cold-miss scans overlap.
+  const pageIdx = Math.max(0, page - 1);
+  const pubSort = (sort === "most_cited" ? "most_cited" : "newest") as PubSort;
+  const grantSort = (sort === "end_date" ? "end_date" : "most_recent") as GrantSort;
+  const [spotlightCards, faculty, pubsList, grantsList] = await Promise.all([
+    getSpotlightCardsForDivision(detail.parentDept.code, detail.division.code),
+    tab === "scholars"
+      ? getDivisionFaculty(detail.division.code, { page: pageIdx })
+      : Promise.resolve(null),
+    tab === "publications"
+      ? getDivisionPublicationsList(detail.division.code, { page: pageIdx, sort: pubSort })
+      : Promise.resolve(null),
+    tab === "grants"
+      ? getDivisionGrantsList(detail.division.code, { page: pageIdx, sort: grantSort })
+      : Promise.resolve(null),
+  ]);
   const spotlightData = spotlightCards
     ? {
         cards: spotlightCards,
@@ -62,27 +75,6 @@ export async function DivisionPage({
         viewAllHref: `${basePath}?tab=publications#tab-content`,
       }
     : null;
-
-  const faculty =
-    tab === "scholars"
-      ? await getDivisionFaculty(detail.division.code, {
-          page: Math.max(0, page - 1),
-        })
-      : null;
-  const pubsList =
-    tab === "publications"
-      ? await getDivisionPublicationsList(detail.division.code, {
-          page: Math.max(0, page - 1),
-          sort: (sort === "most_cited" ? "most_cited" : "newest") as PubSort,
-        })
-      : null;
-  const grantsList =
-    tab === "grants"
-      ? await getDivisionGrantsList(detail.division.code, {
-          page: Math.max(0, page - 1),
-          sort: (sort === "end_date" ? "end_date" : "most_recent") as GrantSort,
-        })
-      : null;
 
   const parentShortName = detail.parentDept.name.replace(/^Department of /, "");
 
