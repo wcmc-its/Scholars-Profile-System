@@ -41,15 +41,15 @@ vi.mock("@/lib/search", () => ({
   }),
 }));
 
-import { fetchKeyPaper } from "@/lib/api/search";
+import { fetchKeyPaper, rankKeyPaperHitsByBlend } from "@/lib/api/search";
 import {
   reasonWantsKeyPaper,
   patchKeyPaper,
 } from "@/components/search/people-result-card-streamed";
 
-// With the default env (no SEARCH_PUB_RELEVANCE_RECENCY → "gentle"), `body.query`
-// is wrapped in a `function_score` whose `.query` holds the bool. Unwrap to the
-// bool whether or not the wrapper is present, so the admission assertions hold.
+// `body.query` is a bare bool now (the recency `function_score` wrapper was
+// dropped — recency lives in the app-side blend re-rank). `boolOf` still tolerates
+// a wrapper so the admission assertions stay shape-agnostic.
 type BoolQuery = { bool: { filter: unknown[]; should?: unknown[] } };
 const boolOf = (q: unknown): BoolQuery["bool"] => {
   const wrapped = q as { function_score?: { query: BoolQuery } } & Partial<BoolQuery>;
@@ -74,7 +74,7 @@ describe("fetchKeyPaper (lazy key paper)", () => {
     ]);
   });
 
-  it("scopes the query to ONE scholar and the resolved concept subtree, top 3", async () => {
+  it("scopes the query to ONE scholar and the resolved concept subtree, pool fetch", async () => {
     captured.length = 0;
     await fetchKeyPaper({
       cwid: "abc1234",
@@ -82,7 +82,7 @@ describe("fetchKeyPaper (lazy key paper)", () => {
       contentQuery: "adenocarcinoma",
     });
     const body = captured[0];
-    expect(body.size).toBe(3);
+    expect(body.size).toBe(50); // pull a pool, then blend-rerank app-side
     const filter = boolOf(body.query).filter;
     expect(filter).toContainEqual({ term: { wcmAuthorCwids: "abc1234" } });
     expect(filter).toContainEqual({ terms: { meshDescriptorUi: ["Dadeno", "Dcyst"] } });
@@ -96,18 +96,21 @@ describe("fetchKeyPaper (lazy key paper)", () => {
     expect(filter.some((f) => JSON.stringify(f).includes("multi_match"))).toBe(true);
   });
 
-  it("ranks by relevance (_score) first, then year, then citationCount", async () => {
+  it("fetches the pool by _score then year, tracks scores, and sources citationCount for the blend", async () => {
     captured.length = 0;
     await fetchKeyPaper({
       cwid: "abc1234",
       descriptorUis: ["Dadeno"],
       contentQuery: "adenocarcinoma",
     });
-    const sort = captured[0].sort as Array<Record<string, unknown>>;
+    const body = captured[0];
+    const sort = body.sort as Array<Record<string, unknown>>;
     expect(sort[0]).toHaveProperty("_score");
     expect((sort[0] as { _score: { order: string } })._score.order).toBe("desc");
     expect(sort[1]).toHaveProperty("year");
-    expect(sort[2]).toHaveProperty("citationCount");
+    expect(sort).toHaveLength(2); // no citationCount in the fetch sort — impact is in the blend
+    expect(body.track_scores).toBe(true); // need _score back even though we sort
+    expect(body._source).toContain("citationCount"); // for the blend's impact nudge
   });
 
   it("injects a keyword-relevance `should` multi_match on the content query", async () => {
@@ -122,16 +125,16 @@ describe("fetchKeyPaper (lazy key paper)", () => {
     expect(should.some((s) => JSON.stringify(s).includes("multi_match"))).toBe(true);
   });
 
-  it("wraps the query in a function_score recency tilt under the default (gentle) env", async () => {
+  it("sends a bare bool query (no function_score wrapper — recency moved into the blend)", async () => {
     captured.length = 0;
     await fetchKeyPaper({
       cwid: "abc1234",
       descriptorUis: ["Dadeno"],
       contentQuery: "adenocarcinoma",
     });
-    const q = captured[0].query as { function_score?: { query: BoolQuery } };
-    expect(q.function_score).toBeDefined();
-    expect(q.function_score?.query.bool).toBeDefined();
+    const q = captured[0].query as { function_score?: unknown; bool?: unknown };
+    expect(q.function_score).toBeUndefined();
+    expect(q.bool).toBeDefined();
   });
 
   it("returns [] when there is neither a concept nor a query (nothing to fetch)", async () => {
@@ -144,6 +147,44 @@ describe("fetchKeyPaper (lazy key paper)", () => {
   it("returns [] when the cwid is empty", async () => {
     const pubs = await fetchKeyPaper({ cwid: "", descriptorUis: ["Dadeno"], contentQuery: "x" });
     expect(pubs).toEqual([]);
+  });
+});
+
+describe("rankKeyPaperHitsByBlend — 0.6 relevance / 0.4 recency + small >50-cite boost", () => {
+  const NOW = 2026;
+  const hit = (score: number, year: number, citationCount = 0) => ({
+    _score: score,
+    _source: { year, citationCount },
+  });
+
+  it("a recent, moderately-relevant paper can outrank an OLD, more-relevant one (not relevance-at-all-costs)", () => {
+    const oldTopRel = hit(6, 2002); // rel 1.0, rec ~0.13 → ~0.65
+    const recentMidRel = hit(4, 2026); // rel 0.67, rec 1.0 → ~0.80
+    const ranked = rankKeyPaperHitsByBlend([oldTopRel, recentMidRel], NOW);
+    expect(ranked[0]).toBe(recentMidRel);
+  });
+
+  it("the >50-citation boost breaks a relevance+recency tie toward the impactful paper", () => {
+    const cited = hit(5, 2022, 100); // >50 → +0.05
+    const uncited = hit(5, 2022, 10); // identical rel + recency, no boost
+    const ranked = rankKeyPaperHitsByBlend([uncited, cited], NOW);
+    expect(ranked[0]).toBe(cited);
+  });
+
+  it("ranks purely by recency when there is no keyword signal (maxScore 0)", () => {
+    const older = hit(0, 2010);
+    const newer = hit(0, 2026);
+    const ranked = rankKeyPaperHitsByBlend([older, newer], NOW);
+    expect(ranked[0]).toBe(newer);
+  });
+
+  it("is order-stable and non-mutating", () => {
+    const a = hit(5, 2024);
+    const b = hit(5, 2024);
+    const input = [a, b];
+    const ranked = rankKeyPaperHitsByBlend(input, NOW);
+    expect(ranked[0]).toBe(a); // equal blend → original order preserved
+    expect(input).toEqual([a, b]); // input array untouched
   });
 });
 

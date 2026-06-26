@@ -7,7 +7,7 @@ how that snippet's expandable disclosure ("dropdown") resolves its papers.
 this person matched the query — preferring query-literal evidence (method / MeSH-tagged /
 full-query bio / mention) over who-they-are hints (research area / concepts / areas);
 for method, topic, and publication matches, reveal up to 3 representative papers on
-expand, ranked by **keyword relevance × recency** with impact only as a tiebreak; and
+expand, ranked by a **0.6 relevance / 0.4 recency blend** with a small boost for highly-cited papers; and
 **never show an empty disclosure** — degrade to a profile-section link.
 
 Source of truth: `lib/api/result-evidence.ts` (`selectEvidence`), `components/search/people-result-card.tsx`
@@ -87,7 +87,7 @@ flowchart TD
     PC -- no --> PCNT{count > 0 and lazy config?}
     PCNT -- yes --> EK["GET /search/key-paper<br/>fetchKeyPaper: filter = author + concept/free-text"]
     PCNT -- no --> NOCH[No chevron]
-    EK --> RK["rank: BM25 _score (keyword 'should' on title^2/abstract)<br/>× #645 recency gauss → then year → then citationCount"]
+    EK --> RK["fetch pool by _score; re-rank app-side:<br/>0.6·relevanceNorm + 0.4·recency(½-life 8y) + (cites>50 ? 0.05)"]
     RK --> SHOWk[Show up to 3 papers + '+N more in profile']
 ```
 
@@ -110,8 +110,9 @@ flowchart TD
 
 | Disclosure | Candidate set | Ranking (top → tiebreak) |
 |---|---|---|
-| **Key paper** (publications) | author's pubs in the matched concept subtree, or free-text scan | **BM25 keyword `_score`** (title^2/abstract `should`) **× #645 recency gauss** → `year` → `citationCount` |
+| **Key paper** (publications) | author's pubs in the matched concept subtree, or free-text scan | fetch a pool by BM25 `_score` (title^2/abstract `should`), then app-side **blend = 0.6·(score/poolMax) + 0.4·0.5^(age/8) + (citations>50 ? 0.05)**; tiebreak `citationCount` → top 3 |
 | **Method / Topic exemplar** | scholar_family pmids / publication_topic pubs (post visibility + suppression gates) | impact (`impactScore`/citations) + query-title nudge + first/senior ownership → top 3 |
 
-The key-paper ranking favors **keyword relevance and recency over impact** (impact is the
-last tiebreak); the method/topic exemplar is impact-led with a query-title nudge.
+The key-paper ranking is a **weighted relevance/recency blend** (relevance 0.6, recency 0.4,
+with a small >50-citation nudge) — so neither relevance nor recency steamrolls the other; the
+method/topic exemplar is impact-led with a query-title nudge.
