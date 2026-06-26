@@ -231,14 +231,16 @@ export function PeopleResultCard({
       : exemplar.total;
 
   // A disclosure is offered when there is something to reveal. For inline pubs
-  // that is `pubs.length > 0`. For a lazy method/topic exemplar OR a lazy key
-  // paper it is optimistic until the fetch resolves; once it resolves with 0
-  // papers we drop the chevron so there is never a dead control.
+  // that is `pubs.length > 0`. For a lazy KEY PAPER it is optimistic until the
+  // fetch resolves; once it resolves with 0 papers we drop the chevron so there
+  // is never a dead control. A lazy method/topic exemplar stays expandable even
+  // when empty: the panel degrades to a profile-section link (the badge
+  // guarantees the content exists), so its chevron is never a dead control either.
   const canExpand = wantsLazyKeyPaper
     ? !(keyPaperStatus === "done" && keyPapers.length === 0)
     : inlinePubs != null
       ? inlinePubs.length > 0
-      : isLazyExemplar && !(exemplarStatus === "done" && exemplar.pubs.length === 0);
+      : isLazyExemplar;
 
   const onToggle = useCallback(() => {
     if (isLazyExemplar) ensureExemplar();
@@ -344,6 +346,17 @@ export function PeopleResultCard({
   // `+N more` link sit ABOVE that overlay with `relative z-10`, so a disclosure
   // click never navigates. The analytics beacon rides the name link.
   const profileHref = `${profilePath(hit.slug)}#publications`;
+  // Empty-fetch fallback for a method/topic disclosure: a link to the scholar's
+  // profile rather than a retracted chevron. The badge only fires when the scholar
+  // matched the indexed `methodFamily` / parent-topic, so they provably have that
+  // section — the link always lands on real content. Undefined for the publications
+  // key-paper path (count-gated; an empty fetch there stays a retract).
+  const exemplarFallback =
+    hit.evidence?.kind === "method"
+      ? { href: profilePath(hit.slug), label: "View their methods & tools" }
+      : hit.evidence?.kind === "topic"
+        ? { href: profilePath(hit.slug), label: "View their research areas" }
+        : undefined;
 
   return (
     <div className="group relative grid grid-cols-[56px_1fr_auto] gap-4 border-b border-[#e3e2dd] py-5 hover:bg-[#fafaf8]">
@@ -394,6 +407,7 @@ export function PeopleResultCard({
                   : "done"
             }
             panelId={panelId}
+            fallback={exemplarFallback}
           />
         ) : null}
       </div>
