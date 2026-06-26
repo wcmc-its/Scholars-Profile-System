@@ -120,9 +120,13 @@ already present (dedup by institution+type/year).
 - Respect row-level **`is_hidden`** (degrees/appointments) → exclude, consistent with our
   suppression-honoring principle.
 - Board certs & training carry **no dates** → those columns render blank, not fabricated.
-- `honors_and_awards` is **unstructured HTML** — v1 heuristic: split per `<p>`, strip tags,
-  pull a leading year/date into the Date column, rest → award name, Organization `N/A`. *Known
-  ceiling; complex entries fall back to the whole line in the award column.*
+- `honors_and_awards` is **unstructured HTML**. Measured ceiling (live POPS, 2026-06-26): split on
+  `<p>` **and `<li>`/`<br>`** — 27% of real entries are `<li>` lists with no `<p>` wrapper and
+  otherwise collapse to one cell; strip tags; leading-date→Date extraction is best-effort and fires
+  on **~1% of real rows** (dates are mostly trailing / comma-led / ranges) so the Date column is
+  normally blank with the year retained inline in the award name; guard against Word-paste CSS junk
+  (`Mso…`/`Normal 0 false`) and decode `&bull;`/stray entities; Organization always `N/A`.
+  *Empirical basis: 62-profile POPS sample, 11 with honors, 71 rows, 1 dated. See §13.2.*
 - **Connectivity — CONFIRMED:** POPS is reachable from outside the WCM network, so the SPS app
   fetches it at generation over the internet (NAT egress); no ETL/proxy needed. (Notable since the
   Sps VPCs cannot reach WCM 10.x internal sources — POPS is the public physician-directory host.)
@@ -278,15 +282,49 @@ clinical scholar (with a POPS payload) — and assert: (a) all 23 WCM headings p
 the scholar's **bolded** surname; (d) a suppressed publication/mentee and a POPS `is_hidden` row do
 **not** appear; (e) the clinical fixture's board certification renders in F2.
 
-## 13. Remaining decisions for the user
+## 13. Decisions — RESOLVED 2026-06-26
 
-1. **ASMS loaders for C & §9:** the code research found C training rows in `Education` (ASMS,
-   inconsistent) but attributed appointments to ED/NYP, not an explicit ASMS *primary-affiliation*
-   field — confirm the exact ASMS loader/field for primary affiliation during implementation.
-2. **POPS honors depth:** ship the simple per-`<p>` heuristic for §H in v1, or leave H as `N/A`
-   until a structured honors source is confirmed (ASMS honors unconfirmed)?
-3. **Clinical expertise (L):** list POPS specialties/`problem_procedure` in the Clinical Practice
-   section, or leave L `N/A` (it expects prose practice entries POPS doesn't provide)?
+Resolved by a 3-agent workflow: code grounding in this worktree (4 behind / 7 ahead of
+`origin/master` — not stale) + live POPS probe (sample `ano9028`; 62-profile honors sample).
+
+1. **ASMS primary-affiliation loader (§9) — no field exists today; add one (handoff §4/§5).**
+   Hospital-affiliation source-of-record in the shipped app is split, and *none* of it is an ASMS
+   primary-affiliation field: the `Appointment` table is **ED-sourced only** (`source` ∈
+   `ED` / `ED-NYP` / `JENZABAR-GSFACULTY` — `prisma/schema.prisma:149`, `etl/ed/index.ts`), and the
+   CV's §9 currently reads **POPS only** (`cv-export.ts:415-425`). The ASMS ETL imports *only* degree
+   rows (`etl/asms/index.ts:64-78`, `wcmc_person_school WHERE grad_year IS NOT NULL`);
+   `wcmc_person.institution_id` is never selected and no `primaryAffiliation`/Training model exists —
+   **identical on `origin/master`, so not stale.** → **Build:** ASMS ETL query
+   `wcmc_person.institution_id LEFT JOIN wcmc_institution` (`title`, `abbreviation`; active cwid,
+   `institution_id IS NOT NULL AND is_deleted = 0`) → new scalar `Scholar.primaryAffiliation`
+   (+ `primaryAffiliationAbbrev`) → `ProfilePayload.primaryAffiliation` → `hospitalAffiliationBody`
+   reads it (keep ED-NYP rows for the NYP line; drop the POPS-only §9 path). A 1:1 **scalar**, not an
+   `Appointment` row. Render non-WCM affiliations (e.g. Hamad/Qatar) as-is. **Confirm exact column
+   names by re-running `etl:asms:probe` at build time** (names rest on the 2026-06-26 probe).
+
+2. **POPS honors (§H) — SHIP the heuristic, not `N/A`; with two required hardenings.** POPS
+   `honors_and_awards` is the *only* honors source (ASMS and the Scholars schema carry none — probed)
+   so "wait for structured" = §H is `N/A` forever; and the `.docx` is an editable draft, so raw honor
+   text beats a blank. Live POPS (62-profile sample + `aorlin`, 2026-06-26): only ~18% of clinical
+   faculty have any honors; the per-`<p>` split is clean for the `<p>`-shaped majority; the
+   leading-year→Date extraction fires on **~1% of real rows** (dates are overwhelmingly trailing /
+   comma-led / ranges) → **Date column normally blank by design, year inline in the award name —
+   acceptable.** **Required before §H ships** (cases *below* the stated ceiling): (a) widen the block
+   splitter to also break on `<li>` (and `<br>`) — **27% of real entries are `<li>` lists with no
+   `<p>`** and currently collapse every honor into one cell (`pops.ts:87-102`); (b) drop
+   Microsoft-Word paste noise (`Mso…`/`Normal 0 false` dumps) and extend `decodeEntities` to cover
+   `&bull;`/stray entities. Organization column stays `N/A`. Add a test fixture over the real failure
+   cases (POPS ids 1142 Word-junk, 1902/4182 `<li>`-collapse, 1522 `&bull;`).
+
+3. **Clinical expertise (§L) — keep the shipped list, not `N/A`.** Already shipped (commit
+   `7f6793f3`, `cv-export.ts:435-465`): specialties + named practices + `problem_procedure` expertise.
+   For an actively-practicing, board-certified clinician a factual labeled list is strictly better
+   than an `N/A` that implies no clinical activity; §L already degrades to `N/A` for research-only
+   faculty (POPS fetched only when `hasClinicalProfile` — `route.ts:153`). Accepted limit: POPS feeds
+   **L1 only** (no L2 Clinical Innovation / L3 Clinical Leadership source) — keep the §5 grade
+   "P (partial)". Non-blocking refinements: (a) filter `practice_type === "Location"` rows out of
+   "Clinical Practice" (department rows redundant with §9 Hospital Affiliation); (b) emit "Areas of
+   expertise" *above* the "Clinical Practice" subheading so it doesn't read as nested under it.
 
 ---
 
