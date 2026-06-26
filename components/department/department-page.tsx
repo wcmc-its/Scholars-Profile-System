@@ -50,9 +50,24 @@ export async function DepartmentPage({
   // Library"). `dept.name` stays the raw ED name; display surfaces use this.
   const deptDisplayName = officialUnitName(detail.dept);
 
-  // §16: Spotlight surface above the tabs. Returns null when the dept
-  // has no qualifying publications under the Highlight selection filters.
-  const spotlightCards = await getSpotlightCardsForDepartment(detail.dept.code);
+  // §16: Spotlight + the active tab's list are mutually independent — fetch in
+  // one batch (all cached via lib/api/swr-cache) so cold-miss scans overlap.
+  // Only the active tab's heavy list is loaded.
+  const pageIdx = Math.max(0, page - 1);
+  const pubSort = (sort === "most_cited" ? "most_cited" : "newest") as PubSort;
+  const grantSort = (sort === "end_date" ? "end_date" : "most_recent") as GrantSort;
+  const [spotlightCards, faculty, pubsList, grantsList] = await Promise.all([
+    getSpotlightCardsForDepartment(detail.dept.code),
+    tab === "scholars"
+      ? getDepartmentFaculty(detail.dept.code, { page: pageIdx })
+      : Promise.resolve(null),
+    tab === "publications"
+      ? getDeptPublicationsList(detail.dept.code, { page: pageIdx, sort: pubSort })
+      : Promise.resolve(null),
+    tab === "grants"
+      ? getDeptGrantsList(detail.dept.code, { page: pageIdx, sort: grantSort })
+      : Promise.resolve(null),
+  ]);
   const spotlightData = spotlightCards
     ? {
         cards: spotlightCards,
@@ -60,28 +75,6 @@ export async function DepartmentPage({
         viewAllHref: `${basePath}?tab=publications#tab-content`,
       }
     : null;
-
-  // Tab-specific data. Only fetch the heavy list relevant to the active tab.
-  const faculty =
-    tab === "scholars"
-      ? await getDepartmentFaculty(detail.dept.code, {
-          page: Math.max(0, page - 1),
-        })
-      : null;
-  const pubsList =
-    tab === "publications"
-      ? await getDeptPublicationsList(detail.dept.code, {
-          page: Math.max(0, page - 1),
-          sort: (sort === "most_cited" ? "most_cited" : "newest") as PubSort,
-        })
-      : null;
-  const grantsList =
-    tab === "grants"
-      ? await getDeptGrantsList(detail.dept.code, {
-          page: Math.max(0, page - 1),
-          sort: (sort === "end_date" ? "end_date" : "most_recent") as GrantSort,
-        })
-      : null;
 
   const jsonLd = buildOrganizationJsonLd({
     slug: detail.dept.slug,
