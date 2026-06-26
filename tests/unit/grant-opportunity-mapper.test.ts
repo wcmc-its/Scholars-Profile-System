@@ -11,6 +11,7 @@ import {
   deriveEligibilityFlags,
   type GrantRecordInput,
 } from "@/etl/dynamodb/grant-opportunity-mapper";
+import { Prisma } from "@/lib/generated/prisma/client";
 
 /** A representative GRANT# item as the DocumentClient yields it (already unwrapped). */
 function grantItem(overrides: Partial<GrantRecordInput> = {}): GrantRecordInput {
@@ -114,6 +115,31 @@ describe("buildOpportunityWrites", () => {
     delete (item as { opportunity_id?: string }).opportunity_id;
     const [w] = buildOpportunityWrites([item]).writes;
     expect(w.opportunityId).toBe("grants_gov:359855");
+  });
+
+  it("passes prestige + is_honorific through; JsonNull / null when absent (GRANT# contract v2)", () => {
+    const prestige = {
+      score: 0.86,
+      mechanism_tier: 0.85,
+      size_bucket: 0.7,
+      sponsor_tier: null,
+      selectivity: null,
+      label: "Flagship",
+      rationale: "R01, NIH",
+    };
+    const [withP] = buildOpportunityWrites([grantItem({ prestige, is_honorific: true })]).writes;
+    expect(withP.prestige).toEqual(prestige);
+    expect(withP.isHonorific).toBe(true);
+
+    // Absent upstream → JSON-null (not []), honorific → null (not false): distinct from "ran but empty".
+    const [without] = buildOpportunityWrites([grantItem()]).writes;
+    expect(without.prestige).toBe(Prisma.JsonNull);
+    expect(without.isHonorific).toBeNull();
+
+    // A stray non-object prestige (e.g. array) is rejected, not stored.
+    const [bad] = buildOpportunityWrites([grantItem({ prestige: ["nope"], is_honorific: "x" as unknown as boolean })]).writes;
+    expect(bad.prestige).toBe(Prisma.JsonNull);
+    expect(bad.isHonorific).toBeNull();
   });
 });
 

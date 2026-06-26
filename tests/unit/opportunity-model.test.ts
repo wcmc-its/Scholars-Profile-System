@@ -37,6 +37,8 @@ describe("Opportunity model — codegen", () => {
       appealByStage: { grad: 0.2, postdoc: 0.6, early: 0.9, mid: 0.8, senior: 0.5 },
       isResearch: true,
       meshDescriptorUi: ["D000074243"],
+      prestige: { score: 0.86, mechanism_tier: 0.85, label: "Flagship" },
+      isHonorific: false,
       taxonomyVersion: "taxonomy_v2",
       ingestedAt: new Date(),
       lastRefreshedAt: new Date(),

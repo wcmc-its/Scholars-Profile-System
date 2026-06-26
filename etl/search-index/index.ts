@@ -575,6 +575,8 @@ async function indexOpportunities(concreteIndex: string) {
       topicVector: true,
       appealByStage: true,
       meshDescriptorUi: true,
+      prestige: true,
+      isHonorific: true,
       awardCeiling: true,
       numberOfAwards: true,
     },

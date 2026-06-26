@@ -41,6 +41,8 @@ export type GrantRecordInput = {
   appeal_by_stage?: unknown; // { grad, postdoc, early, mid, senior }
   is_research?: boolean;
   mesh_descriptor_ui?: unknown; // string[]
+  prestige?: unknown; // { score, mechanism_tier, size_bucket, sponsor_tier, selectivity, label, rationale }
+  is_honorific?: boolean;
   taxonomy_version?: string;
   ingested_at?: string; // ISO
   [key: string]: unknown;
@@ -70,6 +72,8 @@ export type OpportunityWrite = {
   appealByStage: Prisma.InputJsonValue;
   isResearch: boolean;
   meshDescriptorUi: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+  prestige: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+  isHonorific: boolean | null;
   taxonomyVersion: string;
   ingestedAt: Date;
 };
@@ -207,6 +211,11 @@ export function buildOpportunityWrites(items: GrantRecordInput[]): BuildOpportun
       meshDescriptorUi: Array.isArray(meshUi)
         ? (meshUi as Prisma.InputJsonValue)
         : Prisma.JsonNull,
+      prestige:
+        it.prestige && typeof it.prestige === "object" && !Array.isArray(it.prestige)
+          ? (it.prestige as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
+      isHonorific: typeof it.is_honorific === "boolean" ? it.is_honorific : null,
       taxonomyVersion: trimStr(it.taxonomy_version),
       ingestedAt: parseIsoDate(it.ingested_at) ?? new Date(0),
     });

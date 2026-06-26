@@ -95,6 +95,8 @@ export async function projectGrantOpportunities(
           appealByStage: w.appealByStage,
           isResearch: w.isResearch,
           meshDescriptorUi: w.meshDescriptorUi,
+          prestige: w.prestige,
+          isHonorific: w.isHonorific,
           taxonomyVersion: w.taxonomyVersion,
           ingestedAt: w.ingestedAt,
           lastRefreshedAt: now,
