@@ -25,8 +25,19 @@
  * Usage: `npm run etl:reporter-grants`
  */
 import { db } from "../../lib/db";
-import { dedupeAgainstInfoEd, type InfoedGrant } from "@/lib/edit/reporter-grants";
-import { fetchGrantProjectsByProfileIds, sleepBetweenRequests } from "../nih-profile/fetcher";
+import type { Prisma } from "@/lib/generated/prisma/client";
+import {
+  dedupeAgainstInfoEd,
+  rankByPmidOverlap,
+  type Candidate,
+  type InfoedGrant,
+} from "@/lib/edit/reporter-grants";
+import {
+  fetchGrantProjectsByProfileIds,
+  fetchPublicationsByCoreProjectNums,
+  searchProjectsByPiName,
+  sleepBetweenRequests,
+} from "../nih-profile/fetcher";
 import {
   RECENCY_YEARS,
   buildReporterGrantRow,
@@ -35,11 +46,29 @@ import {
   toReporterProject,
   type ReporterGrantRow,
 } from "./transform";
+import {
+  decideWriteOutcome,
+  groupCandidatesByProfileId,
+  hasDiscriminator,
+  parseFirstLast,
+  reconcileWithExisting,
+  selectV2Cohort,
+  summarizeCandidateGrants,
+} from "./v2";
 
 /** createdBy marker for the age-based default-hide. User overrides (a manual
  *  "not mine" hide, or a revoke of this row) carry a different createdBy and are
  *  never touched by this ETL. */
 const SYSTEM_RECENCY = "system-recency";
+
+/** v2 PMID-overlap matcher (spec §9). Gates the entire v2 branch — cohort scan,
+ *  candidate generation, auto-lock + pending writes. Off ⇒ ETL is v1-only.
+ *  Read the same way as other ETL flags (e.g. SELF_EDIT_ED_ADMINS_IMPORT). */
+const REPORTER_MATCH_V2_ENABLED = process.env.REPORTER_MATCH_V2 === "on";
+
+/** resolution_source stamped on a person_nih_profile row a v2 auto-lock creates,
+ *  so the audit SQL can split v2 (pmid-overlap) grants from v1 (spec §12). */
+const PMID_OVERLAP_AUTO = "pmid-overlap-auto";
 
 const DELETE_BATCH = 500;
 
@@ -49,9 +78,231 @@ function chunks<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
+/**
+ * v2 branch (spec §4): resolve the non-`person_nih_profile` active cohort by
+ * name → candidate profile_ids → PMID overlap, then auto-lock (K≥3) or propose
+ * (K=2) the winner. Auto-locks write a `person_nih_profile` row whose grants the
+ * v1 path below materializes in the *same* run; K=2 lands a pending
+ * `ReporterProfileCandidate` for the /edit confirm card (no grants until a human
+ * confirms). Runs before the v1 fetch so same-run materialization works.
+ *
+ * Idempotency (§4.6): terminal (rejected/revoked) candidates are never
+ * resurrected, human/system `confirmed` rows are never overwritten by a re-run,
+ * and a still-pending row just gets its summary + lastSeenAt refreshed.
+ */
+async function runReporterMatchV2(): Promise<void> {
+  console.log("--- v2 PMID-overlap matcher (REPORTER_MATCH_V2=on) ---");
+  const now = new Date();
+
+  const activeScholars = await db.write.scholar.findMany({
+    where: { deletedAt: null, status: "active" },
+    select: { cwid: true, fullName: true },
+  });
+  const profiledCwids = new Set(
+    (await db.write.personNihProfile.findMany({ select: { cwid: true } })).map((r) => r.cwid),
+  );
+  const cohort = selectV2Cohort(activeScholars, profiledCwids);
+  console.log(
+    `  cohort: ${cohort.length} active scholars without a person_nih_profile row ` +
+      `(of ${activeScholars.length} active).`,
+  );
+
+  let autoLocked = 0;
+  let proposed = 0;
+  let skippedNoPmids = 0;
+  let errored = 0;
+  let processed = 0;
+
+  for (const scholar of cohort) {
+    const trustedRows = await db.write.publicationAuthor.findMany({
+      where: { cwid: scholar.cwid, isConfirmed: true },
+      select: { pmid: true },
+    });
+    const trustedPmids = new Set(trustedRows.map((r) => Number(r.pmid)));
+    if (!hasDiscriminator(trustedPmids.size)) {
+      skippedNoPmids++;
+      continue;
+    }
+
+    const { firstName, lastName } = parseFirstLast(scholar.fullName);
+    if (!firstName || !lastName) continue;
+
+    let projects;
+    try {
+      projects = await searchProjectsByPiName({ firstName, lastName });
+    } catch (err) {
+      errored++;
+      console.warn(`  [${scholar.cwid}] pi_names search failed: ${(err as Error).message}`);
+      await sleepBetweenRequests();
+      continue;
+    }
+    await sleepBetweenRequests();
+
+    const groups = groupCandidatesByProfileId(scholar.fullName, projects);
+    if (groups.length === 0) continue;
+
+    // Existing ledger rows for this scholar — drives the terminal-skip + reconcile.
+    const existingRows = await db.write.reporterProfileCandidate.findMany({
+      where: { cwid: scholar.cwid },
+      select: { externalProfileId: true, status: true },
+    });
+    const statusByProfile = new Map(existingRows.map((r) => [r.externalProfileId, r.status]));
+
+    const candidates: Candidate[] = [];
+    for (const g of groups) {
+      // Never re-probe a terminal (rejected/revoked) candidate (§4.6).
+      const st = statusByProfile.get(g.profileId);
+      if (st === "rejected" || st === "revoked") continue;
+      let pubs;
+      try {
+        pubs = await fetchPublicationsByCoreProjectNums(g.coreNums);
+      } catch (err) {
+        errored++;
+        console.warn(
+          `  [${scholar.cwid}] publications fetch failed for profile ${g.profileId}: ` +
+            `${(err as Error).message}`,
+        );
+        await sleepBetweenRequests();
+        continue;
+      }
+      await sleepBetweenRequests();
+      candidates.push({
+        profileId: g.profileId,
+        fullName: g.fullName,
+        orgs: [],
+        grantPmids: new Set(pubs.map((p) => p.pmid)),
+      });
+    }
+    if (candidates.length === 0) continue;
+
+    const match = rankByPmidOverlap(trustedPmids, candidates);
+    const outcome = decideWriteOutcome(match);
+    if (outcome.kind === "none") continue;
+
+    const action = reconcileWithExisting(outcome, statusByProfile.get(outcome.profileId));
+    if (action.kind === "skip") continue;
+
+    // Card detail for the chosen candidate: real grant titles/orgs/years.
+    let detail;
+    try {
+      detail = await fetchGrantProjectsByProfileIds([outcome.profileId]);
+    } catch (err) {
+      errored++;
+      console.warn(`  [${scholar.cwid}] grant detail fetch failed: ${(err as Error).message}`);
+      await sleepBetweenRequests();
+      continue;
+    }
+    await sleepBetweenRequests();
+    const infoedRows = await db.write.grant.findMany({
+      where: { cwid: scholar.cwid, source: "InfoEd", awardNumber: { not: null } },
+      select: { awardNumber: true },
+    });
+    const summary = summarizeCandidateGrants(
+      groupProjectsByCore(detail),
+      infoedRows.map((r) => ({ awardNumber: r.awardNumber })),
+    );
+    const overlapK = match.ranked.find((r) => r.profileId === outcome.profileId)?.overlap ?? 0;
+    const candidateName =
+      groups.find((g) => g.profileId === outcome.profileId)?.fullName ?? scholar.fullName;
+    const sampleGrantsJson = summary.sampleGrants as unknown as Prisma.InputJsonValue;
+
+    if (action.kind === "autolock-confirm") {
+      await db.write.$transaction(async (tx) => {
+        await tx.personNihProfile.upsert({
+          where: { cwid_nihProfileId: { cwid: scholar.cwid, nihProfileId: outcome.profileId } },
+          create: {
+            cwid: scholar.cwid,
+            nihProfileId: outcome.profileId,
+            resolutionSource: PMID_OVERLAP_AUTO,
+            lastVerified: now,
+          },
+          update: { resolutionSource: PMID_OVERLAP_AUTO, lastVerified: now },
+        });
+        await tx.reporterProfileCandidate.upsert({
+          where: {
+            cwid_externalProfileId: { cwid: scholar.cwid, externalProfileId: outcome.profileId },
+          },
+          create: {
+            cwid: scholar.cwid,
+            externalProfileId: outcome.profileId,
+            candidateName,
+            candidateOrgs: summary.candidateOrgs,
+            grantCount: summary.grantCount,
+            overlapK,
+            sampleGrants: sampleGrantsJson,
+            status: "confirmed",
+            reviewedBy: "system-autolock",
+            reviewedAt: now,
+            lastSeenAt: now,
+          },
+          update: {
+            candidateName,
+            candidateOrgs: summary.candidateOrgs,
+            grantCount: summary.grantCount,
+            overlapK,
+            sampleGrants: sampleGrantsJson,
+            status: "confirmed",
+            reviewedBy: "system-autolock",
+            reviewedAt: now,
+            lastSeenAt: now,
+          },
+        });
+      });
+      autoLocked++;
+    } else {
+      // pending-upsert: refresh summary + lastSeenAt; never touch status on update
+      // (reconcile already excluded terminal/confirmed rows, so it stays pending).
+      await db.write.reporterProfileCandidate.upsert({
+        where: {
+          cwid_externalProfileId: { cwid: scholar.cwid, externalProfileId: outcome.profileId },
+        },
+        create: {
+          cwid: scholar.cwid,
+          externalProfileId: outcome.profileId,
+          candidateName,
+          candidateOrgs: summary.candidateOrgs,
+          grantCount: summary.grantCount,
+          overlapK,
+          sampleGrants: sampleGrantsJson,
+          status: "pending",
+          lastSeenAt: now,
+        },
+        update: {
+          candidateName,
+          candidateOrgs: summary.candidateOrgs,
+          grantCount: summary.grantCount,
+          overlapK,
+          sampleGrants: sampleGrantsJson,
+          lastSeenAt: now,
+        },
+      });
+      proposed++;
+    }
+
+    processed++;
+    if (processed % 50 === 0) {
+      console.log(
+        `  ...v2 processed ${processed} matched scholars ` +
+          `(${autoLocked} auto-locked, ${proposed} proposed, ${errored} fetch errors)`,
+      );
+    }
+  }
+
+  console.log(
+    `  v2 complete: ${autoLocked} auto-locked, ${proposed} pending proposals ` +
+      `(${skippedNoPmids} skipped: no trusted PMIDs, ${errored} fetch errors).\n`,
+  );
+}
+
 async function main() {
   console.log("\n=== RePORTER Grants ETL ===\n");
   const currentYear = new Date().getUTCFullYear();
+
+  // 0. v2 PMID-overlap matcher (flag-gated). Runs first so any person_nih_profile
+  //    row it auto-locks is materialized by the v1 path below in the same run.
+  if (REPORTER_MATCH_V2_ENABLED) {
+    await runReporterMatchV2();
+  }
 
   // 1. Confirmed profile_ids per active scholar (resolution source #1; v1).
   //    Union all of a scholar's profile_ids — the PK allows multiple.

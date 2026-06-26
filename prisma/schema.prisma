@@ -111,6 +111,7 @@ model Scholar {
   coiActivities        CoiActivity[]
   coiGapCandidates     CoiGapCandidate[]
   nihProfiles          PersonNihProfile[]
+  reporterCandidates   ReporterProfileCandidate[]
   clinicalTrials       PersonClinicalTrial[]
   overviewGenerations  OverviewGeneration[]
   biosketchGenerations BiosketchGeneration[]
@@ -493,6 +494,43 @@ model PersonNihProfile {
   @@id([cwid, nihProfileId])
   @@index([cwid, isPreferred])
   @@map("person_nih_profile")
+}
+
+/// A candidate NIH eRA `profile_id` proposed for a scholar by the v2 PMID-overlap
+/// matcher (`etl/reporter-grants` v2 branch), surfaced in /edit as an "Is this
+/// you?" confirm card. Distinct from `person_nih_profile`, which is the *resolved*
+/// mapping: this table is the proposal/adjudication ledger. A `confirmed`/`revoked`
+/// row flips whether a `person_nih_profile` row exists for (cwid,
+/// external_profile_id); `rejected`/`revoked` are terminal (never re-proposed).
+/// See docs/reporter-grants-v2-matcher-spec.md §5.
+model ReporterProfileCandidate {
+  id                String    @id @default(uuid()) @db.VarChar(64)
+  cwid              String    @db.VarChar(32)
+  scholar           Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  /// NIH eRA Commons profile_id this proposal resolves to.
+  externalProfileId Int       @map("external_profile_id")
+  candidateName     String    @map("candidate_name") @db.VarChar(255)
+  /// Comma-joined grantee orgs for the candidate's grants — recognition aid on the card.
+  candidateOrgs     String    @map("candidate_orgs") @db.VarChar(512)
+  /// # net-new grants riding on this match (card summary, post-InfoEd dedup).
+  grantCount        Int       @map("grant_count")
+  /// INTERNAL ONLY — PMID-overlap count for QA/audit; never projected to the card.
+  overlapK          Int       @map("overlap_k")
+  /// Up to 3 [{title, startYear, endYear}] for human recognition.
+  sampleGrants      Json      @map("sample_grants")
+  /// pending | confirmed | rejected | revoked.
+  status            String    @default("pending") @db.VarChar(16)
+  /// cwid of the human who adjudicated, or "system-autolock".
+  reviewedBy        String?   @map("reviewed_by") @db.VarChar(32)
+  reviewedAt        DateTime? @map("reviewed_at")
+  /// §6.2 reject-reason enum (not_me | name_only | cant_tell); null unless rejected.
+  rejectReason      String?   @map("reject_reason") @db.VarChar(24)
+  firstSeenAt       DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt        DateTime  @default(now()) @map("last_seen_at")
+
+  @@unique([cwid, externalProfileId])
+  @@index([cwid, status])
+  @@map("reporter_profile_candidate")
 }
 
 /// A clinical trial, deduplicated to one row per institutional protocol.
