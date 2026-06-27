@@ -31,6 +31,7 @@ import {
   type Run,
 } from "./cv-template";
 import type { PopsEnrichment } from "./pops";
+import type { CvSourceKey } from "./field-sources";
 export type {
   PopsEnrichment,
   PopsBoardCert,
@@ -166,44 +167,61 @@ function citationRuns(index: number, pub: PubForCitation, selected: ReadonlySet<
 
 // ── data → rows ─────────────────────────────────────────────────────────────
 
-function educationRows(p: ProfilePayload, pops: PopsEnrichment | null): string[][] {
-  const rows: string[][] = [];
+/** A template-table row plus the system of record for THAT row. The merged
+ *  education/appointment/honor helpers carry each row's true origin so the
+ *  `/edit` outline can badge it per-record; the .docx builder reads `.cells`. */
+type SourcedRow = { cells: string[]; source: CvSourceKey };
+
+function educationRows(p: ProfilePayload, pops: PopsEnrichment | null): SourcedRow[] {
+  const rows: SourcedRow[] = [];
   const seen = new Set<string>();
-  const add = (degree: string, institution: string, yr: string) => {
+  const add = (degree: string, institution: string, yr: string, source: CvSourceKey) => {
     const key = `${degree}|${institution}`.toLowerCase();
     if (!degree || seen.has(key)) return;
     seen.add(key);
-    rows.push([degree, institution, "", yr]); // [Degree+field, Institution, Dates attended, Year]
+    // [Degree+field, Institution, Dates attended, Year]
+    rows.push({ cells: [degree, institution, "", yr], source });
   };
   for (const e of p.educations) {
-    add(e.field ? `${e.degree} (${e.field})` : e.degree, e.institution, e.year ? String(e.year) : "");
+    add(
+      e.field ? `${e.degree} (${e.field})` : e.degree,
+      e.institution,
+      e.year ? String(e.year) : "",
+      "education",
+    );
   }
-  for (const d of pops?.degrees ?? []) add(d.degree, d.institution, d.year ?? "");
+  for (const d of pops?.degrees ?? []) add(d.degree, d.institution, d.year ?? "", "pops");
   return rows;
 }
 
 function appointmentRows(
   p: ProfilePayload,
   pops: PopsEnrichment | null,
-): { academic: string[][]; hospital: string[][] } {
+): { academic: SourcedRow[]; hospital: SourcedRow[] } {
   const isHospital = (org: string) => /presbyterian|hospital|\bnyp\b|medical center/i.test(org);
-  const academic: string[][] = [];
-  const hospital: string[][] = [];
+  const academic: SourcedRow[] = [];
+  const hospital: SourcedRow[] = [];
   const seen = new Set<string>();
-  const add = (title: string, org: string, dates: string) => {
+  const add = (title: string, org: string, dates: string, source: CvSourceKey) => {
     const key = `${title}|${org}`.toLowerCase();
     if ((!title && !org) || seen.has(key)) return;
     seen.add(key);
-    (isHospital(org) ? hospital : academic).push([title, org, dates]);
+    (isHospital(org) ? hospital : academic).push({ cells: [title, org, dates], source });
   };
-  for (const a of p.appointments) add(a.title, a.organization, dateRange(a.startDate, a.endDate, a.isActive));
-  for (const a of pops?.appointments ?? []) add(a.title, a.institution, dateRange(a.start, a.end));
+  for (const a of p.appointments)
+    add(a.title, a.organization, dateRange(a.startDate, a.endDate, a.isActive), "appointments");
+  for (const a of pops?.appointments ?? [])
+    add(a.title, a.institution, dateRange(a.start, a.end), "pops");
   return { academic, hospital };
 }
 
-function honorRows(pops: PopsEnrichment | null): string[][] {
-  const rows = (pops?.honors ?? []).map((h) => [h.name || NA, "", h.date ?? ""]);
-  if (pops?.castleConnolly) rows.push(["Castle Connolly Top Doctor", "Castle Connolly", ""]);
+function honorRows(pops: PopsEnrichment | null): SourcedRow[] {
+  const rows: SourcedRow[] = (pops?.honors ?? []).map((h) => ({
+    cells: [h.name || NA, "", h.date ?? ""],
+    source: "pops",
+  }));
+  if (pops?.castleConnolly)
+    rows.push({ cells: ["Castle Connolly Top Doctor", "Castle Connolly", ""], source: "pops" });
   return rows;
 }
 
@@ -306,7 +324,11 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
   }
 
   // 3. Education — Academic Degrees.
-  fillGrid(doc, findTable(t, (h) => (h[0] ?? "").startsWith("Degree, include field")), educationRows(p, pops));
+  fillGrid(
+    doc,
+    findTable(t, (h) => (h[0] ?? "").startsWith("Degree, include field")),
+    educationRows(p, pops).map((r) => r.cells),
+  );
 
   // 4. Postdoctoral Training (POPS; dates unavailable → blank).
   fillGrid(
@@ -317,8 +339,16 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
 
   // 5. Professional Positions — Academic vs Hospital (anchored by subheading, headers repeat).
   const appts = appointmentRows(p, pops);
-  fillGrid(doc, tableAfterParagraph(t, (x) => x.startsWith("Academic Appointments")), appts.academic);
-  fillGrid(doc, tableAfterParagraph(t, (x) => x.startsWith("Hospital Appointments")), appts.hospital);
+  fillGrid(
+    doc,
+    tableAfterParagraph(t, (x) => x.startsWith("Academic Appointments")),
+    appts.academic.map((r) => r.cells),
+  );
+  fillGrid(
+    doc,
+    tableAfterParagraph(t, (x) => x.startsWith("Hospital Appointments")),
+    appts.hospital.map((r) => r.cells),
+  );
 
   // 6. Licensure — NPI (no license #/dates fabricated); Board Certification.
   if (pops?.npi) {
@@ -335,7 +365,11 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
   );
 
   // 7. Honors, Awards.
-  fillGrid(doc, findTable(t, (h) => h[0] === "Name of award"), honorRows(pops));
+  fillGrid(
+    doc,
+    findTable(t, (h) => h[0] === "Name of award"),
+    honorRows(pops).map((r) => r.cells),
+  );
 
   // 7b. Clinical Practice (Section L1) — POPS specialties / practices / expertise
   //     as prose under the "Clinical Practice" prompt. Clinical faculty only.
@@ -441,17 +475,25 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
  *  source; the template keeps a blank prompt to complete by hand). */
 export type CvOutlineStatus = "filled" | "empty" | "generated" | "todo";
 
+/** One preview record with its own system of record — so the outline can badge
+ *  each row, including the merged sections (Academic Degrees, Appointments) whose
+ *  rows come from different sources. */
+export type CvOutlineItem = { text: string; source: CvSourceKey };
+
 /** One leaf row of the outline — a subsection, or the sole entry of a simple
  *  section (then `code`/`label` are "", and the parent group carries them). */
 export type CvOutlineEntry = {
   code: string;
   label: string;
+  /** Coarse entry-level origin — drives the empty/`todo` status (an entry with a
+   *  source but no data is "empty"; a source-less one is "todo"). Per-record
+   *  provenance for the badge lives on each {@link CvOutlineItem}. */
   source: "scholars" | "pops" | "generated" | "none";
   status: CvOutlineStatus;
   /** Item count, or null for non-list entries (A personal data, M1 summary). */
   count: number | null;
-  /** Up to {@link OUTLINE_ITEM_CAP} preview strings; `count` is the true total. */
-  items: string[];
+  /** Up to {@link OUTLINE_ITEM_CAP} preview records; `count` is the true total. */
+  items: CvOutlineItem[];
 };
 
 /** A top-level WCM section (A–S) and its subsection rows, in document order. */
@@ -487,7 +529,10 @@ function menteeYears(m: MenteeChip): string {
  */
 export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
   const { profile: p, pops, mentees } = input;
-  const cap = (items: string[]): string[] => items.slice(0, OUTLINE_ITEM_CAP);
+  const cap = (items: CvOutlineItem[]): CvOutlineItem[] => items.slice(0, OUTLINE_ITEM_CAP);
+  // Tag a uniform section's text lines with their single system of record.
+  const tag = (source: CvSourceKey, texts: string[]): CvOutlineItem[] =>
+    texts.map((text) => ({ text, source }));
 
   // A list-backed entry: filled when it has items, else empty (we source it) or
   // todo (no source). `count` is the true total; `items` is the capped slice.
@@ -495,7 +540,7 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
     code: string,
     label: string,
     source: CvOutlineEntry["source"],
-    items: string[],
+    items: CvOutlineItem[],
   ): CvOutlineEntry => ({
     code,
     label,
@@ -533,7 +578,7 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
   const pastGrantItems = p.grants.filter((g) => !g.isActive).map(fmtGrant);
 
   // A simple (non-subsectioned) section's sole entry; the group carries the name.
-  const simple = (source: CvOutlineEntry["source"], items: string[]): CvOutlineEntry[] => [
+  const simple = (source: CvOutlineEntry["source"], items: CvOutlineItem[]): CvOutlineEntry[] => [
     entry("", "", source, items),
   ];
 
@@ -548,7 +593,7 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
           source: "scholars",
           status: "filled",
           count: null,
-          items: [p.publishedName, ...(p.email ? [p.email] : [])],
+          items: tag("name-title", [p.publishedName, ...(p.email ? [p.email] : [])]),
         },
       ],
     },
@@ -560,7 +605,12 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
           "B1",
           "Academic Degrees",
           "scholars",
-          eduRows.map((r) => [r[0], r[1], r[3] ? `(${r[3]})` : ""].filter(Boolean).join(" — ")),
+          eduRows.map((r) => ({
+            text: [r.cells[0], r.cells[1], r.cells[3] ? `(${r.cells[3]})` : ""]
+              .filter(Boolean)
+              .join(" — "),
+            source: r.source,
+          })),
         ),
         entry("B2", "Other Educational Experiences", "none", []),
       ],
@@ -570,7 +620,10 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
       label: "Postdoctoral Training",
       entries: simple(
         "pops",
-        (pops?.training ?? []).map((t) => [t.type, t.institution].filter(Boolean).join(" — ")),
+        tag(
+          "pops",
+          (pops?.training ?? []).map((t) => [t.type, t.institution].filter(Boolean).join(" — ")),
+        ),
       ),
     },
     {
@@ -581,17 +634,23 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
           "D1",
           "Academic Appointments",
           "scholars",
-          appts.academic.map((r) =>
-            [r[0], r[1], r[2] ? `(${r[2]})` : ""].filter(Boolean).join(", "),
-          ),
+          appts.academic.map((r) => ({
+            text: [r.cells[0], r.cells[1], r.cells[2] ? `(${r.cells[2]})` : ""]
+              .filter(Boolean)
+              .join(", "),
+            source: r.source,
+          })),
         ),
         entry(
           "D2",
           "Hospital Appointments",
           "scholars",
-          appts.hospital.map((r) =>
-            [r[0], r[1], r[2] ? `(${r[2]})` : ""].filter(Boolean).join(", "),
-          ),
+          appts.hospital.map((r) => ({
+            text: [r.cells[0], r.cells[1], r.cells[2] ? `(${r.cells[2]})` : ""]
+              .filter(Boolean)
+              .join(", "),
+            source: r.source,
+          })),
         ),
         entry("D3", "Other Professional Positions", "none", []),
       ],
@@ -601,13 +660,16 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
       code: "F",
       label: "Licensure, Board Certification",
       entries: [
-        entry("F1", "Licensure", "pops", pops?.npi ? [`NPI ${pops.npi}`] : []),
+        entry("F1", "Licensure", "pops", tag("pops", pops?.npi ? [`NPI ${pops.npi}`] : [])),
         entry(
           "F2",
           "Board Certification",
           "pops",
-          (pops?.boardCertifications ?? []).map((c) =>
-            c.specialty ? `${c.board} (${c.specialty})` : c.board,
+          tag(
+            "pops",
+            (pops?.boardCertifications ?? []).map((c) =>
+              c.specialty ? `${c.board} (${c.specialty})` : c.board,
+            ),
           ),
         ),
       ],
@@ -618,7 +680,10 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
       label: "Honors, Awards",
       entries: simple(
         "pops",
-        honors.map((r) => [r[0], r[2] ? `(${r[2]})` : ""].filter(Boolean).join(" ")),
+        honors.map((r) => ({
+          text: [r.cells[0], r.cells[2] ? `(${r.cells[2]})` : ""].filter(Boolean).join(" "),
+          source: r.source,
+        })),
       ),
     },
     {
@@ -646,7 +711,7 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
       code: "L",
       label: "Clinical Practice, Innovation & Leadership",
       entries: [
-        entry("L1", "Clinical Practice", "pops", clinicalPracticeLines(pops)),
+        entry("L1", "Clinical Practice", "pops", tag("pops", clinicalPracticeLines(pops))),
         entry("L2", "Clinical Innovations", "none", []),
         entry("L3", "Clinical Leadership", "none", []),
       ],
@@ -663,8 +728,8 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
           count: null,
           items: [],
         },
-        entry("M2", "Current Research Funding", "scholars", currentGrantItems),
-        entry("M3", "Past (Completed) Funding", "scholars", pastGrantItems),
+        entry("M2", "Current Research Funding", "scholars", tag("funding", currentGrantItems)),
+        entry("M3", "Past (Completed) Funding", "scholars", tag("funding", pastGrantItems)),
         entry("M4", "Pending Funding", "none", []),
         entry("M5", "Patents & Inventions", "none", []),
       ],
@@ -679,10 +744,13 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
           "N3",
           "Current Mentees",
           "scholars",
-          mentees.map((m) => {
-            const yrs = menteeYears(m);
-            return [m.fullName, yrs ? `(${yrs})` : ""].filter(Boolean).join(" ");
-          }),
+          tag(
+            "mentees",
+            mentees.map((m) => {
+              const yrs = menteeYears(m);
+              return [m.fullName, yrs ? `(${yrs})` : ""].filter(Boolean).join(" ");
+            }),
+          ),
         ),
         entry("N4", "Past Mentees", "none", []),
       ],
@@ -690,7 +758,9 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
     {
       code: "O",
       label: "Institutional Leadership Activities",
-      entries: simple("scholars", p.leadershipTitles),
+      // Chair/Chief lines come from the ED ETL, Center director / Program leader
+      // from Scholars curation → the org-unit provenance label ("ED / Scholars").
+      entries: simple("scholars", tag("org-unit", p.leadershipTitles)),
     },
     {
       code: "P",
@@ -720,7 +790,7 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
       code: "S",
       label: "Bibliography",
       entries: BIB_SUBSECTIONS.map((sub) =>
-        entry(sub.code, sub.label, "scholars", bibByKey.get(sub.key) ?? []),
+        entry(sub.code, sub.label, "scholars", tag("publications", bibByKey.get(sub.key) ?? [])),
       ),
     },
   ];

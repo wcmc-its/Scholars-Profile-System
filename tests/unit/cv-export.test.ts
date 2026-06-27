@@ -460,7 +460,7 @@ describe("cvOutline — document-ordered CV preview", () => {
   it("fills clinical entries from POPS, including Clinical Practice (L1)", () => {
     const o = cvOutline({ profile: clinicalInput.profile, mentees: [], pops: clinicalInput.pops });
     expect(entryOf(o, "C")).toMatchObject({ status: "filled", source: "pops", count: 1 });
-    expect(entryOf(o, "F", "F1").items).toContain("NPI 1234567890");
+    expect(entryOf(o, "F", "F1").items.map((i) => i.text)).toContain("NPI 1234567890");
     expect(entryOf(o, "F", "F2").count).toBe(1); // board cert
     expect(entryOf(o, "H").count).toBe(2); // honor + Castle Connolly
     expect(entryOf(o, "M", "M2").count).toBe(0); // its one grant is completed…
@@ -468,7 +468,8 @@ describe("cvOutline — document-ordered CV preview", () => {
     // POPS specialties/practices/expertise now surface in L1.
     const l1 = entryOf(o, "L", "L1");
     expect(l1.status).toBe("filled");
-    expect(l1.items.join(" ")).toContain("Cardiology");
+    expect(l1.items.map((i) => i.text).join(" ")).toContain("Cardiology");
+    expect(l1.items.every((i) => i.source === "pops")).toBe(true);
   });
 
   it("bins publications into their WCM bibliography subsections", () => {
@@ -489,7 +490,51 @@ describe("cvOutline — document-ordered CV preview", () => {
   it("personal data (A) lists name + visible email and has no count", () => {
     const a = entryOf(cvOutline({ profile: clinicalInput.profile, mentees: [], pops: null }), "A");
     expect(a.count).toBeNull();
-    expect(a.items).toEqual(["Robert Jones, MD", "rj9001@med.cornell.edu"]);
+    expect(a.items).toEqual([
+      { text: "Robert Jones, MD", source: "name-title" },
+      { text: "rj9001@med.cornell.edu", source: "name-title" },
+    ]);
+  });
+
+  it("tags merged Academic Degrees (B1) per-record — ED/ASMS vs POPS", () => {
+    const profile = baseProfile({
+      educations: [{ degree: "PhD", institution: "MIT", year: 2008, field: "Biology" }],
+    });
+    const pops: PopsEnrichment = {
+      npi: null,
+      boardCertifications: [],
+      training: [],
+      degrees: [{ degree: "MD", year: "2012", institution: "Columbia University" }],
+      appointments: [],
+      honors: [],
+      specialties: [],
+      practices: [],
+      expertise: [],
+      castleConnolly: false,
+    };
+    const b1 = entryOf(cvOutline({ profile, mentees: [], pops }), "B", "B1");
+    expect(b1.count).toBe(2); // both rows survive (different degree|institution)
+    const textsBySource = (s: string) =>
+      b1.items
+        .filter((i) => i.source === s)
+        .map((i) => i.text)
+        .join(" ");
+    expect(textsBySource("education")).toContain("MIT"); // p.educations → ASMS/ED
+    expect(textsBySource("pops")).toContain("Columbia University"); // pops.degrees → POPS
+  });
+
+  it("badges uniform sections with their system of record", () => {
+    const profile = baseProfile({
+      grants: researchInput.profile.grants, // one active grant → M2
+      leadershipTitles: ["Director, Center for Aging Research"],
+      publications: [pub({ pmid: "x", publicationType: "Academic Article" })],
+    });
+    const o = cvOutline({ profile, mentees: [mentee({})], pops: null });
+    expect(entryOf(o, "M", "M2").items[0]!.source).toBe("funding");
+    expect(entryOf(o, "N", "N3").items[0]!.source).toBe("mentees");
+    expect(entryOf(o, "O").items[0]!.source).toBe("org-unit");
+    const s1 = group(o, "S").entries.find((e) => e.code === "S1")!;
+    expect(s1.items[0]!.source).toBe("publications");
   });
 
   it("caps the item preview at 10 but reports the true count", () => {
