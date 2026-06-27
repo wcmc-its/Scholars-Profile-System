@@ -276,6 +276,14 @@ function clinicalPracticeLines(pops: PopsEnrichment | null): string[] {
   return lines;
 }
 
+/** One-line "Source. Title. Dates. Role." summary for the Past (Completed)
+ *  Funding section, which the WCM template prompts as free prose (no per-entry
+ *  table, unlike Current Research Funding). */
+function grantSummaryLine(g: ProfilePayload["grants"][number]): string {
+  const range = dateRange(g.startDate, g.endDate, false);
+  return [g.funder, g.title, range, g.role].filter(Boolean).join(". ") + ".";
+}
+
 // ── public builder ──────────────────────────────────────────────────────────
 
 /** Build the WCM CV by filling the official template, returning the .docx bytes. */
@@ -348,10 +356,17 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
       .map((s) => makeParagraph(doc, [{ text: s }]));
     insertParagraphsAfter(t, (x) => x.startsWith("Research Activities:"), [blank(), ...paras]);
   }
+  // Current Research Funding gets the active grants (per-entry table); completed
+  // grants go to Past (Completed) Funding below. Pending is intentionally NOT
+  // populated — InfoEd's pending statuses are filtered out upstream and are too
+  // sensitive to surface. ("In Process" awards are imported as awarded, not
+  // pending, and sort here by date.)
+  const activeGrants = p.grants.filter((g) => g.isActive);
+  const pastGrants = p.grants.filter((g) => !g.isActive);
   fillTablePerEntry(
     doc,
     findTable(t, (h) => (h[0] ?? "").startsWith("Award Source:")),
-    p.grants,
+    activeGrants,
     (clone, g) => {
       setLabeledValue(doc, clone, "Award Source:", g.funder || NA);
       setLabeledValue(doc, clone, "Project title:", g.title || NA);
@@ -360,6 +375,14 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
       setLabeledValue(doc, clone, "Your role", g.role || "");
     },
   );
+  // Past (Completed) Funding — the template prompts free prose here (no table),
+  // so write one summary line per completed grant.
+  if (pastGrants.length > 0) {
+    insertParagraphsAfter(t, (x) => x.startsWith("Past (Completed) Funding"), [
+      blank(),
+      ...pastGrants.map((g) => makeParagraph(doc, [{ text: grantSummaryLine(g) }])),
+    ]);
+  }
 
   // 9. Mentoring — Current Mentees (FERPA-filtered upstream), one table per mentee.
   fillTablePerEntry(
@@ -500,12 +523,14 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
     else bibByKey.set(k, [pubLine(pub)]);
   }
 
-  // Grants all land in "Current Research Funding" (the builder does not split
-  // active/completed); Past/Pending keep blank prompts.
-  const grantItems = p.grants.map((g) => {
+  // Grants split Current (active) / Past (completed) by date, mirroring the
+  // builder. Pending stays a blank prompt (excluded upstream + sensitive).
+  const fmtGrant = (g: ProfilePayload["grants"][number]): string => {
     const range = dateRange(g.startDate, g.endDate, g.isActive);
     return [g.funder, g.title, range ? `(${range})` : ""].filter(Boolean).join(" — ");
-  });
+  };
+  const currentGrantItems = p.grants.filter((g) => g.isActive).map(fmtGrant);
+  const pastGrantItems = p.grants.filter((g) => !g.isActive).map(fmtGrant);
 
   // A simple (non-subsectioned) section's sole entry; the group carries the name.
   const simple = (source: CvOutlineEntry["source"], items: string[]): CvOutlineEntry[] => [
@@ -638,8 +663,8 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
           count: null,
           items: [],
         },
-        entry("M2", "Current Research Funding", "scholars", grantItems),
-        entry("M3", "Past (Completed) Funding", "none", []),
+        entry("M2", "Current Research Funding", "scholars", currentGrantItems),
+        entry("M3", "Past (Completed) Funding", "scholars", pastGrantItems),
         entry("M4", "Pending Funding", "none", []),
         entry("M5", "Patents & Inventions", "none", []),
       ],

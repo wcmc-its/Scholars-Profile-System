@@ -363,6 +363,20 @@ describe("buildWcmCv — pubs are binned and POPS clinical practice is written",
     expect(text).toContain("Heart Failure Program");
     expect(text).toContain("Areas of expertise: Heart failure");
   });
+
+  it("routes completed grants to Past (Completed) Funding, active to Current", async () => {
+    // clinicalInput's grant is isActive:false → Past (prose under that heading).
+    const ctext = allText(await documentXml(clinicalInput));
+    expect(ctext.indexOf("Hospital readmissions cohort")).toBeGreaterThan(
+      ctext.indexOf("Past (Completed) Funding"),
+    );
+    // researchInput's grant is isActive:true → the Current Research Funding table,
+    // i.e. above the Past heading.
+    const rtext = allText(await documentXml(researchInput));
+    const activeAt = rtext.indexOf("Klotho signaling in aging");
+    expect(activeAt).toBeGreaterThan(rtext.indexOf("Current Research Funding"));
+    expect(activeAt).toBeLessThan(rtext.indexOf("Past (Completed) Funding"));
+  });
 });
 
 // ── cvOutline — the live /edit preview (spec §8) ─────────────────────────────
@@ -430,7 +444,8 @@ describe("cvOutline — document-ordered CV preview", () => {
     });
     expect(entryOf(o, "B", "B1").count).toBe(1); // PhD, MIT
     expect(entryOf(o, "D", "D1").count).toBe(1); // Professor @ WCM (academic)
-    expect(entryOf(o, "M", "M2").count).toBe(1); // one grant
+    expect(entryOf(o, "M", "M2").count).toBe(1); // one active grant → Current
+    expect(entryOf(o, "M", "M3").count).toBe(0); // none completed
     expect(entryOf(o, "N", "N3").count).toBe(1); // one mentee
     expect(entryOf(o, "O").count).toBe(1); // one leadership line
     expect(entryOf(o, "M", "M1").status).toBe("generated"); // drafted at download
@@ -448,6 +463,8 @@ describe("cvOutline — document-ordered CV preview", () => {
     expect(entryOf(o, "F", "F1").items).toContain("NPI 1234567890");
     expect(entryOf(o, "F", "F2").count).toBe(1); // board cert
     expect(entryOf(o, "H").count).toBe(2); // honor + Castle Connolly
+    expect(entryOf(o, "M", "M2").count).toBe(0); // its one grant is completed…
+    expect(entryOf(o, "M", "M3").count).toBe(1); // …so it lands in Past, not Current
     // POPS specialties/practices/expertise now surface in L1.
     const l1 = entryOf(o, "L", "L1");
     expect(l1.status).toBe("filled");
