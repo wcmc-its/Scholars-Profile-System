@@ -283,6 +283,9 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
   const { profile: p, pops } = input;
   const t = await loadTemplate();
   const doc = t.doc;
+  // A blank paragraph — inserted between a section/category header and its
+  // injected content so entries don't butt up against the prompt.
+  const blank = () => makeParagraph(doc, []);
 
   // 1. Fill the signature block (the WCM instruction box is kept, per the
   //    template's own "delete this box on completion" guidance — left for the scholar).
@@ -330,11 +333,10 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
   //     as prose under the "Clinical Practice" prompt. Clinical faculty only.
   const clinicalLines = clinicalPracticeLines(pops);
   if (clinicalLines.length > 0) {
-    insertParagraphsAfter(
-      t,
-      (x) => x.startsWith("Clinical Practice"),
-      clinicalLines.map((s) => makeParagraph(doc, [{ text: s }])),
-    );
+    insertParagraphsAfter(t, (x) => x.startsWith("Clinical Practice"), [
+      blank(),
+      ...clinicalLines.map((s) => makeParagraph(doc, [{ text: s }])),
+    ]);
   }
 
   // 8. Research — Activities summary (M1) + Current Research Funding (one table per grant).
@@ -344,7 +346,7 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
       .map((s) => s.replace(/\s+/g, " ").trim())
       .filter(Boolean)
       .map((s) => makeParagraph(doc, [{ text: s }]));
-    insertParagraphsAfter(t, (x) => x.startsWith("Research Activities:"), paras);
+    insertParagraphsAfter(t, (x) => x.startsWith("Research Activities:"), [blank(), ...paras]);
   }
   fillTablePerEntry(
     doc,
@@ -398,7 +400,7 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
       );
       if (pubs.length === 0) continue;
       const paras = pubs.map((pub, i) => makeParagraph(doc, citationRuns(i, pub, selected)));
-      insertParagraphsAfter(t, (x) => x.startsWith(sub.anchor), paras);
+      insertParagraphsAfter(t, (x) => x.startsWith(sub.anchor), [blank(), ...paras]);
     }
   }
 
