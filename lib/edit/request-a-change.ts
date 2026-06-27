@@ -109,6 +109,11 @@ export type RequestAttribute =
   | "appointments"
   | "education"
   | "funding"
+  // RePORTER-sourced grant rows (the "via NIH RePORTER" entries) — same Funding
+  // panel, different system of record, so a distinct option set. Selected
+  // per-row by the panel; never a panel-level `attribute` (no source line of
+  // its own — the Funding header shows the combined "InfoEd and NIH RePORTER").
+  | "funding-reporter"
   | "publications"
   | "org-unit"
   | "coi"
@@ -385,6 +390,33 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
           cc: OSRA_CC,
           sourceSystem: "InfoEd",
           note: "Hiding it here won't correct InfoEd; OSRA fixes the investigator list so it stops appearing on funding reports.",
+        }),
+      },
+    ],
+  },
+  // RePORTER-sourced grants are matched to the scholar from their OWN
+  // publications (PMID overlap), not entered at WCM — so InfoEd/OSRA can't
+  // correct them and the OSRA routes above don't apply. Mirrors the
+  // publications "not mine" stance (fix at the source, don't just hide), but
+  // the source here is the in-app "Is this you?" match: revoke it there, or
+  // Hide for a display-only removal. Explain-only — no junk tickets to OSRA.
+  "funding-reporter": {
+    heading: "What needs to change?",
+    issues: [
+      {
+        id: "funding-reporter-not-mine",
+        label: "I shouldn't be listed on this grant",
+        action: explain({
+          detail:
+            "This NIH grant was linked to your profile from your own publications (via NIH RePORTER) — it isn't a WCM record, so OSRA can't change it. Hide it here to drop it from your profile and CV. If it was suggested under “Is this you?”, choose “Not me — remove these” there to remove the match at its source so it isn't proposed again.",
+        }),
+      },
+      {
+        id: "funding-reporter-detail-wrong",
+        label: "A detail (title, sponsor, dates, or role) is wrong",
+        action: explain({
+          detail:
+            "These details come straight from NIH RePORTER, the public NIH record — they aren't editable in Scholars. If the NIH record itself is wrong, it's corrected through NIH eRA Commons and the update flows here automatically.",
         }),
       },
     ],

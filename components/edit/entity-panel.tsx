@@ -85,6 +85,13 @@ export type EntityPanelProps<T extends EntityRow> = {
   renderMeta: (e: T) => React.ReactNode;
   /** Show a title filter + bounded scroll region (Funding). */
   filterable?: boolean;
+  /** Override the header "Source: <system>" text for a multi-source panel
+   *  (Funding mixes InfoEd + "via NIH RePORTER" rows). */
+  sourceLabel?: string;
+  /** Per-row "Request a change" attribute, when a row's system of record
+   *  differs from the panel's (a RePORTER grant routes differently than an
+   *  InfoEd one). Defaults to the panel attribute for every row. */
+  getRequestAttribute?: (e: T) => RequestAttribute;
   /** `data-slot` for tests (e.g. "appointments-panel"). */
   slot: string;
 };
@@ -108,6 +115,8 @@ export function EntityPanel<T extends EntityRow>({
   getTitle,
   renderMeta,
   filterable = false,
+  sourceLabel,
+  getRequestAttribute,
   slot,
 }: EntityPanelProps<T>) {
   const [list, setList] = React.useState<T[]>([...entities]);
@@ -246,7 +255,7 @@ export function EntityPanel<T extends EntityRow>({
           testId={`${entityType}-row-${e.externalId}`}
           requestMenu={
             <RequestAChangeDialog
-              attribute={REQUEST_ATTR[entityType]}
+              attribute={getRequestAttribute ? getRequestAttribute(e) : REQUEST_ATTR[entityType]}
               cwid={cwid}
               itemLabel={getTitle(e)}
             />
@@ -260,6 +269,7 @@ export function EntityPanel<T extends EntityRow>({
     <EditPanel
       slot={slot}
       attribute={REQUEST_ATTR[entityType]}
+      sourceLabel={sourceLabel}
       heading={copy.heading}
       description={copy.description}
     >

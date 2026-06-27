@@ -24,6 +24,10 @@ export const FIELD_SOURCE: Record<RequestAttribute, string> = {
   appointments: "ASMS by way of Enterprise Directory",
   education: "ASMS",
   funding: "InfoEd",
+  // Request-only (no panel renders a source line keyed to it — the Funding
+  // header shows the combined "InfoEd and NIH RePORTER" when RePORTER rows are
+  // present). The entry exists for `RequestAttribute` Record totality.
+  "funding-reporter": "NIH RePORTER",
   publications: "PubMed (attributed by ReCiter)",
   // #728 Phase D — `org-unit` is a request-only pseudo-attribute (no `/edit`
   // panel renders a source line for it); the entry exists only because the map
