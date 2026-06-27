@@ -22,6 +22,7 @@ describe("REQUEST_A_CHANGE — structure", () => {
         "coi",
         "education",
         "funding",
+        "funding-reporter",
         "mentees",
         "name-title",
         "org-unit",
@@ -99,6 +100,18 @@ describe("operator routing decisions", () => {
     const a = issue("funding", "funding-active-expired").action;
     expect(a.kind).toBe("explain");
     if (a.kind === "explain") expect(a.detail.toLowerCase()).toContain("grace");
+  });
+
+  it("RePORTER grants are explain-only — never an OSRA/InfoEd route", () => {
+    const cfg = REQUEST_A_CHANGE["funding-reporter"];
+    expect(cfg.issues.length).toBeGreaterThan(0);
+    for (const { action } of cfg.issues) expect(action.kind).toBe("explain");
+    // "not mine" points at Hide + the in-app "Is this you?" match, not OSRA.
+    const notMine = issue("funding-reporter", "funding-reporter-not-mine").action;
+    if (notMine.kind === "explain") {
+      expect(notMine.detail.toLowerCase()).toContain("hide");
+      expect(notMine.detail).toContain("NIH RePORTER");
+    }
   });
 
   it("non-PubMed missing publication explains it's unsupported (no route)", () => {

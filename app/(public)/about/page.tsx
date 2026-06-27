@@ -674,8 +674,11 @@ export default function DocsPage() {
               </tr>
               <tr>
                 <td>Your funding / grants</td>
-                <td>InfoEd</td>
-                <td>Request a change (routes to Sponsored Research)</td>
+                <td>InfoEd; NIH RePORTER backfills historical federal grants from a prior institution</td>
+                <td>
+                  Request a change (InfoEd grants route to Sponsored Research; a RePORTER-sourced
+                  grant is matched from your publications — hide or remove it in your profile editor)
+                </td>
               </tr>
               <tr>
                 <td>A disclosure</td>

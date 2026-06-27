@@ -9,7 +9,16 @@ import Link from "next/link";
 import { fieldSource } from "@/lib/edit/field-sources";
 import type { RequestAttribute } from "@/lib/edit/request-a-change";
 
-export function FieldSourceLine({ attribute }: { attribute: RequestAttribute }) {
+export function FieldSourceLine({
+  attribute,
+  label,
+}: {
+  attribute: RequestAttribute;
+  /** Override the system text for a multi-source panel (e.g. Funding, which
+   *  carries both InfoEd and "via NIH RePORTER" rows). Defaults to the
+   *  attribute's single canonical source. */
+  label?: string;
+}) {
   // The system name links to the provenance docs. The wrapping <Link> keeps the
   // line's textContent byte-identical ("Source: <system>") so the strict-equality
   // field-sources tests still pass (vision-round T1.10).
@@ -20,7 +29,7 @@ export function FieldSourceLine({ attribute }: { attribute: RequestAttribute }) 
         href="/about#provenance"
         className="text-foreground font-medium underline-offset-2 hover:underline"
       >
-        {fieldSource(attribute)}
+        {label ?? fieldSource(attribute)}
       </Link>
     </p>
   );

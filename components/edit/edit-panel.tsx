@@ -40,6 +40,10 @@ export type EditPanelProps = {
    * edit"). Omitting both renders no cue.
    */
   attribute?: RequestAttribute;
+  /** Override the "Source: <system>" text — for a multi-source panel like
+   *  Funding ("InfoEd and NIH RePORTER"). Falls back to the attribute's single
+   *  canonical source when omitted. */
+  sourceLabel?: string;
   owned?: boolean;
   /** Explanatory line under the provenance cue. */
   description?: React.ReactNode;
@@ -55,6 +59,7 @@ export function EditPanel({
   heading,
   headingId = EDIT_PANEL_HEADING_ID,
   attribute,
+  sourceLabel,
   owned = false,
   description,
   headerAction,
@@ -73,7 +78,7 @@ export function EditPanel({
           {headerAction}
         </div>
         {attribute ? (
-          <FieldSourceLine attribute={attribute} />
+          <FieldSourceLine attribute={attribute} label={sourceLabel} />
         ) : owned ? (
           <span
             data-slot="ownership-cue"

@@ -21,6 +21,10 @@ export type FundingCardProps = {
 };
 
 export function FundingCard({ cwid, mode, scholarName, grants }: FundingCardProps) {
+  // The panel mixes two systems of record: InfoEd (the default) and NIH
+  // RePORTER (the "via NIH RePORTER" backfill rows). Surface both in the header
+  // when present, and route each row's "Request a change" to the right place.
+  const hasReporter = grants.some((g) => g.source === "RePORTER");
   return (
     <EntityPanel
       slot="funding-panel"
@@ -30,6 +34,8 @@ export function FundingCard({ cwid, mode, scholarName, grants }: FundingCardProp
       entityType="grant"
       entities={grants}
       filterable
+      sourceLabel={hasReporter ? "InfoEd and NIH RePORTER" : undefined}
+      getRequestAttribute={(g) => (g.source === "RePORTER" ? "funding-reporter" : "funding")}
       getTitle={(g) => g.title}
       renderMeta={(g) => (
         <>
