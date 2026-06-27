@@ -52,14 +52,16 @@ export function fieldSource(attribute: RequestAttribute): string {
  * Source key for a single CV-outline record (the per-row provenance badge in the
  * `/edit` "CV (WCM format)" preview). Reuses the panel `RequestAttribute`
  * vocabulary above, extended with the two CV origins that have no `/edit` panel:
- * `pops` (the WCM physician directory) and `generated` (the M1 LLM summary).
+ * `pops` (POPS, the public WeillCornell.org physician directory) and `generated`
+ * (the M1 LLM summary).
  */
 export type CvSourceKey = RequestAttribute | "pops" | "generated";
 
-/** Labels for the CV-only sources that aren't in {@link FIELD_SOURCE}. The bare
- *  acronym "POPS" is never surfaced — it reads as the WCM physician directory. */
+/** Labels for the CV-only sources that aren't in {@link FIELD_SOURCE}. `pops`
+ *  rows surface as the public physician directory by its real name; `generated`
+ *  is the M1 LLM summary. */
 const CV_EXTRA_SOURCE: Record<"pops" | "generated", string> = {
-  pops: "WCM physician directory",
+  pops: "POPS / WeillCornell.org",
   generated: "AI-drafted",
 };
 
