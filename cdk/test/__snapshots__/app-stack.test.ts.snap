@@ -424,6 +424,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "REPORTER_MATCH_V2",
+                "Value": "off",
+              },
+              {
                 "Name": "POPS_BASE_URL",
                 "Value": "http://pops.weillcornell.org",
               },
@@ -3746,6 +3750,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "EDIT_CV_EXPORT",
+                "Value": "on",
+              },
+              {
+                "Name": "REPORTER_MATCH_V2",
                 "Value": "on",
               },
               {

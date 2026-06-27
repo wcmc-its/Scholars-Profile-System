@@ -27,6 +27,7 @@ import {
 } from "@/lib/edit/unit-scholar-authz";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
+import { isReporterMatchV2Enabled } from "@/lib/edit/reporter-match";
 import { isDataQualityDashboardEnabled } from "@/lib/edit/data-quality";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
@@ -83,6 +84,9 @@ export default async function EditSelfPage({
   // `/edit` route is only ever the scholar themselves (or an impersonation we
   // deliberately exclude here).
   const includeHighlights = isManualHighlightsEnabled() && genuineSelf;
+  // RePORTER "Is this you?" matches (`REPORTER_MATCH_V2`) — self-only, the same
+  // genuine-self gate as the COI-gap hint (never under a "View as" overlay).
+  const includeReporterProfile = isReporterMatchV2Enabled() && genuineSelf;
   // ReCiter "pending / suggested" candidate publications nudge
   // (`SELF_EDIT_RECITER_PENDING_HINT`, dormant). Like the COI-gap hint, this is
   // self-only: surfaced ONLY when the real scholar is viewing — never a superuser
@@ -94,6 +98,7 @@ export default async function EditSelfPage({
   const ctx = await loadEditContext(editCwid, db.read, new Date(), undefined, {
     includeCoiGap,
     includeHighlights,
+    includeReporterProfile,
   });
   if (!ctx) {
     // A comms_steward with no Scholar row of their own has no self-profile to
@@ -182,6 +187,9 @@ export default async function EditSelfPage({
     grantRecsEnabled,
     biosketchEnabled,
     cvEnabled,
+    // RePORTER "Is this you?" is valid when there are pending matches OR confirmed
+    // history to revoke — mirroring the rail-gating rule in EditPage.
+    ctx.reporterProfileCandidates.length > 0 || ctx.reporterProfileConfirmed.length > 0,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect("/edit");

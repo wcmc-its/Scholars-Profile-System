@@ -11,6 +11,7 @@
 import { AppointmentsCard } from "@/components/edit/appointments-card";
 import { CoiCard } from "@/components/edit/coi-card";
 import { CoiGapCard } from "@/components/edit/coi-gap-card";
+import { ReporterProfileCard } from "@/components/edit/reporter-profile-card";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { EditShell } from "@/components/edit/edit-shell";
 import { EducationCard } from "@/components/edit/education-card";
@@ -77,6 +78,7 @@ type AttrKey =
   | "education"
   | "coi"
   | "coi-gap"
+  | "reporter-profile"
   | "mentees"
   | "profile-url"
   | "proxy-editors";
@@ -145,6 +147,14 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // NOT to a proxy / unit-admin (excluded in `attrsForMode`). The rail item
   // appears only when there are candidates AND the flag is on.
   { key: "coi-gap", label: "From your publications", readonly: true, modes: ["self", "superuser"] },
+  // RePORTER "Is this you?" (REPORTER_MATCH_V2) — K=2 PMID-overlap matches the
+  // scholar confirms/rejects, plus a revocable confirmed-match history. Self OR a
+  // genuine superuser (on their behalf); never a proxy / unit-admin (excluded in
+  // `attrsForMode`, like coi-gap). `readonly: true` mirrors the coi-gap advisory
+  // (an advisory the scholar acts on, not a free-edit field). The rail item
+  // appears only when there are pending candidates OR confirmed history AND the
+  // flag is on.
+  { key: "reporter-profile", label: "Is this you?", readonly: true, modes: ["self", "superuser"] },
   // Superuser direct-set is always available; the self surface is the request
   // card when `slugRequestEnabled`, else a read-only panel (locked rail item).
   { key: "profile-url", label: "Profile URL", modes: ["self", "superuser"] },
@@ -195,6 +205,7 @@ function attrsForMode(mode: EditMode): AttrDef[] {
         a.modes.includes("self") &&
         a.key !== "profile-url" &&
         a.key !== "coi-gap" &&
+        a.key !== "reporter-profile" && // self/superuser-only advisory, like coi-gap
         a.key !== "proxy-editors", // a proxy / unit admin can never manage the proxy list (CD-2)
     );
   }
@@ -236,6 +247,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "education",
   "publications",
   "funding",
+  "reporter-profile",
   "mentees",
   "coi",
   "coi-gap",
@@ -256,6 +268,7 @@ const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   "profile-url": "owned",
   publications: "sourced",
   funding: "sourced",
+  "reporter-profile": "readonly",
   // "Services" group (#917 v5) — owner-facing tools, distinct from sourced data.
   "grant-recs": "service",
   biosketch: "service",
@@ -301,6 +314,7 @@ const RAIL_V2_ORDER: ReadonlyArray<AttrKey> = [
   "education",
   "publications",
   "funding",
+  "reporter-profile",
   "mentees",
   "coi",
   "coi-gap",
@@ -323,6 +337,7 @@ const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string }> = {
   education: { group: RAIL_V2_WCM_GROUP },
   publications: { group: RAIL_V2_WCM_GROUP },
   funding: { group: RAIL_V2_WCM_GROUP },
+  "reporter-profile": { group: RAIL_V2_WCM_GROUP },
   mentees: { group: RAIL_V2_WCM_GROUP },
   coi: { group: RAIL_V2_WCM_GROUP },
   "coi-gap": { group: RAIL_V2_WCM_GROUP },
@@ -368,6 +383,7 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "visibility",
   "proxy-editors",
   "funding",
+  "reporter-profile",
   "grant-recs",
   "biosketch",
   "cv",
@@ -464,6 +480,7 @@ export function visibleAttrKeys(
   grantRecsEnabled = false,
   biosketchEnabled = false,
   cvEnabled = false,
+  hasReporterProfile = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
   return (
@@ -495,6 +512,10 @@ export function visibleAttrKeys(
       // candidates canonicalizes away (the page redirects to bare /edit) rather
       // than rendering an empty panel or 404-looping. (proxy drops it outright.)
       .filter((a) => a.key !== "coi-gap" || hasCoiGap)
+      // RePORTER "Is this you?" — present only when the loader returned pending
+      // candidates OR confirmed history (flag on + self/superuser). Off ⇒ dropped
+      // from both the rail and the valid-attr set, so the feature is fully dark.
+      .filter((a) => a.key !== "reporter-profile" || hasReporterProfile)
       // #836 — Highlights appears only when the loader populated `ctx.highlights`
       // (flag on + genuine self). Off ⇒ dropped from both the rail and the valid-
       // attr set, so the feature is fully dark.
@@ -537,6 +558,14 @@ export function EditPage({
   // it — self on `/edit`, self or superuser on `/edit/scholar/[cwid]`, never a
   // proxy / unit-admin — so a non-null value here already implies an allowed actor.
   const hasHighlights = (mode === "self" || isSuperuserLike(mode)) && ctx.highlights !== null;
+  // RePORTER "Is this you?" — present for self OR superuser when the loader (per
+  // surface) returned pending candidates OR confirmed history. The loader gates
+  // who may load + the flag, so a non-empty array here already implies an allowed
+  // actor. Pending nags; a confirmed-only history still surfaces the item (to
+  // revoke), without a count badge.
+  const hasReporterProfile =
+    (mode === "self" || isSuperuserLike(mode)) &&
+    (ctx.reporterProfileCandidates.length > 0 || ctx.reporterProfileConfirmed.length > 0);
   // GrantRecs Phase 3 — "Grants for me" shows on self / superuser surfaces. A genuine
   // superuser ALWAYS sees it (QA lens, flag-independent) so the recommendations can be
   // judged per scholar while the owner-facing SELF_EDIT_GRANT_RECS stays off for users;
@@ -555,6 +584,7 @@ export function EditPage({
   const showCv = cvEnabled;
   const visible = attrsForMode(mode)
     .filter((a) => a.key !== "coi-gap" || hasCoiGap)
+    .filter((a) => a.key !== "reporter-profile" || hasReporterProfile)
     .filter((a) => a.key !== "highlights" || hasHighlights)
     .filter((a) => a.key !== "grant-recs" || showGrantRecs)
     .filter((a) => a.key !== "biosketch" || showBiosketch)
@@ -572,6 +602,15 @@ export function EditPage({
   // the flag is off (the panel shows their current URL but no request form).
   const railKindFor = (k: AttrKey): RailKind =>
     k === "profile-url" && mode === "self" && !slugRequestEnabled ? "readonly" : SELF_RAIL_KIND[k];
+
+  // The quiet rail count badge: High-active COI-gap relationships, or PENDING
+  // RePORTER matches awaiting an answer. 0 → undefined so an item with only
+  // settled history (Reviewed / confirmed-only) shows without a "0" badge.
+  const railCount = (k: AttrKey): number | undefined => {
+    if (k === "coi-gap") return ctx.unmatchedPubmedCoi.length || undefined;
+    if (k === "reporter-profile") return ctx.reporterProfileCandidates.length || undefined;
+    return undefined;
+  };
 
   const railItems: RailItem[] = railRestructureEnabled
     ? RAIL_V2_ORDER.flatMap((k) => {
@@ -603,7 +642,7 @@ export function EditPage({
             child: a.key === "coi-gap",
             // High-active count ONLY; 0 → undefined so a Reviewed-only history
             // shows the item without a "0" badge.
-            count: a.key === "coi-gap" ? ctx.unmatchedPubmedCoi.length || undefined : undefined,
+            count: railCount(a.key),
           },
         ];
       })
@@ -631,7 +670,7 @@ export function EditPage({
               // The badge is the High-active count ONLY — Medium and Reviewed are
               // excluded — and 0 coerces to undefined so the item can appear for a
               // Reviewed-only history without showing a "0" badge.
-              count: a.key === "coi-gap" ? ctx.unmatchedPubmedCoi.length || undefined : undefined,
+              count: railCount(a.key),
             },
           ];
         })
@@ -652,7 +691,7 @@ export function EditPage({
               child: a.key === "coi-gap",
               // High-active count ONLY (Medium + Reviewed excluded); 0 → undefined
               // so a Reviewed-only history shows the item without a "0" badge.
-              count: a.key === "coi-gap" ? ctx.unmatchedPubmedCoi.length || undefined : undefined,
+              count: railCount(a.key),
             },
           ];
         });
@@ -997,6 +1036,21 @@ function renderPanel(
           mode={voiceMode}
           scholarName={scholarName}
           mentions={ctx.unmatchedPubmedCoiMentions}
+        />
+      );
+    case "reporter-profile":
+      // Self or superuser — the loader populates the arrays only for an allowed
+      // actor behind the flag, and the rail item is dropped when both are empty.
+      // `voiceMode` reframes the copy for a superuser acting on the scholar's
+      // behalf; the confirm / reject / revoke routes re-authorize genuine-self-or-
+      // superuser. Projection-starved: the card receives no overlap K.
+      return (
+        <ReporterProfileCard
+          cwid={cwid}
+          mode={voiceMode}
+          scholarName={scholarName}
+          candidates={ctx.reporterProfileCandidates}
+          confirmed={ctx.reporterProfileConfirmed}
         />
       );
     case "profile-url":

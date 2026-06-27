@@ -108,6 +108,11 @@ const ctx: EditContext = {
   unmatchedPubmedCoiReviewed: [],
   // #1112 — flat mention set for the redesigned review surface; empty by default.
   unmatchedPubmedCoiMentions: [],
+  // REPORTER_MATCH_V2 — empty by default (loader returns [] unless the flag is on
+  // for a genuine self/superuser viewer); a dedicated case exercises the populated
+  // state in the card's own test.
+  reporterProfileCandidates: [],
+  reporterProfileConfirmed: [],
   // #836 — null unless SELF_EDIT_MANUAL_HIGHLIGHTS is on AND the viewer is self.
   highlights: null,
 };

@@ -58,6 +58,7 @@ type EditContextReadClient = Pick<
   | "coiGapCandidate"
   | "publication"
   | "publicationConflictStatement"
+  | "reporterProfileCandidate"
 >;
 
 export type EditContextScholar = {
@@ -404,6 +405,59 @@ export type EditContextHighlights = {
   }>;
 };
 
+/** One sample grant on a RePORTER "Is this you?" card (recognition aid). Year-
+ *  only — never an amount. Mirrors the ETL's persisted `sample_grants` JSON. */
+export type EditContextReporterSampleGrant = {
+  title: string;
+  startYear: number | null;
+  endYear: number | null;
+};
+
+/**
+ * One PENDING RePORTER PMID-overlap "Is this you?" candidate (a K=2 suggestion),
+ * surfaced ONLY to a genuine self viewer (or genuine superuser) behind
+ * `REPORTER_MATCH_V2`. Populated only when `loadEditContext` is called with
+ * `opts.includeReporterProfile === true`; empty for every other caller.
+ *
+ * GOVERNANCE (projection-starved, per the COI-gap + [[project_topic_score_is_internal]]
+ * rule): the numeric overlap `overlapK` NEVER crosses to the client — the scholar
+ * adjudicates from the grant titles, not a score. Only human-recognizable fields
+ * cross.
+ */
+export type EditContextReporterProfileCandidate = {
+  /** `ReporterProfileCandidate.id` — the confirm/reject route target. */
+  candidateId: string;
+  /** NIH eRA `profile_id` — display-stable key, not shown. */
+  externalProfileId: number;
+  /** PI name as it appears in RePORTER ("Karuna Ganesh"). */
+  candidateName: string;
+  /** Comma-joined grantee orgs — a recognition aid. */
+  candidateOrgs: string;
+  /** # net-new grants riding on this match (the card's headline count). */
+  grantCount: number;
+  /** Up to 3 sample grants for human recognition. */
+  sampleGrants: ReadonlyArray<EditContextReporterSampleGrant>;
+};
+
+/**
+ * One CONFIRMED RePORTER match in the "Confirmed matches" history (incl. system
+ * auto-locks, labeled "matched automatically"). Self-revocable. Same starvation
+ * (no `overlapK`).
+ */
+export type EditContextReporterProfileConfirmed = {
+  candidateId: string;
+  externalProfileId: number;
+  candidateName: string;
+  candidateOrgs: string;
+  grantCount: number;
+  sampleGrants: ReadonlyArray<EditContextReporterSampleGrant>;
+  /** The confirm date (ISO `YYYY-MM-DD`), or null. Governance-allowed — it is the
+   *  scholar's own action (or the system match), not a model verdict. */
+  reviewedAt: string | null;
+  /** true when `reviewedBy === "system-autolock"` → "matched automatically". */
+  autolocked: boolean;
+};
+
 export type EditContext = {
   scholar: EditContextScholar;
   publications: ReadonlyArray<EditContextPublication>;
@@ -453,6 +507,19 @@ export type EditContext = {
    * candidates are excluded (the gap closed once the disclosure appeared).
    */
   unmatchedPubmedCoiMentions: ReadonlyArray<EditContextCoiGapMention>;
+  /**
+   * PENDING RePORTER PMID-overlap matches awaiting an "Is this you?" answer
+   * (`REPORTER_MATCH_V2`). Populated only when `loadEditContext` is called with
+   * `opts.includeReporterProfile === true` for a genuine self/superuser viewer;
+   * empty for every other caller. Projection-starved (no `overlapK`).
+   */
+  reporterProfileCandidates: ReadonlyArray<EditContextReporterProfileCandidate>;
+  /**
+   * CONFIRMED RePORTER matches (incl. system auto-locks) — the revocable
+   * "Confirmed matches" history. Same gate + starvation as
+   * `reporterProfileCandidates`.
+   */
+  reporterProfileConfirmed: ReadonlyArray<EditContextReporterProfileConfirmed>;
   /**
    * The manual-Highlights editor state (#836), or `null` when the surface is not
    * available (flag off, or a non-self caller). Populated only when
@@ -522,12 +589,27 @@ const defaultLoadMentees: LoadMentees = async (mentorCwid) => {
  * layer, means the rows are never read for an unauthorized viewer rather than
  * read-then-hidden.
  */
+/** Coerce the persisted `sample_grants` JSON (a `Prisma.JsonValue`) to the typed,
+ *  starved card shape. Defensive — our own ETL writes it (`summarizeCandidateGrants`),
+ *  but a Json column is `unknown` at the type level, so narrow rather than cast. */
+function coerceReporterSampleGrants(value: unknown): EditContextReporterSampleGrant[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((g): g is Record<string, unknown> => typeof g === "object" && g !== null)
+    .map((g) => ({
+      title: typeof g.title === "string" ? g.title : "",
+      startYear: typeof g.startYear === "number" ? g.startYear : null,
+      endYear: typeof g.endYear === "number" ? g.endYear : null,
+    }))
+    .filter((g) => g.title.length > 0);
+}
+
 export async function loadEditContext(
   cwid: string,
   client: EditContextReadClient,
   now: Date = new Date(),
   loadMentees: LoadMentees = defaultLoadMentees,
-  opts?: { includeCoiGap?: boolean; includeHighlights?: boolean },
+  opts?: { includeCoiGap?: boolean; includeHighlights?: boolean; includeReporterProfile?: boolean },
 ): Promise<EditContext | null> {
   const scholar = await client.scholar.findUnique({
     where: { cwid },
@@ -1033,6 +1115,59 @@ export async function loadEditContext(
     );
   }
 
+  // RePORTER PMID-overlap "Is this you?" candidates (`REPORTER_MATCH_V2`) —
+  // SELF-ONLY, and the opt-in IS the gate (same posture as COI-gap above): only
+  // the self/superuser page passes `includeReporterProfile: true`, and only with
+  // the flag on for a genuine (non-impersonating) viewer. One query over the two
+  // reviewable states: `pending` → the confirm card, `confirmed` (incl. system
+  // auto-locks) → the revocable "Confirmed matches" history. `rejected`/`revoked`
+  // are terminal and never surfaced. PROJECTION-STARVED: `overlapK` is never
+  // selected, so the numeric score cannot reach the client.
+  const reporterProfileCandidates: EditContextReporterProfileCandidate[] = [];
+  const reporterProfileConfirmed: EditContextReporterProfileConfirmed[] = [];
+  if (opts?.includeReporterProfile === true) {
+    const reporterRows = await client.reporterProfileCandidate.findMany({
+      where: { cwid, status: { in: ["pending", "confirmed"] } },
+      select: {
+        id: true,
+        externalProfileId: true,
+        candidateName: true,
+        candidateOrgs: true,
+        grantCount: true,
+        sampleGrants: true,
+        status: true,
+        reviewedBy: true,
+        reviewedAt: true,
+        // overlapK deliberately NOT selected (projection-starved).
+      },
+      orderBy: [{ grantCount: "desc" }, { firstSeenAt: "asc" }],
+    });
+    for (const r of reporterRows) {
+      const sampleGrants = coerceReporterSampleGrants(r.sampleGrants);
+      if (r.status === "pending") {
+        reporterProfileCandidates.push({
+          candidateId: r.id,
+          externalProfileId: r.externalProfileId,
+          candidateName: r.candidateName,
+          candidateOrgs: r.candidateOrgs,
+          grantCount: r.grantCount,
+          sampleGrants,
+        });
+      } else {
+        reporterProfileConfirmed.push({
+          candidateId: r.id,
+          externalProfileId: r.externalProfileId,
+          candidateName: r.candidateName,
+          candidateOrgs: r.candidateOrgs,
+          grantCount: r.grantCount,
+          sampleGrants,
+          reviewedAt: r.reviewedAt ? r.reviewedAt.toISOString().slice(0, 10) : null,
+          autolocked: r.reviewedBy === "system-autolock",
+        });
+      }
+    }
+  }
+
   // Mentees — suppressible, derived from training records (reporting DB). The
   // raw `menteeRows` were fetched best-effort in the batch above (any failure
   // already degraded to `[]`). Each mentee's `externalId` is `{cwid}:{menteeCwid}`,
@@ -1205,6 +1340,8 @@ export async function loadEditContext(
       unmatchedPubmedCoiLower,
       unmatchedPubmedCoiReviewed,
       unmatchedPubmedCoiMentions,
+      reporterProfileCandidates,
+      reporterProfileConfirmed,
       // No confirmed publications → nothing to pick or rank. Surface an empty
       // editor state (still reading any stored override) when requested.
       highlights: includeHighlights
@@ -1366,6 +1503,8 @@ export async function loadEditContext(
     unmatchedPubmedCoiLower,
     unmatchedPubmedCoiReviewed,
     unmatchedPubmedCoiMentions,
+    reporterProfileCandidates,
+    reporterProfileConfirmed,
     highlights,
   };
 }
