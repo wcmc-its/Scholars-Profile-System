@@ -360,7 +360,7 @@ export async function getFamilyCellLineEntities(
       dominantKind: true,
     },
   });
-  return rows.map((r) => ({
+  const entities: CellLineEntity[] = rows.map((r) => ({
     entityId: r.normalizedEntityId,
     label: r.entityLabel,
     usageCount: r.usageCount,
@@ -371,6 +371,65 @@ export async function getFamilyCellLineEntities(
     isGeneric: r.isGeneric,
     dominantKind: r.dominantKind,
   }));
+  if (entities.length === 0) return [];
+
+  // #1265 — reconcile each rail count with what the feed will actually show.
+  // `familyEntity.usageCount` is a denormalized count from the entity-usage
+  // backfill; the feed (`getFamilyPublications` w/ entityId) instead intersects
+  // the entity's `familyEntityUsage` pmids with the family's LIVE gated set
+  // (`collectFamilyPmids`) and the research-article type filter. When the two
+  // backfills come from different corpus snapshots, the stored count can include
+  // pmids the feed no longer shows — so a rail link opens an empty feed (#1265).
+  // Recompute counts from the same primitives the feed uses and drop any entity
+  // with zero visible papers, so the rail can never advertise a dead link.
+  const gate = await loadFamilyOverlayGate();
+  const visiblePmids = new Set(await collectFamilyPmids(supercategory, familyLabel, gate));
+  if (visiblePmids.size === 0) return [];
+
+  const usageRows = await prisma.familyEntityUsage.findMany({
+    where: { supercategory, familyLabel },
+    select: { normalizedEntityId: true, pmid: true },
+  });
+  // Candidate = usage pmids that survive the family's visibility gate; then keep
+  // only research-article types (the feed's default filter) so the rail count
+  // equals the feed's `total` exactly.
+  const candidatePmids = [...new Set(usageRows.map((r) => r.pmid).filter((p) => visiblePmids.has(p)))];
+  const researchPmids = new Set(
+    candidatePmids.length === 0
+      ? []
+      : (
+          await prisma.publication.findMany({
+            where: { pmid: { in: candidatePmids }, publicationType: { notIn: HARD_EXCLUDE_TYPES } },
+            select: { pmid: true },
+          })
+        ).map((p) => p.pmid),
+  );
+  const visiblePmidsByEntity = new Map<string, Set<string>>();
+  for (const r of usageRows) {
+    if (!researchPmids.has(r.pmid)) continue; // research ⇒ already visible
+    let s = visiblePmidsByEntity.get(r.normalizedEntityId);
+    if (!s) visiblePmidsByEntity.set(r.normalizedEntityId, (s = new Set()));
+    s.add(r.pmid);
+  }
+  return reconcileEntityCountsToFeed(entities, visiblePmidsByEntity);
+}
+
+/**
+ * #1265 — re-rank a flat entity list to the feed's reality: overwrite each
+ * `usageCount` with the number of distinct feed-visible pmids the entity actually
+ * has, DROP entities with none (a clickable rail link to an empty feed is the
+ * bug), and re-sort by the live count (`usageCount desc, label asc` — the stored
+ * order was by the stale count). Pure; the DB read lives in
+ * {@link getFamilyCellLineEntities}.
+ */
+export function reconcileEntityCountsToFeed(
+  entities: CellLineEntity[],
+  visiblePmidsByEntity: Map<string, Set<string>>,
+): CellLineEntity[] {
+  return entities
+    .map((e) => ({ ...e, usageCount: visiblePmidsByEntity.get(e.entityId)?.size ?? 0 }))
+    .filter((e) => e.usageCount > 0)
+    .sort((a, b) => b.usageCount - a.usageCount || a.label.localeCompare(b.label));
 }
 
 /**
