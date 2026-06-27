@@ -12,7 +12,13 @@
  */
 import { describe, it, expect } from "vitest";
 import JSZip from "jszip";
-import { buildWcmCvBuffer, type CvInput, type PopsEnrichment } from "@/lib/edit/cv-export";
+import {
+  buildWcmCvBuffer,
+  cvOutline,
+  OUTLINE_ITEM_CAP,
+  type CvInput,
+  type PopsEnrichment,
+} from "@/lib/edit/cv-export";
 import type { ProfilePayload } from "@/lib/api/profile";
 import type { MenteeChip } from "@/lib/api/mentoring";
 
@@ -327,5 +333,82 @@ describe("buildWcmCv — bibliography bolds the scholar surname", () => {
   it("bolds 'Jones' in the clinical fixture bibliography", async () => {
     const bold = boldRunTexts(await documentXml(clinicalInput));
     expect(bold.some((t) => t.includes("Jones"))).toBe(true);
+  });
+});
+
+// ── cvOutline — the live /edit preview (spec §8) ─────────────────────────────
+
+type Pub = ProfilePayload["publications"][number];
+function pub(over: Partial<Pub>): Pub {
+  return { pmid: "1", title: "A paper", journal: "Some Journal", year: 2020, ...over } as Pub;
+}
+
+function find(sections: ReturnType<typeof cvOutline>, code: string) {
+  const s = sections.find((x) => x.code === code);
+  if (!s) throw new Error(`section ${code} missing from outline`);
+  return s;
+}
+
+describe("cvOutline — document-ordered CV preview", () => {
+  it("returns every WCM section A–S in download order", () => {
+    const codes = cvOutline({ profile: researchInput.profile, mentees: [], pops: null }).map(
+      (s) => s.code,
+    );
+    expect(codes).toEqual([
+      "A", "B1", "B2", "C", "D1", "D2", "E", "F1", "F2", "G", "H", "I", "J", "K",
+      "L", "M1", "M2", "N", "O", "P", "Q", "R", "S",
+    ]);
+  });
+
+  it("counts the research spine and marks no-source sections to-complete", () => {
+    const o = cvOutline({
+      profile: researchInput.profile,
+      mentees: researchInput.mentees,
+      pops: null,
+    });
+    expect(find(o, "B1").count).toBe(1); // PhD, MIT
+    expect(find(o, "D1").count).toBe(1); // Professor @ WCM (academic, not hospital)
+    expect(find(o, "M2").count).toBe(1); // one grant
+    expect(find(o, "N").count).toBe(1); // one mentee
+    expect(find(o, "O").count).toBe(1); // one leadership line
+    expect(find(o, "M1").status).toBe("generated"); // drafted at download
+    // No POPS ⇒ clinical sections have a source but no data ("empty"), not "filled".
+    expect(find(o, "C").status).toBe("empty");
+    expect(find(o, "F2").status).toBe("empty");
+    // Truly source-less sections are "todo".
+    expect(find(o, "E").status).toBe("todo");
+    expect(find(o, "K").status).toBe("todo");
+  });
+
+  it("fills clinical sections from POPS and tags them", () => {
+    const o = cvOutline({
+      profile: clinicalInput.profile,
+      mentees: [],
+      pops: clinicalInput.pops,
+    });
+    expect(find(o, "C")).toMatchObject({ status: "filled", source: "pops", count: 1 });
+    expect(find(o, "F1").items).toContain("NPI 1234567890");
+    expect(find(o, "F2").count).toBe(1); // board cert
+    expect(find(o, "H").count).toBe(2); // honor + Castle Connolly
+  });
+
+  it("personal data (A) lists name + visible email and has no count", () => {
+    const a = find(
+      cvOutline({ profile: clinicalInput.profile, mentees: [], pops: null }),
+      "A",
+    );
+    expect(a.count).toBeNull();
+    expect(a.items).toEqual(["Robert Jones, MD", "rj9001@med.cornell.edu"]);
+  });
+
+  it("caps the item preview but reports the true count", () => {
+    const profile = baseProfile({
+      publications: Array.from({ length: OUTLINE_ITEM_CAP + 5 }, (_, i) =>
+        pub({ pmid: String(i), title: `Paper ${i}` }),
+      ),
+    });
+    const s = find(cvOutline({ profile, mentees: [], pops: null }), "S");
+    expect(s.count).toBe(OUTLINE_ITEM_CAP + 5);
+    expect(s.items).toHaveLength(OUTLINE_ITEM_CAP);
   });
 });

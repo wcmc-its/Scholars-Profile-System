@@ -317,3 +317,179 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
 
   return serialize(t);
 }
+
+// ── outline (live /edit preview) ────────────────────────────────────────────
+
+/**
+ * One row of the CV outline preview (spec §8 "what's in your CV"). `status`:
+ * `filled` (we put data here), `empty` (we DO source this section but you have
+ * none yet), `generated` (M1 — drafted by the LLM at download), `todo` (no
+ * Scholars/POPS source; the template keeps a blank prompt to complete by hand).
+ */
+export type CvOutlineStatus = "filled" | "empty" | "generated" | "todo";
+export type CvOutlineSection = {
+  /** WCM section code, e.g. "A", "B1", "C", "D1" (CViche taxonomy / template order). */
+  code: string;
+  label: string;
+  source: "scholars" | "pops" | "generated" | "none";
+  status: CvOutlineStatus;
+  /** Item count, or null for non-list sections (A personal data, M1 summary). */
+  count: number | null;
+  /** Up to {@link OUTLINE_ITEM_CAP} preview strings; `count` is the true total. */
+  items: string[];
+};
+
+export type CvOutlineInput = {
+  profile: ProfilePayload;
+  mentees: MenteeChip[];
+  pops: PopsEnrichment | null;
+};
+
+/** Cap preview items per section so a prolific bibliography can't bloat the
+ *  payload; the UI shows "+N more" from the truthful `count`. */
+export const OUTLINE_ITEM_CAP = 25;
+
+function menteeYears(m: MenteeChip): string {
+  if (m.graduationYear) return String(m.graduationYear);
+  if (m.appointmentRange) {
+    return dateRange(
+      String(m.appointmentRange.startYear),
+      m.appointmentRange.endYear ? String(m.appointmentRange.endYear) : null,
+      m.appointmentRange.endYear === null,
+    );
+  }
+  return "";
+}
+
+/**
+ * Build the document-ordered outline of the WCM CV for the /edit preview — every
+ * template section (A–S) in the order it appears in the downloaded `.docx`, each
+ * tagged with what (if anything) Scholars/POPS fills. Pure; derived from the SAME
+ * row helpers `buildWcmCvBuffer` uses, so the counts/items cannot drift from the
+ * document. Items are formatted for display only (the docx has its own layout).
+ */
+export function cvOutline(input: CvOutlineInput): CvOutlineSection[] {
+  const { profile: p, pops, mentees } = input;
+  const cap = (items: string[]): string[] => items.slice(0, OUTLINE_ITEM_CAP);
+
+  // A list-backed section: filled when it has items, else empty (we source it)
+  // or todo (no source). `count` is the true total; `items` is the capped slice.
+  const list = (
+    code: string,
+    label: string,
+    source: CvOutlineSection["source"],
+    items: string[],
+  ): CvOutlineSection => ({
+    code,
+    label,
+    source,
+    status: items.length > 0 ? "filled" : source === "none" ? "todo" : "empty",
+    count: items.length,
+    items: cap(items),
+  });
+
+  const eduRows = educationRows(p, pops);
+  const appts = appointmentRows(p, pops);
+  const honors = honorRows(pops);
+
+  const sections: CvOutlineSection[] = [
+    // A — Personal Data: identity, not a list.
+    {
+      code: "A",
+      label: "Personal Data",
+      source: "scholars",
+      status: "filled",
+      count: null,
+      items: [p.publishedName, ...(p.email ? [p.email] : [])],
+    },
+    list(
+      "B1",
+      "Academic Degrees",
+      "scholars",
+      eduRows.map((r) => [r[0], r[1], r[3] ? `(${r[3]})` : ""].filter(Boolean).join(" — ")),
+    ),
+    list("B2", "Other Educational Experiences", "none", []),
+    list(
+      "C",
+      "Postdoctoral Training",
+      "pops",
+      (pops?.training ?? []).map((t) => [t.type, t.institution].filter(Boolean).join(" — ")),
+    ),
+    list(
+      "D1",
+      "Academic Appointments",
+      "scholars",
+      appts.academic.map((r) => [r[0], r[1], r[2] ? `(${r[2]})` : ""].filter(Boolean).join(", ")),
+    ),
+    list(
+      "D2",
+      "Hospital Appointments",
+      "scholars",
+      appts.hospital.map((r) => [r[0], r[1], r[2] ? `(${r[2]})` : ""].filter(Boolean).join(", ")),
+    ),
+    list("E", "Employment Status", "none", []),
+    list("F1", "Licensure", "pops", pops?.npi ? [`NPI ${pops.npi}`] : []),
+    list(
+      "F2",
+      "Board Certification",
+      "pops",
+      (pops?.boardCertifications ?? []).map((c) =>
+        c.specialty ? `${c.board} (${c.specialty})` : c.board,
+      ),
+    ),
+    list("G", "Institutional / Hospital Affiliation", "none", []),
+    list(
+      "H",
+      "Honors, Awards",
+      "pops",
+      honors.map((r) => [r[0], r[2] ? `(${r[2]})` : ""].filter(Boolean).join(" ")),
+    ),
+    list("I", "Professional Organizations & Society Memberships", "none", []),
+    list("J", "Percent Effort & Institutional Responsibilities", "none", []),
+    list("K", "Educational Contributions", "none", []),
+    list("L", "Clinical Practice, Innovation & Leadership", "none", []),
+    // M1 — Research Activities: drafted by the LLM at download time, not previewable.
+    {
+      code: "M1",
+      label: "Research Activities",
+      source: "generated",
+      status: "generated",
+      count: null,
+      items: [],
+    },
+    list(
+      "M2",
+      "Research Support — Current Funding",
+      "scholars",
+      p.grants.map((g) => {
+        const range = dateRange(g.startDate, g.endDate, g.isActive);
+        return [g.funder, g.title, range ? `(${range})` : ""].filter(Boolean).join(" — ");
+      }),
+    ),
+    list(
+      "N",
+      "Mentoring — Current Mentees",
+      "scholars",
+      mentees.map((m) => {
+        const yrs = menteeYears(m);
+        return [m.fullName, yrs ? `(${yrs})` : ""].filter(Boolean).join(" ");
+      }),
+    ),
+    list("O", "Institutional Leadership Activities", "scholars", p.leadershipTitles),
+    list("P", "Institutional Administrative Activities", "none", []),
+    list("Q", "Extramural Professional Responsibilities", "none", []),
+    list("R", "Invitations to Speak / Present", "none", []),
+    list(
+      "S",
+      "Bibliography",
+      "scholars",
+      p.publications.map((pub) =>
+        [pub.title?.replace(/\.+$/, ""), pub.journal, pub.year ? `(${pub.year})` : ""]
+          .filter(Boolean)
+          .join(" — "),
+      ),
+    ),
+  ];
+
+  return sections;
+}
