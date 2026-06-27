@@ -1092,6 +1092,14 @@ export class AppStack extends Stack {
         // envs for now: the matcher only returns data once GRANT# opportunities
         // are ingested + indexed in that env, so it stays dark until that lands.
         SELF_EDIT_GRANT_RECS: "off",
+        // PRESTIGE_AXIS_WEIGHT — funding-opportunity prestige axis weight, read by
+        // prestigeAxisWeight() in lib/api/match-opportunities.ts (parsed as a number,
+        // default "0"). The prestige badge + "Prestige" sort ship unconditionally;
+        // "0" disables the prestige *ranking* term in combineScore so it has no
+        // effect on match order until this is raised post Track-A eval. Same "0" in
+        // BOTH envs for launch; flip via `cdk deploy --exclusively Sps-App-<env>`
+        // (CD re-rolls the image only) — the flag-parity rule.
+        PRESTIGE_AXIS_WEIGHT: "0",
         // #1102/#1103/#1104/#1105 — Cancer-Center / org-unit features (merged
         // 2026-06-18, PRs #1108/#1109/#1110/#1111). Staging-on for soak;
         // prod-off/armed (flip on the next approval-gated Sps-App-prod deploy):

@@ -17,19 +17,25 @@ import { apiError } from "@/lib/api/error-response";
 import {
   DEFAULT_WEIGHTS,
   matchOpportunitiesForScholar,
+  prestigeAxisWeight,
   type MatchWeights,
   type RankSort,
 } from "@/lib/api/match-opportunities";
 
 const CWID_RE = /^[a-zA-Z0-9_-]{1,32}$/;
-const SORT_ALLOWLIST: ReadonlySet<RankSort> = new Set(["fit", "deadline", "stage"]);
+const SORT_ALLOWLIST: ReadonlySet<RankSort> = new Set(["fit", "deadline", "stage", "prestige"]);
 const WEIGHT_KEYS = ["topic", "stage", "mesh", "deadline"] as const;
 const MAX_LIMIT = 100;
 
 /** Parse `weights=topic:1,stage:0.5,...` into a full MatchWeights, or null if malformed. */
 function parseWeights(raw: string | null): MatchWeights | null {
-  if (raw === null) return DEFAULT_WEIGHTS;
-  const out: MatchWeights = { ...DEFAULT_WEIGHTS };
+  // prestige isn't a query-overridable WEIGHT_KEY — it's env-gated. Seed it from
+  // the flag so flipping PRESTIGE_AXIS_WEIGHT actually takes effect on this route
+  // (the route always passes weights, so the matcher's own flag-injection path
+  // would otherwise never fire here). Launch default 0 = badge+sort only.
+  const base: MatchWeights = { ...DEFAULT_WEIGHTS, prestige: prestigeAxisWeight() };
+  if (raw === null) return base;
+  const out: MatchWeights = { ...base };
   for (const pair of raw.split(",")) {
     const [k, v] = pair.split(":");
     if (!WEIGHT_KEYS.includes(k as (typeof WEIGHT_KEYS)[number])) return null;

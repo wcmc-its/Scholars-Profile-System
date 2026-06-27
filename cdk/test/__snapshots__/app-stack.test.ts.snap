@@ -360,6 +360,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "PRESTIGE_AXIS_WEIGHT",
+                "Value": "0",
+              },
+              {
                 "Name": "EDIT_UNIT_ROSTER_EXPORT",
                 "Value": "off",
               },
@@ -3687,6 +3691,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SELF_EDIT_GRANT_RECS",
                 "Value": "off",
+              },
+              {
+                "Name": "PRESTIGE_AXIS_WEIGHT",
+                "Value": "0",
               },
               {
                 "Name": "EDIT_UNIT_ROSTER_EXPORT",

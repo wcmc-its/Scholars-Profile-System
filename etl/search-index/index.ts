@@ -589,6 +589,43 @@ async function assertOpportunitiesIndexHealth(
         `(${pct}%) docs carry meshDescriptorUi`,
     );
   }
+
+  // Prestige-score coverage — the prestige axis (badge + "Prestige" sort) reads
+  // prestige.score off `_source`. Unlike meshDescriptorUi this field is mapped
+  // `enabled: false` (stored, not indexed), so it can't be `exists`-counted;
+  // sample `_source.prestige` and count numeric scores instead. Soft-warn (no
+  // throw), same rationale as the meshDescriptorUi check above: the prestige
+  // producer (ReciterAI) populates the field out-of-band, so a low ratio is
+  // expected until that lands + reindexes — warn so the gap stays visible.
+  const prestigeSample = await client.search({
+    index: OPPORTUNITIES_INDEX,
+    body: {
+      query: { match_all: {} },
+      _source: ["prestige"],
+      size: Math.min(total.body.count, 10_000),
+    },
+  });
+  const prestigeHits = prestigeSample.body.hits.hits as Array<{
+    _source?: { prestige?: { score?: unknown } };
+  }>;
+  const withPrestige = prestigeHits.filter(
+    (h) => typeof h._source?.prestige?.score === "number",
+  ).length;
+  const prestigePct = prestigeHits.length
+    ? Math.round((100 * withPrestige) / prestigeHits.length)
+    : 0;
+  if (prestigeHits.length === 0 || withPrestige / prestigeHits.length < 0.5) {
+    console.warn(
+      `[smoke] scholars-opportunities: only ${withPrestige}/${prestigeHits.length} ` +
+        `(${prestigePct}%) docs carry a numeric prestige.score — ` +
+        `expected until the ReciterAI prestige producer has run + reindexed`,
+    );
+  } else {
+    console.log(
+      `[smoke] scholars-opportunities: ${withPrestige}/${prestigeHits.length} ` +
+        `(${prestigePct}%) docs carry a numeric prestige.score`,
+    );
+  }
 }
 
 async function indexOpportunities(concreteIndex: string) {
