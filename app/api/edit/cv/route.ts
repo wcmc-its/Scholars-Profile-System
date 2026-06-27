@@ -51,6 +51,7 @@ import {
   buildWcmCvBuffer,
   isCvEnabled,
   type CvInput,
+  type HistoricalAppointment,
   type PopsEnrichment,
   type PubForCitation,
 } from "@/lib/edit/cv-export";
@@ -133,6 +134,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   let pops: PopsEnrichment | null = null;
   let mentees: MenteeChip[] = [];
   let bibliography: PubForCitation[] = [];
+  let historicalAppointments: HistoricalAppointment[] = [];
   try {
     const scholar = await db.read.scholar.findUnique({
       where: { cwid: entityId },
@@ -201,6 +203,22 @@ export async function POST(request: NextRequest): Promise<Response> {
     bibliography = profile.publications
       .map((pub) => byPmid.get(pub.pmid))
       .filter((row): row is PubForCitation => row != null);
+
+    // Historical appointments (#1323) — the CV exports ALL `ED-HISTORICAL` rows
+    // regardless of `showOnProfile`, and they are NOT in the (active-only,
+    // hidden-excluding) `ProfilePayload`, so load them directly here.
+    const historicalRows = await db.read.appointment.findMany({
+      where: { cwid: entityId, source: "ED-HISTORICAL" },
+      select: { title: true, organization: true, startDate: true, endDate: true },
+      orderBy: { endDate: "desc" },
+    });
+    historicalAppointments = historicalRows.map((a) => ({
+      title: a.title,
+      organization: a.organization,
+      startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
+      endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
+      isActive: false,
+    }));
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
@@ -221,7 +239,14 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // --- build the WCM CV `.docx` and stream it as an attachment. ---
   try {
-    const input: CvInput = { profile, mentees, researchSummary, pops, bibliography };
+    const input: CvInput = {
+      profile,
+      mentees,
+      researchSummary,
+      pops,
+      bibliography,
+      historicalAppointments,
+    };
     const buffer = await buildWcmCvBuffer(input);
     const filename = `${profile.slug}-wcm-cv.docx`;
     return new NextResponse(new Uint8Array(buffer), {

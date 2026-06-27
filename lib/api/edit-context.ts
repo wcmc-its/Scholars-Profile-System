@@ -458,10 +458,27 @@ export type EditContextReporterProfileConfirmed = {
   autolocked: boolean;
 };
 
+/**
+ * #1323 — a historical (source "ED-HISTORICAL") appointment, hidden from the
+ * public profile until a curator / comms_steward reveals it. Distinct from
+ * `EditContextAppointment` (active rows, hide-to-suppress): these are
+ * reveal-to-show, so they carry `showOnProfile` instead of a suppression state.
+ */
+export type EditContextHistoricalAppointment = {
+  externalId: string;
+  title: string;
+  organization: string;
+  startDate: string | null;
+  endDate: string | null;
+  showOnProfile: boolean;
+};
+
 export type EditContext = {
   scholar: EditContextScholar;
   publications: ReadonlyArray<EditContextPublication>;
   appointments: ReadonlyArray<EditContextAppointment>;
+  /** #1323 — historical appointments, reveal-to-show (curator / comms_steward). */
+  historicalAppointments: ReadonlyArray<EditContextHistoricalAppointment>;
   educations: ReadonlyArray<EditContextEducation>;
   grants: ReadonlyArray<EditContextGrant>;
   /** Read-only COI disclosures (the Weill Research Gateway is the SOR). */
@@ -658,6 +675,7 @@ export async function loadEditContext(
     slugOverrideRow,
     scholarSuppressions,
     appointmentRows,
+    historicalAppointmentRows,
     educationRows,
     grantRows,
     coiRows,
@@ -706,6 +724,22 @@ export async function loadEditContext(
         isPrimary: true,
       },
       orderBy: [{ isPrimary: "desc" }, { startDate: "desc" }],
+    }),
+    // #1323 — historical (expired) appointments imported from the WOOFA SOR
+    // under source "ED-HISTORICAL". Hidden on the public profile until a
+    // curator / comms_steward reveals one; the reveal panel lists ALL of them
+    // (revealed and not) with their current `showOnProfile` state.
+    client.appointment.findMany({
+      where: { cwid, source: "ED-HISTORICAL" },
+      select: {
+        externalId: true,
+        title: true,
+        organization: true,
+        startDate: true,
+        endDate: true,
+        showOnProfile: true,
+      },
+      orderBy: [{ endDate: "desc" }],
     }),
     client.education.findMany({
       where: { cwid },
@@ -1268,6 +1302,18 @@ export async function loadEditContext(
     };
   });
 
+  // #1323 — historical appointments are reveal-to-show, not hide-to-suppress, so
+  // they carry their `showOnProfile` state rather than a suppression row state.
+  const historicalAppointments: EditContextHistoricalAppointment[] =
+    historicalAppointmentRows.map((a) => ({
+      externalId: a.externalId,
+      title: a.title,
+      organization: a.organization,
+      startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
+      endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
+      showOnProfile: a.showOnProfile,
+    }));
+
   const educations: EditContextEducation[] = educationRows.map((e) => {
     const hide = entityHide.get(`education:${e.externalId}`);
     return {
@@ -1332,6 +1378,7 @@ export async function loadEditContext(
       },
       publications,
       appointments,
+      historicalAppointments,
       educations,
       grants,
       coiDisclosures,
@@ -1495,6 +1542,7 @@ export async function loadEditContext(
     },
     publications,
     appointments,
+    historicalAppointments,
     educations,
     grants,
     coiDisclosures,

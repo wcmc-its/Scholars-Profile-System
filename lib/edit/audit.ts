@@ -108,7 +108,14 @@ export type AuditAction =
   /** a scholar (or a genuine superuser) revoked a confirmed RePORTER match —
    *  deletes the `person_nih_profile` row (grants reconcile out next run);
    *  before/after carry the status transition. */
-  | "reporter_profile_revoke";
+  | "reporter_profile_revoke"
+  /** a curator / comms_steward (or a superuser) set a historical
+   *  (`source = "ED-HISTORICAL"`) appointment's public visibility via /edit
+   *  (#1323); `targetEntityType='appointment'`, `targetEntityId` is the
+   *  appointment `externalId`, `afterValues` carries `show_on_profile` (+ the
+   *  conferring unit on a unit-admin reveal). Requires the `scholars_audit`
+   *  action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "appointment_visibility_set";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =

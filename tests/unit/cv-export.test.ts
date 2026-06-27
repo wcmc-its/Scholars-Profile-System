@@ -549,4 +549,25 @@ describe("cvOutline — document-ordered CV preview", () => {
     expect(s1.count).toBe(OUTLINE_ITEM_CAP + 5);
     expect(s1.items).toHaveLength(OUTLINE_ITEM_CAP);
   });
+
+  it("includes historical appointments in Academic Appointments (D1) as a past range (#1323)", () => {
+    const o = cvOutline({
+      profile: baseProfile({ appointments: [] }),
+      mentees: [],
+      pops: null,
+      historicalAppointments: [
+        {
+          title: "Assistant Professor",
+          organization: "Department of Medicine",
+          startDate: "2005-07-01",
+          endDate: "2010-06-30",
+          isActive: false,
+        },
+      ],
+    });
+    const d1 = entryOf(o, "D", "D1"); // Academic Appointments
+    expect(d1.count).toBe(1);
+    expect(d1.items[0]!.text).toContain("Assistant Professor");
+    expect(d1.items[0]!.text).toContain("2005–2010"); // rendered as a completed (past) range
+  });
 });

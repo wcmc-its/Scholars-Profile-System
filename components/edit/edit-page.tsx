@@ -9,6 +9,7 @@
  * by actor; the data contract and write calls are layout-independent.
  */
 import { AppointmentsCard } from "@/components/edit/appointments-card";
+import { HistoricalAppointmentsCard } from "@/components/edit/historical-appointments-card";
 import { CoiCard } from "@/components/edit/coi-card";
 import { CoiGapCard } from "@/components/edit/coi-gap-card";
 import { ReporterProfileCard } from "@/components/edit/reporter-profile-card";
@@ -993,12 +994,24 @@ function renderPanel(
       );
     case "appointments":
       return (
-        <AppointmentsCard
-          cwid={cwid}
-          mode={voiceMode}
-          scholarName={scholarName}
-          appointments={ctx.appointments}
-        />
+        <div className="flex flex-col gap-8">
+          <AppointmentsCard
+            cwid={cwid}
+            mode={voiceMode}
+            scholarName={scholarName}
+            appointments={ctx.appointments}
+          />
+          {/* #1323 — reveal-to-show historical appointments. Only reveal-capable
+              editors (superuser / comms_steward / unit-admin curator) see the
+              control; the route enforces the same authorization. */}
+          {(isSuperuserLike(mode) || mode === "unit-admin") &&
+            ctx.historicalAppointments.length > 0 && (
+              <HistoricalAppointmentsCard
+                scholarName={scholarName}
+                appointments={ctx.historicalAppointments}
+              />
+            )}
+        </div>
       );
     case "education":
       return (

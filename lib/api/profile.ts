@@ -457,6 +457,17 @@ export type ProfilePayload = {
     isInterim: boolean;
     isActive: boolean;
   }>;
+  /** Issue #1323 — REVEALED historical (`ED-HISTORICAL`) appointments only:
+   *  rows whose `showOnProfile` is true. Hidden historical rows are excluded
+   *  entirely so this cache-shared payload stays viewer-independent. Sorted by
+   *  end date descending (most recent first; nulls last). */
+  pastAppointments: Array<{
+    title: string;
+    organization: string;
+    startDate: string | null;
+    endDate: string | null;
+    isPrimary: boolean;
+  }>;
   educations: Array<{
     degree: string;
     institution: string;
@@ -1116,6 +1127,9 @@ export const getScholarFullProfileBySlug = cache(async (
   };
   const tier = (s: string) => APPOINTMENT_TIER_ORDER[s] ?? 99;
   const sortedAppointments = [...scholar.appointments]
+    // #1323 — historical (`ED-HISTORICAL`) rows never enter the active
+    // annotate/collapse pipeline; they surface separately via pastAppointments.
+    .filter((a) => a.source !== "ED-HISTORICAL")
     // #160 — drop suppressed appointments before annotate/collapse so a hidden
     // primary can't win the single-visible-primary collapse.
     .filter((a) => !suppressedAppointmentIds.has(a.externalId))
@@ -1187,6 +1201,29 @@ export const getScholarFullProfileBySlug = cache(async (
       isInterim: a.isInterim,
       isActive: a.isActive,
     })),
+    // #1323 — REVEALED historical appointments only (`ED-HISTORICAL` +
+    // showOnProfile). Hidden rows are omitted so this CloudFront PATH-cached
+    // payload stays viewer-independent. Sorted by end date descending (most
+    // recent first; nulls last).
+    pastAppointments: scholar.appointments
+      .filter(
+        (a) =>
+          a.source === "ED-HISTORICAL" &&
+          a.showOnProfile === true &&
+          !suppressedAppointmentIds.has(a.externalId),
+      )
+      .sort((a, b) => {
+        const ae = a.endDate ? a.endDate.getTime() : -Infinity;
+        const be = b.endDate ? b.endDate.getTime() : -Infinity;
+        return be - ae;
+      })
+      .map((a) => ({
+        title: a.title,
+        organization: a.organization,
+        startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
+        endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
+        isPrimary: a.isPrimary,
+      })),
     educations: scholar.educations
       // #160 — drop suppressed education entries from the sidebar.
       .filter((e) => !suppressedEducationIds.has(e.externalId))
