@@ -25,16 +25,13 @@ import { Check, Download, Minus } from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { CvOutlineEntry, CvOutlineGroup, PopsEnrichment } from "@/lib/edit/cv-export";
+import type { CvOutlineEntry, CvOutlineGroup } from "@/lib/edit/cv-export";
+import { cvFieldSource } from "@/lib/edit/field-sources";
 
 const PATH = "/api/edit/cv";
-const POPS_PATH = "/api/edit/cv/pops";
 const OUTLINE_PATH = "/api/edit/cv/outline";
-
-/** Consent/transparency copy for the live POPS preview (spec §6b). */
-const POPS_USAGE =
-  "These clinical credentials come from your WCM physician profile (POPS) and are used to fill your CV's board-certification, training, hospital-appointment, and honors sections. They're shown here so you can see what will be included — they are not added to your public Scholars profile.";
 
 // User-facing copy, kept as named constants (one place, asserted in tests).
 const NOT_AVAILABLE =
@@ -59,25 +56,10 @@ export type CvToolProps = {
 export function CvTool({ entityId }: CvToolProps) {
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  // Live POPS enrichment for the transparency preview (spec §6b). Best-effort:
-  // a failure or a non-clinical scholar simply renders no preview. /edit only —
-  // this data is never shown on the public profile.
-  const [pops, setPops] = React.useState<PopsEnrichment | null>(null);
-  // Live document-ordered outline of the CV (spec §8). Best-effort, like POPS.
+  // Live document-ordered outline of the CV (spec §8). Best-effort: a failure or
+  // a non-clinical scholar simply renders fewer rows. /edit only — POPS-sourced
+  // clinical rows are never shown on the public profile.
   const [outline, setOutline] = React.useState<CvOutlineGroup[] | null>(null);
-
-  React.useEffect(() => {
-    const ctrl = new AbortController();
-    fetch(`${POPS_PATH}?cwid=${encodeURIComponent(entityId)}`, { signal: ctrl.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { pops?: PopsEnrichment | null } | null) => {
-        if (d?.pops) setPops(d.pops);
-      })
-      .catch(() => {
-        /* best-effort preview — stay silent on failure */
-      });
-    return () => ctrl.abort();
-  }, [entityId]);
 
   React.useEffect(() => {
     const ctrl = new AbortController();
@@ -160,125 +142,7 @@ export function CvTool({ entityId }: CvToolProps) {
       )}
 
       {outline && <CvOutline groups={outline} />}
-
-      {pops && <PopsPreview pops={pops} />}
     </EditPanel>
-  );
-}
-
-/** Pull a 4-digit year from an ISO/loose date string; "" when absent. */
-function popsYear(date: string | null): string {
-  if (!date) return "";
-  const m = /(\d{4})/.exec(date);
-  return m ? m[1]! : "";
-}
-
-/** "YYYY–YYYY", "YYYY–Present", "YYYY", or "" — never fabricates a date. */
-function popsRange(start: string | null, end: string | null): string {
-  const s = popsYear(start);
-  const e = popsYear(end) || (start && !end ? "Present" : "");
-  if (!s && !e) return "";
-  return s && e ? `${s}–${e}` : s || e;
-}
-
-export type PopsPreviewGroup = { label: string; section: string; items: string[] };
-
-/**
- * Map a `PopsEnrichment` to the preview's display groups — each tagged with the
- * CV section it feeds — dropping any group with no items. Pure (exported for the
- * unit test). The `→ CV <section>` tags are presentation, so they live here, not
- * in the API response.
- */
-export function buildPopsPreviewGroups(pops: PopsEnrichment): PopsPreviewGroup[] {
-  return [
-    {
-      label: "Board certifications",
-      section: "Board Certification",
-      items: pops.boardCertifications.map((c) =>
-        c.specialty ? `${c.board} (${c.specialty})` : c.board,
-      ),
-    },
-    {
-      label: "Residency & fellowship training",
-      section: "Postdoctoral Training",
-      items: pops.training.map((t) => `${t.type} — ${t.institution}`),
-    },
-    {
-      label: "Hospital appointments",
-      section: "Positions / Affiliation",
-      items: pops.appointments.map((a) => {
-        const r = popsRange(a.start, a.end);
-        return r ? `${a.title}, ${a.institution} (${r})` : `${a.title}, ${a.institution}`;
-      }),
-    },
-    {
-      label: "Honors & awards",
-      section: "Honors and Awards",
-      items: [
-        ...pops.honors.map((h) => (h.date ? `${h.date} — ${h.name}` : h.name)),
-        ...(pops.castleConnolly ? ["Castle Connolly Top Doctor"] : []),
-      ],
-    },
-    {
-      label: "Degrees",
-      section: "Education",
-      items: pops.degrees.map(
-        (d) => `${d.degree}${d.year ? `, ${d.year}` : ""} — ${d.institution}`,
-      ),
-    },
-    {
-      label: "Clinical specialties",
-      section: "Clinical Activities",
-      items: pops.specialties.length > 0 ? [pops.specialties.join(", ")] : [],
-    },
-    {
-      label: "Clinical practices",
-      section: "Clinical Activities",
-      items: pops.practices.map((pr) => (pr.type ? `${pr.name} (${pr.type})` : pr.name)),
-    },
-    {
-      label: "Areas of expertise",
-      section: "Clinical Activities",
-      items: pops.expertise.length > 0 ? [pops.expertise.join(", ")] : [],
-    },
-    { label: "NPI", section: "Licensure", items: pops.npi ? [pops.npi] : [] },
-  ].filter((g) => g.items.length > 0);
-}
-
-/**
- * Live, read-only preview of the POPS (WCM physician-directory) data that will
- * fill this scholar's CV — the §6b transparency surface. Each group is tagged
- * with the CV section it feeds; renders nothing when POPS carries no usable data.
- */
-function PopsPreview({ pops }: { pops: PopsEnrichment }) {
-  const groups = buildPopsPreviewGroups(pops);
-  if (groups.length === 0) return null;
-
-  return (
-    <div
-      className="border-apollo-border bg-apollo-surface-2 flex flex-col gap-3 rounded-md border p-4"
-      data-testid="cv-pops-preview"
-    >
-      <p className="text-foreground text-sm font-semibold">
-        Clinical credentials (from your WCM physician directory)
-      </p>
-      <p className="text-muted-foreground text-xs">{POPS_USAGE}</p>
-      <div className="flex flex-col gap-3">
-        {groups.map((g) => (
-          <div key={g.label} className="flex flex-col gap-1">
-            <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-              {g.label}{" "}
-              <span className="text-muted-foreground/70 normal-case">→ CV {g.section}</span>
-            </p>
-            <ul className="flex flex-col gap-1 text-sm">
-              {g.items.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -296,9 +160,9 @@ function CvOutline({ groups }: { groups: CvOutlineGroup[] }) {
         <p className="text-foreground text-sm font-semibold">What&rsquo;s in your CV</p>
         <p className="text-muted-foreground text-xs">
           Every section and subsection of the WCM CV, in the order it appears in the download. We
-          pre-fill the entries marked below; the rest keep a blank prompt for you to complete.
-          Clinical sections come from your WCM physician directory (POPS) and are not added to your
-          public Scholars profile.
+          pre-fill the entries marked below; the rest keep a blank prompt for you to complete. Each
+          pre-filled item is tagged with the system it comes from. Clinical sections come from your
+          WCM physician directory and are not added to your public Scholars profile.
         </p>
       </div>
       <div className="flex flex-col gap-3">
@@ -329,7 +193,9 @@ function OutlineGroup({ group }: { group: CvOutlineGroup }) {
 }
 
 /** One subsection (or a simple section's sole entry): status icon, optional
- *  code+label, a count/status tag, and the capped item preview ("+N more"). */
+ *  code+label, a count/status tag, and the capped item preview — each row a real
+ *  bullet carrying a per-record provenance badge, with an un-bulleted "+N more"
+ *  continuation. */
 function OutlineEntry({ entry: e }: { entry: CvOutlineEntry }) {
   const filled = e.status === "filled";
   const remainder = e.count !== null ? e.count - e.items.length : 0;
@@ -358,17 +224,19 @@ function OutlineEntry({ entry: e }: { entry: CvOutlineEntry }) {
         {e.count !== null && e.count > 0 && (
           <span className="text-muted-foreground text-xs">· {e.count}</span>
         )}
-        {e.source === "pops" && filled && (
-          <span className="text-muted-foreground/70 text-xs">· POPS</span>
-        )}
         {tag && <span className="text-muted-foreground/70 text-xs">· {tag}</span>}
       </div>
       {e.items.length > 0 && (
-        <ul className="text-muted-foreground mt-0.5 ml-6 flex flex-col gap-0.5 text-xs">
+        <ul className="text-muted-foreground mt-0.5 ml-6 list-disc space-y-0.5 pl-4 text-xs">
           {e.items.map((item, i) => (
-            <li key={i}>{item}</li>
+            <li key={i}>
+              <span className="align-middle">{item.text}</span>{" "}
+              <Badge variant="secondary" className="ml-0.5 align-middle font-normal">
+                {cvFieldSource(item.source)}
+              </Badge>
+            </li>
           ))}
-          {remainder > 0 && <li className="italic">+{remainder} more</li>}
+          {remainder > 0 && <li className="list-none italic">+{remainder} more</li>}
         </ul>
       )}
     </div>

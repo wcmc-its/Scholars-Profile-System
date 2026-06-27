@@ -162,11 +162,18 @@ what will land in their CV. It must **not** be added to the public Scholars prof
 - **Mechanism:** a small `GET /api/edit/cv/pops?cwid=` returning the typed `PopsEnrichment` (+ a
   per-field → CV-section map) for display; **same `authorizeOverviewWrite` gating** as the CV tool;
   reuses `fetchPops` (no new data path). **Never rendered under `app/(public)/scholars/...`.**
-- **Status:** BUILT 2026-06-26 — `GET /api/edit/cv/pops` (reuses `fetchPops`, `authorizeOverviewWrite`,
-  flag-gated, `hasClinicalProfile`-gated) + an embedded `PopsPreview` in `cv-tool.tsx` (consent copy,
-  per-field→CV-section tags, renders nothing for non-clinical / empty POPS). Pure grouping helper
-  `buildPopsPreviewGroups` unit-tested (`tests/unit/cv-pops-preview.test.ts`). Live endpoint not yet
-  exercised through the running server (needs dev-login, same deferral as the POST route).
+- **Status:** SUBSUMED BY THE §8 OUTLINE (2026-06-27) — the standalone POPS preview is **removed**.
+  The live document-ordered outline (§8) now carries the same transparency: every pre-filled record
+  shows a per-record provenance badge, and the POPS-sourced clinical rows (Training, Board
+  Certification, Honors, Hospital Appointments, Licensure/NPI, Clinical Practice L1) are badged
+  **"WCM physician directory"** in the very section they feed — so the scholar sees exactly which
+  clinical credentials land in the CV, where, without a second surface. The outline header keeps the
+  consent copy ("Clinical sections come from your WCM physician directory and are not added to your
+  public Scholars profile"). Deleted with this change: `PopsPreview` / `buildPopsPreviewGroups` in
+  `cv-tool.tsx`, `GET /api/edit/cv/pops`, and `tests/unit/cv-pops-preview.test.ts`. (The bare acronym
+  "POPS" is no longer surfaced in user copy.)
+  - **History:** originally BUILT 2026-06-26 as a separate `GET /api/edit/cv/pops` + embedded
+    `PopsPreview` card; merged into the outline once per-record provenance badges shipped.
 
 ## 6c. ASMS enrichment (primary affiliation + dated postdoc training) — INVESTIGATED, NOT BUILT
 
