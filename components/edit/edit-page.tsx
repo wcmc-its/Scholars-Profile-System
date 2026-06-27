@@ -154,7 +154,7 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // (an advisory the scholar acts on, not a free-edit field). The rail item
   // appears only when there are pending candidates OR confirmed history AND the
   // flag is on.
-  { key: "reporter-profile", label: "Is this you?", readonly: true, modes: ["self", "superuser"] },
+  { key: "reporter-profile", label: "Grant matches", readonly: true, modes: ["self", "superuser"] },
   // Superuser direct-set is always available; the self surface is the request
   // card when `slugRequestEnabled`, else a read-only panel (locked rail item).
   { key: "profile-url", label: "Profile URL", modes: ["self", "superuser"] },
