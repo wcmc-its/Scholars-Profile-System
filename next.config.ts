@@ -29,6 +29,13 @@ const nextConfig: NextConfig = {
   // from the nearest lockfile, which is ambiguous when the build runs from
   // a nested checkout.
   outputFileTracingRoot: process.cwd(),
+  // The CV (WCM format) generator reads the official WCM template `.docx` at
+  // runtime via a cwd-relative path (lib/edit/cv-template.ts). Next can't trace
+  // a dynamic readFile, so force the asset into the standalone bundle or the
+  // /api/edit/cv route 500s in production (the file is absent under .next/standalone).
+  outputFileTracingIncludes: {
+    "/api/edit/cv": ["./lib/edit/assets/wcm-cv-template.docx"],
+  },
   // Issue #391 — keep jsdom (pulled in by isomorphic-dompurify in
   // lib/edit/validators.ts) external to the server bundle. jsdom reads
   // browser/default-stylesheet.css via a module-relative path at runtime;
