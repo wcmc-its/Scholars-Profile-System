@@ -81,6 +81,21 @@ describe("ReporterProfileCard", () => {
     expect(screen.queryByText(/overlap|\bscore\b|confidence|\bK\s*=/i)).toBeNull();
   });
 
+  it("links each candidate to the matched investigator's NIH RePORTER portfolio (by profile id, not cwid)", () => {
+    render(
+      <ReporterProfileCard
+        cwid="aaa1"
+        candidates={[pending({ candidateId: "rp-1" })]}
+        confirmed={[confirmed({ candidateId: "rp-2" })]}
+      />,
+    );
+    const hrefs = screen
+      .getAllByRole("link", { name: /NIH RePORTER/ })
+      .map((l) => l.getAttribute("href"));
+    expect(hrefs).toContain("/api/nih-portfolio?profile_id=12345"); // pending candidate PI
+    expect(hrefs).toContain("/api/nih-portfolio?profile_id=999"); // confirmed candidate PI
+  });
+
   it("shows confirmed history with the auto-lock label + a revoke control", () => {
     render(
       <ReporterProfileCard cwid="aaa1" confirmed={[confirmed({ candidateId: "rp-2", autolocked: true })]} />,

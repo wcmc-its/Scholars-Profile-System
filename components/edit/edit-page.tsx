@@ -612,6 +612,12 @@ export function EditPage({
     return undefined;
   };
 
+  // Sub-view rail items that nest (indented) under the preceding sourced panel
+  // rather than reading as flat siblings: "From your publications" under
+  // Conflicts of Interest, and "Is this you?" under Funding. Each immediately
+  // follows its parent in every *_RAIL_ORDER and shares its rail group.
+  const isNestedSubview = (k: AttrKey) => k === "coi-gap" || k === "reporter-profile";
+
   const railItems: RailItem[] = railRestructureEnabled
     ? RAIL_V2_ORDER.flatMap((k) => {
         const a = visible.find((v) => v.key === k);
@@ -639,7 +645,7 @@ export function EditPage({
             // Home floats at the top of the rail with a leading Home glyph.
             icon: a.key === "home" ? "home" : undefined,
             // "From your publications" nests under Conflicts of Interest.
-            child: a.key === "coi-gap",
+            child: isNestedSubview(a.key),
             // High-active count ONLY; 0 → undefined so a Reviewed-only history
             // shows the item without a "0" badge.
             count: railCount(a.key),
@@ -665,7 +671,7 @@ export function EditPage({
               // "From your publications" nests under Conflicts of Interest (it
               // immediately follows "coi" in SELF_RAIL_ORDER) rather than reading
               // as a flat sibling — it is a sub-view of COI, not its own SOR.
-              child: a.key === "coi-gap",
+              child: isNestedSubview(a.key),
               // A quiet count of High-tier relationships still worth reviewing.
               // The badge is the High-active count ONLY — Medium and Reviewed are
               // excluded — and 0 coerces to undefined so the item can appear for a
@@ -688,7 +694,7 @@ export function EditPage({
               key: a.key,
               label,
               readonly: a.readonly,
-              child: a.key === "coi-gap",
+              child: isNestedSubview(a.key),
               // High-active count ONLY (Medium + Reviewed excluded); 0 → undefined
               // so a Reviewed-only history shows the item without a "0" badge.
               count: railCount(a.key),
