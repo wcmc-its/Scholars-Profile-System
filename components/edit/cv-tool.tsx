@@ -161,8 +161,9 @@ function CvOutline({ groups }: { groups: CvOutlineGroup[] }) {
         <p className="text-muted-foreground text-xs">
           Every section and subsection of the WCM CV, in the order it appears in the download. We
           pre-fill the entries marked below; the rest keep a blank prompt for you to complete. Each
-          pre-filled item is tagged with the system it comes from. Clinical sections come from your
-          WCM physician directory and are not added to your public Scholars profile.
+          pre-filled item is tagged with the system it comes from. Clinical sections come from the
+          WeillCornell.org physician directory (POPS) and are not added to your public Scholars
+          profile.
         </p>
       </div>
       <div className="flex flex-col gap-3">
@@ -207,25 +208,32 @@ function OutlineEntry({ entry: e }: { entry: CvOutlineEntry }) {
         : e.status === "todo"
           ? "complete by hand"
           : null;
+  // A label-less entry (a `simple` section's sole row) has no code/label of its
+  // own — the group header already names it. When it carries items, the status
+  // line would render as a lone check with nothing beside it, so show the items
+  // alone; keep the header only when it's the sole signal (empty section).
+  const showHeader = Boolean(e.code || e.label) || e.items.length === 0;
   return (
     <div className="px-3 py-1.5">
-      <div className="flex items-center gap-2 text-sm">
-        {filled ? (
-          <Check className="text-apollo-maroon size-4 shrink-0" aria-hidden />
-        ) : (
-          <Minus className="text-muted-foreground size-4 shrink-0" aria-hidden />
-        )}
-        {e.code && <span className="text-muted-foreground font-mono text-xs">{e.code}</span>}
-        {e.label && (
-          <span className={filled ? "text-foreground font-medium" : "text-muted-foreground"}>
-            {e.label}
-          </span>
-        )}
-        {e.count !== null && e.count > 0 && (
-          <span className="text-muted-foreground text-xs">· {e.count}</span>
-        )}
-        {tag && <span className="text-muted-foreground/70 text-xs">· {tag}</span>}
-      </div>
+      {showHeader && (
+        <div className="flex items-center gap-2 text-sm">
+          {filled ? (
+            <Check className="text-apollo-maroon size-4 shrink-0" aria-hidden />
+          ) : (
+            <Minus className="text-muted-foreground size-4 shrink-0" aria-hidden />
+          )}
+          {e.code && <span className="text-muted-foreground font-mono text-xs">{e.code}</span>}
+          {e.label && (
+            <span className={filled ? "text-foreground font-medium" : "text-muted-foreground"}>
+              {e.label}
+            </span>
+          )}
+          {e.count !== null && e.count > 0 && (
+            <span className="text-muted-foreground text-xs">· {e.count}</span>
+          )}
+          {tag && <span className="text-muted-foreground/70 text-xs">· {tag}</span>}
+        </div>
+      )}
       {e.items.length > 0 && (
         <ul className="text-muted-foreground mt-0.5 ml-6 list-disc space-y-0.5 pl-4 text-xs">
           {e.items.map((item, i) => (

@@ -166,12 +166,19 @@ what will land in their CV. It must **not** be added to the public Scholars prof
   The live document-ordered outline (§8) now carries the same transparency: every pre-filled record
   shows a per-record provenance badge, and the POPS-sourced clinical rows (Training, Board
   Certification, Honors, Hospital Appointments, Licensure/NPI, Clinical Practice L1) are badged
-  **"WCM physician directory"** in the very section they feed — so the scholar sees exactly which
+  **"POPS / WeillCornell.org"** in the very section they feed — so the scholar sees exactly which
   clinical credentials land in the CV, where, without a second surface. The outline header keeps the
-  consent copy ("Clinical sections come from your WCM physician directory and are not added to your
-  public Scholars profile"). Deleted with this change: `PopsPreview` / `buildPopsPreviewGroups` in
-  `cv-tool.tsx`, `GET /api/edit/cv/pops`, and `tests/unit/cv-pops-preview.test.ts`. (The bare acronym
-  "POPS" is no longer surfaced in user copy.)
+  consent copy ("Clinical sections come from the WeillCornell.org physician directory (POPS) and are
+  not added to your public Scholars profile"). Deleted with this change: `PopsPreview` /
+  `buildPopsPreviewGroups` in `cv-tool.tsx`, `GET /api/edit/cv/pops`, and
+  `tests/unit/cv-pops-preview.test.ts`.
+
+  > **Provenance note (2026-06-27):** the badge names the system the row's data
+  > actually came from. POPS rows read "POPS / WeillCornell.org"; the ASMS/ED
+  > appointment rows keep "ASMS by way of Enterprise Directory". A dedicated
+  > **NYP Directory** source for hospital appointments (ED current ∪ ASMS
+  > historical, preferring ED on overlap) is a deferred data-sourcing change —
+  > not represented as a badge until that feed exists.
   - **History:** originally BUILT 2026-06-26 as a separate `GET /api/edit/cv/pops` + embedded
     `PopsPreview` card; merged into the outline once per-record provenance badges shipped.
 
