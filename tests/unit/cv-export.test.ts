@@ -19,6 +19,7 @@ import {
   type CvInput,
   type PopsEnrichment,
 } from "@/lib/edit/cv-export";
+import { cvFieldSource } from "@/lib/edit/field-sources";
 import type { ProfilePayload } from "@/lib/api/profile";
 import type { MenteeChip } from "@/lib/api/mentoring";
 
@@ -132,6 +133,7 @@ const researchInput: CvInput = {
         isPrimary: true,
         isInterim: false,
         isActive: true,
+        source: "ED",
       },
     ],
     grants: [
@@ -535,6 +537,41 @@ describe("cvOutline — document-ordered CV preview", () => {
     expect(entryOf(o, "O").items[0]!.source).toBe("org-unit");
     const s1 = group(o, "S").entries.find((e) => e.code === "S1")!;
     expect(s1.items[0]!.source).toBe("publications");
+  });
+
+  it("badges ED-NYP appointments as NYP Directory and drops the fake date when undated", () => {
+    const profile = baseProfile({
+      appointments: [
+        {
+          title: "Professor of Medicine",
+          organization: "Weill Cornell Medicine",
+          startDate: "2018-07-01",
+          endDate: null,
+          isPrimary: true,
+          isInterim: false,
+          isActive: true,
+          source: "ED",
+        },
+        {
+          title: "Physician",
+          organization: "NewYork-Presbyterian Hospital",
+          startDate: null,
+          endDate: null,
+          isPrimary: false,
+          isInterim: false,
+          isActive: true,
+          source: "ED-NYP",
+        },
+      ],
+    });
+    const o = cvOutline({ profile, mentees: [], pops: null });
+    // ED faculty appointment → academic (D1), keeps the panel appointment label.
+    expect(entryOf(o, "D", "D1").items[0]!.source).toBe("appointments");
+    // ED-NYP → hospital (D2), badged "NYP Directory" with NO fabricated "(Present)".
+    const nyp = entryOf(o, "D", "D2").items.find((i) => i.text.includes("NewYork-Presbyterian"))!;
+    expect(nyp.source).toBe("nyp");
+    expect(cvFieldSource("nyp")).toBe("NYP Directory");
+    expect(nyp.text).not.toContain("Present");
   });
 
   it("caps the item preview at 10 but reports the true count", () => {
