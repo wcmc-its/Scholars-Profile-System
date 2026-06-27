@@ -12,6 +12,7 @@
  */
 import { careerStageBucket, type CareerStage } from "@/lib/career-stage";
 import { db } from "@/lib/db";
+import { asPrestige, type Prestige } from "@/lib/funding/prestige";
 import { OPPORTUNITIES_INDEX, searchClient, type OpportunityTopicScore } from "@/lib/search";
 
 const RECITERAI_YEAR_FLOOR = 2020; // D-15; mirrors lib/api/topics.ts (module-local there).
@@ -23,12 +24,25 @@ export type MatchAxes = {
   stageAppeal: number;
   meshOverlap: number;
   deadlineProximity: number;
+  prestige: number;
 };
 
-export type MatchWeights = { topic: number; stage: number; mesh: number; deadline: number };
+export type MatchWeights = { topic: number; stage: number; mesh: number; deadline: number; prestige: number };
 
 /** Default blend (decision A) — a starting point, tuned in calibration (spec §10). */
-export const DEFAULT_WEIGHTS: MatchWeights = { topic: 1.0, stage: 0.5, mesh: 0.25, deadline: 0.1 };
+export const DEFAULT_WEIGHTS: MatchWeights = {
+  topic: 1.0,
+  stage: 0.5,
+  mesh: 0.25,
+  deadline: 0.1,
+  prestige: 0, // launch = badge+sort only; raise post Track-A eval
+};
+
+/** Effective prestige weight from env (PRESTIGE_AXIS_WEIGHT). Defaults to 0; never negative. */
+export function prestigeAxisWeight(): number {
+  const n = Number(process.env.PRESTIGE_AXIS_WEIGHT);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -76,7 +90,8 @@ export function combineScore(axes: MatchAxes, weights: MatchWeights = DEFAULT_WE
     weights.topic * axes.topicAffinity +
     weights.stage * axes.stageAppeal * axes.topicAffinity +
     weights.mesh * axes.meshOverlap +
-    weights.deadline * axes.deadlineProximity
+    weights.deadline * axes.deadlineProximity +
+    weights.prestige * axes.prestige * axes.topicAffinity
   );
 }
 
@@ -95,6 +110,7 @@ export type OpportunityCandidate = {
    *  fixtures need not supply them; null-safe on the ranked result below. */
   mechanism?: string | null;
   awardCeiling?: number | null;
+  prestige?: Prestige | null;
 };
 
 export type RankedOpportunity = {
@@ -109,9 +125,10 @@ export type RankedOpportunity = {
    *  actionability (the funding mechanism + award ceiling). `null` when absent. */
   mechanism: string | null;
   awardCeiling: number | null;
+  prestige: Prestige | null;
 };
 
-export type RankSort = "fit" | "deadline" | "stage";
+export type RankSort = "fit" | "deadline" | "stage" | "prestige";
 
 export type RankOptions = {
   now?: Date;
@@ -134,6 +151,7 @@ const SORT_KEY: Record<RankSort, (a: MatchAxes) => number> = {
   fit: () => NaN, // handled by defaultScore
   deadline: (a) => a.deadlineProximity,
   stage: (a) => a.stageAppeal,
+  prestige: (a) => a.prestige,
 };
 
 /**
@@ -160,6 +178,7 @@ export function rankCandidates(
       stageAppeal: c.appealByStage[scholarStage] ?? 0,
       meshOverlap: meshOverlap(scholarMeshUi, c.meshDescriptorUi),
       deadlineProximity: deadlineProximity(c.dueDate, now),
+      prestige: c.prestige?.score ?? 0,
     };
     if (axes.topicAffinity <= floor) continue;
     scored.push({
@@ -172,6 +191,7 @@ export function rankCandidates(
       defaultScore: combineScore(axes, weights),
       mechanism: c.mechanism ?? null,
       awardCeiling: c.awardCeiling ?? null,
+      prestige: c.prestige ?? null,
     });
   }
 
@@ -306,9 +326,18 @@ export async function matchOpportunitiesForScholar(
       meshDescriptorUi: Array.isArray(src.meshDescriptorUi) ? (src.meshDescriptorUi as string[]) : [],
       mechanism: src.mechanism != null ? String(src.mechanism) : null,
       awardCeiling: typeof src.awardCeiling === "number" ? src.awardCeiling : null,
+      prestige: asPrestige(src.prestige),
     };
   });
 
-  // Stage 2 — composite re-rank over the distinct axes.
-  return rankCandidates(vector, stage, scholarMeshUi, candidates, opts);
+  // Stage 2 — composite re-rank over the distinct axes. Inject the env-driven
+  // prestige weight only when the caller did not supply explicit weights, so
+  // DEFAULT_WEIGHTS (prestige: 0) keeps pure unit tests deterministic.
+  return rankCandidates(
+    vector,
+    stage,
+    scholarMeshUi,
+    candidates,
+    opts.weights ? opts : { ...opts, weights: { ...DEFAULT_WEIGHTS, prestige: prestigeAxisWeight() } },
+  );
 }

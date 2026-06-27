@@ -17,7 +17,9 @@
  */
 import { useEffect, useState } from "react";
 
+import { PrestigeBadge } from "@/components/edit/prestige-badge";
 import type { CareerStage } from "@/lib/career-stage";
+import type { Prestige } from "@/lib/funding/prestige";
 import {
   buildResearcherCsv,
   careerStageLabel,
@@ -92,6 +94,8 @@ type OpportunityListItem = {
   dueDate: string | null;
   source: string | null;
   status: string | null;
+  prestige?: Prestige | null;
+  isHonorific?: boolean | null;
 };
 
 type MatchingTopic = { topicId: string; label: string; score: number };
@@ -288,7 +292,10 @@ function OpportunityRow({
       className="block w-full border-t border-border py-3 text-left first:border-t-0 hover:bg-[var(--muted)]/40"
     >
       <div className="flex items-baseline justify-between gap-3">
-        <span className="font-medium leading-snug text-foreground">{o.title ?? o.opportunityId}</span>
+        <span className="flex flex-wrap items-baseline gap-2">
+          <span className="font-medium leading-snug text-foreground">{o.title ?? o.opportunityId}</span>
+          <PrestigeBadge prestige={o.prestige} />
+        </span>
         <SourceBadge source={o.source} />
       </div>
       {meta.length > 0 ? (
