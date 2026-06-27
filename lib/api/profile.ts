@@ -456,6 +456,7 @@ export type ProfilePayload = {
     isPrimary: boolean;
     isInterim: boolean;
     isActive: boolean;
+    source: string;
   }>;
   educations: Array<{
     degree: string;
@@ -1186,6 +1187,7 @@ export const getScholarFullProfileBySlug = cache(async (
       isPrimary: a.isPrimary,
       isInterim: a.isInterim,
       isActive: a.isActive,
+      source: a.source,
     })),
     educations: scholar.educations
       // #160 — drop suppressed education entries from the sidebar.

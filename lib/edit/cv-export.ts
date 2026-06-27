@@ -96,8 +96,11 @@ function dateRange(
   isActive = false,
 ): string {
   const s = year(start);
-  const e = isActive ? "Present" : year(end);
-  if (!s && !e) return "";
+  const eYear = year(end);
+  // No date information at all (e.g. undated ED-NYP affiliate titles) — render
+  // nothing rather than a misleading lone "Present".
+  if (!s && !eYear) return "";
+  const e = isActive ? "Present" : eYear;
   if (s && e) return `${s}–${e}`;
   return s || e;
 }
@@ -209,7 +212,15 @@ function appointmentRows(
     (isHospital(org) ? hospital : academic).push({ cells: [title, org, dates], source });
   };
   for (const a of p.appointments)
-    add(a.title, a.organization, dateRange(a.startDate, a.endDate, a.isActive), "appointments");
+    add(
+      a.title,
+      a.organization,
+      dateRange(a.startDate, a.endDate, a.isActive),
+      // ED-NYP = the NewYork-Presbyterian affiliate feed → "NYP Directory". Other
+      // sources keep the panel's appointment label; the broader source-accurate
+      // relabel + ASMS NYP history are tracked in #1325.
+      a.source === "ED-NYP" ? "nyp" : "appointments",
+    );
   for (const a of pops?.appointments ?? [])
     add(a.title, a.institution, dateRange(a.start, a.end), "pops");
   return { academic, hospital };
