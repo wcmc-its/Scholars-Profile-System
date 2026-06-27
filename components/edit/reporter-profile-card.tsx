@@ -29,6 +29,7 @@ import * as React from "react";
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { Button } from "@/components/ui/button";
+import { nihReporterPiUrl } from "@/lib/nih-reporter";
 import { REJECT_REASONS, REJECT_REASON_LABEL, type RejectReason } from "@/lib/edit/reporter-profile";
 import type {
   EditContextReporterProfileCandidate,
@@ -67,6 +68,25 @@ function SampleGrants({ grants }: { grants: ReadonlyArray<EditContextReporterSam
         );
       })}
     </ul>
+  );
+}
+
+/** Deep-link to the matched investigator's portfolio on NIH RePORTER — keyed by
+ *  the candidate's `externalProfileId` (the matched eRA profile), NOT the
+ *  scholar's cwid: a lateral recruit has no resolved profile of their own yet,
+ *  so the link must point at the candidate PI for the scholar to verify the
+ *  match. `externalProfileId` is a public NIH id, not the internal overlap K. */
+function ReporterPiLink({ profileId }: { profileId: number }) {
+  return (
+    <a
+      href={nihReporterPiUrl({ profileId })}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Opens NIH RePORTER (NIH funding only)"
+      className="text-apollo-slate mt-2 inline-block text-[13px] underline-offset-2 hover:underline"
+    >
+      View this investigator on NIH RePORTER ↗
+    </a>
   );
 }
 
@@ -220,6 +240,7 @@ export function ReporterProfileCard({
                   . {su ? "Are these the scholar's?" : "Are these yours?"}
                 </p>
                 <SampleGrants grants={c.sampleGrants} />
+                <ReporterPiLink profileId={c.externalProfileId} />
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Button
@@ -311,6 +332,7 @@ export function ReporterProfileCard({
                     ) : null}
                   </p>
                   <SampleGrants grants={c.sampleGrants} />
+                  <ReporterPiLink profileId={c.externalProfileId} />
                   <div className="mt-2">
                     <Button
                       type="button"
