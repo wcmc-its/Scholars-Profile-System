@@ -58,6 +58,9 @@ export type PubForCitation = {
   pages: string | null;
   doi: string | null;
   pmcid: string | null;
+  /** PubMed-style `publication_type`; bins the entry into a WCM bibliography
+   *  category ({@link bibSubsectionKey}). Null ⇒ peer-reviewed research article. */
+  publicationType: string | null;
 };
 
 /** Route ↔ builder contract. The route owns all I/O; the builder is pure-ish
@@ -204,6 +207,75 @@ function honorRows(pops: PopsEnrichment | null): string[][] {
   return rows;
 }
 
+// ── bibliography categories (Section S) ─────────────────────────────────────
+
+/**
+ * The WCM template's nine bibliography categories, in document order, each with
+ * the `anchor` prefix used to locate its prompt paragraph in the .docx. Shared
+ * by the builder (where to inject each group) and the outline (preview rows), so
+ * the two cannot disagree on the taxonomy.
+ */
+export const BIB_SUBSECTIONS = [
+  {
+    code: "S1",
+    key: "articles",
+    label: "Peer-reviewed Research Articles",
+    anchor: "Peer-reviewed Research Articles",
+  },
+  { code: "S2", key: "reviews", label: "Reviews and Editorials", anchor: "Reviews and Editorials" },
+  { code: "S3", key: "books", label: "Books", anchor: "Books:" },
+  { code: "S4", key: "chapters", label: "Chapters", anchor: "Chapters" },
+  {
+    code: "S5",
+    key: "nonpeer",
+    label: "Non-peer-reviewed Research Publications",
+    anchor: "Non-peer-reviewed Research Publications",
+  },
+  { code: "S6", key: "cases", label: "Case Reports", anchor: "Case Reports" },
+  { code: "S7", key: "inreview", label: "In review", anchor: "In review" },
+  { code: "S8", key: "abstracts", label: "Abstracts", anchor: "Abstracts" },
+  { code: "S9", key: "other", label: "Other", anchor: "Other (media" },
+] as const;
+
+export type BibSubsectionKey = (typeof BIB_SUBSECTIONS)[number]["key"];
+
+/**
+ * Bin a PubMed `publication_type` into a WCM bibliography category. Keyword
+ * heuristic over the real corpus (Academic Article / Review / Case Report /
+ * Letter / Comment / Editorial Article / Preprint / Conference Paper / Erratum /
+ * Retraction / Guideline); unknown or null ⇒ peer-reviewed research article.
+ */
+export function bibSubsectionKey(type: string | null | undefined): BibSubsectionKey {
+  const t = (type ?? "").toLowerCase();
+  if (/case report/.test(t)) return "cases";
+  if (/review|editorial/.test(t)) return "reviews";
+  if (/letter|comment/.test(t)) return "nonpeer";
+  if (/preprint/.test(t)) return "inreview";
+  if (/erratum|retraction|correction/.test(t)) return "other";
+  if (/conference|abstract|meeting|proceeding/.test(t)) return "abstracts";
+  if (/chapter/.test(t)) return "chapters";
+  if (/\bbook\b/.test(t)) return "books";
+  return "articles";
+}
+
+/**
+ * POPS clinical-practice prose lines for Section L1 (specialties / practices /
+ * areas of expertise) — the WCM physician-directory data the CV otherwise drops.
+ * Empty for non-clinical scholars.
+ */
+function clinicalPracticeLines(pops: PopsEnrichment | null): string[] {
+  if (!pops) return [];
+  const lines: string[] = [];
+  if (pops.specialties.length > 0) lines.push(`Specialties: ${pops.specialties.join(", ")}`);
+  if (pops.practices.length > 0) {
+    lines.push(
+      `Practices: ${pops.practices.map((pr) => (pr.type ? `${pr.name} (${pr.type})` : pr.name)).join("; ")}`,
+    );
+  }
+  if (pops.expertise.length > 0) lines.push(`Areas of expertise: ${pops.expertise.join(", ")}`);
+  return lines;
+}
+
 // ── public builder ──────────────────────────────────────────────────────────
 
 /** Build the WCM CV by filling the official template, returning the .docx bytes. */
@@ -253,6 +325,17 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
 
   // 7. Honors, Awards.
   fillGrid(doc, findTable(t, (h) => h[0] === "Name of award"), honorRows(pops));
+
+  // 7b. Clinical Practice (Section L1) — POPS specialties / practices / expertise
+  //     as prose under the "Clinical Practice" prompt. Clinical faculty only.
+  const clinicalLines = clinicalPracticeLines(pops);
+  if (clinicalLines.length > 0) {
+    insertParagraphsAfter(
+      t,
+      (x) => x.startsWith("Clinical Practice"),
+      clinicalLines.map((s) => makeParagraph(doc, [{ text: s }])),
+    );
+  }
 
   // 8. Research — Activities summary (M1) + Current Research Funding (one table per grant).
   if (input.researchSummary.trim()) {
@@ -304,11 +387,19 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
     p.leadershipTitles.map((title) => [title, "", ""]),
   );
 
-  // 11. Bibliography — citation paragraphs with the scholar's surname bolded.
+  // 11. Bibliography — bin each entry into its WCM category (peer-reviewed
+  //     articles, reviews, case reports, …) and inject under that subsection's
+  //     prompt, numbered within the category, with the scholar's surname bolded.
   if (input.bibliography.length > 0) {
     const selected = new Set([lastNameKey(p.preferredName)]);
-    const paras = input.bibliography.map((pub, i) => makeParagraph(doc, citationRuns(i, pub, selected)));
-    insertParagraphsAfter(t, (x) => x.startsWith("BIBLIOGRAPHY"), paras);
+    for (const sub of BIB_SUBSECTIONS) {
+      const pubs = input.bibliography.filter(
+        (pub) => bibSubsectionKey(pub.publicationType) === sub.key,
+      );
+      if (pubs.length === 0) continue;
+      const paras = pubs.map((pub, i) => makeParagraph(doc, citationRuns(i, pub, selected)));
+      insertParagraphsAfter(t, (x) => x.startsWith(sub.anchor), paras);
+    }
   }
 
   // 12. Style every table (incl. cloned ones) to match CViche's WCM output:
@@ -320,24 +411,26 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
 
 // ── outline (live /edit preview) ────────────────────────────────────────────
 
-/**
- * One row of the CV outline preview (spec §8 "what's in your CV"). `status`:
- * `filled` (we put data here), `empty` (we DO source this section but you have
- * none yet), `generated` (M1 — drafted by the LLM at download), `todo` (no
- * Scholars/POPS source; the template keeps a blank prompt to complete by hand).
- */
+/** Per-entry fill state: `filled` (we put data here), `empty` (we source this
+ *  but you have none yet), `generated` (M1 — drafted at download), `todo` (no
+ *  source; the template keeps a blank prompt to complete by hand). */
 export type CvOutlineStatus = "filled" | "empty" | "generated" | "todo";
-export type CvOutlineSection = {
-  /** WCM section code, e.g. "A", "B1", "C", "D1" (CViche taxonomy / template order). */
+
+/** One leaf row of the outline — a subsection, or the sole entry of a simple
+ *  section (then `code`/`label` are "", and the parent group carries them). */
+export type CvOutlineEntry = {
   code: string;
   label: string;
   source: "scholars" | "pops" | "generated" | "none";
   status: CvOutlineStatus;
-  /** Item count, or null for non-list sections (A personal data, M1 summary). */
+  /** Item count, or null for non-list entries (A personal data, M1 summary). */
   count: number | null;
   /** Up to {@link OUTLINE_ITEM_CAP} preview strings; `count` is the true total. */
   items: string[];
 };
+
+/** A top-level WCM section (A–S) and its subsection rows, in document order. */
+export type CvOutlineGroup = { code: string; label: string; entries: CvOutlineEntry[] };
 
 export type CvOutlineInput = {
   profile: ProfilePayload;
@@ -345,9 +438,8 @@ export type CvOutlineInput = {
   pops: PopsEnrichment | null;
 };
 
-/** Cap preview items per section so a prolific bibliography can't bloat the
- *  payload; the UI shows "+N more" from the truthful `count`. */
-export const OUTLINE_ITEM_CAP = 25;
+/** Cap preview items per entry; the UI shows "+N more" from the true `count`. */
+export const OUTLINE_ITEM_CAP = 10;
 
 function menteeYears(m: MenteeChip): string {
   if (m.graduationYear) return String(m.graduationYear);
@@ -363,23 +455,23 @@ function menteeYears(m: MenteeChip): string {
 
 /**
  * Build the document-ordered outline of the WCM CV for the /edit preview — every
- * template section (A–S) in the order it appears in the downloaded `.docx`, each
- * tagged with what (if anything) Scholars/POPS fills. Pure; derived from the SAME
- * row helpers `buildWcmCvBuffer` uses, so the counts/items cannot drift from the
- * document. Items are formatted for display only (the docx has its own layout).
+ * template section AND subsection (A–S), in download order, each tagged with what
+ * Scholars/POPS fills. Pure; derived from the SAME helpers `buildWcmCvBuffer`
+ * uses (incl. {@link bibSubsectionKey} for the S1–S9 bins and
+ * {@link clinicalPracticeLines} for L1), so the preview mirrors the .docx.
  */
-export function cvOutline(input: CvOutlineInput): CvOutlineSection[] {
+export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
   const { profile: p, pops, mentees } = input;
   const cap = (items: string[]): string[] => items.slice(0, OUTLINE_ITEM_CAP);
 
-  // A list-backed section: filled when it has items, else empty (we source it)
-  // or todo (no source). `count` is the true total; `items` is the capped slice.
-  const list = (
+  // A list-backed entry: filled when it has items, else empty (we source it) or
+  // todo (no source). `count` is the true total; `items` is the capped slice.
+  const entry = (
     code: string,
     label: string,
-    source: CvOutlineSection["source"],
+    source: CvOutlineEntry["source"],
     items: string[],
-  ): CvOutlineSection => ({
+  ): CvOutlineEntry => ({
     code,
     label,
     source,
@@ -392,104 +484,217 @@ export function cvOutline(input: CvOutlineInput): CvOutlineSection[] {
   const appts = appointmentRows(p, pops);
   const honors = honorRows(pops);
 
-  const sections: CvOutlineSection[] = [
-    // A — Personal Data: identity, not a list.
+  // Bibliography: classify each confirmed publication into its WCM category, so
+  // the preview's S1–S9 bins match where the builder injects each entry.
+  const pubLine = (pub: ProfilePayload["publications"][number]): string =>
+    [pub.title?.replace(/\.+$/, ""), pub.journal, pub.year ? `(${pub.year})` : ""]
+      .filter(Boolean)
+      .join(" — ");
+  const bibByKey = new Map<BibSubsectionKey, string[]>();
+  for (const pub of p.publications) {
+    const k = bibSubsectionKey(pub.publicationType);
+    const arr = bibByKey.get(k);
+    if (arr) arr.push(pubLine(pub));
+    else bibByKey.set(k, [pubLine(pub)]);
+  }
+
+  // Grants all land in "Current Research Funding" (the builder does not split
+  // active/completed); Past/Pending keep blank prompts.
+  const grantItems = p.grants.map((g) => {
+    const range = dateRange(g.startDate, g.endDate, g.isActive);
+    return [g.funder, g.title, range ? `(${range})` : ""].filter(Boolean).join(" — ");
+  });
+
+  // A simple (non-subsectioned) section's sole entry; the group carries the name.
+  const simple = (source: CvOutlineEntry["source"], items: string[]): CvOutlineEntry[] => [
+    entry("", "", source, items),
+  ];
+
+  return [
     {
       code: "A",
       label: "Personal Data",
-      source: "scholars",
-      status: "filled",
-      count: null,
-      items: [p.publishedName, ...(p.email ? [p.email] : [])],
+      entries: [
+        {
+          code: "",
+          label: "",
+          source: "scholars",
+          status: "filled",
+          count: null,
+          items: [p.publishedName, ...(p.email ? [p.email] : [])],
+        },
+      ],
     },
-    list(
-      "B1",
-      "Academic Degrees",
-      "scholars",
-      eduRows.map((r) => [r[0], r[1], r[3] ? `(${r[3]})` : ""].filter(Boolean).join(" — ")),
-    ),
-    list("B2", "Other Educational Experiences", "none", []),
-    list(
-      "C",
-      "Postdoctoral Training",
-      "pops",
-      (pops?.training ?? []).map((t) => [t.type, t.institution].filter(Boolean).join(" — ")),
-    ),
-    list(
-      "D1",
-      "Academic Appointments",
-      "scholars",
-      appts.academic.map((r) => [r[0], r[1], r[2] ? `(${r[2]})` : ""].filter(Boolean).join(", ")),
-    ),
-    list(
-      "D2",
-      "Hospital Appointments",
-      "scholars",
-      appts.hospital.map((r) => [r[0], r[1], r[2] ? `(${r[2]})` : ""].filter(Boolean).join(", ")),
-    ),
-    list("E", "Employment Status", "none", []),
-    list("F1", "Licensure", "pops", pops?.npi ? [`NPI ${pops.npi}`] : []),
-    list(
-      "F2",
-      "Board Certification",
-      "pops",
-      (pops?.boardCertifications ?? []).map((c) =>
-        c.specialty ? `${c.board} (${c.specialty})` : c.board,
-      ),
-    ),
-    list("G", "Institutional / Hospital Affiliation", "none", []),
-    list(
-      "H",
-      "Honors, Awards",
-      "pops",
-      honors.map((r) => [r[0], r[2] ? `(${r[2]})` : ""].filter(Boolean).join(" ")),
-    ),
-    list("I", "Professional Organizations & Society Memberships", "none", []),
-    list("J", "Percent Effort & Institutional Responsibilities", "none", []),
-    list("K", "Educational Contributions", "none", []),
-    list("L", "Clinical Practice, Innovation & Leadership", "none", []),
-    // M1 — Research Activities: drafted by the LLM at download time, not previewable.
     {
-      code: "M1",
-      label: "Research Activities",
-      source: "generated",
-      status: "generated",
-      count: null,
-      items: [],
+      code: "B",
+      label: "Education",
+      entries: [
+        entry(
+          "B1",
+          "Academic Degrees",
+          "scholars",
+          eduRows.map((r) => [r[0], r[1], r[3] ? `(${r[3]})` : ""].filter(Boolean).join(" — ")),
+        ),
+        entry("B2", "Other Educational Experiences", "none", []),
+      ],
     },
-    list(
-      "M2",
-      "Research Support — Current Funding",
-      "scholars",
-      p.grants.map((g) => {
-        const range = dateRange(g.startDate, g.endDate, g.isActive);
-        return [g.funder, g.title, range ? `(${range})` : ""].filter(Boolean).join(" — ");
-      }),
-    ),
-    list(
-      "N",
-      "Mentoring — Current Mentees",
-      "scholars",
-      mentees.map((m) => {
-        const yrs = menteeYears(m);
-        return [m.fullName, yrs ? `(${yrs})` : ""].filter(Boolean).join(" ");
-      }),
-    ),
-    list("O", "Institutional Leadership Activities", "scholars", p.leadershipTitles),
-    list("P", "Institutional Administrative Activities", "none", []),
-    list("Q", "Extramural Professional Responsibilities", "none", []),
-    list("R", "Invitations to Speak / Present", "none", []),
-    list(
-      "S",
-      "Bibliography",
-      "scholars",
-      p.publications.map((pub) =>
-        [pub.title?.replace(/\.+$/, ""), pub.journal, pub.year ? `(${pub.year})` : ""]
-          .filter(Boolean)
-          .join(" — "),
+    {
+      code: "C",
+      label: "Postdoctoral Training",
+      entries: simple(
+        "pops",
+        (pops?.training ?? []).map((t) => [t.type, t.institution].filter(Boolean).join(" — ")),
       ),
-    ),
+    },
+    {
+      code: "D",
+      label: "Professional Positions & Employment",
+      entries: [
+        entry(
+          "D1",
+          "Academic Appointments",
+          "scholars",
+          appts.academic.map((r) =>
+            [r[0], r[1], r[2] ? `(${r[2]})` : ""].filter(Boolean).join(", "),
+          ),
+        ),
+        entry(
+          "D2",
+          "Hospital Appointments",
+          "scholars",
+          appts.hospital.map((r) =>
+            [r[0], r[1], r[2] ? `(${r[2]})` : ""].filter(Boolean).join(", "),
+          ),
+        ),
+        entry("D3", "Other Professional Positions", "none", []),
+      ],
+    },
+    { code: "E", label: "Employment Status", entries: simple("none", []) },
+    {
+      code: "F",
+      label: "Licensure, Board Certification",
+      entries: [
+        entry("F1", "Licensure", "pops", pops?.npi ? [`NPI ${pops.npi}`] : []),
+        entry(
+          "F2",
+          "Board Certification",
+          "pops",
+          (pops?.boardCertifications ?? []).map((c) =>
+            c.specialty ? `${c.board} (${c.specialty})` : c.board,
+          ),
+        ),
+      ],
+    },
+    { code: "G", label: "Institutional / Hospital Affiliation", entries: simple("none", []) },
+    {
+      code: "H",
+      label: "Honors, Awards",
+      entries: simple(
+        "pops",
+        honors.map((r) => [r[0], r[2] ? `(${r[2]})` : ""].filter(Boolean).join(" ")),
+      ),
+    },
+    {
+      code: "I",
+      label: "Professional Organizations & Society Memberships",
+      entries: simple("none", []),
+    },
+    {
+      code: "J",
+      label: "Percent Effort & Institutional Responsibilities",
+      entries: simple("none", []),
+    },
+    {
+      code: "K",
+      label: "Educational Contributions",
+      entries: [
+        entry("K1", "Didactic teaching", "none", []),
+        entry("K2", "Clinical teaching", "none", []),
+        entry("K3", "Administrative teaching", "none", []),
+        entry("K4", "Continuing / professional education", "none", []),
+        entry("K5", "Other education / outreach", "none", []),
+      ],
+    },
+    {
+      code: "L",
+      label: "Clinical Practice, Innovation & Leadership",
+      entries: [
+        entry("L1", "Clinical Practice", "pops", clinicalPracticeLines(pops)),
+        entry("L2", "Clinical Innovations", "none", []),
+        entry("L3", "Clinical Leadership", "none", []),
+      ],
+    },
+    {
+      code: "M",
+      label: "Research",
+      entries: [
+        {
+          code: "M1",
+          label: "Research Activities",
+          source: "generated",
+          status: "generated",
+          count: null,
+          items: [],
+        },
+        entry("M2", "Current Research Funding", "scholars", grantItems),
+        entry("M3", "Past (Completed) Funding", "none", []),
+        entry("M4", "Pending Funding", "none", []),
+        entry("M5", "Patents & Inventions", "none", []),
+      ],
+    },
+    {
+      code: "N",
+      label: "Mentoring",
+      entries: [
+        entry("N1", "Leadership & mentoring in programs", "none", []),
+        entry("N2", "Institutional Training & Mentored Trainee Grants", "none", []),
+        entry(
+          "N3",
+          "Current Mentees",
+          "scholars",
+          mentees.map((m) => {
+            const yrs = menteeYears(m);
+            return [m.fullName, yrs ? `(${yrs})` : ""].filter(Boolean).join(" ");
+          }),
+        ),
+        entry("N4", "Past Mentees", "none", []),
+      ],
+    },
+    {
+      code: "O",
+      label: "Institutional Leadership Activities",
+      entries: simple("scholars", p.leadershipTitles),
+    },
+    {
+      code: "P",
+      label: "Institutional Administrative Activities",
+      entries: simple("none", []),
+    },
+    {
+      code: "Q",
+      label: "Extramural Professional Responsibilities",
+      entries: [
+        entry("Q1", "Leadership in Extramural Organizations", "none", []),
+        entry("Q2", "Service on Boards / Committees", "none", []),
+        entry("Q3", "Grant Reviewing / Study Sections", "none", []),
+        entry("Q4", "Editorial Activities", "none", []),
+      ],
+    },
+    {
+      code: "R",
+      label: "Invitations to Speak / Present",
+      entries: [
+        entry("R1", "Regional", "none", []),
+        entry("R2", "National", "none", []),
+        entry("R3", "International", "none", []),
+      ],
+    },
+    {
+      code: "S",
+      label: "Bibliography",
+      entries: BIB_SUBSECTIONS.map((sub) =>
+        entry(sub.code, sub.label, "scholars", bibByKey.get(sub.key) ?? []),
+      ),
+    },
   ];
-
-  return sections;
 }

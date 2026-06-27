@@ -26,7 +26,7 @@ import { Check, Download, Minus } from "lucide-react";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import type { CvOutlineSection, PopsEnrichment } from "@/lib/edit/cv-export";
+import type { CvOutlineEntry, CvOutlineGroup, PopsEnrichment } from "@/lib/edit/cv-export";
 
 const PATH = "/api/edit/cv";
 const POPS_PATH = "/api/edit/cv/pops";
@@ -64,7 +64,7 @@ export function CvTool({ entityId }: CvToolProps) {
   // this data is never shown on the public profile.
   const [pops, setPops] = React.useState<PopsEnrichment | null>(null);
   // Live document-ordered outline of the CV (spec §8). Best-effort, like POPS.
-  const [outline, setOutline] = React.useState<CvOutlineSection[] | null>(null);
+  const [outline, setOutline] = React.useState<CvOutlineGroup[] | null>(null);
 
   React.useEffect(() => {
     const ctrl = new AbortController();
@@ -83,7 +83,7 @@ export function CvTool({ entityId }: CvToolProps) {
     const ctrl = new AbortController();
     fetch(`${OUTLINE_PATH}?cwid=${encodeURIComponent(entityId)}`, { signal: ctrl.signal })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { outline?: CvOutlineSection[] | null } | null) => {
+      .then((d: { outline?: CvOutlineGroup[] | null } | null) => {
         if (d?.outline) setOutline(d.outline);
       })
       .catch(() => {
@@ -159,7 +159,7 @@ export function CvTool({ entityId }: CvToolProps) {
         </Alert>
       )}
 
-      {outline && <CvOutline sections={outline} />}
+      {outline && <CvOutline groups={outline} />}
 
       {pops && <PopsPreview pops={pops} />}
     </EditPanel>
@@ -284,73 +284,94 @@ function PopsPreview({ pops }: { pops: PopsEnrichment }) {
 
 /**
  * Live, document-ordered outline of the WCM CV (spec §8) — every template
- * section A–S in download order, fetched from `GET /api/edit/cv/outline`. Filled
- * sections show their count + a capped item preview; the rest show why they're
- * blank ("complete by hand" / "none yet" / "drafted on download").
+ * section AND subsection A–S in download order, fetched from
+ * `GET /api/edit/cv/outline`. Each section is a bordered, shaded-header block
+ * mirroring the CV document; filled entries show their count + a capped item
+ * preview, the rest show why they're blank.
  */
-function CvOutline({ sections }: { sections: CvOutlineSection[] }) {
+function CvOutline({ groups }: { groups: CvOutlineGroup[] }) {
   return (
-    <div
-      className="border-apollo-border bg-apollo-surface-2 flex flex-col gap-3 rounded-md border p-4"
-      data-testid="cv-outline"
-    >
-      <p className="text-foreground text-sm font-semibold">What&rsquo;s in your CV</p>
-      <p className="text-muted-foreground text-xs">
-        Every section of the WCM CV, in the order it appears in the download. We pre-fill the
-        sections below; the rest keep a blank prompt for you to complete. Clinical sections come
-        from your WCM physician directory (POPS) and are not added to your public Scholars profile.
-      </p>
-      <ul className="flex flex-col gap-2">
-        {sections.map((s) => (
-          <OutlineRow key={s.code} section={s} />
+    <div className="flex flex-col gap-3" data-testid="cv-outline">
+      <div>
+        <p className="text-foreground text-sm font-semibold">What&rsquo;s in your CV</p>
+        <p className="text-muted-foreground text-xs">
+          Every section and subsection of the WCM CV, in the order it appears in the download. We
+          pre-fill the entries marked below; the rest keep a blank prompt for you to complete.
+          Clinical sections come from your WCM physician directory (POPS) and are not added to your
+          public Scholars profile.
+        </p>
+      </div>
+      <div className="flex flex-col gap-3">
+        {groups.map((g) => (
+          <OutlineGroup key={g.code} group={g} />
         ))}
-      </ul>
+      </div>
     </div>
   );
 }
 
-/** One section row of the CV outline: status icon, code, label, a count/status
- *  tag, and (when present) the capped item preview with a "+N more" remainder. */
-function OutlineRow({ section: s }: { section: CvOutlineSection }) {
-  const filled = s.status === "filled";
-  const remainder = s.count !== null ? s.count - s.items.length : 0;
+/** One WCM section as a bordered table-like block (D9D9D9 borders + shaded
+ *  header row), mirroring the CV document's house style. */
+function OutlineGroup({ group }: { group: CvOutlineGroup }) {
+  return (
+    <div className="overflow-hidden rounded-md border border-[#D9D9D9]">
+      <div className="flex items-center gap-2 border-b border-[#D9D9D9] bg-[#D9D9D9]/40 px-3 py-1.5">
+        <span className="text-muted-foreground font-mono text-xs">{group.code}</span>
+        <span className="text-foreground text-sm font-semibold">{group.label}</span>
+      </div>
+      <div className="divide-y divide-[#D9D9D9]">
+        {group.entries.map((e, i) => (
+          <OutlineEntry key={e.code || i} entry={e} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** One subsection (or a simple section's sole entry): status icon, optional
+ *  code+label, a count/status tag, and the capped item preview ("+N more"). */
+function OutlineEntry({ entry: e }: { entry: CvOutlineEntry }) {
+  const filled = e.status === "filled";
+  const remainder = e.count !== null ? e.count - e.items.length : 0;
   const tag =
-    s.status === "generated"
+    e.status === "generated"
       ? "drafted on download"
-      : s.status === "empty"
+      : e.status === "empty"
         ? "none yet"
-        : s.status === "todo"
+        : e.status === "todo"
           ? "complete by hand"
           : null;
   return (
-    <li className="flex flex-col gap-1">
+    <div className="px-3 py-1.5">
       <div className="flex items-center gap-2 text-sm">
         {filled ? (
           <Check className="text-apollo-maroon size-4 shrink-0" aria-hidden />
         ) : (
           <Minus className="text-muted-foreground size-4 shrink-0" aria-hidden />
         )}
-        <span className="text-muted-foreground font-mono text-xs">{s.code}</span>
-        <span className={filled ? "text-foreground font-medium" : "text-muted-foreground"}>
-          {s.label}
-        </span>
-        {s.count !== null && s.count > 0 && (
-          <span className="text-muted-foreground text-xs">· {s.count}</span>
+        {e.code && <span className="text-muted-foreground font-mono text-xs">{e.code}</span>}
+        {e.label && (
+          <span className={filled ? "text-foreground font-medium" : "text-muted-foreground"}>
+            {e.label}
+          </span>
         )}
-        {s.source === "pops" && filled && (
+        {e.count !== null && e.count > 0 && (
+          <span className="text-muted-foreground text-xs">· {e.count}</span>
+        )}
+        {e.source === "pops" && filled && (
           <span className="text-muted-foreground/70 text-xs">· POPS</span>
         )}
         {tag && <span className="text-muted-foreground/70 text-xs">· {tag}</span>}
       </div>
-      {s.items.length > 0 && (
-        <ul className="text-muted-foreground ml-6 flex flex-col gap-0.5 text-xs">
-          {s.items.map((item, i) => (
+      {e.items.length > 0 && (
+        <ul className="text-muted-foreground mt-0.5 ml-6 flex flex-col gap-0.5 text-xs">
+          {e.items.map((item, i) => (
             <li key={i}>{item}</li>
           ))}
           {remainder > 0 && <li className="italic">+{remainder} more</li>}
         </ul>
       )}
-    </li>
+    </div>
   );
 }
 

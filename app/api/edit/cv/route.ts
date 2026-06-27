@@ -193,6 +193,7 @@ export async function POST(request: NextRequest): Promise<Response> {
               pages: true,
               doi: true,
               pmcid: true,
+              publicationType: true,
             },
           })
         : [];
