@@ -12,9 +12,11 @@
  * mapped to a friendly message exactly like the other `/api/edit/*` clients; a
  * 404 (flag off / no scholar) is surfaced as "not available."
  *
- * Below the button is a STATIC, honest checklist of which WCM sections get
- * auto-filled vs left "N/A" (spec §3/§5) — expectation-setting, not live data.
- * The clinical-only group only fills for faculty with a POPS profile.
+ * Below the button is a LIVE, document-ordered outline of the WCM CV (spec §8):
+ * every section A–S in the order it appears in the download, each showing what
+ * Scholars/POPS fills (count + a capped item preview) vs left blank to complete
+ * by hand. Fetched from `GET /api/edit/cv/outline`; clinical sections come from
+ * the scholar's POPS profile.
  */
 "use client";
 
@@ -24,10 +26,11 @@ import { Check, Download, Minus } from "lucide-react";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import type { PopsEnrichment } from "@/lib/edit/cv-export";
+import type { CvOutlineEntry, CvOutlineGroup, PopsEnrichment } from "@/lib/edit/cv-export";
 
 const PATH = "/api/edit/cv";
 const POPS_PATH = "/api/edit/cv/pops";
+const OUTLINE_PATH = "/api/edit/cv/outline";
 
 /** Consent/transparency copy for the live POPS preview (spec §6b). */
 const POPS_USAGE =
@@ -40,42 +43,6 @@ const INSUFFICIENT =
   "We don't have enough of your work indexed to build a CV yet. Review My Publications first, then try again.";
 const FORBIDDEN = "You don't have permission to export this CV.";
 const FAILED = "We couldn't build your CV just now. Please try again.";
-
-/** Sections Scholars always fills (the research spine) — spec §5. */
-const FILLED_SCHOLARS: readonly string[] = [
-  "Bibliography — your confirmed publications, with your name bolded",
-  "Research support — your WCM-administered grants",
-  "Research activities — an AI-drafted summary of your work",
-  "Mentoring — your trainees (only those you haven't hidden)",
-  "Professional positions — your appointments",
-  "Education — your degrees",
-  "Postdoctoral training",
-  "Institutional leadership — current Chair / Chief / Director roles",
-  "Personal data — your name, and email if it's set to visible",
-];
-
-/** Sections that fill ONLY for clinical faculty, from the WCM physician
- *  directory (POPS) — spec §6. Empty for research/PhD faculty. */
-const FILLED_CLINICAL: readonly string[] = [
-  "Board certifications",
-  "Residency & fellowship training",
-  "Hospital appointments & affiliation",
-  "Honors & awards",
-  "NPI number",
-];
-
-/** Sections with no source anywhere — emitted as "N/A" for you to complete by
- *  hand (the WCM template forbids deleting sections) — spec §5/§11. */
-const LEFT_NA: readonly string[] = [
-  "Society memberships",
-  "Committee & administrative service",
-  "Extramural & editorial service",
-  "Invitations to speak",
-  "Teaching & educational contributions",
-  "Licensure dates",
-  "Percent effort",
-  "Patents",
-];
 
 export type CvToolProps = {
   /** The scholar the CV is generated for (self cwid or the delegated `[cwid]`). */
@@ -96,6 +63,8 @@ export function CvTool({ entityId }: CvToolProps) {
   // a failure or a non-clinical scholar simply renders no preview. /edit only —
   // this data is never shown on the public profile.
   const [pops, setPops] = React.useState<PopsEnrichment | null>(null);
+  // Live document-ordered outline of the CV (spec §8). Best-effort, like POPS.
+  const [outline, setOutline] = React.useState<CvOutlineGroup[] | null>(null);
 
   React.useEffect(() => {
     const ctrl = new AbortController();
@@ -103,6 +72,19 @@ export function CvTool({ entityId }: CvToolProps) {
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { pops?: PopsEnrichment | null } | null) => {
         if (d?.pops) setPops(d.pops);
+      })
+      .catch(() => {
+        /* best-effort preview — stay silent on failure */
+      });
+    return () => ctrl.abort();
+  }, [entityId]);
+
+  React.useEffect(() => {
+    const ctrl = new AbortController();
+    fetch(`${OUTLINE_PATH}?cwid=${encodeURIComponent(entityId)}`, { signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { outline?: CvOutlineGroup[] | null } | null) => {
+        if (d?.outline) setOutline(d.outline);
       })
       .catch(() => {
         /* best-effort preview — stay silent on failure */
@@ -177,30 +159,9 @@ export function CvTool({ entityId }: CvToolProps) {
         </Alert>
       )}
 
+      {outline && <CvOutline groups={outline} />}
+
       {pops && <PopsPreview pops={pops} />}
-
-      <div
-        className="border-apollo-border bg-apollo-surface-2 flex flex-col gap-4 rounded-md border p-4"
-        data-testid="cv-checklist"
-      >
-        <p className="text-foreground text-sm font-semibold">What we can fill in</p>
-
-        <ChecklistGroup
-          icon="check"
-          title="Auto-filled from your Scholars data"
-          items={FILLED_SCHOLARS}
-        />
-        <ChecklistGroup
-          icon="check"
-          title="Filled for clinical faculty only (from the WCM physician directory)"
-          items={FILLED_CLINICAL}
-        />
-        <ChecklistGroup
-          icon="na"
-          title={'Left blank ("N/A") for you to complete'}
-          items={LEFT_NA}
-        />
-      </div>
     </EditPanel>
   );
 }
@@ -321,32 +282,95 @@ function PopsPreview({ pops }: { pops: PopsEnrichment }) {
   );
 }
 
-/** One labelled group of the fill checklist. `check` ⇒ a filled section,
- *  `na` ⇒ a section we leave as "N/A" (muted). */
-function ChecklistGroup({
-  icon,
-  title,
-  items,
-}: {
-  icon: "check" | "na";
-  title: string;
-  items: readonly string[];
-}) {
+/**
+ * Live, document-ordered outline of the WCM CV (spec §8) — every template
+ * section AND subsection A–S in download order, fetched from
+ * `GET /api/edit/cv/outline`. Each section is a bordered, shaded-header block
+ * mirroring the CV document; filled entries show their count + a capped item
+ * preview, the rest show why they're blank.
+ */
+function CvOutline({ groups }: { groups: CvOutlineGroup[] }) {
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">{title}</p>
-      <ul className="flex flex-col gap-1.5 text-sm">
-        {items.map((label) => (
-          <li key={label} className="flex items-start gap-2">
-            {icon === "check" ? (
-              <Check className="text-apollo-maroon mt-0.5 size-4 shrink-0" aria-hidden />
-            ) : (
-              <Minus className="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden />
-            )}
-            <span className={icon === "na" ? "text-muted-foreground" : undefined}>{label}</span>
-          </li>
+    <div className="flex flex-col gap-3" data-testid="cv-outline">
+      <div>
+        <p className="text-foreground text-sm font-semibold">What&rsquo;s in your CV</p>
+        <p className="text-muted-foreground text-xs">
+          Every section and subsection of the WCM CV, in the order it appears in the download. We
+          pre-fill the entries marked below; the rest keep a blank prompt for you to complete.
+          Clinical sections come from your WCM physician directory (POPS) and are not added to your
+          public Scholars profile.
+        </p>
+      </div>
+      <div className="flex flex-col gap-3">
+        {groups.map((g) => (
+          <OutlineGroup key={g.code} group={g} />
         ))}
-      </ul>
+      </div>
+    </div>
+  );
+}
+
+/** One WCM section as a bordered table-like block (D9D9D9 borders + shaded
+ *  header row), mirroring the CV document's house style. */
+function OutlineGroup({ group }: { group: CvOutlineGroup }) {
+  return (
+    <div className="overflow-hidden rounded-md border border-[#D9D9D9]">
+      <div className="flex items-center gap-2 border-b border-[#D9D9D9] bg-[#D9D9D9]/40 px-3 py-1.5">
+        <span className="text-muted-foreground font-mono text-xs">{group.code}</span>
+        <span className="text-foreground text-sm font-semibold">{group.label}</span>
+      </div>
+      <div className="divide-y divide-[#D9D9D9]">
+        {group.entries.map((e, i) => (
+          <OutlineEntry key={e.code || i} entry={e} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** One subsection (or a simple section's sole entry): status icon, optional
+ *  code+label, a count/status tag, and the capped item preview ("+N more"). */
+function OutlineEntry({ entry: e }: { entry: CvOutlineEntry }) {
+  const filled = e.status === "filled";
+  const remainder = e.count !== null ? e.count - e.items.length : 0;
+  const tag =
+    e.status === "generated"
+      ? "drafted on download"
+      : e.status === "empty"
+        ? "none yet"
+        : e.status === "todo"
+          ? "complete by hand"
+          : null;
+  return (
+    <div className="px-3 py-1.5">
+      <div className="flex items-center gap-2 text-sm">
+        {filled ? (
+          <Check className="text-apollo-maroon size-4 shrink-0" aria-hidden />
+        ) : (
+          <Minus className="text-muted-foreground size-4 shrink-0" aria-hidden />
+        )}
+        {e.code && <span className="text-muted-foreground font-mono text-xs">{e.code}</span>}
+        {e.label && (
+          <span className={filled ? "text-foreground font-medium" : "text-muted-foreground"}>
+            {e.label}
+          </span>
+        )}
+        {e.count !== null && e.count > 0 && (
+          <span className="text-muted-foreground text-xs">· {e.count}</span>
+        )}
+        {e.source === "pops" && filled && (
+          <span className="text-muted-foreground/70 text-xs">· POPS</span>
+        )}
+        {tag && <span className="text-muted-foreground/70 text-xs">· {tag}</span>}
+      </div>
+      {e.items.length > 0 && (
+        <ul className="text-muted-foreground mt-0.5 ml-6 flex flex-col gap-0.5 text-xs">
+          {e.items.map((item, i) => (
+            <li key={i}>{item}</li>
+          ))}
+          {remainder > 0 && <li className="italic">+{remainder} more</li>}
+        </ul>
+      )}
     </div>
   );
 }

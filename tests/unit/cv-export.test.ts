@@ -12,7 +12,13 @@
  */
 import { describe, it, expect } from "vitest";
 import JSZip from "jszip";
-import { buildWcmCvBuffer, type CvInput, type PopsEnrichment } from "@/lib/edit/cv-export";
+import {
+  buildWcmCvBuffer,
+  cvOutline,
+  OUTLINE_ITEM_CAP,
+  type CvInput,
+  type PopsEnrichment,
+} from "@/lib/edit/cv-export";
 import type { ProfilePayload } from "@/lib/api/profile";
 import type { MenteeChip } from "@/lib/api/mentoring";
 
@@ -173,6 +179,7 @@ const researchInput: CvInput = {
       pages: "500-510",
       doi: "10.1053/j.ajkd.2023.10.015",
       pmcid: "PMC11098699",
+      publicationType: "Academic Article",
     },
   ],
 };
@@ -185,7 +192,12 @@ const clinicalPops: PopsEnrichment = {
   training: [{ type: "Residency", institution: "NewYork-Presbyterian Hospital" }],
   degrees: [{ degree: "MD", year: "2005", institution: "Columbia University" }],
   appointments: [
-    { title: "Attending Physician", institution: "NewYork-Presbyterian Hospital", start: "2012-07-01", end: null },
+    {
+      title: "Attending Physician",
+      institution: "NewYork-Presbyterian Hospital",
+      start: "2012-07-01",
+      end: null,
+    },
   ],
   honors: [{ name: "Top Doctor, New York Magazine", date: "2021" }],
   specialties: ["Cardiology"],
@@ -251,10 +263,10 @@ const clinicalInput: CvInput = {
       pages: "100-108",
       doi: null,
       pmcid: null,
+      publicationType: "Review",
     },
   ],
 };
-
 
 // ── (a) instruction box removed + (b) real headings survive ──────────────────
 
@@ -327,5 +339,169 @@ describe("buildWcmCv — bibliography bolds the scholar surname", () => {
   it("bolds 'Jones' in the clinical fixture bibliography", async () => {
     const bold = boldRunTexts(await documentXml(clinicalInput));
     expect(bold.some((t) => t.includes("Jones"))).toBe(true);
+  });
+});
+
+// ── bibliography subsections + clinical practice land in the .docx ("Both") ──
+
+describe("buildWcmCv — pubs are binned and POPS clinical practice is written", () => {
+  it("places an article under 'Peer-reviewed Research Articles'", async () => {
+    const text = allText(await documentXml(researchInput));
+    const head = text.indexOf("Peer-reviewed Research Articles");
+    const pubAt = text.indexOf("Klotho and clinical outcomes");
+    expect(head).toBeGreaterThanOrEqual(0);
+    expect(pubAt).toBeGreaterThan(head); // citation sits under its category prompt
+  });
+
+  it("places a review under 'Reviews and Editorials' and writes POPS clinical practice (L1)", async () => {
+    const text = allText(await documentXml(clinicalInput));
+    const revHead = text.indexOf("Reviews and Editorials");
+    const revAt = text.indexOf("Care transitions and 30-day readmission");
+    expect(revAt).toBeGreaterThan(revHead);
+    // Section L1 — POPS specialties / practices / expertise as prose.
+    expect(text).toContain("Specialties: Cardiology");
+    expect(text).toContain("Heart Failure Program");
+    expect(text).toContain("Areas of expertise: Heart failure");
+  });
+
+  it("routes completed grants to Past (Completed) Funding, active to Current", async () => {
+    // clinicalInput's grant is isActive:false → Past (prose under that heading).
+    const ctext = allText(await documentXml(clinicalInput));
+    expect(ctext.indexOf("Hospital readmissions cohort")).toBeGreaterThan(
+      ctext.indexOf("Past (Completed) Funding"),
+    );
+    // researchInput's grant is isActive:true → the Current Research Funding table,
+    // i.e. above the Past heading.
+    const rtext = allText(await documentXml(researchInput));
+    const activeAt = rtext.indexOf("Klotho signaling in aging");
+    expect(activeAt).toBeGreaterThan(rtext.indexOf("Current Research Funding"));
+    expect(activeAt).toBeLessThan(rtext.indexOf("Past (Completed) Funding"));
+  });
+});
+
+// ── cvOutline — the live /edit preview (spec §8) ─────────────────────────────
+
+type Pub = ProfilePayload["publications"][number];
+function pub(over: Partial<Pub>): Pub {
+  return {
+    pmid: "1",
+    title: "A paper",
+    journal: "Some Journal",
+    year: 2020,
+    publicationType: "Academic Article",
+    ...over,
+  } as Pub;
+}
+
+function group(groups: ReturnType<typeof cvOutline>, code: string) {
+  const g = groups.find((x) => x.code === code);
+  if (!g) throw new Error(`group ${code} missing from outline`);
+  return g;
+}
+/** An entry by sub-code, or the sole entry of a simple section. */
+function entryOf(groups: ReturnType<typeof cvOutline>, groupCode: string, entryCode = "") {
+  const g = group(groups, groupCode);
+  const e =
+    g.entries.find((x) => x.code === entryCode) ??
+    (g.entries.length === 1 ? g.entries[0] : undefined);
+  if (!e) throw new Error(`entry ${groupCode}/${entryCode || "(sole)"} missing`);
+  return e;
+}
+
+describe("cvOutline — document-ordered CV preview", () => {
+  it("returns every WCM top-level section A–S in download order", () => {
+    const codes = cvOutline({ profile: researchInput.profile, mentees: [], pops: null }).map(
+      (g) => g.code,
+    );
+    expect(codes).toEqual([
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "M",
+      "N",
+      "O",
+      "P",
+      "Q",
+      "R",
+      "S",
+    ]);
+  });
+
+  it("counts the research spine and marks no-source entries to-complete", () => {
+    const o = cvOutline({
+      profile: researchInput.profile,
+      mentees: researchInput.mentees,
+      pops: null,
+    });
+    expect(entryOf(o, "B", "B1").count).toBe(1); // PhD, MIT
+    expect(entryOf(o, "D", "D1").count).toBe(1); // Professor @ WCM (academic)
+    expect(entryOf(o, "M", "M2").count).toBe(1); // one active grant → Current
+    expect(entryOf(o, "M", "M3").count).toBe(0); // none completed
+    expect(entryOf(o, "N", "N3").count).toBe(1); // one mentee
+    expect(entryOf(o, "O").count).toBe(1); // one leadership line
+    expect(entryOf(o, "M", "M1").status).toBe("generated"); // drafted at download
+    // No POPS ⇒ clinical entries have a source but no data ("empty"), not "filled".
+    expect(entryOf(o, "C").status).toBe("empty");
+    expect(entryOf(o, "F", "F2").status).toBe("empty");
+    // Truly source-less entries are "todo".
+    expect(entryOf(o, "E").status).toBe("todo");
+    expect(entryOf(o, "K", "K1").status).toBe("todo");
+  });
+
+  it("fills clinical entries from POPS, including Clinical Practice (L1)", () => {
+    const o = cvOutline({ profile: clinicalInput.profile, mentees: [], pops: clinicalInput.pops });
+    expect(entryOf(o, "C")).toMatchObject({ status: "filled", source: "pops", count: 1 });
+    expect(entryOf(o, "F", "F1").items).toContain("NPI 1234567890");
+    expect(entryOf(o, "F", "F2").count).toBe(1); // board cert
+    expect(entryOf(o, "H").count).toBe(2); // honor + Castle Connolly
+    expect(entryOf(o, "M", "M2").count).toBe(0); // its one grant is completed…
+    expect(entryOf(o, "M", "M3").count).toBe(1); // …so it lands in Past, not Current
+    // POPS specialties/practices/expertise now surface in L1.
+    const l1 = entryOf(o, "L", "L1");
+    expect(l1.status).toBe("filled");
+    expect(l1.items.join(" ")).toContain("Cardiology");
+  });
+
+  it("bins publications into their WCM bibliography subsections", () => {
+    const profile = baseProfile({
+      publications: [
+        pub({ pmid: "a", publicationType: "Academic Article" }),
+        pub({ pmid: "b", publicationType: "Academic Article" }),
+        pub({ pmid: "r", publicationType: "Review" }),
+        pub({ pmid: "c", publicationType: "Case Report" }),
+      ],
+    });
+    const s = group(cvOutline({ profile, mentees: [], pops: null }), "S");
+    expect(s.entries.find((e) => e.code === "S1")!.count).toBe(2); // articles
+    expect(s.entries.find((e) => e.code === "S2")!.count).toBe(1); // reviews
+    expect(s.entries.find((e) => e.code === "S6")!.count).toBe(1); // case reports
+  });
+
+  it("personal data (A) lists name + visible email and has no count", () => {
+    const a = entryOf(cvOutline({ profile: clinicalInput.profile, mentees: [], pops: null }), "A");
+    expect(a.count).toBeNull();
+    expect(a.items).toEqual(["Robert Jones, MD", "rj9001@med.cornell.edu"]);
+  });
+
+  it("caps the item preview at 10 but reports the true count", () => {
+    const profile = baseProfile({
+      publications: Array.from({ length: OUTLINE_ITEM_CAP + 5 }, (_, i) =>
+        pub({ pmid: String(i), title: `Paper ${i}`, publicationType: "Academic Article" }),
+      ),
+    });
+    const s1 = group(cvOutline({ profile, mentees: [], pops: null }), "S").entries.find(
+      (e) => e.code === "S1",
+    )!;
+    expect(s1.count).toBe(OUTLINE_ITEM_CAP + 5);
+    expect(s1.items).toHaveLength(OUTLINE_ITEM_CAP);
   });
 });
