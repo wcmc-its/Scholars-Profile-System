@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  candidatePredatesTerminalDegree,
   decideWriteOutcome,
   groupCandidatesByProfileId,
   hasDiscriminator,
+  isFellowshipCore,
+  isTerminalDegree,
   parseFirstLast,
   reconcileWithExisting,
   selectRunWindow,
   selectV2Cohort,
   summarizeCandidateGrants,
+  terminalDegreeYear,
 } from "@/etl/reporter-grants/v2";
 import type { ReporterProject, ReporterPI } from "@/etl/nih-profile/fetcher";
 import type { GroupedProject } from "@/etl/reporter-grants/transform";
@@ -258,5 +262,62 @@ describe("parseFirstLast (name split for the pi_names query)", () => {
   it("splits first/last and strips postnominals", () => {
     expect(parseFirstLast("Maria T. Diaz-Meco, PhD")).toEqual({ firstName: "Maria", lastName: "Diaz-Meco" });
     expect(parseFirstLast("Cher")).toEqual({ firstName: "", lastName: "" });
+  });
+});
+
+describe("terminal-degree namesake guard (precision filter)", () => {
+  const grant = (
+    coreProjectNum: string,
+    endYear: number | null,
+  ): { coreProjectNum: string; endDate: Date | null } => ({
+    coreProjectNum,
+    endDate: endYear === null ? null : new Date(Date.UTC(endYear, 0, 1)),
+  });
+
+  it("isTerminalDegree recognizes doctorates, not masters/bachelors", () => {
+    for (const d of ["PhD", "Ph.D.", "MD", "M.D.", "MD-PhD", "DO", "ScD", "DrPH", "DVM", "Doctor of Philosophy"]) {
+      expect(isTerminalDegree(d), d).toBe(true);
+    }
+    for (const d of ["MS", "M.S.", "MPH", "BA", "BS", "MBA", "Bachelor of Science"]) {
+      expect(isTerminalDegree(d), d).toBe(false);
+    }
+  });
+
+  it("terminalDegreeYear takes the earliest dated doctorate; null when none", () => {
+    expect(
+      terminalDegreeYear([
+        { degree: "MD", year: 2005 },
+        { degree: "PhD", year: 2010 },
+        { degree: "BS", year: 2000 },
+      ]),
+    ).toBe(2005);
+    expect(terminalDegreeYear([{ degree: "MS", year: 2001 }, { degree: "BA", year: 1998 }])).toBeNull();
+    expect(terminalDegreeYear([{ degree: "PhD", year: null }])).toBeNull();
+    expect(terminalDegreeYear([])).toBeNull();
+  });
+
+  it("isFellowshipCore flags F-awards only", () => {
+    for (const c of ["F30AI1", "F31GM1", "F32GM067403", "F33CA1"]) expect(isFellowshipCore(c)).toBe(true);
+    for (const c of ["R01GM121772", "K08AI1", "DP2OD1", "U01HL1", "P30CA1"]) expect(isFellowshipCore(c)).toBe(false);
+  });
+
+  it("suppresses a namesake whose entire non-fellowship history predates the degree", () => {
+    // older same-name PI: R-grants ending 1995–1997, scholar's PhD 2010
+    expect(candidatePredatesTerminalDegree([grant("R01CA058514", 1997), grant("R29CA1", 1995)], 2010)).toBe(true);
+  });
+
+  it("keeps a real match with non-fellowship grants after the degree (Reck-Peterson shape)", () => {
+    // F32 2005 (excluded) + R01s through 2022; PhD 2002 → keep
+    expect(
+      candidatePredatesTerminalDegree([grant("F32GM067403", 2005), grant("R01GM121772", 2022)], 2002),
+    ).toBe(false);
+  });
+
+  it("never suppresses a fellowship-only candidate (no dated non-fellowship grant)", () => {
+    expect(candidatePredatesTerminalDegree([grant("F31GM1", 2008), grant("F32GM2", 2011)], 2015)).toBe(false);
+  });
+
+  it("undated non-fellowship grants don't trigger suppression", () => {
+    expect(candidatePredatesTerminalDegree([grant("R01GM1", null)], 2010)).toBe(false);
   });
 });

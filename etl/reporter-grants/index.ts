@@ -49,12 +49,14 @@ import {
 import {
   decideWriteOutcome,
   groupCandidatesByProfileId,
+  candidatePredatesTerminalDegree,
   hasDiscriminator,
   parseFirstLast,
   reconcileWithExisting,
   selectRunWindow,
   selectV2Cohort,
   summarizeCandidateGrants,
+  terminalDegreeYear,
 } from "./v2";
 
 /** createdBy marker for the age-based default-hide. User overrides (a manual
@@ -132,6 +134,7 @@ async function runReporterMatchV2(): Promise<void> {
   let autoLocked = 0;
   let proposed = 0;
   let skippedNoPmids = 0;
+  let namesakeSkipped = 0;
   let errored = 0;
   let processed = 0;
 
@@ -215,12 +218,33 @@ async function runReporterMatchV2(): Promise<void> {
       continue;
     }
     await sleepBetweenRequests();
+    const winnerGroups = groupProjectsByCore(detail);
+
+    // Terminal-degree namesake guard (precision): a same-name NIH profile whose
+    // entire NON-fellowship grant history ends before the scholar's earliest
+    // doctorate is almost certainly a different person — skip it. Fellowships
+    // (F30/F31/F32/F33) legitimately precede the degree and don't count; a
+    // scholar with no terminal degree on file fails open (never suppressed).
+    const educations = await db.write.education.findMany({
+      where: { cwid: scholar.cwid },
+      select: { degree: true, year: true },
+    });
+    const degreeYear = terminalDegreeYear(educations);
+    if (degreeYear !== null && candidatePredatesTerminalDegree(winnerGroups, degreeYear)) {
+      namesakeSkipped++;
+      console.log(
+        `  [${scholar.cwid}] skipped profile ${outcome.profileId}: non-fellowship grants ` +
+          `predate terminal degree (${degreeYear}) — likely namesake`,
+      );
+      continue;
+    }
+
     const infoedRows = await db.write.grant.findMany({
       where: { cwid: scholar.cwid, source: "InfoEd", awardNumber: { not: null } },
       select: { awardNumber: true },
     });
     const summary = summarizeCandidateGrants(
-      groupProjectsByCore(detail),
+      winnerGroups,
       infoedRows.map((r) => ({ awardNumber: r.awardNumber })),
     );
     const overlapK = match.ranked.find((r) => r.profileId === outcome.profileId)?.overlap ?? 0;
@@ -312,7 +336,8 @@ async function runReporterMatchV2(): Promise<void> {
 
   console.log(
     `  v2 complete: ${autoLocked} auto-locked, ${proposed} pending proposals ` +
-      `(${skippedNoPmids} skipped: no trusted PMIDs, ${errored} fetch errors).\n`,
+      `(${skippedNoPmids} skipped: no trusted PMIDs, ${namesakeSkipped} skipped: ` +
+      `grants predate terminal degree, ${errored} fetch errors).\n`,
   );
 }
 
