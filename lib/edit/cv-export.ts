@@ -64,6 +64,21 @@ export type PubForCitation = {
   publicationType: string | null;
 };
 
+/**
+ * A historical (`ED-HISTORICAL`) faculty appointment, loaded SEPARATELY from the
+ * public `ProfilePayload` (#1323). The payload's `appointments` are active-only,
+ * and hidden historical rows are excluded from it — but the CV exports ALL
+ * historical appointments regardless of `showOnProfile`, so the route loads them
+ * directly and threads them here.
+ */
+export type HistoricalAppointment = {
+  title: string;
+  organization: string;
+  startDate: string | null;
+  endDate: string | null;
+  isActive: boolean;
+};
+
 /** Route ↔ builder contract. The route owns all I/O; the builder is pure-ish
  *  (reads the bundled template file, no DB/LLM/network). */
 export interface CvInput {
@@ -72,6 +87,8 @@ export interface CvInput {
   researchSummary: string;
   pops: PopsEnrichment | null;
   bibliography: PubForCitation[];
+  /** All historical appointments (any `showOnProfile`), loaded apart from the payload. */
+  historicalAppointments?: HistoricalAppointment[];
 }
 
 /** EDIT_CV_EXPORT flag — gates the "CV (WCM format)" Tools rail item + route. */
@@ -200,6 +217,7 @@ function educationRows(p: ProfilePayload, pops: PopsEnrichment | null): SourcedR
 function appointmentRows(
   p: ProfilePayload,
   pops: PopsEnrichment | null,
+  historical: HistoricalAppointment[] = [],
 ): { academic: SourcedRow[]; hospital: SourcedRow[] } {
   const isHospital = (org: string) => /presbyterian|hospital|\bnyp\b|medical center/i.test(org);
   const academic: SourcedRow[] = [];
@@ -221,6 +239,11 @@ function appointmentRows(
       // relabel + ASMS NYP history are tracked in #1325.
       a.source === "ED-NYP" ? "nyp" : "appointments",
     );
+  // #1323 — all historical (`ED-HISTORICAL`) appointments, rendered as past (with
+  // an end year) regardless of `showOnProfile`. The `seen` dedupe guards re-runs;
+  // the payload's active `appointments` never carry historical rows.
+  for (const a of historical)
+    add(a.title, a.organization, dateRange(a.startDate, a.endDate, false), "appointments");
   for (const a of pops?.appointments ?? [])
     add(a.title, a.institution, dateRange(a.start, a.end), "pops");
   return { academic, hospital };
@@ -349,7 +372,7 @@ export async function buildWcmCvBuffer(input: CvInput): Promise<Buffer> {
   );
 
   // 5. Professional Positions — Academic vs Hospital (anchored by subheading, headers repeat).
-  const appts = appointmentRows(p, pops);
+  const appts = appointmentRows(p, pops, input.historicalAppointments ?? []);
   fillGrid(
     doc,
     tableAfterParagraph(t, (x) => x.startsWith("Academic Appointments")),
@@ -514,6 +537,8 @@ export type CvOutlineInput = {
   profile: ProfilePayload;
   mentees: MenteeChip[];
   pops: PopsEnrichment | null;
+  /** All historical appointments (any `showOnProfile`), loaded apart from the payload. */
+  historicalAppointments?: HistoricalAppointment[];
 };
 
 /** Cap preview items per entry; the UI shows "+N more" from the true `count`. */
@@ -539,7 +564,7 @@ function menteeYears(m: MenteeChip): string {
  * {@link clinicalPracticeLines} for L1), so the preview mirrors the .docx.
  */
 export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
-  const { profile: p, pops, mentees } = input;
+  const { profile: p, pops, mentees, historicalAppointments } = input;
   const cap = (items: CvOutlineItem[]): CvOutlineItem[] => items.slice(0, OUTLINE_ITEM_CAP);
   // Tag a uniform section's text lines with their single system of record.
   const tag = (source: CvSourceKey, texts: string[]): CvOutlineItem[] =>
@@ -562,7 +587,7 @@ export function cvOutline(input: CvOutlineInput): CvOutlineGroup[] {
   });
 
   const eduRows = educationRows(p, pops);
-  const appts = appointmentRows(p, pops);
+  const appts = appointmentRows(p, pops, historicalAppointments ?? []);
   const honors = honorRows(pops);
 
   // Bibliography: classify each confirmed publication into its WCM category, so

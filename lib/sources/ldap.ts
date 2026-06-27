@@ -43,6 +43,9 @@ export const DEFAULT_DOCTORAL_STUDENT_FILTER =
  *  faculty:expired rows so the profile sidebar shows live titles only. */
 export const DEFAULT_FACULTY_SOR_FILTER =
   "(&(objectClass=weillCornellEduSORRoleRecord)(weillCornellEduStatus=faculty:active))";
+// ponytail: faculty:expired is the documented historical token (see active-filter comment); confirm against a live LDAP probe before staging rollout — upgrade path: widen to (!(...faculty:active)) if other historical statuses exist.
+export const DEFAULT_FACULTY_SOR_HISTORICAL_FILTER =
+  "(&(objectClass=weillCornellEduSORRoleRecord)(weillCornellEduStatus=faculty:expired))";
 
 /** WOOFA-sourced System-of-Record for employee records. Carries the
  *  `manager` attribute (full DN of the reporting manager) used for the
@@ -296,10 +299,38 @@ const FACULTY_SOR_ATTRS = [
 export async function fetchActiveFacultyAppointments(
   client: Client,
 ): Promise<EdFacultyAppointment[]> {
-  const searchBase =
-    process.env.SCHOLARS_LDAP_FACULTY_SOR_BASE ?? DEFAULT_FACULTY_SOR_BASE;
   const filter =
     process.env.SCHOLARS_LDAP_FACULTY_SOR_FILTER ?? DEFAULT_FACULTY_SOR_FILTER;
+  return fetchFacultyAppointmentsByFilter(client, filter, "ED-FACULTY-");
+}
+
+/** Fetch every faculty appointment record with status `faculty:expired` from
+ *  the WOOFA SOR. Historical (alumni/prior) appointments — hidden from the
+ *  public profile unless a curator reveals them (see Appointment.showOnProfile),
+ *  but always included in the CV export. The distinct externalId prefix
+ *  ("ED-FACULTY-HIST-") keeps a role that transitions active→expired from
+ *  colliding with its old active row on the externalId unique constraint
+ *  (same SORID, different status/source). */
+export async function fetchHistoricalFacultyAppointments(
+  client: Client,
+): Promise<EdFacultyAppointment[]> {
+  const filter =
+    process.env.SCHOLARS_LDAP_FACULTY_SOR_HISTORICAL_FILTER ??
+    DEFAULT_FACULTY_SOR_HISTORICAL_FILTER;
+  return fetchFacultyAppointmentsByFilter(client, filter, "ED-FACULTY-HIST-");
+}
+
+/** Shared search + projection body for the faculty SOR. `filter` selects the
+ *  status slice (active vs expired) and `externalIdPrefix` stamps the stable
+ *  per-appointment ID so active and historical rows for the same SORID don't
+ *  collide on the externalId unique constraint. */
+async function fetchFacultyAppointmentsByFilter(
+  client: Client,
+  filter: string,
+  externalIdPrefix: string,
+): Promise<EdFacultyAppointment[]> {
+  const searchBase =
+    process.env.SCHOLARS_LDAP_FACULTY_SOR_BASE ?? DEFAULT_FACULTY_SOR_BASE;
   const { searchEntries } = await client.search(searchBase, {
     scope: "sub",
     filter,
@@ -331,7 +362,7 @@ export async function fetchActiveFacultyAppointments(
       startDate: parseLdapGeneralizedTime(firstString(e.weillCornellEduStartDate)),
       endDate: parseLdapGeneralizedTime(firstString(e.weillCornellEduEndDate)),
       isPrimary: firstString(e.weillCornellEduPrimaryEntry) === "TRUE",
-      externalId: `ED-FACULTY-${sorId}`,
+      externalId: `${externalIdPrefix}${sorId}`,
       isJoint: firstString(e.weillCornellEduType) === "Joint",
       deptCode,
       divCode,

@@ -61,6 +61,7 @@ const ctx: EditContext = {
       suppressionId: null,
     },
   ],
+  historicalAppointments: [],
   educations: [
     {
       externalId: "edu-1",

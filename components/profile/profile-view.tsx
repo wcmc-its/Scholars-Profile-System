@@ -346,6 +346,40 @@ export async function ProfileView({ slug }: { slug: string }) {
               </SidebarCard>
             ) : null}
 
+            {/* #1323 — Past Appointments: REVEALED historical (`ED-HISTORICAL`)
+                roles the scholar opted to show. Hidden ones never reach the
+                payload, so this card simply renders whatever survived. Each
+                row shows a start–end year range. `?? []` tolerates a stale
+                CloudFront/ISR payload built before this field existed during a
+                rolling deploy. */}
+            {(profile.pastAppointments ?? []).length > 0 ? (
+              <SidebarCard title="Past Appointments">
+                <ul className="flex flex-col gap-3">
+                  {(profile.pastAppointments ?? []).map((a, i) => {
+                    const startYear = a.startDate ? a.startDate.slice(0, 4) : null;
+                    const endYear = a.endDate ? a.endDate.slice(0, 4) : null;
+                    const yearRange =
+                      startYear && endYear
+                        ? `${startYear}–${endYear}`
+                        : startYear
+                          ? `${startYear}–`
+                          : endYear
+                            ? `–${endYear}`
+                            : "";
+                    return (
+                      <li key={i} className="leading-snug">
+                        <div className="font-semibold">{a.title}</div>
+                        <div className="text-muted-foreground mt-0.5 text-xs">
+                          {a.organization}
+                          {yearRange ? ` · ${yearRange}` : ""}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </SidebarCard>
+            ) : null}
+
             {/* #1103 — Centers card: the scholar's ACTIVE center memberships
                 (reverse of the center roster). Omitted entirely when there are
                 none (flag off ⇒ payload carries []). Each entry links to

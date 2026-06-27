@@ -84,7 +84,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         : [];
     const mentees = filterHiddenMentees(menteesAll, hiddenMenteeCwids(targetCwid, suppressions));
 
-    return editOk({ outline: cvOutline({ profile, mentees, pops }) });
+    // Historical appointments (#1323) — the CV exports ALL `ED-HISTORICAL` rows
+    // regardless of `showOnProfile`; they are not in the active-only payload, so
+    // load them directly for the outline to mirror the .docx.
+    const historicalRows = await db.read.appointment.findMany({
+      where: { cwid: targetCwid, source: "ED-HISTORICAL" },
+      select: { title: true, organization: true, startDate: true, endDate: true },
+      orderBy: { endDate: "desc" },
+    });
+    const historicalAppointments = historicalRows.map((a) => ({
+      title: a.title,
+      organization: a.organization,
+      startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
+      endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
+      isActive: false,
+    }));
+
+    return editOk({ outline: cvOutline({ profile, mentees, pops, historicalAppointments }) });
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(500, "read_failed");

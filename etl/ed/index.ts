@@ -49,6 +49,7 @@ import {
   fetchActiveFaculty,
   fetchActiveFacultyAppointments,
   fetchActiveNypAffiliates,
+  fetchHistoricalFacultyAppointments,
   fetchAllPostdocEmploymentRecords,
   fetchDoctoralStudents,
   fetchPersonNamesByCwid,
@@ -286,6 +287,77 @@ async function refreshEdAppointments(
   }
 }
 
+/** Source tag for historical (faculty:expired) appointments. Distinct from
+ *  "ED" so the active-faculty refresh (refreshEdAppointments) never touches
+ *  these rows, and so the read layer can hide them from the public profile
+ *  unless a curator reveals one (Appointment.showOnProfile). */
+const HISTORICAL_APPOINTMENT_SOURCE = "ED-HISTORICAL";
+
+/**
+ * Reconcile this scholar's historical (faculty:expired) appointments from the
+ * WOOFA SOR. Mirrors refreshEdAppointments but scoped to {cwid,
+ * source:"ED-HISTORICAL"} so the two populations never clobber each other.
+ *
+ * Curator-reveal invariant: `showOnProfile` is written ONLY on INSERT
+ * (defaulted false), and is NEVER part of an UPDATE — so a row a curator
+ * revealed (showOnProfile=true) stays revealed across ETL reruns. The content
+ * key (appointmentContentKey) does not hash showOnProfile, so toggling reveal
+ * causes no reconcile churn.
+ */
+async function refreshHistoricalAppointments(
+  cwid: string,
+  appts: EdFacultyAppointment[],
+): Promise<void> {
+  // Built WITHOUT showOnProfile so the field is set only when mapping
+  // plan.toCreate to createMany data below — never on update.
+  const incoming = appts.map((a) => ({
+    cwid: a.cwid,
+    title: a.title,
+    organization: a.organization ?? "Weill Cornell Medicine",
+    startDate: a.startDate,
+    endDate: a.endDate,
+    isPrimary: a.isPrimary,
+    isInterim: false,
+    externalId: a.externalId,
+    source: HISTORICAL_APPOINTMENT_SOURCE,
+  }));
+  const existing = await db.write.appointment.findMany({
+    where: { cwid, source: HISTORICAL_APPOINTMENT_SOURCE },
+    select: {
+      externalId: true, cwid: true, title: true, organization: true,
+      startDate: true, endDate: true, isPrimary: true, isInterim: true,
+      source: true,
+    },
+  });
+  const plan = classifyByExternalId({
+    incoming,
+    existing,
+    contentKey: appointmentContentKey,
+  });
+  if (plan.toCreate.length > 0) {
+    // showOnProfile defaults to false on INSERT only — see invariant above.
+    await db.write.appointment.createMany({
+      data: plan.toCreate.map((a) => ({ ...a, showOnProfile: false })),
+    });
+  }
+  for (const a of plan.toUpdate) {
+    // No showOnProfile key here — a curator's reveal must survive the update.
+    await db.write.appointment.update({
+      where: { externalId: a.externalId },
+      data: { ...a, lastRefreshedAt: new Date() },
+    });
+  }
+  if (plan.staleExternalIds.length > 0) {
+    await db.write.appointment.deleteMany({
+      where: {
+        cwid,
+        source: HISTORICAL_APPOINTMENT_SOURCE,
+        externalId: { in: plan.staleExternalIds },
+      },
+    });
+  }
+}
+
 /** NYP affiliate organization label shown on the profile sidebar. The title
  *  on these rows is the normalized role only ("Associate Physician"); the
  *  hospital name is carried on the Appointment.organization column so the
@@ -447,6 +519,31 @@ async function main() {
       appointmentsByCwid.set(a.cwid, arr);
     }
 
+    // Issue #1323 — historical (faculty:expired) appointments. Best-effort:
+    // a fetch failure must NOT abort the ETL, and an empty result from a failed
+    // fetch is NOT the same as "no historical rows exist", so we only reconcile
+    // when the fetch actually succeeded (a wipe-on-failure would delete every
+    // curator-revealed historical row). Deliberately NOT merged into
+    // appointmentsByCwid: historical rows must not feed active-faculty rollups
+    // (division/dept membership, primary-appointment dept/div resolution).
+    console.log("Fetching historical (faculty:expired) faculty appointments from ou=faculty SOR...");
+    let historicalAppointments: EdFacultyAppointment[] = [];
+    let historicalFetchSucceeded = false;
+    try {
+      historicalAppointments = await fetchHistoricalFacultyAppointments(client);
+      historicalFetchSucceeded = true;
+      console.log(`ED returned ${historicalAppointments.length} historical faculty appointment rows.`);
+    } catch (err) {
+      console.warn(
+        `Historical faculty appointment fetch skipped (ou=faculty,ou=sors unavailable): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    const historicalByCwid = new Map<string, EdFacultyAppointment[]>();
+    for (const a of historicalAppointments) {
+      const arr = historicalByCwid.get(a.cwid) ?? [];
+      arr.push(a);
+      historicalByCwid.set(a.cwid, arr);
+    }
 
     // Phase 4 — employee SOR for the manager graph. Used by:
     //   - postdoc mentor lookup (issue #5)
@@ -885,6 +982,9 @@ async function main() {
           pinnedSlugCwids,
         );
         await refreshEdAppointments(f.cwid, appointmentsByCwid.get(f.cwid) ?? []);
+        if (historicalFetchSucceeded) {
+          await refreshHistoricalAppointments(f.cwid, historicalByCwid.get(f.cwid) ?? []);
+        }
         if (wasDeleted) reactivated += 1;
         updated += 1;
       } else {
@@ -921,6 +1021,9 @@ async function main() {
           },
         });
         await refreshEdAppointments(f.cwid, appointmentsByCwid.get(f.cwid) ?? []);
+        if (historicalFetchSucceeded) {
+          await refreshHistoricalAppointments(f.cwid, historicalByCwid.get(f.cwid) ?? []);
+        }
         created += 1;
       }
 

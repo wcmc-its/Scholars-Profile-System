@@ -157,6 +157,11 @@ model Appointment {
   isInterim       Boolean   @default(false) @map("is_interim")
   externalId      String    @unique @map("external_id") @db.VarChar(128) // ED appointment ID; #352 reconcile key
   source          String    @default("ED") @db.VarChar(32)
+  // #1323 — historical (source "ED-HISTORICAL") appointments are hidden from the
+  // public profile until a curator or comms_steward reveals one. False for every
+  // imported historical row; irrelevant for active sources (always shown). The CV
+  // export ignores this flag (historical always exported).
+  showOnProfile   Boolean   @default(false) @map("show_on_profile")
   lastRefreshedAt DateTime  @default(now()) @map("last_refreshed_at")
 
   @@index([cwid])

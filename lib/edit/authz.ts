@@ -182,6 +182,22 @@ export function authorizeCommsStewardAction(session: EditSession): AuthzResult {
   return { ok: false, reason: "not_comms_steward" };
 }
 
+/**
+ * `POST /api/edit/appointment-visibility` — reveal/hide a historical
+ * (`source = "ED-HISTORICAL"`) appointment on the public profile (#1323). This
+ * is the GLOBAL base gate: a comms_steward (profile parity, §3b) or a superuser
+ * may reveal any scholar's historical appointment. It is NOT scholar-self — a
+ * scholar does not toggle their own historical visibility; the curator path is
+ * UNIT-scoped and resolved asynchronously in the route via
+ * `resolveEditableUnitViaUnitAdmin`, layered on top of this base exactly as the
+ * suppress route layers the unit-admin allow on top of `authorizeSuppress`.
+ * Pure and synchronous like its siblings.
+ */
+export function authorizeAppointmentVisibility(session: EditSession): AuthzResult {
+  if (session.isCommsSteward || session.isSuperuser) return ALLOW;
+  return { ok: false, reason: "not_comms_steward" };
+}
+
 // ---------------------------------------------------------------------------
 // page-access predicates  (the GET-time superuser re-check)
 // ---------------------------------------------------------------------------
