@@ -94,7 +94,21 @@ export type AuditAction =
   /** a core owner claimed/rejected a (publication, core) usage candidate (cores
    *  inference); `targetEntityType='core'`, `targetEntityId` is the
    *  `"{coreId}:{pmid}"` pair, before/after carry the claim status transition. */
-  | "core_claim";
+  | "core_claim"
+  /** a scholar (or a genuine superuser on their behalf) confirmed a RePORTER
+   *  PMID-overlap "Is this you?" match (`REPORTER_MATCH_V2`); writes the
+   *  `person_nih_profile` row whose grants materialize next nightly.
+   *  `targetEntityType='reporter_profile_candidate'`, `targetEntityId` is the
+   *  candidate id; before/after carry the status transition. */
+  | "reporter_profile_confirm"
+  /** a scholar (or a genuine superuser) declined a RePORTER match with an
+   *  enum reason (`not_me`/`name_only`/`cant_tell`) — terminal, feeds matcher QA;
+   *  `afterValues` carries the status + rejectReason. */
+  | "reporter_profile_reject"
+  /** a scholar (or a genuine superuser) revoked a confirmed RePORTER match —
+   *  deletes the `person_nih_profile` row (grants reconcile out next run);
+   *  before/after carry the status transition. */
+  | "reporter_profile_revoke";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -119,7 +133,11 @@ export type AuditEntityType =
   | "method_family"
   /** a (publication, core-facility) usage claim/rejection by a core owner
    *  (cores inference); `targetEntityId` is the `"{coreId}:{pmid}"` pair. */
-  | "core";
+  | "core"
+  /** a RePORTER PMID-overlap match candidate confirmed/rejected/revoked in /edit
+   *  (`REPORTER_MATCH_V2`); `targetEntityId` is the
+   *  `reporter_profile_candidate.id`. */
+  | "reporter_profile_candidate";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {
