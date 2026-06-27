@@ -234,3 +234,52 @@ export function summarizeCandidateGrants(
 
   return { grantCount: netNewGroups.length, candidateOrgs: orgs.join(", "), sampleGrants };
 }
+
+// --- Terminal-degree namesake guard (precision filter) -----------------------
+// PMID overlap gates recall; this trims the rare residual: a same-name NIH
+// profile whose grant publications happen to overlap a common-name scholar but
+// whose entire independent-grant history predates the scholar's doctorate — you
+// don't hold an independent NIH award before your terminal degree, so it is
+// almost certainly a different person.
+
+/** Doctoral / terminal-degree markers in an ASMS `degree` string. We only need
+ *  the EARLIEST year the scholar held a terminal degree; an unrecognized degree
+ *  contributes no year, so the guard fails OPEN (a miss never suppresses). */
+const TERMINAL_DEGREE_RE =
+  /\b(ph\.?\s?d|m\.?\s?d|d\.?\s?o|sc\.?\s?d|dr\.?\s?ph|d\.?v\.?m|d\.?d\.?s|d\.?m\.?d|ed\.?\s?d|pharm\.?\s?d|doctor of)\b/i;
+
+export function isTerminalDegree(degree: string): boolean {
+  return TERMINAL_DEGREE_RE.test(degree);
+}
+
+/** Earliest year across the scholar's terminal (doctoral) degrees, or null when
+ *  none is on file / dated. Pure. */
+export function terminalDegreeYear(
+  educations: ReadonlyArray<{ degree: string; year: number | null }>,
+): number | null {
+  const years = educations
+    .filter((e) => e.year != null && isTerminalDegree(e.degree))
+    .map((e) => e.year as number);
+  return years.length ? Math.min(...years) : null;
+}
+
+/** NIH fellowship activity codes (F30/F31/F32/F33) legitimately precede or span
+ *  the terminal degree, so they are excluded from the namesake guard. */
+export function isFellowshipCore(coreProjectNum: string): boolean {
+  return /^F\d/i.test(coreProjectNum.trim());
+}
+
+/** True when the candidate is almost certainly a NAMESAKE: its entire
+ *  NON-fellowship grant history ENDS before the scholar's earliest terminal
+ *  degree. Returns FALSE (keep) when there is no dated non-fellowship grant, so
+ *  a fellowship-only / early-career match is never dropped on this basis. Pure. */
+export function candidatePredatesTerminalDegree(
+  grouped: ReadonlyArray<{ coreProjectNum: string; endDate: Date | null }>,
+  terminalYear: number,
+): boolean {
+  const ends = grouped
+    .filter((g) => !isFellowshipCore(g.coreProjectNum) && g.endDate != null)
+    .map((g) => (g.endDate as Date).getUTCFullYear());
+  if (ends.length === 0) return false;
+  return Math.max(...ends) < terminalYear;
+}
