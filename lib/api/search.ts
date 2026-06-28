@@ -212,6 +212,13 @@ export type PublicationsFilters = {
 };
 
 export type PeopleHit = {
+  /**
+   * OpenSearch BM25 `_score` for this hit (#1329). Query-scaled and NOT
+   * cross-query comparable — consumers normalize per query (÷ the query's
+   * max). Surfaced raw; result ordering is unchanged. Absent when OpenSearch
+   * returned no score for the hit.
+   */
+  relevanceScore?: number;
   cwid: string;
   slug: string;
   preferredName: string;
@@ -667,6 +674,13 @@ export function buildHumanizedAreas(
 }
 
 export type PublicationHit = {
+  /**
+   * OpenSearch BM25 `_score` for this hit (#1329). Query-scaled and NOT
+   * cross-query comparable — consumers normalize per query (÷ the query's
+   * max). Surfaced raw; result ordering is unchanged. Absent when OpenSearch
+   * returned no score for the hit.
+   */
+  relevanceScore?: number;
   pmid: string;
   title: string;
   /**
@@ -2244,6 +2258,7 @@ export async function searchPeople(opts: {
   }
 
   type Hit = {
+    _score?: number; // #1329 — surfaced raw onto PeopleHit.relevanceScore.
     _source: {
       cwid: string;
       slug: string;
@@ -2775,6 +2790,8 @@ export async function searchPeople(opts: {
           })
         : undefined;
       return {
+        // #1329 — raw OpenSearch relevance, surfaced for downstream weighting.
+        relevanceScore: h._score ?? undefined,
         cwid: h._source.cwid,
         slug: h._source.slug,
         preferredName: h._source.preferredName,
@@ -3655,6 +3672,7 @@ export async function searchPublications(opts: {
   });
 
   type Hit = {
+    _score?: number; // #1329 — surfaced raw onto PublicationHit.relevanceScore.
     _source: {
       pmid: string;
       title: string;
@@ -3862,6 +3880,8 @@ export async function searchPublications(opts: {
         }
       }
       return {
+        // #1329 — raw OpenSearch relevance, surfaced for downstream weighting.
+        relevanceScore: h._score ?? undefined,
         pmid: h._source.pmid,
         title: h._source.title,
         titleHighlight: h.highlight?.title?.[0] ?? null,
