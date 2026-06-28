@@ -893,3 +893,25 @@ export function resolvePeopleConceptGrantAxis(): boolean {
 export function resolveMeshResolutionFallbackEnabled(): boolean {
   return process.env.SEARCH_MESH_RESOLUTION_FALLBACK === "on";
 }
+
+/**
+ * POPS clinical specialty search — People-tab ranking boost + clinical:exact
+ * evidence kind. When on, the people query adds `clinicalSpecialties` and
+ * `clinicalExpertise` to the multi_match boost ladder so a specialty query
+ * ("cardiology") ranks the matching clinician, and `resolveHitEvidence` emits
+ * a `clinical:exact` reason when every query content token is covered by a
+ * specialty string in the hit's `clinicalSpecialties` set.
+ *
+ * Default OFF (`SEARCH_PEOPLE_CLINICAL=on` enables). This is a
+ * reindex-then-flip rollout: the three clinical fields
+ * (`clinicalSpecialties`, `clinicalExpertise`, `clinicalBoardSet`) must be
+ * in the people index docs BEFORE flipping — the etl/pops step populates
+ * the Scholar rows and a full people reindex writes the doc fields.
+ * Flipping first boosts absent fields (wasted no-op clauses). Reversible
+ * by clearing the flag. Flag-parity note: when enabling later, wire the env
+ * var in BOTH `.env.local` AND `cdk/lib/app-stack.ts` per environment — a
+ * local-on / deployed-off split silently ships nothing.
+ */
+export function resolveSearchPeopleClinical(): boolean {
+  return process.env.SEARCH_PEOPLE_CLINICAL === "on";
+}

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { ChevronDown, FileText, Shapes, Waypoints, Wrench } from "lucide-react";
+import { ChevronDown, FileText, Shapes, Stethoscope, Waypoints, Wrench } from "lucide-react";
 import { PubTitle } from "@/components/publication/pub-html";
 import { highlightedTitleHtml } from "@/lib/search/highlight-title";
 import type { EvidencePub } from "@/lib/api/result-evidence";
@@ -138,14 +138,15 @@ export function MatchReason({
 
 /**
  * #824 follow-up — the match-aware "why" line. A small uppercase badge (rust for
- * method, blue for topic) with a leading lucide icon, then the matched label in
- * bold. The method family name now stands ALONE — the muted exemplar-tool trail
- * was dropped: the rep-papers list below does the evidentiary work, and the bare
- * name reads as a confident, unambiguous label with no casing/truncation to
- * maintain. (The `tools` data is still on the evidence object, so a curated 1–2
- * terms could be reinstated later without re-deriving anything.) Lives inside the
- * result card's stretched-link wrapper, so it is a row of `<span>`s plus (when
- * `canExpand`) a real chevron `<button>`; the icon is decorative (`aria-hidden`).
+ * method, blue for topic, teal for clinical) with a leading lucide icon, then the
+ * matched label in bold. The method family name now stands ALONE — the muted
+ * exemplar-tool trail was dropped: the rep-papers list below does the evidentiary
+ * work, and the bare name reads as a confident, unambiguous label with no
+ * casing/truncation to maintain. (The `tools` data is still on the evidence object,
+ * so a curated 1–2 terms could be reinstated later without re-deriving anything.)
+ * Lives inside the result card's stretched-link wrapper, so it is a row of
+ * `<span>`s plus (when `canExpand`) a real chevron `<button>`; the icon is
+ * decorative (`aria-hidden`).
  */
 export function MatchAwareReason({
   kind,
@@ -155,7 +156,7 @@ export function MatchAwareReason({
   onToggle,
   panelId,
 }: {
-  kind: "method" | "topic";
+  kind: "method" | "topic" | "clinical";
   label: string;
   /** Rep-papers disclosure — when true, trail a clickable chevron `<button>`
    *  that opens the representative-papers panel `panelId`. */
@@ -165,17 +166,20 @@ export function MatchAwareReason({
   panelId?: string;
 }) {
   // From the mockup: method bg #fbf4ea / border #ecdcc8 / ink #8a4a1f;
-  // topic bg #eef2f6 / border #d8e2ec / ink #2c4f6e.
+  // topic bg #eef2f6 / border #d8e2ec / ink #2c4f6e;
+  // clinical bg #e8f4f8 / border #c5e4eb / ink #1a5f7a.
   const badge =
     kind === "method"
       ? "border-[#ecdcc8] bg-[#fbf4ea] text-[#8a4a1f]"
-      : "border-[#d8e2ec] bg-[#eef2f6] text-[#2c4f6e]";
+      : kind === "clinical"
+        ? "border-[#c5e4eb] bg-[#e8f4f8] text-[#1a5f7a]"
+        : "border-[#d8e2ec] bg-[#eef2f6] text-[#2c4f6e]";
   // One content-type glyph per notion across every surface (#1073): method = the
   // SAME Wrench as the "Methods and Tools" chip row + /methods lens; research area
   // = the SAME Shapes as the Research Areas chip row (research-areas-row.tsx),
-  // replacing Tag (which now means only profile Topics/MeSH).
-  const Icon = kind === "method" ? Wrench : Shapes;
-  const badgeText = kind === "method" ? "Method" : "Research area";
+  // replacing Tag (which now means only profile Topics/MeSH); clinical = Stethoscope.
+  const Icon = kind === "method" ? Wrench : kind === "clinical" ? Stethoscope : Shapes;
+  const badgeText = kind === "method" ? "Method" : kind === "clinical" ? "Clinical" : "Research area";
   // items-center (not baseline): the bordered pill and the bold label line up on
   // a shared center axis so the badge doesn't sit low next to the label.
   const inner = (

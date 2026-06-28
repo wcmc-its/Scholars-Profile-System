@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import {
   selectEvidence,
+  clinicalExactMatch,
   bioCoversQuery,
   refineExemplarTools,
   firstMatchingSentence,
@@ -479,6 +480,131 @@ describe("clampAroundMarks (Tier 3 — now-exported mark-aware clamp)", () => {
     // visible budget = maxLen window + the visible region ("HIT") it windows around
     expect(visible(out).length).toBeLessThanOrEqual(maxLen + "HIT".length);
     expect(out).toContain(region);
+  });
+});
+
+describe("clinicalExactMatch — exact-tier detection (spec §4.1)", () => {
+  const BOARD_SET = ["Cardiology", "Interventional Cardiology", "Internal Medicine"];
+
+  it("exact single-token match returns the specialty + boardCertified=true when in boardSet", () => {
+    expect(clinicalExactMatch("cardiology", ["Cardiology"], ["Cardiology"])).toEqual({
+      specialty: "Cardiology",
+      boardCertified: true,
+    });
+  });
+
+  it("boardCertified=false when specialty is in list but NOT in boardSet", () => {
+    expect(clinicalExactMatch("cardiology", ["Cardiology"], [])).toEqual({
+      specialty: "Cardiology",
+      boardCertified: false,
+    });
+  });
+
+  it("case-insensitive comparison — normalizes both query and specialty", () => {
+    expect(clinicalExactMatch("CARDIOLOGY", ["Cardiology"], ["Cardiology"])).toEqual({
+      specialty: "Cardiology",
+      boardCertified: true,
+    });
+  });
+
+  it("token-subset: a single-token query matches a multi-word specialty", () => {
+    // "cardiology" query matches "Interventional Cardiology" because every
+    // query token ("cardiology") appears in the normalized specialty.
+    expect(clinicalExactMatch("cardiology", ["Interventional Cardiology"], BOARD_SET)).toEqual({
+      specialty: "Interventional Cardiology",
+      boardCertified: true,
+    });
+  });
+
+  it("phrase equality: multi-word query matching the specialty exactly", () => {
+    expect(clinicalExactMatch("interventional cardiology", ["Interventional Cardiology"], BOARD_SET)).toEqual({
+      specialty: "Interventional Cardiology",
+      boardCertified: true,
+    });
+  });
+
+  it('"pediatric cardiology" vs ["Cardiology"] → null (query is narrower than specialty)', () => {
+    // token "pediatric" is NOT in normalize("Cardiology") = "cardiology",
+    // and phrase equality "cardiology" ≠ "pediatric cardiology" → no match.
+    expect(clinicalExactMatch("pediatric cardiology", ["Cardiology"], BOARD_SET)).toBeNull();
+  });
+
+  it('"heart surgery" vs ["Cardiac Surgery"] → null (no token overlap)', () => {
+    // "heart" not in "cardiac surgery", "cardiac surgery" ≠ "heart surgery" → no match.
+    expect(clinicalExactMatch("heart surgery", ["Cardiac Surgery"], ["Cardiac Surgery"])).toBeNull();
+  });
+
+  it("returns the FIRST matching specialty in list order", () => {
+    const result = clinicalExactMatch("cardiology", ["Internal Medicine", "Cardiology"], BOARD_SET);
+    // "Internal Medicine" fails ("cardiology" NOT in "internal medicine");
+    // "Cardiology" matches first.
+    expect(result).toEqual({ specialty: "Cardiology", boardCertified: true });
+  });
+
+  it("empty specialties → null", () => {
+    expect(clinicalExactMatch("cardiology", [], BOARD_SET)).toBeNull();
+  });
+
+  it("blank query → null", () => {
+    expect(clinicalExactMatch("", ["Cardiology"], BOARD_SET)).toBeNull();
+    expect(clinicalExactMatch("   ", ["Cardiology"], BOARD_SET)).toBeNull();
+  });
+
+  it("boardCertified flag is case-insensitive against boardSet", () => {
+    // boardSet contains lowercase "cardiology"; specialty is "Cardiology".
+    expect(clinicalExactMatch("cardiology", ["Cardiology"], ["cardiology"])).toEqual({
+      specialty: "Cardiology",
+      boardCertified: true,
+    });
+  });
+});
+
+describe("selectEvidence — clinical:exact precedence (rank 4, spec §4.1)", () => {
+  const CLINICAL = { specialty: "Cardiology", boardCertified: true };
+
+  it("clinical (rank 4) beats pub:mention (rank 7) — the key fix for the clinical-specialty failure mode", () => {
+    const ev = selectEvidence({
+      clinical: CLINICAL,
+      pub: { mention: { text: '1 of 9 publications mention "cardiology"', count: 1 } },
+    });
+    expect(ev).toEqual({ kind: "clinical", specialty: "Cardiology", boardCertified: true });
+  });
+
+  it("clinical (rank 4) beats topic (rank 8)", () => {
+    const ev = selectEvidence({
+      clinical: CLINICAL,
+      topic: { label: "Cardiology", id: "cardiology" },
+    });
+    expect(ev).toEqual({ kind: "clinical", specialty: "Cardiology", boardCertified: true });
+  });
+
+  it("clinical (rank 4) beats pub:concept (rank 5)", () => {
+    const ev = selectEvidence({
+      clinical: CLINICAL,
+      pub: { concept: { text: "via related concept cardiology" } },
+    });
+    expect(ev).toEqual({ kind: "clinical", specialty: "Cardiology", boardCertified: true });
+  });
+
+  it("pub:tagged (rank 3) beats clinical (rank 4) — publishes on it wins in a research system", () => {
+    const ev = selectEvidence({
+      clinical: CLINICAL,
+      pub: { tagged: { text: "5 of 9 publications tagged Cardiology", count: 5 } },
+    });
+    expect(ev).toMatchObject({ kind: "publications", strength: "tagged" });
+  });
+
+  it("method (rank 2) beats clinical (rank 4)", () => {
+    const ev = selectEvidence({
+      clinical: CLINICAL,
+      method: { family: "Echocardiography", tools: [] },
+    });
+    expect(ev).toEqual({ kind: "method", family: "Echocardiography", tools: [] });
+  });
+
+  it("boardCertified=false is passed through faithfully", () => {
+    const ev = selectEvidence({ clinical: { specialty: "Cardiology", boardCertified: false } });
+    expect(ev).toEqual({ kind: "clinical", specialty: "Cardiology", boardCertified: false });
   });
 });
 

@@ -1427,6 +1427,15 @@ export class AppStack extends Stack {
         // reindex + flip). resolvePeopleMethodContextBoost reads === "on"; a
         // not-yet-reindexed cluster matches an absent field (never a 500).
         SEARCH_PEOPLE_METHOD_CONTEXT: env === "staging" ? "on" : "off",
+        // POPS clinical specialty search -- indexes board-cert specialties, primary
+        // specialties, and clinical expertise (problem_procedure) from POPS into the
+        // people doc and adds a clinical:exact evidence kind when the query matches
+        // a specialty exactly. Reindex-then-flip: the etl/pops step must run AND the
+        // people index must be rebuilt with the three clinical fields before flipping
+        // on. resolveSearchPeopleClinical reads === "on"; off => fields indexed but
+        // not queried, no clinical reason emitted, body byte-identical to today.
+        // Default OFF both envs; staging soak after first etl:pops run + reindex.
+        SEARCH_PEOPLE_CLINICAL: "off",
         // #824 follow-up -- match-aware People-results "why" line (method/topic/
         // humanized-areas snippet). APP-ONLY, no reindex: derives from
         // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-
