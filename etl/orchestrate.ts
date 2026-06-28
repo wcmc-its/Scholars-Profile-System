@@ -98,6 +98,10 @@ async function main() {
     // no-op-safe (0 rows when reciterdb is unreachable) like the other
     // reciterdb sources, so it is safe in the chain on the same footing.
     ["Clinical-Trials", "etl/clinical-trials/index.ts"],
+    // POPS clinical enrichment — depends on hasClinicalProfile set by the ED
+    // chain head above; must run before the search reindex below so the new
+    // clinicalSpecialties / clinicalExpertise fields land in the people doc.
+    ["POPS", "etl/pops/index.ts"],
     ["Hierarchy", "etl/hierarchy/index.ts"],
     ["Spotlight", "etl/spotlight/index.ts"],
     ["DynamoDB", "etl/dynamodb/index.ts"],

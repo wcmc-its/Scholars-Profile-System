@@ -67,6 +67,15 @@ model Scholar {
   /// URL on weillcornell.org/doctors-directory. Normalized to https:// at
   /// ETL time even when LDAP returns http://.
   clinicalProfileUrl     String?   @map("clinical_profile_url") @db.VarChar(512)
+  /// POPS clinical enrichment — nightly backfill via etl/pops/index.ts for
+  /// scholars where hasClinicalProfile = true. These columns feed the
+  /// clinicalSpecialties / clinicalExpertise / clinicalBoardSet fields on
+  /// the OpenSearch people document (search-index ETL layer). All nullable
+  /// so the migration applies cleanly; backfilled on the first POPS ETL run.
+  popsBoardCertifications Json?     @map("pops_board_certifications") // [{ board, specialty }]
+  popsSpecialties         Json?     @map("pops_specialties")          // string[] — board-cert ∪ primary, deduped
+  popsExpertise           Json?     @map("pops_expertise")            // string[] — problem_procedure
+  popsRefreshedAt         DateTime? @map("pops_refreshed_at")
   /// Issue #5 — postdoc mentor (manager) CWID, populated only when
   /// roleCategory === 'postdoc'. Sourced from the `manager` attribute on
   /// the scholar's ou=employees,ou=sors entry (parsed by parseManagerCwid).

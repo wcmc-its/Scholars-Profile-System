@@ -290,6 +290,29 @@ export const peopleIndexMapping = {
         type: "text",
         analyzer: "scholar_text",
       },
+      // POPS clinical specialty fields — populated from weillcornell.org board
+      // certifications, primary specialties, and clinical expertise (problem_procedure)
+      // by the etl/pops step. All three are OMIT-on-empty (scholars with no POPS data
+      // carry none of these fields). The query-time boost and clinical:exact evidence
+      // kind are gated behind SEARCH_PEOPLE_CLINICAL (default OFF, reindex-then-flip).
+      //
+      // `clinicalSpecialties` — board-cert ∪ primary specialties, deduped
+      // case-insensitively; queried via the cross_fields multi_match at a conservative
+      // boost so a specialty query ("cardiology") ranks the clinician. Analyzed
+      // `scholar_text` (same analyzer as `areasOfInterest`) for stemming + stopwords.
+      clinicalSpecialties: { type: "text", analyzer: "scholar_text" },
+      // `clinicalExpertise` — POPS problem_procedure strings; loose signal only
+      // (contributes to ranking but never earns a clinical reason line). Analyzed
+      // `scholar_text` so multi-word expertise phrases tokenize consistently.
+      clinicalExpertise: { type: "text", analyzer: "scholar_text" },
+      // `clinicalBoardSet` — board-certified specialty strings ONLY (raw, keyword).
+      // Not queried by the multi_match; read from `_source` at query time by
+      // `resolveHitEvidence` to determine whether a matched specialty is board-cert
+      // (label "Board certified in X") or primary-specialty-only ("Clinical specialty:
+      // X"). Stored as a `keyword` array so an exact case-insensitive membership
+      // check is possible without a DB round-trip. OMITTED when boardCertSpecialties
+      // is empty (omit-on-empty).
+      clinicalBoardSet: { type: "keyword" },
     },
   },
 };

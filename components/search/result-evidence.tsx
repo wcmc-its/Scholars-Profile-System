@@ -100,6 +100,21 @@ export function ResultEvidence({
           panelId={panelId}
         />
       );
+    case "clinical":
+      return (
+        <MatchAwareReason
+          kind="clinical"
+          label={
+            evidence.boardCertified
+              ? `Board certified in ${evidence.specialty}`
+              : `Clinical specialty: ${evidence.specialty}`
+          }
+          canExpand={canExpand}
+          expanded={expanded}
+          onToggle={onToggle}
+          panelId={panelId}
+        />
+      );
     case "publications":
       // The count line IS the evidence; the representative papers ride the
       // disclosure (canExpand = pubs present). Concept is the sparkle variant

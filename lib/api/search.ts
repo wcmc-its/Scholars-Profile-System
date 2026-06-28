@@ -92,6 +92,7 @@ import {
   resolvePeopleMethodContextBoost,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
+  resolveSearchPeopleClinical,
   resolveSearchPeopleConceptHint,
   resolveSearchResultEvidence,
   type PubRecencyMode,
@@ -100,6 +101,7 @@ import {
 import {
   selectEvidence,
   refineExemplarTools,
+  clinicalExactMatch,
   AREAS_CAP,
   type ResultEvidence,
 } from "@/lib/api/result-evidence";
@@ -1372,14 +1374,26 @@ export async function searchPeople(opts: {
     resolvePeopleMethodFamilyTier() && applyTopicTemplate
       ? opts.matchAwareContext?.methodFamily?.familyLabel?.trim() || null
       : null;
-  const peopleTopicFields = (): string[] =>
-    methodBoostOn
-      ? [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS, "methodFamily^4"]
-      : [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS];
-  const peopleDefaultFields = (): string[] =>
-    methodBoostOn
-      ? [...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS, "methodFamily^3"]
-      : [...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS];
+  // POPS clinical specialty boost (`SEARCH_PEOPLE_CLINICAL`). When on, append the
+  // index-time `clinicalSpecialties` / `clinicalExpertise` fields to the topic +
+  // default boost ladders so a specialty query ("cardiology") ranks the matching
+  // clinician. Conservative weights (below `publicationTitles`/`publicationMesh`)
+  // so clinical evidence never overpowers publication evidence; both use the same
+  // `scholar_text` analyzer, so they join the `cross_fields` blended group cleanly
+  // without perturbing the `minimum_should_match` token accounting. Default OFF
+  // (reindex-then-flip): off ⇒ an empty spread, so the ladders are byte-identical.
+  const clinicalBoostOn = resolveSearchPeopleClinical();
+  const clinicalFields = clinicalBoostOn ? ["clinicalSpecialties^3", "clinicalExpertise^2"] : [];
+  const peopleTopicFields = (): string[] => [
+    ...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS,
+    ...(methodBoostOn ? ["methodFamily^4"] : []),
+    ...clinicalFields,
+  ];
+  const peopleDefaultFields = (): string[] => [
+    ...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS,
+    ...(methodBoostOn ? ["methodFamily^3"] : []),
+    ...clinicalFields,
+  ];
 
   // #1119 — the sibling method-CONTEXT boost (`SEARCH_PEOPLE_METHOD_CONTEXT`). The
   // `methodContext` field is a multi-sentence usage-prose blob, so — UNLIKE the
@@ -2169,6 +2183,12 @@ export async function searchPeople(opts: {
       // path keeps today's `_source` shape. The count is then an O(1) `_source`
       // lookup instead of a publications-index agg.
       ...(reasonFromDoc && opts.skipReasonAgg !== true ? ["meshSubtreeCounts"] : []),
+      // POPS clinical fields — the matchable specialty set + the board-cert-only
+      // subset (for the `boardCertified` label), requested ONLY when
+      // SEARCH_PEOPLE_CLINICAL is on so the off path keeps today's `_source`
+      // shape. `clinicalExpertise` is a loose-only ranking signal (never a
+      // reason), so it is not returned. Drives the `clinical:exact` evidence below.
+      ...(clinicalBoostOn ? ["clinicalSpecialties", "clinicalBoardSet"] : []),
     ],
     // OpenSearch's default cap of 10000 short-circuits the total counter
     // and would make the subhead read "10,000 publications" even when
@@ -2292,6 +2312,12 @@ export async function searchPeople(opts: {
       // count is `meshSubtreeCounts[resolvedConceptUi] ?? 0`; a not-yet-reindexed
       // doc lacks the field and degrades to 0 (concept fallback), never a 500.
       meshSubtreeCounts?: Record<string, number>;
+      // POPS clinical specialty set + board-cert-only subset (omit-on-empty in
+      // the ETL). Present only when SEARCH_PEOPLE_CLINICAL is on (added to
+      // `_source` above); feed `clinicalExactMatch` for the `clinical:exact`
+      // reason. A not-yet-reindexed doc lacks them → no clinical reason, never a 500.
+      clinicalSpecialties?: string[];
+      clinicalBoardSet?: string[];
     };
     highlight?: Record<string, string[]>;
   };
@@ -2692,6 +2718,8 @@ export async function searchPeople(opts: {
     hasProvenance: boolean,
     hl: Record<string, string[]> | undefined,
     topMeshTerms: Array<{ ui: string | null; label: string }> | string[] | undefined,
+    clinicalSpecialties: string[] | undefined,
+    clinicalBoardSet: string[] | undefined,
   ): ResultEvidence => {
     const m = methodReasonByCwid.get(cwid);
     let topic: { label: string; id: string } | undefined;
@@ -2755,12 +2783,23 @@ export async function searchPeople(opts: {
       areas = null;
     }
 
+    // POPS clinical:exact reason (selectEvidence rank 4). Gated on
+    // SEARCH_PEOPLE_CLINICAL; off ⇒ the `_source` clinical fields aren't
+    // requested and `clinical` stays null, so the evidence is byte-identical.
+    // `clinicalExactMatch` returns null for a loose / no-overlap query — those
+    // still boost ranking (the §3 multi_match) but emit no reason (under-claim
+    // rather than mislabel).
+    const clinical = clinicalBoostOn
+      ? clinicalExactMatch(contentQuery, clinicalSpecialties ?? [], clinicalBoardSet ?? [])
+      : null;
+
     return selectEvidence({
       nameHighlight: hl?.preferredName?.[0],
       bioHighlight: hl?.overview?.[0],
       method: m ? { family: m.family, tools: refineExemplarTools(m.family, m.rawTools) } : undefined,
       topic,
       pub: Object.keys(pub).length > 0 ? pub : undefined,
+      clinical: clinical ?? undefined,
       // The content query drives the partial-bio-vs-pub.mention precedence split
       // (a subset-only bio highlight loses to publication-mention evidence).
       query: contentQuery,
@@ -2838,6 +2877,8 @@ export async function searchPeople(opts: {
                 prov != null,
                 hl,
                 h._source.topMeshTerms,
+                h._source.clinicalSpecialties,
+                h._source.clinicalBoardSet,
               ),
             }
           : {}),

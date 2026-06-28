@@ -9,9 +9,9 @@
  * Design (handoff §4):
  *   1. One typed `ResultEvidence` per result; the card never re-derives priority.
  *   2. Strongest-evidence-for-this-query precedence, defined once + tested:
- *        name → method → publications:tagged → publications:concept
- *        → selfDescription (bio) → publications:mention → topic → affiliation
- *        → concepts → areas → none
+ *        name → method → publications:tagged → clinical:exact
+ *        → publications:concept → selfDescription (bio) → publications:mention
+ *        → topic → affiliation → concepts → areas → none
  *      Two strong/weak splits (§5.0C): `name` (strongest) floats above `method`
  *      while `affiliation` (weak/organizational) sinks just above empty; tagged
  *      pub sits ABOVE bio while a free-text mention sits BELOW it. `topic` (the
@@ -53,6 +53,12 @@ export type ResultEvidence =
   | { kind: "name"; html: string }
   /** Matched method family + ≤3 cleaned exemplar tools (#824 §4c derive). */
   | { kind: "method"; family: string; tools: string[] }
+  /** Clinical specialty match (exact tier only — see {@link clinicalExactMatch}).
+   *  `boardCertified` true iff the specialty is in the scholar's board-cert set;
+   *  the label renders as "Board certified in {specialty}" vs "Clinical specialty:
+   *  {specialty}" accordingly. Loose specialty matches contribute to ranking but
+   *  emit no reason (under-claim rather than mislabel). */
+  | { kind: "clinical"; specialty: string; boardCertified: boolean }
   /** Matched curated research-area parent topic (v1 keeps the parent label).
    *  `id` is the topic SLUG (= `Topic.id` = `PublicationTopic.parentTopicId`) so
    *  the hover can resolve the scholar's representative paper in this topic. */
@@ -326,6 +332,11 @@ export type SelectEvidenceInput = {
     mention?: { text: string; count: number; pubs?: EvidencePub[] };
     concept?: { text: string };
   };
+  /** Resolved clinical specialty — exact tier only. Caller ran
+   *  {@link clinicalExactMatch} against the hit's `_source` clinical fields; pass
+   *  the non-null result here. Absent ⇒ no clinical reason (loose matches are
+   *  intentionally silent; they still contribute to the multi_match score). */
+  clinical?: { specialty: string; boardCertified: boolean };
   /** The content query (the literal free-text terms the search ran against),
    *  used by the bio-vs-pub precedence split: a bio highlight that covered only a
    *  SUBSET of a multi-word query loses to publication-mention evidence (handoff
@@ -365,6 +376,53 @@ export function bioCoversQuery(bioHighlight: string, query: string): boolean {
 }
 
 /**
+ * Cheap, pure exact-tier clinical match for the search explanation layer. Run
+ * over the hit's `_source` `clinicalSpecialties` field + the content query; the
+ * non-null result is passed directly as `clinical` to {@link selectEvidence}.
+ *
+ * A hit is `clinical:exact` iff, for the first specialty `s` in `specialties`
+ * where EITHER:
+ *   - **token-subset**: every content token of the normalized query appears in
+ *     normalize(s) — the specialty is at least as specific as the query (e.g.
+ *     "cardiology" query matches "Interventional Cardiology" specialty), OR
+ *   - **phrase equality**: normalize(s) equals the normalized query exactly.
+ * `boardCertified` is true iff `s` is case-insensitively present in `boardSet`
+ * (the board-certifications-only subset, separate from primary specialties).
+ * Returns null when no specialty qualifies — the hit still benefits from the
+ * `clinicalSpecialties`/`clinicalExpertise` multi_match boost in the query, but
+ * no clinical reason is emitted (conservative: under-claim rather than mislabel).
+ *
+ * Normalize = lowercase + collapse whitespace (shared with the rest of this module).
+ *
+ * Known gap (accepted v1): synonym/abbreviation queries ("heart" → Cardiology)
+ * won't earn a clinical reason; they still boost ranking via loose match.
+ */
+export function clinicalExactMatch(
+  contentQuery: string,
+  specialties: string[],
+  boardSet: string[],
+): { specialty: string; boardCertified: boolean } | null {
+  const nq = normalize(contentQuery);
+  const tokens = nq.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0 || specialties.length === 0) return null;
+  const boardNorm = new Set(boardSet.map(normalize));
+  for (const s of specialties) {
+    const ns = normalize(s);
+    if (!ns) continue;
+    // token-subset: every query token appears as a substring in the normalized specialty.
+    const tokenSubset = tokens.every((t) => ns.includes(t));
+    // phrase equality: the normalized specialty IS the normalized query. Prevents
+    // "Cardiology" from matching a "pediatric cardiology" query (where the searcher
+    // is asking for something more specific than the specialty) via substring.
+    const phrase = ns === nq;
+    if (tokenSubset || phrase) {
+      return { specialty: s, boardCertified: boardNorm.has(ns) };
+    }
+  }
+  return null;
+}
+
+/**
  * THE precedence function (handoff §4 principle 2). Returns exactly one
  * `ResultEvidence`, strongest-first. Order is the single source of truth for
  * "why this matched"; the card renders the result and never re-ranks.
@@ -379,12 +437,12 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
   // the honest-empty line. `nameKind` is still read by the rank-7 affiliation branch.
   // 2 — method
   if (input.method) return { kind: "method", family: input.method.family, tools: input.method.tools };
-  // 3 — publications, strong tier: a DIRECT subject/MeSH hit (tagged), then the
-  // `concept` MeSH-expansion text variant. A direct query-MeSH match is more
-  // query-relevant than the scholar's self-reported research area (a `topic` can
-  // be an unrelated PARENT of the matched subarea — e.g. a "stem cells" subarea
-  // under a "Gastroenterology" parent), so BOTH now outrank `topic` below (moved
-  // up from rank 4). They still sit ABOVE bio, as before.
+  // 3 — publications, strong tier: a DIRECT subject/MeSH hit (tagged). A direct
+  // query-MeSH match is the most on-mission signal in a research profile system,
+  // so it outranks clinical:exact (rank 4) below (a researcher who PUBLISHES on
+  // the topic beats one who holds a specialty credential for it). It also outranks
+  // `topic` (a `topic` can be an unrelated PARENT of the matched subarea — e.g.
+  // a "stem cells" subarea under a "Gastroenterology" parent).
   if (input.pub?.tagged)
     return {
       kind: "publications",
@@ -393,15 +451,23 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
       ...(input.pub.tagged.pubs && input.pub.tagged.pubs.length > 0 ? { pubs: input.pub.tagged.pubs } : {}),
       count: input.pub.tagged.count,
     };
+  // 4 — clinical:exact — an authoritative board-cert / primary-specialty match that
+  // directly names the query term. Outranks concept/bio/mention/topic; loses to a
+  // direct MeSH tagged hit (rank 3). Exact tier only: the caller ran
+  // clinicalExactMatch() and passes the result here; loose matches (which still
+  // boost ranking) are intentionally absent so we never mislabel.
+  if (input.clinical)
+    return { kind: "clinical", specialty: input.clinical.specialty, boardCertified: input.clinical.boardCertified };
+  // 5 — publications:concept (MeSH-expansion text variant; below clinical:exact)
   if (input.pub?.concept) return { kind: "publications", strength: "concept", text: input.pub.concept.text };
-  // 4 — selfDescription (bio) — ONLY when the bio covered the WHOLE query (a
+  // 6 — selfDescription (bio) — ONLY when the bio covered the WHOLE query (a
   // FULL-query / single-token bio match still wins, as today). A query-literal
   // bio sentence shows WHY this matched, so it now outranks the research-area
   // `topic` below. A partial-bio match falls through to pub.mention so a real
   // subset-only highlight never outranks publication-mention evidence (decision 2).
   if (input.bioHighlight && bioCoversQuery(input.bioHighlight, input.query ?? ""))
     return { kind: "selfDescription", html: firstMatchingSentence(input.bioHighlight) };
-  // 5 — publications:mention (free-text — a paper TITLE/abstract literally mentions
+  // 7 — publications:mention (free-text — a paper TITLE/abstract literally mentions
   // the term; below a FULL bio match so "1 of 133 mention" never outranks a real
   // overview sentence; handoff §5.0C — but a PARTIAL-only bio match has fallen
   // through above and loses to this).
@@ -413,26 +479,26 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
       ...(input.pub.mention.pubs && input.pub.mention.pubs.length > 0 ? { pubs: input.pub.mention.pubs } : {}),
       count: input.pub.mention.count,
     };
-  // 6 — topic (matched research area). Demoted below ALL query-literal evidence
-  // (MeSH tagged/concept, a full-query bio sentence, a paper mention): the area's
-  // displayed PARENT label can look unrelated, so it must never mask a card that
-  // literally shows the search term. Still above the weak subset-only bio match +
-  // org-affiliation + identity hints — it IS a real query match, just the least
-  // self-evident one.
+  // 8 — topic (matched research area). Demoted below ALL query-literal evidence
+  // (MeSH tagged/concept, clinical:exact, a full-query bio sentence, a paper
+  // mention): the area's displayed PARENT label can look unrelated, so it must
+  // never mask a card that literally shows the search term. Still above the weak
+  // subset-only bio match + org-affiliation + identity hints — it IS a real query
+  // match, just the least self-evident one.
   if (input.topic) return { kind: "topic", label: input.topic.label, id: input.topic.id };
-  // 6b — selfDescription (bio) — the partial-bio match that lost to pub.mention +
+  // 8b — selfDescription (bio) — the partial-bio match that lost to pub.mention +
   // topic above still beats affiliation/areas/empty, so it falls here.
   if (input.bioHighlight) return { kind: "selfDescription", html: firstMatchingSentence(input.bioHighlight) };
-  // 7 — affiliation (weak/organizational, just above empty)
+  // 9 — affiliation (weak/organizational, just above empty)
   if (nameKind === "affiliation") return { kind: "affiliation", html: input.nameHighlight! };
-  // 8a — concepts (top-MeSH who-is-this hint; supersedes areas when present,
+  // 10a — concepts (top-MeSH who-is-this hint; supersedes areas when present,
   // behind SEARCH_PEOPLE_CONCEPT_HINT — the caller sets `concepts` and nulls
   // `areas` only when the flag is on, so off-flag this branch never fires)
   if (input.concepts && input.concepts.items.length > 0)
     return { kind: "concepts", items: input.concepts.items, total: input.concepts.total };
-  // 8b — areas (legacy who-is-this hint; E2 renders it OUTSIDE the match slot)
+  // 10b — areas (legacy who-is-this hint; E2 renders it OUTSIDE the match slot)
   if (input.areas && input.areas.labels.length > 0)
     return { kind: "areas", labels: input.areas.labels, total: input.areas.total };
-  // 9 — honest empty
+  // 11 — honest empty
   return { kind: "none" };
 }

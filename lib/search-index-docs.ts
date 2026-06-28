@@ -451,6 +451,14 @@ export const PEOPLE_INDEX_SELECT = {
       },
     },
   },
+  // POPS clinical data — populated by the etl/pops step from weillcornell.org.
+  // All three are Json? columns; coerced to typed arrays in buildPeopleDoc.
+  //   popsBoardCertifications: [{ board, specialty }]
+  //   popsSpecialties:         string[]  (primary specialties)
+  //   popsExpertise:           string[]  (problem_procedure)
+  popsBoardCertifications: true,
+  popsSpecialties: true,
+  popsExpertise: true,
 } satisfies Prisma.ScholarSelect;
 
 export type ScholarForIndex = Prisma.ScholarGetPayload<{
@@ -1136,6 +1144,54 @@ export async function buildPeopleDoc(
     }
   }
 
+  // POPS clinical fields — derived from POPS JSON columns on the scholar row
+  // (populated by the etl/pops step). All three follow the OMIT-on-empty
+  // convention (topMeshTerms pattern): don't emit the key when the array is
+  // empty, so `_source` consumers distinguish "no POPS data" from "[]".
+  // The JSON columns come back as parsed JSON at runtime; guard null /
+  // non-array defensively before coercing to typed arrays.
+  const boardCertSpecialties: string[] = (() => {
+    const raw = s.popsBoardCertifications;
+    if (!Array.isArray(raw)) return [];
+    const out: string[] = [];
+    for (const item of raw) {
+      if (item && typeof item === "object" && "specialty" in item) {
+        const sp = (item as { specialty: unknown }).specialty;
+        if (typeof sp === "string" && sp.length > 0) out.push(sp);
+      }
+    }
+    return out;
+  })();
+  const primarySpecialties: string[] = (() => {
+    const raw = s.popsSpecialties;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((x): x is string => typeof x === "string" && x.length > 0);
+  })();
+  // clinicalSpecialties = board-cert ∪ primary_specialties, deduped
+  // case-insensitively. Board-cert entries come first; first occurrence wins
+  // for the canonical casing.
+  const clinicalSpecialtiesMap = new Map<string, string>();
+  for (const specialty of boardCertSpecialties) {
+    const key = specialty.toLowerCase();
+    if (!clinicalSpecialtiesMap.has(key)) clinicalSpecialtiesMap.set(key, specialty);
+  }
+  for (const specialty of primarySpecialties) {
+    const key = specialty.toLowerCase();
+    if (!clinicalSpecialtiesMap.has(key)) clinicalSpecialtiesMap.set(key, specialty);
+  }
+  const clinicalSpecialties = Array.from(clinicalSpecialtiesMap.values());
+  // clinicalExpertise = popsExpertise (POPS problem_procedure strings).
+  const clinicalExpertise: string[] = (() => {
+    const raw = s.popsExpertise;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((x): x is string => typeof x === "string" && x.length > 0);
+  })();
+  // clinicalBoardSet = board-cert specialty strings only; used by the
+  // result-evidence layer to set the boardCertified label. Stored as a
+  // keyword field (not analyzed) so exact membership is recoverable at
+  // query time without a DB round-trip.
+  const clinicalBoardSet = boardCertSpecialties;
+
   return {
     cwid: s.cwid,
     slug: s.slug,
@@ -1198,6 +1254,15 @@ export async function buildPeopleDoc(
     ...methodFamilyField,
     // #1119 — public method-family tool-USAGE snippets (OMIT-on-empty, gate-only).
     ...methodContextField,
+    // POPS clinical fields (OMIT-on-empty: scholars with no POPS data write
+    // nothing for any of these fields, so `_source` consumers distinguish
+    // "no clinical data" from "[]"). All three are populated by the etl/pops
+    // step; the query-time boost and clinical:exact evidence are gated behind
+    // SEARCH_PEOPLE_CLINICAL (default OFF) so indexing these fields is inert
+    // until the flag is flipped after a successful people reindex.
+    ...(clinicalSpecialties.length > 0 ? { clinicalSpecialties } : {}),
+    ...(clinicalExpertise.length > 0 ? { clinicalExpertise } : {}),
+    ...(clinicalBoardSet.length > 0 ? { clinicalBoardSet } : {}),
   };
 }
 
