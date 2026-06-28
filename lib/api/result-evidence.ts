@@ -9,9 +9,11 @@
  * Design (handoff §4):
  *   1. One typed `ResultEvidence` per result; the card never re-derives priority.
  *   2. Strongest-evidence-for-this-query precedence, defined once + tested:
- *        name → method → publications:tagged → clinical:exact
+ *        name → method → {publications:tagged ⇄ clinical:exact, COUNT-GATED}
  *        → publications:concept → selfDescription (bio) → publications:mention
  *        → topic → affiliation → concepts → areas → none
+ *      (clinical:exact outranks tagged only when the tagged pub count is below an
+ *       env-tunable threshold — higher for a board cert than a bare specialty.)
  *      Two strong/weak splits (§5.0C): `name` (strongest) floats above `method`
  *      while `affiliation` (weak/organizational) sinks just above empty; tagged
  *      pub sits ABOVE bio while a free-text mention sits BELOW it. `topic` (the
@@ -337,6 +339,12 @@ export type SelectEvidenceInput = {
    *  the non-null result here. Absent ⇒ no clinical reason (loose matches are
    *  intentionally silent; they still contribute to the multi_match score). */
   clinical?: { specialty: string; boardCertified: boolean };
+  /** Count thresholds for the clinical:exact-vs-publications:tagged precedence
+   *  (env-tunable). clinical:exact outranks a `tagged` reason only when the tagged
+   *  pub count is below `boardOverTagged` (board-certified match) or
+   *  `specialtyOverTagged` (specialty-only). Absent ⇒ tagged always wins when
+   *  present (clinical fills in only when there are no tagged pubs). */
+  clinicalReasonThresholds?: { boardOverTagged: number; specialtyOverTagged: number };
   /** The content query (the literal free-text terms the search ran against),
    *  used by the bio-vs-pub precedence split: a bio highlight that covered only a
    *  SUBSET of a multi-word query loses to publication-mention evidence (handoff
@@ -437,12 +445,27 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
   // the honest-empty line. `nameKind` is still read by the rank-7 affiliation branch.
   // 2 — method
   if (input.method) return { kind: "method", family: input.method.family, tools: input.method.tools };
-  // 3 — publications, strong tier: a DIRECT subject/MeSH hit (tagged). A direct
-  // query-MeSH match is the most on-mission signal in a research profile system,
-  // so it outranks clinical:exact (rank 4) below (a researcher who PUBLISHES on
-  // the topic beats one who holds a specialty credential for it). It also outranks
-  // `topic` (a `topic` can be an unrelated PARENT of the matched subarea — e.g.
-  // a "stem cells" subarea under a "Gastroenterology" parent).
+  // 3/4 — clinical:exact vs publications:tagged, COUNT-GATED. A direct MeSH
+  // `tagged` hit is the most on-mission signal in a research profile system, so a
+  // STRONG tagged signal wins. But a board-cert / primary-specialty match that
+  // literally names the query should beat a WEAK tagged signal — "5 pubs > 1
+  // specialty, but 3 maybe not", and "board cert > specialty". So clinical:exact
+  // outranks tagged only when the tagged pub COUNT is below a threshold that is
+  // higher for a board certification than for a bare specialty. Thresholds come
+  // from the caller (env-tunable: SEARCH_PEOPLE_CLINICAL_{BOARD,SPECIALTY}_OVER_TAGGED);
+  // absent ⇒ {0,0} ⇒ original behavior (tagged always wins when present; clinical
+  // fills in only when there are no tagged pubs).
+  if (input.clinical) {
+    const tagged = input.pub?.tagged;
+    const th = input.clinicalReasonThresholds;
+    const limit = th ? (input.clinical.boardCertified ? th.boardOverTagged : th.specialtyOverTagged) : 0;
+    if (!tagged || tagged.count < limit)
+      return { kind: "clinical", specialty: input.clinical.specialty, boardCertified: input.clinical.boardCertified };
+    // strong tagged signal ⇒ fall through to the tagged return below.
+  }
+  // tagged: a DIRECT subject/MeSH hit. Beats a weak/absent clinical match (handled
+  // above), `concept`, and `topic` (which can be an unrelated PARENT of the matched
+  // subarea — e.g. a "stem cells" subarea under a "Gastroenterology" parent).
   if (input.pub?.tagged)
     return {
       kind: "publications",
@@ -451,13 +474,6 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
       ...(input.pub.tagged.pubs && input.pub.tagged.pubs.length > 0 ? { pubs: input.pub.tagged.pubs } : {}),
       count: input.pub.tagged.count,
     };
-  // 4 — clinical:exact — an authoritative board-cert / primary-specialty match that
-  // directly names the query term. Outranks concept/bio/mention/topic; loses to a
-  // direct MeSH tagged hit (rank 3). Exact tier only: the caller ran
-  // clinicalExactMatch() and passes the result here; loose matches (which still
-  // boost ranking) are intentionally absent so we never mislabel.
-  if (input.clinical)
-    return { kind: "clinical", specialty: input.clinical.specialty, boardCertified: input.clinical.boardCertified };
   // 5 — publications:concept (MeSH-expansion text variant; below clinical:exact)
   if (input.pub?.concept) return { kind: "publications", strength: "concept", text: input.pub.concept.text };
   // 6 — selfDescription (bio) — ONLY when the bio covered the WHOLE query (a

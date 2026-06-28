@@ -528,6 +528,18 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_PEOPLE_CLINICAL_BOOST",
+                "Value": "5",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_CLINICAL_BOARD_OVER_TAGGED",
+                "Value": "6",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_CLINICAL_SPECIALTY_OVER_TAGGED",
+                "Value": "4",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
                 "Value": "off",
               },
@@ -3862,7 +3874,19 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_CLINICAL",
-                "Value": "off",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_CLINICAL_BOOST",
+                "Value": "5",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_CLINICAL_BOARD_OVER_TAGGED",
+                "Value": "6",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_CLINICAL_SPECIALTY_OVER_TAGGED",
+                "Value": "4",
               },
               {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",

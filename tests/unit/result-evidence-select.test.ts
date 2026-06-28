@@ -608,6 +608,53 @@ describe("selectEvidence — clinical:exact precedence (rank 4, spec §4.1)", ()
   });
 });
 
+describe("selectEvidence — clinical:exact vs tagged, COUNT-GATED (tuning: board 6 / specialty 4)", () => {
+  const TH = { boardOverTagged: 6, specialtyOverTagged: 4 };
+  const board = { specialty: "Interventional Cardiology", boardCertified: true };
+  const spec = { specialty: "Cardiology", boardCertified: false };
+  const tagged = (count: number) => ({ tagged: { text: `${count} of 99 publications tagged Cardiology`, count } });
+
+  it('board cert beats a WEAK tagged signal (5 < 6) — "show clinical" inclination', () => {
+    const ev = selectEvidence({ clinical: board, pub: tagged(5), clinicalReasonThresholds: TH });
+    expect(ev).toMatchObject({ kind: "clinical", boardCertified: true });
+  });
+
+  it("board cert loses to a STRONG tagged signal (6 >= 6) — heavy publisher keeps pubs", () => {
+    const ev = selectEvidence({ clinical: board, pub: tagged(6), clinicalReasonThresholds: TH });
+    expect(ev).toMatchObject({ kind: "publications", strength: "tagged" });
+  });
+
+  it('specialty-only beats 3 tagged pubs (3 < 4) — "3 maybe not"', () => {
+    const ev = selectEvidence({ clinical: spec, pub: tagged(3), clinicalReasonThresholds: TH });
+    expect(ev).toMatchObject({ kind: "clinical", boardCertified: false });
+  });
+
+  it('specialty-only loses to 5 tagged pubs (5 >= 4) — "5 pubs > 1 specialty"', () => {
+    const ev = selectEvidence({ clinical: spec, pub: tagged(5), clinicalReasonThresholds: TH });
+    expect(ev).toMatchObject({ kind: "publications", strength: "tagged" });
+  });
+
+  it("board cert > specialty: at 4 tagged pubs board wins but specialty loses", () => {
+    expect(selectEvidence({ clinical: board, pub: tagged(4), clinicalReasonThresholds: TH })).toMatchObject({
+      kind: "clinical",
+    });
+    expect(selectEvidence({ clinical: spec, pub: tagged(4), clinicalReasonThresholds: TH })).toMatchObject({
+      kind: "publications",
+      strength: "tagged",
+    });
+  });
+
+  it("clinical still wins when there are NO tagged pubs, regardless of thresholds", () => {
+    const ev = selectEvidence({ clinical: spec, pub: { mention: { text: "x", count: 1 } }, clinicalReasonThresholds: TH });
+    expect(ev).toMatchObject({ kind: "clinical" });
+  });
+
+  it("thresholds ABSENT ⇒ original behavior: tagged always wins when present", () => {
+    const ev = selectEvidence({ clinical: board, pub: tagged(1) });
+    expect(ev).toMatchObject({ kind: "publications", strength: "tagged" });
+  });
+});
+
 describe("INVARIANT guardrails (handoff §4 principle 5 — would have caught #1051)", () => {
   it("never renders a raw under_score slug — labels are humanized upstream, payload carries no slugs", () => {
     // selectEvidence passes areas labels through verbatim; the server humanizes

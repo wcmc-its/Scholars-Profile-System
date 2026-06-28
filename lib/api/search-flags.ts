@@ -915,3 +915,30 @@ export function resolveMeshResolutionFallbackEnabled(): boolean {
 export function resolveSearchPeopleClinical(): boolean {
   return process.env.SEARCH_PEOPLE_CLINICAL === "on";
 }
+
+/** Ranking boost applied to the `clinicalSpecialties` field in the people
+ *  multi_match when SEARCH_PEOPLE_CLINICAL is on (`SEARCH_PEOPLE_CLINICAL_BOOST`).
+ *  Default 5 — below `publicationTitles^6`/`publicationMesh^4` so clinical evidence
+ *  surfaces clinicians without overpowering publication evidence. Env-tunable. */
+export function resolveSearchPeopleClinicalBoost(): number {
+  const n = Number(process.env.SEARCH_PEOPLE_CLINICAL_BOOST);
+  return Number.isFinite(n) && n > 0 ? n : 5;
+}
+
+/** Count thresholds for the clinical:exact-vs-publications:tagged reason precedence
+ *  (`SEARCH_PEOPLE_CLINICAL_BOARD_OVER_TAGGED` / `_SPECIALTY_OVER_TAGGED`).
+ *  clinical:exact outranks a `tagged` reason only when the tagged pub count is
+ *  below the threshold — higher for a board certification than a bare specialty.
+ *  Defaults: board 6, specialty 4 ("5 pubs > 1 specialty, 3 maybe not; board cert >
+ *  specialty"). Env-tunable so the inclination can be dialed without a code change. */
+export function resolveSearchPeopleClinicalReasonThresholds(): {
+  boardOverTagged: number;
+  specialtyOverTagged: number;
+} {
+  const board = Number(process.env.SEARCH_PEOPLE_CLINICAL_BOARD_OVER_TAGGED);
+  const spec = Number(process.env.SEARCH_PEOPLE_CLINICAL_SPECIALTY_OVER_TAGGED);
+  return {
+    boardOverTagged: Number.isFinite(board) && board >= 0 ? board : 6,
+    specialtyOverTagged: Number.isFinite(spec) && spec >= 0 ? spec : 4,
+  };
+}

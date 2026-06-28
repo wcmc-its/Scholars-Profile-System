@@ -1434,8 +1434,17 @@ export class AppStack extends Stack {
         // people index must be rebuilt with the three clinical fields before flipping
         // on. resolveSearchPeopleClinical reads === "on"; off => fields indexed but
         // not queried, no clinical reason emitted, body byte-identical to today.
-        // Default OFF both envs; staging soak after first etl:pops run + reindex.
-        SEARCH_PEOPLE_CLINICAL: "off",
+        // Staging soak (etl:pops + people reindex done 2026-06-28); prod stays OFF
+        // until the soak clears.
+        SEARCH_PEOPLE_CLINICAL: env === "staging" ? "on" : "off",
+        // Clinical relevance tuning (env-tunable so the inclination can be dialed on
+        // staging without a code roll). BOOST = clinicalSpecialties field boost in the
+        // people multi_match. *_OVER_TAGGED = the tagged-pub COUNT below which a
+        // clinical:exact reason outranks a tagged-pub reason (board cert allowed to
+        // beat more pubs than a bare specialty: "5 pubs > 1 specialty; board > specialty").
+        SEARCH_PEOPLE_CLINICAL_BOOST: "5",
+        SEARCH_PEOPLE_CLINICAL_BOARD_OVER_TAGGED: "6",
+        SEARCH_PEOPLE_CLINICAL_SPECIALTY_OVER_TAGGED: "4",
         // #824 follow-up -- match-aware People-results "why" line (method/topic/
         // humanized-areas snippet). APP-ONLY, no reindex: derives from
         // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-

@@ -66,7 +66,7 @@ Pattern: clone `methodFamily` (cheap, indexed, query-time `multi_match` boost). 
   - `clinicalExpertise` — `expertise` / `problem_procedure`.
   - ponytail: two `text` fields, not keyword facets — no faceting was requested. Add keyword sub-fields only if a specialty filter UI lands later.
 - **Mapping** (`lib/search.ts` `peopleIndexMapping`): both as `type: text, analyzer: scholar_text` (same as `areasOfInterest`). Adds ~0.5–2 KB/doc — within the ~53 KB/doc budget but **verify against the byte-aware 8 MB chunker** (#485/#626); keep expertise a single short blob, don't repeat it.
-- **Query** (`lib/api/search.ts`): add the two fields to the people `cross_fields multi_match` field set (`peopleTopicFields`/`peopleDefaultFields`) at a **conservative boost (~^2–3**, in line with `primaryTitle`/`areasOfInterest`; **tunable, start low** so it doesn't overpower publication evidence).
+- **Query** (`lib/api/search.ts`): add the two fields to the people `cross_fields multi_match` field set (`peopleTopicFields`/`peopleDefaultFields`). `clinicalSpecialties` boost is **env-tunable** via `SEARCH_PEOPLE_CLINICAL_BOOST` (default **^5**, below `publicationTitles^6`/`publicationMesh^4`); `clinicalExpertise` stays `^2` (loose). Raised from the initial `^3` to surface clinicians higher for specialty queries.
 - **Flag:** gate behind `SEARCH_PEOPLE_CLINICAL` (default **OFF**), cloning the `SEARCH_PEOPLE_METHOD_FAMILY` lifecycle. **Reindex must land before the flag flips** (field has to be in the doc first).
 
 ## 4. Deliverable 3 — search explanation (match reason only)
@@ -77,16 +77,20 @@ Add a `"clinical"` evidence kind, mirroring `"method"`. Data reads from the hit 
 
 `selectEvidence()` is a first-match-wins precedence list; today it already ranks by *match precision* (tagged > concept > mention). Clinical is **two signals, not one**, and obeys the same law:
 
-- **`clinical:exact`** — the searcher asked for exactly this specialty. **This is the only clinical case that earns a reason line.** Slot it at **rank 4 — directly below `publications:tagged`, above `publications:concept` / `selfDescription` / `publications:mention` / `topic`.**
-- **`clinical:loose`** — query tokens fuzzily overlap a specialty/expertise string. **Contributes to ranking only** (the field stays in the §3 `multi_match`); generates **no** clinical reason — it falls through to whatever other reason exists. Conservative: under-claim rather than mislabel. Promote loose→reason later only if coverage/feedback warrant.
+- **`clinical:exact`** — the searcher asked for exactly this specialty. **The only clinical case that earns a reason line.** It sits at **rank 3/4 against `publications:tagged`, COUNT-GATED** (below): it beats a *weak* tagged-pub signal but loses to a *strong* one. Above `publications:concept` / `selfDescription` / `publications:mention` / `topic` regardless.
+- **`clinical:loose`** — query tokens fuzzily overlap a specialty/expertise string. **Contributes to ranking only** (the field stays in the §3 `multi_match`); generates **no** clinical reason. Conservative: under-claim rather than mislabel.
 
-Resulting order (▸ = new; only `clinical:exact` is emitted):
+**Count-gated `clinical:exact` vs `publications:tagged`** (env-tunable). `clinical:exact` outranks a `tagged` reason only when the tagged pub **count is below a threshold** — higher for a board certification than a bare specialty (`SEARCH_PEOPLE_CLINICAL_BOARD_OVER_TAGGED` default **6**, `…_SPECIALTY_OVER_TAGGED` default **4**):
+- board-cert match beats ≤5 tagged pubs, loses to ≥6;
+- specialty-only match beats ≤3 tagged pubs, loses to ≥4 ("5 pubs > 1 specialty; 3 → specialty wins; board cert > specialty").
+- With no tagged pubs, `clinical:exact` wins outright. Thresholds absent ⇒ original behavior (tagged always wins when present).
+
+Resulting order (▸ = new):
 
 ```
 1  name (not rendered)
 2  method
-3  publications:tagged          ← "publishes on it"
-4  ▸ clinical:exact             ← "board-certified in it"   (NEW, exact only)
+3⇄4  publications:tagged ⇄ ▸ clinical:exact   (count-gated: strong pubs win, weak pubs lose to the credential)
 5  publications:concept
 6  selfDescription (full-bio)
 7  publications:mention
@@ -94,7 +98,7 @@ Resulting order (▸ = new; only `clinical:exact` is emitted):
    …  (clinical:loose produces no reason; affiliation / concepts / areas / none follow)
 ```
 
-Rationale: in a **research** profile system, "they publish on it" (`tagged`) is the most on-mission reason, so it stays on top. But an authoritative board certification outranks a fuzzy concept-expansion or an incidental paper *mention* — which fixes the failure mode where a cardiologist with one tangential paper would otherwise read "mentioned in a paper" instead of "Board certified in Cardiology."
+Rationale: in a **research** profile system, *substantial* publication on the topic (`tagged`, high count) is the most on-mission reason and still wins. But an authoritative board certification should beat a thin pub signal or an incidental *mention* — which fixes the failure mode where a board-certified cardiologist with one tangential paper would otherwise read "1 of 99 publications mention cardiology" instead of "Board certified in Cardiology."
 
 **Exact-tier detection (cheap, JS over `_source` + query, no taxonomy/LLM):** a hit is `clinical:exact` iff, for some single specialty string `s` in the hit's board-cert ∪ specialty set, **every content token of the query is contained in `s`** (token-subset), **or** `s` appears as a phrase in the query.
 - `"cardiology"` vs `"Cardiology"` → exact ✓

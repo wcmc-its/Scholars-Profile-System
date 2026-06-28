@@ -93,6 +93,8 @@ import {
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
   resolveSearchPeopleClinical,
+  resolveSearchPeopleClinicalBoost,
+  resolveSearchPeopleClinicalReasonThresholds,
   resolveSearchPeopleConceptHint,
   resolveSearchResultEvidence,
   type PubRecencyMode,
@@ -1383,7 +1385,15 @@ export async function searchPeople(opts: {
   // without perturbing the `minimum_should_match` token accounting. Default OFF
   // (reindex-then-flip): off ⇒ an empty spread, so the ladders are byte-identical.
   const clinicalBoostOn = resolveSearchPeopleClinical();
-  const clinicalFields = clinicalBoostOn ? ["clinicalSpecialties^3", "clinicalExpertise^2"] : [];
+  const clinicalBoost = clinicalBoostOn ? resolveSearchPeopleClinicalBoost() : 0;
+  const clinicalFields = clinicalBoostOn
+    ? [`clinicalSpecialties^${clinicalBoost}`, "clinicalExpertise^2"]
+    : [];
+  // Count thresholds for the clinical:exact-vs-tagged-pubs reason precedence
+  // (env-tunable). Resolved once per request; passed into selectEvidence per hit.
+  const clinicalReasonThresholds = clinicalBoostOn
+    ? resolveSearchPeopleClinicalReasonThresholds()
+    : undefined;
   const peopleTopicFields = (): string[] => [
     ...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS,
     ...(methodBoostOn ? ["methodFamily^4"] : []),
@@ -2800,6 +2810,7 @@ export async function searchPeople(opts: {
       topic,
       pub: Object.keys(pub).length > 0 ? pub : undefined,
       clinical: clinical ?? undefined,
+      clinicalReasonThresholds,
       // The content query drives the partial-bio-vs-pub.mention precedence split
       // (a subset-only bio highlight loses to publication-mention evidence).
       query: contentQuery,
