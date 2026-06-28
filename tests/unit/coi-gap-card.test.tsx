@@ -461,13 +461,16 @@ describe("CoiGapCard #1112 redesign", () => {
     expect(document.body.textContent ?? "").not.toContain("Locked — managed at its source");
   });
 
-  it("uses the softened service copy (courtesy framing, no to-do vibe)", () => {
+  it("collapses the service copy to one line, pills carry the rest (§7.1/§7.2)", () => {
     render(<CoiGapCard cwid="self01" mentions={MENTIONS} />);
     const text = document.body.textContent ?? "";
-    expect(text).toContain("A courtesy heads-up");
-    expect(text).toContain("Nothing to fix here");
-    expect(screen.getByTestId("coi-gap-helper").textContent).toContain(
-      "This is a courtesy list, not a to-do",
+    // The anxious "courtesy"×3 repetition + the helper paragraph are gone.
+    expect(text).not.toContain("courtesy");
+    expect(screen.queryByTestId("coi-gap-helper")).toBeNull();
+    expect(text).toContain("no matching Weill Research Gateway disclosure");
+    // §7.2 — the publish vs. no-publish contrast is explicit, not inferred.
+    expect(screen.getByTestId("coi-gap-reassure").textContent).toContain(
+      "Never appears on the public profile",
     );
     // Non-task filter labels, not "Needs review".
     expect(text).not.toContain("Needs review");

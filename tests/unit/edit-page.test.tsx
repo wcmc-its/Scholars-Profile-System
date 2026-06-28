@@ -471,13 +471,13 @@ describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)",
     );
   });
 
-  it("surfaces coi-gap in superuser mode when candidates are present (operator decision), with reframed rail label", () => {
+  it("surfaces coi-gap in superuser mode when candidates are present (operator decision), with the viewer-neutral rail label", () => {
     const suCtx: EditContext = { ...superuserCtx, unmatchedPubmedCoi: gapCtx.unmatchedPubmedCoi };
     render(<EditPage ctx={suCtx} mode="superuser" />);
     const rail = screen.getByTestId("rail-coi-gap");
     expect(rail).toBeTruthy();
-    // Reframed for the superuser — not the first-person "From your publications".
-    expect(rail.textContent).toContain("From the scholar");
+    // §7.4 — describes the thing, not the source/viewer; same label for self + superuser.
+    expect(rail.textContent).toContain("Disclosed in publications");
     // Nested UNDER Conflicts of Interest (like the self rail) — a sub-view, not a
     // flat sibling. The child marker is the indentation class.
     expect(rail.className).toContain("pl-7");

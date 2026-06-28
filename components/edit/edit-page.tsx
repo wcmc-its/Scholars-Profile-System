@@ -146,7 +146,7 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // superuser (operator decision — trusted, with a UI nag before any action), but
   // NOT to a proxy / unit-admin (excluded in `attrsForMode`). The rail item
   // appears only when there are candidates AND the flag is on.
-  { key: "coi-gap", label: "From your publications", readonly: true, modes: ["self", "superuser"] },
+  { key: "coi-gap", label: "Disclosed in publications", readonly: true, modes: ["self", "superuser"] },
   // RePORTER "Is this you?" (REPORTER_MATCH_V2) — K=2 PMID-overlap matches the
   // scholar confirms/rejects, plus a revocable confirmed-match history. Self OR a
   // genuine superuser (on their behalf); never a proxy / unit-admin (excluded in
@@ -630,11 +630,10 @@ export function EditPage({
           placement.group === "Yours to edit" && mode !== "self"
             ? "Profile content"
             : placement.group;
-        // The advisory's first-person label reframes for anyone editing on the
-        // scholar's behalf (superuser / comms_steward), mirroring the classic
-        // superuser rail.
-        const label =
-          a.key === "coi-gap" && mode !== "self" ? "From the scholar’s publications" : a.label;
+        // §7.4 — the advisory's nav label describes the thing, not the source or
+        // viewer ("Disclosed in publications"), so it reads the same for the
+        // scholar and a superuser editing on their behalf.
+        const label = a.label;
         return [
           {
             key: a.key,
@@ -683,9 +682,9 @@ export function EditPage({
       : SUPERUSER_RAIL_ORDER.flatMap((k) => {
           const a = visible.find((v) => v.key === k);
           if (!a) return [];
-          // The COI-gap label is first-person ("From your publications"); reframe
-          // it for a superuser viewing another scholar's advisory.
-          const label = a.key === "coi-gap" ? "From the scholar’s publications" : a.label;
+          // §7.4 — viewer-neutral nav label ("Disclosed in publications"), same
+          // for self and superuser.
+          const label = a.label;
           // Like the self rail, the advisory nests under Conflicts of Interest
           // (it immediately follows "coi" in SUPERUSER_RAIL_ORDER) rather than
           // reading as a flat sibling — it is a sub-view of COI, not its own SOR.
