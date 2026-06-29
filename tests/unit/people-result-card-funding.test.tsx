@@ -95,6 +95,33 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
     expect(screen.getByText(/NIH \/ NIDDK/)).toBeTruthy();
   });
 
+  it("#1359 — marks the matched term in a KEY FUNDING grant title when a highlight is present", async () => {
+    mockFetch({
+      grants: [
+        {
+          projectId: "p1",
+          title: "Beta-cell regeneration in diabetes",
+          titleHighlight: "Beta-cell regeneration in <mark>diabetes</mark>",
+          sponsor: "NIH / NIDDK",
+          startYear: 2021,
+          endYear: 2025,
+          isActive: true,
+        },
+      ],
+      total: 1,
+    });
+    const { container } = render(
+      <PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /key funding/i })).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /key funding/i }));
+    // highlightedTitleHtml keeps a real <mark> (styled as the light-red pill).
+    const mark = container.querySelector("mark");
+    expect(mark?.textContent).toBe("diabetes");
+  });
+
   it("hides the Funding row entirely when no grant matched (never 0 of N)", async () => {
     const fetchFn = mockFetch({ grants: [], total: 0 });
     render(<PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />);

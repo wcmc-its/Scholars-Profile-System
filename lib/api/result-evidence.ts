@@ -46,6 +46,10 @@ export type EvidenceGrant = {
   /** Account_Number dedupe key from the funding index (FundingHit.projectId). */
   projectId: string;
   title: string;
+  /** #1359 — the grant title with the matched query term(s) wrapped in `<mark>`,
+   *  from `searchFunding`'s highlighter; null when nothing matched in the title.
+   *  Rendered with the same pill styling as key-paper titles. */
+  titleHighlight?: string | null;
   /** Prime sponsor display label, e.g. "NIH / NIA"; null when unknown. */
   sponsor?: string | null;
   /** Award period years (YYYY) parsed from start/end dates; either may be null. */
