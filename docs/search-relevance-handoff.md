@@ -33,6 +33,13 @@ Spec: `docs/search-research-area-relevance-spec.md` (in #1336). Worktree:
   = **A(anchor tier) × Σ B(scholar concentration)**.
 - **D2** granularity carried by the score (subtopic `total` when one resolves); **D3** blend
   into default Relevance, no new scope; **D4** reorder-only MVP (no set/facet change).
+- **D5 — blend ALL THREE coverage axes (spec §3.6), weighted by relevance tier.** The
+  research-area rollup is one rung (curated, but 2020-floored + bandwidth-limited); the two
+  **universal** rungs — concept-tagged (MeSH `publicationMeshUi`/`meshSubtreeCounts`, all
+  years) and keyword-mention (text, all years) — carry older work and un-scored areas. Both
+  universal signals **already exist in the indexes** (display-only today); promoting them to
+  ranking is cheap and needs no ReciterAI area-scoring backfill. Additive, `W_AREA ≥ W_TAGGED
+  > W_MENTION`. Rice (mention-only) stops reading as "absent."
 - **Labeling:** a MeSH-descriptor hit is a **Concept**, not a Research area; "Research area"
   is reserved for the topic-taxonomy match (#1337).
 
@@ -55,6 +62,18 @@ boost by the anchor `confidence` tier (reuse `meshMatchTier`). A name/embedding-
 the descriptor doesn't anchor to is *ancillary* → no boost. Small change in
 `app/api/search/route.ts` + `app/(public)/search/page.tsx` (the area-resolution block) and
 the weight selection in `search.ts`.
+
+### P2.5 — Add the two universal coverage rungs (D5 / spec §3.6)
+Expand Track B from area-rollup-only to the **blended** boost. Both rungs reuse signals that
+already exist (display-only today), so no reindex/backfill beyond what's already on:
+- **Concept-tagged (the workhorse):** a graded `function_score` term from the per-scholar
+  descriptor-subtree count in **`meshSubtreeCounts`** (the `SEARCH_PEOPLE_REASON_FROM_DOC`
+  precompute), else a binary `terms{publicationMeshUi: descendantUis}` weight. All years —
+  this is what gives older/un-rolled-up work credit.
+- **Keyword-mention (fallback rung):** the lexical body already rewards it un-graded; a
+  count-graded term needs a per-scholar mention-count field (defer). Smallest weight.
+- Order `W_AREA ≥ W_TAGGED > W_MENTION`; overlap is intentional reinforcement. This is the
+  real fix for the Rice "absent" symptom (P4) **without** the upstream area backfill.
 
 ### P3 — 2b: real "Research area" evidence row + anchor-gated display precedence
 Build the **"N publications in {Research Area}"** evidence row backed by the rollup (the

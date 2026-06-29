@@ -14,6 +14,13 @@ scholars rank, and in what order* ("relevance"). The two are independent.
   relevance×coverage score at whichever topic level the query resolved to (§3.3).
 - **D3 — blend into the default Relevance sort.** No new user-facing scope.
 - **D4 — reorder-only MVP** (no result-set/facet change); admission is a follow-up (OQ-1).
+- **D5 — use ALL THREE coverage axes, weighted by relevance tier (§3.6).** Research-area
+  rollup is *not* the sole signal — it is one (curated, high-precision, but 2020-floored +
+  bandwidth-limited) rung. The two **universal** rungs — concept-tagged (MeSH, all years)
+  and keyword-mention (text, all years) — cover everyone/everything the rollup can't
+  (older work, un-scored areas). Additive, `W_AREA ≥ W_TAGGED > W_MENTION`. The
+  research-area rung's non-universality is *accepted*: it adds precision where it exists;
+  the universal rungs carry the rest.
 
 ---
 
@@ -209,6 +216,41 @@ term-specific, so a narrow query won't get flooded by broad-area generalists; if
 parent area resolved, use the parent-area `total`. Either way the magnitude is the same
 relevance×coverage quantity (D1) — granularity changes *which* pubs count and *how
 relevant* each is, not the formula.
+
+### 3.6 Blended coverage — use all three match axes (D5)
+
+The research-area rollup is **not universal** (2020 ReciterAI floor + bandwidth limits, §9).
+Rather than fix that upstream (we don't have the bandwidth to score all areas), **blend it
+with the two universal axes already in the indexes.** Each axis is its own relevance×coverage
+and contributes an **additive** term to the same prominence `function_score`, ordered by
+per-pub relevance:
+
+| Rung | Coverage source | Years | Per-pub relevance | Built? |
+|---|---|---|---|---|
+| **Research area** | `publication_topic` `total` (§3.1), anchor-gated (§3.4) | 2020+ | curated topic score × A(anchor) | ✅ #1336 |
+| **Concept-tagged** | # pubs tagged the resolved descriptor subtree (`meshSubtreeCounts` per-doc field, or binary `terms{publicationMeshUi}`) | **all** | descriptor match tier (`exact`>anchored-entry>entry) | ⏳ promote the existing display count to ranking |
+| **Keyword-mention** | # pubs whose title/abstract mention the literal query | **all** | literal (lowest) | ⏳ lexical BM25 already partial; count-grading needs a field |
+
+```
+boost(scholar) = W_AREA·A·areaTier      // where publication_topic has them (2020+)
+               + W_TAGGED·descrTier·taggedTier   // all years, MeSH — the universal workhorse
+               + W_MENTION·mentionTier            // all years, text — the loosest fallback
+   with W_AREA ≥ W_TAGGED > W_MENTION
+```
+
+- **Overlap is intentional reinforcement, not double-counting.** A pub that is tagged AND in
+  the area AND mentioned is genuinely more on-topic, so it *should* contribute to more rungs.
+  Keep `W_MENTION` small so a tagged pub (which usually also mentions the term) reads as
+  ≈`W_TAGGED`, preserving tagged > mention.
+- **No scholar with real engagement is zero.** Rice (mention-only, pre-2020, untagged) lands
+  on the mention rung and stops reading as "absent." A focused pediatrician lands on area +
+  tagged. Elemento (tagged) lands on tagged.
+- **Feasibility per rung (handoff has the detail):** area = the built cwid-tier boost;
+  tagged = read the per-scholar subtree count from `meshSubtreeCounts` (the
+  `SEARCH_PEOPLE_REASON_FROM_DOC` precompute) for a *graded* boost, else a binary
+  `terms{publicationMeshUi}` weight; mention = the lexical body already rewards it un-graded,
+  count-grading is a later field. So the universal rungs are cheap — they reuse signals that
+  already exist, just not yet wired into `function_score`.
 
 ---
 
