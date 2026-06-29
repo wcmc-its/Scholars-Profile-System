@@ -464,7 +464,17 @@ export function KeyFunding({
                 &bull;
               </span>
               <span className="min-w-0">
-                <span className="block text-[#4a4a4a]">{g.title}</span>
+                {/* #1359 — when the query matched in the grant title, style the marks
+                    with the SAME light-red pill as key papers (highlightedTitleHtml);
+                    otherwise the plain title. */}
+                {g.titleHighlight ? (
+                  <span
+                    className="block text-[#4a4a4a]"
+                    dangerouslySetInnerHTML={{ __html: highlightedTitleHtml(g.titleHighlight) }}
+                  />
+                ) : (
+                  <span className="block text-[#4a4a4a]">{g.title}</span>
+                )}
                 {meta ? <span className="block text-[12px] text-[#777]">{meta}</span> : null}
               </span>
             </li>

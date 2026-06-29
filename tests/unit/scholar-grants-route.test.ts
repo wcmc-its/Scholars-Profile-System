@@ -99,6 +99,20 @@ describe("GET /api/scholar/[cwid]/grants", () => {
     expect(vi.mocked(searchFunding).mock.calls[0][0]).toMatchObject({ q: "children's" });
   });
 
+  it("#1359: carries the grant title highlight through to the EvidenceGrant", async () => {
+    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
+    vi.mocked(searchFunding).mockResolvedValue({
+      hits: [
+        hit({ projectId: "p1", title: "Beta-cell regeneration in diabetes", titleHighlight: "Beta-cell regeneration in <mark>diabetes</mark>" }),
+        hit({ projectId: "p2", title: "No title match", titleHighlight: null }),
+      ],
+      total: 2,
+    } as never);
+    const body = await (await call("abc1234", "diabetes")).json();
+    expect(body.grants[0].titleHighlight).toBe("Beta-cell regeneration in <mark>diabetes</mark>");
+    expect(body.grants[1].titleHighlight).toBeNull();
+  });
+
   it("null start/end dates degrade to null years (no NaN)", async () => {
     vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     vi.mocked(searchFunding).mockResolvedValue({
