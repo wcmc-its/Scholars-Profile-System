@@ -270,7 +270,7 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus thirty-two additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus thirty-three additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
@@ -283,8 +283,9 @@ describe("EdgeStack", () => {
         // + the #967 `/api/scholar/*/method-exemplar` representative-paper hover
         // + the two GrantRecs Phase 2 matcher routes
         // (/api/scholars/*/opportunities, /api/opportunities/*/researchers)
-        // + the GrantRecs slice-3 browse list (/api/opportunities).
-        expect(cacheBehaviors).toHaveLength(33);
+        // + the GrantRecs slice-3 browse list (/api/opportunities)
+        // + the SEARCH_EVIDENCE_ROWS `/api/scholar/*/grants` funding-row fetcher.
+        expect(cacheBehaviors).toHaveLength(34);
       });
 
       it("evaluates additional behaviors in the spec-defined order (static first, then uncacheable, then #634 query-keyed)", () => {
@@ -323,6 +324,8 @@ describe("EdgeStack", () => {
           "/api/scholars/*/popover-context",
           // #967 method-badge representative-paper hover -- reads `?family=`.
           "/api/scholar/*/method-exemplar",
+          // Funding-row representative grants (SEARCH_EVIDENCE_ROWS) -- reads `?q=`.
+          "/api/scholar/*/grants",
           "/api/topics/*/publications",
           "/api/methods/*/*/publications",
           // #974 Phase 2 dept/division method-facet roster -- reads `?method=`;
@@ -562,6 +565,8 @@ describe("EdgeStack", () => {
           "/api/scholars/*/popover-context",
           // #967 method-badge representative-paper hover -- GET-only read.
           "/api/scholar/*/method-exemplar",
+          // Funding-row representative grants (SEARCH_EVIDENCE_ROWS) -- GET-only read.
+          "/api/scholar/*/grants",
           "/api/topics/*/publications",
           "/api/methods/*/*/publications",
           // #866 internal-viewer reveal -- GET-only read.

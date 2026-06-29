@@ -48,6 +48,7 @@ import {
   resolvePublicationMeshOnlyFilter,
   resolveConceptFallbackSparseEnabled,
   resolveSearchShellStreaming,
+  resolveSearchEvidenceRows,
   computeConceptFallback,
   CONCEPT_FALLBACK_CAP,
   CONCEPT_FALLBACK_SPARSE_THRESHOLD,
@@ -495,6 +496,10 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           contentQuery,
         }
       : null;
+  // SEARCH_EVIDENCE_ROWS — server-resolved once, threaded to each Scholars card to
+  // gate the lazy Funding row + the publications flavor badge (off ⇒ no fetch, row,
+  // or badge).
+  const evidenceRows = resolveSearchEvidenceRows();
   const activePubsPromise =
     type === "publications"
       ? searchPublications({
@@ -787,6 +792,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 resultPromise={activePeoplePromise!}
                 reasonPromise={activePeopleReasonPromise}
                 keyPaperConfig={keyPaperConfig}
+                evidenceRows={evidenceRows}
               />
             )}
           </React.Suspense>
@@ -1054,6 +1060,7 @@ async function PeopleResults({
   resultPromise,
   reasonPromise,
   keyPaperConfig,
+  evidenceRows,
 }: {
   q: string;
   page: number;
@@ -1078,6 +1085,8 @@ async function PeopleResults({
   /** Search reason-from-doc (lazy key papers) — the per-card lazy key-paper
    *  config, or null when the doc-sourced reason path is off. */
   keyPaperConfig: KeyPaperConfig | null;
+  /** SEARCH_EVIDENCE_ROWS — gates the per-card lazy Funding row + pub flavor badge. */
+  evidenceRows: boolean;
 }) {
   // Overlap the search round-trip with the dept/div label lookup.
   const [result, deptDivLabelMap] = await Promise.all([
@@ -1253,6 +1262,7 @@ async function PeopleResults({
                   filters={{ deptDiv, personType, activity }}
                   reasonPromise={reasonPromise}
                   keyPaperConfig={keyPaperConfig}
+                  evidenceRows={evidenceRows}
                 />
               </li>
             ))}

@@ -170,7 +170,11 @@ export function PeopleResultCardStreamed({
     return <CardWithLazyKeyPaper {...props} keyPaperConfig={keyPaperConfig} />;
   }
   return (
-    <Suspense fallback={<PeopleResultCard {...props} />}>
+    // The fallback is the fast (reason-less) hit that immediately unmounts when the
+    // reason promise resolves — force `evidenceRows={false}` on it so the heavy
+    // per-card /grants fetch fires only on the RESOLVED card, not twice. Mirrors the
+    // key-paper pattern (CardWithLazyKeyPaper wraps only the resolved child).
+    <Suspense fallback={<PeopleResultCard {...props} evidenceRows={false} />}>
       <PatchedCard {...props} reasonPromise={reasonPromise} keyPaperConfig={keyPaperConfig} />
     </Suspense>
   );
