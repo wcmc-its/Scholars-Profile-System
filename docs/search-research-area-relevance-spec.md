@@ -112,11 +112,15 @@ matches the topic page** for the matched area — the behaviour you confirmed is
 ### 3.2 Mechanism — inject `total` into the People `function_score`
 
 When the People query is topic/hybrid shape **and** the query resolved to a topic
-(parent area and/or subtopic) above `AREA_BOOST_MIN_CONFIDENCE` (OQ-6):
+(parent area and/or subtopic) that is a genuine MeSH-anchored hit (§3.4):
 
-1. **Resolve the matched topic.** `matchQueryToTaxonomy` already ranks matched areas for
-   the header chip (#709, `search-taxonomy.ts`). Take the top matched topic id (subtopic
-   if one resolved, §3.3) and its match strength.
+1. **Resolve the matched topic + its anchor tier (A).** `matchQueryToTaxonomy` already
+   ranks matched areas for the header chip (#709, `search-taxonomy.ts`) AND resolves the
+   query's MeSH descriptor with `meshResolution.curatedTopicAnchors` (the parent topics
+   that descriptor is anchored to, from `mesh_curated_topic_anchor`). Take the top matched
+   topic id (subtopic if one resolved, §3.3). **Gate/scale on the anchor (§3.4):** proceed
+   only when the matched area is an anchored topic of the resolved descriptor; scale the
+   boost by the anchor confidence tier (`curated` > `derived`).
 2. **Pull the ranked scholars + their `total`** from the existing **cached** rollup via
    a lean accessor `getAreaScholarConcentration(topicId, …)` that reuses the
    `getTopScholarsForTopic` aggregation but returns `[{ cwid, total }]` (today that
@@ -149,14 +153,52 @@ encodes it.
 docs *already* in the result set; a cwid not matched by the query's `must`/`filter`
 contributes nothing. The MVP cannot change the total or facets — only order.
 
-### 3.2 Gating (inert where it shouldn't fire)
+### 3.2.1 Gating (inert where it shouldn't fire)
 
 - Topic/hybrid shape only — never name or department shape.
-- Only when an area resolves above `AREA_BOOST_MIN_CONFIDENCE`.
-- Concentration floor `AREA_BOOST_MIN_PUBS` per scholar.
+- **Only when the matched area is a MeSH anchor of the resolved descriptor** (§3.4) —
+  i.e. `areas[0].id ∈ meshResolution.curatedTopicAnchors`. A name/embedding-matched area
+  that the descriptor does NOT anchor to is *ancillary* → no boost (defer to concept).
 - Bounded to `AREA_BOOST_TOP_N`; if the area has more qualifying scholars than N,
   `log()` the truncation (no silent cap) — beyond N, lexical order stands.
 - Flag off ⇒ no rollup fetch, no clauses, byte-identical query.
+
+### 3.4 The A signal — the MeSH anchor connects concept ↔ research area
+
+The query→area relevance (**A**) is not substring similarity (which is ~0 for
+synonym/anchor matches like `children's health → Pediatrics & Neonatology`). It is the
+**`mesh_curated_topic_anchor`** edge: `(descriptorUi → parentTopicId, confidence:
+'curated' | 'derived')`. This is literally how the area gets matched in the first place —
+#1258 folds the resolved descriptor's `curatedTopicAnchors` into the Research Areas chip
+row. So the Concept and the Research Area are **not two competing axes; the anchor is the
+edge between them.**
+
+- **anchored, `curated`** → dead-on (high A): *children's health → Child Health → (curated
+  anchor) → Pediatrics & Neonatology*. Boost the research area at full weight.
+- **anchored, `derived`** → weaker A: boost at a reduced weight.
+- **not anchored** (area came from a name/embedding match the descriptor doesn't anchor
+  to) → ancillary (low A): **no area boost** — defer to the concept.
+
+`search-taxonomy.ts` already computes the anchor set + `meshMatchTier(confidence,
+curatedTopicAnchors.length)` for the #726 concept-admission path — reuse it; don't invent
+a new signal. The full boost magnitude is therefore **A(anchor tier) × Σ B (scholar's
+relevance×coverage `total`)** — A gates *whether* the area fires, the `total` ranks *who*
+within it.
+
+### 3.5 Evidence-display precedence: anchor decides area-vs-concept (the 2b row)
+
+The same A drives **which evidence row shows** (the deferred "N publications in {Area}"
+row vs the "N tagged {Concept}" row), per the rule from review:
+
+- **anchored area (high A)** → show the **Research area** row ("N publications in
+  Pediatrics & Neonatology"), backed by the rollup `total`.
+- **not anchored / derived (low A)** → show the **Concept** row, *even if its count is
+  lower* — a low-relevance area is noise; the concept is the more precise evidence.
+
+So "lower (query→area) relevance up-weights displaying the concept even at a lower count"
+falls out of A × coverage: when A is low the area-evidence score collapses and the concept
+wins `selectEvidence` precedence. (Building this row = the 2b follow-up; it needs the
+rollup `total` + per-scholar in-area pub COUNT, not just the ranking `total`.)
 
 ### 3.3 Granularity — no hard subtopic rule; the score carries it (D2)
 
@@ -265,9 +307,9 @@ tagged", …). Exact-match the recency-weighted order by reusing the function, n
 - **OQ-5 — interaction with #726 MeSH escalation.** Orthogonal: escalation is
   sparse-admission, this is dense-reorder. They can co-fire (both add additive
   function-score weight); confirm no surprising double-lift in the eval.
-- **OQ-6 — topic-match confidence threshold.** Reuse the #709 area ranking; pick a
-  strength floor (`AREA_BOOST_MIN_CONFIDENCE`) so a weak/incidental topic mapping doesn't
-  trigger a boost. The "· 387" chip count is itself a coarse strength cue.
+- **OQ-6 — query→area relevance (A).** *Resolved → §3.4: the `mesh_curated_topic_anchor`
+  tier (`curated`/`derived`/none), NOT substring `similarity` (which is ~0 for anchor
+  matches). Gate on `areas[0].id ∈ curatedTopicAnchors`; scale by confidence.*
 - **OQ-7 — continuous weight (the "proper path").** Tiering `total` into 3 bands is an
   OpenSearch encoding workaround. Denormalizing each scholar's per-topic `total` into the
   people index (an ETL field + reindex) would allow a true continuous `script_score` /
@@ -285,3 +327,23 @@ reorder-only (no set/facet change); (b) firing only on a confident topic match, 
 relevance×coverage `total` starving the one-tangential-pub case; (c) shipping behind a
 default-off flag with a
 control-query eval proving non-area queries are byte-identical before any prod flip.
+
+---
+
+## 9. Known bias — recency is baked into the formula
+
+The `total` it ranks on comes from the topic rollup, which carries a **hard year floor
+(`RECITERAI_YEAR_FLOOR = 2020`, D-15)** *and* a recency-weighted `scorePublication`
+curve. Consequences to keep in mind (surfaced by the Rice/CRISPR case):
+
+- A scholar whose engagement with the topic is **older (pre-2020)** is **excluded from the
+  rollup entirely** — zero relevance×coverage, so no boost and no "N publications in
+  {Area}" evidence. Only the *un-gated keyword `mention` count* (a plain text agg over all
+  years) would still show, which is why a pioneer can read as "rather low" with a high
+  mention count but no area/concept credit.
+- This is *intentional* for "who is active in this area now," but it **mis-serves "who are
+  the foundational people in X."** Decide explicitly whether older foundational work should
+  count; if so, the floor/curve — not this boost — is the lever to revisit (upstream of
+  Track B). Track B inherits whatever the rollup decides.
+- Eval implication: include at least one **older-engagement** scholar in the §6 eval so the
+  recency effect is visible, not silently conflated with a ranking bug.
