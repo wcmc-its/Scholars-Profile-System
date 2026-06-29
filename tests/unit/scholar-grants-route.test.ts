@@ -90,6 +90,15 @@ describe("GET /api/scholar/[cwid]/grants", () => {
     });
   });
 
+  it("#1339: matches on the generic-stripped significant query, not raw q", async () => {
+    vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
+    vi.mocked(searchFunding).mockResolvedValue({ hits: [], total: 0 } as never);
+    await call("abc1234", "children's health");
+    // "health" is deprioritized → searchFunding sees only the significant token, so a
+    // grant matching "health" alone can't admit (would otherwise surface off-topic).
+    expect(vi.mocked(searchFunding).mock.calls[0][0]).toMatchObject({ q: "children's" });
+  });
+
   it("null start/end dates degrade to null years (no NaN)", async () => {
     vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
     vi.mocked(searchFunding).mockResolvedValue({
