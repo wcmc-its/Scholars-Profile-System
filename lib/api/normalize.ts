@@ -28,6 +28,42 @@ export function normalizeForMatch(s: string): string {
 }
 
 /**
+ * #1342 — conservative English singularizer for an ALREADY-normalized key (the
+ * output of {@link normalizeForMatch}: lowercase, alnum-only, so a possessive
+ * 's is just a trailing s here). Lets the MeSH resolver retry a plural/possessive
+ * query against the singular form that IS an index key ("melanomas" → "melanoma",
+ * "lymphomas" → "lymphoma"). Returns the input unchanged when no safe rule
+ * applies — it is a best-effort retry, NOT a stemmer, and is only ever consulted
+ * AFTER an exact lookup misses, stamping the result at the low `partial` tier.
+ *
+ * It deliberately leaves Latin/Greek singulars that end in -s untouched
+ * (analy*sis*, lupu*s*, viru*s*, abscess) and stop-lists a few common non-plural
+ * -s words, because over-stripping those would invent a wrong resolution. It does
+ * NOT touch the shared {@link normalizeForMatch} (that backs the byForm index
+ * build + topic-anchor matching across 67 topics / 267k surface forms — symmetric
+ * stemming there is high blast-radius).
+ * ponytail: naive rule-set, not a morphology engine; the flag-off default + miss-only
+ * + partial-tier guards bound the cost of a wrong guess. Upgrade path: a curated
+ * lemma table if recall ever needs the irregulars.
+ */
+const SINGULARIZE_STOP = new Set([
+  "aids", "measles", "news", "series", "species", "mumps", "rabies", "scabies",
+  "herpes", "diabetes", "feces", "ascites", "facies",
+]);
+
+export function singularizeForMatch(key: string): string {
+  if (key.length < 5) return key; // too short to strip safely
+  if (SINGULARIZE_STOP.has(key)) return key;
+  if (!key.endsWith("s")) return key; // not a plural surface
+  if (key.endsWith("ss")) return key; // abscess, class (singular)
+  if (key.endsWith("is")) return key; // analysis, -sis (Latin/Greek singular)
+  if (key.endsWith("us")) return key; // lupus, virus, fungus (Latin singular)
+  if (key.endsWith("ies")) return key.slice(0, -3) + "y"; // therapies → therapy
+  if (/(?:ch|sh|x|z|ss)es$/.test(key)) return key.slice(0, -2); // boxes → box, churches → church
+  return key.slice(0, -1); // melanomas → melanoma, diseases → disease
+}
+
+/**
  * #1255 — normalize a label AND record where each token starts in the
  * space-stripped result, so a matcher can require a query to align to a TOKEN
  * BOUNDARY rather than land anywhere inside the string. `matchKey` is
