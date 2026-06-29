@@ -115,6 +115,48 @@ describe("rankResearchers — weighted topic union", () => {
   it("respects limit", () => {
     expect(rankResearchers(TOPICS, { limit: 2 })).toHaveLength(2);
   });
+
+  describe("esiOnly soft gate", () => {
+    // Fit order is aaa > bbb > ccc; ccc is the only ESI-eligible.
+    const esi = new Map([
+      ["aaa", false],
+      ["bbb", false],
+      ["ccc", true],
+    ]);
+
+    it("off (default): order unchanged", () => {
+      expect(rankResearchers(TOPICS, { esiEligibleByCwid: esi }).map((r) => r.cwid)).toEqual([
+        "aaa",
+        "bbb",
+        "ccc",
+      ]);
+    });
+
+    it("on: demotes ineligible below eligible, preserving within-group order; drops no one", () => {
+      const ranked = rankResearchers(TOPICS, { esiOnly: true, esiEligibleByCwid: esi });
+      expect(ranked.map((r) => r.cwid)).toEqual(["ccc", "aaa", "bbb"]);
+      expect(ranked).toHaveLength(3); // soft — nobody removed
+    });
+
+    it("demote happens BEFORE the limit slice — an eligible scholar past the cut surfaces", () => {
+      // Without the gate, limit:1 yields the top-fit aaa. With it, the only
+      // eligible (ccc, ranked 3rd by fit) must surface despite the cut.
+      expect(rankResearchers(TOPICS, { limit: 1 }).map((r) => r.cwid)).toEqual(["aaa"]);
+      expect(
+        rankResearchers(TOPICS, { limit: 1, esiOnly: true, esiEligibleByCwid: esi }).map((r) => r.cwid),
+      ).toEqual(["ccc"]);
+    });
+
+    it("treats unknown (undateable) eligibility as ineligible — demoted, never dropped", () => {
+      // ccc absent from the map → unknown → ranked among the ineligible group, not removed.
+      const ranked = rankResearchers(TOPICS, {
+        esiOnly: true,
+        esiEligibleByCwid: new Map([["aaa", true]]),
+      });
+      expect(ranked.map((r) => r.cwid)).toEqual(["aaa", "bbb", "ccc"]);
+      expect(ranked).toHaveLength(3);
+    });
+  });
 });
 
 describe("deriveGrantSignals — grant-history display signals", () => {
