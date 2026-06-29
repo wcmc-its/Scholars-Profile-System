@@ -1,0 +1,11 @@
+{
+  "_note": "Gold expected-scholar sets for scholar-search relevance eval. Each name is a case-insensitive regex matched against preferredName. Expected scholars SHOULD rank high (not necessarily in this order). Domain-expert-provided except `hypertension`, whose list is analyst-derived (the true topical specialists found in docs/search-relevance-analysis.md §10). Add queries freely; keep regexes distinctive enough to avoid matching the wrong person.",
+  "queries": [
+    {"q": "diabetes", "note": "metabolism/weight cluster", "expected": ["Aronne", "Shukla", "Tchang", "James C\\. Lo", "Igel", "Mohini Aras"]},
+    {"q": "CRISPR", "expected": ["Lukas.*Dow", "Sheth", "Christopher.*Mason", "Li Gan", "Chun-Jun Guo", "Vardhana", "Artis", "Iliev", "Lyden"]},
+    {"q": "fecal microbiota transplantation", "expected": ["Peled", "Longman", "Crawford", "Scherl", "Vinita.*Jacob", "Lukin", "Battat", "Gogokhia", "Sonnenberg"]},
+    {"q": "single-cell RNA sequencing", "expected": ["Elemento", "Rafii", "Christopher.*Mason", "Betel", "Landau"]},
+    {"q": "alzheimer's", "expected": ["Li Gan", "Iadecola", "de Leon", "Mosconi", "Luo", "Glodzik", "Anna.*Orr", "Pereira"]},
+    {"q": "hypertension", "note": "analyst-derived specialists", "expected": ["Devereux", "Alderman", "Wachtell", "Okin", "Robert.*Phillips", "Samuel.*Mann", "Phyllis August", "Evelyn.*Horn"]}
+  ]
+}
