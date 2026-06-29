@@ -336,6 +336,7 @@ function MatchedView({
 }) {
   const [sort, setSort] = useState<Sort>("fit");
   const [stageLens, setStageLens] = useState(false);
+  const [esiOnly, setEsiOnly] = useState(false);
   const [limit, setLimit] = useState<number>(25);
   const [status, setStatus] = useState<Status>({ kind: "loading" });
 
@@ -345,6 +346,7 @@ function MatchedView({
     const qs = new URLSearchParams({
       sort,
       stageLens: stageLens ? "1" : "0",
+      esiOnly: esiOnly ? "1" : "0",
       limit: String(limit),
     });
     fetch(`/api/opportunities/${encodeURIComponent(opportunityId)}/researchers?${qs}`, {
@@ -377,7 +379,7 @@ function MatchedView({
     return () => {
       active = false;
     };
-  }, [opportunityId, sort, stageLens, limit]);
+  }, [opportunityId, sort, stageLens, esiOnly, limit]);
 
   return (
     <div>
@@ -399,6 +401,17 @@ function MatchedView({
           />
           <span title="Blend career-stage appeal into the default score (who would this suit). Researchers with an unknown career stage score 0 under the lens.">
             Weight by career-stage fit
+          </span>
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={esiOnly}
+            onChange={(e) => setEsiOnly(e.target.checked)}
+            className="size-4 accent-[var(--color-accent-slate)]"
+          />
+          <span title="Soft ESI gate: rank early-stage-investigator-eligible faculty above ineligible ones (no one is dropped). Useful for early-career-targeted grants.">
+            Prioritize ESI-eligible
           </span>
         </label>
         <div className="flex flex-col gap-1">
