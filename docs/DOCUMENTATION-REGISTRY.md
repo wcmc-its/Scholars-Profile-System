@@ -50,6 +50,7 @@ in **§10**.
 | What does it cost to run? | [`cost-model.md`](./cost-model.md) |
 | Why does search rank things this way? | [`search.md`](./search.md), [`people-relevance-baseline.md`](./people-relevance-baseline.md) |
 | Why doesn't searching `covid19` or `tylenol` find the obvious people? | [`search-recall.md`](./search-recall.md) |
+| What are the match-reason line and the KEY PAPERS/METHODS/FUNDING rows under a result? | [`search-evidence-rows.md`](./search-evidence-rows.md) |
 | Why doesn't this (retracted) paper show up? | [`retracted-publications.md`](./retracted-publications.md) |
 | Can a scholar hide a publication / grant / their whole profile / a **method**? What can be hidden? | [`what-can-be-hidden.md`](./what-can-be-hidden.md) (the catalog — by section and by record) |
 | What is the WAF / firewall posture? | [`network-security-topology.md`](./network-security-topology.md), [`waf-request-RITM0792011.md`](./waf-request-RITM0792011.md) |
