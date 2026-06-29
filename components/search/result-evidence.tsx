@@ -142,8 +142,16 @@ export function ResultEvidence({
           {evidence.term ? (
             <>
               {" "}
-              {/* #1350 — the resolved concept term, subtly underlined. */}
-              <span className="underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]">
+              {/* #1361 — the matched term is always semibold; the dotted underline is
+                  added ONLY for a system-expanded concept (tagged/concept), not for a
+                  literal `mention` term. */}
+              <span
+                className={
+                  evidence.strength === "mention"
+                    ? "font-semibold"
+                    : "font-semibold underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]"
+                }
+              >
                 {evidence.term}
               </span>
               {/* #1355 — the narrower descendant term(s) the scholar actually carries. */}

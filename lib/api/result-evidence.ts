@@ -356,7 +356,7 @@ export type SelectEvidenceInput = {
    *  `+N more` math), `pubs` up to 3 representative papers for the disclosure. */
   pub?: {
     tagged?: { text: string; term?: string; descendantTerms?: string[]; count: number; pubs?: EvidencePub[] };
-    mention?: { text: string; count: number; pubs?: EvidencePub[] };
+    mention?: { text: string; term?: string; count: number; pubs?: EvidencePub[] };
     concept?: { text: string; term?: string; descendantTerms?: string[] };
   };
   /** Resolved clinical specialty — exact tier only. Caller ran
@@ -516,6 +516,7 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
       kind: "publications",
       strength: "mention",
       text: input.pub.mention.text,
+      ...(input.pub.mention.term ? { term: input.pub.mention.term } : {}),
       ...(input.pub.mention.pubs && input.pub.mention.pubs.length > 0 ? { pubs: input.pub.mention.pubs } : {}),
       count: input.pub.mention.count,
     };
