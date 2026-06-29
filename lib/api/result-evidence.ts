@@ -40,6 +40,20 @@ export type EvidencePub = {
   year?: number | null;
 };
 
+/** A bounded representative grant for the "Key funding" disclosure — the funding
+ *  analogue of {@link EvidencePub}. Lazily loaded by `/api/scholar/[cwid]/grants`. */
+export type EvidenceGrant = {
+  /** Account_Number dedupe key from the funding index (FundingHit.projectId). */
+  projectId: string;
+  title: string;
+  /** Prime sponsor display label, e.g. "NIH / NIA"; null when unknown. */
+  sponsor?: string | null;
+  /** Award period years (YYYY) parsed from start/end dates; either may be null. */
+  startYear?: number | null;
+  endYear?: number | null;
+  isActive?: boolean;
+};
+
 /**
  * The discriminated evidence union. People-tab kinds are produced by
  * {@link selectEvidence}; the Funding/Publications kinds at the bottom are

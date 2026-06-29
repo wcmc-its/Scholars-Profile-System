@@ -57,6 +57,7 @@ export function ResultEvidence({
   panelId,
   hasQuery = true,
   slug,
+  badged = false,
 }: {
   evidence: ResultEvidence;
   /** Rep-papers disclosure — when true and the evidence is a method/topic/
@@ -67,6 +68,10 @@ export function ResultEvidence({
   expanded?: boolean;
   onToggle?: () => void;
   panelId?: string;
+  /** §4.7 — badge the publications reason row (Research area / Concept / Keyword
+   *  flavor pill). Scoped to the Scholars card: only this renderer threads it, and
+   *  the other surfaces call `<MatchReason>` directly, so they stay un-badged. */
+  badged?: boolean;
   /** True when there is an active query. The honest-empty match line ("— no
    *  specific match for this query —") only makes sense when something was being
    *  matched; on the no-query Browse page it is suppressed for the identity
@@ -118,7 +123,8 @@ export function ResultEvidence({
     case "publications":
       // The count line IS the evidence; the representative papers ride the
       // disclosure (canExpand = pubs present). Concept is the sparkle variant
-      // (Case F, folded in) and carries no pubs.
+      // (Case F, folded in) and carries no pubs. §4.5 flavor: tagged→Research area,
+      // concept→Concept, mention→Keyword.
       return (
         <MatchReason
           kind={evidence.strength === "concept" ? "concept" : "publications"}
@@ -126,6 +132,14 @@ export function ResultEvidence({
           expanded={expanded}
           onToggle={onToggle}
           panelId={panelId}
+          badged={badged}
+          flavor={
+            evidence.strength === "tagged"
+              ? "area"
+              : evidence.strength === "concept"
+                ? "concept"
+                : "keyword"
+          }
         >
           {evidence.text}
         </MatchReason>

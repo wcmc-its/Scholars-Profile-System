@@ -536,6 +536,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_EVIDENCE_ROWS",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_CONCEPT_HINT",
                 "Value": "off",
               },
@@ -3870,6 +3874,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_RESULT_EVIDENCE",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_EVIDENCE_ROWS",
                 "Value": "on",
               },
               {

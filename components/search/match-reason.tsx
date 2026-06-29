@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { ChevronDown, FileText, Shapes, Stethoscope, Waypoints, Wrench } from "lucide-react";
+import { Banknote, ChevronDown, FileText, Quote, Shapes, Stethoscope, Waypoints, Wrench } from "lucide-react";
 import { PubTitle } from "@/components/publication/pub-html";
 import { highlightedTitleHtml } from "@/lib/search/highlight-title";
-import type { EvidencePub } from "@/lib/api/result-evidence";
+import type { EvidenceGrant, EvidencePub } from "@/lib/api/result-evidence";
 
 /**
  * PLAN R4 — the kind of match a reason line explains, which picks the leading
@@ -19,6 +19,21 @@ const ICONS: Record<MatchReasonKind, typeof FileText> = {
   concept: Waypoints,
   publications: FileText,
   area: Shapes,
+};
+
+/**
+ * §4.5/§4.7 — opt-in flavor pill for the publications reason row. The pub strength
+ * tier maps to a flavor: tagged→"Research area" (canonical topic tag), concept→
+ * "Concept" (expanded MeSH), mention→"Keyword" (literal). Colors per handoff §4.2.
+ * ponytail: the §4.5 indigo dotted-underline on the concept descriptor text is
+ * deferred — the badge already differentiates concept from keyword; revisit if the
+ * literal-vs-system-term distinction needs more than the pill.
+ */
+export type PubFlavor = "area" | "concept" | "keyword";
+const FLAVOR_BADGE: Record<PubFlavor, { cls: string; icon: typeof FileText; text: string }> = {
+  area: { cls: "border-[#d8e2ec] bg-[#eef2f6] text-[#2c4f6e]", icon: Shapes, text: "Research area" },
+  concept: { cls: "border-[#d2d6f0] bg-[#e6e8f7] text-[#34408a]", icon: Waypoints, text: "Concept" },
+  keyword: { cls: "border-[#e4e4e7] bg-[#f4f4f5] text-[#52525b]", icon: Quote, text: "Keyword" },
 };
 
 /**
@@ -39,12 +54,15 @@ function DisclosureRow({
   onToggle,
   panelId,
   className = "",
+  srLabel = "key papers",
   children,
 }: {
   expanded: boolean;
   onToggle: () => void;
   panelId?: string;
   className?: string;
+  /** What the disclosure reveals, for the sr-only affordance (e.g. "key funding"). */
+  srLabel?: string;
   children: ReactNode;
 }) {
   return (
@@ -67,7 +85,7 @@ function DisclosureRow({
           accessible name; this appends an explicit affordance so a screen reader
           announces what the disclosure reveals, while `aria-expanded` carries the
           state. */}
-      <span className="sr-only"> key papers</span>
+      <span className="sr-only"> {srLabel}</span>
       <ChevronDown
         aria-hidden
         strokeWidth={2}
@@ -98,6 +116,8 @@ export function MatchReason({
   expanded = false,
   onToggle,
   panelId,
+  badged = false,
+  flavor,
 }: {
   kind: MatchReasonKind;
   children: ReactNode;
@@ -106,11 +126,37 @@ export function MatchReason({
   expanded?: boolean;
   onToggle?: () => void;
   panelId?: string;
+  /** §4.7 — render as a flavor badge pill instead of the muted icon row. Opt-in,
+   *  threaded only via `<ResultEvidence>` (Scholars card); other surfaces leave it
+   *  false and keep the shipped muted row unchanged. */
+  badged?: boolean;
+  /** Which flavor pill when `badged`; defaults from kind. */
+  flavor?: PubFlavor;
 }) {
   const Icon = ICONS[kind];
+  const pill = badged
+    ? FLAVOR_BADGE[flavor ?? (kind === "concept" ? "concept" : kind === "area" ? "area" : "keyword")]
+    : null;
   // Single line — clips an over-long reason (e.g. a representative-pub title)
   // rather than wrapping. A no-op for the short count/concept reasons.
-  const inner = (
+  const inner = pill ? (
+    (() => {
+      const PillIcon = pill.icon;
+      return (
+        <>
+          <span
+            className={`inline-flex shrink-0 items-center gap-1 rounded-[5px] border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.02em] ${pill.cls}`}
+          >
+            <PillIcon aria-hidden className="size-3 shrink-0" strokeWidth={2} />
+            {pill.text}
+          </span>
+          <span className="min-w-0 truncate">
+            <strong className="font-semibold text-[#1a1a1a]">{children}</strong>
+          </span>
+        </>
+      );
+    })()
+  ) : (
     <>
       <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={2} />
       <span className="min-w-0 truncate">{children}</span>
@@ -120,7 +166,9 @@ export function MatchReason({
   // the toggle (content-width, left-aligned), not a chevron flush to the far edge.
   if (canExpand && onToggle) {
     return (
-      <div className={`mt-2 text-[12.5px] leading-snug text-muted-foreground ${className}`}>
+      <div
+        className={`mt-2 leading-snug ${badged ? "text-[13px]" : "text-[12.5px] text-muted-foreground"} ${className}`}
+      >
         <DisclosureRow expanded={expanded} onToggle={onToggle} panelId={panelId}>
           {inner}
         </DisclosureRow>
@@ -129,7 +177,7 @@ export function MatchReason({
   }
   return (
     <div
-      className={`mt-2 flex min-w-0 items-center gap-1.5 text-[12.5px] leading-snug text-muted-foreground ${className}`}
+      className={`mt-2 flex min-w-0 items-center leading-snug ${badged ? "gap-2 text-[13px]" : "gap-1.5 text-[12.5px] text-muted-foreground"} ${className}`}
     >
       {inner}
     </div>
@@ -156,7 +204,7 @@ export function MatchAwareReason({
   onToggle,
   panelId,
 }: {
-  kind: "method" | "topic" | "clinical";
+  kind: "method" | "topic" | "clinical" | "funding";
   label: string;
   /** Rep-papers disclosure — when true, trail a clickable chevron `<button>`
    *  that opens the representative-papers panel `panelId`. */
@@ -167,19 +215,37 @@ export function MatchAwareReason({
 }) {
   // From the mockup: method bg #fbf4ea / border #ecdcc8 / ink #8a4a1f;
   // topic bg #eef2f6 / border #d8e2ec / ink #2c4f6e;
-  // clinical bg #e8f4f8 / border #c5e4eb / ink #1a5f7a.
+  // clinical bg #e8f4f8 / border #c5e4eb / ink #1a5f7a;
+  // funding bg #eef6ef / border #cfe3d3 / ink #2f6b3a (WCAG-AA 5.80:1 at 10px).
   const badge =
     kind === "method"
       ? "border-[#ecdcc8] bg-[#fbf4ea] text-[#8a4a1f]"
       : kind === "clinical"
         ? "border-[#c5e4eb] bg-[#e8f4f8] text-[#1a5f7a]"
-        : "border-[#d8e2ec] bg-[#eef2f6] text-[#2c4f6e]";
+        : kind === "funding"
+          ? "border-[#cfe3d3] bg-[#eef6ef] text-[#2f6b3a]"
+          : "border-[#d8e2ec] bg-[#eef2f6] text-[#2c4f6e]";
   // One content-type glyph per notion across every surface (#1073): method = the
   // SAME Wrench as the "Methods and Tools" chip row + /methods lens; research area
   // = the SAME Shapes as the Research Areas chip row (research-areas-row.tsx),
-  // replacing Tag (which now means only profile Topics/MeSH); clinical = Stethoscope.
-  const Icon = kind === "method" ? Wrench : kind === "clinical" ? Stethoscope : Shapes;
-  const badgeText = kind === "method" ? "Method" : kind === "clinical" ? "Clinical" : "Research area";
+  // replacing Tag (which now means only profile Topics/MeSH); clinical = Stethoscope;
+  // funding = Banknote (Landmark collides with Building2 = org units — handoff §4.2).
+  const Icon =
+    kind === "method"
+      ? Wrench
+      : kind === "clinical"
+        ? Stethoscope
+        : kind === "funding"
+          ? Banknote
+          : Shapes;
+  const badgeText =
+    kind === "method"
+      ? "Method"
+      : kind === "clinical"
+        ? "Clinical"
+        : kind === "funding"
+          ? "Funding"
+          : "Research area";
   // items-center (not baseline): the bordered pill and the bold label line up on
   // a shared center axis so the badge doesn't sit low next to the label.
   const inner = (
@@ -199,7 +265,12 @@ export function MatchAwareReason({
   if (canExpand && onToggle) {
     return (
       <div className="mt-2 text-[13px] leading-snug">
-        <DisclosureRow expanded={expanded} onToggle={onToggle} panelId={panelId}>
+        <DisclosureRow
+          expanded={expanded}
+          onToggle={onToggle}
+          panelId={panelId}
+          srLabel={kind === "funding" ? "key funding" : "key papers"}
+        >
           {inner}
         </DisclosureRow>
       </div>
@@ -309,6 +380,94 @@ export function RepresentativePapers({
             </span>
           </li>
         ))}
+      </ul>
+      {more > 0 ? (
+        <Link
+          href={profileHref}
+          onClick={(e) => e.stopPropagation()}
+          className="relative z-10 mt-1.5 inline-block text-[12px] font-medium text-[#1f51a8] no-underline hover:underline"
+        >
+          +{more} more in profile →
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
+/** Sponsor · year-range meta line for a grant (muted, normal weight — handoff §4.6). */
+function fundingMeta(g: EvidenceGrant): string {
+  const years =
+    g.startYear && g.endYear
+      ? g.startYear === g.endYear
+        ? `${g.startYear}`
+        : `${g.startYear}–${g.endYear}`
+      : g.endYear
+        ? `${g.endYear}`
+        : g.startYear
+          ? `${g.startYear}`
+          : "";
+  return [g.sponsor || "", years].filter(Boolean).join(" · ");
+}
+
+/**
+ * "Key funding" disclosure — the funding analogue of {@link RepresentativePapers}:
+ * the same chrome (uppercase label, hanging-indent bullets, `+N more` profile link)
+ * with grant records instead of papers. A sibling, not a generalized record-panel:
+ * the papers panel is pub-specific (PubTitle / highlightedTitleHtml / pmid) and
+ * shipped — overloading it for grants buys nothing but regression risk.
+ * ponytail: sibling panel; merge the two only if a 3rd record type (trials) lands
+ * and the duplication actually bites.
+ *
+ * Funding rows are presence-gated by the caller (only mounted when ≥1 grant matched),
+ * so an empty resolved state renders nothing — there is no fallback-link branch.
+ */
+export function KeyFunding({
+  grants,
+  total,
+  profileHref,
+  status = "done",
+  panelId,
+}: {
+  grants: EvidenceGrant[];
+  total: number;
+  profileHref: string;
+  status?: ExemplarFetchStatus;
+  panelId?: string;
+}) {
+  if (status === "loading" && grants.length === 0) {
+    return (
+      <div id={panelId} className="mt-1.5 pl-[1px] text-[12px] leading-snug">
+        <span aria-hidden className="text-[#9a958a]">
+          finding key funding&hellip;
+        </span>
+      </div>
+    );
+  }
+  if (grants.length === 0) {
+    return null;
+  }
+
+  const more = total - grants.length;
+  return (
+    <div id={panelId} className="mt-1.5 pl-[1px]">
+      <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
+        {grants.length === 1 ? "Key grant" : "Key funding"}
+      </div>
+      <ul className="mt-1 flex flex-col gap-1.5 text-[13px] leading-snug">
+        {grants.map((g) => {
+          const meta = fundingMeta(g);
+          return (
+            <li key={g.projectId} className="flex items-start gap-[6px] text-muted-foreground">
+              <span aria-hidden className="shrink-0 leading-snug text-[#9a958a]">
+                &bull;
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[#4a4a4a]">{g.title}</span>
+                {meta ? <span className="block text-[12px] text-[#777]">{meta}</span> : null}
+              </span>
+            </li>
+          );
+        })}
       </ul>
       {more > 0 ? (
         <Link

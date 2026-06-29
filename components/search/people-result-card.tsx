@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useCallback, useId, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -9,11 +9,12 @@ import {
   MatchReason,
   MatchAwareReason,
   RepresentativePapers,
+  KeyFunding,
   type ExemplarFetchStatus,
 } from "@/components/search/match-reason";
 import { HighlightedSnippet } from "@/components/search/highlight-snippet";
 import { ResultEvidence } from "@/components/search/result-evidence";
-import type { EvidencePub } from "@/lib/api/result-evidence";
+import type { EvidenceGrant, EvidencePub } from "@/lib/api/result-evidence";
 import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
 
 /**
@@ -48,6 +49,10 @@ export type PeopleResultCardProps = {
     activity: ActivityFilter[];
   };
   keyPaperConfig?: KeyPaperConfig | null;
+  /** SEARCH_EVIDENCE_ROWS (server-resolved) — gates the lazy Funding evidence row
+   *  and the publications flavor badge. Off ⇒ no `/grants` fetch, no Funding row,
+   *  and the pub reason row keeps its shipped muted treatment (byte-identical). */
+  evidenceRows?: boolean;
 };
 
 /**
@@ -104,6 +109,7 @@ export function PeopleResultCard({
   total,
   filters,
   keyPaperConfig = null,
+  evidenceRows = false,
 }: PeopleResultCardProps) {
   function handleClick() {
     if (typeof navigator === "undefined" || !navigator.sendBeacon) return;
@@ -211,6 +217,46 @@ export function PeopleResultCard({
       .finally(() => setExemplarStatus("done"));
   }, [hit.cwid, exemplarQuery]);
 
+  // Funding evidence row (SEARCH_EVIDENCE_ROWS) — a scholar's TOPIC-matching grants.
+  // Eager per-card fetch, gated on flag + active query + the scholar having ANY grant
+  // (`grantCount`, already on the hit). The row is presence-gated (hide-when-empty,
+  // §4.1/§5), so the match count must be known before render — not on expand. Records
+  // are loaded here too, so expanding is instant. Flag-off / no-query / no-grants ⇒
+  // no fetch. ponytail: per-card fetch reuses searchFunding; if the fan-out bites,
+  // hoist presence to one funding terms-agg on the people path (see the /grants route).
+  const [grants, setGrants] = useState<EvidenceGrant[]>([]);
+  const [grantsTotal, setGrantsTotal] = useState(0);
+  const [fundingExpanded, setFundingExpanded] = useState(false);
+  const fundingPanelId = useId();
+
+  useEffect(() => {
+    if (!evidenceRows || !qParam || hit.grantCount <= 0) {
+      // Card instances are keyed by cwid and persist across navigations, so a
+      // query→browse transition (qParam → "") on a card that previously loaded
+      // grants must DROP the now-stale row, not leave it rendering an old query's
+      // grants. Functional reset avoids re-render churn when already empty.
+      setGrants((prev) => (prev.length ? [] : prev));
+      setGrantsTotal(0);
+      return;
+    }
+    let alive = true;
+    fetch(`/api/scholar/${encodeURIComponent(hit.cwid)}/grants?q=${encodeURIComponent(qParam)}`)
+      .then((r) => (r.ok ? r.json() : { grants: [], total: 0 }))
+      .then((d: { grants?: EvidenceGrant[]; total?: number }) => {
+        if (!alive) return;
+        setGrants(d?.grants ?? []);
+        setGrantsTotal(d?.total ?? 0);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setGrants([]);
+        setGrantsTotal(0);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [evidenceRows, qParam, hit.cwid, hit.grantCount]);
+
   // publications kind: representative papers are INLINE in the evidence
   // (`evidence.pubs`) on the legacy agg path; under reason-from-doc they arrive
   // empty and are fetched lazily on expand (`wantsLazyKeyPaper` → `keyPapers`).
@@ -279,6 +325,7 @@ export function PeopleResultCard({
         panelId={panelId}
         hasQuery={hasQuery}
         slug={hit.slug}
+        badged={evidenceRows}
       />
     );
   } else {
@@ -409,6 +456,30 @@ export function PeopleResultCard({
             panelId={panelId}
             fallback={exemplarFallback}
           />
+        ) : null}
+        {/* Funding evidence row (SEARCH_EVIDENCE_ROWS) — topic-matching grants, shown
+            only when ≥1 matched (hide-when-empty, §4.4 last). Own disclosure state;
+            records loaded eagerly so expand is instant. ponytail: claim is count-only
+            (§4.6, no "of Y"); wording tunable against the design mock. */}
+        {grants.length > 0 ? (
+          <>
+            <MatchAwareReason
+              kind="funding"
+              label={`${grantsTotal} grant${grantsTotal === 1 ? "" : "s"}`}
+              canExpand
+              expanded={fundingExpanded}
+              onToggle={() => setFundingExpanded((v) => !v)}
+              panelId={fundingPanelId}
+            />
+            {fundingExpanded ? (
+              <KeyFunding
+                grants={grants}
+                total={grantsTotal}
+                profileHref={profileHref}
+                panelId={fundingPanelId}
+              />
+            ) : null}
+          </>
         ) : null}
       </div>
       <div className="flex flex-col items-end gap-1 whitespace-nowrap text-right text-xs text-muted-foreground">

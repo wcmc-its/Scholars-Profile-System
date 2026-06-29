@@ -739,6 +739,23 @@ export function resolveSearchResultEvidence(): boolean {
 }
 
 /**
+ * Generalized evidence rows on the scholar search card — surfaces a scholar's
+ * topic-matching grants as a "Funding" disclosure row (`[Funding badge] claim ⌄ →
+ * Key funding`) and badges the publications flavor (Research area / Concept /
+ * Keyword) on the Scholars card only. The Funding row is lazy: a card with
+ * `grantCount > 0` fetches `/api/scholar/[cwid]/grants?q=…` and renders the row
+ * only when ≥1 grant matched (hide-when-empty), so flag-OFF ⇒ no fetch, no row,
+ * and the pub row keeps its shipped muted treatment.
+ *
+ * App-only, NO reindex. Default OFF (`SEARCH_EVIDENCE_ROWS=on` enables) — an
+ * `=== "on"` opt-in gate, STAGING-FIRST. Wired per-env in `cdk/lib/app-stack.ts`
+ * (staging-on / prod-off); enabling in prod is the operator `cdk deploy` step.
+ */
+export function resolveSearchEvidenceRows(): boolean {
+  return process.env.SEARCH_EVIDENCE_ROWS === "on";
+}
+
+/**
  * People-tab "concepts" hint — replace the often-sparse self-reported
  * research-areas hint (`areasOfInterest`) on the per-scholar row's identity line
  * with the scholar's TOP MeSH descriptor labels (`topMeshTerms`, denser because

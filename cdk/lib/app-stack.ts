@@ -1450,6 +1450,13 @@ export class AppStack extends Stack {
         // derive). resolveSearchResultEvidence reads === "on". STAGING-FIRST soak:
         // on for staging, off for prod (handoff doc §8 -- flip prod after the soak).
         SEARCH_RESULT_EVIDENCE: env === "staging" ? "on" : "off",
+        // Generalized evidence rows -- surfaces a scholar's topic-matching grants
+        // as a lazy "Funding" disclosure row (Key funding) on the Scholars card and
+        // badges the publications flavor (Research area / Concept / Keyword). The
+        // row is presence-gated (hide-when-empty) via a per-card /grants fetch.
+        // APP-ONLY, no reindex. resolveSearchEvidenceRows reads === "on".
+        // STAGING-FIRST soak: on for staging, off for prod (flip prod after soak).
+        SEARCH_EVIDENCE_ROWS: env === "staging" ? "on" : "off",
         // People-tab "concepts" hint -- replace the sparse self-reported
         // research-areas hint on the scholar row's identity line with the
         // scholar's top MeSH descriptor labels (topMeshTerms). Only the no-match
