@@ -123,8 +123,11 @@ export function ResultEvidence({
     case "publications":
       // The count line IS the evidence; the representative papers ride the
       // disclosure (canExpand = pubs present). Concept is the sparkle variant
-      // (Case F, folded in) and carries no pubs. §4.5 flavor: tagged→Research area,
-      // concept→Concept, mention→Keyword.
+      // (Case F, folded in) and carries no pubs. §4.5 flavor: a MeSH-descriptor
+      // hit IS a concept, so both `tagged` (exact descriptor) and `concept`
+      // (expanded MeSH) render the "Concept" pill; `mention` (literal) → Keyword.
+      // "Research area" is reserved for the actual topic-taxonomy match (the
+      // `topic` MatchAwareReason), NOT a MeSH tag — those pubs aren't "tagged".
       return (
         <MatchReason
           kind={evidence.strength === "concept" ? "concept" : "publications"}
@@ -133,13 +136,7 @@ export function ResultEvidence({
           onToggle={onToggle}
           panelId={panelId}
           badged={badged}
-          flavor={
-            evidence.strength === "tagged"
-              ? "area"
-              : evidence.strength === "concept"
-                ? "concept"
-                : "keyword"
-          }
+          flavor={evidence.strength === "mention" ? "keyword" : "concept"}
         >
           {evidence.text}
         </MatchReason>

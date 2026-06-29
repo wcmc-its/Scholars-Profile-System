@@ -7,7 +7,7 @@
  *   - expanding reveals the "Key funding" records (title · sponsor · years);
  *   - no fetch when the flag is off, the query is empty, or grantCount is 0;
  *   - with the flag on the publications reason row is a flavor pill
- *     (mention→Keyword, tagged→Research area, concept→Concept); off ⇒ muted, no pill.
+ *     (mention→Keyword, tagged→Concept, concept→Concept); off ⇒ muted, no pill.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -139,7 +139,7 @@ describe("PeopleResultCard — publications flavor badge (§4.7, Scholars card o
     expect(screen.getByText("Keyword")).toBeTruthy();
   });
 
-  it("badges a tagged match as Research area", () => {
+  it("badges a tagged match as Concept (a MeSH descriptor is a concept, not a research area)", () => {
     mockFetch({ grants: [], total: 0 });
     render(
       <PeopleResultCard
@@ -151,7 +151,7 @@ describe("PeopleResultCard — publications flavor badge (§4.7, Scholars card o
         })}
       />,
     );
-    expect(screen.getByText("Research area")).toBeTruthy();
+    expect(screen.getByText("Concept")).toBeTruthy();
   });
 
   it("badges a concept match as Concept", () => {

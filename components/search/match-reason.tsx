@@ -22,9 +22,11 @@ const ICONS: Record<MatchReasonKind, typeof FileText> = {
 };
 
 /**
- * §4.5/§4.7 — opt-in flavor pill for the publications reason row. The pub strength
- * tier maps to a flavor: tagged→"Research area" (canonical topic tag), concept→
- * "Concept" (expanded MeSH), mention→"Keyword" (literal). Colors per handoff §4.2.
+ * §4.5/§4.7 — opt-in flavor pill for the publications reason row. A MeSH-descriptor
+ * hit IS a concept, so the pub strength tier maps: tagged (exact descriptor) →
+ * "Concept", concept (expanded MeSH) → "Concept", mention (literal) → "Keyword".
+ * Colors per handoff §4.2. ("Research area" is reserved for the topic-taxonomy
+ * match — the `topic` MatchAwareReason — not a MeSH tag.)
  * ponytail: the §4.5 indigo dotted-underline on the concept descriptor text is
  * deferred — the badge already differentiates concept from keyword; revisit if the
  * literal-vs-system-term distinction needs more than the pill.
@@ -167,7 +169,7 @@ export function MatchReason({
   if (canExpand && onToggle) {
     return (
       <div
-        className={`mt-2 leading-snug ${badged ? "text-[13px]" : "text-[12.5px] text-muted-foreground"} ${className}`}
+        className={`${badged ? "mt-1.5" : "mt-2"} leading-snug ${badged ? "text-[13px]" : "text-[12.5px] text-muted-foreground"} ${className}`}
       >
         <DisclosureRow expanded={expanded} onToggle={onToggle} panelId={panelId}>
           {inner}
@@ -177,7 +179,7 @@ export function MatchReason({
   }
   return (
     <div
-      className={`mt-2 flex min-w-0 items-center leading-snug ${badged ? "gap-2 text-[13px]" : "gap-1.5 text-[12.5px] text-muted-foreground"} ${className}`}
+      className={`${badged ? "mt-1.5" : "mt-2"} flex min-w-0 items-center leading-snug ${badged ? "gap-2 text-[13px]" : "gap-1.5 text-[12.5px] text-muted-foreground"} ${className}`}
     >
       {inner}
     </div>
@@ -264,7 +266,7 @@ export function MatchAwareReason({
   // Item 1 — the whole [badge · label · chevron] cluster is the toggle.
   if (canExpand && onToggle) {
     return (
-      <div className="mt-2 text-[13px] leading-snug">
+      <div className="mt-1.5 text-[13px] leading-snug">
         <DisclosureRow
           expanded={expanded}
           onToggle={onToggle}
@@ -277,7 +279,7 @@ export function MatchAwareReason({
     );
   }
   return (
-    <div className="mt-2 flex min-w-0 items-center gap-2 text-[13px] leading-snug">
+    <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[13px] leading-snug">
       {inner}
     </div>
   );
