@@ -176,3 +176,48 @@ describe("PeopleResultCard — publications flavor badge (§4.7, Scholars card o
     expect(screen.getByText(/publications mention/)).toBeTruthy();
   });
 });
+
+describe("PeopleResultCard — Funding supersedes the generic no-match fallback", () => {
+  const oneGrant = {
+    grants: [{ projectId: "p1", title: "Pediatric trial", sponsor: "NIH", startYear: 2022, endYear: 2025 }],
+    total: 1,
+  };
+
+  it("drops the '— no specific match —' fallback when a grant matched", async () => {
+    mockFetch(oneGrant);
+    render(
+      <PeopleResultCard
+        {...base}
+        evidenceRows
+        hit={makeHit({ evidence: { kind: "none" } as PeopleHit["evidence"] })}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
+    // the honest-empty identity fallback is gone — the Funding row IS the match
+    expect(screen.queryByText(/no specific match for this query/i)).toBeNull();
+  });
+
+  it("keeps the '— no specific match —' fallback when NO grant matched", async () => {
+    const fetchFn = mockFetch({ grants: [], total: 0 });
+    render(
+      <PeopleResultCard
+        {...base}
+        evidenceRows
+        hit={makeHit({ evidence: { kind: "none" } as PeopleHit["evidence"] })}
+      />,
+    );
+    await waitFor(() =>
+      expect(fetchFn.mock.calls.some((c) => String(c[0]).includes("/grants?q="))).toBe(true),
+    );
+    expect(screen.getByText(/no specific match for this query/i)).toBeTruthy();
+    expect(screen.queryByText("Funding")).toBeNull();
+  });
+
+  it("does NOT suppress a real publications match — both rows coexist", async () => {
+    mockFetch(oneGrant);
+    render(<PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />);
+    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
+    // the real match reason still renders alongside the Funding row
+    expect(screen.getByText(/publications mention/)).toBeTruthy();
+  });
+});

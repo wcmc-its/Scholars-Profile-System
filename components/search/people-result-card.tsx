@@ -387,6 +387,20 @@ export function PeopleResultCard({
     }
   }
 
+  // When a topic-matching grant IS the query match, drop the generic NO-MATCH
+  // identity fallback (`concepts`/`areas`/`none`: the "— no specific match —" line +
+  // the scholar's top-MeSH chips, which are who-is-this context, NOT query-specific —
+  // e.g. infectious-disease chips on a "children's health" search). The Funding row
+  // below is the honest, query-specific reason and would otherwise sit under a
+  // contradictory "no specific match". Real matches (publications/method/clinical/
+  // topic) are NOT suppressed — they coexist with the Funding row.
+  const primaryIsIdentityFallback =
+    hit.evidence != null &&
+    (hit.evidence.kind === "concepts" ||
+      hit.evidence.kind === "areas" ||
+      hit.evidence.kind === "none");
+  const suppressIdentityFallback = grants.length > 0 && primaryIsIdentityFallback;
+
   // Stretched-link card (rep-papers disclosure): the row is a `<div>` and the
   // NAME is the profile `<Link>` whose `after:absolute inset-0` overlay makes the
   // WHOLE card clickable (whole-card navigation preserved). The chevron button +
@@ -436,8 +450,9 @@ export function PeopleResultCard({
           <div className="mb-2 text-xs text-muted-foreground">{deptLine}</div>
         ) : null}
         {/* #824 follow-up — one reason line per scholar: the ResultEvidence
-            object when present, else the legacy priority chain. */}
-        {snippetLine}
+            object when present, else the legacy priority chain. Suppressed when a
+            topic-matching grant supersedes a generic no-match identity fallback. */}
+        {suppressIdentityFallback ? null : snippetLine}
         {/* Rep-papers disclosure — the representative papers, shown when the row
             is expanded. Inline for the publications kind; lazily fetched for a
             method/topic match (the fetch is triggered on first toggle). */}
