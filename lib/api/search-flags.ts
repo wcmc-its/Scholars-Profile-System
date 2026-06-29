@@ -403,6 +403,19 @@ export function resolveGenericTermMode(): GenericTermMode {
   return "off";
 }
 
+/**
+ * Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
+ * When ON and a topic query resolves to a Research Area, `searchPeople` lifts scholars
+ * by their relevance×coverage ranking in that area (the topic page's per-scholar
+ * `total`), tiered into the prominence `function_score`. Topic/hybrid shapes only,
+ * reorder-only (no result-set/facet change), suppressed under Exact word. App-only, no
+ * reindex (sources the existing Aurora rollup, cached). Default OFF; `=== "on"` opt-in,
+ * staging-first (wired `env === "staging" ? "on" : "off"` in cdk/lib/app-stack.ts).
+ */
+export function resolveSearchPeopleAreaBoost(): boolean {
+  return process.env.SEARCH_PEOPLE_AREA_BOOST === "on";
+}
+
 export type PubRecencyMode = "off" | "gentle" | "strong";
 
 /**

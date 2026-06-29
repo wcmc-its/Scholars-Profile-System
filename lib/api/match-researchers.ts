@@ -175,6 +175,16 @@ export type RankResearchersOptions = {
   stageByCwid?: Map<string, CareerStage>;
   /** When true, blend stageAppeal into defaultScore ("who would this suit"). Default off. */
   stageLens?: boolean;
+  /**
+   * Soft ESI gate: when true, demote ESI-ineligible scholars BELOW eligible ones
+   * (stable — order within each group preserved), applied before `limit` so eligible
+   * scholars below the cut surface. Never DROPS anyone, so a fragile esiEligible
+   * derivation (undateable scholars, R61/subaward false positives) can't silently
+   * exclude — wrong direction is a demotion, not a disappearance. Default off.
+   */
+  esiOnly?: boolean;
+  /** ESI eligibility per candidate cwid; read only by the esiOnly demote. */
+  esiEligibleByCwid?: Map<string, boolean>;
   sort?: ResearcherSort;
   limit?: number;
 };
@@ -233,11 +243,17 @@ export function rankResearchers(
     });
   }
 
-  ranked.sort((a, b) =>
-    (opts.sort ?? "fit") === "stage"
+  // ponytail: relies on Array.sort being stable (ES2019+) so within-group order holds.
+  const esiRank = (cwid: string) => (opts.esiEligibleByCwid?.get(cwid) === true ? 0 : 1);
+  ranked.sort((a, b) => {
+    if (opts.esiOnly) {
+      const d = esiRank(a.cwid) - esiRank(b.cwid);
+      if (d !== 0) return d; // eligible (0) before ineligible (1); soft — never drops
+    }
+    return (opts.sort ?? "fit") === "stage"
       ? b.axes.stageAppeal - a.axes.stageAppeal
-      : b.defaultScore - a.defaultScore,
-  );
+      : b.defaultScore - a.defaultScore;
+  });
   return typeof opts.limit === "number" ? ranked.slice(0, opts.limit) : ranked;
 }
 
@@ -431,6 +447,8 @@ export async function rankResearchersForOpportunity(
   opportunityId: string,
   opts: {
     stageLens?: boolean;
+    /** Soft ESI gate — demote ESI-ineligible scholars below eligible ones. Off by default. */
+    esiOnly?: boolean;
     sort?: ResearcherSort;
     limit?: number;
     topK?: number;
@@ -497,6 +515,8 @@ export async function rankResearchersForOpportunity(
     appealByStage: (opp.appealByStage ?? {}) as Partial<Record<CareerStage, number>>,
     stageByCwid,
     stageLens: opts.stageLens,
+    esiOnly: opts.esiOnly,
+    esiEligibleByCwid: new Map([...signalsByCwid].map(([c, s]) => [c, s.esiEligible])),
     sort: opts.sort,
     limit: opts.limit,
   });

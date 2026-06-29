@@ -42,6 +42,7 @@ import {
   resolvePeopleMatchExplain,
   resolvePeopleSnippetRepresentativePub,
   resolvePeopleReasonFromDoc,
+  resolveSearchPeopleAreaBoost,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
@@ -68,7 +69,8 @@ import {
   type PublicationsSort,
   type SearchFacetBucket,
 } from "@/lib/api/search";
-import { meshMatchTier } from "@/lib/search";
+import { meshMatchTier, AREA_BOOST_TOP_N } from "@/lib/search";
+import { getAreaScholarConcentration } from "@/lib/api/topics";
 import {
   searchFunding,
   type FundingFilters,
@@ -406,6 +408,31 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // the card). The split only matters when `matchExplain` is on (otherwise no
   // reason agg runs and `skipReasonAgg` is a no-op).
   const peopleMatchExplain = resolvePeopleMatchExplain();
+  // Track B — Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
+  // Same resolution as the JSON route: when the flag is on, the query resolved to a
+  // Research Area, and not under Exact word, pull the area's relevance×coverage ranking
+  // ({cwid,total}) so area-concentrated scholars are lifted (topic/hybrid only,
+  // reorder-only). `areas[0]` is the area drawn as the "Research Areas" chip. Cached
+  // read; flag-off ⇒ skipped, the people search is byte-identical to today.
+  let areaConcentration: { cwid: string; total: number }[] | undefined;
+  if (
+    type === "people" &&
+    resolveSearchPeopleAreaBoost() &&
+    !meshOff &&
+    taxonomyMatch.state === "matches" &&
+    taxonomyMatch.areas.length > 0
+  ) {
+    const top = taxonomyMatch.areas[0];
+    const parentTopicId = top.entityType === "subtopic" ? top.parentTopicId : top.id;
+    const subtopicId = top.entityType === "subtopic" ? top.id : null;
+    if (parentTopicId) {
+      areaConcentration = await getAreaScholarConcentration(
+        parentTopicId,
+        subtopicId,
+        AREA_BOOST_TOP_N,
+      );
+    }
+  }
   const peopleSearchOpts =
     type === "people"
       ? {
@@ -444,6 +471,8 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           // matched topics) derived from the already-resolved taxonomyMatch. Inert
           // unless SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on (searchPeople gates it).
           matchAwareContext: buildMatchAwareContext(taxonomyMatch),
+          // Track B — Research-Area concentration boost (inert unless resolved above).
+          areaConcentration,
         }
       : null;
   // Under reason-from-doc (D) the reason is a cheap O(1) lookup on the list
@@ -551,6 +580,9 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   const [peopleResult, pubsResult, fundingResult] = await Promise.all([
     searchPeople({
       q,
+      // Track B — Research-Area concentration boost (count query; reorder-only, so the
+      // badge total is unchanged — passed for parity with the list query).
+      areaConcentration,
       page: type === "people" ? page : 0,
       sort: type === "people" ? (sort as PeopleSort) : "relevance",
       filters: {

@@ -49,6 +49,7 @@ export async function GET(
   if (!SORT_ALLOWLIST.has(sortRaw as ResearcherSort)) return apiError("invalid sort", 400);
 
   const stageLens = sp.get("stageLens") === "1" || sp.get("stageLens") === "true";
+  const esiOnly = sp.get("esiOnly") === "1" || sp.get("esiOnly") === "true";
 
   let limit = 25;
   const limitRaw = sp.get("limit");
@@ -61,6 +62,7 @@ export async function GET(
   const results = await rankResearchersForOpportunity(opportunityId, {
     sort: sortRaw as ResearcherSort,
     stageLens,
+    esiOnly,
     limit,
     crossRef: true,
   });
