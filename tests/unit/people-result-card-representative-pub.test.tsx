@@ -59,8 +59,9 @@ describe("PeopleResultCard — #967 representative-pub clause", () => {
       />,
     );
     expect(screen.getByText(/14 of 372 publications tagged HIV/)).toBeTruthy();
-    // <mark> is rewritten to a bold <strong> by HighlightedSnippet.
-    expect(screen.getByText("HIV").tagName).toBe("STRONG");
+    // #1361 — HighlightedSnippet now renders the <mark> as the light-red pill (a
+    // real <mark>), unified with publication/grant titles.
+    expect(screen.getByText("HIV").tagName).toBe("MARK");
     expect(screen.getByText(/Broadly neutralizing antibodies for/)).toBeTruthy();
     expect(screen.getByText(/\(2024\)/)).toBeTruthy();
   });
