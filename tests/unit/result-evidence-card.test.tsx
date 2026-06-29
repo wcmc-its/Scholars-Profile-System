@@ -113,6 +113,32 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(screen.getByText(/via related concept Melanoma/)).toBeTruthy();
   });
 
+  it("#1350 — a resolved concept term renders as its own subtly-underlined span", () => {
+    renderEv({
+      kind: "publications",
+      strength: "tagged",
+      text: "3 of 301 publications tagged",
+      term: "Pharmacogenetics",
+      count: 3,
+    });
+    expect(screen.getByText(/3 of 301 publications tagged/)).toBeTruthy();
+    const term = screen.getByText("Pharmacogenetics");
+    expect(term.tagName).toBe("SPAN");
+    expect(term.className).toMatch(/underline/);
+  });
+
+  it("#1355 — narrower descendant terms render after the concept term, capped at 2 + '+N more'", () => {
+    renderEv({
+      kind: "publications",
+      strength: "concept",
+      text: "via related concept",
+      term: "Microbiota",
+      descendantTerms: ["Mycobiome", "Virome", "Metagenome"],
+    });
+    expect(screen.getByText("Microbiota").className).toMatch(/underline/);
+    expect(screen.getByText(/matched Mycobiome, Virome, \+1 more/)).toBeTruthy();
+  });
+
   it("name ⇒ matched term bold", () => {
     renderEv({ kind: "name", html: "Roel <mark>van Herten</mark> - AI In Medical Imaging" });
     expect(screen.getByText("van Herten").tagName).toBe("STRONG");

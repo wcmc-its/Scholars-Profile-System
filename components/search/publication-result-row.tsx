@@ -53,7 +53,23 @@ export function PublicationResultRow({ hit }: { hit: PublicationHit }) {
           expansion (no literal term in the title) gets the quiet sparkle line. */}
       {!hit.titleHighlight && hit.matchProvenance ? (
         <MatchReason kind="concept">
-          via related concept {hit.matchProvenance.parentTerm}
+          via related concept{" "}
+          {/* #1350 — the resolved concept term, subtly underlined. */}
+          <span className="underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]">
+            {hit.matchProvenance.parentTerm}
+          </span>
+          {/* #1355 — the narrower descendant term(s) this publication actually carries. */}
+          {hit.matchProvenance.kind === "narrower" &&
+          hit.matchProvenance.descendantTerms.length > 0 ? (
+            <span className="text-[#6b7280]">
+              {" "}
+              (matched {hit.matchProvenance.descendantTerms.slice(0, 2).join(", ")}
+              {hit.matchProvenance.descendantTerms.length > 2
+                ? `, +${hit.matchProvenance.descendantTerms.length - 2} more`
+                : ""}
+              )
+            </span>
+          ) : null}
         </MatchReason>
       ) : null}
       {/* Issue #284 — impact and concept-impact land inline in the meta row

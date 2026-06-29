@@ -523,6 +523,9 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             ? []
             : (taxonomyMatch.meshResolution?.descendantUis ?? []),
           contentQuery,
+          // #1351 — resolved concept name, so the key-paper title highlight can mark
+          // the concept term (not just the literal query) on a tagged match.
+          conceptLabel: meshOff ? "" : (taxonomyMatch.meshResolution?.name ?? ""),
         }
       : null;
   // SEARCH_EVIDENCE_ROWS — server-resolved once, threaded to each Scholars card to
