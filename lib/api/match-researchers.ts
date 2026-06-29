@@ -352,8 +352,10 @@ async function topicVectorResults(
 /**
  * Subtopic-grain candidate pool for the reverse matcher: instead of fanning the
  * topicVector across parent topics, draw ONE pool of first/last-author papers whose
- * `primary_subtopic_id ∈ dsl.require`, drop papers tagged with a `dsl.penalize`
- * subtopic (hard exclusion, match_v7 semantics), score each with the SAME Variant-B
+ * `primary_subtopic_id` CONTAINS any `dsl.require` substring (the compiler emits substring
+ * patterns, not exact ids — match_v7 `likeAny` semantics; an exact `in` matched ~0 rows and
+ * silently fell back to topicVector), drop papers tagged with a `dsl.penalize` substring
+ * (hard exclusion), score each with the SAME Variant-B
  * curve, and fold in a per-paper relevance boost from the compiled BM25 query (one
  * OpenSearch round-trip). Returns a single synthetic TopicResult so the unchanged
  * downstream (rankResearchers / stage / signals / crossRef) takes over verbatim.
@@ -365,7 +367,12 @@ async function subtopicPoolResults(
 ): Promise<TopicResult[]> {
   const rows = await db.read.publicationTopic.findMany({
     where: {
-      primarySubtopicId: { in: dsl.require },
+      // SUBSTRING match: the compiler emits `require` as substring patterns (e.g. "biochem",
+      // "gpcr_signal"), not exact subtopic ids. An exact `{ in: require }` matched ~0 rows on the
+      // real long-form `primary_subtopic_id` vocab → silent topicVector fallback. ponytail: the
+      // `%substring%` LIKEs can't use the primary_subtopic_id index; the author/year/role filters
+      // narrow first, and the route is admin-only — revisit with a prefix scheme if latency bites.
+      OR: dsl.require.map((p) => ({ primarySubtopicId: { contains: p } })),
       authorPosition: { in: ["first", "last"] },
       year: { gte: RECITERAI_YEAR_FLOOR },
       scholar: { deletedAt: null, status: "active", roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] } },
@@ -377,14 +384,18 @@ async function subtopicPoolResults(
     },
   });
 
-  // penalize = hard exclusion: drop any paper whose subtopic set intersects penalize.
-  const penalize = new Set(dsl.penalize);
+  // penalize = hard exclusion: drop any paper a `penalize` substring matches (same substring
+  // semantics as `require` above; an exact Set.has would silently under-exclude the same way).
+  const penalize = dsl.penalize;
   const kept =
-    penalize.size === 0
+    penalize.length === 0
       ? rows
       : rows.filter((r) => {
           const sids = r.subtopicIds;
-          return !(Array.isArray(sids) && sids.some((s) => penalize.has(s as string)));
+          return !(
+            Array.isArray(sids) &&
+            sids.some((s) => typeof s === "string" && penalize.some((p) => s.includes(p)))
+          );
         });
 
   // Relevance boost (no-ops when no compiled query): normalized [0,1] BM25 per pmid.
