@@ -54,6 +54,23 @@ function parseMatchDsl(raw: unknown): MatchDsl | null {
   return { require, penalize };
 }
 
+// Dense relevance (match_rel) is preferred over the live BM25 boost when present. This opt-out
+// knob reverts to BM25 without a reproject (set "off"), the rollback lever for the ranking change.
+const grantMatcherDenseRel = () => process.env.GRANT_MATCHER_DENSE_REL !== "off";
+
+/** Parse the stored match_rel JSON → `{pmid: cosine∈[0,1]}` as a Map (same shape as the BM25
+ *  `relevanceScoresForQuery`, a drop-in rel source); null when absent/empty so the matcher falls
+ *  back to the BM25 query boost. Values are already pool-max-normalized + floored by the producer. */
+function parseMatchRel(raw: unknown): Map<string, number> | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const m = new Map<string, number>();
+  for (const [pmid, v] of Object.entries(raw as Record<string, unknown>)) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) m.set(pmid, n);
+  }
+  return m.size > 0 ? m : null;
+}
+
 /** One scholar's Variant-B score within a single topic. */
 export type ScholarTopicScore = {
   cwid: string;
@@ -361,6 +378,7 @@ async function topicVectorResults(
 async function subtopicPoolResults(
   dsl: MatchDsl,
   matchQuery: unknown,
+  matchRel: unknown,
   now: Date,
 ): Promise<TopicResult[]> {
   const rows = await db.read.publicationTopic.findMany({
@@ -387,8 +405,10 @@ async function subtopicPoolResults(
           return !(Array.isArray(sids) && sids.some((s) => penalize.has(s as string)));
         });
 
-  // Relevance boost (no-ops when no compiled query): normalized [0,1] BM25 per pmid.
-  const rel = await relevanceScoresForQuery(matchQuery, 1000);
+  // Relevance boost (no-ops when neither source has the pmid): normalized [0,1] per pmid. Prefer
+  // the precomputed DENSE map (match_rel, Titan cosine) when present; else live BM25 (match_query).
+  const dense = grantMatcherDenseRel() ? parseMatchRel(matchRel) : null;
+  const rel = dense ?? (await relevanceScoresForQuery(matchQuery, 1000));
   const relBoost = grantMatcherRelBoost();
 
   const byScholar = new Map<
@@ -460,7 +480,7 @@ export async function rankResearchersForOpportunity(
   const now = opts.now ?? new Date();
   const opp = await db.read.opportunity.findUnique({
     where: { opportunityId },
-    select: { topicVector: true, appealByStage: true, matchDsl: true, matchQuery: true },
+    select: { topicVector: true, appealByStage: true, matchDsl: true, matchQuery: true, matchRel: true },
   });
   if (!opp) return [];
 
@@ -471,7 +491,7 @@ export async function rankResearchersForOpportunity(
   const dsl = grantMatcherSubtopicGrain() ? parseMatchDsl(opp.matchDsl) : null;
   let topicResults: TopicResult[];
   if (dsl) {
-    const pooled = await subtopicPoolResults(dsl, opp.matchQuery, now);
+    const pooled = await subtopicPoolResults(dsl, opp.matchQuery, opp.matchRel, now);
     topicResults = pooled[0].scholars.length > 0 ? pooled : await topicVectorResults(opp, opts, now);
   } else {
     topicResults = await topicVectorResults(opp, opts, now);
