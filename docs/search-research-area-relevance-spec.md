@@ -7,6 +7,14 @@ unchanged. Companion to the merged **evidence-rows** work (#1334, `SEARCH_EVIDEN
 that fixed *how a matched scholar is explained* ("match evidence"); this fixes *which
 scholars rank, and in what order* ("relevance"). The two are independent.
 
+**Decisions (locked 2026-06-28):**
+- **D1 — boost magnitude = relevance(term match) × breadth(coverage).** Not flat
+  count buckets. This equals the topic page's existing per-scholar `total` (§3.1).
+- **D2 — granularity is not a hard "prefer subtopic" rule.** It falls out of the
+  relevance×coverage score at whichever topic level the query resolved to (§3.3).
+- **D3 — blend into the default Relevance sort.** No new user-facing scope.
+- **D4 — reorder-only MVP** (no result-set/facet change); admission is a follow-up (OQ-1).
+
 ---
 
 ## 1. Problem
@@ -36,7 +44,7 @@ Three matching axes exist; the strongest one never reaches People ranking:
 |---|---|---|
 | **Keyword** | BM25 `cross_fields` over people text (`lib/api/search.ts`) | a generic token ("child"/"health") admits off-topic authors; prominence floats them |
 | **Concept (MeSH)** | `terms{publicationMeshUi: descendantUis}`, **escalation-gated** to sparse pages (#726, `MESH_ESCALATION_THRESHOLD=50`) | **binary per-descriptor** — "1 of 286 tagged" == "100 of 130 tagged"; on a dense page (815) it doesn't even fire |
-| **Research Area** | Aurora rollup `getTopScholarsForTopic` / `getTopScholarsForSubtopic` over `publication_topic` (`lib/api/topics.ts`) — **graded distinct-pmid count**, D-13/D-14 first/senior carve | **not consulted by People search at all** — it lives in a different store (Aurora), feeds the topic *page*, never the People index ranking |
+| **Research Area** | Aurora rollup `getTopScholarsForTopic` / `getTopScholarsForSubtopic` over `publication_topic` (`lib/api/topics.ts`) — **graded relevance×coverage** (`Σ` per-pub topic score, D-13/D-14 first/senior carve) | **not consulted by People search at all** — it lives in a different store (Aurora), feeds the topic *page*, never the People index ranking |
 
 The prominence `function_score` (`publicationCount` via `ln1p`, + faculty + active-grants;
 `PEOPLE_PROMINENCE_*` in `lib/search.ts`) then multiplies whatever weak topical score
@@ -74,44 +82,72 @@ query maps to an area.
 
 ## 3. Design
 
-### 3.1 Mechanism — graded concentration boost in the existing `function_score`
+### 3.1 The boost magnitude — relevance × coverage (D1)
 
-When the People query is topic/hybrid shape **and** the query resolved to a Research
-Area (parent topic) and/or subtopic above a confidence floor:
+**Per scholar, the boost = (relevance of term match) × (breadth of coverage).** This is
+not a new metric to invent — it is *already computed*, exactly, by the topic page's
+scholar ranking (`getTopScholarsForTopic` / `getTopScholarsForSubtopic`,
+`lib/api/topics.ts`):
 
-1. **Resolve the area.** `matchQueryToTaxonomy` already ranks matched areas for the
-   header chip (#709, `lib/api/search-taxonomy.ts`). Take the **top** matched
-   parent-topic id (and subtopic id if one resolved) and its match strength. Proceed
-   only if strength ≥ `AREA_BOOST_MIN_CONFIDENCE` (OQ-6).
-2. **Pull the area's ranked scholars** from the existing **cached** rollup — a lean
-   projection of `getTopScholarsForSubtopic` (preferred when a subtopic resolved) else
-   `getTopScholarsForTopic`: `[{ cwid, areaPubs }]`, top `AREA_BOOST_TOP_N` (e.g. 200).
-   No card hydration — just cwid + distinct-pmid count.
-3. **Apply the concentration floor.** Drop scholars with `areaPubs < AREA_BOOST_MIN_PUBS`
-   (e.g. 3). This is what kills "1 of 286": a single tangential pub earns **no** boost.
-4. **Bucket by concentration and boost.** Add tiered `filter`/`weight` clauses to the
-   **prominence `function_score`** (the slot already wrapping the topic body,
-   `lib/api/search.ts` ~2060), keyed on cwid:
+```
+total(scholar) = Σ  scorePublication( reciteraiImpact = publication_topic.score,
+       pub ∈ scholar's      "top_scholars" recency curve )
+   first/last-authored,
+   recent, in-topic pubs
+```
+
+- each pub contributes its **per-pub term-relevance** (`publication_topic.score`, the
+  internal ReCiterAI parent-topic score, recency-weighted) — the *relevance* factor;
+- **summing over the scholar's in-topic pubs** is the *coverage/breadth* factor;
+- so `total = (mean per-pub relevance) × (count) = relevance × coverage` — precisely D1,
+  and precisely the number that ranks Nellis #1 on the page you validated.
+
+Reusing `total` (rather than a fresh formula) **guarantees the People-search order
+matches the topic page** for the matched area — the behaviour you confirmed is good.
+
+> **Internal-score note:** `publication_topic.score` is internal-only — used here purely
+> as ranking input via the existing `scorePublication`, never displayed (the "match
+> evidence" line is the merged #1334 feature). Consistent with the internal-only rule.
+
+### 3.2 Mechanism — inject `total` into the People `function_score`
+
+When the People query is topic/hybrid shape **and** the query resolved to a topic
+(parent area and/or subtopic) above `AREA_BOOST_MIN_CONFIDENCE` (OQ-6):
+
+1. **Resolve the matched topic.** `matchQueryToTaxonomy` already ranks matched areas for
+   the header chip (#709, `search-taxonomy.ts`). Take the top matched topic id (subtopic
+   if one resolved, §3.3) and its match strength.
+2. **Pull the ranked scholars + their `total`** from the existing **cached** rollup via
+   a lean accessor `getAreaScholarConcentration(topicId, …)` that reuses the
+   `getTopScholarsForTopic` aggregation but returns `[{ cwid, total }]` (today that
+   function computes `total` then discards it — just expose it), top `AREA_BOOST_TOP_N`
+   (e.g. 200). No card hydration.
+3. **Encode `total` as weight tiers keyed on cwid** in the **prominence
+   `function_score`** (the slot already wrapping the topic body, `search.ts` ~2060).
+   OpenSearch can't take a continuous per-doc external weight without an index field, so
+   bucket `total` into a few tiers — but the tiering is by **relevance×coverage `total`**,
+   not raw count:
 
    ```
-   { filter: { terms: { cwid: tierHi  } }, weight: AREA_BOOST_W_HI  }   // areaPubs ≥ 20
-   { filter: { terms: { cwid: tierMid } }, weight: AREA_BOOST_W_MID }   // 8–19
-   { filter: { terms: { cwid: tierLo  } }, weight: AREA_BOOST_W_LO  }   // 3–7
+   { filter: { terms: { cwid: tierHi  } }, weight: AREA_BOOST_W_HI  }   // top total band
+   { filter: { terms: { cwid: tierMid } }, weight: AREA_BOOST_W_MID }
+   { filter: { terms: { cwid: tierLo  } }, weight: AREA_BOOST_W_LO  }
    ```
 
-   Buckets (not a continuous score) keep the query small and the weights legible/
-   tunable. Additive within the function_score, so it composes with prominence the same
-   way the §6.1.3 attribution boost does — graded concentration can now overcome the
-   `ln1p(publicationCount)` lift that today floats generalists.
+   Additive within the function_score, composing with prominence the same way the
+   §6.1.3 attribution boost does — so relevance×coverage can overcome the
+   `ln1p(publicationCount)` lift that today floats generalists. (Continuous-weight
+   alternative = reindex `total` as a doc field + `script_score`/`field_value_factor` —
+   the "proper path", OQ-7.)
 
-**Why this is reorder-only by construction:** a `function_score` `filter` clause scores
-only docs *already* in the result set; a cwid not matched by the query's `must`/`filter`
-contributes nothing. So the MVP cannot change the total or the facets — only the order
-of who's already there. (Admission/recall is OQ-1.)
+**A scholar with one tangential pub never qualifies** — their `total` is tiny (one
+low-relevance term, recency-damped), so they fall below the lowest tier. That is what
+kills the "1 of 286" case, *without* a separate count floor: relevance×coverage already
+encodes it.
 
-**Why buckets, not the binary `terms` boost the concept axis uses:** the concept axis
-failed *because* it's binary. A uniform cwid boost would repeat that mistake. Buckets
-restore the graded property that makes the topic page correct.
+**Reorder-only by construction (D4):** a `function_score` `filter` clause scores only
+docs *already* in the result set; a cwid not matched by the query's `must`/`filter`
+contributes nothing. The MVP cannot change the total or facets — only order.
 
 ### 3.2 Gating (inert where it shouldn't fire)
 
@@ -122,13 +158,15 @@ restore the graded property that makes the topic page correct.
   `log()` the truncation (no silent cap) — beyond N, lexical order stands.
 - Flag off ⇒ no rollup fetch, no clauses, byte-identical query.
 
-### 3.3 Granularity — prefer subtopic when one resolved (OQ-2)
+### 3.3 Granularity — no hard subtopic rule; the score carries it (D2)
 
-A broad query → broad area is fine (`children's health` → Pediatrics & Neonatology).
-But a narrow query that merely rolls up to a broad area would get flooded by area
-generalists. So when `matchQueryToTaxonomy` resolves a **subtopic**, boost by
-**subtopic** concentration (`getTopScholarsForSubtopic`); else fall back to parent-area
-concentration. Subtopic is the more precise, false-positive-resistant signal.
+We do **not** hard-prefer subtopic. We compute relevance×coverage `total` at whichever
+level the query resolved to: if `matchQueryToTaxonomy` resolved a **subtopic**, use the
+subtopic `total` (`getTopScholarsForSubtopic`) — its per-pub relevance is naturally more
+term-specific, so a narrow query won't get flooded by broad-area generalists; if only a
+parent area resolved, use the parent-area `total`. Either way the magnitude is the same
+relevance×coverage quantity (D1) — granularity changes *which* pubs count and *how
+relevant* each is, not the formula.
 
 ---
 
@@ -136,8 +174,8 @@ concentration. Subtopic is the more precise, false-positive-resistant signal.
 
 | File | Change |
 |---|---|
-| `lib/api/search.ts` | tiered area-concentration clauses in the prominence `function_score`; gate on resolved area + floor; thread the cwid→areaPubs map in via opts |
-| `lib/api/topics.ts` | lean `getAreaScholarConcentration(topicId, subtopicId?, topN)` → `[{cwid, areaPubs}]` reusing the existing rollup query (no card hydration); reuse the cache |
+| `lib/api/search.ts` | `total`-tiered cwid clauses in the prominence `function_score`; gate on resolved topic; thread the cwid→`total` map in via opts |
+| `lib/api/topics.ts` | lean `getAreaScholarConcentration(topicId, subtopicId?, topN)` → `[{cwid, total}]` — reuse the `getTopScholarsForTopic`/`Subtopic` aggregation and **expose the `total` it already computes** (currently discarded); reuse the cache |
 | `lib/api/search-taxonomy.ts` | expose the top resolved parent-topic/subtopic id + match strength to the People path (already computed for #709) |
 | `app/api/search/route.ts` | resolve flag; when topic-shape + area resolved + flag on, fetch concentration map and pass into `searchPeople` opts |
 | `lib/api/search-flags.ts` | `resolveSearchPeopleAreaBoost()` (`off`/`on`; or `off`/`reorder`/`admit` if OQ-1 lands here) |
@@ -160,14 +198,16 @@ concentration. Subtopic is the more precise, false-positive-resistant signal.
 ## 6. Testing & eval
 
 **Unit**
-- Bucketing: a 26-pub scholar lands in `tierHi`, a 4-pub in `tierLo`, a 2-pub gets **no**
-  clause (floor).
+- Tiering by `total`: a high-`total` scholar lands in `tierHi`, a low-`total` in
+  `tierLo`; a one-tangential-pub scholar (tiny `total`) gets **no** clause.
+- `getAreaScholarConcentration` returns the **same `total`/order** as the topic page's
+  `getTopScholarsForTopic` for the same topic (shared aggregation).
 - Gate: name-shape and dept-shape queries emit no area clauses; flag-off query is
   byte-identical to master.
-- Subtopic preference: when a subtopic resolves, the concentration map comes from
+- Granularity: when a subtopic resolves, the `total` map comes from
   `getTopScholarsForSubtopic`, not the parent.
-- Reorder-only invariant: with the flag on, `total` and facet counts equal the flag-off
-  run for the same query (no admission).
+- Reorder-only invariant: with the flag on, `total` (result count) and facet counts
+  equal the flag-off run for the same query (no admission).
 
 **Eval (staging, flag-off vs flag-on)** — run `children's health` + a set of
 area-mapping queries (e.g. *heart failure*, *breast cancer*, *substance use disorder*,
@@ -178,47 +218,61 @@ area-mapping queries (e.g. *heart failure*, *breast cancer*, *substance use diso
   *Seahorse metabolic flux*) are byte-identical (flag inert);
 - (d) snapshot the top-20 ordering delta per query for review.
 
-**Audit SQL (preview the boost source vs. the topic page)** — for a parent topic,
-confirm the concentration ranking the boost will use matches the topic page's. Mirror
-the **exact** D-13/D-14 first/senior-author carve from `getTopScholarsForTopic` (do not
-invent columns — copy its predicate):
+**Audit SQL (approximate preview of the boost source)** — the exact magnitude is
+`Σ scorePublication(…)` with the app-side `"top_scholars"` recency curve, so pure SQL is
+only an approximation (it omits the recency transform). Use it to sanity-check the source
+table and carve; **exact parity comes from reusing `getTopScholarsForTopic`**, not this
+query. Carve mirrors that function: `authorPosition IN ('first','last')` (D-13),
+`year >= RECITERAI_YEAR_FLOOR` (D-15), scholar active/non-deleted/FT-eligible (D-14),
+publication type not in `FEED_EXCLUDED_TYPES`.
 
 ```sql
--- Top scholars by distinct-pmid concentration for one Research Area.
--- NOTE: add the D-13/D-14 authorship-position carve exactly as getTopScholarsForTopic applies it.
-SELECT cwid, COUNT(DISTINCT pmid) AS area_pubs
-FROM publication_topic
-WHERE parent_topic_id = 'pediatrics_neonatology'
-  -- AND <first-or-senior-author carve — mirror getTopScholarsForTopic>
-GROUP BY cwid
-ORDER BY area_pubs DESC
+-- APPROX: SUM of per-pub topic relevance (no recency curve) ≈ relevance × coverage.
+SELECT pt.cwid,
+       COUNT(DISTINCT pt.pmid)            AS area_pubs,      -- coverage
+       SUM(pt.score)                      AS approx_total    -- ≈ relevance × coverage
+FROM publication_topic pt
+JOIN scholar s        ON s.cwid = pt.cwid
+JOIN publication p    ON p.pmid = pt.pmid
+WHERE pt.parent_topic_id = 'pediatrics_neonatology'
+  AND pt.author_position IN ('first','last')
+  AND pt.year >= /* RECITERAI_YEAR_FLOOR */ 0
+  AND s.deleted_at IS NULL AND s.status = 'active'
+  -- AND s.role_category IN (<TOP_SCHOLARS_ELIGIBLE_ROLES>)
+  -- AND p.publication_type NOT IN (<FEED_EXCLUDED_TYPES>)
+GROUP BY pt.cwid
+ORDER BY approx_total DESC
 LIMIT 25;
 ```
 
-The result should match the order shown on `/topics/pediatrics_neonatology`
-("Nellis · 26 pubs tagged", …). If it doesn't, the boost source is wrong — stop.
+The order should *approximate* `/topics/pediatrics_neonatology` ("Nellis · 26 pubs
+tagged", …). Exact-match the recency-weighted order by reusing the function, not the SQL.
 
 ---
 
 ## 7. Open questions
 
-- **OQ-1 — reorder vs admission.** MVP reorders scholars already in the set (no
-  count/facet change). If the area's top experts aren't in the lexical set for a query,
-  reorder can't surface them; a follow-up `should`/`terms{cwid}` admission (gated like
-  #726, but topic-sourced) would add recall **at the cost of changing counts/facets**.
-  Recommend: **reorder-first MVP**; measure how often experts are absent before
-  investing in admission.
-- **OQ-2 — granularity.** Recommend subtopic-when-resolved, else parent area (§3.3).
-- **OQ-3 — blend vs new scope.** Recommend blending into the default Relevance sort, not
-  a discoverable "Research area" scope (a scope users must find won't fix the default).
-- **OQ-4 — weights & floor.** `AREA_BOOST_W_{HI,MID,LO}`, `AREA_BOOST_MIN_PUBS`,
-  bucket cutoffs, `AREA_BOOST_TOP_N` — all eval-driven; the §6 eval tunes them.
+- **OQ-1 — reorder vs admission.** *Resolved → D4 (reorder-only MVP).* Follow-up: if the
+  area's top experts aren't in the lexical set for a query, reorder can't surface them; a
+  topic-sourced `should`/`terms{cwid}` admission (gated like #726) adds recall **at the
+  cost of changing counts/facets**. Measure how often experts are absent before building it.
+- **OQ-2 — granularity.** *Resolved → D2 (score carries it, §3.3).*
+- **OQ-3 — blend vs new scope.** *Resolved → D3 (blend into default Relevance).*
+- **OQ-4 — weights & tier cutoffs.** `AREA_BOOST_W_{HI,MID,LO}`, the `total` band
+  boundaries, and `AREA_BOOST_TOP_N` — all eval-driven; the §6 eval tunes them. (No
+  separate pub-count floor: relevance×coverage `total` already starves the
+  one-tangential-pub case.)
 - **OQ-5 — interaction with #726 MeSH escalation.** Orthogonal: escalation is
   sparse-admission, this is dense-reorder. They can co-fire (both add additive
   function-score weight); confirm no surprising double-lift in the eval.
-- **OQ-6 — area-match confidence threshold.** Reuse the #709 area ranking; pick a
-  strength floor (`AREA_BOOST_MIN_CONFIDENCE`) so a weak/incidental area mapping doesn't
+- **OQ-6 — topic-match confidence threshold.** Reuse the #709 area ranking; pick a
+  strength floor (`AREA_BOOST_MIN_CONFIDENCE`) so a weak/incidental topic mapping doesn't
   trigger a boost. The "· 387" chip count is itself a coarse strength cue.
+- **OQ-7 — continuous weight (the "proper path").** Tiering `total` into 3 bands is an
+  OpenSearch encoding workaround. Denormalizing each scholar's per-topic `total` into the
+  people index (an ETL field + reindex) would allow a true continuous `script_score` /
+  `field_value_factor` — smoother ordering, no per-query Aurora read. Worth it only if the
+  tiered MVP proves the signal; defer.
 
 ---
 
@@ -227,6 +281,7 @@ The result should match the order shown on `/topics/pediatrics_neonatology`
 The architecture intentionally gated concept influence to sparse pages to protect
 healthy dense lexical rankings (the #726 "ranking-restraint" guarantee). This spec
 reshapes dense pages **on purpose** — but stays restraint-safe by: (a) being
-reorder-only (no set/facet change); (b) firing only on a confident area match with a
-per-scholar concentration floor; (c) shipping behind a default-off flag with a
+reorder-only (no set/facet change); (b) firing only on a confident topic match, with
+relevance×coverage `total` starving the one-tangential-pub case; (c) shipping behind a
+default-off flag with a
 control-query eval proving non-area queries are byte-identical before any prod flip.
