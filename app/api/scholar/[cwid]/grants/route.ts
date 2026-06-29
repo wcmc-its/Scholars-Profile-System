@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
 import { resolveSearchEvidenceRows } from "@/lib/api/search-flags";
 import { searchFunding } from "@/lib/api/search-funding";
 import type { EvidenceGrant } from "@/lib/api/result-evidence";
@@ -60,9 +61,19 @@ export async function GET(
     return NextResponse.json(EMPTY, { headers: NO_STORE });
   }
 
+  // #1339: match on the generic-stripped SIGNIFICANT query, mirroring KEY PAPERS
+  // (#692/#707). Raw `q` lets an academic-common term ("health") admit grants on its
+  // own (searchFunding is OR), so "children's health" surfaced health-only grants even
+  // though "children's" matched none. stripDeprioritized's never-empty contract keeps
+  // contentQuery non-empty whenever `query` is; a fully-generic query ("health") falls
+  // back to itself, same as KEY PAPERS.
+  // ponytail: no min_score floor — the strip removes the spurious admission; add a
+  // relevance floor only if a weak survivor still mis-renders during the soak.
+  const { contentQuery } = stripDeprioritized(query);
+
   try {
     const result = await searchFunding({
-      q: query,
+      q: contentQuery,
       filters: { investigator: [cwid] },
       sort: "relevance",
       page: 0,

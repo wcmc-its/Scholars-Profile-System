@@ -169,7 +169,7 @@ export function MatchReason({
   if (canExpand && onToggle) {
     return (
       <div
-        className={`${badged ? "mt-1.5" : "mt-2"} leading-snug ${badged ? "text-[13px]" : "text-[12.5px] text-muted-foreground"} ${className}`}
+        className={`${badged ? "mt-1" : "mt-2"} leading-snug ${badged ? "text-[13px]" : "text-[12.5px] text-muted-foreground"} ${className}`}
       >
         <DisclosureRow expanded={expanded} onToggle={onToggle} panelId={panelId}>
           {inner}
@@ -179,7 +179,7 @@ export function MatchReason({
   }
   return (
     <div
-      className={`${badged ? "mt-1.5" : "mt-2"} flex min-w-0 items-center leading-snug ${badged ? "gap-2 text-[13px]" : "gap-1.5 text-[12.5px] text-muted-foreground"} ${className}`}
+      className={`${badged ? "mt-1" : "mt-2"} flex min-w-0 items-center leading-snug ${badged ? "gap-2 text-[13px]" : "gap-1.5 text-[12.5px] text-muted-foreground"} ${className}`}
     >
       {inner}
     </div>
