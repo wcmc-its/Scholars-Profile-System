@@ -1477,13 +1477,14 @@ export class AppStack extends Stack {
         //   STAGING-FIRST: neutralized on staging for the A/B soak, prod keeps +1.0.
         SEARCH_PEOPLE_FACULTY_PROMINENCE: env === "staging" ? "off" : "on",
         // #1343 -- on-topic concentration volume DOWN-WEIGHT. When on, topic/hybrid shapes
-        //   down-weight the raw ln1p(publicationCount) term so the on-topic concentration
-        //   boost carries ranking instead of total output (fixes the volume double-count;
-        //   the concept-axis concentration SOURCE rides SEARCH_PEOPLE_AREA_BOOST above).
-        //   resolveSearchPeopleConcentration reads === "on". Query-time, no reindex. DARK
-        //   everywhere -- this lowers a SHARED prominence term and needs a staging
-        //   calibration sweep before any flip (then set staging -> "on").
-        SEARCH_PEOPLE_CONCENTRATION: "off",
+        //   down-weight the raw ln1p(publicationCount) term (factor -> 0.5) so the on-topic
+        //   concentration boost carries ranking instead of total output (attacks the volume
+        //   double-count directly; the concept-axis concentration SOURCE rides
+        //   SEARCH_PEOPLE_AREA_BOOST above). resolveSearchPeopleConcentration reads === "on".
+        //   Query-time, no reindex. STAGING-FIRST: on for staging so the down-weight soaks
+        //   ALONGSIDE the concentration boost (full #1343 fix) and the 0.5 factor can be
+        //   tuned against the A/B; PROD stays off until that calibration sweep signs off.
+        SEARCH_PEOPLE_CONCENTRATION: env === "staging" ? "on" : "off",
         // People-tab "concepts" hint -- replace the sparse self-reported
         // research-areas hint on the scholar row's identity line with the
         // scholar's top MeSH descriptor labels (topMeshTerms). Only the no-match
