@@ -65,12 +65,12 @@ import {
   PEOPLE_PROMINENCE_FACULTY_WEIGHT,
   PEOPLE_PROMINENCE_GRANT_WEIGHT,
   PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
-  PEOPLE_PROMINENCE_PUBCOUNT_FACTOR_CONCENTRATED,
   AREA_BOOST_W_HI,
   AREA_BOOST_W_MID,
   AREA_BOOST_W_LO,
   AREA_BOOST_HI_FRAC,
   AREA_BOOST_MID_FRAC,
+  CONCEPT_CONCENTRATION_MIN_PUBS,
   FUNDING_INDEX,
   PEOPLE_RESTRUCTURED_MSM,
   PEOPLE_TOPIC_ABSTRACTS_BOOST,
@@ -1076,18 +1076,31 @@ export function buildAreaBoostFunctions(
 }
 
 /**
- * #1343 — concept-axis on-topic concentration. Returns the top `limit` scholars by
- * count of publications TAGGED with the resolved concept (descendant descriptor set),
- * as `{ cwid, total }` — the SAME shape `getAreaScholarConcentration` returns, so it
- * feeds `buildAreaBoostFunctions` and the prominence slot UNCHANGED. This is what lets
- * the concentration boost reach MeSH-concept queries (obesity/hypertension) that don't
- * map to a curated Research Area; the area rollup only covers curated areas.
+ * #1343 — concept-axis on-topic CONCENTRATION. Ranks WCM authors of the resolved
+ * concept (descendant descriptor set) by how *concentrated* their work is on it,
+ * not by raw on-topic volume, then returns `{ cwid, total }` — the SAME shape
+ * `getAreaScholarConcentration` returns, so it feeds `buildAreaBoostFunctions`
+ * and the prominence slot UNCHANGED (`total` is a tiering score, never surfaced).
+ * Reaches MeSH-concept queries with no curated Research Area (the area rollup
+ * only covers curated areas).
  *
- * Sources the publications index (`meshDescriptorUi` ∩ `wcmAuthorCwids`) — both fields
- * already indexed, so NO reindex. One pre-ranking round-trip, capped at `limit` and
- * cached (the same SWR cache the reason aggs use), so a broad concept (Neoplasms) can't
- * saturate the search thread pool. `doc_count` IS the distinct on-topic pmid count (the
- * pub index is one doc per pmid).
+ * Why concentration, not count: ranking by raw on-topic `doc_count` rewarded
+ * high-VOLUME authors who merely had many on-topic pubs (a ~900-pub cardiologist
+ * with 20 obesity pubs out-tiered a 30-pub obesity specialist) — the exact volume
+ * dominance the boost was meant to fix (staging A/B 2026-06-29). Score is
+ * `n²/total` = on-topic count × on-topic fraction: rewards BOTH real output and
+ * focus, so a niche specialist out-tiers an incidental generalist while a genuine
+ * high-output expert (high n AND high fraction) still leads. Pure fraction would
+ * over-reward 1–2-pub authors; the n² numerator + the `CONCEPT_CONCENTRATION_MIN_PUBS`
+ * floor prevent that.
+ *
+ * Sources the publications index (`meshDescriptorUi` ∩ `wcmAuthorCwids`, both
+ * already indexed — NO reindex): one agg for on-topic counts, a second for each
+ * author's total pub count (the fraction denominator). Both cached together under
+ * one key, capped at `limit`, so a broad concept can't saturate the search pool.
+ * `doc_count` IS the distinct pmid count (one doc per pmid).
+ * ponytail: n²/total over two aggs; a reindexed per-scholar on-topic-fraction
+ *   field would drop the 2nd round-trip if this proves out (spec OQ-7).
  */
 export async function getConceptScholarConcentration(
   descendantUis: string[],
@@ -1097,7 +1110,16 @@ export async function getConceptScholarConcentration(
   return cachedReasonAgg<{ cwid: string; total: number }[]>(
     `concept-concentration:${[...descendantUis].sort().join(",")}:${limit}`,
     async () => {
-      const resp = await searchClient().search({
+      const authorBuckets = (resp: unknown): { key: string; doc_count: number }[] =>
+        (
+          resp as {
+            body?: {
+              aggregations?: { byAuthor?: { buckets?: { key: string; doc_count: number }[] } };
+            };
+          }
+        ).body?.aggregations?.byAuthor?.buckets ?? [];
+      // 1. On-topic pub count per WCM author.
+      const onTopicResp = await searchClient().search({
         index: PUBLICATIONS_INDEX,
         body: {
           size: 0,
@@ -1105,13 +1127,34 @@ export async function getConceptScholarConcentration(
           aggs: { byAuthor: { terms: { field: "wcmAuthorCwids", size: limit } } },
         } as object,
       });
-      const buckets =
-        (
-          resp.body as {
-            aggregations?: { byAuthor?: { buckets?: { key: string; doc_count: number }[] } };
-          }
-        ).aggregations?.byAuthor?.buckets ?? [];
-      return buckets.map((b) => ({ cwid: b.key, total: b.doc_count }));
+      const onTopic = authorBuckets(onTopicResp)
+        .map((b) => ({ cwid: b.key, n: b.doc_count }))
+        .filter((a) => a.n >= CONCEPT_CONCENTRATION_MIN_PUBS);
+      if (onTopic.length === 0) return [];
+      // 2. Each author's TOTAL WCM-authored pub count (the fraction denominator).
+      //    `include` pins the buckets to exactly our authors so co-authors can't
+      //    crowd them out; each doc_count is then that author's whole-index total
+      //    (every doc an author is on matches the cwid filter, so it's counted).
+      const cwids = onTopic.map((a) => a.cwid);
+      const totalResp = await searchClient().search({
+        index: PUBLICATIONS_INDEX,
+        body: {
+          size: 0,
+          query: { bool: { filter: [{ terms: { wcmAuthorCwids: cwids } }] } },
+          aggs: {
+            byAuthor: { terms: { field: "wcmAuthorCwids", size: cwids.length, include: cwids } },
+          },
+        } as object,
+      });
+      const totalByCwid = new Map(
+        authorBuckets(totalResp).map((b) => [b.key, b.doc_count] as [string, number]),
+      );
+      // 3. Concentration score n²/total (count × on-topic fraction). Tiered by
+      //    buildAreaBoostFunctions' frac-of-max — that logic is UNCHANGED.
+      return onTopic
+        .map(({ cwid, n }) => ({ cwid, total: (n * n) / Math.max(totalByCwid.get(cwid) ?? n, 1) }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, limit);
     },
   );
 }
@@ -1246,15 +1289,6 @@ export async function searchPeople(opts: {
    * headless callers default to today's behavior (`true` — term present).
    */
   facultyProminence?: boolean;
-  /**
-   * #1343 — on-topic concentration volume down-weight. When `true`, the topic/hybrid
-   * prominence uses the reduced `PEOPLE_PROMINENCE_PUBCOUNT_FACTOR_CONCENTRATED` for the
-   * raw-volume term so the on-topic concentration boost carries the ranking instead of
-   * total output. name/dept shapes are never affected. Resolved route/page-side from
-   * `SEARCH_PEOPLE_CONCENTRATION` (default OFF/dark); headless callers default to `false`
-   * (full volume factor, byte-identical to today).
-   */
-  concentration?: boolean;
   /**
    * Issue #692 — generic-term demotion (mode `on`). When true and `contentQuery`
    * differs from the raw query, the topic + hybrid bodies score on the content
@@ -2246,15 +2280,7 @@ export async function searchPeople(opts: {
           field_value_factor: {
             field: "publicationCount",
             modifier: "ln1p",
-            // #1343 — when concentration is on, topic/hybrid shapes down-weight the
-            // raw-volume term so the on-topic concentration boost (areaBoostFunctions)
-            // leads instead of total output. name/dept keep the full #513 factor.
-            // (Evaluated inside the applyProminence-gated array so the constant is read
-            // lazily — only when prominence actually applies.)
-            factor:
-              opts.concentration === true && (applyTopicTemplate || applyHybridTemplate)
-                ? PEOPLE_PROMINENCE_PUBCOUNT_FACTOR_CONCENTRATED
-                : PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
+            factor: PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
             missing: 0,
           },
         },

@@ -25,8 +25,11 @@ vi.mock("@/lib/db", () => ({
 }));
 
 const capturedBodies: Array<Record<string, unknown>> = [];
-// #1343 — author buckets the mocked concept-concentration agg returns (set per test).
+// #1343 — author buckets the mocked concept-concentration aggs return (set per test).
+// `conceptBuckets` = on-topic agg (meshDescriptorUi filter); `totalBuckets` = the
+// per-author total-pub agg (wcmAuthorCwids filter, the fraction denominator).
 let conceptBuckets: { key: string; doc_count: number }[] = [];
+let totalBuckets: { key: string; doc_count: number }[] = [];
 
 vi.mock("@/lib/search", () => ({
   PEOPLE_INDEX: "scholars-people",
@@ -59,7 +62,6 @@ vi.mock("@/lib/search", () => ({
   PEOPLE_TOPIC_ABSTRACTS_BOOST: 0.5,
   PEOPLE_PROMINENCE_BASE_WEIGHT: 1.0,
   PEOPLE_PROMINENCE_PUBCOUNT_FACTOR: 1,
-  PEOPLE_PROMINENCE_PUBCOUNT_FACTOR_CONCENTRATED: 0.5,
   PEOPLE_PROMINENCE_FACULTY_WEIGHT: 1.0,
   PEOPLE_PROMINENCE_GRANT_WEIGHT: 0.5,
   PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE: "full_time_faculty",
@@ -70,6 +72,7 @@ vi.mock("@/lib/search", () => ({
   AREA_BOOST_HI_FRAC: 0.5,
   AREA_BOOST_MID_FRAC: 0.2,
   AREA_BOOST_TOP_N: 200,
+  CONCEPT_CONCENTRATION_MIN_PUBS: 3,
   PUBLICATION_FIELD_BOOSTS: ["title^1"],
   // #726 — searchPeople now dereferences these on the topic-attribution path.
   MESH_ADMIT_WEIGHT: { exact: 3, "anchored-entry": 1.5, entry: 0.7 },
@@ -79,10 +82,16 @@ vi.mock("@/lib/search", () => ({
   searchClient: () => ({
     async search(req: { body: Record<string, unknown> }) {
       capturedBodies.push(req.body);
-      // #1343 concept-concentration agg — return author buckets when asked.
+      // #1343 concept-concentration aggs — the on-topic agg filters on
+      // meshDescriptorUi; the total-pub agg (fraction denominator) filters on
+      // wcmAuthorCwids. Return the matching bucket set per call.
       const aggs = req.body.aggs as { byAuthor?: unknown } | undefined;
       if (aggs && "byAuthor" in aggs) {
-        return { body: { aggregations: { byAuthor: { buckets: conceptBuckets } } } };
+        const filter =
+          ((req.body.query as { bool?: { filter?: { terms?: Record<string, unknown> }[] } })?.bool
+            ?.filter ?? [])[0]?.terms ?? {};
+        const buckets = "wcmAuthorCwids" in filter ? totalBuckets : conceptBuckets;
+        return { body: { aggregations: { byAuthor: { buckets } } } };
       }
       return {
         body: {
@@ -305,52 +314,11 @@ describe("faculty-prominence lever — #1345", () => {
   });
 });
 
-describe("concentration volume down-weight — #1343", () => {
-  beforeEach(() => {
-    capturedBodies.length = 0;
-    groupByMock.mockResolvedValue([]);
-  });
-  afterEach(() => vi.clearAllMocks());
-
-  const pubCountFactor = (body: Record<string, unknown>): number => {
-    const fns = functionScore(body)!.functions;
-    const f = fns.find((x) => "field_value_factor" in x) as {
-      field_value_factor: { factor: number };
-    };
-    return f.field_value_factor.factor;
-  };
-
-  it("concentration:true on topic shape down-weights the volume factor (1 → 0.5)", async () => {
-    await searchPeople({
-      q: "obesity",
-      relevanceMode: "v3",
-      shape: "topic",
-      meshDescendantUis: ["D009765"],
-      concentration: true,
-    });
-    expect(pubCountFactor(capturedBodies[0])).toBe(0.5);
-  });
-
-  it("concentration:true on NAME shape leaves the volume factor at 1 (topic/hybrid only)", async () => {
-    await searchPeople({ q: "cantley", relevanceMode: "v3", shape: "name", concentration: true });
-    expect(pubCountFactor(capturedBodies[0])).toBe(1);
-  });
-
-  it("default (off) leaves the volume factor at 1 (byte-identical)", async () => {
-    await searchPeople({
-      q: "obesity",
-      relevanceMode: "v3",
-      shape: "topic",
-      meshDescendantUis: ["D009765"],
-    });
-    expect(pubCountFactor(capturedBodies[0])).toBe(1);
-  });
-});
-
 describe("getConceptScholarConcentration — #1343 concept-axis source", () => {
   beforeEach(() => {
     capturedBodies.length = 0;
     conceptBuckets = [];
+    totalBuckets = [];
   });
   afterEach(() => vi.clearAllMocks());
 
@@ -360,22 +328,62 @@ describe("getConceptScholarConcentration — #1343 concept-axis source", () => {
     expect(capturedBodies).toHaveLength(0);
   });
 
-  it("maps author buckets to {cwid,total} and builds the on-topic agg body", async () => {
+  it("scores by concentration (n²/total), not raw on-topic count, and builds both agg bodies", async () => {
+    // `a` = high-volume generalist (40 on-topic of 800 total → 40²/800 = 2),
+    // `b` = niche specialist (10 on-topic of 12 total → 10²/12 ≈ 8.33).
+    // Raw-count ordering would put `a` first; concentration flips it to `b`.
     conceptBuckets = [
       { key: "a", doc_count: 40 },
-      { key: "b", doc_count: 7 },
+      { key: "b", doc_count: 10 },
+    ];
+    totalBuckets = [
+      { key: "a", doc_count: 800 },
+      { key: "b", doc_count: 12 },
     ];
     const out = await getConceptScholarConcentration(["D2", "D1"], 200);
-    expect(out).toEqual([
-      { cwid: "a", total: 40 },
-      { cwid: "b", total: 7 },
-    ]);
-    // Agg body: filter on the descriptor set, terms agg on wcmAuthorCwids capped at limit.
-    const body = capturedBodies[0] as {
+    expect(out.map((o) => o.cwid)).toEqual(["b", "a"]);
+    expect(out[0].total).toBeCloseTo(100 / 12, 5);
+    expect(out[1].total).toBeCloseTo(2, 5);
+
+    // 1st body: on-topic agg — filter on the descriptor set, terms agg capped at limit.
+    const onTopic = capturedBodies[0] as {
       query: { bool: { filter: { terms: { meshDescriptorUi: string[] } }[] } };
       aggs: { byAuthor: { terms: { field: string; size: number } } };
     };
-    expect(body.query.bool.filter[0].terms.meshDescriptorUi).toEqual(["D2", "D1"]);
-    expect(body.aggs.byAuthor.terms).toEqual({ field: "wcmAuthorCwids", size: 200 });
+    expect(onTopic.query.bool.filter[0].terms.meshDescriptorUi).toEqual(["D2", "D1"]);
+    expect(onTopic.aggs.byAuthor.terms).toEqual({ field: "wcmAuthorCwids", size: 200 });
+    // 2nd body: total-pub agg — filter+include pinned to the on-topic authors.
+    const total = capturedBodies[1] as {
+      query: { bool: { filter: { terms: { wcmAuthorCwids: string[] } }[] } };
+      aggs: { byAuthor: { terms: { field: string; size: number; include: string[] } } };
+    };
+    expect(total.query.bool.filter[0].terms.wcmAuthorCwids).toEqual(["a", "b"]);
+    expect(total.aggs.byAuthor.terms).toEqual({
+      field: "wcmAuthorCwids",
+      size: 2,
+      include: ["a", "b"],
+    });
+  });
+
+  it("floors out authors below CONCEPT_CONCENTRATION_MIN_PUBS before the total-pub round-trip", async () => {
+    conceptBuckets = [
+      { key: "a", doc_count: 5 },
+      { key: "tiny", doc_count: 2 }, // < 3 → ineligible, never weighted
+    ];
+    totalBuckets = [{ key: "a", doc_count: 10 }];
+    const out = await getConceptScholarConcentration(["D1"], 200);
+    expect(out.map((o) => o.cwid)).toEqual(["a"]);
+    // total-pub agg only asks for the eligible author, not the floored one.
+    const total = capturedBodies[1] as {
+      aggs: { byAuthor: { terms: { include: string[] } } };
+    };
+    expect(total.aggs.byAuthor.terms.include).toEqual(["a"]);
+  });
+
+  it("all authors floored → [] and no total-pub round-trip", async () => {
+    conceptBuckets = [{ key: "x", doc_count: 1 }];
+    const out = await getConceptScholarConcentration(["D1"], 200);
+    expect(out).toEqual([]);
+    expect(capturedBodies).toHaveLength(1); // only the on-topic agg ran
   });
 });

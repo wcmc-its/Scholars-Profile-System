@@ -35,7 +35,6 @@ import {
   resolveGenericTermMode,
   resolveSearchPeopleAreaBoost,
   resolveSearchPeopleFacultyProminence,
-  resolveSearchPeopleConcentration,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
@@ -556,9 +555,6 @@ async function handleSearch(request: NextRequest) {
     // #1345 — full-time-faculty prominence lever (default ON). When off, the flat
     // +1.0 full_time_faculty prominence term is dropped.
     facultyProminence: resolveSearchPeopleFacultyProminence(),
-    // #1343 — on-topic concentration volume down-weight (default OFF/dark). When on,
-    // topic/hybrid shapes down-weight raw volume so the concentration boost leads.
-    concentration: resolveSearchPeopleConcentration(),
     // #824 follow-up — match-aware snippet context so client tab-nav / pagination
     // (this route) keeps the method/topic reason the SSR page produced. Built off
     // the taxonomyMatch already resolved at the top of the handler; inert unless

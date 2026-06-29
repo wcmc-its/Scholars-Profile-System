@@ -22,7 +22,6 @@ import {
   resolveSearchShellStreaming,
   resolveSearchPeopleFacultyProminence,
   resolvePeopleTopicPhraseBoost,
-  resolveSearchPeopleConcentration,
 } from "@/lib/api/search-flags";
 
 describe("resolveConceptMode (§7.1)", () => {
@@ -405,25 +404,6 @@ describe("resolvePeopleTopicPhraseBoost (#1344)", () => {
     expect(resolvePeopleTopicPhraseBoost()).toBe(false);
     process.env.SEARCH_PEOPLE_PHRASE_BOOST = "true";
     expect(resolvePeopleTopicPhraseBoost()).toBe(false);
-  });
-});
-
-describe("resolveSearchPeopleConcentration (#1343)", () => {
-  const original = process.env.SEARCH_PEOPLE_CONCENTRATION;
-  beforeEach(() => delete process.env.SEARCH_PEOPLE_CONCENTRATION);
-  afterEach(() => {
-    if (original === undefined) delete process.env.SEARCH_PEOPLE_CONCENTRATION;
-    else process.env.SEARCH_PEOPLE_CONCENTRATION = original;
-  });
-
-  it("defaults to false (dark everywhere; volume factor unchanged)", () => {
-    expect(resolveSearchPeopleConcentration()).toBe(false);
-  });
-  it("is true only for exactly 'on'", () => {
-    process.env.SEARCH_PEOPLE_CONCENTRATION = "on";
-    expect(resolveSearchPeopleConcentration()).toBe(true);
-    process.env.SEARCH_PEOPLE_CONCENTRATION = "off";
-    expect(resolveSearchPeopleConcentration()).toBe(false);
   });
 });
 

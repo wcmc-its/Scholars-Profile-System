@@ -837,16 +837,6 @@ export const MESH_MIN_MATCHED_FORM_LEN = 4;
  */
 export const PEOPLE_PROMINENCE_BASE_WEIGHT = 1.0;
 export const PEOPLE_PROMINENCE_PUBCOUNT_FACTOR = 1;
-/**
- * #1343 — down-weighted raw-volume factor for topic/hybrid shapes when
- * `SEARCH_PEOPLE_CONCENTRATION` is on. The on-topic concentration boost
- * (area/concept axis) then carries the ranking instead of total output, fixing the
- * "prolific generalist outranks the focused specialist" volume double-count. INITIAL
- * value — tuned by the staging calibration sweep against docs/search-relevance-analysis.md
- * §2/§6 before any flip. name/dept shapes always use the full PEOPLE_PROMINENCE_PUBCOUNT_FACTOR.
- * ponytail: a single scalar knob, not a new scoring model; raise/lower per the sweep.
- */
-export const PEOPLE_PROMINENCE_PUBCOUNT_FACTOR_CONCENTRATED = 0.5;
 export const PEOPLE_PROMINENCE_FACULTY_WEIGHT = 1.0;
 export const PEOPLE_PROMINENCE_GRANT_WEIGHT = 0.5;
 /** The `personType` (= `roleCategory`) value the faculty boost matches. */
@@ -890,6 +880,12 @@ export const AREA_BOOST_HI_FRAC = 0.5;
 export const AREA_BOOST_MID_FRAC = 0.2;
 /** Cap on how many of the area's ranked scholars are pulled for the boost. */
 export const AREA_BOOST_TOP_N = 200;
+/**
+ * #1343 — minimum on-topic pubs for a WCM author to be eligible for the
+ * concept-axis concentration boost. Floors out 1–2-pub authors whose on-topic
+ * fraction would otherwise spike them above genuine specialists.
+ */
+export const CONCEPT_CONCENTRATION_MIN_PUBS = 3;
 
 /**
  * Boost weights used by the publications-index query builder.

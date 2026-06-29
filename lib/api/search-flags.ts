@@ -325,23 +325,6 @@ export function resolvePeopleTopicPhraseBoost(): boolean {
 }
 
 /**
- * #1343 — on-topic concentration volume down-weight. The People ranking rewards
- * total publication volume (`ln1p(publicationCount)`) AND, when a query resolves to
- * an area/concept, an on-topic concentration boost — double-counting volume so
- * prolific generalists outrank focused specialists. When ON, the raw-volume term is
- * down-weighted (to PEOPLE_PROMINENCE_PUBCOUNT_FACTOR_CONCENTRATED) for topic/hybrid
- * shapes ONLY, so the on-topic concentration signal carries the ranking instead.
- *
- * Default OFF (`=== "on"` opt-in, dark everywhere) — this lowers a SHARED prominence
- * term and needs a staging calibration sweep before any flip; name/dept shapes are
- * never touched (the #513 calibration stays byte-identical). Query-time only, no
- * reindex. The concept-axis concentration SOURCE rides SEARCH_PEOPLE_AREA_BOOST.
- */
-export function resolveSearchPeopleConcentration(): boolean {
-  return process.env.SEARCH_PEOPLE_CONCENTRATION === "on";
-}
-
-/**
  * Issue #688 — surface MeSH match provenance on People results. When a
  * topic/unclassified search resolves to a descriptor, the §6.1.3 attribution
  * boost ranks up scholars tagged with a *narrower* descendant term than the
