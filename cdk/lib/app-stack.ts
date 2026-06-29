@@ -1469,6 +1469,14 @@ export class AppStack extends Stack {
         // relevance×coverage ranking in that area (reorder-only, no reindex).
         // resolveSearchPeopleAreaBoost reads === "on". Staging-first.
         SEARCH_PEOPLE_AREA_BOOST: env === "staging" ? "on" : "off",
+        // #1347 -- division-shape routing. When on, a bare clinical-division-name People
+        //   query (Cardiology) routes to the department template AND is scoped to that
+        //   division's roster (deptDivKey filter), instead of falling to topic_template.
+        //   resolveSearchPeopleDivisionShape reads === "on". Query-time, no reindex. DARK
+        //   everywhere -- several division names are also topical terms, so this needs a
+        //   staging A/B before any flip (then set staging -> "on"); the chief-of ranking
+        //   WITHIN the roster additionally needs the #1347 chiefCwid reindex.
+        SEARCH_PEOPLE_DIVISION_SHAPE: "off",
         // People-tab "concepts" hint -- replace the sparse self-reported
         // research-areas hint on the scholar row's identity line with the
         // scholar's top MeSH descriptor labels (topMeshTerms). Only the no-match

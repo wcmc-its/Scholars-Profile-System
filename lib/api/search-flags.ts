@@ -293,6 +293,22 @@ export function resolveDeptLeadershipBoost(): boolean {
 }
 
 /**
+ * #1347 — division-shape routing. When ON, a bare clinical-division-name People query
+ * (Cardiology, Endocrinology) routes to the `department` template AND is scoped to that
+ * division's roster (`deptDivKey` filter), instead of falling to `topic_template` and
+ * returning a topic-scattered list. Division names + their roster keys come from the
+ * classifier-sets `divisions` map; query-time only, no reindex.
+ *
+ * Default OFF (`=== "on"` opt-in, dark): flag-off ⇒ classification + filters are
+ * byte-identical. Regression risk — several division names are also legitimate topical
+ * terms — so this ships dark and needs a staging A/B before any flip. The chief-of
+ * ranking WITHIN the roster additionally depends on the #1347 reindex (chiefCwid).
+ */
+export function resolveSearchPeopleDivisionShape(): boolean {
+  return process.env.SEARCH_PEOPLE_DIVISION_SHAPE === "on";
+}
+
+/**
  * Issue #688 — surface MeSH match provenance on People results. When a
  * topic/unclassified search resolves to a descriptor, the §6.1.3 attribution
  * boost ranks up scholars tagged with a *narrower* descendant term than the

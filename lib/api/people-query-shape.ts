@@ -73,6 +73,13 @@ export interface ClassifyPeopleQueryInput {
   knownSurnames: ReadonlySet<string>;
   /** Lowercased distinct `Scholar.primaryDepartment` values. */
   knownDepartments: ReadonlySet<string>;
+  /**
+   * #1347 — lowercased `Division.name` values. When non-empty (gated by
+   * SEARCH_PEOPLE_DIVISION_SHAPE route/page-side), a bare division-name query routes to
+   * the `department` shape (department_template) instead of falling to `topic`. Default
+   * empty ⇒ classification is byte-identical to today.
+   */
+  knownDivisions?: ReadonlySet<string>;
 }
 
 /**
@@ -139,8 +146,14 @@ export function classifyPeopleQuery(
     input.knownSurnames.has(tokens[tokens.length - 1]);
 
   // Department — a known department name as a phrase prefix. The leftover
-  // (minus noise words) decides pure-department vs. hybrid.
-  const leftover = departmentLeftover(tokens, input.knownDepartments);
+  // (minus noise words) decides pure-department vs. hybrid. #1347: clinical
+  // division names join the department vocabulary when the flag is on (the set is
+  // empty otherwise, so this is byte-identical to today).
+  const deptVocabulary =
+    input.knownDivisions && input.knownDivisions.size > 0
+      ? new Set([...input.knownDepartments, ...input.knownDivisions])
+      : input.knownDepartments;
+  const leftover = departmentLeftover(tokens, deptVocabulary);
   const departmentSignal = leftover !== null;
   const departmentHasLeftover = leftover !== null && leftover.length > 0;
 

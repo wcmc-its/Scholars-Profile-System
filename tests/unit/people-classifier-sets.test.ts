@@ -6,13 +6,14 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { findMany, osSearch } = vi.hoisted(() => ({
+const { findMany, divisionFindMany, osSearch } = vi.hoisted(() => ({
   findMany: vi.fn(),
+  divisionFindMany: vi.fn(),
   osSearch: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
-  prisma: { scholar: { findMany } },
+  prisma: { scholar: { findMany }, division: { findMany: divisionFindMany } },
 }));
 
 vi.mock("@/lib/search", () => ({
@@ -36,6 +37,7 @@ function osResponse(surnames: string[]) {
 describe("getPeopleClassifierSets", () => {
   beforeEach(() => {
     findMany.mockReset();
+    divisionFindMany.mockReset().mockResolvedValue([]); // #1347 — default: no divisions
     osSearch.mockReset();
     vi.resetModules(); // fresh module-level cache per test
   });
@@ -55,6 +57,25 @@ describe("getPeopleClassifierSets", () => {
     expect([...sets.surnames].sort()).toEqual(["cantley", "wong"]);
     expect([...sets.cwids].sort()).toEqual(["abc1001", "def2002"]);
     expect([...sets.departments].sort()).toEqual(["cardiology", "pediatrics"]);
+  });
+
+  it("#1347 — builds the lowercased division-name → deptDivKey(s) map", async () => {
+    osSearch.mockResolvedValue(osResponse(["smith"]));
+    findMany.mockResolvedValue([{ cwid: "abc1001", primaryDepartment: "Medicine" }]);
+    divisionFindMany.mockResolvedValue([
+      { name: "Hematology", code: "HEM", deptCode: "MED" },
+      { name: "Cardiology", code: "CARD", deptCode: "MED" },
+      // Same name across two departments → both roster keys under one entry.
+      { name: "Cardiology", code: "CARD", deptCode: "PEDS" },
+    ]);
+
+    const { getPeopleClassifierSets } = await import(
+      "@/lib/api/people-classifier-sets"
+    );
+    const sets = await getPeopleClassifierSets();
+
+    expect(sets.divisions.get("hematology")).toEqual(["MED--HEM"]);
+    expect(sets.divisions.get("cardiology")).toEqual(["MED--CARD", "PEDS--CARD"]);
   });
 
   it("caches — a second call within the TTL does not re-query", async () => {

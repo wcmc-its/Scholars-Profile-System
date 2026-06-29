@@ -33,6 +33,7 @@ import {
   resolvePeopleSnippetRepresentativePub,
   resolveGenericTermMode,
   resolveSearchPeopleAreaBoost,
+  resolveSearchPeopleDivisionShape,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
@@ -446,12 +447,24 @@ async function handleSearch(request: NextRequest) {
   // `resolvePeopleRelevanceMode` so both rank identically.
   const appliedRelevanceMode = resolvePeopleRelevanceMode();
   const classifierSets = await getPeopleClassifierSets();
+  // #1347 — division-shape routing (dark by default). Add clinical-division names to the
+  // classifier vocabulary so a bare division query hits the department template, and
+  // resolve that division to its roster (deptDivKey) filter. Flag-off ⇒ both are inert.
+  const divisionShapeOn = resolveSearchPeopleDivisionShape();
+  const knownDivisions = divisionShapeOn
+    ? new Set(classifierSets.divisions.keys())
+    : undefined;
+  const divisionRosterKeys = divisionShapeOn
+    ? (classifierSets.divisions.get(q.trim().toLowerCase()) ?? [])
+    : [];
+  const effectiveDeptDiv = [...deptDiv, ...divisionRosterKeys];
   const queryShape = classifyPeopleQuery({
     query: q,
     meshResolved: taxonomyMatch.meshResolution != null,
     knownCwids: classifierSets.cwids,
     knownSurnames: classifierSets.surnames,
     knownDepartments: classifierSets.departments,
+    knownDivisions,
   });
 
   const searchStart = Date.now();
@@ -490,7 +503,9 @@ async function handleSearch(request: NextRequest) {
     page,
     sort,
     filters: {
-      deptDiv: deptDiv.length > 0 ? deptDiv : undefined,
+      // #1347 — `effectiveDeptDiv` unions the facet-selected deptDiv with the resolved
+      // division roster keys (empty unless the division-shape flag is on).
+      deptDiv: effectiveDeptDiv.length > 0 ? effectiveDeptDiv : undefined,
       personType: personType.length > 0 ? personType : undefined,
       activity: activity.length > 0 ? activity : undefined,
       includeIncomplete,

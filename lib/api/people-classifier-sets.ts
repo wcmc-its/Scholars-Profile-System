@@ -56,12 +56,22 @@ export interface PeopleClassifierSets {
   cwids: ReadonlySet<string>;
   /** Lowercased distinct `Scholar.primaryDepartment` values. */
   departments: ReadonlySet<string>;
+  /**
+   * #1347 — lowercased `Division.name` → its `deptDivKey`(s) (`${deptCode}--${code}`).
+   * Clinical divisions are NEVER a `primaryDepartment`, so the classifier can't route
+   * a bare division-name query to the department template (it falls to topic_template);
+   * this set is the missing vocabulary AND the roster-filter lookup. A name can map to
+   * >1 division (same name across departments), hence an array. Only consumed when
+   * SEARCH_PEOPLE_DIVISION_SHAPE is on.
+   */
+  divisions: ReadonlyMap<string, string[]>;
 }
 
 const EMPTY_SETS: PeopleClassifierSets = {
   surnames: new Set(),
   cwids: new Set(),
   departments: new Set(),
+  divisions: new Map(),
 };
 
 let cache: { sets: PeopleClassifierSets; ts: number } | null = null;
@@ -107,12 +117,33 @@ async function loadCwidsAndDepartments(): Promise<{
   return { cwids, departments };
 }
 
+/**
+ * #1347 — lowercased `Division.name` → `deptDivKey`(s). Clinical divisions are
+ * Divisions OF a department (never a `primaryDepartment`), so they need their own
+ * vocabulary for the classifier + a name→roster lookup for the search filter.
+ */
+async function loadDivisions(): Promise<Map<string, string[]>> {
+  const rows = await prisma.division.findMany({
+    select: { name: true, code: true, deptCode: true },
+  });
+  const divisions = new Map<string, string[]>();
+  for (const row of rows) {
+    const key = row.name.toLowerCase();
+    const deptDivKey = `${row.deptCode}--${row.code}`;
+    const existing = divisions.get(key);
+    if (existing) existing.push(deptDivKey);
+    else divisions.set(key, [deptDivKey]);
+  }
+  return divisions;
+}
+
 async function refresh(): Promise<PeopleClassifierSets> {
-  const [surnames, cwidsAndDepartments] = await Promise.all([
+  const [surnames, cwidsAndDepartments, divisions] = await Promise.all([
     loadSurnames(),
     loadCwidsAndDepartments(),
+    loadDivisions(),
   ]);
-  return { surnames, ...cwidsAndDepartments };
+  return { surnames, ...cwidsAndDepartments, divisions };
 }
 
 /**
