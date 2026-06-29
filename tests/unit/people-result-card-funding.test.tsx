@@ -83,8 +83,9 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
     render(<PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />);
 
     await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
-    // count-only claim, never "of Y" (§4.6)
-    expect(screen.getByText(/^1 grant$/)).toBeTruthy();
+    // #1361 — "N of M grants mention 'query'": normal-weight prefix + semibold query term.
+    expect(screen.getByText(/1 of 3 grants mention/)).toBeTruthy();
+    expect(screen.getByText("“diabetes”").tagName).toBe("STRONG");
     expect(
       fetchFn.mock.calls.some((c) => c[0] === "/api/scholar/abc1234/grants?q=diabetes"),
     ).toBe(true);

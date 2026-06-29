@@ -2878,7 +2878,11 @@ export async function searchPeople(opts: {
       };
     if (counts && counts.mention > 0)
       pub.mention = {
-        text: `${Math.min(counts.mention, pubCount)} of ${pubCount} publications mention “${contentQuery}”`,
+        // #1361 — the literal query term is split out (curly-quoted) as `term` so it
+        // renders semibold; the prefix stays normal weight. No underline (that marks
+        // a system-expanded concept, which the literal mention is not).
+        text: `${Math.min(counts.mention, pubCount)} of ${pubCount} publications mention`,
+        term: `“${contentQuery}”`,
         count: Math.min(counts.mention, pubCount),
         ...(reps?.mention && reps.mention.length > 0 ? { pubs: reps.mention } : {}),
       };

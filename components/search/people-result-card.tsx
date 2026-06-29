@@ -489,13 +489,16 @@ export function PeopleResultCard({
         ) : null}
         {/* Funding evidence row (SEARCH_EVIDENCE_ROWS) — topic-matching grants, shown
             only when ≥1 matched (hide-when-empty, §4.4 last). Own disclosure state;
-            records loaded eagerly so expand is instant. ponytail: claim is count-only
-            (§4.6, no "of Y"); wording tunable against the design mock. */}
+            records loaded eagerly so expand is instant. #1361 — the claim now mirrors
+            the publications "mention" line: "N of M grants mention 'query'" with a
+            normal-weight prefix and the semibold query term (replaces the §4.6
+            count-only "N grants"). N = matching grants, M = the scholar's grant total. */}
         {grants.length > 0 ? (
           <>
             <MatchAwareReason
               kind="funding"
-              label={`${grantsTotal} grant${grantsTotal === 1 ? "" : "s"}`}
+              prefix={`${Math.min(grantsTotal, hit.grantCount)} of ${hit.grantCount} grants mention`}
+              label={`“${qParam}”`}
               canExpand
               expanded={fundingExpanded}
               onToggle={() => setFundingExpanded((v) => !v)}

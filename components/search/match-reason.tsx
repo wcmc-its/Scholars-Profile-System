@@ -201,6 +201,7 @@ export function MatchReason({
 export function MatchAwareReason({
   kind,
   label,
+  prefix,
   canExpand = false,
   expanded = false,
   onToggle,
@@ -208,6 +209,10 @@ export function MatchAwareReason({
 }: {
   kind: "method" | "topic" | "clinical" | "funding";
   label: string;
+  /** #1361 — an optional normal-weight count prefix rendered before the semibold
+   *  term (e.g. "3 of 5 grants mention" + **"radiosurgery"**). Omitted for the pure
+   *  label matches (method/topic/clinical), which have no "N of M" count. */
+  prefix?: string;
   /** Rep-papers disclosure — when true, trail a clickable chevron `<button>`
    *  that opens the representative-papers panel `panelId`. */
   canExpand?: boolean;
@@ -259,6 +264,7 @@ export function MatchAwareReason({
         {badgeText}
       </span>
       <span className="min-w-0 truncate">
+        {prefix ? <span className="font-normal text-[#3a3a3a]">{prefix} </span> : null}
         <strong className="font-semibold text-[#1a1a1a]">{label}</strong>
       </span>
     </>
