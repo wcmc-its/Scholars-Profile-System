@@ -1457,6 +1457,11 @@ export class AppStack extends Stack {
         // APP-ONLY, no reindex. resolveSearchEvidenceRows reads === "on".
         // STAGING-FIRST soak: on for staging, off for prod (flip prod after soak).
         SEARCH_EVIDENCE_ROWS: env === "staging" ? "on" : "off",
+        // Research-Area concentration boost (docs/search-research-area-relevance-spec.md).
+        // When on, a topic query that resolves to a Research Area lifts scholars by their
+        // relevance×coverage ranking in that area (reorder-only, no reindex).
+        // resolveSearchPeopleAreaBoost reads === "on". Staging-first.
+        SEARCH_PEOPLE_AREA_BOOST: env === "staging" ? "on" : "off",
         // People-tab "concepts" hint -- replace the sparse self-reported
         // research-areas hint on the scholar row's identity line with the
         // scholar's top MeSH descriptor labels (topMeshTerms). Only the no-match
