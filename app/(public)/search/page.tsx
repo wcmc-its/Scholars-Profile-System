@@ -44,7 +44,6 @@ import {
   resolvePeopleReasonFromDoc,
   resolveSearchPeopleAreaBoost,
   resolveSearchPeopleFacultyProminence,
-  resolveSearchPeopleConcentration,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
@@ -472,11 +471,9 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           meshMatchedFormLength: effectiveMeshResolution?.matchedForm.length,
           scope,
           deptLeadershipBoost: resolveDeptLeadershipBoost(),
-          // #1345 — full-time-faculty prominence lever (default ON); #1343 — concentration
-          // volume down-weight (default OFF/dark). Resolved here so the SSR list ranks
-          // identically to the /api/search route.
+          // #1345 — full-time-faculty prominence lever (default ON). Resolved here so the
+          // SSR list ranks identically to the /api/search route.
           facultyProminence: resolveSearchPeopleFacultyProminence(),
-          concentration: resolveSearchPeopleConcentration(),
           genericDemote,
           contentQuery,
           matchProvenance: resolvePeopleMatchProvenance(),
