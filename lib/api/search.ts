@@ -989,6 +989,56 @@ async function collectGrantMatchedCwids(descendantUis: string[]): Promise<string
   return buckets.map((b) => b.key);
 }
 
+/**
+ * Per-pmid BM25 relevance for a compiled grant query (`[{ q, w }]` weighted terms),
+ * normalized to [0,1] by ÷ this query's own max — OS `_score` is NOT cross-query
+ * comparable, so the normalization is encapsulated here and callers only ever see the
+ * scaled value. ONE OpenSearch round-trip (no aggs, `_source:["pmid"]`); an
+ * empty/absent query yields an empty map so the relevance boost simply no-ops.
+ * Used by the subtopic-grain reverse matcher (grant→researcher).
+ */
+export async function relevanceScoresForQuery(
+  matchQuery: unknown,
+  size = 1000,
+): Promise<Map<string, number>> {
+  const terms = (Array.isArray(matchQuery) ? matchQuery : []).filter(
+    (t): t is { q: string; w?: number } =>
+      !!t &&
+      typeof t === "object" &&
+      typeof (t as { q?: unknown }).q === "string" &&
+      (t as { q: string }).q.trim() !== "",
+  );
+  if (terms.length === 0) return new Map();
+
+  const should = terms.map((t) => ({
+    multi_match: {
+      query: t.q,
+      fields: ["title^2", "abstract"],
+      boost: typeof t.w === "number" && t.w > 0 ? t.w : 1,
+    },
+  }));
+  const resp = await searchClient().search({
+    index: PUBLICATIONS_INDEX,
+    body: { size, _source: ["pmid"], track_total_hits: false, query: { bool: { should } } } as object,
+  });
+  const hits =
+    (resp.body as unknown as { hits?: { hits?: Array<{ _score?: number; _source?: { pmid?: string } }> } })
+      .hits?.hits ?? [];
+
+  let max = 0;
+  const raw: Array<[string, number]> = [];
+  for (const h of hits) {
+    const pmid = h._source?.pmid;
+    const s = h._score ?? 0;
+    if (typeof pmid === "string" && s > 0) {
+      raw.push([pmid, s]);
+      if (s > max) max = s;
+    }
+  }
+  if (max <= 0) return new Map();
+  return new Map(raw.map(([pmid, s]) => [pmid, s / max]));
+}
+
 export async function searchPeople(opts: {
   q: string;
   page?: number;

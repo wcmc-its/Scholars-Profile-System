@@ -98,6 +98,8 @@ export async function projectGrantOpportunities(
           prestige: w.prestige,
           isHonorific: w.isHonorific,
           taxonomyVersion: w.taxonomyVersion,
+          matchDsl: w.matchDsl,
+          matchQuery: w.matchQuery,
           ingestedAt: w.ingestedAt,
           lastRefreshedAt: now,
         };

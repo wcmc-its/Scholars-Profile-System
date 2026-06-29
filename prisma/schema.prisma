@@ -418,6 +418,11 @@ model Opportunity {
   /// Prestige signal from ReciterAI (GRANT# contract v2):
   /// `{ score, mechanism_tier, size_bucket, sponsor_tier, selectivity, label, rationale }`.
   prestige         Json?     @map("prestige")
+  /// LLM-compiled grant→researcher match DSL `{ require, penalize, pediatric_* }`
+  /// (SUBTOPIC slugs) — consumed by the flag-gated subtopic-grain reverse matcher.
+  matchDsl         Json?     @map("match_dsl")
+  /// LLM-compiled weighted BM25 query `[{ q, w }]` for the relevance boost.
+  matchQuery       Json?     @map("match_query")
   /// True for nomination-based honorific recognition (prize/medal/lectureship, or a
   /// recognition "Award" with no NIH activity code) — excluded from recommendations.
   isHonorific      Boolean?  @map("is_honorific")
@@ -1407,6 +1412,7 @@ model PublicationTopic {
   @@index([parentTopicId, year(sort: Desc), score(sort: Desc)]) // /topics/{slug} Recent highlights
   @@index([cwid, year(sort: Desc)]) // profile most-recent feed (with D-16 dedup)
   @@index([parentTopicId, cwid]) // Top scholars chip row group-by
+  @@index([primarySubtopicId]) // subtopic-grain reverse matcher pool (grant→researcher)
   @@map("publication_topic")
 }
 
