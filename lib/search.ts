@@ -837,6 +837,16 @@ export const MESH_MIN_MATCHED_FORM_LEN = 4;
  */
 export const PEOPLE_PROMINENCE_BASE_WEIGHT = 1.0;
 export const PEOPLE_PROMINENCE_PUBCOUNT_FACTOR = 1;
+/**
+ * #1343 — down-weighted raw-volume factor for topic/hybrid shapes when
+ * `SEARCH_PEOPLE_CONCENTRATION` is on. The on-topic concentration boost
+ * (area/concept axis) then carries the ranking instead of total output, fixing the
+ * "prolific generalist outranks the focused specialist" volume double-count. INITIAL
+ * value — tuned by the staging calibration sweep against docs/search-relevance-analysis.md
+ * §2/§6 before any flip. name/dept shapes always use the full PEOPLE_PROMINENCE_PUBCOUNT_FACTOR.
+ * ponytail: a single scalar knob, not a new scoring model; raise/lower per the sweep.
+ */
+export const PEOPLE_PROMINENCE_PUBCOUNT_FACTOR_CONCENTRATED = 0.5;
 export const PEOPLE_PROMINENCE_FACULTY_WEIGHT = 1.0;
 export const PEOPLE_PROMINENCE_GRANT_WEIGHT = 0.5;
 /** The `personType` (= `roleCategory`) value the faculty boost matches. */

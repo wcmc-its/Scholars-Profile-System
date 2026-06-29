@@ -25,6 +25,8 @@ vi.mock("@/lib/db", () => ({
 }));
 
 const capturedBodies: Array<Record<string, unknown>> = [];
+// #1343 — author buckets the mocked concept-concentration agg returns (set per test).
+let conceptBuckets: { key: string; doc_count: number }[] = [];
 
 vi.mock("@/lib/search", () => ({
   PEOPLE_INDEX: "scholars-people",
@@ -57,6 +59,7 @@ vi.mock("@/lib/search", () => ({
   PEOPLE_TOPIC_ABSTRACTS_BOOST: 0.5,
   PEOPLE_PROMINENCE_BASE_WEIGHT: 1.0,
   PEOPLE_PROMINENCE_PUBCOUNT_FACTOR: 1,
+  PEOPLE_PROMINENCE_PUBCOUNT_FACTOR_CONCENTRATED: 0.5,
   PEOPLE_PROMINENCE_FACULTY_WEIGHT: 1.0,
   PEOPLE_PROMINENCE_GRANT_WEIGHT: 0.5,
   PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE: "full_time_faculty",
@@ -76,6 +79,11 @@ vi.mock("@/lib/search", () => ({
   searchClient: () => ({
     async search(req: { body: Record<string, unknown> }) {
       capturedBodies.push(req.body);
+      // #1343 concept-concentration agg — return author buckets when asked.
+      const aggs = req.body.aggs as { byAuthor?: unknown } | undefined;
+      if (aggs && "byAuthor" in aggs) {
+        return { body: { aggregations: { byAuthor: { buckets: conceptBuckets } } } };
+      }
       return {
         body: {
           hits: { total: { value: 1 }, hits: [] },
@@ -94,7 +102,7 @@ vi.mock("@/lib/search", () => ({
   }),
 }));
 
-import { searchPeople } from "@/lib/api/search";
+import { searchPeople, getConceptScholarConcentration } from "@/lib/api/search";
 
 type FnScore = {
   query: Record<string, unknown>;
@@ -267,5 +275,107 @@ describe("research-area concentration boost — Track B", () => {
     });
     const fns = functionScore(capturedBodies[0])!.functions;
     expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length);
+  });
+});
+
+describe("faculty-prominence lever — #1345", () => {
+  beforeEach(() => {
+    capturedBodies.length = 0;
+    groupByMock.mockResolvedValue([]);
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  it("facultyProminence:false drops the full_time_faculty term (others intact)", async () => {
+    await searchPeople({ q: "cantley", relevanceMode: "v3", shape: "name", facultyProminence: false });
+    const fns = functionScore(capturedBodies[0])!.functions;
+    expect(fns).not.toContainEqual({
+      filter: { term: { personType: "full_time_faculty" } },
+      weight: 1.0,
+    });
+    expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length - 1);
+    expect(fns).toContainEqual({ weight: 1.0 }); // BASE survives
+    expect(fns).toContainEqual({ filter: { term: { hasActiveGrants: true } }, weight: 0.5 });
+  });
+
+  it("default (omitted) keeps all four prominence functions (byte-identical)", async () => {
+    await searchPeople({ q: "cantley", relevanceMode: "v3", shape: "name" });
+    const fns = functionScore(capturedBodies[0])!.functions;
+    expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length);
+    for (const fn of EXPECTED_PROMINENCE_FUNCTIONS) expect(fns).toContainEqual(fn);
+  });
+});
+
+describe("concentration volume down-weight — #1343", () => {
+  beforeEach(() => {
+    capturedBodies.length = 0;
+    groupByMock.mockResolvedValue([]);
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  const pubCountFactor = (body: Record<string, unknown>): number => {
+    const fns = functionScore(body)!.functions;
+    const f = fns.find((x) => "field_value_factor" in x) as {
+      field_value_factor: { factor: number };
+    };
+    return f.field_value_factor.factor;
+  };
+
+  it("concentration:true on topic shape down-weights the volume factor (1 → 0.5)", async () => {
+    await searchPeople({
+      q: "obesity",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: ["D009765"],
+      concentration: true,
+    });
+    expect(pubCountFactor(capturedBodies[0])).toBe(0.5);
+  });
+
+  it("concentration:true on NAME shape leaves the volume factor at 1 (topic/hybrid only)", async () => {
+    await searchPeople({ q: "cantley", relevanceMode: "v3", shape: "name", concentration: true });
+    expect(pubCountFactor(capturedBodies[0])).toBe(1);
+  });
+
+  it("default (off) leaves the volume factor at 1 (byte-identical)", async () => {
+    await searchPeople({
+      q: "obesity",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: ["D009765"],
+    });
+    expect(pubCountFactor(capturedBodies[0])).toBe(1);
+  });
+});
+
+describe("getConceptScholarConcentration — #1343 concept-axis source", () => {
+  beforeEach(() => {
+    capturedBodies.length = 0;
+    conceptBuckets = [];
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  it("empty descendant set short-circuits to [] (no agg round-trip)", async () => {
+    const out = await getConceptScholarConcentration([], 200);
+    expect(out).toEqual([]);
+    expect(capturedBodies).toHaveLength(0);
+  });
+
+  it("maps author buckets to {cwid,total} and builds the on-topic agg body", async () => {
+    conceptBuckets = [
+      { key: "a", doc_count: 40 },
+      { key: "b", doc_count: 7 },
+    ];
+    const out = await getConceptScholarConcentration(["D2", "D1"], 200);
+    expect(out).toEqual([
+      { cwid: "a", total: 40 },
+      { cwid: "b", total: 7 },
+    ]);
+    // Agg body: filter on the descriptor set, terms agg on wcmAuthorCwids capped at limit.
+    const body = capturedBodies[0] as {
+      query: { bool: { filter: { terms: { meshDescriptorUi: string[] } }[] } };
+      aggs: { byAuthor: { terms: { field: string; size: number } } };
+    };
+    expect(body.query.bool.filter[0].terms.meshDescriptorUi).toEqual(["D2", "D1"]);
+    expect(body.aggs.byAuthor.terms).toEqual({ field: "wcmAuthorCwids", size: 200 });
   });
 });

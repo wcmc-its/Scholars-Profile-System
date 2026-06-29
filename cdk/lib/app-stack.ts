@@ -1469,6 +1469,21 @@ export class AppStack extends Stack {
         // relevance×coverage ranking in that area (reorder-only, no reindex).
         // resolveSearchPeopleAreaBoost reads === "on". Staging-first.
         SEARCH_PEOPLE_AREA_BOOST: env === "staging" ? "on" : "off",
+        // #1345 -- full-time-faculty prominence lever. Default ON keeps the #513 flat
+        //   +1.0 full_time_faculty prominence term (prod ranking byte-identical until a
+        //   deliberate flip). Set to "off" to drop the expertise-independent employment
+        //   prior so genuine affiliated/clinical subspecialty experts aren't buried.
+        //   resolveSearchPeopleFacultyProminence reads !== "off". Query-time, no reindex.
+        //   STAGING-FIRST: neutralized on staging for the A/B soak, prod keeps +1.0.
+        SEARCH_PEOPLE_FACULTY_PROMINENCE: env === "staging" ? "off" : "on",
+        // #1343 -- on-topic concentration volume DOWN-WEIGHT. When on, topic/hybrid shapes
+        //   down-weight the raw ln1p(publicationCount) term so the on-topic concentration
+        //   boost carries ranking instead of total output (fixes the volume double-count;
+        //   the concept-axis concentration SOURCE rides SEARCH_PEOPLE_AREA_BOOST above).
+        //   resolveSearchPeopleConcentration reads === "on". Query-time, no reindex. DARK
+        //   everywhere -- this lowers a SHARED prominence term and needs a staging
+        //   calibration sweep before any flip (then set staging -> "on").
+        SEARCH_PEOPLE_CONCENTRATION: "off",
         // People-tab "concepts" hint -- replace the sparse self-reported
         // research-areas hint on the scholar row's identity line with the
         // scholar's top MeSH descriptor labels (topMeshTerms). Only the no-match

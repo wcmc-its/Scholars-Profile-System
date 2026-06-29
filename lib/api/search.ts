@@ -65,6 +65,7 @@ import {
   PEOPLE_PROMINENCE_FACULTY_WEIGHT,
   PEOPLE_PROMINENCE_GRANT_WEIGHT,
   PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
+  PEOPLE_PROMINENCE_PUBCOUNT_FACTOR_CONCENTRATED,
   AREA_BOOST_W_HI,
   AREA_BOOST_W_MID,
   AREA_BOOST_W_LO,
@@ -97,6 +98,7 @@ import {
   resolvePeopleMethodContextBoost,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
+  resolvePeopleTopicPhraseBoost,
   resolveSearchPeopleClinical,
   resolveSearchPeopleConceptHint,
   resolveSearchResultEvidence,
@@ -1073,6 +1075,47 @@ export function buildAreaBoostFunctions(
   return fns;
 }
 
+/**
+ * #1343 — concept-axis on-topic concentration. Returns the top `limit` scholars by
+ * count of publications TAGGED with the resolved concept (descendant descriptor set),
+ * as `{ cwid, total }` — the SAME shape `getAreaScholarConcentration` returns, so it
+ * feeds `buildAreaBoostFunctions` and the prominence slot UNCHANGED. This is what lets
+ * the concentration boost reach MeSH-concept queries (obesity/hypertension) that don't
+ * map to a curated Research Area; the area rollup only covers curated areas.
+ *
+ * Sources the publications index (`meshDescriptorUi` ∩ `wcmAuthorCwids`) — both fields
+ * already indexed, so NO reindex. One pre-ranking round-trip, capped at `limit` and
+ * cached (the same SWR cache the reason aggs use), so a broad concept (Neoplasms) can't
+ * saturate the search thread pool. `doc_count` IS the distinct on-topic pmid count (the
+ * pub index is one doc per pmid).
+ */
+export async function getConceptScholarConcentration(
+  descendantUis: string[],
+  limit: number,
+): Promise<{ cwid: string; total: number }[]> {
+  if (descendantUis.length === 0 || limit <= 0) return [];
+  return cachedReasonAgg<{ cwid: string; total: number }[]>(
+    `concept-concentration:${[...descendantUis].sort().join(",")}:${limit}`,
+    async () => {
+      const resp = await searchClient().search({
+        index: PUBLICATIONS_INDEX,
+        body: {
+          size: 0,
+          query: { bool: { filter: [{ terms: { meshDescriptorUi: descendantUis } }] } },
+          aggs: { byAuthor: { terms: { field: "wcmAuthorCwids", size: limit } } },
+        } as object,
+      });
+      const buckets =
+        (
+          resp.body as {
+            aggregations?: { byAuthor?: { buckets?: { key: string; doc_count: number }[] } };
+          }
+        ).aggregations?.byAuthor?.buckets ?? [];
+      return buckets.map((b) => ({ cwid: b.key, total: b.doc_count }));
+    },
+  );
+}
+
 export async function searchPeople(opts: {
   q: string;
   page?: number;
@@ -1195,6 +1238,23 @@ export async function searchPeople(opts: {
    * `false` so the rollout is opt-in.
    */
   deptLeadershipBoost?: boolean;
+  /**
+   * #1345 — full-time-faculty prominence lever. When `false`, the outer prominence
+   * function_score OMITS the flat `+PEOPLE_PROMINENCE_FACULTY_WEIGHT` full_time_faculty
+   * term (the expertise-independent employment prior). Resolved route/page-side from
+   * `SEARCH_PEOPLE_FACULTY_PROMINENCE` (default ON) so the API and SSR rank identically;
+   * headless callers default to today's behavior (`true` — term present).
+   */
+  facultyProminence?: boolean;
+  /**
+   * #1343 — on-topic concentration volume down-weight. When `true`, the topic/hybrid
+   * prominence uses the reduced `PEOPLE_PROMINENCE_PUBCOUNT_FACTOR_CONCENTRATED` for the
+   * raw-volume term so the on-topic concentration boost carries the ranking instead of
+   * total output. name/dept shapes are never affected. Resolved route/page-side from
+   * `SEARCH_PEOPLE_CONCENTRATION` (default OFF/dark); headless callers default to `false`
+   * (full volume factor, byte-identical to today).
+   */
+  concentration?: boolean;
   /**
    * Issue #692 — generic-term demotion (mode `on`). When true and `contentQuery`
    * differs from the raw query, the topic + hybrid bodies score on the content
@@ -1500,6 +1560,20 @@ export async function searchPeople(opts: {
   const methodContextShould = (query: string, boost: number): Record<string, unknown>[] =>
     methodContextBoostOn ? [{ match: { methodContext: { query, boost } } }] : [];
 
+  // #1344 — topic/hybrid proximity boost. Scoring-only `match_phrase` clauses that
+  // reward within-a-single-publication co-occurrence of the query terms (slop kept
+  // well below the default position_increment_gap of 100 so a phrase can't bridge two
+  // unrelated titles in the concatenated `publicationTitles` rollup). Dark by default
+  // (flag-OFF ⇒ empty spread ⇒ body byte-identical); never admits (no msm on the bool).
+  const topicPhraseBoostOn = resolvePeopleTopicPhraseBoost();
+  const phraseBoostShould = (query: string): Record<string, unknown>[] =>
+    topicPhraseBoostOn && query.trim().length > 0
+      ? [
+          { match_phrase: { publicationTitles: { query, slop: 8, boost: 6 } } },
+          { match_phrase: { areasOfInterest: { query, slop: 4, boost: 4 } } },
+        ]
+      : [];
+
   // Issue #311 / SPEC §6.1.4 — name-template should-clauses, reused by the name
   // template (#309) and as the name half of the hybrid template. The cwid^100
   // term stays in the outer `should` (the existing short-circuit), so it is NOT
@@ -1580,6 +1654,8 @@ export async function searchPeople(opts: {
                 },
               },
             },
+            // #1344 — scoring-only proximity boost (dark by default).
+            ...phraseBoostShould(contentQuery),
           ],
           minimum_should_match: 1,
         },
@@ -1625,6 +1701,8 @@ export async function searchPeople(opts: {
             },
             // #1119 — methodContext is scoring-only here too (topic-raised boost).
             ...methodContextShould(contentQuery, PEOPLE_TOPIC_METHOD_CONTEXT_BOOST),
+            // #1344 — scoring-only proximity boost (dark by default).
+            ...phraseBoostShould(contentQuery),
           ],
         },
       }
@@ -2168,14 +2246,28 @@ export async function searchPeople(opts: {
           field_value_factor: {
             field: "publicationCount",
             modifier: "ln1p",
-            factor: PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
+            // #1343 — when concentration is on, topic/hybrid shapes down-weight the
+            // raw-volume term so the on-topic concentration boost (areaBoostFunctions)
+            // leads instead of total output. name/dept keep the full #513 factor.
+            // (Evaluated inside the applyProminence-gated array so the constant is read
+            // lazily — only when prominence actually applies.)
+            factor:
+              opts.concentration === true && (applyTopicTemplate || applyHybridTemplate)
+                ? PEOPLE_PROMINENCE_PUBCOUNT_FACTOR_CONCENTRATED
+                : PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
             missing: 0,
           },
         },
-        {
-          filter: { term: { personType: PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE } },
-          weight: PEOPLE_PROMINENCE_FACULTY_WEIGHT,
-        },
+        // #1345 — the flat full_time_faculty prominence term, dropped when the
+        // faculty-prominence lever is off (expertise-independent employment prior).
+        ...(opts.facultyProminence !== false
+          ? [
+              {
+                filter: { term: { personType: PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE } },
+                weight: PEOPLE_PROMINENCE_FACULTY_WEIGHT,
+              },
+            ]
+          : []),
         {
           filter: { term: { hasActiveGrants: true } },
           weight: PEOPLE_PROMINENCE_GRANT_WEIGHT,

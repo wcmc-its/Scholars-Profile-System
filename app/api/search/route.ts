@@ -3,6 +3,7 @@ import { apiError } from "@/lib/api/error-response";
 import {
   searchPeople,
   searchPublications,
+  getConceptScholarConcentration,
   type PeopleSort,
   type PublicationsSort,
 } from "@/lib/api/search";
@@ -33,6 +34,8 @@ import {
   resolvePeopleSnippetRepresentativePub,
   resolveGenericTermMode,
   resolveSearchPeopleAreaBoost,
+  resolveSearchPeopleFacultyProminence,
+  resolveSearchPeopleConcentration,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
@@ -485,6 +488,21 @@ async function handleSearch(request: NextRequest) {
       );
     }
   }
+  // #1343 — concept-axis fallback. When no curated Research Area matched but the query
+  // resolved to a MeSH descriptor (obesity/hypertension), source the concentration from
+  // the publications index instead, so the same boost slot reaches concept queries.
+  // Reuses the SEARCH_PEOPLE_AREA_BOOST source toggle; reorder-only, no reindex.
+  if (
+    resolveSearchPeopleAreaBoost() &&
+    !meshOff &&
+    (!areaConcentration || areaConcentration.length === 0) &&
+    taxonomyMatch.meshResolution?.descendantUis?.length
+  ) {
+    areaConcentration = await getConceptScholarConcentration(
+      taxonomyMatch.meshResolution.descendantUis,
+      AREA_BOOST_TOP_N,
+    );
+  }
   const result = await searchPeople({
     q,
     page,
@@ -535,6 +553,12 @@ async function handleSearch(request: NextRequest) {
     // Issue #532 — env-gated dept-shape leadership boost. Ignored for
     // non-dept shapes inside `searchPeople`.
     deptLeadershipBoost: resolveDeptLeadershipBoost(),
+    // #1345 — full-time-faculty prominence lever (default ON). When off, the flat
+    // +1.0 full_time_faculty prominence term is dropped.
+    facultyProminence: resolveSearchPeopleFacultyProminence(),
+    // #1343 — on-topic concentration volume down-weight (default OFF/dark). When on,
+    // topic/hybrid shapes down-weight raw volume so the concentration boost leads.
+    concentration: resolveSearchPeopleConcentration(),
     // #824 follow-up — match-aware snippet context so client tab-nav / pagination
     // (this route) keeps the method/topic reason the SSR page produced. Built off
     // the taxonomyMatch already resolved at the top of the handler; inert unless

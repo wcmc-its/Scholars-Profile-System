@@ -293,6 +293,55 @@ export function resolveDeptLeadershipBoost(): boolean {
 }
 
 /**
+ * #1345 — full-time-faculty prominence lever. The outer People prominence
+ * function_score adds a flat `+PEOPLE_PROMINENCE_FACULTY_WEIGHT` (#513) to every
+ * full_time_faculty scholar, an expertise-INDEPENDENT employment-status prior that
+ * buries genuine affiliated/clinical/voluntary subspecialty experts. When set to
+ * `off`, that clause is dropped; the log-saturated `ln1p(publicationCount)` lead
+ * carries prominence on its own.
+ *
+ * Default ON (`!== "off"`) so prod ranking is byte-identical until a deliberate
+ * flip — the same convention as {@link resolveDeptLeadershipBoost}. Query-time
+ * only, no reindex; an independent rollback lever from SEARCH_PEOPLE_RELEVANCE_MODE.
+ */
+export function resolveSearchPeopleFacultyProminence(): boolean {
+  return process.env.SEARCH_PEOPLE_FACULTY_PROMINENCE !== "off";
+}
+
+/**
+ * #1344 — topic/hybrid People proximity boost. When ON, the topic (and hybrid)
+ * template adds scoring-only `match_phrase` clauses (bounded slop) on
+ * publicationTitles/areasOfInterest, rewarding within-a-single-publication
+ * co-occurrence of the query terms so the true subspecialist outranks scholars who
+ * merely scatter the same tokens across unrelated pubs. RANKING ONLY — a top-level
+ * `should` with no minimum_should_match, so it never admits/drops a doc (the 4,558
+ * admission count is unchanged; that is governed by the cross_fields msm).
+ *
+ * Default OFF (`=== "on"` opt-in, dark) — mirrors {@link resolveFundingPhraseBoost};
+ * flag-off ⇒ the people body is byte-identical. No reindex (fields already analyzed).
+ */
+export function resolvePeopleTopicPhraseBoost(): boolean {
+  return process.env.SEARCH_PEOPLE_PHRASE_BOOST === "on";
+}
+
+/**
+ * #1343 — on-topic concentration volume down-weight. The People ranking rewards
+ * total publication volume (`ln1p(publicationCount)`) AND, when a query resolves to
+ * an area/concept, an on-topic concentration boost — double-counting volume so
+ * prolific generalists outrank focused specialists. When ON, the raw-volume term is
+ * down-weighted (to PEOPLE_PROMINENCE_PUBCOUNT_FACTOR_CONCENTRATED) for topic/hybrid
+ * shapes ONLY, so the on-topic concentration signal carries the ranking instead.
+ *
+ * Default OFF (`=== "on"` opt-in, dark everywhere) — this lowers a SHARED prominence
+ * term and needs a staging calibration sweep before any flip; name/dept shapes are
+ * never touched (the #513 calibration stays byte-identical). Query-time only, no
+ * reindex. The concept-axis concentration SOURCE rides SEARCH_PEOPLE_AREA_BOOST.
+ */
+export function resolveSearchPeopleConcentration(): boolean {
+  return process.env.SEARCH_PEOPLE_CONCENTRATION === "on";
+}
+
+/**
  * Issue #688 — surface MeSH match provenance on People results. When a
  * topic/unclassified search resolves to a descriptor, the §6.1.3 attribution
  * boost ranks up scholars tagged with a *narrower* descendant term than the
