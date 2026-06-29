@@ -278,6 +278,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "prod",
               },
               {
+                "Name": "GRANT_MATCHER_SUBTOPIC_GRAIN",
+                "Value": "off",
+              },
+              {
                 "Name": "OPENSEARCH_NODE",
                 "Value": {
                   "Fn::Join": [
@@ -3621,6 +3625,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SPS_ENV",
                 "Value": "staging",
+              },
+              {
+                "Name": "GRANT_MATCHER_SUBTOPIC_GRAIN",
+                "Value": "on",
               },
               {
                 "Name": "OPENSEARCH_NODE",

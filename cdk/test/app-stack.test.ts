@@ -1618,6 +1618,13 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("METHODS_LENS_SENSITIVE_GATE")).toBe("off");
       });
 
+      it("keeps the subtopic-grain grant matcher off in prod (GRANT_MATCHER_SUBTOPIC_GRAIN, staging-first)", () => {
+        // Env-gated: on in staging, off in prod until the prod opportunity corpus
+        // carries match_dsl/match_query and the staging soak completes. Off in
+        // prod = the matcher runs the proven topic-vector path.
+        expect(appContainerEnv().get("GRANT_MATCHER_SUBTOPIC_GRAIN")).toBe("off");
+      });
+
       it("keeps the family click-to-filter off in prod (METHODS_LENS_FAMILY_FILTER, #819)", () => {
         // Staging-first like the sibling Methods-lens flags; off in prod until the
         // pmids-bearing scholar_family rollup is loaded and the staging soak is done.
@@ -2038,6 +2045,25 @@ describe("AppStack", () => {
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("CLINICAL_TRIALS_SECTION")).toBe("on");
+    });
+
+    it("activates the subtopic-grain grant matcher in staging first (GRANT_MATCHER_SUBTOPIC_GRAIN=on)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appTaskDef = Object.values(taskDefs).find(
+        (r) => r.Properties?.Family === "sps-app-staging",
+      );
+      const appContainer = (
+        appTaskDef?.Properties?.ContainerDefinitions as
+          | Array<{
+              Name?: string;
+              Environment?: Array<{ Name?: string; Value?: string }>;
+            }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("GRANT_MATCHER_SUBTOPIC_GRAIN")).toBe("on");
     });
 
     it("enables the center collaboration network in staging first (CENTER_COLLABORATION_NETWORK=on, #1137)", () => {
