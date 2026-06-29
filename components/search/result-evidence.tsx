@@ -139,6 +139,26 @@ export function ResultEvidence({
           flavor={evidence.strength === "mention" ? "keyword" : "concept"}
         >
           {evidence.text}
+          {evidence.term ? (
+            <>
+              {" "}
+              {/* #1350 — the resolved concept term, subtly underlined. */}
+              <span className="underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]">
+                {evidence.term}
+              </span>
+              {/* #1355 — the narrower descendant term(s) the scholar actually carries. */}
+              {evidence.descendantTerms && evidence.descendantTerms.length > 0 ? (
+                <span className="text-[#6b7280]">
+                  {" "}
+                  (matched {evidence.descendantTerms.slice(0, 2).join(", ")}
+                  {evidence.descendantTerms.length > 2
+                    ? `, +${evidence.descendantTerms.length - 2} more`
+                    : ""}
+                  )
+                </span>
+              ) : null}
+            </>
+          ) : null}
         </MatchReason>
       );
     case "name":

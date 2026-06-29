@@ -88,6 +88,36 @@ describe("fetchKeyPaper (lazy key paper)", () => {
     expect(filter).toContainEqual({ terms: { meshDescriptorUi: ["Dadeno", "Dcyst"] } });
   });
 
+  it("#1351 — highlights the resolved concept term (not just the literal query) on a tagged fetch", async () => {
+    captured.length = 0;
+    await fetchKeyPaper({
+      cwid: "abc1234",
+      descriptorUis: ["Dadeno"],
+      contentQuery: "pharmacogenomics",
+      conceptLabel: "Pharmacogenetics",
+    });
+    const hl = captured[0].highlight as { highlight_query: { bool: { should: unknown[] } } };
+    const should = hl.highlight_query.bool.should;
+    // literal query clause stays...
+    expect(should.some((s) => JSON.stringify(s).includes("pharmacogenomics"))).toBe(true);
+    // ...and the resolved concept term is now marked too.
+    expect(should).toContainEqual({ match_phrase: { title: "Pharmacogenetics" } });
+  });
+
+  it("#1351 — a concept-only fetch (no literal query) still highlights the concept term", async () => {
+    captured.length = 0;
+    await fetchKeyPaper({
+      cwid: "abc1234",
+      descriptorUis: ["Dadeno"],
+      contentQuery: "",
+      conceptLabel: "Pharmacogenetics",
+    });
+    const hl = captured[0].highlight as { highlight_query: { bool: { should: unknown[] } } };
+    expect(hl.highlight_query.bool.should).toEqual([
+      { match_phrase: { title: "Pharmacogenetics" } },
+    ]);
+  });
+
   it("falls back to a free-text scan when no concept resolved", async () => {
     captured.length = 0;
     await fetchKeyPaper({ cwid: "abc1234", descriptorUis: [], contentQuery: "16s rna" });

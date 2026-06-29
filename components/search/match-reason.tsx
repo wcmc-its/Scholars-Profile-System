@@ -27,9 +27,9 @@ const ICONS: Record<MatchReasonKind, typeof FileText> = {
  * "Concept", concept (expanded MeSH) → "Concept", mention (literal) → "Keyword".
  * Colors per handoff §4.2. ("Research area" is reserved for the topic-taxonomy
  * match — the `topic` MatchAwareReason — not a MeSH tag.)
- * ponytail: the §4.5 indigo dotted-underline on the concept descriptor text is
- * deferred — the badge already differentiates concept from keyword; revisit if the
- * literal-vs-system-term distinction needs more than the pill.
+ * #1350 — the §4.5 dotted underline on the concept descriptor text now ships: the
+ * caller appends the resolved term as an underlined span (see `ResultEvidence` /
+ * `PublicationResultRow`), so the badged row no longer force-bolds its children.
  */
 export type PubFlavor = "area" | "concept" | "keyword";
 const FLAVOR_BADGE: Record<PubFlavor, { cls: string; icon: typeof FileText; text: string }> = {
@@ -152,9 +152,9 @@ export function MatchReason({
             <PillIcon aria-hidden className="size-3 shrink-0" strokeWidth={2} />
             {pill.text}
           </span>
-          <span className="min-w-0 truncate">
-            <strong className="font-semibold text-[#1a1a1a]">{children}</strong>
-          </span>
+          {/* #1350 — the count prefix reads in normal weight; the resolved concept
+              term (appended by the caller) carries its own subtle underline. */}
+          <span className="min-w-0 truncate text-[#3a3a3a]">{children}</span>
         </>
       );
     })()

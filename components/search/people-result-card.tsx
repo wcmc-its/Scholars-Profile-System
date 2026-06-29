@@ -36,6 +36,9 @@ import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
 export type KeyPaperConfig = {
   descriptorUis: string[];
   contentQuery: string;
+  /** #1351 — resolved concept name, so a tagged key paper's title highlights the
+   *  concept term (not just the literal query). Empty for a free-text-only query. */
+  conceptLabel?: string;
 };
 
 export type PeopleResultCardProps = {
@@ -180,6 +183,14 @@ export function PeopleResultCard({
     hit.evidence?.kind === "publications" &&
     (hit.evidence.pubs?.length ?? 0) === 0 &&
     (hit.evidence.count ?? 0) > 0;
+  // #1357 — a `mention` card is in the mention branch precisely because its tagged
+  // count is 0 (it has NO concept-tagged pubs). Fetching the key paper with the
+  // page-global concept `descriptorUis` would run "this scholar's pubs tagged
+  // {concept}" → 0 hits → empty disclosure. So a mention card fetches with empty
+  // descriptorUis, which makes `fetchKeyPaper` take the literal-scan branch — the
+  // SAME predicate (`title`/`abstract` AND `contentQuery`) that produced the count.
+  const keyPaperMentionOnly =
+    hit.evidence?.kind === "publications" && hit.evidence.strength === "mention";
   const [keyPapers, setKeyPapers] = useState<EvidencePub[]>([]);
   const [keyPaperStatus, setKeyPaperStatus] = useState<ExemplarFetchStatus>("idle");
   const keyPaperFetched = useRef(false);
@@ -191,14 +202,18 @@ export function PeopleResultCard({
     const params = new URLSearchParams({
       cwid: hit.cwid,
       q: keyPaperConfig!.contentQuery,
-      descriptorUis: keyPaperConfig!.descriptorUis.join(","),
+      descriptorUis: keyPaperMentionOnly ? "" : keyPaperConfig!.descriptorUis.join(","),
+      // #1351 — highlight the resolved concept term in the tagged key-paper title.
+      // A mention-only card matched on the literal, not the concept, so it stays
+      // literal-only (label omitted) — consistent with its empty descriptorUis.
+      label: keyPaperMentionOnly ? "" : (keyPaperConfig!.conceptLabel ?? ""),
     });
     fetch(`/api/search/key-paper?${params.toString()}`)
       .then((r) => (r.ok ? r.json() : { pubs: [] }))
       .then((d: { pubs?: EvidencePub[] }) => setKeyPapers(d?.pubs ?? []))
       .catch(() => setKeyPapers([]))
       .finally(() => setKeyPaperStatus("done"));
-  }, [wantsLazyKeyPaper, hit.cwid, keyPaperConfig]);
+  }, [wantsLazyKeyPaper, hit.cwid, keyPaperConfig, keyPaperMentionOnly]);
 
   const ensureExemplar = useCallback(() => {
     if (!exemplarQuery || exemplarFetched.current) return;
