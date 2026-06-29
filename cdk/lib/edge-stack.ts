@@ -523,6 +523,13 @@ export class EdgeStack extends Stack {
       // `family`, so the param would be stripped before the origin and the hover
       // would always come back empty. AllViewer forwards it. GET-only (a read).
       ["/api/scholar/*/method-exemplar", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // Funding-row representative grants (SEARCH_EVIDENCE_ROWS) -- `force-dynamic`,
+      // `no-store`, reads `?q=` to resolve the scholar's topic-matching grants for the
+      // "Key funding" disclosure. Same shape as `/api/scholar/*/method-exemplar`: unlisted
+      // it falls to the cacheable default whose per-route query allow-list omits `q`, so
+      // the param is stripped before the origin and the row never shows. AllViewer
+      // forwards it. GET-only (a read).
+      ["/api/scholar/*/grants", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Topic publication feed -- reads `sort`/`filter`/`subtopic`/`tier`/`page`.
       ["/api/topics/*/publications", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Method (cross-scholar family) publication feed -- reads `sort`/`filter`/

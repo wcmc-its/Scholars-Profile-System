@@ -207,7 +207,7 @@ export class SpsObservabilityStack extends Stack {
           elbv2.HttpCodeTarget.TARGET_5XX_COUNT,
           { statistic: "Sum", period: Duration.minutes(5) },
         ),
-        reqs: appStack.publicAlb.metricRequestCount({
+        reqs: appStack.publicAlb.metrics.requestCount({
           statistic: "Sum",
           period: Duration.minutes(5),
         }),
@@ -827,7 +827,7 @@ export class SpsObservabilityStack extends Stack {
       width: 12,
       height: 6,
       left: [
-        appStack.publicAlb.metricRequestCount({
+        appStack.publicAlb.metrics.requestCount({
           statistic: "Sum",
           period: Duration.minutes(5),
           label: "Requests",
