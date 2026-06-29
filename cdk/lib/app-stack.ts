@@ -987,6 +987,13 @@ export class AppStack extends Stack {
         OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
         OTEL_PROPAGATORS: "tracecontext,xray",
         SPS_ENV: env,
+        // Reverse grant→researcher matcher: subtopic-grain path vs. the proven
+        // topic-vector path. Per-env (on in staging, off in prod until the prod
+        // corpus carries match_dsl); lib/api/match-researchers.ts also self-gates
+        // on the opportunity's compiled match_dsl, so "on" is safe pre-reproject.
+        GRANT_MATCHER_SUBTOPIC_GRAIN: envConfig.grantMatcherSubtopicGrain
+          ? "on"
+          : "off",
         // OpenSearch domain endpoint (https://...) imported from DataStack.
         // lib/search.ts reads OPENSEARCH_NODE; the OPENSEARCH_USER/PASS
         // secrets below supply the FGAC basic-auth credentials. #447

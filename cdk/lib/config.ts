@@ -225,6 +225,17 @@ export interface SpsEnvConfig {
    */
   readonly opportunityProjectionScheduleEnabled: boolean;
   /**
+   * Whether the reverse grant→researcher matcher runs the subtopic-grain path
+   * (require/penalize DSL + BM25 boost) instead of the proven topic-vector path.
+   * Surfaced to the app container as `GRANT_MATCHER_SUBTOPIC_GRAIN` ("on"/"off").
+   * The path ALSO self-gates on the opportunity carrying a compiled `match_dsl`,
+   * so with the flag on it still no-ops (→ topic-vector) on opportunities not yet
+   * reprojected. `true` in staging (corpus backfilled + reprojected); `false` in
+   * prod until the prod corpus carries match_dsl/match_query and staging soaks.
+   * See docs/grant-matching-productionization-handoff.md.
+   */
+  readonly grantMatcherSubtopicGrain: boolean;
+  /**
    * The externally-created, TGW-attached VPC that on-prem-reachable ETL tasks
    * run in — specifically the ED LDAP → S3 email-visibility export (#443).
    * Created out-of-band by WCM networking (NOT by our CDK): staging →
@@ -393,6 +404,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // stays fresh while the nightly is blocked at etl:ed (#443). On in staging
     // (matcher is live here); idempotent upsert, so safe from launch.
     opportunityProjectionScheduleEnabled: true,
+    // grant→researcher matcher: subtopic-grain path ON in staging (corpus
+    // backfilled + reprojected). Self-gates on per-opportunity match_dsl.
+    grantMatcherSubtopicGrain: true,
     // #443 — staging runs the ED email-visibility bridge in scholars-dev, whose
     // on-prem LDAP reach is proven (2026-06-18: in-VPC LDAPS bind + 2440-unit
     // search). Only the two private `app` subnets (TGW + NAT routes) are listed.
@@ -489,6 +503,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // opportunity corpus isn't published yet and the matcher is dark there. Flip
     // when the prod corpus lands (or leave off once #443 unblocks the nightly).
     opportunityProjectionScheduleEnabled: false,
+    // grant→researcher matcher: subtopic-grain path OFF in prod until the prod
+    // corpus carries match_dsl/match_query and staging soaks clean.
+    grantMatcherSubtopicGrain: false,
     // #443 — prod's on-prem-reachable VPC is scholars-prod. Wired but NOT yet
     // activated: edEmailVisibilityBridgeEnabled stays false until the
     // scholars-prod path is verified end-to-end (the same in-VPC bind probe as
