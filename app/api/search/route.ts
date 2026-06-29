@@ -6,7 +6,8 @@ import {
   type PeopleSort,
   type PublicationsSort,
 } from "@/lib/api/search";
-import { meshMatchTier } from "@/lib/search";
+import { meshMatchTier, AREA_BOOST_TOP_N } from "@/lib/search";
+import { getAreaScholarConcentration } from "@/lib/api/topics";
 import {
   searchFunding,
   type FundingFilters,
@@ -31,6 +32,7 @@ import {
   resolvePeopleMatchExplain,
   resolvePeopleSnippetRepresentativePub,
   resolveGenericTermMode,
+  resolveSearchPeopleAreaBoost,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
@@ -460,6 +462,29 @@ async function handleSearch(request: NextRequest) {
   const meshTier = meshRes
     ? meshMatchTier(meshRes.confidence, meshRes.curatedTopicAnchors.length)
     : undefined;
+  // Track B — Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
+  // When the flag is on, the query resolved to a Research Area, and we're not under Exact
+  // word, pull that area's relevance×coverage ranking ({cwid,total}) so searchPeople can
+  // lift area-concentrated scholars (topic/hybrid only, reorder-only). `areas[0]` is the
+  // top matched area — the same one drawn as the "Research Areas" chip. Cached read.
+  let areaConcentration: { cwid: string; total: number }[] | undefined;
+  if (
+    resolveSearchPeopleAreaBoost() &&
+    !meshOff &&
+    taxonomyMatch.state === "matches" &&
+    taxonomyMatch.areas.length > 0
+  ) {
+    const top = taxonomyMatch.areas[0];
+    const parentTopicId = top.entityType === "subtopic" ? top.parentTopicId : top.id;
+    const subtopicId = top.entityType === "subtopic" ? top.id : null;
+    if (parentTopicId) {
+      areaConcentration = await getAreaScholarConcentration(
+        parentTopicId,
+        subtopicId,
+        AREA_BOOST_TOP_N,
+      );
+    }
+  }
   const result = await searchPeople({
     q,
     page,
@@ -515,6 +540,9 @@ async function handleSearch(request: NextRequest) {
     // the taxonomyMatch already resolved at the top of the handler; inert unless
     // SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on (searchPeople gates it).
     matchAwareContext: buildMatchAwareContext(taxonomyMatch),
+    // Track B — Research-Area concentration boost. Inert unless the flag resolved a
+    // non-empty area ranking above; searchPeople applies it only on topic/hybrid shapes.
+    areaConcentration,
   });
   const searchLatencyMs = Date.now() - searchStart;
   // ANALYTICS-02 (D-02): structured search-query log (people branch).

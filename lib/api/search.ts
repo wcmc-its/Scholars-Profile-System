@@ -65,6 +65,11 @@ import {
   PEOPLE_PROMINENCE_FACULTY_WEIGHT,
   PEOPLE_PROMINENCE_GRANT_WEIGHT,
   PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
+  AREA_BOOST_W_HI,
+  AREA_BOOST_W_MID,
+  AREA_BOOST_W_LO,
+  AREA_BOOST_HI_FRAC,
+  AREA_BOOST_MID_FRAC,
   FUNDING_INDEX,
   PEOPLE_RESTRUCTURED_MSM,
   PEOPLE_TOPIC_ABSTRACTS_BOOST,
@@ -1039,6 +1044,35 @@ export async function relevanceScoresForQuery(
   return new Map(raw.map(([pmid, s]) => [pmid, s / max]));
 }
 
+/**
+ * Research-Area concentration boost clauses (spec §3.2). Buckets the area's ranked
+ * scholars (`{cwid, total}`, sorted desc) into 3 tiers by fraction of the top `total`,
+ * emitting one `filter`/`weight` clause per non-empty tier for the OUTER prominence
+ * `function_score` (additive). Pure — unit-tested directly. Reorder-only: a `filter`
+ * clause scores only docs already in the result set.
+ */
+export function buildAreaBoostFunctions(
+  concentration: { cwid: string; total: number }[],
+): Record<string, unknown>[] {
+  const maxTotal = concentration[0]?.total ?? 0;
+  if (maxTotal <= 0) return [];
+  const hi: string[] = [];
+  const mid: string[] = [];
+  const lo: string[] = [];
+  for (const { cwid, total } of concentration) {
+    if (total <= 0) continue;
+    const frac = total / maxTotal;
+    if (frac >= AREA_BOOST_HI_FRAC) hi.push(cwid);
+    else if (frac >= AREA_BOOST_MID_FRAC) mid.push(cwid);
+    else lo.push(cwid);
+  }
+  const fns: Record<string, unknown>[] = [];
+  if (hi.length) fns.push({ filter: { terms: { cwid: hi } }, weight: AREA_BOOST_W_HI });
+  if (mid.length) fns.push({ filter: { terms: { cwid: mid } }, weight: AREA_BOOST_W_MID });
+  if (lo.length) fns.push({ filter: { terms: { cwid: lo } }, weight: AREA_BOOST_W_LO });
+  return fns;
+}
+
 export async function searchPeople(opts: {
   q: string;
   page?: number;
@@ -1219,6 +1253,14 @@ export async function searchPeople(opts: {
    * callers default to a full search (`false`).
    */
   skipReasonAgg?: boolean;
+  /**
+   * Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
+   * The resolved area's scholars as `{cwid, total}` (relevance×coverage, sorted desc),
+   * from `getAreaScholarConcentration`. Applied ONLY on topic/hybrid shapes, as additive
+   * tier weights in the prominence `function_score` (reorder-only). Absent/empty ⇒ no
+   * boost (today's ranking). Resolved + gated route-side behind `SEARCH_PEOPLE_AREA_BOOST`.
+   */
+  areaConcentration?: { cwid: string; total: number }[];
 }): Promise<PeopleSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -2110,6 +2152,15 @@ export async function searchPeople(opts: {
     applyDeptTemplate ||
     applyHybridTemplate ||
     applyTopicTemplate;
+  // Research-Area concentration boost (spec §3.2). Topic/hybrid shapes only — never
+  // name/dept (a name query that incidentally matched an area must not be reordered by
+  // it). Additive tier weights in the outer prominence function_score; reorder-only.
+  const areaBoostFunctions: Record<string, unknown>[] =
+    (applyTopicTemplate || applyHybridTemplate) &&
+    opts.areaConcentration &&
+    opts.areaConcentration.length > 0
+      ? buildAreaBoostFunctions(opts.areaConcentration)
+      : [];
   const prominenceFunctions: Record<string, unknown>[] = applyProminence
     ? [
         { weight: PEOPLE_PROMINENCE_BASE_WEIGHT },
@@ -2129,6 +2180,7 @@ export async function searchPeople(opts: {
           filter: { term: { hasActiveGrants: true } },
           weight: PEOPLE_PROMINENCE_GRANT_WEIGHT,
         },
+        ...areaBoostFunctions,
       ]
     : [];
 

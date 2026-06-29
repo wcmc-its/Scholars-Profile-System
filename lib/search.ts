@@ -859,6 +859,29 @@ export const PEOPLE_DEPT_LEADERSHIP_CHAIR_WEIGHT = 3.0;
 export const PEOPLE_DEPT_LEADERSHIP_CHIEF_WEIGHT = 1.5;
 
 /**
+ * Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
+ * When a topic query resolves to a Research Area, scholars are lifted by their
+ * relevance×coverage ranking in that area — the topic page's own per-scholar `total`
+ * (Σ scorePublication over first/last-authored, recent, in-area pubs). The continuous
+ * `total` is bucketed into 3 tiers (by fraction of the area's max `total`) and each
+ * tier rides as an additive weight in the OUTER prominence `function_score` (same slot
+ * as the #513 prominence factors), so concentration can overcome the
+ * `ln1p(publicationCount)` lift that floats prolific generalists. Reorder-only: a
+ * `filter` clause scores only docs already matched, so the result set/facets are
+ * unchanged. Weights are INITIAL — tuned by the spec §6 dense-page eval.
+ * ponytail: 3 static tiers; a reindexed per-scholar `total` field + script_score is
+ * the smoother upgrade (spec OQ-7) once the signal is proven.
+ */
+export const AREA_BOOST_W_HI = 8;
+export const AREA_BOOST_W_MID = 4;
+export const AREA_BOOST_W_LO = 1.5;
+/** Tier cutoffs as a fraction of the area's top `total` (the #1 scholar). */
+export const AREA_BOOST_HI_FRAC = 0.5;
+export const AREA_BOOST_MID_FRAC = 0.2;
+/** Cap on how many of the area's ranked scholars are pulled for the boost. */
+export const AREA_BOOST_TOP_N = 200;
+
+/**
  * Boost weights used by the publications-index query builder.
  * (Not specified in spec for publications; reasonable defaults.)
  */

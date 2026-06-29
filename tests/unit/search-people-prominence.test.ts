@@ -60,6 +60,13 @@ vi.mock("@/lib/search", () => ({
   PEOPLE_PROMINENCE_FACULTY_WEIGHT: 1.0,
   PEOPLE_PROMINENCE_GRANT_WEIGHT: 0.5,
   PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE: "full_time_faculty",
+  // Research-Area concentration boost constants (spec §3.2).
+  AREA_BOOST_W_HI: 8,
+  AREA_BOOST_W_MID: 4,
+  AREA_BOOST_W_LO: 1.5,
+  AREA_BOOST_HI_FRAC: 0.5,
+  AREA_BOOST_MID_FRAC: 0.2,
+  AREA_BOOST_TOP_N: 200,
   PUBLICATION_FIELD_BOOSTS: ["title^1"],
   // #726 — searchPeople now dereferences these on the topic-attribution path.
   MESH_ADMIT_WEIGHT: { exact: 3, "anchored-entry": 1.5, entry: 0.7 },
@@ -204,5 +211,61 @@ describe("people-index prominence factor — issue #513 / §5.4", () => {
     await searchPeople({ q: "cantley", relevanceMode: "legacy", shape: "name" });
     expect(capturedBodies[0].query).not.toHaveProperty("function_score");
     expect(capturedBodies[0].query).toHaveProperty("bool");
+  });
+});
+
+describe("research-area concentration boost — Track B", () => {
+  beforeEach(() => {
+    capturedBodies.length = 0;
+    groupByMock.mockResolvedValue([]);
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  const areaConcentration = [
+    { cwid: "hi", total: 100 }, // 1.0 → hi
+    { cwid: "mid", total: 30 }, // 0.3 → mid
+    { cwid: "lo", total: 5 }, //  0.05 → lo
+  ];
+
+  it("topic shape appends tiered cwid clauses to the outer prominence functions", async () => {
+    await searchPeople({
+      q: "children's health",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: ["D012345"],
+      areaConcentration,
+    });
+    const fns = functionScore(capturedBodies[0])!.functions;
+    expect(fns).toContainEqual({ filter: { terms: { cwid: ["hi"] } }, weight: 8 });
+    expect(fns).toContainEqual({ filter: { terms: { cwid: ["mid"] } }, weight: 4 });
+    expect(fns).toContainEqual({ filter: { terms: { cwid: ["lo"] } }, weight: 1.5 });
+    // The four prominence functions are still present (boost is additive, not a replacement).
+    for (const fn of EXPECTED_PROMINENCE_FUNCTIONS) expect(fns).toContainEqual(fn);
+  });
+
+  it("name shape does NOT apply the area boost (topic/hybrid only)", async () => {
+    await searchPeople({
+      q: "cantley",
+      relevanceMode: "v3",
+      shape: "name",
+      areaConcentration,
+    });
+    const fns = functionScore(capturedBodies[0])!.functions;
+    expect(fns.some((f) => "filter" in f && JSON.stringify(f).includes('"cwid"'))).toBe(
+      false,
+    );
+    // Exactly the four prominence functions, nothing extra.
+    expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length);
+  });
+
+  it("topic shape with NO areaConcentration is unchanged (today's ranking)", async () => {
+    await searchPeople({
+      q: "children's health",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: ["D012345"],
+    });
+    const fns = functionScore(capturedBodies[0])!.functions;
+    expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length);
   });
 });

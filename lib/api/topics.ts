@@ -43,6 +43,7 @@ import {
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
 import { resolveHiddenStudentCoauthorChips } from "@/lib/api/search-flags";
+import { cachedRead } from "@/lib/api/swr-cache";
 
 // Sparse-state floors and target counts (sourced from 02-UI-SPEC.md §States table
 // + plan acceptance criteria). Top scholars: 7 chips, hide if <3.
@@ -220,6 +221,84 @@ export async function getTopScholarsForTopic(
     identityImageEndpoint: identityImageEndpoint(e.scholar.cwid),
     rank: i + 1,
   }));
+}
+
+export type AreaScholarConcentration = { cwid: string; total: number };
+
+/**
+ * Lean variant of getTopScholarsForTopic for the People-search Research-Area boost
+ * (spec: docs/search-research-area-relevance-spec.md). Returns the area's scholars as
+ * `{ cwid, total }` — the SAME relevance×coverage `total` getTopScholarsForTopic ranks
+ * on (Σ scorePublication over the D-13/D-14 carve) — top `limit`, no chip floors and no
+ * hydration. `subtopicId` narrows to that subtopic (more term-specific) when the query
+ * resolved to one; null ⇒ whole parent area. Cached (SWR) so an area-resolved search
+ * doesn't re-run the Aurora aggregation per request.
+ * ponytail: third copy of the D-13/D-14 carve in this file (alongside
+ * getTopScholarsForTopic / getSubtopicScholars) — consolidate into one ranker if a 4th appears.
+ */
+export function getAreaScholarConcentration(
+  parentTopicId: string,
+  subtopicId: string | null,
+  limit: number,
+  now: Date = new Date(),
+): Promise<AreaScholarConcentration[]> {
+  return cachedRead(
+    `search:area-concentration:${parentTopicId}:${subtopicId ?? ""}:${limit}`,
+    () => loadAreaScholarConcentration(parentTopicId, subtopicId, limit, now),
+  );
+}
+
+async function loadAreaScholarConcentration(
+  parentTopicId: string,
+  subtopicId: string | null,
+  limit: number,
+  now: Date,
+): Promise<AreaScholarConcentration[]> {
+  const rows = await prisma.publicationTopic.findMany({
+    where: {
+      parentTopicId,
+      ...(subtopicId ? { primarySubtopicId: subtopicId } : {}),
+      authorPosition: { in: ["first", "last"] }, // D-13
+      year: { gte: RECITERAI_YEAR_FLOOR }, // D-15
+      scholar: {
+        deletedAt: null,
+        status: "active",
+        roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] }, // D-14
+      },
+      publication: { publicationType: { notIn: [...FEED_EXCLUDED_TYPES] } },
+    },
+    select: {
+      cwid: true,
+      pmid: true,
+      score: true,
+      authorPosition: true,
+      publication: { select: { publicationType: true, dateAddedToEntrez: true } },
+    },
+  });
+
+  const byCwid = new Map<string, number>();
+  for (const r of rows) {
+    const rankable: RankablePublication = {
+      pmid: r.pmid,
+      publicationType: r.publication.publicationType,
+      reciteraiImpact: Number(r.score),
+      dateAddedToEntrez: r.publication.dateAddedToEntrez,
+      authorship: {
+        isFirst: r.authorPosition === "first",
+        isLast: r.authorPosition === "last",
+        isPenultimate: r.authorPosition === "penultimate",
+      },
+      isConfirmed: true,
+    };
+    const score = scorePublication(rankable, "top_scholars", true, now);
+    if (score === 0) continue;
+    byCwid.set(r.cwid, (byCwid.get(r.cwid) ?? 0) + score);
+  }
+
+  return Array.from(byCwid.entries())
+    .map(([cwid, total]) => ({ cwid, total }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, limit);
 }
 
 // Inline middot-separated list threshold per issue #172 spec — up to 10
