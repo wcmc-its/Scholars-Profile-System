@@ -83,12 +83,23 @@ nothing.**
   the keyword axis, BUT mind: a `mention` is lower-relevance than a `tagged`/concept hit, and
   raw count re-introduces the "volume wins" risk (#1329). Relevance×coverage handles it
   (mention coverage × low per-pub relevance) — design before building.
-- **(c) Recency (the key realization).** Rice's CRISPR work **may predate the 2020 rollup
-  floor** (`RECITERAI_YEAR_FLOOR`, D-15) → excluded from `publication_topic` → zero
-  relevance×coverage, so no area/concept credit; only the un-gated keyword mention shows.
-  See spec §9. **Verify Rice's CRISPR pub years.** If old: decide whether foundational work
-  should count — the lever is the rollup floor/recency curve (upstream of Track B), not the
-  boost.
+- **(c) Recency = a 2020 DATA cliff, not a tunable penalty (product direction: ease it).**
+  Rice's CRISPR work likely predates the **`RECITERAI_YEAR_FLOOR = 2020`** — which is
+  ReciterAI *scoring-data coverage* (`"scoring data floor"`, `"won't fire until 2027 given
+  2020+ ReCiterAI floor"`), not a policy knob. Pre-2020 pubs have **no `publication_topic`
+  row** → excluded entirely (weight → 0) → no area/concept credit; only the un-floored
+  keyword mention shows. The in-window curve is already gentle (1.0 / 0.85 / 0.7, 6yr band
+  dormant till 2027), so **there is no app-side weight to soften** — see spec §9.
+  - **Verify:** `SELECT MIN(year), COUNT(*) FROM publication_topic` (data vs filter).
+  - **Proper fix (upstream, ReciterAI repo):** backfill pre-2020 topic scores → recovers
+    area/concept/topic-page/spotlight for foundational work. The only real fix for "Rice on
+    the CRISPR *area*."
+  - **Search-scoped mitigation (app-side, partial):** lean on the un-floored keyword path —
+    P4a (mention-expand) + P4b (keyword coverage) — so older engagement still surfaces *in
+    search* without the backfill. Does not fix the topic page.
+  - Product call from review: **don't penalize older papers this hard** — a prominent scholar
+    absent from their own topic reads as broken. Since the cause is the data cliff, this is
+    primarily an **upstream backfill** decision, not an app-side recency tweak.
 - **(d) Data quality.** If his CRISPR pubs are *recent* but not MeSH-tagged the CRISPR
   descriptor, that's a tagging gap (mention-but-not-tagged) — upstream MeSH/ReciterAI.
 

@@ -330,20 +330,31 @@ control-query eval proving non-area queries are byte-identical before any prod f
 
 ---
 
-## 9. Known bias — recency is baked into the formula
+## 9. Known bias — the older-work penalty is a DATA cliff, not a tunable weight
 
-The `total` it ranks on comes from the topic rollup, which carries a **hard year floor
-(`RECITERAI_YEAR_FLOOR = 2020`, D-15)** *and* a recency-weighted `scorePublication`
-curve. Consequences to keep in mind (surfaced by the Rice/CRISPR case):
+Surfaced by the Rice/CRISPR case ("a Nobel laureate absent from his own topic looks like a
+mistake"). Two mechanisms, only one of which is harsh — and it's **not** a dial we can ease
+in the app:
 
-- A scholar whose engagement with the topic is **older (pre-2020)** is **excluded from the
-  rollup entirely** — zero relevance×coverage, so no boost and no "N publications in
-  {Area}" evidence. Only the *un-gated keyword `mention` count* (a plain text agg over all
-  years) would still show, which is why a pioneer can read as "rather low" with a high
-  mention count but no area/concept credit.
-- This is *intentional* for "who is active in this area now," but it **mis-serves "who are
-  the foundational people in X."** Decide explicitly whether older foundational work should
-  count; if so, the floor/curve — not this boost — is the lever to revisit (upstream of
-  Track B). Track B inherits whatever the rollup decides.
-- Eval implication: include at least one **older-engagement** scholar in the §6 eval so the
-  recency effect is visible, not silently conflated with a ranking bug.
+- **The 2020 floor is ReciterAI *data coverage*, not a policy knob.** `RECITERAI_YEAR_FLOOR
+  = 2020` is the *"ReCiterAI **scoring data** floor"* (`topics.ts`), *"won't fire until 2027
+  given 2020+ ReCiterAI floor"* (`ranking.ts:109`). ReciterAI only scored pubs from 2020 on,
+  so **pre-2020 pubs have no `publication_topic` row at all** — they're *excluded* (weight →
+  0, a cliff), not down-weighted. A scholar whose topic engagement is older gets zero
+  relevance×coverage → no boost and no "N publications in {Area}" evidence; only the
+  un-floored keyword `mention` count (text agg, all years) still shows. **Softening this is
+  an upstream ReciterAI backfill of pre-2020 topic scores — there is no app-side weight to
+  turn, because the data isn't there.** Track B inherits whatever the rollup contains.
+- **The in-window recency curve is already gentle.** For 2020+ pubs the `top_scholars` curve
+  is `1.0` (3mo–3yr) → `0.85` (3–6yr) → `0.7` (6yr+), and the 6yr band doesn't activate
+  until 2027. Worst in-window penalty ≈ 30% on a band that isn't live yet. Tuning this buys
+  ~nothing for the older-work problem.
+- **Verify first:** `SELECT MIN(year), COUNT(*) FROM publication_topic` — confirms the floor
+  is data (no pre-2020 rows) vs a filter over existing data. The comments say data; one query
+  settles it before anyone proposes an app-side recency change that can't help.
+- **Search-scoped mitigation (app-side):** to keep older engagement visible *in search*
+  without the backfill, lean on the un-floored keyword/`mention` path — fix the dead
+  mention-expand (handoff P4a) and give keyword coverage some rank weight (P4b). This does
+  NOT fix the topic page (that needs the data).
+- **Eval implication:** include an **older-engagement** scholar in the §6 eval so the data
+  cliff is visible, not silently conflated with a ranking bug.
