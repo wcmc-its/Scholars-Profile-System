@@ -354,6 +354,44 @@ export interface SpsEnvConfig {
    * CFN-generated name, stable (the bucket is RETAIN).
    */
   readonly cloudFrontLogsBucketName: string;
+
+  // --- Observability metric-by-name decouple (cutover) ---
+
+  /**
+   * Whether ObservabilityStack reads its Aurora + OpenSearch metrics by literal
+   * NAME (config) instead of via the DataStack `auroraCluster` / `opensearchDomain`
+   * L2 handles. OFF (shipped) keeps the handle path — byte-identical, and the two
+   * cross-stack `Ref` exports DataStack publishes for Observability stay intact.
+   * ON severs those two Data→Observability export edges so the estate-consolidation
+   * `useSharedVpc` flip can replace the cluster/domain without CloudFormation's
+   * "cannot update an export in use" (the decouple campaign,
+   * docs/cutover-decouple-increments-2026-06-30.md). A DEDICATED flag, NOT tied to
+   * {@link useSharedVpc}: {@link assertCutoverGate} hard-throws while useSharedVpc
+   * is on without the data path, so a useSharedVpc-gated branch could not be
+   * synthesized or snapshot-tested — this flag lets the edge-severance ship and
+   * deploy (Observability-stack-only, BEFORE the Data deploy) on its own.
+   *
+   * MUST flip only once {@link auroraClusterIdentifier} / {@link opensearchDomainName}
+   * point at live resources (the snapshot-restored cluster/domain assigned explicit
+   * identifiers at cutover) — else the by-name metrics resolve to empty AWS/RDS +
+   * AWS/ES dimensions and the alarms silently never fire (NOT_BREACHING).
+   */
+  readonly observabilityMetricsByName: boolean;
+  /**
+   * Aurora cluster identifier (`DBClusterIdentifier`) the by-name Observability
+   * metrics key on when {@link observabilityMetricsByName} is true. Empty in the
+   * shipped config (unused while the flag is off); assigned the snapshot-restored
+   * cluster's explicit identifier at cutover. Referenced by NAME for the same
+   * Data/Edge-decoupling reason as {@link cloudFrontDistributionId}.
+   */
+  readonly auroraClusterIdentifier: string;
+  /**
+   * OpenSearch domain name (`DomainName`) the by-name Observability metrics key on
+   * when {@link observabilityMetricsByName} is true. Empty in the shipped config
+   * (unused while the flag is off); assigned the fresh domain's explicit name at
+   * cutover.
+   */
+  readonly opensearchDomainName: string;
 }
 
 /**
@@ -475,6 +513,12 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
     cloudFrontDistributionId: "E17NRWINXLP3B3",
     cloudFrontLogsBucketName: "sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz",
+    // Observability metric-by-name decouple (cutover): OFF until the staging data
+    // tier is snapshot-restored with explicit cluster/domain identifiers. A
+    // dormant false keeps the DataStack-handle metric path, byte-identical.
+    observabilityMetricsByName: false,
+    auroraClusterIdentifier: "",
+    opensearchDomainName: "",
   },
   prod: {
     envName: "prod",
@@ -575,6 +619,12 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
     cloudFrontDistributionId: "E28NKDFXC7K2ZL",
     cloudFrontLogsBucketName: "sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
+    // Observability metric-by-name decouple (cutover): OFF until the prod data
+    // tier is snapshot-restored with explicit cluster/domain identifiers. A
+    // dormant false keeps the DataStack-handle metric path, byte-identical.
+    observabilityMetricsByName: false,
+    auroraClusterIdentifier: "",
+    opensearchDomainName: "",
   },
 };
 

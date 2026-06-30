@@ -1,4 +1,5 @@
 import { Match, Template } from "aws-cdk-lib/assertions";
+import { type SpsEnvConfig } from "../lib/config";
 import { AppStack } from "../lib/app-stack";
 import { DataStack } from "../lib/data-stack";
 import { DrBackupVaultStack } from "../lib/dr-backup-vault-stack";
@@ -7,28 +8,33 @@ import { NetworkStack } from "../lib/network-stack";
 import { SpsObservabilityStack } from "../lib/observability-stack";
 import { makeFixture } from "./test-utils";
 
-function buildObservabilityStack(envName: "staging" | "prod"): {
+function buildObservabilityStack(
+  envName: "staging" | "prod",
+  envConfigOverride: Partial<SpsEnvConfig> = {},
+): {
   template: Template;
   stack: SpsObservabilityStack;
   appTemplate: Template;
+  data: DataStack;
 } {
   const fixture = makeFixture(envName);
+  const envConfig = { ...fixture.envConfig, ...envConfigOverride };
   const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
   });
   const drVault = new DrBackupVaultStack(
     fixture.app,
     `Sps-DrBackupVault-${envName}`,
     {
       env: fixture.drEnv,
-      envConfig: fixture.envConfig,
+      envConfig,
       crossRegionReferences: true,
     },
   );
   const data = new DataStack(fixture.app, `Sps-Data-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     crossRegionReferences: true,
     vpc: network.vpc,
     appSecurityGroup: network.appSecurityGroup,
@@ -37,7 +43,7 @@ function buildObservabilityStack(envName: "staging" | "prod"): {
   });
   const app = new AppStack(fixture.app, `Sps-App-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     vpc: network.vpc,
     appSecurityGroup: network.appSecurityGroup,
     etlSecurityGroup: network.etlSecurityGroup,
@@ -45,7 +51,7 @@ function buildObservabilityStack(envName: "staging" | "prod"): {
   });
   const etl = new EtlStack(fixture.app, `Sps-Etl-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     vpc: network.vpc,
     etlSecurityGroup: network.etlSecurityGroup,
     ecsCluster: app.ecsCluster,
@@ -56,7 +62,7 @@ function buildObservabilityStack(envName: "staging" | "prod"): {
     `Sps-Observability-${envName}`,
     {
       env: fixture.env,
-      envConfig: fixture.envConfig,
+      envConfig,
       appStack: app,
       dataStack: data,
       etlStack: etl,
@@ -66,6 +72,7 @@ function buildObservabilityStack(envName: "staging" | "prod"): {
     template: Template.fromStack(stack),
     stack,
     appTemplate: Template.fromStack(app),
+    data,
   };
 }
 
@@ -1080,5 +1087,58 @@ describe("SpsObservabilityStack", () => {
       expect(name).toBeDefined();
       expect(name!).toMatch(PRINTABLE_ASCII);
     });
+  });
+});
+
+// Increment 2 of the VPC-consolidation decouple campaign
+// (docs/cutover-decouple-increments-2026-06-30.md): observabilityMetricsByName
+// switches the Aurora/OpenSearch metrics to literal-name dimensions, severing the
+// two Data->Observability cross-stack Ref exports. Asserted with Template matchers
+// (no second snapshot) so the cutover output is never baked into the committed
+// snapshots; flag-off byte-identity is enforced by the unchanged main snapshot above.
+describe("SpsObservabilityStack — metric-by-name decouple (cutover increment 2)", () => {
+  const BYNAME = {
+    observabilityMetricsByName: true,
+    auroraClusterIdentifier: "sps-prod-cutover-cluster",
+    opensearchDomainName: "sps-prod-cutover-os",
+  } as const;
+
+  it("Aurora alarms key on the literal DBClusterIdentifier (AWS/RDS, no cross-stack import)", () => {
+    const { template } = buildObservabilityStack("prod", BYNAME);
+    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      Namespace: "AWS/RDS",
+      Dimensions: [
+        { Name: "DBClusterIdentifier", Value: "sps-prod-cutover-cluster" },
+      ],
+    });
+  });
+
+  it("OpenSearch alarms key on the literal DomainName + ClientId (AWS/ES)", () => {
+    const { template } = buildObservabilityStack("prod", BYNAME);
+    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      Namespace: "AWS/ES",
+      Dimensions: Match.arrayWith([
+        { Name: "DomainName", Value: "sps-prod-cutover-os" },
+      ]),
+    });
+  });
+
+  it("severs BOTH Data->Observability Ref export edges (DataStack publishes neither once by-name is on)", () => {
+    const { data } = buildObservabilityStack("prod", BYNAME);
+    const json = JSON.stringify(Template.fromStack(data).toJSON());
+    expect(json).not.toMatch(/ExportsOutputRefAuroraCluster/);
+    expect(json).not.toMatch(/ExportsOutputRefOpenSearch/);
+  });
+
+  it("default (flag off) keeps the handle path → DataStack still exports the Aurora Ref", () => {
+    const { data } = buildObservabilityStack("prod");
+    const json = JSON.stringify(Template.fromStack(data).toJSON());
+    expect(json).toMatch(/ExportsOutputRefAuroraCluster/);
+  });
+
+  it("throws at synth when by-name is on but the cluster/domain identifiers are blank", () => {
+    expect(() =>
+      buildObservabilityStack("prod", { observabilityMetricsByName: true }),
+    ).toThrow(/auroraClusterIdentifier\/opensearchDomainName/);
   });
 });
