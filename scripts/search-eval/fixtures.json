@@ -1,13 +1,300 @@
 {
-  "_note": "Gold expected-scholar sets for scholar-search relevance eval. Each name is a case-insensitive regex matched against preferredName. Expected scholars SHOULD rank high (not necessarily in this order). Domain-expert-provided except `hypertension`, whose list is analyst-derived (the true topical specialists found in docs/search-relevance-analysis.md §10). Add queries freely; keep regexes distinctive enough to avoid matching the wrong person.",
+  "_note": "Gold expected-scholar sets for scholar-search relevance eval. Each entry is either a bare regex (legacy, matched case-insensitively against preferredName) or an object {re, cwid, arch} where arch is the data-derived archetype (research-pi | clinician-expert | methods-scientist | research-specialist). cwid enables exact matching (robust to namesakes). Archetype labels are data-derived (authorship mix + clinical-field presence) and PENDING domain-expert review.",
   "queries": [
-    {"q": "diabetes", "note": "metabolism/weight cluster", "expected": ["Aronne", "Shukla", "Tchang", "James C\\. Lo", "Igel", "Mohini Aras"]},
-    {"q": "CRISPR", "expected": ["Lukas.*Dow", "Sheth", "Christopher.*Mason", "Li Gan", "Chun-Jun Guo", "Vardhana", "Artis", "Iliev", "Lyden"]},
-    {"q": "fecal microbiota transplantation", "expected": ["Peled", "Longman", "Crawford", "Scherl", "Vinita.*Jacob", "Lukin", "Battat", "Gogokhia", "Sonnenberg"]},
-    {"q": "single-cell RNA sequencing", "expected": ["Elemento", "Rafii", "Christopher.*Mason", "Betel", "Landau"]},
-    {"q": "alzheimer's", "expected": ["Li Gan", "Iadecola", "de Leon", "Mosconi", "Luo", "Glodzik", "Anna.*Orr", "Pereira"]},
-    {"q": "hypertension", "note": "analyst-derived specialists", "expected": ["Devereux", "Alderman", "Wachtell", "Okin", "Robert.*Phillips", "Samuel.*Mann", "Phyllis August", "Evelyn.*Horn"]},
-    {"q": "obesity", "note": "weight-management cluster; Igel/Aras are the high-concentration specialists #1343 should lift over high-volume generalists", "expected": ["Louis J Aronne", "Alpana.*Shukla", "Beverly Tchang", "Leon.*Igel", "Mohini Aras"]},
-    {"q": "pediatric congenital heart surgery", "note": "analyst anchor; Bacha is THE pediatric congenital-heart surgeon, the #1344 multi-word regression victim", "expected": ["Emile Bacha"]}
+    {
+      "q": "diabetes",
+      "note": "metabolism/weight cluster",
+      "expected": [
+        {
+          "re": "Aronne",
+          "cwid": "ljaronne",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Shukla",
+          "cwid": "aps2004",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Tchang",
+          "cwid": "bgt9001",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "James C\\. Lo",
+          "cwid": "jal2063",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Leon.*Igel",
+          "cwid": "lei9004",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Mohini Aras",
+          "cwid": "moa9031",
+          "arch": "clinician-expert"
+        }
+      ]
+    },
+    {
+      "q": "CRISPR",
+      "expected": [
+        {
+          "re": "Lukas.*Dow",
+          "cwid": "lud2005",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Sheth",
+          "cwid": "shethsu",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Christopher.*Mason",
+          "cwid": "chm2042",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Li Gan",
+          "cwid": "lig2033",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Chun-Jun Guo",
+          "cwid": "chg4001",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Vardhana",
+          "cwid": "sav2012",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Artis",
+          "cwid": "daa2028",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Iliev",
+          "cwid": "ili2001",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Lyden",
+          "cwid": "dcl2001",
+          "arch": "clinician-expert"
+        }
+      ]
+    },
+    {
+      "q": "fecal microbiota transplantation",
+      "expected": [
+        {
+          "re": "Peled",
+          "cwid": "jop9140",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Longman",
+          "cwid": "ral2006",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Crawford",
+          "cwid": "cvc9002",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Scherl",
+          "cwid": "ejs2005",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Vinita.*Jacob",
+          "cwid": "vij9004",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Lukin",
+          "cwid": "djl9010",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Battat",
+          "status": "absent-from-index"
+        },
+        {
+          "re": "Gogokhia",
+          "status": "absent-from-index"
+        },
+        {
+          "re": "Sonnenberg",
+          "cwid": "gfs2002",
+          "arch": "research-pi"
+        }
+      ]
+    },
+    {
+      "q": "single-cell RNA sequencing",
+      "expected": [
+        {
+          "re": "Elemento",
+          "cwid": "ole2001",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Rafii",
+          "cwid": "srafii",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Christopher.*Mason",
+          "cwid": "chm2042",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Betel",
+          "cwid": "dob2014",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Landau",
+          "cwid": "dal3005",
+          "arch": "clinician-expert"
+        }
+      ]
+    },
+    {
+      "q": "alzheimer's",
+      "expected": [
+        {
+          "re": "Li Gan",
+          "cwid": "lig2033",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Iadecola",
+          "cwid": "coi2001",
+          "arch": "research-pi"
+        },
+        {
+          "re": "de Leon",
+          "status": "absent-from-index"
+        },
+        {
+          "re": "Mosconi",
+          "cwid": "lim2035",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Luo",
+          "cwid": "wel2009",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Glodzik",
+          "cwid": "lig4005",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Anna.*Orr",
+          "cwid": "ago2002",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Pereira",
+          "status": "absent-from-index"
+        }
+      ]
+    },
+    {
+      "q": "hypertension",
+      "note": "analyst-derived specialists",
+      "expected": [
+        {
+          "re": "Devereux",
+          "cwid": "rbdevere",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Alderman",
+          "cwid": "mia2003",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Wachtell",
+          "cwid": "krw2003",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Okin",
+          "cwid": "pokin",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Robert.*Phillips",
+          "cwid": "rap2026",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Samuel.*Mann",
+          "cwid": "sjmann",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Phyllis August",
+          "cwid": "paugust",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Evelyn.*Horn",
+          "cwid": "horneve",
+          "arch": "clinician-expert"
+        }
+      ]
+    },
+    {
+      "q": "obesity",
+      "note": "weight-management cluster; Igel/Aras are the high-concentration specialists #1343 should lift over high-volume generalists",
+      "expected": [
+        {
+          "re": "Louis J Aronne",
+          "cwid": "ljaronne",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Alpana.*Shukla",
+          "cwid": "aps2004",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Beverly Tchang",
+          "cwid": "bgt9001",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Leon.*Igel",
+          "cwid": "lei9004",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Mohini Aras",
+          "cwid": "moa9031",
+          "arch": "clinician-expert"
+        }
+      ]
+    },
+    {
+      "q": "pediatric congenital heart surgery",
+      "note": "analyst anchor; Bacha is THE pediatric congenital-heart surgeon, the #1344 multi-word regression victim",
+      "expected": [
+        {
+          "re": "Emile Bacha",
+          "cwid": "emb9016",
+          "arch": "research-pi"
+        }
+      ]
+    }
   ]
 }

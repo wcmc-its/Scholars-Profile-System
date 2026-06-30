@@ -1063,3 +1063,30 @@ export function resolveAcronymSenseGuardEnabled(): boolean {
 export function resolveSearchPeopleClinical(): boolean {
   return process.env.SEARCH_PEOPLE_CLINICAL === "on";
 }
+
+/**
+ * Track B / B2 — clinical-as-function_score. SEPARATE from `SEARCH_PEOPLE_CLINICAL` (the
+ * inert cross_fields text-field variant): an in-VPC A/B proved the text field is swallowed by
+ * the cross_fields blend (a clinician who also publishes on the topic gets no lift). Instead,
+ * boost scholars whose BOARD-DERIVED `clinicalSpecialties` match the query via an additive
+ * function_score weight (the same outer prominence layer the area boost rides). Measured: on
+ * "obesity" this lifts Leon Igel #183→#12 and Mohini Aras #304→#16, and no-ops on condition
+ * queries with no matching specialty (e.g. "hypertension" → 0 matchers). Keyed on
+ * `clinicalSpecialties` ONLY — `clinicalExpertise` free-text is too noisy and regressed
+ * hypertension in the prototype. See `docs/search-trackA-clinical-inert-finding.md` +
+ * `docs/search-mason-attribution-and-rescope-finding.md`. Default OFF; topic/hybrid only.
+ * Flag-parity: wire `SEARCH_PEOPLE_CLINICAL_FN` in BOTH `.env.local` AND `cdk/lib/app-stack.ts`.
+ * No reindex (the fields are already indexed; this is a query-time boost).
+ */
+export function resolveSearchPeopleClinicalFn(): boolean {
+  return process.env.SEARCH_PEOPLE_CLINICAL_FN === "on";
+}
+
+/** Default additive weight for the B2 clinical-specialty boost (matches the area-boost HI tier
+ *  that lifted Igel in the prototype). Query-tunable via `SEARCH_PEOPLE_CLINICAL_FN_WEIGHT` so
+ *  A/B cells need no reindex. */
+const CLINICAL_FN_WEIGHT_DEFAULT = 3;
+export function resolveSearchPeopleClinicalFnWeight(): number {
+  const raw = Number(process.env.SEARCH_PEOPLE_CLINICAL_FN_WEIGHT);
+  return Number.isFinite(raw) && raw > 0 ? raw : CLINICAL_FN_WEIGHT_DEFAULT;
+}

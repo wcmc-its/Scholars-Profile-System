@@ -287,6 +287,70 @@ describe("research-area concentration boost — Track B", () => {
   });
 });
 
+describe("clinical-specialty function_score boost — Track B / B2", () => {
+  beforeEach(() => {
+    capturedBodies.length = 0;
+    groupByMock.mockResolvedValue([]);
+    process.env.SEARCH_PEOPLE_CLINICAL_FN = "on";
+  });
+  afterEach(() => {
+    delete process.env.SEARCH_PEOPLE_CLINICAL_FN;
+    delete process.env.SEARCH_PEOPLE_CLINICAL_FN_WEIGHT;
+    vi.clearAllMocks();
+  });
+
+  it("topic shape appends the clinicalSpecialties match boost (default weight 3)", async () => {
+    await searchPeople({
+      q: "obesity",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: ["D012345"],
+    });
+    const fns = functionScore(capturedBodies[0])!.functions;
+    expect(fns).toContainEqual({
+      filter: { match: { clinicalSpecialties: "obesity" } },
+      weight: 3,
+    });
+    // additive — the four prominence functions are still present.
+    for (const fn of EXPECTED_PROMINENCE_FUNCTIONS) expect(fns).toContainEqual(fn);
+  });
+
+  it("weight is query-tunable via SEARCH_PEOPLE_CLINICAL_FN_WEIGHT (no reindex)", async () => {
+    process.env.SEARCH_PEOPLE_CLINICAL_FN_WEIGHT = "6";
+    await searchPeople({
+      q: "obesity",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: ["D012345"],
+    });
+    const fns = functionScore(capturedBodies[0])!.functions;
+    expect(fns).toContainEqual({
+      filter: { match: { clinicalSpecialties: "obesity" } },
+      weight: 6,
+    });
+  });
+
+  it("name shape does NOT apply the clinical boost (topic/hybrid only)", async () => {
+    await searchPeople({ q: "cantley", relevanceMode: "v3", shape: "name" });
+    const fns = functionScore(capturedBodies[0])!.functions;
+    expect(fns.some((f) => JSON.stringify(f).includes("clinicalSpecialties"))).toBe(false);
+    expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length);
+  });
+
+  it("flag off → no clinical boost (byte-identical to today)", async () => {
+    delete process.env.SEARCH_PEOPLE_CLINICAL_FN;
+    await searchPeople({
+      q: "obesity",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: ["D012345"],
+    });
+    const fns = functionScore(capturedBodies[0])!.functions;
+    expect(fns.some((f) => JSON.stringify(f).includes("clinicalSpecialties"))).toBe(false);
+    expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length);
+  });
+});
+
 describe("faculty-prominence lever — #1345", () => {
   beforeEach(() => {
     capturedBodies.length = 0;
