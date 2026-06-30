@@ -342,6 +342,16 @@ describe("<RepresentativePapers> — the disclosure stack", () => {
     expect(more.closest("a")?.getAttribute("href")).toBe("/p/jane#publications");
   });
 
+  it("Option A — header shows 'N of M' when truncated, and the bare total otherwise", () => {
+    const { rerender } = render(
+      <RepresentativePapers papers={PAPERS} total={8} profileHref="/p/jane#publications" />,
+    );
+    expect(screen.getByText("3 of 8")).toBeTruthy(); // 3 shown of 8 matching
+    rerender(<RepresentativePapers papers={PAPERS} total={3} profileHref="/p/jane#publications" />);
+    expect(screen.getByText("3")).toBeTruthy(); // nothing hidden ⇒ bare total
+    expect(screen.queryByText("3 of 3")).toBeNull();
+  });
+
   it("omits the '+N more' link when total equals the shown papers", () => {
     render(<RepresentativePapers papers={PAPERS} total={3} profileHref="/p/jane#publications" />);
     expect(screen.queryByText(/more in profile/)).toBeNull();

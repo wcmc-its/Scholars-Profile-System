@@ -371,6 +371,12 @@ export function RepresentativePapers({
     <div id={panelId} className="mt-1.5 pl-[1px]">
       <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
         {papers.length === 1 ? "Key paper" : "Key papers"}
+        {/* Matching count: "3 of 8" when the list is truncated (mirrors the "+N more"
+            link), else the bare total. normal-case so "of" isn't shouted in the caps
+            label. `total` is the matching N already passed for the "+N more" link. */}
+        <span className="ml-1.5 font-medium normal-case tracking-normal text-[#b0aaa0]">
+          {more > 0 ? `${papers.length} of ${total}` : total}
+        </span>
       </div>
       <ul className="mt-1 flex flex-col gap-1.5 text-[13px] leading-snug">
         {papers.map((p) => (
@@ -473,6 +479,11 @@ export function KeyFunding({
     <div id={panelId} className="mt-1.5 pl-[1px]">
       <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
         {grants.length === 1 ? "Key grant" : "Key funding"}
+        {/* Matching count, mirroring the key-papers header: "3 of 8" when truncated,
+            else the bare total. `total` here is grantsTotal (capped at grantCount). */}
+        <span className="ml-1.5 font-medium normal-case tracking-normal text-[#b0aaa0]">
+          {more > 0 ? `${grants.length} of ${total}` : total}
+        </span>
       </div>
       <ul className="mt-1 flex flex-col gap-1.5 text-[13px] leading-snug">
         {grants.map((g) => {
