@@ -512,7 +512,7 @@ describe("DataStack", () => {
   });
 
   // docs/etl-vpc-migration-handoff.md (shared-VPC plan), step 3 — datastore
-  // ingress from the per-env ETL SG in lts-reciter-vpc01, referenced cross-VPC
+  // ingress from the per-env ETL SG in its-reciter-vpc01, referenced cross-VPC
   // over the peer (NOT a CIDR — both envs share one CIDR space). Gated on
   // etlVpcPeeringEnabled (present for the source-reach probe before the cadence
   // moves). The real SG id is a config placeholder (plan §12 Q9), so the fixture

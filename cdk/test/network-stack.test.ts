@@ -110,8 +110,8 @@ describe("NetworkStack", () => {
   });
 
   // docs/etl-vpc-migration-handoff.md (shared-VPC plan), step 1 — the Sps side
-  // of the ETL cadence VPC peering to lts-reciter-vpc01. Built only when
-  // etlVpcPeeringEnabled is flipped on. The real lts-reciter vpcId is a config
+  // of the ETL cadence VPC peering to its-reciter-vpc01. Built only when
+  // etlVpcPeeringEnabled is flipped on. The real its-reciter vpcId is a config
   // placeholder (pending networking, plan §12 Q1), so the fixture overrides
   // etlComputeVpc with a synthetic id — this tests the retargeting wiring
   // (peerVpcId = etlComputeVpc.vpcId), not the unknown real id.
@@ -123,7 +123,7 @@ describe("NetworkStack", () => {
         ...fixture.envConfig,
         etlVpcPeeringEnabled: true,
         etlComputeVpc: {
-          vpcId: "vpc-lts-reciter-test",
+          vpcId: "vpc-its-reciter-test",
           availabilityZones: ["us-east-1a", "us-east-1b"],
           appSubnetIds: ["subnet-lts-a", "subnet-lts-b"],
         },
@@ -132,12 +132,12 @@ describe("NetworkStack", () => {
     });
     const template = Template.fromStack(stack);
 
-    it("creates one peering connection to lts-reciter-vpc01 (same-account, no owner id)", () => {
+    it("creates one peering connection to its-reciter-vpc01 (same-account, no owner id)", () => {
       template.resourceCountIs("AWS::EC2::VPCPeeringConnection", 1);
       template.hasResourceProperties("AWS::EC2::VPCPeeringConnection", {
-        // peerVpcId = etlComputeVpc (lts-reciter-vpc01); no PeerOwnerId /
+        // peerVpcId = etlComputeVpc (its-reciter-vpc01); no PeerOwnerId /
         // PeerRegion → same-account, same-region, auto-accepted.
-        PeerVpcId: "vpc-lts-reciter-test",
+        PeerVpcId: "vpc-its-reciter-test",
       });
       const peerings = Object.values(
         template.findResources("AWS::EC2::VPCPeeringConnection"),
@@ -159,7 +159,7 @@ describe("NetworkStack", () => {
     });
   });
 
-  // ENIs straddling both lts-reciter subnets → two placement CIDRs → one
+  // ENIs straddling both its-reciter subnets → two placement CIDRs → one
   // CfnRoute per (cidr, route table). Synth succeeding with 4 routes implies
   // the construct ids are unique (a collision throws at synth).
   describe("ETL cadence VPC peering with two placement CIDRs", () => {
@@ -170,7 +170,7 @@ describe("NetworkStack", () => {
         ...fixture.envConfig,
         etlVpcPeeringEnabled: true,
         etlComputeVpc: {
-          vpcId: "vpc-lts-reciter-test",
+          vpcId: "vpc-its-reciter-test",
           availabilityZones: ["us-east-1a", "us-east-1b"],
           appSubnetIds: ["subnet-lts-a", "subnet-lts-b"],
         },

@@ -1,7 +1,7 @@
 import { assertEtlMigrationInvariants, resolveEnvConfig } from "../lib/config";
 
 // docs/etl-vpc-migration-handoff.md (shared-VPC plan) — the cadence cannot
-// relocate into the shared lts-reciter-vpc01 before (a) the VPC peering exists
+// relocate into the shared its-reciter-vpc01 before (a) the VPC peering exists
 // (every datastore write would be stranded) and (b) the per-env ETL SG id the
 // datastores reference is set (an empty id would synth a broken ingress rule).
 // resolveEnvConfig enforces these; the guard is exported so the invariant is
@@ -13,7 +13,7 @@ describe("assertEtlMigrationInvariants", () => {
   // placeholders (pending networking), so any "passes when peered/relocated"
   // case must supply real-shaped ids to clear the synth-time guards.
   const ETL_VPC = {
-    vpcId: "vpc-lts-reciter-test",
+    vpcId: "vpc-its-reciter-test",
     availabilityZones: ["us-east-1a", "us-east-1b"],
     appSubnetIds: ["subnet-lts-a", "subnet-lts-b"],
   };
@@ -105,7 +105,7 @@ describe("assertEtlMigrationInvariants", () => {
 
 // Guard against accidentally pointing the relocated ETL compute back at the
 // ED-export VPC (scholars-dev/prod): etlComputeVpc is a SEPARATE field
-// (lts-reciter-vpc01) so the bridge and the cadence are independently flippable.
+// (its-reciter-vpc01) so the bridge and the cadence are independently flippable.
 describe("etlComputeVpc is distinct from edExportVpc", () => {
   for (const env of ["staging", "prod"] as const) {
     it(`${env}: etlComputeVpc.vpcId !== edExportVpc.vpcId`, () => {

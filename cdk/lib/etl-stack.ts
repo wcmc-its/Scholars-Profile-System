@@ -149,7 +149,7 @@ export class EtlStack extends Stack {
     // (reachable only via the TGW) and writes Aurora / OpenSearch / the
     // internal ALB (in the Sps VPC). The Sps VPC can't be TGW-attached
     // (10.20/10.10 overlap), so when `etlCadenceVpcRelocated` is set the
-    // cadence steps run in the shared TGW-attached lts-reciter-vpc01
+    // cadence steps run in the shared TGW-attached its-reciter-vpc01
     // (envConfig.etlComputeVpc — hosting BOTH envs' ETL) and reach the
     // datastores back in the Sps VPC over an intra-account VPC peering
     // connection. Env isolation is by SG, not network: each env's tasks attach
@@ -168,7 +168,7 @@ export class EtlStack extends Stack {
     let cadenceSecurityGroups: ec2.ISecurityGroup[] = [etlSecurityGroup];
     if (relocateCadence) {
       const cadVpcCfg = envConfig.etlComputeVpc;
-      // Place ENIs in the lts-reciter-vpc01 subnets by id (no context lookup →
+      // Place ENIs in the its-reciter-vpc01 subnets by id (no context lookup →
       // synth stays deterministic without account creds). Distinct construct
       // ids from the ED bridge's EdExportSubnet* so the two imports don't
       // collide. No Vpc import needed — subnets are selected by id and the SG
@@ -179,7 +179,7 @@ export class EtlStack extends Stack {
         ),
       };
       // The egress-only per-env ETL SG (staging-ETL-SG / prod-ETL-SG) lives in
-      // lts-reciter-vpc01 and is created by networking; IMPORT it by id — the
+      // its-reciter-vpc01 and is created by networking; IMPORT it by id — the
       // SAME id DataStack references for Aurora/OpenSearch ingress and the ALB
       // rule below uses. Import (not create): creating it here and referencing
       // it in DataStack would form a dependency cycle (DataStack is a dependency
@@ -197,7 +197,7 @@ export class EtlStack extends Stack {
       ];
     }
 
-    // Internal-ALB ingress from the per-env ETL SG in lts-reciter-vpc01
+    // Internal-ALB ingress from the per-env ETL SG in its-reciter-vpc01
     // (etl:revalidate POSTs to /api/revalidate). Gated on the PEERING flag, not
     // relocation, so the rule is present for the source-reach probe before the
     // cadence tasks move. Aurora (:3306) + OpenSearch (:443) ingress live in
@@ -213,7 +213,7 @@ export class EtlStack extends Stack {
         fromPort: 80,
         toPort: 80,
         sourceSecurityGroupId: envConfig.etlComputeSecurityGroupId,
-        description: `${env}-ETL-SG in lts-reciter-vpc01 to SPS internal ALB HTTP (${env}) -- /api/revalidate`,
+        description: `${env}-ETL-SG in its-reciter-vpc01 to SPS internal ALB HTTP (${env}) -- /api/revalidate`,
       });
     }
 

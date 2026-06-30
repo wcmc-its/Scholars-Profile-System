@@ -1525,7 +1525,7 @@ describe("EtlStack", () => {
   });
 
   // docs/etl-vpc-migration-handoff.md (shared-VPC plan) — both flags flipped on.
-  // The real lts-reciter vpcId/subnet/SG ids are config placeholders (pending
+  // The real its-reciter vpcId/subnet/SG ids are config placeholders (pending
   // networking, plan §12 Q1/Q2/Q9); the fixture supplies synthetic ids so the
   // relocate wiring is testable.
   describe("ETL cadence VPC relocation + peering (flags on)", () => {
@@ -1536,13 +1536,13 @@ describe("EtlStack", () => {
       etlCadenceVpcRelocated: true,
       etlComputeSecurityGroupId: ETL_SG,
       etlComputeVpc: {
-        vpcId: "vpc-lts-reciter-test",
+        vpcId: "vpc-its-reciter-test",
         availabilityZones: ["us-east-1a", "us-east-1b"],
         appSubnetIds: SUBNETS,
       },
     });
 
-    it("places cadence task ENIs in the lts-reciter (etlComputeVpc) subnets", () => {
+    it("places cadence task ENIs in the its-reciter (etlComputeVpc) subnets", () => {
       // The cadence EcsRunTask steps render their placement subnets as literals
       // in the state-machine definitions; a regression to edExportVpc/Sps subnets
       // would drop these ids.

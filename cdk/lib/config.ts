@@ -271,7 +271,7 @@ export interface SpsEnvConfig {
   /**
    * Whether the regular ETL cadence task family (nightly / weekly / annual +
    * heartbeat) runs in the shared TGW-attached {@link etlComputeVpc}
-   * (`lts-reciter-vpc01`, hosting BOTH envs' ETL) instead of the Sps VPC,
+   * (`its-reciter-vpc01`, hosting BOTH envs' ETL) instead of the Sps VPC,
    * reaching Aurora / OpenSearch / the internal ALB back in the Sps VPC over an
    * intra-account VPC peering connection. The ETL is two-sided — it reads
    * on-prem LDAP + the 10.46.x source DBs (TGW-only) and writes the Sps-VPC
@@ -282,13 +282,13 @@ export interface SpsEnvConfig {
    * which is what concretely replaces the old per-VPC isolation now that both
    * envs share one CIDR space. **OFF in both envs** until that peering + the
    * datastore SG-reference ingress are in place and the source-reach probe
-   * passes from `lts-reciter-vpc01`: the placement move regresses the
+   * passes from `its-reciter-vpc01`: the placement move regresses the
    * (currently-working) write side if it lands first. See
    * docs/etl-vpc-migration-handoff.md (shared-VPC plan).
    */
   readonly etlCadenceVpcRelocated: boolean;
   /**
-   * The shared, TGW-attached VPC (`lts-reciter-vpc01`) the relocated ETL
+   * The shared, TGW-attached VPC (`its-reciter-vpc01`) the relocated ETL
    * cadence tasks place their ENIs into — for BOTH envs (isolation is by
    * {@link etlComputeSecurityGroupId}, not by VPC). Separate from
    * {@link edExportVpc} (which the ED-export bridge still uses on
@@ -315,9 +315,9 @@ export interface SpsEnvConfig {
    */
   readonly etlComputeSecurityGroupId: string;
   /**
-   * The lts-reciter placement-subnet CIDR(s) the relocated ETL ENIs sit in —
+   * The its-reciter placement-subnet CIDR(s) the relocated ETL ENIs sit in —
    * the destination of the Sps-side return route (→ the peering connection) so
-   * datastore replies reach the tasks. 1–2 entries (the two lts-reciter subnets
+   * datastore replies reach the tasks. 1–2 entries (the two its-reciter subnets
    * `10.46.134.0/24` + `10.46.160.0/24` are non-contiguous, cannot aggregate).
    * Populate with ONLY the CIDR(s) the ENIs actually place into (plan §12 Q2) —
    * do not list both speculatively. Referenced only when peered. No longer used
@@ -326,13 +326,13 @@ export interface SpsEnvConfig {
   readonly etlPeerCidrs: readonly string[];
   /**
    * Whether the intra-account VPC peering connection between the Sps VPC and
-   * the shared {@link etlComputeVpc} (`lts-reciter-vpc01`) is created, along
+   * the shared {@link etlComputeVpc} (`its-reciter-vpc01`) is created, along
    * with the Sps-side return route ({@link etlPeerCidrs} → the peering
    * connection) and the datastore SG-reference ingress. **Separate from
    * {@link etlCadenceVpcRelocated} on purpose:** flip this FIRST so an operator
    * can stand up the peer + the ingress and run the source-reach probe from
-   * `lts-reciter-vpc01` (incl. the Aurora + OpenSearch endpoints over the peer)
-   * BEFORE moving the cadence tasks. The lts-reciter-side return routes
+   * `its-reciter-vpc01` (incl. the Aurora + OpenSearch endpoints over the peer)
+   * BEFORE moving the cadence tasks. The its-reciter-side return routes
    * (`10.20/16` / `10.10/16` → the pcx) are added out-of-band in that VPC — not
    * ours to mutate from CDK. OFF in both envs until peering is coordinated with
    * networking. `etlCadenceVpcRelocated` requires this to be true (enforced in
@@ -465,12 +465,12 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     },
     edEmailVisibilityBridgeEnabled: true,
     // ETL cadence VPC relocation (docs/etl-vpc-migration-handoff.md, shared-VPC
-    // plan) — OFF until the lts-reciter-vpc01 ↔ Sps-Network-staging peering +
+    // plan) — OFF until the its-reciter-vpc01 ↔ Sps-Network-staging peering +
     // the datastore SG-reference ingress exist and the source-reach probe
-    // passes from lts-reciter-vpc01. Flip only after peering is up, or the
+    // passes from its-reciter-vpc01. Flip only after peering is up, or the
     // cadence loses DB/index reach.
     etlComputeVpc: {
-      // PLACEHOLDER — lts-reciter-vpc01 (shared, both envs; isolation is by
+      // PLACEHOLDER — its-reciter-vpc01 (shared, both envs; isolation is by
       // staging-ETL-SG). vpcId + placement subnet ids pending networking
       // (plan §12 Q1/Q2). Region us-east-1 confirmed (G1).
       vpcId: "",
@@ -478,14 +478,14 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
       appSubnetIds: [],
     },
     etlCadenceVpcRelocated: false,
-    // PLACEHOLDER — staging-ETL-SG id in lts-reciter-vpc01, pending networking
+    // PLACEHOLDER — staging-ETL-SG id in its-reciter-vpc01, pending networking
     // (plan §12 Q9). The invariant requires it non-empty before relocate flips.
     etlComputeSecurityGroupId: "",
-    // PLACEHOLDER — the lts-reciter subnet CIDR the staging ETL ENIs place into
+    // PLACEHOLDER — the its-reciter subnet CIDR the staging ETL ENIs place into
     // (plan §12 Q2). 10.46.134.0/24 already hosts ReCiter RDS; confirm, and add
     // 10.46.160.0/24 only if ENIs straddle both subnets. Sps-side return-route dest.
     etlPeerCidrs: ["10.46.134.0/24"],
-    // VPC peering lts-reciter-vpc01 ↔ Sps-Network-staging — OFF until peering is
+    // VPC peering its-reciter-vpc01 ↔ Sps-Network-staging — OFF until peering is
     // coordinated with networking. Flip this + deploy + probe BEFORE relocate.
     etlVpcPeeringEnabled: false,
     // #485 — search:index OOM-killed at 2048 MiB building the full corpus
@@ -583,10 +583,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     },
     edEmailVisibilityBridgeEnabled: false,
     // ETL cadence VPC relocation — OFF; replicate the staging peer-and-move on
-    // lts-reciter-vpc01 ↔ Sps-Network-prod and verify before flipping (prod ETL
+    // its-reciter-vpc01 ↔ Sps-Network-prod and verify before flipping (prod ETL
     // schedules are off anyway). See docs/etl-vpc-migration-handoff.md.
     etlComputeVpc: {
-      // PLACEHOLDER — lts-reciter-vpc01 (SAME shared VPC as staging; isolation
+      // PLACEHOLDER — its-reciter-vpc01 (SAME shared VPC as staging; isolation
       // is by prod-ETL-SG). vpcId + placement subnet ids pending networking
       // (plan §12 Q1/Q2).
       vpcId: "",
@@ -594,11 +594,11 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
       appSubnetIds: [],
     },
     etlCadenceVpcRelocated: false,
-    // PLACEHOLDER — prod-ETL-SG id in lts-reciter-vpc01, pending networking (Q9).
+    // PLACEHOLDER — prod-ETL-SG id in its-reciter-vpc01, pending networking (Q9).
     etlComputeSecurityGroupId: "",
-    // PLACEHOLDER — the lts-reciter subnet CIDR the prod ETL ENIs place into (Q2).
+    // PLACEHOLDER — the its-reciter subnet CIDR the prod ETL ENIs place into (Q2).
     etlPeerCidrs: ["10.46.134.0/24"],
-    // VPC peering lts-reciter-vpc01 ↔ Sps-Network-prod — OFF; replicate + verify
+    // VPC peering its-reciter-vpc01 ↔ Sps-Network-prod — OFF; replicate + verify
     // the staging peer-and-probe first. Flip BEFORE etlCadenceVpcRelocated.
     etlVpcPeeringEnabled: false,
     // #485 — match staging's 8 GB headroom for the search:index corpus build
@@ -639,7 +639,7 @@ export function resolveEnvConfig(envContext: unknown): SpsEnvConfig {
 
 /**
  * Footgun guard for the ETL VPC migration (docs/etl-vpc-migration-handoff.md):
- * (a) relocating the cadence into the shared lts-reciter-vpc01 without the VPC
+ * (a) relocating the cadence into the shared its-reciter-vpc01 without the VPC
  * peering (+ its return route + datastore SG-reference ingress) strands every
  * datastore write; and (b) peering/relocating without the network ids those
  * paths consume — the per-env ETL SG id (empty → an ingress rule with an empty
@@ -648,7 +648,7 @@ export function resolveEnvConfig(envContext: unknown): SpsEnvConfig {
  * would synth resources that only fail at CloudFormation deploy. Fail at SYNTH
  * instead, symmetrically across all three placeholder ids, rather than ship a
  * cadence that can't reach Aurora/OpenSearch. Also bounds etlPeerCidrs to the
- * 1–2 non-contiguous lts-reciter placement subnets. Exported so it can be
+ * 1–2 non-contiguous its-reciter placement subnets. Exported so it can be
  * unit-tested with synthetic configs (the real ENV_CONFIG entries never violate
  * it — both placeholders are flag-off, so these checks short-circuit).
  */
@@ -663,7 +663,7 @@ export function assertEtlMigrationInvariants(cfg: SpsEnvConfig): void {
   if (cfg.etlVpcPeeringEnabled && !cfg.etlComputeSecurityGroupId) {
     throw new Error(
       `Invalid config for env="${cfg.envName}": etlVpcPeeringEnabled requires ` +
-        `etlComputeSecurityGroupId (the per-env ETL SG in lts-reciter-vpc01 that ` +
+        `etlComputeSecurityGroupId (the per-env ETL SG in its-reciter-vpc01 that ` +
         `the datastores admit by cross-VPC reference). The SG-reference ingress ` +
         `is created when peered — for the source-reach probe, before any task ` +
         `moves — so the id must be set by then; fail synth here rather than ship ` +
@@ -674,7 +674,7 @@ export function assertEtlMigrationInvariants(cfg: SpsEnvConfig): void {
   if (cfg.etlVpcPeeringEnabled && !cfg.etlComputeVpc.vpcId) {
     throw new Error(
       `Invalid config for env="${cfg.envName}": etlVpcPeeringEnabled requires ` +
-        `etlComputeVpc.vpcId (the lts-reciter-vpc01 id the peer targets). Like ` +
+        `etlComputeVpc.vpcId (the its-reciter-vpc01 id the peer targets). Like ` +
         `the SG id above, it is consumed on the peering path (peerVpcId), so fail ` +
         `synth here rather than emit a peering connection with an empty peerVpcId ` +
         `that only fails at deploy. See docs/etl-vpc-migration-handoff.md.`,
@@ -686,7 +686,7 @@ export function assertEtlMigrationInvariants(cfg: SpsEnvConfig): void {
   ) {
     throw new Error(
       `Invalid config for env="${cfg.envName}": etlCadenceVpcRelocated requires ` +
-        `at least one etlComputeVpc.appSubnetId (the lts-reciter placement subnets ` +
+        `at least one etlComputeVpc.appSubnetId (the its-reciter placement subnets ` +
         `the cadence ENIs launch into); an empty list yields an empty subnet ` +
         `selection that only fails at deploy. See docs/etl-vpc-migration-handoff.md.`,
     );
@@ -694,7 +694,7 @@ export function assertEtlMigrationInvariants(cfg: SpsEnvConfig): void {
   if (cfg.etlPeerCidrs.length < 1 || cfg.etlPeerCidrs.length > 2) {
     throw new Error(
       `Invalid config for env="${cfg.envName}": etlPeerCidrs must hold 1–2 ` +
-        `lts-reciter placement-subnet CIDRs (the two subnets are non-contiguous); ` +
+        `its-reciter placement-subnet CIDRs (the two subnets are non-contiguous); ` +
         `got ${cfg.etlPeerCidrs.length}. See docs/etl-vpc-migration-handoff.md.`,
     );
   }
