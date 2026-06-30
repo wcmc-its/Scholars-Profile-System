@@ -83,7 +83,8 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
     render(<PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />);
 
     await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
-    // #1361 — "N of M grants mention 'query'": normal-weight prefix + semibold query term.
+    // Single-evidence (non-stacked) path is unchanged by the tiered redesign: the
+    // Funding row keeps the full badge — "N of M grants mention 'query'" (#1361).
     expect(screen.getByText(/1 of 3 grants mention/)).toBeTruthy();
     expect(screen.getByText("“diabetes”").tagName).toBe("STRONG");
     expect(
@@ -166,7 +167,8 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
       />,
     );
     await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
-    // "tagged" line: normal-weight count prefix + the underlined, semibold CONCEPT term.
+    // Single-evidence (non-stacked): the full "tagged" line — normal-weight count
+    // prefix + the underlined, semibold CONCEPT term (unchanged by the redesign).
     expect(screen.getByText(/2 of 3 grants tagged/)).toBeTruthy();
     const term = screen.getByText("Heart Arrest");
     expect(term.tagName).toBe("STRONG");
@@ -281,6 +283,24 @@ describe("PeopleResultCard — Funding supersedes the generic no-match fallback"
     expect(screen.queryByText(/no specific match for this query/i)).toBeNull();
   });
 
+  it("#1366 — PROMOTES Funding to the full primary badge when it is the only signal", async () => {
+    mockFetch(oneGrant);
+    const { container } = render(
+      <PeopleResultCard
+        {...base}
+        evidenceRows
+        hit={makeHit({ evidence: { kind: "none" } as PeopleHit["evidence"] })}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
+    // No first-class pub line ⇒ Funding LEADS with the full badge ("N of M grants
+    // mention 'query'" + semibold query term), NOT a demoted dot, and there is no
+    // "Also matched" group to subordinate it under.
+    expect(screen.getByText(/1 of 3 grants mention/)).toBeTruthy();
+    expect(screen.getByText("“diabetes”").tagName).toBe("STRONG");
+    expect(container.textContent).not.toContain("Also matched");
+  });
+
   it("keeps the '— no specific match —' fallback when NO grant matched", async () => {
     const fetchFn = mockFetch({ grants: [], total: 0 });
     render(
@@ -303,5 +323,55 @@ describe("PeopleResultCard — Funding supersedes the generic no-match fallback"
     await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
     // the real match reason still renders alongside the Funding row
     expect(screen.getByText(/publications mention/)).toBeTruthy();
+  });
+});
+
+describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked evidenceLines)", () => {
+  const oneGrant = {
+    grants: [{ projectId: "p1", title: "Pediatric trial", sponsor: "NIH", startYear: 2022, endYear: 2025 }],
+    total: 1,
+  };
+  const stackedHit = (over: Record<string, unknown> = {}) =>
+    makeHit({
+      evidenceLines: [
+        { kind: "method", family: "CRISPR genome editing", tools: [], count: 3 },
+        { kind: "topic", label: "Stem Cell & Regenerative Medicine", id: "stem", count: 2 },
+      ] as PeopleHit["evidenceLines"],
+      ...over,
+    });
+
+  it("leads with the primary badge and DEMOTES Funding into 'Also matched' as a dot row", async () => {
+    mockFetch(oneGrant);
+    const { container } = render(
+      <PeopleResultCard {...base} evidenceRows hit={stackedHit()} />,
+    );
+    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
+    // the primary keeps the full Method badge...
+    expect(screen.getByText("Method")).toBeTruthy();
+    // ...and the demoted signals sit under "Also matched", Funding as a compact dot:
+    // "Funding · mentions 'diabetes' · N of M grants".
+    expect(screen.getByText("Also matched")).toBeTruthy();
+    expect(container.textContent).toMatch(/mentions\s*“diabetes”/);
+    expect(container.textContent).toMatch(/1 of 3 grants/);
+    // the demoted dot still expands to the KEY FUNDING records.
+    fireEvent.click(screen.getByRole("button", { name: /key funding/i }));
+    expect(screen.getByText(/Pediatric trial/)).toBeTruthy();
+  });
+
+  it("a single stacked line with grants still shows the 'Also matched' Funding dot", async () => {
+    mockFetch(oneGrant);
+    render(
+      <PeopleResultCard
+        {...base}
+        evidenceRows
+        hit={makeHit({
+          evidenceLines: [
+            { kind: "method", family: "CRISPR genome editing", tools: [], count: 3 },
+          ] as PeopleHit["evidenceLines"],
+        })}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
+    expect(screen.getByText("Also matched")).toBeTruthy();
   });
 });

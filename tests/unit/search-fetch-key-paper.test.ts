@@ -178,6 +178,25 @@ describe("fetchKeyPaper (lazy key paper)", () => {
     const pubs = await fetchKeyPaper({ cwid: "", descriptorUis: ["Dadeno"], contentQuery: "x" });
     expect(pubs).toEqual([]);
   });
+
+  it("#1366 — `exclude` adds a query-level must_not terms clause on pmid (de-dup in the pool, not post-filter)", async () => {
+    captured.length = 0;
+    await fetchKeyPaper({
+      cwid: "zexcl001",
+      descriptorUis: ["Dexcl"],
+      contentQuery: "dedup-probe",
+      exclude: ["111", "222"],
+    });
+    const bool = boolOf(captured[0].query) as { must_not?: unknown[] };
+    expect(bool.must_not).toContainEqual({ terms: { pmid: ["111", "222"] } });
+  });
+
+  it("#1366 — no `exclude` ⇒ no must_not clause (admission identical to before)", async () => {
+    captured.length = 0;
+    await fetchKeyPaper({ cwid: "znoexcl1", descriptorUis: ["Dnoexcl"], contentQuery: "no-dedup-probe" });
+    const bool = boolOf(captured[0].query) as { must_not?: unknown[] };
+    expect(bool.must_not).toBeUndefined();
+  });
 });
 
 describe("rankKeyPaperHitsByBlend — 0.6 relevance / 0.4 recency + small >50-cite boost", () => {

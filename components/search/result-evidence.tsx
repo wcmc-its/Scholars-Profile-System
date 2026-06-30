@@ -1,5 +1,5 @@
 import type { ResultEvidence } from "@/lib/api/result-evidence";
-import { MatchReason, MatchAwareReason } from "@/components/search/match-reason";
+import { MatchReason, MatchAwareReason, LesserReason } from "@/components/search/match-reason";
 import { HighlightedSnippet } from "@/components/search/highlight-snippet";
 import { ConceptChipRow } from "@/components/search/concept-chip-row";
 
@@ -59,6 +59,7 @@ export function ResultEvidence({
   slug,
   badged = false,
   pubCount,
+  tier = "primary",
 }: {
   evidence: ResultEvidence;
   /** Rep-papers disclosure — when true and the evidence is a method/topic/
@@ -86,11 +87,93 @@ export function ResultEvidence({
    *  to render the "· N of M publications" suffix on method/area lines. Absent ⇒
    *  no suffix (the single-evidence path passes no count, so this stays label-only). */
   pubCount?: number;
+  /** #1366 follow-up — "primary" = the prominent lead signal (today's full badge);
+   *  "lesser" = a compact "Also matched" dot row. Identity-fallback kinds are always
+   *  solo, so they only ever render as "primary". */
+  tier?: "primary" | "lesser";
 }) {
   // #1366 — "· N of M publications" suffix for the named first-class lines, when
   // the stacked path supplied a count (M = the hit's pubCount).
   const countSuffix = (count: number | undefined): string | undefined =>
     count != null && pubCount != null ? ` · ${count} of ${pubCount} publications` : undefined;
+
+  // #1366 follow-up — compact "Also matched" dot rows: filled dot = curated tag
+  // (method/topic/clinical/concept), hollow dot = literal keyword mention. Count is
+  // abbreviated ("· N of M", no "publications" word). The disclosure panel is the
+  // SAME (rep papers); only this summary row restyles.
+  if (tier === "lesser") {
+    const lesserCount = (count: number | undefined): string | undefined =>
+      count != null && pubCount != null ? ` · ${count} of ${pubCount}` : undefined;
+    switch (evidence.kind) {
+      case "method":
+        return (
+          <LesserReason
+            dotClassName="bg-[#8a4a1f]"
+            suffix={lesserCount(evidence.count)}
+            canExpand={canExpand}
+            expanded={expanded}
+            onToggle={onToggle}
+            panelId={panelId}
+          >
+            <span className="font-medium text-[#52514a]">Method</span> · {evidence.family}
+          </LesserReason>
+        );
+      case "topic":
+        return (
+          <LesserReason
+            dotClassName="bg-[#2c4f6e]"
+            suffix={lesserCount(evidence.count)}
+            canExpand={canExpand}
+            expanded={expanded}
+            onToggle={onToggle}
+            panelId={panelId}
+          >
+            <span className="font-medium text-[#52514a]">Research area</span> · {evidence.label}
+          </LesserReason>
+        );
+      case "clinical":
+        return (
+          <LesserReason
+            dotClassName="bg-[#1a5f7a]"
+            canExpand={canExpand}
+            expanded={expanded}
+            onToggle={onToggle}
+            panelId={panelId}
+          >
+            <span className="font-medium text-[#52514a]">Clinical</span> ·{" "}
+            {evidence.boardCertified
+              ? `Board certified in ${evidence.specialty}`
+              : evidence.specialty}
+          </LesserReason>
+        );
+      case "publications": {
+        const mention = evidence.strength === "mention";
+        return (
+          <LesserReason
+            dotClassName={mention ? "border-[1.5px] border-[#52525b]" : "bg-[#34408a]"}
+            weak={mention}
+            suffix={lesserCount(evidence.count)}
+            canExpand={canExpand}
+            expanded={expanded}
+            onToggle={onToggle}
+            panelId={panelId}
+          >
+            <span className="font-medium text-[#52514a]">{mention ? "Keyword" : "Concept"}</span>
+            {evidence.term ? (
+              <>
+                {" · "}
+                <span className="font-semibold text-[#3a3a3a]">{evidence.term}</span>
+              </>
+            ) : null}
+          </LesserReason>
+        );
+      }
+      default:
+        // Identity fallbacks (concepts/areas/none) are always solo ⇒ never lesser.
+        return null;
+    }
+  }
+
   switch (evidence.kind) {
     case "method":
       return (

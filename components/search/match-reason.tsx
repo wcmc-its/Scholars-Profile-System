@@ -311,6 +311,73 @@ export function MatchAwareReason({
   );
 }
 
+/**
+ * #1366 follow-up — the honesty note shown inside a HOLLOW-dot "Also matched" row's
+ * expanded panel: the match is a literal text mention, not a curated tag (the dot's
+ * hollowness made visible in words). The win the flat co-equal stack lacked.
+ */
+export function MentionNote() {
+  return (
+    <p className="mb-1.5 text-[11px] italic leading-snug text-[#9a958a]">
+      text mention in the abstract, not a curated tag
+    </p>
+  );
+}
+
+/**
+ * #1366 follow-up — a compact "Also matched" row: a small dot (FILLED for a curated
+ * tag, HOLLOW for a literal keyword mention), a muted label, an abbreviated "· N of
+ * M" count, and the same chevron disclosure. The visually-subordinate sibling of
+ * {@link MatchReason}/{@link MatchAwareReason}: the ONE primary signal keeps its full
+ * badge, the rest demote here (tiered card, handoff Part 1). `dotClassName` carries
+ * the per-kind color (filled ⇒ `bg-…`, hollow ⇒ `border-…`) so this stays dumb.
+ */
+export function LesserReason({
+  dotClassName,
+  children,
+  suffix,
+  weak = false,
+  canExpand = false,
+  expanded = false,
+  onToggle,
+  panelId,
+  srLabel = "key papers",
+}: {
+  dotClassName: string;
+  children: ReactNode;
+  /** Abbreviated "· N of M" count (no "publications" word); omitted ⇒ label-only. */
+  suffix?: string;
+  /** Extra-muted treatment for the literal-mention (hollow) rows. */
+  weak?: boolean;
+  canExpand?: boolean;
+  expanded?: boolean;
+  onToggle?: () => void;
+  panelId?: string;
+  srLabel?: string;
+}) {
+  const inner = (
+    <>
+      <span aria-hidden className={`size-2 shrink-0 rounded-full ${dotClassName}`} />
+      <span className={`min-w-0 truncate text-[12px] ${weak ? "text-[#9a958a]" : "text-[#6b675e]"}`}>
+        {children}
+        {suffix ? <span className="text-[#a9a399]">{suffix}</span> : null}
+      </span>
+    </>
+  );
+  if (canExpand && onToggle) {
+    return (
+      <div className="mt-0.5 leading-snug">
+        <DisclosureRow expanded={expanded} onToggle={onToggle} panelId={panelId} srLabel={srLabel}>
+          {inner}
+        </DisclosureRow>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-0.5 flex min-w-0 items-center gap-[9px] py-[3px] leading-snug">{inner}</div>
+  );
+}
+
 /** Fetch lifecycle of the lazily-loaded representative papers (method/topic). */
 export type ExemplarFetchStatus = "idle" | "loading" | "done";
 
@@ -334,12 +401,16 @@ export function RepresentativePapers({
   status = "done",
   panelId,
   fallback,
+  mentionNote = false,
 }: {
   papers: EvidencePub[];
   total: number;
   profileHref: string;
   status?: ExemplarFetchStatus;
   panelId?: string;
+  /** #1366 follow-up — prepend the "text mention, not a curated tag" honesty note
+   *  (hollow-dot lesser rows). */
+  mentionNote?: boolean;
   /** When a method/topic exemplar fetch resolves with NO renderable paper (rare —
    *  every family/topic pub is suppressed or non-renderable), degrade to this
    *  profile-section link instead of retracting the chevron into a dead control;
@@ -376,6 +447,7 @@ export function RepresentativePapers({
   const more = total - papers.length;
   return (
     <div id={panelId} className="mt-1.5 pl-[1px]">
+      {mentionNote ? <MentionNote /> : null}
       <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
         {papers.length === 1 ? "Key paper" : "Key papers"}
         {/* Matching count: "3 of 8" when the list is truncated (mirrors the "+N more"
@@ -461,12 +533,16 @@ export function KeyFunding({
   profileHref,
   status = "done",
   panelId,
+  mentionNote = false,
 }: {
   grants: EvidenceGrant[];
   total: number;
   profileHref: string;
   status?: ExemplarFetchStatus;
   panelId?: string;
+  /** #1366 follow-up — prepend the "text mention, not a curated tag" honesty note
+   *  (a literal-mention funding row demoted to "Also matched"). */
+  mentionNote?: boolean;
 }) {
   if (status === "loading" && grants.length === 0) {
     return (
@@ -484,6 +560,7 @@ export function KeyFunding({
   const more = total - grants.length;
   return (
     <div id={panelId} className="mt-1.5 pl-[1px]">
+      {mentionNote ? <MentionNote /> : null}
       <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
         {grants.length === 1 ? "Key grant" : "Key funding"}
         {/* Matching count, mirroring the key-papers header: "3 of 8" when truncated,

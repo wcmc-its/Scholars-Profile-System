@@ -5,7 +5,12 @@ import Link from "next/link";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { formatRoleCategory } from "@/lib/role-display";
 import { profilePath } from "@/lib/profile-url";
-import { MatchReason, MatchAwareReason, KeyFunding } from "@/components/search/match-reason";
+import {
+  MatchReason,
+  MatchAwareReason,
+  LesserReason,
+  KeyFunding,
+} from "@/components/search/match-reason";
 import { HighlightedSnippet } from "@/components/search/highlight-snippet";
 import { EvidenceLine } from "@/components/search/evidence-line";
 import type { EvidenceGrant, ResultEvidence } from "@/lib/api/result-evidence";
@@ -213,39 +218,30 @@ export function PeopleResultCard({
   // two render through one or more `<EvidenceLine>` (each owns its disclosure +
   // exemplar fetch); they share `claimedPmids` so representative papers stay
   // globally disjoint across stacked lines.
-  const lines: ResultEvidence[] | undefined =
-    hit.evidenceLines && hit.evidenceLines.length > 0
-      ? hit.evidenceLines
-      : hit.evidence
-        ? [hit.evidence]
-        : undefined;
+  // #1366 follow-up — `stacked` = the multi-line `evidenceLines` context (the flag on).
+  // The PRIMARY / "Also matched" tiering is scoped to it; the single-`evidence` path
+  // (the older, separately-flagged rendering) keeps its current single block + full
+  // Funding row, so merging this doesn't restyle that surface where the flag is off.
+  const stacked = !!(hit.evidenceLines && hit.evidenceLines.length > 0);
+  const lines: ResultEvidence[] | undefined = stacked
+    ? hit.evidenceLines
+    : hit.evidence
+      ? [hit.evidence]
+      : undefined;
 
-  let evidenceBlock: ReactNode = null;
-  if (lines) {
-    evidenceBlock = lines.map((ev, i) => (
-      <EvidenceLine
-        key={i}
-        evidence={ev}
-        cwid={hit.cwid}
-        slug={hit.slug}
-        pubCount={hit.pubCount}
-        q={q}
-        keyPaperConfig={keyPaperConfig}
-        hasQuery={hasQuery}
-        badged={evidenceRows}
-        claimedPmids={claimedPmids}
-      />
-    ));
-  } else {
-    // LEGACY priority chain (pre-ResultEvidence): method > topic > (legacy
-    // concept/pub matchReason) > bio highlight > humanized research areas. The
-    // method/topic kinds + humanized areas are produced by the server only when
-    // SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on; off ⇒ legacy `{ icon, text }`
-    // reason (or absent) and no humanizedAreas, rendering today's snippet exactly.
+  // LEGACY priority chain — rendered ONLY when there are no stacked/single `lines`
+  // (SEARCH_RESULT_EVIDENCE off). The `lines` path renders inline below with the
+  // primary / "Also matched" tiering (#1366 follow-up, handoff Part 1).
+  let legacyBlock: ReactNode = null;
+  if (!lines) {
+    // method > topic > (legacy concept/pub matchReason) > bio highlight > humanized
+    // research areas. The method/topic kinds + humanized areas are produced by the
+    // server only when SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on; off ⇒ legacy
+    // `{ icon, text }` reason (or absent), rendering today's snippet exactly.
     const reason = hit.matchReason;
     if (reason && "kind" in reason) {
       // New match-aware badge reasons (method / topic).
-      evidenceBlock =
+      legacyBlock =
         reason.kind === "method" ? (
           <MatchAwareReason kind="method" label={reason.family} />
         ) : (
@@ -253,7 +249,7 @@ export function PeopleResultCard({
         );
     } else if (reason) {
       // Legacy PLAN R4 (#688/#702/#967) pub-evidence / concept reason.
-      evidenceBlock = (
+      legacyBlock = (
         <MatchReason kind={reason.icon}>
           {reason.text}
           {/* #967 — concrete proof behind the count: a representative matching
@@ -278,7 +274,7 @@ export function PeopleResultCard({
       );
     } else if (snippet) {
       // Self-evident bio/overview/areas highlight from a self-reported field.
-      evidenceBlock = (
+      legacyBlock = (
         <div className="text-[13px] leading-snug text-[#4a4a4a]">
           <HighlightedSnippet html={snippet} />
         </div>
@@ -286,7 +282,7 @@ export function PeopleResultCard({
     } else if (hit.humanizedAreas && hit.humanizedAreas.labels.length > 0) {
       // #824 follow-up — last-resort humanized research areas (no under_scores),
       // replacing today's raw slug dump. Only present when the flag is on.
-      evidenceBlock = (
+      legacyBlock = (
         <HumanizedAreas
           labels={hit.humanizedAreas.labels}
           matchedIndex={hit.humanizedAreas.matchedIndex}
@@ -311,7 +307,14 @@ export function PeopleResultCard({
     (fallbackEvidence.kind === "concepts" ||
       fallbackEvidence.kind === "areas" ||
       fallbackEvidence.kind === "none");
-  const suppressIdentityFallback = grants.length > 0 && primaryIsIdentityFallback;
+  // #1366 follow-up — funding PROMOTES to the prominent primary slot ONLY when there
+  // is no first-class pub evidence line (the strongest line is an identity fallback).
+  // The branch data has no comparable cross-signal strength score, so "funding is the
+  // strongest signal" is exactly this structural condition — a concept-tagged grant
+  // does NOT preempt a real pub line (which would also jank, since grant strength
+  // loads async). ponytail: structural promotion, known synchronously on first paint;
+  // swap in a normalized relevance weight if/when one exists across pub + funding.
+  const promoteFunding = grants.length > 0 && primaryIsIdentityFallback;
 
   // Stretched-link card (rep-papers disclosure): the row is a `<div>` and the
   // NAME is the profile `<Link>` whose `after:absolute inset-0` overlay makes the
@@ -319,6 +322,58 @@ export function PeopleResultCard({
   // `+N more` link sit ABOVE that overlay with `relative z-10`, so a disclosure
   // click never navigates. The analytics beacon rides the name link.
   const profileHref = `${profilePath(hit.slug)}#publications`;
+
+  // #1366 follow-up — Funding rendered ONCE in the slot its tier dictates: the full
+  // badge when it leads (promoted, or the legacy non-tiered path), else a compact
+  // "Also matched" dot row. Same KeyFunding panel + expand state across tiers. #1359 —
+  // concept-tagged grants read "tagged <Concept>" (filled dot / underline); a literal
+  // text match reads "mention '<query>'" (hollow dot / honesty note).
+  const fundingTagged = grantsStrength === "tagged" && grantConceptLabel.length > 0;
+  // Full badge unless we're in the tiered (stacked) context and funding isn't promoted —
+  // then it's a compact "Also matched" dot. The single-evidence / legacy paths (not
+  // stacked) keep the full Funding row exactly as before.
+  const fundingFull = promoteFunding || !stacked;
+  const fundingCount = `${Math.min(grantsTotal, hit.grantCount)} of ${hit.grantCount} grants`;
+  const fundingNode =
+    grants.length > 0 ? (
+      <>
+        {fundingFull ? (
+          <MatchAwareReason
+            kind="funding"
+            prefix={`${fundingCount} ${fundingTagged ? "tagged" : "mention"}`}
+            label={fundingTagged ? grantConceptLabel : `“${qParam}”`}
+            underline={fundingTagged}
+            canExpand
+            expanded={fundingExpanded}
+            onToggle={() => setFundingExpanded((v) => !v)}
+            panelId={fundingPanelId}
+          />
+        ) : (
+          <LesserReason
+            dotClassName={fundingTagged ? "bg-[#2f6b3a]" : "border-[1.5px] border-[#2f6b3a]"}
+            weak={!fundingTagged}
+            suffix={` · ${fundingCount}`}
+            canExpand
+            expanded={fundingExpanded}
+            onToggle={() => setFundingExpanded((v) => !v)}
+            panelId={fundingPanelId}
+            srLabel="key funding"
+          >
+            <span className="font-medium text-[#52514a]">Funding</span> ·{" "}
+            {fundingTagged ? <>tagged {grantConceptLabel}</> : <>mentions “{qParam}”</>}
+          </LesserReason>
+        )}
+        {fundingExpanded ? (
+          <KeyFunding
+            grants={grants}
+            total={grantsTotal}
+            profileHref={profileHref}
+            panelId={fundingPanelId}
+            mentionNote={!fundingFull && !fundingTagged}
+          />
+        ) : null}
+      </>
+    ) : null;
 
   return (
     <div className="group relative grid grid-cols-[56px_1fr_auto] gap-4 border-b border-[#e3e2dd] py-5 hover:bg-[#fafaf8]">
@@ -350,45 +405,60 @@ export function PeopleResultCard({
         {deptLine ? (
           <div className="mb-2 text-xs text-muted-foreground">{deptLine}</div>
         ) : null}
-        {/* #1366 — the evidence reason line(s): stacked `<EvidenceLine>` (each with
-            its own rep-papers disclosure) under the flag, the single object/legacy
-            chain otherwise. Suppressed when a topic-matching grant supersedes a
-            generic no-match identity fallback. */}
-        {suppressIdentityFallback ? null : evidenceBlock}
-        {/* Funding evidence row (SEARCH_EVIDENCE_ROWS) — topic-matching grants, shown
-            only when ≥1 matched (hide-when-empty, §4.4 last). Own disclosure state;
-            records loaded eagerly so expand is instant. #1361 — the claim now mirrors
-            the publications "mention" line: "N of M grants mention 'query'" with a
-            normal-weight prefix and the semibold query term (replaces the §4.6
-            count-only "N grants"). N = matching grants, M = the scholar's grant total. */}
-        {grants.length > 0 ? (
+        {/* #1366 follow-up — tiered evidence: ONE prominent primary signal + a compact
+            "Also matched" group (the demoted lesser stacked lines + the Funding row).
+            Funding LEADS instead when it's the strongest signal (promoted — no
+            first-class pub line). The legacy (flag-off) path renders its single block
+            plus the full Funding row below, unchanged. */}
+        {promoteFunding ? (
+          fundingNode
+        ) : (
           <>
-            <MatchAwareReason
-              kind="funding"
-              // #1359 — concept-tagged grants read "N of M grants tagged <Concept>"
-              // (underlined concept term, mirroring the concept publications line);
-              // a literal text match stays "N of M grants mention '<query>'". Needs a
-              // concept label to render tagged, else it falls back to the mention line.
-              prefix={`${Math.min(grantsTotal, hit.grantCount)} of ${hit.grantCount} grants ${
-                grantsStrength === "tagged" && grantConceptLabel ? "tagged" : "mention"
-              }`}
-              label={grantsStrength === "tagged" && grantConceptLabel ? grantConceptLabel : `“${qParam}”`}
-              underline={grantsStrength === "tagged" && grantConceptLabel.length > 0}
-              canExpand
-              expanded={fundingExpanded}
-              onToggle={() => setFundingExpanded((v) => !v)}
-              panelId={fundingPanelId}
-            />
-            {fundingExpanded ? (
-              <KeyFunding
-                grants={grants}
-                total={grantsTotal}
-                profileHref={profileHref}
-                panelId={fundingPanelId}
+            {lines ? (
+              <EvidenceLine
+                evidence={lines[0]}
+                cwid={hit.cwid}
+                slug={hit.slug}
+                pubCount={hit.pubCount}
+                q={q}
+                keyPaperConfig={keyPaperConfig}
+                hasQuery={hasQuery}
+                badged={evidenceRows}
+                claimedPmids={claimedPmids}
+                tier="primary"
               />
+            ) : (
+              legacyBlock
+            )}
+            {/* "Also matched" — the demoted signals, under a dashed divider. Only the
+                STACKED (`evidenceLines`) context tiers; shown when there is ≥1 lesser
+                line or a (demoted) Funding row. */}
+            {stacked && lines && (lines.length > 1 || grants.length > 0) ? (
+              <div className="mt-3 border-t border-dashed border-[#e3e2dd] pt-2.5">
+                <div className="mb-0.5 text-[11px] font-medium text-[#9a958a]">Also matched</div>
+                {lines.slice(1).map((ev, i) => (
+                  <EvidenceLine
+                    key={i + 1}
+                    evidence={ev}
+                    cwid={hit.cwid}
+                    slug={hit.slug}
+                    pubCount={hit.pubCount}
+                    q={q}
+                    keyPaperConfig={keyPaperConfig}
+                    hasQuery={hasQuery}
+                    badged={evidenceRows}
+                    claimedPmids={claimedPmids}
+                    tier="lesser"
+                  />
+                ))}
+                {grants.length > 0 ? fundingNode : null}
+              </div>
             ) : null}
+            {/* Non-stacked (single-evidence + legacy) keeps the full Funding row below
+                the block, unchanged from before the tiered redesign. */}
+            {!stacked && grants.length > 0 ? fundingNode : null}
           </>
-        ) : null}
+        )}
       </div>
       <div className="flex flex-col items-end gap-1 whitespace-nowrap text-right text-xs text-muted-foreground">
         {hit.pubCount > 0 ? (

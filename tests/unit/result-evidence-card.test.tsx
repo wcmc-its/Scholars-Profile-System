@@ -383,6 +383,102 @@ describe("<RepresentativePapers> — the disclosure stack", () => {
     expect(mark?.textContent).toBe("Stem");
     expect(mark?.getAttribute("class")).toContain("bg-[#b31b1b]/10");
   });
+
+  it("#1366 — renders the 'text mention, not a curated tag' honesty note when mentionNote", () => {
+    render(
+      <RepresentativePapers papers={PAPERS} total={3} profileHref="/p/x#publications" mentionNote />,
+    );
+    expect(screen.getByText(/text mention in the abstract, not a curated tag/i)).toBeTruthy();
+  });
+
+  it("#1366 — omits the honesty note by default", () => {
+    const { container } = render(
+      <RepresentativePapers papers={PAPERS} total={3} profileHref="/p/x#publications" />,
+    );
+    expect(container.textContent).not.toMatch(/not a curated tag/);
+  });
+});
+
+describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='lesser')", () => {
+  const dotOf = (c: HTMLElement) => c.querySelector("span.rounded-full");
+
+  it("method lesser ⇒ a FILLED dot + 'Method · family' + abbreviated '· N of M' (no 'publications', no badge pill)", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "CRISPR genome editing", tools: [], count: 3 }}
+        pubCount={44}
+        tier="lesser"
+      />,
+    );
+    expect(container.textContent).toMatch(/Method · CRISPR genome editing/);
+    expect(container.textContent).toMatch(/· 3 of 44/);
+    expect(container.textContent).not.toMatch(/publications/);
+    expect(dotOf(container)?.className).toMatch(/bg-\[#8a4a1f\]/); // filled = curated
+  });
+
+  it("research area lesser ⇒ FILLED dot + 'Research area · label'", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "topic", label: "Stem Cell & Regenerative Medicine", id: "stem", count: 2 }}
+        pubCount={44}
+        tier="lesser"
+      />,
+    );
+    expect(container.textContent).toMatch(/Research area · Stem Cell & Regenerative Medicine/);
+    expect(container.textContent).toMatch(/· 2 of 44/);
+    expect(dotOf(container)?.className).toMatch(/bg-\[#2c4f6e\]/);
+  });
+
+  it("publications:mention lesser ⇒ a HOLLOW (bordered) dot + 'Keyword'", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "publications", strength: "mention", text: "x", term: "crispr", count: 2 }}
+        pubCount={44}
+        tier="lesser"
+      />,
+    );
+    expect(container.textContent).toMatch(/Keyword/);
+    expect(dotOf(container)?.className).toMatch(/border-\[1\.5px\]/); // hollow = literal mention
+    expect(dotOf(container)?.className).not.toMatch(/bg-\[#/);
+  });
+
+  it("publications:tagged lesser ⇒ a FILLED dot + 'Concept'", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "publications", strength: "tagged", text: "x", term: "Melanoma", count: 5 }}
+        pubCount={44}
+        tier="lesser"
+      />,
+    );
+    expect(container.textContent).toMatch(/Concept/);
+    expect(dotOf(container)?.className).toMatch(/bg-\[#34408a\]/); // filled = curated tag
+  });
+
+  it("clinical lesser ⇒ label-only dot row, NO count", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "clinical", specialty: "Cardiology", boardCertified: false }}
+        pubCount={44}
+        tier="lesser"
+      />,
+    );
+    expect(container.textContent).toMatch(/Clinical · Cardiology/);
+    expect(container.textContent).not.toMatch(/of 44/);
+  });
+
+  it("a lesser row still offers the disclosure chevron when canExpand", () => {
+    const onToggle = () => {};
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "Flow cytometry", tools: [], count: 1 }}
+        pubCount={10}
+        tier="lesser"
+        canExpand
+        onToggle={onToggle}
+      />,
+    );
+    expect(container.querySelector("button")).toBeTruthy();
+  });
 });
 
 describe("<ResultEvidence> — #1366 count suffix (method / research area)", () => {

@@ -34,6 +34,7 @@ export function EvidenceLine({
   hasQuery,
   badged,
   claimedPmids,
+  tier = "primary",
 }: {
   evidence: ResultEvidenceT;
   cwid: string;
@@ -45,6 +46,10 @@ export function EvidenceLine({
   badged: boolean;
   /** Shared across a card's stacked lines for exemplar de-dup. */
   claimedPmids: MutableRefObject<Set<string>>;
+  /** #1366 follow-up — "primary" = the prominent lead line; "lesser" = a compact
+   *  "Also matched" dot row. Only restyles the summary row; the disclosure panel,
+   *  lazy fetch, and de-dup are identical across tiers. */
+  tier?: "primary" | "lesser";
 }) {
   const [expanded, setExpanded] = useState(false);
   const panelId = useId();
@@ -71,6 +76,10 @@ export function EvidenceLine({
   });
   const [exemplarStatus, setExemplarStatus] = useState<ExemplarFetchStatus>("idle");
   const exemplarFetched = useRef(false);
+  // Whether this line's exemplar fetch actually excluded sibling-claimed pmids — so
+  // an empty resolve can be read as "papers shown under a stronger sibling" (drop the
+  // chevron) vs "genuinely nothing renderable" (keep the fallback link). See canExpand.
+  const exemplarExcluded = useRef(false);
 
   // publications kind under reason-from-doc — pubs arrive empty, fetched lazily.
   const wantsLazyKeyPaper =
@@ -125,6 +134,7 @@ export function EvidenceLine({
     exemplarFetched.current = true;
     setExemplarStatus("loading");
     const ex = Array.from(claimedPmids.current).join(",");
+    exemplarExcluded.current = ex.length > 0;
     const url = `/api/scholar/${encodeURIComponent(cwid)}/method-exemplar?${exemplarQuery}${
       ex ? `&exclude=${encodeURIComponent(ex)}` : ""
     }`;
@@ -149,11 +159,19 @@ export function EvidenceLine({
       ? (evidenceCount ?? inlinePubs.length)
       : exemplar.total;
 
+  // #1366 follow-up — the chevron must not offer an empty panel. The key-paper path
+  // already drops on empty-resolve; the exemplar path was unconditionally `true`
+  // (optimistic), so a line whose papers were all claimed by a higher-priority
+  // sibling expanded to nothing while its count still read "2 of 44". Drop the
+  // chevron ONLY for that de-dup case (this line actually excluded sibling pmids);
+  // a genuine empty (no exclude — every family/topic pub suppressed) keeps its
+  // `fallback` profile link, the existing graceful degradation.
   const canExpand = wantsLazyKeyPaper
     ? !(keyPaperStatus === "done" && keyPapers.length === 0)
     : inlinePubs != null
       ? inlinePubs.length > 0
-      : isLazyExemplar;
+      : isLazyExemplar &&
+        !(exemplarStatus === "done" && exemplar.pubs.length === 0 && exemplarExcluded.current);
 
   const onToggle = useCallback(() => {
     if (isLazyExemplar) ensureExemplar();
@@ -181,6 +199,7 @@ export function EvidenceLine({
         slug={slug}
         badged={badged}
         pubCount={pubCount}
+        tier={tier}
       />
       {expanded && canExpand ? (
         <RepresentativePapers
@@ -190,6 +209,12 @@ export function EvidenceLine({
           status={isLazyExemplar ? exemplarStatus : wantsLazyKeyPaper ? keyPaperStatus : "done"}
           panelId={panelId}
           fallback={exemplarFallback}
+          // #1366 follow-up — the honesty note only on a hollow-dot lesser mention row.
+          mentionNote={
+            tier === "lesser" &&
+            evidence.kind === "publications" &&
+            evidence.strength === "mention"
+          }
         />
       ) : null}
     </>

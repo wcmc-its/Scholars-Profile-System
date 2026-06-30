@@ -548,11 +548,16 @@ export async function fetchKeyPaper(args: {
    *  set, titles that carry the concept term get `<mark>`-highlighted even if the
    *  literal query isn't in the title (the common tagged-match case). */
   conceptLabel?: string;
+  /** #1366 follow-up — pmids already claimed by a sibling stacked line. Dropped at
+   *  the QUERY level (`must_not`) so this line pulls its top-N from the NON-claimed
+   *  pool, instead of fetching then post-filtering (which could empty the panel). */
+  exclude?: string[];
 }): Promise<RepresentativePub[]> {
   const cwid = args.cwid?.trim();
   const contentQuery = args.contentQuery?.trim() ?? "";
   const conceptLabel = args.conceptLabel?.trim() ?? "";
   const descriptorUis = args.descriptorUis ?? [];
+  const exclude = args.exclude ?? [];
   if (!cwid) return [];
   // Need at least one way to identify a relevant pub: a resolved concept subtree
   // OR a literal query to scan. Neither ⇒ nothing to fetch.
@@ -576,6 +581,9 @@ export async function fetchKeyPaper(args: {
     "key-paper",
     cwid,
     descriptorUis.length > 0 ? [...descriptorUis].sort() : `q:${contentQuery}`,
+    // #1366 — the exclude set changes the result, so it MUST bucket the cache (two
+    // lines with different claimed-pmid sets must not collide on the same key).
+    exclude.length > 0 ? [...exclude].sort() : null,
   ]);
 
   // The admitted SET is the bool `filter` (author + concept/free-text) — UNCHANGED
@@ -585,6 +593,9 @@ export async function fetchKeyPaper(args: {
   const boolQuery = {
     bool: {
       filter: [{ term: { wcmAuthorCwids: cwid } }, matchFilter],
+      // #1366 — exclude the sibling-claimed pmids from the candidate pool itself, so
+      // the panel under-fills from the remaining pool rather than resolving empty.
+      ...(exclude.length > 0 ? { must_not: [{ terms: { pmid: exclude } }] } : {}),
       ...(contentQuery.length > 0
         ? {
             should: [
