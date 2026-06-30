@@ -40,6 +40,32 @@ function buildDataStack(
 }
 
 describe("DataStack", () => {
+  // Estate consolidation (plan §4.4): with useSharedVpc on, Aurora + OpenSearch
+  // land in the explicit, AZ-paired db-tier subnets and the stack owns no VPC.
+  describe("shared VPC placement (useSharedVpc on)", () => {
+    const { template } = buildDataStack("prod", { useSharedVpc: true });
+    const DB = ["subnet-0d35923e345653d0d", "subnet-099a9ebefc36ee888"];
+
+    it("Aurora's subnet group uses the db-tier subnet ids", () => {
+      template.hasResourceProperties("AWS::RDS::DBSubnetGroup", {
+        SubnetIds: Match.arrayWith(DB),
+      });
+    });
+
+    it("OpenSearch lands only in db-tier subnets", () => {
+      const domain = Object.values(
+        template.findResources("AWS::OpenSearchService::Domain"),
+      )[0];
+      const ids: string[] = domain?.Properties?.VPCOptions?.SubnetIds ?? [];
+      expect(ids.length).toBeGreaterThan(0);
+      for (const id of ids) expect(DB).toContain(id);
+    });
+
+    it("creates no VPC of its own", () => {
+      template.resourceCountIs("AWS::EC2::VPC", 0);
+    });
+  });
+
   describe("prod", () => {
     const { template } = buildDataStack("prod");
 
@@ -511,57 +537,4 @@ describe("DataStack", () => {
     });
   });
 
-  // docs/etl-vpc-migration-handoff.md (shared-VPC plan), step 3 — datastore
-  // ingress from the per-env ETL SG in lts-reciter-vpc01, referenced cross-VPC
-  // over the peer (NOT a CIDR — both envs share one CIDR space). Gated on
-  // etlVpcPeeringEnabled (present for the source-reach probe before the cadence
-  // moves). The real SG id is a config placeholder (plan §12 Q9), so the fixture
-  // sets a synthetic id. An SG-reference ingress renders as a SEPARATE
-  // AWS::EC2::SecurityGroupIngress resource (the old CIDR rule inlined into the
-  // SG's SecurityGroupIngress array).
-  describe("ETL cadence VPC peering ingress (etlVpcPeeringEnabled)", () => {
-    const ETL_SG = "sg-staging-etl-test";
-    const { template } = buildDataStack("staging", {
-      etlVpcPeeringEnabled: true,
-      etlComputeSecurityGroupId: ETL_SG,
-    });
-
-    it("Aurora admits the per-env ETL SG by reference on 3306", () => {
-      template.hasResourceProperties("AWS::EC2::SecurityGroupIngress", {
-        SourceSecurityGroupId: ETL_SG,
-        FromPort: 3306,
-        ToPort: 3306,
-        IpProtocol: "tcp",
-      });
-    });
-
-    it("OpenSearch admits the per-env ETL SG by reference on 443", () => {
-      template.hasResourceProperties("AWS::EC2::SecurityGroupIngress", {
-        SourceSecurityGroupId: ETL_SG,
-        FromPort: 443,
-        ToPort: 443,
-        IpProtocol: "tcp",
-      });
-    });
-
-    it("uses no CIDR and no cross-account owner id for the peer ingress (same-account SG reference)", () => {
-      const ingress = template.findResources("AWS::EC2::SecurityGroupIngress");
-      const peerRules = Object.values(ingress).filter(
-        (r) => r.Properties?.SourceSecurityGroupId === ETL_SG,
-      );
-      // One per datastore (Aurora 3306 + OpenSearch 443).
-      expect(peerRules).toHaveLength(2);
-      for (const r of peerRules) {
-        expect(r.Properties?.CidrIp).toBeUndefined();
-        expect(r.Properties?.SourceSecurityGroupOwnerId).toBeUndefined();
-      }
-      // The old CIDR allowlist must be gone entirely.
-      const cidrRules = Object.values(ingress).filter(
-        (r) =>
-          r.Properties?.CidrIp === "10.46.231.0/24" ||
-          r.Properties?.CidrIp === "10.46.134.0/24",
-      );
-      expect(cidrRules).toHaveLength(0);
-    });
-  });
 });

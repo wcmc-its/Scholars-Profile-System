@@ -1,20 +1,25 @@
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
+import { type SpsEnvConfig } from "../lib/config";
 import { NetworkStack } from "../lib/network-stack";
 import { makeFixture, TEST_ACCOUNT } from "./test-utils";
 
-function buildAppStack(envName: "staging" | "prod"): {
+function buildAppStack(
+  envName: "staging" | "prod",
+  envConfigOverride: Partial<SpsEnvConfig> = {},
+): {
   template: Template;
   stack: AppStack;
 } {
   const fixture = makeFixture(envName);
+  const envConfig = { ...fixture.envConfig, ...envConfigOverride };
   const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
   });
   const stack = new AppStack(fixture.app, `Sps-App-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     vpc: network.vpc,
     appSecurityGroup: network.appSecurityGroup,
     etlSecurityGroup: network.etlSecurityGroup,
@@ -30,6 +35,46 @@ function buildAppStack(envName: "staging" | "prod"): {
 const EC2_DESCRIPTION_ALLOWED = /^[a-zA-Z0-9. _\-:/()#,@[\]+=&;{}!$*]+$/;
 
 describe("AppStack", () => {
+  // Estate consolidation (plan §4.4/§5.5): with useSharedVpc on, compute lands
+  // in app2, the public ALB in dmz, and SPS owns no VPC interface/gateway
+  // endpoints (it rides its-reciter's; a privateDNS SM endpoint would hijack
+  // co-tenant DNS).
+  describe("shared VPC placement (useSharedVpc on)", () => {
+    const { template } = buildAppStack("staging", { useSharedVpc: true });
+    const APP2 = ["subnet-0c6593fb9c9a165c3", "subnet-070cbc242efbddc3c"];
+    const DMZ = ["subnet-09a6fab648280ca19", "subnet-0485fefe267b06736"];
+
+    it("places the internal ALB in the app2 subnets", () => {
+      const albs = Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::LoadBalancer"),
+      );
+      const internal = albs.find((a) => a.Properties?.Scheme === "internal");
+      expect(internal?.Properties?.Subnets).toEqual(
+        expect.arrayContaining(APP2),
+      );
+    });
+
+    it("places the public ALB in the dmz subnets", () => {
+      const albs = Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::LoadBalancer"),
+      );
+      const pub = albs.find((a) => a.Properties?.Scheme === "internet-facing");
+      expect(pub?.Properties?.Subnets).toEqual(expect.arrayContaining(DMZ));
+    });
+
+    it("runs the ECS service in the app2 subnets", () => {
+      template.hasResourceProperties("AWS::ECS::Service", {
+        NetworkConfiguration: {
+          AwsvpcConfiguration: { Subnets: Match.arrayWith(APP2) },
+        },
+      });
+    });
+
+    it("creates no VPC interface/gateway endpoints (rides its-reciter's)", () => {
+      template.resourceCountIs("AWS::EC2::VPCEndpoint", 0);
+    });
+  });
+
   describe("prod", () => {
     const { template } = buildAppStack("prod");
 

@@ -18,6 +18,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
+import { resolveTierSubnets } from "./shared-vpc-subnets";
 
 /**
  * ADOT collector image, pinned by digest.
@@ -180,6 +181,18 @@ export class AppStack extends Stack {
       albSecurityGroup,
     } = props;
     const env = envConfig.envName;
+
+    // Estate-consolidation subnet placement (plan §4.4): the app service +
+    // internal ALB (compute) land in the app2 tier, the optional public ALB in
+    // the dmz tier, when useSharedVpc is on; else the standalone Sps VPC's
+    // PRIVATE_WITH_EGRESS / PUBLIC tiers — byte-identical otherwise.
+    const appSubnets = resolveTierSubnets(this, envConfig, "app", "AppSubnet");
+    const albSubnets = resolveTierSubnets(
+      this,
+      envConfig,
+      "alb",
+      "PublicAlbSubnet",
+    );
 
     // ------------------------------------------------------------------
     // Secrets lookup. SecretsStack defines the full set; AppStack reads the
@@ -2238,7 +2251,7 @@ export class AppStack extends Stack {
       loadBalancerName: `sps-public-${env}`,
       vpc,
       internetFacing: true,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      vpcSubnets: albSubnets,
       securityGroup: albSecurityGroup,
     });
 
@@ -2246,7 +2259,7 @@ export class AppStack extends Stack {
       loadBalancerName: `sps-internal-${env}`,
       vpc,
       internetFacing: false,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      vpcSubnets: appSubnets,
       securityGroup: internalAlbSecurityGroup,
     });
 
@@ -2388,7 +2401,7 @@ export class AppStack extends Stack {
       taskDefinition: appTaskDefinition,
       desiredCount,
       assignPublicIp: false,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      vpcSubnets: appSubnets,
       securityGroups: [appSecurityGroup],
       minHealthyPercent: 100,
       maxHealthyPercent: 200,
@@ -2724,50 +2737,59 @@ export class AppStack extends Stack {
     // ingress -- adding the ETL Lambda SG ingress on each interface
     // endpoint at EtlStack time would re-touch this stack's SG.
     // ------------------------------------------------------------------
-    const vpcEndpointSecurityGroup = new ec2.SecurityGroup(
-      this,
-      "VpcEndpointSecurityGroup",
-      {
+    // Skipped when sharing its-reciter-vpc01 (plan §4.4 / §5.5 / G5): a
+    // privateDNS Secrets Manager endpoint flips VPC-wide private DNS, which
+    // would hijack the co-tenant ReCiter workloads' SM resolution, and a gateway
+    // endpoint mutates shared route tables SPS does not own. its-reciter already
+    // provides the S3/DynamoDB gateway + Lambda interface endpoints, and SPS
+    // reaches Secrets Manager over its-reciter's NAT. SPS owns these endpoints
+    // only in the standalone Sps VPC it creates.
+    if (!envConfig.useSharedVpc) {
+      const vpcEndpointSecurityGroup = new ec2.SecurityGroup(
+        this,
+        "VpcEndpointSecurityGroup",
+        {
+          vpc,
+          description: `SPS VPC interface endpoints (${env}) -- HTTPS from app + ETL SGs.`,
+          allowAllOutbound: false,
+        },
+      );
+      // Peer.securityGroupId is used instead of passing the L2 SG directly:
+      // L2 `addIngressRule(peerSg, ...)` auto-mirrors the rule by adding a
+      // matching egress on the peer SG. For peers in *another stack*, that
+      // mutates the other stack's resources and closes a Network -> App
+      // cycle. The Peer.securityGroupId variant treats the peer as a bare
+      // ID, suppressing the egress mirror.
+      vpcEndpointSecurityGroup.addIngressRule(
+        ec2.Peer.securityGroupId(appSecurityGroup.securityGroupId),
+        ec2.Port.tcp(443),
+        `App SG to interface endpoints HTTPS (${env})`,
+      );
+      vpcEndpointSecurityGroup.addIngressRule(
+        ec2.Peer.securityGroupId(etlSecurityGroup.securityGroupId),
+        ec2.Port.tcp(443),
+        `ETL SG to interface endpoints HTTPS (${env})`,
+      );
+
+      new ec2.InterfaceVpcEndpoint(this, "SecretsManagerEndpoint", {
         vpc,
-        description: `SPS VPC interface endpoints (${env}) -- HTTPS from app + ETL SGs.`,
-        allowAllOutbound: false,
-      },
-    );
-    // Peer.securityGroupId is used instead of passing the L2 SG directly:
-    // L2 `addIngressRule(peerSg, ...)` auto-mirrors the rule by adding a
-    // matching egress on the peer SG. For peers in *another stack*, that
-    // mutates the other stack's resources and closes a Network -> App
-    // cycle. The Peer.securityGroupId variant treats the peer as a bare
-    // ID, suppressing the egress mirror.
-    vpcEndpointSecurityGroup.addIngressRule(
-      ec2.Peer.securityGroupId(appSecurityGroup.securityGroupId),
-      ec2.Port.tcp(443),
-      `App SG to interface endpoints HTTPS (${env})`,
-    );
-    vpcEndpointSecurityGroup.addIngressRule(
-      ec2.Peer.securityGroupId(etlSecurityGroup.securityGroupId),
-      ec2.Port.tcp(443),
-      `ETL SG to interface endpoints HTTPS (${env})`,
-    );
+        service: ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
+        subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        securityGroups: [vpcEndpointSecurityGroup],
+        privateDnsEnabled: true,
+        // `open: false` suppresses CDK's default ingress that opens :443 to
+        // the whole VPC CIDR. The two SG-to-SG rules above are the
+        // intentional surface; nothing else inside the VPC should be able
+        // to reach the endpoint.
+        open: false,
+      });
 
-    new ec2.InterfaceVpcEndpoint(this, "SecretsManagerEndpoint", {
-      vpc,
-      service: ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-      securityGroups: [vpcEndpointSecurityGroup],
-      privateDnsEnabled: true,
-      // `open: false` suppresses CDK's default ingress that opens :443 to
-      // the whole VPC CIDR. The two SG-to-SG rules above are the
-      // intentional surface; nothing else inside the VPC should be able
-      // to reach the endpoint.
-      open: false,
-    });
-
-    new ec2.GatewayVpcEndpoint(this, "S3GatewayEndpoint", {
-      vpc,
-      service: ec2.GatewayVpcEndpointAwsService.S3,
-      subnets: [{ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }],
-    });
+      new ec2.GatewayVpcEndpoint(this, "S3GatewayEndpoint", {
+        vpc,
+        service: ec2.GatewayVpcEndpointAwsService.S3,
+        subnets: [{ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }],
+      });
+    }
 
     // ------------------------------------------------------------------
     // Outputs.

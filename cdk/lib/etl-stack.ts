@@ -22,6 +22,7 @@ import * as sfn from "aws-cdk-lib/aws-stepfunctions";
 import * as tasks from "aws-cdk-lib/aws-stepfunctions-tasks";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
+import { resolveTierSubnets } from "./shared-vpc-subnets";
 
 /** Props for {@link EtlStack}. */
 export interface EtlStackProps extends StackProps {
@@ -141,81 +142,19 @@ export class EtlStack extends Stack {
       description: `ETL SG to SPS internal ALB HTTP (${env}) -- /api/revalidate`,
     });
 
-    // ------------------------------------------------------------------
-    // ETL cadence VPC relocation (docs/etl-vpc-migration-handoff.md, shared-VPC
-    // plan).
-    //
-    // The cadence task family reads on-prem LDAP + the 10.46.x source DBs
-    // (reachable only via the TGW) and writes Aurora / OpenSearch / the
-    // internal ALB (in the Sps VPC). The Sps VPC can't be TGW-attached
-    // (10.20/10.10 overlap), so when `etlCadenceVpcRelocated` is set the
-    // cadence steps run in the shared TGW-attached lts-reciter-vpc01
-    // (envConfig.etlComputeVpc — hosting BOTH envs' ETL) and reach the
-    // datastores back in the Sps VPC over an intra-account VPC peering
-    // connection. Env isolation is by SG, not network: each env's tasks attach
-    // its own per-env ETL SG (staging-ETL-SG / prod-ETL-SG), which is the SAME
-    // SG its datastores admit by cross-VPC reference (DataStack + the ALB rule
-    // below). OFF by default: the peering + datastore SG-reference ingress must
-    // exist first, or the move regresses the (working) write side. The subnet
-    // selection + SG are built ONCE here and shared by every cadence step (the
-    // reconcilers + curated backup don't move — they only touch the Sps VPC's
-    // own datastores and stay on `etlSecurityGroup`).
-    // ------------------------------------------------------------------
-    const relocateCadence = envConfig.etlCadenceVpcRelocated;
-    let cadenceSubnets: ec2.SubnetSelection = {
-      subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-    };
-    let cadenceSecurityGroups: ec2.ISecurityGroup[] = [etlSecurityGroup];
-    if (relocateCadence) {
-      const cadVpcCfg = envConfig.etlComputeVpc;
-      // Place ENIs in the lts-reciter-vpc01 subnets by id (no context lookup →
-      // synth stays deterministic without account creds). Distinct construct
-      // ids from the ED bridge's EdExportSubnet* so the two imports don't
-      // collide. No Vpc import needed — subnets are selected by id and the SG
-      // is imported by id below.
-      cadenceSubnets = {
-        subnets: cadVpcCfg.appSubnetIds.map((id, i) =>
-          ec2.Subnet.fromSubnetId(this, `EtlCadenceSubnet${i}`, id),
-        ),
-      };
-      // The egress-only per-env ETL SG (staging-ETL-SG / prod-ETL-SG) lives in
-      // lts-reciter-vpc01 and is created by networking; IMPORT it by id — the
-      // SAME id DataStack references for Aurora/OpenSearch ingress and the ALB
-      // rule below uses. Import (not create): creating it here and referencing
-      // it in DataStack would form a dependency cycle (DataStack is a dependency
-      // of EtlStack). allowAllOutbound + no-ingress are properties of the real
-      // SG (networking owns them): allowAllOutbound covers the TGW (on-prem +
-      // 10.46.x reads), the peer (datastore writes), and NAT (S3 / Secrets
-      // Manager / DynamoDB / public APIs); no ingress — a batch task accepts no
-      // inbound.
-      cadenceSecurityGroups = [
-        ec2.SecurityGroup.fromSecurityGroupId(
-          this,
-          "EtlComputeSg",
-          envConfig.etlComputeSecurityGroupId,
-        ),
-      ];
-    }
-
-    // Internal-ALB ingress from the per-env ETL SG in lts-reciter-vpc01
-    // (etl:revalidate POSTs to /api/revalidate). Gated on the PEERING flag, not
-    // relocation, so the rule is present for the source-reach probe before the
-    // cadence tasks move. Aurora (:3306) + OpenSearch (:443) ingress live in
-    // DataStack (it owns those SGs); the ALB SG lives in AppStack, so we attach
-    // a standalone ingress here (same pattern as InternalAlbIngressFromEtl
-    // above). SG reference by id (same account + region) — the SAME id DataStack
-    // and the task attachment use; no CIDR (both envs share one CIDR space, so a
-    // CIDR rule could not distinguish staging from prod).
-    if (envConfig.etlVpcPeeringEnabled) {
-      new ec2.CfnSecurityGroupIngress(this, "InternalAlbIngressFromEtlCadenceVpc", {
-        groupId: internalAlbSgId,
-        ipProtocol: "tcp",
-        fromPort: 80,
-        toPort: 80,
-        sourceSecurityGroupId: envConfig.etlComputeSecurityGroupId,
-        description: `${env}-ETL-SG in lts-reciter-vpc01 to SPS internal ALB HTTP (${env}) -- /api/revalidate`,
-      });
-    }
+    // Estate-consolidation subnet placement (plan §4.4): every ETL Fargate task
+    // (cadence + reconcilers + curated backup + opportunity projection + the ED
+    // import side) lands in the app2 tier when useSharedVpc is on, else the
+    // standalone Sps VPC's PRIVATE_WITH_EGRESS — byte-identical otherwise. Built
+    // ONCE and reused by every task placement below. (#1310's cross-VPC
+    // relocation branch was removed in the supersede — plan §8.8.)
+    const etlTaskSubnets = resolveTierSubnets(
+      this,
+      envConfig,
+      "app",
+      "EtlTaskSubnet",
+    );
+    const etlTaskSecurityGroups: ec2.ISecurityGroup[] = [etlSecurityGroup];
 
     // ------------------------------------------------------------------
     // ETL secrets, looked up by name (SecretsStack owns the stubs; values
@@ -702,10 +641,9 @@ export class EtlStack extends Stack {
           platformVersion: ecs.FargatePlatformVersion.LATEST,
         }),
         assignPublicIp: false,
-        // Sps VPC by default; the scholars-dev/prod app subnets + cadence SG
-        // when relocated (docs/etl-vpc-migration-handoff.md).
-        subnets: cadenceSubnets,
-        securityGroups: cadenceSecurityGroups,
+        // app2 tier when useSharedVpc is on, else the local Sps VPC (plan §4.4).
+        subnets: etlTaskSubnets,
+        securityGroups: etlTaskSecurityGroups,
         containerOverrides: [
           {
             containerDefinition: etlContainer,
@@ -1331,7 +1269,7 @@ export class EtlStack extends Stack {
         platformVersion: ecs.FargatePlatformVersion.LATEST,
       }),
       assignPublicIp: false,
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      subnets: etlTaskSubnets,
       securityGroups: [etlSecurityGroup],
       containerOverrides: [
         {
@@ -1628,7 +1566,7 @@ export class EtlStack extends Stack {
         platformVersion: ecs.FargatePlatformVersion.LATEST,
       }),
       assignPublicIp: false,
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      subnets: etlTaskSubnets,
       securityGroups: [etlSecurityGroup],
       containerOverrides: [
         {
@@ -1799,7 +1737,7 @@ export class EtlStack extends Stack {
           platformVersion: ecs.FargatePlatformVersion.LATEST,
         }),
         assignPublicIp: false,
-        subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        subnets: etlTaskSubnets,
         securityGroups: [etlSecurityGroup],
         containerOverrides: [
           {
@@ -1934,7 +1872,7 @@ export class EtlStack extends Stack {
           platformVersion: ecs.FargatePlatformVersion.LATEST,
         }),
         assignPublicIp: false,
-        subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        subnets: etlTaskSubnets,
         securityGroups: [etlSecurityGroup],
         containerOverrides: [
           {
@@ -2168,7 +2106,7 @@ export class EtlStack extends Stack {
       const edImportTask = buildBridgeStep(
         "EdEmailVisibilityImport",
         "etl:ed:import-email-visibility",
-        { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        etlTaskSubnets,
         [etlSecurityGroup],
       );
       edExportTask.next(edImportTask);

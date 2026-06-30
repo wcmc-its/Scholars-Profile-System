@@ -3,6 +3,38 @@ import { NetworkStack } from "../lib/network-stack";
 import { makeFixture } from "./test-utils";
 
 describe("NetworkStack", () => {
+  // Estate consolidation (plan §5.3): with useSharedVpc on, the stack imports
+  // its-reciter-vpc01 instead of creating a VPC, and drops the resolver-rule
+  // associations (its-reciter already has them — re-associating would fail).
+  describe("shared VPC (useSharedVpc on)", () => {
+    const fixture = makeFixture("staging");
+    const stack = new NetworkStack(fixture.app, "Sps-Network-staging-shared", {
+      env: fixture.env,
+      envConfig: { ...fixture.envConfig, useSharedVpc: true },
+    });
+    const template = Template.fromStack(stack);
+
+    it("creates no VPC / subnets / NAT / IGW (imports the shared VPC)", () => {
+      template.resourceCountIs("AWS::EC2::VPC", 0);
+      template.resourceCountIs("AWS::EC2::Subnet", 0);
+      template.resourceCountIs("AWS::EC2::NatGateway", 0);
+      template.resourceCountIs("AWS::EC2::InternetGateway", 0);
+    });
+
+    it("drops the WCM resolver-rule associations", () => {
+      template.resourceCountIs(
+        "AWS::Route53Resolver::ResolverRuleAssociation",
+        0,
+      );
+    });
+
+    it("defines the per-env security groups against the imported VPC", () => {
+      template.hasResourceProperties("AWS::EC2::SecurityGroup", {
+        VpcId: "vpc-08a1873fc8eebae28",
+      });
+    });
+  });
+
   describe("prod", () => {
     const fixture = makeFixture("prod");
     const stack = new NetworkStack(fixture.app, "Sps-Network-prod", {
@@ -99,7 +131,7 @@ describe("NetworkStack", () => {
       expect(new Set(azs)).toEqual(new Set(["us-east-1a", "us-east-1b"]));
     });
 
-    it("creates no VPC peering connection by default (etlVpcPeeringEnabled off)", () => {
+    it("creates no VPC peering connection (consolidation has no peer)", () => {
       template.resourceCountIs("AWS::EC2::VPCPeeringConnection", 0);
       // No peer-CIDR route either (the base VPC still has its NAT/IGW routes).
       const peerRoutes = Object.values(
@@ -109,86 +141,4 @@ describe("NetworkStack", () => {
     });
   });
 
-  // docs/etl-vpc-migration-handoff.md (shared-VPC plan), step 1 — the Sps side
-  // of the ETL cadence VPC peering to lts-reciter-vpc01. Built only when
-  // etlVpcPeeringEnabled is flipped on. The real lts-reciter vpcId is a config
-  // placeholder (pending networking, plan §12 Q1), so the fixture overrides
-  // etlComputeVpc with a synthetic id — this tests the retargeting wiring
-  // (peerVpcId = etlComputeVpc.vpcId), not the unknown real id.
-  describe("ETL cadence VPC peering (etlVpcPeeringEnabled)", () => {
-    const fixture = makeFixture("staging");
-    const stack = new NetworkStack(fixture.app, "Sps-Network-staging", {
-      env: fixture.env,
-      envConfig: {
-        ...fixture.envConfig,
-        etlVpcPeeringEnabled: true,
-        etlComputeVpc: {
-          vpcId: "vpc-lts-reciter-test",
-          availabilityZones: ["us-east-1a", "us-east-1b"],
-          appSubnetIds: ["subnet-lts-a", "subnet-lts-b"],
-        },
-        etlPeerCidrs: ["10.46.134.0/24"],
-      },
-    });
-    const template = Template.fromStack(stack);
-
-    it("creates one peering connection to lts-reciter-vpc01 (same-account, no owner id)", () => {
-      template.resourceCountIs("AWS::EC2::VPCPeeringConnection", 1);
-      template.hasResourceProperties("AWS::EC2::VPCPeeringConnection", {
-        // peerVpcId = etlComputeVpc (lts-reciter-vpc01); no PeerOwnerId /
-        // PeerRegion → same-account, same-region, auto-accepted.
-        PeerVpcId: "vpc-lts-reciter-test",
-      });
-      const peerings = Object.values(
-        template.findResources("AWS::EC2::VPCPeeringConnection"),
-      );
-      expect(peerings[0]?.Properties?.PeerOwnerId).toBeUndefined();
-      expect(peerings[0]?.Properties?.PeerRegion).toBeUndefined();
-    });
-
-    it("adds one return route per (route table × etlPeerCidrs): 1 CIDR × 2 RTs = 2", () => {
-      // Two AZs → two private subnets → two route tables → two peer routes
-      // (alongside the VPC's existing NAT/IGW routes).
-      const peerRoutes = Object.values(
-        template.findResources("AWS::EC2::Route"),
-      ).filter((r) => r.Properties?.DestinationCidrBlock === "10.46.134.0/24");
-      expect(peerRoutes).toHaveLength(2);
-      for (const route of peerRoutes) {
-        expect(route.Properties?.VpcPeeringConnectionId).toBeDefined();
-      }
-    });
-  });
-
-  // ENIs straddling both lts-reciter subnets → two placement CIDRs → one
-  // CfnRoute per (cidr, route table). Synth succeeding with 4 routes implies
-  // the construct ids are unique (a collision throws at synth).
-  describe("ETL cadence VPC peering with two placement CIDRs", () => {
-    const fixture = makeFixture("staging");
-    const stack = new NetworkStack(fixture.app, "Sps-Network-staging", {
-      env: fixture.env,
-      envConfig: {
-        ...fixture.envConfig,
-        etlVpcPeeringEnabled: true,
-        etlComputeVpc: {
-          vpcId: "vpc-lts-reciter-test",
-          availabilityZones: ["us-east-1a", "us-east-1b"],
-          appSubnetIds: ["subnet-lts-a", "subnet-lts-b"],
-        },
-        etlPeerCidrs: ["10.46.134.0/24", "10.46.160.0/24"],
-      },
-    });
-    const template = Template.fromStack(stack);
-
-    it("creates one CfnRoute per (cidr, route table) = 2 × 2 = 4", () => {
-      const allRoutes = Object.values(template.findResources("AWS::EC2::Route"));
-      const c1 = allRoutes.filter(
-        (r) => r.Properties?.DestinationCidrBlock === "10.46.134.0/24",
-      );
-      const c2 = allRoutes.filter(
-        (r) => r.Properties?.DestinationCidrBlock === "10.46.160.0/24",
-      );
-      expect(c1).toHaveLength(2);
-      expect(c2).toHaveLength(2);
-    });
-  });
 });
