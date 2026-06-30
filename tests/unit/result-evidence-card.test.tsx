@@ -384,3 +384,37 @@ describe("<RepresentativePapers> — the disclosure stack", () => {
     expect(mark?.getAttribute("class")).toContain("bg-[#b31b1b]/10");
   });
 });
+
+describe("<ResultEvidence> — #1366 count suffix (method / research area)", () => {
+  it("method with a count + pubCount renders '· N of M publications' after the family", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "Anti-obesity pharmacotherapy", tools: [], count: 7 }}
+        pubCount={41}
+      />,
+    );
+    // label stays the bold term; the count is a normal-weight suffix AFTER it.
+    expect(screen.getByText("Anti-obesity pharmacotherapy").tagName).toBe("STRONG");
+    expect(container.textContent).toMatch(/· 7 of 41 publications/);
+  });
+
+  it("research area with a count renders the suffix too", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "topic", label: "Endocrinology", id: "endocrinology", count: 12 }}
+        pubCount={41}
+      />,
+    );
+    expect(container.textContent).toMatch(/· 12 of 41 publications/);
+  });
+
+  it("no count (single-evidence path) ⇒ NO suffix — label-only, unchanged", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "Flow cytometry", tools: [] }}
+        pubCount={41}
+      />,
+    );
+    expect(container.textContent).not.toMatch(/of 41 publications/);
+  });
+});

@@ -904,7 +904,7 @@ export async function buildPeopleDoc(
   // kept-authorship pmid set so a hidden/dark pub never inflates the count.
   // OMIT-on-empty.
   const areaPmidSets = new Map<string, Set<string>>();
-  for (const pt of s.publicationTopics) {
+  for (const pt of s.publicationTopics ?? []) {
     if (!keptPmids.has(pt.pmid)) continue;
     let set = areaPmidSets.get(pt.parentTopicId);
     if (!set) {
