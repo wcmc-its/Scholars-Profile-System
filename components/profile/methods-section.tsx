@@ -329,7 +329,10 @@ export function MethodsSection({
                       className="absolute inset-0 rounded-full"
                     />
                   ) : null}
-                  <span className="relative z-10">{f.familyLabel}</span>
+                  {/* No z-10: the label stays BELOW the transparent inset-0 toggle
+                      so clicking the family name toggles the facet (only the
+                      separately-interactive icons below are lifted above it). */}
+                  <span>{f.familyLabel}</span>
                   {f.sensitive ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
