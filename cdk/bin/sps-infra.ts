@@ -2,7 +2,7 @@
 import { App, type Environment, Tags } from "aws-cdk-lib";
 import { AnalyticsStack } from "../lib/analytics-stack";
 import { AppStack } from "../lib/app-stack";
-import { resolveEnvConfig } from "../lib/config";
+import { assertCutoverGate, resolveEnvConfig } from "../lib/config";
 import { DataStack } from "../lib/data-stack";
 import { DrBackupVaultStack } from "../lib/dr-backup-vault-stack";
 import { EdgeStack } from "../lib/edge-stack";
@@ -16,6 +16,13 @@ const app = new App();
 // `-c env=staging|prod` selects the environment; defaults to staging.
 const envConfig = resolveEnvConfig(app.node.tryGetContext("env"));
 
+// Estate-consolidation cutover gate (docs/sps-vpc-consolidation-plan.md
+// §6.2/§8.5/§8.6; #1370): useSharedVpc is not yet deployable — flipping it would
+// CFN-replace Aurora/OpenSearch in place into empty datastores. Hard-throws while
+// the flag is on (shipped config is false → inert today; also fails CI on any
+// premature useSharedVpc:true commit). Lifted by the snapshot-restore cutover task.
+assertCutoverGate(envConfig);
+
 // ADR-008: staging and production are separate AWS accounts. The account id is
 // supplied at deploy time via `-c <envName>Account=<id>` and is never
 // committed. When it is absent — as in CI — the stack synthesizes
@@ -23,6 +30,7 @@ const envConfig = resolveEnvConfig(app.node.tryGetContext("env"));
 const account = app.node.tryGetContext(`${envConfig.envName}Account`) as
   | string
   | undefined;
+
 const env: Environment = { account, region: envConfig.region };
 const drEnv: Environment = { account, region: envConfig.drRegion };
 
