@@ -501,6 +501,16 @@ export class EtlStack extends Stack {
     );
     const containerSecrets: { [k: string]: ecs.Secret } = {
       DATABASE_URL: ecs.Secret.fromSecretsManager(dbEtlSecret),
+      // Cutover de-coupling (§8.4): when on, OPENSEARCH_NODE comes from the
+      // secret's `node` key instead of the dropped cross-stack export.
+      ...(envConfig.openSearchNodeFromSecret
+        ? {
+            OPENSEARCH_NODE: ecs.Secret.fromSecretsManager(
+              opensearchEtlSecret,
+              "node",
+            ),
+          }
+        : {}),
       OPENSEARCH_USER: ecs.Secret.fromSecretsManager(
         opensearchEtlSecret,
         "username",
@@ -579,12 +589,18 @@ export class EtlStack extends Stack {
         // staging soak signs off. Applied via cdk deploy --exclusively
         // Sps-Etl-<env> (CD only rolls the image, never deploys infra).
         REPORTER_MATCH_V2: env === "staging" ? "on" : "off",
-        // OpenSearch domain endpoint (https://...) imported from DataStack;
-        // the search-index step's lib/search.ts reads OPENSEARCH_NODE and
-        // authenticates with the OPENSEARCH_USER/PASS secrets above. #447
-        OPENSEARCH_NODE: `https://${Fn.importValue(
-          `Sps-Data-${env}-OpenSearchDomainEndpoint`,
-        )}`,
+        // OpenSearch domain endpoint (https://...). Default: plaintext env from
+        // the DataStack export. When openSearchNodeFromSecret is on (cutover
+        // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is
+        // injected from the opensearch secret's `node` key (containerSecrets).
+        // lib/search.ts reads OPENSEARCH_NODE; USER/PASS come from secrets. #447
+        ...(envConfig.openSearchNodeFromSecret
+          ? {}
+          : {
+              OPENSEARCH_NODE: `https://${Fn.importValue(
+                `Sps-Data-${env}-OpenSearchDomainEndpoint`,
+              )}`,
+            }),
         // #479 — cadence revalidate step POSTs to /api/revalidate on the
         // VPC-private internal ALB (HTTP :80; no TLS on the internal listener).
         // The ETL SG -> internal-ALB-SG :80 ingress is already opened at the
@@ -1239,16 +1255,29 @@ export class EtlStack extends Stack {
         environment: {
           NODE_ENV: "production",
           // searchClient() reads OPENSEARCH_NODE; OPENSEARCH_USER/PASS arrive
-          // as secrets below. Same cross-stack import the ETL container uses.
-          OPENSEARCH_NODE: `https://${Fn.importValue(
-            `Sps-Data-${env}-OpenSearchDomainEndpoint`,
-          )}`,
+          // as secrets below. Same de-coupling as the ETL container (§8.4):
+          // export-baked env by default, secret `node` key when flag on.
+          ...(envConfig.openSearchNodeFromSecret
+            ? {}
+            : {
+                OPENSEARCH_NODE: `https://${Fn.importValue(
+                  `Sps-Data-${env}-OpenSearchDomainEndpoint`,
+                )}`,
+              }),
         },
         secrets: {
           // db.read + db.write collapse onto this single DSN (no
           // DATABASE_URL_RO in-container), exactly as the search:index step
           // runs.
           DATABASE_URL: ecs.Secret.fromSecretsManager(dbEtlSecret),
+          ...(envConfig.openSearchNodeFromSecret
+            ? {
+                OPENSEARCH_NODE: ecs.Secret.fromSecretsManager(
+                  opensearchEtlSecret,
+                  "node",
+                ),
+              }
+            : {}),
           OPENSEARCH_USER: ecs.Secret.fromSecretsManager(
             opensearchEtlSecret,
             "username",

@@ -142,6 +142,28 @@ function getStateMachineDefinitionText(
 }
 
 describe("EtlStack", () => {
+  // Cutover de-coupling (§8.4): both the ETL container and the reconcile task
+  // move OPENSEARCH_NODE off the Data→Etl cross-stack export onto the opensearch
+  // secret's `node` key, so the OpenSearch-domain replace at cutover isn't
+  // blocked by the export-lock. The Sps-App InternalAlbDns import is untouched.
+  describe("OPENSEARCH_NODE de-coupling (openSearchNodeFromSecret)", () => {
+    it("default (off): node is baked from the DataStack export, not a secret", () => {
+      const json = JSON.stringify(buildEtlStack("staging").template.toJSON());
+      expect(json).toContain("Sps-Data-staging-OpenSearchDomainEndpoint");
+      expect(json).not.toContain(":node::");
+    });
+
+    it("on: node comes from the opensearch secret `node` key; the OpenSearch export is gone but the InternalAlbDns import stays", () => {
+      const json = JSON.stringify(
+        buildEtlStack("staging", { openSearchNodeFromSecret: true }).template.toJSON(),
+      );
+      expect(json).not.toContain("Sps-Data-staging-OpenSearchDomainEndpoint");
+      expect(json).toContain(":node::");
+      // SCHOLARS_BASE_URL still rides the App internal-ALB export (different edge).
+      expect(json).toContain("Sps-App-staging-InternalAlbDns");
+    });
+  });
+
   // Estate consolidation (plan §4.4): with useSharedVpc on, every ETL task ENI
   // lands in the app2 subnets (the cross-VPC relocation branch is gone — §8.8).
   describe("shared VPC placement (useSharedVpc on)", () => {

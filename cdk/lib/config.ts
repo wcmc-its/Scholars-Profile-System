@@ -313,6 +313,23 @@ export interface SpsEnvConfig {
     readonly albSubnetIds: readonly string[];
   };
   /**
+   * Cutover de-coupling flag (docs/sps-vpc-consolidation-plan.md §8.4; review
+   * w26gz881i). When `false` (shipped default both envs) the app + ETL tasks read
+   * `OPENSEARCH_NODE` as a plaintext env baked from
+   * `Fn.importValue("Sps-Data-<env>-OpenSearchDomainEndpoint")` — the current
+   * behavior, byte-identical. When `true`, that named CFN export is no longer
+   * imported; instead `OPENSEARCH_NODE` is injected from the `node` key of the
+   * `scholars/<env>/opensearch/{app,etl}` secret. This removes the Data→App/Etl
+   * export so the consolidation cutover (immutable-subnet-group replace of the
+   * OpenSearch domain) is not blocked by CFN's "cannot update an export in use".
+   *
+   * **Fail-closed ordering:** flip to `true` (and `cdk deploy Sps-App/Etl-<env>`)
+   * ONLY after backfilling the `node` key (holding the current `https://<endpoint>`)
+   * into BOTH `opensearch/app` and `opensearch/etl` in that env — an absent key
+   * fails ECS task-start (search 500s).
+   */
+  readonly openSearchNodeFromSecret: boolean;
+  /**
    * Fargate CPU units for the ETL task family. Tunable per-step via
    * `Overrides.ContainerOverrides[].Cpu`; this is the base allocation.
    */
@@ -464,6 +481,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // the standalone Sps-Network-staging VPC does today.
     useSharedVpc: false,
     sharedVpc: SHARED_VPC,
+    // Cutover de-coupling: OFF until the opensearch/{app,etl} `node` key is
+    // backfilled (else ECS task-start fails closed). See flag JSDoc.
+    openSearchNodeFromSecret: false,
     // #485 — search:index OOM-killed at 2048 MiB building the full corpus
     // (178k+ pubs). 8 GB + the NODE_OPTIONS heap cap (EtlStack) clears it;
     // 2 vCPU also speeds the build, easing throttle pressure on the node.
@@ -564,6 +584,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // standalone Sps-Network-prod VPC does today.
     useSharedVpc: false,
     sharedVpc: SHARED_VPC,
+    // Cutover de-coupling: OFF until the opensearch/{app,etl} `node` key is
+    // backfilled (else ECS task-start fails closed). See flag JSDoc.
+    openSearchNodeFromSecret: false,
     // #485 — match staging's 8 GB headroom for the search:index corpus build
     // (paired with the NODE_OPTIONS heap cap in EtlStack). Prod's 2-node
     // m6g.large.search domain already handles the bulk write rate.

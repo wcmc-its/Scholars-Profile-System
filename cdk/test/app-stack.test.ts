@@ -35,6 +35,25 @@ function buildAppStack(
 const EC2_DESCRIPTION_ALLOWED = /^[a-zA-Z0-9. _\-:/()#,@[\]+=&;{}!$*]+$/;
 
 describe("AppStack", () => {
+  // Cutover de-coupling (§8.4): OPENSEARCH_NODE moves off the Data→App
+  // cross-stack export onto the opensearch secret's `node` key, so the
+  // OpenSearch-domain replace at cutover isn't blocked by the export-lock.
+  describe("OPENSEARCH_NODE de-coupling (openSearchNodeFromSecret)", () => {
+    it("default (off): node is a plaintext env baked from the DataStack export, not a secret", () => {
+      const json = JSON.stringify(buildAppStack("staging").template.toJSON());
+      expect(json).toContain("Sps-Data-staging-OpenSearchDomainEndpoint");
+      expect(json).not.toContain(":node::");
+    });
+
+    it("on: node is injected from the opensearch secret `node` key and the export is no longer imported", () => {
+      const json = JSON.stringify(
+        buildAppStack("staging", { openSearchNodeFromSecret: true }).template.toJSON(),
+      );
+      expect(json).not.toContain("Sps-Data-staging-OpenSearchDomainEndpoint");
+      expect(json).toContain(":node::");
+    });
+  });
+
   // Estate consolidation (plan §4.4/§5.5): with useSharedVpc on, compute lands
   // in app2, the public ALB in dmz, and SPS owns no VPC interface/gateway
   // endpoints (it rides its-reciter's; a privateDNS SM endpoint would hijack
