@@ -42,7 +42,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { getTopScholarsForTopic } from "@/lib/api/topics";
+import { getAreaScholarConcentration, getTopScholarsForTopic } from "@/lib/api/topics";
 import { TOP_SCHOLARS_ELIGIBLE_ROLES } from "@/lib/eligibility";
 
 const NOW = new Date("2026-04-01T00:00:00Z");
@@ -409,6 +409,51 @@ describe("getTopScholarsForTopic (RANKING-03 / D-13 / D-14)", () => {
     expect(result![2].rank).toBe(3);
     // Rank matches sorted position regardless of input order.
     expect(result![0].cwid).toBe("winner00");
+  });
+});
+
+describe("getAreaScholarConcentration (#1363 — concentration over volume)", () => {
+  beforeEach(() => {
+    mockPublicationTopicFindMany.mockReset();
+  });
+
+  // Every row scores identically (same score / author / date / type), so a scholar's
+  // impact is just (pub count) × a constant — letting the assertions reason in pub
+  // counts while exercising the real scorePublication path.
+  const onTopic = (cwid: string, pmid: number) => makePtRow({ cwid, pmid });
+
+  it("ranks a niche specialist above a higher-VOLUME generalist (the #1336 regression)", async () => {
+    // spec: 3 on-topic pubs, all 3 are their entire corpus → fraction 1.0.
+    // gen:  5 on-topic pubs (MORE raw volume) but 50 total → fraction 0.1.
+    // Old volume ranking put gen first (5 > 3); concentration must flip it.
+    const specTopic = [1, 2, 3].map((p) => onTopic("spec", p));
+    const genTopic = [11, 12, 13, 14, 15].map((p) => onTopic("gen", p));
+    // tiny: only 2 on-topic pubs → below AREA_CONCENTRATION_MIN_PUBS (3), dropped.
+    const tinyTopic = [21, 22].map((p) => onTopic("tiny", p));
+
+    const genTotal = Array.from({ length: 50 }, (_, i) => onTopic("gen", 1000 + i));
+
+    mockPublicationTopicFindMany
+      .mockResolvedValueOnce([...specTopic, ...genTopic, ...tinyTopic]) // on-topic query
+      .mockResolvedValueOnce([...specTopic, ...genTotal]); // denominator (floored cwids only)
+
+    const result = await getAreaScholarConcentration("area-test-1", null, 10, NOW);
+
+    expect(result.map((r) => r.cwid)).toEqual(["spec", "gen"]); // tiny floored out
+    expect(result[0].total).toBeGreaterThan(result[1].total);
+    // Second query must be scoped to the two floored cwids, not "tiny".
+    expect(mockPublicationTopicFindMany.mock.calls[1][0].where.cwid).toEqual({
+      in: ["spec", "gen"],
+    });
+  });
+
+  it("returns [] when no scholar clears the min-pubs floor", async () => {
+    const onlyTwo = [31, 32].map((p) => onTopic("a", p));
+    mockPublicationTopicFindMany.mockResolvedValueOnce(onlyTwo);
+    const result = await getAreaScholarConcentration("area-test-2", null, 10, NOW);
+    expect(result).toEqual([]);
+    // Floor short-circuits before the denominator query runs.
+    expect(mockPublicationTopicFindMany).toHaveBeenCalledTimes(1);
   });
 });
 
