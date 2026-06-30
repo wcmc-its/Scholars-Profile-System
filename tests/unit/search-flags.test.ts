@@ -21,6 +21,8 @@ import {
   resolvePeopleMethodContextBoost,
   resolveSearchShellStreaming,
   resolveSearchPeopleDivisionShape,
+  resolveSearchPeopleFacultyProminence,
+  resolvePeopleTopicPhraseBoost,
 } from "@/lib/api/search-flags";
 
 describe("resolveConceptMode (§7.1)", () => {
@@ -382,6 +384,48 @@ describe("resolveSearchPeopleDivisionShape (#1347)", () => {
     expect(resolveSearchPeopleDivisionShape()).toBe(false);
     process.env.SEARCH_PEOPLE_DIVISION_SHAPE = "off";
     expect(resolveSearchPeopleDivisionShape()).toBe(false);
+  });
+});
+
+describe("resolveSearchPeopleFacultyProminence (#1345)", () => {
+  const original = process.env.SEARCH_PEOPLE_FACULTY_PROMINENCE;
+  beforeEach(() => delete process.env.SEARCH_PEOPLE_FACULTY_PROMINENCE);
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_PEOPLE_FACULTY_PROMINENCE;
+    else process.env.SEARCH_PEOPLE_FACULTY_PROMINENCE = original;
+  });
+
+  it("defaults to true (faculty term present, prod byte-identical)", () => {
+    expect(resolveSearchPeopleFacultyProminence()).toBe(true);
+  });
+  it("is false only for exactly 'off'", () => {
+    process.env.SEARCH_PEOPLE_FACULTY_PROMINENCE = "off";
+    expect(resolveSearchPeopleFacultyProminence()).toBe(false);
+    process.env.SEARCH_PEOPLE_FACULTY_PROMINENCE = "OFF";
+    expect(resolveSearchPeopleFacultyProminence()).toBe(true);
+    process.env.SEARCH_PEOPLE_FACULTY_PROMINENCE = "on";
+    expect(resolveSearchPeopleFacultyProminence()).toBe(true);
+  });
+});
+
+describe("resolvePeopleTopicPhraseBoost (#1344)", () => {
+  const original = process.env.SEARCH_PEOPLE_PHRASE_BOOST;
+  beforeEach(() => delete process.env.SEARCH_PEOPLE_PHRASE_BOOST);
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_PEOPLE_PHRASE_BOOST;
+    else process.env.SEARCH_PEOPLE_PHRASE_BOOST = original;
+  });
+
+  it("defaults to false (dark)", () => {
+    expect(resolvePeopleTopicPhraseBoost()).toBe(false);
+  });
+  it("is true only for exactly 'on'", () => {
+    process.env.SEARCH_PEOPLE_PHRASE_BOOST = "on";
+    expect(resolvePeopleTopicPhraseBoost()).toBe(true);
+    process.env.SEARCH_PEOPLE_PHRASE_BOOST = "ON";
+    expect(resolvePeopleTopicPhraseBoost()).toBe(false);
+    process.env.SEARCH_PEOPLE_PHRASE_BOOST = "true";
+    expect(resolvePeopleTopicPhraseBoost()).toBe(false);
   });
 });
 

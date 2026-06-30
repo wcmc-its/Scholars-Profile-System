@@ -12,7 +12,7 @@
 // Keep the scientific-notation whitelist + <mark>; the indexed title may carry
 // <sub>/<sup>/<i>/<b> markup. Everything else is dropped.
 const TITLE_TAG_WHITELIST = /^(?:i|em|b|strong|sup|sub|mark)$/;
-const MARK_CLASS = "box-decoration-clone rounded-[3px] bg-[#b31b1b]/10 px-[3px]";
+export const MARK_CLASS = "box-decoration-clone rounded-[3px] bg-[#b31b1b]/10 px-[3px]";
 
 export function highlightedTitleHtml(fragment: string): string {
   // 1. Keep the scientific-notation whitelist + <mark>; drop everything else.

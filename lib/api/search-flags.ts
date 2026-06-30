@@ -309,6 +309,38 @@ export function resolveSearchPeopleDivisionShape(): boolean {
 }
 
 /**
+ * #1345 — full-time-faculty prominence lever. The outer People prominence
+ * function_score adds a flat `+PEOPLE_PROMINENCE_FACULTY_WEIGHT` (#513) to every
+ * full_time_faculty scholar, an expertise-INDEPENDENT employment-status prior that
+ * buries genuine affiliated/clinical/voluntary subspecialty experts. When set to
+ * `off`, that clause is dropped; the log-saturated `ln1p(publicationCount)` lead
+ * carries prominence on its own.
+ *
+ * Default ON (`!== "off"`) so prod ranking is byte-identical until a deliberate
+ * flip — the same convention as {@link resolveDeptLeadershipBoost}. Query-time
+ * only, no reindex; an independent rollback lever from SEARCH_PEOPLE_RELEVANCE_MODE.
+ */
+export function resolveSearchPeopleFacultyProminence(): boolean {
+  return process.env.SEARCH_PEOPLE_FACULTY_PROMINENCE !== "off";
+}
+
+/**
+ * #1344 — topic/hybrid People proximity boost. When ON, the topic (and hybrid)
+ * template adds scoring-only `match_phrase` clauses (bounded slop) on
+ * publicationTitles/areasOfInterest, rewarding within-a-single-publication
+ * co-occurrence of the query terms so the true subspecialist outranks scholars who
+ * merely scatter the same tokens across unrelated pubs. RANKING ONLY — a top-level
+ * `should` with no minimum_should_match, so it never admits/drops a doc (the 4,558
+ * admission count is unchanged; that is governed by the cross_fields msm).
+ *
+ * Default OFF (`=== "on"` opt-in, dark) — mirrors {@link resolveFundingPhraseBoost};
+ * flag-off ⇒ the people body is byte-identical. No reindex (fields already analyzed).
+ */
+export function resolvePeopleTopicPhraseBoost(): boolean {
+  return process.env.SEARCH_PEOPLE_PHRASE_BOOST === "on";
+}
+
+/**
  * Issue #688 — surface MeSH match provenance on People results. When a
  * topic/unclassified search resolves to a descriptor, the §6.1.3 attribution
  * boost ranks up scholars tagged with a *narrower* descendant term than the
@@ -938,6 +970,39 @@ export function resolvePeopleConceptGrantAxis(): boolean {
  */
 export function resolveMeshResolutionFallbackEnabled(): boolean {
   return process.env.SEARCH_MESH_RESOLUTION_FALLBACK === "on";
+}
+
+/**
+ * #1342 — query-side morphology retry. When ON, `resolveMeshDescriptor`, after the
+ * exact name / entry-term / curated-alias lookup misses, retries the SINGULARIZED
+ * query ({@link singularizeForMatch}: "melanomas" → "melanoma") against the same
+ * index and, on a hit, returns the descriptor at the low `partial` confidence tier.
+ * Closes the inflection tail (plurals/possessives whose singular base is already an
+ * index key) and makes future curated aliases robust to plural/possessive variants.
+ *
+ * Default OFF (`=== "on"` opt-in): flag-off leaves `resolveMeshDescriptor`
+ * byte-identical (the singularize branch is never entered). Resolve-time only — no
+ * reindex. NOTE: the headline lay-term wins (diabetes/alzheimer's) ALSO need the
+ * #1258 alias rows; a singularizer cannot bridge derivational or single→multi-word.
+ */
+export function resolveMeshQueryNormalizationEnabled(): boolean {
+  return process.env.SEARCH_MESH_QUERY_NORMALIZATION === "on";
+}
+
+/**
+ * #1346 — acronym wrong-sense guard. When ON, `resolveMeshDescriptor` suppresses a
+ * short all-caps acronym query (e.g. CAR, PET) that resolved ONLY via a common-word
+ * entry-term synonym whose matched form is a plain Title-case word (CAR → "Car" →
+ * Automobiles, PET → "Pet" → Pets). Such a match is the wrong (non-medical) sense on
+ * a medical-center search; returning null drops the query to BM25, exactly like the
+ * already-safe 2-char acronyms (MS/CD).
+ *
+ * Default OFF (`=== "on"` opt-in): flag-off is byte-identical. Internal-caps acronym
+ * entry terms (COPD/EHR/PCR) and exact descriptor-NAME matches (DNA/RNA, confidence
+ * `exact`) are kept — the discriminator is "matched form has no uppercase past char 0".
+ */
+export function resolveAcronymSenseGuardEnabled(): boolean {
+  return process.env.SEARCH_ACRONYM_SENSE_GUARD === "on";
 }
 
 /**

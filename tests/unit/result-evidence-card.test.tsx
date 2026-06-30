@@ -113,19 +113,60 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(screen.getByText(/via related concept Melanoma/)).toBeTruthy();
   });
 
-  it("name ⇒ matched term bold", () => {
+  it("#1350 — a resolved concept term renders as its own subtly-underlined span", () => {
+    renderEv({
+      kind: "publications",
+      strength: "tagged",
+      text: "3 of 301 publications tagged",
+      term: "Pharmacogenetics",
+      count: 3,
+    });
+    expect(screen.getByText(/3 of 301 publications tagged/)).toBeTruthy();
+    const term = screen.getByText("Pharmacogenetics");
+    expect(term.tagName).toBe("SPAN");
+    expect(term.className).toMatch(/underline/);
+  });
+
+  it("#1355 — narrower descendant terms render after the concept term, capped at 2 + '+N more'", () => {
+    renderEv({
+      kind: "publications",
+      strength: "concept",
+      text: "via related concept",
+      term: "Microbiota",
+      descendantTerms: ["Mycobiome", "Virome", "Metagenome"],
+    });
+    expect(screen.getByText("Microbiota").className).toMatch(/underline/);
+    expect(screen.getByText(/matched Mycobiome, Virome, \+1 more/)).toBeTruthy();
+  });
+
+  it("#1361 — a mention literal term is semibold but NOT underlined (underline = concept only)", () => {
+    renderEv({
+      kind: "publications",
+      strength: "mention",
+      text: "1 of 2 publications mention",
+      term: "“16s rna”",
+      count: 1,
+    });
+    const term = screen.getByText("“16s rna”");
+    expect(term.className).toMatch(/font-semibold/);
+    expect(term.className).not.toMatch(/underline/);
+  });
+
+  // #1361 — snippet/name/bio/affiliation marks now render as the SAME light-red
+  // pill (a real <mark>) as titles, not a bold <strong>.
+  it("name ⇒ matched term highlighted (pill)", () => {
     renderEv({ kind: "name", html: "Roel <mark>van Herten</mark> - AI In Medical Imaging" });
-    expect(screen.getByText("van Herten").tagName).toBe("STRONG");
+    expect(screen.getByText("van Herten").tagName).toBe("MARK");
   });
 
-  it("selfDescription ⇒ bio sentence, matched term bold", () => {
+  it("selfDescription ⇒ bio sentence, matched term highlighted (pill)", () => {
     renderEv({ kind: "selfDescription", html: "The lab studies <mark>RNA</mark> biology." });
-    expect(screen.getByText("RNA").tagName).toBe("STRONG");
+    expect(screen.getByText("RNA").tagName).toBe("MARK");
   });
 
-  it("affiliation ⇒ rendered (weak), matched term bold", () => {
+  it("affiliation ⇒ rendered (weak), matched term highlighted (pill)", () => {
     renderEv({ kind: "affiliation", html: "AI In Medical <mark>Imaging</mark>" });
-    expect(screen.getByText("Imaging").tagName).toBe("STRONG");
+    expect(screen.getByText("Imaging").tagName).toBe("MARK");
   });
 
   it("none ⇒ honest-empty line, no fabricated reason", () => {

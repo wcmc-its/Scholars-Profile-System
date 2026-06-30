@@ -552,6 +552,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_PEOPLE_FACULTY_PROMINENCE",
+                "Value": "on",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_CONCEPT_HINT",
                 "Value": "off",
               },
@@ -581,6 +585,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_MESH_RESOLUTION_FALLBACK",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_MESH_QUERY_NORMALIZATION",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_ACRONYM_SENSE_GUARD",
                 "Value": "off",
               },
               {
@@ -3905,6 +3917,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_PEOPLE_FACULTY_PROMINENCE",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_CONCEPT_HINT",
                 "Value": "on",
               },
@@ -3934,6 +3950,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_MESH_RESOLUTION_FALLBACK",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_MESH_QUERY_NORMALIZATION",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_ACRONYM_SENSE_GUARD",
                 "Value": "on",
               },
               {

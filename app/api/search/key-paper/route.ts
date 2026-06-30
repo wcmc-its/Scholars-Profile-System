@@ -35,7 +35,10 @@ export async function GET(request: NextRequest) {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  // #1351 — the resolved concept display name, so the title highlight can mark the
+  // concept term (not just the literal query) on a descriptor-tagged key paper.
+  const conceptLabel = params.get("label") ?? "";
 
-  const pubs = await fetchKeyPaper({ cwid, descriptorUis, contentQuery });
+  const pubs = await fetchKeyPaper({ cwid, descriptorUis, contentQuery, conceptLabel });
   return NextResponse.json({ pubs });
 }

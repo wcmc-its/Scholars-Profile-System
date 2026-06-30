@@ -83,8 +83,9 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
     render(<PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />);
 
     await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
-    // count-only claim, never "of Y" (§4.6)
-    expect(screen.getByText(/^1 grant$/)).toBeTruthy();
+    // #1361 — "N of M grants mention 'query'": normal-weight prefix + semibold query term.
+    expect(screen.getByText(/1 of 3 grants mention/)).toBeTruthy();
+    expect(screen.getByText("“diabetes”").tagName).toBe("STRONG");
     expect(
       fetchFn.mock.calls.some((c) => c[0] === "/api/scholar/abc1234/grants?q=diabetes"),
     ).toBe(true);
@@ -93,6 +94,33 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
     fireEvent.click(screen.getByRole("button", { name: /key funding/i }));
     expect(screen.getByText(/Beta-cell regeneration in T2D/)).toBeTruthy();
     expect(screen.getByText(/NIH \/ NIDDK/)).toBeTruthy();
+  });
+
+  it("#1359 — marks the matched term in a KEY FUNDING grant title when a highlight is present", async () => {
+    mockFetch({
+      grants: [
+        {
+          projectId: "p1",
+          title: "Beta-cell regeneration in diabetes",
+          titleHighlight: "Beta-cell regeneration in <mark>diabetes</mark>",
+          sponsor: "NIH / NIDDK",
+          startYear: 2021,
+          endYear: 2025,
+          isActive: true,
+        },
+      ],
+      total: 1,
+    });
+    const { container } = render(
+      <PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /key funding/i })).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /key funding/i }));
+    // highlightedTitleHtml keeps a real <mark> (styled as the light-red pill).
+    const mark = container.querySelector("mark");
+    expect(mark?.textContent).toBe("diabetes");
   });
 
   it("hides the Funding row entirely when no grant matched (never 0 of N)", async () => {

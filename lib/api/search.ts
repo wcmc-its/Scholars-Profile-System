@@ -70,6 +70,7 @@ import {
   AREA_BOOST_W_LO,
   AREA_BOOST_HI_FRAC,
   AREA_BOOST_MID_FRAC,
+  CONCEPT_CONCENTRATION_MIN_PUBS,
   FUNDING_INDEX,
   PEOPLE_RESTRUCTURED_MSM,
   PEOPLE_TOPIC_ABSTRACTS_BOOST,
@@ -97,6 +98,7 @@ import {
   resolvePeopleMethodContextBoost,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
+  resolvePeopleTopicPhraseBoost,
   resolveSearchPeopleClinical,
   resolveSearchPeopleConceptHint,
   resolveSearchResultEvidence,
@@ -531,9 +533,14 @@ export async function fetchKeyPaper(args: {
   descriptorUis: string[];
   /** The literal query, for the `<mark>` highlight and the free-text fallback filter. */
   contentQuery: string;
+  /** #1351 — the resolved concept's display name (e.g. "Pharmacogenetics"). When
+   *  set, titles that carry the concept term get `<mark>`-highlighted even if the
+   *  literal query isn't in the title (the common tagged-match case). */
+  conceptLabel?: string;
 }): Promise<RepresentativePub[]> {
   const cwid = args.cwid?.trim();
   const contentQuery = args.contentQuery?.trim() ?? "";
+  const conceptLabel = args.conceptLabel?.trim() ?? "";
   const descriptorUis = args.descriptorUis ?? [];
   if (!cwid) return [];
   // Need at least one way to identify a relevant pub: a resolved concept subtree
@@ -599,15 +606,26 @@ export async function fetchKeyPaper(args: {
           { _score: { order: "desc" } },
           { year: { order: "desc", missing: "_last" } },
         ],
-        // Highlight is keyed to the LITERAL query (not the concept filter), so a
-        // descriptor-tagged title with no literal term highlights nothing and the
-        // card renders plain text — identical to the inline rep-pub behavior.
-        ...(contentQuery.length > 0
+        // #1351 — highlight the LITERAL query AND (when one resolved) the concept
+        // term. So a descriptor-tagged title that carries the concept term verbatim
+        // (e.g. "Pharmacogenetics …") now marks it, instead of rendering plain
+        // because the literal typed query ("Pharmacogenomics") isn't present.
+        // Highlight-only — admission/rank unchanged.
+        ...(contentQuery.length > 0 || conceptLabel.length > 0
           ? {
               highlight: {
                 fields: { title: { number_of_fragments: 0 } },
                 highlight_query: {
-                  multi_match: { query: contentQuery, fields: ["title"], operator: "or" },
+                  bool: {
+                    should: [
+                      ...(contentQuery.length > 0
+                        ? [{ multi_match: { query: contentQuery, fields: ["title"], operator: "or" } }]
+                        : []),
+                      ...(conceptLabel.length > 0
+                        ? [{ match_phrase: { title: conceptLabel } }]
+                        : []),
+                    ],
+                  },
                 },
                 pre_tags: ["<mark>"],
                 post_tags: ["</mark>"],
@@ -1073,6 +1091,90 @@ export function buildAreaBoostFunctions(
   return fns;
 }
 
+/**
+ * #1343 — concept-axis on-topic CONCENTRATION. Ranks WCM authors of the resolved
+ * concept (descendant descriptor set) by how *concentrated* their work is on it,
+ * not by raw on-topic volume, then returns `{ cwid, total }` — the SAME shape
+ * `getAreaScholarConcentration` returns, so it feeds `buildAreaBoostFunctions`
+ * and the prominence slot UNCHANGED (`total` is a tiering score, never surfaced).
+ * Reaches MeSH-concept queries with no curated Research Area (the area rollup
+ * only covers curated areas).
+ *
+ * Why concentration, not count: ranking by raw on-topic `doc_count` rewarded
+ * high-VOLUME authors who merely had many on-topic pubs (a ~900-pub cardiologist
+ * with 20 obesity pubs out-tiered a 30-pub obesity specialist) — the exact volume
+ * dominance the boost was meant to fix (staging A/B 2026-06-29). Score is
+ * `n²/total` = on-topic count × on-topic fraction: rewards BOTH real output and
+ * focus, so a niche specialist out-tiers an incidental generalist while a genuine
+ * high-output expert (high n AND high fraction) still leads. Pure fraction would
+ * over-reward 1–2-pub authors; the n² numerator + the `CONCEPT_CONCENTRATION_MIN_PUBS`
+ * floor prevent that.
+ *
+ * Sources the publications index (`meshDescriptorUi` ∩ `wcmAuthorCwids`, both
+ * already indexed — NO reindex): one agg for on-topic counts, a second for each
+ * author's total pub count (the fraction denominator). Both cached together under
+ * one key, capped at `limit`, so a broad concept can't saturate the search pool.
+ * `doc_count` IS the distinct pmid count (one doc per pmid).
+ * ponytail: n²/total over two aggs; a reindexed per-scholar on-topic-fraction
+ *   field would drop the 2nd round-trip if this proves out (spec OQ-7).
+ */
+export async function getConceptScholarConcentration(
+  descendantUis: string[],
+  limit: number,
+): Promise<{ cwid: string; total: number }[]> {
+  if (descendantUis.length === 0 || limit <= 0) return [];
+  return cachedReasonAgg<{ cwid: string; total: number }[]>(
+    `concept-concentration:${[...descendantUis].sort().join(",")}:${limit}`,
+    async () => {
+      const authorBuckets = (resp: unknown): { key: string; doc_count: number }[] =>
+        (
+          resp as {
+            body?: {
+              aggregations?: { byAuthor?: { buckets?: { key: string; doc_count: number }[] } };
+            };
+          }
+        ).body?.aggregations?.byAuthor?.buckets ?? [];
+      // 1. On-topic pub count per WCM author.
+      const onTopicResp = await searchClient().search({
+        index: PUBLICATIONS_INDEX,
+        body: {
+          size: 0,
+          query: { bool: { filter: [{ terms: { meshDescriptorUi: descendantUis } }] } },
+          aggs: { byAuthor: { terms: { field: "wcmAuthorCwids", size: limit } } },
+        } as object,
+      });
+      const onTopic = authorBuckets(onTopicResp)
+        .map((b) => ({ cwid: b.key, n: b.doc_count }))
+        .filter((a) => a.n >= CONCEPT_CONCENTRATION_MIN_PUBS);
+      if (onTopic.length === 0) return [];
+      // 2. Each author's TOTAL WCM-authored pub count (the fraction denominator).
+      //    `include` pins the buckets to exactly our authors so co-authors can't
+      //    crowd them out; each doc_count is then that author's whole-index total
+      //    (every doc an author is on matches the cwid filter, so it's counted).
+      const cwids = onTopic.map((a) => a.cwid);
+      const totalResp = await searchClient().search({
+        index: PUBLICATIONS_INDEX,
+        body: {
+          size: 0,
+          query: { bool: { filter: [{ terms: { wcmAuthorCwids: cwids } }] } },
+          aggs: {
+            byAuthor: { terms: { field: "wcmAuthorCwids", size: cwids.length, include: cwids } },
+          },
+        } as object,
+      });
+      const totalByCwid = new Map(
+        authorBuckets(totalResp).map((b) => [b.key, b.doc_count] as [string, number]),
+      );
+      // 3. Concentration score n²/total (count × on-topic fraction). Tiered by
+      //    buildAreaBoostFunctions' frac-of-max — that logic is UNCHANGED.
+      return onTopic
+        .map(({ cwid, n }) => ({ cwid, total: (n * n) / Math.max(totalByCwid.get(cwid) ?? n, 1) }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, limit);
+    },
+  );
+}
+
 export async function searchPeople(opts: {
   q: string;
   page?: number;
@@ -1195,6 +1297,14 @@ export async function searchPeople(opts: {
    * `false` so the rollout is opt-in.
    */
   deptLeadershipBoost?: boolean;
+  /**
+   * #1345 — full-time-faculty prominence lever. When `false`, the outer prominence
+   * function_score OMITS the flat `+PEOPLE_PROMINENCE_FACULTY_WEIGHT` full_time_faculty
+   * term (the expertise-independent employment prior). Resolved route/page-side from
+   * `SEARCH_PEOPLE_FACULTY_PROMINENCE` (default ON) so the API and SSR rank identically;
+   * headless callers default to today's behavior (`true` — term present).
+   */
+  facultyProminence?: boolean;
   /**
    * Issue #692 — generic-term demotion (mode `on`). When true and `contentQuery`
    * differs from the raw query, the topic + hybrid bodies score on the content
@@ -1500,6 +1610,20 @@ export async function searchPeople(opts: {
   const methodContextShould = (query: string, boost: number): Record<string, unknown>[] =>
     methodContextBoostOn ? [{ match: { methodContext: { query, boost } } }] : [];
 
+  // #1344 — topic/hybrid proximity boost. Scoring-only `match_phrase` clauses that
+  // reward within-a-single-publication co-occurrence of the query terms (slop kept
+  // well below the default position_increment_gap of 100 so a phrase can't bridge two
+  // unrelated titles in the concatenated `publicationTitles` rollup). Dark by default
+  // (flag-OFF ⇒ empty spread ⇒ body byte-identical); never admits (no msm on the bool).
+  const topicPhraseBoostOn = resolvePeopleTopicPhraseBoost();
+  const phraseBoostShould = (query: string): Record<string, unknown>[] =>
+    topicPhraseBoostOn && query.trim().length > 0
+      ? [
+          { match_phrase: { publicationTitles: { query, slop: 8, boost: 6 } } },
+          { match_phrase: { areasOfInterest: { query, slop: 4, boost: 4 } } },
+        ]
+      : [];
+
   // Issue #311 / SPEC §6.1.4 — name-template should-clauses, reused by the name
   // template (#309) and as the name half of the hybrid template. The cwid^100
   // term stays in the outer `should` (the existing short-circuit), so it is NOT
@@ -1580,6 +1704,8 @@ export async function searchPeople(opts: {
                 },
               },
             },
+            // #1344 — scoring-only proximity boost (dark by default).
+            ...phraseBoostShould(contentQuery),
           ],
           minimum_should_match: 1,
         },
@@ -1625,6 +1751,8 @@ export async function searchPeople(opts: {
             },
             // #1119 — methodContext is scoring-only here too (topic-raised boost).
             ...methodContextShould(contentQuery, PEOPLE_TOPIC_METHOD_CONTEXT_BOOST),
+            // #1344 — scoring-only proximity boost (dark by default).
+            ...phraseBoostShould(contentQuery),
           ],
         },
       }
@@ -2172,10 +2300,16 @@ export async function searchPeople(opts: {
             missing: 0,
           },
         },
-        {
-          filter: { term: { personType: PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE } },
-          weight: PEOPLE_PROMINENCE_FACULTY_WEIGHT,
-        },
+        // #1345 — the flat full_time_faculty prominence term, dropped when the
+        // faculty-prominence lever is off (expertise-independent employment prior).
+        ...(opts.facultyProminence !== false
+          ? [
+              {
+                filter: { term: { personType: PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE } },
+                weight: PEOPLE_PROMINENCE_FACULTY_WEIGHT,
+              },
+            ]
+          : []),
         {
           filter: { term: { hasActiveGrants: true } },
           weight: PEOPLE_PROMINENCE_GRANT_WEIGHT,
@@ -2817,12 +2951,13 @@ export async function searchPeople(opts: {
     cwid: string,
     areasOfInterest: string | undefined,
     pubCount: number,
-    hasProvenance: boolean,
+    prov: MatchProvenance | undefined,
     hl: Record<string, string[]> | undefined,
     topMeshTerms: Array<{ ui: string | null; label: string }> | string[] | undefined,
     clinicalSpecialties: string[] | undefined,
     clinicalBoardSet: string[] | undefined,
   ): ResultEvidence => {
+    const hasProvenance = prov != null;
     const m = methodReasonByCwid.get(cwid);
     let topic: { label: string; id: string } | undefined;
     if (matchedTopicSlugs.size > 0 && areasOfInterest) {
@@ -2844,19 +2979,37 @@ export async function searchPeople(opts: {
     // `tagged` is only meaningful with a resolved descriptor NAME to show — guard
     // against an empty `provenanceParent` rendering "publications tagged " with a
     // trailing blank (the content-shape relaxation dropped the old name gate).
+    // #1350 — the resolved concept term (`provenanceParent`) is split out of `text`
+    // into `term` so the renderer can give it a subtle underline; `text` keeps only
+    // the prefix. #1355 — a narrower match also carries the descendant term(s) the
+    // scholar actually has. `mention` keeps its whole text (the literal is already
+    // quoted, not a resolved term).
+    const narrowerTerms =
+      prov?.kind === "narrower" ? prov.descendantTerms : undefined;
     if (counts && counts.tagged > 0 && provenanceParent.length > 0)
       pub.tagged = {
-        text: `${Math.min(counts.tagged, pubCount)} of ${pubCount} publications tagged ${provenanceParent}`,
+        text: `${Math.min(counts.tagged, pubCount)} of ${pubCount} publications tagged`,
+        term: provenanceParent,
+        ...(narrowerTerms && narrowerTerms.length > 0 ? { descendantTerms: narrowerTerms } : {}),
         count: Math.min(counts.tagged, pubCount),
         ...(reps?.tagged && reps.tagged.length > 0 ? { pubs: reps.tagged } : {}),
       };
     if (counts && counts.mention > 0)
       pub.mention = {
-        text: `${Math.min(counts.mention, pubCount)} of ${pubCount} publications mention “${contentQuery}”`,
+        // #1361 — the literal query term is split out (curly-quoted) as `term` so it
+        // renders semibold; the prefix stays normal weight. No underline (that marks
+        // a system-expanded concept, which the literal mention is not).
+        text: `${Math.min(counts.mention, pubCount)} of ${pubCount} publications mention`,
+        term: `“${contentQuery}”`,
         count: Math.min(counts.mention, pubCount),
         ...(reps?.mention && reps.mention.length > 0 ? { pubs: reps.mention } : {}),
       };
-    if (hasProvenance) pub.concept = { text: `via related concept ${provenanceParent}` };
+    if (hasProvenance)
+      pub.concept = {
+        text: `via related concept`,
+        term: provenanceParent,
+        ...(narrowerTerms && narrowerTerms.length > 0 ? { descendantTerms: narrowerTerms } : {}),
+      };
 
     // Bounded research-areas hint — score-desc (areasOfInterest is already
     // score-ordered), capped to AREAS_CAP, no `matchedIndex` (always -1 here by
@@ -2976,7 +3129,7 @@ export async function searchPeople(opts: {
                 h._source.cwid,
                 h._source.areasOfInterest,
                 h._source.publicationCount,
-                prov != null,
+                prov,
                 hl,
                 h._source.topMeshTerms,
                 h._source.clinicalSpecialties,
@@ -3710,6 +3863,11 @@ export async function searchPublications(opts: {
                 should: [
                   { match_phrase: { title: trimmed } },
                   { match: { title: highlightSignificantQuery } },
+                  // #1351 — also mark the RESOLVED concept term, so a title that
+                  // matched via concept expansion (no literal term) still shows the
+                  // term it actually matched on. Highlight-only; admission/rank
+                  // unchanged. Omitted when no concept resolved.
+                  ...(resolution?.name ? [{ match_phrase: { title: resolution.name } }] : []),
                 ],
               },
             },

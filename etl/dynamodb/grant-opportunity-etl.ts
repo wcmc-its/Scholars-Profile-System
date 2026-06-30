@@ -100,6 +100,7 @@ export async function projectGrantOpportunities(
           taxonomyVersion: w.taxonomyVersion,
           matchDsl: w.matchDsl,
           matchQuery: w.matchQuery,
+          matchRel: w.matchRel,
           ingestedAt: w.ingestedAt,
           lastRefreshedAt: now,
         };

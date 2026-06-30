@@ -44,6 +44,7 @@ export type GrantRecordInput = {
   prestige?: unknown; // { score, mechanism_tier, size_bucket, sponsor_tier, selectivity, label, rationale }
   match_dsl?: unknown; // compact-JSON `S` string: { require, penalize, pediatric_markers, pediatric_required }
   match_query?: unknown; // compact-JSON `S` string: [{ q, w }] weighted BM25 terms
+  match_rel?: unknown; // compact-JSON `S` string: { pmid: cosine∈[0,1] } dense relevance map
   is_honorific?: boolean;
   taxonomy_version?: string;
   ingested_at?: string; // ISO
@@ -77,6 +78,7 @@ export type OpportunityWrite = {
   prestige: Prisma.InputJsonValue | typeof Prisma.JsonNull;
   matchDsl: Prisma.InputJsonValue | typeof Prisma.JsonNull;
   matchQuery: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+  matchRel: Prisma.InputJsonValue | typeof Prisma.JsonNull;
   isHonorific: boolean | null;
   taxonomyVersion: string;
   ingestedAt: Date;
@@ -240,6 +242,7 @@ export function buildOpportunityWrites(items: GrantRecordInput[]): BuildOpportun
           : Prisma.JsonNull,
       matchDsl: parseJsonAttr(it.match_dsl),
       matchQuery: parseJsonAttr(it.match_query),
+      matchRel: parseJsonAttr(it.match_rel),
       isHonorific: typeof it.is_honorific === "boolean" ? it.is_honorific : null,
       taxonomyVersion: trimStr(it.taxonomy_version),
       ingestedAt: parseIsoDate(it.ingested_at) ?? new Date(0),

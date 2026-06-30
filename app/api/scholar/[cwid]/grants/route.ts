@@ -81,6 +81,9 @@ export async function GET(
     const grants: EvidenceGrant[] = result.hits.slice(0, GRANT_CAP).map((h) => ({
       projectId: h.projectId,
       title: h.title,
+      // #1359 — carry the matched-term highlight (already computed by searchFunding)
+      // so KEY FUNDING marks the query term in grant titles, like key papers.
+      titleHighlight: h.titleHighlight,
       sponsor: h.primeSponsor || null,
       startYear: year(h.startDate),
       endYear: year(h.endDate),

@@ -423,6 +423,10 @@ model Opportunity {
   matchDsl         Json?     @map("match_dsl")
   /// LLM-compiled weighted BM25 query `[{ q, w }]` for the relevance boost.
   matchQuery       Json?     @map("match_query")
+  /// Precomputed DENSE relevance map `{ pmid: cosine∈[0,1] }` (Titan v2) — a strictly
+  /// better alternative to the live BM25 boost for the same `{pmid: rel}` seam. The
+  /// matcher prefers it when present and falls back to `matchQuery` (BM25) when absent.
+  matchRel         Json?     @map("match_rel")
   /// True for nomination-based honorific recognition (prize/medal/lectureship, or a
   /// recognition "Award" with no NIH activity code) — excluded from recommendations.
   isHonorific      Boolean?  @map("is_honorific")

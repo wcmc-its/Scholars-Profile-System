@@ -46,6 +46,10 @@ export type EvidenceGrant = {
   /** Account_Number dedupe key from the funding index (FundingHit.projectId). */
   projectId: string;
   title: string;
+  /** #1359 — the grant title with the matched query term(s) wrapped in `<mark>`,
+   *  from `searchFunding`'s highlighter; null when nothing matched in the title.
+   *  Rendered with the same pill styling as key-paper titles. */
+  titleHighlight?: string | null;
   /** Prime sponsor display label, e.g. "NIH / NIA"; null when unknown. */
   sponsor?: string | null;
   /** Award period years (YYYY) parsed from start/end dates; either may be null. */
@@ -86,6 +90,15 @@ export type ResultEvidence =
       kind: "publications";
       strength: "tagged" | "mention" | "concept";
       text: string;
+      /** #1350 — the resolved concept term named at the END of `text` (so `text`
+       *  is just the prefix, e.g. "3 of 301 publications tagged"). Set for the
+       *  `tagged`/`concept` strengths; the renderer gives it a subtle underline.
+       *  Absent for `mention` (the literal query, already quoted in `text`). */
+      term?: string;
+      /** #1355 — narrower descendant descriptors the scholar actually carries,
+       *  when the resolved concept matched via a strictly-narrower term. Rendered
+       *  as "(matched X, Y)" after the term. Absent on a direct concept match. */
+      descendantTerms?: string[];
       pubs?: EvidencePub[];
       count?: number;
     }
@@ -342,9 +355,9 @@ export type SelectEvidenceInput = {
    *  already built; any one may be absent). `count` is the numeric "N" (the
    *  `+N more` math), `pubs` up to 3 representative papers for the disclosure. */
   pub?: {
-    tagged?: { text: string; count: number; pubs?: EvidencePub[] };
-    mention?: { text: string; count: number; pubs?: EvidencePub[] };
-    concept?: { text: string };
+    tagged?: { text: string; term?: string; descendantTerms?: string[]; count: number; pubs?: EvidencePub[] };
+    mention?: { text: string; term?: string; count: number; pubs?: EvidencePub[] };
+    concept?: { text: string; term?: string; descendantTerms?: string[] };
   };
   /** Resolved clinical specialty — exact tier only. Caller ran
    *  {@link clinicalExactMatch} against the hit's `_source` clinical fields; pass
@@ -462,6 +475,10 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
       kind: "publications",
       strength: "tagged",
       text: input.pub.tagged.text,
+      ...(input.pub.tagged.term ? { term: input.pub.tagged.term } : {}),
+      ...(input.pub.tagged.descendantTerms && input.pub.tagged.descendantTerms.length > 0
+        ? { descendantTerms: input.pub.tagged.descendantTerms }
+        : {}),
       ...(input.pub.tagged.pubs && input.pub.tagged.pubs.length > 0 ? { pubs: input.pub.tagged.pubs } : {}),
       count: input.pub.tagged.count,
     };
@@ -473,7 +490,16 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
   if (input.clinical)
     return { kind: "clinical", specialty: input.clinical.specialty, boardCertified: input.clinical.boardCertified };
   // 5 — publications:concept (MeSH-expansion text variant; below clinical:exact)
-  if (input.pub?.concept) return { kind: "publications", strength: "concept", text: input.pub.concept.text };
+  if (input.pub?.concept)
+    return {
+      kind: "publications",
+      strength: "concept",
+      text: input.pub.concept.text,
+      ...(input.pub.concept.term ? { term: input.pub.concept.term } : {}),
+      ...(input.pub.concept.descendantTerms && input.pub.concept.descendantTerms.length > 0
+        ? { descendantTerms: input.pub.concept.descendantTerms }
+        : {}),
+    };
   // 6 — selfDescription (bio) — ONLY when the bio covered the WHOLE query (a
   // FULL-query / single-token bio match still wins, as today). A query-literal
   // bio sentence shows WHY this matched, so it now outranks the research-area
@@ -490,6 +516,7 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
       kind: "publications",
       strength: "mention",
       text: input.pub.mention.text,
+      ...(input.pub.mention.term ? { term: input.pub.mention.term } : {}),
       ...(input.pub.mention.pubs && input.pub.mention.pubs.length > 0 ? { pubs: input.pub.mention.pubs } : {}),
       count: input.pub.mention.count,
     };

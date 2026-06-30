@@ -259,9 +259,9 @@ describe("FundingResultRow — Tier 3 text-evidence line (SEARCH_FUNDING_TEXT_EV
       />,
     );
     expect(container.textContent).toMatch(/In abstract:/);
-    // The <mark> renders as a <strong> child (HighlightedSnippet sink).
-    const strong = container.querySelector("strong");
-    expect(strong?.textContent).toBe("BRCA");
+    // #1361 — the <mark> renders as the light-red pill (a real <mark>), not <strong>.
+    const mark = container.querySelector("mark");
+    expect(mark?.textContent).toBe("BRCA");
     // The text-evidence line is the ONLY reason — neither higher-precedence
     // reason fired.
     expect(container.textContent).not.toMatch(/Matched through/);
@@ -281,7 +281,7 @@ describe("FundingResultRow — Tier 3 text-evidence line (SEARCH_FUNDING_TEXT_EV
       />,
     );
     expect(container.textContent).toMatch(/In keywords:/);
-    expect(container.querySelector("strong")?.textContent).toBe("learning");
+    expect(container.querySelector("mark")?.textContent).toBe("learning");
   });
 
   it("uses the 'In sponsor text:' label for a sponsorText hit", () => {
@@ -297,7 +297,7 @@ describe("FundingResultRow — Tier 3 text-evidence line (SEARCH_FUNDING_TEXT_EV
       />,
     );
     expect(container.textContent).toMatch(/In sponsor text:/);
-    expect(container.querySelector("strong")?.textContent).toBe("Komen");
+    expect(container.querySelector("mark")?.textContent).toBe("Komen");
   });
 
   it("funded-pubs outranks text-evidence", () => {
@@ -369,7 +369,7 @@ describe("FundingResultRow — Tier 3 text-evidence line (SEARCH_FUNDING_TEXT_EV
     );
     expect(container.textContent).not.toContain("<mark>");
     expect(container.textContent).not.toContain("</mark>");
-    // …but the matched term is present (rendered as a <strong>).
+    // …but the matched term is present (rendered as a pill <mark>).
     expect(container.textContent).toMatch(/glioblastoma/);
   });
 });
