@@ -202,6 +202,7 @@ export function MatchAwareReason({
   kind,
   label,
   prefix,
+  suffix,
   underline = false,
   canExpand = false,
   expanded = false,
@@ -214,6 +215,11 @@ export function MatchAwareReason({
    *  term (e.g. "3 of 5 grants mention" + **"radiosurgery"**). Omitted for the pure
    *  label matches (method/topic/clinical), which have no "N of M" count. */
   prefix?: string;
+  /** #1366 — an optional normal-weight count SUFFIX rendered AFTER the semibold
+   *  label, for the named first-class lines that read label-first (e.g.
+   *  **"Anti-obesity pharmacotherapy"** + " · 7 of 41 publications"). Method/area
+   *  use this; concept/keyword/funding use `prefix` (count-first). */
+  suffix?: string;
   /** #1359 — give the semibold term the §4.5 dotted underline used for a resolved
    *  CONCEPT term (the "tagged" funding line: "N of M grants tagged **Heart Arrest**"),
    *  matching the concept publications line. Off for a literal "mention '<query>'". */
@@ -279,6 +285,7 @@ export function MatchAwareReason({
         >
           {label}
         </strong>
+        {suffix ? <span className="font-normal text-[#3a3a3a]">{suffix}</span> : null}
       </span>
     </>
   );

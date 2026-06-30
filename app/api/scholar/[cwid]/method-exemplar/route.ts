@@ -45,6 +45,12 @@ export async function GET(
   const family = sp.get("family")?.trim();
   const topic = sp.get("topic")?.trim();
   const query = sp.get("q")?.trim() || undefined;
+  // #1366 — pmids already shown on a sibling stacked line; drop them so the
+  // representative papers stay globally disjoint across the card's lines. `total`
+  // stays the full count (the "+N more" math is unaffected). ponytail: filtered
+  // post-load, so an exemplar line can under-fill below its cap when a sibling
+  // claimed its top picks; thread `exclude` into the loader query if that bites.
+  const exclude = new Set((sp.get("exclude")?.split(",") ?? []).map((s) => s.trim()).filter(Boolean));
 
   try {
     let result: { pubs: unknown[]; total: number } = EMPTY;
@@ -52,6 +58,12 @@ export async function GET(
       result = await loadMethodExemplar(cwid, family, query);
     } else if (topic) {
       result = await loadTopicExemplar(cwid, topic, query);
+    }
+    if (exclude.size > 0) {
+      result = {
+        ...result,
+        pubs: result.pubs.filter((p) => !exclude.has(String((p as { pmid?: unknown }).pmid))),
+      };
     }
     return NextResponse.json(result, { headers: NO_STORE });
   } catch {

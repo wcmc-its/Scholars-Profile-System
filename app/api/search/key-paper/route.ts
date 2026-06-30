@@ -38,7 +38,14 @@ export async function GET(request: NextRequest) {
   // #1351 — the resolved concept display name, so the title highlight can mark the
   // concept term (not just the literal query) on a descriptor-tagged key paper.
   const conceptLabel = params.get("label") ?? "";
+  // #1366 — pmids already shown on a sibling stacked line; drop them so the
+  // representative papers stay globally disjoint across the card's lines.
+  const exclude = new Set(
+    (params.get("exclude") ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+  );
 
   const pubs = await fetchKeyPaper({ cwid, descriptorUis, contentQuery, conceptLabel });
-  return NextResponse.json({ pubs });
+  const filtered =
+    exclude.size > 0 ? pubs.filter((p) => !exclude.has(String((p as { pmid?: unknown }).pmid))) : pubs;
+  return NextResponse.json({ pubs: filtered });
 }

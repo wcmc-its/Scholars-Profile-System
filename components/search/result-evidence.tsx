@@ -58,6 +58,7 @@ export function ResultEvidence({
   hasQuery = true,
   slug,
   badged = false,
+  pubCount,
 }: {
   evidence: ResultEvidence;
   /** Rep-papers disclosure — when true and the evidence is a method/topic/
@@ -81,13 +82,22 @@ export function ResultEvidence({
    *  (`/{slug}?mesh=<ui>#publications`). Required wherever a concepts evidence
    *  can render (the People card always passes it). */
   slug?: string;
+  /** #1366 — the scholar's total pub count (M), paired with `evidence.count` (N)
+   *  to render the "· N of M publications" suffix on method/area lines. Absent ⇒
+   *  no suffix (the single-evidence path passes no count, so this stays label-only). */
+  pubCount?: number;
 }) {
+  // #1366 — "· N of M publications" suffix for the named first-class lines, when
+  // the stacked path supplied a count (M = the hit's pubCount).
+  const countSuffix = (count: number | undefined): string | undefined =>
+    count != null && pubCount != null ? ` · ${count} of ${pubCount} publications` : undefined;
   switch (evidence.kind) {
     case "method":
       return (
         <MatchAwareReason
           kind="method"
           label={evidence.family}
+          suffix={countSuffix(evidence.count)}
           canExpand={canExpand}
           expanded={expanded}
           onToggle={onToggle}
@@ -99,6 +109,7 @@ export function ResultEvidence({
         <MatchAwareReason
           kind="topic"
           label={evidence.label}
+          suffix={countSuffix(evidence.count)}
           canExpand={canExpand}
           expanded={expanded}
           onToggle={onToggle}
