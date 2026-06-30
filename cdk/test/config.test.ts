@@ -74,15 +74,25 @@ describe("assertCutoverGate", () => {
   });
 
   for (const env of ["staging", "prod"] as const) {
-    it(`hard-throws when useSharedVpc is flipped on for ${env} (also fails CI on a premature flip)`, () => {
+    it(`hard-throws when useSharedVpc is flipped on WITHOUT a snapshot id for ${env} (also fails CI on a premature flip)`, () => {
       const cfg = { ...resolveEnvConfig(env), useSharedVpc: true };
       expect(() => assertCutoverGate(cfg)).toThrow(/not yet deployable/);
       // The message names the prerequisites so the gate gives no false "safe" signal.
+      expect(() => assertCutoverGate(cfg)).toThrow(/auroraSnapshotIdentifier/);
       expect(() => assertCutoverGate(cfg)).toThrow(
         /DatabaseClusterFromSnapshot/,
       );
       expect(() => assertCutoverGate(cfg)).toThrow(/appRwGranteeHost/);
       expect(() => assertCutoverGate(cfg)).toThrow(/reseed/);
+    });
+
+    it(`does NOT throw when useSharedVpc is on AND an auroraSnapshotIdentifier is set for ${env} (the snapshot-restore data path is wired)`, () => {
+      const cfg = {
+        ...resolveEnvConfig(env),
+        useSharedVpc: true,
+        auroraSnapshotIdentifier: "sps-cutover-snapshot",
+      };
+      expect(() => assertCutoverGate(cfg)).not.toThrow();
     });
   }
 });

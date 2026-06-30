@@ -56,8 +56,13 @@ export interface DataStackProps extends StackProps {
  * `RemovalPolicy.RETAIN` (ADR-008's blast-radius rule).
  */
 export class DataStack extends Stack {
-  /** Aurora MySQL Serverless v2 cluster. */
-  public readonly auroraCluster: rds.DatabaseCluster;
+  /**
+   * Aurora MySQL Serverless v2 cluster. Typed as {@link rds.IDatabaseCluster}
+   * (not the concrete `DatabaseCluster`) so the field can hold either the
+   * standalone cluster or the cutover `DatabaseClusterFromSnapshot` — both
+   * satisfy every consumer (Observability metrics, AWS Backup, the CfnOutputs).
+   */
+  public readonly auroraCluster: rds.IDatabaseCluster;
   /**
    * Auto-generated master-user secret bound to the cluster. SecretsStack
    * attaches the Secrets Manager RDS rotation Lambda to this (B06).
@@ -154,59 +159,120 @@ export class DataStack extends Stack {
         }),
     );
 
-    this.auroraCluster = new rds.DatabaseCluster(this, "AuroraCluster", {
-      engine: rds.DatabaseClusterEngine.auroraMysql({
-        version: rds.AuroraMysqlEngineVersion.VER_3_08_0,
-      }),
-      credentials: rds.Credentials.fromGeneratedSecret("scholars_admin", {
-        // Env-prefixed because account `665083158573` hosts both staging and
-        // prod (one-account deviation from ADR-008's separate-accounts
-        // alternative). Without the env in the path, the two stacks collide
-        // on Secrets Manager's per-region-per-account name uniqueness.
-        secretName: `scholars/${envConfig.envName}/db/master`,
-      }),
-      defaultDatabaseName: "scholars",
-      vpc,
-      vpcSubnets: dataSubnets,
-      securityGroups: [auroraSecurityGroup],
-      writer: rds.ClusterInstance.serverlessV2("Writer", {
-        publiclyAccessible: false,
-      }),
-      readers,
-      serverlessV2MinCapacity: envConfig.auroraMinCapacity,
-      serverlessV2MaxCapacity: envConfig.auroraMaxCapacity,
-      storageEncrypted: true,
-      deletionProtection: true,
-      backup: {
-        retention: Duration.days(envConfig.auroraBackupRetentionDays),
-        preferredWindow: "03:00-04:00",
-      },
-      iamAuthentication: false,
-      removalPolicy: RemovalPolicy.RETAIN,
-    });
-    // The auto-generated master secret. Retain on cluster delete so the
-    // recovery procedure can read the credentials from Secrets Manager even
-    // if the cluster has been replaced from a snapshot. RETAIN on
-    // UpdateReplacePolicy is equally critical: a Name change triggers a
-    // CFN replace (Name is replace-required for AWS::SecretsManager::Secret),
-    // and without RETAIN the OLD secret holding the cluster's live password
-    // is deleted. `cluster.secret` resolves through a SecretTargetAttachment
-    // whose `node.defaultChild` is that attachment, not the underlying
-    // Secret — so calling `applyRemovalPolicy` on it (the original shape of
-    // this code) only set the policy on the attachment. Walk into the
-    // construct tree directly so the policy lands on the real CfnSecret.
-    if (!this.auroraCluster.secret) {
-      throw new Error(
-        "Aurora cluster did not produce a master secret — Credentials.fromGeneratedSecret should always create one.",
+    // Estate-consolidation data-bearing cutover (plan §8.5/§8.6): when
+    // envConfig.auroraSnapshotIdentifier is set, restore the cluster via
+    // rds.DatabaseClusterFromSnapshot stood up ALONGSIDE the live one
+    // (reversible — "abandon new, keep old"). Undefined (shipped) → the
+    // standalone DatabaseCluster below, byte-identical to pre-cutover. The
+    // snapshot branch omits credentials/defaultDatabaseName/storageEncrypted —
+    // the master username, database, and KMS key are inherited from the snapshot.
+    const snapshotId = envConfig.auroraSnapshotIdentifier;
+    let cluster: rds.DatabaseCluster | rds.DatabaseClusterFromSnapshot;
+    if (snapshotId) {
+      // Transitional master credential for the restored cluster, GENERATED here
+      // (not SecretsStack) — SnapshotCredentials.fromSecret needs a real
+      // `password` field and the credential lifecycle lives with the cluster. A
+      // distinct name (db/master-its) so the live + restored clusters coexist
+      // during the reversible cutover. RETAIN so a Name-change replace never
+      // deletes the live password. Username is immutable on a snapshot restore,
+      // so it must match the live master (scholars_admin).
+      const itsMaster = new secretsmanager.Secret(
+        this,
+        "AuroraItsMasterSecret",
+        {
+          secretName: `scholars/${envConfig.envName}/db/master-its`,
+          generateSecretString: {
+            secretStringTemplate: JSON.stringify({ username: "scholars_admin" }),
+            generateStringKey: "password",
+            excludeCharacters: '"@/\\',
+          },
+          removalPolicy: RemovalPolicy.RETAIN,
+        },
       );
+      cluster = new rds.DatabaseClusterFromSnapshot(
+        this,
+        "AuroraClusterFromSnapshot",
+        {
+          snapshotIdentifier: snapshotId,
+          snapshotCredentials: rds.SnapshotCredentials.fromSecret(itsMaster),
+          engine: rds.DatabaseClusterEngine.auroraMysql({
+            version: rds.AuroraMysqlEngineVersion.VER_3_08_0,
+          }),
+          vpc,
+          vpcSubnets: dataSubnets,
+          securityGroups: [auroraSecurityGroup],
+          writer: rds.ClusterInstance.serverlessV2("Writer", {
+            publiclyAccessible: false,
+          }),
+          readers,
+          serverlessV2MinCapacity: envConfig.auroraMinCapacity,
+          serverlessV2MaxCapacity: envConfig.auroraMaxCapacity,
+          deletionProtection: true,
+          backup: {
+            retention: Duration.days(envConfig.auroraBackupRetentionDays),
+            preferredWindow: "03:00-04:00",
+          },
+          iamAuthentication: false,
+          removalPolicy: RemovalPolicy.RETAIN,
+        },
+      );
+      this.auroraMasterSecret = itsMaster;
+    } else {
+      cluster = new rds.DatabaseCluster(this, "AuroraCluster", {
+        engine: rds.DatabaseClusterEngine.auroraMysql({
+          version: rds.AuroraMysqlEngineVersion.VER_3_08_0,
+        }),
+        credentials: rds.Credentials.fromGeneratedSecret("scholars_admin", {
+          // Env-prefixed because account `665083158573` hosts both staging and
+          // prod (one-account deviation from ADR-008's separate-accounts
+          // alternative). Without the env in the path, the two stacks collide
+          // on Secrets Manager's per-region-per-account name uniqueness.
+          secretName: `scholars/${envConfig.envName}/db/master`,
+        }),
+        defaultDatabaseName: "scholars",
+        vpc,
+        vpcSubnets: dataSubnets,
+        securityGroups: [auroraSecurityGroup],
+        writer: rds.ClusterInstance.serverlessV2("Writer", {
+          publiclyAccessible: false,
+        }),
+        readers,
+        serverlessV2MinCapacity: envConfig.auroraMinCapacity,
+        serverlessV2MaxCapacity: envConfig.auroraMaxCapacity,
+        storageEncrypted: true,
+        deletionProtection: true,
+        backup: {
+          retention: Duration.days(envConfig.auroraBackupRetentionDays),
+          preferredWindow: "03:00-04:00",
+        },
+        iamAuthentication: false,
+        removalPolicy: RemovalPolicy.RETAIN,
+      });
+      // The auto-generated master secret. Retain on cluster delete so the
+      // recovery procedure can read the credentials from Secrets Manager even
+      // if the cluster has been replaced from a snapshot. RETAIN on
+      // UpdateReplacePolicy is equally critical: a Name change triggers a
+      // CFN replace (Name is replace-required for AWS::SecretsManager::Secret),
+      // and without RETAIN the OLD secret holding the cluster's live password
+      // is deleted. `cluster.secret` resolves through a SecretTargetAttachment
+      // whose `node.defaultChild` is that attachment, not the underlying
+      // Secret — so calling `applyRemovalPolicy` on it (the original shape of
+      // this code) only set the policy on the attachment. Walk into the
+      // construct tree directly so the policy lands on the real CfnSecret.
+      if (!cluster.secret) {
+        throw new Error(
+          "Aurora cluster did not produce a master secret — Credentials.fromGeneratedSecret should always create one.",
+        );
+      }
+      this.auroraMasterSecret = cluster.secret;
+      const masterSecretConstruct = cluster.node.findChild(
+        "Secret",
+      ) as secretsmanager.Secret;
+      (
+        masterSecretConstruct.node.defaultChild as secretsmanager.CfnSecret
+      ).applyRemovalPolicy(RemovalPolicy.RETAIN);
     }
-    this.auroraMasterSecret = this.auroraCluster.secret;
-    const masterSecretConstruct = this.auroraCluster.node.findChild(
-      "Secret",
-    ) as secretsmanager.Secret;
-    (
-      masterSecretConstruct.node.defaultChild as secretsmanager.CfnSecret
-    ).applyRemovalPolicy(RemovalPolicy.RETAIN);
+    this.auroraCluster = cluster;
 
     // RDS rotation for the Aurora master credentials (B06 secrets half).
     //
@@ -225,7 +291,7 @@ export class DataStack extends Stack {
     // Single-user rotation is the right primitive: the master user is
     // administrative and never serves an application connection, so the brief
     // reconnect window at rotation time is invisible.
-    this.auroraCluster.addRotationSingleUser({
+    cluster.addRotationSingleUser({
       automaticallyAfter: Duration.days(30),
       excludeCharacters: '"@/\\',
       // Place the rotation Lambda in the compute (app2) tier, not the cluster's
