@@ -70,6 +70,7 @@ import {
   AREA_BOOST_W_LO,
   AREA_BOOST_HI_FRAC,
   AREA_BOOST_MID_FRAC,
+  CONCEPT_CONCENTRATION_MIN_PUBS,
   FUNDING_INDEX,
   PEOPLE_RESTRUCTURED_MSM,
   PEOPLE_TOPIC_ABSTRACTS_BOOST,
@@ -97,6 +98,7 @@ import {
   resolvePeopleMethodContextBoost,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
+  resolvePeopleTopicPhraseBoost,
   resolveSearchPeopleClinical,
   resolveSearchPeopleConceptHint,
   resolveSearchResultEvidence,
@@ -1089,6 +1091,90 @@ export function buildAreaBoostFunctions(
   return fns;
 }
 
+/**
+ * #1343 — concept-axis on-topic CONCENTRATION. Ranks WCM authors of the resolved
+ * concept (descendant descriptor set) by how *concentrated* their work is on it,
+ * not by raw on-topic volume, then returns `{ cwid, total }` — the SAME shape
+ * `getAreaScholarConcentration` returns, so it feeds `buildAreaBoostFunctions`
+ * and the prominence slot UNCHANGED (`total` is a tiering score, never surfaced).
+ * Reaches MeSH-concept queries with no curated Research Area (the area rollup
+ * only covers curated areas).
+ *
+ * Why concentration, not count: ranking by raw on-topic `doc_count` rewarded
+ * high-VOLUME authors who merely had many on-topic pubs (a ~900-pub cardiologist
+ * with 20 obesity pubs out-tiered a 30-pub obesity specialist) — the exact volume
+ * dominance the boost was meant to fix (staging A/B 2026-06-29). Score is
+ * `n²/total` = on-topic count × on-topic fraction: rewards BOTH real output and
+ * focus, so a niche specialist out-tiers an incidental generalist while a genuine
+ * high-output expert (high n AND high fraction) still leads. Pure fraction would
+ * over-reward 1–2-pub authors; the n² numerator + the `CONCEPT_CONCENTRATION_MIN_PUBS`
+ * floor prevent that.
+ *
+ * Sources the publications index (`meshDescriptorUi` ∩ `wcmAuthorCwids`, both
+ * already indexed — NO reindex): one agg for on-topic counts, a second for each
+ * author's total pub count (the fraction denominator). Both cached together under
+ * one key, capped at `limit`, so a broad concept can't saturate the search pool.
+ * `doc_count` IS the distinct pmid count (one doc per pmid).
+ * ponytail: n²/total over two aggs; a reindexed per-scholar on-topic-fraction
+ *   field would drop the 2nd round-trip if this proves out (spec OQ-7).
+ */
+export async function getConceptScholarConcentration(
+  descendantUis: string[],
+  limit: number,
+): Promise<{ cwid: string; total: number }[]> {
+  if (descendantUis.length === 0 || limit <= 0) return [];
+  return cachedReasonAgg<{ cwid: string; total: number }[]>(
+    `concept-concentration:${[...descendantUis].sort().join(",")}:${limit}`,
+    async () => {
+      const authorBuckets = (resp: unknown): { key: string; doc_count: number }[] =>
+        (
+          resp as {
+            body?: {
+              aggregations?: { byAuthor?: { buckets?: { key: string; doc_count: number }[] } };
+            };
+          }
+        ).body?.aggregations?.byAuthor?.buckets ?? [];
+      // 1. On-topic pub count per WCM author.
+      const onTopicResp = await searchClient().search({
+        index: PUBLICATIONS_INDEX,
+        body: {
+          size: 0,
+          query: { bool: { filter: [{ terms: { meshDescriptorUi: descendantUis } }] } },
+          aggs: { byAuthor: { terms: { field: "wcmAuthorCwids", size: limit } } },
+        } as object,
+      });
+      const onTopic = authorBuckets(onTopicResp)
+        .map((b) => ({ cwid: b.key, n: b.doc_count }))
+        .filter((a) => a.n >= CONCEPT_CONCENTRATION_MIN_PUBS);
+      if (onTopic.length === 0) return [];
+      // 2. Each author's TOTAL WCM-authored pub count (the fraction denominator).
+      //    `include` pins the buckets to exactly our authors so co-authors can't
+      //    crowd them out; each doc_count is then that author's whole-index total
+      //    (every doc an author is on matches the cwid filter, so it's counted).
+      const cwids = onTopic.map((a) => a.cwid);
+      const totalResp = await searchClient().search({
+        index: PUBLICATIONS_INDEX,
+        body: {
+          size: 0,
+          query: { bool: { filter: [{ terms: { wcmAuthorCwids: cwids } }] } },
+          aggs: {
+            byAuthor: { terms: { field: "wcmAuthorCwids", size: cwids.length, include: cwids } },
+          },
+        } as object,
+      });
+      const totalByCwid = new Map(
+        authorBuckets(totalResp).map((b) => [b.key, b.doc_count] as [string, number]),
+      );
+      // 3. Concentration score n²/total (count × on-topic fraction). Tiered by
+      //    buildAreaBoostFunctions' frac-of-max — that logic is UNCHANGED.
+      return onTopic
+        .map(({ cwid, n }) => ({ cwid, total: (n * n) / Math.max(totalByCwid.get(cwid) ?? n, 1) }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, limit);
+    },
+  );
+}
+
 export async function searchPeople(opts: {
   q: string;
   page?: number;
@@ -1211,6 +1297,14 @@ export async function searchPeople(opts: {
    * `false` so the rollout is opt-in.
    */
   deptLeadershipBoost?: boolean;
+  /**
+   * #1345 — full-time-faculty prominence lever. When `false`, the outer prominence
+   * function_score OMITS the flat `+PEOPLE_PROMINENCE_FACULTY_WEIGHT` full_time_faculty
+   * term (the expertise-independent employment prior). Resolved route/page-side from
+   * `SEARCH_PEOPLE_FACULTY_PROMINENCE` (default ON) so the API and SSR rank identically;
+   * headless callers default to today's behavior (`true` — term present).
+   */
+  facultyProminence?: boolean;
   /**
    * Issue #692 — generic-term demotion (mode `on`). When true and `contentQuery`
    * differs from the raw query, the topic + hybrid bodies score on the content
@@ -1516,6 +1610,20 @@ export async function searchPeople(opts: {
   const methodContextShould = (query: string, boost: number): Record<string, unknown>[] =>
     methodContextBoostOn ? [{ match: { methodContext: { query, boost } } }] : [];
 
+  // #1344 — topic/hybrid proximity boost. Scoring-only `match_phrase` clauses that
+  // reward within-a-single-publication co-occurrence of the query terms (slop kept
+  // well below the default position_increment_gap of 100 so a phrase can't bridge two
+  // unrelated titles in the concatenated `publicationTitles` rollup). Dark by default
+  // (flag-OFF ⇒ empty spread ⇒ body byte-identical); never admits (no msm on the bool).
+  const topicPhraseBoostOn = resolvePeopleTopicPhraseBoost();
+  const phraseBoostShould = (query: string): Record<string, unknown>[] =>
+    topicPhraseBoostOn && query.trim().length > 0
+      ? [
+          { match_phrase: { publicationTitles: { query, slop: 8, boost: 6 } } },
+          { match_phrase: { areasOfInterest: { query, slop: 4, boost: 4 } } },
+        ]
+      : [];
+
   // Issue #311 / SPEC §6.1.4 — name-template should-clauses, reused by the name
   // template (#309) and as the name half of the hybrid template. The cwid^100
   // term stays in the outer `should` (the existing short-circuit), so it is NOT
@@ -1596,6 +1704,8 @@ export async function searchPeople(opts: {
                 },
               },
             },
+            // #1344 — scoring-only proximity boost (dark by default).
+            ...phraseBoostShould(contentQuery),
           ],
           minimum_should_match: 1,
         },
@@ -1641,6 +1751,8 @@ export async function searchPeople(opts: {
             },
             // #1119 — methodContext is scoring-only here too (topic-raised boost).
             ...methodContextShould(contentQuery, PEOPLE_TOPIC_METHOD_CONTEXT_BOOST),
+            // #1344 — scoring-only proximity boost (dark by default).
+            ...phraseBoostShould(contentQuery),
           ],
         },
       }
@@ -2188,10 +2300,16 @@ export async function searchPeople(opts: {
             missing: 0,
           },
         },
-        {
-          filter: { term: { personType: PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE } },
-          weight: PEOPLE_PROMINENCE_FACULTY_WEIGHT,
-        },
+        // #1345 — the flat full_time_faculty prominence term, dropped when the
+        // faculty-prominence lever is off (expertise-independent employment prior).
+        ...(opts.facultyProminence !== false
+          ? [
+              {
+                filter: { term: { personType: PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE } },
+                weight: PEOPLE_PROMINENCE_FACULTY_WEIGHT,
+              },
+            ]
+          : []),
         {
           filter: { term: { hasActiveGrants: true } },
           weight: PEOPLE_PROMINENCE_GRANT_WEIGHT,

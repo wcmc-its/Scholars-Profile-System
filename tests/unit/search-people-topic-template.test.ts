@@ -488,3 +488,59 @@ describe("method-family boost — #824 §4c (people topic shape)", () => {
     );
   });
 });
+
+// #1344 — scoring-only proximity boost on the topic template (dark by default).
+describe("phrase boost — #1344 (people topic shape)", () => {
+  const FLAG = "SEARCH_PEOPLE_PHRASE_BOOST";
+  let prior: string | undefined;
+
+  beforeEach(() => {
+    capturedBodies.length = 0;
+    groupByMock.mockResolvedValue([]);
+    prior = process.env[FLAG];
+  });
+  afterEach(() => {
+    if (prior === undefined) delete process.env[FLAG];
+    else process.env[FLAG] = prior;
+    vi.clearAllMocks();
+  });
+
+  const topicShould = (body: Record<string, unknown>): Record<string, unknown>[] =>
+    (topicBranch(body).bool as { should: Record<string, unknown>[] }).should;
+
+  it("flag OFF (default): the topic should[] has NO match_phrase clause (byte-identical)", async () => {
+    delete process.env[FLAG];
+    await searchPeople({
+      q: "ras signaling pancreatic cancer",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: DESCENDANTS,
+    });
+    expect(topicShould(capturedBodies[0]).some((c) => "match_phrase" in c)).toBe(false);
+  });
+
+  it("flag ON: adds bounded-slop match_phrase clauses; admission msm is unchanged", async () => {
+    process.env[FLAG] = "on";
+    await searchPeople({
+      q: "ras signaling pancreatic cancer",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: DESCENDANTS,
+    });
+    const should = topicShould(capturedBodies[0]);
+    expect(should).toContainEqual({
+      match_phrase: {
+        publicationTitles: { query: "ras signaling pancreatic cancer", slop: 8, boost: 6 },
+      },
+    });
+    expect(should).toContainEqual({
+      match_phrase: {
+        areasOfInterest: { query: "ras signaling pancreatic cancer", slop: 4, boost: 4 },
+      },
+    });
+    // Admission untouched: the cross_fields msm is still the canonical value.
+    const mm = (topicBranch(capturedBodies[0]).bool as { must: Record<string, unknown>[] })
+      .must[0] as { multi_match: { minimum_should_match: string } };
+    expect(mm.multi_match.minimum_should_match).toBe("2<-34%");
+  });
+});

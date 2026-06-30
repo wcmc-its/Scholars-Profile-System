@@ -293,6 +293,38 @@ export function resolveDeptLeadershipBoost(): boolean {
 }
 
 /**
+ * #1345 — full-time-faculty prominence lever. The outer People prominence
+ * function_score adds a flat `+PEOPLE_PROMINENCE_FACULTY_WEIGHT` (#513) to every
+ * full_time_faculty scholar, an expertise-INDEPENDENT employment-status prior that
+ * buries genuine affiliated/clinical/voluntary subspecialty experts. When set to
+ * `off`, that clause is dropped; the log-saturated `ln1p(publicationCount)` lead
+ * carries prominence on its own.
+ *
+ * Default ON (`!== "off"`) so prod ranking is byte-identical until a deliberate
+ * flip — the same convention as {@link resolveDeptLeadershipBoost}. Query-time
+ * only, no reindex; an independent rollback lever from SEARCH_PEOPLE_RELEVANCE_MODE.
+ */
+export function resolveSearchPeopleFacultyProminence(): boolean {
+  return process.env.SEARCH_PEOPLE_FACULTY_PROMINENCE !== "off";
+}
+
+/**
+ * #1344 — topic/hybrid People proximity boost. When ON, the topic (and hybrid)
+ * template adds scoring-only `match_phrase` clauses (bounded slop) on
+ * publicationTitles/areasOfInterest, rewarding within-a-single-publication
+ * co-occurrence of the query terms so the true subspecialist outranks scholars who
+ * merely scatter the same tokens across unrelated pubs. RANKING ONLY — a top-level
+ * `should` with no minimum_should_match, so it never admits/drops a doc (the 4,558
+ * admission count is unchanged; that is governed by the cross_fields msm).
+ *
+ * Default OFF (`=== "on"` opt-in, dark) — mirrors {@link resolveFundingPhraseBoost};
+ * flag-off ⇒ the people body is byte-identical. No reindex (fields already analyzed).
+ */
+export function resolvePeopleTopicPhraseBoost(): boolean {
+  return process.env.SEARCH_PEOPLE_PHRASE_BOOST === "on";
+}
+
+/**
  * Issue #688 — surface MeSH match provenance on People results. When a
  * topic/unclassified search resolves to a descriptor, the §6.1.3 attribution
  * boost ranks up scholars tagged with a *narrower* descendant term than the

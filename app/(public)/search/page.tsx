@@ -43,6 +43,7 @@ import {
   resolvePeopleSnippetRepresentativePub,
   resolvePeopleReasonFromDoc,
   resolveSearchPeopleAreaBoost,
+  resolveSearchPeopleFacultyProminence,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
@@ -60,6 +61,7 @@ import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
 import {
   searchPeople,
   searchPublications,
+  getConceptScholarConcentration,
   PI_MIN_CEILING,
   PI_MIN_FLOOR,
   type ActivityFilter,
@@ -433,6 +435,21 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       );
     }
   }
+  // #1343 — concept-axis fallback (mirrors the route). No curated area but a MeSH
+  // descriptor resolved ⇒ source concentration from the publications index so the boost
+  // reaches concept queries (obesity/hypertension). Reuses the area-boost source toggle.
+  if (
+    type === "people" &&
+    resolveSearchPeopleAreaBoost() &&
+    !meshOff &&
+    (!areaConcentration || areaConcentration.length === 0) &&
+    taxonomyMatch.meshResolution?.descendantUis?.length
+  ) {
+    areaConcentration = await getConceptScholarConcentration(
+      taxonomyMatch.meshResolution.descendantUis,
+      AREA_BOOST_TOP_N,
+    );
+  }
   const peopleSearchOpts =
     type === "people"
       ? {
@@ -454,6 +471,9 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           meshMatchedFormLength: effectiveMeshResolution?.matchedForm.length,
           scope,
           deptLeadershipBoost: resolveDeptLeadershipBoost(),
+          // #1345 — full-time-faculty prominence lever (default ON). Resolved here so the
+          // SSR list ranks identically to the /api/search route.
+          facultyProminence: resolveSearchPeopleFacultyProminence(),
           genericDemote,
           contentQuery,
           matchProvenance: resolvePeopleMatchProvenance(),

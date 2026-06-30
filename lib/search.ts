@@ -880,6 +880,12 @@ export const AREA_BOOST_HI_FRAC = 0.5;
 export const AREA_BOOST_MID_FRAC = 0.2;
 /** Cap on how many of the area's ranked scholars are pulled for the boost. */
 export const AREA_BOOST_TOP_N = 200;
+/**
+ * #1343 — minimum on-topic pubs for a WCM author to be eligible for the
+ * concept-axis concentration boost. Floors out 1–2-pub authors whose on-topic
+ * fraction would otherwise spike them above genuine specialists.
+ */
+export const CONCEPT_CONCENTRATION_MIN_PUBS = 3;
 
 /**
  * Boost weights used by the publications-index query builder.
