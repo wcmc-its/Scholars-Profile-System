@@ -353,7 +353,7 @@ export function PeopleResultCard({
           <LesserReason
             // #1366 follow-up Part C — dot is always FILLED green; a literal mention's
             // weakness is carried by `weak` (muted/italic text) + the MentionNote.
-            dotClassName="bg-[#2f6b3a]"
+            dotClassName="bg-[#16a34a]"
             weak={!fundingTagged}
             suffix={` · ${fundingCount}`}
             canExpand
@@ -362,8 +362,17 @@ export function PeopleResultCard({
             panelId={fundingPanelId}
             srLabel="key funding"
           >
-            <span className="font-medium text-[#52514a]">Funding</span> ·{" "}
-            {fundingTagged ? <>tagged {grantConceptLabel}</> : <>mentions “{qParam}”</>}
+            <span className="font-medium text-[#166534]">Funding</span> ·{" "}
+            {fundingTagged ? (
+              <>
+                tagged{" "}
+                <span className="font-[450] text-[#3a3a3a] underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]">
+                  {grantConceptLabel}
+                </span>
+              </>
+            ) : (
+              <>mentions “{qParam}”</>
+            )}
           </LesserReason>
         )}
         {fundingExpanded ? (
@@ -447,9 +456,9 @@ export function PeopleResultCard({
                 dropped when there's a single secondary row (header for one row is
                 noise); the divider + row(s) still render. */}
             {stacked && lines && secondaryCount >= 1 ? (
-              <div className="mt-3 border-t border-dashed border-[#e3e2dd] pt-2.5">
+              <div className="mt-[9px] pt-[11px]">
                 {secondaryCount >= 2 ? (
-                  <div className="mb-0.5 text-[11px] font-medium text-[#9a958a]">Also matched</div>
+                  <div className="mb-1.5 text-[11px] font-medium text-[#9a958a]">Also matched</div>
                 ) : null}
                 {lesserLines.map((ev, i) => (
                   <EvidenceLine

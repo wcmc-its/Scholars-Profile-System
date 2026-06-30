@@ -419,7 +419,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
     expect(container.textContent).toMatch(/Method · CRISPR genome editing/);
     expect(container.textContent).toMatch(/· 3 of 44/);
     expect(container.textContent).not.toMatch(/publications/);
-    expect(dotOf(container)?.className).toMatch(/bg-\[#8a4a1f\]/); // filled = curated
+    expect(dotOf(container)?.className).toMatch(/bg-\[#c2410c\]/); // filled = curated
   });
 
   it("research area lesser ⇒ FILLED dot + 'Research area · label'", () => {
@@ -432,7 +432,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
     );
     expect(container.textContent).toMatch(/Research area · Stem Cell & Regenerative Medicine/);
     expect(container.textContent).toMatch(/· 2 of 44/);
-    expect(dotOf(container)?.className).toMatch(/bg-\[#2c4f6e\]/);
+    expect(dotOf(container)?.className).toMatch(/bg-\[#2563eb\]/);
   });
 
   it("publications:mention lesser ⇒ a FILLED grey dot + 'Keyword' (Part C — no hollow dot)", () => {
@@ -446,7 +446,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
     expect(container.textContent).toMatch(/Keyword/);
     // #1366 follow-up Part C — the mention dot is now FILLED grey (strength carried by
     // the muted/italic text + the MentionNote), NOT a hollow bordered dot.
-    expect(dotOf(container)?.className).toMatch(/bg-\[#52525b\]/);
+    expect(dotOf(container)?.className).toMatch(/bg-\[#64748b\]/);
     expect(dotOf(container)?.className).not.toMatch(/border-\[1\.5px\]/);
   });
 
@@ -459,7 +459,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
       />,
     );
     expect(container.textContent).toMatch(/Concept/);
-    expect(dotOf(container)?.className).toMatch(/bg-\[#34408a\]/); // filled = curated tag
+    expect(dotOf(container)?.className).toMatch(/bg-\[#7c3aed\]/); // filled = curated tag
   });
 
   it("clinical lesser ⇒ label-only dot row, NO count", () => {
@@ -549,11 +549,11 @@ describe("<RepresentativePapers> — #1366 follow-up Part A panel relabeling", (
         total={2}
         profileHref="/p/x#publications"
         panelLabel="Representative papers"
-        panelSubtitle="top papers in this area — not matched to your search"
+        panelSubtitle="Papers mapped to area — not search"
       />,
     );
     expect(screen.getByText("Representative papers")).toBeTruthy();
-    const sub = screen.getByText(/not matched to your search/i);
+    const sub = screen.getByText(/Papers mapped to area/i);
     expect(sub.className).toMatch(/italic/);
   });
 
@@ -614,15 +614,15 @@ describe("<EvidenceLine> — #1366 follow-up Part A derives the panel header fro
     });
     fireEvent.click(screen.getByRole("button"));
     expect(screen.getByText("Matching publications")).toBeTruthy();
-    expect(screen.queryByText(/not matched to your search/)).toBeNull();
+    expect(screen.queryByText(/Papers mapped to area/)).toBeNull();
   });
 
-  it("topic → 'Representative papers' + the 'not matched to your search' subtitle", async () => {
+  it("topic → 'Representative papers' + the 'Papers mapped to area — not search' subtitle", async () => {
     mockFetch({ pubs: [{ pmid: "1", title: "Top area paper", year: 2024 }], total: 1 });
     renderLine({ kind: "topic", label: "Stem Cell Biology", id: "stem", count: 10 });
     fireEvent.click(screen.getByRole("button"));
     await waitFor(() => expect(screen.getByText("Representative papers")).toBeTruthy());
-    expect(screen.getByText(/not matched to your search/i)).toBeTruthy();
+    expect(screen.getByText(/Papers mapped to area/i)).toBeTruthy();
   });
 
   it("single-evidence (stacked=false) keeps the legacy 'Key papers' header, not the relabel", () => {

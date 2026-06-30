@@ -132,42 +132,49 @@ export function ResultEvidence({
       case "method":
         return (
           <LesserReason
-            dotClassName="bg-[#8a4a1f]"
+            dotClassName="bg-[#c2410c]"
             suffix={lesserCount(evidence.count)}
             canExpand={canExpand}
             expanded={expanded}
             onToggle={onToggle}
             panelId={panelId}
           >
-            <span className="font-medium text-[#52514a]">Method</span> · {evidence.family}
+            <span className="font-medium text-[#9a3412]">Method</span> ·{" "}
+            <span className="font-[450] text-[#3a3a3a]">{evidence.family}</span>
           </LesserReason>
         );
       case "topic":
         return (
           <LesserReason
-            dotClassName="bg-[#2c4f6e]"
+            dotClassName="bg-[#2563eb]"
             suffix={lesserCount(evidence.count)}
             canExpand={canExpand}
             expanded={expanded}
             onToggle={onToggle}
             panelId={panelId}
           >
-            <span className="font-medium text-[#52514a]">Research area</span> · {evidence.label}
+            <span className="font-medium text-[#1d4ed8]">Research area</span> ·{" "}
+            <span className="font-[450] text-[#3a3a3a]">{evidence.label}</span>
           </LesserReason>
         );
       case "clinical":
         return (
           <LesserReason
-            dotClassName="bg-[#1a5f7a]"
+            dotClassName="bg-[#0891b2]"
             canExpand={canExpand}
             expanded={expanded}
             onToggle={onToggle}
             panelId={panelId}
           >
-            <span className="font-medium text-[#52514a]">Clinical</span> ·{" "}
-            {evidence.boardCertified
-              ? `Board certified in ${evidence.specialty}`
-              : evidence.specialty}
+            <span className="font-medium text-[#0e7490]">Clinical</span> ·{" "}
+            {evidence.boardCertified ? (
+              <>
+                Board certified in{" "}
+                <span className="font-[450] text-[#3a3a3a]">{evidence.specialty}</span>
+              </>
+            ) : (
+              <span className="font-[450] text-[#3a3a3a]">{evidence.specialty}</span>
+            )}
           </LesserReason>
         );
       case "publications": {
@@ -177,7 +184,7 @@ export function ResultEvidence({
             // #1366 follow-up Part C — dots are always FILLED in the category color; a
             // mention's weakness is carried by `weak` (muted/italic text) + the
             // MentionNote, not a hollow dot.
-            dotClassName={mention ? "bg-[#52525b]" : "bg-[#34408a]"}
+            dotClassName={mention ? "bg-[#64748b]" : "bg-[#7c3aed]"}
             weak={mention}
             suffix={lesserCount(evidence.count)}
             canExpand={canExpand}
@@ -185,11 +192,21 @@ export function ResultEvidence({
             onToggle={onToggle}
             panelId={panelId}
           >
-            <span className="font-medium text-[#52514a]">{mention ? "Keyword" : "Concept"}</span>
+            <span className={`font-medium ${mention ? "text-[#475569]" : "text-[#6d28d9]"}`}>
+              {mention ? "Keyword" : "Concept"}
+            </span>
             {evidence.term ? (
               <>
                 {" · "}
-                <span className="font-semibold text-[#3a3a3a]">{evidence.term}</span>
+                <span
+                  className={
+                    mention
+                      ? "font-[450] text-[#3a3a3a]"
+                      : "font-[450] text-[#3a3a3a] underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]"
+                  }
+                >
+                  {evidence.term}
+                </span>
               </>
             ) : null}
           </LesserReason>
@@ -303,8 +320,8 @@ export function ResultEvidence({
               <span
                 className={
                   evidence.strength === "mention"
-                    ? "font-semibold"
-                    : "font-semibold underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]"
+                    ? "font-semibold text-[#3a3a3a]"
+                    : "font-semibold text-[#3a3a3a] underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]"
                 }
               >
                 {evidence.term}
