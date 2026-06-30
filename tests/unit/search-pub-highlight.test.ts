@@ -199,6 +199,21 @@ describe("searchPublications highlight body", () => {
     const res = await searchPublications({ q: "microbiome", highlightMatches: true });
     expect(res.hits[0].titleHighlight).toBeNull();
   });
+
+  it("#1351 — with a concept resolved, the should also marks the resolved concept term", async () => {
+    await searchPublications({
+      q: "breast cancer",
+      contentQuery: "breast cancer",
+      highlightMatches: true,
+      meshResolution: BREAST_RESOLUTION,
+    });
+    const should = (highlightOf(capturedBodies[0])?.highlight_query as { bool: { should: unknown[] } })
+      .bool.should;
+    // literal clauses stay...
+    expect(should).toContainEqual({ match_phrase: { title: "breast cancer" } });
+    // ...and the resolved descriptor name is marked too (concept-expansion match).
+    expect(should).toContainEqual({ match_phrase: { title: "Breast Neoplasms" } });
+  });
 });
 
 describe("searchPublications MeSH match provenance (#707)", () => {

@@ -1566,6 +1566,22 @@ export class AppStack extends Stack {
         //     Resolve-time only: no reindex. Flip is env-only via cdk deploy
         //     Sps-App-<env> (CD re-rolls the image only) -- the flag-parity rule.
         SEARCH_MESH_RESOLUTION_FALLBACK: env === "staging" ? "on" : "off",
+        // #1342 -- query-side morphology retry. When ON, resolveMeshDescriptor, after
+        //   the exact lookup misses, retries the SINGULARIZED query ("melanomas" ->
+        //   "melanoma") against the same index and, on a hit, returns the descriptor at
+        //   `partial` confidence. Closes the plural/possessive inflection tail (headline
+        //   lay-term wins additionally need the #1258 alias rows). Resolve-time only: no
+        //   reindex. STAGING ON to soak; PROD OFF pending eval. Flip env-only via cdk
+        //   deploy Sps-App-<env> (CD re-rolls the image only) -- the flag-parity rule.
+        SEARCH_MESH_QUERY_NORMALIZATION: env === "staging" ? "on" : "off",
+        // #1346 -- acronym wrong-sense guard. When ON, resolveMeshDescriptor suppresses a
+        //   short all-caps acronym (CAR/PET) that resolved ONLY via a common-word entry-
+        //   term synonym whose matched form is a plain Title-case word (CAR -> "Car" ->
+        //   Automobiles, PET -> "Pet" -> Pets) -- the wrong non-medical sense on a medical
+        //   search; it drops to BM25. Internal-caps acronyms (COPD/EHR) and exact NAME
+        //   matches (DNA/RNA) are kept. Resolve-time only: no reindex. STAGING ON; PROD
+        //   OFF pending eval. Flip env-only via cdk deploy Sps-App-<env> (flag-parity).
+        SEARCH_ACRONYM_SENSE_GUARD: env === "staging" ? "on" : "off",
         // #1026 -- surface soft-deleted doctoral-student co-authors as NON-LINKED
         // chips (name + headshot, no profile link, never faceted/searchable) on
         // publication chip surfaces site-wide (search, topic feeds, methods pages,

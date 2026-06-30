@@ -40,6 +40,7 @@ describe("Opportunity model — codegen", () => {
       prestige: { score: 0.86, mechanism_tier: 0.85, label: "Flagship" },
       matchDsl: { require: ["implementation_science"], penalize: [] },
       matchQuery: [{ q: "dissemination implementation", w: 1 }],
+      matchRel: { "39492837": 0.91, "38112233": 0.42 },
       isHonorific: false,
       taxonomyVersion: "taxonomy_v2",
       ingestedAt: new Date(),

@@ -605,11 +605,17 @@ describe("searchFunding — PLAN P4 match-reason (funded outputs + named queries
       highlight_query: unknown;
     };
     // Match-reason-only path (text-evidence OFF) keeps the original top-level
-    // `highlight_query` + single `title` field shape — byte-identical to the
-    // pre-Tier-3 request. The per-field shape is exercised ONLY under
-    // SEARCH_FUNDING_TEXT_EVIDENCE (covered in the Tier 3 describe block).
+    // `highlight_query` + single `title` field shape. The per-field shape is
+    // exercised ONLY under SEARCH_FUNDING_TEXT_EVIDENCE (Tier 3 describe block).
+    // #1351 — with a concept resolved, the title highlight widens to a should of
+    // [literal `match`, concept `match_phrase`] so a grant that matched on the
+    // concept term marks it (not just the literal query).
     expect(highlight.fields.title).toEqual({ number_of_fragments: 0 });
-    expect(highlight.highlight_query).toEqual({ match: { title: "cancer" } });
+    expect(highlight.highlight_query).toEqual({
+      bool: {
+        should: [{ match: { title: "cancer" } }, { match_phrase: { title: "Neoplasms" } }],
+      },
+    });
   });
 
   it("runs a per-project pub-index cardinality(pmid) agg over the funded pmids", async () => {
