@@ -123,6 +123,62 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
     expect(mark?.textContent).toBe("diabetes");
   });
 
+  it("Option A — the KEY FUNDING disclosure header shows the matching count (top N of M)", async () => {
+    mockFetch({
+      grants: [
+        { projectId: "p1", title: "Grant one", sponsor: "NIH", startYear: 2021, endYear: 2025, isActive: true },
+      ],
+      total: 8,
+    });
+    render(<PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /key funding/i })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /key funding/i }));
+    // 1 of 8 surfaced grants shown in the disclosure (the rest are "+7 more in profile").
+    expect(screen.getByText("1 of 8")).toBeTruthy();
+  });
+
+  it("#1359 — concept-tagged grants read 'N of M grants tagged <Concept>' (underlined term, concept threaded)", async () => {
+    const fetchFn = mockFetch({
+      grants: [
+        {
+          projectId: "p1",
+          title: "Cardiac arrest survival",
+          sponsor: "NIH",
+          startYear: 2022,
+          endYear: 2026,
+          isActive: true,
+        },
+      ],
+      total: 2,
+      strength: "tagged",
+    });
+    render(
+      <PeopleResultCard
+        {...base}
+        q="cardiac arrest"
+        evidenceRows
+        keyPaperConfig={{
+          descriptorUis: ["D006323"],
+          contentQuery: "cardiac arrest",
+          conceptLabel: "Heart Arrest",
+        }}
+        hit={makeHit({ evidence: pubEvidence() })}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
+    // "tagged" line: normal-weight count prefix + the underlined, semibold CONCEPT term.
+    expect(screen.getByText(/2 of 3 grants tagged/)).toBeTruthy();
+    const term = screen.getByText("Heart Arrest");
+    expect(term.tagName).toBe("STRONG");
+    expect(term.className).toMatch(/underline/);
+    // the page-resolved concept is threaded into the /grants fetch
+    expect(
+      fetchFn.mock.calls.some(
+        (c) => String(c[0]).includes("descriptorUis=D006323") && String(c[0]).includes("label=Heart"),
+      ),
+    ).toBe(true);
+  });
+
   it("hides the Funding row entirely when no grant matched (never 0 of N)", async () => {
     const fetchFn = mockFetch({ grants: [], total: 0 });
     render(<PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />);

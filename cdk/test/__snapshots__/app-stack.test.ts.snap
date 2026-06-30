@@ -568,6 +568,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "fundedPubMeshUi",
               },
               {
+                "Name": "SEARCH_FUNDING_CONCEPT_GRANTS",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_SHELL_STREAMING",
                 "Value": "off",
               },
@@ -3931,6 +3935,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_FUNDING_MESH_GATE",
                 "Value": "fundedPubMeshUi",
+              },
+              {
+                "Name": "SEARCH_FUNDING_CONCEPT_GRANTS",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_SHELL_STREAMING",

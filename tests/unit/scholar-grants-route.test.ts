@@ -11,18 +11,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 import { GET } from "@/app/api/scholar/[cwid]/grants/route";
-import { resolveSearchEvidenceRows } from "@/lib/api/search-flags";
+import { resolveFundingConceptGrants, resolveSearchEvidenceRows } from "@/lib/api/search-flags";
 import { searchFunding } from "@/lib/api/search-funding";
 
-vi.mock("@/lib/api/search-flags", () => ({ resolveSearchEvidenceRows: vi.fn() }));
+vi.mock("@/lib/api/search-flags", () => ({
+  resolveSearchEvidenceRows: vi.fn(),
+  resolveFundingConceptGrants: vi.fn(),
+}));
 vi.mock("@/lib/api/search-funding", () => ({ searchFunding: vi.fn() }));
 
-function call(cwid: string, q?: string) {
+function call(cwid: string, q?: string, extra?: Record<string, string>) {
+  const qs = new URLSearchParams();
+  if (q != null) qs.set("q", q);
+  for (const [k, v] of Object.entries(extra ?? {})) qs.set(k, v);
+  const suffix = qs.toString();
   const url =
-    "http://localhost/api/scholar/" +
-    cwid +
-    "/grants" +
-    (q != null ? "?q=" + encodeURIComponent(q) : "");
+    "http://localhost/api/scholar/" + cwid + "/grants" + (suffix ? "?" + suffix : "");
   // The route reads `request.nextUrl` (the method-exemplar convention), so a
   // NextRequest is required — a plain Request has no `nextUrl`.
   return GET(new NextRequest(url), { params: Promise.resolve({ cwid }) });
@@ -42,6 +46,7 @@ function hit(over: Record<string, unknown>) {
 
 afterEach(() => {
   vi.mocked(resolveSearchEvidenceRows).mockReset();
+  vi.mocked(resolveFundingConceptGrants).mockReset();
   vi.mocked(searchFunding).mockReset();
 });
 
@@ -129,5 +134,59 @@ describe("GET /api/scholar/[cwid]/grants", () => {
     const res = await call("abc1234", "diabetes");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ grants: [], total: 0 });
+  });
+
+  describe("#1359 Tier 2 — concept threading", () => {
+    it("threads the resolved concept into searchFunding when the flag is on", async () => {
+      vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
+      vi.mocked(resolveFundingConceptGrants).mockReturnValue(true);
+      vi.mocked(searchFunding).mockResolvedValue({
+        hits: [hit({ projectId: "p1", matchedConcept: true })],
+        total: 5,
+      } as never);
+      const body = await (
+        await call("abc1234", "heart attack", { descriptorUis: "D009203,D009202", label: "Myocardial Infarction" })
+      ).json();
+      const arg = vi.mocked(searchFunding).mock.calls[0][0] as { meshResolution?: { descendantUis: string[]; name: string } };
+      expect(arg.meshResolution).toMatchObject({
+        descendantUis: ["D009203", "D009202"],
+        name: "Myocardial Infarction",
+      });
+      // a concept-admitted grant ⇒ the row reads "tagged"
+      expect(body.strength).toBe("tagged");
+    });
+
+    it("strength is 'mention' when no surfaced grant matched via the concept axis", async () => {
+      vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
+      vi.mocked(resolveFundingConceptGrants).mockReturnValue(true);
+      vi.mocked(searchFunding).mockResolvedValue({
+        hits: [hit({ projectId: "p1", matchedConcept: false })],
+        total: 2,
+      } as never);
+      const body = await (
+        await call("abc1234", "heart attack", { descriptorUis: "D009203", label: "Myocardial Infarction" })
+      ).json();
+      expect(body.strength).toBe("mention");
+    });
+
+    it("stays text-only (no meshResolution) when the flag is off, even with descriptorUis", async () => {
+      vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
+      vi.mocked(resolveFundingConceptGrants).mockReturnValue(false);
+      vi.mocked(searchFunding).mockResolvedValue({ hits: [hit({ matchedConcept: true })], total: 1 } as never);
+      const body = await (
+        await call("abc1234", "heart attack", { descriptorUis: "D009203", label: "Myocardial Infarction" })
+      ).json();
+      expect(vi.mocked(searchFunding).mock.calls[0][0]).not.toHaveProperty("meshResolution");
+      expect(body.strength).toBe("mention");
+    });
+
+    it("stays text-only when the flag is on but no concept resolved (no descriptorUis)", async () => {
+      vi.mocked(resolveSearchEvidenceRows).mockReturnValue(true);
+      vi.mocked(resolveFundingConceptGrants).mockReturnValue(true);
+      vi.mocked(searchFunding).mockResolvedValue({ hits: [hit({ matchedConcept: false })], total: 1 } as never);
+      const body = await (await call("abc1234", "heart attack")).json();
+      expect(vi.mocked(searchFunding).mock.calls[0][0]).not.toHaveProperty("meshResolution");
+      expect(body.strength).toBe("mention");
+    });
   });
 });

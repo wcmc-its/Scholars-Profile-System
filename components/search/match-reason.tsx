@@ -202,6 +202,7 @@ export function MatchAwareReason({
   kind,
   label,
   prefix,
+  underline = false,
   canExpand = false,
   expanded = false,
   onToggle,
@@ -213,6 +214,10 @@ export function MatchAwareReason({
    *  term (e.g. "3 of 5 grants mention" + **"radiosurgery"**). Omitted for the pure
    *  label matches (method/topic/clinical), which have no "N of M" count. */
   prefix?: string;
+  /** #1359 — give the semibold term the §4.5 dotted underline used for a resolved
+   *  CONCEPT term (the "tagged" funding line: "N of M grants tagged **Heart Arrest**"),
+   *  matching the concept publications line. Off for a literal "mention '<query>'". */
+  underline?: boolean;
   /** Rep-papers disclosure — when true, trail a clickable chevron `<button>`
    *  that opens the representative-papers panel `panelId`. */
   canExpand?: boolean;
@@ -265,7 +270,15 @@ export function MatchAwareReason({
       </span>
       <span className="min-w-0 truncate">
         {prefix ? <span className="font-normal text-[#3a3a3a]">{prefix} </span> : null}
-        <strong className="font-semibold text-[#1a1a1a]">{label}</strong>
+        <strong
+          className={
+            underline
+              ? "font-semibold text-[#1a1a1a] underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]"
+              : "font-semibold text-[#1a1a1a]"
+          }
+        >
+          {label}
+        </strong>
       </span>
     </>
   );
@@ -358,6 +371,12 @@ export function RepresentativePapers({
     <div id={panelId} className="mt-1.5 pl-[1px]">
       <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
         {papers.length === 1 ? "Key paper" : "Key papers"}
+        {/* Matching count: "3 of 8" when the list is truncated (mirrors the "+N more"
+            link), else the bare total. normal-case so "of" isn't shouted in the caps
+            label. `total` is the matching N already passed for the "+N more" link. */}
+        <span className="ml-1.5 font-medium normal-case tracking-normal text-[#b0aaa0]">
+          {more > 0 ? `${papers.length} of ${total}` : total}
+        </span>
       </div>
       <ul className="mt-1 flex flex-col gap-1.5 text-[13px] leading-snug">
         {papers.map((p) => (
@@ -460,6 +479,11 @@ export function KeyFunding({
     <div id={panelId} className="mt-1.5 pl-[1px]">
       <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
         {grants.length === 1 ? "Key grant" : "Key funding"}
+        {/* Matching count, mirroring the key-papers header: "3 of 8" when truncated,
+            else the bare total. `total` here is grantsTotal (capped at grantCount). */}
+        <span className="ml-1.5 font-medium normal-case tracking-normal text-[#b0aaa0]">
+          {more > 0 ? `${grants.length} of ${total}` : total}
+        </span>
       </div>
       <ul className="mt-1 flex flex-col gap-1.5 text-[13px] leading-snug">
         {grants.map((g) => {

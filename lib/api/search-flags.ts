@@ -214,6 +214,24 @@ export function resolveFundingMeshGateField(): "meshDescriptorUi" | "fundedPubMe
 }
 
 /**
+ * #1359 Tier 2 — concept-match the People-card KEY FUNDING evidence row. When on,
+ * `/api/scholar/[cwid]/grants` threads the page-resolved MeSH concept
+ * (`descriptorUis` + `label`) into `searchFunding`, so a scholar's grant surfaces
+ * by concept tag (`fundedPubMeshUi` ∩ descendant set) even without a literal text
+ * hit, and the row's reason line reads "N of M grants tagged <Concept>" instead of
+ * "mention '<query>'". Recall-affecting (widens which grants surface), so it ships
+ * off and gets a staging A/B before prod — same posture as the #1336/#1339 funding
+ * recall changes. Off ⇒ the route stays text-only (today's behavior), byte-identical.
+ *
+ * Independent of `SEARCH_EVIDENCE_ROWS` (which gates the row's existence): this only
+ * changes HOW the row matches, so the A/B can toggle concept matching without
+ * toggling the whole row.
+ */
+export function resolveFundingConceptGrants(): boolean {
+  return process.env.SEARCH_FUNDING_CONCEPT_GRANTS === "on";
+}
+
+/**
  * TIER 3 — funding-tab text-hit evidence line. A grant matched ONLY on a text
  * field (abstract / keywordsText / sponsorText) — not title, not concept, not
  * funded-pubs — renders today with NO "why it matched" reason (just a bare,

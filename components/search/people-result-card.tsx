@@ -241,8 +241,19 @@ export function PeopleResultCard({
   // hoist presence to one funding terms-agg on the people path (see the /grants route).
   const [grants, setGrants] = useState<EvidenceGrant[]>([]);
   const [grantsTotal, setGrantsTotal] = useState(0);
+  // #1359 — row reason strength from the route: "tagged" (concept axis) vs "mention"
+  // (literal text). Server-derived (only it knows which grants are concept-tagged);
+  // defaults "mention" so the flag-off / text-only payload reads exactly as before.
+  const [grantsStrength, setGrantsStrength] = useState<"tagged" | "mention">("mention");
   const [fundingExpanded, setFundingExpanded] = useState(false);
   const fundingPanelId = useId();
+
+  // #1359 — the page-resolved concept (same source the key-paper fetch uses), threaded
+  // so grants can match by concept tag. Empty for a free-text query ⇒ route stays
+  // text-only. The server flag (SEARCH_FUNDING_CONCEPT_GRANTS) decides whether to act
+  // on these, so passing them when off is harmless.
+  const grantDescriptorUis = keyPaperConfig?.descriptorUis.join(",") ?? "";
+  const grantConceptLabel = keyPaperConfig?.conceptLabel ?? "";
 
   useEffect(() => {
     if (!evidenceRows || !qParam || hit.grantCount <= 0) {
@@ -252,25 +263,33 @@ export function PeopleResultCard({
       // grants. Functional reset avoids re-render churn when already empty.
       setGrants((prev) => (prev.length ? [] : prev));
       setGrantsTotal(0);
+      setGrantsStrength("mention");
       return;
     }
     let alive = true;
-    fetch(`/api/scholar/${encodeURIComponent(hit.cwid)}/grants?q=${encodeURIComponent(qParam)}`)
+    const params = new URLSearchParams({ q: qParam });
+    if (grantDescriptorUis) {
+      params.set("descriptorUis", grantDescriptorUis);
+      params.set("label", grantConceptLabel);
+    }
+    fetch(`/api/scholar/${encodeURIComponent(hit.cwid)}/grants?${params.toString()}`)
       .then((r) => (r.ok ? r.json() : { grants: [], total: 0 }))
-      .then((d: { grants?: EvidenceGrant[]; total?: number }) => {
+      .then((d: { grants?: EvidenceGrant[]; total?: number; strength?: "tagged" | "mention" }) => {
         if (!alive) return;
         setGrants(d?.grants ?? []);
         setGrantsTotal(d?.total ?? 0);
+        setGrantsStrength(d?.strength ?? "mention");
       })
       .catch(() => {
         if (!alive) return;
         setGrants([]);
         setGrantsTotal(0);
+        setGrantsStrength("mention");
       });
     return () => {
       alive = false;
     };
-  }, [evidenceRows, qParam, hit.cwid, hit.grantCount]);
+  }, [evidenceRows, qParam, hit.cwid, hit.grantCount, grantDescriptorUis, grantConceptLabel]);
 
   // publications kind: representative papers are INLINE in the evidence
   // (`evidence.pubs`) on the legacy agg path; under reason-from-doc they arrive
@@ -497,8 +516,15 @@ export function PeopleResultCard({
           <>
             <MatchAwareReason
               kind="funding"
-              prefix={`${Math.min(grantsTotal, hit.grantCount)} of ${hit.grantCount} grants mention`}
-              label={`“${qParam}”`}
+              // #1359 — concept-tagged grants read "N of M grants tagged <Concept>"
+              // (underlined concept term, mirroring the concept publications line);
+              // a literal text match stays "N of M grants mention '<query>'". Needs a
+              // concept label to render tagged, else it falls back to the mention line.
+              prefix={`${Math.min(grantsTotal, hit.grantCount)} of ${hit.grantCount} grants ${
+                grantsStrength === "tagged" && grantConceptLabel ? "tagged" : "mention"
+              }`}
+              label={grantsStrength === "tagged" && grantConceptLabel ? grantConceptLabel : `“${qParam}”`}
+              underline={grantsStrength === "tagged" && grantConceptLabel.length > 0}
               canExpand
               expanded={fundingExpanded}
               onToggle={() => setFundingExpanded((v) => !v)}
