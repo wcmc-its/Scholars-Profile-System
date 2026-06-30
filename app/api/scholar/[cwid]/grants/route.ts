@@ -1,8 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
-import { resolveSearchEvidenceRows } from "@/lib/api/search-flags";
+import { resolveFundingConceptGrants, resolveSearchEvidenceRows } from "@/lib/api/search-flags";
 import { searchFunding } from "@/lib/api/search-funding";
+import type { MeshResolution } from "@/lib/api/search-taxonomy";
 import type { EvidenceGrant } from "@/lib/api/result-evidence";
 
 /**
@@ -23,11 +24,13 @@ import type { EvidenceGrant } from "@/lib/api/result-evidence";
  * terms-agg over wcmInvestigatorCwids on the people-search path (1 query/search) and
  * keep this route only for the on-expand record list.
  *
- * Matching is TEXT-only (no meshResolution/scope threaded), per spec §2 (text is the
- * base mechanism; MeSH is an optional boost). Consequence: the "N grants" count here
- * can differ from the Funding tab's count for the same query (the tab threads the
- * resolved MeSH concept). ponytail: thread meshResolution in if that divergence
- * proves confusing during the staging soak — left text-only for v1.
+ * Matching is TEXT-only UNLESS `SEARCH_FUNDING_CONCEPT_GRANTS` is on (#1359 Tier 2):
+ * with the flag + a `descriptorUis`/`label` concept (mirrors the key-paper route's
+ * params), the route threads a MeSH resolution into `searchFunding` so a grant
+ * surfaces by concept tag even without a literal text hit, and returns a row-level
+ * `strength` ("tagged" when the concept axis admitted a surfaced grant, else
+ * "mention") that the card turns into "N of M grants tagged <Concept>" vs the
+ * "mention '<query>'" line. Flag off / no concept ⇒ text-only, byte-identical to v1.
  */
 export const dynamic = "force-dynamic";
 
@@ -71,12 +74,39 @@ export async function GET(
   // relevance floor only if a weak survivor still mis-renders during the soak.
   const { contentQuery } = stripDeprioritized(query);
 
+  // #1359 Tier 2 — thread the page-resolved concept (passed by the card, mirroring
+  // the key-paper route's `descriptorUis`/`label`) so grants surface by concept tag,
+  // not just literal text. Flag-gated for the recall A/B; absent concept ⇒ null ⇒
+  // text-only. `searchFunding` reads only `.descendantUis` (admission) and `.name`
+  // (the phrase boost / concept label), so a minimal resolution is sufficient.
+  const sp = request.nextUrl.searchParams;
+  const descriptorUis = (sp.get("descriptorUis") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const label = sp.get("label")?.trim() ?? "";
+  const meshResolution: MeshResolution | null =
+    resolveFundingConceptGrants() && descriptorUis.length > 0
+      ? {
+          descriptorUi: descriptorUis[0],
+          name: label,
+          matchedForm: label,
+          confidence: "exact",
+          scopeNote: null,
+          entryTerms: [],
+          curatedTopicAnchors: [],
+          descendantUis: descriptorUis,
+        }
+      : null;
+
   try {
     const result = await searchFunding({
       q: contentQuery,
       filters: { investigator: [cwid] },
       sort: "relevance",
       page: 0,
+      // Omitted ⇒ `expanded` scope: admit text OR concept-tagged (the recall gain).
+      ...(meshResolution ? { meshResolution } : {}),
     });
     const grants: EvidenceGrant[] = result.hits.slice(0, GRANT_CAP).map((h) => ({
       projectId: h.projectId,
@@ -89,7 +119,15 @@ export async function GET(
       endYear: year(h.endDate),
       isActive: h.isActive,
     }));
-    return NextResponse.json({ grants, total: result.total }, { headers: NO_STORE });
+    // Row-level reason strength: "tagged" when the concept axis admitted ≥1 surfaced
+    // grant (mirrors composeMatchReason's tagged>mention precedence), else "mention".
+    // ponytail: read off the returned page hits' `matchedConcept` — a concept-only
+    // grant ranked below the page could leave a mixed row labeled "mention". A display
+    // label, not the admission set; upgrade by returning a concept count from
+    // searchFunding if the mislabel proves confusing during the soak.
+    const strength: "tagged" | "mention" =
+      meshResolution !== null && result.hits.some((h) => h.matchedConcept) ? "tagged" : "mention";
+    return NextResponse.json({ grants, total: result.total, strength }, { headers: NO_STORE });
   } catch {
     return NextResponse.json(EMPTY, { headers: NO_STORE });
   }

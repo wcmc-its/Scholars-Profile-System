@@ -1502,6 +1502,13 @@ export class AppStack extends Stack {
         // resolveFundingMeshGateField reads === "fundedPubMeshUi".
         SEARCH_FUNDING_TAB_CONCEPT: "on",
         SEARCH_FUNDING_MESH_GATE: "fundedPubMeshUi",
+        // #1359 Tier 2 -- concept-match the People-card KEY FUNDING evidence row
+        // (threads the resolved concept into /api/scholar/[cwid]/grants). Recall-
+        // affecting, so staging-on for the A/B and prod-off until the precision
+        // spot-check passes. Independent of SEARCH_EVIDENCE_ROWS (which gates the
+        // row's existence -- also staging-only today). resolveFundingConceptGrants
+        // reads === "on". Relies on the same fundedPubMeshUi reindex as the gate above.
+        SEARCH_FUNDING_CONCEPT_GRANTS: env === "staging" ? "on" : "off",
         // #861 -- streams the /search shell so the header/tabs paint before the
         // cold MeSH precompute + the three badge-count searches resolve (the
         // 6-10s first-byte block). resolveSearchShellStreaming reads === "on".

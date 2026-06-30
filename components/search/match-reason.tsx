@@ -202,6 +202,7 @@ export function MatchAwareReason({
   kind,
   label,
   prefix,
+  underline = false,
   canExpand = false,
   expanded = false,
   onToggle,
@@ -213,6 +214,10 @@ export function MatchAwareReason({
    *  term (e.g. "3 of 5 grants mention" + **"radiosurgery"**). Omitted for the pure
    *  label matches (method/topic/clinical), which have no "N of M" count. */
   prefix?: string;
+  /** #1359 — give the semibold term the §4.5 dotted underline used for a resolved
+   *  CONCEPT term (the "tagged" funding line: "N of M grants tagged **Heart Arrest**"),
+   *  matching the concept publications line. Off for a literal "mention '<query>'". */
+  underline?: boolean;
   /** Rep-papers disclosure — when true, trail a clickable chevron `<button>`
    *  that opens the representative-papers panel `panelId`. */
   canExpand?: boolean;
@@ -265,7 +270,15 @@ export function MatchAwareReason({
       </span>
       <span className="min-w-0 truncate">
         {prefix ? <span className="font-normal text-[#3a3a3a]">{prefix} </span> : null}
-        <strong className="font-semibold text-[#1a1a1a]">{label}</strong>
+        <strong
+          className={
+            underline
+              ? "font-semibold text-[#1a1a1a] underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]"
+              : "font-semibold text-[#1a1a1a]"
+          }
+        >
+          {label}
+        </strong>
       </span>
     </>
   );
