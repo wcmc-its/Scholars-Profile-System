@@ -36,7 +36,13 @@ import type { ResultEvidence } from "@/lib/api/result-evidence";
  * swap is sub-second). Keeps all B logic in this one wrapper; the card stays
  * byte-identical to its pre-B self.
  */
-type ReasonPatch = { matchReason?: PeopleMatchReason; evidence?: ResultEvidence };
+type ReasonPatch = {
+  matchReason?: PeopleMatchReason;
+  evidence?: ResultEvidence;
+  // #1366 — the stacked, counted lines (present instead of `evidence` under
+  // SEARCH_EVIDENCE_REASON_COUNTS); overlaid the same way.
+  evidenceLines?: ResultEvidence[];
+};
 type ReasonMap = Map<string, ReasonPatch>;
 
 // Search reason-from-doc — `KeyPaperConfig` now lives in `people-result-card`
@@ -47,7 +53,12 @@ export type { KeyPaperConfig };
 function mergeHit(hit: PeopleHit, patch: ReasonPatch | undefined): PeopleHit {
   if (!patch) return hit;
   // Overlay only the reason-bearing fields; everything else is the fast hit.
-  return { ...hit, matchReason: patch.matchReason, evidence: patch.evidence };
+  return {
+    ...hit,
+    matchReason: patch.matchReason,
+    evidence: patch.evidence,
+    evidenceLines: patch.evidenceLines,
+  };
 }
 
 /**
@@ -86,9 +97,13 @@ function CardWithLazyKeyPaper({
   // evidence path the card owns a fetch-on-EXPAND for the disclosure (via
   // `keyPaperConfig`), so we must not also eager-fetch here — that's the
   // per-visible-card load the chevron lets us avoid.
+  // #1366 — the evidence path is active when EITHER the single `evidence` OR the
+  // stacked `evidenceLines` is present; in both cases the card owns a
+  // fetch-on-EXPAND, so the wrapper must NOT also eager-fetch.
   const wants =
     keyPaperConfig !== null &&
     !props.hit.evidence &&
+    !props.hit.evidenceLines &&
     reasonWantsKeyPaper(props.hit.matchReason);
 
   useEffect(() => {
