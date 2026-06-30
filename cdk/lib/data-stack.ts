@@ -22,6 +22,7 @@ import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as cr from "aws-cdk-lib/custom-resources";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
+import { resolveTierSubnets } from "./shared-vpc-subnets";
 
 /** Props for {@link DataStack}. */
 export interface DataStackProps extends StackProps {
@@ -71,6 +72,18 @@ export class DataStack extends Stack {
     const { envConfig, vpc, appSecurityGroup, etlSecurityGroup, drBackupVault } =
       props;
 
+    // Estate-consolidation subnet placement (plan §4.4): Aurora + OpenSearch in
+    // the db tier; the bootstrap/rotation Lambdas (compute) in the app2 tier —
+    // but only when useSharedVpc is on. Otherwise both resolve to the standalone
+    // Sps VPC's PRIVATE_WITH_EGRESS tier, byte-identical to pre-consolidation.
+    const dataSubnets = resolveTierSubnets(this, envConfig, "data", "DataSubnet");
+    const computeSubnets = resolveTierSubnets(
+      this,
+      envConfig,
+      "app",
+      "ComputeSubnet",
+    );
+
     // ------------------------------------------------------------------
     // Security groups for the data plane. Each is created in this stack
     // (not in NetworkStack) so that the data-resource and its reachability
@@ -93,32 +106,6 @@ export class DataStack extends Stack {
       ec2.Port.tcp(3306),
       "ETL Lambdas to Aurora writer/reader endpoints",
     );
-    // ETL cadence VPC peering (docs/etl-vpc-migration-handoff.md, shared-VPC
-    // plan): once the peer is up, the relocated cadence reaches Aurora/OpenSearch
-    // from its per-env ETL SG in lts-reciter-vpc01 — referenced cross-VPC over
-    // the peer, NOT a CIDR (both envs share one CIDR space, so a CIDR rule could
-    // not tell staging from prod). Gated on etlVpcPeeringEnabled (NOT the
-    // relocation flag) so the ingress is present for the source-reach probe
-    // before the tasks move. Same account + region (G2/G1) → L2 SG reference by
-    // id, no owner id. Imported once and reused for both the Aurora (3306) and
-    // OpenSearch (443) rules; etl-stack imports the SAME id for task attachment
-    // (import-by-id, not create — avoids a data-stack ↔ etl-stack cycle).
-    // Additive — the Sps etl-SG rule above stays for the reconcilers + curated
-    // backup that do NOT move and reach Aurora from the local SG.
-    const etlComputeSgRef = envConfig.etlVpcPeeringEnabled
-      ? ec2.SecurityGroup.fromSecurityGroupId(
-          this,
-          "EtlComputeSgRef",
-          envConfig.etlComputeSecurityGroupId,
-        )
-      : undefined;
-    if (etlComputeSgRef) {
-      auroraSecurityGroup.addIngressRule(
-        etlComputeSgRef,
-        ec2.Port.tcp(3306),
-        `${envConfig.envName}-ETL-SG in lts-reciter-vpc01 → Aurora 3306 over the peer`,
-      );
-    }
     // The Secrets Manager RDS rotation Lambda's SG ingress is added by
     // `cluster.addRotationSingleUser()` below — CDK creates the Lambda + a
     // dedicated SG + the Aurora-SG ingress rule together, so we do not
@@ -143,18 +130,6 @@ export class DataStack extends Stack {
       ec2.Port.tcp(443),
       "ETL Lambdas to OpenSearch HTTPS (index writes + suggest)",
     );
-    // ETL cadence VPC peering (see Aurora rule above): the relocated cadence
-    // writes the OpenSearch index from the same per-env ETL SG, referenced
-    // cross-VPC over the peer. Reuses etlComputeSgRef so both rules point at one
-    // imported SG construct. Gated on the peering flag so it's present for the
-    // probe before the tasks move.
-    if (etlComputeSgRef) {
-      opensearchSecurityGroup.addIngressRule(
-        etlComputeSgRef,
-        ec2.Port.tcp(443),
-        `${envConfig.envName}-ETL-SG in lts-reciter-vpc01 → OpenSearch 443 over the peer`,
-      );
-    }
 
     // ------------------------------------------------------------------
     // Aurora MySQL Serverless v2.
@@ -192,7 +167,7 @@ export class DataStack extends Stack {
       }),
       defaultDatabaseName: "scholars",
       vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      vpcSubnets: dataSubnets,
       securityGroups: [auroraSecurityGroup],
       writer: rds.ClusterInstance.serverlessV2("Writer", {
         publiclyAccessible: false,
@@ -253,6 +228,12 @@ export class DataStack extends Stack {
     this.auroraCluster.addRotationSingleUser({
       automaticallyAfter: Duration.days(30),
       excludeCharacters: '"@/\\',
+      // Place the rotation Lambda in the compute (app2) tier, not the cluster's
+      // db tier it would otherwise inherit (plan §4.4/G2 budgets seeder +
+      // rotation ENIs against app2). Matters when useSharedVpc is on: the tight
+      // db /27 is reserved for Aurora/OpenSearch, and the Lambda needs NAT
+      // egress to reach Secrets Manager (no SPS-owned SM endpoint when shared).
+      vpcSubnets: computeSubnets,
     });
 
     // ------------------------------------------------------------------
@@ -289,6 +270,12 @@ export class DataStack extends Stack {
     // a dedicated seeder SG hung ~49s on the master-secret read — never reaching
     // Aurora — because the endpoint dropped its 443 SYN.) Reusing the ETL SG,
     // already blessed on both the endpoint and Aurora, sidesteps the layering.
+    //
+    // When useSharedVpc is on there is no SPS-owned Secrets Manager interface
+    // endpoint (AppStack skips it; SM is reached over its-reciter's NAT — plan
+    // §4.4/G5), so the endpoint-private-DNS reasoning above is moot there; the
+    // seeder + rotation Lambdas sit in the app2 tier (computeSubnets) and the
+    // IAM role — not the SG — remains the security boundary.
     // ------------------------------------------------------------------
     const bootstrapSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
@@ -326,7 +313,7 @@ export class DataStack extends Stack {
         memorySize: 256,
         timeout: Duration.minutes(2),
         vpc,
-        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        vpcSubnets: computeSubnets,
         // ETL SG: already admitted on the Secrets Manager interface endpoint
         // (443, AppStack) and on Aurora (3306, this stack) — see the block
         // comment above for why a dedicated seeder SG can't reach the endpoint.
@@ -425,10 +412,14 @@ export class DataStack extends Stack {
     // domain ("You must specify exactly one subnet"). Pick the exact subnet
     // count the topology calls for: 1 for single-AZ staging, N for the
     // multi-AZ envs.
-    const allPrivateSubnets = vpc.selectSubnets({
-      subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-    }).subnets;
-    const opensearchSubnets = allPrivateSubnets.slice(
+    // When shared, the explicit db-tier subnets (already AZ-paired); otherwise
+    // the created VPC's private subnets. Sliced to the node count because
+    // OpenSearch requires len(SubnetIds) == zone-awareness AZ count.
+    const allDataSubnets =
+      dataSubnets.subnets ??
+      vpc.selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS })
+        .subnets;
+    const opensearchSubnets = allDataSubnets.slice(
       0,
       envConfig.opensearchDataNodes,
     );

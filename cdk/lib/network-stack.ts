@@ -26,8 +26,13 @@ export interface NetworkStackProps extends StackProps {
  * properties so the later stacks reference them across stack boundaries.
  */
 export class NetworkStack extends Stack {
-  /** The VPC every Scholars Profile System workload runs in. */
-  public readonly vpc: ec2.Vpc;
+  /**
+   * The VPC every Scholars Profile System workload runs in — either a VPC this
+   * stack creates (default) or, when {@link SpsEnvConfig.useSharedVpc} is on,
+   * the shared its-reciter-vpc01 imported by attributes (plan §5.3). Typed
+   * `IVpc` so both paths satisfy it.
+   */
+  public readonly vpc: ec2.IVpc;
 
   /** Security group for the ECS application tasks. */
   public readonly appSecurityGroup: ec2.SecurityGroup;
@@ -43,24 +48,43 @@ export class NetworkStack extends Stack {
 
     const { envConfig } = props;
 
-    // Two AZs — enough for an ALB and a Multi-AZ Aurora cluster, no more than
-    // the workload needs. Public subnets carry the ALB and the NAT gateways;
-    // private-with-egress subnets carry the ECS tasks, Aurora, OpenSearch, and
-    // the ETL Lambdas — unreachable from the internet, able only to reach out
-    // through the NAT gateway.
-    this.vpc = new ec2.Vpc(this, "Vpc", {
-      ipAddresses: ec2.IpAddresses.cidr(envConfig.vpcCidr),
-      availabilityZones: ["us-east-1a", "us-east-1b"],
-      natGateways: envConfig.natGateways,
-      subnetConfiguration: [
-        { name: "public", subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },
-        {
-          name: "private",
-          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-          cidrMask: 22,
-        },
-      ],
-    });
+    // Estate consolidation (plan §5.3): when useSharedVpc is on, import the
+    // shared its-reciter-vpc01 by attributes (no context lookup → deterministic
+    // synth) and own no VPC/subnets/NAT/IGW. Otherwise create the standalone Sps
+    // VPC exactly as before — the default both envs ship, so flag-off synth is
+    // byte-identical. Downstream stacks select explicit per-tier subnet ids when
+    // shared (subnetType filtering is unreliable on an imported VPC); the VPC
+    // attributes list every tier so the import is complete.
+    if (envConfig.useSharedVpc) {
+      const sv = envConfig.sharedVpc;
+      // Only vpcId + AZs — every downstream placement selects explicit per-tier
+      // subnet ids (resolveTierSubnets), so the import needs no subnet lists,
+      // and omitting them avoids CDK's "privateSubnetIds must be a multiple of
+      // availabilityZones" pairing (which could mis-assign a subnet's AZ).
+      this.vpc = ec2.Vpc.fromVpcAttributes(this, "SharedVpc", {
+        vpcId: sv.vpcId,
+        availabilityZones: [...sv.availabilityZones],
+      });
+    } else {
+      // Two AZs — enough for an ALB and a Multi-AZ Aurora cluster, no more than
+      // the workload needs. Public subnets carry the ALB and the NAT gateways;
+      // private-with-egress subnets carry the ECS tasks, Aurora, OpenSearch, and
+      // the ETL Lambdas — unreachable from the internet, able only to reach out
+      // through the NAT gateway.
+      this.vpc = new ec2.Vpc(this, "Vpc", {
+        ipAddresses: ec2.IpAddresses.cidr(envConfig.vpcCidr),
+        availabilityZones: ["us-east-1a", "us-east-1b"],
+        natGateways: envConfig.natGateways,
+        subnetConfiguration: [
+          { name: "public", subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },
+          {
+            name: "private",
+            subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+            cidrMask: 22,
+          },
+        ],
+      });
+    }
 
     // WCM-internal DNS resolution. The ETL (and any in-VPC client) must resolve
     // WCM-internal hostnames -- ED LDAP (edprovider.weill.cornell.edu) and the
@@ -76,21 +100,27 @@ export class NetworkStack extends Stack {
     // network and tracked separately. ResolverRuleId is a stable shared-resource
     // id, intentionally inlined (no CDK construct exists for an out-of-account
     // shared rule).
-    const wcmResolverRules: ReadonlyArray<{ key: string; ruleId: string }> = [
-      { key: "WeillCornellEdu", ruleId: "rslvr-rr-58457e95d34548148" },
-      { key: "MedCornellEdu", ruleId: "rslvr-rr-467f0939c1f2458e9" },
-      { key: "WcmcAdNet", ruleId: "rslvr-rr-56f32331b3a1441ba" },
-    ];
-    for (const { key, ruleId } of wcmResolverRules) {
-      new route53resolver.CfnResolverRuleAssociation(
-        this,
-        `WcmResolverAssoc${key}`,
-        {
-          resolverRuleId: ruleId,
-          vpcId: this.vpc.vpcId,
-          name: `sps-${envConfig.envName}-${key.toLowerCase()}`,
-        },
-      );
+    // Skipped when sharing its-reciter-vpc01: a resolver rule associates to a
+    // VPC exactly once, and its-reciter already associates all three (plan
+    // §5.3 / G7), so re-associating would fail RuleAlreadyAssociated. SPS owns
+    // these associations only for the standalone Sps VPC it creates.
+    if (!envConfig.useSharedVpc) {
+      const wcmResolverRules: ReadonlyArray<{ key: string; ruleId: string }> = [
+        { key: "WeillCornellEdu", ruleId: "rslvr-rr-58457e95d34548148" },
+        { key: "MedCornellEdu", ruleId: "rslvr-rr-467f0939c1f2458e9" },
+        { key: "WcmcAdNet", ruleId: "rslvr-rr-56f32331b3a1441ba" },
+      ];
+      for (const { key, ruleId } of wcmResolverRules) {
+        new route53resolver.CfnResolverRuleAssociation(
+          this,
+          `WcmResolverAssoc${key}`,
+          {
+            resolverRuleId: ruleId,
+            vpcId: this.vpc.vpcId,
+            name: `sps-${envConfig.envName}-${key.toLowerCase()}`,
+          },
+        );
+      }
     }
 
     // Security groups. Each is created with egress allowed and no ingress
@@ -133,72 +163,5 @@ export class NetworkStack extends Stack {
       value: this.albSecurityGroup.securityGroupId,
       description: "SPS load-balancer security group id",
     });
-
-    // ------------------------------------------------------------------
-    // ETL cadence VPC peering (docs/etl-vpc-migration-handoff.md, shared-VPC plan).
-    //
-    // The ETL cadence relocates into the shared TGW-attached lts-reciter-vpc01
-    // (envConfig.etlComputeVpc), which hosts BOTH envs' ETL, to read on-prem +
-    // 10.46.x sources, and reaches Aurora / OpenSearch / the internal ALB back
-    // here over an intra-account VPC peering connection. This stack owns the
-    // requester side:
-    //   - the peering connection itself. Same account + same region, so AWS
-    //     auto-accepts it on create — no manual accept step.
-    //   - the RETURN route on each Sps private subnet's route table
-    //     (etlPeerCidrs → pcx), so a datastore's reply to a relocated task
-    //     (10.46.x) goes to the peer instead of following the VPC's default
-    //     local/NAT path. (Aurora, OpenSearch, and the in-Sps ETL all live in
-    //     the `private` PRIVATE_WITH_EGRESS subnets here — there is no isolated
-    //     tier — so these are the only route tables that need the route.)
-    //
-    // The lts-reciter-side route (10.20/16 [staging] / 10.10/16 [prod] → this
-    // pcx) is added out-of-band in that VPC; it isn't ours to mutate from CDK.
-    //
-    // Gated on its OWN flag, separate from etlCadenceVpcRelocated, so the peer
-    // + the datastore ingress can go up and be probed from lts-reciter-vpc01
-    // BEFORE the cadence tasks move. resolveEnvConfig enforces relocated ⇒ peered.
-    // ------------------------------------------------------------------
-    if (envConfig.etlVpcPeeringEnabled) {
-      const peering = new ec2.CfnVPCPeeringConnection(
-        this,
-        "EtlCadenceVpcPeering",
-        {
-          vpcId: this.vpc.vpcId,
-          peerVpcId: envConfig.etlComputeVpc.vpcId,
-          // Same account + region → omit peerOwnerId/peerRegion (auto-accepted).
-          tags: [
-            {
-              key: "Name",
-              value: `sps-etl-cadence-peer-${envConfig.envName}`,
-            },
-          ],
-        },
-      );
-      const seenRouteTables = new Set<string>();
-      this.vpc.privateSubnets.forEach((subnet, i) => {
-        const routeTableId = subnet.routeTable.routeTableId;
-        if (seenRouteTables.has(routeTableId)) {
-          return;
-        }
-        seenRouteTables.add(routeTableId);
-        // One return route per (route table, lts-reciter placement CIDR). The
-        // route-table id is a CFN token (can't be a construct-id segment), so
-        // the id combines the dedup index with a slug of the literal CIDR —
-        // unique per pair even when etlPeerCidrs holds both subnets.
-        envConfig.etlPeerCidrs.forEach((cidr) => {
-          const cidrSlug = cidr.replace(/[./]/g, "_");
-          new ec2.CfnRoute(this, `EtlCadencePeerRoute${i}-${cidrSlug}`, {
-            routeTableId,
-            destinationCidrBlock: cidr,
-            vpcPeeringConnectionId: peering.ref,
-          });
-        });
-      });
-      new CfnOutput(this, "EtlCadenceVpcPeeringId", {
-        value: peering.ref,
-        description:
-          "ETL cadence VPC peering connection id (Sps ↔ lts-reciter-vpc01). Add the lts-reciter-side route 10.20/16 [staging] / 10.10/16 [prod] → this pcx out-of-band.",
-      });
-    }
   }
 }
