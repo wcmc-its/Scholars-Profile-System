@@ -38,6 +38,7 @@ import {
   resolveDeptLeadershipBoost,
   resolvePeopleRelevanceMode,
   resolveGenericTermMode,
+  resolveSearchPeopleDivisionShape,
   resolvePeopleMatchProvenance,
   resolvePeopleMatchExplain,
   resolvePeopleSnippetRepresentativePub,
@@ -382,12 +383,25 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // while client-side requests went v3. Classifier sets are boot-cached.
   const peopleRelevanceMode = resolvePeopleRelevanceMode();
   // `peopleClassifierSets` is resolved in the parallel block above (Perf).
+  // #1347 — division-shape routing (dark by default; mirrors the route). Adds division
+  // names to the classifier vocabulary and resolves a bare division query to its roster
+  // (deptDivKey) filter; the filter changes the result SET, so the count query below uses
+  // `effectiveDeptDiv` too, keeping the badge count aligned with the list.
+  const divisionShapeOn = resolveSearchPeopleDivisionShape();
+  const knownDivisions = divisionShapeOn
+    ? new Set(peopleClassifierSets.divisions.keys())
+    : undefined;
+  const divisionRosterKeys = divisionShapeOn
+    ? (peopleClassifierSets.divisions.get(q.trim().toLowerCase()) ?? [])
+    : [];
+  const effectiveDeptDiv = [...deptDiv, ...divisionRosterKeys];
   const peopleQueryShape = classifyPeopleQuery({
     query: q,
     meshResolved: taxonomyMatch.meshResolution != null,
     knownCwids: peopleClassifierSets.cwids,
     knownSurnames: peopleClassifierSets.surnames,
     knownDepartments: peopleClassifierSets.departments,
+    knownDivisions,
   });
 
   // Perf — start the active tab's FULL faceted search NOW, concurrently with the
@@ -457,7 +471,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           page,
           sort: sort as PeopleSort,
           filters: {
-            deptDiv: deptDiv.length > 0 ? deptDiv : undefined,
+            deptDiv: effectiveDeptDiv.length > 0 ? effectiveDeptDiv : undefined,
             personType: personType.length > 0 ? personType : undefined,
             activity: activity.length > 0 ? activity : undefined,
             pi,
@@ -609,7 +623,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
       page: type === "people" ? page : 0,
       sort: type === "people" ? (sort as PeopleSort) : "relevance",
       filters: {
-        deptDiv: deptDiv.length > 0 ? deptDiv : undefined,
+        deptDiv: effectiveDeptDiv.length > 0 ? effectiveDeptDiv : undefined,
         personType: personType.length > 0 ? personType : undefined,
         activity: activity.length > 0 ? activity : undefined,
         pi,

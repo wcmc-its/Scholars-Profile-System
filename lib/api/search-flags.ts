@@ -293,6 +293,22 @@ export function resolveDeptLeadershipBoost(): boolean {
 }
 
 /**
+ * #1347 — division-shape routing. When ON, a bare clinical-division-name People query
+ * (Cardiology, Endocrinology) routes to the `department` template AND is scoped to that
+ * division's roster (`deptDivKey` filter), instead of falling to `topic_template` and
+ * returning a topic-scattered list. Division names + their roster keys come from the
+ * classifier-sets `divisions` map; query-time only, no reindex.
+ *
+ * Default OFF (`=== "on"` opt-in, dark): flag-off ⇒ classification + filters are
+ * byte-identical. Regression risk — several division names are also legitimate topical
+ * terms — so this ships dark and needs a staging A/B before any flip. The chief-of
+ * ranking WITHIN the roster additionally depends on the #1347 reindex (chiefCwid).
+ */
+export function resolveSearchPeopleDivisionShape(): boolean {
+  return process.env.SEARCH_PEOPLE_DIVISION_SHAPE === "on";
+}
+
+/**
  * #1345 — full-time-faculty prominence lever. The outer People prominence
  * function_score adds a flat `+PEOPLE_PROMINENCE_FACULTY_WEIGHT` (#513) to every
  * full_time_faculty scholar, an expertise-INDEPENDENT employment-status prior that

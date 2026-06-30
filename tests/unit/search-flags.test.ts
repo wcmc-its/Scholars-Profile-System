@@ -20,6 +20,7 @@ import {
   resolvePeopleMethodFamilyBoost,
   resolvePeopleMethodContextBoost,
   resolveSearchShellStreaming,
+  resolveSearchPeopleDivisionShape,
   resolveSearchPeopleFacultyProminence,
   resolvePeopleTopicPhraseBoost,
 } from "@/lib/api/search-flags";
@@ -362,6 +363,27 @@ describe("resolveDeptLeadershipBoost (#532)", () => {
     expect(resolveDeptLeadershipBoost()).toBe(true);
     process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "";
     expect(resolveDeptLeadershipBoost()).toBe(true);
+  });
+});
+
+describe("resolveSearchPeopleDivisionShape (#1347)", () => {
+  const original = process.env.SEARCH_PEOPLE_DIVISION_SHAPE;
+  beforeEach(() => delete process.env.SEARCH_PEOPLE_DIVISION_SHAPE);
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_PEOPLE_DIVISION_SHAPE;
+    else process.env.SEARCH_PEOPLE_DIVISION_SHAPE = original;
+  });
+
+  it("defaults to false (dark)", () => {
+    expect(resolveSearchPeopleDivisionShape()).toBe(false);
+  });
+  it("is true only for exactly 'on'", () => {
+    process.env.SEARCH_PEOPLE_DIVISION_SHAPE = "on";
+    expect(resolveSearchPeopleDivisionShape()).toBe(true);
+    process.env.SEARCH_PEOPLE_DIVISION_SHAPE = "ON";
+    expect(resolveSearchPeopleDivisionShape()).toBe(false);
+    process.env.SEARCH_PEOPLE_DIVISION_SHAPE = "off";
+    expect(resolveSearchPeopleDivisionShape()).toBe(false);
   });
 });
 

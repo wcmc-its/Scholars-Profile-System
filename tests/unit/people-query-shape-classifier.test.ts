@@ -178,3 +178,54 @@ describe("classifyPeopleQuery — #528 dept/surname collisions", () => {
     );
   });
 });
+
+// #1347 — clinical-division names (NOT a primaryDepartment) route to the department
+// shape only when the division-shape flag has populated `knownDivisions`.
+describe("classifyPeopleQuery — division-shape routing (#1347)", () => {
+  // "hematology" is a Division of Medicine, never a primaryDepartment — so it is
+  // absent from DEPARTMENTS, exactly as in prod.
+  const DIVISIONS: ReadonlySet<string> = new Set(["hematology"]);
+
+  it("flag-off (no knownDivisions): a bare division name does NOT reach department", () => {
+    expect(classify("hematology")).toBe("unclassified");
+  });
+
+  it("with knownDivisions: a bare division name routes to department", () => {
+    expect(
+      classifyPeopleQuery({
+        query: "hematology",
+        meshResolved: false,
+        knownCwids: CWIDS,
+        knownSurnames: SURNAMES,
+        knownDepartments: DEPARTMENTS,
+        knownDivisions: DIVISIONS,
+      }),
+    ).toBe("department");
+  });
+
+  it("with knownDivisions: division name + extra tokens routes to hybrid", () => {
+    expect(
+      classifyPeopleQuery({
+        query: "hematology research",
+        meshResolved: false,
+        knownCwids: CWIDS,
+        knownSurnames: SURNAMES,
+        knownDepartments: DEPARTMENTS,
+        knownDivisions: DIVISIONS,
+      }),
+    ).toBe("hybrid");
+  });
+
+  it("empty knownDivisions is byte-identical to omitting it (off-path)", () => {
+    const omitted = classify("cardiology"); // cardiology IS in DEPARTMENTS here
+    const empty = classifyPeopleQuery({
+      query: "cardiology",
+      meshResolved: false,
+      knownCwids: CWIDS,
+      knownSurnames: SURNAMES,
+      knownDepartments: DEPARTMENTS,
+      knownDivisions: new Set(),
+    });
+    expect(empty).toBe(omitted);
+  });
+});
