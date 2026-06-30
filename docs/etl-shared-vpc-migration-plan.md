@@ -1,5 +1,8 @@
 # Plan: Relocate the SPS ETL cadence into the shared `lts-reciter-vpc01` (per-env SGs over dual peering)
 
+> **⚠️ SUPERSEDED (2026-06-30) — read the current plan first: [`docs/sps-vpc-consolidation-plan.md`](./sps-vpc-consolidation-plan.md).**
+> This plan moved only the **ETL compute** into `lts-reciter-vpc01` and kept Aurora/OpenSearch/the app in the Sps VPCs, reachable over **VPC peering + cross-VPC SG references** (shipped flag-off in merged PR #1310). On the same day the decision changed to **full consolidation, no peering**: relocate the **entire SPS estate (app + data, both envs)** into `lts-reciter-vpc01` and **decommission** the `Sps-network-staging/prod` VPCs. The peering apparatus this plan + #1310 build is therefore **superseded** (see the new plan's §8.8 for #1310's disposition). Retained for history.
+
 Status: **PLAN for human approval.** No code changes, no deploys, no git-history edits. Every code reference below is grounded against `origin/master` (`e8ab902b`) and `feat/etl-vpc-peering` (`8f354425`, open PR #1310) via `git show <ref>:<path>` — **not** the stale checked-out worktree (~358 commits behind master). Line numbers cite the content I verified at those refs; treat them as anchors, not promises, since the branch must be rebased before edits land (Section 3).
 
 This plan supersedes the per-env ETL target that PR #1229 (merged) and PR #1310 (open) encode, applying the Fabrice/networking meeting decisions of 2026-06-30.

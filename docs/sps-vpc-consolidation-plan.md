@@ -1,0 +1,681 @@
+# SPS Estate Consolidation into `lts-reciter-vpc01` — Migration PLAN
+
+**Status: DRAFT PLAN for human approval (senior engineer + networking lead). Not yet approved; no work authorized by this document.**
+
+- **Grounded vs `origin/master`** (working tree is ~358 commits behind and was NOT trusted; every code reference was re-read via `git show origin/master:<path>` for `cdk/lib/{network,data,app,etl,edge,config}-stack.ts`, `cdk/lib/config.ts`, `cdk/bin/sps-infra.ts`, `etl/search-index/index.ts`, `etl/orchestrate.ts`, `etl/search-index/alias-swap.ts`).
+- **Supersedes the peering design.** This plan **replaces** the VPC-peering approach of PR **#1229** + merged PR **#1310** and `docs/etl-shared-vpc-migration-plan.md`, per the **2026-06-30 "full consolidation, no peering" decision**. Those moved only the ETL compute and stretched reachability across two `CfnVPCPeeringConnection`s; this plan relocates the **entire SPS estate (both envs)** into one shared, TGW-attached VPC and **deletes the peering apparatus**.
+- **Decision being planned:** relocate AppStack (both ALBs + ECS), DataStack (Aurora + OpenSearch), and EtlStack for **both staging and prod** into the single, already-existing **`lts-reciter-vpc01`** (account `665083158573`, `us-east-1`; CIDRs `10.46.134.0/24` + `10.46.160.0/24`; already hosts ReCiter RDS `10.46.134.208` and `reciter-publication-manager-dev` `10.46.134.113`). **Env isolation is by per-env security groups inside one shared CIDR — no network boundary, no peering.** Then decommission the SPS-owned `Sps-network-staging` (`10.20.0.0/16`) and `Sps-network-prod` (`10.10.0.0/16`) VPCs.
+- **Identifier discipline:** every concrete `lts-reciter` network identifier (vpcId, subnet ids/AZs, per-env SG ids, IP capacity, NAT/endpoint inventory, public-subnet/IGW presence, resolver-rule association state, the exact `10.46.x` app/ETL source range) is **UNKNOWN** and recorded as an open question for networking (§10). None is invented anywhere in this plan. The only concrete `lts-reciter` facts used are the four given as inputs.
+
+---
+
+## 1. Decision summary — old peering design → this consolidation
+
+| Dimension | Old peering design (#1229 / merged #1310 / `docs/etl-shared-vpc-migration-plan.md`) | This consolidation (2026-06-30 decision) |
+|---|---|---|
+| Scope of move | **ETL compute only** relocates into `lts-reciter-vpc01`; Aurora/OpenSearch/App stay in the Sps VPCs | **Entire estate** (App + Data + ETL, both envs) relocates into `lts-reciter-vpc01` |
+| Cross-VPC reachability | **Two VPC peerings** (`lts-reciter ↔ 10.20/16`, `↔ 10.10/16`) + return routes + cross-VPC SG references ("Allow referenceable SGs") | **No peering anywhere.** All reachability is intra-VPC SG-to-SG references |
+| Sps VPCs | Retained (datastores stay there) | **Decommissioned** (`10.20/16` + `10.10/16` deleted, last) |
+| Env isolation | Network layer (separate VPC/CIDR per env) + cross-VPC SG refs gated by `etlVpcPeeringEnabled` | **Per-env security groups only**, inside one shared CIDR — no network backstop |
+| Key CDK constructs | `CfnVPCPeeringConnection`, `EtlCadencePeerRoute*`, `EtlComputeSgRef`, `InternalAlbIngressFromEtlCadenceVpc`, `etlPeerCidrs`, `etlVpcPeeringEnabled`, `etlCadenceVpcRelocated`, `assertEtlMigrationInvariants` | **All deleted.** Reuse only the import-by-id pattern (`Vpc.fromVpcAttributes` / `Subnet.fromSubnetId` / `SecurityGroup.fromSecurityGroupId`) and the SG-isolation model, **generalized** to the whole estate |
+| WCM source reach | Peering + out-of-band routing; #443 gap persists | Native via `lts-reciter`'s TGW attachment — the consolidation's primary upside |
+| #1310 disposition | n/a | **Superseded by a forward PR**, not `git revert` (keep the reusable import scaffolding; delete the peering halves) — §9.7 |
+
+---
+
+## 2. Pre-flight HARD GATES
+
+### 2.1 How to read this section
+
+Every item in §2.2 is a **binary GO/NO-GO gate**. No change-list item deploys until *all* gates it depends on are GREEN, where GREEN means **networking/owner supplied the fact in writing** — not assumed. This plan invents **zero** concrete network identifiers; every such value is «UNKNOWN — networking» and tracked in §10. A gate cannot flip GREEN while any identifier it needs is «UNKNOWN».
+
+Three gates are **plan-validity** gates: if RED they invalidate the consolidation shape and force a redesign — clear these first.
+- **G0 (account model)** and **G4 (public ingress)** can void the architecture.
+- **G15 (cutover-mechanics / name-collision plan)** can void the rollout mechanic (see §9, the blocker the reviews surfaced).
+
+The consolidation inverts the substrate; nothing carries over automatically:
+
+| Dimension | BEFORE (per-env) | AFTER (consolidated) | Gate |
+|---|---|---|---|
+| VPC | NetworkStack **CREATES** a 2-AZ VPC from `vpcCidr` | NetworkStack **IMPORTS** `lts-reciter-vpc01` via `fromVpcAttributes` (CI synth is account-agnostic → `fromLookup` unavailable) | G1 |
+| Env isolation | **Network layer** (separate VPCs + non-overlapping CIDRs) | **SG references only** — both envs share `10.46.134.0/24` + `10.46.160.0/24` | G8, G9 |
+| Tenancy | SPS owns its whole VPC | SPS ENIs/SGs co-tenant with ReCiter RDS, pub-mgr-dev, and (ASSUMPTION) the ReCiter EKS workload | G2, G9 |
+
+### 2.2 HARD GATES (all must be GREEN before the deploy steps they block)
+
+Cross-ref shorthand: **§CL-Net/Data/App/Etl/Edge/Cfg** = the §6 per-stack change-lists; **§DM-\*** = §7 data-migration items.
+
+| ID | Gate (must be GREEN) | Evidence / owner | Failure mode if RED | Blocks |
+|---|---|---|---|---|
+| **G0** | **Account + region confirmed.** `lts-reciter-vpc01` AND both SPS envs are in `665083158573` / `us-east-1`, and staging+prod genuinely share that one account today. | Networking + AWS Orgs: resolve the **ADR-008 contradiction** (config JSDoc + `network-security-topology.md` say *separate accounts*; the EIP-cap comment + session memory say *shared* `665083158573`). | If separate accounts, this is **also a cross-account merge** → KMS/secret/cross-account-share/IAM rework; the `-c <env>Account` synth pattern + ADR-008 decision-5 no longer hold. **Plan-validity.** | everything |
+| **G1** | **VPC identity + import attributes known.** `vpcId` + explicit subnet ids + AZs (+ per-subnet route-table ids if any route reference is needed). | Networking supplies them (config placeholder is empty). | Synth cannot import; or resources land in the wrong tier/AZ. | §CL-Net, §CL-Cfg |
+| **G2** | **IP / ENI capacity proven** in the two /24s to absorb **BOTH envs' full estate** on top of ReCiter (RDS + pub-mgr + EKS VPC-CNI per-pod IPs/prefix-delegation). | Networking: free-IP count per subnet *after* ReCiter; whether a **dedicated SPS subnet** is needed. SPS demand is an **estimate** (≈9 app ENIs at max autoscale, ~8 ALB ENIs across 2 AZ×2 env, Aurora writer+reader, OpenSearch 1+2 nodes, ETL fat task + 5-min reconcilers, rotation/seeder Lambda ENIs, any SPS endpoint ENIs). | ENI/IP exhaustion → tasks stuck PROVISIONING, datastore/endpoint ENI placement fails, autoscale stalls, partial deploy. | §CL-App, §CL-Data, §CL-Etl |
+| **G3** | **AZ coverage ≥ 2.** Placement subnets span ≥2 AZs (us-east-1a/1b is **not** guaranteed in lts-reciter). | Networking confirms placement-subnet AZs. | Prod loses multi-AZ (Aurora writer+reader, 2-node OpenSearch `zoneAwareness=2` synth fails with <2 AZs, multi-AZ ALBs). | §CL-Data, §CL-App |
+| **G4** | **Public ingress exists** — internet-facing PUBLIC subnets + IGW for the internet-facing public ALB (classic `LoadBalancerV2Origin`). | Networking: does this TGW-attached internal VPC have public subnets + IGW at all? | If private-only, the public ALB cannot be internet-facing → CloudFront-origin/edge model must be redesigned (VPC origin, or NetScaler front per #502). **Plan-validity.** | §CL-App, §CL-Edge |
+| **G5** | **Egress + AWS-service endpoints sufficient**, role-permitting, **no duplicate-private-DNS conflict.** Need NAT and/or interface endpoints for ECR-api, ECR-dkr, CloudWatch Logs, Secrets Manager (`privateDnsEnabled`), STS + gateway endpoints S3, DynamoDB. | Networking: endpoint inventory + policies. SPS must **reuse** the existing private-DNS SM endpoint (a 2nd in one VPC is **rejected**) and drop AppStack's own SM+S3 endpoints; ECR/Logs/DDB ride NAT today. | Image pulls, log puts, `GetSecretValue` (seeder + rotation Lambda hang ~49s then fail), ReCiter DynamoDB/S3/KMS reads break; or CFN rejects duplicate SM endpoint. | §CL-App, §CL-Data, §CL-Etl |
+| **G6** | **TGW source reach + WCM firewall hold for `10.46.x`** to the **full** SPS source set: ReciterDB, ED LDAPS (`edprovider.weill.cornell.edu:636`), InfoEd `10.20.91.8`, ASMS, COI, Jenzabar, SES, POPS (`pops.weillcornell.org`), and the public-API ETL sources. | Networking: TGW route-table coverage per source + WCM-side firewall admits `10.46.134/160` (or a new change is filed). | ETL steps fail; #443 reach regresses; staging `etl:infoed` stays blocked if `10.20.91.8` unreachable from `10.46.x`. | §CL-Etl, §CL-App |
+| **G7** | **WCM DNS resolver state decided.** Are the 3 RAM-shared FORWARD-rule associations (`rslvr-rr-58457e95d34548148`, `-467f0939c1f2458e9`, `-56f32331b3a1441ba`; Central Services `091981818184`) **already associated to lts-reciter** → SPS **DROPS** its 3 `CfnResolverRuleAssociation`s. | Networking confirms current association state on lts-reciter. | Re-associating an already-associated rule → CFN *"rule already associated."* Dropping when they're **not** present → WCM hostnames stop resolving after Sps-network teardown. | §CL-Net, §CL-Cfg |
+| **G8** | **Per-env SG ownership + quota decided.** Who creates the per-env SGs (alb / internal-alb / app / etl / vpc-endpoint / aurora / opensearch) **inside the imported VPC** — SPS-CDK against the import, or networking-pre-created + imported by id — and SG-count / rules-per-SG headroom. | Networking decides ownership + confirms quota; supplies SG ids if pre-created. | SG-to-SG ingress is valid only intra-VPC — if SGs aren't created against the imported VPC the reachability rules are invalid; or SPS lacks quota → stack fails. | §CL-Net, §CL-Data, §CL-App, §CL-Etl |
+| **G9** | **Isolation enforced two ways, SG-only.** (a) **From ReCiter:** SPS and ReCiter SGs mutually scoped; ReCiter team **accepts** SPS ENIs/SGs in their subnets. (b) **staging↔prod:** with one shared CIDR and no peering, every ingress is an **SG-reference by id** and a **prod SG must NEVER appear in a staging rule** (and vice-versa). | Networking + SPS: agreed env-suffixed naming/tagging making SGs auditable; ReCiter sign-off. | Cross-env or cross-tenant datastore exposure with **no network backstop** — one mis-named/missing SG reference silently cross-wires prod↔staging or SPS↔ReCiter. **Security-review-grade threat-model change** to `network-security-topology.md` + ADR-008. | §CL-Data, §CL-App, §CL-Etl + ADR update |
+| **G10** | **IAM for ENI attach into shared subnets.** SPS task-exec / task / rotation / seeder roles **and** the CDK/CFN deploy role hold `ec2:CreateNetworkInterface` / `Describe*` / `Delete*` (+ `CreateNetworkInterfacePermission` if cross-owner) in the shared subnets; no **SCP / permission boundary** blocks ENI attach into networking-owned subnets. | Networking + IAM. | Fargate tasks / rotation+seeder Lambdas / Aurora / OpenSearch can't attach ENIs → stuck PROVISIONING, deploy timeout, rollback. | §CL-App, §CL-Data, §CL-Etl |
+| **G11** | **ACM + edge constancy locked.** Live us-east-1 ACM cert ARNs for `scholars[-staging].weill.cornell.edu`; the **existing** distributions `E17NRWINXLP3B3` (staging) / `E28NKDFXC7K2ZL` (prod) are **KEPT** (origin re-point only, never recreate); every `Sps-Edge` deploy carries **all three** context flags; the **same** `scholars/<env>/edge/origin-shared-secret` is reused. | WCM-ITS: cert ARNs + current allowlist CIDRs; SPS: `--strict` diff before any `Sps-Edge` deploy. | Recreating the distribution mints a new id + `*.cloudfront.net` → breaks the WCM CNAME, the #353 reconciler, dashboards. A missing context flag **STRIPS** alias/cert/WAF off the live distribution. Rotating `X-Origin-Verify` mid-cutover → universal 403. | §CL-Edge |
+| **G12** | **Data-migration mechanism + cutover window agreed (ONE mechanism end-to-end).** Aurora = encrypted **snapshot-restore** into a NEW lts-reciter cluster, **adopted into CDK via `DatabaseClusterFromSnapshot`**, with **optional DMS/binlog CDC drain** for the final cutover if measured volume requires it (§7.2); OpenSearch = **fresh domain + full `search:index` rebuild** (~178k+ pubs); **regrant** `app_rw`/`app_ro`/`sps_migrate`/`sps_bootstrap` from `'10.20.%'`/`'%'` → the new `10.46.x` scope (or `'%'`), update `appRwGranteeHost` + verify-grants golden list; **reseed** every DSN/endpoint secret. | DBA + SPS: agreed window; restore-target KMS confirmed (same acct/region → snapshot retains key). | A stale DSN silently regresses every write step; MySQL **1410** closes the app for staging once tasks get `10.46.x` ENIs; reindex can't run until ETL+sources are reachable. | §DM-\*, §CL-Cfg |
+| **G13** | **Decommission sequencing approved.** `Sps-Network-staging`/`-prod` torn down **LAST**, only after cutover verification **and** prod's **35-day** recovery-point retention; RETAIN + deletion-protected Aurora/OpenSearch/BackupVaults preserved; orphaned recovery points handled; NAT EIPs + resolver associations released cleanly (upside: relieves the prod EIP cap — 2nd-NAT request denied 2026-05-20). | SPS + networking: written cutover runbook with ordering. | Premature teardown destroys the live data tier, orphans recovery points, or drops DNS/egress before co-location → outage + data loss. | §DM-\* + §CL-Net teardown |
+| **G14** | **Prod-scale dry-run measured (NEW gate).** A staging-or-restore dry-run timed **end-to-end** (snapshot-restore + optional CDC drain + full `search:index` reindex) **at prod data scale**, yielding a real write-freeze duration. A staging-tiny / 0-reader run does **not** represent prod. | DBA + SPS: measured durations recorded. | A prod window committed on the false "modest relational volume" premise → window blows past, edits lost or extended outage. | prod window scheduling, §DM-\* |
+| **G15** | **Fixed-physical-name + CFN export hand-off plan approved (NEW gate; plan-validity for the rollout mechanic).** A per-resource disposition exists for every env-keyed physical name (OIDC provider [#491], IAM role names, ECR repos, ECS cluster/service, ALBs, RETAIN log groups, backup/DR vault names, `scholars/<env>/db/master`) AND a transitional cross-stack endpoint-wiring + export hand-off sequence (§9.2/§9.3). | SPS infra owner: approved §9.2 disposition matrix + §9.4 export hand-off order. | The naïve `-v2` parallel-stack model is **unbuildable** (env-keyed names + CFN export names collide); deploy fails "already exists"; backup vaults can't be renamed/deleted-while-nonempty. **Rollout-validity.** | §9 (all phases), §CL-* |
+| **G16** | **CDC prerequisites pre-staged (NEW gate; conditional on G14 choosing CDC).** If the measured window forces near-zero-downtime: source Aurora `binlog_format=ROW` via cluster parameter-group change **+ reboot of the old cluster** (a pre-window prod maintenance action), DMS replication instance in-VPC, endpoints + IAM, type-mapping validated — all **before** the window. | DBA + SPS: prerequisites stood up + a CDC dry-run passed. | Invoking DMS reactively mid-cutover adds its own setup delay (param-group reboot, instance spin-up) — defeats the purpose. | §DM-Aurora |
+
+---
+
+## 3. Current state (concise)
+
+- **Two CDK-created VPCs:** `Sps-network-staging` (`10.20.0.0/16`) and `Sps-network-prod` (`10.10.0.0/16`), each 2-AZ (`us-east-1a/b`), public `/24` + private-with-egress `/22`, **1 NAT gateway + EIP** per env (prod single-NAT due to the EIP cap).
+- **Stacks** (instantiation order): NetworkStack → DrBackupVaultStack → DataStack → SecretsStack → AppStack → EtlStack → ObservabilityStack → EdgeStack → AnalyticsStack.
+  - **DataStack:** Aurora MySQL Serverless v2 (`scholars`, engine `VER_3_08_0`; ACU 0.5–2 staging / 1–8 prod; reader 0/1; 14-day backup; `deletionProtection:true`, `RETAIN`) + OpenSearch domain (`OPENSEARCH_2_19`; 1×t3.medium.search staging / 2×m6g.large.search prod, `zoneAwareness=2`); db-bootstrap seeder + 30-day single-user rotation Lambda; `BackupPlan` `sps-aurora-daily-<env>` → primary vault `sps-backup-vault-<env>` + cross-region copy to us-west-2 `sps-dr-backup-vault-<env>`.
+  - **AppStack:** public ALB (`sps-public-<env>`, internet-facing) + internal ALB (`sps-internal-<env>`), ECS Fargate cluster/service (`sps-cluster-<env>` / `sps-app-<env>`, `assignPublicIp:false`), Secrets Manager interface endpoint (`privateDnsEnabled`) + S3 gateway endpoint, ECR repos `scholars-app-<env>` / `scholars-etl-<env>` (RETAIN), the GitHub OIDC provider (owned only when `env==='staging'`, #491), IAM roles (`sps-task-exec-<env>`, `sps-task-<env>`, `sps-deploy-<env>`, …). Exports `Sps-App-<env>-InternalAlbDns` / `-InternalAlbSecurityGroupId`.
+  - **EtlStack:** cadence + both reconcilers (`TaskReconcile`, `TaskCdnReconcile`), `TaskCurationBackup`, `TaskOpportunityProjection`, ED import — all hardwired to the Sps VPC private subnets + `etlSecurityGroup`; internal-ALB ingress from the ETL SG; `CurationBackupBucket` (S3, versioned, RETAIN). RunTask resolves its VPC from the AppStack cluster.
+  - **EdgeStack:** CloudFront (dist ids above) + WAFv2 CLOUDFRONT-scope WCM allowlist (#461), ACM imported, S3 static origin (OAC) with ALB fallback, `X-Origin-Verify` shared secret, RETAIN logs bucket. **Frozen** behind the #502 NetScaler-vs-WAFv2 decision (RITM0792011).
+- **Env isolation today:** network layer (separate VPC/CIDR) + (assumed) account boundary. Datastores co-resident with compute in each Sps VPC; app/ETL reach them via **intra-VPC SG-to-SG references**.
+- **WCM reach:** 3 RAM-shared resolver-rule associations on each Sps VPC + half-fixed routing (#443 gap). Staging `etl:infoed` excluded because InfoEd `10.20.91.8` self-overlaps `10.20/16`.
+- **#1310 (merged, flag-off):** peering scaffolding present but inert (`etlVpcPeeringEnabled=false`, `etlCadenceVpcRelocated=false` both envs).
+- **`lts-reciter-vpc01`:** TGW-attached, account `665083158573`, `us-east-1`, CIDRs `10.46.134.0/24` + `10.46.160.0/24`; already hosts ReCiter RDS `10.46.134.208` and `reciter-publication-manager-dev` `10.46.134.113` (and, ASSUMPTION, the ReCiter EKS workload).
+- **`search:index` is reproducible from Aurora (confirmed `origin/master`):** `etl/search-index/index.ts` builds all four indices (people, publications, funding, opportunities) from MySQL/Aurora via Prisma using the **alias-swap pattern** (`alias-swap.ts`: versioned index → bulk-fill → atomic alias repoint); `orchestrate.ts` runs it **last**, after every source ETL. The only OpenSearch-resident state NOT rebuilt by `search:index` is the FGAC internal-user DB (set out-of-band via the `_security` API).
+
+---
+
+## 4. Target architecture (`lts-reciter-vpc01`, no peering)
+
+### 4.1 End-state in one sentence
+
+The **entire SPS estate for both environments** — public ALB + internal ALB, the ECS Fargate app service, every ETL Fargate task, the Aurora MySQL cluster, the OpenSearch domain, and all VPC endpoints — lives inside the single, already-existing, TGW-attached **`lts-reciter-vpc01`**, alongside the existing ReCiter RDS tenants. Staging and prod are isolated **only by per-env security groups inside one shared CIDR space** — no network boundary between them, and **no VPC peering anywhere**.
+
+### 4.2 The load-bearing fact: the *whole* app moves, not just data
+
+> **[ASSUMPTION — WHOLE-ESTATE MOVE]** AppStack (both ALBs + ECS), DataStack (Aurora + OpenSearch), and EtlStack all relocate into `lts-reciter-vpc01` *together*. You cannot move a subset.
+
+**Why no-peering forces this.** App→datastore reachability is expressed as **intra-VPC SG-to-SG references**, not CIDR rules: `app→aurora:3306`, `app→opensearch:443`, `etl→aurora:3306`, `etl→opensearch:443`, `etl→internal-alb:80`. An SG-to-SG reference is valid **only within a single VPC** (the peering plan needed "Allow referenceable security groups" precisely to stretch it across the boundary). With peering removed, the reference resolves only if source and target SGs are co-resident — so the moment any tier moves, every tier it talks to must move with it. The peering plan's "ETL-only relocation" is no longer expressible.
+
+### 4.3 Before → after
+
+| Dimension | Current (Sps-network-staging / -prod) | Target (`lts-reciter-vpc01`, no peering) |
+|---|---|---|
+| VPC | Two CDK-**created** VPCs (`10.20/16`, `10.10/16`) | One pre-existing VPC, **imported** (`Vpc.fromVpcAttributes`, not `fromLookup` — CI synth is credential-free). CIDRs `10.46.134.0/24` + `10.46.160.0/24` (non-contiguous) |
+| Env isolation | Network layer (separate VPC + CIDR) | **Per-env SGs inside one shared VPC/CIDR.** No network backstop |
+| App/ETL → datastore | Intra-(Sps)-VPC SG-to-SG | Intra-(lts-reciter)-VPC SG-to-SG. **No peer, no return routes, no `etlPeerCidrs`** |
+| Subnets / AZs / NAT / IGW / route tables | SPS **creates** them | SPS **owns none** — consumes lts-reciter's. `vpcCidr`/`natGateways`/hardcoded AZs stop driving creation |
+| Internet egress | SPS-owned NAT + EIP per env | lts-reciter NAT and/or endpoints ‹**UNKNOWN inventory** — §10› (releases SPS NAT EIPs — eases the prod EIP cap) |
+| WCM DNS | 3 RAM-shared resolver-rule associations on the Sps VPC | lts-reciter is almost certainly already associated → SPS **drops** its 3 associations ‹confirm — §10› |
+| WCM source reach | Half-fixed; #443 gap | Native via lts-reciter's TGW attachment — the primary upside |
+| Aurora `app_rw` grantee host | staging `'app_rw'@'10.20.%'`, prod `'%'` | Re-scoped to the lts-reciter source CIDR (`10.46.%`, exact range **UNKNOWN**) or `'%'` (the `10.20.%` grant fails closed at `10.46.x`) |
+
+### 4.4 Subnet / tier layout
+
+SPS places ENIs into lts-reciter's existing subnets; it no longer creates any. Placement subnet IDs/AZs are ‹**UNKNOWN** — §10›.
+
+| SPS tier | Subnet type required | Notes |
+|---|---|---|
+| Public ALB (internet-facing) | **PUBLIC** (IGW-routed) | **[HARD UNKNOWN — G4]** Whether lts-reciter has internet-facing public subnets + IGW is the single biggest open question (intersects #502). If private-only, the edge model changes (CloudFront VPC origin / front the internal ALB) — §8 |
+| Internal ALB | Private (NAT-egress) | Serves only intra-VPC `/api/revalidate` from the ETL tier |
+| ECS app service ENIs (`assignPublicIp:false`) | Private (NAT-egress) | Egress for Bedrock / SES / New Relic OTLP / POPS / ReCiter DynamoDB+S3+KMS |
+| ETL Fargate ENIs | Private (NAT-egress) | Egress for RePORTER / NSF / Gates / PubMed E-utils / ECR pulls |
+| Aurora + OpenSearch | Private (no public exposure) | Prod requires **2 AZs** (writer+reader; `zoneAwareness=2`) — depends on lts-reciter spanning ≥2 AZs ‹UNKNOWN — G3› |
+| Interface/Gateway endpoints | Private | **Reuse lts-reciter's** — a 2nd `privateDnsEnabled` SM endpoint is rejected; confirm ECR-api/ECR-dkr/Logs/DynamoDB exist ‹UNKNOWN — G5› |
+
+> **[ASSUMPTION — `fromVpcAttributes` placement]** Because the VPC is imported, `subnetType` filters (`PRIVATE_WITH_EGRESS`, `PUBLIC`) are unreliable. Aurora's subnet group, the OpenSearch subnet list, the ALB placements, and the seeder/rotation-Lambda placement must each be given **explicit lts-reciter subnet IDs** ‹UNKNOWN›.
+
+### 4.5 Per-env security-group model
+
+Env isolation rests **entirely** on SGs. One set per env (suffix `-<env>`): `alb`, `internal-alb`, `app`, `etl`, `vpc-endpoint`, `aurora`, `opensearch`. Concrete SG IDs are ‹**UNKNOWN**›; ownership (SPS-created against the import vs networking-pre-created + imported) is **G8**.
+
+| Target SG | Admits (same env only) | Port |
+|---|---|---|
+| `alb-<env>` (public) | `0.0.0.0/0` but listener default = `403`; priority-1 rule forwards only on matching `X-Origin-Verify` | `:80` |
+| `internal-alb-<env>` | `etl-<env>` | `:80` |
+| `app-<env>` | `alb-<env>`, `internal-alb-<env>` | `:3000` |
+| `etl-<env>` | none (egress-only) | — |
+| `vpc-endpoint-<env>` (if SPS keeps any) | `app-<env>`, `etl-<env>` | `:443` |
+| `aurora-<env>` | `app-<env>`, `etl-<env>` | `:3306` |
+| `opensearch-<env>` | `app-<env>`, `etl-<env>` | `:443` |
+
+**Cross-env blocking (the only isolation guard):** `prod-*` SGs never appear in any `staging-*` ingress rule and vice-versa. A single mis-scoped/mis-named SG reference silently cross-wires prod and staging datastores with **no network backstop**. SG naming/tagging discipline (env-suffixed, auditable) is load-bearing — a threat-model change versus the "separate VPCs/accounts" framing in `network-security-topology.md` + ADR-008 decision 5 (**G9**).
+
+**Sharing the VPC with ReCiter.** SPS rules reference only SPS SGs, so ReCiter workloads are unaffected; SPS does not depend on ReCiter SG membership except where ETL reads ReciterDB-derived sources (a separate reachability question — G6/G16-Q).
+
+### 4.6 Local datastore access (no peer)
+
+```
+write/read path:  app or etl task ENI  ──:3306/:443──►  Aurora / OpenSearch ENI
+                  (SG app-<env> / etl-<env>)             (SG aurora-<env> / opensearch-<env>)
+```
+1. Task ENI and datastore ENI are **in the same VPC**; endpoints resolve to private `10.46.x` IPs via in-VPC AWS DNS ‹confirm whether SPS datastore hostnames need a Route53 PHZ association, or co-location resolves natively — §10›.
+2. The datastore SG admits the connection because its ingress rule **references the source SG by id** — no CIDR, no peer, no return route.
+
+Versus #1310, the whole write-back choreography (resolve → cross peer → SG-ref-with-owner-id → return route) collapses to a single intra-VPC SG reference. `DATABASE_URL` / `OPENSEARCH_NODE` / `SCHOLARS_BASE_URL` point at in-VPC endpoints (re-seeded with the new cluster/domain endpoints — the data tier is **re-created**, not lifted; Aurora's subnet group and OpenSearch's VPC are immutable).
+
+### 4.7 Egress
+
+SPS stops owning a NAT + EIP. All internet/AWS-service egress uses **lts-reciter's** NAT and/or VPC endpoints.
+
+> **[OPEN — egress posture, G5]** Does lts-reciter provide outbound internet (NAT), or is it TGW-only? Do endpoint policies admit the SPS task/exec/rotation/seeder roles? If egress is restricted, image pulls, secret pulls, and external-source ETL break at deploy/runtime.
+
+### 4.8 Topology (target end-state)
+
+```
+                              ┌──────────────────────────────────────────────────────────────┐
+   Internet ─► CloudFront ───►│  PUBLIC subnets  [HARD UNKNOWN/G4: lts-reciter IGW/public?]    │
+              (+WCM WAF,      │   sps-public-staging ALB        sps-public-prod ALB            │
+               X-Origin-Verify)│  (SG alb-staging)               (SG alb-prod)                 │
+                              ├──────────────────────────────────────────────────────────────┤
+   WCM on-prem ◄═ TGW ═══════►│              lts-reciter-vpc01   (acct 665083158573, us-east-1)│
+   (ED/InfoEd/COI/            │   CIDRs 10.46.134.0/24 + 10.46.160.0/24   ‹subnet ids UNKNOWN› │
+    ReciterDB, LDAPS)         │                                                                │
+                              │   PRIVATE subnets (NAT/endpoints = lts-reciter's ‹UNKNOWN›)    │
+                              │  ┌───────────── STAGING (SG set -staging) ──────────────┐      │
+                              │  │ internal-alb │ ECS app (app) │ ETL tasks (etl)        │      │
+                              │  │      ▲:80         │:3306/:443      │:3306/:443        │      │
+                              │  │      └───────►  Aurora(aurora) │ OpenSearch(opensearch)│     │
+                              │  │  ingress: aurora/opensearch admit app-staging+etl-staging ONLY│
+                              │  └──────────────────────────────────────────────────────┘      │
+                              │  ┌───────────── PROD (SG set -prod) ────────────────────┐       │
+                              │  │ internal-alb │ ECS app (app) │ ETL tasks (etl)        │       │
+                              │  │      └───────►  Aurora(aurora) │ OpenSearch(opensearch)│      │
+                              │  │  ingress: aurora/opensearch admit app-prod+etl-prod ONLY      │
+                              │  └──────────────────────────────────────────────────────┘       │
+                              │  ┌──── existing ReCiter tenants (NOT SPS) ─────┐                 │
+                              │  │ reciter-analysis-report-db   10.46.134.208  │                 │
+                              │  │ reciter-publication-manager-dev 10.46.134.113│                │
+                              │  └──────────────────────────────────────────────┘               │
+                              └──────────────────────────────────────────────────────────────┘
+   NO PEERING ANYWHERE.  Sps-network-staging (10.20/16) + Sps-network-prod (10.10/16) DECOMMISSIONED.
+   Isolation = SG references only:  prod SGs never in a staging ingress rule, and vice-versa.
+```
+
+### 4.9 What this end-state deletes vs the #1310 peering design
+
+- **Deleted constructs:** `CfnVPCPeeringConnection "EtlCadenceVpcPeering"`, all `EtlCadencePeerRoute*`, `CfnOutput EtlCadenceVpcPeeringId`, the cross-VPC `EtlComputeSgRef`, the cross-VPC `InternalAlbIngressFromEtlCadenceVpc`, and SPS's own `ec2.Vpc`/subnets/NAT/EIP/IGW/route tables (now lts-reciter-owned) plus its 3 resolver-rule associations.
+- **Deleted config + guards:** `etlVpcPeeringEnabled`, `etlComputeVpc`, `etlComputeSecurityGroupId`, `etlPeerCidrs`, `etlCadenceVpcRelocated`, `vpcCidr` (as a creation driver), `natGateways`, and `assertEtlMigrationInvariants`.
+- **Generalized from #1310 (reusable):** the import-by-id pattern (`Vpc.fromVpcAttributes`, `Subnet.fromSubnetId`, `SecurityGroup.fromSecurityGroupId`) and the per-env-SG isolation model — now extended from ETL-only to the whole app+data+ETL estate.
+
+---
+
+## 5. CDK change list per stack
+
+Conventions: **`UNKNOWN-NET`** = a concrete lts-reciter identifier/capability networking must supply (never guessed); **`ASSUMPTION`** = a design choice pending approval. "Recreate, not lift" = every VPC-bound resource (Aurora, OpenSearch, ECS cluster/service, both ALBs, VPC endpoints) is **re-created** in the new VPC (the VPC/subnet-group is immutable). Order of edits: **config.ts first**, then app wiring, then stacks.
+
+### 5.1 `config.ts` — env shape
+
+| Field | Before (origin/master) | After (consolidation) |
+|---|---|---|
+| `vpcCidr` | `10.20/16` / `10.10/16` — drives `ec2.Vpc` | **Removed** as a creation input. Retain only as a doc-comment of the *decommissioned* CIDRs (WCM-firewall teardown + `app_rw` re-scope reference it). |
+| `natGateways` | `1` both envs | **Removed** — SPS owns no NAT. |
+| *(new)* `sharedVpc` | — | **ASSUMPTION** descriptor for `fromVpcAttributes`: `{ vpcId, availabilityZones, albSubnetIds[], appSubnetIds[], dataSubnetIds[], etlSubnetIds[], (privateSubnetRouteTableIds[] if needed) }`. All values **UNKNOWN-NET**. May be one shared block (env separation via SG). |
+| `appRwGranteeHost` | `'10.20.%'` / `'%'` | Staging re-scoped to the lts-reciter app/ETL source CIDR (**UNKNOWN-NET**) or `'%'`. Prod unchanged. Drives both the seeder `GRANT` and the live in-DB grant (§7). |
+| `etlComputeVpc` / `etlComputeSecurityGroupId` / `etlPeerCidrs` / `etlVpcPeeringEnabled` / `etlCadenceVpcRelocated` | #1310 peering field set (placeholders, flags `false`) | **Deleted** (§9.7). Intent generalized into `sharedVpc` + per-env SG ids. |
+| `assertEtlMigrationInvariants(cfg)` | relocated⇒peered invariants | **Replaced** by `ASSUMPTION assertSharedVpcConfig(cfg)`: assert `sharedVpc.vpcId` non-empty, ≥1 subnet id per tier, ≥2 AZs for prod, non-empty per-env SG ids if imported. |
+| *(new)* per-env SG ids | — | **ASSUMPTION + UNKNOWN-NET.** Present only if networking pre-creates SGs (option b, §5.3); omitted if SPS creates them in the imported VPC (**G8**). |
+
+**New phased-cutover flag (ASSUMPTION).** Per-env `useSharedVpc` (default `false`) flips NetworkStack create→import and re-targets every downstream subnet/SG selection. Governs CDK *topology* only; the Aurora/OpenSearch move is a snapshot-restore + reseed, not a flag flip (§7). `edExportVpc` (scholars-dev/prod) is **untouched** (out of scope, `edEmailVisibilityBridgeEnabled`); whether TGW co-location lets it retire is a follow-up (§10-Q17).
+
+### 5.2 CDK app wiring — `cdk/bin/sps-infra.ts`
+
+| Element | Before | After |
+|---|---|---|
+| `-c <envName>Account` → `account` | Per-env account | **Mechanics unchanged**, but ADR-008's "separate accounts" premise is contradicted by the shared-`665083158573` signal — **G0 must resolve this**; if confirmed single-account, correct the comment + framing. |
+| `networkStack.vpc` → Data/App/Etl props | NetworkStack *creates* the VPC | NetworkStack exposes `.vpc` as an **import** (§5.3). Prop threading **unchanged** — the key lever: wiring stays identical, only what NetworkStack returns changes. |
+| Stack instantiation order | as in §3 | **Unchanged.** No new stacks. |
+| `crossRegionReferences:true` (Data + DrVault) | — | **Unchanged** (DR stays us-west-2). |
+
+> **Cross-stack endpoint wiring during the parallel window (see §9):** the §3 export-import contract (`Sps-Data-<env>-OpenSearchDomainEndpoint`, `Sps-App-<env>-InternalAlbDns`, `-InternalAlbSecurityGroupId`, AppStack's legacy `this.exportValue` pins) is consumed via `Fn.importValue`. Because **a CFN export name is account/region-unique**, a parallel producer cannot re-export the same name while the old producer lives. The transitional wiring + export hand-off is specified in §9.3–§9.4 — **do not assume export names "stay stable" through a parallel window.**
+
+### 5.3 NetworkStack — `cdk/lib/network-stack.ts` (most-rewritten)
+
+| Element | Before | After |
+|---|---|---|
+| `ec2.Vpc "Vpc"` | creates VPC + 2 public + 2 private subnets + IGW + NAT + EIP + route tables | **Replaced** by `Vpc.fromVpcAttributes(...)` (not `fromLookup` — account-agnostic synth). Every id explicit from `config.sharedVpc` (UNKNOWN-NET). Deletes the VPC/subnets/IGW/NAT/EIP/route tables from CFN; **releases the SPS NAT EIPs**. |
+| 3 base SGs (`AlbSecurityGroup`/`AppSecurityGroup`/`EtlSecurityGroup`) | created in `this.vpc` | **Two options (G8):** (a) `new ec2.SecurityGroup({ vpc: importedVpc })` — SPS creates per-env SGs against the import (cleanest: keeps the `.appSecurityGroup` props alive, SG hygiene stays in reviewable IaC); or (b) `fromSecurityGroupId(...)` if networking pre-creates them. **ASSUMPTION: prefer (a).** |
+| 3 `CfnResolverRuleAssociation` | associate the created VPC with the 3 WCM rules | **Likely DELETED (G7).** A rule associates to a VPC **once**; lts-reciter almost certainly already has all three. Re-associating fails `RuleAlreadyAssociated`. Confirm before dropping SPS's own. |
+| `CfnOutput` VpcId/AppSgId/EtlSgId/AlbSgId | descriptive | **Kept** (useful for `cdk diff`); values reflect imported ids. |
+| **#1310 peering block** | gated, inert | **DELETED entirely** (§9.7). Justification: **a single shared VPC has no peer**, so no peering connection and no return routes exist. (Note: `fromVpcAttributes` *can* expose private-subnet route tables when `privateSubnetRouteTableIds` are supplied — so route-table exposure is **not** the reason; the reason is simply "no peer.") |
+
+Net: NetworkStack collapses to "import a VPC + define (or import) three per-env SGs." Constructor signature + exposed props unchanged.
+
+### 5.4 DataStack — `cdk/lib/data-stack.ts` (+ DrBackupVaultStack)
+
+The data tier is the **heavy lift** — a real migration (§7), not a CDK re-point. CDK edits describe the new resources.
+
+| Element | Before | After |
+|---|---|---|
+| `rds.DatabaseCluster "AuroraCluster"` | `vpc: props.vpc`, `vpcSubnets:{subnetType:PRIVATE_WITH_EGRESS}` | New cluster in lts-reciter via **`rds.DatabaseClusterFromSnapshot`** (adopts the restored snapshot — the **single** mechanism, §7.2), `vpc: importedVpc`, `vpcSubnets:{ subnets: <explicit dataSubnetIds> }` (subnetType filtering unreliable on imports; prod needs ≥2 AZs, UNKNOWN-NET). Old cluster RETAIN + deletion-protected → survives as rollback. |
+| `AuroraSecurityGroup`/`OpenSearchSecurityGroup` ingress | 3306/443 from app+etl SGs **plus** `EtlComputeSgRef` (gated) | SGs against `importedVpc`; ingress from the co-resident app+etl SGs (intra-VPC). `EtlComputeSgRef` **DELETED** (§9.7). |
+| `opensearchservice.Domain "OpenSearch"` | `vpcSubnets` via `selectSubnets(PRIVATE_WITH_EGRESS)` | New domain with **explicit** `dataSubnetIds`; zoneAwareness AZ count must match supplied subnets (UNKNOWN-NET). **Index rebuilt via `search:index`**; FGAC internal users re-created out-of-band. Endpoint changes → export *value* changes (§9.3 governs the *name*). |
+| `DbBootstrapSeederFunction` + rotation Lambda | in `vpc` on `etlSecurityGroup`; hard-depend on a privateDNS SM endpoint | Explicit lts-reciter subnets on the new etl SG. **Hard dependency** on lts-reciter providing a privateDNS SM endpoint + Aurora 3306 reach (UNKNOWN-NET, G5). `DB_HOST`/`DB_PORT` from the new endpoint; `APP_RW_GRANTEE_HOST` from re-scoped config. |
+| `APP_RW_GRANTEE_HOST` / live grant | `'app_rw'@'10.20.%'` (staging) | Re-scoped to the new CIDR or `'%'`. **The live in-DB grants must be re-issued** for the new source CIDR or auth fails closed (MySQL 1410) — runbook step (§7.2), not CDK. |
+| `BackupPlan AuroraSelection` | `fromRdsDatabaseCluster(oldCluster)` | Re-point to the new cluster. Vaults env-named, not VPC-coupled → **reused unchanged** (§7.6); existing recovery points preserved through teardown. |
+| DrBackupVaultStack | us-west-2 vault | **No change** — region/account constant; the new DataStack consumes the **existing** vault (no v2 DR vault), confirm cross-region SSM resolves (§7.6). |
+
+DataStack constructor props unchanged in signature.
+
+### 5.5 AppStack — `cdk/lib/app-stack.ts`
+
+| Element | Before | After |
+|---|---|---|
+| Consumed props | `vpc`, app/etl/alb SGs | **Unchanged signature** — resolve to the imported VPC + per-env SGs. |
+| `PublicAlb` (internetFacing) | `subnetType:PUBLIC` | Requires IGW-routed PUBLIC subnets in lts-reciter (**UNKNOWN-NET / G4 — hardest gate**). If none, the edge model is redesigned (§8). Subnets become **explicit ids** (`albSubnetIds`). **Name handling: §9.2.** |
+| `InternalAlb`, `EcsService`, `SecretsManagerEndpoint` | `PRIVATE_WITH_EGRESS` filter | Explicit `appSubnetIds`. App egress for Bedrock/SES/New Relic/POPS/ReCiter — depends on lts-reciter NAT/endpoints (G5). |
+| `EcsCluster` | Sps VPC | Co-located in lts-reciter. **Critical coupling:** RunTask resolves its VPC from this cluster, so App+Etl must move together (§5.6). |
+| `SecretsManagerEndpoint` (privateDNS) + `S3GatewayEndpoint` | created here | **Likely REMOVED** — reuse lts-reciter's; a 2nd privateDNS SM endpoint is rejected (G5). Confirm ECR/Logs/DDB endpoints or NAT exist. |
+| OIDC provider (`env==='staging'` owner, #491), IAM roles (`sps-task-exec-<env>` …), ECR repos (`scholars-app/etl-<env>`, RETAIN) | account/region-scoped singletons | **NOT VPC-coupled → REUSED by reference, not recreated** (§9.2). This avoids the #491 `EntityAlreadyExistsException` and the IAM/ECR name collisions the parallel model would otherwise hit. |
+| `VpcEndpointSecurityGroup`, `AppIngressFrom*Alb`, `PublicAlbIngressFromInternet` | SG-id ingress | Re-point to the new per-env SG ids; intra-VPC refs valid. |
+| db-bootstrap `GRANTEE_HOST` + verify-grants golden list | `'10.20.%'` | Re-scoped (matches §5.4 / §7); golden list updated. |
+| Exports `Sps-App-<env>-InternalAlbDns` / `-InternalAlbSecurityGroupId` + legacy `exportValue` pins | consumed by EtlStack | **§9.3 governs** — during the window, consumers read via props/SSM, not the locked shared export. |
+
+run-task subnet/SG params for migrate/db-bootstrap/verify-grants are passed by the **deploy workflow**; the pipeline's network params update to the new VPC/SGs (coordinate with `useSharedVpc`).
+
+### 5.6 EtlStack — `cdk/lib/etl-stack.ts`
+
+**Simpler** under consolidation: datastore access becomes local.
+
+| Element | Before | After |
+|---|---|---|
+| `props.vpc` / `props.etlSecurityGroup` | Sps VPC + SG; `void props.vpc` | Imported VPC + new per-env ETL SG. The two SG concepts merge into one. |
+| **5 hardwired task families** (`TaskReconcile`, `TaskCdnReconcile`, `TaskCurationBackup`, `TaskOpportunityProjection`, ED import) | `etlSecurityGroup` + `{subnetType:PRIVATE_WITH_EGRESS}` | **Each re-targeted** to explicit `etlSubnetIds` + the new ETL SG. Consolidation routes **every** ETL task into the one VPC/SG. |
+| cadence relocate branch (`etlCadenceVpcRelocated`) | flag-gated cross-VPC | **Branch deleted; pattern generalized** — `fromSubnetId`/`fromSecurityGroupId` becomes the single placement path for all ETL tasks (§9.7). |
+| `InternalAlbIngressFromEtl` | same-VPC, kept | Kept; re-points to the new internal-ALB SG (intra-VPC). |
+| `InternalAlbIngressFromEtlCadenceVpc` (gated) | cross-VPC :80 | **DELETED** (§9.7). |
+| Env: `OPENSEARCH_NODE`, `SCHOLARS_BASE_URL`, `DATABASE_URL` | Sps-VPC endpoints | In-VPC lts-reciter endpoints; **DSN secret re-seeded** or write steps silently regress. |
+| `CurationBackupBucket` (S3, versioned, RETAIN, CFN-generated name) | dump history | **Data migrated** (sync), not re-created empty (§7.5). |
+| InfoEd staging-exclusion (`10.20.91.8` overlaps `10.20/16`) | CIDR-overlap workaround | **Re-evaluate** under `10.46.x` — self-overlap disappears; staging may re-add `etl:infoed` if reachable over TGW (G6). Behavior follow-up, not a CDK edit. |
+
+Constructor props unchanged in signature. **Risk:** if the cluster stays in the Sps VPC while ETL sets lts-reciter subnets, RunTask gets a cross-VPC ENI mismatch — cluster placement (§5.5) and ETL placement must flip together.
+
+### 5.7 Other stacks (no CDK *network* change)
+
+- **EdgeStack:** owns no VPC/subnet/SG. When the public ALB is recreated, its DNS changes → the CloudFront origin must be re-pointed (§8), and any `cdk deploy Sps-Edge` must carry all three context flags or it strips alias/cert/WAF. **Keep the existing distributions.**
+- **SecretsStack:** secret *resources* RETAIN/unchanged; the **DSN/OpenSearch secret VALUES** are re-seeded out-of-band with new endpoints (§7.4).
+- **DrBackupVaultStack, AnalyticsStack, ObservabilityStack:** non-VPC by design — no manual network edit.
+
+### 5.8 #1310 (merged peering) — reuse vs delete ledger
+
+| #1310 artifact | Verdict | Why |
+|---|---|---|
+| network-stack peering block (`CfnVPCPeeringConnection` + per-RT `CfnRoute` + `EtlCadenceVpcPeeringId`) | **DELETE** | No peer in a single shared VPC. |
+| data-stack `EtlComputeSgRef` cross-VPC ingress | **DELETE** | Becomes a plain intra-VPC SG reference. |
+| etl-stack `InternalAlbIngressFromEtlCadenceVpc` | **DELETE** | Internal ALB admits the ETL SG intra-VPC. |
+| `etlVpcPeeringEnabled` / `etlPeerCidrs` / `etlCadenceVpcRelocated` + peering invariants in `assertEtlMigrationInvariants` | **DELETE / REWRITE** | Replaced by `useSharedVpc` + `assertSharedVpcConfig`. |
+| `etlComputeVpc` / `etlComputeSecurityGroupId` (import-by-id descriptor) | **REUSE / GENERALIZE** | This *is* the consolidation import model — promote to the shared `sharedVpc` descriptor used by all stacks. |
+| import-by-id placement (`Subnet.fromSubnetId` / `SecurityGroup.fromSecurityGroupId`) | **REUSE / GENERALIZE** | Single placement path for all ETL (and App/Data) tasks. |
+| Per-env-SG isolation model | **REUSE / EXTEND** | Extended to the whole estate — now the **only** env boundary (G9). |
+
+**Grounded paths (all via `git show origin/master`):** `cdk/lib/{network,data,app,etl,config}-stack.ts`, `cdk/lib/config.ts`, `cdk/bin/sps-infra.ts`. Every lts-reciter identifier is **UNKNOWN-NET** and tracked in §10 — none invented here.
+
+---
+
+## 6. Data migration (Aurora + OpenSearch + secrets)
+
+This section moves only the **genuinely stateful** tier and separates what must be physically migrated from what is rebuilt or re-pointed. Every lts-reciter identifier is `[UNKNOWN — networking]`; every non-code judgement is `[ASSUMPTION]`.
+
+> **Grounding fact (confirmed):** SPS both envs and `lts-reciter-vpc01` are the **same account `665083158573`, same region `us-east-1`** — making an **encrypted same-account/same-region snapshot-restore valid** and removing cross-region/cross-account credential or KMS-grant work. The DR copy stays cross-region to us-west-2 and is unaffected. (Pending **G0** confirmation.)
+
+### 6.1 Migration triage
+
+An Aurora cluster's **DB subnet group and an OpenSearch domain's VPC are immutable**. A CDK change that re-points the subnet group/VPC forces **replacement**; with `RETAIN` + `deletionProtection:true` that yields a *new, empty* resource beside the old one. So the data tier is necessarily **create-new-in-lts-reciter → migrate/rebuild → cutover → decommission-old**.
+
+| Resource | Classification | Action |
+|---|---|---|
+| Aurora MySQL `scholars` | **STATEFUL — migrate** | New cluster in lts-reciter + data move + cutover (§6.2) |
+| OpenSearch indices | **REPRODUCIBLE — rebuild** | New domain + `search:index` full reindex from migrated Aurora (§6.3) |
+| OpenSearch FGAC internal users | STATEFUL config, not in the index | Re-create out-of-band on the new domain (§6.3) |
+| Aurora master secret `scholars/${env}/db/master` | STATEFUL credential | Name-collision handling (§6.4) |
+| DSN/user secret VALUES (`db/*`, `opensearch/*`) | STATEFUL values embedding endpoints | **Re-seed** with new endpoints; resources (RETAIN) unchanged (§6.4) |
+| Live MySQL host-scoped GRANTs | STATEFUL, CIDR-coupled | Re-issue for the new `10.46.x` source range (§6.2) |
+| `CurationBackupBucket` dump history | **STATEFUL data** | Reuse bucket; else `s3 sync` before teardown (§6.5) |
+| AWS Backup recovery points | **STATEFUL data** (RETAIN) | Preserve through prod 35-day window; re-point selection (§6.6) |
+| DR vault (us-west-2) | STATEFUL, not VPC-coupled | Reuse unchanged (§6.6) |
+| ECR repos, Static/Logs/Analytics buckets | Region-scoped, not VPC-coupled | Survive in-place; reused by reference (§6.5, §9.2) |
+
+### 6.2 Aurora MySQL — the one genuinely stateful tier
+
+The `scholars` Aurora MySQL Serverless v2 cluster is the SPS field-of-record, including **center membership — the single datum whose system-of-record is this app**, existing nowhere else. It must move with **zero data loss**.
+
+> **[CORRECTION — relational volume is NOT "modest"]** OpenSearch is a **projection built from Aurora**; the search corpus being rebuildable does **not** make the relational SOR small. The 178k+ publications plus people, funding, opportunities, topics, grants, and COI are all resident in Aurora. **The write-freeze window is therefore unbounded by this plan until measured** — see **G14** (a prod-scale dry-run is a GO/NO-GO gate before any prod window). A staging-tiny / 0-reader run does not represent prod (1–8 ACU + a reader).
+
+**New cluster spec:** carry forward engine `VER_3_08_0`, ACU/reader config, encryption (AWS-managed RDS KMS), `deletionProtection:true`, `RETAIN`, 14-day backup, 03:00–04:00 UTC window — only the **network** changes: explicit lts-reciter private subnets (prod ≥2 AZs, `[UNKNOWN]` / G3), SG re-created in the imported VPC with ingress from the new per-env app/etl SGs (`[UNKNOWN]` SG ids / G8).
+
+**Single chosen mechanism (resolves the prior internal inconsistency):**
+
+> **Aurora = encrypted snapshot-restore into a NEW cluster, adopted into CDK via `rds.DatabaseClusterFromSnapshot`** (so the cluster is a first-class CDK resource — no out-of-CDK drift), **plus an OPTIONAL DMS/binlog CDC drain for the final cutover** *only if* the **G14**-measured write-freeze proves too long. There is **no logical dump/restore primary path and no "snapshot delta" semantics** — a plain snapshot-restore has no incremental catch-up. "Final delta" language applies **only** to the CDC variant, where DMS/binlog provides a genuine ongoing change stream.
+
+| Mechanism | Role | Notes |
+|---|---|---|
+| **Snapshot-restore → `DatabaseClusterFromSnapshot`** | **Primary seed (always).** | Native, same-acct/region, preserves data + KMS exactly, carries schema objects/triggers/routines/charset/AUTO_INCREMENT natively. Adopted into CDK so DataStack owns it. Restore can target the new lts-reciter DB subnet group. |
+| **DMS full-load+CDC or binlog logical replication** | **Conditional final drain (only if G14 says the freeze is too long).** | Pre-staged per **G16**: source `binlog_format=ROW` (cluster parameter-group change **+ reboot of the old cluster**, a pre-window prod maintenance action), DMS replication instance in-VPC, endpoints + IAM, type-mapping validated, a CDC dry-run passed. Cutover = stop writes → drain final CDC lag (seconds) → flip endpoints. **This is the only path that gives a true near-zero-downtime cutover.** |
+| Logical `mysqldump`/`mydumper` | **Not the primary path.** | Only if snapshot-restore is somehow unavailable. If used at all, see §6.7 (PII artifact handling) and ensure `--routines --triggers --events` (or mydumper equivalents). |
+| Aurora cross-region/cross-VPC native (Global DB, clone) | **N/A** | No in-place VPC move; clones stay in the source VPC; Global DB is cross-*region*, we stay us-east-1. |
+
+**The host-scoped GRANT landmine (hard cutover blocker for staging).** The live `app_rw` user is `'app_rw'@'10.20.%'` — scoped to the Sps staging CIDR. Once app/ETL ENIs sit in `10.46.x`, MySQL rejects them (1410) until `app_rw`, `app_ro`, `sps_migrate`, `sps_bootstrap` are **re-granted** for the new source CIDR `[UNKNOWN — which 10.46.x range]` (or `%`), **and** `config.appRwGranteeHost` + the verify-grants golden list are updated so the seeder re-issues the matching GRANT. Prod (`@'%'`) is unaffected by host scope but still needs the new endpoint in its DSN. This is DB-resident + config state, fails *closed*.
+
+### 6.3 OpenSearch — rebuild, do not migrate (with explicit cross-domain read continuity)
+
+**Confirmed reproducible** (`origin/master`): `etl/search-index/index.ts` builds all four indices entirely from Aurora via Prisma, using the alias-swap pattern; `orchestrate.ts` runs the reindex last. No OpenSearch-resident data is non-derivable from Aurora.
+
+**Plan:**
+1. Stand up a **fresh OpenSearch domain** in lts-reciter (`OPENSEARCH_2_19`; 1 node staging / 2 nodes prod with `zoneAwareness=2` — needs 2 AZs `[UNKNOWN]` / G3), new SG admitting :443 from the new per-env app+etl SGs.
+2. **Re-create the FGAC internal users** out-of-band (`sps_master` + app/etl via the `_security` API) — a fresh domain's `_security` DB is empty. The **one** piece `search:index` does not rebuild.
+3. **Run `search:index`** against the new domain *after* the migrated Aurora is live and reachable in lts-reciter.
+
+> **[CORRECTION — cross-domain read continuity]** The alias-swap bridges versioned indices **within a single domain only** — it does **NOT** bridge old-domain → new-domain. Therefore the app **keeps reading the OLD OpenSearch domain** (fed by the now-frozen old Aurora — acceptable for a read projection) **until the NEW domain's full reindex completes and passes doc-count/alias verification**, and only then is `OPENSEARCH_NODE` flipped to the new domain. The reindex is a long serial step that sits inside the no-edit window unless deferred behind the old domain this way.
+
+4. Re-point the `Sps-Data-${env}-OpenSearchDomainEndpoint` value and the `OPENSEARCH_NODE` consumers (App + ETL); re-seed `opensearch/{app,etl}` with the new endpoint.
+
+**Fallback (not expected):** if rebuild proves non-viable, snapshot the old index to S3 and restore into the new domain — re-importing whatever staleness the old index carried.
+
+### 6.4 Secrets Manager + rotation re-pointing
+
+Secret **resources** are RETAIN/account-region-scoped — they do not move. The **VALUES embedding endpoints** are re-seeded after the new cluster/domain come up.
+
+| Secret | Embeds | Action |
+|---|---|---|
+| `scholars/${env}/db/master` | generated master creds | **Name-collision gotcha** (below) |
+| `scholars/${env}/db/{app-rw,app-ro,etl,bootstrap,migrate}` | DSN → old Aurora host | **Re-seed**; staging host pattern must match the re-scoped GRANT |
+| `scholars/${env}/opensearch/{master,app,etl}` | domain endpoint + FGAC creds | **Re-seed** with new domain endpoint |
+| `edge/origin-shared-secret`, SAML, session-cookie, New Relic, ETL source creds | no datastore endpoint | **Unchanged** |
+
+**Master-secret name-collision.** `scholars/${env}/db/master` is a singleton name RETAIN'd on the old cluster. A `DatabaseClusterFromSnapshot`-generated secret at the same name collides while old and new coexist. Resolution (secrets owner decides): (a) build the new cluster with a **transitional master-secret name**, cut over, then converge to the canonical name only after the old cluster is deleted; or (b) supply the new cluster's master credential from a pre-created secret. DSN stubs carry no such conflict — re-seeded by the seeder.
+
+**Rotation re-pointing.** The 30-day single-user rotation + Lambda + SG are re-created against the new cluster (`addRotationSingleUser`), placed in lts-reciter. Both the rotation Lambda **and** the seeder hard-depend on a **privateDNS SM interface endpoint** (the seeder records a ~49s hang when 443 was dropped). lts-reciter providing it (admitting the new etl SG) is `[UNKNOWN]` / G5. After cutover, **force one rotation** and confirm reconnect (§6.8).
+
+**Retention.** The old cluster + old domain (RETAIN, deletion-protected) survive Sps-VPC teardown; deleted only after verification + retention obligations (§6.7 / §9).
+
+### 6.5 S3 buckets, ECR, and what re-points vs is recreated
+
+| Asset | VPC-coupled? | Treatment |
+|---|---|---|
+| `CurationBackupBucket` (gzipped curated SQL, RETAIN, versioned) | No | **Keep the bucket if EtlStack updates in place.** If replaced, `aws s3 sync` all objects (incl. `latest/`) before decommission; update `CURATION_BACKUP_BUCKET` / output. Do not orphan the dump history. |
+| ECR `scholars-app/etl-${env}` (RETAIN) | No | Region-scoped; **reused by reference** (§9.2). Re-push images only if a repo is *replaced* (CD rolls images, never CDK). |
+| `StaticAssetsBucket`, `LogsBucket` (config-pinned, RETAIN) | No | Keep unchanged. |
+| `AnalyticsBucket` (RETAIN) | No | Keep unchanged; Glue LOCATION derives from the pinned name. |
+
+### 6.6 AWS Backup + DR vault
+
+- **Re-point `AuroraSelection`** in `sps-aurora-daily-${env}` to the new cluster ARN. Plan, primary vault, rule are env-named, **not** VPC-coupled → reused.
+- **Preserve recovery points.** `sps-backup-vault-${env}` + DR vault hold real RETAIN data. **Backup vaults cannot be renamed and cannot be deleted while holding recovery points** — so **do not create a v2 vault; reuse the existing one** (§9.2). Honor **prod's 35-day** retention before any teardown; orphaned recovery points age out, not force-deleted.
+- **DR copy unchanged.** The new DataStack consumes the **existing** DrBackupVaultStack (no v2 DR vault). Confirm the cross-region `crossRegionReferences` SSM export/import still resolves when DataStack changes, and that the next daily backup produces both a primary recovery point **and** a us-west-2 copy for the new cluster.
+
+### 6.7 Migration-artifact data-safety (PII)
+
+The `scholars` SOR contains **FERPA-carve doctoral-mentee records and other PII**.
+- **Preferred path produces no plaintext artifact:** snapshot-restore uses an encrypted native snapshot (KMS, same acct/region) — nothing lands on disk unencrypted.
+- **If any logical dump is taken** (sizing, dry-run, or fallback): stage it **only** in a **KMS-encrypted S3 location with a least-privilege bucket policy** (or an in-VPC transfer that never lands unencrypted on disk), restrict read access to the migration role, and **securely delete the artifact after row-count/checksum + schema-object parity verification passes** (§6.8). No PII-bearing dump may persist past verification.
+
+### 6.8 Cutover sequence and downtime window
+
+Ordered so the data tier is rebuilt and verified in lts-reciter **before** anything in the old VPCs is torn down (old Aurora/OpenSearch/vaults are RETAIN + deletion-protected — they survive as rollback until step 10).
+
+1. **Networking pre-reqs green** (G1–G11): imported VPC id, subnet ids/AZs, per-env SGs, NAT/endpoints (incl. **privateDNS SM endpoint**), WCM resolver reach.
+2. **Stand up the new data tier:** new Aurora (`DatabaseClusterFromSnapshot` from a baseline snapshot), new OpenSearch domain, new data-tier SGs, rotation Lambda. (If CDC: stand up DMS + start full-load+CDC now — **G16**.)
+3. **Pre-seed credentials:** re-create OpenSearch FGAC users; seed transitional DSN secrets (master-secret name gotcha, §6.4).
+4. **Quiesce ETL:** park Step Functions schedules **and confirm no state machine is in `RUNNING`** (a parked schedule does not stop an in-flight multi-step execution) — abort/drain any in flight before the freeze.
+5. **Open the maintenance window** — app read-only/maintenance.
+6. **Final Aurora data move:** drain final CDC lag (CDC variant) **or** take the final snapshot and restore (freeze-only variant). The **whole no-edit window spans the final drain + reseed + reindex + cut** unless the CDC variant keeps the freeze to the final lag drain.
+7. **Re-issue GRANTs** for the `10.46.x` range; update `appRwGranteeHost` + golden list; **re-seed** all DSN + OpenSearch secrets with new endpoints.
+8. **OpenSearch reindex:** run `search:index` against the new domain from the migrated Aurora; confirm the alias points at the fresh versioned index. **App still reads the OLD domain until this passes verification** (§6.3); only then flip `OPENSEARCH_NODE`.
+9. **Cut traffic over:** point App/ETL at the new endpoints; smoke-test (§6.9); re-point AWS Backup selection.
+10. **Close the window;** resume ETL on the new tier; monitor one full nightly cycle.
+11. **Decommission (last):** only after verification + retention — disable deletion protection, take final retained snapshots of the old Aurora, delete old Aurora/OpenSearch, then the old Sps-network VPCs (§9).
+
+**Downtime window:** **NOT asserted as sub-hour.** It is bounded by (a) the freeze-only variant = final snapshot+restore + reseed + reindex + cut, or (b) the CDC variant = final CDC-lag drain + reseed + cut (reindex deferred behind the old domain per §6.3). The committed prod window is set **only** from the **G14** prod-scale measurement, not the staging dry-run alone.
+
+### 6.9 Verification checklist (before decommissioning anything)
+
+- [ ] **Row-count / checksum parity** between old and new Aurora for every `scholars` table (esp. center-membership — the app-only SOR). Per-table counts + a content checksum on a sample; do not eyeball.
+- [ ] **Schema-object parity:** compare `SHOW CREATE` for tables/views/triggers/stored routines/events, charset/collation, foreign-key constraints, and **AUTO_INCREMENT** positions. (Snapshot-restore carries these natively; a logical dump must use `--routines --triggers --events`.) A missing trigger or wrong AUTO_INCREMENT is silent until a later write.
+- [ ] New cluster reachable from app + ETL ENIs on :3306; `app_rw`/`app_ro`/`sps_migrate`/`sps_bootstrap` **authenticate** from a `10.46.x` source IP (verify-grants golden list passes).
+- [ ] All DSN secret VALUES resolve to the **new** endpoints (no stale `10.20`/`10.10` host in any `db/*` or `opensearch/*` secret).
+- [ ] **Force one secret rotation** on the new cluster; confirm success + app reconnect (proves SM endpoint + Aurora reach in lts-reciter).
+- [ ] OpenSearch: new domain green; FGAC users present; `search:index` completed; alias on the fresh index; people/pubs/funding/opportunities doc counts match a fresh build (≈178k+ pubs); a representative `/search` returns expected top results — **then** `OPENSEARCH_NODE` flipped.
+- [ ] AppStack `OPENSEARCH_NODE` + EtlStack consumers resolve the **new** endpoint; internal `/api/revalidate` works end-to-end.
+- [ ] **AWS Backup:** selection re-pointed; next daily run produces a primary recovery point **and** a us-west-2 DR copy.
+- [ ] Old `sps-backup-vault-${env}` + DR recovery points **still present** and within retention (nothing force-deleted).
+- [ ] `CurationBackupBucket` objects present in the bucket the new EtlStack consumes; `latest/` intact.
+- [ ] One full **nightly Step Functions cycle** completes on the new tier (ETL → Aurora → reindex → revalidate) with no regression.
+- [ ] PII migration artifact (if any) **securely deleted** post-verification (§6.7).
+- [ ] Rollback proven available: old Aurora/OpenSearch still RETAIN + deletion-protected until all of the above pass.
+
+---
+
+## 7. Edge / DNS / cert / WAF cutover
+
+The public entry — `scholars[-staging].weill.cornell.edu` → CloudFront → AppStack public ALB — has the cleanest rollback but is gated by one networking fact (does lts-reciter expose an internet-facing ALB at all? — G4) and one launch decision (#502). EdgeStack owns **no** VPC/subnet/SG; its only coupling is the **origin pointer at the ALB** — this is a re-point, not a relocation.
+
+### 7.1 What changes vs. what is preserved
+
+| Edge component | Today | After | Action |
+|---|---|---|---|
+| Distribution id | staging `E17NRWINXLP3B3`, prod `E28NKDFXC7K2ZL` | **unchanged** | KEEP — recreating mints new ids/`*.cloudfront.net` → breaks the WCM CNAME, #353 reconciler, dashboards (G11). |
+| Public hostname / CNAME | → `<dist>.cloudfront.net` | **unchanged** (if dist kept) | No public DNS change — the cutover is an internal origin-domain edit (exception: #502). |
+| Origin | `LoadBalancerV2Origin(appStack.publicAlb)`, HTTP :80 | New ALB DNS (UNKNOWN) **or** CloudFront VPC origin → internal ALB | The cutover — §7.2/§7.3. |
+| `X-Origin-Verify` secret | `scholars/<env>/edge/origin-shared-secret`; matched by ALB listener priority-1 (default 403) | same value, re-wired to the new ALB listener | Reuse (don't rotate) during cutover — §7.4. |
+| ACM cert | imported via `-c edgeCertArn` | **unchanged** (viewer-side, VPC-independent) | Must still pass `-c edgeCertArn` (G11). ARNs UNKNOWN — §10. |
+| WAF (#461) | CLOUDFRONT-scope WCM allowlist, default BLOCK | **unchanged** (viewer-source CIDRs, VPC-independent) | Must still pass `-c edgeAllowedCidrs`. |
+| Static-asset origin group | S3 (OAC) primary, ALB fallback | fallback re-points with the ALB | Update OriginGroup `fallbackOrigin` alongside the default origin. |
+| Logs bucket | RETAIN, read by-name by AnalyticsStack | **unchanged** | Preserve. |
+| IPv6 | `enableIpv6:false` | **unchanged** | Leave off. |
+
+### 7.2 Gating decision: does lts-reciter have a public ALB path?
+
+lts-reciter is a TGW-attached **internal** VPC. Whether it has public subnets + IGW is **UNKNOWN** (G4) and the biggest edge question.
+
+| | Path A — internet-facing ALB retained | Path B — internal ALB + CloudFront VPC origin |
+|---|---|---|
+| Precondition | lts-reciter has public subnets + IGW (UNKNOWN) | lts-reciter is private-only (likely) |
+| AppStack ALB | `internetFacing:true` in PUBLIC subnets | `internetFacing:false`, private subnets |
+| CloudFront origin | same shape; only origin domain changes | `cloudfront.VpcOrigin` → internal ALB (GA Nov 2024); ALB must be **same account** as the distribution — it is (665083158573) |
+| CDK scope | minimal — origin re-point | larger — add a `VpcOrigin`; in-place on the existing distribution |
+| Exposure | ALB still has public DNS → `X-Origin-Verify` load-bearing | internal ALB has no public DNS → exposure largely removed; keep `X-Origin-Verify` as defense-in-depth |
+| CF→origin | traverses public internet | stays private inside the VPC |
+
+**ASSUMPTION (flag for networking):** given lts-reciter's internal/TGW character, **Path B is the more likely target** — a larger change than the origin swap the task title implies, intersecting #502 (§7.7). Do not assume Path A.
+
+### 7.3 The origin re-point (the cutover step)
+
+Regardless of path, the cutover is a single CloudFront config change on the **existing** distribution: swap the default behavior's origin (and the static OriginGroup fallback) from the old-VPC public ALB to the new ALB.
+1. Stand up the new ALB + listener + `X-Origin-Verify` rule (AppStack in lts-reciter); bring ECS to steady state, `/api/health` green (§7.6) — **before** touching the origin.
+2. Re-point the origin (Edge deploy, all three context flags — §7.5).
+3. Verify end-to-end through the distribution.
+4. Only then decommission the old `Sps-Network-<env>` VPC (whose public ALB is the rollback target).
+
+### 7.4 `X-Origin-Verify` continuity
+
+Re-establish the rule on the **new** ALB listener with the **same secret value**. A missing rule or differing value 403s every viewer. Reuse the value (do not rotate) to avoid a 403 window. This rule lives in AppStack and moves with it.
+
+### 7.5 Frozen-Edge redeploy hazard
+
+EdgeStack is frozen behind #502. **Any** `cdk deploy Sps-Edge-<env>` MUST pass all three flags or it silently strips the live alias, cert, and WAF:
+```
+-c edgeCustomDomain=scholars[-staging].weill.cornell.edu \
+-c edgeCertArn=<ACM cert ARN, us-east-1>   # UNKNOWN — §10 \
+-c edgeAllowedCidrs=<WCM viewer CIDRs>      # UNKNOWN exact set — §10
+```
+Always `--strict` cdk diff first; confirm it is origin-only (no removal of `domainNames` / `certificate` / `webAclId`). Applies to **both** the cutover **and** the rollback deploy.
+
+### 7.6 Health-check + warmup
+
+- Target groups health-check `/api/health` (IP targets, :3000). CloudFront 5xx responses are `5xx→0s` (no caching) — origin 5xx during cutover is served live, not cached.
+- SPS has a cold-start latch (#695 + #1297): a freshly-placed Fargate task returns 503 until primed. **Bring the new ECS service to steady-state with health checks passing AND the warmup primer complete before the origin re-point.** Verify the target group is healthy and a direct origin probe (with `X-Origin-Verify`) returns 200, then re-point.
+
+### 7.7 NetScaler-vs-CloudFront (#502)
+
+RITM0792011 / REQ0292790 (Andrew Budries) — whether NetScaler **replaces** or **fronts** CloudFront — is **on HOLD** and is why EdgeStack is frozen.
+- If CloudFront remains the public entry: this plan stands; no public DNS change.
+- If NetScaler replaces/fronts: a real WCM-ITS DNS change (CNAME → NetScaler VIP) with TTL lowering, owned by the edge/launch track — and the Path A/B origin model may be moot. **Do not finalize the edge cutover until #502 resolves.**
+
+**ASSUMPTION for planning:** proceed on "CloudFront stays the public entry," but treat the irreversible step (decommissioning the old ALB) as **blocked on #502**.
+
+### 7.8 DNS / cutover / rollback
+
+- **Public DNS:** keeping the distribution means the WCM CNAME is untouched — no viewer DNS change. (TTL planning re-enters only if #502 forces a NetScaler CNAME.)
+- **Rollback:** a **single origin-domain revert** to the old-VPC public ALB DNS — requires the old ALB + ECS + Aurora/OpenSearch still alive (so the old stack is decommissioned only after edge cutover verified). The rollback deploy also carries the three context flags.
+- **In-place, not recreate:** both the re-point and a switch to `VpcOrigin` (Path B) are done on the existing distribution.
+
+### 7.9 Dependencies inherited from other tracks
+
+- **AppStack:** new ALB + `X-Origin-Verify` rule are AppStack-owned; EdgeStack can't cut over until the ALB exists and is healthy. New ALB DNS UNKNOWN until AppStack deploys.
+- **Data tier:** a healthy `/api/health` depends on the DataStack move being complete + DSN/endpoint secrets re-seeded.
+- **Networking:** G4 (public subnets/IGW), the new ALB DNS, VPC-origin ENI permission.
+- **Edge/launch track:** #502, the live ACM cert ARNs, the exact `edgeAllowedCidrs`, any WCM-ITS DNS action.
+
+---
+
+## 8. Rollout phasing, rollback, decommission, #1310 disposition
+
+This section sequences the consolidation per environment, **staging fully soaked before prod**. All §2 gates the affected steps depend on must be GREEN before that phase — the SG-reference isolation model fails *silently* if they are not.
+
+### 8.1 The cutover-mechanics blocker — and its resolution (G15)
+
+> **The naïve "stand up a parallel `-v2` estate" model is UNBUILDABLE and is rejected.** A `-v2` suffix renames only CDK stack/construct **ids**; it does not rename the **physical** resources, and a second same-env estate collides on every env-keyed account/region-unique name. Verified against `origin/master`:
+>
+> - **CFN export names** — `Sps-Data-${env}-OpenSearchDomainEndpoint`, `Sps-App-${env}-InternalAlbDns`, `Sps-App-${env}-InternalAlbSecurityGroupId` (+ AppStack legacy `exportValue` pins) are account/region-unique; a parallel producer **cannot re-export the same name** while the old producer lives (`export already exported by stack …`). This directly contradicts a naïve "keep export names stable while running parallel."
+> - **Account/region-scoped singletons** — the GitHub **OIDC provider** (`env==='staging'` owner — the code documents this exact `EntityAlreadyExistsException`, #491), **IAM role names** (`sps-task-exec-${env}`, `sps-task-${env}`, `sps-deploy-${env}`, …), **ECR repos** (`scholars-app/etl-${env}`), **ECS cluster** (`sps-cluster-${env}`), **service** (`sps-app-${env}`), **ALBs** (`sps-public/internal-${env}`), RETAIN **log groups** (`/aws/ecs/sps-*-${env}`, `/aws/lambda/sps-db-bootstrap-seed-${env}`), the **master secret** (`scholars/${env}/db/master`), and **backup-vault names** (`sps-backup-vault-${env}`, `sps-dr-backup-vault-${env}`).
+> - **Backup vaults are worst:** AWS Backup **refuses to delete a vault holding recovery points** and **cannot rename** a vault — so a `-v2` vault becomes permanent.
+> - **A distinct `envName` ("staging-v2")** cascades into broken `scholars/staging/db/*` secret lookups, `-c staging-v2Account` context, per-env-pinned dist ids, SAML ACS/entity URLs, and `appRwGranteeHost`.
+> - **CFN stack names are immutable** — "drop the `-v2` suffix in a later cosmetic rename" is a destroy/recreate, which for the data stack means re-migration. There is **no cosmetic rename.**
+
+**Resolution (the model this plan adopts), gated by G15:**
+
+1. **Account/region-scoped, NOT VPC-coupled → REUSE by reference, never recreate:** OIDC provider, all IAM roles, ECR repos, **the existing primary + DR backup vaults**, Static/Logs/Analytics S3 buckets, and the **existing CloudFront distributions**. The estate keeps **one** identity per env — these are referenced, not duplicated.
+2. **VPC-coupled, must be re-created → use distinct/auto-generated physical names so create-before-delete works, and let the old (RETAIN) copy survive as rollback:** Aurora (`DatabaseClusterFromSnapshot`, **transitional master-secret name** §6.4), OpenSearch domain, ALBs, ECS cluster/service, ETL task ENIs, per-env SGs. Where a fixed `loadBalancerName`/`clusterName`/`serviceName`/`domainName` would block CFN create-before-delete, **switch it to a CDK auto-generated name** (a one-time tradeoff — the names are not externally referenced; CloudFront reads the ALB **DNS**, not the `loadBalancerName`).
+3. **Cross-stack endpoint wiring during the transition (§8.3):** consumers (Etl/App) read the new Aurora/OpenSearch/internal-ALB endpoints via **constructor props or SSM parameters**, NOT `Fn::ImportValue` of the locked shared name. The shared export name is re-established on the new producer only **after** the old producer is gone (§8.4).
+4. **Decommission honors the CFN export-lock (§8.4):** an export referenced by any `Fn::ImportValue` cannot be modified/deleted, and its producing stack cannot be deleted, until every importer stops referencing it.
+
+> [ASSUMPTION] Both envs share account `665083158573` (G0). If ADR-008's "two accounts" is literally true, confirm before Phase A — it changes `-c <env>Account`, the isolation threat model, and adds a cross-account merge.
+
+### 8.2 Cutover style per tier
+
+| Tier | Re-created? | Cutover style | Why |
+|---|---|---|---|
+| Network substrate | import lts-reciter | parallel — old VPC stays up | additive until edge flip |
+| Aurora MySQL | yes — new cluster | **freeze-only OR CDC-drained cutover** (§6.2, set by G14) | single SOR; writes cannot diverge |
+| OpenSearch domain | yes — new domain | **app reads OLD domain until NEW reindex verified, then flip `OPENSEARCH_NODE`** (§6.3) | index rebuildable; no write-divergence |
+| ECS app + ALBs | yes — auto-named (§8.1) | hard cutover at the edge (CloudFront origin re-point) | new ALB validated by direct probe before viewer traffic |
+| ETL | yes — new placement | hard cutover; **schedules parked AND no RUNNING execution** before the freeze (§6.8 step 4) | never two cadences writing the same SOR |
+| CloudFront / Edge | **NO — keep existing distributions** | origin re-point only | recreating breaks WCM DNS, #353, dashboards |
+
+### 8.3 Transitional cross-stack endpoint wiring
+
+During the window, **do not** rely on `Fn::ImportValue` of the shared export names (they are locked by the live old producer). Instead, the new App/Etl stacks receive the new Aurora endpoint, OpenSearch endpoint, and internal-ALB DNS/SG via **constructor props (preferred) or SSM parameters**. Re-seeded DSN/OpenSearch secrets already carry the new endpoints for the running tasks; the props/SSM path covers synth-time references. This removes the `Fn::ImportValue` dependency on the old exports and lets convergence happen cleanly at teardown.
+
+### 8.4 Export hand-off + decommission ordering (CFN export-lock)
+
+Because an in-use export cannot be deleted and its producer cannot be torn down:
+1. **Re-point importers** (Etl/App) off `Fn::ImportValue(<shared name>)` to props/SSM (§8.3) — removing the references to the old exports.
+2. **Confirm zero importers:** `aws cloudformation list-imports --export-name <name>` returns empty for each old export.
+3. **Only then** delete/replace the old producer stack.
+4. **Re-establish the canonical export name** on the new producer after the old is gone (or **keep the transitional names permanently** — decide in G15; if kept, update the §5.2/§5.5 wiring to reference the permanent names rather than asserting "names stay stable").
+
+### 8.5 Phase sequence (per env; staging fully soaked before prod)
+
+| Phase | Action | Old VPC state | Reversible? |
+|---|---|---|---|
+| **A. Stand-up** | Import lts-reciter (`fromVpcAttributes`); create per-env SGs in the import; **reuse** OIDC/IAM/ECR/vaults/dist (§8.1); create the new auto-named ALBs/ECS/endpoints (reuse lts-reciter's SM/S3 — no 2nd privateDNS SM); **drop** the 3 resolver associations (G7). Push bootstrap images to the existing ECR repos. | live, serving | yes — delete new stacks |
+| **B. Data migration** | Snapshot-restore Aurora into a new cluster (`DatabaseClusterFromSnapshot`); (CDC variant: start full-load+CDC); create the fresh OpenSearch domain; re-create FGAC users; re-seed `db/*` + `opensearch/*` secret VALUES (transitional master-secret name); **re-grant** host-scoped users `'10.20.%'`→`10.46.x`/`'%'`, update `appRwGranteeHost` + golden list; run `search:index` on the new domain (§6). | live, serving | yes — abandon new, keep old |
+| **C. App validation** | Bring up the new ECS service; validate **directly against the new ALB DNS** with `X-Origin-Verify`; confirm app→Aurora :3306 + app→OpenSearch :443 intra-VPC SG refs; confirm edit-flow writes land in the new cluster. | live, serving | yes |
+| **D. Edge cutover** | **Write-freeze + ETL quiesced (no RUNNING execution)** → final Aurora drain → flip `OPENSEARCH_NODE` after new-domain verify → re-point the **existing** CloudFront origin to the new ALB (EdgeStack, all 3 flags, `--strict` diff) → re-establish `X-Origin-Verify` on the new ALB (same value) → lift freeze. | live (standby) | **yes — re-point origin back** (minutes) |
+| **E. ETL cutover** | Re-point importers off old exports (§8.4); enable ETL schedules on the new stacks pointed at the new endpoints; park old schedules. | live (standby) | yes — re-park new, re-enable old (see §8.7) |
+| **F. Soak** | ≥ one full nightly **+** weekly cycle: Step Functions failures, datastore connect errors, search freshness, edit writes, ALB 5xx/latency, EIP/ENI capacity. **Verify cross-env SG isolation** (a staging SG must not reach prod datastores). | live (standby) | yes |
+| **G. Decommission** | Drain → verify-no-refs (incl. `list-imports` empty per §8.4) → delete old stacks → old VPC last (§8.6). | **deleted** | no (§8.7) |
+
+Per-env ordering: complete **A→F for staging**, soak clean, then **A→F for prod**. Cross-env isolation can only be *fully* tested once the prod data tier exists — add an explicit **"staging-SG → prod-datastore is refused" probe at prod Phase A**, since SGs are the **only** boundary.
+
+### 8.6 Decommission order (drain → verify → delete)
+
+Delete strictly **last**, reverse-dependency, only after Phase F soak passes **and** prod's 35-day retention is honored, **and** §8.4 `list-imports` is empty:
+1. **Old ECS / ALBs** — drained; log groups RETAIN (let retention expire).
+2. **Old ETL** — migrate `CurationBackupBucket` objects to the new bucket first (the dump history *is* data); then delete.
+3. **Old data tier** — final manual snapshot of the old Aurora; disable `deletionProtection` on the **old** cluster; **preserve** recovery points in `sps-backup-vault-<env>` through prod's 35-day window; then delete old Aurora + old OpenSearch.
+4. **Old network** **last** — drops the NAT + **releases the EIPs** (relieves the prod EIP cap), the endpoints, the subnets, and the 3 resolver associations. Confirm lts-reciter already carries the WCM resolver reach **before** this delete, or app/ETL DNS to WCM breaks. (Note: a VPC delete fails while any orphaned RDS still lives in it — step 3 must truly delete the old cluster first, which is why the old data tier must be a *new* resource in lts-reciter, not an in-place flip of the old VPC.)
+
+### 8.7 Rollback per phase
+
+| Phase | Rollback | Notes |
+|---|---|---|
+| A–C | Delete new stacks; old estate untouched. | Zero user impact. |
+| **D (edge)** | **Re-point CloudFront origin back to the old public ALB DNS.** | Minutes; carry the 3 edge flags on the revert too. |
+| **E (ETL)** | Re-park new schedules; ETL is idempotent (upserts / per-partition delete-then-insert / full reindex). | Safe **only while the app still writes the old cluster.** |
+| **D+E coupled** | After the app is cut to the **new** Aurora, the new cluster is the SOR; rolling back strands post-cutover edits. | **Mitigation = the Phase-D write-freeze** — no edits during cutover, so a rollback inside the freeze loses nothing. Keep the window short and the approver on-call. This is the practical point-of-no-easy-return. |
+| **G (decommission)** | **None once the old data tier is deleted.** | Delete old **last**; keep the final old-cluster snapshot + RETAIN vaults through prod's 35-day window as the only recovery path. |
+
+### 8.8 #1310 disposition — refactor the pattern, revert the peering
+
+PR #1310 (merged, **flag-off**) splits cleanly:
+
+| #1310 artifact | Disposition |
+|---|---|
+| `etlComputeVpc{vpcId,AZs,appSubnetIds}` + import-by-id pattern | **REUSE & GENERALIZE** — this *is* the consolidation import model (deterministic, credential-free synth). Promote to all of Network/Data/App/Etl as `sharedVpc`. |
+| `etlComputeSecurityGroupId` + per-env-SG isolation | **REUSE** — extend to the full per-env SG set. |
+| `etlVpcPeeringEnabled` flag | **DELETE** |
+| network-stack peering block (`CfnVPCPeeringConnection` + per-RT `CfnRoute`) | **DELETE** — no peer in a single shared VPC. |
+| `etlPeerCidrs` + data-stack `EtlComputeSgRef` + `InternalAlbIngressFromEtlCadenceVpc` | **DELETE / collapse to intra-VPC SG references.** |
+| `assertEtlMigrationInvariants` | **REWRITE** — drop peering invariants; keep "imported VPC + SG id must be set." |
+
+**Recommendation: a forward "supersede" PR, not `git revert` of #1310** (a literal revert would delete the reusable import scaffolding). Land one PR that (a) deletes the peering constructs/flags/fields and (b) generalizes the surviving import-by-id placement to the whole estate. Update #1310's description to point at this plan. Regenerate the CDK snapshots — run `npm ci && npm test -- -u` **from `cdk/`** (the root lockfile skips cdk deps), commit only the `.snap` deltas after eyeballing each hunk; verify AppStack export-name changes are intentional per §8.4.
+
+### 8.9 Prod reviewer-gate + edge scheduling
+
+- **Prod is reviewer-gated** (paulalbert1 approval; push-to-master = staging only). Every prod cutover step — new `Sps-Data-prod`/`Sps-App-prod`/`Sps-Etl-prod` resources and the **`Sps-Edge-prod` origin re-point** — pauses for approval. Schedule the prod window with the approver **on-call** (the Phase-D rollback boundary depends on a human approving a fast revert).
+- **Edge cutover is the single highest-risk, frozen-stack step** — always `--strict` diff, all 3 flags on cutover **and** rollback, keep the distribution id stable, reuse the same `X-Origin-Verify` value.
+
+> **Hard blocker before scheduling any edge cutover [UNKNOWN — G4]:** does lts-reciter have internet-facing PUBLIC subnets + IGW for the classic `LoadBalancerV2Origin` model? If not, the edge model itself changes (CloudFront VPC origin / NetScaler front per #502) — a larger redesign than an origin swap.
+
+---
+
+## 9. Open questions for networking / Fabrice (identifiers this plan will NOT invent)
+
+Each row is a value/decision recorded as unknown rather than guessed. "Gate" shows which gate stays RED until answered.
+
+| # | Question | Why unresolved | Failure mode if guessed | Gate |
+|---|---|---|---|---|
+| Q1 | **`lts-reciter-vpc01` vpcId?** | config placeholder is empty. | Import fails / wrong VPC. | G1 |
+| Q2 | **Subnet ids + AZs + which /24** per tier (public/ALB, private app+data, ETL)? | never disclosed. | wrong AZ/tier, prod loses AZ spread. | G1, G3, G4 |
+| Q3 | **Free IP capacity** in both /24s *after* ReCiter RDS (.208), pub-mgr-dev (.113), and the **ReCiter EKS VPC-CNI** footprint — dedicated SPS subnet needed? prefix delegation? | capacity + EKS IP model unknown. | ENI exhaustion → partial deploy. | G2 |
+| Q4 | **Per-env SG ids**, or does SPS create them against the import? naming/tagging for auditability? | ownership undecided. | invalid SG-to-SG ingress, or un-auditable cross-wiring. | G8, G9 |
+| Q5 | **Are the 3 WCM resolver rules already associated** to lts-reciter? | unknown. | re-associate → CFN error; drop-without-present → DNS dies post-teardown. | G7 |
+| Q6 | **Endpoint inventory + policies** (ECR api/dkr, Logs, SM [privateDNS?], S3, DynamoDB, STS) — admit SPS roles? | never disclosed. | duplicate SM endpoint rejected; pulls/logs/secret/DDB break. | G5 |
+| Q7 | **NAT / outbound posture** — internet egress at all, or TGW-only? Bedrock/SES/New Relic/POPS/RePORTER/NSF/Gates/PubMed reachable? | unknown. | app + public-API ETL outbound fail. | G5, G6 |
+| Q8 | **Public subnets + IGW** for an internet-facing ALB — or VPC origin / NetScaler? | TGW-attached internal VPC. | edge model unbuildable as-is. | G4 |
+| Q9 | **Route-table ids** SPS may need; **who owns route-table/SG IaC + drift detection** in the shared VPC? | boundary undecided. | silent drift; unclear blast-radius ownership. | G8 |
+| Q10 | **Live us-east-1 ACM cert ARNs** + current `-c edgeAllowedCidrs` WCM ranges? | not in this plan; rotated by WCM ITS. | frozen-Edge redeploy strips alias/cert/WAF. | G11 |
+| Q11 | **New public/internal ALB DNS** (or existing ALB reused?) for the origin re-point? | depends on G4 + placement. | origin points at nothing. | G4, G11 |
+| Q12 | **WCM firewall + TGW route tables** open for `10.46.134/160 → every SPS source` (ED LDAPS :636, InfoEd `10.20.91.8`, ReciterDB, SES, POPS)? Does leaving `10.20/16` resolve the InfoEd self-overlap so staging can re-add `etl:infoed`? | only the ReCiter subset is known-reachable. | ETL fails; #443 regresses; infoed stays excluded. | G6 |
+| Q13 | **#502 NetScaler-vs-WAFv2 (RITM0792011) resolved?** CloudFront stays, or NetScaler fronts/replaces? | parked. | edge plan built on the wrong front-door. | G4, G11 |
+| Q14 | **Confirmed account model** — truly shared `665083158573`, or separate? what does `-c <env>Account` become? | ADR-008/topology vs EIP-comment/memory contradict. | plan is/isn't also an account merge. | G0 |
+| Q15 | **SCP / permission boundary** blocking SPS roles' `ec2:*NetworkInterface*` into networking-owned subnets? | account guardrails not visible. | tasks stuck PROVISIONING; deploy timeout. | G10 |
+| Q16 | **ReCiter co-tenancy sign-off** — will ReCiter SGs admit SPS SGs where required, and does ReCiter accept SPS ENIs/SGs in their subnets? | cross-team acceptance not obtained. | source-DB reachability blocked, or ReCiter objects post-hoc. | G6, G9 |
+| Q17 | **#443 ED LDAPS export** — can it run from lts-reciter, retiring `edExportVpc` (staging `vpc-02c4dd698f3e3869c`, prod `vpc-0b8006fee120df6bc`)? | known non-target ids; fate must be decided. | bridge orphaned, or prematurely retired. | G6 (decision, not blocking) |
+| Q18 | **Prod-scale data volume + acceptable write-freeze** — measured snapshot-restore + (CDC drain) + reindex durations (G14)? | the only input yielding a real window; the "modest volume" premise was false. | prod window blows past; edits lost / extended outage. | G12, G14 |
+| Q19 | **CDC prerequisites** (if needed) — source `binlog_format=ROW` param-group + reboot of the old prod cluster, DMS replication instance + endpoints/IAM — acceptable + pre-staged? | not pre-staged; reboot is a prod maintenance action. | reactive DMS mid-cutover adds delay. | G16 |
+| Q20 | **Fixed-physical-name + export hand-off plan** (G15) — auto-name the recreated ALB/ECS/domain; reuse OIDC/IAM/ECR/vaults; switch consumers to props/SSM; keep transitional names or do a full export migration? | the naïve `-v2` model is unbuildable. | deploy fails "already exists"; permanent `-v2` vault; export-lock deadlock at teardown. | G15 |
+
+---
+
+## 10. Out of scope / assumptions
+
+**Out of scope**
+- **The `edExportVpc` ED-LDAPS bridge** (#443 / `edEmailVisibilityBridgeEnabled`, scholars-dev/prod VPCs) is untouched here; whether TGW co-location lets it retire is a follow-up (Q17), not part of this consolidation.
+- **The #502 NetScaler-vs-WAFv2 decision** is a dependency, not deliverable; this plan proceeds on "CloudFront stays the public entry" and treats the irreversible edge step as blocked on #502.
+- **DR-region (us-west-2) topology** is unchanged — same account, DR vault + cross-region copy preserved.
+- **Application/feature code** (search ranking, ETL business logic, UI) — only network placement, datastore endpoints, grants, secrets, and CDK topology change.
+- **A literal `git revert` of #1310** — superseded by a forward PR (§8.8).
+
+**Assumptions (each must be confirmed before the dependent phase)**
+- **[A1 — account model]** Both envs and lts-reciter share `665083158573` / `us-east-1` (G0). If separate, this becomes a cross-account merge and the IAM/KMS/secret scope changes.
+- **[A2 — whole-estate move]** App + Data + ETL all relocate together; a subset is not expressible without peering (§4.2).
+- **[A3 — resolver pre-association]** lts-reciter already associates the 3 WCM rules, so SPS drops its own (G7).
+- **[A4 — endpoint reuse]** lts-reciter provides (or will provide) a privateDNS SM endpoint + ECR/Logs/DDB/S3 endpoints or NAT admitting the SPS roles; SPS drops its own SM/S3 endpoints (G5).
+- **[A5 — edge path]** Path B (CloudFront VPC origin against an internal ALB) is the more likely target given lts-reciter's internal/TGW character (G4); Path A is not assumed available.
+- **[A6 — migration mechanism]** Aurora = snapshot-restore adopted via `DatabaseClusterFromSnapshot`, with a conditional DMS/binlog CDC drain only if G14 measurement requires it; OpenSearch = rebuild-from-source via `search:index` (G12/G14).
+- **[A7 — read continuity]** The app reads the OLD OpenSearch domain (and old Aurora is read-frozen, not deleted) until the new domain is reindexed and verified, then `OPENSEARCH_NODE` flips (§6.3).
+- **[A8 — physical-name disposition]** Account/region-scoped singletons (OIDC, IAM roles, ECR, backup vaults, S3, CloudFront) are reused by reference; VPC-coupled recreated resources use auto-generated/transitional names so create-before-delete works and the RETAIN'd old copies remain as rollback (§8.1, G15).
+- **[A9 — SG isolation hygiene]** Env-suffixed, auditable SG naming/tagging is enforced; a prod SG never appears in a staging rule (the only env boundary; G9).
+- **[A10 — ENI capacity]** lts-reciter's two /24s have headroom for both envs' full ENI footprint on top of ReCiter (RDS + pub-mgr + EKS); a dedicated SPS subnet may be required (G2/Q3) — this is the largest silent-failure risk.
+
+*Source grounding: all CDK/ETL references re-read via `git -C /Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System show origin/master:<path>`. No lts-reciter network identifier was read from or inferred into the working tree; all are open questions in §9.*
