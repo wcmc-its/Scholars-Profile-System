@@ -147,6 +147,19 @@ describe("loadMethodExemplar — gating", () => {
     expect(await loadMethodExemplar("", "F")).toEqual(EMPTY);
     expect(scholarFamilyFindMany).not.toHaveBeenCalled();
   });
+
+  it("#1366 — drops sibling-claimed (exclude) pmids from the candidate pool before ranking", async () => {
+    scholarFamilyFindMany.mockResolvedValue([
+      { supercategory: "x", familyLabel: "F", pmids: ["1", "2", "3"] },
+    ]);
+    publicationFindMany.mockResolvedValue([
+      pub({ pmid: "2", title: "P2" }),
+      pub({ pmid: "3", title: "P3" }),
+    ]);
+    await loadMethodExemplar("abc", "F", undefined, ["1"]);
+    // pmid "1" is excluded at the candidate stage ⇒ only "2","3" reach the metadata query.
+    expect(publicationFindMany.mock.calls[0][0].where.pmid.in).toEqual(["2", "3"]);
+  });
 });
 
 describe("loadMethodExemplar — methodContext + #1158 sourcePmid", () => {
@@ -298,5 +311,13 @@ describe("loadTopicExemplar — gating", () => {
     expect(await loadTopicExemplar("abc", "  ")).toEqual(EMPTY);
     expect(await loadTopicExemplar("", "t1")).toEqual(EMPTY);
     expect(publicationTopicFindMany).not.toHaveBeenCalled();
+  });
+
+  it("#1366 — threads exclude as a `notIn` on the publication_topic query (query-level de-dup)", async () => {
+    publicationTopicFindMany.mockResolvedValue([{ pmid: "2" }]);
+    publicationFindMany.mockResolvedValue([pub({ pmid: "2", title: "P2" })]);
+    await loadTopicExemplar("abc", "t1", undefined, ["1"]);
+    const where = publicationTopicFindMany.mock.calls[0][0].where;
+    expect(where.pmid).toEqual({ notIn: ["1"] });
   });
 });

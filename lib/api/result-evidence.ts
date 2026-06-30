@@ -69,8 +69,12 @@ export type ResultEvidence =
   /** Exact match on the person's name (strongest signal). `html` is the
    *  `preferredName` highlight fragment, mark in the NAME segment. */
   | { kind: "name"; html: string }
-  /** Matched method family + ≤3 cleaned exemplar tools (#824 §4c derive). */
-  | { kind: "method"; family: string; tools: string[] }
+  /** Matched method family + ≤3 cleaned exemplar tools (#824 §4c derive).
+   *  `count` (#1366) — the family's distinct-pub count `N` for the "N of M
+   *  publications" reason-line prefix; set ONLY on the stacked-lines path
+   *  (`selectEvidenceLines`, behind SEARCH_EVIDENCE_REASON_COUNTS). Absent on the
+   *  single-evidence `selectEvidence` path, so the off-flag render is unchanged. */
+  | { kind: "method"; family: string; tools: string[]; count?: number }
   /** Clinical specialty match (exact tier only — see {@link clinicalExactMatch}).
    *  `boardCertified` true iff the specialty is in the scholar's board-cert set;
    *  the label renders as "Board certified in {specialty}" vs "Clinical specialty:
@@ -79,8 +83,10 @@ export type ResultEvidence =
   | { kind: "clinical"; specialty: string; boardCertified: boolean }
   /** Matched curated research-area parent topic (v1 keeps the parent label).
    *  `id` is the topic SLUG (= `Topic.id` = `PublicationTopic.parentTopicId`) so
-   *  the hover can resolve the scholar's representative paper in this topic. */
-  | { kind: "topic"; label: string; id: string }
+   *  the hover can resolve the scholar's representative paper in this topic.
+   *  `count` (#1366) — distinct on-topic-pub count `N` for the "N of M
+   *  publications" prefix; set ONLY on the stacked-lines path. */
+  | { kind: "topic"; label: string; id: string; count?: number }
   /** Publication-count evidence. `strength` ranks it: `tagged` (subject tag,
    *  strong) above bio; `mention` (free-text, weak) below bio; `concept` is the
    *  MeSH-expansion text variant (handoff Case F — folded in, no own kind).
@@ -346,11 +352,13 @@ export type SelectEvidenceInput = {
   nameHighlight?: string;
   /** `hl.overview?.[0]` — the bio highlight fragment. */
   bioHighlight?: string;
-  /** Resolved method-family reason (overlay-gated), tools already refined. */
-  method?: { family: string; tools: string[] };
+  /** Resolved method-family reason (overlay-gated), tools already refined.
+   *  `count` (#1366) — distinct-pub count for the stacked-lines prefix; ignored
+   *  by `selectEvidence` (single path), read by `selectEvidenceLines`. */
+  method?: { family: string; tools: string[]; count?: number };
   /** Resolved matched parent topic — `label` for display, `id` (slug) for the
-   *  representative-paper hover. */
-  topic?: { label: string; id: string };
+   *  representative-paper hover. `count` (#1366) — as `method.count`. */
+  topic?: { label: string; id: string; count?: number };
   /** Pre-formatted publication-evidence parts (counts already capped, text
    *  already built; any one may be absent). `count` is the numeric "N" (the
    *  `+N more` math), `pubs` up to 3 representative papers for the disclosure. */
@@ -542,4 +550,77 @@ export function selectEvidence(input: SelectEvidenceInput): ResultEvidence {
     return { kind: "areas", labels: input.areas.labels, total: input.areas.total };
   // 11 — honest empty
   return { kind: "none" };
+}
+
+/**
+ * #1366 — the STACKED reason-line variant. Where {@link selectEvidence} returns
+ * ONE evidence by strict precedence, this returns an ORDERED LIST in which the
+ * first-class research signals — method, a tagged-concept (MeSH) match, and the
+ * matched research area — each appear as their OWN line when present (a scholar
+ * can match on more than one). `mention` (keyword) is the fallback shown ONLY
+ * when none of the three fired; `clinical` is an INDEPENDENT label-only line.
+ * When NONE of those fire, it falls back to the single {@link selectEvidence}
+ * tail (concept-text / bio / affiliation / identity hints / honest-empty) so a
+ * card never loses its existing evidence.
+ *
+ * Behind SEARCH_EVIDENCE_REASON_COUNTS — the caller uses this instead of
+ * `selectEvidence` only when the flag is on, so the off-flag path is unchanged.
+ * `count` on method/topic drives the "N of M publications" prefix (the renderer
+ * pairs it with the hit's `pubCount`). Pure + client-safe.
+ */
+export function selectEvidenceLines(input: SelectEvidenceInput): ResultEvidence[] {
+  const lines: ResultEvidence[] = [];
+  // 1 — method (first-class)
+  if (input.method)
+    lines.push({
+      kind: "method",
+      family: input.method.family,
+      tools: input.method.tools,
+      ...(input.method.count != null ? { count: input.method.count } : {}),
+    });
+  // 2 — concept: a DIRECT subject/MeSH tagged hit (the counted `tagged` variant;
+  // the weaker `concept` text variant stays in the single-tail fallback below).
+  if (input.pub?.tagged)
+    lines.push({
+      kind: "publications",
+      strength: "tagged",
+      text: input.pub.tagged.text,
+      ...(input.pub.tagged.term ? { term: input.pub.tagged.term } : {}),
+      ...(input.pub.tagged.descendantTerms && input.pub.tagged.descendantTerms.length > 0
+        ? { descendantTerms: input.pub.tagged.descendantTerms }
+        : {}),
+      ...(input.pub.tagged.pubs && input.pub.tagged.pubs.length > 0 ? { pubs: input.pub.tagged.pubs } : {}),
+      count: input.pub.tagged.count,
+    });
+  // 3 — research area (first-class peer line; demoted-below-all in the single path)
+  if (input.topic)
+    lines.push({
+      kind: "topic",
+      label: input.topic.label,
+      id: input.topic.id,
+      ...(input.topic.count != null ? { count: input.topic.count } : {}),
+    });
+  // 4 — keyword/mention FALLBACK: only when none of method/concept/area fired.
+  if (lines.length === 0 && input.pub?.mention)
+    lines.push({
+      kind: "publications",
+      strength: "mention",
+      text: input.pub.mention.text,
+      ...(input.pub.mention.term ? { term: input.pub.mention.term } : {}),
+      ...(input.pub.mention.pubs && input.pub.mention.pubs.length > 0 ? { pubs: input.pub.mention.pubs } : {}),
+      count: input.pub.mention.count,
+    });
+  // 5 — clinical: an INDEPENDENT label-only line (#1367 — no count), appended
+  // whenever a clinical:exact match exists, alongside the lines above.
+  if (input.clinical)
+    lines.push({
+      kind: "clinical",
+      specialty: input.clinical.specialty,
+      boardCertified: input.clinical.boardCertified,
+    });
+  // 6 — nothing first-class matched ⇒ the single-evidence tail (concept-text /
+  // bio / affiliation / identity hints / honest-empty). It can't return
+  // method/topic/tagged/mention/clinical here — all were handled + absent above.
+  if (lines.length === 0) lines.push(selectEvidence(input));
+  return lines;
 }

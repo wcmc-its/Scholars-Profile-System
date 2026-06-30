@@ -537,7 +537,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
               new Map(
                 r.hits.map((h) => [
                   h.cwid,
-                  { matchReason: h.matchReason, evidence: h.evidence },
+                  { matchReason: h.matchReason, evidence: h.evidence, evidenceLines: h.evidenceLines },
                 ]),
               ),
           )
@@ -1037,6 +1037,9 @@ type PubsResultData = Awaited<ReturnType<typeof searchPublications>>;
 type PeopleReasonPatch = {
   matchReason: PeopleResultData["hits"][number]["matchReason"];
   evidence: PeopleResultData["hits"][number]["evidence"];
+  // #1366 — the stacked, counted lines (present instead of `evidence` under the
+  // reason-counts flag); streamed and overlaid the same way.
+  evidenceLines: PeopleResultData["hits"][number]["evidenceLines"];
 };
 type PeopleReasonMap = Map<string, PeopleReasonPatch>;
 

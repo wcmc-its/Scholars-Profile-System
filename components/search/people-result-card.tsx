@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -8,13 +8,12 @@ import { profilePath } from "@/lib/profile-url";
 import {
   MatchReason,
   MatchAwareReason,
-  RepresentativePapers,
+  LesserReason,
   KeyFunding,
-  type ExemplarFetchStatus,
 } from "@/components/search/match-reason";
 import { HighlightedSnippet } from "@/components/search/highlight-snippet";
-import { ResultEvidence } from "@/components/search/result-evidence";
-import type { EvidenceGrant, EvidencePub } from "@/lib/api/result-evidence";
+import { EvidenceLine } from "@/components/search/evidence-line";
+import type { EvidenceGrant, ResultEvidence } from "@/lib/api/result-evidence";
 import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
 
 /**
@@ -132,105 +131,10 @@ export function PeopleResultCard({
     );
   }
 
-  // Rep-papers disclosure — clickable, collapsed by default (replaces the #1060
-  // hover reveal). State lives here; the chevron lives in the evidence row.
-  const [expanded, setExpanded] = useState(false);
-  const panelId = useId();
-
-  // method/topic kinds resolve their representative papers LAZILY (on the first
-  // expand, not on hover) so the cacheable results derive stays untouched and the
-  // lookup runs only for a row the viewer actually opens. The query string
-  // selects which loader the (shared) route uses: `?family=` / `?topic=`.
-  // Pass the active query so the loader surfaces + highlights title-matching
-  // "Key papers" first (relevant to the search, not just the scholar's top pub
-  // in the matched area). Empty on the no-query Browse page ⇒ pure impact rank.
-  const qParam = (q ?? "").trim();
-  const qSuffix = qParam ? `&q=${encodeURIComponent(qParam)}` : "";
-  const exemplarQuery =
-    hit.evidence?.kind === "method"
-      ? `family=${encodeURIComponent(hit.evidence.family)}${qSuffix}`
-      : hit.evidence?.kind === "topic"
-        ? `topic=${encodeURIComponent(hit.evidence.id)}${qSuffix}`
-        : null;
-  // #1119 — `methodContext` is the family's "how researchers use <tool>" snippet,
-  // returned alongside the representative papers for a method match (null unless
-  // METHODS_LENS_TOOL_CONTEXT is on; the server gates it).
-  type ExemplarPayload = {
-    pubs: EvidencePub[];
-    total: number;
-    methodContext?: { tool: string; context: string } | null;
-  };
-  const [exemplar, setExemplar] = useState<{
-    pubs: EvidencePub[];
-    total: number;
-    methodContext: { tool: string; context: string } | null;
-  }>({
-    pubs: [],
-    total: 0,
-    methodContext: null,
-  });
-  const [exemplarStatus, setExemplarStatus] = useState<ExemplarFetchStatus>("idle");
-  const exemplarFetched = useRef(false);
-
-  // Search reason-from-doc — under D the publications evidence arrives with an
-  // EMPTY `pubs` list (the up-front top_hits agg is gone), carrying only the count.
-  // So the top-3 key papers are fetched LAZILY on first expand — the SAME pattern
-  // as the method/topic exemplar above, with the same payoff: the per-card query
-  // runs only for a row the viewer actually opens (not eagerly for every visible
-  // card), which keeps the ambient OpenSearch load down under concurrency.
-  const wantsLazyKeyPaper =
-    keyPaperConfig != null &&
-    hit.evidence?.kind === "publications" &&
-    (hit.evidence.pubs?.length ?? 0) === 0 &&
-    (hit.evidence.count ?? 0) > 0;
-  // #1357 — a `mention` card is in the mention branch precisely because its tagged
-  // count is 0 (it has NO concept-tagged pubs). Fetching the key paper with the
-  // page-global concept `descriptorUis` would run "this scholar's pubs tagged
-  // {concept}" → 0 hits → empty disclosure. So a mention card fetches with empty
-  // descriptorUis, which makes `fetchKeyPaper` take the literal-scan branch — the
-  // SAME predicate (`title`/`abstract` AND `contentQuery`) that produced the count.
-  const keyPaperMentionOnly =
-    hit.evidence?.kind === "publications" && hit.evidence.strength === "mention";
-  const [keyPapers, setKeyPapers] = useState<EvidencePub[]>([]);
-  const [keyPaperStatus, setKeyPaperStatus] = useState<ExemplarFetchStatus>("idle");
-  const keyPaperFetched = useRef(false);
-
-  const ensureKeyPaper = useCallback(() => {
-    if (!wantsLazyKeyPaper || keyPaperFetched.current) return;
-    keyPaperFetched.current = true;
-    setKeyPaperStatus("loading");
-    const params = new URLSearchParams({
-      cwid: hit.cwid,
-      q: keyPaperConfig!.contentQuery,
-      descriptorUis: keyPaperMentionOnly ? "" : keyPaperConfig!.descriptorUis.join(","),
-      // #1351 — highlight the resolved concept term in the tagged key-paper title.
-      // A mention-only card matched on the literal, not the concept, so it stays
-      // literal-only (label omitted) — consistent with its empty descriptorUis.
-      label: keyPaperMentionOnly ? "" : (keyPaperConfig!.conceptLabel ?? ""),
-    });
-    fetch(`/api/search/key-paper?${params.toString()}`)
-      .then((r) => (r.ok ? r.json() : { pubs: [] }))
-      .then((d: { pubs?: EvidencePub[] }) => setKeyPapers(d?.pubs ?? []))
-      .catch(() => setKeyPapers([]))
-      .finally(() => setKeyPaperStatus("done"));
-  }, [wantsLazyKeyPaper, hit.cwid, keyPaperConfig, keyPaperMentionOnly]);
-
-  const ensureExemplar = useCallback(() => {
-    if (!exemplarQuery || exemplarFetched.current) return;
-    exemplarFetched.current = true;
-    setExemplarStatus("loading");
-    fetch(`/api/scholar/${encodeURIComponent(hit.cwid)}/method-exemplar?${exemplarQuery}`)
-      .then((r) => (r.ok ? r.json() : { pubs: [], total: 0 }))
-      .then((d: ExemplarPayload) =>
-        setExemplar({
-          pubs: d?.pubs ?? [],
-          total: d?.total ?? 0,
-          methodContext: d?.methodContext ?? null,
-        }),
-      )
-      .catch(() => setExemplar({ pubs: [], total: 0, methodContext: null }))
-      .finally(() => setExemplarStatus("done"));
-  }, [hit.cwid, exemplarQuery]);
+  // #1366 — shared across this card's stacked evidence lines for exemplar de-dup
+  // (representative papers stay globally disjoint though counts may overlap). A
+  // single-evidence card gets a fresh empty set ⇒ behaves exactly as before.
+  const claimedPmids = useRef(new Set<string>());
 
   // Funding evidence row (SEARCH_EVIDENCE_ROWS) — a scholar's TOPIC-matching grants.
   // Eager per-card fetch, gated on flag + active query + the scholar having ANY grant
@@ -247,6 +151,8 @@ export function PeopleResultCard({
   const [grantsStrength, setGrantsStrength] = useState<"tagged" | "mention">("mention");
   const [fundingExpanded, setFundingExpanded] = useState(false);
   const fundingPanelId = useId();
+
+  const qParam = (q ?? "").trim();
 
   // #1359 — the page-resolved concept (same source the key-paper fetch uses), threaded
   // so grants can match by concept tag. Empty for a free-text query ⇒ route stays
@@ -291,43 +197,6 @@ export function PeopleResultCard({
     };
   }, [evidenceRows, qParam, hit.cwid, hit.grantCount, grantDescriptorUis, grantConceptLabel]);
 
-  // publications kind: representative papers are INLINE in the evidence
-  // (`evidence.pubs`) on the legacy agg path; under reason-from-doc they arrive
-  // empty and are fetched lazily on expand (`wantsLazyKeyPaper` → `keyPapers`).
-  // method/topic: the lazily-fetched `exemplar`.
-  const inlinePubs =
-    hit.evidence?.kind === "publications" ? (hit.evidence.pubs ?? []) : null;
-  const isLazyExemplar = !!exemplarQuery;
-  const evidenceCount =
-    hit.evidence?.kind === "publications" ? hit.evidence.count : undefined;
-
-  const repPapers = wantsLazyKeyPaper
-    ? keyPapers
-    : (inlinePubs ?? exemplar.pubs);
-  const repTotal = wantsLazyKeyPaper
-    ? (evidenceCount ?? keyPapers.length)
-    : inlinePubs != null
-      ? (evidenceCount ?? inlinePubs.length)
-      : exemplar.total;
-
-  // A disclosure is offered when there is something to reveal. For inline pubs
-  // that is `pubs.length > 0`. For a lazy KEY PAPER it is optimistic until the
-  // fetch resolves; once it resolves with 0 papers we drop the chevron so there
-  // is never a dead control. A lazy method/topic exemplar stays expandable even
-  // when empty: the panel degrades to a profile-section link (the badge
-  // guarantees the content exists), so its chevron is never a dead control either.
-  const canExpand = wantsLazyKeyPaper
-    ? !(keyPaperStatus === "done" && keyPapers.length === 0)
-    : inlinePubs != null
-      ? inlinePubs.length > 0
-      : isLazyExemplar;
-
-  const onToggle = useCallback(() => {
-    if (isLazyExemplar) ensureExemplar();
-    if (wantsLazyKeyPaper) ensureKeyPaper();
-    setExpanded((v) => !v);
-  }, [isLazyExemplar, ensureExemplar, wantsLazyKeyPaper, ensureKeyPaper]);
-
   const deptLine = hit.divisionName
     ? `${hit.divisionName} · Department of ${hit.deptName ?? hit.primaryDepartment ?? ""}`.trim()
     : hit.deptName
@@ -340,38 +209,39 @@ export function PeopleResultCard({
   const pubLabel = hit.pubCount === 1 ? "pub" : "pubs";
   const grantLabel = hit.grantCount === 1 ? "grant" : "grants";
 
-  // #824 follow-up Phase 1 — the coherent ResultEvidence model. When present
-  // (`SEARCH_RESULT_EVIDENCE` on), the server already selected the ONE "why"
-  // via one precedence function, so render it through one component and IGNORE
-  // the legacy priority chain below. Absent ⇒ fall through to today's chain.
-  // The disclosure props drive the clickable rep-papers chevron + panel.
   // The honest-empty match line only makes sense when a query is being matched;
   // on the no-query Browse page the identity hints (areas/concepts) stand alone.
-  const hasQuery = (q ?? "").trim().length > 0;
-  let snippetLine: ReactNode = null;
-  if (hit.evidence) {
-    snippetLine = (
-      <ResultEvidence
-        evidence={hit.evidence}
-        canExpand={canExpand}
-        expanded={expanded}
-        onToggle={onToggle}
-        panelId={panelId}
-        hasQuery={hasQuery}
-        slug={hit.slug}
-        badged={evidenceRows}
-      />
-    );
-  } else {
-    // LEGACY priority chain (pre-ResultEvidence): method > topic > (legacy
-    // concept/pub matchReason) > bio highlight > humanized research areas. The
-    // method/topic kinds + humanized areas are produced by the server only when
-    // SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on; off ⇒ legacy `{ icon, text }`
-    // reason (or absent) and no humanizedAreas, rendering today's snippet exactly.
+  const hasQuery = qParam.length > 0;
+
+  // #1366 — the evidence reason block. STACKED lines (`evidenceLines`, flag on),
+  // else the single `evidence` object, else the legacy priority chain. The first
+  // two render through one or more `<EvidenceLine>` (each owns its disclosure +
+  // exemplar fetch); they share `claimedPmids` so representative papers stay
+  // globally disjoint across stacked lines.
+  // #1366 follow-up — `stacked` = the multi-line `evidenceLines` context (the flag on).
+  // The PRIMARY / "Also matched" tiering is scoped to it; the single-`evidence` path
+  // (the older, separately-flagged rendering) keeps its current single block + full
+  // Funding row, so merging this doesn't restyle that surface where the flag is off.
+  const stacked = !!(hit.evidenceLines && hit.evidenceLines.length > 0);
+  const lines: ResultEvidence[] | undefined = stacked
+    ? hit.evidenceLines
+    : hit.evidence
+      ? [hit.evidence]
+      : undefined;
+
+  // LEGACY priority chain — rendered ONLY when there are no stacked/single `lines`
+  // (SEARCH_RESULT_EVIDENCE off). The `lines` path renders inline below with the
+  // primary / "Also matched" tiering (#1366 follow-up, handoff Part 1).
+  let legacyBlock: ReactNode = null;
+  if (!lines) {
+    // method > topic > (legacy concept/pub matchReason) > bio highlight > humanized
+    // research areas. The method/topic kinds + humanized areas are produced by the
+    // server only when SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on; off ⇒ legacy
+    // `{ icon, text }` reason (or absent), rendering today's snippet exactly.
     const reason = hit.matchReason;
     if (reason && "kind" in reason) {
       // New match-aware badge reasons (method / topic).
-      snippetLine =
+      legacyBlock =
         reason.kind === "method" ? (
           <MatchAwareReason kind="method" label={reason.family} />
         ) : (
@@ -379,7 +249,7 @@ export function PeopleResultCard({
         );
     } else if (reason) {
       // Legacy PLAN R4 (#688/#702/#967) pub-evidence / concept reason.
-      snippetLine = (
+      legacyBlock = (
         <MatchReason kind={reason.icon}>
           {reason.text}
           {/* #967 — concrete proof behind the count: a representative matching
@@ -404,7 +274,7 @@ export function PeopleResultCard({
       );
     } else if (snippet) {
       // Self-evident bio/overview/areas highlight from a self-reported field.
-      snippetLine = (
+      legacyBlock = (
         <div className="text-[13px] leading-snug text-[#4a4a4a]">
           <HighlightedSnippet html={snippet} />
         </div>
@@ -412,7 +282,7 @@ export function PeopleResultCard({
     } else if (hit.humanizedAreas && hit.humanizedAreas.labels.length > 0) {
       // #824 follow-up — last-resort humanized research areas (no under_scores),
       // replacing today's raw slug dump. Only present when the flag is on.
-      snippetLine = (
+      legacyBlock = (
         <HumanizedAreas
           labels={hit.humanizedAreas.labels}
           matchedIndex={hit.humanizedAreas.matchedIndex}
@@ -427,13 +297,24 @@ export function PeopleResultCard({
   // e.g. infectious-disease chips on a "children's health" search). The Funding row
   // below is the honest, query-specific reason and would otherwise sit under a
   // contradictory "no specific match". Real matches (publications/method/clinical/
-  // topic) are NOT suppressed — they coexist with the Funding row.
+  // topic) are NOT suppressed — they coexist with the Funding row. In the stacked
+  // path an identity kind is ONLY ever the sole fallback element (selectEvidenceLines
+  // returns it alone), so a one-element list is the analogue of the single evidence.
+  const fallbackEvidence: ResultEvidence | undefined =
+    lines && lines.length === 1 ? lines[0] : undefined;
   const primaryIsIdentityFallback =
-    hit.evidence != null &&
-    (hit.evidence.kind === "concepts" ||
-      hit.evidence.kind === "areas" ||
-      hit.evidence.kind === "none");
-  const suppressIdentityFallback = grants.length > 0 && primaryIsIdentityFallback;
+    fallbackEvidence != null &&
+    (fallbackEvidence.kind === "concepts" ||
+      fallbackEvidence.kind === "areas" ||
+      fallbackEvidence.kind === "none");
+  // #1366 follow-up — funding PROMOTES to the prominent primary slot ONLY when there
+  // is no first-class pub evidence line (the strongest line is an identity fallback).
+  // The branch data has no comparable cross-signal strength score, so "funding is the
+  // strongest signal" is exactly this structural condition — a concept-tagged grant
+  // does NOT preempt a real pub line (which would also jank, since grant strength
+  // loads async). ponytail: structural promotion, known synchronously on first paint;
+  // swap in a normalized relevance weight if/when one exists across pub + funding.
+  const promoteFunding = grants.length > 0 && primaryIsIdentityFallback;
 
   // Stretched-link card (rep-papers disclosure): the row is a `<div>` and the
   // NAME is the profile `<Link>` whose `after:absolute inset-0` overlay makes the
@@ -441,17 +322,68 @@ export function PeopleResultCard({
   // `+N more` link sit ABOVE that overlay with `relative z-10`, so a disclosure
   // click never navigates. The analytics beacon rides the name link.
   const profileHref = `${profilePath(hit.slug)}#publications`;
-  // Empty-fetch fallback for a method/topic disclosure: a link to the scholar's
-  // profile rather than a retracted chevron. The badge only fires when the scholar
-  // matched the indexed `methodFamily` / parent-topic, so they provably have that
-  // section — the link always lands on real content. Undefined for the publications
-  // key-paper path (count-gated; an empty fetch there stays a retract).
-  const exemplarFallback =
-    hit.evidence?.kind === "method"
-      ? { href: profilePath(hit.slug), label: "View their methods & tools" }
-      : hit.evidence?.kind === "topic"
-        ? { href: profilePath(hit.slug), label: "View their research areas" }
-        : undefined;
+
+  // #1366 follow-up — Funding rendered ONCE in the slot its tier dictates: the full
+  // badge when it leads (promoted, or the legacy non-tiered path), else a compact
+  // "Also matched" dot row. Same KeyFunding panel + expand state across tiers. #1359 —
+  // concept-tagged grants read "tagged <Concept>" (underlined term); a literal text
+  // match reads "mention '<query>'" (the honesty note). The dot is always FILLED green
+  // (Part C); strength is carried by the muted/italic text, not the dot fill.
+  const fundingTagged = grantsStrength === "tagged" && grantConceptLabel.length > 0;
+  // Full badge unless we're in the tiered (stacked) context and funding isn't promoted —
+  // then it's a compact "Also matched" dot. The single-evidence / legacy paths (not
+  // stacked) keep the full Funding row exactly as before.
+  const fundingFull = promoteFunding || !stacked;
+  const fundingCount = `${Math.min(grantsTotal, hit.grantCount)} of ${hit.grantCount} grants`;
+  const fundingNode =
+    grants.length > 0 ? (
+      <>
+        {fundingFull ? (
+          <MatchAwareReason
+            kind="funding"
+            prefix={`${fundingCount} ${fundingTagged ? "tagged" : "mention"}`}
+            label={fundingTagged ? grantConceptLabel : `“${qParam}”`}
+            underline={fundingTagged}
+            canExpand
+            expanded={fundingExpanded}
+            onToggle={() => setFundingExpanded((v) => !v)}
+            panelId={fundingPanelId}
+          />
+        ) : (
+          <LesserReason
+            // #1366 follow-up Part C — dot is always FILLED green; a literal mention's
+            // weakness is carried by `weak` (muted/italic text) + the MentionNote.
+            dotClassName="bg-[#2f6b3a]"
+            weak={!fundingTagged}
+            suffix={` · ${fundingCount}`}
+            canExpand
+            expanded={fundingExpanded}
+            onToggle={() => setFundingExpanded((v) => !v)}
+            panelId={fundingPanelId}
+            srLabel="key funding"
+          >
+            <span className="font-medium text-[#52514a]">Funding</span> ·{" "}
+            {fundingTagged ? <>tagged {grantConceptLabel}</> : <>mentions “{qParam}”</>}
+          </LesserReason>
+        )}
+        {fundingExpanded ? (
+          <KeyFunding
+            grants={grants}
+            total={grantsTotal}
+            profileHref={profileHref}
+            panelId={fundingPanelId}
+            mentionNote={!fundingFull && !fundingTagged}
+          />
+        ) : null}
+      </>
+    ) : null;
+
+  // #1366 follow-up Part D — the "Also matched" group = the demoted stacked lines
+  // (everything after the primary) plus the (demoted) Funding row. The header is a
+  // grouping affordance: with a SINGLE secondary row it's noise, so drop it and show
+  // the row bare under the divider; keep it for two or more.
+  const lesserLines = lines ? lines.slice(1) : [];
+  const secondaryCount = lesserLines.length + (grants.length > 0 ? 1 : 0);
 
   return (
     <div className="group relative grid grid-cols-[56px_1fr_auto] gap-4 border-b border-[#e3e2dd] py-5 hover:bg-[#fafaf8]">
@@ -483,63 +415,66 @@ export function PeopleResultCard({
         {deptLine ? (
           <div className="mb-2 text-xs text-muted-foreground">{deptLine}</div>
         ) : null}
-        {/* #824 follow-up — one reason line per scholar: the ResultEvidence
-            object when present, else the legacy priority chain. Suppressed when a
-            topic-matching grant supersedes a generic no-match identity fallback. */}
-        {suppressIdentityFallback ? null : snippetLine}
-        {/* Rep-papers disclosure — the representative papers, shown when the row
-            is expanded. Inline for the publications kind; lazily fetched for a
-            method/topic match (the fetch is triggered on first toggle). */}
-        {hit.evidence && expanded && canExpand ? (
-          <RepresentativePapers
-            papers={repPapers}
-            total={repTotal}
-            profileHref={profileHref}
-            status={
-              isLazyExemplar
-                ? exemplarStatus
-                : wantsLazyKeyPaper
-                  ? keyPaperStatus
-                  : "done"
-            }
-            panelId={panelId}
-            fallback={exemplarFallback}
-          />
-        ) : null}
-        {/* Funding evidence row (SEARCH_EVIDENCE_ROWS) — topic-matching grants, shown
-            only when ≥1 matched (hide-when-empty, §4.4 last). Own disclosure state;
-            records loaded eagerly so expand is instant. #1361 — the claim now mirrors
-            the publications "mention" line: "N of M grants mention 'query'" with a
-            normal-weight prefix and the semibold query term (replaces the §4.6
-            count-only "N grants"). N = matching grants, M = the scholar's grant total. */}
-        {grants.length > 0 ? (
+        {/* #1366 follow-up — tiered evidence: ONE prominent primary signal + a compact
+            "Also matched" group (the demoted lesser stacked lines + the Funding row).
+            Funding LEADS instead when it's the strongest signal (promoted — no
+            first-class pub line). The legacy (flag-off) path renders its single block
+            plus the full Funding row below, unchanged. */}
+        {promoteFunding ? (
+          fundingNode
+        ) : (
           <>
-            <MatchAwareReason
-              kind="funding"
-              // #1359 — concept-tagged grants read "N of M grants tagged <Concept>"
-              // (underlined concept term, mirroring the concept publications line);
-              // a literal text match stays "N of M grants mention '<query>'". Needs a
-              // concept label to render tagged, else it falls back to the mention line.
-              prefix={`${Math.min(grantsTotal, hit.grantCount)} of ${hit.grantCount} grants ${
-                grantsStrength === "tagged" && grantConceptLabel ? "tagged" : "mention"
-              }`}
-              label={grantsStrength === "tagged" && grantConceptLabel ? grantConceptLabel : `“${qParam}”`}
-              underline={grantsStrength === "tagged" && grantConceptLabel.length > 0}
-              canExpand
-              expanded={fundingExpanded}
-              onToggle={() => setFundingExpanded((v) => !v)}
-              panelId={fundingPanelId}
-            />
-            {fundingExpanded ? (
-              <KeyFunding
-                grants={grants}
-                total={grantsTotal}
-                profileHref={profileHref}
-                panelId={fundingPanelId}
+            {lines ? (
+              <EvidenceLine
+                evidence={lines[0]}
+                cwid={hit.cwid}
+                slug={hit.slug}
+                pubCount={hit.pubCount}
+                q={q}
+                keyPaperConfig={keyPaperConfig}
+                hasQuery={hasQuery}
+                badged={evidenceRows}
+                claimedPmids={claimedPmids}
+                stacked={stacked}
+                tier="primary"
               />
+            ) : (
+              legacyBlock
+            )}
+            {/* "Also matched" — the demoted signals, under a dashed divider. Only the
+                STACKED (`evidenceLines`) context tiers; shown when there is ≥1 lesser
+                line or a (demoted) Funding row. Part D — the "Also matched" HEADER is
+                dropped when there's a single secondary row (header for one row is
+                noise); the divider + row(s) still render. */}
+            {stacked && lines && secondaryCount >= 1 ? (
+              <div className="mt-3 border-t border-dashed border-[#e3e2dd] pt-2.5">
+                {secondaryCount >= 2 ? (
+                  <div className="mb-0.5 text-[11px] font-medium text-[#9a958a]">Also matched</div>
+                ) : null}
+                {lesserLines.map((ev, i) => (
+                  <EvidenceLine
+                    key={i + 1}
+                    evidence={ev}
+                    cwid={hit.cwid}
+                    slug={hit.slug}
+                    pubCount={hit.pubCount}
+                    q={q}
+                    keyPaperConfig={keyPaperConfig}
+                    hasQuery={hasQuery}
+                    badged={evidenceRows}
+                    claimedPmids={claimedPmids}
+                    stacked={stacked}
+                    tier="lesser"
+                  />
+                ))}
+                {grants.length > 0 ? fundingNode : null}
+              </div>
             ) : null}
+            {/* Non-stacked (single-evidence + legacy) keeps the full Funding row below
+                the block, unchanged from before the tiered redesign. */}
+            {!stacked && grants.length > 0 ? fundingNode : null}
           </>
-        ) : null}
+        )}
       </div>
       <div className="flex flex-col items-end gap-1 whitespace-nowrap text-right text-xs text-muted-foreground">
         {hit.pubCount > 0 ? (

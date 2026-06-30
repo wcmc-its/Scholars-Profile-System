@@ -1477,6 +1477,13 @@ export class AppStack extends Stack {
         // APP-ONLY, no reindex. resolveSearchEvidenceRows reads === "on".
         // STAGING-FIRST soak: on for staging, off for prod (flip prod after soak).
         SEARCH_EVIDENCE_ROWS: env === "staging" ? "on" : "off",
+        // #1366 -- counted, STACKED evidence reason lines on the People card:
+        // method / tagged-concept / research-area each become a first-class line
+        // prefixed "N of M publications" (keyword fallback; clinical label-only).
+        // Method + area counts read precomputed people-doc maps (methodFamilyCounts
+        // / areaCounts), populated by a reindex. resolveSearchEvidenceReasonCounts
+        // reads === "on". STAGING-FIRST soak: on for staging, off for prod.
+        SEARCH_EVIDENCE_REASON_COUNTS: env === "staging" ? "on" : "off",
         // Research-Area concentration boost (docs/search-research-area-relevance-spec.md).
         // When on, a topic query that resolves to a Research Area lifts scholars by their
         // relevance×coverage ranking in that area (reorder-only, no reindex).

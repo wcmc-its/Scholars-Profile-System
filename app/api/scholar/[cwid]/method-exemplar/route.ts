@@ -45,13 +45,18 @@ export async function GET(
   const family = sp.get("family")?.trim();
   const topic = sp.get("topic")?.trim();
   const query = sp.get("q")?.trim() || undefined;
+  // #1366 — pmids already shown on a sibling stacked line; dropped INSIDE the loader
+  // query (must_not / notIn) so the exemplar pool is the non-claimed set and the
+  // panel never resolves empty from a sibling claiming its top picks (the bug the
+  // follow-up fixes). `total` reflects the post-exclude renderable count.
+  const exclude = (sp.get("exclude")?.split(",") ?? []).map((s) => s.trim()).filter(Boolean);
 
   try {
     let result: { pubs: unknown[]; total: number } = EMPTY;
     if (family) {
-      result = await loadMethodExemplar(cwid, family, query);
+      result = await loadMethodExemplar(cwid, family, query, exclude);
     } else if (topic) {
-      result = await loadTopicExemplar(cwid, topic, query);
+      result = await loadTopicExemplar(cwid, topic, query, exclude);
     }
     return NextResponse.json(result, { headers: NO_STORE });
   } catch {

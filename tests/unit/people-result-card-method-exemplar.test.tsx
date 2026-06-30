@@ -18,6 +18,7 @@ vi.mock("@/components/scholar/headshot-avatar", () => ({
 }));
 
 import { PeopleResultCard } from "@/components/search/people-result-card";
+import { EvidenceLine } from "@/components/search/evidence-line";
 import type { PeopleHit } from "@/lib/api/search";
 
 function makeHit(overrides: Partial<PeopleHit>): PeopleHit {
@@ -199,5 +200,64 @@ describe("PeopleResultCard — non-method/topic evidence never fetches a method-
     expect(screen.queryByRole("button", { name: /key papers/i })).toBeNull();
     await Promise.resolve();
     expect(fetchFn).not.toHaveBeenCalled();
+  });
+});
+
+describe("EvidenceLine — #1366 follow-up: de-dup empty-resolve drops the chevron (Bug A)", () => {
+  it("a line that EXCLUDES sibling pmids and resolves empty drops its chevron (no empty panel)", async () => {
+    mockFetch({ pubs: [], total: 0 });
+    // A sibling line already claimed a pmid ⇒ this line fetches with a non-empty
+    // `exclude` and (here) gets nothing back: its papers are all shown under the
+    // stronger sibling, so the chevron must drop rather than offer an empty panel.
+    const claimed = { current: new Set(["999"]) };
+    render(
+      <EvidenceLine
+        evidence={{ kind: "method", family: "Confocal microscopy", tools: [], count: 3 }}
+        cwid="abc1234"
+        slug="jane-doe"
+        pubCount={100}
+        q="confocal"
+        keyPaperConfig={null}
+        hasQuery
+        badged
+        claimedPmids={claimed}
+        stacked
+        tier="lesser"
+      />,
+    );
+    // chevron shows before the fetch resolves...
+    fireEvent.click(screen.getByRole("button", { name: /key papers/i }));
+    // ...and once the empty resolve lands (with a non-empty exclude) it is dropped.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /key papers/i })).toBeNull(),
+    );
+    // No fallback link either — the evidence is honestly shown under the sibling.
+    expect(screen.queryByRole("link", { name: /view their methods/i })).toBeNull();
+  });
+
+  it("the SAME line with NO sibling exclude keeps its fallback link on empty (genuine empty)", async () => {
+    mockFetch({ pubs: [], total: 0 });
+    const claimed = { current: new Set<string>() }; // nothing claimed ⇒ exclude empty
+    render(
+      <EvidenceLine
+        evidence={{ kind: "method", family: "Confocal microscopy", tools: [], count: 3 }}
+        cwid="abc1234"
+        slug="jane-doe"
+        pubCount={100}
+        q="confocal"
+        keyPaperConfig={null}
+        hasQuery
+        badged
+        claimedPmids={claimed}
+        stacked
+        tier="primary"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /key papers/i }));
+    // genuine empty (no exclude) keeps the graceful-degradation profile link.
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /view their methods/i })).toBeTruthy(),
+    );
+    expect(screen.getByRole("button", { name: /key papers/i })).toBeTruthy();
   });
 });

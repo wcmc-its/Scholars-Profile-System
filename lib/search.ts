@@ -195,6 +195,13 @@ export const peopleIndexMapping = {
       // `object` + `enabled: false`. OMITTED on scholars with no MeSH-tagged pub.
       // Served only when SEARCH_PEOPLE_REASON_FROM_DOC is on.
       meshSubtreeCounts: { type: "object", enabled: false },
+      // #1366 — per-method-family distinct-pub counts for the reason-line "N of M".
+      // Dynamic family-label keys ⇒ store in `_source` but DON'T index (object +
+      // enabled:false), same as `meshSubtreeCounts`, to avoid a mapping explosion.
+      methodFamilyCounts: { type: "object", enabled: false },
+      // #1366 — per-parent-topic distinct-pub counts (dynamic topic-slug keys);
+      // store in `_source`, don't index — same rationale as `methodFamilyCounts`.
+      areaCounts: { type: "object", enabled: false },
       overview: { type: "text", analyzer: "scholar_text" },
       // Issue #310 / SPEC §6.1.5 — materialized inputs to the topic-shape
       // sparse-profile soft decay. The decay's "non-trivial" thresholds
