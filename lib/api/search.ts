@@ -100,6 +100,8 @@ import {
   resolvePublicationDepartmentFilter,
   resolvePeopleTopicPhraseBoost,
   resolveSearchPeopleClinical,
+  resolveSearchPeopleClinicalFn,
+  resolveSearchPeopleClinicalFnWeight,
   resolveSearchPeopleConceptHint,
   resolveSearchResultEvidence,
   type PubRecencyMode,
@@ -2289,6 +2291,23 @@ export async function searchPeople(opts: {
     opts.areaConcentration.length > 0
       ? buildAreaBoostFunctions(opts.areaConcentration)
       : [];
+  // Track B / B2 — clinical-specialty function_score boost (spec: docs/search-trackA-clinical-
+  // inert-finding.md). Topic/hybrid only, like the area boost. An additive weight on docs whose
+  // board-derived `clinicalSpecialties` match the query — bypasses the cross_fields blend that
+  // makes the `SEARCH_PEOPLE_CLINICAL` text-field variant inert. `match` (analyzed) handles case
+  // ("obesity" → "Obesity"); `clinicalSpecialties` ONLY (board-derived, high precision) — NOT the
+  // noisy `clinicalExpertise` free-text. No-ops when no specialty matches (e.g. "hypertension").
+  const clinicalFnFunctions: Record<string, unknown>[] =
+    (applyTopicTemplate || applyHybridTemplate) &&
+    resolveSearchPeopleClinicalFn() &&
+    trimmed.length > 0
+      ? [
+          {
+            filter: { match: { clinicalSpecialties: trimmed } },
+            weight: resolveSearchPeopleClinicalFnWeight(),
+          },
+        ]
+      : [];
   const prominenceFunctions: Record<string, unknown>[] = applyProminence
     ? [
         { weight: PEOPLE_PROMINENCE_BASE_WEIGHT },
@@ -2315,6 +2334,7 @@ export async function searchPeople(opts: {
           weight: PEOPLE_PROMINENCE_GRANT_WEIGHT,
         },
         ...areaBoostFunctions,
+        ...clinicalFnFunctions,
       ]
     : [];
 
