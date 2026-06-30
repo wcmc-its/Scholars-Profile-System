@@ -1,4 +1,8 @@
-import { assertSharedVpcConfig, resolveEnvConfig } from "../lib/config";
+import {
+  assertCutoverGate,
+  assertSharedVpcConfig,
+  resolveEnvConfig,
+} from "../lib/config";
 
 // docs/sps-vpc-consolidation-plan.md — when useSharedVpc is on, every stack
 // imports its-reciter-vpc01 by id and places resources into explicit subnet
@@ -56,6 +60,31 @@ describe("assertSharedVpcConfig", () => {
       }),
     ).toThrow(/useSharedVpc requires ≥2 sharedVpc\.availabilityZones/);
   });
+});
+
+// Cutover gate (docs/sps-vpc-consolidation-plan.md §6.2/§8.5/§8.6; #1370). Runs at
+// the `bin` entrypoint, not in resolveEnvConfig, so it does not touch the flag-on
+// placement tests (which synth stacks directly). useSharedVpc is a hard tripwire
+// until the snapshot-restore data path lands: flipping it would CFN-replace the
+// in-place Aurora/OpenSearch into empty datastores (forbidden, §8.6).
+describe("assertCutoverGate", () => {
+  it("is a no-op for the shipped config (useSharedVpc off) in both envs", () => {
+    expect(() => assertCutoverGate(resolveEnvConfig("staging"))).not.toThrow();
+    expect(() => assertCutoverGate(resolveEnvConfig("prod"))).not.toThrow();
+  });
+
+  for (const env of ["staging", "prod"] as const) {
+    it(`hard-throws when useSharedVpc is flipped on for ${env} (also fails CI on a premature flip)`, () => {
+      const cfg = { ...resolveEnvConfig(env), useSharedVpc: true };
+      expect(() => assertCutoverGate(cfg)).toThrow(/not yet deployable/);
+      // The message names the prerequisites so the gate gives no false "safe" signal.
+      expect(() => assertCutoverGate(cfg)).toThrow(
+        /DatabaseClusterFromSnapshot/,
+      );
+      expect(() => assertCutoverGate(cfg)).toThrow(/appRwGranteeHost/);
+      expect(() => assertCutoverGate(cfg)).toThrow(/reseed/);
+    });
+  }
 });
 
 // Both envs share ONE sharedVpc descriptor by design (isolation is by per-env
