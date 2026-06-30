@@ -872,9 +872,15 @@ export const PEOPLE_DEPT_LEADERSHIP_CHIEF_WEIGHT = 1.5;
  * ponytail: 3 static tiers; a reindexed per-scholar `total` field + script_score is
  * the smoother upgrade (spec OQ-7) once the signal is proven.
  */
-export const AREA_BOOST_W_HI = 8;
-export const AREA_BOOST_W_MID = 4;
-export const AREA_BOOST_W_LO = 1.5;
+// Prominence is `score_mode: sum` × relevance, where the non-boost terms sum to
+// ~6 (mostly ln1p(publicationCount)). The original 8/4/1.5 made a top-tier boost
+// DOUBLE the multiplier — concentration dominated relevance instead of informing it
+// (the "huge FT boost" / method-tagged-ethics-prof-over-Rice distortion). Softened
+// to a peer signal: a top tier now adds ~50% (6→9), reordering within a relevance
+// band without overriding it. Still INITIAL — the staging A/B picks the final values.
+export const AREA_BOOST_W_HI = 3;
+export const AREA_BOOST_W_MID = 1.5;
+export const AREA_BOOST_W_LO = 0.75;
 /** Tier cutoffs as a fraction of the area's top `total` (the #1 scholar). */
 export const AREA_BOOST_HI_FRAC = 0.5;
 export const AREA_BOOST_MID_FRAC = 0.2;

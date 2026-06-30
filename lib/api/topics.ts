@@ -34,7 +34,11 @@
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { scorePublication, type RankablePublication } from "@/lib/ranking";
-import { TOP_SCHOLARS_ELIGIBLE_ROLES, type RoleCategory } from "@/lib/eligibility";
+import {
+  SEARCH_BOOST_ELIGIBLE_ROLES,
+  TOP_SCHOLARS_ELIGIBLE_ROLES,
+  type RoleCategory,
+} from "@/lib/eligibility";
 import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 import {
   isAuthorHidden,
@@ -264,8 +268,14 @@ function topicRowToRankable(r: {
  * resolved to one; null ⇒ whole parent area. Cached (SWR) so an area-resolved search
  * doesn't re-run the aggregation per request. `total` is a tiering score for
  * buildAreaBoostFunctions (frac-of-max) — never surfaced.
- * ponytail: third+fourth copy of the D-13/D-14 carve in this file (alongside
- * getTopScholarsForTopic / getSubtopicScholars) — consolidate into one ranker if it grows.
+ *
+ * Role carve is SEARCH_BOOST_ELIGIBLE_ROLES (research roles), NOT the FT-only
+ * TOP_SCHOLARS_ELIGIBLE_ROLES that getTopScholarsForTopic uses — search must be able to
+ * lift concentrated affiliated experts, not just FT faculty (#1363). This function is
+ * search-only, so the wider carve does not touch the topic-page chip row.
+ * ponytail: third+fourth copy of the D-13 carve in this file (alongside
+ * getTopScholarsForTopic / getSubtopicScholars, which keep the FT-only carve) —
+ * consolidate into one parameterized ranker if it grows.
  */
 export function getAreaScholarConcentration(
   parentTopicId: string,
@@ -299,7 +309,9 @@ async function loadAreaScholarConcentration(
       scholar: {
         deletedAt: null,
         status: "active",
-        roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] }, // D-14
+        // #1363 — research roles, NOT the FT-only D-14 chip-row carve: search must
+        // be able to lift concentrated affiliated experts, not just FT faculty.
+        roleCategory: { in: [...SEARCH_BOOST_ELIGIBLE_ROLES] },
       },
       publication: { publicationType: { notIn: [...FEED_EXCLUDED_TYPES] } },
     },
@@ -342,7 +354,7 @@ async function loadAreaScholarConcentration(
       scholar: {
         deletedAt: null,
         status: "active",
-        roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] }, // D-14
+        roleCategory: { in: [...SEARCH_BOOST_ELIGIBLE_ROLES] }, // #1363 — research roles, not FT-only
       },
       publication: { publicationType: { notIn: [...FEED_EXCLUDED_TYPES] } },
     },

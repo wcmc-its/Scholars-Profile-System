@@ -445,6 +445,11 @@ describe("getAreaScholarConcentration (#1363 — concentration over volume)", ()
     expect(mockPublicationTopicFindMany.mock.calls[1][0].where.cwid).toEqual({
       in: ["spec", "gen"],
     });
+    // #1363 — boost eligibility is research roles, NOT FT-only: affiliated experts
+    // (e.g. Rice on `crispr`) must be liftable, not structurally excluded.
+    expect(
+      mockPublicationTopicFindMany.mock.calls[0][0].where.scholar.roleCategory.in,
+    ).toEqual(expect.arrayContaining(["affiliated_faculty", "postdoc", "fellow"]));
   });
 
   it("returns [] when no scholar clears the min-pubs floor", async () => {
