@@ -34,6 +34,7 @@
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { scorePublication, type RankablePublication } from "@/lib/ranking";
+import { concentrationExponent } from "@/lib/search";
 import {
   SEARCH_BOOST_ELIGIBLE_ROLES,
   TOP_SCHOLARS_ELIGIBLE_ROLES,
@@ -373,12 +374,13 @@ async function loadAreaScholarConcentration(
     totalImpact.set(r.cwid, (totalImpact.get(r.cwid) ?? 0) + score);
   }
 
-  // 3. Concentration = topicImpact² / totalImpact (impact × on-topic fraction). Tiered
-  //    downstream by buildAreaBoostFunctions' frac-of-max — that logic is unchanged.
+  // 3. Concentration = topicImpact^p / totalImpact (p tunable; default 2 = impact ×
+  //    on-topic fraction). Tiered downstream by buildAreaBoostFunctions' frac-of-max — unchanged.
+  const p = concentrationExponent();
   return cwids
     .map((cwid) => {
       const ti = topicImpact.get(cwid) ?? 0;
-      return { cwid, total: (ti * ti) / Math.max(totalImpact.get(cwid) ?? ti, ti) };
+      return { cwid, total: Math.pow(ti, p) / Math.max(totalImpact.get(cwid) ?? ti, ti) };
     })
     .sort((a, b) => b.total - a.total)
     .slice(0, limit);

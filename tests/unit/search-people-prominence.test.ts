@@ -73,6 +73,7 @@ vi.mock("@/lib/search", () => ({
   AREA_BOOST_MID_FRAC: 0.2,
   AREA_BOOST_TOP_N: 200,
   CONCEPT_CONCENTRATION_MIN_PUBS: 3,
+  concentrationExponent: () => 2,
   PUBLICATION_FIELD_BOOSTS: ["title^1"],
   // #726 — searchPeople now dereferences these on the topic-attribution path.
   MESH_ADMIT_WEIGHT: { exact: 3, "anchored-entry": 1.5, entry: 0.7 },

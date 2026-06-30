@@ -894,6 +894,21 @@ export const AREA_BOOST_TOP_N = 200;
 export const CONCEPT_CONCENTRATION_MIN_PUBS = 3;
 
 /**
+ * Concentration-score exponent `p` in `n^p / total` (both the concept-axis and
+ * curated boost paths). `n^p/total = (n/total)^p · total^(p-1)` — so `p` trades
+ * focus against career size: `p=2` (today) leaves a volume lean (a prolific
+ * generalist can out-score a niche specialist), `p=1` is pure on-topic fraction,
+ * `p≈1.5` is fraction with a gentle √n volume nudge. Env-tunable so the value can be
+ * A/B-swept on staging without a rebuild; the floor (CONCEPT/AREA_CONCENTRATION_MIN_PUBS)
+ * does the fluke-protection that low `p` would otherwise lose.
+ * ponytail: experiment knob — hard-code the winning `p` and drop the env read once the A/B settles.
+ */
+export function concentrationExponent(): number {
+  const p = Number.parseFloat(process.env.SEARCH_CONCENTRATION_EXPONENT ?? "");
+  return Number.isFinite(p) && p > 0 ? p : 2;
+}
+
+/**
  * Boost weights used by the publications-index query builder.
  * (Not specified in spec for publications; reasonable defaults.)
  */

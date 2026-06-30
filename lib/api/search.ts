@@ -71,6 +71,7 @@ import {
   AREA_BOOST_HI_FRAC,
   AREA_BOOST_MID_FRAC,
   CONCEPT_CONCENTRATION_MIN_PUBS,
+  concentrationExponent,
   FUNDING_INDEX,
   PEOPLE_RESTRUCTURED_MSM,
   PEOPLE_TOPIC_ABSTRACTS_BOOST,
@@ -1165,10 +1166,14 @@ export async function getConceptScholarConcentration(
       const totalByCwid = new Map(
         authorBuckets(totalResp).map((b) => [b.key, b.doc_count] as [string, number]),
       );
-      // 3. Concentration score n²/total (count × on-topic fraction). Tiered by
-      //    buildAreaBoostFunctions' frac-of-max — that logic is UNCHANGED.
+      // 3. Concentration score n^p/total (p tunable; default 2 = count × on-topic
+      //    fraction). Tiered by buildAreaBoostFunctions' frac-of-max — that logic is UNCHANGED.
+      const p = concentrationExponent();
       return onTopic
-        .map(({ cwid, n }) => ({ cwid, total: (n * n) / Math.max(totalByCwid.get(cwid) ?? n, 1) }))
+        .map(({ cwid, n }) => ({
+          cwid,
+          total: Math.pow(n, p) / Math.max(totalByCwid.get(cwid) ?? n, 1),
+        }))
         .sort((a, b) => b.total - a.total)
         .slice(0, limit);
     },

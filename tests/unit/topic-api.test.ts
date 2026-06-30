@@ -460,5 +460,37 @@ describe("getAreaScholarConcentration (#1363 — concentration over volume)", ()
     // Floor short-circuits before the denominator query runs.
     expect(mockPublicationTopicFindMany).toHaveBeenCalledTimes(1);
   });
+
+  // SEARCH_CONCENTRATION_EXPONENT experiment. spec = 4 on-topic / 5 total (focus 0.8);
+  // gen = 7 on-topic / 14 total (focus 0.5 but more raw on-topic volume). At p=2 the
+  // volume lean makes gen win (49/14=3.5 > 16/5=3.2); at p=1 (pure fraction) spec wins
+  // (0.8 > 0.5). Documents the volume bias AND that the knob flips it.
+  const expCase = () => {
+    const specTopic = [41, 42, 43, 44].map((p) => onTopic("spec", p));
+    const genTopic = [51, 52, 53, 54, 55, 56, 57].map((p) => onTopic("gen", p));
+    const specTotal = [...specTopic, onTopic("spec", 49)]; // 5 total
+    const genTotal = [...genTopic, ...[61, 62, 63, 64, 65, 66, 67].map((p) => onTopic("gen", p))]; // 14
+    mockPublicationTopicFindMany
+      .mockResolvedValueOnce([...specTopic, ...genTopic])
+      .mockResolvedValueOnce([...specTotal, ...genTotal]);
+  };
+
+  it("p=2 (default) lets the higher-VOLUME generalist out-tier the focused specialist", async () => {
+    delete process.env.SEARCH_CONCENTRATION_EXPONENT;
+    expCase();
+    const result = await getAreaScholarConcentration("area-exp-2", null, 10, NOW);
+    expect(result.map((r) => r.cwid)).toEqual(["gen", "spec"]);
+  });
+
+  it("p=1 (pure fraction) flips it — the focused specialist wins", async () => {
+    process.env.SEARCH_CONCENTRATION_EXPONENT = "1";
+    try {
+      expCase();
+      const result = await getAreaScholarConcentration("area-exp-1", null, 10, NOW);
+      expect(result.map((r) => r.cwid)).toEqual(["spec", "gen"]);
+    } finally {
+      delete process.env.SEARCH_CONCENTRATION_EXPONENT;
+    }
+  });
 });
 
