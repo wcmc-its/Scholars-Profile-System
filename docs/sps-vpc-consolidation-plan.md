@@ -476,18 +476,18 @@ The public entry — `scholars[-staging].weill.cornell.edu` → CloudFront → A
 
 ### 7.2 Gating decision: does its-reciter have a public ALB path?
 
-its-reciter is a TGW-attached **internal** VPC. Whether it has public subnets + IGW is **UNKNOWN** (G4) and the biggest edge question.
+its-reciter is TGW-attached but — **CONFIRMED 2026-06-30 (read-only describe, G4 GREEN)** — it **does** have an IGW (`igw-09ece8f823b10c030`) and a 2-AZ public **dmz** tier routing to it, so **Path A (internet-facing public ALB) is available** — the classic origin-swap, not a redesign. Path B (CloudFront VPC origin to an internal-only ALB) remains a valid alternative if WCM prefers to keep the ALB off the public internet; both are buildable here.
 
-| | Path A — internet-facing ALB retained | Path B — internal ALB + CloudFront VPC origin |
+| | Path A — internet-facing ALB retained **(viable, G4 ✓)** | Path B — internal ALB + CloudFront VPC origin |
 |---|---|---|
-| Precondition | its-reciter has public subnets + IGW (UNKNOWN) | its-reciter is private-only (likely) |
+| Precondition | its-reciter has public subnets + IGW — **CONFIRMED** (dmz tier → `igw-09ece8…`) | n/a — works regardless |
 | AppStack ALB | `internetFacing:true` in PUBLIC subnets | `internetFacing:false`, private subnets |
 | CloudFront origin | same shape; only origin domain changes | `cloudfront.VpcOrigin` → internal ALB (GA Nov 2024); ALB must be **same account** as the distribution — it is (665083158573) |
 | CDK scope | minimal — origin re-point | larger — add a `VpcOrigin`; in-place on the existing distribution |
 | Exposure | ALB still has public DNS → `X-Origin-Verify` load-bearing | internal ALB has no public DNS → exposure largely removed; keep `X-Origin-Verify` as defense-in-depth |
 | CF→origin | traverses public internet | stays private inside the VPC |
 
-**ASSUMPTION (flag for networking):** given its-reciter's internal/TGW character, **Path B is the more likely target** — a larger change than the origin swap the task title implies, intersecting #502 (§7.7). Do not assume Path A.
+**DECISION (confirm preference with networking):** Path A is **available** (G4 confirmed — IGW + public dmz tier), so the edge change can be the minimal **origin re-point** the task implies. Recommend **Path A** unless WCM wants the ALB off the public internet, in which case Path B (VPC origin) is the in-place alternative. Either way this still intersects the #502 NetScaler-vs-CloudFront question (§7.7) — that, not the public-ingress capability, is now the open edge item.
 
 ### 7.3 The origin re-point (the cutover step)
 
