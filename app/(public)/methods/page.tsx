@@ -21,9 +21,9 @@ import {
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Research Methods at WCM",
+  title: "Methods & tools at WCM",
   description:
-    "Browse the research methods and method families used by scholars across Weill Cornell Medicine.",
+    "Browse the research methods, tools, and method families used by scholars across Weill Cornell Medicine.",
   alternates: { canonical: "/methods" },
 };
 
@@ -53,14 +53,14 @@ export default async function MethodsHubPage() {
 
       <section className="mb-4">
         <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
-          RESEARCH METHODS
+          METHODS &amp; TOOLS
         </div>
         <h1 className="page-title mt-2 text-3xl font-bold leading-tight tracking-tight">
-          Research methods at WCM
+          Methods &amp; tools
         </h1>
         <p className="mt-3 max-w-prose text-base text-muted-foreground">
-          The instruments, assays, datasets, and computational methods Weill
-          Cornell Medicine researchers use, grouped into method categories.
+          The instruments, assays, datasets, and computational methods &amp; tools
+          Weill Cornell Medicine researchers use, grouped into categories.
         </p>
       </section>
 

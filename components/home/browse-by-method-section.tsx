@@ -19,11 +19,11 @@ export function BrowseByMethodSection({ data }: { data: HomeMethodCategories }) 
   return (
     <section aria-labelledby="browse-by-method-heading" className="mt-12">
       <h2 id="browse-by-method-heading" className="text-lg font-semibold">
-        Browse by research method
+        Browse Methods &amp; tools
       </h2>
       <p className="mt-1 mb-6 text-[14px] text-muted-foreground">
-        The instruments, assays, datasets, and computational methods used at WCM
-        — {categoryCount} categories.
+        The instruments, assays, datasets, and computational methods &amp; tools
+        used at WCM — {categoryCount} categories.
       </p>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
