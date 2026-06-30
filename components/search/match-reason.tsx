@@ -120,6 +120,8 @@ export function MatchReason({
   panelId,
   badged = false,
   flavor,
+  cue,
+  dim = false,
 }: {
   kind: MatchReasonKind;
   children: ReactNode;
@@ -134,6 +136,11 @@ export function MatchReason({
   badged?: boolean;
   /** Which flavor pill when `badged`; defaults from kind. */
   flavor?: PubFlavor;
+  /** #1366 follow-up Part B — an italic, muted relevance caveat appended after the
+   *  reason text (e.g. " · term match only" for a keyword-only lead). */
+  cue?: string;
+  /** #1366 follow-up Part B — faint the lead (mute the pill + reason text). */
+  dim?: boolean;
 }) {
   const Icon = ICONS[kind];
   const pill = badged
@@ -141,27 +148,36 @@ export function MatchReason({
     : null;
   // Single line — clips an over-long reason (e.g. a representative-pub title)
   // rather than wrapping. A no-op for the short count/concept reasons.
+  // #1366 follow-up Part B — the relevance caveat (italic muted) trailing the reason
+  // text; `dim` mutes the pill + reason text so a low-relevance lead reads quieter.
+  const cueSpan = cue ? <span className="font-normal italic text-[#9a958a]">{cue}</span> : null;
   const inner = pill ? (
     (() => {
       const PillIcon = pill.icon;
       return (
         <>
           <span
-            className={`inline-flex shrink-0 items-center gap-1 rounded-[5px] border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.02em] ${pill.cls}`}
+            className={`inline-flex shrink-0 items-center gap-1 rounded-[5px] border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.02em] ${pill.cls}${dim ? " opacity-70" : ""}`}
           >
             <PillIcon aria-hidden className="size-3 shrink-0" strokeWidth={2} />
             {pill.text}
           </span>
           {/* #1350 — the count prefix reads in normal weight; the resolved concept
               term (appended by the caller) carries its own subtle underline. */}
-          <span className="min-w-0 truncate text-[#3a3a3a]">{children}</span>
+          <span className={`min-w-0 truncate ${dim ? "text-[#9a958a]" : "text-[#3a3a3a]"}`}>
+            {children}
+            {cueSpan}
+          </span>
         </>
       );
     })()
   ) : (
     <>
       <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={2} />
-      <span className="min-w-0 truncate">{children}</span>
+      <span className={`min-w-0 truncate${dim ? " text-[#9a958a]" : ""}`}>
+        {children}
+        {cueSpan}
+      </span>
     </>
   );
   // Item 1 — when a panel can open, the whole [icon · count · chevron] cluster is
@@ -203,6 +219,8 @@ export function MatchAwareReason({
   label,
   prefix,
   suffix,
+  cue,
+  dim = false,
   underline = false,
   canExpand = false,
   expanded = false,
@@ -220,6 +238,13 @@ export function MatchAwareReason({
    *  **"Anti-obesity pharmacotherapy"** + " · 7 of 41 publications"). Method/area
    *  use this; concept/keyword/funding use `prefix` (count-first). */
   suffix?: string;
+  /** #1366 follow-up Part B — an italic, muted relevance caveat appended AFTER the
+   *  suffix (e.g. " · 0.2% of output" or " · term match only"). The lead is computed
+   *  in `ResultEvidence` (the primary tier); funding never carries one. */
+  cue?: string;
+  /** #1366 follow-up Part B — faint the lead: mute the badge + bold label + count so
+   *  a low-relevance primary reads quieter than a confident one. Paired with `cue`. */
+  dim?: boolean;
   /** #1359 — give the semibold term the §4.5 dotted underline used for a resolved
    *  CONCEPT term (the "tagged" funding line: "N of M grants tagged **Heart Arrest**"),
    *  matching the concept publications line. Off for a literal "mention '<query>'". */
@@ -264,28 +289,34 @@ export function MatchAwareReason({
         : kind === "funding"
           ? "Funding"
           : "Research area";
+  // #1366 follow-up Part B — when `dim`, faint the lead: the label drops from
+  // near-black to muted grey and the count/prefix follow, so a low-relevance primary
+  // reads quieter. The cue (italic muted) trails the suffix.
+  const labelColor = dim ? "text-[#9a958a]" : "text-[#1a1a1a]";
+  const metaColor = dim ? "text-[#9a958a]" : "text-[#3a3a3a]";
   // items-center (not baseline): the bordered pill and the bold label line up on
   // a shared center axis so the badge doesn't sit low next to the label.
   const inner = (
     <>
       <span
-        className={`inline-flex shrink-0 items-center gap-1 rounded-[5px] border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.02em] ${badge}`}
+        className={`inline-flex shrink-0 items-center gap-1 rounded-[5px] border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.02em] ${badge}${dim ? " opacity-70" : ""}`}
       >
         <Icon aria-hidden className="size-3 shrink-0" strokeWidth={2} />
         {badgeText}
       </span>
       <span className="min-w-0 truncate">
-        {prefix ? <span className="font-normal text-[#3a3a3a]">{prefix} </span> : null}
+        {prefix ? <span className={`font-normal ${metaColor}`}>{prefix} </span> : null}
         <strong
           className={
             underline
-              ? "font-semibold text-[#1a1a1a] underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]"
-              : "font-semibold text-[#1a1a1a]"
+              ? `font-semibold ${labelColor} underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]`
+              : `font-semibold ${labelColor}`
           }
         >
           {label}
         </strong>
-        {suffix ? <span className="font-normal text-[#3a3a3a]">{suffix}</span> : null}
+        {suffix ? <span className={`font-normal ${metaColor}`}>{suffix}</span> : null}
+        {cue ? <span className="font-normal italic text-[#9a958a]">{cue}</span> : null}
       </span>
     </>
   );
@@ -312,9 +343,11 @@ export function MatchAwareReason({
 }
 
 /**
- * #1366 follow-up — the honesty note shown inside a HOLLOW-dot "Also matched" row's
- * expanded panel: the match is a literal text mention, not a curated tag (the dot's
- * hollowness made visible in words). The win the flat co-equal stack lacked.
+ * #1366 follow-up — the honesty note shown inside a literal-MENTION "Also matched"
+ * row's expanded panel: the match is a text mention, not a curated tag. Dots are now
+ * always FILLED in the category color, so strength is carried by the muted/italic
+ * text — this note does the honesty work the (dropped) hollow dot used to. The win
+ * the flat co-equal stack lacked.
  */
 export function MentionNote() {
   return (
@@ -325,12 +358,13 @@ export function MentionNote() {
 }
 
 /**
- * #1366 follow-up — a compact "Also matched" row: a small dot (FILLED for a curated
- * tag, HOLLOW for a literal keyword mention), a muted label, an abbreviated "· N of
- * M" count, and the same chevron disclosure. The visually-subordinate sibling of
- * {@link MatchReason}/{@link MatchAwareReason}: the ONE primary signal keeps its full
- * badge, the rest demote here (tiered card, handoff Part 1). `dotClassName` carries
- * the per-kind color (filled ⇒ `bg-…`, hollow ⇒ `border-…`) so this stays dumb.
+ * #1366 follow-up — a compact "Also matched" row: a small FILLED dot in the category
+ * color, a muted label, an abbreviated "· N of M" count, and the same chevron
+ * disclosure. The visually-subordinate sibling of {@link MatchReason}/
+ * {@link MatchAwareReason}: the ONE primary signal keeps its full badge, the rest
+ * demote here (tiered card, handoff Part 1). `dotClassName` carries the per-kind
+ * FILLED color (`bg-…`); a literal-mention row's weakness is carried by `weak`
+ * (muted/italic text) + the {@link MentionNote}, never by the dot fill.
  */
 export function LesserReason({
   dotClassName,
@@ -402,6 +436,8 @@ export function RepresentativePapers({
   panelId,
   fallback,
   mentionNote = false,
+  panelLabel,
+  panelSubtitle,
 }: {
   papers: EvidencePub[];
   total: number;
@@ -409,8 +445,18 @@ export function RepresentativePapers({
   status?: ExemplarFetchStatus;
   panelId?: string;
   /** #1366 follow-up — prepend the "text mention, not a curated tag" honesty note
-   *  (hollow-dot lesser rows). */
+   *  (literal-mention lesser rows). */
   mentionNote?: boolean;
+  /** #1366 follow-up Part A — the panel header (the honesty relabel). The caller
+   *  (`EvidenceLine`) derives it from the line kind: method/publications →
+   *  "Matching publications"; topic → "Representative papers". Omitted ⇒ the legacy
+   *  singular/plural "Key paper(s)" (the chevron-as-count semantics, still used by
+   *  the direct-component callers). */
+  panelLabel?: string;
+  /** #1366 follow-up Part A — an italic, muted clarifying line under the header
+   *  (the research-area panel: "top papers in this area — not matched to your
+   *  search"). Omitted ⇒ no subtitle. */
+  panelSubtitle?: string;
   /** When a method/topic exemplar fetch resolves with NO renderable paper (rare —
    *  every family/topic pub is suppressed or non-renderable), degrade to this
    *  profile-section link instead of retracting the chevron into a dead control;
@@ -449,7 +495,10 @@ export function RepresentativePapers({
     <div id={panelId} className="mt-1.5 pl-[1px]">
       {mentionNote ? <MentionNote /> : null}
       <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
-        {papers.length === 1 ? "Key paper" : "Key papers"}
+        {/* #1366 follow-up Part A — honesty relabel: the caller-supplied header
+            ("Matching publications" / "Representative papers") replaces the legacy
+            "Key paper(s)" string, which stays as the singular/plural fallback. */}
+        {panelLabel ?? (papers.length === 1 ? "Key paper" : "Key papers")}
         {/* Matching count: "3 of 8" when the list is truncated (mirrors the "+N more"
             link), else the bare total. normal-case so "of" isn't shouted in the caps
             label. `total` is the matching N already passed for the "+N more" link. */}
@@ -457,6 +506,9 @@ export function RepresentativePapers({
           {more > 0 ? `${papers.length} of ${total}` : total}
         </span>
       </div>
+      {panelSubtitle ? (
+        <div className="mt-0.5 text-[11px] italic leading-snug text-[#9a958a]">{panelSubtitle}</div>
+      ) : null}
       <ul className="mt-1 flex flex-col gap-1.5 text-[13px] leading-snug">
         {papers.map((p) => (
           // Bullet + hanging indent: the dot is its own flex item, so a title that

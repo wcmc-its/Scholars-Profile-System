@@ -358,7 +358,7 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     expect(screen.getByText(/Pediatric trial/)).toBeTruthy();
   });
 
-  it("a single stacked line with grants still shows the 'Also matched' Funding dot", async () => {
+  it("#1366 follow-up Part D — a lone secondary (just the demoted Funding row) DROPS the 'Also matched' header", async () => {
     mockFetch(oneGrant);
     render(
       <PeopleResultCard
@@ -372,6 +372,20 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
       />,
     );
     await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
-    expect(screen.getByText("Also matched")).toBeTruthy();
+    // ONE secondary (the funding dot; the method badge is the primary) ⇒ the header
+    // is noise and is dropped...
+    expect(screen.queryByText("Also matched")).toBeNull();
+    // ...but the lone secondary still renders as a compact dot row under the divider.
+    expect(screen.getByText(/mentions\s*“diabetes”/)).toBeTruthy();
+  });
+
+  it("#1366 follow-up Part C — the demoted funding MENTION dot is FILLED green (bg-[#2f6b3a]), not bordered", async () => {
+    mockFetch(oneGrant);
+    const { container } = render(<PeopleResultCard {...base} evidenceRows hit={stackedHit()} />);
+    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
+    const dots = Array.from(container.querySelectorAll("span.rounded-full")).map((d) => d.className);
+    // the funding dot is filled green; no dot uses the old hollow bordered-green style.
+    expect(dots.some((c) => c.includes("bg-[#2f6b3a]"))).toBe(true);
+    expect(dots.some((c) => c.includes("border-[#2f6b3a]"))).toBe(false);
   });
 });

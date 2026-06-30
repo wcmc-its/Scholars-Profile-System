@@ -326,8 +326,9 @@ export function PeopleResultCard({
   // #1366 follow-up — Funding rendered ONCE in the slot its tier dictates: the full
   // badge when it leads (promoted, or the legacy non-tiered path), else a compact
   // "Also matched" dot row. Same KeyFunding panel + expand state across tiers. #1359 —
-  // concept-tagged grants read "tagged <Concept>" (filled dot / underline); a literal
-  // text match reads "mention '<query>'" (hollow dot / honesty note).
+  // concept-tagged grants read "tagged <Concept>" (underlined term); a literal text
+  // match reads "mention '<query>'" (the honesty note). The dot is always FILLED green
+  // (Part C); strength is carried by the muted/italic text, not the dot fill.
   const fundingTagged = grantsStrength === "tagged" && grantConceptLabel.length > 0;
   // Full badge unless we're in the tiered (stacked) context and funding isn't promoted —
   // then it's a compact "Also matched" dot. The single-evidence / legacy paths (not
@@ -350,7 +351,9 @@ export function PeopleResultCard({
           />
         ) : (
           <LesserReason
-            dotClassName={fundingTagged ? "bg-[#2f6b3a]" : "border-[1.5px] border-[#2f6b3a]"}
+            // #1366 follow-up Part C — dot is always FILLED green; a literal mention's
+            // weakness is carried by `weak` (muted/italic text) + the MentionNote.
+            dotClassName="bg-[#2f6b3a]"
             weak={!fundingTagged}
             suffix={` · ${fundingCount}`}
             canExpand
@@ -374,6 +377,13 @@ export function PeopleResultCard({
         ) : null}
       </>
     ) : null;
+
+  // #1366 follow-up Part D — the "Also matched" group = the demoted stacked lines
+  // (everything after the primary) plus the (demoted) Funding row. The header is a
+  // grouping affordance: with a SINGLE secondary row it's noise, so drop it and show
+  // the row bare under the divider; keep it for two or more.
+  const lesserLines = lines ? lines.slice(1) : [];
+  const secondaryCount = lesserLines.length + (grants.length > 0 ? 1 : 0);
 
   return (
     <div className="group relative grid grid-cols-[56px_1fr_auto] gap-4 border-b border-[#e3e2dd] py-5 hover:bg-[#fafaf8]">
@@ -425,6 +435,7 @@ export function PeopleResultCard({
                 hasQuery={hasQuery}
                 badged={evidenceRows}
                 claimedPmids={claimedPmids}
+                stacked={stacked}
                 tier="primary"
               />
             ) : (
@@ -432,11 +443,15 @@ export function PeopleResultCard({
             )}
             {/* "Also matched" — the demoted signals, under a dashed divider. Only the
                 STACKED (`evidenceLines`) context tiers; shown when there is ≥1 lesser
-                line or a (demoted) Funding row. */}
-            {stacked && lines && (lines.length > 1 || grants.length > 0) ? (
+                line or a (demoted) Funding row. Part D — the "Also matched" HEADER is
+                dropped when there's a single secondary row (header for one row is
+                noise); the divider + row(s) still render. */}
+            {stacked && lines && secondaryCount >= 1 ? (
               <div className="mt-3 border-t border-dashed border-[#e3e2dd] pt-2.5">
-                <div className="mb-0.5 text-[11px] font-medium text-[#9a958a]">Also matched</div>
-                {lines.slice(1).map((ev, i) => (
+                {secondaryCount >= 2 ? (
+                  <div className="mb-0.5 text-[11px] font-medium text-[#9a958a]">Also matched</div>
+                ) : null}
+                {lesserLines.map((ev, i) => (
                   <EvidenceLine
                     key={i + 1}
                     evidence={ev}
@@ -448,6 +463,7 @@ export function PeopleResultCard({
                     hasQuery={hasQuery}
                     badged={evidenceRows}
                     claimedPmids={claimedPmids}
+                    stacked={stacked}
                     tier="lesser"
                   />
                 ))}

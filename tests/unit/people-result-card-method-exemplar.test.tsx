@@ -221,6 +221,7 @@ describe("EvidenceLine — #1366 follow-up: de-dup empty-resolve drops the chevr
         hasQuery
         badged
         claimedPmids={claimed}
+        stacked
         tier="lesser"
       />,
     );
@@ -248,6 +249,7 @@ describe("EvidenceLine — #1366 follow-up: de-dup empty-resolve drops the chevr
         hasQuery
         badged
         claimedPmids={claimed}
+        stacked
         tier="primary"
       />,
     );

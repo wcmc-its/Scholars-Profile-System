@@ -3,11 +3,17 @@
  * render per kind, plus the E2 areas treatment and the DOM-level guardrails
  * (no raw slug leaks; bounded list).
  */
-import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ResultEvidence } from "@/components/search/result-evidence";
 import { RepresentativePapers } from "@/components/search/match-reason";
+import { EvidenceLine } from "@/components/search/evidence-line";
 import type { ResultEvidence as Evidence } from "@/lib/api/result-evidence";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 const renderEv = (evidence: Evidence, slug?: string) =>
   render(<ResultEvidence evidence={evidence} slug={slug} />);
@@ -429,7 +435,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
     expect(dotOf(container)?.className).toMatch(/bg-\[#2c4f6e\]/);
   });
 
-  it("publications:mention lesser ⇒ a HOLLOW (bordered) dot + 'Keyword'", () => {
+  it("publications:mention lesser ⇒ a FILLED grey dot + 'Keyword' (Part C — no hollow dot)", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "publications", strength: "mention", text: "x", term: "crispr", count: 2 }}
@@ -438,8 +444,10 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
       />,
     );
     expect(container.textContent).toMatch(/Keyword/);
-    expect(dotOf(container)?.className).toMatch(/border-\[1\.5px\]/); // hollow = literal mention
-    expect(dotOf(container)?.className).not.toMatch(/bg-\[#/);
+    // #1366 follow-up Part C — the mention dot is now FILLED grey (strength carried by
+    // the muted/italic text + the MentionNote), NOT a hollow bordered dot.
+    expect(dotOf(container)?.className).toMatch(/bg-\[#52525b\]/);
+    expect(dotOf(container)?.className).not.toMatch(/border-\[1\.5px\]/);
   });
 
   it("publications:tagged lesser ⇒ a FILLED dot + 'Concept'", () => {
@@ -512,5 +520,213 @@ describe("<ResultEvidence> — #1366 count suffix (method / research area)", () 
       />,
     );
     expect(container.textContent).not.toMatch(/of 41 publications/);
+  });
+});
+
+describe("<RepresentativePapers> — #1366 follow-up Part A panel relabeling", () => {
+  const PAPERS = [
+    { pmid: "1", title: "First paper", year: 2024 },
+    { pmid: "2", title: "Second paper", year: 2023 },
+  ];
+
+  it("renders the caller-supplied panelLabel in place of the legacy 'Key papers'", () => {
+    render(
+      <RepresentativePapers
+        papers={PAPERS}
+        total={2}
+        profileHref="/p/x#publications"
+        panelLabel="Matching publications"
+      />,
+    );
+    expect(screen.getByText("Matching publications")).toBeTruthy();
+    expect(screen.queryByText("Key papers")).toBeNull();
+  });
+
+  it("renders the italic muted subtitle when panelSubtitle is set (research-area panel)", () => {
+    render(
+      <RepresentativePapers
+        papers={PAPERS}
+        total={2}
+        profileHref="/p/x#publications"
+        panelLabel="Representative papers"
+        panelSubtitle="top papers in this area — not matched to your search"
+      />,
+    );
+    expect(screen.getByText("Representative papers")).toBeTruthy();
+    const sub = screen.getByText(/not matched to your search/i);
+    expect(sub.className).toMatch(/italic/);
+  });
+
+  it("omits the subtitle by default (method / publications panels)", () => {
+    const { container } = render(
+      <RepresentativePapers
+        papers={PAPERS}
+        total={2}
+        profileHref="/p/x#publications"
+        panelLabel="Matching publications"
+      />,
+    );
+    expect(container.textContent).not.toMatch(/not matched to your search/);
+  });
+
+  it("still falls back to the legacy singular/plural 'Key paper(s)' when no panelLabel", () => {
+    const { rerender } = render(
+      <RepresentativePapers papers={PAPERS} total={2} profileHref="/p/x#publications" />,
+    );
+    expect(screen.getByText("Key papers")).toBeTruthy();
+    rerender(<RepresentativePapers papers={[PAPERS[0]]} total={1} profileHref="/p/x#publications" />);
+    expect(screen.getByText("Key paper")).toBeTruthy();
+  });
+});
+
+describe("<EvidenceLine> — #1366 follow-up Part A derives the panel header from kind", () => {
+  function mockFetch(payload: unknown) {
+    const fn = vi.fn().mockResolvedValue({ ok: true, json: async () => payload });
+    vi.stubGlobal("fetch", fn);
+    return fn;
+  }
+  function renderLine(evidence: Evidence) {
+    const claimedPmids = { current: new Set<string>() };
+    return render(
+      <EvidenceLine
+        evidence={evidence}
+        cwid="abc1234"
+        slug="jane-doe"
+        pubCount={50}
+        q="x"
+        keyPaperConfig={null}
+        hasQuery
+        badged
+        claimedPmids={claimedPmids}
+        stacked
+        tier="primary"
+      />,
+    );
+  }
+
+  it("publications (inline pubs) → 'Matching publications', no subtitle", () => {
+    renderLine({
+      kind: "publications",
+      strength: "tagged",
+      text: "10 of 50 publications tagged Melanoma",
+      count: 10,
+      pubs: [{ pmid: "1", title: "A paper", year: 2024 }],
+    });
+    fireEvent.click(screen.getByRole("button"));
+    expect(screen.getByText("Matching publications")).toBeTruthy();
+    expect(screen.queryByText(/not matched to your search/)).toBeNull();
+  });
+
+  it("topic → 'Representative papers' + the 'not matched to your search' subtitle", async () => {
+    mockFetch({ pubs: [{ pmid: "1", title: "Top area paper", year: 2024 }], total: 1 });
+    renderLine({ kind: "topic", label: "Stem Cell Biology", id: "stem", count: 10 });
+    fireEvent.click(screen.getByRole("button"));
+    await waitFor(() => expect(screen.getByText("Representative papers")).toBeTruthy());
+    expect(screen.getByText(/not matched to your search/i)).toBeTruthy();
+  });
+
+  it("single-evidence (stacked=false) keeps the legacy 'Key papers' header, not the relabel", () => {
+    const claimedPmids = { current: new Set<string>() };
+    render(
+      <EvidenceLine
+        evidence={{
+          kind: "publications",
+          strength: "tagged",
+          text: "10 of 50 publications tagged Melanoma",
+          count: 10,
+          pubs: [{ pmid: "1", title: "A paper", year: 2024 }],
+        }}
+        cwid="abc1234"
+        slug="jane-doe"
+        pubCount={50}
+        q="x"
+        keyPaperConfig={null}
+        hasQuery
+        badged
+        claimedPmids={claimedPmids}
+        stacked={false}
+        tier="primary"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button"));
+    // legacy fallback is count-aware; one inline pub → singular "Key paper".
+    expect(screen.getByText("Key paper")).toBeTruthy();
+    expect(screen.queryByText("Matching publications")).toBeNull();
+  });
+});
+
+describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the primary lead", () => {
+  it("a low-coverage method primary (<2%) gets a '% of output' cue and is dimmed", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "Mass spectrometry", tools: [], count: 1 }}
+        pubCount={538}
+        stacked
+      />,
+    );
+    // 1/538 = 0.19% → fires; the family label drops from near-black to muted grey.
+    expect(container.textContent).toMatch(/· 0\.2% of output/);
+    expect(screen.getByText("Mass spectrometry").className).toMatch(/text-\[#9a958a\]/);
+  });
+
+  it("a coverage that rounds below 0.1% displays '<0.1% of output'", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "Imaging mass cytometry", tools: [], count: 1 }}
+        pubCount={3000}
+        stacked
+      />,
+    );
+    expect(container.textContent).toMatch(/<0\.1% of output/);
+  });
+
+  it("a keyword-only primary gets 'term match only', stays dimmed, KEEPS the Keyword pill, and never stacks the coverage cue", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "mention",
+          text: "1 of 538 publications mention",
+          term: "crispr",
+          count: 1,
+        }}
+        pubCount={538}
+        stacked
+        badged
+      />,
+    );
+    expect(screen.getByText("Keyword")).toBeTruthy(); // the flavor pill is retained
+    expect(container.textContent).toMatch(/· term match only/);
+    // precedence: keyword-only wins; the low-coverage cue is NOT also appended.
+    expect(container.textContent).not.toMatch(/% of output/);
+    // dim: the reason text drops to muted grey (the term span inherits it).
+    expect(screen.getByText("crispr").parentElement?.className).toMatch(/text-\[#9a958a\]/);
+  });
+
+  it("a normal-coverage primary shows NEITHER cue and is NOT dimmed", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "Flow cytometry", tools: [], count: 4 }}
+        pubCount={98}
+        stacked
+      />,
+    );
+    // 4/98 = 4.1% ≥ 2% → no cue; the label stays near-black.
+    expect(container.textContent).not.toMatch(/of output/);
+    expect(screen.getByText("Flow cytometry").className).toMatch(/text-\[#1a1a1a\]/);
+    expect(screen.getByText("Flow cytometry").className).not.toMatch(/text-\[#9a958a\]/);
+  });
+
+  it("the single-evidence path (stacked omitted) shows NO cue and is NOT dimmed, even at low coverage", () => {
+    // Same 1/538 = 0.19% lead as the first test, but without `stacked` → the cue is
+    // gated off so the single-evidence render stays visually frozen (matches C/D).
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "Mass spectrometry", tools: [], count: 1 }}
+        pubCount={538}
+      />,
+    );
+    expect(container.textContent).not.toMatch(/of output/);
+    expect(screen.getByText("Mass spectrometry").className).not.toMatch(/text-\[#9a958a\]/);
   });
 });

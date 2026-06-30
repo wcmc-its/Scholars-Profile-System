@@ -34,6 +34,7 @@ export function EvidenceLine({
   hasQuery,
   badged,
   claimedPmids,
+  stacked,
   tier = "primary",
 }: {
   evidence: ResultEvidenceT;
@@ -46,6 +47,11 @@ export function EvidenceLine({
   badged: boolean;
   /** Shared across a card's stacked lines for exemplar de-dup. */
   claimedPmids: MutableRefObject<Set<string>>;
+  /** #1366 follow-up — true only in the tiered (`evidenceLines`) context. Parts A/B
+   *  (panel relabel + relevance cues) are scoped to it so the single-evidence path
+   *  keeps the legacy "Key paper(s)" header + no cues, matching the `stacked`-gated
+   *  C/D tiering. */
+  stacked: boolean;
   /** #1366 follow-up — "primary" = the prominent lead line; "lesser" = a compact
    *  "Also matched" dot row. Only restyles the summary row; the disclosure panel,
    *  lazy fetch, and de-dup are identical across tiers. */
@@ -187,6 +193,20 @@ export function EvidenceLine({
         ? { href: profilePath(slug), label: "View their research areas" }
         : undefined;
 
+  // #1366 follow-up Part A — the honesty relabel: method/publications exemplars ARE
+  // the query match → "Matching publications"; the research-area panel lists the
+  // scholar's top papers IN that area (not matched to the query), so it reads
+  // "Representative papers" + a clarifying subtitle. Scoped to the tiered (`stacked`)
+  // context — the single-evidence path keeps the legacy "Key paper(s)" header.
+  const isTopicPanel = evidence.kind === "topic";
+  const panelLabel = !stacked
+    ? undefined
+    : isTopicPanel
+      ? "Representative papers"
+      : "Matching publications";
+  const panelSubtitle =
+    stacked && isTopicPanel ? "top papers in this area — not matched to your search" : undefined;
+
   return (
     <>
       <ResultEvidence
@@ -199,6 +219,7 @@ export function EvidenceLine({
         slug={slug}
         badged={badged}
         pubCount={pubCount}
+        stacked={stacked}
         tier={tier}
       />
       {expanded && canExpand ? (
@@ -209,7 +230,9 @@ export function EvidenceLine({
           status={isLazyExemplar ? exemplarStatus : wantsLazyKeyPaper ? keyPaperStatus : "done"}
           panelId={panelId}
           fallback={exemplarFallback}
-          // #1366 follow-up — the honesty note only on a hollow-dot lesser mention row.
+          panelLabel={panelLabel}
+          panelSubtitle={panelSubtitle}
+          // #1366 follow-up — the honesty note only on a literal-mention lesser row.
           mentionNote={
             tier === "lesser" &&
             evidence.kind === "publications" &&
