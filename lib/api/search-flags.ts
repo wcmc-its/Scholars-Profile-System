@@ -818,6 +818,25 @@ export function resolveSearchResultEvidence(): boolean {
 }
 
 /**
+ * #1366 — counted, STACKED evidence reason lines on the People card. When on
+ * (and `SEARCH_RESULT_EVIDENCE` is on), `searchPeople` emits `evidenceLines` (an
+ * ordered list) instead of a single `evidence`: method, a tagged-concept match,
+ * and the matched research area each appear as their own line — each prefixed
+ * with "N of M publications" — with keyword as the fallback and clinical as an
+ * independent label-only line. Flag-OFF ⇒ no `evidenceLines`, the single
+ * `evidence` field is unchanged, and the card render is byte-identical to today.
+ *
+ * App-only EXCEPT the method count, which reads the precomputed people-doc
+ * `methodFamilyCounts` (a reindex populates it; a not-yet-reindexed doc simply
+ * shows no method count — graceful). Default OFF (`=== "on"` opt-in), STAGING-
+ * FIRST. Wired per-env in `cdk/lib/app-stack.ts` (staging-on / prod-off);
+ * enabling in prod is the operator `cdk deploy` step.
+ */
+export function resolveSearchEvidenceReasonCounts(): boolean {
+  return process.env.SEARCH_EVIDENCE_REASON_COUNTS === "on";
+}
+
+/**
  * Generalized evidence rows on the scholar search card — surfaces a scholar's
  * topic-matching grants as a "Funding" disclosure row (`[Funding badge] claim ⌄ →
  * Key funding`) and badges the publications flavor (Research area / Concept /

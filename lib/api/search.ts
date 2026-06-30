@@ -102,15 +102,18 @@ import {
   resolveSearchPeopleClinical,
   resolveSearchPeopleConceptHint,
   resolveSearchResultEvidence,
+  resolveSearchEvidenceReasonCounts,
   type PubRecencyMode,
   type Scope,
 } from "@/lib/api/search-flags";
 import {
   selectEvidence,
+  selectEvidenceLines,
   refineExemplarTools,
   clinicalExactMatch,
   AREAS_CAP,
   type ResultEvidence,
+  type SelectEvidenceInput,
 } from "@/lib/api/result-evidence";
 // Issue #309 / SPEC §6.1.2 — the classifier's shape enum (cwid / name / …),
 // distinct from the OS-body `PeopleQueryShape` telemetry label below. Aliased
@@ -288,6 +291,14 @@ export type PeopleHit = {
    * card falls back to that legacy chain (today's behavior). Serializable.
    */
   evidence?: ResultEvidence;
+  /**
+   * #1366 — the STACKED evidence lines (method / concept / research-area as
+   * first-class peers, each "N of M publications"; keyword fallback; clinical an
+   * independent label-only line). Present INSTEAD of `evidence` only when
+   * `SEARCH_EVIDENCE_REASON_COUNTS` is on; the card renders the list. Absent ⇒
+   * the single `evidence` (or the legacy chain) drives the card. Serializable.
+   */
+  evidenceLines?: ResultEvidence[];
 };
 
 /**
@@ -1409,6 +1420,10 @@ export async function searchPeople(opts: {
   // emits the single typed `evidence` object per hit and bumps the overview
   // highlight fragment_size for the Case-D sentence trim.
   const resultEvidence = resolveSearchResultEvidence();
+  // #1366 — counted, STACKED evidence reason lines. Only meaningful under
+  // `resultEvidence` (the evidence object is only built then); when on, the hit
+  // carries `evidenceLines` (a list) instead of the single `evidence`.
+  const reasonCountsStacked = resultEvidence && resolveSearchEvidenceReasonCounts();
   // People-tab "concepts" hint — when on, the evidence TAIL surfaces the
   // scholar's top MeSH descriptors (`topMeshTerms`) instead of the sparse
   // self-reported areas. Only relevant under `resultEvidence` (the evidence
@@ -2419,6 +2434,12 @@ export async function searchPeople(opts: {
       // path keeps today's `_source` shape. The count is then an O(1) `_source`
       // lookup instead of a publications-index agg.
       ...(reasonFromDoc && opts.skipReasonAgg !== true ? ["meshSubtreeCounts"] : []),
+      // #1366 — the precomputed reason-line counts (method family + research
+      // area), requested ONLY when the stacked-lines flag is on so the off path
+      // keeps today's `_source` shape. Both are O(1) `_source` lookups (no agg).
+      ...(reasonCountsStacked && opts.skipReasonAgg !== true
+        ? ["methodFamilyCounts", "areaCounts"]
+        : []),
       // POPS clinical fields — the matchable specialty set + the board-cert-only
       // subset (for the `boardCertified` label), requested ONLY when
       // SEARCH_PEOPLE_CLINICAL is on so the off path keeps today's `_source`
@@ -2548,6 +2569,12 @@ export async function searchPeople(opts: {
       // count is `meshSubtreeCounts[resolvedConceptUi] ?? 0`; a not-yet-reindexed
       // doc lacks the field and degrades to 0 (concept fallback), never a 500.
       meshSubtreeCounts?: Record<string, number>;
+      // #1366 — precomputed reason-line counts. `methodFamilyCounts[familyLabel]`
+      // + `areaCounts[parentTopicSlug]` = distinct on-topic pub counts, read O(1).
+      // Present only when SEARCH_EVIDENCE_REASON_COUNTS is on (added to `_source`
+      // above); a not-yet-reindexed doc lacks them → no count, never a 500.
+      methodFamilyCounts?: Record<string, number>;
+      areaCounts?: Record<string, number>;
       // POPS clinical specialty set + board-cert-only subset (omit-on-empty in
       // the ETL). Present only when SEARCH_PEOPLE_CLINICAL is on (added to
       // `_source` above); feed `clinicalExactMatch` for the `clinical:exact`
@@ -2947,7 +2974,7 @@ export async function searchPeople(opts: {
   // called when `resultEvidence` is on (and then `matchAwareContext` is set, so
   // method/topic/areas are derived). Keyed `hl` (NOT the flattened `highlight`)
   // is required so name vs affiliation can be told apart (handoff Edge G).
-  const resolveHitEvidence = (
+  const buildHitEvidenceInput = (
     cwid: string,
     areasOfInterest: string | undefined,
     pubCount: number,
@@ -2956,17 +2983,32 @@ export async function searchPeople(opts: {
     topMeshTerms: Array<{ ui: string | null; label: string }> | string[] | undefined,
     clinicalSpecialties: string[] | undefined,
     clinicalBoardSet: string[] | undefined,
-  ): ResultEvidence => {
+    // #1366 — doc-precomputed reason-line counts (O(1) lookups, no agg). Keyed by
+    // `familyLabel` / parent-topic slug. Only read by the stacked-lines path.
+    methodFamilyCounts: Record<string, number> | undefined,
+    areaCounts: Record<string, number> | undefined,
+  ): SelectEvidenceInput => {
     const hasProvenance = prov != null;
+    // #1366 — clamp a doc-precomputed count to the scholar total; drop 0/absent
+    // (a not-yet-reindexed doc has no map → no count → no prefix, gracefully).
+    const countOf = (n: number | undefined): number | undefined =>
+      n && n > 0 ? Math.min(n, pubCount) : undefined;
     const m = methodReasonByCwid.get(cwid);
-    let topic: { label: string; id: string } | undefined;
+    let topic: { label: string; id: string; count?: number } | undefined;
     if (matchedTopicSlugs.size > 0 && areasOfInterest) {
       const areaSlugs = areasOfInterest.trim().split(/\s+/).filter(Boolean);
       const hitSlug = areaSlugs.find((s) => matchedTopicSlugs.has(s));
       // `hitSlug` IS the parent-topic slug (= Topic.id = PublicationTopic
       // .parentTopicId) — carry it as `id` so the hover can resolve the
-      // scholar's representative paper in this topic.
-      if (hitSlug) topic = { label: topicLabelByMatchedSlug.get(hitSlug) ?? hitSlug, id: hitSlug };
+      // scholar's representative paper in this topic, and as the `areaCounts` key.
+      if (hitSlug) {
+        const areaCount = countOf(areaCounts?.[hitSlug]);
+        topic = {
+          label: topicLabelByMatchedSlug.get(hitSlug) ?? hitSlug,
+          id: hitSlug,
+          ...(areaCount != null ? { count: areaCount } : {}),
+        };
+      }
     }
 
     // Publication-evidence parts — tagged and mention split out so the
@@ -3048,10 +3090,17 @@ export async function searchPeople(opts: {
       ? clinicalExactMatch(contentQuery, clinicalSpecialties ?? [], clinicalBoardSet ?? [])
       : null;
 
-    return selectEvidence({
+    const methodCount = m ? countOf(methodFamilyCounts?.[m.family]) : undefined;
+    return {
       nameHighlight: hl?.preferredName?.[0],
       bioHighlight: hl?.overview?.[0],
-      method: m ? { family: m.family, tools: refineExemplarTools(m.family, m.rawTools) } : undefined,
+      method: m
+        ? {
+            family: m.family,
+            tools: refineExemplarTools(m.family, m.rawTools),
+            ...(methodCount != null ? { count: methodCount } : {}),
+          }
+        : undefined,
       topic,
       pub: Object.keys(pub).length > 0 ? pub : undefined,
       clinical: clinical ?? undefined,
@@ -3060,7 +3109,7 @@ export async function searchPeople(opts: {
       query: contentQuery,
       areas,
       concepts,
-    });
+    };
   };
 
   return {
@@ -3124,8 +3173,8 @@ export async function searchPeople(opts: {
         // only under `SEARCH_RESULT_EVIDENCE`; when present the card renders it
         // via `<ResultEvidence>` and ignores the legacy fields above.
         ...(resultEvidence
-          ? {
-              evidence: resolveHitEvidence(
+          ? (() => {
+              const evInput = buildHitEvidenceInput(
                 h._source.cwid,
                 h._source.areasOfInterest,
                 h._source.publicationCount,
@@ -3134,8 +3183,15 @@ export async function searchPeople(opts: {
                 h._source.topMeshTerms,
                 h._source.clinicalSpecialties,
                 h._source.clinicalBoardSet,
-              ),
-            }
+                h._source.methodFamilyCounts,
+                h._source.areaCounts,
+              );
+              // #1366 — flag on ⇒ the stacked list; off ⇒ today's single object
+              // (byte-identical, `selectEvidenceLines` is never called).
+              return reasonCountsStacked
+                ? { evidenceLines: selectEvidenceLines(evInput) }
+                : { evidence: selectEvidence(evInput) };
+            })()
           : {}),
       };
     }),
