@@ -51,6 +51,27 @@ scholars moved and how the per-query `MRR` / `top20` changed. `JSON_OUT=run.json
 - **medianRank** — median rank of the found expected scholars.
 - **MRR** — mean reciprocal rank over the expected list (1.0 = all at #1; rewards top placement). Watch `OVERALL meanMRR` as the single headline number.
 
+## Archetype labels (per-expected-scholar)
+
+Each `expected` entry is either a bare regex (legacy) or an object
+`{re, cwid, arch}`. `cwid` enables **exact** matching (robust to namesakes — e.g.
+"Igel" vs "N*igel*"); `arch` is a data-derived **archetype** so `eval.sh` can break
+the scorecard down per archetype (the lever that lifts one archetype often can't move
+another, so a mixed average hides it):
+
+- **clinician-expert** — expertise lives in clinical/POPS signal; non-anchor-heavy. Lever: clinical fields (`SEARCH_PEOPLE_CLINICAL`).
+- **research-pi** — anchor-heavy (first/last) senior author; pub signal carries them.
+- **methods-scientist** — high-N middle author, no clinical signal; prone to BM25 term-dilution + length-norm suppression (e.g. C. Mason, a 468-pub genomics PI, is `#MISS` on CRISPR). Lever: authorship-expertise restructure — **with** a `1/√N` double-suppression guardrail.
+
+Two-axis rule (reproducible): `anchor≥50 → research-pi`; else `clinSpec>0 → clinician-expert`;
+else `avgN≥8 → methods-scientist`; else `research-specialist`. Authorship mix is from the
+`publication_author` table; clinical-field presence from the staging people-index. **Labels
+are data-derived and pending domain-expert review** — borderline physician-scientists carry a
+`clinician-but-high-N` / `clinician-scientist` flag in the build's review table.
+
+`{"re": ..., "status": "absent-from-index"}` marks an expected scholar **not present in the
+people index at all** (a recall gap, not a ranking one) — it always scores `MISS`.
+
 ## Knobs (env vars)
 
 | var | default | use |
