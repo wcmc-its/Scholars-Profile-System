@@ -580,6 +580,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_MESH_QUERY_NORMALIZATION",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_ACRONYM_SENSE_GUARD",
+                "Value": "off",
+              },
+              {
                 "Name": "COAUTHOR_HIDDEN_STUDENT_CHIPS",
                 "Value": "off",
               },
@@ -3926,6 +3934,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_MESH_RESOLUTION_FALLBACK",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_MESH_QUERY_NORMALIZATION",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_ACRONYM_SENSE_GUARD",
                 "Value": "on",
               },
               {

@@ -925,6 +925,39 @@ export function resolveMeshResolutionFallbackEnabled(): boolean {
 }
 
 /**
+ * #1342 — query-side morphology retry. When ON, `resolveMeshDescriptor`, after the
+ * exact name / entry-term / curated-alias lookup misses, retries the SINGULARIZED
+ * query ({@link singularizeForMatch}: "melanomas" → "melanoma") against the same
+ * index and, on a hit, returns the descriptor at the low `partial` confidence tier.
+ * Closes the inflection tail (plurals/possessives whose singular base is already an
+ * index key) and makes future curated aliases robust to plural/possessive variants.
+ *
+ * Default OFF (`=== "on"` opt-in): flag-off leaves `resolveMeshDescriptor`
+ * byte-identical (the singularize branch is never entered). Resolve-time only — no
+ * reindex. NOTE: the headline lay-term wins (diabetes/alzheimer's) ALSO need the
+ * #1258 alias rows; a singularizer cannot bridge derivational or single→multi-word.
+ */
+export function resolveMeshQueryNormalizationEnabled(): boolean {
+  return process.env.SEARCH_MESH_QUERY_NORMALIZATION === "on";
+}
+
+/**
+ * #1346 — acronym wrong-sense guard. When ON, `resolveMeshDescriptor` suppresses a
+ * short all-caps acronym query (e.g. CAR, PET) that resolved ONLY via a common-word
+ * entry-term synonym whose matched form is a plain Title-case word (CAR → "Car" →
+ * Automobiles, PET → "Pet" → Pets). Such a match is the wrong (non-medical) sense on
+ * a medical-center search; returning null drops the query to BM25, exactly like the
+ * already-safe 2-char acronyms (MS/CD).
+ *
+ * Default OFF (`=== "on"` opt-in): flag-off is byte-identical. Internal-caps acronym
+ * entry terms (COPD/EHR/PCR) and exact descriptor-NAME matches (DNA/RNA, confidence
+ * `exact`) are kept — the discriminator is "matched form has no uppercase past char 0".
+ */
+export function resolveAcronymSenseGuardEnabled(): boolean {
+  return process.env.SEARCH_ACRONYM_SENSE_GUARD === "on";
+}
+
+/**
  * POPS clinical specialty search — People-tab ranking boost + clinical:exact
  * evidence kind. When on, the people query adds `clinicalSpecialties` and
  * `clinicalExpertise` to the multi_match boost ladder so a specialty query
