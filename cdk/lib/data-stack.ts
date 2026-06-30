@@ -93,15 +93,30 @@ export class DataStack extends Stack {
       ec2.Port.tcp(3306),
       "ETL Lambdas to Aurora writer/reader endpoints",
     );
-    // ETL cadence VPC relocation (docs/etl-vpc-migration-handoff.md): once the
-    // cadence runs in scholars-dev/prod and peers back, those tasks reach
-    // Aurora from the peer CIDR, not the Sps ETL SG. Additive — the Sps-SG rule
-    // above stays for the reconcilers + curated backup that don't move.
-    if (envConfig.etlCadenceVpcRelocated) {
+    // ETL cadence VPC peering (docs/etl-vpc-migration-handoff.md, shared-VPC
+    // plan): once the peer is up, the relocated cadence reaches Aurora/OpenSearch
+    // from its per-env ETL SG in lts-reciter-vpc01 — referenced cross-VPC over
+    // the peer, NOT a CIDR (both envs share one CIDR space, so a CIDR rule could
+    // not tell staging from prod). Gated on etlVpcPeeringEnabled (NOT the
+    // relocation flag) so the ingress is present for the source-reach probe
+    // before the tasks move. Same account + region (G2/G1) → L2 SG reference by
+    // id, no owner id. Imported once and reused for both the Aurora (3306) and
+    // OpenSearch (443) rules; etl-stack imports the SAME id for task attachment
+    // (import-by-id, not create — avoids a data-stack ↔ etl-stack cycle).
+    // Additive — the Sps etl-SG rule above stays for the reconcilers + curated
+    // backup that do NOT move and reach Aurora from the local SG.
+    const etlComputeSgRef = envConfig.etlVpcPeeringEnabled
+      ? ec2.SecurityGroup.fromSecurityGroupId(
+          this,
+          "EtlComputeSgRef",
+          envConfig.etlComputeSecurityGroupId,
+        )
+      : undefined;
+    if (etlComputeSgRef) {
       auroraSecurityGroup.addIngressRule(
-        ec2.Peer.ipv4(envConfig.etlPeerCidr),
+        etlComputeSgRef,
         ec2.Port.tcp(3306),
-        "Relocated ETL cadence (scholars-dev/prod) to Aurora over the VPC peer",
+        `${envConfig.envName}-ETL-SG in lts-reciter-vpc01 → Aurora 3306 over the peer`,
       );
     }
     // The Secrets Manager RDS rotation Lambda's SG ingress is added by
@@ -128,13 +143,16 @@ export class DataStack extends Stack {
       ec2.Port.tcp(443),
       "ETL Lambdas to OpenSearch HTTPS (index writes + suggest)",
     );
-    // ETL cadence VPC relocation (see Aurora rule above): the relocated cadence
-    // writes the OpenSearch index from the peer CIDR.
-    if (envConfig.etlCadenceVpcRelocated) {
+    // ETL cadence VPC peering (see Aurora rule above): the relocated cadence
+    // writes the OpenSearch index from the same per-env ETL SG, referenced
+    // cross-VPC over the peer. Reuses etlComputeSgRef so both rules point at one
+    // imported SG construct. Gated on the peering flag so it's present for the
+    // probe before the tasks move.
+    if (etlComputeSgRef) {
       opensearchSecurityGroup.addIngressRule(
-        ec2.Peer.ipv4(envConfig.etlPeerCidr),
+        etlComputeSgRef,
         ec2.Port.tcp(443),
-        "Relocated ETL cadence (scholars-dev/prod) to OpenSearch over the VPC peer",
+        `${envConfig.envName}-ETL-SG in lts-reciter-vpc01 → OpenSearch 443 over the peer`,
       );
     }
 
