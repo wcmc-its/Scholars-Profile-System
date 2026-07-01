@@ -36,6 +36,7 @@ export function EvidenceLine({
   claimedPmids,
   stacked,
   tier = "primary",
+  defaultExpanded = false,
 }: {
   evidence: ResultEvidenceT;
   cwid: string;
@@ -47,6 +48,10 @@ export function EvidenceLine({
   badged: boolean;
   /** Shared across a card's stacked lines for exemplar de-dup. */
   claimedPmids: MutableRefObject<Set<string>>;
+  /** #1381 follow-up — mount this line already expanded (and kick its lazy fetch on
+   *  mount), so a LONE "Also matched" secondary reveals its records in one click on
+   *  the umbrella toggle rather than two. Default false ⇒ unchanged. */
+  defaultExpanded?: boolean;
   /** #1366 follow-up — true only in the tiered (`evidenceLines`) context. Parts A/B
    *  (panel relabel + relevance cues) are scoped to it so the single-evidence path
    *  keeps the legacy "Key paper(s)" header + no cues, matching the `stacked`-gated
@@ -57,7 +62,7 @@ export function EvidenceLine({
    *  lazy fetch, and de-dup are identical across tiers. */
   tier?: "primary" | "lesser";
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const panelId = useId();
 
   // method/topic resolve their representative papers LAZILY (on first expand). The
@@ -184,6 +189,16 @@ export function EvidenceLine({
     if (wantsLazyKeyPaper) ensureKeyPaper();
     setExpanded((v) => !v);
   }, [isLazyExemplar, ensureExemplar, wantsLazyKeyPaper, ensureKeyPaper]);
+
+  // #1381 follow-up — a lone secondary mounts pre-expanded (defaultExpanded); kick its
+  // lazy fetch on mount so the records are there for the single umbrella click.
+  useEffect(() => {
+    if (!defaultExpanded) return;
+    if (isLazyExemplar) ensureExemplar();
+    if (wantsLazyKeyPaper) ensureKeyPaper();
+    // Once, on mount — the toggle/fetch helpers are stable for a card line.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const profileHref = `${profilePath(slug)}#publications`;
   const exemplarFallback =

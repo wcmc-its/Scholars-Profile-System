@@ -383,7 +383,7 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     expect(screen.getByRole("button", { name: /key funding/i })).toBeTruthy();
   });
 
-  it("#1366 follow-up Part D — a lone secondary (just the demoted Funding row) DROPS the 'Also matched' header", async () => {
+  it("#1381 follow-up — a LONE secondary collapses under 'Also matched' and ONE click reveals its records", async () => {
     mockFetch(oneGrant);
     render(
       <PeopleResultCard
@@ -397,11 +397,46 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
       />,
     );
     await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
-    // ONE secondary (the funding dot; the method badge is the primary) ⇒ the header
-    // is noise and is dropped...
-    expect(screen.queryByText("Also matched")).toBeNull();
-    // ...but the lone secondary still renders as a compact dot row under the divider.
+    // ONE secondary (the funding dot; the method badge is the primary) still collapses
+    // under the "Also matched" umbrella — the summary shows, the detail is hidden.
+    expect(screen.getByRole("button", { name: /also matched/i })).toBeTruthy();
+    expect(screen.queryByText(/mentions\s*“diabetes”/)).toBeNull();
+    expect(screen.queryByText(/Pediatric trial/)).toBeNull();
+    // and there is NO separate inner "key funding" chevron — the umbrella is the sole
+    // control, so ONE click on it reveals the grant records directly.
+    expect(screen.queryByRole("button", { name: /key funding/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /also matched/i }));
     expect(screen.getByText(/mentions\s*“diabetes”/)).toBeTruthy();
+    expect(screen.getByText(/Pediatric trial/)).toBeTruthy();
+  });
+
+  it("#1381 follow-up — a lone LESSER LINE secondary also reveals its records in one click", async () => {
+    mockFetch({ grants: [], total: 0 });
+    render(
+      <PeopleResultCard
+        {...base}
+        evidenceRows
+        hit={makeHit({
+          grantCount: 0, // no funding ⇒ the sole secondary is the lesser pub line
+          evidenceLines: [
+            { kind: "method", family: "CRISPR genome editing", tools: [], count: 3 },
+            {
+              kind: "publications",
+              strength: "mention",
+              text: "2 of 100 publications mention",
+              count: 2,
+              pubs: [{ pmid: "1", title: "Inline lesser paper", year: 2020 }],
+            },
+          ] as PeopleHit["evidenceLines"],
+        })}
+      />,
+    );
+    // collapsed under "Also matched" (Keyword chip); the record is hidden until expand
+    const umbrella = await screen.findByRole("button", { name: /also matched/i });
+    expect(screen.queryByText(/Inline lesser paper/)).toBeNull();
+    // ONE click on the umbrella reveals the lesser line's records (mounted pre-expanded)
+    fireEvent.click(umbrella);
+    expect(screen.getByText(/Inline lesser paper/)).toBeTruthy();
   });
 
   it("#1366 follow-up Part C — the demoted funding MENTION dot is FILLED green (bg-[#16a34a]), not bordered", async () => {

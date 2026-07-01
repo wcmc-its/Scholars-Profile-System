@@ -251,6 +251,14 @@ export function PeopleResultCard({
       ? [hit.evidence]
       : undefined;
 
+  // #1366 follow-up Part D — the "Also matched" group = the demoted stacked lines
+  // (everything after the primary) plus the (demoted) Funding row. `singleSecondary`
+  // (exactly one) still collapses under "Also matched" (#1381 follow-up), but the
+  // umbrella toggle then expands straight to that secondary's records — one click.
+  const lesserLines = lines ? lines.slice(1) : [];
+  const secondaryCount = lesserLines.length + (grants.length > 0 ? 1 : 0);
+  const singleSecondary = secondaryCount === 1;
+
   // LEGACY priority chain — rendered ONLY when there are no stacked/single `lines`
   // (SEARCH_RESULT_EVIDENCE off). The `lines` path renders inline below with the
   // primary / "Also matched" tiering (#1366 follow-up, handoff Part 1).
@@ -357,6 +365,10 @@ export function PeopleResultCard({
   // stacked) keep the full Funding row exactly as before.
   const fundingFull = promoteFunding || !stacked;
   const fundingCount = `${Math.min(grantsTotal, hit.grantCount)} of ${hit.grantCount} grants`;
+  // #1381 follow-up — a lone demoted Funding secondary is the sole "Also matched" row:
+  // the umbrella toggle is its only control (no inner chevron) and the grant records
+  // render as soon as the group expands, so one click reveals funding.
+  const fundingLoneDemoted = !fundingFull && singleSecondary;
   const fundingNode =
     grants.length > 0 ? (
       <>
@@ -378,9 +390,11 @@ export function PeopleResultCard({
             dotClassName="bg-[#16a34a]"
             weak={!fundingTagged}
             suffix={` · ${fundingCount}`}
-            canExpand
-            expanded={fundingExpanded}
-            onToggle={() => setFundingExpanded((v) => !v)}
+            // Lone demoted secondary → no inner chevron; the "Also matched" umbrella is
+            // the sole control and the records show on its one click.
+            canExpand={!fundingLoneDemoted}
+            expanded={fundingLoneDemoted ? true : fundingExpanded}
+            onToggle={fundingLoneDemoted ? undefined : () => setFundingExpanded((v) => !v)}
             panelId={fundingPanelId}
             srLabel="key funding"
           >
@@ -397,7 +411,7 @@ export function PeopleResultCard({
             )}
           </LesserReason>
         )}
-        {fundingExpanded ? (
+        {fundingLoneDemoted || fundingExpanded ? (
           <KeyFunding
             grants={grants}
             total={grantsTotal}
@@ -408,13 +422,6 @@ export function PeopleResultCard({
         ) : null}
       </>
     ) : null;
-
-  // #1366 follow-up Part D — the "Also matched" group = the demoted stacked lines
-  // (everything after the primary) plus the (demoted) Funding row. The header is a
-  // grouping affordance: with a SINGLE secondary row it's noise, so drop it and show
-  // the row bare under the divider; keep it for two or more.
-  const lesserLines = lines ? lines.slice(1) : [];
-  const secondaryCount = lesserLines.length + (grants.length > 0 ? 1 : 0);
 
   // #1366 follow-up Part D collapse — colored dot + category label per secondary, NO
   // counts / NO entities: the counts mix denominators (pub-share vs grant-share), so a
@@ -451,6 +458,9 @@ export function PeopleResultCard({
           claimedPmids={claimedPmids}
           stacked={stacked}
           tier="lesser"
+          // A lone lesser secondary mounts pre-expanded so the "Also matched" umbrella
+          // reveals its records in one click (matches the lone-funding behavior).
+          defaultExpanded={singleSecondary}
         />
       ))}
       {grants.length > 0 ? fundingNode : null}
@@ -513,22 +523,18 @@ export function PeopleResultCard({
             ) : (
               legacyBlock
             )}
-            {/* "Also matched" — the demoted signals, under a dashed divider. Only the
-                STACKED (`evidenceLines`) context tiers; shown when there is ≥1 lesser
-                line or a (demoted) Funding row. Part D — the "Also matched" HEADER is
-                dropped when there's a single secondary row (header for one row is
-                noise); the divider + row(s) still render. */}
+            {/* "Also matched" — the demoted signals collapsed under one summary line.
+                Only the STACKED (`evidenceLines`) context tiers; shown when there is ≥1
+                lesser line or a (demoted) Funding row. A single secondary collapses the
+                same way (#1381 follow-up) and expands to its records in one click. */}
             {stacked && lines && secondaryCount >= 1 ? (
               // #1381 follow-up — trimmed 8px of vertical space above the "Also matched"
               // group (mt-[9px] → mt-[1px]) so the primary and secondaries sit tighter.
               <div className="mt-[1px] pt-[11px]">
-                {secondaryCount >= 2 ? (
-                  // Collapse hybrid — the "Also matched" group is one summary line by
-                  // default (colored dot + category label per secondary, no counts /
-                  // entities), expandable to the full lesser rows. The far-right chevron
-                  // (ml-auto) distinguishes this umbrella toggle from the primary's
-                  // content-width rep-papers chevron so they don't read as one control.
-                  <>
+                {/* Collapse hybrid — one summary line by default (colored dot + category
+                    label per secondary, no counts / entities), expandable to the full
+                    lesser rows. The far-right chevron (ml-auto) distinguishes this
+                    umbrella toggle from the primary's content-width rep-papers chevron. */}
                     <button
                       type="button"
                       onClick={(e) => {
@@ -572,12 +578,6 @@ export function PeopleResultCard({
                         {secondaryRows}
                       </div>
                     ) : null}
-                  </>
-                ) : (
-                  // A lone secondary — the header/collapse is noise; render the single
-                  // row bare under the divider (unchanged from before the collapse).
-                  secondaryRows
-                )}
               </div>
             ) : null}
             {/* Non-stacked (single-evidence + legacy) keeps the full Funding row below
