@@ -1,6 +1,7 @@
 import { CfnOutput, Stack, type StackProps } from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as route53resolver from "aws-cdk-lib/aws-route53resolver";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
 
@@ -144,6 +145,76 @@ export class NetworkStack extends Stack {
       description: `SPS ETL Lambdas (${envConfig.envName})`,
       allowAllOutbound: true,
     });
+
+    // Item-3 pass 1 (publish; docs/cutover-item3-implementation-map-2026-06-30.md).
+    // Echo the flag-appropriate network ids to SSM so pass-2 consumers import them
+    // by id (fromVpcAttributes / resolveTierSubnets / fromSecurityGroupId) instead
+    // of cross-stack Ref handles — that severs the export edges that would lock the
+    // useSharedVpc flip. Flag-off the values are this stack's standalone resources;
+    // flag-on they are the shared its-reciter ids from config. Nothing reads these
+    // until pass 2, so publishing them is additive and flag-off byte-behavioral.
+    const shared = envConfig.useSharedVpc;
+    const sv = envConfig.sharedVpc;
+    const netParam = (name: string, value: string): void => {
+      new ssm.StringParameter(this, `Net-${name}`, {
+        parameterName: `/sps/${envConfig.envName}/net/${name}`,
+        stringValue: value,
+      });
+    };
+
+    netParam("vpc-id", this.vpc.vpcId);
+
+    // Two AZs → exactly two subnet ids per tier. Write one param per AZ (fixed
+    // count) because an SSM string-list reads back as a synth-opaque token pass-2
+    // could not map over. Flag-off the standalone tiers are private (app+data) and
+    // public (alb); flag-on they are the explicit its-reciter per-tier ids.
+    const privateIds = shared
+      ? null
+      : this.vpc.selectSubnets({
+          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+        }).subnetIds;
+    const publicIds = shared
+      ? null
+      : this.vpc.selectSubnets({ subnetType: ec2.SubnetType.PUBLIC }).subnetIds;
+    const tierSubnetIds: ReadonlyArray<readonly [string, readonly string[]]> = [
+      ["app", shared ? sv.appSubnetIds : privateIds!],
+      ["data", shared ? sv.dataSubnetIds : privateIds!],
+      ["alb", shared ? sv.albSubnetIds : publicIds!],
+    ];
+    for (const [tier, ids] of tierSubnetIds) {
+      ids.forEach((id, i) => netParam(`${tier}-subnet-${i}`, id));
+    }
+
+    netParam("app-sg-id", shared ? sv.appSgId : this.appSecurityGroup.securityGroupId);
+    netParam("etl-sg-id", shared ? sv.etlSgId : this.etlSecurityGroup.securityGroupId);
+    netParam("alb-sg-id", shared ? sv.albSgId : this.albSecurityGroup.securityGroupId);
+
+    // exportValue pins (item-3 pass 1): keep the auto-generated cross-stack Ref
+    // exports for the VPC + 3 SGs (+ the imported subnets) alive after pass-2 drops
+    // the consumer imports, so a producer-first NetworkStack redeploy during the
+    // transition never hits "cannot delete export in use". Only meaningful flag-off
+    // (the standalone resources these export); flag-on there are no such exports.
+    // Removed in the pass-4 cleanup once every consumer is confirmed repointed.
+    if (!shared) {
+      this.exportValue(this.vpc.vpcId);
+      this.exportValue(this.appSecurityGroup.securityGroupId);
+      this.exportValue(this.etlSecurityGroup.securityGroupId);
+      this.exportValue(this.albSecurityGroup.securityGroupId);
+      // The private tier also exports a route-table ref (a consumer routes through
+      // it); the public tier exports only its subnet ref. Pin exactly the set
+      // `cdk synth Sps-Network-<env>` shows so no in-use export is orphaned.
+      for (const subnet of this.vpc.selectSubnets({
+        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+      }).subnets) {
+        this.exportValue(subnet.subnetId);
+        this.exportValue(subnet.routeTable.routeTableId);
+      }
+      for (const subnet of this.vpc.selectSubnets({
+        subnetType: ec2.SubnetType.PUBLIC,
+      }).subnets) {
+        this.exportValue(subnet.subnetId);
+      }
+    }
 
     // Outputs — surfaced so the `cdk diff` / deploy review (ADR-008's
     // verification model) and the later stacks have stable references.

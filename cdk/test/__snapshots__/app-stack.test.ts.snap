@@ -156,6 +156,17 @@ exports[`AppStack prod matches the snapshot 1`] = `
         ],
       },
     },
+    "ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9": {
+      "Export": {
+        "Name": "Sps-App-prod:ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "PublicAlb84330974",
+          "DNSName",
+        ],
+      },
+    },
     "ExportsOutputRefEcrRepository4D7B3EE140E01346": {
       "Export": {
         "Name": "Sps-App-prod:ExportsOutputRefEcrRepository4D7B3EE140E01346",
@@ -1169,6 +1180,45 @@ service:
         },
       },
       "Type": "AWS::ECS::TaskDefinition",
+    },
+    "AppinternalalbdnsEDBEA85B": {
+      "Properties": {
+        "Name": "/sps/prod/app/internal-alb-dns",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "InternalAlb58CEEAE8",
+            "DNSName",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "Appinternalalbsgid03BC738C": {
+      "Properties": {
+        "Name": "/sps/prod/app/internal-alb-sg-id",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "InternalAlbSecurityGroup32D71C5A",
+            "GroupId",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ApppublicalbdnsB3FF6E1F": {
+      "Properties": {
+        "Name": "/sps/prod/app/public-alb-dns",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "PublicAlb84330974",
+            "DNSName",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
     },
     "DbBootstrapLogGroupAF64F8C3": {
       "DeletionPolicy": "Retain",
@@ -3533,6 +3583,17 @@ exports[`AppStack staging matches the snapshot 1`] = `
         ],
       },
     },
+    "ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9": {
+      "Export": {
+        "Name": "Sps-App-staging:ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "PublicAlb84330974",
+          "DNSName",
+        ],
+      },
+    },
     "ExportsOutputRefEcrRepository4D7B3EE140E01346": {
       "Export": {
         "Name": "Sps-App-staging:ExportsOutputRefEcrRepository4D7B3EE140E01346",
@@ -4546,6 +4607,45 @@ service:
         },
       },
       "Type": "AWS::ECS::TaskDefinition",
+    },
+    "AppinternalalbdnsEDBEA85B": {
+      "Properties": {
+        "Name": "/sps/staging/app/internal-alb-dns",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "InternalAlb58CEEAE8",
+            "DNSName",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "Appinternalalbsgid03BC738C": {
+      "Properties": {
+        "Name": "/sps/staging/app/internal-alb-sg-id",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "InternalAlbSecurityGroup32D71C5A",
+            "GroupId",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ApppublicalbdnsB3FF6E1F": {
+      "Properties": {
+        "Name": "/sps/staging/app/public-alb-dns",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "PublicAlb84330974",
+            "DNSName",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
     },
     "CustomAWSCDKOpenIdConnectProviderCustomResourceProviderHandlerF2C543E0": {
       "DependsOn": [

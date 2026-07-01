@@ -311,6 +311,19 @@ export interface SpsEnvConfig {
     readonly dataSubnetIds: readonly string[];
     /** dmz — optional public ALB only; unused under the NetScaler front (§7). */
     readonly albSubnetIds: readonly string[];
+    /**
+     * Out-of-band pre-provisioned security-group ids in the shared VPC (option 2,
+     * item-3 pass 1; docs/cutover-item3-implementation-map-2026-06-30.md). The
+     * shared-VPC team (its-reciter-vpc01 owners) creates the app/etl/alb SGs —
+     * **with default allow-all egress** — and owns their base ingress; NetworkStack
+     * echoes the flag-appropriate id to SSM and every consumer imports by id
+     * (`fromSecurityGroupId`), so no SG replaces at the `useSharedVpc` flip. Empty
+     * in the shipped config (flag-off) — {@link assertSharedVpcConfig} fails closed
+     * if `useSharedVpc` is flipped before these are filled.
+     */
+    readonly appSgId: string;
+    readonly etlSgId: string;
+    readonly albSgId: string;
   };
   /**
    * Cutover de-coupling flag (docs/sps-vpc-consolidation-plan.md §8.4; review
@@ -457,6 +470,12 @@ const SHARED_VPC = {
   dataSubnetIds: ["subnet-0d35923e345653d0d", "subnet-099a9ebefc36ee888"],
   // dmz (public, IGW) — optional public ALB only; unused under NetScaler (§7).
   albSubnetIds: ["subnet-09a6fab648280ca19", "subnet-0485fefe267b06736"],
+  // Out-of-band pre-provisioned SGs (item-3 pass 1). TODO: fill once the
+  // shared-VPC team creates them WITH default allow-all egress; empty is safe
+  // while useSharedVpc is off (assertSharedVpcConfig gates the flip on these).
+  appSgId: "",
+  etlSgId: "",
+  albSgId: "",
 } as const;
 
 const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
@@ -750,6 +769,22 @@ export function assertSharedVpcConfig(cfg: SpsEnvConfig): void {
         `sharedVpc.availabilityZones (prod Aurora writer+reader and zone-aware ` +
         `OpenSearch span two AZs). See docs/sps-vpc-consolidation-plan.md.`,
     );
+  }
+  const sgs: ReadonlyArray<readonly [string, string]> = [
+    ["appSgId", v.appSgId],
+    ["etlSgId", v.etlSgId],
+    ["albSgId", v.albSgId],
+  ];
+  for (const [name, id] of sgs) {
+    if (!id) {
+      throw new Error(
+        `Invalid config for env="${cfg.envName}": useSharedVpc requires ` +
+          `sharedVpc.${name} (the out-of-band pre-provisioned SG id in the shared ` +
+          `VPC; an empty id yields an import that only fails at deploy). Fill it ` +
+          `from the shared-VPC team's provisioned SG. See ` +
+          `docs/cutover-item3-implementation-map-2026-06-30.md.`,
+      );
+    }
   }
 }
 
