@@ -4,6 +4,7 @@ import { SidebarCard } from "@/components/profile/sidebar-card";
 import { ContactEmailReveal } from "@/components/profile/contact-email-reveal";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
+import { MentoringInfoTooltip } from "@/components/scholar/mentoring-info-tooltip";
 import { DisclosureGroupInfoTooltip } from "@/components/scholar/disclosure-group-info-tooltip";
 import { MentoringSection } from "@/components/scholar/mentoring-section";
 import { getMenteesForMentor } from "@/lib/api/mentoring";
@@ -546,7 +547,12 @@ export async function ProfileView({ slug }: { slug: string }) {
             const distribution = formatMentoringDistribution(mentees);
             return (
               <Section
-                title="Mentoring"
+                title={
+                  <>
+                    Mentoring
+                    <MentoringInfoTooltip />
+                  </>
+                }
                 headingLg
                 count={`${mentees.length} ${mentees.length === 1 ? "mentee" : "mentees"}`}
                 subtitle={distribution}

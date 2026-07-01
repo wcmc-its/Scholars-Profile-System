@@ -185,7 +185,7 @@ describe("MethodsSection — #819 family click-to-filter", () => {
 });
 
 describe("MethodsSection — PROFILE_FACET_REDESIGN (flag on)", () => {
-  it("renders an unchecked Square + plain count when nothing is selected and no familyCounts", () => {
+  it("renders an unselected bordered pill + plain count when nothing is selected and no familyCounts", () => {
     render(
       <MethodsSection
         families={makeFamilies(2)}
@@ -196,14 +196,15 @@ describe("MethodsSection — PROFILE_FACET_REDESIGN (flag on)", () => {
       />,
     );
     const row = screen.getByText("Family 1").closest("li") as HTMLElement;
-    // The whole row is a toggle button (aria-label = family label).
+    // The whole pill is a toggle button (aria-label = family label).
     expect(within(row).getByRole("button", { name: "Family 1" })).toBeTruthy();
     expect(within(row).getByText("100")).toBeTruthy();
-    // Lucide Square (unchecked) is an <svg> in the row; no SquareCheck class.
-    expect(row.querySelector("svg")).toBeTruthy();
+    // The unselected pill is a bordered rounded-full chip (no accent-slate fill).
+    expect(row.innerHTML).toContain("rounded-full");
+    expect(row.innerHTML).not.toContain("bg-[var(--color-accent-slate)]");
   });
 
-  it("shows a SquareCheck and a trailing remove (X) on the selected row", () => {
+  it("shows a filled accent-slate pill and a trailing remove (X) on the selected family", () => {
     render(
       <MethodsSection
         families={makeFamilies(2)}
@@ -214,11 +215,11 @@ describe("MethodsSection — PROFILE_FACET_REDESIGN (flag on)", () => {
       />,
     );
     const row = screen.getByText("Family 1").closest("li") as HTMLElement;
-    // Selected row carries the method-fill token and a remove control.
-    expect(row.className).toContain("bg-[var(--color-facet-method-fill)]");
+    // Selected pill carries the accent-slate fill and a remove control.
+    expect(row.innerHTML).toContain("bg-[var(--color-accent-slate)]");
     expect(within(row).getByRole("button", { name: /Remove Family 1 filter/ })).toBeTruthy();
-    // At least two svgs: the SquareCheck indicator + the trailing X.
-    expect(row.querySelectorAll("svg").length).toBeGreaterThanOrEqual(2);
+    // The trailing X remove control renders as an svg.
+    expect(row.querySelectorAll("svg").length).toBeGreaterThanOrEqual(1);
   });
 
   it("renders contextual '{in} of {total}' counts from familyCounts", () => {
@@ -397,11 +398,11 @@ describe("MethodsSection — v2 budget / selected-zero / animation (#841)", () =
         {...redesignProps}
       />,
     );
-    // fam_1: selected + 0 → deliberate selected-zero (filled, ringed, full opacity).
+    // fam_1: selected + 0 → deliberate selected-zero (filled accent-slate pill,
+    // full opacity).
     const selZero = screen.getByText("Family 1").closest("li") as HTMLElement;
     expect(selZero.getAttribute("data-selected-zero")).toBe("true");
-    expect(selZero.className).toContain("bg-[var(--color-facet-method-fill)]");
-    expect(selZero.className).toContain("ring-[var(--color-facet-method-border)]");
+    expect(selZero.innerHTML).toContain("bg-[var(--color-accent-slate)]");
     expect(selZero.innerHTML).not.toContain("opacity-45");
     expect(within(selZero).getByRole("button", { name: /Remove Family 1 filter/ })).toBeTruthy();
     expect(
