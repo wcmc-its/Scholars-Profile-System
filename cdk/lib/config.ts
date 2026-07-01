@@ -119,6 +119,14 @@ export interface SpsEnvConfig {
    * auto-create the missing `@'host'` account -- so it is fail-closed, not
    * silent. NOT derivable from {@link vpcCidr}: prod uses `%` despite its
    * 10.10/16 CIDR.
+   *
+   * Cutover (docs/sps-vpc-consolidation-plan.md §6.2): once compute moves to the
+   * shared its-reciter app2 tier, the source IP changes to `10.46.160.x`, so
+   * staging must re-scope from `10.20.%` to `10.46.160.%` (the two app2 /25s =
+   * `10.46.160.0/24`) — or `%` — together with the live in-DB regrant, else
+   * app_rw auth fails closed (MySQL 1410). One of the prerequisites
+   * {@link assertCutoverGate} lists before {@link useSharedVpc} may be flipped.
+   * Prod stays `%`, unaffected by the source move.
    */
   readonly appRwGranteeHost: string;
   /**
@@ -639,4 +647,50 @@ export function assertSharedVpcConfig(cfg: SpsEnvConfig): void {
         `OpenSearch span two AZs). See docs/sps-vpc-consolidation-plan.md.`,
     );
   }
+}
+
+/**
+ * Cutover gate for the estate consolidation
+ * (docs/sps-vpc-consolidation-plan.md §6.2/§8.5/§8.6; tracker #1370). Called from
+ * the `bin` entrypoint — NOT from {@link resolveEnvConfig} — so the flag-on
+ * placement unit tests (which synth stacks with `useSharedVpc:true` directly) are
+ * unaffected.
+ *
+ * `useSharedVpc` is NOT yet safe to flip. As built, DataStack holds a single
+ * in-place `rds.DatabaseCluster` + `opensearchservice.Domain`; flipping the flag
+ * changes their immutable subnet group, so CloudFormation REPLACES both in place
+ * — and a replace provisions a FRESH EMPTY cluster/domain (there is no
+ * `DatabaseClusterFromSnapshot` path yet). The plan forbids exactly this: §8.5/§8.6
+ * require the data tier to move as a NEW resource (`DatabaseClusterFromSnapshot` +
+ * a fresh OpenSearch domain) stood up ALONGSIDE the live one (reversible —
+ * "abandon new, keep old"), "NOT an in-place flip of the old VPC".
+ *
+ * So this is a hard tripwire, not an acknowledgement: while `useSharedVpc` is on,
+ * synth throws — which also fails CI on any premature `useSharedVpc:true` commit
+ * (shipped config is `false`, so the gate is inert today). It is lifted by the
+ * separate, larger cutover-code task (#1370), which implements the snapshot-restore
+ * data path and re-homes this gate. The message names every prerequisite so the
+ * gate gives no false "looks safe" signal.
+ */
+export function assertCutoverGate(cfg: SpsEnvConfig): void {
+  if (!cfg.useSharedVpc) {
+    return; // standalone topology — nothing replaces, nothing to gate
+  }
+  throw new Error(
+    `Refusing to synth/deploy env="${cfg.envName}" with useSharedVpc=true: it is ` +
+      `not yet deployable. Flipping it would CFN-REPLACE the in-place Aurora ` +
+      `cluster + OpenSearch domain into EMPTY datastores — the plan forbids this ` +
+      `(§8.6: the data tier must move as a NEW resource, not an in-place flip). ` +
+      `Before useSharedVpc can be flipped, the separate cutover-code task (#1370) ` +
+      `must land, and the operator must complete the §6 prerequisites:\n` +
+      `  1. snapshot-restore data path: a NEW DatabaseClusterFromSnapshot cluster ` +
+      `+ fresh OpenSearch domain stood up alongside the live ones (§5.4/§8.5);\n` +
+      `  2. re-scope appRwGranteeHost off the decommissioned CIDR ` +
+      `("${cfg.appRwGranteeHost}") → "10.46.160.%" (or "%") AND re-issue the live ` +
+      `app_rw/app_ro/sps_migrate/sps_bootstrap GRANTs for the 10.46.x source ` +
+      `(§6.2) — else app_rw auth fails closed (MySQL 1410);\n` +
+      `  3. reseed every DSN + OpenSearch endpoint secret with the new endpoints ` +
+      `(§6.4/§6.8) — a stale DSN silently regresses every write.\n` +
+      `See docs/sps-vpc-consolidation-plan.md §6.2/§6.8/§8.5/§8.6.`,
+  );
 }

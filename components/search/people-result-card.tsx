@@ -2,6 +2,7 @@
 
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
+import { ChevronDown } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { formatRoleCategory } from "@/lib/role-display";
 import { profilePath } from "@/lib/profile-url";
@@ -55,6 +56,22 @@ export type PeopleResultCardProps = {
    *  and the publications flavor badge. Off ⇒ no `/grants` fetch, no Funding row,
    *  and the pub reason row keeps its shipped muted treatment (byte-identical). */
   evidenceRows?: boolean;
+};
+
+/**
+ * #1366 follow-up Part D collapse — the per-category dot + label for the collapsed
+ * "Also matched" summary. Bright FILLED dot (matches the expanded lesser rows) + the
+ * AA-safe dark label tone. Keyed by the lesser row's kind (publications splits into
+ * concept vs keyword by strength). No counts here on purpose (see the call site).
+ */
+type SecondaryMeta = { dot: string; label: string; color: string };
+const SECONDARY_META: Record<string, SecondaryMeta> = {
+  method: { dot: "bg-[#c2410c]", label: "Method", color: "text-[#9a3412]" },
+  topic: { dot: "bg-[#2563eb]", label: "Research area", color: "text-[#1d4ed8]" },
+  clinical: { dot: "bg-[#0891b2]", label: "Clinical", color: "text-[#0e7490]" },
+  concept: { dot: "bg-[#7c3aed]", label: "Concept", color: "text-[#6d28d9]" },
+  keyword: { dot: "bg-[#64748b]", label: "Keyword", color: "text-[#475569]" },
+  funding: { dot: "bg-[#16a34a]", label: "Funding", color: "text-[#166534]" },
 };
 
 /**
@@ -135,6 +152,11 @@ export function PeopleResultCard({
   // (representative papers stay globally disjoint though counts may overlap). A
   // single-evidence card gets a fresh empty set ⇒ behaves exactly as before.
   const claimedPmids = useRef(new Set<string>());
+
+  // #1366 follow-up Part D collapse — the "Also matched" group is collapsed to a
+  // category summary line by default (expandable). Only used when ≥2 secondaries.
+  const [alsoExpanded, setAlsoExpanded] = useState(false);
+  const alsoPanelId = useId();
 
   // Funding evidence row (SEARCH_EVIDENCE_ROWS) — a scholar's TOPIC-matching grants.
   // Eager per-card fetch, gated on flag + active query + the scholar having ANY grant
@@ -353,7 +375,7 @@ export function PeopleResultCard({
           <LesserReason
             // #1366 follow-up Part C — dot is always FILLED green; a literal mention's
             // weakness is carried by `weak` (muted/italic text) + the MentionNote.
-            dotClassName="bg-[#2f6b3a]"
+            dotClassName="bg-[#16a34a]"
             weak={!fundingTagged}
             suffix={` · ${fundingCount}`}
             canExpand
@@ -362,8 +384,17 @@ export function PeopleResultCard({
             panelId={fundingPanelId}
             srLabel="key funding"
           >
-            <span className="font-medium text-[#52514a]">Funding</span> ·{" "}
-            {fundingTagged ? <>tagged {grantConceptLabel}</> : <>mentions “{qParam}”</>}
+            <span className="font-medium text-[#166534]">Funding</span> ·{" "}
+            {fundingTagged ? (
+              <>
+                tagged{" "}
+                <span className="font-[450] text-[#3a3a3a] underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]">
+                  {grantConceptLabel}
+                </span>
+              </>
+            ) : (
+              <>mentions “{qParam}”</>
+            )}
           </LesserReason>
         )}
         {fundingExpanded ? (
@@ -384,6 +415,47 @@ export function PeopleResultCard({
   // the row bare under the divider; keep it for two or more.
   const lesserLines = lines ? lines.slice(1) : [];
   const secondaryCount = lesserLines.length + (grants.length > 0 ? 1 : 0);
+
+  // #1366 follow-up Part D collapse — colored dot + category label per secondary, NO
+  // counts / NO entities: the counts mix denominators (pub-share vs grant-share), so a
+  // bare count line would invert real strength. The only count on the card stays the
+  // primary's single-denominator fraction; expanding reveals the full lesser rows.
+  const secondaryChips = lesserLines
+    .map((ev) =>
+      ev.kind === "publications"
+        ? SECONDARY_META[ev.strength === "mention" ? "keyword" : "concept"]
+        : SECONDARY_META[ev.kind],
+    )
+    .filter((c): c is SecondaryMeta => Boolean(c));
+  if (grants.length > 0) secondaryChips.push(SECONDARY_META.funding);
+  // ponytail: 4 chips fit one line at typical widths; more collapse to "+N". Bump the
+  // cap if cards routinely carry more secondaries.
+  const shownChips = secondaryChips.slice(0, 4);
+  const chipOverflow = secondaryChips.length - shownChips.length;
+
+  // The demoted "Also matched" rows — the lesser stacked lines + the (demoted) Funding
+  // row. Rendered bare for a lone secondary, or behind the collapse toggle for ≥2.
+  const secondaryRows = (
+    <>
+      {lesserLines.map((ev, i) => (
+        <EvidenceLine
+          key={i + 1}
+          evidence={ev}
+          cwid={hit.cwid}
+          slug={hit.slug}
+          pubCount={hit.pubCount}
+          q={q}
+          keyPaperConfig={keyPaperConfig}
+          hasQuery={hasQuery}
+          badged={evidenceRows}
+          claimedPmids={claimedPmids}
+          stacked={stacked}
+          tier="lesser"
+        />
+      ))}
+      {grants.length > 0 ? fundingNode : null}
+    </>
+  );
 
   return (
     <div className="group relative grid grid-cols-[56px_1fr_auto] gap-4 border-b border-[#e3e2dd] py-5 hover:bg-[#fafaf8]">
@@ -447,27 +519,63 @@ export function PeopleResultCard({
                 dropped when there's a single secondary row (header for one row is
                 noise); the divider + row(s) still render. */}
             {stacked && lines && secondaryCount >= 1 ? (
-              <div className="mt-3 border-t border-dashed border-[#e3e2dd] pt-2.5">
+              <div className="mt-[9px] pt-[11px]">
                 {secondaryCount >= 2 ? (
-                  <div className="mb-0.5 text-[11px] font-medium text-[#9a958a]">Also matched</div>
-                ) : null}
-                {lesserLines.map((ev, i) => (
-                  <EvidenceLine
-                    key={i + 1}
-                    evidence={ev}
-                    cwid={hit.cwid}
-                    slug={hit.slug}
-                    pubCount={hit.pubCount}
-                    q={q}
-                    keyPaperConfig={keyPaperConfig}
-                    hasQuery={hasQuery}
-                    badged={evidenceRows}
-                    claimedPmids={claimedPmids}
-                    stacked={stacked}
-                    tier="lesser"
-                  />
-                ))}
-                {grants.length > 0 ? fundingNode : null}
+                  // Collapse hybrid — the "Also matched" group is one summary line by
+                  // default (colored dot + category label per secondary, no counts /
+                  // entities), expandable to the full lesser rows. The far-right chevron
+                  // (ml-auto) distinguishes this umbrella toggle from the primary's
+                  // content-width rep-papers chevron so they don't read as one control.
+                  <>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setAlsoExpanded((v) => !v);
+                      }}
+                      aria-expanded={alsoExpanded}
+                      aria-controls={alsoExpanded ? alsoPanelId : undefined}
+                      className="relative z-10 -mx-2 flex w-full items-center gap-2.5 rounded-md px-2 py-[3px] text-left hover:bg-[#f0eeea] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2c4f6e] focus-visible:ring-offset-1"
+                    >
+                      <span className="shrink-0 text-[11px] font-medium text-[#9a958a]">
+                        Also matched
+                      </span>
+                      {!alsoExpanded ? (
+                        <span className="flex min-w-0 items-center gap-2.5 text-[12px]">
+                          {shownChips.map((c, i) => (
+                            <span key={i} className="inline-flex items-center gap-[5px]">
+                              <span
+                                aria-hidden
+                                className={`size-2 shrink-0 rounded-full ${c.dot}`}
+                              />
+                              <span className={`font-medium ${c.color}`}>{c.label}</span>
+                            </span>
+                          ))}
+                          {chipOverflow > 0 ? (
+                            <span className="text-[#9a958a]">+{chipOverflow}</span>
+                          ) : null}
+                        </span>
+                      ) : null}
+                      <ChevronDown
+                        aria-hidden
+                        strokeWidth={2}
+                        className={`ml-auto size-3.5 shrink-0 text-[#9a958a] motion-safe:transition-transform motion-safe:duration-150 ${
+                          alsoExpanded ? "rotate-180" : ""
+                        }`}
+                      />
+                    </button>
+                    {alsoExpanded ? (
+                      <div id={alsoPanelId} className="mt-1">
+                        {secondaryRows}
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  // A lone secondary — the header/collapse is noise; render the single
+                  // row bare under the divider (unchanged from before the collapse).
+                  secondaryRows
+                )}
               </div>
             ) : null}
             {/* Non-stacked (single-evidence + legacy) keeps the full Funding row below

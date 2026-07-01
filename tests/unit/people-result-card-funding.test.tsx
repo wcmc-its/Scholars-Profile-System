@@ -348,14 +348,39 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
     // the primary keeps the full Method badge...
     expect(screen.getByText("Method")).toBeTruthy();
-    // ...and the demoted signals sit under "Also matched", Funding as a compact dot:
-    // "Funding · mentions 'diabetes' · N of M grants".
+    // ...and the demoted signals sit under "Also matched", collapsed by default.
     expect(screen.getByText("Also matched")).toBeTruthy();
+    // expand the umbrella → the demoted Funding dot row: "mentions 'diabetes' · N of M".
+    fireEvent.click(screen.getByRole("button", { name: /also matched/i }));
     expect(container.textContent).toMatch(/mentions\s*“diabetes”/);
     expect(container.textContent).toMatch(/1 of 3 grants/);
     // the demoted dot still expands to the KEY FUNDING records.
     fireEvent.click(screen.getByRole("button", { name: /key funding/i }));
     expect(screen.getByText(/Pediatric trial/)).toBeTruthy();
+  });
+
+  it("Part D collapse — the 'Also matched' group is a category summary line by default (counts/entities hidden)", async () => {
+    mockFetch(oneGrant);
+    const { container } = render(<PeopleResultCard {...base} evidenceRows hit={stackedHit()} />);
+    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
+    // the summary shows colored category labels for each secondary...
+    expect(screen.getByRole("button", { name: /also matched/i })).toBeTruthy();
+    expect(screen.getByText("Research area")).toBeTruthy();
+    // ...but NOT the entities or counts (they mix denominators — see the collapse note).
+    expect(screen.queryByText(/Stem Cell & Regenerative Medicine/)).toBeNull();
+    expect(container.textContent).not.toMatch(/1 of 3 grants/);
+    // and the per-row disclosures are hidden until expanded.
+    expect(screen.queryByRole("button", { name: /key funding/i })).toBeNull();
+  });
+
+  it("Part D collapse — expanding the summary reveals the full lesser rows", async () => {
+    mockFetch(oneGrant);
+    render(<PeopleResultCard {...base} evidenceRows hit={stackedHit()} />);
+    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /also matched/i }));
+    // the topic entity + funding count + disclosure now render.
+    expect(screen.getByText(/Stem Cell & Regenerative Medicine/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /key funding/i })).toBeTruthy();
   });
 
   it("#1366 follow-up Part D — a lone secondary (just the demoted Funding row) DROPS the 'Also matched' header", async () => {
@@ -379,13 +404,13 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     expect(screen.getByText(/mentions\s*“diabetes”/)).toBeTruthy();
   });
 
-  it("#1366 follow-up Part C — the demoted funding MENTION dot is FILLED green (bg-[#2f6b3a]), not bordered", async () => {
+  it("#1366 follow-up Part C — the demoted funding MENTION dot is FILLED green (bg-[#16a34a]), not bordered", async () => {
     mockFetch(oneGrant);
     const { container } = render(<PeopleResultCard {...base} evidenceRows hit={stackedHit()} />);
     await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
     const dots = Array.from(container.querySelectorAll("span.rounded-full")).map((d) => d.className);
     // the funding dot is filled green; no dot uses the old hollow bordered-green style.
-    expect(dots.some((c) => c.includes("bg-[#2f6b3a]"))).toBe(true);
-    expect(dots.some((c) => c.includes("border-[#2f6b3a]"))).toBe(false);
+    expect(dots.some((c) => c.includes("bg-[#16a34a]"))).toBe(true);
+    expect(dots.some((c) => c.includes("border-[#16a34a]"))).toBe(false);
   });
 });
