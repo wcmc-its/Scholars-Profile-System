@@ -541,7 +541,7 @@ export function PeopleResultCard({
             {stacked && lines && secondaryCount >= 1 ? (
               // #1381 follow-up — trimmed 8px of vertical space above the "Also matched"
               // group (mt-[9px] → mt-[1px]) so the primary and secondaries sit tighter.
-              <div className="mt-[1px] pt-[11px]">
+              <div className="mt-[1px] border-t border-dotted border-[#d5d5d5] pt-[11px]">
                 {/* Collapse hybrid — one summary line by default (colored dot + category
                     label per secondary, no counts / entities), expandable to the full
                     lesser rows. The far-right chevron (ml-auto) distinguishes this
@@ -579,7 +579,7 @@ export function PeopleResultCard({
                       <ChevronDown
                         aria-hidden
                         strokeWidth={2.5}
-                        className={`ml-auto size-3.5 shrink-0 text-[#9a958a] motion-safe:transition-transform motion-safe:duration-150 ${
+                        className={`ml-auto mr-[3px] size-3.5 shrink-0 text-[#9a958a] motion-safe:transition-transform motion-safe:duration-150 ${
                           alsoExpanded ? "rotate-180" : ""
                         }`}
                       />
