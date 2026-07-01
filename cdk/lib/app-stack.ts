@@ -16,6 +16,7 @@ import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
 import { resolveTierSubnets } from "./shared-vpc-subnets";
@@ -2887,6 +2888,27 @@ export class AppStack extends Stack {
       description:
         "SPS internal ALB security group id (consumed by EtlStack ingress).",
     });
+
+    // Item-3 pass 1 (publish; docs/cutover-item3-implementation-map-2026-06-30.md).
+    // Mirror the internal-ALB SG-id + DNS and the public-ALB DNS into SSM so pass-2
+    // consumers read them by id instead of the cross-stack handle / named export
+    // that locks at the useSharedVpc flip (both ALBs replace onto the shared VPC):
+    //   - EtlStack repoints to the internal-ALB DNS + SG-id params (edges 6/7). The
+    //     named CfnOutputs above stay, so those exports are never orphaned — no pin.
+    //   - EdgeStack repoints to the public-ALB DNS param (edge 8), whose current
+    //     source is the AUTO-generated FnGetAtt DNSName export from the handle Edge
+    //     imports today; pin it so dropping that import at pass 2 leaves no in-use
+    //     export for the flip to delete. (Removed in the pass-4 cleanup.)
+    const appParam = (name: string, value: string): void => {
+      new ssm.StringParameter(this, `App-${name}`, {
+        parameterName: `/sps/${env}/app/${name}`,
+        stringValue: value,
+      });
+    };
+    appParam("internal-alb-sg-id", internalAlbSecurityGroup.securityGroupId);
+    appParam("internal-alb-dns", this.internalAlb.loadBalancerDnsName);
+    appParam("public-alb-dns", this.publicAlb.loadBalancerDnsName);
+    this.exportValue(this.publicAlb.loadBalancerDnsName);
     new CfnOutput(this, "DeployRoleArn", {
       value: this.deployRole.roleArn,
       description: "SPS GitHub Actions deploy role ARN",

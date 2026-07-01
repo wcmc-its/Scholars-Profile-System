@@ -13,13 +13,27 @@ import {
 describe("assertSharedVpcConfig", () => {
   const base = resolveEnvConfig("staging");
 
+  // The shipped descriptor ships EMPTY out-of-band SG ids (item-3 pass 1 — the
+  // shared-VPC team provisions those later), so a flip-ready descriptor supplies
+  // them. assertSharedVpcConfig gates the flip on these; see the empty-SG cases.
+  const readySharedVpc = {
+    ...base.sharedVpc,
+    appSgId: "sg-0app0000000000",
+    etlSgId: "sg-0etl0000000000",
+    albSgId: "sg-0alb0000000000",
+  };
+
   it("passes for the shipped config (useSharedVpc off)", () => {
     expect(() => assertSharedVpcConfig(base)).not.toThrow();
   });
 
-  it("passes when useSharedVpc is on with the shipped sharedVpc descriptor", () => {
+  it("passes when useSharedVpc is on with a complete sharedVpc descriptor", () => {
     expect(() =>
-      assertSharedVpcConfig({ ...base, useSharedVpc: true }),
+      assertSharedVpcConfig({
+        ...base,
+        useSharedVpc: true,
+        sharedVpc: readySharedVpc,
+      }),
     ).not.toThrow();
   });
 
@@ -60,6 +74,18 @@ describe("assertSharedVpcConfig", () => {
       }),
     ).toThrow(/useSharedVpc requires ≥2 sharedVpc\.availabilityZones/);
   });
+
+  for (const sg of ["appSgId", "etlSgId", "albSgId"] as const) {
+    it(`throws when shared-VPC-on with an empty ${sg}`, () => {
+      expect(() =>
+        assertSharedVpcConfig({
+          ...base,
+          useSharedVpc: true,
+          sharedVpc: { ...readySharedVpc, [sg]: "" },
+        }),
+      ).toThrow(new RegExp(`useSharedVpc requires sharedVpc\\.${sg}`));
+    });
+  }
 });
 
 // Cutover gate (docs/sps-vpc-consolidation-plan.md §6.2/§8.5/§8.6; #1370). Runs at
