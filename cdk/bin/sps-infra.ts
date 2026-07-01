@@ -59,8 +59,6 @@ const dataStack = new DataStack(app, `Sps-Data-${envConfig.envName}`, {
   envConfig,
   crossRegionReferences: true,
   vpc: networkStack.vpc,
-  appSecurityGroup: networkStack.appSecurityGroup,
-  etlSecurityGroup: networkStack.etlSecurityGroup,
   drBackupVault: drBackupVaultStack.vault,
   description: `SPS data — Aurora MySQL, OpenSearch, AWS Backup, ${envConfig.envName} (ADR-008).`,
 });
@@ -81,9 +79,6 @@ const appStack = new AppStack(app, `Sps-App-${envConfig.envName}`, {
   env,
   envConfig,
   vpc: networkStack.vpc,
-  appSecurityGroup: networkStack.appSecurityGroup,
-  etlSecurityGroup: networkStack.etlSecurityGroup,
-  albSecurityGroup: networkStack.albSecurityGroup,
   description: `SPS application plane — ECR, ECS Fargate, ALBs, VPC endpoints, ${envConfig.envName} (ADR-008).`,
 });
 
@@ -98,7 +93,6 @@ const etlStack = new EtlStack(app, `Sps-Etl-${envConfig.envName}`, {
   env,
   envConfig,
   vpc: networkStack.vpc,
-  etlSecurityGroup: networkStack.etlSecurityGroup,
   ecsCluster: appStack.ecsCluster,
   etlEcrRepository: appStack.etlEcrRepository,
   description: `SPS ETL orchestration — Step Functions state machines + alarms, ${envConfig.envName} (ADR-008 B08+B20).`,

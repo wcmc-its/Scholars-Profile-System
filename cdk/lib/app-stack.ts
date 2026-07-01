@@ -19,7 +19,7 @@ import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
-import { resolveTierSubnets } from "./shared-vpc-subnets";
+import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
 
 /**
  * ADOT collector image, pinned by digest.
@@ -93,12 +93,6 @@ export interface AppStackProps extends StackProps {
   readonly envConfig: SpsEnvConfig;
   /** VPC every workload runs in (from NetworkStack). */
   readonly vpc: ec2.IVpc;
-  /** SG for the ECS application tasks (from NetworkStack). */
-  readonly appSecurityGroup: ec2.ISecurityGroup;
-  /** SG for the ETL Lambdas (from NetworkStack) — referenced by VPC endpoint ingress and internal-ALB ingress (deferred). */
-  readonly etlSecurityGroup: ec2.ISecurityGroup;
-  /** SG for the public ALB (from NetworkStack). */
-  readonly albSecurityGroup: ec2.ISecurityGroup;
 }
 
 /**
@@ -174,14 +168,17 @@ export class AppStack extends Stack {
   constructor(scope: Construct, id: string, props: AppStackProps) {
     super(scope, id, props);
 
-    const {
-      envConfig,
-      vpc,
-      appSecurityGroup,
-      etlSecurityGroup,
-      albSecurityGroup,
-    } = props;
+    const { envConfig, vpc } = props;
     const env = envConfig.envName;
+    // Item-3 pass 2a: import the app/etl/alb SGs by id from the SSM params
+    // NetworkStack publishes (pass 1) instead of the cross-stack handles — severs
+    // the SG `Ref` exports that would lock the useSharedVpc flip (the SGs replace
+    // onto the imported VPC). All uses below are `.securityGroupId` or a
+    // `securityGroup` reference, valid on an imported SG; the L1 id-keyed ingress
+    // rules survive the switch (map Q4).
+    const appSecurityGroup = resolveSharedSg(this, envConfig, "app", "AppSg");
+    const etlSecurityGroup = resolveSharedSg(this, envConfig, "etl", "EtlSg");
+    const albSecurityGroup = resolveSharedSg(this, envConfig, "alb", "AlbSg");
 
     // Estate-consolidation subnet placement (plan §4.4): the app service +
     // internal ALB (compute) land in the app2 tier, the optional public ALB in

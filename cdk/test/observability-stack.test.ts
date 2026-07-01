@@ -37,23 +37,17 @@ function buildObservabilityStack(
     envConfig,
     crossRegionReferences: true,
     vpc: network.vpc,
-    appSecurityGroup: network.appSecurityGroup,
-    etlSecurityGroup: network.etlSecurityGroup,
     drBackupVault: drVault.vault,
   });
   const app = new AppStack(fixture.app, `Sps-App-${envName}`, {
     env: fixture.env,
     envConfig,
     vpc: network.vpc,
-    appSecurityGroup: network.appSecurityGroup,
-    etlSecurityGroup: network.etlSecurityGroup,
-    albSecurityGroup: network.albSecurityGroup,
   });
   const etl = new EtlStack(fixture.app, `Sps-Etl-${envName}`, {
     env: fixture.env,
     envConfig,
     vpc: network.vpc,
-    etlSecurityGroup: network.etlSecurityGroup,
     ecsCluster: app.ecsCluster,
     etlEcrRepository: app.etlEcrRepository,
   });

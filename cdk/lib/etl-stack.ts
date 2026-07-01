@@ -22,7 +22,7 @@ import * as sfn from "aws-cdk-lib/aws-stepfunctions";
 import * as tasks from "aws-cdk-lib/aws-stepfunctions-tasks";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
-import { resolveTierSubnets } from "./shared-vpc-subnets";
+import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
 
 /** Props for {@link EtlStack}. */
 export interface EtlStackProps extends StackProps {
@@ -30,8 +30,6 @@ export interface EtlStackProps extends StackProps {
   readonly envConfig: SpsEnvConfig;
   /** VPC every workload runs in (from NetworkStack). */
   readonly vpc: ec2.IVpc;
-  /** SG attached to ETL Fargate tasks (from NetworkStack). */
-  readonly etlSecurityGroup: ec2.ISecurityGroup;
   /** ECS cluster the ETL task family runs in (from AppStack). */
   readonly ecsCluster: ecs.ICluster;
   /**
@@ -112,7 +110,12 @@ export class EtlStack extends Stack {
   constructor(scope: Construct, id: string, props: EtlStackProps) {
     super(scope, id, props);
 
-    const { envConfig, etlSecurityGroup, ecsCluster, etlEcrRepository } = props;
+    const { envConfig, ecsCluster, etlEcrRepository } = props;
+    // Item-3 pass 2a: import the ETL SG by id from the SSM param NetworkStack
+    // publishes (pass 1) instead of the cross-stack handle — severs the SG `Ref`
+    // export that would lock the useSharedVpc flip. Used only as `.securityGroupId`
+    // and as a `securityGroups` array member, both valid on an imported SG.
+    const etlSecurityGroup = resolveSharedSg(this, envConfig, "etl", "EtlSg");
     const env = envConfig.envName;
     // `vpc` is in props for future SG lookups + API consistency with the
     // other stacks. ECS RunTask resolves the VPC from `ecsCluster`, so

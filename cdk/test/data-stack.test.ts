@@ -32,8 +32,6 @@ function buildDataStack(
     envConfig,
     crossRegionReferences: true,
     vpc: network.vpc,
-    appSecurityGroup: network.appSecurityGroup,
-    etlSecurityGroup: network.etlSecurityGroup,
     drBackupVault: dr.vault,
   });
   return { template: Template.fromStack(stack), stack };
