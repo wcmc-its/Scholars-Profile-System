@@ -128,7 +128,7 @@ export function ResultEvidence({
   // papers); only this summary row restyles.
   if (tier === "lesser") {
     const lesserCount = (count: number | undefined): string | undefined =>
-      count != null && pubCount != null ? ` · ${count} of ${pubCount}` : undefined;
+      count != null && pubCount != null ? ` · ${count} of ${pubCount} publications` : undefined;
     switch (evidence.kind) {
       case "method":
         return (

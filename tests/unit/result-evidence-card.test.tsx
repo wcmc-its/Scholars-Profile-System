@@ -414,14 +414,16 @@ describe("<RepresentativePapers> — the disclosure stack", () => {
     expect(more.closest("a")?.getAttribute("href")).toBe("/p/jane#publications");
   });
 
-  it("Option A — header shows 'N of M' when truncated, and the bare total otherwise", () => {
+  it("no inline count in the header; truncation shows only via the '+N more' link", () => {
     const { rerender } = render(
       <RepresentativePapers papers={PAPERS} total={8} profileHref="/p/jane#publications" />,
     );
-    expect(screen.getByText("3 of 8")).toBeTruthy(); // 3 shown of 8 matching
+    // Sentence-case header carries no "N of M" count (approved) — the total lives in
+    // the "+N more" link.
+    expect(screen.queryByText("3 of 8")).toBeNull();
+    expect(screen.getByText(/\+5 more in profile/)).toBeTruthy();
     rerender(<RepresentativePapers papers={PAPERS} total={3} profileHref="/p/jane#publications" />);
-    expect(screen.getByText("3")).toBeTruthy(); // nothing hidden ⇒ bare total
-    expect(screen.queryByText("3 of 3")).toBeNull();
+    expect(screen.queryByText(/more in profile/)).toBeNull();
   });
 
   it("omits the '+N more' link when total equals the shown papers", () => {
@@ -474,7 +476,7 @@ describe("<RepresentativePapers> — the disclosure stack", () => {
 describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='lesser')", () => {
   const dotOf = (c: HTMLElement) => c.querySelector("span.rounded-full");
 
-  it("method lesser ⇒ a FILLED dot + 'Method · family' + abbreviated '· N of M' (no 'publications', no badge pill)", () => {
+  it("method lesser ⇒ a FILLED dot + 'Method · family' + '· N of M publications' (no badge pill)", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "method", family: "CRISPR genome editing", tools: [], count: 3 }}
@@ -483,8 +485,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
       />,
     );
     expect(container.textContent).toMatch(/Method · CRISPR genome editing/);
-    expect(container.textContent).toMatch(/· 3 of 44/);
-    expect(container.textContent).not.toMatch(/publications/);
+    expect(container.textContent).toMatch(/· 3 of 44 publications/); // unit spelled out
     expect(dotOf(container)?.className).toMatch(/bg-\[#8B4A2F\]/); // filled burnt umber = curated
   });
 
@@ -610,19 +611,22 @@ describe("<RepresentativePapers> — #1366 follow-up Part A panel relabeling", (
     expect(screen.queryByText("Key papers")).toBeNull();
   });
 
-  it("renders the italic muted subtitle when panelSubtitle is set (research-area panel)", () => {
+  it("folds panelSubtitle into the header as a muted, non-italic caveat (research-area panel)", () => {
     render(
       <RepresentativePapers
         papers={PAPERS}
         total={2}
         profileHref="/p/x#publications"
         panelLabel="Representative papers"
-        panelSubtitle="Papers mapped to area — not search"
+        panelSubtitle="not from your search"
       />,
     );
     expect(screen.getByText("Representative papers")).toBeTruthy();
-    const sub = screen.getByText(/Papers mapped to area/i);
-    expect(sub.className).toMatch(/italic/);
+    const sub = screen.getByText(/not from your search/i);
+    // Folded inline as "· <caveat>", muted, no longer a separate italic line.
+    expect(sub.textContent).toMatch(/·\s*not from your search/);
+    expect(sub.className).toMatch(/text-\[#8c8c8c\]/);
+    expect(sub.className).not.toMatch(/italic/);
   });
 
   it("omits the subtitle by default (method / publications panels)", () => {
@@ -682,15 +686,17 @@ describe("<EvidenceLine> — #1366 follow-up Part A derives the panel header fro
     });
     fireEvent.click(screen.getByRole("button"));
     expect(screen.getByText("Matching publications")).toBeTruthy();
-    expect(screen.queryByText(/Papers mapped to area/)).toBeNull();
+    expect(screen.queryByText(/not from your search/)).toBeNull();
   });
 
-  it("topic → 'Representative papers' + the 'Papers mapped to area — not search' subtitle", async () => {
+  it("topic → 'Representative papers' + folded 'not from your search' caveat + blue rail", async () => {
     mockFetch({ pubs: [{ pmid: "1", title: "Top area paper", year: 2024 }], total: 1 });
     renderLine({ kind: "topic", label: "Stem Cell Biology", id: "stem", count: 10 });
     fireEvent.click(screen.getByRole("button"));
     await waitFor(() => expect(screen.getByText("Representative papers")).toBeTruthy());
-    expect(screen.getByText(/Papers mapped to area/i)).toBeTruthy();
+    expect(screen.getByText(/not from your search/i)).toBeTruthy();
+    // Headline: the expanded research-area panel carries the blue signal rail.
+    expect(document.querySelector('[class*="border-[#2563eb]"]')).toBeTruthy();
   });
 
   it("single-evidence (stacked=false) keeps the legacy 'Key papers' header, not the relabel", () => {

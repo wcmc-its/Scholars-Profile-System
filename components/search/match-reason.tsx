@@ -101,7 +101,7 @@ function DisclosureRow({
       <ChevronDown
         aria-hidden
         strokeWidth={2.5}
-        className={`size-3.5 shrink-0 ${wide ? "ml-auto" : ""} text-[#9a958a] motion-safe:transition-transform motion-safe:duration-150 ${
+        className={`shrink-0 ${wide ? "size-5 ml-auto" : "size-3.5"} text-[#9a958a] motion-safe:transition-transform motion-safe:duration-150 ${
           expanded ? "rotate-180" : ""
         }`}
       />
@@ -448,6 +448,7 @@ export function RepresentativePapers({
   mentionNote = false,
   panelLabel,
   panelSubtitle,
+  railClassName = "pl-[1px]",
 }: {
   papers: EvidencePub[];
   total: number;
@@ -473,6 +474,9 @@ export function RepresentativePapers({
    *  the badge firing guarantees the scholar has the section. Undefined for the
    *  publications key-paper path (its chevron is count-gated, so empty ⇒ nothing). */
   fallback?: { href: string; label: string };
+  /** Signal-colored left rail on the panel (blue = research area, green = funding,
+   *  per-kind for the rest). Defaults to the flush `pl-[1px]` = no rail. */
+  railClassName?: string;
 }) {
   if (status === "loading" && papers.length === 0) {
     return (
@@ -502,31 +506,27 @@ export function RepresentativePapers({
 
   const more = total - papers.length;
   return (
-    <div id={panelId} className="mt-1.5 pl-[1px]">
+    <div id={panelId} className={`mt-1.5 ${railClassName}`}>
       {mentionNote ? <MentionNote /> : null}
-      <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
-        {/* #1366 follow-up Part A — honesty relabel: the caller-supplied header
-            ("Matching publications" / "Representative papers") replaces the legacy
-            "Key paper(s)" string, which stays as the singular/plural fallback. */}
+      {/* #1366 follow-up Part A — honesty relabel: the caller-supplied header
+          ("Matching publications" / "Representative papers") replaces the legacy
+          "Key paper(s)" string. Sentence-case with the clarifying caveat folded in
+          (" · not from your search") — no separate count (the "+N more" link carries
+          the total). */}
+      <div className="mb-1.5 text-[11.5px] font-medium leading-snug text-[#3a3a3a]">
         {panelLabel ?? (papers.length === 1 ? "Key paper" : "Key papers")}
-        {/* Matching count: "3 of 8" when the list is truncated (mirrors the "+N more"
-            link), else the bare total. normal-case so "of" isn't shouted in the caps
-            label. `total` is the matching N already passed for the "+N more" link. */}
-        <span className="ml-1.5 font-medium normal-case tracking-normal text-[#b0aaa0]">
-          {more > 0 ? `${papers.length} of ${total}` : total}
-        </span>
+        {panelSubtitle ? (
+          <span className="font-normal text-[#8c8c8c]"> · {panelSubtitle}</span>
+        ) : null}
       </div>
-      {panelSubtitle ? (
-        <div className="mt-0.5 text-[11px] italic leading-snug text-[#9a958a]">{panelSubtitle}</div>
-      ) : null}
       <ul className="mt-1 flex flex-col gap-1.5 text-[13px] leading-snug">
         {papers.map((p) => (
           // Bullet + hanging indent: the dot is its own flex item, so a title that
           // wraps aligns line 2 under the TITLE text (not the bullet); the dot
           // shares the title's line-height so it baselines with line 1. Titles are
           // roman at 13px and NEVER truncate — the full article title always wraps.
-          <li key={p.pmid} className="flex items-start gap-[6px] text-muted-foreground">
-            <span aria-hidden className="shrink-0 leading-snug text-[#9a958a]">
+          <li key={p.pmid} className="flex items-start gap-[9px] text-muted-foreground">
+            <span aria-hidden className="shrink-0 text-[16px] leading-[1.1] text-[#9a958a]">
               &bull;
             </span>
             <span className="min-w-0">
@@ -538,11 +538,11 @@ export function RepresentativePapers({
                   (highlightedTitleHtml). Otherwise the plain sanitized title. */}
               {p.titleHtml ? (
                 <span
-                  className="text-[#4a4a4a]"
+                  className="text-[#1a1a1a]"
                   dangerouslySetInnerHTML={{ __html: highlightedTitleHtml(p.titleHtml) }}
                 />
               ) : (
-                <PubTitle as="span" value={p.title} className="text-[#4a4a4a]" />
+                <PubTitle as="span" value={p.title} className="text-[#1a1a1a]" />
               )}
               {p.year ? <span className="text-[#777]"> ({p.year})</span> : null}
             </span>
@@ -621,22 +621,18 @@ export function KeyFunding({
 
   const more = total - grants.length;
   return (
-    <div id={panelId} className="mt-1.5 pl-[1px]">
+    <div id={panelId} className="mt-1.5 border-l-2 border-[#16a34a] pl-[14px]">
       {mentionNote ? <MentionNote /> : null}
-      <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#9a958a]">
+      {/* Sentence-case, no count (the "+N more" link carries the total). */}
+      <div className="mb-1.5 text-[11.5px] font-medium leading-snug text-[#3a3a3a]">
         {grants.length === 1 ? "Key grant" : "Key funding"}
-        {/* Matching count, mirroring the key-papers header: "3 of 8" when truncated,
-            else the bare total. `total` here is grantsTotal (capped at grantCount). */}
-        <span className="ml-1.5 font-medium normal-case tracking-normal text-[#b0aaa0]">
-          {more > 0 ? `${grants.length} of ${total}` : total}
-        </span>
       </div>
       <ul className="mt-1 flex flex-col gap-1.5 text-[13px] leading-snug">
         {grants.map((g) => {
           const meta = fundingMeta(g);
           return (
-            <li key={g.projectId} className="flex items-start gap-[6px] text-muted-foreground">
-              <span aria-hidden className="shrink-0 leading-snug text-[#9a958a]">
+            <li key={g.projectId} className="flex items-start gap-[9px] text-muted-foreground">
+              <span aria-hidden className="shrink-0 text-[16px] leading-[1.1] text-[#9a958a]">
                 &bull;
               </span>
               <span className="min-w-0">
@@ -645,11 +641,11 @@ export function KeyFunding({
                     otherwise the plain title. */}
                 {g.titleHighlight ? (
                   <span
-                    className="block text-[#4a4a4a]"
+                    className="block text-[#1a1a1a]"
                     dangerouslySetInnerHTML={{ __html: highlightedTitleHtml(g.titleHighlight) }}
                   />
                 ) : (
-                  <span className="block text-[#4a4a4a]">{g.title}</span>
+                  <span className="block text-[#1a1a1a]">{g.title}</span>
                 )}
                 {meta ? <span className="block text-[12px] text-[#777]">{meta}</span> : null}
               </span>
