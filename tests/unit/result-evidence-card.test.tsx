@@ -35,6 +35,44 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(screen.getByText("Single-cell & spatial biology").tagName).toBe("STRONG");
   });
 
+  it("#1381 — the primary type indicator is a FILLED category dot, not a bordered pill/icon", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "method", family: "CRISPR", tools: [], count: 4 }}
+        pubCount={98}
+        stacked
+      />,
+    );
+    // method dot in the bright category color; the old bordered pill is gone.
+    const dots = Array.from(container.querySelectorAll("span.rounded-full")).map((d) => d.className);
+    expect(dots.some((c) => c.includes("bg-[#c2410c]"))).toBe(true);
+    expect(container.innerHTML).not.toContain("rounded-[5px]");
+    // the type word + entity still render (word as text, entity bold).
+    expect(screen.getByText("Method")).toBeTruthy();
+    expect(screen.getByText("CRISPR").tagName).toBe("STRONG");
+  });
+
+  it("#1381 — the badged publications primary is a dot + type word, not a flavor pill", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{
+          kind: "publications",
+          strength: "mention",
+          text: "1 of 98 publications mention",
+          term: "crispr",
+          count: 1,
+        }}
+        pubCount={98}
+        stacked
+        badged
+      />,
+    );
+    const dots = Array.from(container.querySelectorAll("span.rounded-full")).map((d) => d.className);
+    expect(dots.some((c) => c.includes("bg-[#64748b]"))).toBe(true); // keyword dot
+    expect(screen.getByText("Keyword")).toBeTruthy();
+    expect(container.innerHTML).not.toContain("rounded-[5px]");
+  });
+
   it("shows a real disclosure chevron BUTTON on method AND topic badges when canExpand", () => {
     // The chevron is now a real clickable `<button>` (replaces the hover ▾); it
     // must appear for both kinds, and only when canExpand + onToggle are given.
@@ -695,7 +733,7 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the prim
         badged
       />,
     );
-    expect(screen.getByText("Keyword")).toBeTruthy(); // the flavor pill is retained
+    expect(screen.getByText("Keyword")).toBeTruthy(); // the type word is retained (now a dot, not a pill)
     expect(container.textContent).toMatch(/· term match only/);
     // precedence: keyword-only wins; the low-coverage cue is NOT also appended.
     expect(container.textContent).not.toMatch(/% of output/);
