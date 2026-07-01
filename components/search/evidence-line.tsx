@@ -205,7 +205,7 @@ export function EvidenceLine({
       ? "Representative papers"
       : "Matching publications";
   const panelSubtitle =
-    stacked && isTopicPanel ? "top papers in this area — not matched to your search" : undefined;
+    stacked && isTopicPanel ? "Papers mapped to area — not search" : undefined;
 
   return (
     <>

@@ -57,6 +57,7 @@ function DisclosureRow({
   panelId,
   className = "",
   srLabel = "key papers",
+  compact = false,
   children,
 }: {
   expanded: boolean;
@@ -65,6 +66,8 @@ function DisclosureRow({
   className?: string;
   /** What the disclosure reveals, for the sr-only affordance (e.g. "key funding"). */
   srLabel?: string;
+  /** Tighter vertical padding for the compact "Also matched" lesser rows. */
+  compact?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -80,7 +83,7 @@ function DisclosureRow({
       // by the card only when expanded, so a collapsed-state aria-controls would
       // be a dangling reference.
       aria-controls={expanded ? panelId : undefined}
-      className={`relative z-10 -mx-2 inline-flex max-w-full cursor-pointer items-center gap-[7px] rounded-md px-2 py-[5px] text-left align-top hover:bg-[#f0eeea] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2c4f6e] focus-visible:ring-offset-1 ${className}`}
+      className={`relative z-10 -mx-2 inline-flex max-w-full cursor-pointer items-center gap-[7px] rounded-md px-2 ${compact ? "py-[1px]" : "py-[5px]"} text-left align-top hover:bg-[#f0eeea] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2c4f6e] focus-visible:ring-offset-1 ${className}`}
     >
       {children}
       {/* The visible cluster text (the count / method label) is the button's
@@ -164,7 +167,7 @@ export function MatchReason({
           </span>
           {/* #1350 — the count prefix reads in normal weight; the resolved concept
               term (appended by the caller) carries its own subtle underline. */}
-          <span className={`min-w-0 truncate ${dim ? "text-[#9a958a]" : "text-[#3a3a3a]"}`}>
+          <span className={`min-w-0 truncate ${dim ? "text-[#9a958a]" : "text-[#8c8c8c]"}`}>
             {children}
             {cueSpan}
           </span>
@@ -195,7 +198,7 @@ export function MatchReason({
   }
   return (
     <div
-      className={`${badged ? "mt-1" : "mt-2"} flex min-w-0 items-center leading-snug ${badged ? "gap-2 text-[13px]" : "gap-1.5 text-[12.5px] text-muted-foreground"} ${className}`}
+      className={`${badged ? "mt-1" : "mt-2"} flex min-w-0 items-center leading-snug ${badged ? "gap-[7px] text-[13px]" : "gap-1.5 text-[12.5px] text-muted-foreground"} ${className}`}
     >
       {inner}
     </div>
@@ -293,7 +296,7 @@ export function MatchAwareReason({
   // near-black to muted grey and the count/prefix follow, so a low-relevance primary
   // reads quieter. The cue (italic muted) trails the suffix.
   const labelColor = dim ? "text-[#9a958a]" : "text-[#1a1a1a]";
-  const metaColor = dim ? "text-[#9a958a]" : "text-[#3a3a3a]";
+  const metaColor = dim ? "text-[#9a958a]" : "text-[#8c8c8c]";
   // items-center (not baseline): the bordered pill and the bold label line up on
   // a shared center axis so the badge doesn't sit low next to the label.
   const inner = (
@@ -309,8 +312,8 @@ export function MatchAwareReason({
         <strong
           className={
             underline
-              ? `font-semibold ${labelColor} underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]`
-              : `font-semibold ${labelColor}`
+              ? `font-[450] ${labelColor} underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]`
+              : `font-[450] ${labelColor}`
           }
         >
           {label}
@@ -336,7 +339,7 @@ export function MatchAwareReason({
     );
   }
   return (
-    <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[13px] leading-snug">
+    <div className="mt-1.5 flex min-w-0 items-center gap-[7px] text-[13px] leading-snug">
       {inner}
     </div>
   );
@@ -400,15 +403,21 @@ export function LesserReason({
   );
   if (canExpand && onToggle) {
     return (
-      <div className="mt-0.5 leading-snug">
-        <DisclosureRow expanded={expanded} onToggle={onToggle} panelId={panelId} srLabel={srLabel}>
+      <div className="mt-1 leading-snug">
+        <DisclosureRow
+          expanded={expanded}
+          onToggle={onToggle}
+          panelId={panelId}
+          srLabel={srLabel}
+          compact
+        >
           {inner}
         </DisclosureRow>
       </div>
     );
   }
   return (
-    <div className="mt-0.5 flex min-w-0 items-center gap-[9px] py-[3px] leading-snug">{inner}</div>
+    <div className="mt-1 flex min-w-0 items-center gap-[9px] py-[1px] leading-snug">{inner}</div>
   );
 }
 
