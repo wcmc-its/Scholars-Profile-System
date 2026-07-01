@@ -392,6 +392,21 @@ export interface SpsEnvConfig {
    * cutover.
    */
   readonly opensearchDomainName: string;
+  /**
+   * Public ALB "full name" (the `LoadBalancer` CloudWatch dimension value,
+   * `app/<name>/<id>`) the by-name Observability ALB metrics key on when
+   * {@link observabilityMetricsByName} is true. Empty in the shipped config
+   * (unused while the flag is off); assigned the replaced ALB's full name at
+   * cutover. Severs the App->Observability ALB `LoadBalancerFullName` export.
+   */
+  readonly publicAlbFullName: string;
+  /**
+   * Public target-group "full name" (`targetgroup/<name>/<id>`, the `TargetGroup`
+   * CloudWatch dimension) the by-name unhealthy-hosts metric keys on when
+   * {@link observabilityMetricsByName} is true. Empty in the shipped config;
+   * assigned at cutover. Severs the App->Observability `TargetGroupFullName` export.
+   */
+  readonly publicTargetGroupFullName: string;
 }
 
 /**
@@ -519,6 +534,8 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     observabilityMetricsByName: false,
     auroraClusterIdentifier: "",
     opensearchDomainName: "",
+    publicAlbFullName: "",
+    publicTargetGroupFullName: "",
   },
   prod: {
     envName: "prod",
@@ -625,6 +642,8 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     observabilityMetricsByName: false,
     auroraClusterIdentifier: "",
     opensearchDomainName: "",
+    publicAlbFullName: "",
+    publicTargetGroupFullName: "",
   },
 };
 

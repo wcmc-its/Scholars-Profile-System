@@ -1101,6 +1101,8 @@ describe("SpsObservabilityStack — metric-by-name decouple (cutover increment 2
     observabilityMetricsByName: true,
     auroraClusterIdentifier: "sps-prod-cutover-cluster",
     opensearchDomainName: "sps-prod-cutover-os",
+    publicAlbFullName: "app/sps-prod-alb/0abc123def456789",
+    publicTargetGroupFullName: "targetgroup/sps-prod-tg/0def456abc123789",
   } as const;
 
   it("Aurora alarms key on the literal DBClusterIdentifier (AWS/RDS, no cross-stack import)", () => {
@@ -1134,6 +1136,44 @@ describe("SpsObservabilityStack — metric-by-name decouple (cutover increment 2
     const { data } = buildObservabilityStack("prod");
     const json = JSON.stringify(Template.fromStack(data).toJSON());
     expect(json).toMatch(/ExportsOutputRefAuroraCluster/);
+  });
+
+  it("Public ALB alarms key on the literal LoadBalancer full name (AWS/ApplicationELB, no import)", () => {
+    const { template } = buildObservabilityStack("prod", BYNAME);
+    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      Namespace: "AWS/ApplicationELB",
+      Dimensions: [
+        { Name: "LoadBalancer", Value: "app/sps-prod-alb/0abc123def456789" },
+      ],
+    });
+  });
+
+  it("Unhealthy-hosts metric keys on the literal LoadBalancer + TargetGroup (AWS/ApplicationELB)", () => {
+    const { template } = buildObservabilityStack("prod", BYNAME);
+    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      Namespace: "AWS/ApplicationELB",
+      MetricName: "UnHealthyHostCount",
+      Dimensions: Match.arrayWith([
+        {
+          Name: "TargetGroup",
+          Value: "targetgroup/sps-prod-tg/0def456abc123789",
+        },
+      ]),
+    });
+  });
+
+  it("severs the App->Observability ALB + target-group full-name export edges (9/10)", () => {
+    const { appTemplate } = buildObservabilityStack("prod", BYNAME);
+    const outputs = JSON.stringify(appTemplate.findOutputs("*"));
+    expect(outputs).not.toMatch(/LoadBalancerFullName/);
+    expect(outputs).not.toMatch(/TargetGroupFullName/);
+  });
+
+  it("default (flag off) keeps the ALB metric handles → App still exports the ALB/TG full names", () => {
+    const { appTemplate } = buildObservabilityStack("prod");
+    const outputs = JSON.stringify(appTemplate.findOutputs("*"));
+    expect(outputs).toMatch(/LoadBalancerFullName/);
+    expect(outputs).toMatch(/TargetGroupFullName/);
   });
 
   it("throws at synth when by-name is on but the cluster/domain identifiers are blank", () => {
