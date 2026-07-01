@@ -422,10 +422,27 @@ export function MethodsSection({
                   data-selected-zero={selectedZero ? "true" : undefined}
                 >
                   {/* #1377 — the exemplar member-tools surface as a non-interactive
-                      hover preview on the pill (tool NAMES only; no per-tool click
-                      target — the pill itself carries the filter/link). */}
+                      hover preview on the pill: a titled bulleted list (the plain
+                      dotted `text` stays as the accessible fallback). Tool NAMES
+                      only; no per-tool click target — the pill carries the
+                      filter/link. */}
                   {f.exemplarTools.length > 0 ? (
-                    <HoverTooltip wide text={f.exemplarTools.join(" · ")}>
+                    <HoverTooltip
+                      wide
+                      text={f.exemplarTools.join(" · ")}
+                      body={
+                        <div>
+                          <p className="mb-1 font-semibold">
+                            Methods &amp; tools used by this scholar
+                          </p>
+                          <ul className="list-disc space-y-0.5 pl-4">
+                            {f.exemplarTools.map((tool) => (
+                              <li key={tool}>{tool}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      }
+                    >
                       {pill}
                     </HoverTooltip>
                   ) : (
