@@ -90,7 +90,7 @@ function DisclosureRow({
       // by the card only when expanded, so a collapsed-state aria-controls would
       // be a dangling reference.
       aria-controls={expanded ? panelId : undefined}
-      className={`relative z-10 -mx-2 ${wide ? "flex w-full" : "inline-flex max-w-full"} cursor-pointer items-center gap-[7px] rounded-md px-2 ${compact ? "py-[1px]" : "py-[5px]"} text-left align-top hover:bg-[#f0eeea] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2c4f6e] focus-visible:ring-offset-1 ${className}`}
+      className={`relative z-10 -mx-2 ${wide || compact ? "flex w-full" : "inline-flex max-w-full"} cursor-pointer items-center gap-[7px] rounded-md px-2 ${compact ? "py-[1px]" : "py-[5px]"} text-left align-top hover:bg-[#f0eeea] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2c4f6e] focus-visible:ring-offset-1 ${className}`}
     >
       {children}
       {/* The visible cluster text (the count / method label) is the button's
@@ -101,7 +101,7 @@ function DisclosureRow({
       <ChevronDown
         aria-hidden
         strokeWidth={2.5}
-        className={`shrink-0 ${wide ? "size-5 ml-auto" : "size-3.5"} text-[#9a958a] motion-safe:transition-transform motion-safe:duration-150 ${
+        className={`shrink-0 ${wide ? "size-5 ml-auto" : compact ? "size-3.5 ml-auto mr-[3px]" : "size-3.5"} text-[#9a958a] motion-safe:transition-transform motion-safe:duration-150 ${
           expanded ? "rotate-180" : ""
         }`}
       />
