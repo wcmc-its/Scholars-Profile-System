@@ -539,9 +539,10 @@ export function PeopleResultCard({
                 lesser line or a (demoted) Funding row. A single secondary collapses the
                 same way (#1381 follow-up) and expands to its records in one click. */}
             {stacked && lines && secondaryCount >= 1 ? (
-              // #1381 follow-up — trimmed 8px of vertical space above the "Also matched"
-              // group (mt-[9px] → mt-[1px]) so the primary and secondaries sit tighter.
-              <div className="mt-[1px] border-t border-dotted border-[#d5d5d5] pt-[11px]">
+              // Balanced 10px above/below the dotted rule so it sits centered in the
+              // gap between the primary row and the "Also matched" group (not hugging
+              // the primary). Supersedes the #1381 tightening now that there's a rule.
+              <div className="mt-[10px] border-t border-dotted border-[#d5d5d5] pt-[10px]">
                 {/* Collapse hybrid — one summary line by default (colored dot + category
                     label per secondary, no counts / entities), expandable to the full
                     lesser rows. The far-right chevron (ml-auto) distinguishes this
