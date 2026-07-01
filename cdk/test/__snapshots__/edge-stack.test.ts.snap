@@ -37,6 +37,10 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
+    "SsmParameterValuespsprodapppublicalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/app/public-alb-dns",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
   },
   "Resources": {
     "DefaultRscCacheCFC4DDE6": {
@@ -750,7 +754,7 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 ],
               },
               "DomainName": {
-                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9",
+                "Ref": "SsmParameterValuespsprodapppublicalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
               "Id": "SpsEdgeprodDistributionOrigin13FA7C7AF",
               "OriginCustomHeaders": [
@@ -1222,6 +1226,10 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
     "BootstrapVersion": {
       "Default": "/cdk-bootstrap/hnb659fds/version",
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "SsmParameterValuespsstagingapppublicalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/staging/app/public-alb-dns",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
   },
@@ -1937,7 +1945,7 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
                 ],
               },
               "DomainName": {
-                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9",
+                "Ref": "SsmParameterValuespsstagingapppublicalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
               "Id": "SpsEdgestagingDistributionOrigin145B7DDC3",
               "OriginCustomHeaders": [

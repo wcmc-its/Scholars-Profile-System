@@ -9,9 +9,9 @@ import {
 import * as acm from "aws-cdk-lib/aws-certificatemanager";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
-import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as wafv2 from "aws-cdk-lib/aws-wafv2";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
@@ -20,8 +20,6 @@ import { type SpsEnvConfig } from "./config";
 export interface EdgeStackProps extends StackProps {
   /** Resolved per-environment configuration. */
   readonly envConfig: SpsEnvConfig;
-  /** The public ALB from AppStack — the primary (fallback) origin. */
-  readonly publicAlb: elbv2.IApplicationLoadBalancer;
   /**
    * ARN of the AppStack GitHub Actions deploy role (`sps-deploy-<env>`). The
    * static-asset bucket grants this principal `s3:PutObject` (prefix-scoped) so
@@ -89,7 +87,7 @@ export class EdgeStack extends Stack {
   constructor(scope: Construct, id: string, props: EdgeStackProps) {
     super(scope, id, props);
 
-    const { envConfig, publicAlb } = props;
+    const { envConfig } = props;
     const env = envConfig.envName;
 
     // ------------------------------------------------------------------
@@ -236,13 +234,28 @@ export class EdgeStack extends Stack {
     // customHeaders carries the X-Origin-Verify shared secret; the
     // listener-rule edit in AppStack admits only requests matching it.
     // ------------------------------------------------------------------
-    const origin = new origins.LoadBalancerV2Origin(publicAlb, {
-      protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
-      httpPort: 80,
-      customHeaders: {
-        "X-Origin-Verify": originVerifyToken,
+    // Item-3 pass 2b: point the origin at the public-ALB DNS name AppStack
+    // publishes to SSM (pass 1) instead of the cross-stack ALB handle — severs the
+    // App→Edge FnGetAtt DNSName import (edge 8) that would lock the flip (the
+    // public ALB replaces onto the shared VPC). `HttpOrigin` defaults to
+    // HTTPS_ONLY, so HTTP_ONLY + httpPort:80 stay explicit; every other origin
+    // prop is left default (byte-identical to the LoadBalancerV2Origin, which
+    // injected none). The X-Origin-Verify header is the whole origin-protection
+    // contract — the ALB listener default-denies 403 and forwards only the
+    // matching secret — and is unchanged.
+    const origin = new origins.HttpOrigin(
+      ssm.StringParameter.valueForStringParameter(
+        this,
+        `/sps/${env}/app/public-alb-dns`,
+      ),
+      {
+        protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+        httpPort: 80,
+        customHeaders: {
+          "X-Origin-Verify": originVerifyToken,
+        },
       },
-    });
+    );
 
     // ------------------------------------------------------------------
     // Static-asset S3 origin (Layer 2 of the /about chunk-404 fix).

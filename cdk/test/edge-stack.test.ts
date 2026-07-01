@@ -37,7 +37,6 @@ function buildEdgeStack(
   const stack = new EdgeStack(fixture.app, `Sps-Edge-${envName}`, {
     env: fixture.env,
     envConfig: fixture.envConfig,
-    publicAlb: app.publicAlb,
     deployRoleArn: app.deployRole.roleArn,
   });
   return { template: Template.fromStack(stack), stack };

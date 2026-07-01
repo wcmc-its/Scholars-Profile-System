@@ -141,7 +141,7 @@ describe("EtlStack", () => {
   // Cutover de-coupling (§8.4): both the ETL container and the reconcile task
   // move OPENSEARCH_NODE off the Data→Etl cross-stack export onto the opensearch
   // secret's `node` key, so the OpenSearch-domain replace at cutover isn't
-  // blocked by the export-lock. The Sps-App InternalAlbDns import is untouched.
+  // blocked by the export-lock. The internal-ALB DNS is a separate edge (SSM).
   describe("OPENSEARCH_NODE de-coupling (openSearchNodeFromSecret)", () => {
     it("default (off): node is baked from the DataStack export, not a secret", () => {
       const json = JSON.stringify(buildEtlStack("staging").template.toJSON());
@@ -149,14 +149,15 @@ describe("EtlStack", () => {
       expect(json).not.toContain(":node::");
     });
 
-    it("on: node comes from the opensearch secret `node` key; the OpenSearch export is gone but the InternalAlbDns import stays", () => {
+    it("on: node comes from the opensearch secret `node` key; the OpenSearch export is gone but SCHOLARS_BASE_URL still resolves", () => {
       const json = JSON.stringify(
         buildEtlStack("staging", { openSearchNodeFromSecret: true }).template.toJSON(),
       );
       expect(json).not.toContain("Sps-Data-staging-OpenSearchDomainEndpoint");
       expect(json).toContain(":node::");
-      // SCHOLARS_BASE_URL still rides the App internal-ALB export (different edge).
-      expect(json).toContain("Sps-App-staging-InternalAlbDns");
+      // SCHOLARS_BASE_URL rides the App internal-ALB DNS SSM param (item-3 pass 2b),
+      // a separate edge unaffected by openSearchNodeFromSecret.
+      expect(json).toContain("/sps/staging/app/internal-alb-dns");
     });
   });
 
@@ -1262,8 +1263,8 @@ describe("EtlStack", () => {
 
       it("sets SCHOLARS_BASE_URL pointing at the internal ALB (#479)", () => {
         // The cadence revalidate step calls /api/revalidate on the VPC-private
-        // ALB. The value is an Fn::Join that interpolates the cross-stack
-        // import of InternalAlbDns; assert by string-matching the JSON shape
+        // ALB. The value is an Fn::Join that interpolates the internal-ALB DNS
+        // SSM param (item-3 pass 2b); assert by string-matching the JSON shape
         // rather than the resolved value (which is a CloudFormation token).
         const envEntries = (etlContainerDef().Environment ?? []) as Array<{
           Name?: string;
@@ -1273,7 +1274,10 @@ describe("EtlStack", () => {
         expect(baseUrl).toBeDefined();
         const valueJson = JSON.stringify(baseUrl?.Value ?? {});
         expect(valueJson).toContain("http://");
-        expect(valueJson).toContain("Sps-App-prod-InternalAlbDns");
+        // Value is `http://` + a Ref to the internal-alb-dns SSM CfnParameter
+        // (the `/sps/.../internal-alb-dns` path lives in the param's Default, not
+        // the env value); match the param's normalized logical-id fragment.
+        expect(valueJson).toContain("internalalbdns");
       });
     });
 
