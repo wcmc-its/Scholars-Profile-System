@@ -18,6 +18,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as sns from "aws-cdk-lib/aws-sns";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as sfn from "aws-cdk-lib/aws-stepfunctions";
 import * as tasks from "aws-cdk-lib/aws-stepfunctions-tasks";
 import { type Construct } from "constructs";
@@ -133,8 +134,13 @@ export class EtlStack extends Stack {
     // regardless of which SG it modifies (mirrors AppStack's pattern that
     // breaks the App <-> Network cycle).
     // ------------------------------------------------------------------
-    const internalAlbSgId = Fn.importValue(
-      `Sps-App-${env}-InternalAlbSecurityGroupId`,
+    // Item-3 pass 2b: read the internal-ALB SG id from the SSM param AppStack
+    // publishes (pass 1) instead of the cross-stack named export — severs the
+    // App→Etl import (edge 6) that would lock the flip (the internal ALB replaces
+    // onto the shared VPC). The standalone ingress below is otherwise unchanged.
+    const internalAlbSgId = ssm.StringParameter.valueForStringParameter(
+      this,
+      `/sps/${env}/app/internal-alb-sg-id`,
     );
     new ec2.CfnSecurityGroupIngress(this, "InternalAlbIngressFromEtl", {
       groupId: internalAlbSgId,
@@ -609,8 +615,9 @@ export class EtlStack extends Stack {
         // The ETL SG -> internal-ALB-SG :80 ingress is already opened at the
         // top of this stack. `etl/revalidate/index.ts` validates this origin
         // against its allowlist before sending the bearer token.
-        SCHOLARS_BASE_URL: `http://${Fn.importValue(
-          `Sps-App-${env}-InternalAlbDns`,
+        SCHOLARS_BASE_URL: `http://${ssm.StringParameter.valueForStringParameter(
+          this,
+          `/sps/${env}/app/internal-alb-dns`,
         )}`,
         // #746 — the etl:reciter-refresh scanner (operator-run for now) reads
         // this to deliver any deferred ReCiter rejects and fire the delayed,

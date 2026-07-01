@@ -129,7 +129,6 @@ new SpsObservabilityStack(
 new EdgeStack(app, `Sps-Edge-${envConfig.envName}`, {
   env,
   envConfig,
-  publicAlb: appStack.publicAlb,
   // The static-asset bucket (#700) grants this role PutObject so the deploy
   // workflow can sync `.next/static` to S3. Passed as the ARN string; CDK
   // resolves the cross-stack reference.
