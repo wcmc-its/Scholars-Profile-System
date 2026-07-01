@@ -61,6 +61,7 @@ function DisclosureRow({
   className = "",
   srLabel = "key papers",
   compact = false,
+  wide = false,
   children,
 }: {
   expanded: boolean;
@@ -71,6 +72,9 @@ function DisclosureRow({
   srLabel?: string;
   /** Tighter vertical padding for the compact "Also matched" lesser rows. */
   compact?: boolean;
+  /** #1381 follow-up — full-width row with the chevron pushed to the far right (the
+   *  column-aligned primary lead). Default is the content-width inline cluster. */
+  wide?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -86,7 +90,7 @@ function DisclosureRow({
       // by the card only when expanded, so a collapsed-state aria-controls would
       // be a dangling reference.
       aria-controls={expanded ? panelId : undefined}
-      className={`relative z-10 -mx-2 inline-flex max-w-full cursor-pointer items-center gap-[7px] rounded-md px-2 ${compact ? "py-[1px]" : "py-[5px]"} text-left align-top hover:bg-[#f0eeea] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2c4f6e] focus-visible:ring-offset-1 ${className}`}
+      className={`relative z-10 -mx-2 ${wide ? "flex w-full" : "inline-flex max-w-full"} cursor-pointer items-center gap-[7px] rounded-md px-2 ${compact ? "py-[1px]" : "py-[5px]"} text-left align-top hover:bg-[#f0eeea] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2c4f6e] focus-visible:ring-offset-1 ${className}`}
     >
       {children}
       {/* The visible cluster text (the count / method label) is the button's
@@ -96,8 +100,8 @@ function DisclosureRow({
       <span className="sr-only"> {srLabel}</span>
       <ChevronDown
         aria-hidden
-        strokeWidth={2}
-        className={`size-3.5 shrink-0 text-[#9a958a] motion-safe:transition-transform motion-safe:duration-150 ${
+        strokeWidth={2.5}
+        className={`size-3.5 shrink-0 ${wide ? "ml-auto" : ""} text-[#9a958a] motion-safe:transition-transform motion-safe:duration-150 ${
           expanded ? "rotate-180" : ""
         }`}
       />
@@ -214,41 +218,90 @@ export function MatchReason({
  * `<span>`s plus (when `canExpand`) a real chevron `<button>`; the icon is
  * decorative (`aria-hidden`).
  */
+/** #1381 follow-up — per-kind primary tokens: the FILLED dot color, the AA-safe dark
+ *  type-word color, and the type word itself. Method = burnt umber (was red). Concept/
+ *  keyword are folded in so the publications lead shares the one column-aligned chrome. */
+const PRIMARY_KIND: Record<
+  "method" | "topic" | "clinical" | "funding" | "concept" | "keyword",
+  { dot: string; type: string; word: string }
+> = {
+  method: { dot: "bg-[#8B4A2F]", type: "text-[#8B4A2F]", word: "Method" },
+  topic: { dot: "bg-[#2563eb]", type: "text-[#1d4ed8]", word: "Research area" },
+  clinical: { dot: "bg-[#0891b2]", type: "text-[#0e7490]", word: "Clinical" },
+  funding: { dot: "bg-[#16a34a]", type: "text-[#166534]", word: "Funding" },
+  concept: { dot: "bg-[#7c3aed]", type: "text-[#6d28d9]", word: "Concept" },
+  keyword: { dot: "bg-[#64748b]", type: "text-[#475569]", word: "Keyword" },
+};
+
+/**
+ * #1381 follow-up — the count-first primary phrase: the matched **N** is the emphasized
+ * anchor, then a muted "of M <thing> <relation>", then the entity. The entity carries a
+ * subtle dotted underline for every kind EXCEPT a literal keyword/mention (`underline`).
+ * When there is no count (the single-evidence path, or clinical) it renders the entity
+ * alone. `dim` faints the whole phrase for a low-relevance lead.
+ */
+export function CountFirst({
+  n,
+  m,
+  thing,
+  relation,
+  entity,
+  underline,
+  dim = false,
+}: {
+  n?: number;
+  m?: number;
+  thing?: string;
+  relation?: string;
+  entity: ReactNode;
+  underline: boolean;
+  dim?: boolean;
+}) {
+  const anchor = dim ? "text-[#9a958a]" : "text-[#1a1a1a]";
+  const muted = dim ? "text-[#9a958a]" : "text-[#8c8c8c]";
+  const hasCount = n != null && m != null;
+  return (
+    <>
+      {hasCount ? (
+        <>
+          <span className={`font-semibold ${anchor}`}>{n}</span>{" "}
+          <span className={muted}>
+            of {m} {thing} {relation}{" "}
+          </span>
+        </>
+      ) : null}
+      <span
+        className={
+          underline
+            ? `font-[450] ${anchor} underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]`
+            : `font-[450] ${anchor}`
+        }
+      >
+        {entity}
+      </span>
+    </>
+  );
+}
+
 export function MatchAwareReason({
   kind,
-  label,
-  prefix,
-  suffix,
+  children,
   cue,
   dim = false,
-  underline = false,
   canExpand = false,
   expanded = false,
   onToggle,
   panelId,
 }: {
-  kind: "method" | "topic" | "clinical" | "funding";
-  label: string;
-  /** #1361 — an optional normal-weight count prefix rendered before the semibold
-   *  term (e.g. "3 of 5 grants mention" + **"radiosurgery"**). Omitted for the pure
-   *  label matches (method/topic/clinical), which have no "N of M" count. */
-  prefix?: string;
-  /** #1366 — an optional normal-weight count SUFFIX rendered AFTER the semibold
-   *  label, for the named first-class lines that read label-first (e.g.
-   *  **"Anti-obesity pharmacotherapy"** + " · 7 of 41 publications"). Method/area
-   *  use this; concept/keyword/funding use `prefix` (count-first). */
-  suffix?: string;
+  kind: "method" | "topic" | "clinical" | "funding" | "concept" | "keyword";
+  /** #1381 follow-up — the count-first evidence phrase, built by the caller
+   *  (`ResultEvidence` / `people-result-card`) via {@link CountFirst}. */
+  children: ReactNode;
   /** #1366 follow-up Part B — an italic, muted relevance caveat appended AFTER the
-   *  suffix (e.g. " · 0.2% of output" or " · term match only"). The lead is computed
-   *  in `ResultEvidence` (the primary tier); funding never carries one. */
+   *  phrase (e.g. " · 0.2% of output" or " · term match only"). Funding never has one. */
   cue?: string;
-  /** #1366 follow-up Part B — faint the lead: mute the badge + bold label + count so
-   *  a low-relevance primary reads quieter than a confident one. Paired with `cue`. */
+  /** #1366 follow-up Part B — faint the lead (mute the type word + phrase). */
   dim?: boolean;
-  /** #1359 — give the semibold term the §4.5 dotted underline used for a resolved
-   *  CONCEPT term (the "tagged" funding line: "N of M grants tagged **Heart Arrest**"),
-   *  matching the concept publications line. Off for a literal "mention '<query>'". */
-  underline?: boolean;
   /** Rep-papers disclosure — when true, trail a clickable chevron `<button>`
    *  that opens the representative-papers panel `panelId`. */
   canExpand?: boolean;
@@ -256,66 +309,26 @@ export function MatchAwareReason({
   onToggle?: () => void;
   panelId?: string;
 }) {
-  // #1381 — the primary type indicator is a colored dot + type word (no bordered pill /
-  // icon), matching the "Also matched" secondaries + the approved lead mock. Bright
-  // FILLED dot + the AA-safe dark label tone per kind (same tokens as the lesser rows).
-  const dotColor =
-    kind === "method"
-      ? "bg-[#c2410c]"
-      : kind === "clinical"
-        ? "bg-[#0891b2]"
-        : kind === "funding"
-          ? "bg-[#16a34a]"
-          : "bg-[#2563eb]";
-  const typeColor =
-    kind === "method"
-      ? "text-[#9a3412]"
-      : kind === "clinical"
-        ? "text-[#0e7490]"
-        : kind === "funding"
-          ? "text-[#166534]"
-          : "text-[#1d4ed8]";
-  const badgeText =
-    kind === "method"
-      ? "Method"
-      : kind === "clinical"
-        ? "Clinical"
-        : kind === "funding"
-          ? "Funding"
-          : "Research area";
-  // #1366 follow-up Part B — when `dim`, faint the lead: the label drops from
-  // near-black to muted grey and the count/prefix follow, so a low-relevance primary
-  // reads quieter. The cue (italic muted) trails the suffix.
-  const labelColor = dim ? "text-[#9a958a]" : "text-[#1a1a1a]";
-  const metaColor = dim ? "text-[#9a958a]" : "text-[#8c8c8c]";
-  // items-center (not baseline): the dot and the bold label line up on a shared center
-  // axis so the marker doesn't sit low next to the label.
+  const k = PRIMARY_KIND[kind];
+  // #1381 follow-up — the type word sits in a fixed-width column so the phrases align
+  // across cards; the chevron (via DisclosureRow `wide`) is pushed to the far right.
   const inner = (
     <>
-      <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${dotColor}`} />
-      <span className="min-w-0 truncate">
-        <span className={`font-medium ${dim ? metaColor : typeColor}`}>{badgeText}</span>
-        <span className={metaColor}> · </span>
-        {prefix ? <span className={`font-normal ${metaColor}`}>{prefix} </span> : null}
-        <strong
-          className={
-            underline
-              ? `font-[450] ${labelColor} underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]`
-              : `font-[450] ${labelColor}`
-          }
-        >
-          {label}
-        </strong>
-        {suffix ? <span className={`font-normal ${metaColor}`}>{suffix}</span> : null}
+      <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${k.dot}`} />
+      <span className={`w-[124px] shrink-0 font-medium ${dim ? "text-[#9a958a]" : k.type}`}>
+        {k.word}
+      </span>
+      <span className="min-w-0 flex-1 truncate">
+        {children}
         {cue ? <span className="font-normal italic text-[#9a958a]">{cue}</span> : null}
       </span>
     </>
   );
-  // Item 1 — the whole [badge · label · chevron] cluster is the toggle.
   if (canExpand && onToggle) {
     return (
       <div className="mt-1.5 text-[13px] leading-snug">
         <DisclosureRow
+          wide
           expanded={expanded}
           onToggle={onToggle}
           panelId={panelId}
@@ -327,7 +340,7 @@ export function MatchAwareReason({
     );
   }
   return (
-    <div className="mt-1.5 flex min-w-0 items-center gap-[7px] text-[13px] leading-snug">
+    <div className="mt-1.5 flex w-full items-center gap-[7px] text-[13px] leading-snug">
       {inner}
     </div>
   );
