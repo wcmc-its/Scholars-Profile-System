@@ -60,12 +60,18 @@ export function resolveTierSubnets(
 }
 
 /**
- * Import a security group by the id NetworkStack publishes to
- * `/sps/<env>/net/<tier>-sg-id` (item-3 pass 1), flag-appropriate — the
- * standalone CDK-created SG id when `useSharedVpc` is off, the out-of-band
- * shared SG id when it is on. Replaces the cross-stack SG handle consumers
- * received from NetworkStack, severing the `Ref` export that would otherwise
- * lock the flip (the SG replaces onto the imported VPC).
+ * Import a security group by id, flag-appropriate. When `useSharedVpc` is off
+ * (shipped default) the standalone CDK-created SG id is read from the
+ * `/sps/<env>/net/<tier>-sg-id` param NetworkStack publishes — byte-identical to
+ * pre-consolidation synth. When it is on, the out-of-band shared SG id is read
+ * **directly from the `cfg.sharedVpc.<tier>SgId` config literal**, NOT from
+ * Network's SSM echo: a consumer that read the param would depend on Network
+ * running first, forcing producer-first ordering and re-creating the export
+ * lock. Reading the literal lets the flip deploy **consumers-first** (Data → App
+ * → Etl before Network; item-3 §4) — the fail-closed `assertSharedVpcConfig`
+ * guarantees the literal is populated before `useSharedVpc` is flipped. Either
+ * way this replaces the cross-stack SG handle consumers received from
+ * NetworkStack, severing the `Ref` export that would otherwise lock the flip.
  *
  * **`mutable: false` is deliberate.** Every ingress rule these SGs receive is an
  * explicit standalone L1 `CfnSecurityGroupIngress` keyed on `.securityGroupId`
@@ -82,13 +88,17 @@ export function resolveSharedSg(
   tier: SharedSgTier,
   idPrefix: string,
 ): ec2.ISecurityGroup {
-  return ec2.SecurityGroup.fromSecurityGroupId(
-    scope,
-    idPrefix,
-    ssm.StringParameter.valueForStringParameter(
-      scope,
-      netParamName(cfg, `${tier}-sg-id`),
-    ),
-    { mutable: false },
-  );
+  const sgId = cfg.useSharedVpc
+    ? tier === "app"
+      ? cfg.sharedVpc.appSgId
+      : tier === "etl"
+        ? cfg.sharedVpc.etlSgId
+        : cfg.sharedVpc.albSgId
+    : ssm.StringParameter.valueForStringParameter(
+        scope,
+        netParamName(cfg, `${tier}-sg-id`),
+      );
+  return ec2.SecurityGroup.fromSecurityGroupId(scope, idPrefix, sgId, {
+    mutable: false,
+  });
 }

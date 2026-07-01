@@ -1,6 +1,6 @@
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
-import { type SpsEnvConfig } from "../lib/config";
+import { resolveEnvConfig, type SpsEnvConfig } from "../lib/config";
 import { NetworkStack } from "../lib/network-stack";
 import { makeFixture, TEST_ACCOUNT } from "./test-utils";
 
@@ -88,6 +88,29 @@ describe("AppStack", () => {
 
     it("creates no VPC interface/gateway endpoints (rides its-reciter's)", () => {
       template.resourceCountIs("AWS::EC2::VPCEndpoint", 0);
+    });
+
+    // The flag-on SG id must come from the cfg.sharedVpc.<tier>SgId literal, not
+    // Network's /sps/<env>/net/<tier>-sg-id SSM echo (item-3 §4): a consumer that
+    // read the param would depend on Network deploying first, forcing
+    // producer-first ordering and re-locking the consumers-first flip.
+    it("imports SGs from the sharedVpc config literal, not Network's SSM param", () => {
+      const sv = resolveEnvConfig("staging").sharedVpc;
+      const json = JSON.stringify(
+        buildAppStack("staging", {
+          useSharedVpc: true,
+          sharedVpc: {
+            ...sv,
+            appSgId: "sg-0app",
+            etlSgId: "sg-0etl",
+            albSgId: "sg-0alb",
+          },
+        }).template.toJSON(),
+      );
+      expect(json).toContain("sg-0app");
+      expect(json).not.toContain("/sps/staging/net/app-sg-id");
+      expect(json).not.toContain("/sps/staging/net/etl-sg-id");
+      expect(json).not.toContain("/sps/staging/net/alb-sg-id");
     });
   });
 
