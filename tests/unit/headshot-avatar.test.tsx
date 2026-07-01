@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
+import { hydrateRoot } from "react-dom/client";
+import { act } from "react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 
 function getRoot(container: HTMLElement): HTMLElement {
@@ -81,6 +84,35 @@ describe("HeadshotAvatar", () => {
     const root = getRoot(container);
     expect(root.className).toContain("h-12");
     expect(root.className).toContain("w-12");
+  });
+
+  it("hydrates without a mismatch — SSR renders no <img>, matching the initial client render (#1387)", () => {
+    const props = {
+      cwid: "abc1234",
+      preferredName: "Jane Doe",
+      identityImageEndpoint:
+        "https://directory.weill.cornell.edu/api/v1/person/profile/abc1234.png?returnGenericOn404=false",
+      size: "lg" as const,
+    };
+    // Radix AvatarImage is client-only; SSR must be fallback-only (no <img>) so
+    // the deferred-mount initial client render matches it.
+    const html = renderToString(<HeadshotAvatar {...props} />);
+    expect(html).not.toContain("<img");
+
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    const errors: string[] = [];
+    const spy = vi
+      .spyOn(console, "error")
+      .mockImplementation((...a) => errors.push(a.map(String).join(" ")));
+    act(() => {
+      hydrateRoot(container, <HeadshotAvatar {...props} />);
+    });
+    spy.mockRestore();
+    const mismatch = errors.filter((e) =>
+      /hydrat|did not match|server rendered|#?418/i.test(e)
+    );
+    expect(mismatch).toEqual([]);
   });
 
   it("applies size=sm classes for chip row (Phase 2 reserved)", () => {
