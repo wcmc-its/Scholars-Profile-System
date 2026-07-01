@@ -519,7 +519,9 @@ export function PeopleResultCard({
                 dropped when there's a single secondary row (header for one row is
                 noise); the divider + row(s) still render. */}
             {stacked && lines && secondaryCount >= 1 ? (
-              <div className="mt-[9px] pt-[11px]">
+              // #1381 follow-up — trimmed 8px of vertical space above the "Also matched"
+              // group (mt-[9px] → mt-[1px]) so the primary and secondaries sit tighter.
+              <div className="mt-[1px] pt-[11px]">
                 {secondaryCount >= 2 ? (
                   // Collapse hybrid — the "Also matched" group is one summary line by
                   // default (colored dot + category label per secondary, no counts /

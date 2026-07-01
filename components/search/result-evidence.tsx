@@ -282,7 +282,7 @@ export function ResultEvidence({
           label={
             evidence.boardCertified
               ? `Board certified in ${evidence.specialty}`
-              : `Clinical specialty: ${evidence.specialty}`
+              : evidence.specialty
           }
           canExpand={canExpand}
           expanded={expanded}

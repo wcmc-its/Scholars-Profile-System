@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { Banknote, ChevronDown, FileText, Quote, Shapes, Stethoscope, Waypoints, Wrench } from "lucide-react";
+import { ChevronDown, FileText, Shapes, Waypoints } from "lucide-react";
 import { PubTitle } from "@/components/publication/pub-html";
 import { highlightedTitleHtml } from "@/lib/search/highlight-title";
 import type { EvidenceGrant, EvidencePub } from "@/lib/api/result-evidence";
@@ -32,10 +32,13 @@ const ICONS: Record<MatchReasonKind, typeof FileText> = {
  * `PublicationResultRow`), so the badged row no longer force-bolds its children.
  */
 export type PubFlavor = "area" | "concept" | "keyword";
-const FLAVOR_BADGE: Record<PubFlavor, { cls: string; icon: typeof FileText; text: string }> = {
-  area: { cls: "border-[#d8e2ec] bg-[#eef2f6] text-[#2c4f6e]", icon: Shapes, text: "Research area" },
-  concept: { cls: "border-[#d2d6f0] bg-[#e6e8f7] text-[#34408a]", icon: Waypoints, text: "Concept" },
-  keyword: { cls: "border-[#e4e4e7] bg-[#f4f4f5] text-[#52525b]", icon: Quote, text: "Keyword" },
+// #1381 follow-up — the primary publications reason is now a colored dot + type word
+// (matching the "Also matched" secondaries + the approved lead mock), NOT a bordered
+// pill/icon. Bright FILLED dot + the AA-safe dark label tone, keyed by flavor.
+const FLAVOR_DOT: Record<PubFlavor, { dot: string; text: string; color: string }> = {
+  area: { dot: "bg-[#2563eb]", text: "Research area", color: "text-[#1d4ed8]" },
+  concept: { dot: "bg-[#7c3aed]", text: "Concept", color: "text-[#6d28d9]" },
+  keyword: { dot: "bg-[#64748b]", text: "Keyword", color: "text-[#475569]" },
 };
 
 /**
@@ -147,7 +150,7 @@ export function MatchReason({
 }) {
   const Icon = ICONS[kind];
   const pill = badged
-    ? FLAVOR_BADGE[flavor ?? (kind === "concept" ? "concept" : kind === "area" ? "area" : "keyword")]
+    ? FLAVOR_DOT[flavor ?? (kind === "concept" ? "concept" : kind === "area" ? "area" : "keyword")]
     : null;
   // Single line — clips an over-long reason (e.g. a representative-pub title)
   // rather than wrapping. A no-op for the short count/concept reasons.
@@ -155,25 +158,19 @@ export function MatchReason({
   // text; `dim` mutes the pill + reason text so a low-relevance lead reads quieter.
   const cueSpan = cue ? <span className="font-normal italic text-[#9a958a]">{cue}</span> : null;
   const inner = pill ? (
-    (() => {
-      const PillIcon = pill.icon;
-      return (
-        <>
-          <span
-            className={`inline-flex shrink-0 items-center gap-1 rounded-[5px] border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.02em] ${pill.cls}${dim ? " opacity-70" : ""}`}
-          >
-            <PillIcon aria-hidden className="size-3 shrink-0" strokeWidth={2} />
-            {pill.text}
-          </span>
-          {/* #1350 — the count prefix reads in normal weight; the resolved concept
-              term (appended by the caller) carries its own subtle underline. */}
-          <span className={`min-w-0 truncate ${dim ? "text-[#9a958a]" : "text-[#8c8c8c]"}`}>
-            {children}
-            {cueSpan}
-          </span>
-        </>
-      );
-    })()
+    // #1381 — dot + colored type word (no pill / icon), so the primary reads like the
+    // "Also matched" secondaries and the approved lead mock. The count prefix reads in
+    // normal weight; the resolved concept term (appended by the caller) keeps its own
+    // subtle underline.
+    <>
+      <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${pill.dot}`} />
+      <span className={`min-w-0 truncate ${dim ? "text-[#9a958a]" : "text-[#8c8c8c]"}`}>
+        <span className={`font-medium ${dim ? "text-[#9a958a]" : pill.color}`}>{pill.text}</span>
+        {" · "}
+        {children}
+        {cueSpan}
+      </span>
+    </>
   ) : (
     <>
       <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={2} />
@@ -259,31 +256,25 @@ export function MatchAwareReason({
   onToggle?: () => void;
   panelId?: string;
 }) {
-  // From the mockup: method bg #fbf4ea / border #ecdcc8 / ink #8a4a1f;
-  // topic bg #eef2f6 / border #d8e2ec / ink #2c4f6e;
-  // clinical bg #e8f4f8 / border #c5e4eb / ink #1a5f7a;
-  // funding bg #eef6ef / border #cfe3d3 / ink #2f6b3a (WCAG-AA 5.80:1 at 10px).
-  const badge =
+  // #1381 — the primary type indicator is a colored dot + type word (no bordered pill /
+  // icon), matching the "Also matched" secondaries + the approved lead mock. Bright
+  // FILLED dot + the AA-safe dark label tone per kind (same tokens as the lesser rows).
+  const dotColor =
     kind === "method"
-      ? "border-[#ecdcc8] bg-[#fbf4ea] text-[#8a4a1f]"
+      ? "bg-[#c2410c]"
       : kind === "clinical"
-        ? "border-[#c5e4eb] bg-[#e8f4f8] text-[#1a5f7a]"
+        ? "bg-[#0891b2]"
         : kind === "funding"
-          ? "border-[#cfe3d3] bg-[#eef6ef] text-[#2f6b3a]"
-          : "border-[#d8e2ec] bg-[#eef2f6] text-[#2c4f6e]";
-  // One content-type glyph per notion across every surface (#1073): method = the
-  // SAME Wrench as the "Methods and Tools" chip row + /methods lens; research area
-  // = the SAME Shapes as the Research Areas chip row (research-areas-row.tsx),
-  // replacing Tag (which now means only profile Topics/MeSH); clinical = Stethoscope;
-  // funding = Banknote (Landmark collides with Building2 = org units — handoff §4.2).
-  const Icon =
+          ? "bg-[#16a34a]"
+          : "bg-[#2563eb]";
+  const typeColor =
     kind === "method"
-      ? Wrench
+      ? "text-[#9a3412]"
       : kind === "clinical"
-        ? Stethoscope
+        ? "text-[#0e7490]"
         : kind === "funding"
-          ? Banknote
-          : Shapes;
+          ? "text-[#166534]"
+          : "text-[#1d4ed8]";
   const badgeText =
     kind === "method"
       ? "Method"
@@ -297,17 +288,14 @@ export function MatchAwareReason({
   // reads quieter. The cue (italic muted) trails the suffix.
   const labelColor = dim ? "text-[#9a958a]" : "text-[#1a1a1a]";
   const metaColor = dim ? "text-[#9a958a]" : "text-[#8c8c8c]";
-  // items-center (not baseline): the bordered pill and the bold label line up on
-  // a shared center axis so the badge doesn't sit low next to the label.
+  // items-center (not baseline): the dot and the bold label line up on a shared center
+  // axis so the marker doesn't sit low next to the label.
   const inner = (
     <>
-      <span
-        className={`inline-flex shrink-0 items-center gap-1 rounded-[5px] border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.02em] ${badge}${dim ? " opacity-70" : ""}`}
-      >
-        <Icon aria-hidden className="size-3 shrink-0" strokeWidth={2} />
-        {badgeText}
-      </span>
+      <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${dotColor}`} />
       <span className="min-w-0 truncate">
+        <span className={`font-medium ${dim ? metaColor : typeColor}`}>{badgeText}</span>
+        <span className={metaColor}> · </span>
         {prefix ? <span className={`font-normal ${metaColor}`}>{prefix} </span> : null}
         <strong
           className={
