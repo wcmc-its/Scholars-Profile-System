@@ -100,7 +100,7 @@ function DisclosureRow({
       <span className="sr-only"> {srLabel}</span>
       <ChevronDown
         aria-hidden
-        strokeWidth={2}
+        strokeWidth={2.5}
         className={`size-3.5 shrink-0 ${wide ? "ml-auto" : ""} text-[#9a958a] motion-safe:transition-transform motion-safe:duration-150 ${
           expanded ? "rotate-180" : ""
         }`}

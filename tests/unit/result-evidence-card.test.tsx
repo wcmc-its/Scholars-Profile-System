@@ -81,6 +81,24 @@ describe("<ResultEvidence> — one render per kind", () => {
     expect(container.innerHTML).not.toContain("rounded-[5px]");
   });
 
+  it("#1391 — clinical primary ⇒ 'Clinical' type word + underlined specialty, NO count", () => {
+    const { container } = render(
+      <ResultEvidence
+        evidence={{ kind: "clinical", specialty: "Cardiology", boardCertified: true }}
+        pubCount={44}
+        stacked
+      />,
+    );
+    expect(screen.getByText("Clinical")).toBeTruthy();
+    expect(container.textContent).toMatch(/Board certified in Cardiology/);
+    // clinical carries no "N of M" count.
+    expect(container.textContent).not.toMatch(/of 44/);
+    // the specialty is the dotted-underline entity (every kind but keyword).
+    const spec = screen.getByText("Cardiology");
+    expect(spec.tagName).toBe("SPAN");
+    expect(spec.className).toMatch(/underline/);
+  });
+
   it("shows a real disclosure chevron BUTTON on method AND topic badges when canExpand", () => {
     // The chevron is now a real clickable `<button>` (replaces the hover ▾); it
     // must appear for both kinds, and only when canExpand + onToggle are given.

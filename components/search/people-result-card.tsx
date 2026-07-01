@@ -578,7 +578,7 @@ export function PeopleResultCard({
                       ) : null}
                       <ChevronDown
                         aria-hidden
-                        strokeWidth={2}
+                        strokeWidth={2.5}
                         className={`ml-auto size-3.5 shrink-0 text-[#9a958a] motion-safe:transition-transform motion-safe:duration-150 ${
                           alsoExpanded ? "rotate-180" : ""
                         }`}
