@@ -1,5 +1,5 @@
 import type { ResultEvidence } from "@/lib/api/result-evidence";
-import { MatchReason, MatchAwareReason, LesserReason } from "@/components/search/match-reason";
+import { MatchAwareReason, LesserReason, CountFirst } from "@/components/search/match-reason";
 import { HighlightedSnippet } from "@/components/search/highlight-snippet";
 import { ConceptChipRow } from "@/components/search/concept-chip-row";
 
@@ -12,6 +12,12 @@ import { ConceptChipRow } from "@/components/search/concept-chip-row";
  * 3-of-44 (6.8%) lead (don't).
  */
 const COVERAGE_CUE_THRESHOLD = 0.02;
+
+/** #1381 follow-up — the subtle dotted underline that marks a matched entity for every
+ *  kind EXCEPT a literal keyword/mention (method family, research area, concept term,
+ *  clinical specialty, funding-tagged concept). */
+const ENTITY_UNDERLINE =
+  "underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]";
 
 /** #1366 follow-up Part B — the "X.X% of output" coverage figure, rounded to one
  *  decimal; a share that rounds below 0.1% reads "<0.1%" rather than a misleading
@@ -75,7 +81,6 @@ export function ResultEvidence({
   panelId,
   hasQuery = true,
   slug,
-  badged = false,
   pubCount,
   stacked = false,
   tier = "primary",
@@ -89,9 +94,9 @@ export function ResultEvidence({
   expanded?: boolean;
   onToggle?: () => void;
   panelId?: string;
-  /** §4.7 — badge the publications reason row (Research area / Concept / Keyword
-   *  flavor pill). Scoped to the Scholars card: only this renderer threads it, and
-   *  the other surfaces call `<MatchReason>` directly, so they stay un-badged. */
+  /** #1381 — DEPRECATED / ignored. The publications reason row is now the count-first
+   *  dot layout for all callers (the §4.7 flavor pill was removed), so this no longer
+   *  gates anything; kept only so existing callers keep type-checking. */
   badged?: boolean;
   /** True when there is an active query. The honest-empty match line ("— no
    *  specific match for this query —") only makes sense when something was being
@@ -115,10 +120,6 @@ export function ResultEvidence({
    *  solo, so they only ever render as "primary". */
   tier?: "primary" | "lesser";
 }) {
-  // #1366 — "· N of M publications" suffix for the named first-class lines, when
-  // the stacked path supplied a count (M = the hit's pubCount).
-  const countSuffix = (count: number | undefined): string | undefined =>
-    count != null && pubCount != null ? ` · ${count} of ${pubCount} publications` : undefined;
 
   // #1366 follow-up — compact "Also matched" dot rows: the dot is always FILLED in
   // the category color (Part C); a literal keyword mention's weakness is carried by
@@ -132,15 +133,15 @@ export function ResultEvidence({
       case "method":
         return (
           <LesserReason
-            dotClassName="bg-[#c2410c]"
+            dotClassName="bg-[#8B4A2F]"
             suffix={lesserCount(evidence.count)}
             canExpand={canExpand}
             expanded={expanded}
             onToggle={onToggle}
             panelId={panelId}
           >
-            <span className="font-medium text-[#9a3412]">Method</span> ·{" "}
-            <span className="font-[450] text-[#3a3a3a]">{evidence.family}</span>
+            <span className="font-medium text-[#8B4A2F]">Method</span> ·{" "}
+            <span className={`font-[450] text-[#3a3a3a] ${ENTITY_UNDERLINE}`}>{evidence.family}</span>
           </LesserReason>
         );
       case "topic":
@@ -154,7 +155,7 @@ export function ResultEvidence({
             panelId={panelId}
           >
             <span className="font-medium text-[#1d4ed8]">Research area</span> ·{" "}
-            <span className="font-[450] text-[#3a3a3a]">{evidence.label}</span>
+            <span className={`font-[450] text-[#3a3a3a] ${ENTITY_UNDERLINE}`}>{evidence.label}</span>
           </LesserReason>
         );
       case "clinical":
@@ -170,10 +171,10 @@ export function ResultEvidence({
             {evidence.boardCertified ? (
               <>
                 Board certified in{" "}
-                <span className="font-[450] text-[#3a3a3a]">{evidence.specialty}</span>
+                <span className={`font-[450] text-[#3a3a3a] ${ENTITY_UNDERLINE}`}>{evidence.specialty}</span>
               </>
             ) : (
-              <span className="font-[450] text-[#3a3a3a]">{evidence.specialty}</span>
+              <span className={`font-[450] text-[#3a3a3a] ${ENTITY_UNDERLINE}`}>{evidence.specialty}</span>
             )}
           </LesserReason>
         );
@@ -202,7 +203,7 @@ export function ResultEvidence({
                   className={
                     mention
                       ? "font-[450] text-[#3a3a3a]"
-                      : "font-[450] text-[#3a3a3a] underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]"
+                      : `font-[450] text-[#3a3a3a] ${ENTITY_UNDERLINE}`
                   }
                 >
                   {evidence.term}
@@ -251,79 +252,95 @@ export function ResultEvidence({
       return (
         <MatchAwareReason
           kind="method"
-          label={evidence.family}
-          suffix={countSuffix(evidence.count)}
           cue={cue}
           dim={dim}
           canExpand={canExpand}
           expanded={expanded}
           onToggle={onToggle}
           panelId={panelId}
-        />
+        >
+          <CountFirst
+            n={evidence.count}
+            m={pubCount}
+            thing="publications"
+            relation="used"
+            entity={evidence.family}
+            underline
+            dim={dim}
+          />
+        </MatchAwareReason>
       );
     case "topic":
       return (
         <MatchAwareReason
           kind="topic"
-          label={evidence.label}
-          suffix={countSuffix(evidence.count)}
           cue={cue}
           dim={dim}
           canExpand={canExpand}
           expanded={expanded}
           onToggle={onToggle}
           panelId={panelId}
-        />
+        >
+          <CountFirst
+            n={evidence.count}
+            m={pubCount}
+            thing="publications"
+            relation="in"
+            entity={evidence.label}
+            underline
+            dim={dim}
+          />
+        </MatchAwareReason>
       );
     case "clinical":
+      // No count — the dotted underline (every kind but keyword) marks the specialty.
       return (
         <MatchAwareReason
           kind="clinical"
-          label={
-            evidence.boardCertified
-              ? `Board certified in ${evidence.specialty}`
-              : evidence.specialty
-          }
           canExpand={canExpand}
           expanded={expanded}
           onToggle={onToggle}
           panelId={panelId}
-        />
+        >
+          {evidence.boardCertified ? <span className="text-[#8c8c8c]">Board certified in </span> : null}
+          <CountFirst entity={evidence.specialty} underline />
+        </MatchAwareReason>
       );
-    case "publications":
-      // The count line IS the evidence; the representative papers ride the
-      // disclosure (canExpand = pubs present). Concept is the sparkle variant
-      // (Case F, folded in) and carries no pubs. §4.5 flavor: a MeSH-descriptor
-      // hit IS a concept, so both `tagged` (exact descriptor) and `concept`
-      // (expanded MeSH) render the "Concept" pill; `mention` (literal) → Keyword.
-      // "Research area" is reserved for the actual topic-taxonomy match (the
-      // `topic` MatchAwareReason), NOT a MeSH tag — those pubs aren't "tagged".
+    case "publications": {
+      // §4.5 flavor: a MeSH-descriptor hit IS a concept (tagged/concept → "Concept"); a
+      // literal mention → "Keyword". Count-first emphasis: bold the leading matched count
+      // in the server phrase ("N of M publications tagged/mention"), keep the rest muted,
+      // then the term. The dotted underline marks a system-resolved concept — a literal
+      // keyword/mention term stays plain (semibold, no underline).
+      const mention = evidence.strength === "mention";
+      const anchor = dim ? "text-[#9a958a]" : "text-[#1a1a1a]";
+      const muted = dim ? "text-[#9a958a]" : "text-[#8c8c8c]";
+      const lead = evidence.text.match(/^(\d[\d,]*)(\s[\s\S]*)$/);
       return (
-        <MatchReason
-          kind={evidence.strength === "concept" ? "concept" : "publications"}
-          canExpand={canExpand}
-          expanded={expanded}
-          onToggle={onToggle}
-          panelId={panelId}
-          badged={badged}
-          flavor={evidence.strength === "mention" ? "keyword" : "concept"}
+        <MatchAwareReason
+          kind={mention ? "keyword" : "concept"}
           cue={cue}
           dim={dim}
+          canExpand={canExpand}
+          expanded={expanded}
+          onToggle={onToggle}
+          panelId={panelId}
         >
-          {evidence.text}
+          {lead ? (
+            <>
+              <span className={`font-semibold ${anchor}`}>{lead[1]}</span>
+              <span className={muted}>{lead[2]}</span>
+            </>
+          ) : (
+            <span className={muted}>{evidence.text}</span>
+          )}
           {evidence.term ? (
             <>
               {" "}
-              {/* #1361 — the matched term is always semibold; the dotted underline is
-                  added ONLY for a system-expanded concept (tagged/concept), not for a
-                  literal `mention` term. */}
-              <span
-                className={
-                  evidence.strength === "mention"
-                    ? "font-semibold text-[#3a3a3a]"
-                    : "font-semibold text-[#3a3a3a] underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]"
-                }
-              >
+              {/* #1361 — the matched term is semibold; the dotted underline (§4.5) is
+                  added ONLY for a system-resolved concept (tagged/concept), never a
+                  literal `mention`. */}
+              <span className={mention ? `font-semibold ${anchor}` : `font-semibold ${anchor} ${ENTITY_UNDERLINE}`}>
                 {evidence.term}
               </span>
               {/* #1355 — the narrower descendant term(s) the scholar actually carries. */}
@@ -339,8 +356,9 @@ export function ResultEvidence({
               ) : null}
             </>
           ) : null}
-        </MatchReason>
+        </MatchAwareReason>
       );
+    }
     case "name":
       // Strongest signal — render the matched name fragment, term bold.
       return (

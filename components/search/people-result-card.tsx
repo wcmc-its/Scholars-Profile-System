@@ -9,6 +9,7 @@ import { profilePath } from "@/lib/profile-url";
 import {
   MatchReason,
   MatchAwareReason,
+  CountFirst,
   LesserReason,
   KeyFunding,
 } from "@/components/search/match-reason";
@@ -66,7 +67,7 @@ export type PeopleResultCardProps = {
  */
 type SecondaryMeta = { dot: string; label: string; color: string };
 const SECONDARY_META: Record<string, SecondaryMeta> = {
-  method: { dot: "bg-[#c2410c]", label: "Method", color: "text-[#9a3412]" },
+  method: { dot: "bg-[#8B4A2F]", label: "Method", color: "text-[#8B4A2F]" },
   topic: { dot: "bg-[#2563eb]", label: "Research area", color: "text-[#1d4ed8]" },
   clinical: { dot: "bg-[#0891b2]", label: "Clinical", color: "text-[#0e7490]" },
   concept: { dot: "bg-[#7c3aed]", label: "Concept", color: "text-[#6d28d9]" },
@@ -273,9 +274,13 @@ export function PeopleResultCard({
       // New match-aware badge reasons (method / topic).
       legacyBlock =
         reason.kind === "method" ? (
-          <MatchAwareReason kind="method" label={reason.family} />
+          <MatchAwareReason kind="method">
+            <CountFirst entity={reason.family} underline />
+          </MatchAwareReason>
         ) : (
-          <MatchAwareReason kind="topic" label={reason.label} />
+          <MatchAwareReason kind="topic">
+            <CountFirst entity={reason.label} underline />
+          </MatchAwareReason>
         );
     } else if (reason) {
       // Legacy PLAN R4 (#688/#702/#967) pub-evidence / concept reason.
@@ -375,14 +380,20 @@ export function PeopleResultCard({
         {fundingFull ? (
           <MatchAwareReason
             kind="funding"
-            prefix={`${fundingCount} ${fundingTagged ? "tagged" : "mention"}`}
-            label={fundingTagged ? grantConceptLabel : `“${qParam}”`}
-            underline={fundingTagged}
             canExpand
             expanded={fundingExpanded}
             onToggle={() => setFundingExpanded((v) => !v)}
             panelId={fundingPanelId}
-          />
+          >
+            <CountFirst
+              n={Math.min(grantsTotal, hit.grantCount)}
+              m={hit.grantCount}
+              thing="grants"
+              relation={fundingTagged ? "tagged" : "mention"}
+              entity={fundingTagged ? grantConceptLabel : `“${qParam}”`}
+              underline={fundingTagged}
+            />
+          </MatchAwareReason>
         ) : (
           <LesserReason
             // #1366 follow-up Part C — dot is always FILLED green; a literal mention's

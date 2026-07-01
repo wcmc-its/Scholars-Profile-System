@@ -19,23 +19,28 @@ const renderEv = (evidence: Evidence, slug?: string) =>
   render(<ResultEvidence evidence={evidence} slug={slug} />);
 
 describe("<ResultEvidence> — one render per kind", () => {
-  it("method ⇒ Method badge + bold family, with NO exemplar-tool trail", () => {
+  it("method ⇒ Method type word + underlined family, with NO exemplar-tool trail", () => {
     renderEv({ kind: "method", family: "Single-cell RNA sequencing", tools: ["scRNA-seq", "10x"] });
     expect(screen.getByText("Method")).toBeTruthy();
-    expect(screen.getByText("Single-cell RNA sequencing").tagName).toBe("STRONG");
+    // #1381 — the entity is a subtly-underlined span (all kinds but keyword), not <strong>.
+    const fam = screen.getByText("Single-cell RNA sequencing");
+    expect(fam.tagName).toBe("SPAN");
+    expect(fam.className).toMatch(/underline/);
     // The related-terms trail was dropped — the family name stands alone even when
     // the evidence object still carries tools (kept so it can be reinstated later).
     expect(screen.queryByText("scRNA-seq")).toBeNull();
     expect(screen.queryByText("10x")).toBeNull();
   });
 
-  it("topic ⇒ Research area badge + bold label", () => {
+  it("topic ⇒ Research area type word + underlined label", () => {
     renderEv({ kind: "topic", label: "Single-cell & spatial biology", id: "single_cell_spatial_biology" });
     expect(screen.getByText("Research area")).toBeTruthy();
-    expect(screen.getByText("Single-cell & spatial biology").tagName).toBe("STRONG");
+    const label = screen.getByText("Single-cell & spatial biology");
+    expect(label.tagName).toBe("SPAN");
+    expect(label.className).toMatch(/underline/);
   });
 
-  it("#1381 — the primary type indicator is a FILLED category dot, not a bordered pill/icon", () => {
+  it("#1381 — the primary type indicator is a FILLED category dot (method = burnt umber), not a pill", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "method", family: "CRISPR", tools: [], count: 4 }}
@@ -43,13 +48,16 @@ describe("<ResultEvidence> — one render per kind", () => {
         stacked
       />,
     );
-    // method dot in the bright category color; the old bordered pill is gone.
+    // method dot in burnt umber; the old bordered pill is gone.
     const dots = Array.from(container.querySelectorAll("span.rounded-full")).map((d) => d.className);
-    expect(dots.some((c) => c.includes("bg-[#c2410c]"))).toBe(true);
+    expect(dots.some((c) => c.includes("bg-[#8B4A2F]"))).toBe(true);
     expect(container.innerHTML).not.toContain("rounded-[5px]");
-    // the type word + entity still render (word as text, entity bold).
+    // count-first: emphasized count + muted "of 98 publications used" + underlined family.
     expect(screen.getByText("Method")).toBeTruthy();
-    expect(screen.getByText("CRISPR").tagName).toBe("STRONG");
+    expect(container.textContent).toMatch(/4 of 98 publications used/);
+    const fam = screen.getByText("CRISPR");
+    expect(fam.tagName).toBe("SPAN");
+    expect(fam.className).toMatch(/underline/);
   });
 
   it("#1381 — the badged publications primary is a dot + type word, not a flavor pill", () => {
@@ -129,7 +137,9 @@ describe("<ResultEvidence> — one render per kind", () => {
     const onToggle = () => {};
     // No pubs ⇒ no chevron offered (the card passes canExpand=false).
     renderEv({ kind: "publications", strength: "tagged", text: "25 of 373 publications tagged Melanoma", count: 25 });
-    expect(screen.getByText(/25 of 373 publications tagged Melanoma/)).toBeTruthy();
+    // #1381 — the leading count is its own emphasized span, so assert the whole phrase
+    // on the concatenated text rather than a single element.
+    expect(document.body.textContent).toMatch(/25 of 373 publications tagged Melanoma/);
 
     // With pubs the card threads canExpand=true ⇒ a chevron button trails the line.
     const { container } = render(
@@ -165,7 +175,7 @@ describe("<ResultEvidence> — one render per kind", () => {
       term: "Pharmacogenetics",
       count: 3,
     });
-    expect(screen.getByText(/3 of 301 publications tagged/)).toBeTruthy();
+    expect(document.body.textContent).toMatch(/3 of 301 publications tagged/);
     const term = screen.getByText("Pharmacogenetics");
     expect(term.tagName).toBe("SPAN");
     expect(term.className).toMatch(/underline/);
@@ -457,7 +467,7 @@ describe("<ResultEvidence> — #1366 follow-up tiered 'Also matched' (tier='less
     expect(container.textContent).toMatch(/Method · CRISPR genome editing/);
     expect(container.textContent).toMatch(/· 3 of 44/);
     expect(container.textContent).not.toMatch(/publications/);
-    expect(dotOf(container)?.className).toMatch(/bg-\[#c2410c\]/); // filled = curated
+    expect(dotOf(container)?.className).toMatch(/bg-\[#8B4A2F\]/); // filled burnt umber = curated
   });
 
   it("research area lesser ⇒ FILLED dot + 'Research area · label'", () => {
@@ -535,19 +545,21 @@ describe("<ResultEvidence> — #1366 count suffix (method / research area)", () 
         pubCount={41}
       />,
     );
-    // label stays the bold term; the count is a normal-weight suffix AFTER it.
-    expect(screen.getByText("Anti-obesity pharmacotherapy").tagName).toBe("STRONG");
-    expect(container.textContent).toMatch(/· 7 of 41 publications/);
+    // #1381 count-first: emphasized count, muted "of 41 publications used", underlined family.
+    const fam = screen.getByText("Anti-obesity pharmacotherapy");
+    expect(fam.tagName).toBe("SPAN");
+    expect(fam.className).toMatch(/underline/);
+    expect(container.textContent).toMatch(/7 of 41 publications used Anti-obesity pharmacotherapy/);
   });
 
-  it("research area with a count renders the suffix too", () => {
+  it("research area with a count renders the count-first phrase too", () => {
     const { container } = render(
       <ResultEvidence
         evidence={{ kind: "topic", label: "Endocrinology", id: "endocrinology", count: 12 }}
         pubCount={41}
       />,
     );
-    expect(container.textContent).toMatch(/· 12 of 41 publications/);
+    expect(container.textContent).toMatch(/12 of 41 publications in Endocrinology/);
   });
 
   it("no count (single-evidence path) ⇒ NO suffix — label-only, unchanged", () => {
@@ -738,7 +750,7 @@ describe("<ResultEvidence> — #1366 follow-up Part B relevance cues on the prim
     // precedence: keyword-only wins; the low-coverage cue is NOT also appended.
     expect(container.textContent).not.toMatch(/% of output/);
     // dim: the reason text drops to muted grey (the term span inherits it).
-    expect(screen.getByText("crispr").parentElement?.className).toMatch(/text-\[#9a958a\]/);
+    expect(screen.getByText("crispr").className).toMatch(/text-\[#9a958a\]/);
   });
 
   it("a normal-coverage primary shows NEITHER cue and is NOT dimmed", () => {

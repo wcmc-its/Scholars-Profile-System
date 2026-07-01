@@ -83,10 +83,10 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
     render(<PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />);
 
     await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
-    // Single-evidence (non-stacked) path is unchanged by the tiered redesign: the
-    // Funding row keeps the full badge — "N of M grants mention 'query'" (#1361).
-    expect(screen.getByText(/1 of 3 grants mention/)).toBeTruthy();
-    expect(screen.getByText("“diabetes”").tagName).toBe("STRONG");
+    // #1381 — the full Funding lead is now the count-first dot layout: emphasized count,
+    // muted "of 3 grants mention", quoted query as the entity span.
+    expect(document.body.textContent).toMatch(/1 of 3 grants mention/);
+    expect(screen.getByText("“diabetes”").tagName).toBe("SPAN");
     expect(
       fetchFn.mock.calls.some((c) => c[0] === "/api/scholar/abc1234/grants?q=diabetes"),
     ).toBe(true);
@@ -167,11 +167,11 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
       />,
     );
     await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
-    // Single-evidence (non-stacked): the full "tagged" line — normal-weight count
-    // prefix + the underlined, semibold CONCEPT term (unchanged by the redesign).
-    expect(screen.getByText(/2 of 3 grants tagged/)).toBeTruthy();
+    // #1381 count-first: emphasized count + muted "of 3 grants tagged" + the underlined
+    // CONCEPT term (a span now, not <strong>).
+    expect(document.body.textContent).toMatch(/2 of 3 grants tagged/);
     const term = screen.getByText("Heart Arrest");
-    expect(term.tagName).toBe("STRONG");
+    expect(term.tagName).toBe("SPAN");
     expect(term.className).toMatch(/underline/);
     // the page-resolved concept is threaded into the /grants fetch
     expect(
@@ -255,10 +255,13 @@ describe("PeopleResultCard — publications flavor badge (§4.7, Scholars card o
     expect(screen.getByText("Concept")).toBeTruthy();
   });
 
-  it("leaves the pub row un-badged (muted) when the flag is off", () => {
+  it("renders the pub row as a dot + type word — the dot layout is not flag-gated", () => {
     mockFetch({ grants: [], total: 0 });
     render(<PeopleResultCard {...base} hit={makeHit({ grantCount: 0, evidence: pubEvidence() })} />);
-    expect(screen.queryByText("Keyword")).toBeNull();
+    // #1381 — the primary is the count-first dot layout regardless of SEARCH_EVIDENCE_ROWS;
+    // the old muted MatchReason row and the bordered flavor pill are both gone.
+    expect(screen.getByText("Keyword")).toBeTruthy();
+    expect(document.body.innerHTML).not.toContain("rounded-[5px]");
     expect(screen.getByText(/publications mention/)).toBeTruthy();
   });
 });
@@ -293,11 +296,11 @@ describe("PeopleResultCard — Funding supersedes the generic no-match fallback"
       />,
     );
     await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
-    // No first-class pub line ⇒ Funding LEADS with the full badge ("N of M grants
-    // mention 'query'" + semibold query term), NOT a demoted dot, and there is no
+    // No first-class pub line ⇒ Funding LEADS with the count-first dot layout ("N of M
+    // grants mention 'query'" + quoted query span), NOT a demoted dot, and there is no
     // "Also matched" group to subordinate it under.
-    expect(screen.getByText(/1 of 3 grants mention/)).toBeTruthy();
-    expect(screen.getByText("“diabetes”").tagName).toBe("STRONG");
+    expect(container.textContent).toMatch(/1 of 3 grants mention/);
+    expect(screen.getByText("“diabetes”").tagName).toBe("SPAN");
     expect(container.textContent).not.toContain("Also matched");
   });
 
