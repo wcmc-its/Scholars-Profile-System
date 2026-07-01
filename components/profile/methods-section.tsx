@@ -431,8 +431,10 @@ export function MethodsSection({
                       wide
                       text={f.exemplarTools.join(" · ")}
                       body={
-                        <div>
-                          <p className="mb-1 font-semibold">
+                        // text-sm matches the ⓘ definition tooltip (both text-sm);
+                        // p-1 adds a little breathing room past the pill's padding.
+                        <div className="p-1 text-sm">
+                          <p className="mb-1 font-bold">
                             Methods &amp; tools used by this scholar
                           </p>
                           <ul className="list-disc space-y-0.5 pl-4">
