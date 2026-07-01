@@ -66,6 +66,63 @@ describe("DataStack", () => {
     });
   });
 
+  // Increment 4 (cutover, plan §8.5/§8.6): with auroraSnapshotIdentifier set,
+  // DataStack RESTORES the cluster from the snapshot (data-bearing, alongside the
+  // live one) instead of creating a fresh empty cluster. Asserted with Template
+  // matchers, NOT a snapshot, so no cutover output is baked into the committed
+  // snapshots — the shipped config (no snapshot id) stays byte-identical.
+  describe("Aurora snapshot-restore path (auroraSnapshotIdentifier set)", () => {
+    const { template } = buildDataStack("prod", {
+      auroraSnapshotIdentifier: "sps-prod-cutover-snap",
+    });
+
+    it("restores the single DBCluster from the configured snapshot id", () => {
+      template.resourceCountIs("AWS::RDS::DBCluster", 1);
+      template.hasResourceProperties("AWS::RDS::DBCluster", {
+        Engine: "aurora-mysql",
+        SnapshotIdentifier: "sps-prod-cutover-snap",
+        DeletionProtection: true,
+      });
+      template.hasResource("AWS::RDS::DBCluster", {
+        DeletionPolicy: "Retain",
+        UpdateReplacePolicy: "Retain",
+      });
+    });
+
+    it("omits DatabaseName / MasterUsername on the restore (inherited from the snapshot)", () => {
+      const cluster = Object.values(
+        template.findResources("AWS::RDS::DBCluster"),
+      )[0];
+      expect(cluster?.Properties?.DatabaseName).toBeUndefined();
+      expect(cluster?.Properties?.MasterUsername).toBeUndefined();
+    });
+
+    it("creates ONLY the transitional db/master-its master secret (retained, no plaintext)", () => {
+      template.hasResourceProperties("AWS::SecretsManager::Secret", {
+        Name: "scholars/prod/db/master-its",
+        GenerateSecretString: Match.objectLike({
+          GenerateStringKey: "password",
+          SecretStringTemplate: Match.stringLikeRegexp(
+            "\\{\\s*\"username\"\\s*:\\s*\"scholars_admin\"",
+          ),
+        }),
+      });
+      const names = Object.values(
+        template.findResources("AWS::SecretsManager::Secret"),
+      ).map((s) => s.Properties?.Name);
+      expect(names).toContain("scholars/prod/db/master-its");
+      // The standalone master secret is NOT created on the restore path.
+      expect(names).not.toContain("scholars/prod/db/master");
+      expect(JSON.stringify(template.toJSON())).not.toMatch(
+        /scholars_admin_password/,
+      );
+    });
+
+    it("still schedules single-user rotation on the restored cluster", () => {
+      template.resourceCountIs("AWS::SecretsManager::RotationSchedule", 1);
+    });
+  });
+
   describe("prod", () => {
     const { template } = buildDataStack("prod");
 

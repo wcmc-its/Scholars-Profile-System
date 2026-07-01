@@ -330,6 +330,18 @@ export interface SpsEnvConfig {
    */
   readonly openSearchNodeFromSecret: boolean;
   /**
+   * Aurora cluster/instance SNAPSHOT identifier to restore the data tier FROM
+   * during the estate-consolidation cutover (plan §8.5/§8.6). When set, DataStack
+   * builds `rds.DatabaseClusterFromSnapshot` (data-bearing, restored ALONGSIDE the
+   * live cluster — reversible "abandon new, keep old") instead of a fresh, empty
+   * `rds.DatabaseCluster`. Required by {@link assertCutoverGate} once
+   * {@link useSharedVpc} is on — flipping the VPC topology without it would
+   * CFN-replace the live cluster into an empty datastore (§8.6 forbids this).
+   * Undefined in the shipped config → the standalone `DatabaseCluster` path,
+   * byte-identical to today.
+   */
+  readonly auroraSnapshotIdentifier?: string;
+  /**
    * Fargate CPU units for the ETL task family. Tunable per-step via
    * `Overrides.ContainerOverrides[].Cpu`; this is the base allocation.
    */
@@ -751,38 +763,51 @@ export function assertSharedVpcConfig(cfg: SpsEnvConfig): void {
  * `useSharedVpc` is NOT yet safe to flip. As built, DataStack holds a single
  * in-place `rds.DatabaseCluster` + `opensearchservice.Domain`; flipping the flag
  * changes their immutable subnet group, so CloudFormation REPLACES both in place
- * — and a replace provisions a FRESH EMPTY cluster/domain (there is no
- * `DatabaseClusterFromSnapshot` path yet). The plan forbids exactly this: §8.5/§8.6
+ * — and a replace provisions a FRESH EMPTY cluster/domain UNLESS the snapshot-
+ * restore path ({@link SpsEnvConfig.auroraSnapshotIdentifier}) is selected. The
+ * plan forbids the empty in-place replace: §8.5/§8.6
  * require the data tier to move as a NEW resource (`DatabaseClusterFromSnapshot` +
  * a fresh OpenSearch domain) stood up ALONGSIDE the live one (reversible —
  * "abandon new, keep old"), "NOT an in-place flip of the old VPC".
  *
- * So this is a hard tripwire, not an acknowledgement: while `useSharedVpc` is on,
- * synth throws — which also fails CI on any premature `useSharedVpc:true` commit
- * (shipped config is `false`, so the gate is inert today). It is lifted by the
- * separate, larger cutover-code task (#1370), which implements the snapshot-restore
- * data path and re-homes this gate. The message names every prerequisite so the
- * gate gives no false "looks safe" signal.
+ * So this is a conditional tripwire, not an acknowledgement: while `useSharedVpc`
+ * is on WITHOUT an {@link SpsEnvConfig.auroraSnapshotIdentifier}, synth throws —
+ * which also fails CI on a premature `useSharedVpc:true` flip before the
+ * snapshot-restore data path is wired (shipped config is `false`, so the gate is
+ * inert today). Setting a snapshot id selects the DataStack
+ * `DatabaseClusterFromSnapshot` branch and lifts the throw; the remaining §6
+ * operator prerequisites are named in the message but are out-of-band and not
+ * synth-enforceable, so the gate still gives no false "looks safe" signal.
  */
 export function assertCutoverGate(cfg: SpsEnvConfig): void {
   if (!cfg.useSharedVpc) {
     return; // standalone topology — nothing replaces, nothing to gate
   }
-  throw new Error(
-    `Refusing to synth/deploy env="${cfg.envName}" with useSharedVpc=true: it is ` +
-      `not yet deployable. Flipping it would CFN-REPLACE the in-place Aurora ` +
-      `cluster + OpenSearch domain into EMPTY datastores — the plan forbids this ` +
-      `(§8.6: the data tier must move as a NEW resource, not an in-place flip). ` +
-      `Before useSharedVpc can be flipped, the separate cutover-code task (#1370) ` +
-      `must land, and the operator must complete the §6 prerequisites:\n` +
-      `  1. snapshot-restore data path: a NEW DatabaseClusterFromSnapshot cluster ` +
-      `+ fresh OpenSearch domain stood up alongside the live ones (§5.4/§8.5);\n` +
-      `  2. re-scope appRwGranteeHost off the decommissioned CIDR ` +
-      `("${cfg.appRwGranteeHost}") → "10.46.160.%" (or "%") AND re-issue the live ` +
-      `app_rw/app_ro/sps_migrate/sps_bootstrap GRANTs for the 10.46.x source ` +
-      `(§6.2) — else app_rw auth fails closed (MySQL 1410);\n` +
-      `  3. reseed every DSN + OpenSearch endpoint secret with the new endpoints ` +
-      `(§6.4/§6.8) — a stale DSN silently regresses every write.\n` +
-      `See docs/sps-vpc-consolidation-plan.md §6.2/§6.8/§8.5/§8.6.`,
-  );
+  if (!cfg.auroraSnapshotIdentifier) {
+    throw new Error(
+      `Refusing to synth/deploy env="${cfg.envName}" with useSharedVpc=true and ` +
+        `no auroraSnapshotIdentifier: it is not yet deployable. Flipping ` +
+        `useSharedVpc without a snapshot id would CFN-REPLACE the in-place Aurora ` +
+        `cluster + OpenSearch domain into EMPTY datastores — the plan forbids ` +
+        `this (§8.6: the data tier must move as a NEW resource via ` +
+        `DatabaseClusterFromSnapshot, not an in-place flip). Set ` +
+        `auroraSnapshotIdentifier to the prod cluster snapshot id (DataStack then ` +
+        `restores it alongside the live cluster), and the operator must complete ` +
+        `the §6 prerequisites:\n` +
+        `  1. snapshot-restore data path: the NEW DatabaseClusterFromSnapshot ` +
+        `cluster + fresh OpenSearch domain stood up alongside the live ones ` +
+        `(§5.4/§8.5);\n` +
+        `  2. re-scope appRwGranteeHost off the decommissioned CIDR ` +
+        `("${cfg.appRwGranteeHost}") → "10.46.160.%" (or "%") AND re-issue the live ` +
+        `app_rw/app_ro/sps_migrate/sps_bootstrap GRANTs for the 10.46.x source ` +
+        `(§6.2) — else app_rw auth fails closed (MySQL 1410);\n` +
+        `  3. reseed every DSN + OpenSearch endpoint secret with the new endpoints ` +
+        `(§6.4/§6.8) — a stale DSN silently regresses every write.\n` +
+        `See docs/sps-vpc-consolidation-plan.md §6.2/§6.8/§8.5/§8.6.`,
+    );
+  }
+  // useSharedVpc on AND a snapshot id set → DataStack builds the data-bearing
+  // DatabaseClusterFromSnapshot path, so the synth tripwire lifts. The remaining
+  // §6 operator prerequisites (appRwGranteeHost regrant, DSN/endpoint reseed) are
+  // out-of-band and NOT synth-enforceable — they are named in the throw above.
 }
