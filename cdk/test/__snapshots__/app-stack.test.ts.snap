@@ -215,6 +215,18 @@ exports[`AppStack prod matches the snapshot 1`] = `
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
+    "SsmParameterValuespsprodnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/net/alb-sg-id",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/net/app-sg-id",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "SsmParameterValuespsprodnetetlsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/net/etl-sg-id",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
   },
   "Resources": {
     "AppIngressFromInternalAlb": {
@@ -222,7 +234,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
         "Description": "Internal ALB to SPS app tasks on container port (prod)",
         "FromPort": 3000,
         "GroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+          "Ref": "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "IpProtocol": "tcp",
         "SourceSecurityGroupId": {
@@ -240,11 +252,11 @@ exports[`AppStack prod matches the snapshot 1`] = `
         "Description": "Public ALB to SPS app tasks on container port (prod)",
         "FromPort": 3000,
         "GroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+          "Ref": "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "IpProtocol": "tcp",
         "SourceSecurityGroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
+          "Ref": "SsmParameterValuespsprodnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "ToPort": 3000,
       },
@@ -1980,7 +1992,7 @@ service:
             "AssignPublicIp": "DISABLED",
             "SecurityGroups": [
               {
-                "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+                "Ref": "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
             ],
             "Subnets": [
@@ -2438,7 +2450,7 @@ service:
         "Scheme": "internet-facing",
         "SecurityGroups": [
           {
-            "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
+            "Ref": "SsmParameterValuespsprodnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
           },
         ],
         "Subnets": [
@@ -2459,7 +2471,7 @@ service:
         "Description": "Internet to SPS public ALB HTTP (prod) -- HTTPS lands with EdgeStack",
         "FromPort": 80,
         "GroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
+          "Ref": "SsmParameterValuespsprodnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "IpProtocol": "tcp",
         "ToPort": 80,
@@ -3376,7 +3388,7 @@ service:
             "FromPort": 443,
             "IpProtocol": "tcp",
             "SourceSecurityGroupId": {
-              "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+              "Ref": "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
             },
             "ToPort": 443,
           },
@@ -3385,7 +3397,7 @@ service:
             "FromPort": 443,
             "IpProtocol": "tcp",
             "SourceSecurityGroupId": {
-              "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
+              "Ref": "SsmParameterValuespsprodnetetlsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
             },
             "ToPort": 443,
           },
@@ -3642,6 +3654,18 @@ exports[`AppStack staging matches the snapshot 1`] = `
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
+    "SsmParameterValuespsstagingnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/staging/net/alb-sg-id",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "SsmParameterValuespsstagingnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/staging/net/app-sg-id",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "SsmParameterValuespsstagingnetetlsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/staging/net/etl-sg-id",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
   },
   "Resources": {
     "AppIngressFromInternalAlb": {
@@ -3649,7 +3673,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
         "Description": "Internal ALB to SPS app tasks on container port (staging)",
         "FromPort": 3000,
         "GroupId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+          "Ref": "SsmParameterValuespsstagingnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "IpProtocol": "tcp",
         "SourceSecurityGroupId": {
@@ -3667,11 +3691,11 @@ exports[`AppStack staging matches the snapshot 1`] = `
         "Description": "Public ALB to SPS app tasks on container port (staging)",
         "FromPort": 3000,
         "GroupId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+          "Ref": "SsmParameterValuespsstagingnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "IpProtocol": "tcp",
         "SourceSecurityGroupId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
+          "Ref": "SsmParameterValuespsstagingnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "ToPort": 3000,
       },
@@ -5474,7 +5498,7 @@ service:
             "AssignPublicIp": "DISABLED",
             "SecurityGroups": [
               {
-                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+                "Ref": "SsmParameterValuespsstagingnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
             ],
             "Subnets": [
@@ -5951,7 +5975,7 @@ service:
         "Scheme": "internet-facing",
         "SecurityGroups": [
           {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
+            "Ref": "SsmParameterValuespsstagingnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
           },
         ],
         "Subnets": [
@@ -5972,7 +5996,7 @@ service:
         "Description": "Internet to SPS public ALB HTTP (staging) -- HTTPS lands with EdgeStack",
         "FromPort": 80,
         "GroupId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
+          "Ref": "SsmParameterValuespsstagingnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "IpProtocol": "tcp",
         "ToPort": 80,
@@ -6889,7 +6913,7 @@ service:
             "FromPort": 443,
             "IpProtocol": "tcp",
             "SourceSecurityGroupId": {
-              "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+              "Ref": "SsmParameterValuespsstagingnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
             },
             "ToPort": 443,
           },
@@ -6898,7 +6922,7 @@ service:
             "FromPort": 443,
             "IpProtocol": "tcp",
             "SourceSecurityGroupId": {
-              "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
+              "Ref": "SsmParameterValuespsstagingnetetlsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
             },
             "ToPort": 443,
           },

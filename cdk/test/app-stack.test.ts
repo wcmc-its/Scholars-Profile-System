@@ -21,9 +21,6 @@ function buildAppStack(
     env: fixture.env,
     envConfig,
     vpc: network.vpc,
-    appSecurityGroup: network.appSecurityGroup,
-    etlSecurityGroup: network.etlSecurityGroup,
-    albSecurityGroup: network.albSecurityGroup,
   });
   return { template: Template.fromStack(stack), stack };
 }
@@ -2410,9 +2407,6 @@ describe("AppStack", () => {
         env: fixture.env,
         envConfig: fixture.envConfig,
         vpc: network.vpc,
-        appSecurityGroup: network.appSecurityGroup,
-        etlSecurityGroup: network.etlSecurityGroup,
-        albSecurityGroup: network.albSecurityGroup,
       });
       const t = Template.fromStack(stack);
       t.hasResourceProperties("AWS::ECS::Service", { DesiredCount: 0 });

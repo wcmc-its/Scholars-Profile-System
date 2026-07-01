@@ -33,9 +33,6 @@ function buildEdgeStack(
     env: fixture.env,
     envConfig: fixture.envConfig,
     vpc: network.vpc,
-    appSecurityGroup: network.appSecurityGroup,
-    etlSecurityGroup: network.etlSecurityGroup,
-    albSecurityGroup: network.albSecurityGroup,
   });
   const stack = new EdgeStack(fixture.app, `Sps-Edge-${envName}`, {
     env: fixture.env,

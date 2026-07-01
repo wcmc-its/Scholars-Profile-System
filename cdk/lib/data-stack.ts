@@ -22,7 +22,7 @@ import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as cr from "aws-cdk-lib/custom-resources";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
-import { resolveTierSubnets } from "./shared-vpc-subnets";
+import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
 
 /** Props for {@link DataStack}. */
 export interface DataStackProps extends StackProps {
@@ -30,10 +30,6 @@ export interface DataStackProps extends StackProps {
   readonly envConfig: SpsEnvConfig;
   /** VPC the cluster and domain attach to (from NetworkStack). */
   readonly vpc: ec2.IVpc;
-  /** ECS application security group — granted Aurora + OpenSearch ingress. */
-  readonly appSecurityGroup: ec2.ISecurityGroup;
-  /** ETL Lambda security group — granted Aurora + OpenSearch ingress. */
-  readonly etlSecurityGroup: ec2.ISecurityGroup;
   /**
    * DR-region {@link backup.IBackupVault} from {@link DrBackupVaultStack}.
    * The AWS Backup plan's `copyAction` writes recovery points here, closing
@@ -74,8 +70,14 @@ export class DataStack extends Stack {
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
 
-    const { envConfig, vpc, appSecurityGroup, etlSecurityGroup, drBackupVault } =
-      props;
+    const { envConfig, vpc, drBackupVault } = props;
+    // Item-3 pass 2a: import the app/etl SGs by id from the SSM params NetworkStack
+    // publishes (pass 1) instead of the cross-stack handle — severs the SG `Ref`
+    // exports that would lock the useSharedVpc flip (the SGs replace onto the
+    // imported VPC). Flag-agnostic; the Aurora/OpenSearch ingress rules below
+    // reference these by `.securityGroupId` (L1, id-keyed), so nothing drops.
+    const appSecurityGroup = resolveSharedSg(this, envConfig, "app", "AppSg");
+    const etlSecurityGroup = resolveSharedSg(this, envConfig, "etl", "EtlSg");
 
     // Estate-consolidation subnet placement (plan §4.4): Aurora + OpenSearch in
     // the db tier; the bootstrap/rotation Lambdas (compute) in the app2 tier —

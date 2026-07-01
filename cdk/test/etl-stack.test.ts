@@ -22,15 +22,11 @@ function buildEtlStack(
     env: fixture.env,
     envConfig,
     vpc: network.vpc,
-    appSecurityGroup: network.appSecurityGroup,
-    etlSecurityGroup: network.etlSecurityGroup,
-    albSecurityGroup: network.albSecurityGroup,
   });
   const stack = new EtlStack(fixture.app, `Sps-Etl-${envName}`, {
     env: fixture.env,
     envConfig,
     vpc: network.vpc,
-    etlSecurityGroup: network.etlSecurityGroup,
     ecsCluster: appStack.ecsCluster,
     etlEcrRepository: appStack.etlEcrRepository,
   });
