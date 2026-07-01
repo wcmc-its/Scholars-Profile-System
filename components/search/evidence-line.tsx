@@ -220,7 +220,23 @@ export function EvidenceLine({
       ? "Representative papers"
       : "Matching publications";
   const panelSubtitle =
-    stacked && isTopicPanel ? "Papers mapped to area — not search" : undefined;
+    stacked && isTopicPanel ? "not from your search" : undefined;
+
+  // Signal-colored left rail on the expanded panel, keyed to the row's category
+  // (blue = research area, green handled by KeyFunding). Undefined ⇒ the panel's
+  // default flush padding (no rail).
+  const railClassName =
+    evidence.kind === "method"
+      ? "border-l-2 border-[#8B4A2F] pl-[14px]"
+      : evidence.kind === "topic"
+        ? "border-l-2 border-[#2563eb] pl-[14px]"
+        : evidence.kind === "clinical"
+          ? "border-l-2 border-[#0891b2] pl-[14px]"
+          : evidence.kind === "publications"
+            ? evidence.strength === "mention"
+              ? "border-l-2 border-[#64748b] pl-[14px]"
+              : "border-l-2 border-[#7c3aed] pl-[14px]"
+            : undefined;
 
   return (
     <>
@@ -247,6 +263,7 @@ export function EvidenceLine({
           fallback={exemplarFallback}
           panelLabel={panelLabel}
           panelSubtitle={panelSubtitle}
+          railClassName={railClassName}
           // #1366 follow-up — the honesty note only on a literal-mention lesser row.
           mentionNote={
             tier === "lesser" &&

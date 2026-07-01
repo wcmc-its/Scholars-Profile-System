@@ -124,7 +124,7 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
     expect(mark?.textContent).toBe("diabetes");
   });
 
-  it("Option A — the KEY FUNDING disclosure header shows the matching count (top N of M)", async () => {
+  it("the KEY FUNDING disclosure header carries no inline count (total via '+N more')", async () => {
     mockFetch({
       grants: [
         { projectId: "p1", title: "Grant one", sponsor: "NIH", startYear: 2021, endYear: 2025, isActive: true },
@@ -134,8 +134,9 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
     render(<PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />);
     await waitFor(() => expect(screen.getByRole("button", { name: /key funding/i })).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /key funding/i }));
-    // 1 of 8 surfaced grants shown in the disclosure (the rest are "+7 more in profile").
-    expect(screen.getByText("1 of 8")).toBeTruthy();
+    // Sentence-case subhead, no "1 of 8" count (approved); the rest live in "+7 more".
+    expect(screen.queryByText("1 of 8")).toBeNull();
+    expect(screen.getByText(/\+7 more in profile/)).toBeTruthy();
   });
 
   it("#1359 — concept-tagged grants read 'N of M grants tagged <Concept>' (underlined term, concept threaded)", async () => {
