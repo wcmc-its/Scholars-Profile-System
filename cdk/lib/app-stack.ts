@@ -1007,12 +1007,19 @@ export class AppStack extends Stack {
         GRANT_MATCHER_SUBTOPIC_GRAIN: envConfig.grantMatcherSubtopicGrain
           ? "on"
           : "off",
-        // OpenSearch domain endpoint (https://...) imported from DataStack.
-        // lib/search.ts reads OPENSEARCH_NODE; the OPENSEARCH_USER/PASS
-        // secrets below supply the FGAC basic-auth credentials. #447
-        OPENSEARCH_NODE: `https://${Fn.importValue(
-          `Sps-Data-${env}-OpenSearchDomainEndpoint`,
-        )}`,
+        // OpenSearch domain endpoint (https://...). Default: a plaintext env
+        // baked from the DataStack cross-stack export. When
+        // openSearchNodeFromSecret is on (consolidation cutover de-coupling,
+        // §8.4), the export is dropped and OPENSEARCH_NODE is injected from the
+        // opensearch secret's `node` key (secrets block below). lib/search.ts
+        // reads OPENSEARCH_NODE; OPENSEARCH_USER/PASS come from secrets. #447
+        ...(envConfig.openSearchNodeFromSecret
+          ? {}
+          : {
+              OPENSEARCH_NODE: `https://${Fn.importValue(
+                `Sps-Data-${env}-OpenSearchDomainEndpoint`,
+              )}`,
+            }),
         // SAML SP non-secret config (#466). Without these, getSamlEnv()'s
         // requireEnv throws on the first missing var and every SAML route
         // 503s ("SAML SP is not configured"); SP-initiated sign-in is dead.
@@ -2000,6 +2007,16 @@ export class AppStack extends Stack {
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(appRwSecret),
         DATABASE_URL_RO: ecs.Secret.fromSecretsManager(appRoSecret),
+        // Cutover de-coupling (§8.4): when on, OPENSEARCH_NODE comes from the
+        // secret's `node` key instead of the dropped cross-stack export above.
+        ...(envConfig.openSearchNodeFromSecret
+          ? {
+              OPENSEARCH_NODE: ecs.Secret.fromSecretsManager(
+                opensearchAppSecret,
+                "node",
+              ),
+            }
+          : {}),
         OPENSEARCH_USER: ecs.Secret.fromSecretsManager(
           opensearchAppSecret,
           "username",
