@@ -56,7 +56,18 @@ describe("AppStack", () => {
   // endpoints (it rides its-reciter's; a privateDNS SM endpoint would hijack
   // co-tenant DNS).
   describe("shared VPC placement (useSharedVpc on)", () => {
-    const { template } = buildAppStack("staging", { useSharedVpc: true });
+    // Out-of-band shared SG ids (item-3 G8) — resolveSharedSg reads these config
+    // literals when shared, so the template must carry them, not an SSM ref.
+    const SHARED_SG = {
+      appSgId: "sg-0app0000000000",
+      etlSgId: "sg-0etl0000000000",
+      albSgId: "sg-0alb0000000000",
+    };
+    const staging = resolveEnvConfig("staging");
+    const { template } = buildAppStack("staging", {
+      useSharedVpc: true,
+      sharedVpc: { ...staging.sharedVpc, ...SHARED_SG },
+    });
     const APP2 = ["subnet-0c6593fb9c9a165c3", "subnet-070cbc242efbddc3c"];
     const DMZ = ["subnet-09a6fab648280ca19", "subnet-0485fefe267b06736"];
 
@@ -111,6 +122,21 @@ describe("AppStack", () => {
       expect(json).not.toContain("/sps/staging/net/app-sg-id");
       expect(json).not.toContain("/sps/staging/net/etl-sg-id");
       expect(json).not.toContain("/sps/staging/net/alb-sg-id");
+    });
+
+    // G15-a: the ALBs + TGs are VPC-coupled, so the flip REPLACES them; a fixed
+    // physical name blocks CFN create-before-delete. Under shared they auto-name.
+    it("auto-generates ALB + target-group names under shared VPC (G15-a)", () => {
+      for (const alb of Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::LoadBalancer"),
+      )) {
+        expect(alb.Properties?.Name).toBeUndefined();
+      }
+      for (const tg of Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::TargetGroup"),
+      )) {
+        expect(tg.Properties?.Name).toBeUndefined();
+      }
     });
   });
 
