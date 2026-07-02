@@ -26,6 +26,7 @@
  * for the actual `_source` shape.
  */
 import { prisma } from "../../lib/db";
+import { assertSourceVolume } from "../../lib/etl-guard";
 import {
   loadAllGrantSuppressions,
   loadAllPublicationSuppressions,
@@ -396,8 +397,9 @@ function parseSelected(argv: string[]): Set<SourceType> {
  */
 async function assertPeopleIndexHealth(
   client: ReturnType<typeof searchClient>,
+  index: string,
 ): Promise<void> {
-  const total = await client.count({ index: PEOPLE_INDEX });
+  const total = await client.count({ index });
   if (total.body.count === 0) {
     throw new Error("[smoke] scholars-people index is empty after indexPeople()");
   }
@@ -413,7 +415,7 @@ async function assertPeopleIndexHealth(
   // hit). MeSH check-tags (Humans, Male, Female, Adult, ...) are filtered
   // upstream by ReciterDB and don't appear in this field — see #292.
   const withMesh = await client.count({
-    index: PEOPLE_INDEX,
+    index,
     body: { query: { match_phrase: { publicationMesh: "Neoplasms" } } },
   });
   if (withMesh.body.count === 0) {
@@ -430,7 +432,7 @@ async function assertPeopleIndexHealth(
   // WCM corpus — many scholars clear the min-evidence threshold on it. `term`
   // (keyword) here, unlike the analyzed-text match_phrase above.
   const withMeshUi = await client.count({
-    index: PEOPLE_INDEX,
+    index,
     body: { query: { term: { publicationMeshUi: "D001943" } } },
   });
   if (withMeshUi.body.count === 0) {
@@ -443,8 +445,9 @@ async function assertPeopleIndexHealth(
 
 async function assertPublicationsIndexHealth(
   client: ReturnType<typeof searchClient>,
+  index: string,
 ): Promise<void> {
-  const total = await client.count({ index: PUBLICATIONS_INDEX });
+  const total = await client.count({ index });
   if (total.body.count === 0) {
     throw new Error("[smoke] scholars-publications index is empty after indexPublications()");
   }
@@ -454,7 +457,7 @@ async function assertPublicationsIndexHealth(
   // the meshTerms field on every doc — the exact silent-regression mode
   // from #278.
   const meshHit = await client.count({
-    index: PUBLICATIONS_INDEX,
+    index,
     body: { query: { match_phrase: { meshTerms: "Neoplasms" } } },
   });
   if (meshHit.body.count === 0) {
@@ -475,7 +478,7 @@ async function assertPublicationsIndexHealth(
   // #292. The 2,500 floor gives ~45% headroom on the current count and
   // catches any regression that drops the field on more than ~half the docs.
   const meshUiSmoke = await client.search({
-    index: PUBLICATIONS_INDEX,
+    index,
     body: { query: { term: { meshDescriptorUi: "D001943" } } },
     size: 0,
   });
@@ -492,7 +495,7 @@ async function assertPublicationsIndexHealth(
   // topic rows shouldn't carry the field. A healthy index has it on at
   // least one publication.
   const withTopicId = await client.count({
-    index: PUBLICATIONS_INDEX,
+    index,
     body: { query: { exists: { field: "reciterParentTopicId" } } },
   });
   if (withTopicId.body.count === 0) {
@@ -504,8 +507,9 @@ async function assertPublicationsIndexHealth(
 
 async function assertFundingIndexHealth(
   client: ReturnType<typeof searchClient>,
+  index: string,
 ): Promise<void> {
-  const total = await client.count({ index: FUNDING_INDEX });
+  const total = await client.count({ index });
   if (total.body.count === 0) {
     throw new Error("[smoke] scholars-funding index is empty after indexFunding()");
   }
@@ -518,7 +522,7 @@ async function assertFundingIndexHealth(
   // without bricking the index build. Promote to a throw once keyword data is
   // established (cf. the meshTerms hard assertion on the publications index).
   const withKeywords = await client.count({
-    index: FUNDING_INDEX,
+    index,
     body: { query: { exists: { field: "keywords" } } },
   });
   if (withKeywords.body.count === 0) {
@@ -538,7 +542,7 @@ async function assertFundingIndexHealth(
   // rebuilt. Promote to a throw once a green resolver + reindex cycle is
   // established (cf. the meshTerms hard assertion on the publications index).
   const withMeshUi = await client.count({
-    index: FUNDING_INDEX,
+    index,
     body: { query: { exists: { field: "meshDescriptorUi" } } },
   });
   if (withMeshUi.body.count === 0) {
@@ -555,8 +559,9 @@ async function assertFundingIndexHealth(
 
 async function assertOpportunitiesIndexHealth(
   client: ReturnType<typeof searchClient>,
+  index: string,
 ): Promise<void> {
-  const total = await client.count({ index: OPPORTUNITIES_INDEX });
+  const total = await client.count({ index });
   if (total.body.count === 0) {
     throw new Error("[smoke] scholars-opportunities index is empty after indexOpportunities()");
   }
@@ -569,7 +574,7 @@ async function assertOpportunitiesIndexHealth(
   // flat-fill + reindex cycle is established. `exists` counts docs with ≥1 UI
   // (an empty array does not match), mirroring the funding-index smoke.
   const withMeshUi = await client.count({
-    index: OPPORTUNITIES_INDEX,
+    index,
     body: { query: { exists: { field: "meshDescriptorUi" } } },
   });
   const pct = Math.round((100 * withMeshUi.body.count) / total.body.count);
@@ -598,7 +603,7 @@ async function assertOpportunitiesIndexHealth(
   // producer (ReciterAI) populates the field out-of-band, so a low ratio is
   // expected until that lands + reindexes — warn so the gap stays visible.
   const prestigeSample = await client.search({
-    index: OPPORTUNITIES_INDEX,
+    index,
     body: {
       query: { match_all: {} },
       _source: ["prestige"],
@@ -685,6 +690,38 @@ async function indexOpportunities(concreteIndex: string) {
   return rows.length;
 }
 
+/**
+ * Pre-swap validation gate (reliability-audit PR-2). Runs against the
+ * fully-written NEW concrete index BEFORE the alias moves: (1) doc-count
+ * shrink check vs whatever the live alias currently serves — the corpora only
+ * grow in normal operation, so a >20% drop means a truncated corpus read or an
+ * indexer bug; (2) the per-index smoke assertions, previously run after the
+ * swap (too late — an empty or field-dropped index was already live). A throw
+ * here makes rebuildAliasedIndex delete the new index and leave the previous
+ * version serving, which is strictly better than swapping in a bad one.
+ * Operator escape: ETL_GUARD_BYPASS="search-index:<alias>" (or "all").
+ */
+function preSwapGate(
+  client: ReturnType<typeof searchClient>,
+  alias: string,
+  health: (client: ReturnType<typeof searchClient>, index: string) => Promise<void>,
+) {
+  return async (newIndex: string, docsIndexed: number): Promise<void> => {
+    const live = await client.count({ index: alias }, { ignore: [404] });
+    const liveCount =
+      live.statusCode === 200 ? ((live.body as { count?: number }).count ?? 0) : 0;
+    assertSourceVolume(`search-index:${alias}`, {
+      incoming: docsIndexed,
+      existing: liveCount,
+      maxDropPct: 20,
+    });
+    await health(client, newIndex);
+    console.log(
+      `  ...pre-swap gate passed for ${newIndex} (${docsIndexed} docs vs ${liveCount} live)`,
+    );
+  };
+}
+
 async function main() {
   const selected = parseSelected(process.argv.slice(2));
   const counts: Partial<Record<SourceType, number>> = {};
@@ -698,6 +735,7 @@ async function main() {
       alias: PEOPLE_INDEX,
       mapping: peopleIndexMapping,
       fillFn: indexPeople,
+      preSwapCheck: preSwapGate(client, PEOPLE_INDEX, assertPeopleIndexHealth),
     });
     counts.people = docsIndexed;
     console.log(
@@ -713,6 +751,7 @@ async function main() {
       alias: PUBLICATIONS_INDEX,
       mapping: publicationsIndexMapping,
       fillFn: indexPublications,
+      preSwapCheck: preSwapGate(client, PUBLICATIONS_INDEX, assertPublicationsIndexHealth),
     });
     counts.publications = docsIndexed;
     console.log(
@@ -728,6 +767,7 @@ async function main() {
       alias: FUNDING_INDEX,
       mapping: fundingIndexMapping,
       fillFn: indexFunding,
+      preSwapCheck: preSwapGate(client, FUNDING_INDEX, assertFundingIndexHealth),
     });
     counts.funding = docsIndexed;
     console.log(
@@ -743,6 +783,7 @@ async function main() {
       alias: OPPORTUNITIES_INDEX,
       mapping: opportunitiesIndexMapping,
       fillFn: indexOpportunities,
+      preSwapCheck: preSwapGate(client, OPPORTUNITIES_INDEX, assertOpportunitiesIndexHealth),
     });
     counts.opportunities = docsIndexed;
     console.log(
@@ -751,12 +792,9 @@ async function main() {
     );
   }
 
-  console.log("Running smoke checks...");
-  if (selected.has("people")) await assertPeopleIndexHealth(client);
-  if (selected.has("publications")) await assertPublicationsIndexHealth(client);
-  if (selected.has("funding")) await assertFundingIndexHealth(client);
-  if (selected.has("opportunities")) await assertOpportunitiesIndexHealth(client);
-  console.log("Smoke checks passed.");
+  // Smoke checks now run inside each preSwapGate against the NEW concrete
+  // index before its alias moves — a failing rebuild leaves the previous
+  // version serving instead of publishing an empty/broken index.
 
   const parts: string[] = [];
   if (counts.people !== undefined) parts.push(`${counts.people} scholars`);
