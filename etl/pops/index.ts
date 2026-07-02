@@ -22,6 +22,7 @@
  * Usage: `npm run etl:pops`
  */
 import { db } from "../../lib/db";
+import { assertSourceVolume } from "../../lib/etl-guard";
 import { fetchPops, type PopsEnrichment } from "../../lib/edit/pops";
 
 /** Inter-request sleep to be a good citizen toward the POPS directory.
@@ -152,6 +153,15 @@ async function main() {
       `POPS ETL complete in ${elapsed}s: cohort=${scholars.length}, ` +
         `fetched=${fetched}, persisted=${persisted}, missed=${missed}.`,
     );
+
+    // Every fetch is swallowed to null (best-effort by design), so a total
+    // source outage previously exited 0 with fetched=0 and recorded SUCCESS.
+    // A non-trivial cohort with a >90% miss rate is an outage, not noise.
+    assertSourceVolume("pops:fetch-coverage", {
+      incoming: fetched,
+      existing: scholars.length,
+      maxDropPct: 90,
+    });
 
     await db.write.etlRun.update({
       where: { id: run.id },
