@@ -41,6 +41,7 @@
  */
 import { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "../../lib/db";
+import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { markTopicRebuildStarted } from "../../lib/etl-state";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
@@ -312,6 +313,17 @@ async function main() {
     }
     console.log(`Got ${articleByPmid.size} article rows.`);
 
+    // ReciterDB's analysis_summary_* tables are themselves rebuilt nightly; a
+    // read overlapping that rebuild (or an auth-scope change) succeeds with a
+    // truncated set. The corpus only grows in normal operation, so a >20%
+    // shrink vs what we already hold means a bad read — abort before the
+    // publication_score wipe / authorship rewrite / orphan prune below.
+    assertSourceVolume("reciter:publications", {
+      incoming: articleByPmid.size,
+      existing: await db.write.publication.count(),
+      maxDropPct: 20,
+    });
+
     // Issue #21 — pull abstracts for the same pmid set so the search-index
     // ETL can emit a `publicationAbstracts` field on each people document.
     // We use `abstractVarchar` (already capped at 15000 chars at the
@@ -566,6 +578,14 @@ async function main() {
       await db.write.publication.findMany({ select: { pmid: true } })
     ).map((p) => p.pmid);
     const orphanPmids = existingPmids.filter((pmid) => !sourcePmidsSet.has(pmid));
+    // Orphan churn is normally a trickle (retractions, disambiguation fixes).
+    // A large orphan set means the source read was truncated — deleting would
+    // cascade into publication_topic / publication_author / grant_publication.
+    assertPruneVolume("reciter:orphan-prune", {
+      pruning: orphanPmids.length,
+      of: existingPmids.length,
+      maxPct: 5,
+    });
     if (orphanPmids.length > 0) {
       console.log(
         `Deleting ${orphanPmids.length} orphan publication(s) ` +

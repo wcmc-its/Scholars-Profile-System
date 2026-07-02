@@ -24,6 +24,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import { db } from "../../lib/db";
+import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { detectDivisionChief, type ChiefVerdict } from "./chief-detection";
 import {
   loadUnitOverridesForETL,
@@ -367,6 +368,10 @@ async function main() {
     console.log("Fetching active academic faculty (this can take a moment)...");
     const facultyEntries = await fetchActiveFaculty(client);
     console.log(`ED returned ${facultyEntries.length} active academic entries.`);
+    // The bind DN can be silently scoped (ACL change, filter/base-DN drift) so
+    // the search SUCCEEDS with a truncated set; unguarded, that soft-deletes
+    // every missing scholar below. Current active feed is ~8,900 entries.
+    assertSourceVolume("ed:faculty", { incoming: facultyEntries.length, floor: 5000 });
 
     // Phase 2: doctoral students live under ou=students, not ou=people, so the
     // active-faculty filter excludes them. Pull them as a second branch and
@@ -385,6 +390,15 @@ async function main() {
     console.log("Fetching active faculty appointments from ou=faculty SOR...");
     const facultyAppointments = await fetchActiveFacultyAppointments(client);
     console.log(`ED returned ${facultyAppointments.length} active faculty appointment rows.`);
+    // A truncated appointment feed (same silent-ACL failure mode) would wipe
+    // each scholar's ED appointment rows via the refreshEdAppointments stale
+    // pass and clear department chairs. Nearly every faculty entry carries at
+    // least one appointment row, so well under half the faculty count means a
+    // truncated read.
+    assertSourceVolume("ed:appointments", {
+      incoming: facultyAppointments.length,
+      floor: Math.floor(facultyEntries.length / 2),
+    });
     const appointmentsByCwid = new Map<string, EdFacultyAppointment[]>();
     for (const a of facultyAppointments) {
       const arr = appointmentsByCwid.get(a.cwid) ?? [];
@@ -871,6 +885,15 @@ async function main() {
     const departed = existing.filter(
       (s) => !s.deletedAt && !incomingCwids.has(s.cwid),
     );
+    // Normal nightly departures are a handful; hundreds at once means a
+    // truncated feed (this also catches a swallowed doctoral-student fetch
+    // failure, which would otherwise tombstone every PhD student). Bypass via
+    // ETL_GUARD_BYPASS for a genuine bulk offboarding.
+    assertPruneVolume("ed:scholar-soft-delete", {
+      pruning: departed.length,
+      of: existing.filter((s) => !s.deletedAt).length,
+      maxPct: 2,
+    });
     let softDeleted = 0;
     for (const s of departed) {
       await db.write.scholar.update({

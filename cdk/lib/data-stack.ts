@@ -138,6 +138,19 @@ export class DataStack extends Stack {
       "ETL Lambdas to OpenSearch HTTPS (index writes + suggest)",
     );
 
+    // item-3 cutover: under useSharedVpc the data-tier SGs move to the shared
+    // VPC, which forces a replace (a SecurityGroup's VpcId is immutable). RETAIN
+    // the OLD physical SGs so CloudFormation ORPHANS them — exactly like the
+    // RETAIN'd old cluster/domain that are still attached to them — instead of
+    // trying to DELETE them during cleanup, which raises DependencyViolation
+    // (the orphaned datastore still holds the SG). The orphaned old SGs are torn
+    // down with the old VPC at Phase G. Gated on useSharedVpc so the flag-off
+    // synth stays byte-identical (no DeletionPolicy on the SGs pre-cutover).
+    if (envConfig.useSharedVpc) {
+      auroraSecurityGroup.applyRemovalPolicy(RemovalPolicy.RETAIN);
+      opensearchSecurityGroup.applyRemovalPolicy(RemovalPolicy.RETAIN);
+    }
+
     // ------------------------------------------------------------------
     // Aurora MySQL Serverless v2.
     //
@@ -491,7 +504,16 @@ export class DataStack extends Stack {
       0,
       envConfig.opensearchDataNodes,
     );
-    this.opensearchDomain = new opensearchservice.Domain(this, "OpenSearch", {
+    // item-3 cutover: an OpenSearch domain CANNOT move to a different VPC in
+    // place (AWS: "after you place a domain within a VPC, you can't move it to a
+    // different VPC") — an in-place VPCOptions change onto a shared-VPC subnet
+    // would FAIL the UpdateDomainConfig and roll back the Data deploy. So under
+    // useSharedVpc use a NEW construct id: CloudFormation stands up a FRESH (empty)
+    // domain in the shared VPC and ORPHANS the RETAIN'd old one; data is rebuilt
+    // via search:index (runbook Phase B4, app reads OLD until the new one verifies).
+    // Flag-off keeps the "OpenSearch" id → byte-identical pre-cutover synth.
+    const openSearchId = envConfig.useSharedVpc ? "OpenSearchShared" : "OpenSearch";
+    this.opensearchDomain = new opensearchservice.Domain(this, openSearchId, {
       version: opensearchservice.EngineVersion.OPENSEARCH_2_19,
       vpc,
       vpcSubnets: [{ subnets: opensearchSubnets }],

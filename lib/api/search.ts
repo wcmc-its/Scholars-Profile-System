@@ -3933,6 +3933,33 @@ export async function searchPublications(opts: {
   const body = {
     from: page * PAGE_SIZE,
     size: PAGE_SIZE,
+    // Perf (#1407) — return only the fields the pub `Hit` mapper reads
+    // (verified against the `Hit._source` type + the mapper below; mirrors the
+    // people-search include list). Without this, OpenSearch ships the entire
+    // `_source` per hit — the concatenated `meshTerms` labels, `authorNames`,
+    // the nested `wcmAuthors` rows (author chips are re-hydrated from Prisma
+    // via `fetchWcmAuthorsForPmids` anyway), `wcmAuthorCwids` /
+    // `wcmAuthorPositions` / `wcmAuthorDepartments` / `reciterParentTopicId` /
+    // `dateAddedToEntrez` — only to be discarded. Sorts, filters, and aggs run
+    // on indexed doc values, not `_source`, so they are unaffected; highlight
+    // fragments arrive on `hit.highlight`, independent of `_source`. The
+    // `countOnly` fast path above is `size: 0` (no hits), so it needs no list.
+    _source: [
+      "pmid",
+      "title",
+      "journal",
+      "year",
+      "publicationType",
+      "citationCount",
+      "doi",
+      "pmcid",
+      "pubmedUrl",
+      "impactScore",
+      "topicImpacts",
+      "impactJustification",
+      "abstract",
+      "meshDescriptorUi",
+    ],
     // OpenSearch's default cap of 10000 short-circuits the total counter
     // and would make the subhead read "10,000 publications" even when
     // there are 90k+. Larger publications index (~90k docs) so this
@@ -4113,7 +4140,7 @@ export async function searchPublications(opts: {
       abstract?: string;
       // Issue #707 — descriptor UIs this publication is tagged with (#259 uses
       // them for the concept-mode `terms { meshDescriptorUi }` clause). Read for
-      // the match-provenance path; already in `_source` (no include-list trims it).
+      // the match-provenance path; kept in the `_source` include list above.
       meshDescriptorUi?: string[];
     };
     // SEARCH_PUB_HIGHLIGHT — `title` highlight fragment (whole field, marked),

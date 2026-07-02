@@ -18,7 +18,9 @@ import {
 } from "@/lib/api/search-funding";
 import {
   matchQueryToTaxonomy,
+  resolveMeshDescriptor,
   buildMatchAwareContext,
+  type TaxonomyMatchResult,
 } from "@/lib/api/search-taxonomy";
 import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
 import {
@@ -75,10 +77,16 @@ async function handleSearch(request: NextRequest) {
 
   // Issue #259 §1.5 — taxonomy match (curated + MeSH resolution) computed
   // once at the top so all three branches can log resolution outcome.
-  // matchQueryToTaxonomy short-circuits on q < 3 normalized chars, so the
-  // cost here is one Map lookup + one indexed etl_run row when the cache
-  // is hot. Same call the server-rendered /search page makes; the duplication
-  // is acceptable until call sites consolidate.
+  //
+  // Perf #1406 — the publications and funding branches consume ONLY
+  // `taxonomyMatch.meshResolution` (the concept clause plus the
+  // interpretation/log fields derived from it). The curated-candidate matching
+  // and its per-candidate Prisma count enrichment (up to MATCH_HARD_CAP × 2
+  // group-bys) feed `primary`/`areas`/`methodMatches`, which only the people
+  // branch (and the SSR page) read — so those branches resolve just the MeSH
+  // side, O(1) warm off the module-cached MeSH map, and the full matcher runs
+  // only on the people path. Measured before the split (prod, warm): the
+  // funding tab paid ~460ms of taxonomy for a ~118ms search.
   //
   // Issue #259 SPEC §7.5 — split-scope timing. `taxonomyMatchMs` measures
   // the resolver in isolation so a resolver regression doesn't dilute the
@@ -93,23 +101,49 @@ async function handleSearch(request: NextRequest) {
   const genericStripped = genericTermMode !== "off" && genericRemoved.length > 0;
   const genericDemote = genericTermMode === "on" && genericRemoved.length > 0;
 
+  const meshOnlyResolution = type === "publications" || type === "funding";
   const taxonomyStart = Date.now();
-  let taxonomyMatch = await matchQueryToTaxonomy(q);
-  // Issue #692 §4.1 — full query first; only on a complete MISS (no curated
-  // match AND no MeSH descriptor) retry against the stripped content query.
-  // Full-first protects descriptors built from filler ("gene therapy",
-  // "clinical trial") — those resolve on the first call and never reach here.
-  if (
-    genericStripped &&
-    taxonomyMatch.state === "none" &&
-    taxonomyMatch.meshResolution === null
-  ) {
-    const retry = await matchQueryToTaxonomy(contentQuery);
-    if (retry.state === "matches" || retry.meshResolution !== null) {
-      taxonomyMatch = retry;
+  let taxonomyMatch: TaxonomyMatchResult;
+  if (meshOnlyResolution) {
+    // Perf #1406 — MeSH-only path (see block comment above). Same object the
+    // full matcher would embed as `meshResolution`; it has its own <3-char
+    // short-circuit and fails closed to null.
+    let mesh = await resolveMeshDescriptor(q);
+    // Issue #692 §4.1, mesh-only shape — retry the stripped content query on a
+    // resolution miss. The full path below additionally requires a curated-
+    // match miss before retrying; curated state isn't computed here, so in the
+    // rare case where the full query curated-matches a topic label WITHOUT
+    // MeSH-resolving, this retry can resolve a descriptor the people/SSR path
+    // would not. Strictly more-resolved for branches that only consume the
+    // descriptor; accepted to keep this path off the candidate/count queries.
+    if (genericStripped && mesh === null) {
+      mesh = await resolveMeshDescriptor(contentQuery);
+    }
+    taxonomyMatch = { state: "none", meshResolution: mesh };
+  } else {
+    taxonomyMatch = await matchQueryToTaxonomy(q);
+    // Issue #692 §4.1 — full query first; only on a complete MISS (no curated
+    // match AND no MeSH descriptor) retry against the stripped content query.
+    // Full-first protects descriptors built from filler ("gene therapy",
+    // "clinical trial") — those resolve on the first call and never reach here.
+    if (
+      genericStripped &&
+      taxonomyMatch.state === "none" &&
+      taxonomyMatch.meshResolution === null
+    ) {
+      const retry = await matchQueryToTaxonomy(contentQuery);
+      if (retry.state === "matches" || retry.meshResolution !== null) {
+        taxonomyMatch = retry;
+      }
     }
   }
   const taxonomyMatchMs = Date.now() - taxonomyStart;
+  // Server-Timing `taxonomy` span desc — names the resolver actually run
+  // (#1406: mesh-only on the publications/funding branches). The span name
+  // (`taxonomy;dur=`) is unchanged, so SLI parsing is unaffected.
+  const taxonomyLabel = meshOnlyResolution
+    ? "resolveMeshDescriptor"
+    : "matchQueryToTaxonomy";
   // PLAN R2/R6 — one user-facing `?match=exact|expanded|concept` scope (default
   // `expanded`) replaces the split `?mesh=` surface. `parseScopeParam` validates
   // the value (anything unrecognized → `expanded`) and folds the legacy
@@ -213,6 +247,7 @@ async function handleSearch(request: NextRequest) {
       result,
       searchInterpretation,
       taxonomyMatchMs,
+      taxonomyLabel,
       searchLatencyMs,
       "searchFunding",
     );
@@ -407,6 +442,7 @@ async function handleSearch(request: NextRequest) {
       result,
       searchInterpretation,
       taxonomyMatchMs,
+      taxonomyLabel,
       searchLatencyMs,
       "searchPublications",
     );
@@ -623,6 +659,7 @@ async function handleSearch(request: NextRequest) {
     result,
     searchInterpretation,
     taxonomyMatchMs,
+    taxonomyLabel,
     searchLatencyMs,
     "searchPeople",
   );
@@ -644,6 +681,7 @@ function jsonWithTiming<T extends object>(
   body: T,
   searchInterpretation: SearchInterpretation,
   taxonomyMatchMs: number,
+  taxonomyLabel: string,
   searchLatencyMs: number,
   searchLabel: string,
 ) {
@@ -652,7 +690,7 @@ function jsonWithTiming<T extends object>(
     {
       headers: {
         "Server-Timing": serverTimingHeader([
-          { name: "taxonomy", ms: taxonomyMatchMs, desc: "matchQueryToTaxonomy" },
+          { name: "taxonomy", ms: taxonomyMatchMs, desc: taxonomyLabel },
           { name: "search", ms: searchLatencyMs, desc: searchLabel },
         ]),
       },

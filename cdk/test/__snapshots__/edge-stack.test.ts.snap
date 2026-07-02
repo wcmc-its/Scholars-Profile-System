@@ -311,7 +311,9 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 "HEAD",
                 "OPTIONS",
               ],
-              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "CachePolicyId": {
+                "Ref": "SearchApiNoStoreCompressible179C8AE1",
+              },
               "Compress": true,
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/search*",
@@ -980,6 +982,31 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudFront::CachePolicy",
     },
+    "SearchApiNoStoreCompressible179C8AE1": {
+      "Properties": {
+        "CachePolicyConfig": {
+          "Comment": "SPS search API (prod) -- CachingDisabled TTLs plus gzip/brotli support so compress fires.",
+          "DefaultTTL": 0,
+          "MaxTTL": 1,
+          "MinTTL": 0,
+          "Name": "sps-search-nostore-compress-prod",
+          "ParametersInCacheKeyAndForwardedToOrigin": {
+            "CookiesConfig": {
+              "CookieBehavior": "none",
+            },
+            "EnableAcceptEncodingBrotli": true,
+            "EnableAcceptEncodingGzip": true,
+            "HeadersConfig": {
+              "HeaderBehavior": "none",
+            },
+            "QueryStringsConfig": {
+              "QueryStringBehavior": "all",
+            },
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::CachePolicy",
+    },
     "SecurityHeadersE66B69D3": {
       "Properties": {
         "ResponseHeadersPolicyConfig": {
@@ -1502,7 +1529,9 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
                 "HEAD",
                 "OPTIONS",
               ],
-              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "CachePolicyId": {
+                "Ref": "SearchApiNoStoreCompressible179C8AE1",
+              },
               "Compress": true,
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/search*",
@@ -2165,6 +2194,31 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
                 "q",
                 "role",
               ],
+            },
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::CachePolicy",
+    },
+    "SearchApiNoStoreCompressible179C8AE1": {
+      "Properties": {
+        "CachePolicyConfig": {
+          "Comment": "SPS search API (staging) -- CachingDisabled TTLs plus gzip/brotli support so compress fires.",
+          "DefaultTTL": 0,
+          "MaxTTL": 1,
+          "MinTTL": 0,
+          "Name": "sps-search-nostore-compress-staging",
+          "ParametersInCacheKeyAndForwardedToOrigin": {
+            "CookiesConfig": {
+              "CookieBehavior": "none",
+            },
+            "EnableAcceptEncodingBrotli": true,
+            "EnableAcceptEncodingGzip": true,
+            "HeadersConfig": {
+              "HeaderBehavior": "none",
+            },
+            "QueryStringsConfig": {
+              "QueryStringBehavior": "all",
             },
           },
         },

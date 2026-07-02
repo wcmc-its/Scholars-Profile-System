@@ -2379,10 +2379,10 @@ describe("AppStack", () => {
       expect(appTaskDef?.Properties?.Memory).toBe("2048");
     });
 
-    it("grants the audit INSERT to `'app_rw'@'10.20.%'` on staging (#493 staging fix)", () => {
-      // Staging's app user is host-pattern `10.20.%` (VPC-CIDR-scoped), not the
-      // `%` the bootstrap defaulted to -- the cause of the MySQL 1410 at GRANT.
-      // Guards the per-env appRwGranteeHost wiring on the bootstrap task def.
+    it("grants the audit INSERT to `'app_rw'@'10.46.160.%'` on staging (item-3 cutover)", () => {
+      // Post-item-3-cutover staging's app user connects from the shared VPC's
+      // app2 tier, so the host pattern is `10.46.160.%` (was `10.20.%` on the
+      // standalone VPC). Guards the per-env appRwGranteeHost wiring.
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const bootstrap = Object.values(taskDefs).find(
         (r) => r.Properties?.Family === "sps-db-bootstrap-staging",
@@ -2399,7 +2399,7 @@ describe("AppStack", () => {
       const envByName = new Map(
         (container?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
-      expect(envByName.get("GRANTEE_HOST")).toBe("10.20.%");
+      expect(envByName.get("GRANTEE_HOST")).toBe("10.46.160.%");
     });
 
     it("provisions the verify-grants task on staging with all four role DSNs (ADR-009 Phase 2)", () => {

@@ -29,7 +29,7 @@ const nodes = {
   srcvpc: { x: 1098, y: 188, w: 266, h: 100, kind: "good", title: "Shared ETL VPC", sub: ["lts-reciter-vpc01 · TGW-attached", "10.46.134/.160 · both envs' ETL", "staging-ETL-SG · prod-ETL-SG"], chip: { tone: "planned", text: "flag OFF" } },
   onprem: { x: 1098, y: 312, w: 266, h: 64, kind: "ext", title: "On-prem + 10.46 sources", sub: ["ED-LDAP 10.63 · ReciterDB · ASMS", "COI · Jenzabar — reached via TGW"] },
   pcx:    { x: 1098, y: 400, w: 266, h: 104, kind: "open", title: "VPC peering ×2", sub: ["per env: ↔ Sps-staging 10.20", "+ ↔ Sps-prod 10.10 · same acct", "datastore admits its ETL-SG only"], chip: { tone: "planned", text: "flag OFF" } },
-  ns:     { x: 1098, y: 528, w: 266, h: 80, kind: "open", title: "Edge / NetScaler  ✗ open", sub: ["NetScaler replace vs front CF?", "RITM0792011 · #502"] },
+  ns:     { x: 1098, y: 528, w: 266, h: 80, kind: "good", title: "Edge / NetScaler ✓ decided", sub: ["CF+WAF → NetScaler → ALB (Fabrice)", "insert as follow-on · #502"] },
 };
 
 const groups = [
@@ -107,8 +107,10 @@ export const meta = {
             Aurora/OS reach <i>from lts-reciter</i> → then <code>etlCadenceVpcRelocated</code> (synth blocks
             relocation without peering). Staging first. <span class="tag open">rollout</span></li>
           <li><b>Parked:</b> InfoEd (<code>10.20.91.8</code>, third-party, overlaps 10.20/16) excluded
-            until WCM re-IP/NAT; NetScaler edge fork (RITM0792011 · #502).
-            <span class="tag open">out of scope</span></li>
+            until WCM re-IP/NAT. <b>NetScaler edge model decided</b> (Fabrice 2026-07-02:
+            CloudFront&nbsp;+&nbsp;WAF&nbsp;→&nbsp;NetScaler&nbsp;→&nbsp;ALB) and <b>decoupled</b> from this
+            move — inserted as a follow-on (RITM0792011 · #502, see View&nbsp;④).
+            <span class="tag done">decided · orthogonal</span></li>
         </ol>
       </div>
       <div class="panel">
