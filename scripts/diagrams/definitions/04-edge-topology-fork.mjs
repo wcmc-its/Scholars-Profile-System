@@ -1,80 +1,88 @@
 /**
- * View 4 — Edge topology decision (cloud-team deep-dive on the #502 fork).
- * Expands the "NetScaler ✗ open" card from View 3 into a side-by-side
- * replace-vs-front comparison. Self-contained SVG (title + footer baked in) so
- * the PNG/SVG export stands alone in the meeting deck.
- * Source: docs/network-security-topology.md, waf-request-RITM0792011.md, #502.
+ * View 4 — Edge topology, RESOLVED (the #502 fork is decided).
+ * Fabrice confirmed 2026-07-02 (docs/cutover-item3-execution-runbook.md §1):
+ * the target is CloudFront + WAF -> NetScaler -> ALB -> Fargate. CloudFront and
+ * the WAF stay; the AWS ALB stays because the app is ECS Fargate. NetScaler is
+ * NOT in the path today (both distributions point straight at their ALB), so
+ * reaching the target is a NetScaler-insertion change orthogonal to the item-3
+ * VPC move. The only remaining choice is sequencing (insert decoupled vs coupled).
+ * Self-contained SVG (title + footer baked in) so the export stands alone in a deck.
+ * Source: docs/cutover-item3-execution-runbook.md, network-security-topology.md,
+ * waf-request-RITM0792011.md, #502, #1400.
  */
 import { A } from "../lib.mjs";
 
 const nodes = {
-  // ---- Option A: NetScaler replaces CloudFront + WAF ----
-  iA:   { x: 80, y: 200, w: 170, h: 38, kind: "ext", title: "Internet" },
-  nsA:  { x: 80, y: 270, w: 170, h: 38, kind: "ext", title: "NetScaler" },
-  albA: { x: 80, y: 340, w: 170, h: 38, kind: "net", title: "Public ALB" },
-  ecsA: { x: 80, y: 410, w: 170, h: 40, kind: "app", title: "ECS app" },
-  impA: { x: 286, y: 198, w: 372, h: 102, kind: "ext", title: "Implications",
-          sub: ["·  Lose AWS WAF + CloudFront caching", "·  #461 WCM-only gate moves to NetScaler", "·  Edge failover / DR becomes on-prem"] },
-  openA:{ x: 286, y: 326, w: 372, h: 64, kind: "open", title: "Open · RITM0792011",
-          sub: ["NetScaler->ALB port + :80 default-403 exception"] },
-  // ---- Option B: NetScaler fronts CloudFront + WAF ----
-  iB:   { x: 800, y: 184, w: 170, h: 36, kind: "ext", title: "Internet" },
-  nsB:  { x: 800, y: 248, w: 170, h: 36, kind: "ext", title: "NetScaler" },
-  cfB:  { x: 800, y: 312, w: 170, h: 36, kind: "edge", title: "CloudFront + WAF" },
-  albB: { x: 800, y: 376, w: 170, h: 36, kind: "net", title: "Public ALB" },
-  ecsB: { x: 800, y: 440, w: 170, h: 40, kind: "app", title: "ECS app" },
-  impB: { x: 1006, y: 198, w: 358, h: 102, kind: "ext", title: "Implications",
-          sub: ["·  Keep AWS WAF + CloudFront caching", "·  Origin guard unchanged (CDN fronts ALB)", "·  Confirm fronting a CDN is intended"] },
-  openB:{ x: 1006, y: 326, w: 358, h: 64, kind: "open", title: "Open · #502",
-          sub: ["Is 'front' = NetScaler->CloudFront, or ->ALB?"] },
+  // ---- Left: the DECIDED target path (top -> bottom) ----
+  iT:   { x: 140, y: 170, w: 320, h: 40, kind: "ext",  title: "Internet" },
+  cfT:  { x: 140, y: 238, w: 320, h: 56, kind: "edge", title: "CloudFront + AWS WAF",
+          sub: ["WCM-only gate (#461) · caching · managed rules"] },
+  nsT:  { x: 140, y: 322, w: 320, h: 56, kind: "ext",  title: "NetScaler",
+          sub: ["on-prem · inserted edge layer (WCM)"], chip: { tone: "planned", text: "to insert" } },
+  albT: { x: 140, y: 406, w: 320, h: 56, kind: "net",  title: "Public ALB",
+          sub: ["X-Origin-Verify origin guard"], chip: { tone: "live", text: "stays" } },
+  ecsT: { x: 140, y: 490, w: 320, h: 40, kind: "app",  title: "ECS Fargate app" },
+
+  // ---- Right: where it stands + the one remaining choice ----
+  today: { x: 632, y: 168, w: 696, h: 60, kind: "ext", title: "Today (as deployed)",
+           sub: ["Both CloudFront distributions point straight at their ALB — NetScaler is not in the path yet.",
+                 "Inserting it is a WCM edge change, orthogonal to the item-3 VPC move (no CDK change)."] },
+  decouple: { x: 632, y: 248, w: 696, h: 76, kind: "good", title: "Sequencing A · decouple   ✓ recommended",
+              sub: ["Repoint the CloudFront origin to the new ALB in-window — SPS-only, no WCM dependency.",
+                    "WCM inserts NetScaler in front of the ALB as a separate follow-on. Q11 = N/A."] },
+  couple:   { x: 632, y: 344, w: 696, h: 72, kind: "ext", title: "Sequencing B · couple",
+              sub: ["Insert NetScaler at cutover: CloudFront origin → NetScaler VIP → new ALB.",
+                    "Q11 becomes a hard in-window gate — WCM must be ready."] },
+  openSeq:  { x: 632, y: 436, w: 696, h: 72, kind: "open", title: "Still open · #502 / RITM0792011 — sequencing only",
+              sub: ["Topology is decided; the remaining question is WHEN NetScaler is inserted.",
+                    ":80 default-403 origin guard still 403s a NetScaler not sending X-Origin-Verify."] },
 };
 
 const groups = [
-  { x: 40, y: 120, w: 640, h: 412, kind: "edge", title: "Option A · Replace the AWS edge", fo: 0.06 },
-  { x: 720, y: 120, w: 644, h: 412, kind: "net", title: "Option B · Front the AWS edge", fo: 0.06 },
+  { x: 40, y: 120, w: 520, h: 410, kind: "good", title: "Decided target path · Fabrice 2026-07-02", fo: 0.05 },
+  { x: 600, y: 120, w: 760, h: 410, kind: "net", title: "Where it stands + the one open choice", fo: 0.04 },
 ];
 
 const edges = [
-  // Option A flow
-  { p0: A(nodes.iA, "b"), p1: A(nodes.nsA, "t"), color: "gray", label: "HTTPS" },
-  { p0: A(nodes.nsA, "b"), p1: A(nodes.albA, "t"), color: "red", label: ":? port · :80->403" },
-  { p0: A(nodes.albA, "b"), p1: A(nodes.ecsA, "t"), color: "gray", label: ":443" },
-  // Option B flow
-  { p0: A(nodes.iB, "b"), p1: A(nodes.nsB, "t"), color: "gray", label: "HTTPS" },
-  { p0: A(nodes.nsB, "b"), p1: A(nodes.cfB, "t"), color: "red", label: "path? (CDN front)" },
-  { p0: A(nodes.cfB, "b"), p1: A(nodes.albB, "t"), color: "gray", label: "X-Origin-Verify" },
-  { p0: A(nodes.albB, "b"), p1: A(nodes.ecsB, "t"), color: "gray", label: ":443" },
+  { p0: A(nodes.iT, "b"),  p1: A(nodes.cfT, "t"),  color: "gray",   label: "HTTPS" },
+  { p0: A(nodes.cfT, "b"), p1: A(nodes.nsT, "t"),  color: "maroon", label: "origin" },
+  { p0: A(nodes.nsT, "b"), p1: A(nodes.albT, "t"), color: "gray",   label: "X-Origin-Verify" },
+  { p0: A(nodes.albT, "b"),p1: A(nodes.ecsT, "t"), color: "gray",   label: ":443" },
 ];
 
 const decos = [
-  `<text x="40" y="40" font-size="12.5" font-weight="700" fill="#7d1c1c" letter-spacing="0.5">EDGE TOPOLOGY DECISION · RITM0792011 · #502</text>`,
-  `<text x="40" y="74" font-size="22" font-weight="800" fill="#1f2933">Does NetScaler replace the AWS edge, or front it?</text>`,
-  `<rect x="1188" y="34" width="176" height="28" rx="14" fill="#fceced" stroke="#e7b9bf"/><text x="1276" y="52" font-size="11" font-weight="700" fill="#a12e3a" text-anchor="middle">DECISION REQUIRED</text>`,
-  `<text x="64" y="166" font-size="11.5" fill="#6b7280">NetScaler instead of CloudFront + WAF</text>`,
-  `<text x="744" y="166" font-size="11.5" fill="#6b7280">NetScaler in front of CloudFront + WAF</text>`,
-  `<rect x="40" y="548" width="1324" height="46" rx="8" fill="#fbf7f0" stroke="#ece2cf"/>`,
-  `<text x="58" y="568" font-size="11" fill="#5b4a20">#461 WCM-only WAF gate stays until resolved · the :80 default-403 origin guard currently 403s NetScaler (RITM0792011).</text>`,
-  `<text x="58" y="585" font-size="11" fill="#5b4a20">Pin down what "fronting" means (NetScaler to ALB vs NetScaler to CloudFront) before the meeting — it changes the origin-guard story.</text>`,
+  `<text x="40" y="40" font-size="12.5" font-weight="700" fill="#256f33" letter-spacing="0.5">EDGE TOPOLOGY · RESOLVED 2026-07-02 · RITM0792011 · #502</text>`,
+  `<text x="40" y="74" font-size="22" font-weight="800" fill="#1f2933">Decided: CloudFront + WAF → NetScaler → ALB → Fargate</text>`,
+  `<rect x="1224" y="34" width="136" height="28" rx="14" fill="#ebfbee" stroke="#b7dfc0"/><text x="1292" y="52" font-size="11" font-weight="700" fill="#256f33" text-anchor="middle">DECIDED</text>`,
+  `<text x="64" y="150" font-size="11.5" fill="#6b7280">CloudFront and the WAF stay · the ALB stays because the app is Fargate</text>`,
+  `<text x="632" y="150" font-size="11.5" fill="#6b7280">Getting there = inserting NetScaler; the only debate is when</text>`,
+  `<rect x="40" y="548" width="1320" height="46" rx="8" fill="#fbf7f0" stroke="#ece2cf"/>`,
+  `<text x="58" y="568" font-size="11" fill="#5b4a20">#461 WCM-only WAF gate stays until NetScaler enforces equivalent filtering · the :80 default-403 origin guard is unchanged (the ALB is kept).</text>`,
+  `<text x="58" y="585" font-size="11" fill="#5b4a20">NetScaler insertion is decoupled from the item-3 VPC move (recommended): repoint the CloudFront origin to the new ALB now, add NetScaler in front as a follow-on.</text>`,
 ];
 
 export const spec = { id: "edge-topology-fork", vb: [1400, 612], groups, nodes, edges, decos };
 
 export const meta = {
   nav: "④ Edge decision",
-  kicker: "View 4 · the edge decision (#502)",
-  heading: "Edge topology — replace or front?",
-  dot: "#7d1c1c",
+  kicker: "View 4 · the edge decision — resolved (#502)",
+  heading: "Edge topology — resolved",
+  dot: "#2f9e44",
   blurb:
-    "A deep-dive on the one open item most likely to drive the cloud-team meeting: whether the " +
-    "on-prem <b>NetScaler replaces</b> the AWS edge (CloudFront + WAF) or <b>sits in front</b> of " +
-    "it. Each path has a different origin-guard story — the <code>:80</code> default-403 guard 403s " +
-    "NetScaler today, so the answer changes what has to be reconfigured.",
+    "The one open item most likely to drive the cloud-team meeting is now <b>decided</b>. Fabrice " +
+    "confirmed (2026-07-02) the target is <b>CloudFront + WAF → NetScaler → ALB → Fargate</b>: " +
+    "CloudFront and the WAF <b>stay</b>, and the AWS <b>ALB is kept</b> because the app is ECS Fargate. " +
+    "NetScaler is <b>not in the path today</b> — both distributions point straight at their ALB — so " +
+    "reaching the target is a NetScaler-<b>insertion</b> change, orthogonal to the item-3 VPC move. The " +
+    "only choice left is <b>sequencing</b>: insert NetScaler <b>decoupled</b> (a follow-on — recommended) " +
+    "or <b>coupled</b> into the cutover freeze (Q11 becomes a hard gate).",
   legend: [
-    { fill: "#f1f3f5", stroke: "#adb5bd", label: "On-prem / external" },
-    { fill: "#fbeaea", stroke: "#7d1c1c", label: "AWS edge (CloudFront + WAF)" },
-    { fill: "#e7ecff", stroke: "#4263eb", label: "Load balancer" },
-    { fill: "#e3faf3", stroke: "#0ca678", label: "Compute" },
-    { fill: "#fff0f0", stroke: "#e03131", label: "Open question" },
+    { fill: "#f1f3f5", stroke: "#adb5bd", label: "Internet / on-prem" },
+    { fill: "#fbeaea", stroke: "#7d1c1c", label: "CloudFront + WAF (kept)" },
+    { fill: "#e7ecff", stroke: "#4263eb", label: "Load balancer (kept)" },
+    { fill: "#e3faf3", stroke: "#0ca678", label: "ECS Fargate" },
+    { fill: "#ebfbee", stroke: "#2f9e44", label: "Decided / recommended" },
+    { fill: "#fff0f0", stroke: "#e03131", label: "Open · sequencing only" },
   ],
-  source: "docs/network-security-topology.md · docs/waf-request-RITM0792011.md · #502",
+  source: "docs/cutover-item3-execution-runbook.md (§1 edge · Fabrice 2026-07-02, #1400) · docs/network-security-topology.md · docs/waf-request-RITM0792011.md · #502",
 };
