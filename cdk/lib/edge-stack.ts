@@ -396,31 +396,33 @@ export class EdgeStack extends Stack {
         ["/api/export/*", internalViewerOrp],
       ]);
 
-    // Compression-enabling (NOT cache-enabling) policy for `/api/search*`.
-    // Managed-CachingDisabled hard-codes gzip/brotli support OFF, so the
-    // behavior's `compress: true` never fires and the search API ships raw
-    // (measured 177.7 KB for a publications-tab response that gzips to
-    // ~20-30 KB). CloudFront only accepts the Accept-Encoding flags when
-    // maxTtl > 0, hence the 1s ceiling -- but with defaultTtl 0 the origin's
-    // Cache-Control still governs, and the force-dynamic search routes never
-    // send a caching header, so nothing is ever stored: this policy enables
-    // compression, not caching. Query strings ALL go in the (never-used)
-    // cache key -- they are forwarded by AllViewer regardless -- and cookies /
-    // headers stay out of the key, same as the managed policy. Key shape
-    // mirrors `queryKeyedCache` below where applicable.
+    // Compression-enabling policy for `/api/search*`. Managed-CachingDisabled
+    // hard-codes gzip/brotli support OFF, so the behavior's `compress: true`
+    // never fires and the search API ships raw (measured 177.7 KB for a
+    // publications-tab response that gzips to ~20-30 KB). CloudFront only
+    // compresses responses it can store: the search routes send NO
+    // Cache-Control header, so with defaultTtl 0 the response is uncacheable
+    // and CloudFront skips compression too (verified empirically on staging
+    // 2026-07-02 -- policy live, compress on, still identity encoding).
+    // defaultTtl/maxTtl 1s makes the header-less response cacheable for <=1s,
+    // which is what lets compression fire; a 1-second, full-query-keyed cache
+    // on a public read-only API is deliberate and harmless. Query strings ALL
+    // go in the cache key -- they are forwarded by AllViewer regardless --
+    // and cookies / headers stay out of the key, same as the managed policy.
+    // Key shape mirrors `queryKeyedCache` below where applicable.
     const searchApiNoStoreCompressible = new cloudfront.CachePolicy(
       this,
       "SearchApiNoStoreCompressible",
       {
         cachePolicyName: `sps-search-nostore-compress-${env}`,
-        comment: `SPS search API (${env}) -- CachingDisabled TTLs plus gzip/brotli support so compress fires.`,
+        comment: `SPS search API (${env}) -- 1s query-keyed TTL plus gzip/brotli support so compress fires.`,
         queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
         cookieBehavior: cloudfront.CacheCookieBehavior.none(),
         headerBehavior: cloudfront.CacheHeaderBehavior.none(),
         enableAcceptEncodingGzip: true,
         enableAcceptEncodingBrotli: true,
         minTtl: Duration.seconds(0),
-        defaultTtl: Duration.seconds(0),
+        defaultTtl: Duration.seconds(1),
         maxTtl: Duration.seconds(1),
       },
     );

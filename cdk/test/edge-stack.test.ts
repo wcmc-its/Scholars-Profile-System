@@ -720,13 +720,16 @@ describe("EdgeStack", () => {
         return cfg as Record<string, unknown>;
       };
 
-      it("keeps never-cache semantics: TTLs 0/0/1s so the origin's Cache-Control governs", () => {
-        // maxTtl 1s only because CloudFront rejects the Accept-Encoding flags
-        // at maxTtl 0; defaultTtl 0 means a header-less response is not
-        // cached, so this is compression-enabling, not cache-enabling.
+      it("caches for at most 1s: the minimum that lets CloudFront compress a header-less response", () => {
+        // CloudFront only compresses responses it can store. The search
+        // routes send no Cache-Control, so DefaultTTL must be >= 1s or the
+        // response is uncacheable and ships raw (verified on staging
+        // 2026-07-02 with DefaultTTL 0: policy live, still no
+        // content-encoding). 1s, keyed on the full query string, is the
+        // deliberate ceiling.
         const cfg = policyConfig();
         expect(cfg.MinTTL).toBe(0);
-        expect(cfg.DefaultTTL).toBe(0);
+        expect(cfg.DefaultTTL).toBe(1);
         expect(cfg.MaxTTL).toBe(1);
       });
 
