@@ -101,6 +101,7 @@
     "etl:daily": "tsx etl/orchestrate.ts",
     "etl:revalidate": "tsx etl/revalidate/index.ts",
     "etl:freshness": "tsx etl/freshness/index.ts",
+    "etl:integrity": "tsx etl/integrity/index.ts",
     "etl:vivo-redirect": "tsx etl/vivo-redirect/generate-map.ts",
     "backup:curated": "tsx scripts/backups/export-curated-tables.ts",
     "seo:basket": "tsx scripts/seo/build-basket.ts",

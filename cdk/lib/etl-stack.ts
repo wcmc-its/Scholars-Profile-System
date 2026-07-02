@@ -863,6 +863,13 @@ export class EtlStack extends Stack {
       { id: "PubMedRetractions", npmScript: "etl:pubmed-retractions", external: false },
       { id: "SearchIndexNightly", npmScript: "search:index", external: false },
       { id: "RevalidateNightly", npmScript: "etl:revalidate", external: false },
+      // Reliability-audit PR-5 — terminal volume gate. Reads etl_run
+      // rowsProcessed history, spine-table floors, and live OpenSearch alias
+      // doc-counts; a violation exits 1 -> Catch -> SNS so an implausible end
+      // state pages instead of silently serving. Runs LAST so it validates
+      // what the night actually published. external:false — SPS DB + in-VPC
+      // OpenSearch only.
+      { id: "IntegrityNightly", npmScript: "etl:integrity", external: false },
     ];
     const weeklySteps: ReadonlyArray<StepSpec> = [
       { id: "Completeness", npmScript: "etl:completeness", external: false },
@@ -896,6 +903,8 @@ export class EtlStack extends Stack {
       { id: "NihProfileWeekly", npmScript: "etl:nih-profile", external: false },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false },
       { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false },
+      // Terminal volume gate — see IntegrityNightly above.
+      { id: "IntegrityWeekly", npmScript: "etl:integrity", external: false },
     ];
     const annualSteps: ReadonlyArray<StepSpec> = [
       { id: "Hierarchy", npmScript: "etl:hierarchy", external: true },
