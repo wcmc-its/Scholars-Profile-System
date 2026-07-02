@@ -3971,7 +3971,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_CLINICAL_FN",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",

@@ -27,7 +27,7 @@ Exit criteria are the flip/kill conditions; "GAP" = no open issue owns the flip.
 
 | Flag | staging | prod | Owner | Exit criterion |
 |---|---|---|---|---|
-| SEARCH_PEOPLE_AREA_BOOST | on | off | #1363 / #1343 | 2-cell staging A/B (off-control vs fraction-fixed on) vs meanMRR 0.144 baseline; flip if specialists lift w/o top-1 regressions, weaken/kill if ≈ control. **A/B run 2026-07-02 — see `docs/search-area-boost-ab-2026-07-02.md`** |
+| SEARCH_PEOPLE_AREA_BOOST | on | off | #1363 / #1343 | **A/B DONE 2026-07-02** (`docs/search-area-boost-ab-2026-07-02.md`): ON beats OFF overall (0.257 vs 0.249) with the targeted clinician-expert lift, but flip criteria (Igel/Aras lift, hypertension specialists) not met — keep staging-on, HOLD prod; next = tune AREA_BOOST_W_* against the hypertension/alzheimer's regressions |
 | SEARCH_PEOPLE_FACULTY_PROMINENCE | off | on | #1345 | Re-run A/B WITH #1363 in place (diabetes regression may dissolve); note inverted drift — prod has it ON, staging OFF |
 | SEARCH_MESH_RESOLUTION_FALLBACK | on | off | #1342/#1346/#1348 sweep | Staging soak + gold-set eval → prod flip (resolve-time only, no reindex); lay-term wins additionally need #1258 alias rows |
 | SEARCH_MESH_QUERY_NORMALIZATION | on | off | #1342/#1346/#1348 sweep | Same as above |
@@ -82,7 +82,7 @@ Exit criteria are the flip/kill conditions; "GAP" = no open issue owns the flip.
 
 | Flag | Owner | Exit criterion / decision |
 |---|---|---|
-| SEARCH_PEOPLE_CLINICAL_FN | PR #1372 Track B2, no issue | Staging A/B on clinician-expert archetype (weight lever SEARCH_PEOPLE_CLINICAL_FN_WEIGHT, default 3). **A/B run 2026-07-02 — see results doc** |
+| SEARCH_PEOPLE_CLINICAL_FN | PR #1372 Track B2, no issue | **A/B DONE 2026-07-02 — strict win** (clinician-expert medRank 14→9, zero regressions); wired staging-on in this PR, prod flip after soak |
 | SEARCH_PEOPLE_CLINICAL | #1372 Track A | INERT (text field empty in index) — kill or backfill decision rides clinical-fn outcome |
 | SEARCH_PEOPLE_DIVISION_SHAPE | #1347 | Dark pending A/B of division-shape routing |
 | SEARCH_PEOPLE_CONCEPT_PRECOUNT | #1414 | Inverted polarity ("off" = new fast path); #1414 wants code-default flip |

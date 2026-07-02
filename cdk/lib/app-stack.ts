@@ -1473,9 +1473,12 @@ export class AppStack extends Stack {
         // Track B / B2 — clinical-specialty function_score boost (separate from the inert
         // text-field SEARCH_PEOPLE_CLINICAL above). Additive boost on docs whose board-derived
         // clinicalSpecialties match the query; lifts thin-publication clinician-experts
-        // (measured: obesity Igel #183->#12). No reindex (query-time boost). Default OFF both
-        // envs; query-tunable weight via SEARCH_PEOPLE_CLINICAL_FN_WEIGHT (code default 3).
-        SEARCH_PEOPLE_CLINICAL_FN: "off",
+        // (measured: obesity Igel #183->#12). No reindex (query-time boost). Query-tunable
+        // weight via SEARCH_PEOPLE_CLINICAL_FN_WEIGHT (code default 3). Staging-on after the
+        // 2026-07-02 A/B (docs/search-area-boost-ab-2026-07-02.md): strict win over the
+        // staging default — clinician-expert medRank 14->9, zero per-query regressions.
+        // Prod flip after staging soak.
+        SEARCH_PEOPLE_CLINICAL_FN: env === "staging" ? "on" : "off",
         // #824 follow-up -- match-aware People-results "why" line (method/topic/
         // humanized-areas snippet). APP-ONLY, no reindex: derives from
         // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-
