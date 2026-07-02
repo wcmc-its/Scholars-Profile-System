@@ -410,6 +410,62 @@ describe("rebuildAliasedIndex", () => {
     ).toBeUndefined();
   });
 
+  it("runs preSwapCheck against the new index after fill and before the swap", async () => {
+    const { client, calls } = makeMockClient({
+      getAlias: {
+        statusCode: 200,
+        body: { "scholars-people-v2": { aliases: { "scholars-people": {} } } },
+      },
+    });
+    const gateCalls: Array<{ index: string; docs: number }> = [];
+    await rebuildAliasedIndex({
+      client: client as never,
+      alias: "scholars-people",
+      mapping: { settings: {} },
+      fillFn: async () => 42,
+      preSwapCheck: async (concreteIndex, docsIndexed) => {
+        gateCalls.push({ index: concreteIndex, docs: docsIndexed });
+        // The swap must not have happened yet when the gate runs.
+        expect(
+          calls.find((c) => c.method === "indices.updateAliases"),
+        ).toBeUndefined();
+      },
+    });
+    expect(gateCalls).toEqual([{ index: "scholars-people-v3", docs: 42 }]);
+    expect(
+      calls.find((c) => c.method === "indices.updateAliases"),
+    ).toBeDefined();
+  });
+
+  it("deletes the new concrete index and keeps the alias when preSwapCheck throws", async () => {
+    const { client, calls } = makeMockClient({
+      getAlias: {
+        statusCode: 200,
+        body: { "scholars-people-v2": { aliases: { "scholars-people": {} } } },
+      },
+    });
+    const gateError = new Error("pre-swap gate: doc count shrank 90%");
+    await expect(
+      rebuildAliasedIndex({
+        client: client as never,
+        alias: "scholars-people",
+        mapping: { settings: {} },
+        fillFn: async () => 5,
+        preSwapCheck: async () => {
+          throw gateError;
+        },
+      }),
+    ).rejects.toBe(gateError);
+
+    const deletes = calls
+      .filter((c) => c.method === "indices.delete")
+      .map((c) => (c.args as { index: string }).index);
+    expect(deletes).toContain("scholars-people-v3");
+    expect(
+      calls.find((c) => c.method === "indices.updateAliases"),
+    ).toBeUndefined();
+  });
+
   it("deletes the new concrete index when swapAlias throws (no orphan)", async () => {
     // Mock that throws on updateAliases. Reuse the standard helper for the
     // happy-path calls, then wrap with a swap-throwing override.
