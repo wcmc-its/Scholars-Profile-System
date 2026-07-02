@@ -1130,19 +1130,58 @@ describe("EdgeStack", () => {
         ]);
       });
 
-      it("creates a WebACL that defaults to BLOCK and ALLOWs the IP set", () => {
+      it("defaults to ALLOW and drops non-WCM at priority 0 (so managed rules can inspect WCM traffic)", () => {
         template.resourceCountIs("AWS::WAFv2::WebACL", 1);
         const acl = Object.values(
           template.findResources("AWS::WAFv2::WebACL"),
         )[0]?.Properties as Record<string, unknown>;
         expect(acl.Scope).toBe("CLOUDFRONT");
-        expect(acl.DefaultAction).toHaveProperty("Block");
+        // Inverted from default-BLOCK: a terminating allow-wcm short-circuited
+        // evaluation, so managed rules never saw WCM requests. Now default
+        // ALLOW + a priority-0 block-non-wcm rule, and WCM traffic falls
+        // through to the inspection rules.
+        expect(acl.DefaultAction).toHaveProperty("Allow");
         const rules = acl.Rules as Array<Record<string, unknown>>;
-        expect(rules).toHaveLength(1);
-        expect(rules[0].Action).toHaveProperty("Allow");
-        expect(JSON.stringify(rules[0].Statement)).toContain(
-          "IPSetReferenceStatement",
+        const block = rules.find((r) => r.Name === "block-non-wcm");
+        expect(block?.Priority).toBe(0);
+        expect(block?.Action).toHaveProperty("Block");
+        const stmt = JSON.stringify(block?.Statement);
+        expect(stmt).toContain("NotStatement");
+        expect(stmt).toContain("IPSetReferenceStatement");
+      });
+
+      it("layers AWS managed rule groups (SQLi/known-bad/common) in COUNT mode", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        const rules = acl.Rules as Array<Record<string, unknown>>;
+        const managed = rules.filter((r) =>
+          JSON.stringify(r.Statement ?? {}).includes("ManagedRuleGroupStatement"),
         );
+        const names = managed
+          .map((r) => JSON.stringify(r.Statement))
+          .join(",");
+        expect(names).toContain("AWSManagedRulesCommonRuleSet");
+        expect(names).toContain("AWSManagedRulesKnownBadInputsRuleSet");
+        expect(names).toContain("AWSManagedRulesSQLiRuleSet");
+        // Observe-only: every managed group overrides to Count (no enforcement
+        // until the metrics prove no false positives on real WCM traffic).
+        for (const r of managed) {
+          expect(r.OverrideAction).toHaveProperty("Count");
+          expect(r.Action).toBeUndefined();
+        }
+      });
+
+      it("adds a per-IP rate-based rule in COUNT mode", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        const rules = acl.Rules as Array<Record<string, unknown>>;
+        const rate = rules.find((r) =>
+          JSON.stringify(r.Statement ?? {}).includes("RateBasedStatement"),
+        );
+        expect(rate).toBeDefined();
+        expect(rate?.Action).toHaveProperty("Count");
       });
 
       it("attaches the WebACL to the distribution (WebACLId set)", () => {
