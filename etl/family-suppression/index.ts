@@ -63,10 +63,12 @@ function readCurated(): SuppressedRow[] {
     return parseCsv(readFileSync(abs, "utf-8"));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      console.warn(
-        `[FamilySuppression] ${JSON.stringify({ event: "curated_csv_missing", path: abs })}`,
+      // The curated CSV is checked into the repo — its absence is a packaging
+      // bug, not "zero rows". Returning [] here used to silently delete the
+      // curated seed suppression rows and record SUCCESS (audit PR-3).
+      throw new Error(
+        `[FamilySuppression] curated CSV missing at ${abs} — refusing to treat as empty`,
       );
-      return [];
     }
     throw err;
   }
