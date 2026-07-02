@@ -37,7 +37,7 @@ import { coreProjectNum } from "@/lib/award-number";
 import { parseReporterTerms } from "@/lib/reporter-terms";
 import { resolveGrantKeywords } from "./mesh";
 import { withEtlRun } from "@/lib/etl-run";
-import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
+import { assertSourceVolume } from "../../lib/etl-guard";
 
 type ReporterRow = {
   core_project_num: string;

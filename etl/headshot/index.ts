@@ -38,24 +38,41 @@ async function main(): Promise<void> {
           deletedAt: null,
           OR: [{ headshotCheckedAt: null }, { headshotCheckedAt: { lt: staleBefore } }],
         },
-    select: { cwid: true },
+    select: { cwid: true, hasHeadshot: true },
   });
 
   let present = 0;
   let absent = 0;
   let indeterminate = 0;
+  // Directory-wide 404s (outage, URL-scheme change) read as authoritative
+  // absence per-probe; cap how many previously-true rows may flip to absent
+  // in one run before aborting (audit PR-3). Threshold: 20% of the cohort's
+  // known-true rows, min 25 so small incremental batches don't false-trip.
+  const previouslyTrue = scholars.filter((s) => s.hasHeadshot === true).length;
+  const maxAbsentFlips = Math.max(25, Math.ceil(previouslyTrue * 0.2));
+  let absentFlips = 0;
 
   // Bounded-concurrency pool over a shared index — each worker pulls the next
   // cwid until the list is drained.
   let next = 0;
   async function worker(): Promise<void> {
     while (next < scholars.length) {
-      const cwid = scholars[next++].cwid;
+      const scholar = scholars[next++];
+      const cwid = scholar.cwid;
       const verdict = await probeHeadshot(cwid);
       if (verdict === null) {
         // Indeterminate — do NOT overwrite a known value or stamp checkedAt.
         indeterminate++;
         continue;
+      }
+      if (verdict === false && scholar.hasHeadshot === true) {
+        absentFlips++;
+        if (absentFlips > maxAbsentFlips) {
+          throw new Error(
+            `[Headshot] ${absentFlips} previously-true rows flipped to absent ` +
+              `(cap ${maxAbsentFlips}) — suspected directory outage, aborting run`,
+          );
+        }
       }
       await db.write.scholar.update({
         where: { cwid },
