@@ -2275,8 +2275,18 @@ export class AppStack extends Stack {
     // subnets. Each ALB uses its own SG (NetworkStack-owned for public;
     // this-stack-owned for internal).
     // ------------------------------------------------------------------
+    // G15 (docs/cutover-item3-execution-runbook.md §0): the ALBs + target
+    // groups are VPC-coupled, so the useSharedVpc flip REPLACES them onto the
+    // shared VPC. A fixed physical name blocks CFN create-before-delete
+    // ("sps-public-<env> already exists" — the old one still holds the name).
+    // Auto-generate the name when shared; keep the exact env-prefixed name when
+    // standalone so flag-off synth stays byte-identical. Names are not
+    // externally referenced (NetScaler reads the ALB DNS, not the name).
+    const sharedReplaceName = (fixed: string): string | undefined =>
+      envConfig.useSharedVpc ? undefined : fixed;
+
     this.publicAlb = new elbv2.ApplicationLoadBalancer(this, "PublicAlb", {
-      loadBalancerName: `sps-public-${env}`,
+      loadBalancerName: sharedReplaceName(`sps-public-${env}`),
       vpc,
       internetFacing: true,
       vpcSubnets: albSubnets,
@@ -2284,7 +2294,7 @@ export class AppStack extends Stack {
     });
 
     this.internalAlb = new elbv2.ApplicationLoadBalancer(this, "InternalAlb", {
-      loadBalancerName: `sps-internal-${env}`,
+      loadBalancerName: sharedReplaceName(`sps-internal-${env}`),
       vpc,
       internetFacing: false,
       vpcSubnets: appSubnets,
@@ -2320,12 +2330,12 @@ export class AppStack extends Stack {
     const publicAppTargetGroup = new elbv2.ApplicationTargetGroup(
       this,
       "PublicAppTargetGroup",
-      { ...tgProps, targetGroupName: `sps-tg-pub-${env}` },
+      { ...tgProps, targetGroupName: sharedReplaceName(`sps-tg-pub-${env}`) },
     );
     const internalAppTargetGroup = new elbv2.ApplicationTargetGroup(
       this,
       "InternalAppTargetGroup",
-      { ...tgProps, targetGroupName: `sps-tg-int-${env}` },
+      { ...tgProps, targetGroupName: sharedReplaceName(`sps-tg-int-${env}`) },
     );
     // Public TG is the one ObservabilityStack alarms watch (RequestCount,
     // UnhealthyHostCount, etc. on the customer-facing path). The
