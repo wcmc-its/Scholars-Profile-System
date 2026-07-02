@@ -70,9 +70,6 @@ async function main() {
       maxDropPct: 50,
     });
 
-    console.log("Resetting coi_activity table...");
-    await db.write.coiActivity.deleteMany();
-
     const inserts = filtered.map((r) => ({
       cwid: r.cwid!,
       entity: r.entity,
@@ -87,15 +84,25 @@ async function main() {
       source: "COI",
     }));
 
-    console.log(`Inserting ${inserts.length} disclosures...`);
+    // Delete + repopulate in one transaction so a mid-write kill (OOM/SIGKILL)
+    // can't leave coi_activity half-empty — CoiGap (next nightly step) would
+    // fabricate false compliance gaps from the truncated table. Interactive-tx
+    // timeout raised well above the 5 s default for the batched createMany.
+    console.log(`Resetting + inserting ${inserts.length} disclosures in one transaction...`);
     let inserted = 0;
-    for (const batch of chunks(inserts, INSERT_BATCH)) {
-      await db.write.coiActivity.createMany({ data: batch, skipDuplicates: true });
-      inserted += batch.length;
-      if (inserted % (INSERT_BATCH * 10) === 0) {
-        console.log(`  ...${inserted}/${inserts.length}`);
-      }
-    }
+    await db.write.$transaction(
+      async (tx) => {
+        await tx.coiActivity.deleteMany();
+        for (const batch of chunks(inserts, INSERT_BATCH)) {
+          await tx.coiActivity.createMany({ data: batch, skipDuplicates: true });
+          inserted += batch.length;
+          if (inserted % (INSERT_BATCH * 10) === 0) {
+            console.log(`  ...${inserted}/${inserts.length}`);
+          }
+        }
+      },
+      { timeout: 120_000, maxWait: 10_000 },
+    );
 
     await db.write.etlRun.update({
       where: { id: run.id },
