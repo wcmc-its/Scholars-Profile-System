@@ -344,6 +344,16 @@ async function main() {
     }
     console.log(`Got ${abstractByPmid.size} abstracts.`);
 
+    // Empty-but-reachable secondary tables would mass-null their enrichment
+    // column via the unconditional upsert below (same truncated-read fragility
+    // as the primary guard above). Compare each map against the rows whose
+    // value it is about to overwrite; bootstrap (0 existing) passes.
+    assertSourceVolume("reciter:abstracts", {
+      incoming: abstractByPmid.size,
+      existing: await db.write.publication.count({ where: { abstract: { not: null } } }),
+      maxDropPct: 30,
+    });
+
     // #917 v6 — NIH iCite bibliometrics (RCR / NIH percentile / iCite citation count) for the
     // same pmid set, from `reciterdb.analysis_nih`. Rides this weekly refresh so the biosketch
     // impact grounding has the field-normalized figure. Best-effort per batch: a missing or
@@ -370,6 +380,17 @@ async function main() {
       }
     }
     console.log(`Got ${nihByPmid.size} NIH iCite rows.`);
+
+    // The best-effort per-batch catch above means a dead or emptied
+    // analysis_nih arrives here as a near-empty map — which would null
+    // RCR / nihPercentile / citedByCount corpus-wide. Guard on volume.
+    assertSourceVolume("reciter:nih-bibliometrics", {
+      incoming: nihByPmid.size,
+      existing: await db.write.publication.count({
+        where: { relativeCitationRatio: { not: null } },
+      }),
+      maxDropPct: 30,
+    });
 
     // Issue #89 — full author list for the Word bibliography. We pull
     // structured per-rank rows from analysis_summary_author_list (which
@@ -421,6 +442,15 @@ async function main() {
     }
     console.log(`Got ${fullAuthorsByPmid.size} full-author strings.`);
 
+    // An empty analysis_summary_author_list would null fullAuthorsString everywhere.
+    assertSourceVolume("reciter:full-author-lists", {
+      incoming: fullAuthorsByPmid.size,
+      existing: await db.write.publication.count({
+        where: { fullAuthorsString: { not: null } },
+      }),
+      maxDropPct: 30,
+    });
+
     // Issue #89 — NLM journal abbreviation. person_article carries the
     // ISO abbreviation per pmid (despite the name, it's the NLM-style
     // form: "Proc Natl Acad Sci U S A"). Distinct per pmid; pick first
@@ -445,6 +475,13 @@ async function main() {
       });
     }
     console.log(`Got ${journalAbbrevByPmid.size} journal abbreviations.`);
+
+    // An empty person_article would null journalAbbrev everywhere.
+    assertSourceVolume("reciter:journal-abbrevs", {
+      incoming: journalAbbrevByPmid.size,
+      existing: await db.write.publication.count({ where: { journalAbbrev: { not: null } } }),
+      maxDropPct: 30,
+    });
 
     // Issue #73 — pull MeSH keywords for the same pmid set so the profile
     // loader can derive the Topics section without a runtime join. Keywords
@@ -472,6 +509,15 @@ async function main() {
       });
     }
     console.log(`Got keywords for ${keywordsByPmid.size} pmids.`);
+
+    // An empty person_article_keyword would wipe meshTerms (→ DbNull) everywhere.
+    assertSourceVolume("reciter:mesh-keywords", {
+      incoming: keywordsByPmid.size,
+      existing: await db.write.publication.count({
+        where: { meshTerms: { not: Prisma.AnyNull } },
+      }),
+      maxDropPct: 30,
+    });
 
     // First-seen authors string per pmid (denormalized, same per row).
     const authorsStringByPmid = new Map<number, string>();
