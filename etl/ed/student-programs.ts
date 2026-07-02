@@ -13,6 +13,7 @@
  * Usage: `npm run etl:ed:student-programs`
  */
 import { db } from "../../lib/db";
+import { assertSourceVolume } from "../../lib/etl-guard";
 import {
   collapsePhdStudentProgramRecords,
   fetchPhdStudentProgramRecords,
@@ -56,6 +57,14 @@ async function main() {
       startDate: r.startDate,
       endDate: r.endDate,
     }));
+
+    // An empty/truncated source read must not be mirrored as a table wipe
+    // via the truncate below (audit PR-3).
+    assertSourceVolume("ed-student-programs:phd-programs", {
+      incoming: rows.length,
+      existing: await db.write.studentPhdProgram.count(),
+      maxDropPct: 50,
+    });
 
     console.log("Truncating student_phd_program...");
     await db.write.studentPhdProgram.deleteMany();

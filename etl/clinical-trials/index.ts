@@ -25,6 +25,7 @@
  * Usage: `npm run etl:clinical-trials`
  */
 import { db } from "../../lib/db";
+import { assertSourceVolume } from "../../lib/etl-guard";
 import { closeReciterPool } from "@/lib/sources/reciterdb";
 import { buildTrialsAndLinks, loadScholars, readReciterdbTables, replaceAll } from "./shared";
 
@@ -58,6 +59,15 @@ async function main() {
         `Refusing to full-replace: ${institutional.length} institutional rows read but 0 trials built.`,
       );
     }
+
+    // The guard above misses the EMPTY-source case (institutional.length === 0
+    // → trials=[] sails through and replaceAll wipes both tables). Volume-check
+    // the built set against what we currently hold before the full-replace.
+    assertSourceVolume("clinical-trials:full-replace", {
+      incoming: trials.length,
+      existing: await db.write.clinicalTrial.count(),
+      maxDropPct: 50,
+    });
 
     console.log("Replacing person_clinical_trial + clinical_trial...");
     const r = await replaceAll(trials, links);

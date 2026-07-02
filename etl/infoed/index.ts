@@ -25,6 +25,7 @@
  * Usage: `npm run etl:infoed`
  */
 import { db } from "../../lib/db";
+import { assertPruneVolume } from "../../lib/etl-guard";
 import { closeInfoedPool, getInfoedPool } from "@/lib/sources/mssql-infoed";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { parseNihAward } from "@/lib/award-number";
@@ -298,6 +299,14 @@ async function main() {
         data: { ...g, lastRefreshedAt: new Date() },
       });
     }
+    // A truncated-but-successful MSSQL read marks every missing grant stale;
+    // normal expiration churn is a trickle, so a >10% single-run tombstone
+    // means a bad source read, not real attrition.
+    assertPruneVolume("infoed:stale-grants", {
+      pruning: plan.staleExternalIds.length,
+      of: await db.write.grant.count({ where: { source: "InfoEd" } }),
+      maxPct: 10,
+    });
     let tombstoned = 0;
     if (plan.staleExternalIds.length > 0) {
       tombstoned = (

@@ -18,6 +18,7 @@
  * Usage: `npm run etl:asms`
  */
 import { db } from "../../lib/db";
+import { assertPruneVolume } from "../../lib/etl-guard";
 import { closeAsmsPool, getAsmsPool } from "@/lib/sources/mssql-asms";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
 
@@ -135,6 +136,13 @@ async function main() {
         data: { ...e, lastRefreshedAt: new Date() },
       });
     }
+    // Same shape as the InfoEd stale-grant guard: a truncated-but-successful
+    // source read would tombstone every missing education row at once.
+    assertPruneVolume("asms:stale-education", {
+      pruning: plan.staleExternalIds.length,
+      of: await db.write.education.count({ where: { source: "ASMS" } }),
+      maxPct: 10,
+    });
     let tombstoned = 0;
     if (plan.staleExternalIds.length > 0) {
       tombstoned = (

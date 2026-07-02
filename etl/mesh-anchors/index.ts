@@ -207,13 +207,12 @@ function readCurated(): ReturnType<typeof parseCuratedCsv> {
     text = readFileSync(abs, "utf-8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      console.warn(
-        `[MeshAnchor] ${JSON.stringify({
-          event: "curated_csv_missing",
-          path: abs,
-        })}`,
+      // curated.csv is checked into the repo — absence is a packaging bug.
+      // Returning [] used to replace all curated anchors with derived-only
+      // rows under a SUCCESS run (audit PR-3).
+      throw new Error(
+        `[MeshAnchor] curated CSV missing at ${abs} — refusing to treat as empty`,
       );
-      return [];
     }
     throw err;
   }

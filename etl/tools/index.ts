@@ -48,6 +48,7 @@ import { createHash } from "node:crypto";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "../../lib/db";
+import { assertSourceVolume } from "../../lib/etl-guard";
 import { loadAllPublicationSuppressions } from "@/lib/api/manual-layer";
 import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
 import { buildScholarToolWritesFromS3, type ToolsArtifactSlice } from "./scholar-tool-mapper-s3";
@@ -567,6 +568,13 @@ async function main(): Promise<void> {
   // Step 6: full-replacement write — deleteMany then chunked createMany, the
   // same semantics Block 5 used (identity is @@unique([cwid, toolName]); the
   // uuid id is unstable across runs so this is a rebuild, not an upsert).
+  // A truncated/empty upstream artifact must not be mirrored as a wipe of the
+  // Methods-lens tables (audit PR-3). Bootstrap (0 existing) passes.
+  assertSourceVolume("tools:scholar-tool", {
+    incoming: result.writes.length,
+    existing: await db.write.scholarTool.count(),
+    maxDropPct: 50,
+  });
   log("writing", { rows: result.writes.length });
   await db.write.scholarTool.deleteMany();
 
@@ -594,6 +602,11 @@ async function main(): Promise<void> {
   // uuid id and family_id are both unstable across A2 rebuilds, so this is a
   // rebuild keyed by @@unique([cwid, family_id]); stamp the source artifact
   // sha256 on every row so a family-id renumber is detectable per refresh.
+  assertSourceVolume("tools:scholar-family", {
+    incoming: familyResult.writes.length,
+    existing: await db.write.scholarFamily.count(),
+    maxDropPct: 50,
+  });
   await db.write.scholarFamily.deleteMany();
   let familiesInserted = 0;
   const FAMILY_BATCH = 500;
