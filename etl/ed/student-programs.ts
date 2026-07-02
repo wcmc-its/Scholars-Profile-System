@@ -66,16 +66,22 @@ async function main() {
       maxDropPct: 50,
     });
 
-    console.log("Truncating student_phd_program...");
-    await db.write.studentPhdProgram.deleteMany();
-
-    console.log(`Inserting ${rows.length} rows...`);
-    for (const batch of chunks(rows, INSERT_BATCH)) {
-      await db.write.studentPhdProgram.createMany({
-        data: batch,
-        skipDuplicates: true,
-      });
-    }
+    // Truncate + repopulate in one transaction so a mid-write kill can't leave
+    // student_phd_program half-empty. Interactive-tx timeout raised above the
+    // 5 s default for the batched createMany.
+    console.log(`Truncating + inserting ${rows.length} rows in one transaction...`);
+    await db.write.$transaction(
+      async (tx) => {
+        await tx.studentPhdProgram.deleteMany();
+        for (const batch of chunks(rows, INSERT_BATCH)) {
+          await tx.studentPhdProgram.createMany({
+            data: batch,
+            skipDuplicates: true,
+          });
+        }
+      },
+      { timeout: 120_000, maxWait: 10_000 },
+    );
 
     await db.write.etlRun.update({
       where: { id: run.id },

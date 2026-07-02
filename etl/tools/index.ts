@@ -576,26 +576,33 @@ async function main(): Promise<void> {
     maxDropPct: 50,
   });
   log("writing", { rows: result.writes.length });
-  await db.write.scholarTool.deleteMany();
-
+  // Delete + insert in one transaction so a mid-write kill can't leave
+  // scholar_tool half-empty. Timeout raised above the 5 s default for the
+  // batched createMany.
   let inserted = 0;
   const TOOL_BATCH = 500;
-  for (let i = 0; i < result.writes.length; i += TOOL_BATCH) {
-    const chunk = result.writes.slice(i, i + TOOL_BATCH);
-    await db.write.scholarTool.createMany({
-      data: chunk.map((w) => ({
-        cwid: w.cwid,
-        toolName: w.toolName,
-        category: w.category,
-        pmidCount: w.pmidCount,
-        maxConfidence: new Prisma.Decimal(w.maxConfidence),
-        sampleContext: w.sampleContext,
-        pmids: w.pmids,
-      })),
-      skipDuplicates: true,
-    });
-    inserted += chunk.length;
-  }
+  await db.write.$transaction(
+    async (tx) => {
+      await tx.scholarTool.deleteMany();
+      for (let i = 0; i < result.writes.length; i += TOOL_BATCH) {
+        const chunk = result.writes.slice(i, i + TOOL_BATCH);
+        await tx.scholarTool.createMany({
+          data: chunk.map((w) => ({
+            cwid: w.cwid,
+            toolName: w.toolName,
+            category: w.category,
+            pmidCount: w.pmidCount,
+            maxConfidence: new Prisma.Decimal(w.maxConfidence),
+            sampleContext: w.sampleContext,
+            pmids: w.pmids,
+          })),
+          skipDuplicates: true,
+        });
+        inserted += chunk.length;
+      }
+    },
+    { timeout: 120_000, maxWait: 10_000 },
+  );
 
   // scholar_family (#799) — same full-replacement semantics (deleteMany then
   // chunked createMany), written from the same artifact + the same gate. The
@@ -607,88 +614,97 @@ async function main(): Promise<void> {
     existing: await db.write.scholarFamily.count(),
     maxDropPct: 50,
   });
-  await db.write.scholarFamily.deleteMany();
+  // Delete + insert scholar_family AND the entity layer in one transaction so a
+  // mid-write kill can't leave the Methods-lens projection half-rebuilt or skewed
+  // between the family rollup and its entity detail. Timeout raised above the 5 s
+  // default for the batched createMany.
   let familiesInserted = 0;
   const FAMILY_BATCH = 500;
-  for (let i = 0; i < familyResult.writes.length; i += FAMILY_BATCH) {
-    const chunk = familyResult.writes.slice(i, i + FAMILY_BATCH);
-    await db.write.scholarFamily.createMany({
-      data: chunk.map((w) => ({
-        cwid: w.cwid,
-        familyId: w.familyId,
-        familyLabel: w.familyLabel,
-        supercategory: w.supercategory,
-        pmidCount: w.pmidCount,
-        exemplarTools: w.exemplarTools,
-        exemplarContexts: w.exemplarContexts,
-        exemplarContextPmids: w.exemplarContextPmids,
-        pmids: w.pmids,
-        definition: w.definition,
-        definitionSource: w.definitionSource,
-        sourceArtifactSha: manifest.sha256,
-      })),
-      skipDuplicates: true,
-    });
-    familiesInserted += chunk.length;
-  }
-
-  // #1166 — entity layer full-replacement (deleteMany then chunked createMany).
-  // FACTS first then DIMENSION (no FK either way; order is cosmetic). Identity is
-  // @@unique([supercategory, family_label, normalized_entity_id]) on the dimension;
-  // the uuid id is unstable so this is a rebuild, not an upsert. Stamp the artifact
-  // sha per row so a producer republish is detectable. An empty entityArtifact
-  // (pre-v4 manifest) clears the tables — intentional: no entity data ⇒ no rows.
-  await db.write.familyEntityUsage.deleteMany();
-  await db.write.familyEntity.deleteMany();
   let entityRowsInserted = 0;
   let usageRowsInserted = 0;
   const ENTITY_BATCH = 1000;
-  for (let i = 0; i < entityResult.entityWrites.length; i += ENTITY_BATCH) {
-    const chunk = entityResult.entityWrites.slice(i, i + ENTITY_BATCH);
-    await db.write.familyEntity.createMany({
-      data: chunk.map((w) => ({
-        supercategory: w.supercategory,
-        familyLabel: w.familyLabel,
-        normalizedEntityId: w.normalizedEntityId,
-        entityLabel: w.entityLabel,
-        parentEntityId: w.parentEntityId,
-        parentLabel: w.parentLabel,
-        parentDescriptor: w.parentDescriptor,
-        entityRole: w.entityRole,
-        usageCount: w.usageCount,
-        evidenced: w.evidenced,
-        isGeneric: w.isGeneric,
-        dominantKind: w.dominantKind,
-        sourceArtifactSha: manifest.sha256,
-      })),
-      skipDuplicates: true,
-    });
-    entityRowsInserted += chunk.length;
-  }
-  for (let i = 0; i < entityResult.usageWrites.length; i += ENTITY_BATCH) {
-    const chunk = entityResult.usageWrites.slice(i, i + ENTITY_BATCH);
-    await db.write.familyEntityUsage.createMany({
-      data: chunk.map((w) => ({
-        supercategory: w.supercategory,
-        familyLabel: w.familyLabel,
-        normalizedEntityId: w.normalizedEntityId,
-        pmid: w.pmid,
-        usageSentence: w.usageSentence,
-        matchedSpanStart: w.matchedSpanStart,
-        matchedSpanEnd: w.matchedSpanEnd,
-        centralityScore:
-          w.centralityScore == null ? null : new Prisma.Decimal(w.centralityScore),
-        entityRole: w.entityRole,
-        informativenessScore:
-          w.informativenessScore == null ? null : new Prisma.Decimal(w.informativenessScore),
-        mentionClass: w.mentionClass,
-        sentenceComplete: w.sentenceComplete,
-        sourceArtifactSha: manifest.sha256,
-      })),
-      skipDuplicates: true,
-    });
-    usageRowsInserted += chunk.length;
-  }
+  await db.write.$transaction(
+    async (tx) => {
+      await tx.scholarFamily.deleteMany();
+      for (let i = 0; i < familyResult.writes.length; i += FAMILY_BATCH) {
+        const chunk = familyResult.writes.slice(i, i + FAMILY_BATCH);
+        await tx.scholarFamily.createMany({
+          data: chunk.map((w) => ({
+            cwid: w.cwid,
+            familyId: w.familyId,
+            familyLabel: w.familyLabel,
+            supercategory: w.supercategory,
+            pmidCount: w.pmidCount,
+            exemplarTools: w.exemplarTools,
+            exemplarContexts: w.exemplarContexts,
+            exemplarContextPmids: w.exemplarContextPmids,
+            pmids: w.pmids,
+            definition: w.definition,
+            definitionSource: w.definitionSource,
+            sourceArtifactSha: manifest.sha256,
+          })),
+          skipDuplicates: true,
+        });
+        familiesInserted += chunk.length;
+      }
+
+      // #1166 — entity layer full-replacement (deleteMany then chunked createMany).
+      // FACTS first then DIMENSION (no FK either way; order is cosmetic). Identity is
+      // @@unique([supercategory, family_label, normalized_entity_id]) on the dimension;
+      // the uuid id is unstable so this is a rebuild, not an upsert. Stamp the artifact
+      // sha per row so a producer republish is detectable. An empty entityArtifact
+      // (pre-v4 manifest) clears the tables — intentional: no entity data ⇒ no rows.
+      await tx.familyEntityUsage.deleteMany();
+      await tx.familyEntity.deleteMany();
+      for (let i = 0; i < entityResult.entityWrites.length; i += ENTITY_BATCH) {
+        const chunk = entityResult.entityWrites.slice(i, i + ENTITY_BATCH);
+        await tx.familyEntity.createMany({
+          data: chunk.map((w) => ({
+            supercategory: w.supercategory,
+            familyLabel: w.familyLabel,
+            normalizedEntityId: w.normalizedEntityId,
+            entityLabel: w.entityLabel,
+            parentEntityId: w.parentEntityId,
+            parentLabel: w.parentLabel,
+            parentDescriptor: w.parentDescriptor,
+            entityRole: w.entityRole,
+            usageCount: w.usageCount,
+            evidenced: w.evidenced,
+            isGeneric: w.isGeneric,
+            dominantKind: w.dominantKind,
+            sourceArtifactSha: manifest.sha256,
+          })),
+          skipDuplicates: true,
+        });
+        entityRowsInserted += chunk.length;
+      }
+      for (let i = 0; i < entityResult.usageWrites.length; i += ENTITY_BATCH) {
+        const chunk = entityResult.usageWrites.slice(i, i + ENTITY_BATCH);
+        await tx.familyEntityUsage.createMany({
+          data: chunk.map((w) => ({
+            supercategory: w.supercategory,
+            familyLabel: w.familyLabel,
+            normalizedEntityId: w.normalizedEntityId,
+            pmid: w.pmid,
+            usageSentence: w.usageSentence,
+            matchedSpanStart: w.matchedSpanStart,
+            matchedSpanEnd: w.matchedSpanEnd,
+            centralityScore:
+              w.centralityScore == null ? null : new Prisma.Decimal(w.centralityScore),
+            entityRole: w.entityRole,
+            informativenessScore:
+              w.informativenessScore == null ? null : new Prisma.Decimal(w.informativenessScore),
+            mentionClass: w.mentionClass,
+            sentenceComplete: w.sentenceComplete,
+            sourceArtifactSha: manifest.sha256,
+          })),
+          skipDuplicates: true,
+        });
+        usageRowsInserted += chunk.length;
+      }
+    },
+    { timeout: 120_000, maxWait: 10_000 },
+  );
 
   log("write_complete", {
     rows: inserted,
