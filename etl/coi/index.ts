@@ -8,6 +8,7 @@
  * Usage: `npm run etl:coi`
  */
 import { db } from "../../lib/db";
+import { assertSourceVolume } from "../../lib/etl-guard";
 import { closeCoiPool, withCoiConnection } from "@/lib/sources/mysql-coi";
 
 type Row = {
@@ -59,6 +60,15 @@ async function main() {
 
     const filtered = rows.filter((r) => r.cwid !== null && ourSet.has(r.cwid));
     console.log(`After filter to active scholars: ${filtered.length} rows.`);
+
+    // An empty/truncated source view would be mirrored as a full disclosure
+    // wipe (and CoiGap, next in the nightly, would fabricate false compliance
+    // gaps from the empty set). Abort before the delete instead.
+    assertSourceVolume("coi:disclosures", {
+      incoming: filtered.length,
+      existing: await db.write.coiActivity.count(),
+      maxDropPct: 50,
+    });
 
     console.log("Resetting coi_activity table...");
     await db.write.coiActivity.deleteMany();
