@@ -470,9 +470,11 @@ const SHARED_VPC = {
   dataSubnetIds: ["subnet-0d35923e345653d0d", "subnet-099a9ebefc36ee888"],
   // dmz (public, IGW) — optional public ALB only; unused under NetScaler (§7).
   albSubnetIds: ["subnet-09a6fab648280ca19", "subnet-0485fefe267b06736"],
-  // Out-of-band pre-provisioned SGs (item-3 pass 1). TODO: fill once the
-  // shared-VPC team creates them WITH default allow-all egress; empty is safe
-  // while useSharedVpc is off (assertSharedVpcConfig gates the flip on these).
+  // Out-of-band pre-provisioned SGs (item-3 pass 1). Left empty here = the
+  // per-env default; each env overrides with its OWN SGs via a spread (staging
+  // done, prod TODO at its cutover) because isolation is by per-env SG (plan
+  // §4.5). Empty is safe while useSharedVpc is off (assertSharedVpcConfig gates
+  // the flip on these being non-empty).
   appSgId: "",
   etlSgId: "",
   albSgId: "",
@@ -564,7 +566,18 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // reindex) and the cutover is run. A dormant `false` synthesizes exactly as
     // the standalone Sps-Network-staging VPC does today.
     useSharedVpc: false,
-    sharedVpc: SHARED_VPC,
+    // Staging's own pre-provisioned SGs in the shared VPC (item-3 G8, created
+    // out-of-band 2026-07-02, allow-all egress / no ingress). Per-env override
+    // of SHARED_VPC's empty SG fields — isolation is by per-env SG (plan §4.5),
+    // so staging and prod cannot share SG ids even though they share the VPC +
+    // subnets. Inert while useSharedVpc is off (resolveSharedSg only reads these
+    // at flag-on); assertSharedVpcConfig gates the flip on them being non-empty.
+    sharedVpc: {
+      ...SHARED_VPC,
+      appSgId: "sg-010c270a395b4854b",
+      etlSgId: "sg-016b62e11314e7050",
+      albSgId: "sg-0ab492e161a9e9976",
+    },
     // Cutover de-coupling: OFF until the opensearch/{app,etl} `node` key is
     // backfilled (else ECS task-start fails closed). See flag JSDoc.
     openSearchNodeFromSecret: false,

@@ -123,9 +123,11 @@ describe("assertCutoverGate", () => {
   }
 });
 
-// Both envs share ONE sharedVpc descriptor by design (isolation is by per-env
-// security group, never network — plan §4.5); the ED-export VPC is a separate,
-// untouched field used only by the email-visibility bridge.
+// Both envs share the shared VPC + subnets, but carry their OWN per-env SG ids
+// (isolation is by per-env security group, never network — plan §4.5): staging
+// overrides SHARED_VPC's empty SG fields via a spread, prod stays on the bare
+// const until its cutover. The ED-export VPC is a separate, untouched field
+// used only by the email-visibility bridge.
 describe("sharedVpc descriptor", () => {
   for (const env of ["staging", "prod"] as const) {
     it(`${env}: ships useSharedVpc off and a populated sharedVpc`, () => {
@@ -138,4 +140,17 @@ describe("sharedVpc descriptor", () => {
       expect(cfg.sharedVpc.vpcId).not.toBe(cfg.edExportVpc.vpcId);
     });
   }
+
+  // Per-env SG isolation: staging carries its own G8 SGs; prod stays empty
+  // until its cutover. If a future edit fills prod on the shared const, the two
+  // envs would collide on the same SGs — this catches that.
+  it("staging carries its own SGs; prod's remain empty", () => {
+    const staging = resolveEnvConfig("staging").sharedVpc;
+    const prod = resolveEnvConfig("prod").sharedVpc;
+    for (const sg of [staging.appSgId, staging.etlSgId, staging.albSgId]) {
+      expect(sg).toMatch(/^sg-/);
+    }
+    expect([prod.appSgId, prod.etlSgId, prod.albSgId]).toEqual(["", "", ""]);
+    expect(staging.appSgId).not.toBe(prod.appSgId);
+  });
 });
