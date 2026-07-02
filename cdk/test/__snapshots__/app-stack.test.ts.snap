@@ -3654,27 +3654,13 @@ exports[`AppStack staging matches the snapshot 1`] = `
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
-    "SsmParameterValuespsstagingnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
-      "Default": "/sps/staging/net/alb-sg-id",
-      "Type": "AWS::SSM::Parameter::Value<String>",
-    },
-    "SsmParameterValuespsstagingnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
-      "Default": "/sps/staging/net/app-sg-id",
-      "Type": "AWS::SSM::Parameter::Value<String>",
-    },
-    "SsmParameterValuespsstagingnetetlsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
-      "Default": "/sps/staging/net/etl-sg-id",
-      "Type": "AWS::SSM::Parameter::Value<String>",
-    },
   },
   "Resources": {
     "AppIngressFromInternalAlb": {
       "Properties": {
         "Description": "Internal ALB to SPS app tasks on container port (staging)",
         "FromPort": 3000,
-        "GroupId": {
-          "Ref": "SsmParameterValuespsstagingnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
-        },
+        "GroupId": "sg-010c270a395b4854b",
         "IpProtocol": "tcp",
         "SourceSecurityGroupId": {
           "Fn::GetAtt": [
@@ -3690,13 +3676,9 @@ exports[`AppStack staging matches the snapshot 1`] = `
       "Properties": {
         "Description": "Public ALB to SPS app tasks on container port (staging)",
         "FromPort": 3000,
-        "GroupId": {
-          "Ref": "SsmParameterValuespsstagingnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
-        },
+        "GroupId": "sg-010c270a395b4854b",
         "IpProtocol": "tcp",
-        "SourceSecurityGroupId": {
-          "Ref": "SsmParameterValuespsstagingnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
-        },
+        "SourceSecurityGroupId": "sg-0ab492e161a9e9976",
         "ToPort": 3000,
       },
       "Type": "AWS::EC2::SecurityGroupIngress",
@@ -4758,7 +4740,7 @@ service:
             "Environment": [
               {
                 "Name": "GRANTEE_HOST",
-                "Value": "10.20.%",
+                "Value": "10.46.160.%",
               },
             ],
             "Essential": true,
@@ -5498,17 +5480,11 @@ service:
           "AwsvpcConfiguration": {
             "AssignPublicIp": "DISABLED",
             "SecurityGroups": [
-              {
-                "Ref": "SsmParameterValuespsstagingnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
-              },
+              "sg-010c270a395b4854b",
             ],
             "Subnets": [
-              {
-                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
-              },
-              {
-                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
-              },
+              "subnet-0c6593fb9c9a165c3",
+              "subnet-070cbc242efbddc3c",
             ],
           },
         },
@@ -5714,7 +5690,6 @@ service:
             "Value": "false",
           },
         ],
-        "Name": "sps-internal-staging",
         "Scheme": "internal",
         "SecurityGroups": [
           {
@@ -5725,12 +5700,8 @@ service:
           },
         ],
         "Subnets": [
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
-          },
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
-          },
+          "subnet-0c6593fb9c9a165c3",
+          "subnet-070cbc242efbddc3c",
         ],
         "Type": "application",
       },
@@ -5773,9 +5744,7 @@ service:
             "ToPort": 80,
           },
         ],
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
+        "VpcId": "vpc-08a1873fc8eebae28",
       },
       "Type": "AWS::EC2::SecurityGroup",
     },
@@ -5785,7 +5754,6 @@ service:
         "HealthCheckPath": "/api/health",
         "HealthCheckTimeoutSeconds": 5,
         "HealthyThresholdCount": 2,
-        "Name": "sps-tg-int-staging",
         "Port": 3000,
         "Protocol": "HTTP",
         "TargetGroupAttributes": [
@@ -5800,9 +5768,7 @@ service:
         ],
         "TargetType": "ip",
         "UnhealthyThresholdCount": 3,
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
+        "VpcId": "vpc-08a1873fc8eebae28",
       },
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
     },
@@ -5972,20 +5938,13 @@ service:
             "Value": "false",
           },
         ],
-        "Name": "sps-public-staging",
         "Scheme": "internet-facing",
         "SecurityGroups": [
-          {
-            "Ref": "SsmParameterValuespsstagingnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
-          },
+          "sg-0ab492e161a9e9976",
         ],
         "Subnets": [
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcpublicSubnet1Subnet2BB74ED74EB42ADC",
-          },
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcpublicSubnet2SubnetE34B022AC8BB6627",
-          },
+          "subnet-09a6fab648280ca19",
+          "subnet-0485fefe267b06736",
         ],
         "Type": "application",
       },
@@ -5996,9 +5955,7 @@ service:
         "CidrIp": "0.0.0.0/0",
         "Description": "Internet to SPS public ALB HTTP (staging) -- HTTPS lands with EdgeStack",
         "FromPort": 80,
-        "GroupId": {
-          "Ref": "SsmParameterValuespsstagingnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
-        },
+        "GroupId": "sg-0ab492e161a9e9976",
         "IpProtocol": "tcp",
         "ToPort": 80,
       },
@@ -6030,7 +5987,6 @@ service:
         "HealthCheckPath": "/api/health",
         "HealthCheckTimeoutSeconds": 5,
         "HealthyThresholdCount": 2,
-        "Name": "sps-tg-pub-staging",
         "Port": 3000,
         "Protocol": "HTTP",
         "TargetGroupAttributes": [
@@ -6045,67 +6001,9 @@ service:
         ],
         "TargetType": "ip",
         "UnhealthyThresholdCount": 3,
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
+        "VpcId": "vpc-08a1873fc8eebae28",
       },
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
-    },
-    "S3GatewayEndpointE8BAF1BC": {
-      "Properties": {
-        "RouteTableIds": [
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1RouteTable1979EACBE1BD1DD4",
-          },
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2RouteTable4D0FFC8C36E62A4A",
-          },
-        ],
-        "ServiceName": {
-          "Fn::Join": [
-            "",
-            [
-              "com.amazonaws.",
-              {
-                "Ref": "AWS::Region",
-              },
-              ".s3",
-            ],
-          ],
-        },
-        "VpcEndpointType": "Gateway",
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
-      },
-      "Type": "AWS::EC2::VPCEndpoint",
-    },
-    "SecretsManagerEndpoint5E83C66B": {
-      "Properties": {
-        "PrivateDnsEnabled": true,
-        "SecurityGroupIds": [
-          {
-            "Fn::GetAtt": [
-              "VpcEndpointSecurityGroup02EA44AC",
-              "GroupId",
-            ],
-          },
-        ],
-        "ServiceName": "com.amazonaws.us-east-1.secretsmanager",
-        "SubnetIds": [
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
-          },
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
-          },
-        ],
-        "VpcEndpointType": "Interface",
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
-      },
-      "Type": "AWS::EC2::VPCEndpoint",
     },
     "TaskExecutionRole250D2532": {
       "Properties": {
@@ -6895,44 +6793,6 @@ service:
         },
       },
       "Type": "AWS::ECS::TaskDefinition",
-    },
-    "VpcEndpointSecurityGroup02EA44AC": {
-      "Properties": {
-        "GroupDescription": "SPS VPC interface endpoints (staging) -- HTTPS from app + ETL SGs.",
-        "SecurityGroupEgress": [
-          {
-            "CidrIp": "255.255.255.255/32",
-            "Description": "Disallow all traffic",
-            "FromPort": 252,
-            "IpProtocol": "icmp",
-            "ToPort": 86,
-          },
-        ],
-        "SecurityGroupIngress": [
-          {
-            "Description": "App SG to interface endpoints HTTPS (staging)",
-            "FromPort": 443,
-            "IpProtocol": "tcp",
-            "SourceSecurityGroupId": {
-              "Ref": "SsmParameterValuespsstagingnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
-            },
-            "ToPort": 443,
-          },
-          {
-            "Description": "ETL SG to interface endpoints HTTPS (staging)",
-            "FromPort": 443,
-            "IpProtocol": "tcp",
-            "SourceSecurityGroupId": {
-              "Ref": "SsmParameterValuespsstagingnetetlsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
-            },
-            "ToPort": 443,
-          },
-        ],
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
-      },
-      "Type": "AWS::EC2::SecurityGroup",
     },
   },
   "Rules": {

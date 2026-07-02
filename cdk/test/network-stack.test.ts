@@ -115,20 +115,18 @@ describe("NetworkStack", () => {
     });
     const template = Template.fromStack(stack);
 
-    it("creates exactly one NAT gateway in staging", () => {
-      template.resourceCountIs("AWS::EC2::NatGateway", 1);
+    it("creates no NAT gateway in staging (imports shared its-reciter-vpc01, item-3 cutover)", () => {
+      // Post-item-3 staging is on the shared VPC (useSharedVpc:true), so
+      // NetworkStack imports it via fromVpcAttributes and creates no NAT.
+      template.resourceCountIs("AWS::EC2::NatGateway", 0);
     });
 
-    it("synthesizes literal AZ names, not Fn::Select placeholders", () => {
-      const subnets = template.findResources("AWS::EC2::Subnet");
-      const azs = Object.values(subnets).map(
-        (r) => (r as { Properties: { AvailabilityZone: unknown } }).Properties.AvailabilityZone,
-      );
-      expect(azs).toHaveLength(4);
-      for (const az of azs) {
-        expect(typeof az).toBe("string");
-      }
-      expect(new Set(azs)).toEqual(new Set(["us-east-1a", "us-east-1b"]));
+    it("imports the shared VPC — creates no VPC or subnets in staging", () => {
+      // fromVpcAttributes import: no standalone VPC/subnets are synthesized.
+      // (The standalone literal-AZ invariant is covered by the prod block, which
+      // is still flag-off until its own cutover.)
+      template.resourceCountIs("AWS::EC2::VPC", 0);
+      expect(Object.keys(template.findResources("AWS::EC2::Subnet"))).toHaveLength(0);
     });
 
     it("creates no VPC peering connection (consolidation has no peer)", () => {
