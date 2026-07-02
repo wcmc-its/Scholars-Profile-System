@@ -396,6 +396,40 @@ export class EdgeStack extends Stack {
         ["/api/export/*", internalViewerOrp],
       ]);
 
+    // Compression-enabling (NOT cache-enabling) policy for `/api/search*`.
+    // Managed-CachingDisabled hard-codes gzip/brotli support OFF, so the
+    // behavior's `compress: true` never fires and the search API ships raw
+    // (measured 177.7 KB for a publications-tab response that gzips to
+    // ~20-30 KB). CloudFront only accepts the Accept-Encoding flags when
+    // maxTtl > 0, hence the 1s ceiling -- but with defaultTtl 0 the origin's
+    // Cache-Control still governs, and the force-dynamic search routes never
+    // send a caching header, so nothing is ever stored: this policy enables
+    // compression, not caching. Query strings ALL go in the (never-used)
+    // cache key -- they are forwarded by AllViewer regardless -- and cookies /
+    // headers stay out of the key, same as the managed policy. Key shape
+    // mirrors `queryKeyedCache` below where applicable.
+    const searchApiNoStoreCompressible = new cloudfront.CachePolicy(
+      this,
+      "SearchApiNoStoreCompressible",
+      {
+        cachePolicyName: `sps-search-nostore-compress-${env}`,
+        comment: `SPS search API (${env}) -- CachingDisabled TTLs plus gzip/brotli support so compress fires.`,
+        queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
+        cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+        headerBehavior: cloudfront.CacheHeaderBehavior.none(),
+        enableAcceptEncodingGzip: true,
+        enableAcceptEncodingBrotli: true,
+        minTtl: Duration.seconds(0),
+        defaultTtl: Duration.seconds(0),
+        maxTtl: Duration.seconds(1),
+      },
+    );
+    // Per-path cache-policy override (mirrors `orpOverrides`): ONLY
+    // `/api/search*` swaps off Managed-CachingDisabled; every other
+    // uncacheable behavior keeps it.
+    const cachePolicyOverrides: ReadonlyMap<string, cloudfront.ICachePolicy> =
+      new Map([["/api/search*", searchApiNoStoreCompressible]]);
+
     // Next.js App Router serves two representations at the SAME URL: the
     // full HTML document (a hard navigation / refresh) and the React
     // Flight payload (a soft navigation -- a `<Link>` click), told apart
@@ -496,8 +530,10 @@ export class EdgeStack extends Stack {
       // the query string from the cache key -- so CloudFront BOTH strips `?q=`
       // before the origin sees it (every request degrades to a match_all over
       // the whole corpus) AND caches the first response for every subsequent
-      // query. CachingDisabled + AllViewer forwards the full query string and
-      // never caches, matching the other dynamic GET routes above.
+      // query. AllViewer forwards the full query string; the cache policy is
+      // the custom `searchApiNoStoreCompressible` above (same never-cache
+      // TTLs, but with gzip/brotli support ON so the large JSON compresses),
+      // via `cachePolicyOverrides` -- not Managed-CachingDisabled.
       ["/api/search*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // `/search*` -- the user-facing search PAGE (SSR, `force-dynamic`). Same
       // failure mode as `/api/search*` but it was never given an explicit
@@ -695,7 +731,7 @@ export class EdgeStack extends Stack {
     for (const [pathPattern, allowedMethods] of uncacheableBehaviors) {
       additionalBehaviors[pathPattern] = {
         origin,
-        cachePolicy: cachingDisabled,
+        cachePolicy: cachePolicyOverrides.get(pathPattern) ?? cachingDisabled,
         originRequestPolicy: orpOverrides.get(pathPattern) ?? allViewer,
         allowedMethods,
         responseHeadersPolicy: securityHeaders,

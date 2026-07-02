@@ -382,9 +382,9 @@ describe("EdgeStack", () => {
         const dc = props.DistributionConfig as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         // The custom cache policy is a stack-local resource; CDK references it
-        // by logical id (a `Ref`), not the managed-policy UUID. Two custom
-        // policies now exist (default RSC-aware + query-keyed); resolve the
-        // query-keyed one by name.
+        // by logical id (a `Ref`), not the managed-policy UUID. Three custom
+        // policies now exist (default RSC-aware + query-keyed + search-API
+        // compressible); resolve each by name.
         const customPolicyLogicalId = Object.entries(
           template.findResources("AWS::CloudFront::CachePolicy"),
         ).find(
@@ -394,6 +394,16 @@ describe("EdgeStack", () => {
                 .CachePolicyConfig as Record<string, unknown>
             ).Name === "sps-query-keyed-prod",
         )?.[0];
+        const searchPolicyLogicalId = Object.entries(
+          template.findResources("AWS::CloudFront::CachePolicy"),
+        ).find(
+          ([, r]) =>
+            (
+              (r.Properties as Record<string, unknown>)
+                .CachePolicyConfig as Record<string, unknown>
+            ).Name === "sps-search-nostore-compress-prod",
+        )?.[0];
+        expect(searchPolicyLogicalId).toBeDefined();
         for (const behavior of cacheBehaviors) {
           const path = behavior.PathPattern as string;
           if (path === "/_next/static/*") {
@@ -405,6 +415,14 @@ describe("EdgeStack", () => {
           } else if (QUERY_KEYED_PATTERNS.has(path)) {
             // #634 Group B -- custom `sps-query-keyed-*` policy (a Ref).
             expect(behavior.CachePolicyId).toEqual({ Ref: customPolicyLogicalId });
+          } else if (path === "/api/search*") {
+            // Custom no-store-but-compressible policy: CachingDisabled TTLs
+            // (0/0/1s) plus gzip/brotli support so `compress: true` fires on
+            // the large search JSON -- Managed-CachingDisabled hard-codes the
+            // Accept-Encoding flags off.
+            expect(behavior.CachePolicyId).toEqual({
+              Ref: searchPolicyLogicalId,
+            });
           } else {
             // Managed-CachingDisabled id.
             expect(behavior.CachePolicyId).toBe(
@@ -629,8 +647,8 @@ describe("EdgeStack", () => {
         const policies = template.findResources(
           "AWS::CloudFront::CachePolicy",
         );
-        // Two custom policies now: the default RSC-aware policy and this
-        // query-keyed one. Select the query-keyed policy by name.
+        // Multiple custom policies exist (default RSC-aware, search-API
+        // compressible, this one). Select the query-keyed policy by name.
         const cfgs = Object.values(policies).map(
           (e) =>
             (e.Properties as Record<string, unknown>)
@@ -686,6 +704,55 @@ describe("EdgeStack", () => {
       });
     });
 
+    describe("search-API no-store-but-compressible cache policy", () => {
+      const policyConfig = (): Record<string, unknown> => {
+        const cfgs = Object.values(
+          template.findResources("AWS::CloudFront::CachePolicy"),
+        ).map(
+          (e) =>
+            (e.Properties as Record<string, unknown>)
+              .CachePolicyConfig as Record<string, unknown>,
+        );
+        const cfg = cfgs.find(
+          (c) => c.Name === "sps-search-nostore-compress-prod",
+        );
+        expect(cfg).toBeDefined();
+        return cfg as Record<string, unknown>;
+      };
+
+      it("keeps never-cache semantics: TTLs 0/0/1s so the origin's Cache-Control governs", () => {
+        // maxTtl 1s only because CloudFront rejects the Accept-Encoding flags
+        // at maxTtl 0; defaultTtl 0 means a header-less response is not
+        // cached, so this is compression-enabling, not cache-enabling.
+        const cfg = policyConfig();
+        expect(cfg.MinTTL).toBe(0);
+        expect(cfg.DefaultTTL).toBe(0);
+        expect(cfg.MaxTTL).toBe(1);
+      });
+
+      it("enables gzip + brotli (the point -- Managed-CachingDisabled hard-codes them off)", () => {
+        const params = policyConfig()
+          .ParametersInCacheKeyAndForwardedToOrigin as Record<string, unknown>;
+        expect(params.EnableAcceptEncodingGzip).toBe(true);
+        expect(params.EnableAcceptEncodingBrotli).toBe(true);
+      });
+
+      it("keys on the full query string, never cookies or headers", () => {
+        const params = policyConfig()
+          .ParametersInCacheKeyAndForwardedToOrigin as Record<string, unknown>;
+        expect(
+          (params.QueryStringsConfig as Record<string, unknown>)
+            .QueryStringBehavior,
+        ).toBe("all");
+        expect(
+          (params.CookiesConfig as Record<string, unknown>).CookieBehavior,
+        ).toBe("none");
+        expect(
+          (params.HeadersConfig as Record<string, unknown>).HeaderBehavior,
+        ).toBe("none");
+      });
+    });
+
     describe("default RSC-aware cache policy (App Router soft navigation)", () => {
       const defaultCacheConfig = (): Record<string, unknown> => {
         const policies = template.findResources(
@@ -701,8 +768,10 @@ describe("EdgeStack", () => {
         return def as Record<string, unknown>;
       };
 
-      it("synthesizes the env-named default policy alongside the query-keyed one", () => {
-        template.resourceCountIs("AWS::CloudFront::CachePolicy", 2);
+      it("synthesizes the env-named default policy alongside the query-keyed + search ones", () => {
+        // Three custom policies: default RSC-aware, #634 query-keyed, and the
+        // search-API no-store-but-compressible policy.
+        template.resourceCountIs("AWS::CloudFront::CachePolicy", 3);
         expect(defaultCacheConfig().Name).toBe("sps-default-rsc-prod");
       });
 
