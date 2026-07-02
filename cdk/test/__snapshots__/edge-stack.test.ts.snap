@@ -985,8 +985,8 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
     "SearchApiNoStoreCompressible179C8AE1": {
       "Properties": {
         "CachePolicyConfig": {
-          "Comment": "SPS search API (prod) -- CachingDisabled TTLs plus gzip/brotli support so compress fires.",
-          "DefaultTTL": 0,
+          "Comment": "SPS search API (prod) -- 1s query-keyed TTL plus gzip/brotli support so compress fires.",
+          "DefaultTTL": 1,
           "MaxTTL": 1,
           "MinTTL": 0,
           "Name": "sps-search-nostore-compress-prod",
@@ -2203,8 +2203,8 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
     "SearchApiNoStoreCompressible179C8AE1": {
       "Properties": {
         "CachePolicyConfig": {
-          "Comment": "SPS search API (staging) -- CachingDisabled TTLs plus gzip/brotli support so compress fires.",
-          "DefaultTTL": 0,
+          "Comment": "SPS search API (staging) -- 1s query-keyed TTL plus gzip/brotli support so compress fires.",
+          "DefaultTTL": 1,
           "MaxTTL": 1,
           "MinTTL": 0,
           "Name": "sps-search-nostore-compress-staging",
