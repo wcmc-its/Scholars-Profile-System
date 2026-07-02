@@ -19,6 +19,7 @@
  */
 import { db } from "../../lib/db";
 import { probeHeadshot } from "../../lib/headshot-presence";
+import { withEtlRun } from "@/lib/etl-run";
 
 /** Concurrent in-flight directory probes. The directory is a shared WCM service;
  *  keep this modest so the weekly job is a good citizen. */
@@ -82,7 +83,7 @@ async function main(): Promise<void> {
   );
 }
 
-main()
+withEtlRun("Headshot", main)
   .catch((err) => {
     console.error("[Headshot] failed:", err);
     process.exit(1);

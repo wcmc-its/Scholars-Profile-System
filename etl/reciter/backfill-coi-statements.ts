@@ -27,6 +27,7 @@
  */
 import { db } from "../../lib/db";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
+import { withEtlRun } from "@/lib/etl-run";
 
 type ConflictRow = { pmid: number; conflictsVarchar: string | null };
 
@@ -101,7 +102,7 @@ async function main() {
   }
 }
 
-main()
+withEtlRun("ReCiter-COI-Statements", main)
   .catch((err) => {
     console.error(err);
     process.exit(1);

@@ -1347,6 +1347,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "production",
               },
               {
+                "Name": "SCHOLARS_ENV",
+                "Value": "prod",
+              },
+              {
                 "Name": "NODE_OPTIONS",
                 "Value": "--max-old-space-size=7168",
               },
@@ -7362,6 +7366,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Name": "NODE_ENV",
                 "Value": "production",
+              },
+              {
+                "Name": "SCHOLARS_ENV",
+                "Value": "staging",
               },
               {
                 "Name": "NODE_OPTIONS",
