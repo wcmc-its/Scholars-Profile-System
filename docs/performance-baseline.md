@@ -153,19 +153,43 @@ Publications paths.
   (`config.ts`, deployed task def rev 83) left C=3 p50 unchanged (4.8 → 5.0 s) and only
   tightened the tail (C=3 p90 6.9 → 5.4 s). A null result on a CPU bump is itself the proof
   the bottleneck is DB I/O, not CPU. Prod was **not** deployed (same reason).
-- **The Publications facet-split was investigated and parked.** A handoff
-  (`pub-tab-performance-handoff.md`) proposed splitting/caching the OpenSearch facet aggs
-  off the hit list; measurement shows the aggs are ~0.2 s, so the split optimizes the wrong
-  component. Code preserved at `origin/perf/pub-tab-facet-split` (`SEARCH_PUB_FACET_SPLIT`,
-  default-off, byte-identical), pinned by the immutable tag `parked/pub-tab-facet-split`
-  (commit `927c35dd`); tracked with its revisit trigger in **#1301** — revisit only if
-  OpenSearch aggs ever become binding.
+- **The Publications facet-split was investigated and parked** *(since revived — see the
+  2026-07-02 update below)*. A handoff (`pub-tab-performance-handoff.md`) proposed
+  splitting/caching the OpenSearch facet aggs off the hit list; measurement shows the aggs
+  are ~0.2 s, so the split optimizes the wrong component. Code preserved at
+  `origin/perf/pub-tab-facet-split` (`SEARCH_PUB_FACET_SPLIT`, default-off, byte-identical),
+  pinned by the immutable tag `parked/pub-tab-facet-split` (commit `927c35dd`); tracked in
+  **#1301**.
 
 **The real lever (documented, not built):** a cross-request cache of the taxonomy resolve.
 The per-candidate counts are ETL-cadence (safe to cache for minutes/hours) and the candidate
 load is query-independent, but the `#800/#801` method-family overlay gate must stay live —
 so the cache needs ETL-versioning or a short TTL, not a blunt freeze. Worth doing only if
 go-live concurrency makes it bind.
+
+**4. 2026-07-02 update — the lever above was (partly) built, and the numbers moved.** A
+full search/faceting audit ([`search-facet-perf-audit-2026-07-02.md`](./search-facet-perf-audit-2026-07-02.md),
+tracker **#1415**) landed nine PRs the same day, deployed to staging:
+
+- **`getCounts` is now SWR-cached** cross-request (15-min fresh / 1-h stale) and
+  method-family enrichment is pre-capped (#1420) — the "dozens of groupBys per broad
+  query" above no longer recur per request. The candidate-set snapshot and whole-result
+  memo remain open as **#1409**.
+- **The publications/funding API branches skip the resolver's Prisma enrichment entirely**
+  (#1421) — they only ever consumed the in-memory MeSH resolution. Staging `Server-Timing`
+  for the C-ramp query class now reads `taxonomy;dur=0` (was ~0.5 s warm / 1.7 s cold in
+  the table above).
+- **The facet-split was revived** (#1423, cherry-pick of `927c35dd`, applied clean) and
+  the flag is **ON in staging**: repeat publications searches serve the agg request from
+  its 5-min cache — measured `search;dur=69–84 ms` vs 269–635 ms combined.
+- **Responses are ~80 % smaller on the wire**: pub `_source` trim (#1418) plus
+  gzip (#1416/#1428/#1433 — see
+  [`cloudfront-cache-spec.md` §Compression](./cloudfront-cache-spec.md)); measured
+  196,315 → 39,275 bytes through CloudFront.
+
+Prod: flags deployed (task-def `:21`) but **inert until the prod image release** (the
+running Jun-22 image predates the code); the C-ramp should be re-run against prod after
+that release + people reindex.
 
 ## Scaling characteristics
 
@@ -218,7 +242,10 @@ moves the render path (a new heavy query, an ISR TTL change, an instance-size ch
 
 ---
 
-*Baseline last updated: 2026-06-26 — added § Search performance findings (taxonomy-resolver
+*Baseline last updated: 2026-07-02 — added item 4 (search/faceting audit #1415: taxonomy
+counts cached #1420, pubs/funding mesh-only #1421 → `taxonomy;dur=0` on staging,
+facet-split revived + staging-on #1423, wire size −80 % via #1416/#1428/#1433; prod
+pending image release). 2026-06-26: § Search performance findings (taxonomy-resolver
 Aurora bottleneck under concurrency; cold-start warm-up gap → #1297; vCPU bump null result;
 facet-split parked) and app-tier sizing change. 2026-06-12: search origin-path optimizations
 (Section A/B, #913 / #922 / #924). Per-surface latency cells still pending a
