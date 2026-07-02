@@ -761,9 +761,21 @@ export class EdgeStack extends Stack {
     // because CloudFront is the only client the ALB ever sees.
     //
     // Toggle: `-c edgeAllowedCidrs=140.251.0.0/16,157.139.0.0/16` builds the
-    // WebACL (IP-set ALLOW, default BLOCK) and attaches it. Omit the flag and
-    // redeploy to remove the restriction -- no code change. WAFv2 WebACLs with
-    // CLOUDFRONT scope must live in us-east-1, which is EdgeStack's region.
+    // WebACL and attaches it. Omit the flag and redeploy to remove the whole
+    // WebACL (unrestricted) -- no code change. WAFv2 WebACLs with CLOUDFRONT
+    // scope must live in us-east-1, which is EdgeStack's region.
+    //
+    // Layering (priority order): the WebACL defaults to ALLOW; a priority-0
+    // `block-non-wcm` rule drops anything outside the WCM IP set (so only WCM
+    // traffic reaches the rest), then AWS managed rule groups + a rate-based
+    // rule inspect that traffic in COUNT mode (observe-only until the metrics
+    // prove no false positives). That is the application-layer inspection the
+    // IP allowlist alone never did -- the reason we do not need to sit behind
+    // the enterprise NetScaler for edge security.
+    //
+    // ponytail: managed rules live inside this allowlist gate because we only
+    // ever run WCM-only. If the front end is opened to the public, move them
+    // OUT of the `if` so payload inspection survives without the allowlist.
     // ------------------------------------------------------------------
     const allowedCidrsCtx = this.node.tryGetContext("edgeAllowedCidrs") as
       | string
@@ -785,21 +797,68 @@ export class EdgeStack extends Stack {
         // and space) -- a deploy-only constraint cdk synth does not catch.
         description: `Temporary #461 SPS front-end allowlist ${env} - remove after testing`,
       });
+      // AWS managed rule groups -- application-layer inspection (SQLi/XSS/
+      // known-bad-inputs) the IP allowlist never did. COUNT-mode first so we
+      // see what they would block on real WCM traffic before enforcing.
+      const managedGroups = [
+        "AWSManagedRulesCommonRuleSet",
+        "AWSManagedRulesKnownBadInputsRuleSet",
+        "AWSManagedRulesSQLiRuleSet",
+      ];
       const webAcl = new wafv2.CfnWebACL(this, "EdgeWebAcl", {
         name: `sps-edge-${env}-wcm-only`,
         scope: "CLOUDFRONT",
-        defaultAction: { block: {} },
+        // Default ALLOW: only WCM traffic ever reaches the default action --
+        // the priority-0 block-non-wcm rule drops everything else. (Was
+        // default-BLOCK + a terminating allow-wcm rule, which short-circuited
+        // evaluation so no later rule could inspect WCM requests.)
+        defaultAction: { allow: {} },
         rules: [
           {
-            name: "allow-wcm-networks",
+            name: "block-non-wcm",
             priority: 0,
-            action: { allow: {} },
+            action: { block: {} },
             statement: {
-              ipSetReferenceStatement: { arn: ipAllowSet.attrArn },
+              notStatement: {
+                statement: {
+                  ipSetReferenceStatement: { arn: ipAllowSet.attrArn },
+                },
+              },
             },
             visibilityConfig: {
               cloudWatchMetricsEnabled: true,
-              metricName: `sps-edge-${env}-allow-wcm`,
+              metricName: `sps-edge-${env}-block-non-wcm`,
+              sampledRequestsEnabled: true,
+            },
+          },
+          ...managedGroups.map((groupName, i) => ({
+            name: groupName,
+            priority: i + 1,
+            // ponytail: COUNT-mode -- flip a group to `overrideAction:
+            // { none: {} }` once its *-count metric shows no false positives.
+            overrideAction: { count: {} },
+            statement: {
+              managedRuleGroupStatement: { vendorName: "AWS", name: groupName },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-${groupName}`,
+              sampledRequestsEnabled: true,
+            },
+          })),
+          {
+            name: "rate-limit",
+            priority: managedGroups.length + 1,
+            // ponytail: COUNT-mode. WCM egresses via shared NAT IPs, so a
+            // per-IP limit can pool a whole office onto one counter -- watch
+            // the *-rate-limit metric before flipping to `{ block: {} }`.
+            action: { count: {} },
+            statement: {
+              rateBasedStatement: { limit: 5000, aggregateKeyType: "IP" },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-rate-limit`,
               sampledRequestsEnabled: true,
             },
           },
@@ -809,7 +868,7 @@ export class EdgeStack extends Stack {
           metricName: `sps-edge-${env}-wcm-only`,
           sampledRequestsEnabled: true,
         },
-        description: `Temporary #461 SPS front end restricted to WCM networks ${env}`,
+        description: `SPS front end ${env} - WCM-only IP allow plus AWS managed rule groups in count mode`,
       });
       webAclArn = webAcl.attrArn;
     }
