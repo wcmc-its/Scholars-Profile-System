@@ -19,6 +19,7 @@
  * Usage: `npm run etl:jenzabar`
  */
 import { db } from "../../lib/db";
+import { assertSourceVolume } from "../../lib/etl-guard";
 import { closeJenzabarPool, getJenzabarPool } from "@/lib/sources/mssql-jenzabar";
 
 const VIEW = "[TmsEPly].[dbo].[WCN_IDM_GS_ADVISOR_ADVISEE_View]";
@@ -121,6 +122,14 @@ async function main() {
         externalId: `JENZABAR-${r.ADVISOR_ID}-${r.STUDENT_ID}`,
         source: "JENZABAR-MAJSP",
       };
+    });
+
+    // Mentoring history only grows (conferrals accrue); an empty/truncated
+    // MAJSP result would silently wipe the table via the truncate below.
+    assertSourceVolume("jenzabar:mentor-relationships", {
+      incoming: inserts.length,
+      existing: await db.write.phdMentorRelationship.count(),
+      maxDropPct: 20,
     });
 
     console.log("Truncating phd_mentor_relationship...");
