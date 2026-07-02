@@ -71,6 +71,7 @@ import {
 } from "@/lib/methods/supercategory-labels";
 import { methodFamilyPath, methodSupercategoryPath } from "@/lib/method-url";
 import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-layer";
+import { cachedRead } from "@/lib/api/swr-cache";
 
 const MIN_QUERY_LEN = 3;
 const SECONDARY_CAP = 4;
@@ -80,6 +81,11 @@ const ROW_AREA_CAP = 12;
 /** Cap candidates considered before enrichment. Anything beyond this rolls
  *  into the overflow count without being individually counted/ranked. */
 const MATCH_HARD_CAP = 1 + SECONDARY_CAP + 20;
+/** perf #1405 — cap matched method families/supercategories enriched (2-3 count
+ *  queries each, multi-thousand-pmid IN-lists) before the display slice. 10, not
+ *  the SECONDARY_CAP+1=5 ultimately shown, leaves headroom for the post-enrichment
+ *  scholarCount re-sort + same-label dedupe (see the enrichment site below). */
+const METHOD_ENRICH_CAP = 10;
 
 /**
  * Entity types the taxonomy-match callout can surface. `parentTopic` / `subtopic`
@@ -327,6 +333,17 @@ const loadEntityCandidates = cache(async (): Promise<EntityCandidate[]> => {
 });
 
 /**
+ * #824 PR-2 (perf #1405) — request-scoped memo for the Method overlay gate. It is
+ * needed twice on a method-matching request: inside {@link loadMethodCandidates}
+ * (to drop #800-suppressed / #801-sensitive families) and again in
+ * {@link matchQueryToTaxonomy} (the supercategory rollup count needs it). React
+ * cache() collapses the two reads to ONE Prisma round-trip per request while keeping
+ * the gate live per request — deliberately NOT a cross-request TTL, which would
+ * freeze #800/#801 visibility. Mirrors loadEntityCandidates.
+ */
+const loadMethodOverlayGate = cache(() => loadFamilyOverlayGate());
+
+/**
  * #824 PR-2 — Method-taxonomy candidates from `scholar_family`, overlay-gated.
  *
  * Two candidate kinds:
@@ -353,7 +370,7 @@ async function loadMethodCandidates(): Promise<EntityCandidate[]> {
       by: ["supercategory", "familyLabel"],
       _min: { familyId: true },
     }),
-    loadFamilyOverlayGate(),
+    loadMethodOverlayGate(),
   ]);
 
   const out: EntityCandidate[] = [];
@@ -675,11 +692,13 @@ export async function matchQueryToTaxonomy(
   const matched = matchedAll.filter((c) => !isMethodKind(c.entityType));
   const matchedMethods = matchedAll.filter((c) => isMethodKind(c.entityType));
 
-  // The overlay gate is loaded ONCE per request inside loadEntityCandidates; load
-  // it again here only when there are method matches to enrich (the supercategory
-  // rollup count needs it). Off-flag / no-method-match ⇒ never loaded.
+  // The overlay gate is read through the request-scoped loadMethodOverlayGate memo,
+  // so this reuses the read loadMethodCandidates already performed (one Prisma
+  // round-trip per request, not two). Only fetched when there are method matches to
+  // enrich (the supercategory rollup count needs it). Off-flag / no-method-match ⇒
+  // never loaded.
   const methodGate: FamilyOverlayGate | null =
-    matchedMethods.length > 0 ? await loadFamilyOverlayGate() : null;
+    matchedMethods.length > 0 ? await loadMethodOverlayGate() : null;
 
   // Pre-rank by [type priority, similarity desc] before the hard cap so the
   // best candidates make it through to count enrichment regardless of how
@@ -696,7 +715,16 @@ export async function matchQueryToTaxonomy(
   const cappedExtra = matched.length - considered.length;
 
   const enrich = async (c: (typeof matchedAll)[number]): Promise<TaxonomyMatch> => {
-    const counts = await getCounts(c, methodGate);
+    // perf #1405 — SWR-cache the per-candidate count read. Both branches of
+    // getCounts run 2 groupBys (topics) or 1-2 findMany rollups (methods) that
+    // queue on the tiny Fargate Prisma pool ahead of the OS query, yet the numbers
+    // change only at nightly ETL (topic pub rollups) or overlay-curation time.
+    // 15-min fresh / 1-h stale (swr-cache defaults), keyed by the candidate's stable
+    // identity. Bypassed under test (swr-cache), so per-candidate query assertions
+    // still hold. Return shape is exactly what getCounts returns.
+    const counts = await cachedRead(`taxonomy-counts:${c.entityType}:${c.id}`, () =>
+      getCounts(c, methodGate),
+    );
     return {
       entityType: c.entityType,
       id: c.id,
@@ -723,8 +751,27 @@ export async function matchQueryToTaxonomy(
   // family (typePriorityFor), then scholarCount desc, then similarity, then name —
   // so the broadest, densest method lands first in the callout. Capped at
   // SECONDARY_CAP+1 so an over-broad family-label substring never floods the card.
+  //
+  // perf #1405 — pre-rank by the same pre-enrichment keys the topic side caps on
+  // ([type priority, similarity desc]) and CAP BEFORE enrichment, mirroring the
+  // topic `matched.slice(0, MATCH_HARD_CAP)` above — so an over-broad label
+  // substring can't fan out into dozens of multi-thousand-pmid count queries
+  // (topics already capped; methods did not). The cap is METHOD_ENRICH_CAP (10),
+  // not the SECONDARY_CAP+1=5 ultimately displayed, because the FINAL sort below
+  // re-orders by scholarCount — only known post-enrichment — and dedupeFirstByKey
+  // can collapse same-label families; 10 keeps enough headroom that a
+  // high-scholarCount family ranked slightly lower by the similarity proxy still
+  // survives into the displayed 5.
+  const consideredMethods = matchedMethods
+    .slice()
+    .sort(
+      (a, b) =>
+        typePriorityFor(a.entityType) - typePriorityFor(b.entityType) ||
+        b.similarity - a.similarity,
+    )
+    .slice(0, METHOD_ENRICH_CAP);
   const enrichedMethods = (
-    await Promise.all(matchedMethods.map(enrich))
+    await Promise.all(consideredMethods.map(enrich))
   ).sort(
     (a, b) =>
       typePriorityFor(a.entityType) - typePriorityFor(b.entityType) ||
