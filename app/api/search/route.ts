@@ -685,17 +685,23 @@ function jsonWithTiming<T extends object>(
   searchLatencyMs: number,
   searchLabel: string,
 ) {
-  return NextResponse.json(
-    { ...body, searchInterpretation },
-    {
-      headers: {
-        "Server-Timing": serverTimingHeader([
-          { name: "taxonomy", ms: taxonomyMatchMs, desc: taxonomyLabel },
-          { name: "search", ms: searchLatencyMs, desc: searchLabel },
-        ]),
-      },
+  // Serialized once so the response carries an explicit Content-Length.
+  // CloudFront refuses to compress a response whose size it cannot read from
+  // a Content-Length header (docs: "Serving compressed files" > conditions),
+  // and NextResponse.json streams chunked without one — which left these
+  // payloads shipping identity (177.7 KB measured) even with gzip/brotli
+  // enabled on the edge cache policy.
+  const payload = JSON.stringify({ ...body, searchInterpretation });
+  return new NextResponse(payload, {
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Length": String(Buffer.byteLength(payload)),
+      "Server-Timing": serverTimingHeader([
+        { name: "taxonomy", ms: taxonomyMatchMs, desc: taxonomyLabel },
+        { name: "search", ms: searchLatencyMs, desc: searchLabel },
+      ]),
     },
-  );
+  });
 }
 
 // PLAN R3 — the interpretation block returned on every branch.
