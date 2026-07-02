@@ -29,6 +29,7 @@
  * never want a stale-cache lag to fail the cadence and page on-call.
  */
 import { db } from "@/lib/db";
+import { withEtlRun } from "@/lib/etl-run";
 
 /**
  * Origins from which `/api/revalidate` may be reached. Each entry matches an
@@ -131,7 +132,7 @@ const isDirectInvocation =
   process.argv[1] !== undefined &&
   import.meta.url === `file://${process.argv[1]}`;
 if (isDirectInvocation) {
-  runRevalidate().catch((err) => {
+  withEtlRun("Revalidate", runRevalidate).catch((err) => {
     console.error(err);
     process.exit(1);
   });

@@ -10,6 +10,7 @@
  */
 import { prisma } from "../../lib/db";
 import { computeCompletenessSnapshot } from "../../lib/analytics/completeness";
+import { withEtlRun } from "@/lib/etl-run";
 
 async function main() {
   const result = await computeCompletenessSnapshot();
@@ -22,7 +23,7 @@ async function main() {
   );
 }
 
-main()
+withEtlRun("Completeness", main)
   .catch((err) => {
     console.error("[Completeness] failed:", err);
     process.exit(1);

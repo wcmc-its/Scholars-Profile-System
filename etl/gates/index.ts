@@ -23,6 +23,7 @@
 import { db } from "../../lib/db";
 import { gatesGrantId } from "@/lib/award-number";
 import { fetchGatesGrants } from "./fetcher";
+import { withEtlRun } from "@/lib/etl-run";
 
 const REFRESH_TTL_DAYS = 90;
 
@@ -141,7 +142,7 @@ async function main() {
   console.log(`\nDone in ${((Date.now() - start) / 1000).toFixed(1)}s.`);
 }
 
-main()
+withEtlRun("Gates", main)
   .catch((e) => {
     console.error(e);
     process.exit(1);

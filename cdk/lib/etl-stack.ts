@@ -565,6 +565,10 @@ export class EtlStack extends Stack {
       //   hierarchy -> ReciterAI hierarchy bucket
       environment: {
         NODE_ENV: "production",
+        // Deployment env name for steps whose behavior is env-scoped —
+        // etl:freshness skips SLA entries for sources a given env's cadence
+        // deliberately omits (InfoEd on staging, MeshAnchor on prod).
+        SCHOLARS_ENV: env,
         // #485 — the search:index build holds the full corpus graph in memory
         // (178k+ publications). Node's default old-space cap (~2 GB) OOM-kills
         // the task well under the container limit; pin the heap to ~85% of the

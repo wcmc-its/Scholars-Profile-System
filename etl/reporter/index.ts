@@ -36,6 +36,7 @@ import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb
 import { coreProjectNum } from "@/lib/award-number";
 import { parseReporterTerms } from "@/lib/reporter-terms";
 import { resolveGrantKeywords } from "./mesh";
+import { withEtlRun } from "@/lib/etl-run";
 
 type ReporterRow = {
   core_project_num: string;
@@ -418,7 +419,7 @@ async function main() {
   console.log(`\nDone in ${((Date.now() - start) / 1000).toFixed(1)}s.`);
 }
 
-main().catch((e) => {
+withEtlRun("Reporter", main).catch((e) => {
   console.error(e);
   process.exit(1);
 });

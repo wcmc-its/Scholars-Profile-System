@@ -27,6 +27,7 @@
  */
 import { prisma } from "../../lib/db";
 import { assertSourceVolume } from "../../lib/etl-guard";
+import { withEtlRun } from "../../lib/etl-run";
 import {
   loadAllGrantSuppressions,
   loadAllPublicationSuppressions,
@@ -811,7 +812,7 @@ async function main() {
 // guard wasn't in place. The guard stays because this file remains a script
 // entry point (`npm run search:index` → `tsx etl/search-index/index.ts`).
 if (!process.env.VITEST) {
-  main()
+  withEtlRun("SearchIndex", main)
     .catch((err) => {
       console.error(err);
       process.exit(1);
