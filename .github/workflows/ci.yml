@@ -89,6 +89,9 @@ jobs:
         run: npm test
         working-directory: cdk
 
+      - name: Flag parity (code vs cdk wiring)
+        run: node scripts/release/flag-parity.mjs
+
       - name: Synth (staging)
         run: npm run synth -- -c env=staging
         working-directory: cdk
