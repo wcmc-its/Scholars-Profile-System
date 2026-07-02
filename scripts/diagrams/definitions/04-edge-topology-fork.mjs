@@ -23,24 +23,20 @@ const nodes = {
           sub: ["X-Origin-Verify origin guard"], chip: { tone: "live", text: "stays" } },
   ecsT: { x: 140, y: 490, w: 320, h: 40, kind: "app",  title: "ECS Fargate app" },
 
-  // ---- Right: where it stands + the one remaining choice ----
-  today: { x: 632, y: 168, w: 696, h: 60, kind: "ext", title: "Today (as deployed)",
+  // ---- Right: where it stands + the plan ----
+  today: { x: 632, y: 196, w: 696, h: 104, kind: "ext", title: "Today (as deployed)",
            sub: ["Both CloudFront distributions point straight at their ALB — NetScaler is not in the path yet.",
-                 "Inserting it is a WCM edge change, orthogonal to the item-3 VPC move (no CDK change)."] },
-  decouple: { x: 632, y: 248, w: 696, h: 76, kind: "good", title: "Sequencing A · decouple   ✓ recommended",
-              sub: ["Repoint the CloudFront origin to the new ALB in-window — SPS-only, no WCM dependency.",
-                    "WCM inserts NetScaler in front of the ALB as a separate follow-on. Q11 = N/A."] },
-  couple:   { x: 632, y: 344, w: 696, h: 72, kind: "ext", title: "Sequencing B · couple",
-              sub: ["Insert NetScaler at cutover: CloudFront origin → NetScaler VIP → new ALB.",
-                    "Q11 becomes a hard in-window gate — WCM must be ready."] },
-  openSeq:  { x: 632, y: 436, w: 696, h: 72, kind: "open", title: "Still open · #502 / RITM0792011 — sequencing only",
-              sub: ["Topology is decided; the remaining question is WHEN NetScaler is inserted.",
-                    ":80 default-403 origin guard still 403s a NetScaler not sending X-Origin-Verify."] },
+                 "Inserting it is a WCM edge change, orthogonal to the item-3 VPC move (no CDK change).",
+                 "The :80 default-403 origin guard still 403s a NetScaler not yet sending X-Origin-Verify."] },
+  plan:  { x: 632, y: 340, w: 696, h: 108, kind: "good", title: "Insertion — decoupled follow-on",
+           sub: ["Repoint the CloudFront origin to the new ALB in-window — SPS-only, no WCM dependency.",
+                 "Then WCM inserts NetScaler in front of the ALB as a separate follow-on step.",
+                 "Reversible; pending WCM scheduling."] },
 };
 
 const groups = [
   { x: 40, y: 120, w: 520, h: 410, kind: "good", title: "Decided target path · Fabrice 2026-07-02", fo: 0.05 },
-  { x: 600, y: 120, w: 760, h: 410, kind: "net", title: "Where it stands + the one open choice", fo: 0.04 },
+  { x: 600, y: 120, w: 760, h: 410, kind: "net", title: "Where it stands + how it lands", fo: 0.04 },
 ];
 
 const edges = [
@@ -55,10 +51,10 @@ const decos = [
   `<text x="40" y="74" font-size="22" font-weight="800" fill="#1f2933">Decided: CloudFront + WAF → NetScaler → ALB → Fargate</text>`,
   `<rect x="1224" y="34" width="136" height="28" rx="14" fill="#ebfbee" stroke="#b7dfc0"/><text x="1292" y="52" font-size="11" font-weight="700" fill="#256f33" text-anchor="middle">DECIDED</text>`,
   `<text x="64" y="150" font-size="11.5" fill="#6b7280">CloudFront and the WAF stay · the ALB stays because the app is Fargate</text>`,
-  `<text x="632" y="150" font-size="11.5" fill="#6b7280">Getting there = inserting NetScaler; the only debate is when</text>`,
+  `<text x="632" y="150" font-size="11.5" fill="#6b7280">Getting there = inserting NetScaler as a decoupled follow-on</text>`,
   `<rect x="40" y="548" width="1320" height="46" rx="8" fill="#fbf7f0" stroke="#ece2cf"/>`,
   `<text x="58" y="568" font-size="11" fill="#5b4a20">#461 WCM-only WAF gate stays until NetScaler enforces equivalent filtering · the :80 default-403 origin guard is unchanged (the ALB is kept).</text>`,
-  `<text x="58" y="585" font-size="11" fill="#5b4a20">NetScaler insertion is decoupled from the item-3 VPC move (recommended): repoint the CloudFront origin to the new ALB now, add NetScaler in front as a follow-on.</text>`,
+  `<text x="58" y="585" font-size="11" fill="#5b4a20">NetScaler insertion is decoupled from the item-3 VPC move: repoint the CloudFront origin to the new ALB now, then add NetScaler in front as a follow-on.</text>`,
 ];
 
 export const spec = { id: "edge-topology-fork", vb: [1400, 612], groups, nodes, edges, decos };
@@ -69,13 +65,12 @@ export const meta = {
   heading: "Edge topology — resolved",
   dot: "#2f9e44",
   blurb:
-    "The one open item most likely to drive the cloud-team meeting is now <b>decided</b>. Fabrice " +
-    "confirmed (2026-07-02) the target is <b>CloudFront + WAF → NetScaler → ALB → Fargate</b>: " +
-    "CloudFront and the WAF <b>stay</b>, and the AWS <b>ALB is kept</b> because the app is ECS Fargate. " +
-    "NetScaler is <b>not in the path today</b> — both distributions point straight at their ALB — so " +
-    "reaching the target is a NetScaler-<b>insertion</b> change, orthogonal to the item-3 VPC move. The " +
-    "only choice left is <b>sequencing</b>: insert NetScaler <b>decoupled</b> (a follow-on — recommended) " +
-    "or <b>coupled</b> into the cutover freeze (Q11 becomes a hard gate).",
+    "The edge front door is <b>decided</b>. Fabrice confirmed (2026-07-02) the target is " +
+    "<b>CloudFront + WAF → NetScaler → ALB → Fargate</b>: CloudFront and the WAF <b>stay</b>, and the AWS " +
+    "<b>ALB is kept</b> because the app is ECS Fargate. NetScaler is <b>not in the path today</b> — both " +
+    "distributions point straight at their ALB — so reaching the target is a NetScaler-<b>insertion</b> " +
+    "change, orthogonal to the item-3 VPC move. It lands as a <b>decoupled follow-on</b>: repoint the " +
+    "CloudFront origin to the new ALB now, then WCM inserts NetScaler in front as a separate step.",
   legend: [
     { fill: "#f1f3f5", stroke: "#adb5bd", label: "Internet / on-prem" },
     { fill: "#fbeaea", stroke: "#7d1c1c", label: "CloudFront + WAF (kept)" },
