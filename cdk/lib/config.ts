@@ -514,10 +514,12 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     appMemoryMiB: 2048,
     migrationTaskCpu: 512,
     migrationTaskMemoryMiB: 1024,
-    // Staging's app user is `'app_rw'@'10.20.%'` (VPC-CIDR-scoped), confirmed
-    // 2026-05-30 via SELECT CURRENT_USER() from an in-VPC app_rw connection.
-    // The bootstrap default of `%` 1410'd here because that account is absent.
-    appRwGranteeHost: "10.20.%",
+    // Item-3 cutover (2026-07-02): the app now connects from the shared VPC's
+    // app2 tier (10.46.160.0/24), so app_rw/app_ro/etl were re-granted to
+    // `@'10.46.160.%'` on the restored cluster (the old `@'10.20.%'` grants remain,
+    // harmless). The seeder's app_rw tighten + db-bootstrap's audit grant target
+    // this host. Pre-cutover this was `'10.20.%'` (standalone-VPC CIDR).
+    appRwGranteeHost: "10.46.160.%",
     // Staging announces the PROD SP entityID, not its own host (#466). WCM
     // registered a single SP (the prod entityID, tied to the filed cert) and
     // confirmed it covers staging too -- the staging-host entityID is not
@@ -561,11 +563,15 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
       appSubnetIds: ["subnet-08cab06d3084fba41", "subnet-07ffed73356c01f6c"],
     },
     edEmailVisibilityBridgeEnabled: true,
-    // Estate consolidation (docs/sps-vpc-consolidation-plan.md): OFF until the
-    // staging data tier is migrated into its-reciter-vpc01 (dump/restore +
-    // reindex) and the cutover is run. A dormant `false` synthesizes exactly as
-    // the standalone Sps-Network-staging VPC does today.
-    useSharedVpc: false,
+    // Estate consolidation (docs/sps-vpc-consolidation-plan.md): ON — item-3
+    // staging cutover 2026-07-02. Every stack now imports the shared its-reciter-
+    // vpc01 substrate; DataStack restores the FINAL freeze-time snapshot into a
+    // NEW DatabaseClusterFromSnapshot + fresh OS domain alongside the RETAIN'd old
+    // ones. assertCutoverGate requires auroraSnapshotIdentifier below.
+    useSharedVpc: true,
+    // Final freeze-time staging snapshot (taken after ETL quiesce + write-freeze,
+    // 2026-07-02). Selects the DatabaseClusterFromSnapshot data-bearing path.
+    auroraSnapshotIdentifier: "sps-data-staging-cutover-final-20260702",
     // Staging's own pre-provisioned SGs in the shared VPC (item-3 G8, created
     // out-of-band 2026-07-02, allow-all egress / no ingress). Per-env override
     // of SHARED_VPC's empty SG fields — isolation is by per-env SG (plan §4.5),
@@ -595,14 +601,20 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
     cloudFrontDistributionId: "E17NRWINXLP3B3",
     cloudFrontLogsBucketName: "sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz",
-    // Observability metric-by-name decouple (cutover): OFF until the staging data
-    // tier is snapshot-restored with explicit cluster/domain identifiers. A
-    // dormant false keeps the DataStack-handle metric path, byte-identical.
-    observabilityMetricsByName: false,
-    auroraClusterIdentifier: "",
-    opensearchDomainName: "",
-    publicAlbFullName: "",
-    publicTargetGroupFullName: "",
+    // Observability metric-by-name decouple (cutover, item-3 Phase B2): ON.
+    // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-
+    // stack Ref exports so the useSharedVpc flip can replace those resources without
+    // "cannot update an export in use". Seeded with the CURRENT LIVE names so alarms
+    // stay functional through the freeze (the flag can't synth with empty ids —
+    // observability-stack.ts throws). Swapped to the new snapshot-restored cluster/
+    // fresh-domain/auto-named-ALB names once they exist (Phase C Observability redeploy).
+    observabilityMetricsByName: true,
+    // Post-cutover (Phase C): swapped from the transitional CURRENT-live names to
+    // the NEW snapshot-restored cluster / fresh domain / auto-named replaced ALB+TG.
+    auroraClusterIdentifier: "sps-data-staging-auroraclusterfromsnapshot7b6a45d8-8kp4eh79cfrn",
+    opensearchDomainName: "opensearchshare-mhshucea3jvk",
+    publicAlbFullName: "app/Sps-Ap-Publi-28Px8J5FO9hH/54dece3b8bad13da",
+    publicTargetGroupFullName: "targetgroup/Sps-Ap-Publi-VGHKKQ7XZH2E/7db931046bbc72ff",
   },
   prod: {
     envName: "prod",

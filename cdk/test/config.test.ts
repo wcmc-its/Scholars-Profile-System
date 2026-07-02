@@ -101,7 +101,10 @@ describe("assertCutoverGate", () => {
 
   for (const env of ["staging", "prod"] as const) {
     it(`hard-throws when useSharedVpc is flipped on WITHOUT a snapshot id for ${env} (also fails CI on a premature flip)`, () => {
-      const cfg = { ...resolveEnvConfig(env), useSharedVpc: true };
+      // Force the no-snapshot-id case explicitly: staging now ships a real
+      // auroraSnapshotIdentifier (item-3 cutover), so overriding only useSharedVpc
+      // would leave the id set and the gate would (correctly) not throw.
+      const cfg = { ...resolveEnvConfig(env), useSharedVpc: true, auroraSnapshotIdentifier: undefined };
       expect(() => assertCutoverGate(cfg)).toThrow(/not yet deployable/);
       // The message names the prerequisites so the gate gives no false "safe" signal.
       expect(() => assertCutoverGate(cfg)).toThrow(/auroraSnapshotIdentifier/);
@@ -130,9 +133,10 @@ describe("assertCutoverGate", () => {
 // used only by the email-visibility bridge.
 describe("sharedVpc descriptor", () => {
   for (const env of ["staging", "prod"] as const) {
-    it(`${env}: ships useSharedVpc off and a populated sharedVpc`, () => {
+    it(`${env}: ships the expected useSharedVpc flag and a populated sharedVpc`, () => {
       const cfg = resolveEnvConfig(env);
-      expect(cfg.useSharedVpc).toBe(false);
+      // staging is cut over (item-3, 2026-07-02); prod stays standalone until its cutover.
+      expect(cfg.useSharedVpc).toBe(env === "staging");
       expect(cfg.sharedVpc.vpcId).toMatch(/^vpc-/);
       expect(cfg.sharedVpc.appSubnetIds.length).toBeGreaterThan(0);
       expect(cfg.sharedVpc.dataSubnetIds.length).toBeGreaterThan(0);
