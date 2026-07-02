@@ -1,3 +1,4 @@
+import { gzipSync } from "node:zlib";
 import { NextResponse, type NextRequest } from "next/server";
 import { apiError } from "@/lib/api/error-response";
 import {
@@ -250,6 +251,7 @@ async function handleSearch(request: NextRequest) {
       taxonomyLabel,
       searchLatencyMs,
       "searchFunding",
+      request.headers.get("accept-encoding"),
     );
   }
 
@@ -445,6 +447,7 @@ async function handleSearch(request: NextRequest) {
       taxonomyLabel,
       searchLatencyMs,
       "searchPublications",
+      request.headers.get("accept-encoding"),
     );
   }
 
@@ -662,6 +665,7 @@ async function handleSearch(request: NextRequest) {
     taxonomyLabel,
     searchLatencyMs,
     "searchPeople",
+    request.headers.get("accept-encoding"),
   );
 }
 
@@ -677,6 +681,9 @@ function orUndefined<T>(arr: T[]): T[] | undefined {
 // PLAN R3 — the result object is spread alongside `searchInterpretation`
 // ({ scope, conceptLabel, meshMapped }) so all three branches return the same
 // shape uniformly without each search result type having to carry the field.
+// Origin floor mirrors CloudFront's own 1,000-byte compression floor.
+const GZIP_MIN_BYTES = 1000;
+
 function jsonWithTiming<T extends object>(
   body: T,
   searchInterpretation: SearchInterpretation,
@@ -684,24 +691,36 @@ function jsonWithTiming<T extends object>(
   taxonomyLabel: string,
   searchLatencyMs: number,
   searchLabel: string,
+  acceptEncoding: string | null,
 ) {
-  // Serialized once so the response carries an explicit Content-Length.
-  // CloudFront refuses to compress a response whose size it cannot read from
-  // a Content-Length header (docs: "Serving compressed files" > conditions),
-  // and NextResponse.json streams chunked without one — which left these
-  // payloads shipping identity (177.7 KB measured) even with gzip/brotli
-  // enabled on the edge cache policy.
+  // Compressed at the ORIGIN, not the edge. CloudFront only compresses
+  // responses whose size it can read from a Content-Length header (docs:
+  // "Serving compressed files" > conditions), and Next.js strips any
+  // app-set Content-Length from route-handler responses (bodies re-stream
+  // chunked) — verified live on staging 2026-07-02, where these payloads
+  // shipped identity at 196 KB with compression fully enabled at the edge.
+  // An origin response that already carries Content-Encoding passes through
+  // CloudFront untouched, so gzipping here is the deterministic fix.
+  // gzipSync on a ~200 KB JSON string costs low single-digit ms.
   const payload = JSON.stringify({ ...body, searchInterpretation });
-  return new NextResponse(payload, {
-    headers: {
-      "Content-Type": "application/json",
-      "Content-Length": String(Buffer.byteLength(payload)),
-      "Server-Timing": serverTimingHeader([
-        { name: "taxonomy", ms: taxonomyMatchMs, desc: taxonomyLabel },
-        { name: "search", ms: searchLatencyMs, desc: searchLabel },
-      ]),
-    },
-  });
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Server-Timing": serverTimingHeader([
+      { name: "taxonomy", ms: taxonomyMatchMs, desc: taxonomyLabel },
+      { name: "search", ms: searchLatencyMs, desc: searchLabel },
+    ]),
+    Vary: "Accept-Encoding",
+  };
+  if (
+    acceptEncoding !== null &&
+    /\bgzip\b/i.test(acceptEncoding) &&
+    Buffer.byteLength(payload) >= GZIP_MIN_BYTES
+  ) {
+    return new NextResponse(new Uint8Array(gzipSync(payload)), {
+      headers: { ...headers, "Content-Encoding": "gzip" },
+    });
+  }
+  return new NextResponse(payload, { headers });
 }
 
 // PLAN R3 — the interpretation block returned on every branch.
