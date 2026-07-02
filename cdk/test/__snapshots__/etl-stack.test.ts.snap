@@ -7456,20 +7456,6 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
-                "Name": "OPENSEARCH_NODE",
-                "Value": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "https://",
-                      {
-                        "Fn::ImportValue": "Sps-Data-staging-OpenSearchDomainEndpoint",
-                      },
-                    ],
-                  ],
-                },
-              },
-              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -7565,6 +7551,21 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/etl",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl:node::",
                     ],
                   ],
                 },
@@ -10691,20 +10692,6 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Name": "NODE_ENV",
                 "Value": "production",
               },
-              {
-                "Name": "OPENSEARCH_NODE",
-                "Value": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "https://",
-                      {
-                        "Fn::ImportValue": "Sps-Data-staging-OpenSearchDomainEndpoint",
-                      },
-                    ],
-                  ],
-                },
-              },
             ],
             "Essential": true,
             "Image": {
@@ -10773,6 +10760,21 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/etl",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl:node::",
                     ],
                   ],
                 },

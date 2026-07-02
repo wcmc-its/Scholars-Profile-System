@@ -143,8 +143,10 @@ describe("EtlStack", () => {
   // secret's `node` key, so the OpenSearch-domain replace at cutover isn't
   // blocked by the export-lock. The internal-ALB DNS is a separate edge (SSM).
   describe("OPENSEARCH_NODE de-coupling (openSearchNodeFromSecret)", () => {
-    it("default (off): node is baked from the DataStack export, not a secret", () => {
-      const json = JSON.stringify(buildEtlStack("staging").template.toJSON());
+    it("off (explicit): node is baked from the DataStack export, not a secret", () => {
+      const json = JSON.stringify(
+        buildEtlStack("staging", { openSearchNodeFromSecret: false }).template.toJSON(),
+      );
       expect(json).toContain("Sps-Data-staging-OpenSearchDomainEndpoint");
       expect(json).not.toContain(":node::");
     });

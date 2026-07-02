@@ -3744,20 +3744,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
-                "Name": "OPENSEARCH_NODE",
-                "Value": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "https://",
-                      {
-                        "Fn::ImportValue": "Sps-Data-staging-OpenSearchDomainEndpoint",
-                      },
-                    ],
-                  ],
-                },
-              },
-              {
                 "Name": "SAML_IDP_ENTITY_ID",
                 "Value": "https://login-proxy.weill.cornell.edu/idp",
               },
@@ -4300,6 +4286,21 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/app-ro",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/app:node::",
                     ],
                   ],
                 },

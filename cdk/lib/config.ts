@@ -578,9 +578,12 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
       etlSgId: "sg-016b62e11314e7050",
       albSgId: "sg-0ab492e161a9e9976",
     },
-    // Cutover de-coupling: OFF until the opensearch/{app,etl} `node` key is
-    // backfilled (else ECS task-start fails closed). See flag JSDoc.
-    openSearchNodeFromSecret: false,
+    // Cutover de-coupling (increment-1): ON — the opensearch/{app,etl} `node`
+    // key was backfilled 2026-07-02 with the CURRENT staging endpoint, so App/Etl
+    // read OPENSEARCH_NODE from the secret (same endpoint) instead of the Data
+    // cross-stack export. Byte-identical in effect; severs the App/Etl→Data
+    // OpenSearchDomainEndpoint export ahead of the useSharedVpc cutover. See flag JSDoc.
+    openSearchNodeFromSecret: true,
     // #485 — search:index OOM-killed at 2048 MiB building the full corpus
     // (178k+ pubs). 8 GB + the NODE_OPTIONS heap cap (EtlStack) clears it;
     // 2 vCPU also speeds the build, easing throttle pressure on the node.
