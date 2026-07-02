@@ -27,7 +27,7 @@ CloudFront evaluates path patterns in order. Specific patterns must precede the 
 | 8 | `/api/csp-report` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE | The CSP `report-uri`/`report-to` collector (`lib/security-headers.ts`). Browsers POST violation reports here; the GET-only default 403'd them all → reports silently dropped at the edge. |
 | 9 | `/api/nih-resolve` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE | POST batch resolver fired from profile/funding pages (`lib/use-nih-resolve.ts`). Default GET-only behavior 403'd every resolve → NIH award links silently failed on live profiles. |
 | 10 | `/api/feedback/submit` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE | POST from the feedback form (`components/feedback/feedback-form.tsx`). Same default GET-only 403; breaks submission once `FEEDBACK_BADGE_ENABLED` is on. |
-| 11 | `/api/search*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | Query-string dynamic GET (`force-dynamic`). The cacheable default strips `?q` and caches a match_all for everyone (#490). Covers `/api/search` and `/api/search/suggest`. |
+| 11 | `/api/search*` | `sps-search-nostore-compress-${env}` (custom) | `AllViewer` | GET, HEAD, OPTIONS | Query-string dynamic GET (`force-dynamic`). The cacheable default strips `?q` and caches a match_all for everyone (#490). Covers `/api/search` and `/api/search/suggest`. **2026-07-02 (#1403):** swapped off `CachingDisabled` so compression can fire — see §Compression on `/api/search*`. |
 | 12 | `/search*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | The search PAGE, same strip as the API (#624). `#632` made the origin render sub-0.5s, so no caching benefit is lost. |
 | 13 | `/api/directory/people` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. SSO-gated typeahead; reads `q`/`cwids` **and** the session cookie → needs AllViewer. |
 | 14 | `/api/nih-portfolio` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. RePORTER click-through proxy; reads `cwid`/`profile_id`, 302s. |
@@ -46,7 +46,35 @@ CloudFront evaluates path patterns in order. Specific patterns must precede the 
 
 > **Mutating-method note:** rows #7–#10 (plus the existing ALLOW_ALL writer/auth/revalidate/analytics behaviors) carry POST because the default behavior allows only GET/HEAD/OPTIONS — an uncovered mutating route is **403'd at the edge** before the origin sees it. A synth-time guard (`edge-stack.test.ts`) now ratchets this: any `route.ts` exporting POST/PUT/PATCH/DELETE without an ALLOW_ALL behavior fails the test.
 
-`AllViewer` is AWS-managed origin request policy `Managed-AllViewer` (`216adef6-5c7f-47e4-b989-5492eafa07d3`). `CachingDisabled` and `CachingOptimized` are `Managed-CachingDisabled` (`4135ea2d-6df8-44a3-9df3-4b5a84be39ad`) and `Managed-CachingOptimized` (`658327ea-f89d-4fab-a63d-7e88639e58f6`) respectively. `sps-query-keyed-${env}` is the **custom** cache policy defined in `EdgeStack` (see §Cache key — query-keyed cacheable pages).
+`AllViewer` is AWS-managed origin request policy `Managed-AllViewer` (`216adef6-5c7f-47e4-b989-5492eafa07d3`). `CachingDisabled` and `CachingOptimized` are `Managed-CachingDisabled` (`4135ea2d-6df8-44a3-9df3-4b5a84be39ad`) and `Managed-CachingOptimized` (`658327ea-f89d-4fab-a63d-7e88639e58f6`) respectively. `sps-query-keyed-${env}` and `sps-search-nostore-compress-${env}` are the **custom** cache policies defined in `EdgeStack` (see §Cache key — query-keyed cacheable pages and §Compression on `/api/search*`).
+
+## Compression on `/api/search*`
+
+The search API's JSON responses are large (a broad publications query measured 177.7 KB
+before the `_source` trim, ~196 KB with facets at the time of fixing; gzips to ~39 KB).
+Getting them compressed took three pieces — all are required, and each failure mode was
+verified live on staging (2026-07-02, #1403):
+
+1. **Custom cache policy** (#1416). `Managed-CachingDisabled` hard-codes the
+   Accept-Encoding gzip/brotli flags OFF, so `compress: true` on the behavior never fires.
+   `sps-search-nostore-compress-${env}` enables both flags, keys on the full query string,
+   and excludes cookies/headers.
+2. **DefaultTTL 1s** (#1428). CloudFront only compresses responses it can store. The search
+   routes send no `Cache-Control`, and a header-less response at `DefaultTTL 0` is
+   uncacheable — verified: policy live, compress on, still identity. At 1s the response is
+   cacheable (Miss→Hit observed) — a deliberate ≤1-second, full-query-keyed public cache.
+3. **Origin gzip** (#1433 — the piece that actually produces compressed bytes). CloudFront
+   also requires an origin `Content-Length` to size the response, and **Next.js strips
+   app-set `Content-Length` from route-handler responses** (bodies re-stream chunked) —
+   verified in #1431: header set in code, absent on the wire. So `jsonWithTiming`
+   (`app/api/search/route.ts`) gzips the payload at the origin when the request's
+   `Accept-Encoding` allows and the body is ≥1,000 bytes; a response that already carries
+   `Content-Encoding` passes through CloudFront untouched.
+
+Probe consequences: plain `curl` (no `Accept-Encoding`) still gets identity; `curl
+--compressed` gets gzip (verified: 196,315 → 39,275 bytes on the wire). The 1s TTL means a
+repeated identical URL can serve from the edge — the eval scripts' cache-busting query-param
+convention already covers this.
 
 ## Cache key (default cacheable behavior)
 

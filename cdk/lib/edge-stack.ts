@@ -50,6 +50,10 @@ export interface EdgeStackProps extends StackProps {
  *      for writer routes, SSO endpoints, mutating internal endpoints, the
  *      health probe, telemetry, on-demand exports, and every query-string
  *      DYNAMIC route (search + the #634 Group A API/feedback/export routes).
+ *      One carve-out: `/api/search*` keeps the uncacheable semantics but on
+ *      the custom `sps-search-nostore-compress-*` policy (1s query-keyed
+ *      TTL + gzip/brotli flags) so compression can fire — see the policy
+ *      definition below and docs/cloudfront-cache-spec.md §Compression.
  *   4. Query-keyed CACHEABLE behaviors (#634 Group B) for the high-traffic
  *      ISR pages (profile, dept/center/division, topic-scholars) that read
  *      `searchParams`: a custom cache policy that keeps them edge-cacheable
