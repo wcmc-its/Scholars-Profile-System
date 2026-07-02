@@ -4,11 +4,15 @@ Operator runbook for consolidating the SPS estate into `its-reciter-vpc01`
 (`vpc-08a1873fc8eebae28`, acct `665083158573`, `us-east-1`). Reconciles the
 authoritative plan (`docs/sps-vpc-consolidation-plan.md` §6.8/§8.5, on the
 `docs/sps-vpc-consolidation-plan` branch) with what is actually built on
-`origin/master` as of 2026-07-01. **Staging is fully soaked before prod.**
+`origin/master` as of 2026-07-02. **Staging is fully soaked before prod.**
 
-> This is a coordinated, booked-maintenance-window operation with two
-> **cross-team (WCM) dependencies** and one **unbuilt code gap**. It is **not**
-> a flag flip. Do not start any phase until its gate row below is GREEN.
+> This is a coordinated, booked-maintenance-window operation. **All item-3 code
+> has landed** (increment-2 merged: #1397 / #1398 / #1399 — see §0), so the flip
+> is now operational, not a code change. Two external asks remain: the edge
+> **sequencing** (Fabrice confirmed the target is CloudFront → NetScaler → ALB;
+> open choice = insert NetScaler at cutover vs. as a follow-on — see §1 ⚠️) and
+> ReCiter `:5000` SG ingress (Mahender/EKS). It is **not** a flag flip. Do not
+> start any phase until its gate row below is GREEN.
 
 ---
 
@@ -29,13 +33,13 @@ authoritative plan (`docs/sps-vpc-consolidation-plan.md` §6.8/§8.5, on the
 - `assertCutoverGate` tripwire: `useSharedVpc:true` without
   `auroraSnapshotIdentifier` fails synth (`config.ts:817-848`). ✔.
 
-**NOT built — must land before any flip (increment-2, this PR):**
+**LANDED (increment-2 — merged #1397 / #1398 / #1399; nothing further must land before the flip):**
 
-| Gap | Evidence | Fix |
+| Gap | Evidence | Status |
 |---|---|---|
-| **G15-a: AppStack hardcodes VPC-coupled physical names** | `loadBalancerName: sps-public/internal-${env}` (`app-stack.ts:2279/2287`), `clusterName: sps-cluster-${env}` (928), `serviceName: sps-app-${env}` (2428) — none gated on `useSharedVpc`. | Under `useSharedVpc`, pass `undefined` (CDK auto-generates) so the VPC-change replace is create-before-delete without an `already exists` collision. Flag-off keeps the exact fixed names (byte-identical synth). |
-| **G15-b: `resolveSharedSg` reads shared SG ids from SSM** | `shared-vpc-subnets.ts:79-93` always reads `/sps/<env>/net/<tier>-sg-id`. NetworkStack publishes the *shared* ids there only when it is flipped — but NetworkStack flips **last** (Phase G; see §2), so during Phases A–F SSM still holds the **standalone** SG ids. Consumers would wire the wrong SGs. | Under `useSharedVpc`, read `cfg.sharedVpc[`${tier}SgId`]` config literal; else SSM. Keeps `mutable:false`. Flag-off unchanged. |
-| **G8: shared SG ids empty in config** | `config.ts:476-478` `appSgId/etlSgId/albSgId = ""`; `assertSharedVpcConfig` (`config.ts:773-788`) fails synth on empty. | Operator creates 3 per-env SGs in the shared VPC (allow-all egress, no ingress — CDK adds ingress as standalone L1 `CfnSecurityGroupIngress`, `app-stack.ts:894-916`), and fills **staging's** `sharedVpc` via spread override so prod stays empty/untouched. |
+| **G15-a: AppStack hardcodes VPC-coupled physical names** | `loadBalancerName: sps-public/internal-${env}`, `clusterName: sps-cluster-${env}` (928), `serviceName: sps-app-${env}` (2438). | ✅ **#1397** — under `useSharedVpc` the ALBs **+ target groups** auto-generate names (`sharedReplaceName`, `app-stack.ts:2286`), so the replace is create-before-delete with no `already exists`; flag-off byte-identical. **Cluster + service stay fixed by design** — an ECS cluster isn't VPC-scoped, and a Fargate service's subnet/SG/target-group change is an in-place update under the rolling deployment controller, so neither replaces or collides. Belt-and-suspenders: confirm at Phase B step 8 `cdk diff` that both show *update*, not *replace*. |
+| **G15-b: `resolveSharedSg` reads shared SG ids from SSM** | `shared-vpc-subnets.ts` — SSM held the *standalone* ids during Phases A–F (NetworkStack flips last), so consumers would have wired the wrong SGs. | ✅ **#1397 / #1398** — under `useSharedVpc`, reads the `cfg.sharedVpc.<tier>SgId` config literal (`shared-vpc-subnets.ts:91`); SSM only when flag-off. `mutable:false` kept. |
+| **G8: shared SG ids empty in config** | `config.ts` `appSgId/etlSgId/albSgId = ""`; `assertSharedVpcConfig` fails synth on empty. | ✅ **#1399** — 3 staging SGs created out-of-band in the shared VPC (allow-all egress, no ingress): app `sg-010c270a395b4854b`, etl `sg-016b62e11314e7050`, alb `sg-0ab492e161a9e9976`; wired into **staging's** `sharedVpc` via a per-env spread so prod stays empty. |
 
 ---
 
@@ -46,9 +50,25 @@ authoritative plan (`docs/sps-vpc-consolidation-plan.md` §6.8/§8.5, on the
 | Network substrate | imported (`fromVpcAttributes`) | NetworkStack stays **flag-off until Phase G**; per-env SGs are created **out-of-band** (the old VPC can't be deleted while datastores occupy it) | old VPC live until Phase G |
 | Aurora | new cluster (`DatabaseClusterFromSnapshot`) | freeze-only final restore at 658 MB (~10–20 min, §6.2/G14) | old cluster RETAIN + deletion-protected |
 | OpenSearch | new domain | app reads **OLD** domain until new-domain reindex verifies, **then** flip `OPENSEARCH_NODE` (§6.3) | old domain RETAIN |
-| ECS app + ALBs | replaced, **auto-named** (G15-a) | hard cutover; validate new internal ALB by direct `X-Origin-Verify` probe before NetScaler re-point | — (hard cutover; window covers the outage) |
+| ECS app + ALBs | replaced, **auto-named** (G15-a) | hard cutover; validate new ALBs by direct `X-Origin-Verify` probe before the edge cutover | — (hard cutover; window covers the outage) |
 | ETL | replaced placement | hard cutover; schedules parked **and no RUNNING execution** before freeze | idempotent; re-park new / re-enable old |
-| Edge | **no SPS resource** | **NetScaler backend re-point** to the new internal ALB DNS (WCM edge track, Q11) | re-point NetScaler back (minutes) |
+| Edge | CloudFront distribution (**SPS-owned**) | **Target: CloudFront → NetScaler → ALB** (Fabrice; ALB kept — Fargate). Cutover step depends on sequencing (see ⚠️): **decouple** = repoint CloudFront origin to new ALB (SPS, no WCM); **couple** = NetScaler backend re-point (WCM, Q11) | repoint origin / re-point NetScaler back (minutes) |
+
+> ⚠️ **Edge model — Fabrice confirmed NetScaler in front (2026-07-02).** Target for
+> the new VPC is **CloudFront → NetScaler → ALB → Fargate**; because the app is ECS
+> Fargate, the AWS **ALB stays** (no CDK change — our design already keeps it). BUT
+> NetScaler is **not in the path today** (verified: both distributions point straight
+> at their ALBs — prod `E28NKDFXC7K2ZL` → `sps-public-prod-374923924…`, staging
+> `E17NRWINXLP3B3` → `sps-public-staging-955542627…`), so reaching Fabrice's target
+> requires *inserting* NetScaler — a change **orthogonal to the VPC move** (NetScaler →
+> ALB works regardless of which VPC the ALB lives in). **Open sequencing decision:**
+> - **Decouple (recommended):** the VPC cutover keeps CloudFront → ALB and just
+>   repoints the CloudFront origin to the new ALB DNS (SPS-owned, one `Sps-Edge-staging`
+>   redeploy, no external dep — handoff item 3). WCM inserts NetScaler as a **separate
+>   follow-on**. Q11 is **N/A in the window**; the risky freeze stays SPS-only.
+> - **Couple:** insert NetScaler at cutover — CloudFront origin → NetScaler VIP,
+>   NetScaler backend → new ALB. Q11 becomes a **hard in-window gate** (WCM ready) and
+>   adds cross-team coordination to the freeze.
 
 ---
 
@@ -56,16 +76,17 @@ authoritative plan (`docs/sps-vpc-consolidation-plan.md` §6.8/§8.5, on the
 
 | Gate | What | Owner | How to confirm |
 |---|---|---|---|
-| **G15 code** | increment-2 PR merged (auto-naming + `resolveSharedSg` config-literal + config filled) | **SPS (me)** | PR green (build+cdk), `cdk diff Sps-App-staging` shows ALB **create-before-delete**, no `already exists` |
-| **G8 SGs** | 3 staging SGs exist in `vpc-08a1873fc8eebae28`; ids in `sharedVpc` (staging override) | **SPS operator** | `aws ec2 describe-security-groups --group-ids <ids>` |
-| **G6 firewall** | WCM firewall admits `10.46.134/160 → every ETL source` (ReciterDB, ED LDAPS `:636`, InfoEd `10.20.91.8`, ASMS, COI, Jenzabar, SES, POPS) | **WCM network (Q12)** | WCM change-ticket confirmation — a describe **cannot** prove it |
-| **Q11 NetScaler** | NetScaler VIP can reach the new internal-ALB DNS and is ready to re-point its backend | **WCM edge track** | WCM confirmation + SPS supplies internal-ALB DNS |
+| **G15 code** ✅ | increment-2 merged (#1397/#1398/#1399: auto-naming + `resolveSharedSg` config-literal + G8 config) | **SPS (me)** | ✅ merged, build+cdk green. Still `cdk diff Sps-App-staging` at the flip → ALB **create-before-delete**, no `already exists` |
+| **G8 SGs** ✅ | 3 staging SGs in `vpc-08a1873fc8eebae28`; ids wired in staging `sharedVpc` spread (#1399) | **SPS operator** | ✅ `describe-security-groups --group-ids sg-010c270a395b4854b sg-016b62e11314e7050 sg-0ab492e161a9e9976` (0 ingress, allow-all egress) |
+| **G6 firewall** ✅ | WCM firewall admits `10.46.134/160 → every ETL source` (ReciterDB, ED LDAPS `:636`, InfoEd `10.20.91.8`, ASMS, COI, Jenzabar, SES, POPS) | **WCM network (Q12)** | ✅ empirically proven open 2026-07-02 (all 6 sources reachable from `10.46.160.x`) |
+| **Q11 NetScaler** (live only if NetScaler is **coupled** into the cutover — N/A if decoupled) | NetScaler VIP can reach the new ALB DNS and is ready to re-point its backend | **WCM edge track (Fabrice)** | WCM confirmation + SPS supplies new ALB DNS |
 | **G5 endpoints** | its-reciter reaches SM/ECR/Logs/STS over NAT (no 2nd SM endpoint) | GREEN (confirmed 2026-06-30) | — |
-| **Snapshot** | fresh staging Aurora snapshot id set as `auroraSnapshotIdentifier` | **SPS operator** | `aws rds describe-db-cluster-snapshots` |
+| **Snapshot** | fresh staging Aurora snapshot id set as `auroraSnapshotIdentifier` at Phase B step 6 — restore-compat **pre-verified 2026-07-02** (live cluster engine 3.08.0 exact, master `scholars_admin`, same-account KMS) | **SPS operator** | `aws rds describe-db-cluster-snapshots` |
 
-**If G6 or Q11 is not GREEN, stop.** Moving the app strands staging behind an
-un-re-pointed front door / a firewall that rejects every source — that is an
-outage, not "downtime".
+**If G6 is not GREEN — or Q11, when NetScaler is coupled into the cutover — stop.**
+Moving the app strands staging behind an un-re-pointed front door / a firewall that
+rejects every source — that is an outage, not "downtime". (G6 is proven; Q11 is N/A
+if NetScaler insertion is decoupled from the VPC move — recommended.)
 
 ---
 
@@ -76,12 +97,14 @@ All deploys from a clean `origin/master`-based tree (`~/worktrees/sps-deploy`),
 rolls the image only — all infra here is manual.
 
 ### Phase A — Stand-up (reversible: delete new, old untouched)
-1. Create the 3 staging SGs in the shared VPC (allow-all egress, no ingress);
-   record ids; fill `sharedVpc` staging override in config.
-2. Merge the increment-2 PR (§0 gaps). Keep `useSharedVpc:false` still —
-   this only lands the code; nothing flips yet.
-3. Seed `scholars/staging/opensearch/{app,etl}` secret `node` key = the
-   **current live** OS endpoint (so App/Etl keep working when the flag flips).
+1. ✅ **DONE (#1399):** 3 staging SGs created in the shared VPC (allow-all egress,
+   no ingress) — app `sg-010c270a395b4854b`, etl `sg-016b62e11314e7050`, alb
+   `sg-0ab492e161a9e9976`; wired into staging's `sharedVpc` spread override.
+2. ✅ **DONE:** increment-2 code merged (#1397/#1398/#1399). `useSharedVpc:false`
+   still — the code is landed, nothing flips yet.
+3. ⬜ **Next pre-window prep:** seed `scholars/staging/opensearch/{app,etl}` secret
+   `node` key = the **current live** OS endpoint (so App/Etl keep working when the
+   flag flips). Inert while `openSearchNodeFromSecret:false`.
 
 ### Phase B — Data migration (reversible: abandon new, keep old)
 4. Quiesce ETL: park schedules **and confirm no Step Functions execution is
@@ -109,11 +132,17 @@ rolls the image only — all infra here is manual.
     **internal** ALB directly with `X-Origin-Verify`; confirm app→Aurora:3306 and
     app→OS:443 intra-VPC SG refs; confirm an edit-flow write lands in the new cluster.
 
-### Phase D — Edge cutover (reversible: re-point NetScaler back, minutes)
+### Phase D — Edge cutover (reversible: repoint origin / re-point NetScaler back, minutes)
 14. Inside the write-freeze: flip `OPENSEARCH_NODE` to the new domain (reseed
-    `opensearch/{app,etl}` `node`) **after** reindex verify; **WCM re-points the
-    NetScaler backend** to the new internal-ALB DNS; re-assert `X-Origin-Verify`;
-    lift the freeze.
+    `opensearch/{app,etl}` `node`) **after** reindex verify; re-assert
+    `X-Origin-Verify`; **cut the edge over** (per the ⚠️ sequencing decision);
+    then lift the freeze.
+    - **Decouple (recommended):** redeploy `Sps-Edge-staging` with the 3 `-c edge*`
+      context flags so its SSM-param origin re-resolves to the new public-ALB DNS
+      (procedure + pinned values in handoff item 3). No WCM step; WCM inserts
+      NetScaler in front as a separate follow-on.
+    - **Couple:** WCM (Fabrice) re-points the NetScaler backend to the new ALB DNS;
+      CloudFront origin → NetScaler VIP.
 
 ### Phase E — ETL cutover (reversible)
 15. Deploy `Sps-Etl-staging`; enable schedules on the new tier; park old.
@@ -168,7 +197,9 @@ the ALB alarms are non-load-bearing during the freeze.
 ## 6. Rollback
 
 - **A–C:** delete new stacks; old estate untouched. Zero user impact.
-- **D:** WCM re-points NetScaler backend to the old ALB DNS (minutes).
+- **D:** revert the edge (minutes) — CloudFront-direct: redeploy `Sps-Edge-staging`
+  with the origin SSM param pointed back at the old ALB DNS; NetScaler model: WCM
+  re-points the backend to the old ALB DNS.
 - **E:** re-park new schedules, re-enable old (idempotent; safe only while the app
   still writes the OLD cluster).
 - **Point of no easy return:** once App is cut to the NEW Aurora it is the SOR;
