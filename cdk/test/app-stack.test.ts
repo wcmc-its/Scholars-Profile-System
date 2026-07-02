@@ -36,8 +36,10 @@ describe("AppStack", () => {
   // cross-stack export onto the opensearch secret's `node` key, so the
   // OpenSearch-domain replace at cutover isn't blocked by the export-lock.
   describe("OPENSEARCH_NODE de-coupling (openSearchNodeFromSecret)", () => {
-    it("default (off): node is a plaintext env baked from the DataStack export, not a secret", () => {
-      const json = JSON.stringify(buildAppStack("staging").template.toJSON());
+    it("off (explicit): node is a plaintext env baked from the DataStack export, not a secret", () => {
+      const json = JSON.stringify(
+        buildAppStack("staging", { openSearchNodeFromSecret: false }).template.toJSON(),
+      );
       expect(json).toContain("Sps-Data-staging-OpenSearchDomainEndpoint");
       expect(json).not.toContain(":node::");
     });
