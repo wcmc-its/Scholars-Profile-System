@@ -96,6 +96,7 @@ import {
   resolvePeopleMethodFamilyBoost,
   resolvePeopleMethodFamilyTier,
   resolvePeopleMethodContextBoost,
+  resolvePubFacetSplit,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
   resolvePeopleTopicPhraseBoost,
@@ -3267,6 +3268,26 @@ export async function searchPeople(opts: {
   };
 }
 
+// Pub-tab facet split — bound the facet (Request B) load so a wedged broad-
+// concept agg can't tail past the #1017 7s nav watchdog and hard-reload the
+// page. Same idiom as people-classifier-sets.ts `refreshWithTimeout` (#610): the
+// underlying OpenSearch call can't be cancelled, so a timed-out one keeps running
+// in the background — we just stop awaiting it and reject so the caller degrades
+// to empty facets (and `cachedReasonAgg` does not cache the rejection, so the
+// next request retries). Timer is unref'd and always cleared.
+const PUB_FACET_TIMEOUT_MS = 5000;
+function racePubFacetTimeout<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`pub facet agg exceeded ${PUB_FACET_TIMEOUT_MS}ms`)),
+      PUB_FACET_TIMEOUT_MS,
+    );
+    timer.unref?.();
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+}
+
 export async function searchPublications(opts: {
   q: string;
   page?: number;
@@ -3423,6 +3444,10 @@ export async function searchPublications(opts: {
   // follow-up /api/search call rank identically. Only applied on the relevance
   // path (empty sortClause) below.
   const recencyMode = resolvePubRecencyMode();
+
+  // Pub-tab perf — split the facet aggregation off the hit-list request (see
+  // resolvePubFacetSplit). Off → the single combined body below, byte-identical.
+  const facetSplit = resolvePubFacetSplit();
 
   let queryShape: PublicationsQueryShape;
   const must: Record<string, unknown>[] = [];
@@ -4031,7 +4056,16 @@ export async function searchPublications(opts: {
         filter: aggBoolFor(filtersExcept("wcmAuthor")),
         aggs: {
           keys: { terms: { field: "wcmAuthorCwids", size: 500 } },
-          total: { cardinality: { field: "wcmAuthorCwids", precision_threshold: 4000 } },
+          // §4.5 — near-exact 4000 is the priciest single sub-agg; the rail
+          // header ("Author 1,619") tolerates ~1–2% error, so the facet-split
+          // path drops to 1000. Flag-off keeps 4000 so the combined body is
+          // byte-identical to today.
+          total: {
+            cardinality: {
+              field: "wcmAuthorCwids",
+              precision_threshold: facetSplit ? 1000 : 4000,
+            },
+          },
         },
       },
       // Issue #837 — Department facet. Top 200 mirrors the People-tab dept
@@ -4080,11 +4114,7 @@ export async function searchPublications(opts: {
   // Mirrors the `countOnly` short-circuit above, but keeps `size` and hit
   // emission. The facet `scholar.findMany` is skipped separately below.
   const skipAggs = opts.hitsOnly === true;
-  const { aggs: _aggs, ...bodyNoAggs } = body;
-  const resp = await searchClient().search({
-    index: PUBLICATIONS_INDEX,
-    body: (skipAggs ? bodyNoAggs : body) as object,
-  });
+  const { aggs: aggsBlock, ...bodyNoAggs } = body;
 
   type Hit = {
     _score?: number; // #1329 — surfaced raw onto PublicationHit.relevanceScore.
@@ -4118,25 +4148,91 @@ export async function searchPublications(opts: {
     highlight?: { title?: string[] };
   };
   type Bucket = { key: string; doc_count: number };
-  const r = resp.body as unknown as {
-    hits: { hits: Hit[]; total: { value: number } };
-    aggregations?: {
-      publicationTypes?: { keys: { buckets: Bucket[] } };
-      journals?: { keys: { buckets: Bucket[] } };
-      wcmRoleFirst?: { doc_count: number };
-      wcmRoleSenior?: { doc_count: number };
-      wcmRoleMiddle?: { doc_count: number };
-      wcmAuthors?: {
-        keys: { buckets: Bucket[] };
-        total: { value: number };
-      };
-      // Issue #837 — present only when SEARCH_PUB_DEPARTMENT_FILTER is on.
-      departments?: { keys: { buckets: Bucket[] } };
-      mentoringPrograms?: {
-        buckets: Record<MentoringProgramKey, { doc_count: number }>;
-      };
+  type PubAggregations = {
+    publicationTypes?: { keys: { buckets: Bucket[] } };
+    journals?: { keys: { buckets: Bucket[] } };
+    wcmRoleFirst?: { doc_count: number };
+    wcmRoleSenior?: { doc_count: number };
+    wcmRoleMiddle?: { doc_count: number };
+    wcmAuthors?: {
+      keys: { buckets: Bucket[] };
+      total: { value: number };
+    };
+    // Issue #837 — present only when SEARCH_PUB_DEPARTMENT_FILTER is on.
+    departments?: { keys: { buckets: Bucket[] } };
+    mentoringPrograms?: {
+      buckets: Record<MentoringProgramKey, { doc_count: number }>;
     };
   };
+  type PubSearchResponse = {
+    hits: { hits: Hit[]; total: { value: number } };
+    aggregations?: PubAggregations;
+  };
+
+  let r: PubSearchResponse;
+  if (facetSplit && !skipAggs) {
+    // §4.1 — decouple the facet aggregation from the hit list. Request A (hits)
+    // and Request B (facets) run in parallel; B is cached on the facet-
+    // determining inputs only (counts are page- AND sort-invariant) and time-
+    // capped, so paginating/re-sorting the same query pays only A's cost and a
+    // wedged agg degrades to empty facets rather than hanging the nav.
+    //
+    // Request B uses the UNSCORED `query` (not `scoredQuery`): the recency
+    // function_score never reaches the filter-context aggs, and `query` still
+    // carries the #396 meshOnly hard filter (`query.bool.filter`) that a
+    // match_all would drop. post_filter is omitted — each agg already scopes
+    // itself via `filtersExcept(axis)`, so post_filter was never part of agg
+    // scope. `total` stays on Request A (it keeps track_total_hits+post_filter).
+    const facetKey =
+      "pub-facets:" +
+      JSON.stringify([
+        query,
+        userAxisFilters,
+        useDepartmentFilter,
+        // The mentoring agg embeds per-program pmid lists that aren't otherwise
+        // in the key; fingerprint their size so a ReciterDB recovery
+        // (empty→full buckets) busts the cache instead of serving zero
+        // mentoring counts for the TTL. ponytail: a count-equal-but-content-
+        // changed bucket set collides — bounded by the 5-min TTL, harmless.
+        Object.values(mentoringBuckets.byProgram).reduce((n, a) => n + a.length, 0),
+      ]);
+    const [hitsResp, facetAggs] = await Promise.all([
+      searchClient().search({
+        index: PUBLICATIONS_INDEX,
+        body: bodyNoAggs as object,
+      }),
+      // A timed-out/rejected load is not cached (cachedReasonAgg only stores
+      // resolved values), so the catch degrades to empty facets and the next
+      // request retries — same contract as the People reason-agg.
+      cachedReasonAgg<PubAggregations | null>(facetKey, () =>
+        racePubFacetTimeout(
+          searchClient()
+            .search({
+              index: PUBLICATIONS_INDEX,
+              body: { size: 0, query, aggs: aggsBlock } as object,
+            })
+            .then(
+              (resp) =>
+                (resp.body as unknown as { aggregations?: PubAggregations })
+                  .aggregations ?? null,
+            ),
+        ),
+      ).catch(() => null),
+    ]);
+    const hitsBody = hitsResp.body as unknown as {
+      hits: { hits: Hit[]; total: { value: number } };
+    };
+    r = { hits: hitsBody.hits, aggregations: facetAggs ?? undefined };
+  } else {
+    // Combined single request — byte-identical to the pre-split body when the
+    // flag is off. `hitsOnly` (sparse-concept preview) also lands here and drops
+    // the aggs block via `bodyNoAggs`.
+    const resp = await searchClient().search({
+      index: PUBLICATIONS_INDEX,
+      body: (skipAggs ? bodyNoAggs : body) as object,
+    });
+    r = resp.body as unknown as PubSearchResponse;
+  }
 
   // Issue #88 — hydrate Author facet buckets with display name + slug +
   // avatar in a single Prisma round trip. Active selections may not

@@ -674,6 +674,31 @@ export function resolvePublicationDepartmentFilter(): boolean {
 }
 
 /**
+ * Pub-tab performance — decouple the facet aggregation from the hit list.
+ *
+ * When on, the active Publications search fires TWO OpenSearch requests in
+ * parallel instead of one combined request: Request A is the hit list
+ * (`bodyNoAggs` — keeps `track_total_hits`, `post_filter`, sort, highlight),
+ * Request B is `{ size: 0, query, aggs }` over the UNSCORED query (the recency
+ * `function_score` is irrelevant to filter-context facet counts). Request B is
+ * cached on `(query + active filters + dept-flag + mentoring-bucket size)` —
+ * facet counts are page- AND sort-invariant, so pagination and re-sort of the
+ * same query reuse the cached facets and pay only the cheap hit query — and
+ * time-capped so a slow broad-concept agg degrades to empty facets instead of
+ * hanging the nav (there is no `requestTimeout` guard otherwise). The author
+ * `cardinality` precision_threshold also drops 4000→1000 on this path (~1–2%
+ * error the rail header tolerates) since the split path is the rollout target.
+ *
+ * Default OFF (`SEARCH_PUB_FACET_SPLIT=on` enables). No reindex needed — this is
+ * a request-shape change only; the flag-off path is byte-identical to the
+ * single-request body. `=== "on"` default-off gate so it ships inert and the
+ * split rolls out staging-first.
+ */
+export function resolvePubFacetSplit(): boolean {
+  return process.env.SEARCH_PUB_FACET_SPLIT === "on";
+}
+
+/**
  * Issue #396 — Publications-tab "Show only MeSH-tagged matches" filter. When
  * on AND the request carries `?searchMode=mesh-only`, `searchPublications`
  * adds a HARD query filter `{ exists: { field: "meshDescriptorUi" } }` to the
