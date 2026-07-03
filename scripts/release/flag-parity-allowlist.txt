@@ -40,6 +40,9 @@ REPORTER_MATCH_V2_MAX_PER_RUN
 REPORTER_MATCH_V2_MIN_PMIDS
 SCHOLARS_HEALTH_TOKEN
 SCHOLARS_REVALIDATE_TOKEN_PREVIOUS
+SEARCH_AREA_BOOST_W_HI              # area-boost tier weight (code default 3) — A/B lever
+SEARCH_AREA_BOOST_W_MID             # area-boost tier weight (code default 1.5) — A/B lever
+SEARCH_AREA_BOOST_W_LO              # area-boost tier weight (code default 0.75) — A/B lever
 SEARCH_FUNDING_MATCH_REASON         # default-on (!== "off")
 SEARCH_FUNDING_PHRASE_BOOST
 SEARCH_FUNDING_TAB_MSM

@@ -100,6 +100,7 @@ import {
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
   resolvePeopleTopicPhraseBoost,
+  resolveAreaBoostWeights,
   resolveSearchPeopleClinical,
   resolveSearchPeopleClinicalFn,
   resolveSearchPeopleClinicalFnWeight,
@@ -1110,9 +1111,14 @@ export function buildAreaBoostFunctions(
     else lo.push(cwid);
   }
   const fns: Record<string, unknown>[] = [];
-  if (hi.length) fns.push({ filter: { terms: { cwid: hi } }, weight: AREA_BOOST_W_HI });
-  if (mid.length) fns.push({ filter: { terms: { cwid: mid } }, weight: AREA_BOOST_W_MID });
-  if (lo.length) fns.push({ filter: { terms: { cwid: lo } }, weight: AREA_BOOST_W_LO });
+  const w = resolveAreaBoostWeights({
+    hi: AREA_BOOST_W_HI,
+    mid: AREA_BOOST_W_MID,
+    lo: AREA_BOOST_W_LO,
+  });
+  if (hi.length && w.hi > 0) fns.push({ filter: { terms: { cwid: hi } }, weight: w.hi });
+  if (mid.length && w.mid > 0) fns.push({ filter: { terms: { cwid: mid } }, weight: w.mid });
+  if (lo.length && w.lo > 0) fns.push({ filter: { terms: { cwid: lo } }, weight: w.lo });
   return fns;
 }
 
