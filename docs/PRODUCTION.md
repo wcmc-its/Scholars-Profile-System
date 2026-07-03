@@ -105,7 +105,7 @@ A typical crawl pattern for this site is `GET /sitemap.xml` (8,919 scholar URLs 
 
 If a bot somehow ignores caching headers, two layers protect us:
 
-1. **AWS WAF rate rule**: 1000 req / 5 min per IP (`RateBasedRule`). Borderline-aggressive crawlers see 429s; well-behaved Googlebot/Bingbot stay well under.
+1. **AWS WAF rate rule**: 5000 req / 5 min per IP (`RateBasedRule`), currently in **COUNT mode** (#1430) — it only tags matching requests, so nothing is 429'd today. Flip-to-block is pending the #1434 false-positive review: WCM egresses via shared NAT IPs that pool onto one counter, so a live limit could catch legitimate staff traffic before it slows a crawler.
 2. **Origin concurrency**: ALB target group caps in-flight requests per task (default 2x healthy task count). If the burst still gets through WAF, the queue absorbs and 503s start; the ECS service autoscaler (target-tracking on avg CPU 60% + ALB request-count-per-target) adds tasks toward the `appMaxCount` ceiling (prod 6) — scale-out cooldown is 60 s.
 
 Lighter mitigation appropriate for `robots.txt`:

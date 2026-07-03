@@ -95,15 +95,17 @@ changes cut it on the hot concept-People path (fix plan: `.planning/perf-audit.m
   only on the rare sparse case, removing **2 round-trips per cold concept-People SSR render**
   on the common non-sparse path. Gated by `SEARCH_PEOPLE_CONCEPT_PRECOUNT` (default-on = old
   pre-count path; `off` = reorder). **Staging flipped to the reorder 2026-06-12** (task def
-  `sps-app-staging:45`); prod still on the old path.
+  `sps-app-staging:45`); **prod flipped to the reorder in cdk** (#929, `c9fbf28d`, ~2026-06-12)
+  and went live with the 2026-07-01 prod App deploy (task def `sps-app-prod:21`).
 
 > ⚠️ **Not yet a measured win.** A staging curl probe (`/search?q=…&type=people`, HTTP 200)
 > confirmed the B2 reorder is live with no hot-path regression, but staging's small
 > OpenSearch + single-sample curl noise (±1 s run-to-run) **cannot isolate** the per-RTT
-> delta — do not cite the staging numbers as a baseline. The real before/after is the
-> `search_query` `duration_ms` **p50/p95** (Logs Insights, see [§ How to (re)measure](#how-to-remeasure))
-> under **prod** traffic; capture that before flipping `SEARCH_PEOPLE_CONCEPT_PRECOUNT=off`
-> in prod. Until then the `/search` origin cell above stays `TBD (measure)`.
+> delta — do not cite the staging numbers as a baseline. The `search_query` `duration_ms`
+> **p50/p95** (Logs Insights, see [§ How to (re)measure](#how-to-remeasure)) under **prod**
+> traffic is the only usable signal, but the before-flip prod capture never happened, so the
+> `/search` origin baseline must now come from **post-flip** numbers only. Until then the
+> `/search` origin cell above stays `TBD (measure)`.
 
 > ⚠️ **Profile edge-cache reality vs. the table.** The Scholar-profile row lists ISR TTL
 > 24 h, but that is the *intended* state — the canonical root profile URL is currently
@@ -194,8 +196,8 @@ that release + people reindex.
 ## Scaling characteristics
 
 - **App tier:** ECS Fargate. Per-task sizing: **staging 1024 CPU / 2048 MiB** (bumped from
-  512/1024 and deployed 2026-06-26); **prod 2048 / 4096 in `config.ts` but the deployed task
-  def is still 1024 / 2048** pending a prod `cdk deploy` (sizing rides a task-def deploy, not
+  512/1024 and deployed 2026-06-26); **prod task def rev 21 (deployed 2026-07-01) runs the
+  `config.ts` sizing 2048 / 4096** (sizing rides a task-def deploy, not
   the CD image roll). The 2026-06-26 bump is a marginal-only mitigation for the Aurora-bound
   taxonomy cost above — not a fix. Target-tracking
   autoscaling (#596) between min 2 (= `appDesiredCount`, AZ-spread) and max 6

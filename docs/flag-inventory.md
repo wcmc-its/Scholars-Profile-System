@@ -39,7 +39,7 @@ Exit criteria are the flip/kill conditions; "GAP" = no open issue owns the flip.
 | SEARCH_PEOPLE_CONCEPT_GRANT_AXIS | on | off | #921 | Staging soak + grant-admitted-scholar eval; prod = pure flag flip (reuses live fundedPubMeshUi gate) |
 | SEARCH_FUNDING_CONCEPT_GRANTS | on | off | #1359 (Tier 2) | Staging A/B of funding-row concept matches → prod |
 | SEARCH_PUB_MESH_ONLY_FILTER | on | off | #396 | Prod flip (no reindex prereq) after staging soak |
-| SEARCH_PUB_FACET_SPLIT | on | off | #1301 (PARKED) | Kill criterion stated in #1301; bottleneck was `matchQueryToTaxonomy`, largely addressed by #1415 perf PRs — re-evaluate then flip or kill |
+| SEARCH_PUB_FACET_SPLIT | on | off | #1301 (revived by #1423, staging-on; prod flip rides the #1415 prod image release) | Kill criterion stated in #1301; bottleneck was `matchQueryToTaxonomy`, largely addressed by #1415 perf PRs — re-evaluate then flip or kill |
 | SEARCH_SHELL_STREAMING | on | off | #861 | Staging cold/warm TTFB measurement → prod at go-live (flag-off is byte-identical) |
 | SEARCH_RESULT_EVIDENCE | on | off | GAP (#1366 closed) | UI evidence panel master gate; prod flip rides the evidence bundle below |
 | SEARCH_EVIDENCE_ROWS | on | off | GAP (#1366 closed) | Same bundle |
