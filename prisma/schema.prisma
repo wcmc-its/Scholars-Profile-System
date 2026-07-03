@@ -2519,3 +2519,27 @@ enum FeedbackRole {
   prefer_not_say
   other
 }
+
+/// Single-use ledger for consumed SAML assertions (issue #1439). One row per
+/// SAML assertion the ACS has already accepted, keyed by the assertion's own
+/// signature-covered ID (falling back to the response ID or a hash of the raw
+/// SAMLResponse). The insert uses the PK as a uniqueness guard: a duplicate PK
+/// means the same assertion is being presented a second time, so the callback
+/// rejects it instead of minting another session. This is the shared,
+/// instance-independent single-use guard — an in-memory cache would not catch a
+/// second presentation routed to a different Fargate task. `expiresAt` is the assertion's
+/// validity horizon (NotOnOrAfter + clock skew); rows past it can never gate a
+/// fresh login (node-saml already rejects a time-expired assertion) and are
+/// pruned opportunistically on each successful sign-in.
+model SamlAssertionSeen {
+  /// Stable unique id for the consumed assertion (assertion ID / response ID /
+  /// hash of the raw SAMLResponse). Primary key => the single-use guard.
+  id        String   @id @db.VarChar(255)
+  /// Validity horizon after which the row is safe to prune.
+  expiresAt DateTime @map("expires_at")
+  /// When the assertion was first consumed (audit / debugging).
+  seenAt    DateTime @default(now()) @map("seen_at")
+
+  @@index([expiresAt], map: "idx_saml_assertion_seen_expires_at")
+  @@map("saml_assertion_seen")
+}
