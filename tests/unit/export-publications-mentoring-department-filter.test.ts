@@ -36,6 +36,16 @@ vi.mock("@/lib/api/mentoring-pmids", () => ({
   getMentoringPmidBuckets: vi.fn(async () => BUCKETS),
 }));
 
+// The export route now gates on an internal viewer; treat the POST caller as an
+// authenticated session so the parseBody assertions still reach the 200 path.
+vi.mock("@/lib/auth/viewer-context", () => ({
+  resolveViewerContext: vi.fn(async () => ({
+    internal: true,
+    basis: "session",
+    cwid: "test1234",
+  })),
+}));
+
 // Capture every OpenSearch body the query builders send.
 const capturedBodies: Array<Record<string, unknown>> = [];
 
