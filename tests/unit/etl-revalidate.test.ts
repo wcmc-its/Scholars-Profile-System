@@ -29,6 +29,25 @@ describe("isAllowedBaseUrl (#479)", () => {
     ).toBe(true);
   });
 
+  it("allows the CDK-auto-named internal ALB (post-VPC-consolidation)", () => {
+    // The app stack's internal ALB is auto-named from its construct path
+    // (`internal-Sps-Ap-Inter-<hash>-<num>`) rather than the older custom
+    // `sps-internal-{env}` name; both env stacks share the construct prefix.
+    expect(
+      isAllowedBaseUrl(
+        "http://internal-Sps-Ap-Inter-wkUfLYl8kUqw-211765873.us-east-1.elb.amazonaws.com",
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects an internal ALB from a different construct prefix", () => {
+    // The auto-name pattern is still pinned to OUR construct prefix — a
+    // different app's `internal-*` ALB must not be accepted.
+    expect(
+      isAllowedBaseUrl("http://internal-Some-Other-Alb-abcdef-123.us-east-1.elb.amazonaws.com"),
+    ).toBe(false);
+  });
+
   it("rejects an arbitrary AWS ALB (different naming convention)", () => {
     // Defense in depth — any tenant could spin up an ALB ending in
     // `.elb.amazonaws.com`; pin to OUR convention.
