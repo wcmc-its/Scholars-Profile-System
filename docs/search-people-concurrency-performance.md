@@ -70,7 +70,7 @@ Single-query latency improved markedly (C=1: 2.27 → 1.32 s). But C=10 stayed ~
 - **The cross-request taxonomy cache is built.** `getCounts` is now SWR-cached cross-request (`lib/api/search-taxonomy.ts`, #1420), so the per-candidate `groupBy` load called out above no longer recurs per request.
 - **The publications/funding branches skip the resolver's Prisma enrichment entirely** (#1421) — the People path still runs the full resolver, but the pub/funding tabs never pay it, and staging `Server-Timing` for this query class now reads `taxonomy;dur=0`.
 - **`SEARCH_PEOPLE_REASON_FROM_DOC` is now ON in both envs** (#1417; verified in the live prod task-def `:21`), so the fixed doc-reason path runs in prod, not just staging.
-- **The only remaining prod caveat is the pending prod image roll + a prod people-reindex** to verify `meshSubtreeCounts`. Prod is no longer ~350 commits behind — it took a release 2026-07-01.
+- **The prod image roll is done** (GH Actions run 28624978997, deployed 2026-07-02 — `/api/search` now serves gzip on the wire and `SEARCH_PEOPLE_REASON_FROM_DOC` is on in prod, rev 21). **Caveat (verified 2026-07-03): the prod people index carries `meshSubtreeCounts` on 0 of 8,937 docs** — the prod reindex predates the field's indexer — so with the flag on the concept reason count currently degrades to 0 / concept-fallback (never a 500, per `lib/api/search-flags.ts`). A prod people-reindex off the current image is needed to populate it (#1404).
 
 ## 8. Reusable load-test tooling
 
