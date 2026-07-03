@@ -359,23 +359,6 @@ export function resolvePeopleTopicPhraseBoost(): boolean {
 }
 
 /**
- * Issue #688 — surface MeSH match provenance on People results. When a
- * topic/unclassified search resolves to a descriptor, the §6.1.3 attribution
- * boost ranks up scholars tagged with a *narrower* descendant term than the
- * one typed (e.g. `Microbiome` surfacing a `Mycobiome` scholar). With this on,
- * each such hit carries the narrower term(s) so the UI can explain the match;
- * the query-keyed highlighter can't (the typed term isn't in the scholar's
- * text). Pure additive metadata — no effect on ranking or the result set.
- *
- * Default on (`SEARCH_PEOPLE_MATCH_PROVENANCE=off` rolls back); this is an
- * explainability/UX change, not a ranking change, so it gets its own lever
- * independent of `SEARCH_PEOPLE_RELEVANCE_MODE`.
- */
-export function resolvePeopleMatchProvenance(): boolean {
-  return process.env.SEARCH_PEOPLE_MATCH_PROVENANCE !== "off";
-}
-
-/**
  * Issue #702 — People-result match explainability. People highlighting is keyed
  * to only three self-reported fields (`preferredName` / `areasOfInterest` /
  * `overview`), but topic relevance scores heavily on publication-derived fields
@@ -392,9 +375,8 @@ export function resolvePeopleMatchProvenance(): boolean {
  * possibly-sensitive blob makes a poor snippet.
  *
  * Pure presentation metadata — no effect on the query predicate, scoring, or
- * result set. Default on (`SEARCH_PEOPLE_MATCH_EXPLAIN=off` rolls back); a separate lever from
- * `SEARCH_PEOPLE_MATCH_PROVENANCE` (the MeSH "why this match" note) and from
- * `SEARCH_GENERIC_TERM_DEMOTE`, each with an independent rollback trigger.
+ * result set. Default on (`SEARCH_PEOPLE_MATCH_EXPLAIN=off` rolls back); a separate
+ * lever from `SEARCH_GENERIC_TERM_DEMOTE`, with an independent rollback trigger.
  */
 export function resolvePeopleMatchExplain(): boolean {
   return process.env.SEARCH_PEOPLE_MATCH_EXPLAIN !== "off";
@@ -634,17 +616,18 @@ export function computeConceptFallback(input: {
 
 /**
  * Publications-tab MeSH match provenance — the publications twin of the People
- * tab's `SEARCH_PEOPLE_MATCH_PROVENANCE` (#688). When a topic query resolves to
- * a descriptor, the concept-mode admission/boost (`terms { meshDescriptorUi:
- * descendantUis }`, #259) ranks up publications tagged with the descriptor or a
- * narrower descendant — a match the title highlighter can't explain when the
- * typed term isn't in the title. With this on, each such hit carries
- * `matchProvenance` (reusing the generalized `computeMatchProvenance`) so the row
- * can render the same "Why this match" note as the Scholars tab. Pure additive
- * metadata — no effect on ranking or the result set.
+ * tab's always-on provenance (#688; its `SEARCH_PEOPLE_MATCH_PROVENANCE` lever
+ * was retired in #1440). When a topic query resolves to a descriptor, the
+ * concept-mode admission/boost (`terms { meshDescriptorUi: descendantUis }`,
+ * #259) ranks up publications tagged with the descriptor or a narrower
+ * descendant — a match the title highlighter can't explain when the typed term
+ * isn't in the title. With this on, each such hit carries `matchProvenance`
+ * (reusing the generalized `computeMatchProvenance`) so the row can render the
+ * same "Why this match" note as the Scholars tab. Pure additive metadata — no
+ * effect on ranking or the result set.
  *
- * Default on (`SEARCH_PUB_MATCH_PROVENANCE=off` rolls back); a separate lever from the People-tab provenance flag
- * and from `SEARCH_PUB_HIGHLIGHT`, each with an independent rollback trigger.
+ * Default on (`SEARCH_PUB_MATCH_PROVENANCE=off` rolls back); a separate lever
+ * from `SEARCH_PUB_HIGHLIGHT`, each with an independent rollback trigger.
  */
 export function resolvePublicationMatchProvenance(): boolean {
   return process.env.SEARCH_PUB_MATCH_PROVENANCE !== "off";

@@ -1246,16 +1246,6 @@ export class AppStack extends Stack {
         // (isOverviewGenerateStreamEnabled, lib/edit/overview-generator.ts). Takes effect
         // on a manual `cdk deploy --exclusively Sps-App-<env>`.
         SELF_EDIT_OVERVIEW_GENERATE_STREAM: env === "staging" ? "on" : "off",
-        // #742 -- post-generation faithfulness pass. OFF in both envs: the #742
-        // validation gate showed the generator already grounds drafts on the FACTS
-        // (including the ReciterAI distilled synopsis/justification it is designed to
-        // use), so this is OPTIONAL defense-in-depth for the bulk rollout, not a fix.
-        // When "on" (isOverviewFaithfulnessPassEnabled, lib/edit/overview-generator.ts)
-        // each generate runs a verify -> revise critic pass that strips any specific
-        // a draft adds beyond ALL fact fields, at the cost of one or two extra Bedrock
-        // calls. Same TaskRoleBedrockPolicy; no new IAM. Flip per-env here + a manual
-        // `cdk deploy --exclusively Sps-App-<env>`.
-        OVERVIEW_FAITHFULNESS_PASS: "off",
         // #917 v5 -- the NIH-biosketch generator on the /edit surface. Default-off
         // and staging-first: this is a NEW surface, so it stays "on" only in
         // staging while it bakes, and "off" in prod until an approval-gated
@@ -1286,18 +1276,6 @@ export class AppStack extends Stack {
         // prod until an approval-gated Sps-App-prod deploy flips it. Takes effect
         // on a manual `cdk deploy --exclusively Sps-App-<env>`.
         SELF_EDIT_RAIL_RESTRUCTURE: env === "staging" ? "on" : "off",
-        // ACCOUNT_CONSOLE_NAV_RESTRUCTURE -- the unified account dropdown + console
-        // nav (account-dropdown-nav handoff, Workstreams A + B). Reorders the menu
-        // to View -> Edit, relabels the superuser row "Admin" -> "Admin console"
-        // and the GrantRecs row "Find researchers" -> "Funding matcher", and mounts
-        // the account chip in the /edit AdminSubnav strip in place of the old
-        // "My Profile" tab. Presentational / navigation only -- no data changes.
-        // Promoted to ON in BOTH envs -- the unified nav is the new default. The
-        // value is now live in code; activation is still a manual
-        // `cdk deploy --exclusively Sps-App-<env>` (staging picks it up immediately;
-        // prod activates on its next approval-gated App deploy, NOT via the CD image
-        // roll, which never ships CDK env vars).
-        ACCOUNT_CONSOLE_NAV_RESTRUCTURE: "on",
         // #917 v6 -- post-generation faithfulness pass for the biosketch generator.
         // ON in BOTH envs: the biosketch is a grant document, and one fabricated
         // metric there dwarfs the ~3x cost (handoff §5). The route forces it on
@@ -1361,13 +1339,12 @@ export class AppStack extends Stack {
         // Sps-App-<env>` -- no code revert (CD re-rolls the image only, so an
         // env-flag change requires an explicit cdk deploy).
         SHOW_BETA_BADGE: "on",
-        // #688 / #692 -- search query-interpretation flags. Graduated to prod
-        // parity after the staging UAT + SPEC §8 eval: the #692 generic-term
-        // de-highlight and the #688 "Why this match" MeSH-provenance note now
-        // run in BOTH envs. resolveGenericTermMode reads off|resolve|on;
-        // resolvePeopleMatchProvenance reads on|off (lib/api/search-flags.ts).
+        // #692 -- generic-term de-highlight, graduated to prod parity after the
+        // staging UAT + SPEC §8 eval; runs in BOTH envs. resolveGenericTermMode
+        // reads off|resolve|on (lib/api/search-flags.ts). Its #688 sibling
+        // SEARCH_PEOPLE_MATCH_PROVENANCE (the "Why this match" MeSH-provenance
+        // note) was retired in #1440 -- the note is now always on in code.
         SEARCH_GENERIC_TERM_DEMOTE: "on",
-        SEARCH_PEOPLE_MATCH_PROVENANCE: "on",
         // #713 / #702 / #707 -- "Why this match" explanation lines. Brought to
         // local-dev parity (these were on in .env.local but never wired here, so
         // the features worked locally and were silently off in staging+prod):

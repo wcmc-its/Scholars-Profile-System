@@ -443,10 +443,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
-                "Name": "OVERVIEW_FAITHFULNESS_PASS",
-                "Value": "off",
-              },
-              {
                 "Name": "EDIT_BIOSKETCH_GENERATE",
                 "Value": "off",
               },
@@ -465,10 +461,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
               {
                 "Name": "SELF_EDIT_RAIL_RESTRUCTURE",
                 "Value": "off",
-              },
-              {
-                "Name": "ACCOUNT_CONSOLE_NAV_RESTRUCTURE",
-                "Value": "on",
               },
               {
                 "Name": "BIOSKETCH_FAITHFULNESS_PASS",
@@ -504,10 +496,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_GENERIC_TERM_DEMOTE",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_PEOPLE_MATCH_PROVENANCE",
                 "Value": "on",
               },
               {
@@ -3854,10 +3842,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
-                "Name": "OVERVIEW_FAITHFULNESS_PASS",
-                "Value": "off",
-              },
-              {
                 "Name": "EDIT_BIOSKETCH_GENERATE",
                 "Value": "on",
               },
@@ -3875,10 +3859,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_RAIL_RESTRUCTURE",
-                "Value": "on",
-              },
-              {
-                "Name": "ACCOUNT_CONSOLE_NAV_RESTRUCTURE",
                 "Value": "on",
               },
               {
@@ -3915,10 +3895,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_GENERIC_TERM_DEMOTE",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_PEOPLE_MATCH_PROVENANCE",
                 "Value": "on",
               },
               {

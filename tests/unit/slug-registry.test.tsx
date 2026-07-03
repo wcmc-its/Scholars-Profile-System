@@ -35,7 +35,6 @@ function base(over: Partial<SlugRegistryProps> = {}): SlugRegistryProps {
     requestedSegmentVisible: true,
     pendingSlugRequests: 2,
     administratorsTab: null,
-    selfEditHref: null,
     ...over,
   };
 }

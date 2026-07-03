@@ -113,14 +113,6 @@ export default async function EditScholarsPage({
   const pendingSlugRequests =
     superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
 
-  // Back-link to the admin's own self-edit surface — only when they actually
-  // have a (non-deleted) profile, so a staff superuser without one never gets
-  // a link that 404s.
-  const self = await db.read.scholar.findUnique({
-    where: { cwid: session.cwid },
-    select: { deletedAt: true },
-  });
-  const selfEditHref = self && self.deletedAt === null ? "/edit" : null;
 
   return (
     <ProfilesRoster
@@ -137,7 +129,6 @@ export default async function EditScholarsPage({
       administratorsTab={superuserSurfaces && isAdministratorsTabEnabled() ? 0 : null}
       methodsTab={isMethodsTabVisible(session) ? 0 : null}
       dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
-      selfEditHref={selfEditHref}
       canImpersonate={impersonationEnabled() && session.isSuperuser}
       viewerCwid={session.cwid}
       superuserSurfaces={superuserSurfaces}

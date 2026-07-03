@@ -6,7 +6,9 @@
  * Profile-URL request queue (`/edit/slug-requests`), the URL registry,
  * Administrators, Method Families, and the Funding matcher
  * (`/edit/find-researchers`). A pending-count pill sits on the "URL requests"
- * tab; "My Profile" anchors the right end.
+ * tab; the account chip/dropdown anchors the right end (account-dropdown-nav
+ * handoff, Workstream A — its `ACCOUNT_CONSOLE_NAV_RESTRUCTURE` flag was
+ * retired in #1440).
  *
  * Originally only the superuser list pages rendered this. It now also renders on
  * the `/edit` self-edit surface for a superuser or comms_steward (via
@@ -19,10 +21,8 @@
  * that doesn't exist isn't advertised.
  */
 import Link from "next/link";
-import { ChevronLeftIcon } from "lucide-react";
 
 import { AccountMenu } from "@/components/site/account-menu";
-import { isAccountConsoleNavRestructureEnabled } from "@/lib/auth/account-console-nav";
 import { isCorePagesEnabled } from "@/lib/profile/cores-flags";
 
 export type AdminSubnavActive =
@@ -35,8 +35,8 @@ export type AdminSubnavActive =
   | "data-quality"
   | "cores"
   | "find-researchers"
-  /** The viewer's own self-edit surface (`/edit`), shown as the active right-end
-   *  tab when a superuser / comms_steward is on their own profile. */
+  /** The viewer's own self-edit surface (`/edit`) — no list tab is active;
+   *  profile actions live in the right-end account menu. */
   | "self";
 
 export function AdminSubnav({
@@ -45,7 +45,6 @@ export function AdminSubnav({
   administratorsTab,
   methodsTab,
   dataQualityTab,
-  selfEditHref,
   superuserSurfaces = true,
   profilesTab = false,
   unitsTab = false,
@@ -66,11 +65,6 @@ export function AdminSubnav({
    *  shows it to a unit Owner/Curator with grants). A number shows it (passed
    *  `0` — no badge), mirroring `methodsTab`. */
   dataQualityTab?: number | null;
-  /** Link back to the viewer's own self-edit surface (`/edit`), right-aligned.
-   *  `null`/omitted when the viewer has no profile of their own (a staff
-   *  superuser), so the link never lands on a 404. Ignored when `active="self"`
-   *  — the viewer is already there, so "My Profile" renders as the active tab. */
-  selfEditHref?: string | null;
   /** Whether to show the superuser list surfaces (URL requests / Slug registry /
    *  Administrators — and Profiles, unless `profilesTab` separately enables it).
    *  Default `true`. A comms_steward who is NOT a superuser passes `false` so
@@ -90,12 +84,6 @@ export function AdminSubnav({
    *  Default `false`. */
   viewerIsDeveloper?: boolean;
 }) {
-  // When the unified account-dropdown flag is on, the account chip/dropdown
-  // replaces the right-end "My Profile" tab — profile actions move entirely into
-  // the menu (account-dropdown-nav handoff, Workstream A). The menu derives its
-  // scholar + rows from the `/api/auth/session` probe, so no scholar object needs
-  // threading through every console page that renders this strip.
-  const accountNavEnabled = isAccountConsoleNavRestructureEnabled();
   return (
     <div className="border-border border-b" data-slot="admin-subnav">
       <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
@@ -164,30 +152,15 @@ export function AdminSubnav({
           <AdminTab
             href="/edit/find-researchers"
             id="find-researchers"
-            label={accountNavEnabled ? "Funding matcher" : "Find researchers"}
+            label="Funding matcher"
             active={active === "find-researchers"}
           />
         )}
-        {accountNavEnabled ? (
-          <AccountMenu context="console" />
-        ) : active === "self" ? (
-          <span
-            className="border-apollo-maroon ml-auto inline-block border-b-2 py-3 text-sm font-medium"
-            aria-current="page"
-            data-testid="admin-subnav-self-edit"
-          >
-            My Profile
-          </span>
-        ) : selfEditHref ? (
-          <Link
-            href={selfEditHref}
-            className="text-muted-foreground hover:text-foreground ml-auto inline-flex items-center gap-1 py-3 text-sm"
-            data-testid="admin-subnav-self-edit"
-          >
-            <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
-            My profile
-          </Link>
-        ) : null}
+        {/* The account chip/dropdown anchors the right end — profile actions live
+            entirely in the menu, which derives its scholar + rows from the
+            `/api/auth/session` probe, so no scholar object needs threading
+            through every console page that renders this strip. */}
+        <AccountMenu context="console" />
       </div>
     </div>
   );

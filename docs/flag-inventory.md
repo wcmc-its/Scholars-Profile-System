@@ -91,7 +91,7 @@ Exit criteria are the flip/kill conditions; "GAP" = no open issue owns the flip.
 | SELF_EDIT_GRANT_RECS | #1203 + #1218 | Opportunities ingested per env (prod: 1,121 loaded 2026-07-01) → flip gated on prod image roll |
 | SELF_EDIT_REQUEST_CHANGE_SEND | SES doc | SES sender verified + out of sandbox → on (falls back to mailto: meanwhile) |
 | SELF_EDIT_ED_ADMINS_IMPORT / SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY | #728 | LDAPS OQ-4 (post-#443, likely unblocked by VPC cutover) / OQ-8a sign-off |
-| OVERVIEW_FAITHFULNESS_PASS | #742 | **KILL CANDIDATE** — the #742 validation gate passed without it; keep dark or delete the code path |
+| OVERVIEW_FAITHFULNESS_PASS | #742 | **DELETED** (#1440 sweep) — the #742 validation gate passed without it and it never ran in any env; the env flag + cdk entry are gone. The grounding machinery (`groundOverviewDraft`) stays: the biosketch pass (BIOSKETCH_FAITHFULNESS_PASS) and the validation harness still use it via explicit opts |
 | PRESTIGE_AXIS_WEIGHT (=0) | #1294–#1296 | Operational: RE-backfill w/ ReciterAI#276 → etl:dynamodb → search:index:funding → verify → raise weight |
 
 ## Flag-shaped items that are NOT in cdk (allowlisted, tracked)
@@ -108,6 +108,14 @@ Exit criteria are the flip/kill conditions; "GAP" = no open issue owns the flip.
 | PROFILE_CANONICAL (="root" both) | #671 | Fully cut over; flag is rollback lever only — prod smoke of root-canonical done → **remove the flag entirely** |
 | SHOW_BETA_BADGE | #506 | Retire at full public launch (set off + deploy; no code revert) |
 | COMMS_STEWARD_ENABLED | comms spec §9 | ON both envs but prod allowlist EMPTY (superusers only) — set EA steward CWIDs or wire GROUP_CN post-#443, else the flip confers nothing |
+
+### Retired (flag + dead branch deleted; #1440 sweep)
+
+| Flag | Was | Surviving path |
+|---|---|---|
+| OVERVIEW_FAITHFULNESS_PASS | off/off (KILL CANDIDATE, #742) | Pass skipped by default; still reachable via explicit `opts.faithfulnessPass` (validation harness / tests). Shared grounding machinery kept — the biosketch pass uses it |
+| ACCOUNT_CONSOLE_NAV_RESTRUCTURE | on/on (promoted 2026-06-21, #1204) | Unified account dropdown + console nav is the only path (View→Edit order, "Admin console"/"Funding matcher" labels, account chip in AdminSubnav) |
+| SEARCH_PEOPLE_MATCH_PROVENANCE | on/on (graduated 2026-06-03, #733) | People-tab narrower-term "Why this match" provenance always attaches when a topic query resolves (pure additive metadata) |
 
 ## Process rules this inventory enforces
 

@@ -50,13 +50,6 @@ export default async function SlugRequestsPage() {
 
   const requests = await loadSlugRequestQueue(db.read);
 
-  // Back-link to the admin's own self-edit surface — only when they have a
-  // (non-deleted) profile, so a staff superuser without one never gets a 404.
-  const self = await db.read.scholar.findUnique({
-    where: { cwid: session.cwid },
-    select: { deletedAt: true },
-  });
-  const selfEditHref = self && self.deletedAt === null ? "/edit" : null;
 
   return (
     <div className="min-h-screen bg-[var(--background)]" data-slot="slug-requests-page">
@@ -79,7 +72,6 @@ export default async function SlugRequestsPage() {
         administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
         methodsTab={isMethodsTabVisible(session) ? 0 : null}
         dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
-        selfEditHref={selfEditHref}
       />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
