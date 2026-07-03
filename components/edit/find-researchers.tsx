@@ -151,14 +151,13 @@ function awardRange(floor: number | null, ceiling: number | null): string | null
   return null;
 }
 
-export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }) {
-  const toolName = unifiedNav ? "Funding matcher" : "Find researchers";
+export function FindResearchers() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   return (
     <div>
       <div className="mb-5">
-        <h1 className="text-2xl font-bold tracking-tight">{toolName}</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Funding matcher</h1>
         <p className="text-muted-foreground mt-1 text-sm">
           Browse funding opportunities — the hand-curated WCM awards first — and open one
           to rank Weill Cornell researchers by topic fit and career-stage appeal.

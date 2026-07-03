@@ -39,7 +39,6 @@ import {
   resolvePeopleRelevanceMode,
   resolveGenericTermMode,
   resolveSearchPeopleDivisionShape,
-  resolvePeopleMatchProvenance,
   resolvePeopleMatchExplain,
   resolvePeopleSnippetRepresentativePub,
   resolvePeopleReasonFromDoc,
@@ -490,7 +489,6 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           facultyProminence: resolveSearchPeopleFacultyProminence(),
           genericDemote,
           contentQuery,
-          matchProvenance: resolvePeopleMatchProvenance(),
           meshDescriptorName: taxonomyMatch.meshResolution?.name,
           // Search reason-from-doc — the resolved ROOT concept UI (the O(1)
           // lookup key into the people doc's `meshSubtreeCounts`) + the flag.

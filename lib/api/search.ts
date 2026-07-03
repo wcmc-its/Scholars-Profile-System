@@ -1259,14 +1259,6 @@ export async function searchPeople(opts: {
    */
   scope?: Scope;
   /**
-   * Issue #688 — `SEARCH_PEOPLE_MATCH_PROVENANCE` resolved at request time by
-   * the route. When true (and the topic template ran against a resolved
-   * descriptor), each hit that matched via a narrower descendant term carries
-   * `matchProvenance` so the UI can explain the subsumption match. Pure
-   * additive metadata: no effect on the query, scoring, or result set.
-   */
-  matchProvenance?: boolean;
-  /**
    * Issue #702 / PLAN R4 — `SEARCH_PEOPLE_MATCH_EXPLAIN` resolved at request time
    * by the route. When true (and a concept resolved against the topic template),
    * `searchPeople` runs ONE extra publications-index aggregation to count each
@@ -2640,13 +2632,13 @@ export async function searchPeople(opts: {
       ? (r.aggregations?.attributionMatch?.doc_count ?? 0) > 0
       : null;
 
-  // Issue #688 — narrower-term match provenance. Only when the flag is on, the
-  // topic template ran against a resolved descriptor with at least one
-  // descendant, and we have the descriptor's display name to frame the "…
-  // narrower term of {name}" string. Labels for the whole descendant set are
-  // resolved once, then intersected per hit by `computeMatchProvenance`.
+  // Issue #688 — narrower-term match provenance (always on; #1440 retired the
+  // `SEARCH_PEOPLE_MATCH_PROVENANCE` lever). Attaches when the topic template
+  // ran against a resolved descriptor with at least one descendant, and we have
+  // the descriptor's display name to frame the "… narrower term of {name}"
+  // string. Labels for the whole descendant set are resolved once, then
+  // intersected per hit by `computeMatchProvenance`.
   const provenanceOn =
-    opts.matchProvenance === true &&
     applyTopicTemplate &&
     meshDescendantUis.length > 1 &&
     (opts.meshDescriptorName?.length ?? 0) > 0;

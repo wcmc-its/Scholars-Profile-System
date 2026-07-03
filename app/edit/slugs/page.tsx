@@ -84,13 +84,6 @@ export default async function EditSlugsPage({
     ? await countPendingSlugRequests(db.read)
     : null;
 
-  // Back-link to the admin's own self-edit surface — only when they have a
-  // (non-deleted) profile, so a staff superuser without one never gets a 404.
-  const self = await db.read.scholar.findUnique({
-    where: { cwid: session.cwid },
-    select: { deletedAt: true },
-  });
-  const selfEditHref = self && self.deletedAt === null ? "/edit" : null;
 
   return (
     <SlugRegistry
@@ -105,7 +98,6 @@ export default async function EditSlugsPage({
       administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
       methodsTab={isMethodsTabVisible(session) ? 0 : null}
       dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
-      selfEditHref={selfEditHref}
       unitsTab={session.isSuperuser}
     />
   );

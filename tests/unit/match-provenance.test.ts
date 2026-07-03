@@ -12,10 +12,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { computeMatchProvenance } from "@/lib/api/match-provenance";
-import {
-  resolvePeopleMatchProvenance,
-  resolvePeopleMatchExplain,
-} from "@/lib/api/search-flags";
+import { resolvePeopleMatchExplain } from "@/lib/api/search-flags";
 
 // Microbiota (D064307) descendant set (real tree-walk order from mesh_descriptor).
 const MICROBIOTA = "D064307";
@@ -146,30 +143,6 @@ describe("computeMatchProvenance — nothing to explain", () => {
         labels: LABELS,
       }),
     ).toBeUndefined();
-  });
-});
-
-describe("resolvePeopleMatchProvenance (#688)", () => {
-  const original = process.env.SEARCH_PEOPLE_MATCH_PROVENANCE;
-  beforeEach(() => {
-    delete process.env.SEARCH_PEOPLE_MATCH_PROVENANCE;
-  });
-  afterEach(() => {
-    if (original === undefined) delete process.env.SEARCH_PEOPLE_MATCH_PROVENANCE;
-    else process.env.SEARCH_PEOPLE_MATCH_PROVENANCE = original;
-  });
-
-  it("defaults to on when the env is unset", () => {
-    expect(resolvePeopleMatchProvenance()).toBe(true);
-  });
-
-  it("is off only for the exact value 'off'", () => {
-    process.env.SEARCH_PEOPLE_MATCH_PROVENANCE = "off";
-    expect(resolvePeopleMatchProvenance()).toBe(false);
-    process.env.SEARCH_PEOPLE_MATCH_PROVENANCE = "on";
-    expect(resolvePeopleMatchProvenance()).toBe(true);
-    process.env.SEARCH_PEOPLE_MATCH_PROVENANCE = "true";
-    expect(resolvePeopleMatchProvenance()).toBe(true);
   });
 });
 

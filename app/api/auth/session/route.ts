@@ -4,7 +4,6 @@ import { isSuperuser } from "@/lib/auth/superuser";
 import { isDeveloper } from "@/lib/auth/development";
 import { isCommsSteward, isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { buildConsoleLinks, type ConsoleLink } from "@/lib/auth/console-links";
-import { isAccountConsoleNavRestructureEnabled } from "@/lib/auth/account-console-nav";
 import { impersonationActive } from "@/lib/auth/effective-identity";
 import {
   resolveImpersonationDisplay,
@@ -67,11 +66,6 @@ export async function GET(): Promise<NextResponse> {
   const session = await getSession().catch(() => null);
   const noStore = { "cache-control": "no-store" };
 
-  // The unified account-dropdown + console-nav flag rides the probe to the
-  // client AccountMenu (it reorders View/Edit and renders the relabeled console
-  // rows). Also gates the buildConsoleLinks relabel below.
-  const accountNavRestructure = isAccountConsoleNavRestructureEnabled();
-
   if (!session) {
     return NextResponse.json(
       {
@@ -81,7 +75,6 @@ export async function GET(): Promise<NextResponse> {
         canImpersonate: false,
         canAccessFundingMatcher: false,
         consoleLinks: [],
-        accountNavRestructure,
       },
       { headers: noStore },
     );
@@ -126,25 +119,19 @@ export async function GET(): Promise<NextResponse> {
   // `canImpersonate` above. Fail-closed: a lookup error just drops that link.
   let consoleLinks: ConsoleLink[];
   if (superuser) {
-    consoleLinks = buildConsoleLinks(
-      {
-        isSuperuser: true,
-        canManageMethods: false,
-        managesUnits: false,
-      },
-      { unifiedNav: accountNavRestructure },
-    );
+    consoleLinks = buildConsoleLinks({
+      isSuperuser: true,
+      canManageMethods: false,
+      managesUnits: false,
+    });
   } else {
     const commsSteward = await isCommsSteward(session.cwid).catch(() => false);
     const manageable = await loadManageableUnits(session.cwid, db.read).catch(() => null);
-    consoleLinks = buildConsoleLinks(
-      {
-        isSuperuser: false,
-        canManageMethods: isMethodsTabVisible({ isSuperuser: false, isCommsSteward: commsSteward }),
-        managesUnits: manageable !== null && manageable.total > 0,
-      },
-      { unifiedNav: accountNavRestructure },
-    );
+    consoleLinks = buildConsoleLinks({
+      isSuperuser: false,
+      canManageMethods: isMethodsTabVisible({ isSuperuser: false, isCommsSteward: commsSteward }),
+      managesUnits: manageable !== null && manageable.total > 0,
+    });
   }
 
   // The live overlay's target, if any. `impersonationActive` already folds in
@@ -208,7 +195,6 @@ export async function GET(): Promise<NextResponse> {
       canImpersonate,
       canAccessFundingMatcher,
       consoleLinks,
-      accountNavRestructure,
     },
     { headers: noStore },
   );

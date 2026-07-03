@@ -60,19 +60,14 @@ export type ConsoleLinkVerdicts = {
  * Pure — no env reads, no I/O — so the policy is unit-testable in isolation.
  * Returns `[]` for a plain scholar (no console section renders).
  *
- * `opts.unifiedNav` carries the `ACCOUNT_CONSOLE_NAV_RESTRUCTURE` flag (read by
- * the caller — this function stays pure). When on it relabels the superuser
- * roster row "Admin" → "Admin console" (account-dropdown-nav handoff, Workstream
- * B). Hrefs, ids, gating, and the Method families / Org units labels are
- * unchanged. The GrantRecs "Funding matcher" is no longer a dropdown row — it
- * lives in the in-console `AdminSubnav` (`/edit/find-researchers`).
+ * The superuser roster row is labeled "Admin console" (account-dropdown-nav
+ * handoff, Workstream B; the `ACCOUNT_CONSOLE_NAV_RESTRUCTURE` flag that gated
+ * the relabel was retired in #1440). The GrantRecs "Funding matcher" is no
+ * longer a dropdown row — it lives in the in-console `AdminSubnav`
+ * (`/edit/find-researchers`).
  */
-export function buildConsoleLinks(
-  v: ConsoleLinkVerdicts,
-  opts?: { unifiedNav?: boolean },
-): ConsoleLink[] {
+export function buildConsoleLinks(v: ConsoleLinkVerdicts): ConsoleLink[] {
   const links: ConsoleLink[] = [];
-  const unifiedNav = opts?.unifiedNav ?? false;
 
   // A superuser collapses to the Profiles roster — its AdminSubnav already fans
   // out to the rest, so a superuser who also happens to be a steward / unit
@@ -80,7 +75,7 @@ export function buildConsoleLinks(
   if (v.isSuperuser) {
     links.push({
       id: "manage-profiles",
-      label: unifiedNav ? "Admin console" : "Admin",
+      label: "Admin console",
       href: "/edit/scholars",
     });
   } else {

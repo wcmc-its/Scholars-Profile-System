@@ -20,7 +20,6 @@ function mockProbe(probe: Partial<ImpersonationProbe>): void {
     impersonating: null,
     canImpersonate: false,
     consoleLinks: [],
-    accountNavRestructure: false,
     ...probe,
   });
 }
@@ -155,26 +154,19 @@ describe("AccountMenu — role-aware console links", () => {
   });
 });
 
-// account-dropdown-nav handoff, Workstream A — the unified dropdown.
-describe("AccountMenu — unified dropdown (ACCOUNT_CONSOLE_NAV_RESTRUCTURE)", () => {
+// account-dropdown-nav handoff, Workstream A — the unified dropdown (its
+// ACCOUNT_CONSOLE_NAV_RESTRUCTURE flag was retired in #1440; unified is the
+// only order).
+describe("AccountMenu — unified dropdown", () => {
   const order = () =>
     screen
       .getAllByTestId(/^account-menu-(view|edit)$/)
       .map((el) => el.getAttribute("data-testid"));
 
-  it("flag off (classic) → Edit precedes View", () => {
-    const jane = { slug: "jane-smith", preferredName: "Jane Smith" };
-    mockProbe({ scholar: jane, accountNavRestructure: false });
-    render(<AccountMenu scholar={jane} />);
-    fireEvent.click(screen.getByLabelText("Account menu"));
-    expect(order()).toEqual(["account-menu-edit", "account-menu-view"]);
-  });
-
-  it("public + flag on → View precedes Edit, no Back-to-Scholars row", () => {
+  it("public → View precedes Edit, no Back-to-Scholars row", () => {
     const sue = { slug: "sue-admin", preferredName: "Sue Admin" };
     mockProbe({
       scholar: sue,
-      accountNavRestructure: true,
       consoleLinks: [{ id: "manage-profiles", label: "Admin console", href: "/edit/scholars" }],
     });
     render(<AccountMenu scholar={sue} />);

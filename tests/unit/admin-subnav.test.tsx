@@ -13,8 +13,8 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-// The unified-nav flag mounts the real AccountMenu (a client island that probes
-// /api/auth/session). Stub it so the strip's right-end swap is tested in
+// The strip mounts the real AccountMenu (a client island that probes
+// /api/auth/session) at its right end. Stub it so the strip is tested in
 // isolation without a live fetch / Popover.
 vi.mock("@/components/site/account-menu", () => ({
   AccountMenu: ({ context }: { context?: string }) => (
@@ -163,18 +163,20 @@ describe("AdminSubnav", () => {
     expect(screen.queryByTestId("admin-tab-administrators")).toBeNull();
   });
 
-  // role-aware-navigation-entry-points-spec.md — the strip now also renders on the
-  // self-edit surface (active="self"), where "My Profile" is the active tab.
-  it('active="self" renders "My Profile" as the active tab (not a back-link)', () => {
+  // account-dropdown-nav handoff, Workstream A (its ACCOUNT_CONSOLE_NAV_RESTRUCTURE
+  // flag was retired in #1440) — the account chip/dropdown (context="console")
+  // anchors the right end on every console surface; profile actions live in the
+  // menu, so there is no "My Profile" tab.
+  it("mounts the account menu (console context) at the right end — no My Profile tab", () => {
     render(<AdminSubnav active="self" pendingSlugRequests={null} methodsTab={0} />);
-    const self = screen.getByTestId("admin-subnav-self-edit");
-    expect(self.tagName.toLowerCase()).toBe("span"); // active = span, not a link
-    expect(self.getAttribute("aria-current")).toBe("page");
-    expect(self.getAttribute("href")).toBeNull();
-    expect(self.textContent).toBe("My Profile");
+    expect(screen.queryByTestId("admin-subnav-self-edit")).toBeNull();
+    const stub = screen.getByTestId("account-menu-stub");
+    expect(stub.getAttribute("data-context")).toBe("console");
+    // The console tabs themselves are unaffected.
+    expect(screen.getByTestId("admin-tab-methods")).toBeTruthy();
   });
 
-  it('active="self" for a superuser shows the full tab strip + My Profile active', () => {
+  it('active="self" for a superuser shows the full tab strip (no tab active)', () => {
     render(
       <AdminSubnav active="self" pendingSlugRequests={0} administratorsTab={0} methodsTab={0} />,
     );
@@ -183,10 +185,10 @@ describe("AdminSubnav", () => {
       const tab = screen.getByTestId(`admin-tab-${id}`);
       expect(tab.getAttribute("aria-current")).toBeNull();
     }
-    expect(screen.getByTestId("admin-subnav-self-edit").getAttribute("aria-current")).toBe("page");
+    expect(screen.getByTestId("account-menu-stub")).toBeTruthy();
   });
 
-  it('active="self" for a steward-only viewer shows only Method families + My Profile', () => {
+  it('active="self" for a steward-only viewer shows only Method families', () => {
     render(
       <AdminSubnav
         active="self"
@@ -197,36 +199,7 @@ describe("AdminSubnav", () => {
     );
     expect(screen.getByTestId("admin-tab-methods")).toBeTruthy();
     expect(screen.queryByTestId("admin-tab-profiles")).toBeNull();
-    expect(screen.getByTestId("admin-subnav-self-edit").getAttribute("aria-current")).toBe("page");
-  });
-
-  it("renders the My-Profile back-link (a real link) when selfEditHref is set and not on self", () => {
-    render(<AdminSubnav active="methods" pendingSlugRequests={null} methodsTab={0} selfEditHref="/edit" />);
-    const self = screen.getByTestId("admin-subnav-self-edit");
-    expect(self.tagName.toLowerCase()).toBe("a");
-    expect(self.getAttribute("href")).toBe("/edit");
-  });
-
-  // account-dropdown-nav handoff, Workstream A — the unified-nav flag replaces the
-  // right-end "My Profile" tab with the account chip/dropdown (context="console").
-  it("flag on → mounts the account menu (console context) in place of the My Profile tab", () => {
-    process.env.ACCOUNT_CONSOLE_NAV_RESTRUCTURE = "on";
-    try {
-      render(<AdminSubnav active="self" pendingSlugRequests={null} methodsTab={0} selfEditHref="/edit" />);
-      expect(screen.queryByTestId("admin-subnav-self-edit")).toBeNull();
-      const stub = screen.getByTestId("account-menu-stub");
-      expect(stub.getAttribute("data-context")).toBe("console");
-      // The console tabs themselves are unaffected.
-      expect(screen.getByTestId("admin-tab-methods")).toBeTruthy();
-    } finally {
-      delete process.env.ACCOUNT_CONSOLE_NAV_RESTRUCTURE;
-    }
-  });
-
-  it("flag off (default) → keeps the classic My Profile tab, no account menu", () => {
-    render(<AdminSubnav active="self" pendingSlugRequests={null} methodsTab={0} />);
-    expect(screen.getByTestId("admin-subnav-self-edit").textContent).toBe("My Profile");
-    expect(screen.queryByTestId("account-menu-stub")).toBeNull();
+    expect(screen.getByTestId("account-menu-stub")).toBeTruthy();
   });
 
   // Data Quality dashboard tab (docs/data-quality-dashboard-spec.md).

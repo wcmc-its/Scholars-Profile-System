@@ -32,7 +32,6 @@ import {
   resolveFundingConceptEnabled,
   resolveDeptLeadershipBoost,
   resolvePeopleRelevanceMode,
-  resolvePeopleMatchProvenance,
   resolvePeopleMatchExplain,
   resolvePeopleSnippetRepresentativePub,
   resolveGenericTermMode,
@@ -587,10 +586,10 @@ async function handleSearch(request: NextRequest) {
     // the API people count (ungated, 76) disagrees with the rendered Scholars
     // badge (gated, 5) for the identical request.
     scope,
-    // Issue #688 — env-gated narrower-term match provenance. searchPeople only
-    // attaches it on topic/unclassified hits that matched via a descendant; the
-    // descriptor name frames the "… narrower term of {name}" string.
-    matchProvenance: resolvePeopleMatchProvenance(),
+    // Issue #688 — narrower-term match provenance (always on; #1440 retired the
+    // env lever). searchPeople only attaches it on topic/unclassified hits that
+    // matched via a descendant; the descriptor name frames the "… narrower term
+    // of {name}" string.
     meshDescriptorName: taxonomyMatch.meshResolution?.name,
     // Issue #702 — env-gated pub-evidence highlighting + "Matched on" chip so a
     // publication-only match isn't left bare. Pure presentation metadata.
