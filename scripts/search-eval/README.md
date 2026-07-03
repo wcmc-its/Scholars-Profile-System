@@ -14,6 +14,8 @@ public from WCM, no SSO).
 | `fixtures.json` | expert-labeled `query → expected scholars` gold set (edit/extend freely) |
 | `lib.sh` | `fetch_combined`: pages a query, dedupes by cwid, sorts by `relevanceScore` |
 | `score_query.jq` | scores one query's results against an expected list (rank, MRR, top-N) |
+| `compare.sh` | diffs a fresh run against `baselines/staging.json`, fails on a threshold breach |
+| `baselines/staging.json` | checked-in scored baseline (`JSON_OUT` results + run metadata) |
 
 ## Quick start
 
@@ -44,6 +46,43 @@ diff before.txt after.txt          # rank/MRR movement per query, deterministic
 `eval.sh` output is stable (sorted), so `diff` shows exactly which expected
 scholars moved and how the per-query `MRR` / `top20` changed. `JSON_OUT=run.json
 ./eval.sh` also writes machine-readable results for a workflow to consume.
+
+## Baseline & regression gate (`compare.sh`)
+
+`baselines/staging.json` is a **checked-in scored baseline**: the `JSON_OUT` results
+array wrapped in a `meta` block (capture date, the pinned staging image digest + git sha
++ task-def revision, per-query `meshMapped`/`total`, and the overall roll-up). Because it
+is committed, a relevance regression becomes a **red diff** and re-baselining is a
+**reviewed PR** (snapshot-test style) — never an unattended overwrite.
+
+```bash
+# Re-score staging, then gate the fresh run against the committed baseline:
+JSON_OUT=fresh.json ./eval.sh >/dev/null
+./compare.sh baselines/staging.json fresh.json      # exit 0 = pass, non-zero = breach
+#   or stream a bare JSON_OUT array straight in:
+JSON_OUT=/dev/stdout ./eval.sh 2>/dev/null | ./compare.sh
+```
+
+`compare.sh` accepts either the wrapped baseline (`{meta, results}`) or a bare `JSON_OUT`
+array for both inputs, and **exits non-zero** on any of the issue #1444 thresholds:
+
+| threshold | env knob | default |
+|---|---|---|
+| OVERALL `meanMRR` relative drop | `MRR_DROP` | `0.10` (>10% fails) |
+| any single-archetype `MRR` relative drop | `ARCH_DROP` | `0.20` (>20% fails) |
+| a pinned top-anchor falling out of its max rank | _(hard-coded `PINS`)_ | Devereux top-3 on `hypertension`; Bacha top-3 on `pediatric congenital heart surgery` |
+
+Pinned anchors are documented, stable #1–#3 results from the audit docs / the 2026-07-02
+A/B cells; extend the `PINS` array in `compare.sh` as new anchors are agreed.
+
+### Re-baselining (reviewed PR)
+
+1. Confirm staging serves the intended image (`git sha` in the baseline `meta` should be
+   the master commit you want to bless).
+2. `JSON_OUT=baselines/staging.raw.json ./eval.sh` (full run; a full pass takes a couple
+   of minutes), then rebuild `baselines/staging.json` with a refreshed `meta` block.
+3. Open a PR — the reviewer eyeballs the score movement before it becomes the new floor.
+   Never re-baseline to make a red `compare.sh` pass without that review.
 
 ### Metrics
 - **rank** — position among all results (`MISS` = beyond `MAX_PAGES`; bump it for deep checks).
@@ -103,4 +142,11 @@ capture a baseline.
   binary) — see `docs/search-relevance-analysis.md` §12.
 - Expected lists encode human judgment; treat the scorecard as a regression signal,
   not ground truth. Extend `fixtures.json` as new query archetypes come up.
+- The failure-class fixtures (from `CAR` onward — #1342/#1344/#1345/#1346/#1348/#1367)
+  were derived from the audit docs and verified live, but several are **forward guards**:
+  the interpretation bugs the audit found no longer reproduce on current staging (e.g.
+  CAR/PET now fall to BM25 instead of resolving to Automobiles/Pets), so those fixtures
+  lock in the corrected expected sets rather than catch a live failure. Their archetype
+  labels are provisional proxies pending the same domain-expert review as the original set
+  (see `fixtures.json` `_note_failure_classes`).
 ```
