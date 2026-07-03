@@ -1489,6 +1489,13 @@ export class AppStack extends Stack {
         // relevance×coverage ranking in that area (reorder-only, no reindex).
         // resolveSearchPeopleAreaBoost reads === "on". Staging-first.
         SEARCH_PEOPLE_AREA_BOOST: env === "staging" ? "on" : "off",
+        // #1344 -- multi-word topic phrase boost. When on, a topic People query adds
+        //   match_phrase should-clauses over publicationTitles (slop 8) + areasOfInterest
+        //   (slop 4) so a multi-word specialty ("pediatric congenital heart surgery") is
+        //   not diluted by the min_should_match over-broadening. resolvePeopleTopicPhraseBoost
+        //   reads === "on"; flag-OFF => empty spread => body byte-identical (never admits,
+        //   no msm on the bool). Query-time, no reindex. Staging-first for the #1344 A/B.
+        SEARCH_PEOPLE_PHRASE_BOOST: env === "staging" ? "on" : "off",
         // #1347 -- division-shape routing. When on, a bare clinical-division-name People
         //   query (Cardiology) routes to the department template AND is scoped to that
         //   division's roster (deptDivKey filter), instead of falling to topic_template.
