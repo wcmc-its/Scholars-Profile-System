@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { buildDefinedTermJsonLd } from "@/lib/seo/jsonld";
+import { buildDefinedTermJsonLd, serializeJsonLd } from "@/lib/seo/jsonld";
 import {
   getFamily,
   getFamilyScholars,
@@ -140,7 +140,7 @@ export default async function FamilyPage({
     <main className="mx-auto max-w-[1100px] px-6 py-12">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
       />
       <Breadcrumb className="mb-4">
         <BreadcrumbList>

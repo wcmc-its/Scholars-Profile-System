@@ -30,6 +30,7 @@ import {
   type ProfilePayload,
   type ProfilePublication,
 } from "@/lib/api/profile";
+import { serializeJsonLd } from "@/lib/seo/jsonld";
 import { groupPublicationsByYear } from "@/lib/profile-pub-grouping";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import {
@@ -149,7 +150,7 @@ export async function ProfileView({ slug }: { slug: string }) {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
       />
       <main className="mx-auto grid max-w-[1100px] grid-cols-1 gap-10 px-6 py-10 md:grid-cols-[280px_1fr] md:py-12">
         {/* ============== Sidebar ============== */}
