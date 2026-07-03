@@ -15,8 +15,14 @@ import { Client } from "ldapts";
 
 export const DEFAULT_BIND_DN = "cn=reciter,ou=binds,dc=weill,dc=cornell,dc=edu";
 export const DEFAULT_SEARCH_BASE = "ou=people,dc=weill,dc=cornell,dc=edu";
+/** Doctoral-student person records. ED removed the former top-level
+ *  `ou=students` subtree (2026-07-03 probe: the directory root now exposes only
+ *  ou=People + ou=Groups); PhD students now live under the students SOR, next to
+ *  the faculty/employee/nyp SORs — one `weillCornellEduSORRecord` person entry per
+ *  student, with nested `weillCornellEduSORRoleRecord` program rows read separately
+ *  by fetchPhdStudentProgramRecords (#195). */
 export const DEFAULT_STUDENT_SEARCH_BASE =
-  "ou=students,dc=weill,dc=cornell,dc=edu";
+  "ou=students,ou=sors,dc=weill,dc=cornell,dc=edu";
 /** WOOFA-sourced System-of-Record for faculty academic appointments. One LDAP
  *  entry per appointment row with per-appointment dept, dates, status, etc.
  *  We pull from here instead of the multi-valued `title` attribute on the
@@ -26,9 +32,13 @@ export const DEFAULT_FACULTY_SOR_BASE =
   "ou=faculty,ou=sors,dc=weill,dc=cornell,dc=edu";
 export const DEFAULT_ACTIVE_FILTER =
   "(&(objectClass=eduPerson)(weillCornellEduPersonTypeCode=academic))";
-/** Phase 2 — only doctoral students (PHD degree code) feed the eligibility carve. */
+/** Phase 2 — only doctoral students (PHD degree code) feed the eligibility carve.
+ *  Pin `weillCornellEduSORRecord` so a subtree search under the students SOR
+ *  returns the person entries and NOT the nested SORRoleRecord program rows,
+ *  which carry a CWID + PHD degreeCode but no name/personType and would otherwise
+ *  project to junk scholar rows. */
 export const DEFAULT_DOCTORAL_STUDENT_FILTER =
-  "(weillCornellEduDegreeCode=PHD)";
+  "(&(objectClass=weillCornellEduSORRecord)(weillCornellEduDegreeCode=PHD))";
 /** Faculty SOR search: only currently-active appointments. Excludes
  *  faculty:expired rows so the profile sidebar shows live titles only. */
 export const DEFAULT_FACULTY_SOR_FILTER =
