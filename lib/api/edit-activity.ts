@@ -10,7 +10,15 @@
  * literal and the whole query is parameterized. The audit DB lives in a
  * separate schema; if the read role lacks SELECT there the loader throws and
  * the page fails soft (the scholar-history pattern).
+ *
+ * Recent-activity substance: unlike the per-entity history view (which
+ * deliberately renders only changed field NAMES, not the before/after blobs),
+ * this superuser-only surface surfaces the actual before -> after values per
+ * changed field ({@link buildChanges}). Long values are collapsed in the UI
+ * (`<details>`), so the length concern that motivated hiding them upstream does
+ * not apply here.
  */
+import { detailForAction, humanizeField } from "@/lib/api/scholar-audit";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 
 /** Rolling window the summary spans. */
@@ -22,6 +30,8 @@ export type EditActivityClient = Pick<PrismaClient, "$queryRaw">;
 export type PerDay = { day: string; edits: number };
 export type TopEditor = { actorCwid: string; edits: number };
 export type TopEntity = { entityType: string; entityId: string; edits: number };
+/** One changed field's before -> after, both already coerced to display strings. */
+export type FieldChange = { field: string; before: string | null; after: string | null };
 export type RecentEdit = {
   id: string;
   ts: string;
@@ -30,6 +40,10 @@ export type RecentEdit = {
   action: string;
   entityType: string;
   entityId: string;
+  /** Per-field before -> after for field-mutating actions (may be empty). */
+  changes: FieldChange[];
+  /** A compact fallback detail for non-field actions (proxy cwid, slug), else null. */
+  detail: string | null;
 };
 export type EditActivitySummary = {
   windowDays: number;
@@ -41,7 +55,8 @@ export type EditActivitySummary = {
 };
 
 // Raw row shapes as MySQL/Prisma returns them: COUNT(*) is a bigint, DATE()/
-// DATETIME come back as a Date (some drivers as a string) — both handled.
+// DATETIME come back as a Date (some drivers as a string), and the JSON columns
+// as a string (queryRaw does not auto-parse) — all handled below.
 type RawPerDay = { day: Date | string; edits: bigint | number };
 type RawEditor = { actor_cwid: string; edits: bigint | number };
 type RawEntity = {
@@ -57,6 +72,9 @@ type RawRecent = {
   action: string;
   target_entity_type: string;
   target_entity_id: string;
+  fields_changed: unknown;
+  before_values: unknown;
+  after_values: unknown;
 };
 
 /** A DATE column as YYYY-MM-DD, whether the driver hands back a Date or string. */
@@ -69,6 +87,57 @@ export function toDay(v: Date | string): string {
 function toIso(v: Date | string): string {
   const d = v instanceof Date ? v : new Date(v);
   return Number.isNaN(d.getTime()) ? String(v) : d.toISOString();
+}
+
+/** Parse a JSON column that may arrive as a string or an already-parsed value. */
+function asJson(value: unknown): unknown {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") {
+    if (value.length === 0) return null;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return value;
+}
+
+/** Coerce a stored value to a display string: string as-is, else compact JSON; empty/null -> null. */
+export function coerceValue(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "string") return v.length > 0 ? v : null;
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
+/**
+ * `fields_changed` (JSON array of keys) + the before/after JSON objects ->
+ * one {@link FieldChange} per changed field, with the field key humanized and
+ * each side coerced to a display string. Returns [] for non-field actions
+ * (where `fields_changed` is absent/empty) — those fall back to `detail`.
+ */
+export function buildChanges(
+  fieldsChanged: unknown,
+  beforeVals: unknown,
+  afterVals: unknown,
+): FieldChange[] {
+  const keys = asJson(fieldsChanged);
+  if (!Array.isArray(keys)) return [];
+  const rec = (o: unknown): Record<string, unknown> =>
+    o !== null && typeof o === "object" ? (o as Record<string, unknown>) : {};
+  const before = rec(asJson(beforeVals));
+  const after = rec(asJson(afterVals));
+  return keys
+    .filter((k): k is string => typeof k === "string" && k.length > 0)
+    .map((k) => ({
+      field: humanizeField(k),
+      before: coerceValue(before[k]),
+      after: coerceValue(after[k]),
+    }));
 }
 
 /**
@@ -100,6 +169,8 @@ export function shapeSummary(
       action: r.action,
       entityType: r.target_entity_type,
       entityId: r.target_entity_id,
+      changes: buildChanges(r.fields_changed, r.before_values, r.after_values),
+      detail: detailForAction(r.action, asJson(r.before_values), asJson(r.after_values)),
     })),
   };
 }
@@ -139,7 +210,8 @@ export async function loadEditActivitySummary(
        LIMIT 20`,
     client.$queryRaw<RawRecent[]>`
       SELECT id, ts, actor_cwid, impersonated_cwid, action,
-             target_entity_type, target_entity_id
+             target_entity_type, target_entity_id,
+             fields_changed, before_values, after_values
         FROM scholars_audit.manual_edit_audit
        WHERE ts >= ${cutoff}
        ORDER BY ts DESC, id DESC

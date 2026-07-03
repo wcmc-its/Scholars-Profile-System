@@ -33,6 +33,7 @@ export type AdminSubnavActive =
   | "administrators"
   | "methods"
   | "data-quality"
+  | "activity"
   | "cores"
   | "find-researchers"
   /** The viewer's own self-edit surface (`/edit`) — no list tab is active;
@@ -134,6 +135,18 @@ export function AdminSubnav({
             id="data-quality"
             label="Data quality"
             active={active === "data-quality"}
+          />
+        )}
+        {/* Fleet-wide edit-activity oversight (`/edit/activity`). Superuser-only
+            — rides `superuserSurfaces`, so a comms_steward / unit owner (who
+            cannot open the page) never sees the tab. No separate flag: the
+            superuser gate on the page IS the control. */}
+        {superuserSurfaces && (
+          <AdminTab
+            href="/edit/activity"
+            id="activity"
+            label="Activity"
+            active={active === "activity"}
           />
         )}
         {/* Cores review-queue index (`/edit/core`). Superuser-facing — rides
