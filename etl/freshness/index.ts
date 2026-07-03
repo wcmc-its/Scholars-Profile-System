@@ -93,7 +93,9 @@ const TRACKED: Readonly<
   // Terminal steps — run in BOTH cadences; the nightly SLA is the binding one.
   SearchIndex: { cadence: "nightly" },
   Revalidate: { cadence: "nightly" },
-  // Weekly cadence (cron 0 8 ? * SUN *)
+  // PR-7 — terminal Integrity validator; self-records via withEtlRun("Integrity").
+  Integrity: { cadence: "nightly" },
+  // Weekly cadence (cron 0 12 ? * SUN *)
   Completeness: { cadence: "weekly" },
   Headshot: { cadence: "weekly" },
   Spotlight: { cadence: "weekly" },
@@ -101,6 +103,12 @@ const TRACKED: Readonly<
   NSF: { cadence: "weekly" },
   Gates: { cadence: "weekly" },
   NihProfile: { cadence: "weekly" },
+  // PR-7 — three newly-cadenced weekly sources. Their entrypoints record an
+  // etl_run row via withEtlRun ("ReporterGrants"/"ClinicalTrials") or inline
+  // ("POPS"); all three run in BOTH envs' weekly cadence (not env-scoped).
+  POPS: { cadence: "weekly" },
+  ReporterGrants: { cadence: "weekly" },
+  ClinicalTrials: { cadence: "weekly" },
   // Annual cadence (cron 0 9 1 7 ? *)
   Hierarchy: { cadence: "annual" },
 };

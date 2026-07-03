@@ -46,11 +46,25 @@ export interface EtlStackProps extends StackProps {
  * `$.startFrom` token operators pass to skip ahead); `npmScript` is the
  * `npm run` script the container executes; `external` marks sources that
  * need a per-source secret from SecretsStack.
+ *
+ * `tier` classifies how a failure of this step is handled (reliability-audit
+ * PR-7). Only the nightly/weekly cadence steps set it:
+ *   - `"abort"`   — failure PAGES (publishes to `etl-page-<env>`) and STOPS the
+ *                   chain (`.next(Fail)`). For the spine (Ed/Reciter/Dynamodb/
+ *                   search:index) + the terminal Integrity validator: a
+ *                   stale-but-coherent site beats a broken one.
+ *   - `"continue"`— failure WARNS (publishes to the existing `etl-failures-<env>`)
+ *                   and PROCEEDS to the next step (`.next(successor)`). For the
+ *                   enrichers, whose absence degrades gracefully.
+ *   - omitted     — legacy: failure warns (`etl-failures-<env>`) and stops the
+ *                   chain. Kept for the single-step / non-cadence machines
+ *                   (annual, heartbeat) whose one failure mode should not page.
  */
 interface StepSpec {
   readonly id: string;
   readonly npmScript: string;
   readonly external: boolean;
+  readonly tier?: "abort" | "continue";
 }
 
 /**
@@ -82,7 +96,7 @@ interface StepSpec {
  *   Lambda variant is not introduced here; the metric-based alarms cover
  *   the same failure modes with fewer moving parts.
  * - **D7.** Cadences: nightly `cron(0 7 * * ? *)`, weekly
- *   `cron(0 8 ? * SUN *)`, annual `cron(0 9 1 7 ? *)` — all UTC.
+ *   `cron(0 12 ? * SUN *)`, annual `cron(0 9 1 7 ? *)` — all UTC.
  *
  * Cross-stack handoff: this stack consumes the AppStack ECS cluster and
  * the dedicated ETL ECR repo via constructor props (CDK auto-wires the
@@ -95,6 +109,14 @@ interface StepSpec {
 export class EtlStack extends Stack {
   /** SNS topic every failure / cadence alarm publishes to (B23 wires PagerDuty). */
   public readonly failureTopic: sns.Topic;
+  /**
+   * P1 page topic for abort-tier step failures (reliability-audit PR-7). The
+   * on-call relay routes any topic that is neither `sps-warn-*` nor
+   * `etl-failures-*` to the page channel, so this needs no relay change; the
+   * subscription is wired in ObservabilityStack (same cycle-avoidance pattern
+   * as `failureTopic`).
+   */
+  public readonly pageTopic: sns.Topic;
   /** Fargate task family every state-machine step launches. */
   public readonly etlTaskDefinition: ecs.FargateTaskDefinition;
   /** Three cadence state machines: nightly, weekly, annual. */
@@ -658,11 +680,39 @@ export class EtlStack extends Stack {
       new iam.ServicePrincipal("states.amazonaws.com"),
     );
 
+    // PR-7 — P1 page topic. Abort-tier step failures publish here (vs the
+    // warn-tier etl-failures topic); the relay's severityForRecord defaults any
+    // non-warn topic to the page channel, so no lambda change is needed.
+    this.pageTopic = new sns.Topic(this, "EtlPageTopic", {
+      topicName: `etl-page-${env}`,
+      displayName: `SPS ETL page (${env})`,
+    });
+    this.pageTopic.grantPublish(new iam.ServicePrincipal("states.amazonaws.com"));
+
     // ------------------------------------------------------------------
-    // Helper -- build one step (an EcsRunTask) plus its retry/catch.
-    // Returns a Chain so the caller can wire it inline.
+    // Helper -- build a step's SNS-notify state. The topic depends on the
+    // tier (page vs failures); buildStateMachine chains .next(Fail|successor)
+    // after it. Construct id `Notify${id}` is stable across the refactor.
     // ------------------------------------------------------------------
-    const buildStep = (spec: StepSpec): sfn.IChainable => {
+    const buildNotify = (spec: StepSpec, topic: sns.Topic): tasks.SnsPublish =>
+      new tasks.SnsPublish(this, `Notify${spec.id}`, {
+        topic,
+        subject: `SPS ETL ${env} -- ${spec.id} failed`,
+        message: sfn.TaskInput.fromObject({
+          env,
+          step: spec.id,
+          stateMachine: sfn.JsonPath.stateMachineName,
+          execution: sfn.JsonPath.executionName,
+          error: sfn.JsonPath.stringAt("$.error"),
+        }),
+      });
+
+    // ------------------------------------------------------------------
+    // Helper -- build one step's EcsRunTask + retry. The Catch is wired in
+    // buildStateMachine (a continue-tier step routes failure to its successor,
+    // which only the chaining loop knows -- PR-7).
+    // ------------------------------------------------------------------
+    const buildStep = (spec: StepSpec): sfn.TaskStateBase => {
       const task = new tasks.EcsRunTask(this, `Task${spec.id}`, {
         integrationPattern: sfn.IntegrationPattern.RUN_JOB,
         cluster: ecsCluster,
@@ -680,31 +730,18 @@ export class EtlStack extends Stack {
             command: ["npm", "run", spec.npmScript],
           },
         ],
-        // .sync polls every 5 s; 24 h cap is well past the longest
-        // observed ETL (reciter ~12 min). Failure of the underlying ECS
-        // task surfaces as States.TaskFailed for the Retry/Catch block.
-        taskTimeout: sfn.Timeout.duration(Duration.hours(24)),
+        // .sync polls every 5 s. Per-attempt cap cut 24h -> 4h (PR-7): the
+        // longest observed step is ~12 min and search:index worst case is well
+        // under 1h, so 4h bounds a pathological hang while keeping a wedged
+        // nightly from colliding with the (now noon) Sunday weekly. The
+        // machine-level 24h timeout (buildStateMachine) is the outer backstop.
+        taskTimeout: sfn.Timeout.duration(Duration.hours(4)),
       });
       task.addRetry({
         errors: ["States.TaskFailed", "States.Timeout"],
         maxAttempts: 2,
         backoffRate: 2,
         interval: Duration.seconds(30),
-      });
-      const onFailure = new tasks.SnsPublish(this, `Notify${spec.id}`, {
-        topic: this.failureTopic,
-        subject: `SPS ETL ${env} -- ${spec.id} failed`,
-        message: sfn.TaskInput.fromObject({
-          env,
-          step: spec.id,
-          stateMachine: sfn.JsonPath.stateMachineName,
-          execution: sfn.JsonPath.executionName,
-          error: sfn.JsonPath.stringAt("$.error"),
-        }),
-      }).next(new sfn.Fail(this, `Fail${spec.id}`, { cause: `${spec.id} failed` }));
-      task.addCatch(onFailure, {
-        errors: ["States.ALL"],
-        resultPath: "$.error",
       });
       return task;
     };
@@ -725,21 +762,52 @@ export class EtlStack extends Stack {
       if (steps.length === 0) {
         throw new Error("state machine requires at least one step");
       }
-      // Build each step task once; the Choice fans into the same task
-      // graph by chaining task[i] -> task[i+1] -> ... -> tail. Wiring the
-      // success transitions mutates the underlying State -- the Chain
-      // value itself is discarded.
+      // Build each step task once, then wire BOTH transitions per step: the
+      // success edge to its successor (task[i] -> task[i+1] -> ... -> tail) and
+      // the tiered failure edge (PR-7). The Choice below fans into this same
+      // graph, so entering mid-chain still walks the rest of the sequence.
       const stepTasks = steps.map((s) => buildStep(s));
       const startStates = stepTasks as sfn.TaskStateBase[];
-      for (let i = 0; i < startStates.length - 1; i++) {
-        startStates[i].next(startStates[i + 1]);
+      for (let i = 0; i < steps.length; i++) {
+        const spec = steps[i];
+        const task = startStates[i];
+        // Successor: the next step, else the tail (annual's approval gate),
+        // else nothing (last step of a tail-less machine).
+        const successor: sfn.IChainable | undefined =
+          i < startStates.length - 1 ? startStates[i + 1] : tail;
+        if (successor !== undefined) {
+          task.next(successor);
+        }
+        // Failure wiring by tier (StepSpec.tier):
+        //   continue -> warn (etl-failures) then CONTINUE to the successor;
+        //   abort    -> page (etl-page) then STOP (Fail);
+        //   omitted  -> warn (etl-failures) then STOP (Fail)  [legacy].
+        // resultPath keeps the error payload out of `$` so it can flow into a
+        // continue-successor harmlessly (steps use static container overrides,
+        // never state input; the startFrom Choice runs once at the top).
+        if (spec.tier === "continue") {
+          if (successor === undefined) {
+            throw new Error(
+              `continue-tier step ${spec.id} has no successor to continue to`,
+            );
+          }
+          task.addCatch(buildNotify(spec, this.failureTopic).next(successor), {
+            errors: ["States.ALL"],
+            resultPath: "$.error",
+          });
+        } else {
+          const topic = spec.tier === "abort" ? this.pageTopic : this.failureTopic;
+          task.addCatch(
+            buildNotify(spec, topic).next(
+              new sfn.Fail(this, `Fail${spec.id}`, { cause: `${spec.id} failed` }),
+            ),
+            { errors: ["States.ALL"], resultPath: "$.error" },
+          );
+        }
       }
-      if (tail !== undefined) {
-        startStates[startStates.length - 1].next(tail);
-      }
-      // Top-level Choice. Each branch enters at a different stepTask;
-      // because each stepTask was already chained to its successor above,
-      // entering mid-chain still walks the rest of the sequence.
+      // Top-level Choice. Each branch enters at a different stepTask; because
+      // each stepTask was already chained to its successor above, entering
+      // mid-chain still walks the rest of the sequence.
       const choice = new sfn.Choice(this, `${smId}StartFromChoice`);
       for (let i = 0; i < steps.length; i++) {
         choice.when(
@@ -748,7 +816,7 @@ export class EtlStack extends Stack {
           // `States.Runtime: Invalid path '$.startFrom'` when a Choice tests
           // a path that is absent from the input. isPresent makes the And
           // short-circuit to false for the missing-key case, so it falls
-          // through to .otherwise(step[0]) instead of failing the execution.
+          // through to the strict-fail / otherwise branches below.
           sfn.Condition.and(
             sfn.Condition.isPresent("$.startFrom"),
             sfn.Condition.stringEquals("$.startFrom", steps[i].id),
@@ -756,6 +824,18 @@ export class EtlStack extends Stack {
           stepTasks[i],
         );
       }
+      // Strict startFrom (PR-7): a PRESENT but unmatched startFrom is an
+      // operator typo. Fail loudly instead of silently running the whole chain
+      // via otherwise. Ordered AFTER the per-step matches (Choice conditions
+      // evaluate in insertion order) and BEFORE otherwise, which now handles
+      // only the absent-key (scheduled `{}`) case.
+      choice.when(
+        sfn.Condition.isPresent("$.startFrom"),
+        new sfn.Fail(this, `${smId}UnknownStartFrom`, {
+          error: "UnknownStartFrom",
+          cause: "unknown startFrom step id",
+        }),
+      );
       choice.otherwise(stepTasks[0] as sfn.State);
       const logGroup = new logs.LogGroup(this, `${smId}LogGroup`, {
         logGroupName: `/aws/states/${cadenceName}-${env}`,
@@ -798,13 +878,18 @@ export class EtlStack extends Stack {
     // (vivo-redirect is a manual cutover-prep tool, never a cadence step.)
     // ------------------------------------------------------------------
     const nightlySteps: ReadonlyArray<StepSpec> = [
-      { id: "Ed", npmScript: "etl:ed", external: true },
-      { id: "Reciter", npmScript: "etl:reciter", external: true },
+      { id: "Ed", npmScript: "etl:ed", external: true, tier: "abort" },
+      { id: "Reciter", npmScript: "etl:reciter", external: true, tier: "abort" },
       // PubMed competing-interest statements — same WCM-ReciterDB path as Reciter
       // (reads reporting_conflicts), so external:true and placed right after it.
       // Seeds publication_conflict_statement for the COI-gap source below.
-      { id: "ReciterCoiStatements", npmScript: "etl:reciter:coi-statements", external: true },
-      { id: "Asms", npmScript: "etl:asms", external: true },
+      {
+        id: "ReciterCoiStatements",
+        npmScript: "etl:reciter:coi-statements",
+        external: true,
+        tier: "continue",
+      },
+      { id: "Asms", npmScript: "etl:asms", external: true, tier: "continue" },
       // etl:infoed is EXCLUDED from the STAGING cadence (Paul, 2026-06-22).
       // InfoEd is at 10.20.91.8, which overlaps the Sps VPC's own 10.20/16
       // CIDR, so once the cadence relocates + peers, scholars-dev routes
@@ -815,34 +900,39 @@ export class EtlStack extends Stack {
       // once WCM re-IPs / NATs InfoEd off 10.20 (docs/etl-vpc-migration-handoff.md).
       ...(env === "staging"
         ? []
-        : [{ id: "Infoed", npmScript: "etl:infoed", external: true } as StepSpec]),
-      { id: "Coi", npmScript: "etl:coi", external: true },
+        : [{ id: "Infoed", npmScript: "etl:infoed", external: true, tier: "continue" } as StepSpec]),
+      { id: "Coi", npmScript: "etl:coi", external: true, tier: "continue" },
       // COI-gap recommendations — reads SPS-DB only (disclosed COI from the Coi
       // step + the PubMed statements above), so external:false. Computes whatever
       // its inputs hold; zero candidates until the WCM statement path is flowing.
-      { id: "CoiGap", npmScript: "etl:coi-gap", external: false },
+      { id: "CoiGap", npmScript: "etl:coi-gap", external: false, tier: "continue" },
       // #608 mentoring source — moved from the weekly machine to nightly (operator
       // request) so grad-school mentoring chips refresh within a day. Reads its own
       // MSSQL credential (etl/jenzabar), external:true. Chips are ISR-only (not
       // indexed), so it only needs to precede the closing revalidate.
-      { id: "JenzabarNightly", npmScript: "etl:jenzabar", external: true },
+      { id: "JenzabarNightly", npmScript: "etl:jenzabar", external: true, tier: "continue" },
       // After the source ETLs (so a freshly matched publication is enriched the
       // same night) and before search:index (so the rebuilt index carries the
       // day's scores).
-      { id: "Dynamodb", npmScript: "etl:dynamodb", external: true },
+      { id: "Dynamodb", npmScript: "etl:dynamodb", external: true, tier: "abort" },
       // #918 — populate Scholar.orcid from the WCM Identity table (DynamoDB
       // Scan, external:true). After Dynamodb (scholars exist; both are DynamoDB
       // scans); ORCID feeds the profile JSON-LD `sameAs`, not the search index,
       // so there's no SearchIndex ordering dependency. Never NULLs an existing
       // orcid — Identity may lag ED — so re-running nightly only self-heals.
-      { id: "Identity", npmScript: "etl:identity", external: true },
+      { id: "Identity", npmScript: "etl:identity", external: true, tier: "continue" },
       // #794 — A2 canonical tools taxonomy → scholar_tool. Runs after Dynamodb
       // (whose scholar projection the cwid FK targets) and before SearchIndex.
       // external:true — reads s3://wcmc-reciterai-artifacts/tools/ via the task
       // role (no per-source secret). A no-op while SCHOLAR_TOOL_SOURCE=ddb;
       // the sole scholar_tool writer once flipped to s3.
-      { id: "Tools", npmScript: "etl:scholar-tool", external: true },
-      { id: "MeshCoverageNightly", npmScript: "etl:mesh-coverage", external: false },
+      { id: "Tools", npmScript: "etl:scholar-tool", external: true, tier: "continue" },
+      {
+        id: "MeshCoverageNightly",
+        npmScript: "etl:mesh-coverage",
+        external: false,
+        tier: "continue",
+      },
       // #1258 — curated + derived descriptor→topic anchors. SPS-DB only (reads
       // publication.mesh_terms × publication_topic), so external:false. Runs after
       // MeshCoverage (mesh_terms fresh) and Dynamodb (publication_topic fresh).
@@ -851,7 +941,14 @@ export class EtlStack extends Stack {
       // suppresses *derived* rows, not curated), bypassing the soak. Add to prod
       // once staging is verified — mirror of the infoed exclusion above.
       ...(env === "staging"
-        ? [{ id: "MeshAnchorNightly", npmScript: "etl:mesh-anchors", external: false } as StepSpec]
+        ? [
+            {
+              id: "MeshAnchorNightly",
+              npmScript: "etl:mesh-anchors",
+              external: false,
+              tier: "continue",
+            } as StepSpec,
+          ]
         : []),
       // #604 -- stamp publication_type='Retraction' on PubMed-retracted originals
       // ReCiter hasn't re-fetched yet. MUST run after Reciter (whose upsert
@@ -860,19 +957,24 @@ export class EtlStack extends Stack {
       // un-retraction self-heals: Reciter restores the real type, then this step
       // simply no longer re-stamps the PMID. external:false -- it reads public
       // PubMed E-utilities (NAT egress), no per-source WCM secret.
-      { id: "PubMedRetractions", npmScript: "etl:pubmed-retractions", external: false },
-      { id: "SearchIndexNightly", npmScript: "search:index", external: false },
-      { id: "RevalidateNightly", npmScript: "etl:revalidate", external: false },
+      {
+        id: "PubMedRetractions",
+        npmScript: "etl:pubmed-retractions",
+        external: false,
+        tier: "continue",
+      },
+      { id: "SearchIndexNightly", npmScript: "search:index", external: false, tier: "abort" },
+      { id: "RevalidateNightly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Reliability-audit PR-5 — terminal volume gate. Reads etl_run
       // rowsProcessed history, spine-table floors, and live OpenSearch alias
       // doc-counts; a violation exits 1 -> Catch -> SNS so an implausible end
       // state pages instead of silently serving. Runs LAST so it validates
       // what the night actually published. external:false — SPS DB + in-VPC
       // OpenSearch only.
-      { id: "IntegrityNightly", npmScript: "etl:integrity", external: false },
+      { id: "IntegrityNightly", npmScript: "etl:integrity", external: false, tier: "abort" },
     ];
     const weeklySteps: ReadonlyArray<StepSpec> = [
-      { id: "Completeness", npmScript: "etl:completeness", external: false },
+      { id: "Completeness", npmScript: "etl:completeness", external: false, tier: "continue" },
       // Data Quality dashboard headshot signal (docs/data-quality-dashboard-spec.md).
       // Probes the PUBLIC WCM directory (`identityImageEndpoint`, which 404s when no
       // photo exists) per active scholar and persists has_headshot — the app can't
@@ -880,8 +982,8 @@ export class EtlStack extends Stack {
       // Reads the directory over NAT egress with no credential (like etl:nsf), so
       // external:false; mutates SPS-DB only. Weekly cadence is plenty for a slow-
       // changing signal; incremental by default (re-probes never-checked + >30d-stale).
-      { id: "HeadshotPresence", npmScript: "etl:headshot", external: false },
-      { id: "Spotlight", npmScript: "etl:spotlight", external: true },
+      { id: "HeadshotPresence", npmScript: "etl:headshot", external: false, tier: "continue" },
+      { id: "Spotlight", npmScript: "etl:spotlight", external: true, tier: "continue" },
       // Grant-enrichment sources (#608). They key off the `grant` table that
       // etl:infoed refreshes nightly; neither needs 24h freshness, so they batch
       // here weekly instead of weighting the nightly critical path. RePORTER +
@@ -892,19 +994,36 @@ export class EtlStack extends Stack {
       // ReciterDB (etl/reciter secret) and NSF hits the public NSF Awards API
       // (no credential -- NAT egress only, so external: false). (Jenzabar moved to
       // the nightly machine so mentoring chips refresh daily.)
-      { id: "ReporterWeekly", npmScript: "etl:reporter", external: true },
-      { id: "NsfWeekly", npmScript: "etl:nsf", external: false },
+      { id: "ReporterWeekly", npmScript: "etl:reporter", external: true, tier: "continue" },
+      { id: "NsfWeekly", npmScript: "etl:nsf", external: false, tier: "continue" },
       // #658 -- the remaining grant/PI enrichers, completing the set. Both read
       // PUBLIC sources (Gates BMGF CSV; NIH RePORTER API) over NAT egress with no
       // credential -> external: false, no SecretsStack wiring. Gates (an NSF twin:
       // 90-day TTL + source-precedence guard) precedes search:index so its abstracts
       // are indexed; nih-profile feeds profile/grant deep-links, not the index.
-      { id: "GatesWeekly", npmScript: "etl:gates", external: false },
-      { id: "NihProfileWeekly", npmScript: "etl:nih-profile", external: false },
-      { id: "SearchIndexWeekly", npmScript: "search:index", external: false },
-      { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false },
+      { id: "GatesWeekly", npmScript: "etl:gates", external: false, tier: "continue" },
+      { id: "NihProfileWeekly", npmScript: "etl:nih-profile", external: false, tier: "continue" },
+      // PR-7 — three ready-but-uncadenced sources, now scheduled weekly ahead of
+      // search:index so their fresh rows are indexed. POPS reads the public
+      // directory (no secret); reporter-grants + clinical-trials read ReciterDB
+      // (external). Their entrypoints record etl_run via withEtlRun (freshness).
+      { id: "PopsWeekly", npmScript: "etl:pops", external: false, tier: "continue" },
+      {
+        id: "ReporterGrantsWeekly",
+        npmScript: "etl:reporter-grants",
+        external: true,
+        tier: "continue",
+      },
+      {
+        id: "ClinicalTrialsWeekly",
+        npmScript: "etl:clinical-trials",
+        external: true,
+        tier: "continue",
+      },
+      { id: "SearchIndexWeekly", npmScript: "search:index", external: false, tier: "abort" },
+      { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false, tier: "continue" },
       // Terminal volume gate — see IntegrityNightly above.
-      { id: "IntegrityWeekly", npmScript: "etl:integrity", external: false },
+      { id: "IntegrityWeekly", npmScript: "etl:integrity", external: false, tier: "abort" },
     ];
     const annualSteps: ReadonlyArray<StepSpec> = [
       { id: "Hierarchy", npmScript: "etl:hierarchy", external: true },
@@ -1015,7 +1134,10 @@ export class EtlStack extends Stack {
     buildSchedule(
       "WeeklyScheduleRule",
       "weekly",
-      events.Schedule.expression("cron(0 8 ? * SUN *)"),
+      // PR-7 — moved 08:00 -> 12:00 UTC. With the per-attempt task timeout cut
+      // to 4h, this 5h gap after the 07:00 nightly makes a nightly/weekly
+      // collision (both rebuild the same tables) impossible without a wait-loop.
+      events.Schedule.expression("cron(0 12 ? * SUN *)"),
       this.weeklyStateMachine,
     );
     buildSchedule(
@@ -1025,7 +1147,7 @@ export class EtlStack extends Stack {
       this.annualStateMachine,
     );
     // #595 — heartbeat runs daily at 13:00 UTC, ~6h after the nightly window
-    // (07:00) and after the Sunday weekly (08:00), so a failed or missed
+    // (07:00) and after the Sunday weekly (12:00), so a failed or missed
     // overnight cadence shows up as staleness the same day. Gated on the same
     // `etlSchedulesEnabled` flag as the cadences: where cadences are disabled
     // (prod pre-launch) there is no fresh data to expect, so the heartbeat
@@ -2190,7 +2312,7 @@ export class EtlStack extends Stack {
       );
 
       // Weekly, Sunday 05:00 UTC — a quiet slot ahead of the 06:00 curated
-      // backup / 07:00 nightly / 08:00 weekly cadences. Email-visibility release
+      // backup / 07:00 nightly / 12:00 weekly cadences. Email-visibility release
       // codes change slowly, so weekly is ample. enabled:true — the whole block
       // is already creation-gated on the flag, so reaching here means this env
       // should run it.
@@ -2259,6 +2381,10 @@ export class EtlStack extends Stack {
     new CfnOutput(this, "EtlFailureTopicArn", {
       value: this.failureTopic.topicArn,
       description: "SPS ETL failure SNS topic ARN (B23 subscribes PagerDuty).",
+    });
+    new CfnOutput(this, "EtlPageTopicArn", {
+      value: this.pageTopic.topicArn,
+      description: "SPS ETL P1 page SNS topic ARN (abort-tier step failures; PR-7).",
     });
     new CfnOutput(this, "EtlTaskFamily", {
       value: this.etlTaskDefinition.family,

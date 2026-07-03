@@ -211,11 +211,11 @@ describe("SpsObservabilityStack", () => {
     });
 
     it("notify topic has exactly one email subscription to the operator", () => {
-      // Four AWS::SNS::Subscription resources total: email on notify topic,
+      // Five AWS::SNS::Subscription resources total: email on notify topic,
       // Lambda on page topic (the B27 relay), Lambda on the new warn topic
-      // (relay routes it to the P2 channel), and (#595) Lambda on the
-      // cross-stack etl-failures topic (also the relay).
-      template.resourceCountIs("AWS::SNS::Subscription", 4);
+      // (relay routes it to the P2 channel), (#595) Lambda on the cross-stack
+      // etl-failures topic, and (PR-7) Lambda on the cross-stack etl-page topic.
+      template.resourceCountIs("AWS::SNS::Subscription", 5);
       template.hasResourceProperties("AWS::SNS::Subscription", {
         Protocol: "email",
         Endpoint: "paa2013@med.cornell.edu",
@@ -838,10 +838,10 @@ describe("SpsObservabilityStack", () => {
     });
 
     it("page topic carries the B27 Lambda subscription; notify topic has the operator email", () => {
-      // Four AWS::SNS::Subscription resources: email on notify, lambda on
-      // page, lambda on the new warn topic, and (#595) lambda on the
-      // cross-stack etl-failures topic.
-      template.resourceCountIs("AWS::SNS::Subscription", 4);
+      // Five AWS::SNS::Subscription resources: email on notify, lambda on
+      // page, lambda on the new warn topic, (#595) lambda on the cross-stack
+      // etl-failures topic, and (PR-7) lambda on the cross-stack etl-page topic.
+      template.resourceCountIs("AWS::SNS::Subscription", 5);
       template.hasResourceProperties("AWS::SNS::Subscription", {
         Protocol: "email",
         Endpoint: "paa2013@med.cornell.edu",

@@ -301,6 +301,21 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::SNS::Subscription",
     },
+    "EtlPageRelaySubscription284818E2": {
+      "Properties": {
+        "Endpoint": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Protocol": "lambda",
+        "TopicArn": {
+          "Fn::ImportValue": "Sps-Etl-prod:ExportsOutputRefEtlPageTopic608308D6173DA1E0",
+        },
+      },
+      "Type": "AWS::SNS::Subscription",
+    },
     "MonthlyBudget": {
       "Properties": {
         "Budget": {
@@ -532,6 +547,22 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         "Principal": "sns.amazonaws.com",
         "SourceArn": {
           "Fn::ImportValue": "Sps-Etl-prod:ExportsOutputRefEtlFailureTopic8361D0D072A9D80D",
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "OncallRelayFunctionAllowEtlPageTopicInvoke02FC50C1": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Principal": "sns.amazonaws.com",
+        "SourceArn": {
+          "Fn::ImportValue": "Sps-Etl-prod:ExportsOutputRefEtlPageTopic608308D6173DA1E0",
         },
       },
       "Type": "AWS::Lambda::Permission",
@@ -1338,6 +1369,21 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::SNS::Subscription",
     },
+    "EtlPageRelaySubscription284818E2": {
+      "Properties": {
+        "Endpoint": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Protocol": "lambda",
+        "TopicArn": {
+          "Fn::ImportValue": "Sps-Etl-staging:ExportsOutputRefEtlPageTopic608308D6173DA1E0",
+        },
+      },
+      "Type": "AWS::SNS::Subscription",
+    },
     "NotifyTopic5FFA0016": {
       "Properties": {
         "DisplayName": "SPS staging notifications (notify)",
@@ -1468,6 +1514,22 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "Principal": "sns.amazonaws.com",
         "SourceArn": {
           "Fn::ImportValue": "Sps-Etl-staging:ExportsOutputRefEtlFailureTopic8361D0D072A9D80D",
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "OncallRelayFunctionAllowEtlPageTopicInvoke02FC50C1": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Principal": "sns.amazonaws.com",
+        "SourceArn": {
+          "Fn::ImportValue": "Sps-Etl-staging:ExportsOutputRefEtlPageTopic608308D6173DA1E0",
         },
       },
       "Type": "AWS::Lambda::Permission",

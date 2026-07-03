@@ -40,7 +40,7 @@ const EC2_DESCRIPTION_ALLOWED = /^[a-zA-Z0-9. _\-:/()#,@[\]+=&;{}!$*]+$/;
 // EventBridge cron expressions confirmed in plan D7.
 const EXPECTED_CRONS: Readonly<Record<string, string>> = {
   nightly: "cron(0 7 * * ? *)",
-  weekly: "cron(0 8 ? * SUN *)",
+  weekly: "cron(0 12 ? * SUN *)",
   annual: "cron(0 9 1 7 ? *)",
 };
 
@@ -188,13 +188,16 @@ describe("EtlStack", () => {
     });
 
     describe("Resource counts (B08 / B20 acceptance)", () => {
-      it("creates six state machines (3 cadence + #595 heartbeat + #393 reconciler + #353 cdn reconciler), six EventBridge rules, one SNS topic", () => {
+      it("creates six state machines (3 cadence + #595 heartbeat + #393 reconciler + #353 cdn reconciler), six EventBridge rules, two SNS topics", () => {
         // 3 cadence machines + the #595 heartbeat + the #393 reconciler +
         // the #353 cdn reconciler (PR-2).
         template.resourceCountIs("AWS::StepFunctions::StateMachine", 6);
         template.resourceCountIs("AWS::Events::Rule", 6);
-        // The heartbeat + both reconcilers reuse the cadence failure topic -- still one.
-        template.resourceCountIs("AWS::SNS::Topic", 1);
+        // The heartbeat + both reconcilers reuse the cadence failure topic; PR-7
+        // adds the etl-page P1 topic, so two total: etl-failures + etl-page.
+        template.resourceCountIs("AWS::SNS::Topic", 2);
+        template.hasResourceProperties("AWS::SNS::Topic", { TopicName: "etl-failures-prod" });
+        template.hasResourceProperties("AWS::SNS::Topic", { TopicName: "etl-page-prod" });
       });
 
       it("creates eleven CloudWatch alarms (4 status + nightly/weekly/heartbeat cadence + reconciler status/cadence + cdn reconciler status/cadence)", () => {

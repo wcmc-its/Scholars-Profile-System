@@ -27,6 +27,7 @@
 import { db } from "../../lib/db";
 import { assertSourceVolume } from "../../lib/etl-guard";
 import { closeReciterPool } from "@/lib/sources/reciterdb";
+import { withEtlRun } from "@/lib/etl-run";
 import { buildTrialsAndLinks, loadScholars, readReciterdbTables, replaceAll } from "./shared";
 
 async function main() {
@@ -83,7 +84,11 @@ async function main() {
   console.log(`\nDone in ${((Date.now() - start) / 1000).toFixed(1)}s.`);
 }
 
-main().catch((e) => {
+// Records an etl_run row (source "ClinicalTrials", distinct from the bridge
+// import's "ClinicalTrials-Import") so the freshness heartbeat tracks this
+// weekly step (PR-7). main() disconnects db.write in its own finally; the
+// trailing etl_run update reconnects lazily, matching etl/reporter (#1426).
+withEtlRun("ClinicalTrials", main).catch((e) => {
   console.error(e);
   process.exit(1);
 });
