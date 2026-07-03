@@ -1,7 +1,7 @@
 # `/search` People concept-search — performance findings
 
 **Scope:** why broad-concept People searches saturated under concurrency, what we changed, what the numbers say, and where the remaining ceiling is.
-**Last updated:** 2026-06-26 (added §7 note on the shared Aurora-side taxonomy bottleneck).
+**Last updated:** 2026-07-03 (§7 addendum: taxonomy cache built #1420, pubs/funding mesh-only #1421, `SEARCH_PEOPLE_REASON_FROM_DOC` on both envs #1417). 2026-06-26: added §7 note on the shared Aurora-side taxonomy bottleneck.
 
 > TL;DR — The app-side query load is now minimal (one people-index query per concept search; the per-request publications aggregation is gone). On staging the optimization improved latency but did **not** clear the ~10-concurrent target — because staging OpenSearch is a single burstable `t3.medium` node and hits a **node-capacity wall at ~5 concurrent**, not because of the code. Production is a far larger cluster (`m6g.large.search ×2`, Multi-AZ). The remaining lever is cluster scale, not more app code.
 
@@ -64,6 +64,13 @@ Single-query latency improved markedly (C=1: 2.27 → 1.32 s). But C=10 stayed ~
 - **Remaining lever: cluster scale.** If a **representative** cluster still saturates at C=10 after the 1-query fix, the fix is more/bigger data nodes — not more application changes.
 - **A second, Aurora-side bottleneck (found 2026-06-26).** A Publications-tab C-ramp isolated `matchQueryToTaxonomy` — the query→taxonomy resolver shared by **both** tabs — as the dominant cost under concurrency: ~8.6 s at C=5 vs ~1.3 s for the OpenSearch search+aggs, because it runs two `publicationTopic.groupBy` queries **per matched candidate** (`getCounts`), uncached across requests. That is an **Aurora** ceiling independent of the OpenSearch one above, and the People path pays it too. An app-CPU bump did **not** move it (proof it's DB I/O, not CPU); the lever is a cross-request taxonomy cache. Full detail: [`performance-baseline.md` § Search performance findings (2026-06-26)](./performance-baseline.md).
 - **What's unverified:** the C=10 number on the representative (prod-sized) cluster. Cheapest ways to get it without a production release: (a) re-run the staging load test now to quantify #1285 on the `t3.medium`; (b) temporarily resize staging to `m6g.large` and load-test the optimized path; (c) fold into the next planned prod release (prod is ~350 commits behind; deploying it is a large multi-feature release, and exercising the *fixed* path on prod additionally needs a prod people-reindex for `meshSubtreeCounts` + flipping `SEARCH_PEOPLE_REASON_FROM_DOC` on for prod).
+
+**Update 2026-07-03 — the taxonomy lever above was built and the prod flag flipped** (full search/faceting audit, tracker **#1415**; see [`performance-baseline.md` § Search performance findings, item 4](./performance-baseline.md)):
+
+- **The cross-request taxonomy cache is built.** `getCounts` is now SWR-cached cross-request (`lib/api/search-taxonomy.ts`, #1420), so the per-candidate `groupBy` load called out above no longer recurs per request.
+- **The publications/funding branches skip the resolver's Prisma enrichment entirely** (#1421) — the People path still runs the full resolver, but the pub/funding tabs never pay it, and staging `Server-Timing` for this query class now reads `taxonomy;dur=0`.
+- **`SEARCH_PEOPLE_REASON_FROM_DOC` is now ON in both envs** (#1417; verified in the live prod task-def `:21`), so the fixed doc-reason path runs in prod, not just staging.
+- **The only remaining prod caveat is the pending prod image roll + a prod people-reindex** to verify `meshSubtreeCounts`. Prod is no longer ~350 commits behind — it took a release 2026-07-01.
 
 ## 8. Reusable load-test tooling
 

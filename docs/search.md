@@ -92,6 +92,8 @@ Every facet axis is **multi-select**, with `OR` within an axis and `AND` across 
 
 This pattern is used identically in `searchPeople`, `searchPublications`, and `searchFunding`.
 
+Under `SEARCH_PUB_FACET_SPLIT` (staging-on since 2026-07-02, #1423), the publications tab no longer derives its facet counts from the single hits+aggregations request above. Instead, the facet counts come from a **second, separate OpenSearch aggregation request** (`size: 0`, `post_filter` omitted, unscored query) issued in parallel with the hits request and cached with a ~5-minute TTL. The excluding-self semantics are unchanged, but because the agg side is cached page- and sort-invariantly, the counts can lag the filter-relevant data by up to 5 minutes and degrade to empty facets on timeout by design.
+
 ### Per-tab facets
 
 | Tab | Facets |
