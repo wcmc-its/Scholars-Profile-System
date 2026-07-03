@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CRISPR gene editing — method family · Scholars</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.7.0/dist/tabler-icons.min.css">
+<style>
+/* --------------------------------------------------------------------------
+   Design-system tokens (Tabler core), reused verbatim by the family-row
+   recipe in docs/mockups/methods-lens/two-lens-subjects-vs-methods.html.
+   --color-accent-slate is the app's Top-scholars hover accent (globals.css).
+   -------------------------------------------------------------------------- */
+:root{
+  --color-background-primary:#ffffff;
+  --color-background-secondary:#f8fafc;
+  --color-background-info:#e6f2fd;
+
+  --color-text-primary:#1d273b;
+  --color-text-secondary:#4b5563;
+  --color-text-tertiary:#667382;
+  --color-text-info:#1971c2;
+
+  --color-border-secondary:#dadfe5;
+  --color-border-tertiary:#e6e7e9;
+
+  --color-accent-slate:#2c4f6e;
+
+  --border-radius-md:6px;
+  --border-radius-lg:8px;
+
+  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --font-sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  font-family:var(--font-sans);
+  color:var(--color-text-primary);
+  background:var(--color-background-secondary);
+  -webkit-font-smoothing:antialiased;
+  line-height:1.45;
+}
+.page{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+
+/* ---- breadcrumb ---- */
+.crumbs{font-size:13px;color:var(--color-text-tertiary);margin-bottom:14px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.crumbs a{color:var(--color-accent-slate);text-decoration:none}
+.crumbs a:hover{text-decoration:underline}
+.crumbs i{font-size:14px;color:var(--color-text-tertiary)}
+.crumbs .sep{color:var(--color-border-secondary)}
+
+/* ---- card shell (matches two-lens bundle) ---- */
+.card{
+  background:var(--color-background-primary);
+  border:0.5px solid var(--color-border-tertiary);
+  border-radius:var(--border-radius-lg);
+  padding:22px 24px;
+}
+.card+.card{margin-top:18px}
+
+/* ---- page header ---- */
+.laxis{display:flex;align-items:center;gap:10px;font-size:24px;font-weight:600;line-height:1.2}
+.laxis i{font-size:24px;color:var(--color-text-tertiary)}
+.lcap{font-size:13px;color:var(--color-text-tertiary);font-weight:400;margin:6px 0 0}
+.basis{font-size:12px;color:var(--color-text-tertiary);margin:14px 0 0}
+
+.stats{display:flex;gap:34px;margin-top:18px;padding-top:16px;border-top:0.5px solid var(--color-border-tertiary)}
+.stat .num{font-size:22px;font-weight:600;color:var(--color-text-primary)}
+.stat .lbl{font-size:12px;color:var(--color-text-tertiary)}
+
+/* ---- section eyebrow ---- */
+.eyebrow{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-tertiary)}
+.eyebrow i{font-size:14px}
+.subcap{font-size:12px;color:var(--color-text-tertiary);margin:4px 0 14px}
+
+/* ---- exemplar mono tools (reused .ms recipe from bundle) ---- */
+.ms{font-size:12px;color:var(--color-text-tertiary);font-family:var(--font-mono)}
+.exemplars{margin-top:12px}
+
+/* ---- Top scholars ranked list (mirrors Topic top-scholars chip styling) ---- */
+.tscholar{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 2px;
+  border-top:0.5px solid var(--color-border-tertiary);
+  text-decoration:none;color:inherit;
+}
+.tscholar:first-of-type{border-top:0}
+.rank{
+  flex:none;width:22px;text-align:right;
+  font-family:var(--font-mono);font-size:13px;color:var(--color-text-tertiary);
+}
+.avatar{
+  flex:none;width:34px;height:34px;border-radius:999px;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--color-background-secondary);
+  border:0.5px solid var(--color-border-tertiary);
+  font-size:12px;font-weight:600;color:var(--color-text-secondary);
+  overflow:hidden;
+}
+.tname{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
+.tname .nm{font-size:14px;font-weight:600;color:var(--color-text-primary)}
+.tname .dept{font-size:13px;color:var(--color-text-tertiary)}
+.tcount{flex:none;display:flex;flex-direction:column;align-items:flex-end;line-height:1.2}
+.tcount .c{font-size:14px;font-weight:600;color:var(--color-text-primary)}
+.tcount .cl{font-size:11px;color:var(--color-text-tertiary)}
+/* hover state: Slate outline 1.5px, matching the chip recipe */
+.tscholar{border-radius:var(--border-radius-md);transition:background .12s,box-shadow .12s}
+.tscholar:hover{background:var(--color-background-secondary);box-shadow:inset 0 0 0 1.5px var(--color-accent-slate)}
+.morelink{
+  display:inline-flex;align-items:center;gap:4px;margin-top:14px;
+  font-size:13px;color:var(--color-accent-slate);text-decoration:none;
+}
+.morelink:hover{text-decoration:underline}
+
+/* ---- representative publications (reuses .mrow recipe from bundle) ---- */
+.mrow{display:flex;align-items:flex-start;gap:10px;padding:11px 2px;border-top:0.5px solid var(--color-border-tertiary)}
+.mrow:first-of-type{border-top:0}
+.mrow .ml{flex:1;min-width:0}
+.mrow .mt{font-size:14px;color:var(--color-text-primary)}
+.mrow .mt a{color:inherit;text-decoration:none}
+.mrow .mt a:hover{color:var(--color-accent-slate);text-decoration:underline}
+.mrow .mauth{font-size:12px;color:var(--color-text-tertiary);margin-top:2px}
+.mrow .mauth b{font-weight:600;color:var(--color-text-secondary)}
+.mrow .mjournal{font-size:12px;color:var(--color-text-tertiary);font-style:italic;margin-top:2px}
+
+.foot{font-size:11px;color:var(--color-text-tertiary);margin-top:18px;line-height:1.5}
+</style>
+</head>
+<body>
+<main class="page">
+
+  <!-- breadcrumb: parent supercategory -> family -->
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a href="/methods">Methods &amp; tools</a>
+    <span class="sep">/</span>
+    <a href="/methods/genome-engineering"><i class="ti ti-tools" aria-hidden="true"></i> Genome engineering</a>
+    <span class="sep">/</span>
+    <span aria-current="page" style="color:var(--color-text-secondary)">CRISPR gene editing</span>
+  </nav>
+
+  <!-- ===== HEADER ===== -->
+  <header class="card">
+    <div class="laxis">
+      <i class="ti ti-tools" aria-hidden="true"></i>
+      CRISPR gene editing
+    </div>
+    <p class="lcap">— how the work is done</p>
+
+    <div class="exemplars">
+      <span class="ms">Cas9 · Cas12a · base editing · prime editing · sgRNA libraries · CRISPRi/a</span>
+    </div>
+
+    <p class="basis">A method family under <a href="/methods/genome-engineering" style="color:var(--color-accent-slate);text-decoration:none">Genome engineering</a> · inferred from tools &amp; reagents named in first/senior-authored work</p>
+
+    <div class="stats">
+      <div class="stat"><div class="num">47</div><div class="lbl">scholars</div></div>
+      <div class="stat"><div class="num">312</div><div class="lbl">publications</div></div>
+    </div>
+  </header>
+
+  <!-- ===== TOP SCHOLARS ===== -->
+  <section class="card">
+    <span class="eyebrow"><i class="ti ti-users" aria-hidden="true"></i> Top scholars in this family</span>
+    <p class="subcap">Full-time faculty ranked by ReCiterAI on their first- or senior-authored publications using this method. The order updates weekly as new work appears.</p>
+
+    <a class="tscholar" href="/jh2024">
+      <span class="rank">1</span>
+      <span class="avatar">JH</span>
+      <span class="tname"><span class="nm">Jennifer Hsu, PhD</span><span class="dept">Pharmacology</span></span>
+      <span class="tcount"><span class="c">24</span><span class="cl">pubs</span></span>
+    </a>
+    <a class="tscholar" href="/mra2011">
+      <span class="rank">2</span>
+      <span class="avatar">MA</span>
+      <span class="tname"><span class="nm">Marcus Reyes, MD, PhD</span><span class="dept">Genetic Medicine</span></span>
+      <span class="tcount"><span class="c">19</span><span class="cl">pubs</span></span>
+    </a>
+    <a class="tscholar" href="/ako2018">
+      <span class="rank">3</span>
+      <span class="avatar">AO</span>
+      <span class="tname"><span class="nm">Aisha Okonkwo, PhD</span><span class="dept">Cell &amp; Developmental Biology</span></span>
+      <span class="tcount"><span class="c">17</span><span class="cl">pubs</span></span>
+    </a>
+    <a class="tscholar" href="/dlc2009">
+      <span class="rank">4</span>
+      <span class="avatar">DC</span>
+      <span class="tname"><span class="nm">David L. Chen, MD</span><span class="dept">Medicine — Hematology &amp; Oncology</span></span>
+      <span class="tcount"><span class="c">14</span><span class="cl">pubs</span></span>
+    </a>
+    <a class="tscholar" href="/spk2015">
+      <span class="rank">5</span>
+      <span class="avatar">SP</span>
+      <span class="tname"><span class="nm">Sofia Petrova, PhD</span><span class="dept">Biochemistry</span></span>
+      <span class="tcount"><span class="c">12</span><span class="cl">pubs</span></span>
+    </a>
+    <a class="tscholar" href="/rng2012">
+      <span class="rank">6</span>
+      <span class="avatar">RN</span>
+      <span class="tname"><span class="nm">Rajesh Nair, MD</span><span class="dept">Neurology</span></span>
+      <span class="tcount"><span class="c">11</span><span class="cl">pubs</span></span>
+    </a>
+    <a class="tscholar" href="/elw2019">
+      <span class="rank">7</span>
+      <span class="avatar">EW</span>
+      <span class="tname"><span class="nm">Emily Walsh, PhD</span><span class="dept">Microbiology &amp; Immunology</span></span>
+      <span class="tcount"><span class="c">9</span><span class="cl">pubs</span></span>
+    </a>
+
+    <a class="morelink" href="/methods/crispr-gene-editing/scholars">+ 40 more scholars →</a>
+  </section>
+
+  <!-- ===== REPRESENTATIVE PUBLICATIONS ===== -->
+  <section class="card">
+    <span class="eyebrow"><i class="ti ti-file-text" aria-hidden="true"></i> Representative publications</span>
+    <p class="subcap">A sample of first/senior-authored work in which this method was used, weighted toward recent and high-impact articles.</p>
+
+    <div class="mrow">
+      <div class="ml">
+        <div class="mt"><a href="/publications/39218004">Prime editing corrects a pathogenic splice variant in patient-derived hematopoietic stem cells</a></div>
+        <div class="mauth"><b>Hsu J</b>, Petrova S, Okonkwo A, … <b>Chen DL</b></div>
+        <div class="mjournal">Nature Medicine · 2025</div>
+      </div>
+    </div>
+    <div class="mrow">
+      <div class="ml">
+        <div class="mt"><a href="/publications/38771233">A genome-wide CRISPRi screen identifies modifiers of tau aggregation in human neurons</a></div>
+        <div class="mauth"><b>Nair R</b>, Walsh E, … <b>Reyes M</b></div>
+        <div class="mjournal">Cell · 2024</div>
+      </div>
+    </div>
+    <div class="mrow">
+      <div class="ml">
+        <div class="mt"><a href="/publications/38004112">Cas12a base editing enables multiplexed correction of beta-thalassemia alleles</a></div>
+        <div class="mauth"><b>Reyes M</b>, Chen DL, … <b>Hsu J</b></div>
+        <div class="mjournal">Nature Biotechnology · 2024</div>
+      </div>
+    </div>
+    <div class="mrow">
+      <div class="ml">
+        <div class="mt"><a href="/publications/37665890">High-fidelity Cas9 variants reduce off-target editing in primary T cells for adoptive cell therapy</a></div>
+        <div class="mauth"><b>Okonkwo A</b>, … <b>Petrova S</b></div>
+        <div class="mjournal">Cell Stem Cell · 2023</div>
+      </div>
+    </div>
+    <div class="mrow">
+      <div class="ml">
+        <div class="mt"><a href="/publications/37011455">An sgRNA library platform for combinatorial perturbation of innate-immune signaling</a></div>
+        <div class="mauth"><b>Walsh E</b>, Nair R, … <b>Reyes M</b></div>
+        <div class="mjournal">Nature Methods · 2023</div>
+      </div>
+    </div>
+
+    <a class="morelink" href="/methods/crispr-gene-editing/publications">View all 312 publications →</a>
+  </section>
+
+  <p class="foot">Methods and tool families are inferred automatically from datasets, reagents, and models named in the text — they are not curated and may be incomplete. Counts reflect first- and senior-authored publications only.</p>
+
+</main>
+</body>
+</html>

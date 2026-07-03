@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mockup · Cell-line family page as master-detail</title>
+<style>
+  :root{
+    --wcm-red:#b31b1b;
+    --wcm-red-dark:#9a1414;
+    --accent-slate:#5a6b7b;
+    --ink:#1c2024;
+    --muted:#6b7280;
+    --muted2:#8b929c;
+    --border:#e5e7eb;
+    --border-dash:#d8dbe0;
+    --warm-fill:#faf7f3;
+    --mark:#f7dfe8;
+    --mark-ink:#7a2233;
+    --note:#0d5c5c;
+    --note-bg:#ecf7f6;
+  }
+  *{box-sizing:border-box}
+  html{ -webkit-text-size-adjust:100%; }
+  body{
+    margin:0; color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    font-size:15px; line-height:1.5; background:#fff;
+  }
+  .serif{ font-family:Georgia,"Times New Roman",serif; }
+
+  /* brand bar */
+  .brand{ background:var(--wcm-red); color:#fff; }
+  .brand-inner{ max-width:1180px; margin:0 auto; padding:14px 24px; display:flex; align-items:center; gap:24px; }
+  .logo{ font-family:Georgia,serif; font-weight:700; font-size:20px; letter-spacing:.2px; display:flex; align-items:center; gap:8px;}
+  .logo .beta{ font-size:10px; background:#fff; color:var(--wcm-red); border-radius:4px; padding:1px 6px; font-family:-apple-system,sans-serif; font-weight:700; letter-spacing:.5px; vertical-align:middle;}
+  .logo .sub{ display:block; font-family:-apple-system,sans-serif; font-size:9px; font-weight:600; letter-spacing:1.5px; opacity:.9; margin-top:2px; }
+  .search{ flex:1; background:rgba(255,255,255,.16); border-radius:8px; padding:9px 14px; color:#fff; font-size:13px; }
+  .search::before{ content:"⌕  "; opacity:.8; }
+  .navlinks{ display:flex; gap:22px; font-size:14px; }
+  .navlinks span{ opacity:.95; }
+
+  main{ max-width:1100px; margin:0 auto; padding:28px 24px 80px; }
+
+  /* sim toggle */
+  .sim{ display:flex; align-items:center; gap:12px; margin:0 0 22px; padding:10px 14px; background:#f6f7f9; border:1px solid var(--border); border-radius:10px; font-size:13px; }
+  .sim b{ font-weight:650; }
+  .seg{ display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .seg button{ appearance:none; border:0; background:#fff; padding:6px 14px; font:inherit; font-size:13px; cursor:pointer; color:var(--ink); }
+  .seg button.active{ background:var(--wcm-red); color:#fff; font-weight:600; }
+  .sim .hint{ color:var(--muted); margin-left:auto; font-style:italic; }
+
+  /* breadcrumb */
+  .crumb{ font-size:13px; color:var(--muted); margin-bottom:16px; }
+  .crumb a{ color:var(--muted); text-decoration:none; }
+  .crumb .sep{ margin:0 8px; opacity:.6; }
+  .crumb .cur{ color:var(--ink); }
+
+  /* header */
+  .eyebrow{ font-size:12px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:var(--accent-slate); }
+  h1.title{ font-size:34px; line-height:1.12; font-weight:700; margin:8px 0 0; letter-spacing:-.3px; }
+  .def{ max-width:62ch; color:#4b5563; margin:14px 0 0; }
+  .def .ai{ display:block; font-style:italic; color:var(--muted2); font-size:13px; margin-top:6px; }
+
+  .scholars-label{ font-size:12px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:var(--muted); margin:26px 0 12px; display:flex; align-items:center; gap:7px;}
+  .scholars-label .i{ width:15px;height:15px;border:1px solid var(--muted2); border-radius:50%; font-size:10px; display:inline-flex; align-items:center; justify-content:center; color:var(--muted2); font-weight:700;}
+  .chips{ display:flex; flex-wrap:wrap; gap:10px; }
+  .chip{ display:flex; align-items:center; gap:9px; border:1px solid var(--border); border-radius:999px; padding:6px 14px 6px 6px; background:#fff; }
+  .chip .av{ width:28px;height:28px;border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px; font-weight:600; flex:none; }
+  .chip .nm{ font-weight:600; font-size:13.5px; }
+  .chip .ti{ color:var(--muted); font-size:12px; }
+  .chip.member{ box-shadow:0 0 0 2px #e98a3a inset; border-color:transparent; }
+  .chip.member2{ box-shadow:0 0 0 2px #3b6fb0 inset; border-color:transparent; }
+
+  .rule{ border:0; border-top:1px solid var(--border); margin:30px 0; }
+
+  /* spotlight */
+  #spotlight h2, #pubs h2{ font-size:13px; font-weight:700; letter-spacing:1.2px; text-transform:uppercase; color:var(--muted); margin:0 0 4px; }
+  #spotlight .sptitle{ font-family:Georgia,serif; font-size:20px; font-weight:700; margin:0 0 16px; }
+  .sp-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  .sp-card{ border:1px solid var(--border); border-radius:12px; padding:16px; background:#fff; }
+  .sp-card .k{ font-size:11px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--wcm-red); }
+  .sp-card .t{ font-weight:650; font-size:14.5px; margin:7px 0 6px; line-height:1.3; }
+  .sp-card .m{ color:var(--muted); font-size:12.5px; }
+
+  /* sparse note */
+  .note{ background:var(--note-bg); border:1px solid #cfe8e6; color:var(--note); border-radius:10px; padding:11px 14px; font-size:13px; margin:0 0 22px; display:none; }
+  .note b{ font-weight:700; }
+
+  /* master-detail */
+  #pubs .pubhead{ display:flex; align-items:baseline; gap:10px; margin-bottom:18px; }
+  #pubs .pubhead .h{ font-family:Georgia,serif; font-size:22px; font-weight:700; }
+  #pubs .pubhead .ct{ color:var(--muted); font-size:14px; }
+  .md{ display:grid; grid-template-columns:300px 1fr; gap:34px; align-items:start; }
+
+  /* rail */
+  .rail{ position:sticky; top:16px; }
+  .rail .rhead{ font-size:12px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:var(--muted); margin-bottom:12px; }
+  .rail .filter{ width:100%; border:1px solid var(--border); border-radius:8px; padding:8px 11px; font:inherit; font-size:13px; margin-bottom:10px; }
+  .row{ width:100%; text-align:left; background:#fff; border:0; border-left:3px solid transparent; padding:9px 12px; cursor:pointer; display:flex; align-items:flex-start; gap:10px; border-radius:0 6px 6px 0; }
+  .row:hover{ background:#fafafa; }
+  .row.active{ background:var(--warm-fill); border-left-color:var(--wcm-red); }
+  .row .lab{ flex:1; min-width:0; display:flex; flex-direction:column; }
+  .row .nm{ font-weight:600; font-size:14px; }
+  .row .desc{ color:var(--muted2); font-size:11.5px; margin-top:2px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:-.2px;}
+  .row .cnt{ text-align:right; flex:none; }
+  .row .cnt b{ font-variant-numeric:tabular-nums; font-size:14px; font-weight:700; display:block; }
+  .row .cnt small{ font-size:9px; letter-spacing:.5px; text-transform:uppercase; color:var(--muted2); }
+  .row.nested{ padding-left:26px; }
+  .group-cap{ font-size:11px; color:var(--muted2); padding:8px 12px 2px; letter-spacing:.3px; }
+  .group-cap .frm{ font-style:italic; }
+  .row .formsb{ font-size:9.5px; font-weight:700; letter-spacing:.3px; text-transform:uppercase; color:#1f6b3b; background:#e7f0ea; border-radius:4px; padding:1px 5px; margin-left:5px; vertical-align:1px; }
+  .hintln{ font-size:11px; color:var(--muted2); margin:0 0 10px; line-height:1.35; }
+  /* punch #1 — non-evidenced rows render as plain, non-interactive labels */
+  .row.plain{ cursor:default; color:var(--muted2); border-left-color:transparent !important; }
+  .row.plain:hover{ background:#fff; }
+  .row.plain .nm{ font-weight:500; color:var(--muted); }
+  .row.plain .cnt{ visibility:hidden; }
+
+  /* feed */
+  .feed{ }
+  .pub{ padding:0 0 22px; border-bottom:1px solid var(--border); margin-bottom:22px; }
+  .pub:last-child{ border-bottom:0; }
+  .pub.hide{ display:none; }
+  .pub .pt{ font-weight:700; font-size:17px; line-height:1.3; }
+  .pub .src{ font-style:italic; color:var(--muted); font-size:13.5px; margin:5px 0 12px; }
+  .authrow{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  .auth{ display:flex; align-items:center; gap:7px; border:1px solid var(--border); border-radius:999px; padding:3px 12px 3px 3px; font-size:12.5px; }
+  .auth .av{ width:22px;height:22px;border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:9.5px; font-weight:600; }
+  .auth.member{ box-shadow:0 0 0 2px #e98a3a inset; border-color:transparent; }
+  .auth.member2{ box-shadow:0 0 0 2px #3b6fb0 inset; border-color:transparent; }
+  .meta{ color:var(--muted); font-size:12.5px; margin-bottom:12px; }
+  .meta a{ color:var(--wcm-red); text-decoration:none; }
+  .meta .d{ margin:0 8px; opacity:.5; }
+  blockquote.snip{ margin:0; padding:2px 0 2px 14px; border-left:3px solid var(--border); color:#52606d; font-size:14px; }
+  mark{ background:var(--mark); color:var(--mark-ink); padding:1px 6px; border-radius:4px; font-weight:600; }
+  .snip .usetag{ display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:.4px; text-transform:uppercase; border-radius:4px; padding:1px 6px; margin-right:8px; vertical-align:1px; }
+  .usetag.spec{ background:#e7f0ea; color:#1f6b3b; }
+  .usetag.bg{ background:#f1f0ee; color:#8a7b58; }
+
+  /* annotations */
+  .anno{ position:relative; }
+  .callout{ font-size:11.5px; color:var(--note); background:var(--note-bg); border:1px dashed #b8ddda; border-radius:8px; padding:7px 11px; margin:10px 0; display:flex; gap:8px; }
+  .callout b{ color:#0a4a4a; }
+  .callout .pin{ flex:none; font-weight:700; }
+  body.clean .callout{ display:none; }
+
+  .legend{ margin-top:34px; padding-top:18px; border-top:1px dashed var(--border-dash); font-size:12.5px; color:var(--muted); }
+  .legend b{ color:var(--ink); }
+  @media (max-width:780px){ .md{ grid-template-columns:1fr; } .sp-grid{ grid-template-columns:1fr; } .rail{ position:static; } }
+</style>
+</head>
+<body class="rich">
+
+<div class="brand">
+  <div class="brand-inner">
+    <div class="logo">Scholars <span class="beta">BETA</span><span class="sub">WEILL CORNELL MEDICINE</span></div>
+    <div class="search">Search by name, topic, department…</div>
+    <div class="navlinks"><span>Browse</span><span>About</span><span>Sign in</span></div>
+  </div>
+</div>
+
+<main>
+
+  <div class="sim">
+    <b>Mockup control —</b> simulate family size:
+    <span class="seg">
+      <button id="bRich" class="active" onclick="setMode('rich')">Rich (33 papers)</button>
+      <button id="bSparse" onclick="setMode('sparse')">Sparse (4 papers)</button>
+    </span>
+    <label style="margin-left:14px;"><input type="checkbox" id="annoToggle" checked onchange="document.body.classList.toggle('clean', !this.checked)" /> show design notes</label>
+    <span class="hint">counts illustrative · 33 = real immortalized-cell-lines total</span>
+  </div>
+
+  <div class="crumb">
+    <a>Home</a><span class="sep">›</span><a>Methods</a><span class="sep">›</span><a>Animal cell models</a><span class="sep">›</span><span class="cur">Immortalized cell lines</span>
+  </div>
+
+  <!-- HEADER -->
+  <section>
+    <div class="eyebrow">Research Methods</div>
+    <h1 class="title serif">Immortalized cell lines</h1>
+    <p class="def">Continuously dividing cell lines derived from human and animal tissue, used as <em>in&nbsp;vitro</em> models for heterologous expression, biochemistry, and assay development across Weill Cornell Medicine.
+      <span class="ai">AI-generated definition</span>
+    </p>
+
+    <div class="scholars-label">Top scholars in this area <span class="i">i</span></div>
+    <div class="chips">
+      <div class="chip"><span class="av member" style="background:#7a5a86">HH</span><span><span class="nm">Hugh C Hemmings</span> · <span class="ti">Professor of Anesthesiology</span></span></div>
+      <div class="chip"><span class="av member2" style="background:#3b6fb0">GK</span><span><span class="nm">George Khelashvili</span> · <span class="ti">Associate Professor of Physiology</span></span></div>
+      <div class="chip"><span class="av" style="background:#557a55">RC</span><span><span class="nm">Ronald G Crystal</span> · <span class="ti">Professor of Genetic Medicine</span></span></div>
+      <div class="chip"><span class="av" style="background:#8a6a3a">AM</span><span><span class="nm">Anant K Menon</span> · <span class="ti">Professor of Biochemistry</span></span></div>
+    </div>
+  </section>
+
+  <hr class="rule" />
+
+  <!-- SPOTLIGHT (conditional on record volume) -->
+  <section id="spotlight">
+    <h2>Spotlight</h2>
+    <div class="sptitle serif">Selected work using these cell lines</div>
+    <div class="callout"><span class="pin">▸</span><span><b>Design decision:</b> Spotlight renders only when the family is <b>record-rich enough for curation to add signal</b> (≥ ~12 papers and ≥ 3 curatable highlights). Toggle to “Sparse” to see it removed.</span></div>
+    <div class="sp-grid">
+      <div class="sp-card"><div class="k">Most cited</div><div class="t">Assessment of Residual SV40 Large T Antigen in AAV Vectors Produced in 293T Cells</div><div class="m">Human gene therapy · 2023 · 6 citations</div></div>
+      <div class="sp-card"><div class="k">Methodological</div><div class="t">Unusual mode of dimerization of retinitis pigmentosa-associated F220C rhodopsin</div><div class="m">Scientific reports · 2021 · 7 citations</div></div>
+      <div class="sp-card"><div class="k">Recent</div><div class="t">Sevoflurane inhibition of the developmentally expressed neuronal sodium channel Naᵥ1.3</div><div class="m">Scientific reports · 2025 · 2 citations</div></div>
+    </div>
+    <hr class="rule" />
+  </section>
+
+  <div class="note" id="sparseNote"><b>Only 4 papers in this family.</b> Spotlight is omitted — with this few records the article list <em>is</em> the highlight, so a curated 3-card strip above a 4-item list would just pad the page.</div>
+
+  <!-- PUBLICATIONS · master-detail -->
+  <section id="pubs">
+    <div class="pubhead">
+      <span class="h serif">Publications</span>
+      <span class="ct" id="pubCount">across 33 papers</span>
+    </div>
+
+    <div class="callout"><span class="pin">▸</span><span><b>The whole point of master-detail:</b> the cell-line filter (left) sits <b>directly beside the list it controls</b> (right). No “strip floating two sections above the results.” This is the same <code>FamilyRail</code> used on the supercategory &amp; subtopic pages.</span></div>
+
+    <div class="md">
+      <!-- RAIL -->
+      <aside class="rail">
+        <div class="rhead">Cell lines (6)</div>
+        <input class="filter" placeholder="Filter cell lines…" oninput="filterRail(this.value)" />
+        <div class="hintln">No selection = all 33 papers (the default). Pick a cell line to filter the list; click it again to clear.</div>
+
+        <button class="row" data-ent="HEK293T" onclick="pick(this)">
+          <span class="lab"><span class="nm">HEK293T</span><span class="desc">human · carries SV40 large&nbsp;T</span></span>
+          <span class="cnt"><b>14</b><small>papers</small></span>
+        </button>
+        <button class="row" data-ent="HEK293" onclick="pick(this)">
+          <span class="lab"><span class="nm">HEK293</span><span class="desc">human embryonic kidney</span></span>
+          <span class="cnt"><b>9</b><small>papers</small></span>
+        </button>
+        <div class="callout"><span class="pin">293</span><span><b>HEK293 ≠ HEK293T.</b> 293T is a derivative carrying the SV40 large&nbsp;T antigen — a distinct line with distinct uses. Two separate rows, <b>never merged.</b></span></div>
+
+        <button class="row extra" data-ent="HMC-1" onclick="pick(this)">
+          <span class="lab"><span class="nm">HMC-1 <span class="formsb">3 forms</span></span><span class="desc">human mast cell line</span></span>
+          <span class="cnt"><b>7</b><small>papers</small></span>
+        </button>
+        <div class="callout extra"><span class="pin">⌥</span><span><b>“3 forms” = surface-form merge (the opposite of 293/293T).</b> “HMC-1 cells”, “human mast cell line HMC-1”, “cultured human mast cells (HMC-1)” all collapse to <b>one</b> row — same line, different spellings (WS-B).</span></div>
+        <button class="row extra" data-ent="3T3-L1" onclick="pick(this)">
+          <span class="lab"><span class="nm">3T3-L1</span><span class="desc">mouse fibroblast / adipocyte</span></span>
+          <span class="cnt"><b>5</b><small>papers</small></span>
+        </button>
+        <button class="row extra" data-ent="OKF6" onclick="pick(this)">
+          <span class="lab"><span class="nm">OKF6</span><span class="desc">oral keratinocyte</span></span>
+          <span class="cnt"><b>4</b><small>papers</small></span>
+        </button>
+        <button class="row extra" data-ent="MDCK" onclick="pick(this)">
+          <span class="lab"><span class="nm">MDCK</span><span class="desc">canine kidney epithelial</span></span>
+          <span class="cnt"><b>3</b><small>papers</small></span>
+        </button>
+
+        <!-- punch #1: non-evidenced survivor → plain, non-clickable -->
+        <div class="row plain extra">
+          <span class="lab"><span class="nm">macrophage cell line</span><span class="desc">no usable in-text evidence</span></span>
+          <span class="cnt"><b>0</b><small>papers</small></span>
+        </div>
+        <div class="callout extra"><span class="pin">#1</span><span><b>Punch-list&nbsp;#1:</b> a non-evidenced survivor renders as a <b>plain, non-clickable label</b> (greyed) — never a clickable dead-end. (Most generics &amp; 0-count rows are suppressed upstream by WS-B.)</span></div>
+      </aside>
+
+      <!-- FEED -->
+      <div class="feed anno">
+        <div class="callout"><span class="pin">#3</span><span><b>Punch-list&nbsp;#3:</b> “across <b>33</b> papers” is a real <b>distinct-pmid</b> total — not <code>0</code>, and not the sum of per-entity counts (14+9+7+… double-counts shared papers).</span></div>
+
+        <article class="pub" data-ents="HEK293T">
+          <div class="pt">Sevoflurane inhibition of the developmentally expressed neuronal sodium channel Naᵥ1.3.</div>
+          <div class="src">Scientific reports · 2025</div>
+          <div class="authrow">
+            <span class="auth"><span class="av" style="background:#9a7f86">JP</span>Jimcy Platholi</span>
+            <span class="auth member"><span class="av" style="background:#7a5a86">HH</span>Hugh C Hemmings</span>
+          </div>
+          <div class="meta"><a>PMID 40830395</a><span class="d">·</span><a>PMCID PMC12365293</a><span class="d">·</span><a>DOI</a><span class="d">·</span>2 citations</div>
+          <blockquote class="snip"><span class="usetag spec">How it was used</span>Sevoflurane at clinical concentrations inhibited peak Na⁺ current of human Naᵥ1.3 heterologously expressed in <mark>HEK293T cells</mark>.</blockquote>
+        </article>
+
+        <article class="pub" data-ents="HEK293T">
+          <div class="pt">Assessment of Residual Full-Length SV40 Large T Antigen in Clinical-Grade Adeno-Associated Virus Vectors Produced in 293T Cells.</div>
+          <div class="src">Human gene therapy · 2023</div>
+          <div class="authrow">
+            <span class="auth"><span class="av" style="background:#9a6a8a">DS</span>Dolan Sondhi</span>
+            <span class="auth member"><span class="av" style="background:#557a55">RC</span>Ronald G Crystal</span>
+            <span class="auth member"><span class="av" style="background:#3a6a6a">SK</span>Stephen M. Kaminsky</span>
+          </div>
+          <div class="meta"><a>PMID 37171121</a><span class="d">·</span><a>PMCID PMC10457653</a><span class="d">·</span><a>DOI</a><span class="d">·</span>6 citations</div>
+          <blockquote class="snip"><span class="usetag bg">Where it appears</span>Human embryonic kidney <mark>HEK293T cells</mark> are widely used in good manufacturing practice facilities, producing higher yield of AAV vectors.</blockquote>
+          <div class="callout"><span class="pin">D5</span><span><b>WS-C informativeness:</b> this is a <b>generic background</b> mention (“widely used…”), so it’s ranked <em>below</em> the experimental-use sentence above and labelled “Where it appears,” not “How it was used.”</span></div>
+        </article>
+
+        <article class="pub" data-ents="HEK293">
+          <div class="pt">Unusual mode of dimerization of retinitis pigmentosa-associated F220C rhodopsin.</div>
+          <div class="src">Scientific reports · 2021</div>
+          <div class="authrow">
+            <span class="auth member2"><span class="av" style="background:#3b6fb0">GK</span>George Khelashvili</span>
+            <span class="auth"><span class="av" style="background:#a59b6a">MC</span>Michel Alain Cuendet</span>
+            <span class="auth"><span class="av" style="background:#6a6a8a">JL</span>Joshua Levitz</span>
+            <span class="auth member"><span class="av" style="background:#8a6a3a">AM</span>Anant K Menon</span>
+          </div>
+          <div class="meta"><a>PMID 34006992</a><span class="d">·</span><a>PMCID PMC8131606</a><span class="d">·</span><a>DOI</a><span class="d">·</span>7 citations</div>
+          <blockquote class="snip"><span class="usetag spec">How it was used</span>…they both dimerize in the plasma membrane of <mark>HEK293 cells</mark> and FRET experiments with SNAP-tagged wild-type and F220C opsin expressed in HEK293 cells…</blockquote>
+          <div class="callout"><span class="pin">293</span><span><b>WS-B guarded non-merge:</b> this paper uses <b>HEK293</b>, not 293T. Selecting “HEK293T” in the rail must <b>not</b> surface it. The rail keeps them as separate forms under one family.</span></div>
+        </article>
+      </div>
+    </div>
+
+    <div class="legend">
+      <b>What this mockup shows.</b> The cell-line family page rebuilt as the <b>same master-detail layout</b> as the supercategory page (Image #1): a <code>FamilyRail</code>-style filter on the left, the publication feed on the right, inline <mark>highlighting</mark> (the one genuine innovation) in the snippets. No selection is the default (all papers); selecting a cell line filters the feed, clicking it again clears — no explicit “All” row needed. The “How it was used” / “Where it appears” labels also apply on the <b>supercategory</b> feed (<code>/methods/animal-cell-models</code>). Bespoke <code>cell-line-strip</code> + <code>cell-line-directory</code> retire. Folds in punch-list <b>#1</b> (non-evidenced → plain label) and <b>#3</b> (real distinct-pmid total). WS-B data quality (canonicalize HMC-1×3, drop generics, suppress 0-count, keep 293≠293T) is orthogonal and still required — a clean rail makes those defects <em>more</em> visible.
+    </div>
+  </section>
+</main>
+
+<script>
+  function total(){ return document.body.classList.contains('sparse') ? 4 : 33; }
+  function clearSel(){
+    document.querySelectorAll('.rail .row').forEach(r=>r.classList.remove('active'));
+    document.querySelectorAll('.feed .pub').forEach(p=>p.classList.remove('hide'));
+    document.getElementById('pubCount').textContent = 'across ' + total() + ' papers';
+  }
+  function setMode(m){
+    const sparse = m==='sparse';
+    document.body.classList.toggle('rich', !sparse);
+    document.body.classList.toggle('sparse', sparse);
+    document.getElementById('bRich').classList.toggle('active', !sparse);
+    document.getElementById('bSparse').classList.toggle('active', sparse);
+    document.getElementById('spotlight').style.display = sparse ? 'none' : '';
+    document.getElementById('sparseNote').style.display = sparse ? 'block' : 'none';
+    document.querySelectorAll('.extra').forEach(e=>e.style.display = sparse ? 'none' : '');
+    document.querySelector('.rail .rhead').textContent = 'Cell lines (' + (sparse?2:6) + ')';
+    document.querySelector('.row[data-ent="HEK293T"] .cnt b').textContent = sparse?'2':'14';
+    document.querySelector('.row[data-ent="HEK293"] .cnt b').textContent = sparse?'1':'9';
+    document.querySelector('.hintln').textContent = sparse
+      ? 'No selection = all 4 papers (the default). Pick a cell line to filter; click it again to clear.'
+      : 'No selection = all 33 papers (the default). Pick a cell line to filter the list; click it again to clear.';
+    clearSel();
+  }
+  function pick(el){
+    if(!el || el.classList.contains('plain')) return;
+    if(el.classList.contains('active')){ clearSel(); return; }   // click active row → clear
+    document.querySelectorAll('.rail .row').forEach(r=>r.classList.remove('active'));
+    el.classList.add('active');
+    const ent = el.getAttribute('data-ent');
+    document.querySelectorAll('.feed .pub').forEach(p=>{
+      const ents = (p.getAttribute('data-ents')||'').split(',');
+      p.classList.toggle('hide', !ents.includes(ent));
+    });
+    const cnt = el.querySelector('.cnt b').textContent;
+    document.getElementById('pubCount').textContent = cnt + ' papers use ' + ent;
+  }
+  function filterRail(v){
+    v=v.trim().toLowerCase();
+    document.querySelectorAll('.rail .row').forEach(r=>{
+      const nm=r.querySelector('.nm').textContent.toLowerCase();
+      r.style.display = (!v || nm.includes(v)) ? '' : 'none';
+    });
+  }
+</script>
+</body>
+</html>
