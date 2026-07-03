@@ -1,5 +1,6 @@
 {
   "_note": "Gold expected-scholar sets for scholar-search relevance eval. Each entry is either a bare regex (legacy, matched case-insensitively against preferredName) or an object {re, cwid, arch} where arch is the data-derived archetype (research-pi | clinician-expert | methods-scientist | research-specialist). cwid enables exact matching (robust to namesakes). Archetype labels are data-derived (authorship mix + clinical-field presence) and PENDING domain-expert review.",
+  "_note_failure_classes": "Queries below the original 8 (from 'CAR' onward) cover the relevance-audit failure classes tracked by #1342/#1344/#1345/#1346/#1348/#1367 (see docs/search-relevance-analysis.md and docs/search-area-boost-ab-2026-07-02.md). Each names its class + issue in its `note` field. Their expectation sets were derived from the audit docs and VERIFIED live against staging /api/search on 2026-07-02 (every listed cwid exists in the people index; ranks/interpretation were probed). IMPORTANT: (a) several interpretation-level bugs the audit documented no longer reproduce on current staging — CAR/PET now fall to BM25 (meshMapped=false) rather than resolving to Automobiles/Pets, and blood-disorders/gut-bacteria/AI-in-medicine now resolve to the correct descriptor — so these queries are forward regression GUARDS (they lock in the corrected expected-scholar sets, snapshot-test style) rather than live-failing cases; (b) archetype labels on these new entries are PROVISIONAL proxies inferred from roleCategory + primaryTitle + domain, not the publication_author two-axis recompute, and like the original set are PENDING domain-expert review before they count as hand-verified.",
   "queries": [
     {
       "q": "diabetes",
@@ -293,6 +294,333 @@
           "re": "Emile Bacha",
           "cwid": "emb9016",
           "arch": "research-pi"
+        }
+      ]
+    },
+    {
+      "q": "CAR",
+      "note": "ambiguous-acronym (Refs #1346): intended sense = CAR-T (Receptors, Chimeric Antigen). Audit found CAR mis-resolving to 'Automobiles'; on 2026-07-02 staging CAR is meshMapped=false (falls to BM25) and the burn-surgeon 'tagged Automobiles' injection no longer appears — guard against re-introducing the wrong-sense mapping. Expected = CAR-T cellular-therapy experts (verified present in index; all top-15 on live 'CAR').",
+      "expected": [
+        {
+          "re": "Scheinberg",
+          "cwid": "das2027",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Perales",
+          "cwid": "mip2043",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Adusumilli",
+          "cwid": "psa2001",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Villena-Vargas",
+          "cwid": "jov9069",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Moonsoo Jin",
+          "cwid": "moj2005",
+          "arch": "methods-scientist"
+        }
+      ]
+    },
+    {
+      "q": "PET",
+      "note": "ambiguous-acronym (Refs #1346): intended sense = Positron-Emission Tomography. Audit found PET mis-resolving to 'Pets'; on 2026-07-02 staging PET is meshMapped=false (BM25) yet still surfaces PET/molecular-imaging scholars (method-family rescue) — guard against a wrong-sense label/boost regression. Expected = PET/nuclear-medicine imaging experts (verified top-15 on live 'PET').",
+      "expected": [
+        {
+          "re": "Osborne",
+          "cwid": "jro7001",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Ivanidze",
+          "cwid": "jai9018",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Nehmeh",
+          "cwid": "san2028",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Karakatsanis",
+          "cwid": "nak2032",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Jason S\\. Lewis",
+          "cwid": "jal9028",
+          "arch": "research-pi"
+        }
+      ]
+    },
+    {
+      "q": "diabetic",
+      "note": "lay/abbreviation term (Refs #1342): morphological variant of 'diabetes' that does NOT resolve to MeSH on 2026-07-02 staging (meshMapped=false, 692 hits) so ranking floats high-volume generalists (Safford, Devereux) over the endocrinology/diabetes cluster. Expected = the diabetes-specialist cluster (same experts as the 'diabetes' fixture; verified present).",
+      "expected": [
+        {
+          "re": "Laura Alonso",
+          "cwid": "lca4001",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Kashyap",
+          "cwid": "srk4008",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Malik",
+          "cwid": "ram2045",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Sinha Gregory",
+          "cwid": "sinhana",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Leon.*Igel",
+          "cwid": "lei9004",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Tchang",
+          "cwid": "bgt9001",
+          "arch": "clinician-expert"
+        }
+      ]
+    },
+    {
+      "q": "parkinsons",
+      "note": "lay/possessive term (Refs #1342): plural/possessive-stripped form of 'Parkinson Disease'. On 2026-07-02 staging it resolves via entry-term (meshMapped=true, 193 hits) — a partial improvement over the audit — so this is a guard that the correct Parkinson's cluster stays surfaced if normalization changes. Expected = Parkinson's disease researchers/clinicians (verified top-12 on live 'parkinsons').",
+      "expected": [
+        {
+          "re": "Harini Sarva",
+          "cwid": "has9059",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Kaplitt",
+          "cwid": "mik2002",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Eliezer",
+          "cwid": "dae2005",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Marongiu",
+          "cwid": "rom2043",
+          "arch": "research-specialist"
+        }
+      ]
+    },
+    {
+      "q": "blood disorders",
+      "note": "descriptor-trap (Refs #1348): audit found the decompose-and-resolve fallback latching onto the generic component word ('Blood') and dropping the salient concept. On 2026-07-02 staging it resolves correctly to 'Hematologic Diseases' (entry-term, 1239 hits) — guard that it stays on the right descriptor. Expected = hematology / hematologic-disease clinicians (verified present in index).",
+      "expected": [
+        {
+          "re": "Juliet.*Barker",
+          "cwid": "jub2029",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Canaani",
+          "cwid": "ygg9005",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Gomez Arteaga",
+          "cwid": "alg9117",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "DeSimone",
+          "cwid": "rod9096",
+          "arch": "clinician-expert"
+        }
+      ]
+    },
+    {
+      "q": "gut bacteria",
+      "note": "descriptor-trap (Refs #1348): audit found it resolving to the generic 'Bacteria'. On 2026-07-02 staging it resolves correctly to 'Gastrointestinal Microbiome' (entry-term, 63 hits) and returns a clean microbiome/mucosal-immunology cluster — guard that it stays on the right descriptor. Expected = GI-microbiome researchers (cwids/archetypes consistent with the FMT & CRISPR fixtures).",
+      "expected": [
+        {
+          "re": "Iliev",
+          "cwid": "ili2001",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Longman",
+          "cwid": "ral2006",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Chun-Jun Guo",
+          "cwid": "chg4001",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Sonnenberg",
+          "cwid": "gfs2002",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Artis",
+          "cwid": "daa2028",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Melody Zeng",
+          "cwid": "myz4001",
+          "arch": "methods-scientist"
+        }
+      ]
+    },
+    {
+      "q": "computational drug discovery",
+      "note": "multi-word over-broadening (Refs #1344): adding 'computational' BROADENS the pool ('drug discovery' 468 -> 'computational drug discovery' 859 on live) and floats computational-biology generalists over the actual molecular-modeling / drug-design specialists. Expected = computational drug-discovery experts; Weinstein (the molecular-modeling PI) is buried ~#12 behind pop-health comp-bio.",
+      "expected": [
+        {
+          "re": "Harel Weinstein",
+          "cwid": "haw2002",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Huggins",
+          "cwid": "djh2009",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Elemento",
+          "cwid": "ole2001",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Khurana",
+          "cwid": "ekk2003",
+          "arch": "methods-scientist"
+        },
+        {
+          "re": "Moustafa Gabr",
+          "cwid": "mog4005",
+          "arch": "research-specialist"
+        }
+      ]
+    },
+    {
+      "q": "pediatric cardiac surgery",
+      "note": "multi-word over-broadening (Refs #1344): 3-word probe (4458 hits — more than 'research') where the canonical pediatric-cardiac surgeon Emile Bacha is buried at ~#4 among off-topic surgeons (Fichera/Nellis/Gaudino). Companion to the 4-word 'pediatric congenital heart surgery' fixture; both track the minimum_should_match clause-count defect.",
+      "expected": [
+        {
+          "re": "Emile Bacha",
+          "cwid": "emb9016",
+          "arch": "research-pi"
+        }
+      ]
+    },
+    {
+      "q": "electrophysiology",
+      "note": "clinical subspecialty (Refs #1367): the intended clinical sense is cardiac EP, but the query also matches basic-science (ion-channel/patch-clamp) electrophysiology, diluting the clinical experts. Expected = clinical cardiac-electrophysiology attendings (verified top-15 on live 'electrophysiology').",
+      "expected": [
+        {
+          "re": "Markowitz",
+          "cwid": "smarkow",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Jim W\\. Cheung",
+          "cwid": "jac9029",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Slotwiner",
+          "cwid": "djs2001",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "James E\\. Ip",
+          "cwid": "jei9008",
+          "arch": "clinician-expert"
+        }
+      ]
+    },
+    {
+      "q": "interventional cardiology",
+      "note": "clinical subspecialty (Refs #1367): resolves partial->Cardiology; the cath-lab interventionalists are mixed with non-interventional cardiologists (Goyal #1 = geriatric/HF, Cheung = EP, Truong = imaging). Expected = true interventional (cath-lab) cardiologists (verified present in the top of live 'interventional cardiology').",
+      "expected": [
+        {
+          "re": "Feldman",
+          "cwid": "dnf9001",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Luke Kim",
+          "cwid": "luk9003",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Khatri",
+          "cwid": "jak4033",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Harsimran Singh",
+          "cwid": "has9028",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Manish.*Parikh",
+          "cwid": "map2007",
+          "arch": "clinician-expert"
+        }
+      ]
+    },
+    {
+      "q": "resistant hypertension",
+      "note": "non-full-time-faculty expert penalty (Refs #1345): the concentrated hypertension specialists are all affiliated/voluntary faculty and sit deep (verified live: Alderman #10, Mann #21, Wachtell #39) below off-topic full-time faculty (Wolf/Safford/Pape). Guard against the personType +1.0 / grants / areas-null triple-stack burying them further. cwids/archetypes consistent with the 'hypertension' fixture.",
+      "expected": [
+        {
+          "re": "Alderman",
+          "cwid": "mia2003",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Samuel.*Mann",
+          "cwid": "sjmann",
+          "arch": "research-pi"
+        },
+        {
+          "re": "Wachtell",
+          "cwid": "krw2003",
+          "arch": "methods-scientist"
+        }
+      ]
+    },
+    {
+      "q": "irritable bowel syndrome",
+      "note": "non-full-time-faculty expert (Refs #1345): several canonical functional-GI / motility experts here are affiliated/voluntary faculty (verified live: Quigley #1 affiliated, Lucak #6 affiliated) alongside FT Frissora #5. Small corpus (18 hits) so ranks are compressed; the fixture guards that these non-FT experts are not demoted on expertise.",
+      "expected": [
+        {
+          "re": "Quigley",
+          "cwid": "emq2004",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Lucak",
+          "cwid": "lucaksu",
+          "arch": "clinician-expert"
+        },
+        {
+          "re": "Frissora",
+          "cwid": "cfrissor",
+          "arch": "clinician-expert"
         }
       ]
     }
