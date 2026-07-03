@@ -738,6 +738,84 @@ ORDER BY hits DESC",
       },
       "Type": "AWS::Athena::NamedQuery",
     },
+    "QueryPerfCacheHit": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Edge cache outcome mix over 7d (x_edge_result_type share) -- Hit/Miss/RefreshHit/Error.",
+        "Name": "sps-perf-cache-hit-prod",
+        "QueryString": "SELECT
+  x_edge_result_type AS result_type,
+  COUNT(*) AS hits,
+  round(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS pct
+FROM cf_access_logs
+WHERE "date" >= current_date - interval '7' day
+GROUP BY 1
+ORDER BY hits DESC",
+        "WorkGroup": "sps-usage-prod",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QueryPerfErrorsByRoute": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "4xx / 5xx counts + 5xx rate by route over 7d (routes with any error).",
+        "Name": "sps-perf-errors-by-route-prod",
+        "QueryString": "SELECT
+  regexp_replace(cs_uri_stem, '(/(scholar|center|department|division|topics|topic|publication|core|unit)/)[^/?]+', '$1:id') AS route,
+  COUNT(*) AS hits,
+  SUM(CASE WHEN sc_status BETWEEN 400 AND 499 THEN 1 ELSE 0 END) AS c4xx,
+  SUM(CASE WHEN sc_status BETWEEN 500 AND 599 THEN 1 ELSE 0 END) AS c5xx,
+  round(100.0 * SUM(CASE WHEN sc_status >= 500 THEN 1 ELSE 0 END) / COUNT(*), 2) AS err5xx_pct
+FROM cf_access_logs
+WHERE "date" >= current_date - interval '7' day
+GROUP BY 1
+HAVING SUM(CASE WHEN sc_status >= 400 THEN 1 ELSE 0 END) > 0
+ORDER BY c5xx DESC, c4xx DESC
+LIMIT 50",
+        "WorkGroup": "sps-usage-prod",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QueryPerfSlowRoutes": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Slowest routes over 7d: p50/p95/p99 time_taken + p95 TTFB (seconds), min 50 hits.",
+        "Name": "sps-perf-slow-routes-prod",
+        "QueryString": "SELECT
+  regexp_replace(cs_uri_stem, '(/(scholar|center|department|division|topics|topic|publication|core|unit)/)[^/?]+', '$1:id') AS route,
+  COUNT(*) AS hits,
+  round(approx_percentile(time_taken, 0.5), 3) AS p50_s,
+  round(approx_percentile(time_taken, 0.95), 3) AS p95_s,
+  round(approx_percentile(time_taken, 0.99), 3) AS p99_s,
+  round(approx_percentile(time_to_first_byte, 0.95), 3) AS ttfb_p95_s
+FROM cf_access_logs
+WHERE "date" >= current_date - interval '7' day AND cs_method = 'GET'
+GROUP BY 1
+HAVING COUNT(*) >= 50
+ORDER BY p95_s DESC
+LIMIT 50",
+        "WorkGroup": "sps-usage-prod",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
     "QueryReferrers": {
       "DependsOn": [
         "UsageDatabase",
@@ -1638,6 +1716,84 @@ FROM daily_usage
 WHERE metric = 'geo'
 GROUP BY dimension
 ORDER BY hits DESC",
+        "WorkGroup": "sps-usage-staging",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QueryPerfCacheHit": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Edge cache outcome mix over 7d (x_edge_result_type share) -- Hit/Miss/RefreshHit/Error.",
+        "Name": "sps-perf-cache-hit-staging",
+        "QueryString": "SELECT
+  x_edge_result_type AS result_type,
+  COUNT(*) AS hits,
+  round(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS pct
+FROM cf_access_logs
+WHERE "date" >= current_date - interval '7' day
+GROUP BY 1
+ORDER BY hits DESC",
+        "WorkGroup": "sps-usage-staging",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QueryPerfErrorsByRoute": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "4xx / 5xx counts + 5xx rate by route over 7d (routes with any error).",
+        "Name": "sps-perf-errors-by-route-staging",
+        "QueryString": "SELECT
+  regexp_replace(cs_uri_stem, '(/(scholar|center|department|division|topics|topic|publication|core|unit)/)[^/?]+', '$1:id') AS route,
+  COUNT(*) AS hits,
+  SUM(CASE WHEN sc_status BETWEEN 400 AND 499 THEN 1 ELSE 0 END) AS c4xx,
+  SUM(CASE WHEN sc_status BETWEEN 500 AND 599 THEN 1 ELSE 0 END) AS c5xx,
+  round(100.0 * SUM(CASE WHEN sc_status >= 500 THEN 1 ELSE 0 END) / COUNT(*), 2) AS err5xx_pct
+FROM cf_access_logs
+WHERE "date" >= current_date - interval '7' day
+GROUP BY 1
+HAVING SUM(CASE WHEN sc_status >= 400 THEN 1 ELSE 0 END) > 0
+ORDER BY c5xx DESC, c4xx DESC
+LIMIT 50",
+        "WorkGroup": "sps-usage-staging",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QueryPerfSlowRoutes": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Slowest routes over 7d: p50/p95/p99 time_taken + p95 TTFB (seconds), min 50 hits.",
+        "Name": "sps-perf-slow-routes-staging",
+        "QueryString": "SELECT
+  regexp_replace(cs_uri_stem, '(/(scholar|center|department|division|topics|topic|publication|core|unit)/)[^/?]+', '$1:id') AS route,
+  COUNT(*) AS hits,
+  round(approx_percentile(time_taken, 0.5), 3) AS p50_s,
+  round(approx_percentile(time_taken, 0.95), 3) AS p95_s,
+  round(approx_percentile(time_taken, 0.99), 3) AS p99_s,
+  round(approx_percentile(time_to_first_byte, 0.95), 3) AS ttfb_p95_s
+FROM cf_access_logs
+WHERE "date" >= current_date - interval '7' day AND cs_method = 'GET'
+GROUP BY 1
+HAVING COUNT(*) >= 50
+ORDER BY p95_s DESC
+LIMIT 50",
         "WorkGroup": "sps-usage-staging",
       },
       "Type": "AWS::Athena::NamedQuery",
