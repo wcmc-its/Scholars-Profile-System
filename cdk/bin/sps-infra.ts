@@ -146,6 +146,9 @@ new EdgeStack(app, `Sps-Edge-${envConfig.envName}`, {
 new AnalyticsStack(app, `Sps-Analytics-${envConfig.envName}`, {
   env,
   envConfig,
+  // Grant target for the in-app Usage dashboard's Athena/Glue/S3 query policy —
+  // creates an Analytics->App dependency (Analytics deploys after App).
+  appTaskRole: appStack.appTaskRole,
   description: `SPS usage analytics — Glue + Athena over CloudFront logs + nightly rollup, ${envConfig.envName} (ADR-008 9th stack).`,
 });
 

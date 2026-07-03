@@ -1,3 +1,5 @@
+import { Stack } from "aws-cdk-lib";
+import * as iam from "aws-cdk-lib/aws-iam";
 import { Template } from "aws-cdk-lib/assertions";
 import { AnalyticsStack } from "../lib/analytics-stack";
 import { makeFixture } from "./test-utils";
@@ -10,10 +12,19 @@ function buildAnalyticsStack(envName: "staging" | "prod"): {
   // AnalyticsStack references the raw CloudFront log bucket BY NAME
   // (envConfig.cloudFrontLogsBucketName) rather than via an EdgeStack handle,
   // so it stands alone with no prerequisite stacks (it deploys while EdgeStack
-  // is frozen behind #502).
+  // is frozen behind #502). Its only prop dependency is the AppStack task role
+  // (for the in-app Usage dashboard grant) — stubbed here by ARN so the stack
+  // still synthesizes standalone.
+  const roleScope = new Stack(fixture.app, `AppStub-${envName}`);
+  const appTaskRole = iam.Role.fromRoleArn(
+    roleScope,
+    "AppTaskRoleStub",
+    `arn:aws:iam::123456789012:role/sps-task-${envName}`,
+  );
   const stack = new AnalyticsStack(fixture.app, `Sps-Analytics-${envName}`, {
     env: fixture.env,
     envConfig: fixture.envConfig,
+    appTaskRole,
   });
   return { template: Template.fromStack(stack), stack };
 }
@@ -196,6 +207,28 @@ describe("AnalyticsStack", () => {
             `sps-perf-cache-hit-${env}`,
           ].sort(),
         );
+      });
+
+      // ---- In-app Usage dashboard grant (least privilege / PII boundary) ----
+      it("grants the app task role workgroup-scoped Athena but NO raw-log access", () => {
+        const policies = template.findResources("AWS::IAM::Policy", {
+          Properties: { PolicyName: `sps-usage-app-query-${env}` },
+        });
+        const docs = Object.values(policies).map(
+          (p) => (p.Properties as { PolicyDocument: unknown }).PolicyDocument,
+        );
+        expect(docs).toHaveLength(1);
+        const json = JSON.stringify(docs[0]);
+        // Query is on the capped usage workgroup, not the rollup workgroup.
+        expect(json).toContain(`workgroup/sps-usage-${env}`);
+        expect(json).not.toContain(`workgroup/sps-usage-rollup-${env}`);
+        // Glue read is scoped to daily_usage only — never the raw PII table.
+        expect(json).toContain("daily_usage");
+        expect(json).not.toContain("cf_access_logs");
+        // S3 is scoped to the aggregate rollup + athena-results prefixes; the app
+        // must NEVER get read on the raw CloudFront `cf/` log prefix (client IPs).
+        expect(json).toContain("rollup/daily-usage/*");
+        expect(json).not.toMatch(/"[^"]*\/cf\/\*?"/);
       });
 
       // ---- Lambda ----------------------------------------------------
