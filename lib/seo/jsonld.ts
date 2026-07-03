@@ -36,6 +36,25 @@ const KNOWS_ABOUT_CAP = 20;
  *  not a duplicate of the on-page content. */
 const DESCRIPTION_CHAR_CAP = 300;
 
+/**
+ * Serialize a JSON-LD object for embedding inside an inline
+ * `<script type="application/ld+json">` block via `dangerouslySetInnerHTML`.
+ *
+ * Plain `JSON.stringify` output is unsafe to drop into an HTML `<script>`
+ * element verbatim: a `<` in any string value (e.g. a `</script>` sequence a
+ * self-editor can get into their overview) closes the script element early and
+ * lets the remainder render as live markup. This escapes the HTML-significant
+ * characters to their `\uXXXX` JSON forms — still valid, parse-identical JSON,
+ * but inert as HTML. This is the single serializer every inline JSON-LD sink
+ * must route through.
+ */
+export function serializeJsonLd(obj: unknown): string {
+  return JSON.stringify(obj)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026");
+}
+
 export type PersonJsonLdInput = {
   slug: string;
   /** Display name with postnominal applied (e.g. "Curtis Cole, MD"). */
@@ -253,6 +272,13 @@ export function buildDefinedTermJsonLd(
  * whitespace, then cap at DESCRIPTION_CHAR_CAP at a word boundary with an
  * ellipsis when truncation occurs.
  *
+ * This is plain-text meta content: it must never carry raw `<`/`>`. We
+ * therefore do NOT decode `&lt;`/`&gt;` back into their metacharacters —
+ * doing so would resurrect markup that an inline `<script>` sink could then
+ * emit verbatim. The angle-bracket entities are left intact; the ampersand
+ * decode is kept only for readability (`serializeJsonLd` re-encodes `&` when
+ * embedding, so it can't reopen a markup vector at the sink).
+ *
  * Exported for unit tests.
  */
 export function overviewToDescription(overview: string | null): string | null {
@@ -261,11 +287,10 @@ export function overviewToDescription(overview: string | null): string | null {
   const tagless = overview.replace(/<[^>]+>/g, " ");
   // Decode the entities our editor produces. Anything else stays as-is
   // (an LLM consuming the JSON-LD will handle stray entities fine).
+  // `&lt;`/`&gt;` are intentionally NOT decoded — see the doc comment.
   const decoded = tagless
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
     .replace(/&ndash;/g, "–")

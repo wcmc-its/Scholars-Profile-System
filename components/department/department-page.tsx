@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { buildOrganizationJsonLd } from "@/lib/seo/jsonld";
+import { buildOrganizationJsonLd, serializeJsonLd } from "@/lib/seo/jsonld";
 import { getDepartment, getDepartmentFaculty } from "@/lib/api/departments";
 import { getSpotlightCardsForDepartment } from "@/lib/api/spotlight";
 import {
@@ -87,7 +87,7 @@ export async function DepartmentPage({
     <main className="mx-auto max-w-[1100px] px-6 py-12">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
       />
       {/* Breadcrumbs per UI-SPEC §7 */}
       <Breadcrumb className="mb-4">
