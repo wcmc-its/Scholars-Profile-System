@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-05-18
+**Last reviewed:** 2026-07-03 — reaffirmed at #506 Gate B (see *Gate B reconfirmation* below)
 **Authors:** Scholars Profile System development team
 **Supersedes:** —
 **Superseded by:** —
@@ -142,3 +143,37 @@ Revisit this ADR if the premise changes:
 - OWASP — strict-CSP guidance (nonce/hash + `'strict-dynamic'`); this ADR is a documented deviation from it, with compensating controls.
 - #112 (`B13`) — staging environment; #374 part 1 (promotion) is execution-gated on it.
 - #99 — production-readiness epic.
+
+## Gate B reconfirmation (2026-07-03)
+
+The #506 Gate B sign-off requires the pre-launch auth/authz audit (#1439) to reconfirm every accepted-risk it surfaced. This ADR is the accepted-risk record behind the audit's Finding 7 (prod CSP keeps `script-src 'unsafe-inline'`), and the audit's ask is a Gate-B recheck of the decision — specifically now that the audit's Finding 1 (stored XSS via a JSON-LD `<script>` breakout) has been remediated by #1450. **Decision reaffirmed for launch, unchanged.** The rationale below re-grounds the original decision against the code as it stands on `master` at reconfirmation time.
+
+### (a) Why the decision holds — output encoding is the real control
+
+The audit is explicit that this finding is defense-in-depth, not an exploitable defect: it has no standalone reachability trace and matters only *conditional on* a bypass of output encoding. That framing is the reason the decision is sound. On this app the primary XSS control is, and was always intended to be, **output encoding at the sink** — React's automatic contextual escaping on the ordinary render path, DOMPurify (`sanitizeOverviewHtml`, `lib/edit/validators.ts`) on the two `dangerouslySetInnerHTML` HTML surfaces, and now a dedicated escaper on the structured-data path. CSP `script-src` is, per this ADR's threat model, a *second* line behind that encoding, and on a static-first architecture it cannot be the inline-`<script>` backstop a nonce would provide (see the original Decision).
+
+The one place where that layering had actually failed — the JSON-LD sink that emitted `buildPersonJsonLd(...)` through a bare `JSON.stringify`, so a `</script>` sequence in a self-edited overview terminated the `application/ld+json` block — is closed as of **#1450** (`3e657649`, 2026-07-03, *Refs #1439*). #1450 (i) introduced a single shared serializer `serializeJsonLd()` in `lib/seo/jsonld.ts` that escapes `<`, `>`, and `&` to their `\uXXXX` JSON forms (valid, parse-identical JSON, inert as HTML) and routed **all six** inline JSON-LD sinks through it, and (ii) stopped `overviewToDescription` from decoding `&lt;`/`&gt;` back into raw angle brackets. Regression coverage lives in `tests/unit/jsonld.test.ts`. So the single known injection sink that could have reached script execution *regardless of* the CSP is now hardened at the encoding layer — which is exactly where the audit says the defense must hold.
+
+With that sink closed, the residual exposure the CSP does not backstop is narrowed to a *hypothetical future* sanitizer/encoder gap, and even then the enforced policy meaningfully limits exploitability: `script-src-attr 'none'` blocks the inline event-handler vector (`onerror=`/`onclick=`), `connect-src 'self'` confines any exfiltration beacon to the origin, `script-src 'self'` still blocks loading an external script, and `frame-ancestors 'none'` (doubled by the static `X-Frame-Options: DENY`) blocks framing. The gap is a same-origin injected inline `<script>` or `javascript:` URI, reachable only after an encoder bypass on one of the two named HTML-injection surfaces — the same narrow residual the original Consequences section recorded, now with the one real-world instance of it eliminated.
+
+### (b) Is a nonce-based `script-src` worth adopting now?
+
+The concrete obstacle is unchanged. Re-verified against the current Next.js CSP guide at reconfirmation time (`next@15.5.15`): a per-request nonce still forces **all** pages into dynamic rendering — "static optimization and Incremental Static Regeneration (ISR) are disabled … pages cannot be cached by CDNs … Partial Prerendering (PPR) is incompatible with nonce-based CSP." That is the identical constraint the original Decision rejected the nonce on, and it has not relaxed. This app's entire public surface remains static/ISR behind CloudFront (the rendering audit in the Decision still describes `master`), so adopting a nonce would still trade the whole performance/cost architecture for hardening a sink that #1450 already closed at the encoding layer. **Verdict: keep the current policy (no nonce; `'unsafe-inline'` + `script-src-attr 'none'`). Do not adopt a nonce for launch.**
+
+One genuinely new datapoint since 2026-05-18: the Next.js CSP guide now documents an **experimental Subresource Integrity (SRI)** mode that generates script hashes at build time and is described as CDN- and static-generation-compatible — i.e. a hardening path that does *not* carry the nonce's dynamic-render penalty. This is exactly the "static-compatible mechanism appears" trigger the original *Forward compatibility* section anticipated. It is experimental and not adopted here, but it, together with Trusted Types (still the intended next step, to land with or just after #356), is the concrete post-launch revisit path.
+
+**Post-launch revisit trigger.** Reopen this decision if any of: (1) the rendering model stops being static-first (most routes become `force-dynamic` for personalization/auth), at which point a nonce + `'strict-dynamic'` costs nothing and becomes the right call; (2) Next.js's build-time SRI leaves experimental, giving a static-compatible strict `script-src`; or (3) #356 lands the user-controlled HTML surface — pair the Trusted Types adoption with it. Absent those, the accepted risk stands and re-verifies at the next security review.
+
+### (c) Compensating controls (accepted-risk justification)
+
+The `'unsafe-inline'` deviation from OWASP strict-CSP is accepted for launch on the strength of these controls, in defense-in-depth order:
+
+1. **Output encoding at every sink (primary control).** React contextual auto-escaping on the render path; DOMPurify (`sanitizeOverviewHtml`) on both `dangerouslySetInnerHTML` HTML surfaces; `serializeJsonLd()` (#1450) on all six structured-data sinks. The audit's one demonstrated injection sink is closed here.
+2. **`script-src-attr 'none'`** — blocks inline event-handler attributes (`onerror`, `onclick`), the highest-likelihood injected-script vector, with no regression to first-party code (React binds handlers in JS, never as HTML attributes).
+3. **`script-src 'self'`** — even with `'unsafe-inline'`, still blocks loading any *external* script.
+4. **`connect-src 'self'`** — confines any exfiltration/beacon to the origin.
+5. **`frame-ancestors 'none'` + static `X-Frame-Options: DENY`** — clickjacking doubly covered; `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `default-src 'self'` are all unweakened hard blocks under enforcement.
+6. **Sanitizer discipline as a launch requirement.** Third-party sanitizers are unit-tested (`tests/unit/`); the future user-controlled `overview` surface (#356) remains gated on a vetted library (DOMPurify), a server-side adversarial payload corpus, and explicit security sign-off before merge — the requirements the original Consequences section placed on it are unchanged.
+7. **Report-only observation window still available.** The policy value is identical in report-only and enforce mode (`SECURITY_CSP_MODE`), so any residual violation is observable via the `/api/csp-report` collector and the flag is reversible by a single env flip.
+
+**Net Gate-B posture:** Finding 7 stays an accepted risk, not a launch blocker. Its severity was always conditional on Finding 1, and #1450 removed that condition; the CSP directive set is unchanged and correct for a static-first public directory; the nonce obstacle has not moved; and a static-compatible hardening path (build-time SRI / Trusted Types) is tracked for post-launch rather than forced pre-launch.
