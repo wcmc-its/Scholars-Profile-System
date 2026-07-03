@@ -192,11 +192,12 @@ tracker **#1415**) landed nine PRs the same day, deployed to staging:
 Prod: the image shipped 2026-07-02 (GH Actions run 28624978997), so the flags on task-def
 `:21` are now **live** in prod — gzip verified on `/api/search` and
 `SEARCH_PEOPLE_REASON_FROM_DOC` on — and the reorder / doc-reason paths run in prod, no
-longer inert behind an older image. Residual (verified 2026-07-03): the prod people index
-carries `meshSubtreeCounts` on **0 of 8,937 docs** (the prod reindex predates the field's
-indexer), so the flag-on concept reason count degrades to 0 / concept-fallback until a prod
-**people-reindex** off the current image populates it (#1404); the C-ramp can be re-run
-against prod after that reindex.
+longer inert behind an older image. `meshSubtreeCounts` is **present** on the prod people
+index (verified 2026-07-03 by a direct `_source` read — 118 of a 200-doc sample carry a
+non-empty map; the field is mapped `enabled: false`, so it is readable from `_source` but
+**not** via an `exists` query — the reason the doc-reason path reads it from `_source`), so
+the flag-on reason counts are served correctly (#1404 resolved). The C-ramp can be re-run
+against prod to quantify the win.
 
 ## Scaling characteristics
 
