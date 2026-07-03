@@ -38,6 +38,7 @@ import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug, reconcileScholarSlug } from "@/lib/slug";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
 import { appointmentContentKey } from "@/lib/etl/content-keys";
+import { Prisma } from "@/lib/generated/prisma/client";
 import {
   collapseEmployeeRecordsByCwid,
   type EdFacultyAppointment,
@@ -229,8 +230,48 @@ async function refreshEdAppointments(
     existing,
     contentKey: appointmentContentKey,
   });
+  if (plan.duplicateExternalIds.length > 0) {
+    // Previously swallowed by createMany({ skipDuplicates }); surface it so a
+    // scholar with two ED SOR rows sharing one SORID is visible upstream.
+    console.warn(
+      `[ED appointments] ${cwid}: source emitted ${plan.duplicateExternalIds.length} ` +
+        `duplicate appointment SORID(s) (last wins): ${plan.duplicateExternalIds.join(", ")}`,
+    );
+  }
   if (plan.toCreate.length > 0) {
-    await db.write.appointment.createMany({ data: plan.toCreate });
+    try {
+      // Fast path: batch-insert the genuinely new rows.
+      await db.write.appointment.createMany({ data: plan.toCreate });
+    } catch (err) {
+      // external_id is GLOBALLY unique, but this reconcile runs per-cwid, so a
+      // toCreate row can collide with a row the same external_id already owns
+      // under a DIFFERENT cwid — an ED-FACULTY-{SORID} shared across people or
+      // migrated between them. That P2002 used to abort the entire ED nightly.
+      // Fall back to per-row upsert so the row is reassigned to this cwid, and
+      // log each reassignment: a genuinely shared SORID is a source anomaly to
+      // escalate to the ED owner, while a benign cwid migration just proceeds.
+      // createMany is one atomic statement (InnoDB), so nothing was inserted.
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002")) {
+        throw err;
+      }
+      for (const a of plan.toCreate) {
+        const clash = await db.write.appointment.findUnique({
+          where: { externalId: a.externalId },
+          select: { cwid: true },
+        });
+        if (clash && clash.cwid !== a.cwid) {
+          console.warn(
+            `[ED appointments] external_id ${a.externalId} reassigned cwid ` +
+              `${clash.cwid} -> ${a.cwid} (SORID shared across / migrated between people)`,
+          );
+        }
+        await db.write.appointment.upsert({
+          where: { externalId: a.externalId },
+          create: a,
+          update: { ...a, lastRefreshedAt: new Date() },
+        });
+      }
+    }
   }
   for (const a of plan.toUpdate) {
     await db.write.appointment.update({
