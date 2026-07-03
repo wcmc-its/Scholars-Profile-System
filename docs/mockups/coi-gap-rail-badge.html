@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>COI-gap rail count — chip treatments (throwaway mockup)</title>
+<style>
+  :root {
+    --apollo-maroon: #8a1f2b;
+    --apollo-maroon-press: #6e1620;
+    --apollo-border: #e9e3df;
+    --apollo-border-strong: #dbd3cd;
+    --apollo-rail: #f4f1ed;
+    --apollo-rail-border: #e9e3df;
+    --apollo-rail-hover: #ece7e1;
+    --muted: #8c857d;
+    --ink: #2c2925;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 28px 80px;
+    background: #faf8f6;
+    color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 28px; max-width: 760px; }
+  .row { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+  .opt { width: 270px; }
+  .opt > .tag {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--apollo-maroon); margin-bottom: 6px;
+  }
+  .opt > .desc { color: var(--muted); font-size: 12.5px; margin: 0 0 12px; min-height: 48px; }
+  .opt.rec > .tag::after { content: "  ·  recommended"; color: #4a7a4a; }
+
+  /* ---- faithful ATTRIBUTES rail ---- */
+  .rail {
+    background: var(--apollo-rail);
+    border: 1px solid var(--apollo-rail-border);
+    border-radius: 8px; padding: 8px; width: 100%;
+  }
+  .ghead {
+    color: var(--muted); padding: 6px 8px 4px; font-size: 11px; font-weight: 600;
+    letter-spacing: .06em; text-transform: uppercase;
+  }
+  .ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 10px; border-radius: 6px; cursor: default; color: var(--ink);
+  }
+  .item:hover { background: var(--apollo-rail-hover); }
+  .item .lhs { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .chev { color: var(--apollo-maroon); font-size: 13px; }
+  .item.active { background: var(--apollo-maroon); color: #fff; }
+  .item.active .chev { color: rgba(255,255,255,.85); }
+
+  /* nested child: indent + left tick (mirrors the real before:bg rule) */
+  .child { position: relative; margin-left: 14px; padding-left: 14px; }
+  .child::before {
+    content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+    width: 2px; height: 14px; border-radius: 1px; background: var(--apollo-border-strong);
+  }
+  .parent-of-active::before { background: var(--apollo-maroon); }
+
+  /* ---------- chip variants ---------- */
+  /* A — muted warm-gray pill */
+  .chip-a {
+    font-size: 11px; font-weight: 600; line-height: 1; color: #6b6560;
+    background: var(--apollo-border); border: 1px solid var(--apollo-border-strong);
+    border-radius: 999px; padding: 3px 7px; min-width: 18px; text-align: center;
+  }
+  .active .chip-a { color: #fff; background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.3); }
+
+  /* B — parenthetical inline text */
+  .chip-b { color: var(--muted); font-size: 13px; }
+  .active .chip-b { color: rgba(255,255,255,.8); }
+
+  /* C — maroon-tint pill (on-brand accent, not alert red) */
+  .chip-c {
+    font-size: 11px; font-weight: 700; line-height: 1; color: var(--apollo-maroon);
+    background: rgba(138,31,43,.08); border: 1px solid rgba(138,31,43,.22);
+    border-radius: 999px; padding: 3px 7px; min-width: 18px; text-align: center;
+  }
+  .active .chip-c { color: #fff; background: rgba(255,255,255,.18); border-color: rgba(255,255,255,.3); }
+
+  /* D — the anti-pattern, shown only to reject it */
+  .chip-red {
+    font-size: 11px; font-weight: 700; line-height: 1; color: #fff;
+    background: #c0392b; border-radius: 999px; padding: 3px 7px; min-width: 18px; text-align: center;
+  }
+  .note { margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .reject .tag { color: #b03a2e; }
+  hr { border: 0; border-top: 1px solid var(--apollo-border); margin: 36px 0 24px; }
+  .placement .rail { width: 270px; }
+</style>
+</head>
+<body>
+  <h1>COI-gap rail count — chip treatments</h1>
+  <p class="sub">
+    A throwaway mockup. The count = number of <em>High-tier</em> relationships to review
+    (<code>unmatchedPubmedCoi.length</code>, already deduped per relationship, already excludes
+    dismissed/resolved). It only appears when &gt; 0 and the feature flag is on. Goal: a quiet
+    "there's something to reconcile" cue — <strong>not</strong> a compliance alarm.
+    Numbers shown use a typical count (6); see the note on large counts.
+  </p>
+
+  <div class="row">
+    <!-- A -->
+    <div class="opt rec">
+      <span class="tag">A — muted pill</span>
+      <p class="desc">Warm-gray pill on the child item. Reads as metadata, not an alert. Most neutral.</p>
+      <nav class="rail">
+        <p class="ghead">From WCM systems</p>
+        <ul class="ul">
+          <li class="item parent-of-active"><span class="lhs">Conflicts of Interest</span></li>
+          <li class="item child active">
+            <span class="lhs">From your publications <span class="chip-a">6</span></span>
+            <span class="chev">›</span>
+          </li>
+        </ul>
+      </nav>
+      <nav class="rail" style="margin-top:10px">
+        <ul class="ul">
+          <li class="item"><span class="lhs">Conflicts of Interest</span></li>
+          <li class="item child"><span class="lhs">From your publications <span class="chip-a">6</span></span></li>
+        </ul>
+      </nav>
+    </div>
+
+    <!-- B -->
+    <div class="opt">
+      <span class="tag">B — parenthetical</span>
+      <p class="desc">Plain "(6)" in muted text appended to the label. The most understated option; no shape at all.</p>
+      <nav class="rail">
+        <p class="ghead">From WCM systems</p>
+        <ul class="ul">
+          <li class="item parent-of-active"><span class="lhs">Conflicts of Interest</span></li>
+          <li class="item child active">
+            <span class="lhs">From your publications <span class="chip-b">(6)</span></span>
+            <span class="chev">›</span>
+          </li>
+        </ul>
+      </nav>
+      <nav class="rail" style="margin-top:10px">
+        <ul class="ul">
+          <li class="item"><span class="lhs">Conflicts of Interest</span></li>
+          <li class="item child"><span class="lhs">From your publications <span class="chip-b">(6)</span></span></li>
+        </ul>
+      </nav>
+    </div>
+
+    <!-- C -->
+    <div class="opt">
+      <span class="tag">C — maroon-tint pill</span>
+      <p class="desc">Editor-accent pill (maroon tint, not red). More noticeable / on-brand, still not alarming.</p>
+      <nav class="rail">
+        <p class="ghead">From WCM systems</p>
+        <ul class="ul">
+          <li class="item parent-of-active"><span class="lhs">Conflicts of Interest</span></li>
+          <li class="item child active">
+            <span class="lhs">From your publications <span class="chip-c">6</span></span>
+            <span class="chev">›</span>
+          </li>
+        </ul>
+      </nav>
+      <nav class="rail" style="margin-top:10px">
+        <ul class="ul">
+          <li class="item"><span class="lhs">Conflicts of Interest</span></li>
+          <li class="item child"><span class="lhs">From your publications <span class="chip-c">6</span></span></li>
+        </ul>
+      </nav>
+    </div>
+
+    <!-- D reject -->
+    <div class="opt reject">
+      <span class="tag">D — red badge (rejected)</span>
+      <p class="desc">Shown only to reject it: a red notification badge reads as "you have 6 violations" — the accusatory tone the whole feature avoids.</p>
+      <nav class="rail">
+        <p class="ghead">From WCM systems</p>
+        <ul class="ul">
+          <li class="item"><span class="lhs">Conflicts of Interest</span></li>
+          <li class="item child"><span class="lhs">From your publications <span class="chip-red">6</span></span></li>
+        </ul>
+      </nav>
+      <p class="note">✗ Not this.</p>
+    </div>
+  </div>
+
+  <hr />
+
+  <h1 style="font-size:16px">Placement — child only vs. bubble to the parent</h1>
+  <p class="sub">When "Conflicts of Interest" is the collapsed/parent row, the child badge isn't visible.
+    Option to bubble a count to the parent so it's discoverable without expanding.</p>
+  <div class="row placement">
+    <div class="opt">
+      <span class="tag">P1 — child only (simplest)</span>
+      <p class="desc">Count lives on "From your publications". Clear meaning, but only visible once the COI group is in view.</p>
+      <nav class="rail">
+        <ul class="ul">
+          <li class="item"><span class="lhs">Conflicts of Interest</span></li>
+          <li class="item child"><span class="lhs">From your publications <span class="chip-a">6</span></span></li>
+        </ul>
+      </nav>
+    </div>
+    <div class="opt">
+      <span class="tag">P2 — bubble to parent</span>
+      <p class="desc">Same count also on the parent (so it shows when the child is out of view). Risk: the parent row is the <em>disclosed</em> COI list, so the count could be misread as "6 disclosures" — needs a tooltip.</p>
+      <nav class="rail">
+        <ul class="ul">
+          <li class="item"><span class="lhs">Conflicts of Interest <span class="chip-a">6</span></span></li>
+          <li class="item child"><span class="lhs">From your publications <span class="chip-a">6</span></span></li>
+        </ul>
+      </nav>
+    </div>
+  </div>
+
+  <p class="note" style="margin-top:24px; max-width:760px">
+    Large counts: a heavy discloser (e.g. Drilon, 48 High) would show "48". If that feels loud, cap the
+    display at "9+". Counts are deduped per relationship but inherit the entity-split residual
+    (Genentech / Roche / Genentech&nbsp;Roche = 3), so a big number is slightly inflated until entity-dedup is tidied.
+  </p>
+</body>
+</html>

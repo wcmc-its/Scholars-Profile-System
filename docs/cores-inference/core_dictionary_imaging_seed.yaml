@@ -1,0 +1,44 @@
+# Core dictionary — Biomedical Imaging (CBIC) seed entry
+# Resolved against ReCiterDB `identity` (prod) 2026-06-19. CWIDs verified by
+# given-name + Radiology-department match; "Bin He" disambiguated to the Radiology
+# record (bih2006), not the Medicine one (bih4001).
+
+- coreId: 2
+  name: Biomedical Imaging
+  facility: Citigroup Biomedical Imaging Center
+  owner_cwid: null            # TBD — designate via SPS Superuser grant
+
+  aliases:                    # signal 3 (full-text acknowledgement match)
+    - "Citigroup Biomedical Imaging Center"        # canonical (157/157 pilot hits)
+    - "Citigroup Biomedical Imaging Core Facility"
+    - "Biomedical Imaging Core Facility"
+    - "CBIC"                                         # acronym — require \bword-boundary\b
+
+  staff_cwids:                # signal 2 (core-staff co-authorship). Verified in `identity`.
+    - cwid: djb2001  name: "Douglas J. Ballon"     dept: Radiology  person_article_pubs: 102  active: true
+    - cwid: jpd2001  name: "Jonathan P. Dyke"       dept: Radiology  person_article_pubs: 181  active: true
+    - cwid: dcs7001  name: "Dikoma C. Shungu"       dept: Radiology  person_article_pubs: 140  active: true
+    - cwid: bih2006  name: "Bin He"                 dept: Radiology  person_article_pubs: 65   active: true
+    # Resolve in `identity` but have 0 person_article rows -> NOT in ReCiter's tracked set.
+    # Co-authorship by these is invisible to a person_article join; needs raw-author-name match.
+    - cwid: hev2006  name: "Henning U. Voss"        dept: Radiology  person_article_pubs: 0    active: false
+    - cwid: job2060  name: "John W. Babich"         dept: Radiology  person_article_pubs: 0    active: false
+    - cwid: cof2003  name: "Conor P. Foley"         dept: null       person_article_pubs: 0    active: false
+
+  grant_ids: []               # NONE — validation showed no shared core grant; do not use
+
+  llm_description: >
+    multimodal imaging research; advanced MRI/MRS, PET/CT, MicroPET/SPECT/CT,
+    optical imaging, ultrasound, cyclotron, radiochemistry for radiotracer synthesis
+
+# --- Signal-2 validation on the 237-paper pilot ---
+# Source of truth: reciterdb.analysis_summary_author_list.personIdentifier (RESOLVED CWID
+# per author row; mirrored into the SPS DB). Match on personIdentifier, NEVER on name.
+#   co-authorship by >=1 of the 4 ACTIVE staff CWIDs:
+#     recall    = 53/137 yes-papers (39%)
+#     precision = 100% (0/100 no-papers matched)
+# The 4 inactive staff (Voss/Babich/Foley + note) return 0 because they are NOT ReCiter
+# target persons -> their author rows have personIdentifier=null (verified: pmid 21724116,
+# Voss null while co-authors resolve). FIX = add them to ReCiter's identity/target feed
+# (upstream), NOT surname matching: 511 resolved "Voss" rows are Martin Henner Voss
+# (mhv9001, oncology), not Henning Voss (hev2006) -> string matching mis-attributes.
