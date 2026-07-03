@@ -10,9 +10,11 @@
  * middleware bundle. Middleware deals only with the already-minted session
  * cookie (`lib/auth/session.ts`).
  */
+import { createHash } from "node:crypto";
 import { SAML, SamlStatusError, ValidateInResponseTo } from "@node-saml/node-saml";
 import type { Profile, SamlConfig } from "@node-saml/node-saml";
 import { getSamlEnv, type SamlEnv } from "@/lib/auth/config";
+import type { AssertionIdentity } from "@/lib/auth/saml-assertion-store";
 
 let cached: { saml: SAML; env: SamlEnv } | null = null;
 
@@ -35,9 +37,14 @@ function ensureSaml(): { saml: SAML; env: SamlEnv } {
     wantAssertionsSigned: true,
     wantAuthnResponseSigned: env.wantAuthnResponseSigned,
     acceptedClockSkewMs: env.clockSkewMs,
-    // Stateless: no server-side request-ID cache, so InResponseTo is not
-    // checked against one (B01 plan OQ6). Replay protection rests on the
-    // assertion signature, a tight NotOnOrAfter window, and the audience.
+    // InResponseTo is not validated against a stored request id (B01 plan OQ6).
+    // node-saml's request-id check is backed by an in-process cache, which does
+    // not hold across the 1–2 Fargate tasks staging/prod run: an AuthnRequest
+    // minted on one task and a response validated on another would spuriously
+    // fail. Single-use of each assertion is enforced instead by a shared,
+    // instance-independent store (`lib/auth/saml-assertion-store.ts`, #1439),
+    // which is the load-bearing single-use guard; the assertion signature, a
+    // tight NotOnOrAfter window, and the audience remain the other layers.
     validateInResponseTo: ValidateInResponseTo.never,
     // Unset SAML_NAMEID_FORMAT => null => request no specific NameID format,
     // the most IdP-compatible default.
@@ -62,7 +69,7 @@ export async function getLoginRedirectUrl(relayState: string): Promise<string> {
 }
 
 export type SamlValidationResult =
-  | { ok: true; cwid: string }
+  | { ok: true; cwid: string; assertion: AssertionIdentity }
   | { ok: false; reason: string };
 
 /**
@@ -95,7 +102,13 @@ export async function validateSamlResponse(
     extractCwid(profile, env.cwidAttribute) ??
     extractCwidFromEppn(profile, env.eppnAttribute, env.eppnTrustedScopes);
   if (!cwid) return { ok: false, reason: "no_cwid" };
-  return { ok: true, cwid };
+  // Dedup key for the single-use guard (#1439). The caller records it before
+  // minting a session; a second presentation of the same assertion is rejected.
+  const assertion = extractAssertionIdentity(profile, samlResponseB64, {
+    now: new Date(),
+    clockSkewMs: env.clockSkewMs,
+  });
+  return { ok: true, cwid, assertion };
 }
 
 /** First non-empty, trimmed string from a SAML value (tolerates a single-element array). */
@@ -146,6 +159,97 @@ export function extractCwidFromEppn(
   if (local.includes("@")) return null;
   const scope = eppn.slice(at + 1).toLowerCase();
   return trustedScopes.includes(scope) ? local : null;
+}
+
+/**
+ * Fallback horizon for the single-use ledger row when the assertion carries no
+ * parseable `NotOnOrAfter` (SAML makes it optional). Only controls pruning, so
+ * over-retaining is harmless; it must merely exceed any realistic reuse window
+ * (node-saml independently rejects an assertion older than its own timestamps).
+ */
+const ASSERTION_FALLBACK_WINDOW_MS = 60 * 60 * 1000; // 1h
+
+/** A plain (non-array) object, or undefined. Tolerates node-saml's xml2js shapes. */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** First element of an xml2js array node (or the value itself if not arrayed). */
+function firstElement(value: unknown): unknown {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+/** Read a string XML attribute (`node.$.<attr>`) from an xml2js element. */
+function xmlAttr(node: unknown, attr: string): string | undefined {
+  const dollar = asRecord(asRecord(node)?.["$"]);
+  const value = dollar?.[attr];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/** Parse a SAML timestamp to epoch ms, or null if absent/unparseable. */
+function timestampMs(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const t = Date.parse(raw);
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * Derive a stable single-use dedup key and prune horizon for a validated
+ * assertion (#1439). Preference order for the key:
+ *
+ *   1. `assn:<Assertion/@ID>` — the assertion's own id. It is inside the
+ *      signed element, so it cannot be altered without breaking the signature,
+ *      and a byte-for-byte re-presentation carries the exact same id.
+ *   2. `resp:<Response/@ID>` — the response id, when the assertion id is
+ *      somehow absent.
+ *   3. `hash:<sha256(raw SAMLResponse)>` — last-resort content hash.
+ *
+ * The prune horizon is the latest `NotOnOrAfter` on the assertion (Conditions
+ * or SubjectConfirmationData) plus the accepted clock skew, mirroring the
+ * window node-saml itself will still accept; it falls back to a generous fixed
+ * window when no timestamp is present. This function is pure and never throws —
+ * the same profile + response always yields the same key.
+ */
+export function extractAssertionIdentity(
+  profile: Profile,
+  samlResponseB64: string,
+  opts: { now: Date; clockSkewMs: number; fallbackWindowMs?: number },
+): AssertionIdentity {
+  const parsed =
+    typeof profile.getAssertion === "function" ? profile.getAssertion() : undefined;
+  const assertionNode = firstElement(asRecord(parsed)?.["Assertion"]);
+
+  const assertionId = xmlAttr(assertionNode, "ID");
+  const responseId = firstStringValue(profile.ID);
+  const id = assertionId
+    ? `assn:${assertionId}`
+    : responseId
+      ? `resp:${responseId}`
+      : `hash:${createHash("sha256").update(samlResponseB64).digest("hex")}`;
+
+  const conditionsNode = firstElement(asRecord(assertionNode)?.["Conditions"]);
+  const subjectNode = firstElement(asRecord(assertionNode)?.["Subject"]);
+  const confirmationNode = firstElement(
+    asRecord(subjectNode)?.["SubjectConfirmation"],
+  );
+  const confirmationData = firstElement(
+    asRecord(confirmationNode)?.["SubjectConfirmationData"],
+  );
+
+  const horizons = [
+    timestampMs(xmlAttr(conditionsNode, "NotOnOrAfter")),
+    timestampMs(xmlAttr(confirmationData, "NotOnOrAfter")),
+  ].filter((t): t is number => t !== null);
+
+  const fallbackMs = opts.fallbackWindowMs ?? ASSERTION_FALLBACK_WINDOW_MS;
+  const expiresAt =
+    horizons.length > 0
+      ? new Date(Math.max(...horizons) + opts.clockSkewMs)
+      : new Date(opts.now.getTime() + fallbackMs);
+
+  return { id, expiresAt };
 }
 
 /** SP metadata XML — hand the `/api/auth/saml/metadata` URL to WCM identity. */
