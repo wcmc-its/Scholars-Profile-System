@@ -11,15 +11,20 @@
  * `{ReportType}-Scholars-{YYYY-MM-DD}.csv` per spec §6.5.
  *
  * Security:
+ *   - Internal-viewer gate (an authenticated WCM session OR an allowlisted
+ *     on-network viewer, #866) — an external viewer => 401. Mirrors the
+ *     sibling scholars-export route (app/api/export/scholars/[scope]/route.ts);
+ *     these /api/export/* routes are not covered by middleware, so the gate
+ *     lives in the handler.
  *   - Granularity path param against a fixed allowlist
  *   - JSON body parsed defensively; structurally invalid → 400
  *   - Filter values constrained to the same shape `searchPublications`
  *     accepts; OpenSearch handles further escaping
- *   - No auth gating in Phase 1 (mirrors the rest of /search/* routes);
- *     rate limiting deferred to Phase 2
+ *   - Rate limiting deferred to Phase 2
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { apiError } from "@/lib/api/error-response";
+import { resolveViewerContext } from "@/lib/auth/viewer-context";
 import {
   AUTHORSHIP_HEADERS,
   ARTICLE_HEADERS,
@@ -142,6 +147,15 @@ export async function POST(
   request: NextRequest,
   ctx: { params: Promise<{ granularity: string }> },
 ) {
+  // Internal-only: an authenticated WCM session OR an allowlisted on-network
+  // viewer (#866) may download; everyone else => 401. Resolving here (not a
+  // bare session check) lets an anonymous on-WCM-network viewer through, exactly
+  // as the sibling scholars-export route does.
+  const vc = await resolveViewerContext(request);
+  if (!vc.internal) {
+    return apiError("unauthorized", 401);
+  }
+
   const { granularity: raw } = await ctx.params;
   if (!GRANULARITY_ALLOWLIST.has(raw as RouteGranularity)) {
     return apiError("invalid granularity", 400);
