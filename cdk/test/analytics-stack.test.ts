@@ -176,8 +176,8 @@ describe("AnalyticsStack", () => {
         expect(cfg?.BytesScannedCutoffPerQuery).toBeUndefined();
       });
 
-      it("creates the six saved marketing named queries", () => {
-        template.resourceCountIs("AWS::Athena::NamedQuery", 6);
+      it("creates the six marketing + three perf saved named queries", () => {
+        template.resourceCountIs("AWS::Athena::NamedQuery", 9);
         const qs = template.findResources("AWS::Athena::NamedQuery");
         const names = Object.values(qs)
           .map((q) => (q.Properties as { Name?: string })?.Name)
@@ -191,6 +191,9 @@ describe("AnalyticsStack", () => {
             `sps-usage-referrers-${env}`,
             `sps-usage-search-terms-${env}`,
             `sps-usage-top-profiles-${env}`,
+            `sps-perf-slow-routes-${env}`,
+            `sps-perf-errors-by-route-${env}`,
+            `sps-perf-cache-hit-${env}`,
           ].sort(),
         );
       });
