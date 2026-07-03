@@ -189,9 +189,14 @@ tracker **#1415**) landed nine PRs the same day, deployed to staging:
   [`cloudfront-cache-spec.md` §Compression](./cloudfront-cache-spec.md)); measured
   196,315 → 39,275 bytes through CloudFront.
 
-Prod: flags deployed (task-def `:21`) but **inert until the prod image release** (the
-running Jun-22 image predates the code); the C-ramp should be re-run against prod after
-that release + people reindex.
+Prod: the image shipped 2026-07-02 (GH Actions run 28624978997), so the flags on task-def
+`:21` are now **live** in prod — gzip verified on `/api/search` and
+`SEARCH_PEOPLE_REASON_FROM_DOC` on — and the reorder / doc-reason paths run in prod, no
+longer inert behind an older image. Residual (verified 2026-07-03): the prod people index
+carries `meshSubtreeCounts` on **0 of 8,937 docs** (the prod reindex predates the field's
+indexer), so the flag-on concept reason count degrades to 0 / concept-fallback until a prod
+**people-reindex** off the current image populates it (#1404); the C-ramp can be re-run
+against prod after that reindex.
 
 ## Scaling characteristics
 
