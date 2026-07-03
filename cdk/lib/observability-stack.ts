@@ -705,6 +705,21 @@ export class SpsObservabilityStack extends Stack {
       action: "lambda:InvokeFunction",
     });
 
+    // PR-7 — subscribe the same relay to the P1 page topic (abort-tier step
+    // failures). Same in-this-stack wiring as EtlFailures above to avoid the
+    // EtlStack->ObservabilityStack cycle. severityForRecord routes any non-warn
+    // topic (etl-page-* included) to the page channel, so no relay change.
+    new sns.Subscription(this, "EtlPageRelaySubscription", {
+      topic: props.etlStack.pageTopic,
+      protocol: sns.SubscriptionProtocol.LAMBDA,
+      endpoint: relay.functionArn,
+    });
+    relay.addPermission("AllowEtlPageTopicInvoke", {
+      principal: new iam.ServicePrincipal("sns.amazonaws.com"),
+      sourceArn: props.etlStack.pageTopic.topicArn,
+      action: "lambda:InvokeFunction",
+    });
+
     // Failure-mode design (SPEC § Failure-mode design): if this Lambda
     // errors, route to the NOTIFY topic (email) -- not the page topic --
     // because the page topic IS this Lambda; routing failure back through

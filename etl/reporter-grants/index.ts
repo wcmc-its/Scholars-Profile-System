@@ -26,6 +26,7 @@
  */
 import { db } from "../../lib/db";
 import { assertPruneVolume } from "../../lib/etl-guard";
+import { withEtlRun } from "@/lib/etl-run";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import {
   dedupeAgainstInfoEd,
@@ -534,7 +535,10 @@ async function main() {
   console.log("\nRePORTER Grants ETL complete.\n");
 }
 
-main()
+// Records an etl_run row (source "ReporterGrants") so the freshness heartbeat
+// tracks this weekly step (PR-7). main() does not disconnect internally, so the
+// success/failure etl_run update runs before the outer disconnect below.
+withEtlRun("ReporterGrants", main)
   .then(() => db.write.$disconnect())
   .catch(async (err) => {
     console.error(err);
