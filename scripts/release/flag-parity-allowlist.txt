@@ -9,7 +9,6 @@
 
 # --- tracked gaps: flags waiting on an open issue to wire + flip ---
 SEARCH_REQUIRE_DISPLAYABLE_AUTHOR   # 718: wire cdk ETL+app, reindex, then flip
-SEARCH_PEOPLE_PHRASE_BOOST          # 1344: wire staging-on + A/B multi-word queries
 
 # --- runtime/system (injected by platform, test runner, or build) ---
 AWS_DEFAULT_REGION
