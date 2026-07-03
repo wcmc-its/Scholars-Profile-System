@@ -27,8 +27,9 @@ Exit criteria are the flip/kill conditions; "GAP" = no open issue owns the flip.
 
 | Flag | staging | prod | Owner | Exit criterion |
 |---|---|---|---|---|
-| SEARCH_PEOPLE_AREA_BOOST | on | off | #1363 / #1343 | **A/B DONE 2026-07-02** (`docs/search-area-boost-ab-2026-07-02.md`): ON beats OFF overall (0.257 vs 0.249) with the targeted clinician-expert lift, but flip criteria (Igel/Aras lift, hypertension specialists) not met — keep staging-on, HOLD prod; next = tune AREA_BOOST_W_* against the hypertension/alzheimer's regressions |
-| SEARCH_PEOPLE_FACULTY_PROMINENCE | off | on | #1345 | Re-run A/B WITH #1363 in place (diabetes regression may dissolve); note inverted drift — prod has it ON, staging OFF |
+| SEARCH_PEOPLE_AREA_BOOST | on | off | #1363 / #1343 | **A/Bs DONE 07-02 + 07-03** (`docs/search-area-boost-ab-2026-07-02.md`, `docs/search-boost-tuning-ab-2026-07-03.md`): ON beats OFF; weight-tuning found 2/1/0.5 relieves the hypertension/alzheimer's regressions at a flat headline (redistribution, not Pareto). Keep staging-on, HOLD prod; #1343 owner soaks 2/1/0.5 (env `SEARCH_AREA_BOOST_W_*`, tunable since #1470) then decides default |
+| SEARCH_PEOPLE_FACULTY_PROMINENCE | off | on | #1345 | **RE-EVAL DONE 07-03**: turning ON regresses (0.292→0.285); the diabetes-cluster regression that parked #1345 does NOT reproduce with #1363 active — keep OFF on staging, #1345 resolvable as "keep disabled". Prod still has the legacy ON (inverted drift) |
+| SEARCH_PEOPLE_PHRASE_BOOST | on | off | #1344 | **WIRED + A/B DONE 07-03** (#1470): phrase-boost ON = net +0.022 meanMRR, driven by clinical multi-word specialty queries (resistant hypertension, interventional cardiology). Staging-on validated; prod flip after soak |
 | SEARCH_MESH_RESOLUTION_FALLBACK | on | off | #1342/#1346/#1348 sweep | Staging soak + gold-set eval → prod flip (resolve-time only, no reindex); lay-term wins additionally need #1258 alias rows |
 | SEARCH_MESH_QUERY_NORMALIZATION | on | off | #1342/#1346/#1348 sweep | Same as above |
 | SEARCH_ACRONYM_SENSE_GUARD | on | off | #1346 | Same sweep; prod flip after gold-set eval |
@@ -41,10 +42,10 @@ Exit criteria are the flip/kill conditions; "GAP" = no open issue owns the flip.
 | SEARCH_PUB_MESH_ONLY_FILTER | on | off | #396 | Prod flip (no reindex prereq) after staging soak |
 | SEARCH_PUB_FACET_SPLIT | on | off | #1301 (revived by #1423, staging-on; prod flip rides the #1415 prod image release) | Kill criterion stated in #1301; bottleneck was `matchQueryToTaxonomy`, largely addressed by #1415 perf PRs — re-evaluate then flip or kill |
 | SEARCH_SHELL_STREAMING | on | off | #861 | Staging cold/warm TTFB measurement → prod at go-live (flag-off is byte-identical) |
-| SEARCH_RESULT_EVIDENCE | on | off | GAP (#1366 closed) | UI evidence panel master gate; prod flip rides the evidence bundle below |
-| SEARCH_EVIDENCE_ROWS | on | off | GAP (#1366 closed) | Same bundle |
-| SEARCH_EVIDENCE_REASON_COUNTS | on | off | GAP (#1366 closed) | Staging soak done; prod needs people reindex (doc-precomputed methodFamilyCounts/areaCounts) + cdk deploy. **Needs an owning rollout issue** |
-| SEARCH_PEOPLE_CONCEPT_HINT | on | off | GAP (spec only) | Prod needs topMeshTerms people reindex; **needs an owning issue** |
+| SEARCH_RESULT_EVIDENCE | on | off | #1464 | UI evidence panel master gate; prod flip rides the evidence bundle below |
+| SEARCH_EVIDENCE_ROWS | on | off | #1464 | Same bundle |
+| SEARCH_EVIDENCE_REASON_COUNTS | on | off | #1464 | Staging soak done; prod needs people reindex (doc-precomputed methodFamilyCounts/areaCounts, present per #1461) + cdk deploy |
+| SEARCH_PEOPLE_CONCEPT_HINT | on | off | #1465 | Prod needs topMeshTerms people reindex (verify present post 07-03 reindex) |
 
 ### Methods lens & org surfaces
 
@@ -70,19 +71,19 @@ Exit criteria are the flip/kill conditions; "GAP" = no open issue owns the flip.
 | SCHOLAR_LIST_EXPORT (+_EMAIL) | on | off | #847 | Staging soak → prod flip |
 | SELF_EDIT_RECITER_PENDING_HINT | on | off | #1078 | Staging soak → next approval-gated prod deploy |
 | GRANT_MATCHER_SUBTOPIC_GRAIN | on | off | #1090 family | envConfig-driven (config.ts), not env-string ternary; funding-relevance eval → enable+tune |
-| EDIT_BIOSKETCH_GENERATE | on | off | GAP (917 handoffs) | Generic "staging bake → prod deploy" — **needs an owning rollout issue** |
-| EDIT_CV_EXPORT | on | off | GAP (cv-asms handoff) | Same — **needs an owning issue** |
-| SELF_EDIT_OVERVIEW_GENERATE_STREAM | on | off | GAP (917 handoffs) | Same — **needs an owning issue** |
-| SELF_EDIT_RAIL_RESTRUCTURE | on | off | GAP | Same — **needs an owning issue** |
-| EDIT_DATA_QUALITY_DASHBOARD | on | off | GAP | Same — **needs an owning issue** |
-| REPORTER_MATCH_V2 | on | off | GAP (also etl-stack) | Same — **needs an owning issue** |
-| RECITER_REJECT_SEND | on | off | GAP (#746 closed) | Same — **needs an owning issue** |
+| EDIT_BIOSKETCH_GENERATE | on | off | #1467 | /edit bundle — staging bake → one prod deploy |
+| EDIT_CV_EXPORT | on | off | #1467 | /edit bundle |
+| SELF_EDIT_OVERVIEW_GENERATE_STREAM | on | off | #1467 | /edit bundle |
+| SELF_EDIT_RAIL_RESTRUCTURE | on | off | #1467 | /edit bundle |
+| EDIT_DATA_QUALITY_DASHBOARD | on | off | #1467 | /edit bundle |
+| REPORTER_MATCH_V2 | on | off | #1468 | Staging match-quality spot-check → flip prod in app+etl stacks (coordinate with the PR-6/7 etl deploy) |
+| RECITER_REJECT_SEND | on | off | #1469 | DECISION issue — outward write-back to ReCiter; confirm feedback loop wanted + verify staging write-backs, or keep staging-only |
 
 ## Dark-everywhere flags (off/0 both envs) — flip-or-kill queue
 
 | Flag | Owner | Exit criterion / decision |
 |---|---|---|
-| SEARCH_PEOPLE_CLINICAL_FN | PR #1372 Track B2, no issue | **A/B DONE 2026-07-02 — strict win** (clinician-expert medRank 14→9, zero regressions); wired staging-on in this PR, prod flip after soak |
+| SEARCH_PEOPLE_CLINICAL_FN | #1466 | **A/B DONE 2026-07-02 — strict win** (clinician-expert medRank 14→9, zero regressions); wired staging-on (#1435), prod flip after soak + prod clinicalSpecialties field verification |
 | SEARCH_PEOPLE_CLINICAL | #1372 Track A | INERT (text field empty in index) — kill or backfill decision rides clinical-fn outcome |
 | SEARCH_PEOPLE_DIVISION_SHAPE | #1347 | Dark pending A/B of division-shape routing |
 | SEARCH_PEOPLE_CONCEPT_PRECOUNT | #1414 | Inverted polarity ("off" = new fast path); #1414 wants code-default flip |
@@ -99,7 +100,6 @@ Exit criteria are the flip/kill conditions; "GAP" = no open issue owns the flip.
 | Key | Owner | Note |
 |---|---|---|
 | SEARCH_REQUIRE_DISPLAYABLE_AUTHOR | #718 + #807 | Wire cdk ETL+app → reindex → flip; #485 blocker likely OBE after VPC cutover reseeded FGAC |
-| SEARCH_PEOPLE_PHRASE_BOOST | #1344 | Wire staging-on + A/B multi-word archetype (pediatric congenital heart surgery) |
 
 ## Retire-at-launch / cleanup
 

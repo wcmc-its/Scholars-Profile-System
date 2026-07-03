@@ -1098,3 +1098,23 @@ export function resolveSearchPeopleClinicalFnWeight(): number {
   const raw = Number(process.env.SEARCH_PEOPLE_CLINICAL_FN_WEIGHT);
   return Number.isFinite(raw) && raw > 0 ? raw : CLINICAL_FN_WEIGHT_DEFAULT;
 }
+
+/** #1343/#1363 — area-boost tier weights, env-tunable (same shape as the clinical-fn
+ *  weight above) so weight cells A/B on staging as task-def env edits, no rebuild.
+ *  Code defaults are the softened `AREA_BOOST_W_*` constants in lib/search.ts.
+ *  0 is a valid override (disables a tier); negative/NaN falls back to the default. */
+export function resolveAreaBoostWeights(defaults: {
+  hi: number;
+  mid: number;
+  lo: number;
+}): { hi: number; mid: number; lo: number } {
+  const num = (raw: string | undefined, dflt: number) => {
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : dflt;
+  };
+  return {
+    hi: num(process.env.SEARCH_AREA_BOOST_W_HI, defaults.hi),
+    mid: num(process.env.SEARCH_AREA_BOOST_W_MID, defaults.mid),
+    lo: num(process.env.SEARCH_AREA_BOOST_W_LO, defaults.lo),
+  };
+}

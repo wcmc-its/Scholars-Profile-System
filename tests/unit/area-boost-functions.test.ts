@@ -4,7 +4,7 @@
  * relevance×coverage `total` is bucketed into hi/mid/lo weighted function_score
  * clauses keyed on cwid, and that the boundary/empty cases hold.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildAreaBoostFunctions } from "@/lib/api/search";
 import {
   AREA_BOOST_W_HI,
@@ -57,5 +57,43 @@ describe("buildAreaBoostFunctions", () => {
       { filter: { terms: { cwid: ["focused"] } }, weight: AREA_BOOST_W_HI },
       { filter: { terms: { cwid: ["tangential"] } }, weight: AREA_BOOST_W_LO },
     ]);
+  });
+
+  describe("SEARCH_AREA_BOOST_W_* env overrides (#1343/#1363 A/B lever)", () => {
+    const input = [
+      { cwid: "hi1", total: 100 },
+      { cwid: "mid1", total: 30 },
+      { cwid: "lo1", total: 5 },
+    ];
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("overrides tier weights from env", () => {
+      vi.stubEnv("SEARCH_AREA_BOOST_W_HI", "2");
+      vi.stubEnv("SEARCH_AREA_BOOST_W_MID", "1");
+      vi.stubEnv("SEARCH_AREA_BOOST_W_LO", "0.5");
+      expect(buildAreaBoostFunctions(input)).toEqual([
+        { filter: { terms: { cwid: ["hi1"] } }, weight: 2 },
+        { filter: { terms: { cwid: ["mid1"] } }, weight: 1 },
+        { filter: { terms: { cwid: ["lo1"] } }, weight: 0.5 },
+      ]);
+    });
+
+    it("weight 0 disables that tier's clause entirely", () => {
+      vi.stubEnv("SEARCH_AREA_BOOST_W_LO", "0");
+      expect(buildAreaBoostFunctions(input)).toEqual([
+        { filter: { terms: { cwid: ["hi1"] } }, weight: AREA_BOOST_W_HI },
+        { filter: { terms: { cwid: ["mid1"] } }, weight: AREA_BOOST_W_MID },
+      ]);
+    });
+
+    it("garbage and negative values fall back to the code defaults", () => {
+      vi.stubEnv("SEARCH_AREA_BOOST_W_HI", "banana");
+      vi.stubEnv("SEARCH_AREA_BOOST_W_MID", "-1");
+      expect(buildAreaBoostFunctions(input)).toEqual([
+        { filter: { terms: { cwid: ["hi1"] } }, weight: AREA_BOOST_W_HI },
+        { filter: { terms: { cwid: ["mid1"] } }, weight: AREA_BOOST_W_MID },
+        { filter: { terms: { cwid: ["lo1"] } }, weight: AREA_BOOST_W_LO },
+      ]);
+    });
   });
 });

@@ -9,7 +9,6 @@
 
 # --- tracked gaps: flags waiting on an open issue to wire + flip ---
 SEARCH_REQUIRE_DISPLAYABLE_AUTHOR   # 718: wire cdk ETL+app, reindex, then flip
-SEARCH_PEOPLE_PHRASE_BOOST          # 1344: wire staging-on + A/B multi-word queries
 
 # --- runtime/system (injected by platform, test runner, or build) ---
 AWS_DEFAULT_REGION
@@ -40,6 +39,9 @@ REPORTER_MATCH_V2_MAX_PER_RUN
 REPORTER_MATCH_V2_MIN_PMIDS
 SCHOLARS_HEALTH_TOKEN
 SCHOLARS_REVALIDATE_TOKEN_PREVIOUS
+SEARCH_AREA_BOOST_W_HI              # area-boost tier weight (code default 3) — A/B lever
+SEARCH_AREA_BOOST_W_MID             # area-boost tier weight (code default 1.5) — A/B lever
+SEARCH_AREA_BOOST_W_LO              # area-boost tier weight (code default 0.75) — A/B lever
 SEARCH_FUNDING_MATCH_REASON         # default-on (!== "off")
 SEARCH_FUNDING_PHRASE_BOOST
 SEARCH_FUNDING_TAB_MSM
