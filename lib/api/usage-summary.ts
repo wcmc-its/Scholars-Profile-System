@@ -24,7 +24,7 @@ export const USAGE_WINDOW_DAYS = 30;
 const USAGE_CACHE_TTL_SECONDS = 43_200;
 
 export type DayViews = { day: string; views: number };
-export type ProfileViews = { cwid: string; views: number };
+export type ProfileViews = { slug: string; views: number };
 export type TermCount = { term: string; searches: number };
 export type NamedCount = { label: string; hits: number };
 
@@ -62,7 +62,7 @@ export function shapeUsageRows(rows: UsageRows): UsageSummary {
     windowDays: USAGE_WINDOW_DAYS,
     totalPageviews: pageviewsByDay.reduce((sum, r) => sum + r.views, 0),
     pageviewsByDay,
-    topProfiles: rows.topProfiles.map((r) => ({ cwid: r.cwid ?? "", views: n(r.views) })),
+    topProfiles: rows.topProfiles.map((r) => ({ slug: r.slug ?? "", views: n(r.views) })),
     searchTerms: rows.searchTerms.map((r) => ({ term: r.term ?? "", searches: n(r.searches) })),
     referrers: rows.referrers.map((r) => ({ label: r.referrer ?? "", hits: n(r.hits) })),
     geo: rows.geo.map((r) => ({ label: r.region ?? "", hits: n(r.hits) })),

@@ -105,8 +105,51 @@ const REFERRER_CASE = [
 const SEARCH_TERM_EXPR =
   "lower(trim(url_decode(url_extract_parameter('http://x?' || cs_uri_query, 'q'))))";
 
-/** The profile CWID from a /scholar/<cwid> URI stem (empty if it does not match). */
-const PROFILE_CWID_EXPR = "regexp_extract(cs_uri_stem, '^/scholar/([^/?]+)', 1)";
+/**
+ * Reserved top-level route segments that are NOT scholar profiles. SPS serves a
+ * profile at a ROOT vanity slug (`app/(public)/[slug]`, e.g. `/carl-f-nathan`) —
+ * there is no `/scholar/<cwid>` path — so a profile pageview is a single-segment
+ * root path whose segment is none of these app routes. Keep in sync with the
+ * app's top-level routes.
+ *
+ * ponytail: hardcoded reserved list is the maintenance ceiling. If profile
+ * counts ever start absorbing a new site section, add that section's root
+ * segment here. Dotted paths (favicon.ico, robots.txt, *.png, sitemap.xml) are
+ * excluded structurally by the no-dot class below, so they need no entry.
+ */
+const RESERVED_ROOT_SEGMENTS = [
+  "about",
+  "browse",
+  "centers",
+  "cores",
+  "departments",
+  "methods",
+  "scholars",
+  "search",
+  "topics",
+  "api",
+  "edit",
+  "healthz",
+  "og",
+  "readiness",
+  "sitemap",
+]
+  .map((s) => `'${s}'`)
+  .join(", ");
+
+/** The root vanity slug from a `/<slug>` profile URL (empty if not a bare root path). */
+const PROFILE_SLUG_EXPR = "regexp_extract(cs_uri_stem, '^/([^/?]+)', 1)";
+
+/**
+ * Predicate identifying a scholar-profile pageview: a single-segment root path
+ * with no dot (so static files like `/robots.txt` are excluded) and an optional
+ * trailing slash, whose segment is not a reserved app route. Shared verbatim by
+ * the pageviews + profile arms.
+ */
+const PROFILE_PATH_PREDICATE = [
+  "regexp_like(cs_uri_stem, '^/[^/?.]+/?$')",
+  `    AND ${PROFILE_SLUG_EXPR} NOT IN (${RESERVED_ROOT_SEGMENTS})`,
+].join("\n");
 
 /**
  * INSERT INTO daily_usage the six aggregated marketing metrics for a single dt
@@ -135,24 +178,25 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     `INSERT INTO ${into}`,
     "SELECT metric, dimension, cnt, dt FROM (",
 
-    // (1) pageviews -- successful GETs to a bare /scholar/<cwid> profile page;
-    // a single rolled-up bucket label (totals live in the cnt column).
+    // (1) pageviews -- successful GETs to a bare /<slug> profile page (root
+    // vanity slug, minus reserved routes); a single rolled-up bucket label
+    // (totals live in the cnt column).
     "  SELECT 'pageviews' AS metric, 'profile_pageviews' AS dimension,",
     `    COUNT(*) AS cnt, ${dtLit} AS dt`,
     `  FROM ${from}`,
     `  WHERE "date" = ${day} AND ${SUCCESS_GET}`,
-    "    AND regexp_like(cs_uri_stem, '^/scholar/[^/?]+/?$')",
+    `    AND ${PROFILE_PATH_PREDICATE}`,
 
     "  UNION ALL",
 
-    // (2) profile -- dimension = cwid, cnt = views per profile.
-    `  SELECT 'profile' AS metric, ${PROFILE_CWID_EXPR} AS dimension,`,
+    // (2) profile -- dimension = the vanity slug, cnt = views per profile.
+    `  SELECT 'profile' AS metric, ${PROFILE_SLUG_EXPR} AS dimension,`,
     `    COUNT(*) AS cnt, ${dtLit} AS dt`,
     `  FROM ${from}`,
     `  WHERE "date" = ${day} AND ${SUCCESS_GET}`,
-    "    AND regexp_like(cs_uri_stem, '^/scholar/[^/?]+')",
-    `  GROUP BY ${PROFILE_CWID_EXPR}`,
-    `  HAVING ${PROFILE_CWID_EXPR} <> ''`,
+    `    AND ${PROFILE_PATH_PREDICATE}`,
+    `  GROUP BY ${PROFILE_SLUG_EXPR}`,
+    `  HAVING ${PROFILE_SLUG_EXPR} <> ''`,
 
     "  UNION ALL",
 

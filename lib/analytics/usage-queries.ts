@@ -73,7 +73,7 @@ export function buildUsageQueries(sinceDt: string): UsageQueries {
       "GROUP BY dt",
       "ORDER BY dt",
     ].join("\n"),
-    topProfiles: ranked("profile", "cwid", "views"),
+    topProfiles: ranked("profile", "slug", "views"),
     searchTerms: ranked("search_term", "term", "searches"),
     referrers: grouped("referrer", "referrer", "hits"),
     geo: grouped("geo", "region", "hits"),

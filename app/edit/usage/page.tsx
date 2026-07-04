@@ -11,11 +11,17 @@
  * every GET; the DATA is cached (daily) but the AUTH is not. Fails soft to an
  * "unavailable" notice if Athena errors (mirrors the /edit/activity pattern).
  */
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import { type UsageSummary, loadUsageSummary } from "@/lib/api/usage-summary";
+import {
+  type DayViews,
+  type ProfileViews,
+  type UsageSummary,
+  loadUsageSummary,
+} from "@/lib/api/usage-summary";
 import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
@@ -80,40 +86,123 @@ function CountTable({
   );
 }
 
-/** Pageviews-by-day as a table with a proportional CSS bar (no chart lib). */
-function PageviewsByDay({ summary }: { summary: UsageSummary }) {
-  const max = summary.pageviewsByDay.reduce((m, r) => Math.max(m, r.views), 0) || 1;
+/** Pageviews-by-day as a server-rendered SVG bar graph (no chart lib). Bars
+ *  carry a <title> for hover tooltips; y-gridlines + sparse x date labels give
+ *  scale. `currentColor` (set via text-muted-foreground on the svg) draws the
+ *  axes; the bars fill with the brand maroon CSS var. */
+function PageviewsChart({ data, windowDays }: { data: DayViews[]; windowDays: number }) {
+  if (data.length === 0) {
+    return (
+      <p className="text-muted-foreground mt-2" data-testid="usage-pageviews-empty">
+        No profile pageviews recorded in the last {windowDays} days.
+      </p>
+    );
+  }
+  const W = 900;
+  const H = 240;
+  const padL = 48;
+  const padR = 8;
+  const padT = 12;
+  const padB = 26;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const max = Math.max(...data.map((d) => d.views), 1);
+  const slot = plotW / data.length;
+  const barW = Math.max(1, slot * 0.72);
+  const labelEvery = Math.ceil(data.length / 8);
+
+  return (
+    <div className="mt-3 overflow-x-auto">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="text-muted-foreground h-60 w-full min-w-[560px]"
+        role="img"
+        aria-label={`Profile pageviews per day over the last ${windowDays} days`}
+      >
+        {[0, 0.5, 1].map((f) => {
+          const y = padT + plotH * (1 - f);
+          return (
+            <g key={f}>
+              <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="currentColor" strokeOpacity={0.15} />
+              <text x={padL - 6} y={y + 3} textAnchor="end" fontSize={10} fill="currentColor" fillOpacity={0.7}>
+                {Math.round(max * f).toLocaleString()}
+              </text>
+            </g>
+          );
+        })}
+        {data.map((d, i) => {
+          const h = (d.views / max) * plotH;
+          const x = padL + i * slot + (slot - barW) / 2;
+          return (
+            <rect
+              key={d.day}
+              x={x}
+              y={padT + plotH - h}
+              width={barW}
+              height={h}
+              rx={1}
+              style={{ fill: "var(--apollo-maroon)" }}
+            >
+              <title>
+                {d.day}: {d.views.toLocaleString()} views
+              </title>
+            </rect>
+          );
+        })}
+        {data.map((d, i) =>
+          i % labelEvery === 0 || i === data.length - 1 ? (
+            <text
+              key={d.day}
+              x={padL + i * slot + slot / 2}
+              y={H - 8}
+              textAnchor="middle"
+              fontSize={9}
+              fill="currentColor"
+              fillOpacity={0.7}
+            >
+              {d.day.slice(5)}
+            </text>
+          ) : null,
+        )}
+      </svg>
+    </div>
+  );
+}
+
+/** Top profiles by pageview — the vanity slug links to the live profile page. */
+function TopProfilesTable({ profiles }: { profiles: ProfileViews[] }) {
   return (
     <section className="mt-8">
-      <h2 className="text-base font-semibold">Pageviews by day</h2>
+      <h2 className="text-base font-semibold">Top profiles</h2>
       <div className="mt-2 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
             <tr className="border-apollo-border border-b">
-              <th className={thClass}>Day</th>
-              <th className={`${thClass} w-full`}>Views</th>
-              <th className={`${thClass} text-right`}>Count</th>
+              <th className={thClass}>Profile</th>
+              <th className={`${thClass} text-right`}>Views</th>
             </tr>
           </thead>
           <tbody>
-            {summary.pageviewsByDay.length === 0 ? (
+            {profiles.length === 0 ? (
               <tr>
-                <td className={`${tdClass} text-muted-foreground`} colSpan={3}>
-                  No profile pageviews recorded in the last {summary.windowDays} days.
+                <td className={`${tdClass} text-muted-foreground`} colSpan={2}>
+                  No profile views in the window.
                 </td>
               </tr>
             ) : (
-              summary.pageviewsByDay.map((r) => (
-                <tr key={r.day} className="border-apollo-border border-b">
-                  <td className={`${tdClass} whitespace-nowrap tabular-nums`}>{r.day}</td>
+              profiles.map((p, i) => (
+                <tr key={`${p.slug}-${i}`} className="border-apollo-border border-b">
                   <td className={tdClass}>
-                    <div
-                      className="bg-apollo-maroon/70 h-3 rounded-sm"
-                      style={{ width: `${Math.max(2, (r.views / max) * 100)}%` }}
-                      aria-hidden
-                    />
+                    <Link
+                      href={`/${encodeURIComponent(p.slug)}`}
+                      className="text-apollo-slate hover:underline"
+                    >
+                      /{p.slug}
+                    </Link>
                   </td>
-                  <td className={`${tdClass} text-right tabular-nums`}>{r.views.toLocaleString()}</td>
+                  <td className={`${tdClass} text-right tabular-nums`}>
+                    {p.views.toLocaleString()}
+                  </td>
                 </tr>
               ))
             )}
@@ -133,13 +222,11 @@ function UsageBody({ summary }: { summary: UsageSummary }) {
         nightly CloudFront rollup; refreshes about once a day.
       </p>
 
-      <PageviewsByDay summary={summary} />
-      <CountTable
-        caption="Top profiles"
-        headers={["Scholar (cwid)", "Views"]}
-        rows={summary.topProfiles.map((r) => [r.cwid, r.views])}
-        emptyLabel="No profile views in the window."
-      />
+      <section className="mt-8">
+        <h2 className="text-base font-semibold">Pageviews by day</h2>
+        <PageviewsChart data={summary.pageviewsByDay} windowDays={summary.windowDays} />
+      </section>
+      <TopProfilesTable profiles={summary.topProfiles} />
       <CountTable
         caption="Top search terms"
         headers={["Term", "Searches"]}

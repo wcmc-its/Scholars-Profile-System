@@ -91,4 +91,14 @@ describe("buildRollupInsert", () => {
     expect(sql).not.toContain("c_ip");
     expect(sql).not.toContain("x_forwarded_for");
   });
+
+  it("counts profiles at the root vanity slug, not a nonexistent /scholar/ path", () => {
+    // SPS profiles live at a root slug (app/(public)/[slug]); there is no
+    // /scholar/<cwid> route, so the old pattern counted zero (bug: pageviews=0).
+    expect(sql).not.toContain("/scholar/");
+    // Single-segment, dot-free root path...
+    expect(sql).toContain("^/[^/?.]+/?$");
+    // ...minus the reserved app routes.
+    expect(sql).toContain("NOT IN ('about', 'browse'");
+  });
 });

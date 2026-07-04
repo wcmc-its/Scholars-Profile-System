@@ -341,9 +341,9 @@ export class AnalyticsStack extends Stack {
       {
         constructId: "QueryTopProfiles",
         name: `sps-usage-top-profiles-${env}`,
-        description: "Top 50 profiles by pageview (dimension = cwid).",
+        description: "Top 50 profiles by pageview (dimension = vanity slug).",
         sql: [
-          "SELECT dimension AS cwid, SUM(cnt) AS views",
+          "SELECT dimension AS slug, SUM(cnt) AS views",
           "FROM daily_usage",
           "WHERE metric = 'profile'",
           "GROUP BY dimension",
