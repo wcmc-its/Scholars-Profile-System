@@ -14,8 +14,17 @@ import { RESERVED_SLUGS } from "@/lib/slug";
 
 // Slug shape: alphanumeric start and end, hyphens only interior. No dots, no
 // slashes, no whitespace. Anchored — prevents prefix-match attacks. Matches the
-// `/scholars/[slug]` and `/topics/[slug]` dynamic segments.
+// `/scholars/[slug]`, `/departments/[slug]`, `/centers/[slug]`, `/methods/[slug]`
+// dynamic segments.
 const SLUG_RE_SOURCE = "[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?";
+
+// Topic ids are underscore-delimited slugs (`Topic.id` VarChar(128), e.g.
+// "cancer_genomics"), unlike the hyphen convention above — so `/topics/[slug]`
+// needs its own source that also permits `_` interior. Still anchored,
+// alphanumeric start/end, no dots/slashes/whitespace. Without this the ETL's
+// per-topic revalidation POSTs are all rejected 400 by the route (the base-URL
+// skip in etl/revalidate masked it until #1473 re-enabled the calls).
+const TOPIC_SLUG_RE_SOURCE = "[a-zA-Z0-9](?:[a-zA-Z0-9_-]*[a-zA-Z0-9])?";
 
 /** Exact paths eligible for revalidation. */
 export const ALLOWED_EXACT: ReadonlySet<string> = new Set([
@@ -28,7 +37,7 @@ export const ALLOWED_EXACT: ReadonlySet<string> = new Set([
 /** Dynamic-path patterns eligible for revalidation. */
 export const ALLOWED_PATTERNS: readonly RegExp[] = [
   new RegExp(`^/scholars/${SLUG_RE_SOURCE}$`),
-  new RegExp(`^/topics/${SLUG_RE_SOURCE}$`),
+  new RegExp(`^/topics/${TOPIC_SLUG_RE_SOURCE}$`),
   new RegExp(`^/departments/${SLUG_RE_SOURCE}$`),
   new RegExp(`^/departments/${SLUG_RE_SOURCE}/divisions/${SLUG_RE_SOURCE}$`),
   // Center retire / curation revalidates `/centers/{slug}` (#540 Phase 5).
