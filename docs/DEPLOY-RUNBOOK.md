@@ -21,6 +21,8 @@ A typical end-to-end deploy looks like this:
 
 Total wall-clock for a staging deploy with no pending migrations: ~7-9 minutes. A migration adds whatever Prisma needs to apply it. The 3-minute rolling-replacement step is the constant cost of zero-downtime for ECS Fargate.
 
+> ⚠️ **A branch→staging deploy reverts master-only ETL fixes.** `gh workflow run deploy.yml --ref <branch> -f env=staging` is permitted (the "refuse non-master" guard fires only for prod) and rebuilds **both** `scholars-app-staging:latest` **and** `scholars-etl-staging:latest` from that branch. The nightly Step Functions pull `scholars-etl-staging:latest`, so deploying a feature branch silently rolls staging ETL back to that branch's last master merge-base until master is redeployed. Before/after a branch deploy: `git merge-base --is-ancestor <fixSHA> <deployed-sha-tag>` on the ECR image tag, and redeploy master when done. (Bit us 2026-07-04: a feature-branch deploy reverted merged revalidate fixes #1473/#1474 — see [`./ed-nightly-revalidate-handoff-2026-07-04.md`](./ed-nightly-revalidate-handoff-2026-07-04.md).)
+
 To promote a tested build to **production**:
 
 1. Open `Actions -> Deploy` in the GitHub UI.
