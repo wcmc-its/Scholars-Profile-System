@@ -216,15 +216,31 @@ It reuses the ETL task definition, so it runs in-VPC with `OPENSEARCH_NODE` +
 the `opensearch/etl` basic-auth creds injected:
 
 ```bash
+# Resolve the live ETL network config for $ENV. NEVER hardcode subnet/SG ids --
+# they change on every VPC cutover (staging moved to the shared its-reciter-vpc01
+# on 2026-07-02; the old ids now point at the dead VPC, where the task launches
+# but times out with no reachable Aurora/OpenSearch). This pulls the exact config
+# the nightly cadence uses, per env, so it survives the pending prod cutover too:
+read ETL_SUBNETS ETL_SG < <(aws stepfunctions describe-state-machine \
+  --state-machine-arn "$(aws stepfunctions list-state-machines \
+     --query "stateMachines[?contains(name,'scholars-nightly-$ENV')].stateMachineArn|[0]" --output text)" \
+  --query definition --output text \
+  | python3 -c 'import sys,re
+t=sys.stdin.read()
+m=re.search(r"\"Subnets\"\s*:\s*\[([^\]]*)\].*?\"SecurityGroups\"\s*:\s*\[([^\]]*)\]", t, re.S)
+print(",".join(s.strip().strip("\"") for s in m.group(1).split(",")), m.group(2).strip().strip("\""))')
+
 aws ecs run-task --cluster sps-cluster-$ENV \
   --task-definition sps-etl-$ENV \
   --launch-type FARGATE \
-  --network-configuration 'awsvpcConfiguration={subnets=[subnet-03de6e3dfe190288b,subnet-019afebef588ee4b3],securityGroups=[sg-09b494047547ea148],assignPublicIp=DISABLED}' \
+  --network-configuration "awsvpcConfiguration={subnets=[$ETL_SUBNETS],securityGroups=[$ETL_SG],assignPublicIp=DISABLED}" \
   --overrides '{"containerOverrides":[{"name":"etl","command":["npm","run","search:index"]}]}'
 ```
 
-(Subnets = the two `private` subnets; SG = `EtlSecurityGroup`. Re-derive for a
-fresh env: `aws cloudformation describe-stack-resources --stack-name Sps-Network-$ENV` for the SG, and `aws ec2 describe-subnets` filtered to the `private` subnet-name tag.)
+(`ETL_SUBNETS` = the env's two `private` subnets, `ETL_SG` = its `EtlSecurityGroup`,
+resolved live from the deployed nightly state machine so this never rots. As of
+2026-07-04: staging = shared VPC `vpc-08a1873fc8eebae28` (`10.46.160.0/25`); prod =
+`vpc-0d0209cbfd298c892` (`10.10.0.0/16`) until its cutover.)
 
 Watch the task's `/aws/ecs/sps-etl-$ENV` log stream to completion (the indexer
 logs people/publication/funding counts and the alias swap).
@@ -298,7 +314,9 @@ rows everything else hangs off: `Scholar`, `Department`, `Division`,
 `Appointment`, `Education`, `Grant`, `Publication`, `PublicationAuthor`,
 `PublicationScore`. From the SPS VPC these **time out** (DNS resolves — the three
 resolver rules are associated — but there is no TGW return route and no WCM
-firewall allowance for `10.20.0.0/16`).
+firewall allowance for the SPS VPC CIDR: staging `10.46.160.0/25` on the shared
+`its-reciter-vpc01` since the 2026-07-02 cutover; prod `10.10.0.0/16` until its
+own cutover).
 
 The remaining ETLs (**DynamoDB** topics, **Hierarchy**/**Spotlight** from S3,
 **NSF**/**NIH-Profile**/**Gates** public APIs, **Mesh-Descriptors** from NLM, and
@@ -421,11 +439,18 @@ Aurora writer. Tear it down when done.
 ```bash
 export ENV=staging   # then repeat for prod -- see §7.4
 
-# SPS VPC private subnets (us-east-1a / 1b) and the EtlSecurityGroup:
-SUBNET=subnet-019afebef588ee4b3        # Sps-Network-$ENV/Vpc/privateSubnet1
-ETL_SG=$(aws cloudformation describe-stack-resources --stack-name Sps-Network-${ENV} \
-  --query "StackResources[?ResourceType=='AWS::EC2::SecurityGroup' && contains(LogicalResourceId,'Etl')].PhysicalResourceId" \
-  --output text)   # staging today: sg-09b494047547ea148
+# Resolve the env's private subnets + EtlSecurityGroup live (rot-proof -- never
+# hardcode; the 2026-07-02 staging cutover to the shared VPC changed both, and the
+# old `Sps-Network-$ENV` stack no longer owns them). Same resolver as §3:
+read ETL_SUBNETS ETL_SG < <(aws stepfunctions describe-state-machine \
+  --state-machine-arn "$(aws stepfunctions list-state-machines \
+     --query "stateMachines[?contains(name,'scholars-nightly-$ENV')].stateMachineArn|[0]" --output text)" \
+  --query definition --output text \
+  | python3 -c 'import sys,re
+t=sys.stdin.read()
+m=re.search(r"\"Subnets\"\s*:\s*\[([^\]]*)\].*?\"SecurityGroups\"\s*:\s*\[([^\]]*)\]", t, re.S)
+print(",".join(s.strip().strip("\"") for s in m.group(1).split(",")), m.group(2).strip().strip("\""))')
+SUBNET=${ETL_SUBNETS%%,*}   # first private subnet
 
 # Launch the bastion (AL2023; SSM agent is preinstalled). The instance profile
 # must allow SSM -- reuse an existing AmazonSSMManagedInstanceCore profile or
