@@ -128,4 +128,30 @@ describe("ReporterProfileCard", () => {
     expect(screen.getByText(/Confirm this match\?/)).toBeTruthy();
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("renders the three status pills, with the public-profile consequence emphasized (§3.3)", () => {
+    render(<ReporterProfileCard cwid="aaa1" confirmed={[confirmed({ candidateId: "rp-2" })]} />);
+    const pills = screen.getByTestId("reporter-profile-pills");
+    expect(within(pills).getByText("Visible to administrators and the scholar")).toBeTruthy();
+    expect(within(pills).getByText("Sourced from NIH RePORTER")).toBeTruthy();
+    // The amber pill is the consequential fact — carries the warning tint, not slate.
+    const publicPill = within(pills).getByText("Included on the public profile");
+    expect(publicPill.closest("li")?.className).toMatch(/amber/);
+  });
+
+  it("heading names the scholar (opt-out framing), not the old 'Is this you?'", () => {
+    const { rerender } = render(<ReporterProfileCard cwid="aaa1" />);
+    expect(screen.getByText("NIH grants matched to you")).toBeTruthy();
+    rerender(<ReporterProfileCard cwid="aaa1" mode="superuser" scholarName="Karuna Ganesh" />);
+    expect(screen.getByText("NIH grants matched to Karuna Ganesh")).toBeTruthy();
+  });
+
+  it("removal copy is honest about the nightly batch — never promises instant (§6 / §8.1)", async () => {
+    render(<ReporterProfileCard cwid="aaa1" confirmed={[confirmed({ candidateId: "rp-2" })]} />);
+    fireEvent.click(screen.getByRole("button", { name: /remove these/ }));
+    const removed = await screen.findByTestId("reporter-profile-removed");
+    expect(removed.textContent).toMatch(/tonight.s update/);
+    // The pipeline can't purge on demand, so the UI must not claim it can.
+    expect(removed.textContent).not.toMatch(/right away|instantly|immediately|within the hour/i);
+  });
 });
