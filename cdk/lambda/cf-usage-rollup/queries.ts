@@ -49,6 +49,17 @@ export interface RollupConfig {
 const SUCCESS_GET = `cs_method = 'GET' AND sc_status BETWEEN 200 AND 399`;
 
 /**
+ * A profile pageview must be a 2xx -- content actually rendered. The wider
+ * SUCCESS_GET (<=399) is fine for the traffic-shape arms (geo/device/referrer)
+ * but over-counts the profile arms: bot/scanner probes to bare single-segment
+ * paths (`/docs`, `/actuator`, `/swagger`, ...) get a 301 redirect, which the
+ * 3xx range counted as a "profile pageview" and polluted the top-profiles list
+ * (#1476). A 3xx redirect renders nothing, so it is not a view. Excludes 304
+ * too -- negligible for these dynamic (no-store) profile HTML pages.
+ */
+const PROFILE_SUCCESS_GET = `cs_method = 'GET' AND sc_status BETWEEN 200 AND 299`;
+
+/**
  * Coarse continent from the CloudFront edge-location IATA prefix
  * (substr(x_edge_location,1,3)). Not exhaustive -- the long tail rolls into
  * 'Other/Unknown'; the named POPs cover the bulk of PRICE_CLASS_100 (NA + EU)
@@ -184,7 +195,7 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     "  SELECT 'pageviews' AS metric, 'profile_pageviews' AS dimension,",
     `    COUNT(*) AS cnt, ${dtLit} AS dt`,
     `  FROM ${from}`,
-    `  WHERE "date" = ${day} AND ${SUCCESS_GET}`,
+    `  WHERE "date" = ${day} AND ${PROFILE_SUCCESS_GET}`,
     `    AND ${PROFILE_PATH_PREDICATE}`,
 
     "  UNION ALL",
@@ -193,7 +204,7 @@ export function buildRollupInsert(cfg: RollupConfig, dt: string): string {
     `  SELECT 'profile' AS metric, ${PROFILE_SLUG_EXPR} AS dimension,`,
     `    COUNT(*) AS cnt, ${dtLit} AS dt`,
     `  FROM ${from}`,
-    `  WHERE "date" = ${day} AND ${SUCCESS_GET}`,
+    `  WHERE "date" = ${day} AND ${PROFILE_SUCCESS_GET}`,
     `    AND ${PROFILE_PATH_PREDICATE}`,
     `  GROUP BY ${PROFILE_SLUG_EXPR}`,
     `  HAVING ${PROFILE_SLUG_EXPR} <> ''`,

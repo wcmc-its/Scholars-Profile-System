@@ -101,4 +101,15 @@ describe("buildRollupInsert", () => {
     // ...minus the reserved app routes.
     expect(sql).toContain("NOT IN ('about', 'browse'");
   });
+
+  it("restricts the two profile arms to 2xx, leaves the traffic arms at <=3xx (#1476)", () => {
+    // A profile pageview must be a 2xx (content rendered); a 3xx redirect --
+    // e.g. bot probes to /docs, /actuator getting a 301 -- is not a view and
+    // must not count. The geo/device/referrer traffic-shape arms keep the wider
+    // range. So: exactly 2 arms at 200-299, exactly 3 at 200-399.
+    const twoxx = sql.match(/sc_status BETWEEN 200 AND 299/g) ?? [];
+    const upTo3xx = sql.match(/sc_status BETWEEN 200 AND 399/g) ?? [];
+    expect(twoxx).toHaveLength(2);
+    expect(upTo3xx).toHaveLength(3);
+  });
 });
