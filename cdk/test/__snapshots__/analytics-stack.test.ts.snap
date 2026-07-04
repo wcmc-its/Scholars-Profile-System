@@ -79,6 +79,146 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::S3::BucketPolicy",
     },
+    "AppUsageQueryPolicy65D2729D": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "athena:StartQueryExecution",
+                "athena:GetQueryExecution",
+                "athena:GetQueryResults",
+                "athena:StopQueryExecution",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":athena:us-east-1:123456789012:workgroup/sps-usage-prod",
+                  ],
+                ],
+              },
+              "Sid": "AthenaUsageWorkgroup",
+            },
+            {
+              "Action": [
+                "glue:GetDatabase",
+                "glue:GetTable",
+                "glue:GetTables",
+                "glue:GetPartition",
+                "glue:GetPartitions",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":glue:us-east-1:123456789012:catalog",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":glue:us-east-1:123456789012:database/sps_usage_prod",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":glue:us-east-1:123456789012:table/sps_usage_prod/daily_usage",
+                    ],
+                  ],
+                },
+              ],
+              "Sid": "GlueUsageTableRead",
+            },
+            {
+              "Action": [
+                "s3:GetBucketLocation",
+                "s3:ListBucket",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AnalyticsBucket39EAAEEA",
+                  "Arn",
+                ],
+              },
+              "Sid": "S3UsageSourceAndResults",
+            },
+            {
+              "Action": "s3:GetObject",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "AnalyticsBucket39EAAEEA",
+                        "Arn",
+                      ],
+                    },
+                    "/rollup/daily-usage/*",
+                  ],
+                ],
+              },
+              "Sid": "S3UsageRollupRead",
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "AnalyticsBucket39EAAEEA",
+                        "Arn",
+                      ],
+                    },
+                    "/athena-results/*",
+                  ],
+                ],
+              },
+              "Sid": "S3AthenaResultsReadWrite",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-usage-app-query-prod",
+        "Roles": [
+          "sps-task-prod",
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "CfAccessLogsTable": {
       "DependsOn": [
         "UsageDatabase",
@@ -255,7 +395,7 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "c74e657e3ad542d4a0638c9aa308e05508f1849900438100852a875f536b3934.zip",
+          "S3Key": "5e3afd460400f43f1247c1dc46051a4f381f21411a1207480a2a17548c0709bc.zip",
         },
         "Environment": {
           "Variables": {
@@ -866,9 +1006,9 @@ LIMIT 100",
         "Database": {
           "Ref": "UsageDatabase",
         },
-        "Description": "Top 50 profiles by pageview (dimension = cwid).",
+        "Description": "Top 50 profiles by pageview (dimension = vanity slug).",
         "Name": "sps-usage-top-profiles-prod",
-        "QueryString": "SELECT dimension AS cwid, SUM(cnt) AS views
+        "QueryString": "SELECT dimension AS slug, SUM(cnt) AS views
 FROM daily_usage
 WHERE metric = 'profile'
 GROUP BY dimension
@@ -1061,6 +1201,146 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::S3::BucketPolicy",
     },
+    "AppUsageQueryPolicy65D2729D": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "athena:StartQueryExecution",
+                "athena:GetQueryExecution",
+                "athena:GetQueryResults",
+                "athena:StopQueryExecution",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":athena:us-east-1:123456789012:workgroup/sps-usage-staging",
+                  ],
+                ],
+              },
+              "Sid": "AthenaUsageWorkgroup",
+            },
+            {
+              "Action": [
+                "glue:GetDatabase",
+                "glue:GetTable",
+                "glue:GetTables",
+                "glue:GetPartition",
+                "glue:GetPartitions",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":glue:us-east-1:123456789012:catalog",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":glue:us-east-1:123456789012:database/sps_usage_staging",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":glue:us-east-1:123456789012:table/sps_usage_staging/daily_usage",
+                    ],
+                  ],
+                },
+              ],
+              "Sid": "GlueUsageTableRead",
+            },
+            {
+              "Action": [
+                "s3:GetBucketLocation",
+                "s3:ListBucket",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AnalyticsBucket39EAAEEA",
+                  "Arn",
+                ],
+              },
+              "Sid": "S3UsageSourceAndResults",
+            },
+            {
+              "Action": "s3:GetObject",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "AnalyticsBucket39EAAEEA",
+                        "Arn",
+                      ],
+                    },
+                    "/rollup/daily-usage/*",
+                  ],
+                ],
+              },
+              "Sid": "S3UsageRollupRead",
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "AnalyticsBucket39EAAEEA",
+                        "Arn",
+                      ],
+                    },
+                    "/athena-results/*",
+                  ],
+                ],
+              },
+              "Sid": "S3AthenaResultsReadWrite",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-usage-app-query-staging",
+        "Roles": [
+          "sps-task-staging",
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "CfAccessLogsTable": {
       "DependsOn": [
         "UsageDatabase",
@@ -1237,7 +1517,7 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "c74e657e3ad542d4a0638c9aa308e05508f1849900438100852a875f536b3934.zip",
+          "S3Key": "5e3afd460400f43f1247c1dc46051a4f381f21411a1207480a2a17548c0709bc.zip",
         },
         "Environment": {
           "Variables": {
@@ -1848,9 +2128,9 @@ LIMIT 100",
         "Database": {
           "Ref": "UsageDatabase",
         },
-        "Description": "Top 50 profiles by pageview (dimension = cwid).",
+        "Description": "Top 50 profiles by pageview (dimension = vanity slug).",
         "Name": "sps-usage-top-profiles-staging",
-        "QueryString": "SELECT dimension AS cwid, SUM(cnt) AS views
+        "QueryString": "SELECT dimension AS slug, SUM(cnt) AS views
 FROM daily_usage
 WHERE metric = 'profile'
 GROUP BY dimension

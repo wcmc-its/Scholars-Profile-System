@@ -22,6 +22,14 @@ import { type SpsEnvConfig } from "./config";
 export interface AnalyticsStackProps extends StackProps {
   /** Resolved per-environment configuration. */
   readonly envConfig: SpsEnvConfig;
+  /**
+   * The AppStack ECS task role. AnalyticsStack attaches a workgroup-scoped
+   * Athena/Glue/S3 policy to it here (rather than AppStack importing the
+   * CFN-named analytics bucket) so the in-app Usage dashboard can query the
+   * `daily_usage` rollup. Gives an Analytics→App stack dependency; the grant is
+   * usage-table-only (no read on the raw `cf_access_logs` S3 data / PII).
+   */
+  readonly appTaskRole: iam.IRole;
 }
 
 /**
@@ -333,9 +341,9 @@ export class AnalyticsStack extends Stack {
       {
         constructId: "QueryTopProfiles",
         name: `sps-usage-top-profiles-${env}`,
-        description: "Top 50 profiles by pageview (dimension = cwid).",
+        description: "Top 50 profiles by pageview (dimension = vanity slug).",
         sql: [
-          "SELECT dimension AS cwid, SUM(cnt) AS views",
+          "SELECT dimension AS slug, SUM(cnt) AS views",
           "FROM daily_usage",
           "WHERE metric = 'profile'",
           "GROUP BY dimension",
@@ -471,6 +479,81 @@ export class AnalyticsStack extends Stack {
       named.addDependency(workGroup);
       named.addDependency(usageDatabase);
     }
+
+    // ------------------------------------------------------------------
+    // In-app Usage dashboard grant (/edit/usage). Attach a workgroup-scoped
+    // Athena/Glue/S3 policy to the AppStack task role so the app can query the
+    // `daily_usage` rollup at read time. Declared HERE (not via appTaskRole
+    // .grant* / analyticsBucket.grantRead, which would attach to the role's
+    // default policy in AppStack and import this CFN-named bucket THERE) so the
+    // dependency runs Analytics->App and every ARN below is local to this stack.
+    //
+    // LEAST PRIVILEGE: query on the capped `sps-usage-${env}` workgroup only;
+    // Glue read on the `daily_usage` table only (NOT `cf_access_logs`); S3 read
+    // on the rollup-source prefix + read/write on the athena-results prefix
+    // only. No S3 access to the raw `cf/` log prefix, so the app can never read
+    // client IPs / unredacted paths — the usage aggregates carry no PII.
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "AppUsageQueryPolicy", {
+      policyName: `sps-usage-app-query-${env}`,
+      roles: [props.appTaskRole],
+      statements: [
+        new iam.PolicyStatement({
+          sid: "AthenaUsageWorkgroup",
+          actions: [
+            "athena:StartQueryExecution",
+            "athena:GetQueryExecution",
+            "athena:GetQueryResults",
+            "athena:StopQueryExecution",
+          ],
+          resources: [
+            this.formatArn({
+              service: "athena",
+              resource: "workgroup",
+              resourceName: `sps-usage-${env}`,
+            }),
+          ],
+        }),
+        new iam.PolicyStatement({
+          sid: "GlueUsageTableRead",
+          actions: [
+            "glue:GetDatabase",
+            "glue:GetTable",
+            "glue:GetTables",
+            "glue:GetPartition",
+            "glue:GetPartitions",
+          ],
+          resources: [
+            this.formatArn({ service: "glue", resource: "catalog" }),
+            this.formatArn({
+              service: "glue",
+              resource: "database",
+              resourceName: `sps_usage_${env}`,
+            }),
+            this.formatArn({
+              service: "glue",
+              resource: "table",
+              resourceName: `sps_usage_${env}/daily_usage`,
+            }),
+          ],
+        }),
+        new iam.PolicyStatement({
+          sid: "S3UsageSourceAndResults",
+          actions: ["s3:GetBucketLocation", "s3:ListBucket"],
+          resources: [this.analyticsBucket.bucketArn],
+        }),
+        new iam.PolicyStatement({
+          sid: "S3UsageRollupRead",
+          actions: ["s3:GetObject"],
+          resources: [this.analyticsBucket.arnForObjects(`${rollupPrefix}/*`)],
+        }),
+        new iam.PolicyStatement({
+          sid: "S3AthenaResultsReadWrite",
+          actions: ["s3:GetObject", "s3:PutObject"],
+          resources: [this.analyticsBucket.arnForObjects(`${athenaResultsPrefix}/*`)],
+        }),
+      ],
+    });
 
     // ------------------------------------------------------------------
     // Rollup Lambda. Mirrors observability-stack.ts OncallRelayFunction: an

@@ -491,6 +491,18 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "https://scholars.weill.cornell.edu",
               },
               {
+                "Name": "SPS_USAGE_WORKGROUP",
+                "Value": "sps-usage-prod",
+              },
+              {
+                "Name": "SPS_USAGE_DATABASE",
+                "Value": "sps_usage_prod",
+              },
+              {
+                "Name": "SPS_USAGE_REGION",
+                "Value": "us-east-1",
+              },
+              {
                 "Name": "SHOW_BETA_BADGE",
                 "Value": "on",
               },
@@ -3892,6 +3904,18 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SITE_URL",
                 "Value": "https://scholars-staging.weill.cornell.edu",
+              },
+              {
+                "Name": "SPS_USAGE_WORKGROUP",
+                "Value": "sps-usage-staging",
+              },
+              {
+                "Name": "SPS_USAGE_DATABASE",
+                "Value": "sps_usage_staging",
+              },
+              {
+                "Name": "SPS_USAGE_REGION",
+                "Value": "us-east-1",
               },
               {
                 "Name": "SHOW_BETA_BADGE",

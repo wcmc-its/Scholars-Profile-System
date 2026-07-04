@@ -34,6 +34,7 @@ export type AdminSubnavActive =
   | "methods"
   | "data-quality"
   | "activity"
+  | "usage"
   | "cores"
   | "find-researchers"
   /** The viewer's own self-edit surface (`/edit`) — no list tab is active;
@@ -49,6 +50,7 @@ export function AdminSubnav({
   superuserSurfaces = true,
   profilesTab = false,
   unitsTab = false,
+  usageTab = false,
   viewerIsDeveloper = false,
 }: {
   active: AdminSubnavActive;
@@ -79,6 +81,11 @@ export function AdminSubnav({
   /** Show the "Units" tab (the `/edit/units` finder). A comms_steward edits any
    *  existing org unit's content (§3b), and a superuser jumps to any unit too. */
   unitsTab?: boolean;
+  /** Show the "Usage" tab (`/edit/usage`, the global usage dashboard) to a
+   *  non-superuser unit admin (owner/curator). Superusers already get it via
+   *  `superuserSurfaces`; this is the escape hatch so a unit admin who can view
+   *  usage (`canViewUsage`) sees the tab too. Default `false`. */
+  usageTab?: boolean;
   /** Show the "Funding matcher" tab to a pure development-role viewer who is NOT
    *  a superuser. Superusers already get it via `superuserSurfaces`; this is the
    *  dev-role escape hatch on `/edit/find-researchers` (their only console page).
@@ -148,6 +155,13 @@ export function AdminSubnav({
             label="Activity"
             active={active === "activity"}
           />
+        )}
+        {/* Global usage dashboard (`/edit/usage`). Wider audience than the other
+            superuser tabs: a superuser (via `superuserSurfaces`) OR any unit
+            admin (via `usageTab`, set when `canViewUsage` passes). Aggregates
+            only, so no per-unit scoping. */}
+        {(superuserSurfaces || usageTab) && (
+          <AdminTab href="/edit/usage" id="usage" label="Usage" active={active === "usage"} />
         )}
         {/* Cores review-queue index (`/edit/core`). Superuser-facing — rides
             `superuserSurfaces` like the other superuser tabs — and gated on the

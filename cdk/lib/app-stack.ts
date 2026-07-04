@@ -164,6 +164,12 @@ export class AppStack extends Stack {
   public readonly appLogGroup: logs.LogGroup;
   /** GitHub Actions OIDC deploy role. */
   public readonly deployRole: iam.Role;
+  /** ECS task role (application runtime identity). Exposed so AnalyticsStack can
+   *  grant it workgroup-scoped Athena/Glue/S3 for the in-app Usage dashboard —
+   *  the grant lives in AnalyticsStack (which owns the bucket + workgroup L2s),
+   *  giving an Analytics→App dependency rather than importing the CFN-named
+   *  analytics bucket into this stack. */
+  public readonly appTaskRole: iam.Role;
 
   constructor(scope: Construct, id: string, props: AppStackProps) {
     super(scope, id, props);
@@ -599,6 +605,7 @@ export class AppStack extends Stack {
       assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
       description: `SPS ECS task role (${env}). Application runtime identity; X-Ray write only.`,
     });
+    this.appTaskRole = taskRole;
 
     // ------------------------------------------------------------------
     // X-Ray write grant (B24).
@@ -1331,6 +1338,15 @@ export class AppStack extends Stack {
         // unset build baked the localhost fallback into every canonical. Derived
         // from the SAML ACS URL (same per-env `https://<public-host>`).
         SITE_URL: new URL(envConfig.samlSpAcsUrl).origin,
+        // In-app Usage dashboard (/edit/usage) — the workgroup + Glue database the
+        // app queries for the daily_usage rollup. Stable, config-derived names
+        // (AnalyticsStack creates `sps-usage-${env}` / `sps_usage_${env}`); the
+        // matching Athena/Glue/S3 grant on THIS task role is attached in
+        // AnalyticsStack. Region is pinned so the Athena client targets the same
+        // region the workgroup lives in regardless of the task's default chain.
+        SPS_USAGE_WORKGROUP: `sps-usage-${env}`,
+        SPS_USAGE_DATABASE: `sps_usage_${env}`,
+        SPS_USAGE_REGION: this.region,
         // #760 -- launch-period "Beta" pill beside the Scholars wordmark.
         // DEFAULT ON: the header reads `=== "off"` (isBetaBadgeEnabled), so the
         // badge shows in both envs while we're in beta. Wired here explicitly so
