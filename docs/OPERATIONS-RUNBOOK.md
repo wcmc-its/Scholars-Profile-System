@@ -422,6 +422,27 @@ Key structured events to search: `profile_view` (`duration_ms`), `search_degrade
 
 > Deeper: [`./SLOs.md`](./SLOs.md), [`./oncall.md`](./oncall.md), [`./etl-monitoring.md`](./etl-monitoring.md), [`./logging-reference.md`](./logging-reference.md), [`./tracing.md`](./tracing.md), [`./performance-baseline.md`](./performance-baseline.md).
 
+### Usage & performance analytics (on-demand, read-only)
+
+Two operator surfaces beyond the live `sps-reliability-${env}` dashboard + alarms above. Neither is scheduled — you pull them when you want a number.
+
+**1. CloudFront usage + per-URL performance — Athena saved queries.** AnalyticsStack (`Sps-Analytics-${env}`) rolls CloudFront access logs into Glue/Athena. Console → **Athena** → workgroup selector (top-right) → **`sps-usage-${env}`** → **Saved queries** tab → pick one → **Run**. Needs console access to the SPS account (§5) with Athena/Glue/S3-read. CLI equivalent: `aws athena start-query-execution --work-group sps-usage-${env} --query-execution-context Database=sps_usage_${env} --query-string "<sql>"`.
+
+| Saved query (suffix `-${env}`) | Answers | Source |
+|---|---|---|
+| `sps-usage-daily-pageviews` · `-top-profiles` · `-search-terms` · `-referrers` · `-geo` · `-device` | Marketing: pageviews, top profiles, search terms, referrers, geo, device class | pre-aggregated `daily_usage` rollup (nightly Lambda) |
+| `sps-perf-slow-routes` | p50/p95/p99 `time_taken` + p95 TTFB by route (min 50 hits) | raw `cf_access_logs`, trailing 7 d |
+| `sps-perf-errors-by-route` | 4xx/5xx counts + 5xx rate by route | raw `cf_access_logs`, trailing 7 d |
+| `sps-perf-cache-hit` | edge cache-outcome mix (Hit/Miss/RefreshHit/Error share) | raw `cf_access_logs`, trailing 7 d |
+
+⚠️ The three `sps-perf-*` queries read the **raw** `cf_access_logs` table (client IPs, unredacted paths, query strings). The workgroup is **operator-restricted — do not broaden its grants**. The 7-day bound + the workgroup's bytes-scanned cap keep scan cost and PII exposure bounded; the marketing rollup holds aggregates only (ADR-008 § PII).
+
+**2. In-app Usage dashboard — `/edit/usage`.** The viewer-friendly, no-AWS-console view of the usage aggregates above: pageviews-by-day (SVG bar graph), top profiles (linked to the live page), search terms, referrers, geo, device — last 30 days, read live from the `daily_usage` rollup and cached ~daily. Sign in (SAML) → **`https://scholars.weill.cornell.edu/edit/usage`**; also the **Usage** tab in the admin sub-nav. **Audience: a superuser OR any unit admin (owner/curator)** — global (site-wide) view for all (aggregates carry no PII; the per-URL `sps-perf-*` queries stay Athena/operator-only). Fails soft to "unavailable" on any Athena error. Two operator notes:
+- **Deploy shape:** the app queries Athena at read time, so this needs a `cdk deploy` of **both** `Sps-App-${env}` (the `SPS_USAGE_*` env vars) and `Sps-Analytics-${env}` (the workgroup-scoped Athena/Glue/S3 grant on the app task role). A CD image roll alone will render it "unavailable".
+- **Profile counts** are keyed on the **root vanity slug** (`app/(public)/[slug]`, e.g. `/carl-f-nathan`), not a `/scholar/<cwid>` path (which does not exist). The `pageviews`/`profile` rollup arms exclude a reserved-route list in `cdk/lambda/cf-usage-rollup/queries.ts` — add a new top-level site section there if profile counts ever start absorbing it, then backfill (`aws lambda invoke --function-name sps-cf-usage-rollup-${env} --payload '{"backfillFrom":"YYYY-MM-DD","backfillTo":"YYYY-MM-DD"}'`).
+
+**3. Fleet-wide edit activity — `/edit/activity`.** Superuser-only page: edits/day, top editors, most-edited entities, and recent activity over the last 30 days across **all** profile entities (reads `scholars_audit.manual_edit_audit`). Sign in (SAML) → **`https://scholars.weill.cornell.edu/edit/activity`** (staging: same path on the staging host). **Not** linked in the admin nav — superuser URL only. Renders "unavailable" if the read role (`app_ro`) lacks SELECT on the audit DB — the same grant the per-entity `/edit/scholar/[cwid]/history` and `/edit/center/[code]/history` pages need, so if those work this does too. The per-entity history pages are the edit-scoped companion (any editor of that entity, not just superusers).
+
 ## 4. Common error messages & fixes
 
 `${env}` / `$ENV` = `staging` or `prod`. This is the section operators use most.

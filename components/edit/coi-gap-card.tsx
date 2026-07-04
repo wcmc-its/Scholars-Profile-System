@@ -54,7 +54,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ArrowUpRight, ChevronLeft, EyeOff, Info, Lock } from "lucide-react";
+import { ArrowUpRight, ChevronLeft, EyeOff, GlobeLock, Info, Lock } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { EditPanel } from "@/components/edit/edit-panel";
@@ -969,22 +969,21 @@ export function CoiGapCard({
 
       <EditPanel
         slot="coi-gap-panel"
-        heading={su ? "From the scholar’s publications" : "From your publications"}
+        heading="Disclosed in publications"
         description={
           su
-            ? `A courtesy heads-up — relationships named in the “Competing interests” statements of ${scholarName}’s own PubMed-indexed papers that we couldn’t match to a current Weill Research Gateway disclosure. Nothing to fix here; it’s just a chance to flag anything that’s out of date or isn’t theirs.`
-            : `A courtesy heads-up — relationships named in the “Competing interests” statements of your own PubMed-indexed papers that we couldn’t match to a current Weill Research Gateway disclosure. Nothing to fix here; it’s just a chance to flag anything that’s out of date or isn’t yours.`
+            ? `Relationships named in the “Competing interests” statements of ${scholarName}’s PubMed-indexed papers with no matching Weill Research Gateway disclosure — flag anything out of date or not theirs.`
+            : `Relationships named in the “Competing interests” statements of your PubMed-indexed papers with no matching Weill Research Gateway disclosure — flag anything out of date or not yours.`
         }
       >
-        <p className="text-muted-foreground -mt-1 text-[13px]" data-testid="coi-gap-helper">
-          This is a courtesy list, not a to-do — respond only if something’s out of date or isn’t{" "}
-          {su ? "theirs" : "yours"}.
-        </p>
-
         <ul className="flex flex-wrap gap-2" data-testid="coi-gap-reassure">
           {su && <ReassureChip icon={EyeOff} label="Visible to administrators and the scholar" />}
           <ReassureChip icon={Info} label="Not a compliance judgement" />
           <ReassureChip icon={Lock} label="Managed in the Gateway, never here" />
+          {/* §7.2 — the publish vs. no-publish contrast made explicit (the
+              deliberate sibling of the grant tab's amber "Included on the public
+              profile" pill), not left to be inferred. */}
+          <ReassureChip icon={GlobeLock} label="Never appears on the public profile" />
         </ul>
 
         {/* Key — the two things a highlight can mark. Swatches are decorative; the

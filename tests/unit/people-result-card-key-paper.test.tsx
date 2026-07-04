@@ -44,7 +44,11 @@ const props = {
   filters: { deptDiv: [], personType: [], activity: [] },
 };
 
-const keyPaperConfig = { descriptorUis: ["D015658"], contentQuery: "hiv" };
+const keyPaperConfig = {
+  descriptorUis: ["D015658"],
+  contentQuery: "hiv",
+  conceptLabel: "HIV Infections",
+};
 
 // A publications-tagged evidence with NO inline pubs (the reason-from-doc shape):
 // just the count. The key papers are fetched lazily on expand.
@@ -95,15 +99,43 @@ describe("PeopleResultCard — evidence-path lazy key paper (fetch on expand)", 
     expect(screen.getByText(/\+252 more in profile/)).toBeTruthy();
 
     // The fetch hits the key-paper endpoint scoped to this scholar + concept.
+    // #1351 — the resolved concept name rides as `label` so the title highlight can
+    // mark the concept term, not just the literal query.
     expect(fetchFn).toHaveBeenCalledTimes(1);
     expect(fetchFn.mock.calls[0][0]).toBe(
-      "/api/search/key-paper?cwid=abc1234&q=hiv&descriptorUis=D015658",
+      "/api/search/key-paper?cwid=abc1234&q=hiv&descriptorUis=D015658&label=HIV+Infections",
     );
 
     // collapse + re-open must NOT re-fetch (once, cached in a ref).
     fireEvent.click(chevron()); // close
     fireEvent.click(chevron()); // re-open
     expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("#1357 — a mention-only card fetches with empty descriptorUis + label (literal scan), so the disclosure isn't empty", async () => {
+    // A `mention` card is in the mention branch precisely because its tagged count
+    // is 0 — it has no concept-tagged pubs. Fetching with the page-global concept
+    // `descriptorUis` would return 0 (empty disclosure). It must fall to the literal
+    // scan — the SAME predicate that produced its count — so descriptorUis + label
+    // are cleared even though `keyPaperConfig` carries them.
+    const mentionHit = makeHit({
+      evidence: {
+        kind: "publications",
+        strength: "mention",
+        text: "1 of 37 publications mention “hiv”",
+        count: 37,
+      },
+    });
+    const fetchFn = mockFetch({
+      pubs: [{ pmid: "9", title: "An HIV mention in the title", year: 2019 }],
+    });
+    render(<PeopleResultCard {...props} hit={mentionHit} keyPaperConfig={keyPaperConfig} />);
+
+    fireEvent.click(chevron());
+    await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(1));
+    expect(fetchFn.mock.calls[0][0]).toBe(
+      "/api/search/key-paper?cwid=abc1234&q=hiv&descriptorUis=&label=",
+    );
   });
 
   it("drops the chevron (no dead control) when the fetch resolves with 0 papers", async () => {

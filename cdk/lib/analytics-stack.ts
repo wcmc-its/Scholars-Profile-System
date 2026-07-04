@@ -22,6 +22,14 @@ import { type SpsEnvConfig } from "./config";
 export interface AnalyticsStackProps extends StackProps {
   /** Resolved per-environment configuration. */
   readonly envConfig: SpsEnvConfig;
+  /**
+   * The AppStack ECS task role. AnalyticsStack attaches a workgroup-scoped
+   * Athena/Glue/S3 policy to it here (rather than AppStack importing the
+   * CFN-named analytics bucket) so the in-app Usage dashboard can query the
+   * `daily_usage` rollup. Gives an Analytics→App stack dependency; the grant is
+   * usage-table-only (no read on the raw `cf_access_logs` S3 data / PII).
+   */
+  readonly appTaskRole: iam.IRole;
 }
 
 /**
@@ -333,9 +341,9 @@ export class AnalyticsStack extends Stack {
       {
         constructId: "QueryTopProfiles",
         name: `sps-usage-top-profiles-${env}`,
-        description: "Top 50 profiles by pageview (dimension = cwid).",
+        description: "Top 50 profiles by pageview (dimension = vanity slug).",
         sql: [
-          "SELECT dimension AS cwid, SUM(cnt) AS views",
+          "SELECT dimension AS slug, SUM(cnt) AS views",
           "FROM daily_usage",
           "WHERE metric = 'profile'",
           "GROUP BY dimension",
@@ -393,6 +401,72 @@ export class AnalyticsStack extends Stack {
           "ORDER BY hits DESC",
         ].join("\n"),
       },
+      // --- Per-URL performance (read the RAW cf_access_logs table, not the
+      // daily_usage rollup). These expose time_taken / TTFB / status the rollup
+      // deliberately drops. Bounded to the trailing 7 days because cf_access_logs
+      // is NOT partition-projected -- a wider window scans more log objects and
+      // the workgroup's bytes-scanned cap will abort a runaway. The route
+      // normalization regexp (dynamic id/slug -> ':id') is the ONE tuning point
+      // for all three: add a segment name here to collapse a new dynamic route.
+      // ponytail: 7-day window + regexp route-fold; widen/extend only if an
+      // operator actually needs it.
+      {
+        constructId: "QueryPerfSlowRoutes",
+        name: `sps-perf-slow-routes-${env}`,
+        description:
+          "Slowest routes over 7d: p50/p95/p99 time_taken + p95 TTFB (seconds), min 50 hits.",
+        sql: [
+          "SELECT",
+          "  regexp_replace(cs_uri_stem, '(/(scholar|center|department|division|topics|topic|publication|core|unit)/)[^/?]+', '$1:id') AS route,",
+          "  COUNT(*) AS hits,",
+          "  round(approx_percentile(time_taken, 0.5), 3) AS p50_s,",
+          "  round(approx_percentile(time_taken, 0.95), 3) AS p95_s,",
+          "  round(approx_percentile(time_taken, 0.99), 3) AS p99_s,",
+          "  round(approx_percentile(time_to_first_byte, 0.95), 3) AS ttfb_p95_s",
+          "FROM cf_access_logs",
+          "WHERE \"date\" >= current_date - interval '7' day AND cs_method = 'GET'",
+          "GROUP BY 1",
+          "HAVING COUNT(*) >= 50",
+          "ORDER BY p95_s DESC",
+          "LIMIT 50",
+        ].join("\n"),
+      },
+      {
+        constructId: "QueryPerfErrorsByRoute",
+        name: `sps-perf-errors-by-route-${env}`,
+        description:
+          "4xx / 5xx counts + 5xx rate by route over 7d (routes with any error).",
+        sql: [
+          "SELECT",
+          "  regexp_replace(cs_uri_stem, '(/(scholar|center|department|division|topics|topic|publication|core|unit)/)[^/?]+', '$1:id') AS route,",
+          "  COUNT(*) AS hits,",
+          "  SUM(CASE WHEN sc_status BETWEEN 400 AND 499 THEN 1 ELSE 0 END) AS c4xx,",
+          "  SUM(CASE WHEN sc_status BETWEEN 500 AND 599 THEN 1 ELSE 0 END) AS c5xx,",
+          "  round(100.0 * SUM(CASE WHEN sc_status >= 500 THEN 1 ELSE 0 END) / COUNT(*), 2) AS err5xx_pct",
+          "FROM cf_access_logs",
+          "WHERE \"date\" >= current_date - interval '7' day",
+          "GROUP BY 1",
+          "HAVING SUM(CASE WHEN sc_status >= 400 THEN 1 ELSE 0 END) > 0",
+          "ORDER BY c5xx DESC, c4xx DESC",
+          "LIMIT 50",
+        ].join("\n"),
+      },
+      {
+        constructId: "QueryPerfCacheHit",
+        name: `sps-perf-cache-hit-${env}`,
+        description:
+          "Edge cache outcome mix over 7d (x_edge_result_type share) -- Hit/Miss/RefreshHit/Error.",
+        sql: [
+          "SELECT",
+          "  x_edge_result_type AS result_type,",
+          "  COUNT(*) AS hits,",
+          "  round(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS pct",
+          "FROM cf_access_logs",
+          "WHERE \"date\" >= current_date - interval '7' day",
+          "GROUP BY 1",
+          "ORDER BY hits DESC",
+        ].join("\n"),
+      },
     ];
     for (const q of savedQueries) {
       const named = new athena.CfnNamedQuery(this, q.constructId, {
@@ -405,6 +479,81 @@ export class AnalyticsStack extends Stack {
       named.addDependency(workGroup);
       named.addDependency(usageDatabase);
     }
+
+    // ------------------------------------------------------------------
+    // In-app Usage dashboard grant (/edit/usage). Attach a workgroup-scoped
+    // Athena/Glue/S3 policy to the AppStack task role so the app can query the
+    // `daily_usage` rollup at read time. Declared HERE (not via appTaskRole
+    // .grant* / analyticsBucket.grantRead, which would attach to the role's
+    // default policy in AppStack and import this CFN-named bucket THERE) so the
+    // dependency runs Analytics->App and every ARN below is local to this stack.
+    //
+    // LEAST PRIVILEGE: query on the capped `sps-usage-${env}` workgroup only;
+    // Glue read on the `daily_usage` table only (NOT `cf_access_logs`); S3 read
+    // on the rollup-source prefix + read/write on the athena-results prefix
+    // only. No S3 access to the raw `cf/` log prefix, so the app can never read
+    // client IPs / unredacted paths — the usage aggregates carry no PII.
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "AppUsageQueryPolicy", {
+      policyName: `sps-usage-app-query-${env}`,
+      roles: [props.appTaskRole],
+      statements: [
+        new iam.PolicyStatement({
+          sid: "AthenaUsageWorkgroup",
+          actions: [
+            "athena:StartQueryExecution",
+            "athena:GetQueryExecution",
+            "athena:GetQueryResults",
+            "athena:StopQueryExecution",
+          ],
+          resources: [
+            this.formatArn({
+              service: "athena",
+              resource: "workgroup",
+              resourceName: `sps-usage-${env}`,
+            }),
+          ],
+        }),
+        new iam.PolicyStatement({
+          sid: "GlueUsageTableRead",
+          actions: [
+            "glue:GetDatabase",
+            "glue:GetTable",
+            "glue:GetTables",
+            "glue:GetPartition",
+            "glue:GetPartitions",
+          ],
+          resources: [
+            this.formatArn({ service: "glue", resource: "catalog" }),
+            this.formatArn({
+              service: "glue",
+              resource: "database",
+              resourceName: `sps_usage_${env}`,
+            }),
+            this.formatArn({
+              service: "glue",
+              resource: "table",
+              resourceName: `sps_usage_${env}/daily_usage`,
+            }),
+          ],
+        }),
+        new iam.PolicyStatement({
+          sid: "S3UsageSourceAndResults",
+          actions: ["s3:GetBucketLocation", "s3:ListBucket"],
+          resources: [this.analyticsBucket.bucketArn],
+        }),
+        new iam.PolicyStatement({
+          sid: "S3UsageRollupRead",
+          actions: ["s3:GetObject"],
+          resources: [this.analyticsBucket.arnForObjects(`${rollupPrefix}/*`)],
+        }),
+        new iam.PolicyStatement({
+          sid: "S3AthenaResultsReadWrite",
+          actions: ["s3:GetObject", "s3:PutObject"],
+          resources: [this.analyticsBucket.arnForObjects(`${athenaResultsPrefix}/*`)],
+        }),
+      ],
+    });
 
     // ------------------------------------------------------------------
     // Rollup Lambda. Mirrors observability-stack.ts OncallRelayFunction: an

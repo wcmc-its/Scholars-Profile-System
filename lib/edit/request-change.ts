@@ -18,6 +18,7 @@ const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
   appointments: "Appointments",
   education: "Education",
   funding: "Funding",
+  "funding-reporter": "Funding",
   publications: "Publications",
   "org-unit": "Org Unit",
   coi: "Conflicts of Interest",

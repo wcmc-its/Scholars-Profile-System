@@ -27,6 +27,7 @@ import {
   buildOrganizationJsonLd,
   buildPersonJsonLd,
   overviewToDescription,
+  serializeJsonLd,
   splitPersonName,
   type PersonJsonLdInput,
 } from "@/lib/seo/jsonld";
@@ -375,5 +376,59 @@ describe("overviewToDescription", () => {
 
   it("leaves short text uncapped", () => {
     expect(overviewToDescription("Short blurb.")).toBe("Short blurb.");
+  });
+
+  // Defense in depth: the description is plain-text meta content and must never
+  // carry raw `<`/`>`. `&lt;`/`&gt;` are left as entities rather than decoded
+  // back into metacharacters, so nothing here can reopen a markup vector at the
+  // inline <script> sink.
+  it("does not decode &lt;/&gt; back into raw angle brackets", () => {
+    const out = overviewToDescription("A closing tag &lt;/script&gt; stays inert.");
+    expect(out).not.toBeNull();
+    expect(out).not.toContain("<");
+    expect(out).not.toContain(">");
+    expect(out).not.toContain("</script>");
+    // The entities survive intact for a downstream consumer to interpret.
+    expect(out).toContain("&lt;/script&gt;");
+  });
+});
+
+describe("serializeJsonLd", () => {
+  it("escapes <, > and & to their \\uXXXX JSON forms", () => {
+    const out = serializeJsonLd({ v: "a<b>c&d" });
+    expect(out).not.toContain("<");
+    expect(out).not.toContain(">");
+    expect(out).toContain("\\u003c");
+    expect(out).toContain("\\u003e");
+    expect(out).toContain("\\u0026");
+  });
+
+  it("stays valid, parse-identical JSON after escaping", () => {
+    const obj = { a: "x<y", b: "p&q", c: "m>n" };
+    expect(JSON.parse(serializeJsonLd(obj))).toEqual(obj);
+  });
+
+  // Regression for the JSON-LD output-escaping fix (#1439): an overview a
+  // self-editor controls — carrying a `</script>` sequence (entity-encoded) AND
+  // a raw `<` that survives tag-stripping — must not produce a literal
+  // `</script>` or a raw `<`/`>` in the inline <script type="application/ld+json">
+  // payload. Fails against the pre-fix bare `JSON.stringify` sink.
+  it("never emits a literal </script> or raw </> for a hostile overview", () => {
+    const jsonLd = buildPersonJsonLd({
+      ...baseInput,
+      // "Risk was < 5%" leaves a lone raw `<` (no closing `>`) that tag-stripping
+      // cannot remove; the entity-encoded closer + onerror image is what a naive
+      // decode would resurrect into live markup.
+      overview:
+        "Risk was < 5% in cohorts. &lt;/script&gt;&lt;img src=x onerror=alert(1)&gt;",
+    });
+    const serialized = serializeJsonLd(jsonLd);
+    expect(serialized).not.toContain("</script>");
+    expect(serialized).not.toContain("<");
+    expect(serialized).not.toContain(">");
+    // Escaping is transparent: a JSON-LD consumer round-trips the original text.
+    const parsed = JSON.parse(serialized) as { description?: string };
+    expect(parsed.description).toContain("< 5%");
+    expect(parsed.description).toContain("&lt;/script&gt;");
   });
 });

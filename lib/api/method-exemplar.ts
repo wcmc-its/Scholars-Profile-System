@@ -193,6 +193,10 @@ export async function loadMethodExemplar(
   cwid: string,
   familyLabel: string,
   query?: string,
+  /** #1366 — pmids already claimed by a sibling stacked line; removed from the
+   *  candidate pool BEFORE ranking so this line under-fills from the non-claimed
+   *  set rather than handing back claimed top picks for the route to empty out. */
+  exclude?: string[],
 ): Promise<ExemplarResult> {
   const id = cwid.trim();
   const label = familyLabel.trim();
@@ -243,7 +247,9 @@ export async function loadMethodExemplar(
     if (pmidSet.size >= MAX_CANDIDATES) break;
   }
 
-  const result = await rankExemplarForPmids(id, Array.from(pmidSet), query);
+  const excludeSet = new Set(exclude ?? []);
+  const candidatePmids = Array.from(pmidSet).filter((p) => !excludeSet.has(p));
+  const result = await rankExemplarForPmids(id, candidatePmids, query);
   return { ...result, methodContext };
 }
 
@@ -260,6 +266,8 @@ export async function loadTopicExemplar(
   cwid: string,
   parentTopicId: string,
   query?: string,
+  /** #1366 — sibling-claimed pmids, dropped at the query level (`notIn`). */
+  exclude?: string[],
 ): Promise<ExemplarResult> {
   const id = cwid.trim();
   const topicId = parentTopicId.trim();
@@ -275,6 +283,7 @@ export async function loadTopicExemplar(
       cwid: id,
       parentTopicId: topicId,
       scholar: { deletedAt: null, status: "active" },
+      ...(exclude && exclude.length > 0 ? { pmid: { notIn: exclude } } : {}),
     },
     select: { pmid: true },
     orderBy: { score: "desc" },

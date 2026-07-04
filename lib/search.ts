@@ -195,6 +195,13 @@ export const peopleIndexMapping = {
       // `object` + `enabled: false`. OMITTED on scholars with no MeSH-tagged pub.
       // Served only when SEARCH_PEOPLE_REASON_FROM_DOC is on.
       meshSubtreeCounts: { type: "object", enabled: false },
+      // #1366 — per-method-family distinct-pub counts for the reason-line "N of M".
+      // Dynamic family-label keys ⇒ store in `_source` but DON'T index (object +
+      // enabled:false), same as `meshSubtreeCounts`, to avoid a mapping explosion.
+      methodFamilyCounts: { type: "object", enabled: false },
+      // #1366 — per-parent-topic distinct-pub counts (dynamic topic-slug keys);
+      // store in `_source`, don't index — same rationale as `methodFamilyCounts`.
+      areaCounts: { type: "object", enabled: false },
       overview: { type: "text", analyzer: "scholar_text" },
       // Issue #310 / SPEC §6.1.5 — materialized inputs to the topic-shape
       // sparse-profile soft decay. The decay's "non-trivial" thresholds
@@ -290,6 +297,29 @@ export const peopleIndexMapping = {
         type: "text",
         analyzer: "scholar_text",
       },
+      // POPS clinical specialty fields — populated from weillcornell.org board
+      // certifications, primary specialties, and clinical expertise (problem_procedure)
+      // by the etl/pops step. All three are OMIT-on-empty (scholars with no POPS data
+      // carry none of these fields). The query-time boost and clinical:exact evidence
+      // kind are gated behind SEARCH_PEOPLE_CLINICAL (default OFF, reindex-then-flip).
+      //
+      // `clinicalSpecialties` — board-cert ∪ primary specialties, deduped
+      // case-insensitively; queried via the cross_fields multi_match at a conservative
+      // boost so a specialty query ("cardiology") ranks the clinician. Analyzed
+      // `scholar_text` (same analyzer as `areasOfInterest`) for stemming + stopwords.
+      clinicalSpecialties: { type: "text", analyzer: "scholar_text" },
+      // `clinicalExpertise` — POPS problem_procedure strings; loose signal only
+      // (contributes to ranking but never earns a clinical reason line). Analyzed
+      // `scholar_text` so multi-word expertise phrases tokenize consistently.
+      clinicalExpertise: { type: "text", analyzer: "scholar_text" },
+      // `clinicalBoardSet` — board-certified specialty strings ONLY (raw, keyword).
+      // Not queried by the multi_match; read from `_source` at query time by
+      // `resolveHitEvidence` to determine whether a matched specialty is board-cert
+      // (label "Board certified in X") or primary-specialty-only ("Clinical specialty:
+      // X"). Stored as a `keyword` array so an exact case-insensitive membership
+      // check is possible without a DB round-trip. OMITTED when boardCertSpecialties
+      // is empty (omit-on-empty).
+      clinicalBoardSet: { type: "keyword" },
     },
   },
 };
@@ -836,6 +866,41 @@ export const PEOPLE_DEPT_LEADERSHIP_CHAIR_WEIGHT = 3.0;
 export const PEOPLE_DEPT_LEADERSHIP_CHIEF_WEIGHT = 1.5;
 
 /**
+ * Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
+ * When a topic query resolves to a Research Area, scholars are lifted by their
+ * relevance×coverage ranking in that area — the topic page's own per-scholar `total`
+ * (Σ scorePublication over first/last-authored, recent, in-area pubs). The continuous
+ * `total` is bucketed into 3 tiers (by fraction of the area's max `total`) and each
+ * tier rides as an additive weight in the OUTER prominence `function_score` (same slot
+ * as the #513 prominence factors), so concentration can overcome the
+ * `ln1p(publicationCount)` lift that floats prolific generalists. Reorder-only: a
+ * `filter` clause scores only docs already matched, so the result set/facets are
+ * unchanged. Weights are INITIAL — tuned by the spec §6 dense-page eval.
+ * ponytail: 3 static tiers; a reindexed per-scholar `total` field + script_score is
+ * the smoother upgrade (spec OQ-7) once the signal is proven.
+ */
+// Prominence is `score_mode: sum` × relevance, where the non-boost terms sum to
+// ~6 (mostly ln1p(publicationCount)). The original 8/4/1.5 made a top-tier boost
+// DOUBLE the multiplier — concentration dominated relevance instead of informing it
+// (the "huge FT boost" / method-tagged-ethics-prof-over-Rice distortion). Softened
+// to a peer signal: a top tier now adds ~50% (6→9), reordering within a relevance
+// band without overriding it. Still INITIAL — the staging A/B picks the final values.
+export const AREA_BOOST_W_HI = 3;
+export const AREA_BOOST_W_MID = 1.5;
+export const AREA_BOOST_W_LO = 0.75;
+/** Tier cutoffs as a fraction of the area's top `total` (the #1 scholar). */
+export const AREA_BOOST_HI_FRAC = 0.5;
+export const AREA_BOOST_MID_FRAC = 0.2;
+/** Cap on how many of the area's ranked scholars are pulled for the boost. */
+export const AREA_BOOST_TOP_N = 200;
+/**
+ * #1343 — minimum on-topic pubs for a WCM author to be eligible for the
+ * concept-axis concentration boost. Floors out 1–2-pub authors whose on-topic
+ * fraction would otherwise spike them above genuine specialists.
+ */
+export const CONCEPT_CONCENTRATION_MIN_PUBS = 3;
+
+/**
  * Boost weights used by the publications-index query builder.
  * (Not specified in spec for publications; reasonable defaults.)
  */
@@ -915,6 +980,9 @@ export const opportunitiesIndexMapping = {
       // Hard-filter axes.
       status: { type: "keyword" },
       mechanism: { type: "keyword" },
+      // Honorific recognition (prize/medal/…) — excluded from recommendations +
+      // prestige-ordered lists via `must_not term isHonorific:true`.
+      isHonorific: { type: "boolean" },
       // Derived eligibility flags (us_eligible / faculty_eligible / ...).
       eligibilityFlags: { type: "keyword" },
       cfdaList: { type: "keyword" },
@@ -937,6 +1005,7 @@ export const opportunitiesIndexMapping = {
       // NON-INDEXED re-rank payload — returned in `_source`, never searched.
       topicVector: { type: "object", enabled: false },
       appealByStage: { type: "object", enabled: false },
+      prestige: { type: "object", enabled: false },
     },
   },
 };
@@ -963,6 +1032,8 @@ export type OpportunityIndexRow = {
   topicVector: unknown; // OpportunityTopicScore[]
   appealByStage: unknown; // { grad, postdoc, early, mid, senior }
   meshDescriptorUi: unknown; // string[] | null
+  prestige: unknown; // { score, mechanism_tier, ... } | null
+  isHonorific: boolean | null;
   awardCeiling: bigint | null;
   numberOfAwards: number | null;
 };
@@ -1000,11 +1071,15 @@ export function buildOpportunityDoc(
     primaryTopicId: row.primaryTopicId ?? undefined,
     topicIds,
     meshDescriptorUi: asStringArray(row.meshDescriptorUi),
+    // Honorific flag — indexed so prestige-ordered / recommender reads can filter
+    // (`must_not term isHonorific:true`). Absent/null ⇒ false (not excluded).
+    isHonorific: row.isHonorific === true,
     awardCeiling: row.awardCeiling != null ? Number(row.awardCeiling) : undefined,
     numberOfAwards: row.numberOfAwards ?? undefined,
     // Non-indexed re-rank payload.
     topicVector,
     appealByStage: row.appealByStage && typeof row.appealByStage === "object" ? row.appealByStage : {},
+    prestige: row.prestige && typeof row.prestige === "object" ? row.prestige : undefined,
   };
   return { id: row.opportunityId, doc };
 }

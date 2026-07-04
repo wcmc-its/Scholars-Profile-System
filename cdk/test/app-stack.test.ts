@@ -1,24 +1,26 @@
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
+import { resolveEnvConfig, type SpsEnvConfig } from "../lib/config";
 import { NetworkStack } from "../lib/network-stack";
 import { makeFixture, TEST_ACCOUNT } from "./test-utils";
 
-function buildAppStack(envName: "staging" | "prod"): {
+function buildAppStack(
+  envName: "staging" | "prod",
+  envConfigOverride: Partial<SpsEnvConfig> = {},
+): {
   template: Template;
   stack: AppStack;
 } {
   const fixture = makeFixture(envName);
+  const envConfig = { ...fixture.envConfig, ...envConfigOverride };
   const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
   });
   const stack = new AppStack(fixture.app, `Sps-App-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     vpc: network.vpc,
-    appSecurityGroup: network.appSecurityGroup,
-    etlSecurityGroup: network.etlSecurityGroup,
-    albSecurityGroup: network.albSecurityGroup,
   });
   return { template: Template.fromStack(stack), stack };
 }
@@ -30,6 +32,116 @@ function buildAppStack(envName: "staging" | "prod"): {
 const EC2_DESCRIPTION_ALLOWED = /^[a-zA-Z0-9. _\-:/()#,@[\]+=&;{}!$*]+$/;
 
 describe("AppStack", () => {
+  // Cutover de-coupling (§8.4): OPENSEARCH_NODE moves off the Data→App
+  // cross-stack export onto the opensearch secret's `node` key, so the
+  // OpenSearch-domain replace at cutover isn't blocked by the export-lock.
+  describe("OPENSEARCH_NODE de-coupling (openSearchNodeFromSecret)", () => {
+    it("off (explicit): node is a plaintext env baked from the DataStack export, not a secret", () => {
+      const json = JSON.stringify(
+        buildAppStack("staging", { openSearchNodeFromSecret: false }).template.toJSON(),
+      );
+      expect(json).toContain("Sps-Data-staging-OpenSearchDomainEndpoint");
+      expect(json).not.toContain(":node::");
+    });
+
+    it("on: node is injected from the opensearch secret `node` key and the export is no longer imported", () => {
+      const json = JSON.stringify(
+        buildAppStack("staging", { openSearchNodeFromSecret: true }).template.toJSON(),
+      );
+      expect(json).not.toContain("Sps-Data-staging-OpenSearchDomainEndpoint");
+      expect(json).toContain(":node::");
+    });
+  });
+
+  // Estate consolidation (plan §4.4/§5.5): with useSharedVpc on, compute lands
+  // in app2, the public ALB in dmz, and SPS owns no VPC interface/gateway
+  // endpoints (it rides its-reciter's; a privateDNS SM endpoint would hijack
+  // co-tenant DNS).
+  describe("shared VPC placement (useSharedVpc on)", () => {
+    // Out-of-band shared SG ids (item-3 G8) — resolveSharedSg reads these config
+    // literals when shared, so the template must carry them, not an SSM ref.
+    const SHARED_SG = {
+      appSgId: "sg-0app0000000000",
+      etlSgId: "sg-0etl0000000000",
+      albSgId: "sg-0alb0000000000",
+    };
+    const staging = resolveEnvConfig("staging");
+    const { template } = buildAppStack("staging", {
+      useSharedVpc: true,
+      sharedVpc: { ...staging.sharedVpc, ...SHARED_SG },
+    });
+    const APP2 = ["subnet-0c6593fb9c9a165c3", "subnet-070cbc242efbddc3c"];
+    const DMZ = ["subnet-09a6fab648280ca19", "subnet-0485fefe267b06736"];
+
+    it("places the internal ALB in the app2 subnets", () => {
+      const albs = Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::LoadBalancer"),
+      );
+      const internal = albs.find((a) => a.Properties?.Scheme === "internal");
+      expect(internal?.Properties?.Subnets).toEqual(
+        expect.arrayContaining(APP2),
+      );
+    });
+
+    it("places the public ALB in the dmz subnets", () => {
+      const albs = Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::LoadBalancer"),
+      );
+      const pub = albs.find((a) => a.Properties?.Scheme === "internet-facing");
+      expect(pub?.Properties?.Subnets).toEqual(expect.arrayContaining(DMZ));
+    });
+
+    it("runs the ECS service in the app2 subnets", () => {
+      template.hasResourceProperties("AWS::ECS::Service", {
+        NetworkConfiguration: {
+          AwsvpcConfiguration: { Subnets: Match.arrayWith(APP2) },
+        },
+      });
+    });
+
+    it("creates no VPC interface/gateway endpoints (rides its-reciter's)", () => {
+      template.resourceCountIs("AWS::EC2::VPCEndpoint", 0);
+    });
+
+    // The flag-on SG id must come from the cfg.sharedVpc.<tier>SgId literal, not
+    // Network's /sps/<env>/net/<tier>-sg-id SSM echo (item-3 §4): a consumer that
+    // read the param would depend on Network deploying first, forcing
+    // producer-first ordering and re-locking the consumers-first flip.
+    it("imports SGs from the sharedVpc config literal, not Network's SSM param", () => {
+      const sv = resolveEnvConfig("staging").sharedVpc;
+      const json = JSON.stringify(
+        buildAppStack("staging", {
+          useSharedVpc: true,
+          sharedVpc: {
+            ...sv,
+            appSgId: "sg-0app",
+            etlSgId: "sg-0etl",
+            albSgId: "sg-0alb",
+          },
+        }).template.toJSON(),
+      );
+      expect(json).toContain("sg-0app");
+      expect(json).not.toContain("/sps/staging/net/app-sg-id");
+      expect(json).not.toContain("/sps/staging/net/etl-sg-id");
+      expect(json).not.toContain("/sps/staging/net/alb-sg-id");
+    });
+
+    // G15-a: the ALBs + TGs are VPC-coupled, so the flip REPLACES them; a fixed
+    // physical name blocks CFN create-before-delete. Under shared they auto-name.
+    it("auto-generates ALB + target-group names under shared VPC (G15-a)", () => {
+      for (const alb of Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::LoadBalancer"),
+      )) {
+        expect(alb.Properties?.Name).toBeUndefined();
+      }
+      for (const tg of Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::TargetGroup"),
+      )) {
+        expect(tg.Properties?.Name).toBeUndefined();
+      }
+    });
+  });
+
   describe("prod", () => {
     const { template } = buildAppStack("prod");
 
@@ -1618,6 +1730,13 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("METHODS_LENS_SENSITIVE_GATE")).toBe("off");
       });
 
+      it("keeps the subtopic-grain grant matcher off in prod (GRANT_MATCHER_SUBTOPIC_GRAIN, staging-first)", () => {
+        // Env-gated: on in staging, off in prod until the prod opportunity corpus
+        // carries match_dsl/match_query and the staging soak completes. Off in
+        // prod = the matcher runs the proven topic-vector path.
+        expect(appContainerEnv().get("GRANT_MATCHER_SUBTOPIC_GRAIN")).toBe("off");
+      });
+
       it("keeps the family click-to-filter off in prod (METHODS_LENS_FAMILY_FILTER, #819)", () => {
         // Staging-first like the sibling Methods-lens flags; off in prod until the
         // pmids-bearing scholar_family rollup is loaded and the staging soak is done.
@@ -2040,6 +2159,25 @@ describe("AppStack", () => {
       expect(envByName.get("CLINICAL_TRIALS_SECTION")).toBe("on");
     });
 
+    it("activates the subtopic-grain grant matcher in staging first (GRANT_MATCHER_SUBTOPIC_GRAIN=on)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appTaskDef = Object.values(taskDefs).find(
+        (r) => r.Properties?.Family === "sps-app-staging",
+      );
+      const appContainer = (
+        appTaskDef?.Properties?.ContainerDefinitions as
+          | Array<{
+              Name?: string;
+              Environment?: Array<{ Name?: string; Value?: string }>;
+            }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("GRANT_MATCHER_SUBTOPIC_GRAIN")).toBe("on");
+    });
+
     it("enables the center collaboration network in staging first (CENTER_COLLABORATION_NETWORK=on, #1137)", () => {
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const appTaskDef = Object.values(taskDefs).find(
@@ -2229,20 +2367,22 @@ describe("AppStack", () => {
       expect(json).toContain("scholars/staging/saml/idp-cert");
     });
 
-    it("uses staging Fargate sizing 512 cpu / 1024 MiB on the app task definition", () => {
+    it("uses staging Fargate sizing 1024 cpu / 2048 MiB on the app task definition", () => {
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const appTaskDef = Object.values(taskDefs).find(
         (r) => r.Properties?.Family === "sps-app-staging",
       );
       expect(appTaskDef).toBeDefined();
-      expect(appTaskDef?.Properties?.Cpu).toBe("512");
-      expect(appTaskDef?.Properties?.Memory).toBe("1024");
+      // 2026-06-26 — bumped 512→1024 (0.5→1 vCPU) after a §6 load-test showed the
+      // per-request taxonomy resolve saturating the app-tier CPU under concurrency.
+      expect(appTaskDef?.Properties?.Cpu).toBe("1024");
+      expect(appTaskDef?.Properties?.Memory).toBe("2048");
     });
 
-    it("grants the audit INSERT to `'app_rw'@'10.20.%'` on staging (#493 staging fix)", () => {
-      // Staging's app user is host-pattern `10.20.%` (VPC-CIDR-scoped), not the
-      // `%` the bootstrap defaulted to -- the cause of the MySQL 1410 at GRANT.
-      // Guards the per-env appRwGranteeHost wiring on the bootstrap task def.
+    it("grants the audit INSERT to `'app_rw'@'10.46.160.%'` on staging (item-3 cutover)", () => {
+      // Post-item-3-cutover staging's app user connects from the shared VPC's
+      // app2 tier, so the host pattern is `10.46.160.%` (was `10.20.%` on the
+      // standalone VPC). Guards the per-env appRwGranteeHost wiring.
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const bootstrap = Object.values(taskDefs).find(
         (r) => r.Properties?.Family === "sps-db-bootstrap-staging",
@@ -2259,7 +2399,7 @@ describe("AppStack", () => {
       const envByName = new Map(
         (container?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
-      expect(envByName.get("GRANTEE_HOST")).toBe("10.20.%");
+      expect(envByName.get("GRANTEE_HOST")).toBe("10.46.160.%");
     });
 
     it("provisions the verify-grants task on staging with all four role DSNs (ADR-009 Phase 2)", () => {
@@ -2318,9 +2458,6 @@ describe("AppStack", () => {
         env: fixture.env,
         envConfig: fixture.envConfig,
         vpc: network.vpc,
-        appSecurityGroup: network.appSecurityGroup,
-        etlSecurityGroup: network.etlSecurityGroup,
-        albSecurityGroup: network.albSecurityGroup,
       });
       const t = Template.fromStack(stack);
       t.hasResourceProperties("AWS::ECS::Service", { DesiredCount: 0 });

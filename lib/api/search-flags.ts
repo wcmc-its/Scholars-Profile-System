@@ -214,6 +214,24 @@ export function resolveFundingMeshGateField(): "meshDescriptorUi" | "fundedPubMe
 }
 
 /**
+ * #1359 Tier 2 — concept-match the People-card KEY FUNDING evidence row. When on,
+ * `/api/scholar/[cwid]/grants` threads the page-resolved MeSH concept
+ * (`descriptorUis` + `label`) into `searchFunding`, so a scholar's grant surfaces
+ * by concept tag (`fundedPubMeshUi` ∩ descendant set) even without a literal text
+ * hit, and the row's reason line reads "N of M grants tagged <Concept>" instead of
+ * "mention '<query>'". Recall-affecting (widens which grants surface), so it ships
+ * off and gets a staging A/B before prod — same posture as the #1336/#1339 funding
+ * recall changes. Off ⇒ the route stays text-only (today's behavior), byte-identical.
+ *
+ * Independent of `SEARCH_EVIDENCE_ROWS` (which gates the row's existence): this only
+ * changes HOW the row matches, so the A/B can toggle concept matching without
+ * toggling the whole row.
+ */
+export function resolveFundingConceptGrants(): boolean {
+  return process.env.SEARCH_FUNDING_CONCEPT_GRANTS === "on";
+}
+
+/**
  * TIER 3 — funding-tab text-hit evidence line. A grant matched ONLY on a text
  * field (abstract / keywordsText / sponsorText) — not title, not concept, not
  * funded-pubs — renders today with NO "why it matched" reason (just a bare,
@@ -293,20 +311,51 @@ export function resolveDeptLeadershipBoost(): boolean {
 }
 
 /**
- * Issue #688 — surface MeSH match provenance on People results. When a
- * topic/unclassified search resolves to a descriptor, the §6.1.3 attribution
- * boost ranks up scholars tagged with a *narrower* descendant term than the
- * one typed (e.g. `Microbiome` surfacing a `Mycobiome` scholar). With this on,
- * each such hit carries the narrower term(s) so the UI can explain the match;
- * the query-keyed highlighter can't (the typed term isn't in the scholar's
- * text). Pure additive metadata — no effect on ranking or the result set.
+ * #1347 — division-shape routing. When ON, a bare clinical-division-name People query
+ * (Cardiology, Endocrinology) routes to the `department` template AND is scoped to that
+ * division's roster (`deptDivKey` filter), instead of falling to `topic_template` and
+ * returning a topic-scattered list. Division names + their roster keys come from the
+ * classifier-sets `divisions` map; query-time only, no reindex.
  *
- * Default on (`SEARCH_PEOPLE_MATCH_PROVENANCE=off` rolls back); this is an
- * explainability/UX change, not a ranking change, so it gets its own lever
- * independent of `SEARCH_PEOPLE_RELEVANCE_MODE`.
+ * Default OFF (`=== "on"` opt-in, dark): flag-off ⇒ classification + filters are
+ * byte-identical. Regression risk — several division names are also legitimate topical
+ * terms — so this ships dark and needs a staging A/B before any flip. The chief-of
+ * ranking WITHIN the roster additionally depends on the #1347 reindex (chiefCwid).
  */
-export function resolvePeopleMatchProvenance(): boolean {
-  return process.env.SEARCH_PEOPLE_MATCH_PROVENANCE !== "off";
+export function resolveSearchPeopleDivisionShape(): boolean {
+  return process.env.SEARCH_PEOPLE_DIVISION_SHAPE === "on";
+}
+
+/**
+ * #1345 — full-time-faculty prominence lever. The outer People prominence
+ * function_score adds a flat `+PEOPLE_PROMINENCE_FACULTY_WEIGHT` (#513) to every
+ * full_time_faculty scholar, an expertise-INDEPENDENT employment-status prior that
+ * buries genuine affiliated/clinical/voluntary subspecialty experts. When set to
+ * `off`, that clause is dropped; the log-saturated `ln1p(publicationCount)` lead
+ * carries prominence on its own.
+ *
+ * Default ON (`!== "off"`) so prod ranking is byte-identical until a deliberate
+ * flip — the same convention as {@link resolveDeptLeadershipBoost}. Query-time
+ * only, no reindex; an independent rollback lever from SEARCH_PEOPLE_RELEVANCE_MODE.
+ */
+export function resolveSearchPeopleFacultyProminence(): boolean {
+  return process.env.SEARCH_PEOPLE_FACULTY_PROMINENCE !== "off";
+}
+
+/**
+ * #1344 — topic/hybrid People proximity boost. When ON, the topic (and hybrid)
+ * template adds scoring-only `match_phrase` clauses (bounded slop) on
+ * publicationTitles/areasOfInterest, rewarding within-a-single-publication
+ * co-occurrence of the query terms so the true subspecialist outranks scholars who
+ * merely scatter the same tokens across unrelated pubs. RANKING ONLY — a top-level
+ * `should` with no minimum_should_match, so it never admits/drops a doc (the 4,558
+ * admission count is unchanged; that is governed by the cross_fields msm).
+ *
+ * Default OFF (`=== "on"` opt-in, dark) — mirrors {@link resolveFundingPhraseBoost};
+ * flag-off ⇒ the people body is byte-identical. No reindex (fields already analyzed).
+ */
+export function resolvePeopleTopicPhraseBoost(): boolean {
+  return process.env.SEARCH_PEOPLE_PHRASE_BOOST === "on";
 }
 
 /**
@@ -326,9 +375,8 @@ export function resolvePeopleMatchProvenance(): boolean {
  * possibly-sensitive blob makes a poor snippet.
  *
  * Pure presentation metadata — no effect on the query predicate, scoring, or
- * result set. Default on (`SEARCH_PEOPLE_MATCH_EXPLAIN=off` rolls back); a separate lever from
- * `SEARCH_PEOPLE_MATCH_PROVENANCE` (the MeSH "why this match" note) and from
- * `SEARCH_GENERIC_TERM_DEMOTE`, each with an independent rollback trigger.
+ * result set. Default on (`SEARCH_PEOPLE_MATCH_EXPLAIN=off` rolls back); a separate
+ * lever from `SEARCH_GENERIC_TERM_DEMOTE`, with an independent rollback trigger.
  */
 export function resolvePeopleMatchExplain(): boolean {
   return process.env.SEARCH_PEOPLE_MATCH_EXPLAIN !== "off";
@@ -401,6 +449,19 @@ export function resolveGenericTermMode(): GenericTermMode {
     );
   }
   return "off";
+}
+
+/**
+ * Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
+ * When ON and a topic query resolves to a Research Area, `searchPeople` lifts scholars
+ * by their relevance×coverage ranking in that area (the topic page's per-scholar
+ * `total`), tiered into the prominence `function_score`. Topic/hybrid shapes only,
+ * reorder-only (no result-set/facet change), suppressed under Exact word. App-only, no
+ * reindex (sources the existing Aurora rollup, cached). Default OFF; `=== "on"` opt-in,
+ * staging-first (wired `env === "staging" ? "on" : "off"` in cdk/lib/app-stack.ts).
+ */
+export function resolveSearchPeopleAreaBoost(): boolean {
+  return process.env.SEARCH_PEOPLE_AREA_BOOST === "on";
 }
 
 export type PubRecencyMode = "off" | "gentle" | "strong";
@@ -555,17 +616,18 @@ export function computeConceptFallback(input: {
 
 /**
  * Publications-tab MeSH match provenance — the publications twin of the People
- * tab's `SEARCH_PEOPLE_MATCH_PROVENANCE` (#688). When a topic query resolves to
- * a descriptor, the concept-mode admission/boost (`terms { meshDescriptorUi:
- * descendantUis }`, #259) ranks up publications tagged with the descriptor or a
- * narrower descendant — a match the title highlighter can't explain when the
- * typed term isn't in the title. With this on, each such hit carries
- * `matchProvenance` (reusing the generalized `computeMatchProvenance`) so the row
- * can render the same "Why this match" note as the Scholars tab. Pure additive
- * metadata — no effect on ranking or the result set.
+ * tab's always-on provenance (#688; its `SEARCH_PEOPLE_MATCH_PROVENANCE` lever
+ * was retired in #1440). When a topic query resolves to a descriptor, the
+ * concept-mode admission/boost (`terms { meshDescriptorUi: descendantUis }`,
+ * #259) ranks up publications tagged with the descriptor or a narrower
+ * descendant — a match the title highlighter can't explain when the typed term
+ * isn't in the title. With this on, each such hit carries `matchProvenance`
+ * (reusing the generalized `computeMatchProvenance`) so the row can render the
+ * same "Why this match" note as the Scholars tab. Pure additive metadata — no
+ * effect on ranking or the result set.
  *
- * Default on (`SEARCH_PUB_MATCH_PROVENANCE=off` rolls back); a separate lever from the People-tab provenance flag
- * and from `SEARCH_PUB_HIGHLIGHT`, each with an independent rollback trigger.
+ * Default on (`SEARCH_PUB_MATCH_PROVENANCE=off` rolls back); a separate lever
+ * from `SEARCH_PUB_HIGHLIGHT`, each with an independent rollback trigger.
  */
 export function resolvePublicationMatchProvenance(): boolean {
   return process.env.SEARCH_PUB_MATCH_PROVENANCE !== "off";
@@ -592,6 +654,31 @@ export function resolvePublicationMatchProvenance(): boolean {
  */
 export function resolvePublicationDepartmentFilter(): boolean {
   return process.env.SEARCH_PUB_DEPARTMENT_FILTER === "on";
+}
+
+/**
+ * Pub-tab performance — decouple the facet aggregation from the hit list.
+ *
+ * When on, the active Publications search fires TWO OpenSearch requests in
+ * parallel instead of one combined request: Request A is the hit list
+ * (`bodyNoAggs` — keeps `track_total_hits`, `post_filter`, sort, highlight),
+ * Request B is `{ size: 0, query, aggs }` over the UNSCORED query (the recency
+ * `function_score` is irrelevant to filter-context facet counts). Request B is
+ * cached on `(query + active filters + dept-flag + mentoring-bucket size)` —
+ * facet counts are page- AND sort-invariant, so pagination and re-sort of the
+ * same query reuse the cached facets and pay only the cheap hit query — and
+ * time-capped so a slow broad-concept agg degrades to empty facets instead of
+ * hanging the nav (there is no `requestTimeout` guard otherwise). The author
+ * `cardinality` precision_threshold also drops 4000→1000 on this path (~1–2%
+ * error the rail header tolerates) since the split path is the rollout target.
+ *
+ * Default OFF (`SEARCH_PUB_FACET_SPLIT=on` enables). No reindex needed — this is
+ * a request-shape change only; the flag-off path is byte-identical to the
+ * single-request body. `=== "on"` default-off gate so it ships inert and the
+ * split rolls out staging-first.
+ */
+export function resolvePubFacetSplit(): boolean {
+  return process.env.SEARCH_PUB_FACET_SPLIT === "on";
 }
 
 /**
@@ -736,6 +823,42 @@ export function resolvePeopleMatchAwareSnippet(): boolean {
  */
 export function resolveSearchResultEvidence(): boolean {
   return process.env.SEARCH_RESULT_EVIDENCE === "on";
+}
+
+/**
+ * #1366 — counted, STACKED evidence reason lines on the People card. When on
+ * (and `SEARCH_RESULT_EVIDENCE` is on), `searchPeople` emits `evidenceLines` (an
+ * ordered list) instead of a single `evidence`: method, a tagged-concept match,
+ * and the matched research area each appear as their own line — each prefixed
+ * with "N of M publications" — with keyword as the fallback and clinical as an
+ * independent label-only line. Flag-OFF ⇒ no `evidenceLines`, the single
+ * `evidence` field is unchanged, and the card render is byte-identical to today.
+ *
+ * App-only EXCEPT the method count, which reads the precomputed people-doc
+ * `methodFamilyCounts` (a reindex populates it; a not-yet-reindexed doc simply
+ * shows no method count — graceful). Default OFF (`=== "on"` opt-in), STAGING-
+ * FIRST. Wired per-env in `cdk/lib/app-stack.ts` (staging-on / prod-off);
+ * enabling in prod is the operator `cdk deploy` step.
+ */
+export function resolveSearchEvidenceReasonCounts(): boolean {
+  return process.env.SEARCH_EVIDENCE_REASON_COUNTS === "on";
+}
+
+/**
+ * Generalized evidence rows on the scholar search card — surfaces a scholar's
+ * topic-matching grants as a "Funding" disclosure row (`[Funding badge] claim ⌄ →
+ * Key funding`) and badges the publications flavor (Research area / Concept /
+ * Keyword) on the Scholars card only. The Funding row is lazy: a card with
+ * `grantCount > 0` fetches `/api/scholar/[cwid]/grants?q=…` and renders the row
+ * only when ≥1 grant matched (hide-when-empty), so flag-OFF ⇒ no fetch, no row,
+ * and the pub row keeps its shipped muted treatment.
+ *
+ * App-only, NO reindex. Default OFF (`SEARCH_EVIDENCE_ROWS=on` enables) — an
+ * `=== "on"` opt-in gate, STAGING-FIRST. Wired per-env in `cdk/lib/app-stack.ts`
+ * (staging-on / prod-off); enabling in prod is the operator `cdk deploy` step.
+ */
+export function resolveSearchEvidenceRows(): boolean {
+  return process.env.SEARCH_EVIDENCE_ROWS === "on";
 }
 
 /**
@@ -892,4 +1015,106 @@ export function resolvePeopleConceptGrantAxis(): boolean {
  */
 export function resolveMeshResolutionFallbackEnabled(): boolean {
   return process.env.SEARCH_MESH_RESOLUTION_FALLBACK === "on";
+}
+
+/**
+ * #1342 — query-side morphology retry. When ON, `resolveMeshDescriptor`, after the
+ * exact name / entry-term / curated-alias lookup misses, retries the SINGULARIZED
+ * query ({@link singularizeForMatch}: "melanomas" → "melanoma") against the same
+ * index and, on a hit, returns the descriptor at the low `partial` confidence tier.
+ * Closes the inflection tail (plurals/possessives whose singular base is already an
+ * index key) and makes future curated aliases robust to plural/possessive variants.
+ *
+ * Default OFF (`=== "on"` opt-in): flag-off leaves `resolveMeshDescriptor`
+ * byte-identical (the singularize branch is never entered). Resolve-time only — no
+ * reindex. NOTE: the headline lay-term wins (diabetes/alzheimer's) ALSO need the
+ * #1258 alias rows; a singularizer cannot bridge derivational or single→multi-word.
+ */
+export function resolveMeshQueryNormalizationEnabled(): boolean {
+  return process.env.SEARCH_MESH_QUERY_NORMALIZATION === "on";
+}
+
+/**
+ * #1346 — acronym wrong-sense guard. When ON, `resolveMeshDescriptor` suppresses a
+ * short all-caps acronym query (e.g. CAR, PET) that resolved ONLY via a common-word
+ * entry-term synonym whose matched form is a plain Title-case word (CAR → "Car" →
+ * Automobiles, PET → "Pet" → Pets). Such a match is the wrong (non-medical) sense on
+ * a medical-center search; returning null drops the query to BM25, exactly like the
+ * already-safe 2-char acronyms (MS/CD).
+ *
+ * Default OFF (`=== "on"` opt-in): flag-off is byte-identical. Internal-caps acronym
+ * entry terms (COPD/EHR/PCR) and exact descriptor-NAME matches (DNA/RNA, confidence
+ * `exact`) are kept — the discriminator is "matched form has no uppercase past char 0".
+ */
+export function resolveAcronymSenseGuardEnabled(): boolean {
+  return process.env.SEARCH_ACRONYM_SENSE_GUARD === "on";
+}
+
+/**
+ * POPS clinical specialty search — People-tab ranking boost + clinical:exact
+ * evidence kind. When on, the people query adds `clinicalSpecialties` and
+ * `clinicalExpertise` to the multi_match boost ladder so a specialty query
+ * ("cardiology") ranks the matching clinician, and `resolveHitEvidence` emits
+ * a `clinical:exact` reason when every query content token is covered by a
+ * specialty string in the hit's `clinicalSpecialties` set.
+ *
+ * Default OFF (`SEARCH_PEOPLE_CLINICAL=on` enables). This is a
+ * reindex-then-flip rollout: the three clinical fields
+ * (`clinicalSpecialties`, `clinicalExpertise`, `clinicalBoardSet`) must be
+ * in the people index docs BEFORE flipping — the etl/pops step populates
+ * the Scholar rows and a full people reindex writes the doc fields.
+ * Flipping first boosts absent fields (wasted no-op clauses). Reversible
+ * by clearing the flag. Flag-parity note: when enabling later, wire the env
+ * var in BOTH `.env.local` AND `cdk/lib/app-stack.ts` per environment — a
+ * local-on / deployed-off split silently ships nothing.
+ */
+export function resolveSearchPeopleClinical(): boolean {
+  return process.env.SEARCH_PEOPLE_CLINICAL === "on";
+}
+
+/**
+ * Track B / B2 — clinical-as-function_score. SEPARATE from `SEARCH_PEOPLE_CLINICAL` (the
+ * inert cross_fields text-field variant): an in-VPC A/B proved the text field is swallowed by
+ * the cross_fields blend (a clinician who also publishes on the topic gets no lift). Instead,
+ * boost scholars whose BOARD-DERIVED `clinicalSpecialties` match the query via an additive
+ * function_score weight (the same outer prominence layer the area boost rides). Measured: on
+ * "obesity" this lifts Leon Igel #183→#12 and Mohini Aras #304→#16, and no-ops on condition
+ * queries with no matching specialty (e.g. "hypertension" → 0 matchers). Keyed on
+ * `clinicalSpecialties` ONLY — `clinicalExpertise` free-text is too noisy and regressed
+ * hypertension in the prototype. See `docs/search-trackA-clinical-inert-finding.md` +
+ * `docs/search-mason-attribution-and-rescope-finding.md`. Default OFF; topic/hybrid only.
+ * Flag-parity: wire `SEARCH_PEOPLE_CLINICAL_FN` in BOTH `.env.local` AND `cdk/lib/app-stack.ts`.
+ * No reindex (the fields are already indexed; this is a query-time boost).
+ */
+export function resolveSearchPeopleClinicalFn(): boolean {
+  return process.env.SEARCH_PEOPLE_CLINICAL_FN === "on";
+}
+
+/** Default additive weight for the B2 clinical-specialty boost (matches the area-boost HI tier
+ *  that lifted Igel in the prototype). Query-tunable via `SEARCH_PEOPLE_CLINICAL_FN_WEIGHT` so
+ *  A/B cells need no reindex. */
+const CLINICAL_FN_WEIGHT_DEFAULT = 3;
+export function resolveSearchPeopleClinicalFnWeight(): number {
+  const raw = Number(process.env.SEARCH_PEOPLE_CLINICAL_FN_WEIGHT);
+  return Number.isFinite(raw) && raw > 0 ? raw : CLINICAL_FN_WEIGHT_DEFAULT;
+}
+
+/** #1343/#1363 — area-boost tier weights, env-tunable (same shape as the clinical-fn
+ *  weight above) so weight cells A/B on staging as task-def env edits, no rebuild.
+ *  Code defaults are the softened `AREA_BOOST_W_*` constants in lib/search.ts.
+ *  0 is a valid override (disables a tier); negative/NaN falls back to the default. */
+export function resolveAreaBoostWeights(defaults: {
+  hi: number;
+  mid: number;
+  lo: number;
+}): { hi: number; mid: number; lo: number } {
+  const num = (raw: string | undefined, dflt: number) => {
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : dflt;
+  };
+  return {
+    hi: num(process.env.SEARCH_AREA_BOOST_W_HI, defaults.hi),
+    mid: num(process.env.SEARCH_AREA_BOOST_W_MID, defaults.mid),
+    lo: num(process.env.SEARCH_AREA_BOOST_W_LO, defaults.lo),
+  };
 }

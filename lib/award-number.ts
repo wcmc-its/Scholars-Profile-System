@@ -33,9 +33,10 @@ const EMPTY: ParsedAward = { mechanism: null, nihIc: null, serial: null };
 
 /** Activity code: 1 letter + 2 alphanumerics (R01, K23, UG3, U2C, S10,
  *  DP1, etc.). May be preceded by an optional support-type digit. Then
- *  2-letter IC prefix + 6/7-digit serial, with optional dash-separated
- *  sequence/suffix. */
-const NIH_AWARD_RE = /^\s*[1-9]?\s*([A-Z][A-Z0-9][A-Z0-9])\s*([A-Z]{2})\s*(\d{6,7})(?:[-\s][\w]+)?\s*$/i;
+ *  2-letter IC prefix + 6/7-digit serial, with optional dash-/space-
+ *  separated sequence and any number of trailing annotation tokens
+ *  (e.g. InfoEd's "5 R34 HL117352-02 EW"). */
+const NIH_AWARD_RE = /^\s*[1-9]?\s*([A-Z][A-Z0-9][A-Z0-9])\s*([A-Z]{2})\s*(\d{6,7})(?:[-\s][\w]+)*\s*$/i;
 
 export function parseNihAward(awardNumber: string | null | undefined): ParsedAward {
   if (!awardNumber) return EMPTY;

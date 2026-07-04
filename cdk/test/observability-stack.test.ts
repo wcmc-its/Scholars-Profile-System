@@ -1,4 +1,5 @@
 import { Match, Template } from "aws-cdk-lib/assertions";
+import { type SpsEnvConfig } from "../lib/config";
 import { AppStack } from "../lib/app-stack";
 import { DataStack } from "../lib/data-stack";
 import { DrBackupVaultStack } from "../lib/dr-backup-vault-stack";
@@ -7,47 +8,46 @@ import { NetworkStack } from "../lib/network-stack";
 import { SpsObservabilityStack } from "../lib/observability-stack";
 import { makeFixture } from "./test-utils";
 
-function buildObservabilityStack(envName: "staging" | "prod"): {
+function buildObservabilityStack(
+  envName: "staging" | "prod",
+  envConfigOverride: Partial<SpsEnvConfig> = {},
+): {
   template: Template;
   stack: SpsObservabilityStack;
   appTemplate: Template;
+  data: DataStack;
 } {
   const fixture = makeFixture(envName);
+  const envConfig = { ...fixture.envConfig, ...envConfigOverride };
   const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
   });
   const drVault = new DrBackupVaultStack(
     fixture.app,
     `Sps-DrBackupVault-${envName}`,
     {
       env: fixture.drEnv,
-      envConfig: fixture.envConfig,
+      envConfig,
       crossRegionReferences: true,
     },
   );
   const data = new DataStack(fixture.app, `Sps-Data-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     crossRegionReferences: true,
     vpc: network.vpc,
-    appSecurityGroup: network.appSecurityGroup,
-    etlSecurityGroup: network.etlSecurityGroup,
     drBackupVault: drVault.vault,
   });
   const app = new AppStack(fixture.app, `Sps-App-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     vpc: network.vpc,
-    appSecurityGroup: network.appSecurityGroup,
-    etlSecurityGroup: network.etlSecurityGroup,
-    albSecurityGroup: network.albSecurityGroup,
   });
   const etl = new EtlStack(fixture.app, `Sps-Etl-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     vpc: network.vpc,
-    etlSecurityGroup: network.etlSecurityGroup,
     ecsCluster: app.ecsCluster,
     etlEcrRepository: app.etlEcrRepository,
   });
@@ -56,7 +56,7 @@ function buildObservabilityStack(envName: "staging" | "prod"): {
     `Sps-Observability-${envName}`,
     {
       env: fixture.env,
-      envConfig: fixture.envConfig,
+      envConfig,
       appStack: app,
       dataStack: data,
       etlStack: etl,
@@ -66,6 +66,7 @@ function buildObservabilityStack(envName: "staging" | "prod"): {
     template: Template.fromStack(stack),
     stack,
     appTemplate: Template.fromStack(app),
+    data,
   };
 }
 
@@ -210,11 +211,11 @@ describe("SpsObservabilityStack", () => {
     });
 
     it("notify topic has exactly one email subscription to the operator", () => {
-      // Four AWS::SNS::Subscription resources total: email on notify topic,
+      // Five AWS::SNS::Subscription resources total: email on notify topic,
       // Lambda on page topic (the B27 relay), Lambda on the new warn topic
-      // (relay routes it to the P2 channel), and (#595) Lambda on the
-      // cross-stack etl-failures topic (also the relay).
-      template.resourceCountIs("AWS::SNS::Subscription", 4);
+      // (relay routes it to the P2 channel), (#595) Lambda on the cross-stack
+      // etl-failures topic, and (PR-7) Lambda on the cross-stack etl-page topic.
+      template.resourceCountIs("AWS::SNS::Subscription", 5);
       template.hasResourceProperties("AWS::SNS::Subscription", {
         Protocol: "email",
         Endpoint: "paa2013@med.cornell.edu",
@@ -837,10 +838,10 @@ describe("SpsObservabilityStack", () => {
     });
 
     it("page topic carries the B27 Lambda subscription; notify topic has the operator email", () => {
-      // Four AWS::SNS::Subscription resources: email on notify, lambda on
-      // page, lambda on the new warn topic, and (#595) lambda on the
-      // cross-stack etl-failures topic.
-      template.resourceCountIs("AWS::SNS::Subscription", 4);
+      // Five AWS::SNS::Subscription resources: email on notify, lambda on
+      // page, lambda on the new warn topic, (#595) lambda on the cross-stack
+      // etl-failures topic, and (PR-7) lambda on the cross-stack etl-page topic.
+      template.resourceCountIs("AWS::SNS::Subscription", 5);
       template.hasResourceProperties("AWS::SNS::Subscription", {
         Protocol: "email",
         Endpoint: "paa2013@med.cornell.edu",
@@ -1080,5 +1081,98 @@ describe("SpsObservabilityStack", () => {
       expect(name).toBeDefined();
       expect(name!).toMatch(PRINTABLE_ASCII);
     });
+  });
+});
+
+// Increment 2 of the VPC-consolidation decouple campaign
+// (docs/cutover-decouple-increments-2026-06-30.md): observabilityMetricsByName
+// switches the Aurora/OpenSearch metrics to literal-name dimensions, severing the
+// two Data->Observability cross-stack Ref exports. Asserted with Template matchers
+// (no second snapshot) so the cutover output is never baked into the committed
+// snapshots; flag-off byte-identity is enforced by the unchanged main snapshot above.
+describe("SpsObservabilityStack — metric-by-name decouple (cutover increment 2)", () => {
+  const BYNAME = {
+    observabilityMetricsByName: true,
+    auroraClusterIdentifier: "sps-prod-cutover-cluster",
+    opensearchDomainName: "sps-prod-cutover-os",
+    publicAlbFullName: "app/sps-prod-alb/0abc123def456789",
+    publicTargetGroupFullName: "targetgroup/sps-prod-tg/0def456abc123789",
+  } as const;
+
+  it("Aurora alarms key on the literal DBClusterIdentifier (AWS/RDS, no cross-stack import)", () => {
+    const { template } = buildObservabilityStack("prod", BYNAME);
+    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      Namespace: "AWS/RDS",
+      Dimensions: [
+        { Name: "DBClusterIdentifier", Value: "sps-prod-cutover-cluster" },
+      ],
+    });
+  });
+
+  it("OpenSearch alarms key on the literal DomainName + ClientId (AWS/ES)", () => {
+    const { template } = buildObservabilityStack("prod", BYNAME);
+    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      Namespace: "AWS/ES",
+      Dimensions: Match.arrayWith([
+        { Name: "DomainName", Value: "sps-prod-cutover-os" },
+      ]),
+    });
+  });
+
+  it("severs BOTH Data->Observability Ref export edges (DataStack publishes neither once by-name is on)", () => {
+    const { data } = buildObservabilityStack("prod", BYNAME);
+    const json = JSON.stringify(Template.fromStack(data).toJSON());
+    expect(json).not.toMatch(/ExportsOutputRefAuroraCluster/);
+    expect(json).not.toMatch(/ExportsOutputRefOpenSearch/);
+  });
+
+  it("default (flag off) keeps the handle path → DataStack still exports the Aurora Ref", () => {
+    const { data } = buildObservabilityStack("prod");
+    const json = JSON.stringify(Template.fromStack(data).toJSON());
+    expect(json).toMatch(/ExportsOutputRefAuroraCluster/);
+  });
+
+  it("Public ALB alarms key on the literal LoadBalancer full name (AWS/ApplicationELB, no import)", () => {
+    const { template } = buildObservabilityStack("prod", BYNAME);
+    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      Namespace: "AWS/ApplicationELB",
+      Dimensions: [
+        { Name: "LoadBalancer", Value: "app/sps-prod-alb/0abc123def456789" },
+      ],
+    });
+  });
+
+  it("Unhealthy-hosts metric keys on the literal LoadBalancer + TargetGroup (AWS/ApplicationELB)", () => {
+    const { template } = buildObservabilityStack("prod", BYNAME);
+    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      Namespace: "AWS/ApplicationELB",
+      MetricName: "UnHealthyHostCount",
+      Dimensions: Match.arrayWith([
+        {
+          Name: "TargetGroup",
+          Value: "targetgroup/sps-prod-tg/0def456abc123789",
+        },
+      ]),
+    });
+  });
+
+  it("severs the App->Observability ALB + target-group full-name export edges (9/10)", () => {
+    const { appTemplate } = buildObservabilityStack("prod", BYNAME);
+    const outputs = JSON.stringify(appTemplate.findOutputs("*"));
+    expect(outputs).not.toMatch(/LoadBalancerFullName/);
+    expect(outputs).not.toMatch(/TargetGroupFullName/);
+  });
+
+  it("default (flag off) keeps the ALB metric handles → App still exports the ALB/TG full names", () => {
+    const { appTemplate } = buildObservabilityStack("prod");
+    const outputs = JSON.stringify(appTemplate.findOutputs("*"));
+    expect(outputs).toMatch(/LoadBalancerFullName/);
+    expect(outputs).toMatch(/TargetGroupFullName/);
+  });
+
+  it("throws at synth when by-name is on but the cluster/domain identifiers are blank", () => {
+    expect(() =>
+      buildObservabilityStack("prod", { observabilityMetricsByName: true }),
+    ).toThrow(/auroraClusterIdentifier\/opensearchDomainName/);
   });
 });

@@ -11,6 +11,7 @@ import {
   deriveEligibilityFlags,
   type GrantRecordInput,
 } from "@/etl/dynamodb/grant-opportunity-mapper";
+import { Prisma } from "@/lib/generated/prisma/client";
 
 /** A representative GRANT# item as the DocumentClient yields it (already unwrapped). */
 function grantItem(overrides: Partial<GrantRecordInput> = {}): GrantRecordInput {
@@ -114,6 +115,59 @@ describe("buildOpportunityWrites", () => {
     delete (item as { opportunity_id?: string }).opportunity_id;
     const [w] = buildOpportunityWrites([item]).writes;
     expect(w.opportunityId).toBe("grants_gov:359855");
+  });
+
+  it("passes prestige + is_honorific through; JsonNull / null when absent (GRANT# contract v2)", () => {
+    const prestige = {
+      score: 0.86,
+      mechanism_tier: 0.85,
+      size_bucket: 0.7,
+      sponsor_tier: null,
+      selectivity: null,
+      label: "Flagship",
+      rationale: "R01, NIH",
+    };
+    const [withP] = buildOpportunityWrites([grantItem({ prestige, is_honorific: true })]).writes;
+    expect(withP.prestige).toEqual(prestige);
+    expect(withP.isHonorific).toBe(true);
+
+    // Absent upstream → JSON-null (not []), honorific → null (not false): distinct from "ran but empty".
+    const [without] = buildOpportunityWrites([grantItem()]).writes;
+    expect(without.prestige).toBe(Prisma.JsonNull);
+    expect(without.isHonorific).toBeNull();
+
+    // A stray non-object prestige (e.g. array) is rejected, not stored.
+    const [bad] = buildOpportunityWrites([grantItem({ prestige: ["nope"], is_honorific: "x" as unknown as boolean })]).writes;
+    expect(bad.prestige).toBe(Prisma.JsonNull);
+    expect(bad.isHonorific).toBeNull();
+  });
+
+  it("parses match_dsl / match_query S-string JSON; JsonNull when absent/malformed (contract v3)", () => {
+    // ReciterAI writes these as compact-JSON DynamoDB `S` strings (DocumentClient yields strings).
+    const [w] = buildOpportunityWrites([
+      grantItem({
+        match_dsl: '{"require":["pediatric_cardiology"],"penalize":["health_informatics"]}',
+        match_query: '[{"q":"congenital heart","w":1}]',
+        match_rel: '{"39492837":0.91,"38112233":0.42}',
+      }),
+    ]).writes;
+    expect(w.matchDsl).toEqual({ require: ["pediatric_cardiology"], penalize: ["health_informatics"] });
+    expect(w.matchQuery).toEqual([{ q: "congenital heart", w: 1 }]);
+    expect(w.matchRel).toEqual({ "39492837": 0.91, "38112233": 0.42 }); // dense map (contract v4)
+
+    // Absent upstream → JSON-null (matcher stays fail-closed → BM25 fallback).
+    const [without] = buildOpportunityWrites([grantItem()]).writes;
+    expect(without.matchDsl).toBe(Prisma.JsonNull);
+    expect(without.matchQuery).toBe(Prisma.JsonNull);
+    expect(without.matchRel).toBe(Prisma.JsonNull);
+
+    // Malformed string → JsonNull (fail-open, never throws).
+    const [bad] = buildOpportunityWrites([grantItem({ match_dsl: "{not json" })]).writes;
+    expect(bad.matchDsl).toBe(Prisma.JsonNull);
+
+    // Already-parsed object (future native DDB map) passes through unchanged.
+    const [native] = buildOpportunityWrites([grantItem({ match_dsl: { require: ["x"], penalize: [] } })]).writes;
+    expect(native.matchDsl).toEqual({ require: ["x"], penalize: [] });
   });
 });
 

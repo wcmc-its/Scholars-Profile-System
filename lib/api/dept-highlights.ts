@@ -232,6 +232,7 @@ export async function getDeptActiveGrants(
     where: {
       scholar: { deptCode, deletedAt: null, status: "active" },
       endDate: { gte: now },
+      source: { not: "RePORTER" }, // exclude individual RePORTER history
     },
     select: {
       cwid: true,
@@ -413,6 +414,7 @@ export async function getDeptHighlights(deptCode: string): Promise<DeptHighlight
       where: {
         scholar: { deptCode, deletedAt: null, status: "active" },
         endDate: { gte: since, lt: now },
+        source: { not: "RePORTER" }, // exclude individual RePORTER history
       },
       select: {
         cwid: true,

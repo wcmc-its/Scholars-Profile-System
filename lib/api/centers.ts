@@ -7,7 +7,9 @@
  * so the existing `PersonRow` and `RoleChipRow` components render them
  * unchanged.
  */
+import { cache } from "react";
 import { prisma } from "@/lib/db";
+import { cachedRead } from "@/lib/api/swr-cache";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -77,9 +79,9 @@ function todayIso(): string {
  * this so the page, stats, highlights, topics, publications, grants and
  * spotlight all agree on who counts.
  */
-export async function loadActiveCenterMemberCwids(
+export const loadActiveCenterMemberCwids = cache(async (
   centerCode: string,
-): Promise<string[]> {
+): Promise<string[]> => {
   const today = todayIso();
   const rows = (await prisma.centerMembership.findMany({
     where: { centerCode },
@@ -94,7 +96,7 @@ export async function loadActiveCenterMemberCwids(
     select: { cwid: true },
   });
   return scholars.map((s) => s.cwid);
-}
+});
 
 /**
  * #1137 — does this center define a program taxonomy (≥1 `CenterProgram` row)?
@@ -320,7 +322,7 @@ type CenterRow = {
   leaderInterim: boolean;
 };
 
-export async function getCenter(slug: string): Promise<CenterDetail | null> {
+async function getCenterUncached(slug: string): Promise<CenterDetail | null> {
   const center = (await prisma.center.findUnique({
     where: { slug },
     select: {
@@ -373,6 +375,16 @@ export async function getCenter(slug: string): Promise<CenterDetail | null> {
   };
 }
 
+/**
+ * Cached: center detail is viewer-independent and slow-changing (ETL/editor
+ * updates, not per-request). Repeat + concurrent renders serve warm; the 15-min
+ * fresh window is the dead `revalidate=21600` route intent realized at the data
+ * layer (the route can't ISR-cache because it awaits searchParams).
+ */
+export function getCenter(slug: string): Promise<CenterDetail | null> {
+  return cachedRead(`center:detail:${slug}`, () => getCenterUncached(slug));
+}
+
 type CenterScholarRow = {
   cwid: string;
   preferredName: string;
@@ -399,7 +411,7 @@ async function buildCenterMemberHits(
           _count: { pmid: true },
         }) as unknown as Promise<Array<{ cwid: string; _count: { pmid: number } }>>,
         prisma.grant.findMany({
-          where: { cwid: { in: cwids }, endDate: { gte: now } },
+          where: { cwid: { in: cwids }, endDate: { gte: now }, source: { not: "RePORTER" } },
           select: { cwid: true, externalId: true, id: true },
         }) as Promise<
           Array<{ cwid: string; externalId: string | null; id: string }>
@@ -447,7 +459,7 @@ async function buildCenterMemberHits(
  * center with a program taxonomy and ≥1 programmed active member returns a
  * grouped, single-page shape (§ 6.2); otherwise a flat paginated list.
  */
-export async function getCenterMembers(
+async function getCenterMembersUncached(
   centerCode: string,
   opts: { page?: number } = {},
 ): Promise<CenterMembersResult> {
@@ -596,6 +608,21 @@ export async function getCenterMembers(
   return { mode: "grouped", groups, total };
 }
 
+/**
+ * Cached: the roster (esp. the grouped, all-members-on-one-page branch for
+ * programmed centers like Meyer — the heaviest viewer-independent read on the
+ * page) keyed by page so each pagination slice caches independently.
+ */
+export function getCenterMembers(
+  centerCode: string,
+  opts: { page?: number } = {},
+): Promise<CenterMembersResult> {
+  const page = Math.max(0, opts.page ?? 0);
+  return cachedRead(`center:members:${centerCode}:${page}`, () =>
+    getCenterMembersUncached(centerCode, { page }),
+  );
+}
+
 /** #1105 — a program leader for the program page hero (LeaderCard shape). */
 export type ProgramLeader = {
   cwid: string;
@@ -730,7 +757,7 @@ const PUB_PAGE_SIZE = 20;
  * can render this surface unchanged (component is structurally generic; only
  * the name is dept-flavored).
  */
-export async function getCenterPublicationsList(
+async function getCenterPublicationsListUncached(
   centerCode: string,
   opts: { page?: number; sort?: PubSort } = {},
 ): Promise<DeptListPubResult> {
@@ -825,13 +852,29 @@ export async function getCenterPublicationsList(
   return { hits, total, page, pageSize: PUB_PAGE_SIZE };
 }
 
+/**
+ * Cached: keyed by page+sort. The page-0/newest key doubles as the always-loaded
+ * publications COUNT used for the header stat, tab label and Spotlight view-all
+ * link, so that count call serves warm after first render.
+ */
+export function getCenterPublicationsList(
+  centerCode: string,
+  opts: { page?: number; sort?: PubSort } = {},
+): Promise<DeptListPubResult> {
+  const page = Math.max(0, opts.page ?? 0);
+  const sort: PubSort = opts.sort ?? "newest";
+  return cachedRead(`center:pubs:${centerCode}:${page}:${sort}`, () =>
+    getCenterPublicationsListUncached(centerCode, { page, sort }),
+  );
+}
+
 const GRANT_PAGE_SIZE = 20;
 
 /**
  * Top research areas computed from the center's member-authored work.
  * Returns up to 3 topic chips ranked by distinct PMID count.
  */
-export async function getCenterTopResearchAreas(
+async function getCenterTopResearchAreasUncached(
   centerCode: string,
 ): Promise<DepartmentTopicArea[]> {
   const memberCwids = await loadActiveCenterMemberCwids(centerCode);
@@ -869,6 +912,15 @@ export async function getCenterTopResearchAreas(
       };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
+}
+
+/** Cached: top research areas — viewer-independent topic rollup over the roster. */
+export function getCenterTopResearchAreas(
+  centerCode: string,
+): Promise<DepartmentTopicArea[]> {
+  return cachedRead(`center:topareas:${centerCode}`, () =>
+    getCenterTopResearchAreasUncached(centerCode),
+  );
 }
 
 /**
@@ -960,6 +1012,7 @@ export async function getCenterHighlights(
     where: {
       endDate: { gte: new Date() },
       cwid: { in: memberCwids },
+      source: { not: "RePORTER" }, // exclude individual RePORTER history
     },
     orderBy: [{ endDate: "desc" }],
     take: 12,
@@ -1067,6 +1120,7 @@ export async function getCenterGrantsList(
   const baseWhere = {
     endDate: { gte: new Date() },
     cwid: { in: memberCwids },
+    source: { not: "RePORTER" }, // exclude individual RePORTER history
   };
 
   const distinctRows = (await prisma.grant.findMany({

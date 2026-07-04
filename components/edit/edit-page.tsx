@@ -11,6 +11,7 @@
 import { AppointmentsCard } from "@/components/edit/appointments-card";
 import { CoiCard } from "@/components/edit/coi-card";
 import { CoiGapCard } from "@/components/edit/coi-gap-card";
+import { ReporterProfileCard } from "@/components/edit/reporter-profile-card";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { EditShell } from "@/components/edit/edit-shell";
 import { EducationCard } from "@/components/edit/education-card";
@@ -49,6 +50,7 @@ import {
 import { isReciterRejectEnabled } from "@/lib/reciter/client";
 import { GrantRecsCard } from "@/components/edit/grant-recs-card";
 import { BiosketchTool } from "@/components/edit/biosketch-tool";
+import { CvTool } from "@/components/edit/cv-tool";
 import { listSelectableBiosketchPromptVersions } from "@/lib/edit/biosketch-prompt-versions";
 
 /** The model the biosketch route will actually generate on — surfaced to the
@@ -71,10 +73,12 @@ type AttrKey =
   | "funding"
   | "grant-recs"
   | "biosketch"
+  | "cv"
   | "appointments"
   | "education"
   | "coi"
   | "coi-gap"
+  | "reporter-profile"
   | "mentees"
   | "profile-url"
   | "proxy-editors";
@@ -124,6 +128,12 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // can draft it on the scholar's behalf. Grouped with "Grants for me" under the
   // "Services" rail section. Rail item appears only when the flag is on.
   { key: "biosketch", label: "NIH biosketch", modes: ["self", "superuser"] },
+  // CV (WCM format) generator (EDIT_CV_EXPORT) — exports the scholar's structured
+  // Scholars data (plus POPS enrichment for clinical faculty) as a Word `.docx` in
+  // the WCM faculty CV format. Same audience as biosketch (the shared
+  // `authorizeOverviewWrite`), so a delegate can generate it on the scholar's
+  // behalf. Grouped with the other Tools. Rail item appears only when the flag is on.
+  { key: "cv", label: "CV (WCM format)", modes: ["self", "superuser"] },
   { key: "appointments", label: "Appointments", modes: ["self", "superuser"] },
   { key: "education", label: "Education", modes: ["self", "superuser"] },
   // Mentees — suppressible (hide/show); corrections route to ITS Support.
@@ -136,7 +146,15 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // superuser (operator decision — trusted, with a UI nag before any action), but
   // NOT to a proxy / unit-admin (excluded in `attrsForMode`). The rail item
   // appears only when there are candidates AND the flag is on.
-  { key: "coi-gap", label: "From your publications", readonly: true, modes: ["self", "superuser"] },
+  { key: "coi-gap", label: "Disclosed in publications", readonly: true, modes: ["self", "superuser"] },
+  // RePORTER "Is this you?" (REPORTER_MATCH_V2) — K=2 PMID-overlap matches the
+  // scholar confirms/rejects, plus a revocable confirmed-match history. Self OR a
+  // genuine superuser (on their behalf); never a proxy / unit-admin (excluded in
+  // `attrsForMode`, like coi-gap). `readonly: true` mirrors the coi-gap advisory
+  // (an advisory the scholar acts on, not a free-edit field). The rail item
+  // appears only when there are pending candidates OR confirmed history AND the
+  // flag is on.
+  { key: "reporter-profile", label: "Grant matches", readonly: true, modes: ["self", "superuser"] },
   // Superuser direct-set is always available; the self surface is the request
   // card when `slugRequestEnabled`, else a read-only panel (locked rail item).
   { key: "profile-url", label: "Profile URL", modes: ["self", "superuser"] },
@@ -187,6 +205,7 @@ function attrsForMode(mode: EditMode): AttrDef[] {
         a.modes.includes("self") &&
         a.key !== "profile-url" &&
         a.key !== "coi-gap" &&
+        a.key !== "reporter-profile" && // self/superuser-only advisory, like coi-gap
         a.key !== "proxy-editors", // a proxy / unit admin can never manage the proxy list (CD-2)
     );
   }
@@ -228,6 +247,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "education",
   "publications",
   "funding",
+  "reporter-profile",
   "mentees",
   "coi",
   "coi-gap",
@@ -237,6 +257,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   // array (`attribute-rail.tsx` `groupItems`), so these two keys position the header.
   "biosketch",
   "grant-recs",
+  "cv",
 ];
 const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   home: "owned",
@@ -247,9 +268,11 @@ const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   "profile-url": "owned",
   publications: "sourced",
   funding: "sourced",
+  "reporter-profile": "readonly",
   // "Services" group (#917 v5) — owner-facing tools, distinct from sourced data.
   "grant-recs": "service",
   biosketch: "service",
+  cv: "service",
   appointments: "sourced",
   education: "sourced",
   mentees: "sourced",
@@ -291,11 +314,13 @@ const RAIL_V2_ORDER: ReadonlyArray<AttrKey> = [
   "education",
   "publications",
   "funding",
+  "reporter-profile",
   "mentees",
   "coi",
   "coi-gap",
   "biosketch",
   "grant-recs",
+  "cv",
   "visibility",
   "proxy-editors",
   "profile-url",
@@ -312,11 +337,13 @@ const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string }> = {
   education: { group: RAIL_V2_WCM_GROUP },
   publications: { group: RAIL_V2_WCM_GROUP },
   funding: { group: RAIL_V2_WCM_GROUP },
+  "reporter-profile": { group: RAIL_V2_WCM_GROUP },
   mentees: { group: RAIL_V2_WCM_GROUP },
   coi: { group: RAIL_V2_WCM_GROUP },
   "coi-gap": { group: RAIL_V2_WCM_GROUP },
   biosketch: { group: "Tools" },
   "grant-recs": { group: "Tools" },
+  cv: { group: "Tools" },
   visibility: { group: "Settings" },
   "proxy-editors": { group: "Settings" },
   "profile-url": { group: "Settings" },
@@ -356,8 +383,10 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "visibility",
   "proxy-editors",
   "funding",
+  "reporter-profile",
   "grant-recs",
   "biosketch",
+  "cv",
   "appointments",
   "education",
   // Publications — now a superuser surface too (#836 follow-on); the scholar's
@@ -422,6 +451,12 @@ export type EditPageProps = {
    *  threaded in like grantRecsEnabled. Surfaced to every actor the generate
    *  route authorizes (self, superuser, comms-steward, proxy, unit-admin). */
   biosketchEnabled?: boolean;
+  /** `EDIT_CV_EXPORT`: whether the "CV (WCM format)" Tools rail item + panel
+   *  surface. Computed by the server page (env flag) and threaded in like
+   *  biosketchEnabled. Surfaced to every actor the generate route authorizes
+   *  (self, superuser, comms-steward, proxy, unit-admin — the shared
+   *  `authorizeOverviewWrite`). */
+  cvEnabled?: boolean;
   /** `SELF_EDIT_RAIL_RESTRUCTURE`: when on, the self / proxy / unit-admin rail
    *  uses the restructured layout (floating Home, content-only "Yours to edit",
    *  "From WCM records" with Identity/Records sub-headers, "Tools", and a
@@ -444,6 +479,8 @@ export function visibleAttrKeys(
   hasHighlights = false,
   grantRecsEnabled = false,
   biosketchEnabled = false,
+  cvEnabled = false,
+  hasReporterProfile = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
   return (
@@ -466,11 +503,19 @@ export function visibleAttrKeys(
       // all five surfaces, so the flag is the only remaining gate — unlike
       // grant-recs, which stays self / superuser only.
       .filter((a) => a.key !== "biosketch" || biosketchEnabled)
+      // EDIT_CV_EXPORT — "CV (WCM format)" appears only when the flag is on. Same
+      // every-authorized-actor gate as biosketch (`attrsForMode` keeps "cv" for all
+      // five surfaces), so the flag is the only remaining filter.
+      .filter((a) => a.key !== "cv" || cvEnabled)
       // The "From your publications" item only exists when there are candidates to
       // show — an empty panel is never surfaced, and an `?attr=coi-gap` with zero
       // candidates canonicalizes away (the page redirects to bare /edit) rather
       // than rendering an empty panel or 404-looping. (proxy drops it outright.)
       .filter((a) => a.key !== "coi-gap" || hasCoiGap)
+      // RePORTER "Is this you?" — present only when the loader returned pending
+      // candidates OR confirmed history (flag on + self/superuser). Off ⇒ dropped
+      // from both the rail and the valid-attr set, so the feature is fully dark.
+      .filter((a) => a.key !== "reporter-profile" || hasReporterProfile)
       // #836 — Highlights appears only when the loader populated `ctx.highlights`
       // (flag on + genuine self). Off ⇒ dropped from both the rail and the valid-
       // attr set, so the feature is fully dark.
@@ -494,6 +539,7 @@ export function EditPage({
   reciterPendingEnabled = false,
   grantRecsEnabled = false,
   biosketchEnabled = false,
+  cvEnabled = false,
   railRestructureEnabled = false,
 }: EditPageProps) {
   // "From your publications" is conditionally present: self OR superuser, and only
@@ -512,6 +558,14 @@ export function EditPage({
   // it — self on `/edit`, self or superuser on `/edit/scholar/[cwid]`, never a
   // proxy / unit-admin — so a non-null value here already implies an allowed actor.
   const hasHighlights = (mode === "self" || isSuperuserLike(mode)) && ctx.highlights !== null;
+  // RePORTER "Is this you?" — present for self OR superuser when the loader (per
+  // surface) returned pending candidates OR confirmed history. The loader gates
+  // who may load + the flag, so a non-empty array here already implies an allowed
+  // actor. Pending nags; a confirmed-only history still surfaces the item (to
+  // revoke), without a count badge.
+  const hasReporterProfile =
+    (mode === "self" || isSuperuserLike(mode)) &&
+    (ctx.reporterProfileCandidates.length > 0 || ctx.reporterProfileConfirmed.length > 0);
   // GrantRecs Phase 3 — "Grants for me" shows on self / superuser surfaces. A genuine
   // superuser ALWAYS sees it (QA lens, flag-independent) so the recommendations can be
   // judged per scholar while the owner-facing SELF_EDIT_GRANT_RECS stays off for users;
@@ -524,11 +578,17 @@ export function EditPage({
   // (the server page computes + threads it). The cost line stays superuser-only
   // and version selection stays superuser / unit-admin (see the panel render).
   const showBiosketch = biosketchEnabled;
+  // EDIT_CV_EXPORT — the "CV (WCM format)" Tools item shows on every surface the
+  // generate route authorizes (the shared `authorizeOverviewWrite`), gated only by
+  // the flag (the server page computes + threads it), mirroring biosketch.
+  const showCv = cvEnabled;
   const visible = attrsForMode(mode)
     .filter((a) => a.key !== "coi-gap" || hasCoiGap)
+    .filter((a) => a.key !== "reporter-profile" || hasReporterProfile)
     .filter((a) => a.key !== "highlights" || hasHighlights)
     .filter((a) => a.key !== "grant-recs" || showGrantRecs)
-    .filter((a) => a.key !== "biosketch" || showBiosketch);
+    .filter((a) => a.key !== "biosketch" || showBiosketch)
+    .filter((a) => a.key !== "cv" || showCv);
   // A proxy (#779) and a unit admin (Amendment 4) reuse the SELF rail/cards on
   // the scholar's route (D4). Treated like self for layout; the distinct chrome
   // (banner, breadcrumb, no account menu) is the shell's job.
@@ -543,6 +603,21 @@ export function EditPage({
   const railKindFor = (k: AttrKey): RailKind =>
     k === "profile-url" && mode === "self" && !slugRequestEnabled ? "readonly" : SELF_RAIL_KIND[k];
 
+  // The quiet rail count badge: High-active COI-gap relationships, or PENDING
+  // RePORTER matches awaiting an answer. 0 → undefined so an item with only
+  // settled history (Reviewed / confirmed-only) shows without a "0" badge.
+  const railCount = (k: AttrKey): number | undefined => {
+    if (k === "coi-gap") return ctx.unmatchedPubmedCoi.length || undefined;
+    if (k === "reporter-profile") return ctx.reporterProfileCandidates.length || undefined;
+    return undefined;
+  };
+
+  // Sub-view rail items that nest (indented) under the preceding sourced panel
+  // rather than reading as flat siblings: "From your publications" under
+  // Conflicts of Interest, and "Is this you?" under Funding. Each immediately
+  // follows its parent in every *_RAIL_ORDER and shares its rail group.
+  const isNestedSubview = (k: AttrKey) => k === "coi-gap" || k === "reporter-profile";
+
   const railItems: RailItem[] = railRestructureEnabled
     ? RAIL_V2_ORDER.flatMap((k) => {
         const a = visible.find((v) => v.key === k);
@@ -555,11 +630,10 @@ export function EditPage({
           placement.group === "Yours to edit" && mode !== "self"
             ? "Profile content"
             : placement.group;
-        // The advisory's first-person label reframes for anyone editing on the
-        // scholar's behalf (superuser / comms_steward), mirroring the classic
-        // superuser rail.
-        const label =
-          a.key === "coi-gap" && mode !== "self" ? "From the scholar’s publications" : a.label;
+        // §7.4 — the advisory's nav label describes the thing, not the source or
+        // viewer ("Disclosed in publications"), so it reads the same for the
+        // scholar and a superuser editing on their behalf.
+        const label = a.label;
         return [
           {
             key: a.key,
@@ -570,10 +644,10 @@ export function EditPage({
             // Home floats at the top of the rail with a leading Home glyph.
             icon: a.key === "home" ? "home" : undefined,
             // "From your publications" nests under Conflicts of Interest.
-            child: a.key === "coi-gap",
+            child: isNestedSubview(a.key),
             // High-active count ONLY; 0 → undefined so a Reviewed-only history
             // shows the item without a "0" badge.
-            count: a.key === "coi-gap" ? ctx.unmatchedPubmedCoi.length || undefined : undefined,
+            count: railCount(a.key),
           },
         ];
       })
@@ -596,21 +670,21 @@ export function EditPage({
               // "From your publications" nests under Conflicts of Interest (it
               // immediately follows "coi" in SELF_RAIL_ORDER) rather than reading
               // as a flat sibling — it is a sub-view of COI, not its own SOR.
-              child: a.key === "coi-gap",
+              child: isNestedSubview(a.key),
               // A quiet count of High-tier relationships still worth reviewing.
               // The badge is the High-active count ONLY — Medium and Reviewed are
               // excluded — and 0 coerces to undefined so the item can appear for a
               // Reviewed-only history without showing a "0" badge.
-              count: a.key === "coi-gap" ? ctx.unmatchedPubmedCoi.length || undefined : undefined,
+              count: railCount(a.key),
             },
           ];
         })
       : SUPERUSER_RAIL_ORDER.flatMap((k) => {
           const a = visible.find((v) => v.key === k);
           if (!a) return [];
-          // The COI-gap label is first-person ("From your publications"); reframe
-          // it for a superuser viewing another scholar's advisory.
-          const label = a.key === "coi-gap" ? "From the scholar’s publications" : a.label;
+          // §7.4 — viewer-neutral nav label ("Disclosed in publications"), same
+          // for self and superuser.
+          const label = a.label;
           // Like the self rail, the advisory nests under Conflicts of Interest
           // (it immediately follows "coi" in SUPERUSER_RAIL_ORDER) rather than
           // reading as a flat sibling — it is a sub-view of COI, not its own SOR.
@@ -619,10 +693,10 @@ export function EditPage({
               key: a.key,
               label,
               readonly: a.readonly,
-              child: a.key === "coi-gap",
+              child: isNestedSubview(a.key),
               // High-active count ONLY (Medium + Reviewed excluded); 0 → undefined
               // so a Reviewed-only history shows the item without a "0" badge.
-              count: a.key === "coi-gap" ? ctx.unmatchedPubmedCoi.length || undefined : undefined,
+              count: railCount(a.key),
             },
           ];
         });
@@ -725,6 +799,19 @@ function renderPanel(
           model={BIOSKETCH_EFFECTIVE_MODEL}
           versions={listSelectableBiosketchPromptVersions()}
           canSelectVersion={isSuperuserLike(mode) || mode === "unit-admin"}
+        />
+      );
+    case "cv":
+      // EDIT_CV_EXPORT — the "CV (WCM format)" Tools panel. The download tool
+      // (client island) POSTs to /api/edit/cv for the resolved cwid and streams a
+      // `.docx` attachment. Deterministic Scholars/POPS fill, so there is no
+      // per-run cost line or model selector — `canSeeCost`/`model` are accepted but
+      // unused by the card today, passed for parity with the biosketch tool.
+      return (
+        <CvTool
+          entityId={cwid}
+          canSeeCost={isSuperuserLike(mode)}
+          model={BIOSKETCH_EFFECTIVE_MODEL}
         />
       );
     case "home": {
@@ -954,6 +1041,21 @@ function renderPanel(
           mode={voiceMode}
           scholarName={scholarName}
           mentions={ctx.unmatchedPubmedCoiMentions}
+        />
+      );
+    case "reporter-profile":
+      // Self or superuser — the loader populates the arrays only for an allowed
+      // actor behind the flag, and the rail item is dropped when both are empty.
+      // `voiceMode` reframes the copy for a superuser acting on the scholar's
+      // behalf; the confirm / reject / revoke routes re-authorize genuine-self-or-
+      // superuser. Projection-starved: the card receives no overlap K.
+      return (
+        <ReporterProfileCard
+          cwid={cwid}
+          mode={voiceMode}
+          scholarName={scholarName}
+          candidates={ctx.reporterProfileCandidates}
+          confirmed={ctx.reporterProfileConfirmed}
         />
       );
     case "profile-url":

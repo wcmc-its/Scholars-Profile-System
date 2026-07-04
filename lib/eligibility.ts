@@ -115,3 +115,19 @@ export const ELIGIBLE_ROLES: ReadonlyArray<RoleCategory> = [
 export const TOP_SCHOLARS_ELIGIBLE_ROLES: ReadonlyArray<RoleCategory> = [
   "full_time_faculty",
 ] as const;
+
+/**
+ * People-search Research-Area concentration boost (#1363) — the roles eligible to
+ * RECEIVE the on-topic concentration lift in People search. Deliberately broader than
+ * TOP_SCHOLARS_ELIGIBLE_ROLES (the FT-only chip row): search must be able to rank every
+ * research role that can appear in results, or a concentrated affiliated expert (e.g. a
+ * cross-appointed PI) gets structurally buried under boosted FT faculty regardless of
+ * on-topic output. Mirrors the concept-axis path (getConceptScholarConcentration), which
+ * filters no role. Search-only — does NOT touch the topic-page chip row.
+ */
+export const SEARCH_BOOST_ELIGIBLE_ROLES: ReadonlyArray<RoleCategory> = [
+  "full_time_faculty",
+  "affiliated_faculty",
+  "postdoc",
+  "fellow",
+] as const;

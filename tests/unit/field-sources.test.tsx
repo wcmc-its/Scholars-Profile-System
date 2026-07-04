@@ -51,6 +51,14 @@ describe("FieldSourceLine", () => {
       expect(line.textContent).toBe(`Source: ${fieldSource(attr)}`);
     },
   );
+
+  it("renders an overridden label for a multi-source panel (Funding)", () => {
+    const { container } = render(
+      <FieldSourceLine attribute="funding" label="InfoEd and NIH RePORTER" />,
+    );
+    const line = container.querySelector('[data-slot="field-source"]')!;
+    expect(line.textContent).toBe("Source: InfoEd and NIH RePORTER");
+  });
 });
 
 describe("panel wiring — source line is surfaced in each sourced panel", () => {

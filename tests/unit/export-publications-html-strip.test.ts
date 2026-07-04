@@ -17,6 +17,9 @@ const TITLE_WITH_HTML =
 
 vi.mock("@/lib/db", () => ({
   prisma: {
+    // fetchAuthorshipRows now consults publication suppression per request; no
+    // active suppressions in this fixture.
+    suppression: { findMany: vi.fn(async () => []) },
     publication: {
       findMany: vi.fn(async () => [
         {

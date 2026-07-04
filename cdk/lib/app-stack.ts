@@ -16,8 +16,10 @@ import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
+import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
 
 /**
  * ADOT collector image, pinned by digest.
@@ -91,12 +93,6 @@ export interface AppStackProps extends StackProps {
   readonly envConfig: SpsEnvConfig;
   /** VPC every workload runs in (from NetworkStack). */
   readonly vpc: ec2.IVpc;
-  /** SG for the ECS application tasks (from NetworkStack). */
-  readonly appSecurityGroup: ec2.ISecurityGroup;
-  /** SG for the ETL Lambdas (from NetworkStack) — referenced by VPC endpoint ingress and internal-ALB ingress (deferred). */
-  readonly etlSecurityGroup: ec2.ISecurityGroup;
-  /** SG for the public ALB (from NetworkStack). */
-  readonly albSecurityGroup: ec2.ISecurityGroup;
 }
 
 /**
@@ -168,18 +164,39 @@ export class AppStack extends Stack {
   public readonly appLogGroup: logs.LogGroup;
   /** GitHub Actions OIDC deploy role. */
   public readonly deployRole: iam.Role;
+  /** ECS task role (application runtime identity). Exposed so AnalyticsStack can
+   *  grant it workgroup-scoped Athena/Glue/S3 for the in-app Usage dashboard —
+   *  the grant lives in AnalyticsStack (which owns the bucket + workgroup L2s),
+   *  giving an Analytics→App dependency rather than importing the CFN-named
+   *  analytics bucket into this stack. */
+  public readonly appTaskRole: iam.Role;
 
   constructor(scope: Construct, id: string, props: AppStackProps) {
     super(scope, id, props);
 
-    const {
-      envConfig,
-      vpc,
-      appSecurityGroup,
-      etlSecurityGroup,
-      albSecurityGroup,
-    } = props;
+    const { envConfig, vpc } = props;
     const env = envConfig.envName;
+    // Item-3 pass 2a: import the app/etl/alb SGs by id from the SSM params
+    // NetworkStack publishes (pass 1) instead of the cross-stack handles — severs
+    // the SG `Ref` exports that would lock the useSharedVpc flip (the SGs replace
+    // onto the imported VPC). All uses below are `.securityGroupId` or a
+    // `securityGroup` reference, valid on an imported SG; the L1 id-keyed ingress
+    // rules survive the switch (map Q4).
+    const appSecurityGroup = resolveSharedSg(this, envConfig, "app", "AppSg");
+    const etlSecurityGroup = resolveSharedSg(this, envConfig, "etl", "EtlSg");
+    const albSecurityGroup = resolveSharedSg(this, envConfig, "alb", "AlbSg");
+
+    // Estate-consolidation subnet placement (plan §4.4): the app service +
+    // internal ALB (compute) land in the app2 tier, the optional public ALB in
+    // the dmz tier, when useSharedVpc is on; else the standalone Sps VPC's
+    // PRIVATE_WITH_EGRESS / PUBLIC tiers — byte-identical otherwise.
+    const appSubnets = resolveTierSubnets(this, envConfig, "app", "AppSubnet");
+    const albSubnets = resolveTierSubnets(
+      this,
+      envConfig,
+      "alb",
+      "PublicAlbSubnet",
+    );
 
     // ------------------------------------------------------------------
     // Secrets lookup. SecretsStack defines the full set; AppStack reads the
@@ -588,6 +605,7 @@ export class AppStack extends Stack {
       assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
       description: `SPS ECS task role (${env}). Application runtime identity; X-Ray write only.`,
     });
+    this.appTaskRole = taskRole;
 
     // ------------------------------------------------------------------
     // X-Ray write grant (B24).
@@ -987,12 +1005,26 @@ export class AppStack extends Stack {
         OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
         OTEL_PROPAGATORS: "tracecontext,xray",
         SPS_ENV: env,
-        // OpenSearch domain endpoint (https://...) imported from DataStack.
-        // lib/search.ts reads OPENSEARCH_NODE; the OPENSEARCH_USER/PASS
-        // secrets below supply the FGAC basic-auth credentials. #447
-        OPENSEARCH_NODE: `https://${Fn.importValue(
-          `Sps-Data-${env}-OpenSearchDomainEndpoint`,
-        )}`,
+        // Reverse grant→researcher matcher: subtopic-grain path vs. the proven
+        // topic-vector path. Per-env (on in staging, off in prod until the prod
+        // corpus carries match_dsl); lib/api/match-researchers.ts also self-gates
+        // on the opportunity's compiled match_dsl, so "on" is safe pre-reproject.
+        GRANT_MATCHER_SUBTOPIC_GRAIN: envConfig.grantMatcherSubtopicGrain
+          ? "on"
+          : "off",
+        // OpenSearch domain endpoint (https://...). Default: a plaintext env
+        // baked from the DataStack cross-stack export. When
+        // openSearchNodeFromSecret is on (consolidation cutover de-coupling,
+        // §8.4), the export is dropped and OPENSEARCH_NODE is injected from the
+        // opensearch secret's `node` key (secrets block below). lib/search.ts
+        // reads OPENSEARCH_NODE; OPENSEARCH_USER/PASS come from secrets. #447
+        ...(envConfig.openSearchNodeFromSecret
+          ? {}
+          : {
+              OPENSEARCH_NODE: `https://${Fn.importValue(
+                `Sps-Data-${env}-OpenSearchDomainEndpoint`,
+              )}`,
+            }),
         // SAML SP non-secret config (#466). Without these, getSamlEnv()'s
         // requireEnv throws on the first missing var and every SAML route
         // 503s ("SAML SP is not configured"); SP-initiated sign-in is dead.
@@ -1092,6 +1124,14 @@ export class AppStack extends Stack {
         // envs for now: the matcher only returns data once GRANT# opportunities
         // are ingested + indexed in that env, so it stays dark until that lands.
         SELF_EDIT_GRANT_RECS: "off",
+        // PRESTIGE_AXIS_WEIGHT — funding-opportunity prestige axis weight, read by
+        // prestigeAxisWeight() in lib/api/match-opportunities.ts (parsed as a number,
+        // default "0"). The prestige badge + "Prestige" sort ship unconditionally;
+        // "0" disables the prestige *ranking* term in combineScore so it has no
+        // effect on match order until this is raised post Track-A eval. Same "0" in
+        // BOTH envs for launch; flip via `cdk deploy --exclusively Sps-App-<env>`
+        // (CD re-rolls the image only) — the flag-parity rule.
+        PRESTIGE_AXIS_WEIGHT: "0",
         // #1102/#1103/#1104/#1105 — Cancer-Center / org-unit features (merged
         // 2026-06-18, PRs #1108/#1109/#1110/#1111). Staging-on for soak;
         // prod-off/armed (flip on the next approval-gated Sps-App-prod deploy):
@@ -1213,16 +1253,6 @@ export class AppStack extends Stack {
         // (isOverviewGenerateStreamEnabled, lib/edit/overview-generator.ts). Takes effect
         // on a manual `cdk deploy --exclusively Sps-App-<env>`.
         SELF_EDIT_OVERVIEW_GENERATE_STREAM: env === "staging" ? "on" : "off",
-        // #742 -- post-generation faithfulness pass. OFF in both envs: the #742
-        // validation gate showed the generator already grounds drafts on the FACTS
-        // (including the ReciterAI distilled synopsis/justification it is designed to
-        // use), so this is OPTIONAL defense-in-depth for the bulk rollout, not a fix.
-        // When "on" (isOverviewFaithfulnessPassEnabled, lib/edit/overview-generator.ts)
-        // each generate runs a verify -> revise critic pass that strips any specific
-        // a draft adds beyond ALL fact fields, at the cost of one or two extra Bedrock
-        // calls. Same TaskRoleBedrockPolicy; no new IAM. Flip per-env here + a manual
-        // `cdk deploy --exclusively Sps-App-<env>`.
-        OVERVIEW_FAITHFULNESS_PASS: "off",
         // #917 v5 -- the NIH-biosketch generator on the /edit surface. Default-off
         // and staging-first: this is a NEW surface, so it stays "on" only in
         // staging while it bakes, and "off" in prod until an approval-gated
@@ -1230,6 +1260,21 @@ export class AppStack extends Stack {
         // generator (no new IAM). Takes effect on a manual
         // `cdk deploy --exclusively Sps-App-<env>`.
         EDIT_BIOSKETCH_GENERATE: env === "staging" ? "on" : "off",
+        // EDIT_CV_EXPORT -- the "CV (WCM format)" generator on the /edit Tools
+        // section. NEW surface: staging-first, prod-dark until an approval-gated
+        // `cdk deploy --exclusively Sps-App-<env>`. Same Bedrock task role (M1
+        // reuses the overview generator) -- no new IAM.
+        EDIT_CV_EXPORT: env === "staging" ? "on" : "off",
+        // REPORTER_MATCH_V2 -- the RePORTER PMID-overlap "Is this you?" card on the
+        // /edit surface (the app side of the flag; the ETL side is set in
+        // etl-stack.ts). Gates the EditContext load, the rail item, and the
+        // confirm/reject/revoke routes. NEW surface: staging-first, prod-dark until
+        // an approval-gated `cdk deploy --exclusively Sps-App-<env>`. No new IAM.
+        REPORTER_MATCH_V2: env === "staging" ? "on" : "off",
+        // POPS physician-directory base (clinical CV enrichment, zero-persist, over
+        // NAT egress -- the public WCM physician-directory host, reachable from the
+        // Sps VPC unlike the 10.x internal sources).
+        POPS_BASE_URL: "http://pops.weillcornell.org",
         // SELF_EDIT_RAIL_RESTRUCTURE -- the restructured self-edit attribute rail
         // (floating Home, content-only "Yours to edit", "From WCM records" with
         // Identity/Records sub-headers, "Tools", and a "Settings" group for the
@@ -1238,18 +1283,6 @@ export class AppStack extends Stack {
         // prod until an approval-gated Sps-App-prod deploy flips it. Takes effect
         // on a manual `cdk deploy --exclusively Sps-App-<env>`.
         SELF_EDIT_RAIL_RESTRUCTURE: env === "staging" ? "on" : "off",
-        // ACCOUNT_CONSOLE_NAV_RESTRUCTURE -- the unified account dropdown + console
-        // nav (account-dropdown-nav handoff, Workstreams A + B). Reorders the menu
-        // to View -> Edit, relabels the superuser row "Admin" -> "Admin console"
-        // and the GrantRecs row "Find researchers" -> "Funding matcher", and mounts
-        // the account chip in the /edit AdminSubnav strip in place of the old
-        // "My Profile" tab. Presentational / navigation only -- no data changes.
-        // Promoted to ON in BOTH envs -- the unified nav is the new default. The
-        // value is now live in code; activation is still a manual
-        // `cdk deploy --exclusively Sps-App-<env>` (staging picks it up immediately;
-        // prod activates on its next approval-gated App deploy, NOT via the CD image
-        // roll, which never ships CDK env vars).
-        ACCOUNT_CONSOLE_NAV_RESTRUCTURE: "on",
         // #917 v6 -- post-generation faithfulness pass for the biosketch generator.
         // ON in BOTH envs: the biosketch is a grant document, and one fabricated
         // metric there dwarfs the ~3x cost (handoff §5). The route forces it on
@@ -1305,6 +1338,15 @@ export class AppStack extends Stack {
         // unset build baked the localhost fallback into every canonical. Derived
         // from the SAML ACS URL (same per-env `https://<public-host>`).
         SITE_URL: new URL(envConfig.samlSpAcsUrl).origin,
+        // In-app Usage dashboard (/edit/usage) — the workgroup + Glue database the
+        // app queries for the daily_usage rollup. Stable, config-derived names
+        // (AnalyticsStack creates `sps-usage-${env}` / `sps_usage_${env}`); the
+        // matching Athena/Glue/S3 grant on THIS task role is attached in
+        // AnalyticsStack. Region is pinned so the Athena client targets the same
+        // region the workgroup lives in regardless of the task's default chain.
+        SPS_USAGE_WORKGROUP: `sps-usage-${env}`,
+        SPS_USAGE_DATABASE: `sps_usage_${env}`,
+        SPS_USAGE_REGION: this.region,
         // #760 -- launch-period "Beta" pill beside the Scholars wordmark.
         // DEFAULT ON: the header reads `=== "off"` (isBetaBadgeEnabled), so the
         // badge shows in both envs while we're in beta. Wired here explicitly so
@@ -1313,13 +1355,12 @@ export class AppStack extends Stack {
         // Sps-App-<env>` -- no code revert (CD re-rolls the image only, so an
         // env-flag change requires an explicit cdk deploy).
         SHOW_BETA_BADGE: "on",
-        // #688 / #692 -- search query-interpretation flags. Graduated to prod
-        // parity after the staging UAT + SPEC §8 eval: the #692 generic-term
-        // de-highlight and the #688 "Why this match" MeSH-provenance note now
-        // run in BOTH envs. resolveGenericTermMode reads off|resolve|on;
-        // resolvePeopleMatchProvenance reads on|off (lib/api/search-flags.ts).
+        // #692 -- generic-term de-highlight, graduated to prod parity after the
+        // staging UAT + SPEC §8 eval; runs in BOTH envs. resolveGenericTermMode
+        // reads off|resolve|on (lib/api/search-flags.ts). Its #688 sibling
+        // SEARCH_PEOPLE_MATCH_PROVENANCE (the "Why this match" MeSH-provenance
+        // note) was retired in #1440 -- the note is now always on in code.
         SEARCH_GENERIC_TERM_DEMOTE: "on",
-        SEARCH_PEOPLE_MATCH_PROVENANCE: "on",
         // #713 / #702 / #707 -- "Why this match" explanation lines. Brought to
         // local-dev parity (these were on in .env.local but never wired here, so
         // the features worked locally and were silently off in staging+prod):
@@ -1353,8 +1394,10 @@ export class AppStack extends Stack {
         // never a 500). Inert unless MATCH_EXPLAIN is on. DEFAULT OFF BOTH ENVS --
         // staging-first parity A/B + instant rollback; flip on staging after the
         // people reindex, then prod after its own reindex.
-        // Staging reindex done 2026-06-25 (people v11 carries meshSubtreeCounts) → ON staging; prod off pending its own reindex.
-        SEARCH_PEOPLE_REASON_FROM_DOC: env === "staging" ? "on" : "off",
+        // Staging reindex done 2026-06-25 (people v11 carries meshSubtreeCounts) → ON staging.
+        // Prod ON 2026-07-02 (prod search:index ran 2026-07-01; verify a prod
+        // people doc carries non-null meshSubtreeCounts before deploying).
+        SEARCH_PEOPLE_REASON_FROM_DOC: "on",
         SEARCH_PUB_HIGHLIGHT: "on",
         SEARCH_PUB_MATCH_PROVENANCE: "on",
         // #837 -- Publications-tab Department facet. Unlike the three above this
@@ -1374,6 +1417,13 @@ export class AppStack extends Stack {
         // `?searchMode=mesh-only` so a stale URL is inert when off.
         // STAGING-FIRST: on for staging, off for prod (separate gated flip).
         SEARCH_PUB_MESH_ONLY_FILTER: env === "staging" ? "on" : "off",
+        // Pub-tab perf -- split the facet aggregation off the hit-list request
+        // (resolvePubFacetSplit): hits (Request A) + cached/time-capped facets
+        // (Request B) in parallel, so paginating/re-sorting a query reuses the
+        // page- and sort-invariant facet counts and pays only the cheap hit
+        // query. NO reindex prereq -- request-shape change only; flag-off is
+        // byte-identical. STAGING-FIRST: soak on staging before prod.
+        SEARCH_PUB_FACET_SPLIT: env === "staging" ? "on" : "off",
         // #824 sec4c -- People-tab method-family ranking boost. Same
         // reindex-then-flip shape as SEARCH_PUB_DEPARTMENT_FILTER above: the
         // people index must be rebuilt so docs carry the `methodFamily` rollup
@@ -1404,6 +1454,24 @@ export class AppStack extends Stack {
         // reindex + flip). resolvePeopleMethodContextBoost reads === "on"; a
         // not-yet-reindexed cluster matches an absent field (never a 500).
         SEARCH_PEOPLE_METHOD_CONTEXT: env === "staging" ? "on" : "off",
+        // POPS clinical specialty search -- indexes board-cert specialties, primary
+        // specialties, and clinical expertise (problem_procedure) from POPS into the
+        // people doc and adds a clinical:exact evidence kind when the query matches
+        // a specialty exactly. Reindex-then-flip: the etl/pops step must run AND the
+        // people index must be rebuilt with the three clinical fields before flipping
+        // on. resolveSearchPeopleClinical reads === "on"; off => fields indexed but
+        // not queried, no clinical reason emitted, body byte-identical to today.
+        // Default OFF both envs; staging soak after first etl:pops run + reindex.
+        SEARCH_PEOPLE_CLINICAL: "off",
+        // Track B / B2 — clinical-specialty function_score boost (separate from the inert
+        // text-field SEARCH_PEOPLE_CLINICAL above). Additive boost on docs whose board-derived
+        // clinicalSpecialties match the query; lifts thin-publication clinician-experts
+        // (measured: obesity Igel #183->#12). No reindex (query-time boost). Query-tunable
+        // weight via SEARCH_PEOPLE_CLINICAL_FN_WEIGHT (code default 3). Staging-on after the
+        // 2026-07-02 A/B (docs/search-area-boost-ab-2026-07-02.md): strict win over the
+        // staging default — clinician-expert medRank 14->9, zero per-query regressions.
+        // Prod flip after staging soak.
+        SEARCH_PEOPLE_CLINICAL_FN: env === "staging" ? "on" : "off",
         // #824 follow-up -- match-aware People-results "why" line (method/topic/
         // humanized-areas snippet). APP-ONLY, no reindex: derives from
         // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-
@@ -1418,6 +1486,47 @@ export class AppStack extends Stack {
         // derive). resolveSearchResultEvidence reads === "on". STAGING-FIRST soak:
         // on for staging, off for prod (handoff doc §8 -- flip prod after the soak).
         SEARCH_RESULT_EVIDENCE: env === "staging" ? "on" : "off",
+        // Generalized evidence rows -- surfaces a scholar's topic-matching grants
+        // as a lazy "Funding" disclosure row (Key funding) on the Scholars card and
+        // badges the publications flavor (Research area / Concept / Keyword). The
+        // row is presence-gated (hide-when-empty) via a per-card /grants fetch.
+        // APP-ONLY, no reindex. resolveSearchEvidenceRows reads === "on".
+        // STAGING-FIRST soak: on for staging, off for prod (flip prod after soak).
+        SEARCH_EVIDENCE_ROWS: env === "staging" ? "on" : "off",
+        // #1366 -- counted, STACKED evidence reason lines on the People card:
+        // method / tagged-concept / research-area each become a first-class line
+        // prefixed "N of M publications" (keyword fallback; clinical label-only).
+        // Method + area counts read precomputed people-doc maps (methodFamilyCounts
+        // / areaCounts), populated by a reindex. resolveSearchEvidenceReasonCounts
+        // reads === "on". STAGING-FIRST soak: on for staging, off for prod.
+        SEARCH_EVIDENCE_REASON_COUNTS: env === "staging" ? "on" : "off",
+        // Research-Area concentration boost (docs/search-research-area-relevance-spec.md).
+        // When on, a topic query that resolves to a Research Area lifts scholars by their
+        // relevance×coverage ranking in that area (reorder-only, no reindex).
+        // resolveSearchPeopleAreaBoost reads === "on". Staging-first.
+        SEARCH_PEOPLE_AREA_BOOST: env === "staging" ? "on" : "off",
+        // #1344 -- multi-word topic phrase boost. When on, a topic People query adds
+        //   match_phrase should-clauses over publicationTitles (slop 8) + areasOfInterest
+        //   (slop 4) so a multi-word specialty ("pediatric congenital heart surgery") is
+        //   not diluted by the min_should_match over-broadening. resolvePeopleTopicPhraseBoost
+        //   reads === "on"; flag-OFF => empty spread => body byte-identical (never admits,
+        //   no msm on the bool). Query-time, no reindex. Staging-first for the #1344 A/B.
+        SEARCH_PEOPLE_PHRASE_BOOST: env === "staging" ? "on" : "off",
+        // #1347 -- division-shape routing. When on, a bare clinical-division-name People
+        //   query (Cardiology) routes to the department template AND is scoped to that
+        //   division's roster (deptDivKey filter), instead of falling to topic_template.
+        //   resolveSearchPeopleDivisionShape reads === "on". Query-time, no reindex. DARK
+        //   everywhere -- several division names are also topical terms, so this needs a
+        //   staging A/B before any flip (then set staging -> "on"); the chief-of ranking
+        //   WITHIN the roster additionally needs the #1347 chiefCwid reindex.
+        SEARCH_PEOPLE_DIVISION_SHAPE: "off",
+        // #1345 -- full-time-faculty prominence lever. Default ON keeps the #513 flat
+        //   +1.0 full_time_faculty prominence term (prod ranking byte-identical until a
+        //   deliberate flip). Set to "off" to drop the expertise-independent employment
+        //   prior so genuine affiliated/clinical subspecialty experts aren't buried.
+        //   resolveSearchPeopleFacultyProminence reads !== "off". Query-time, no reindex.
+        //   STAGING-FIRST: neutralized on staging for the A/B soak, prod keeps +1.0.
+        SEARCH_PEOPLE_FACULTY_PROMINENCE: env === "staging" ? "off" : "on",
         // People-tab "concepts" hint -- replace the sparse self-reported
         // research-areas hint on the scholar row's identity line with the
         // scholar's top MeSH descriptor labels (topMeshTerms). Only the no-match
@@ -1436,6 +1545,13 @@ export class AppStack extends Stack {
         // resolveFundingMeshGateField reads === "fundedPubMeshUi".
         SEARCH_FUNDING_TAB_CONCEPT: "on",
         SEARCH_FUNDING_MESH_GATE: "fundedPubMeshUi",
+        // #1359 Tier 2 -- concept-match the People-card KEY FUNDING evidence row
+        // (threads the resolved concept into /api/scholar/[cwid]/grants). Recall-
+        // affecting, so staging-on for the A/B and prod-off until the precision
+        // spot-check passes. Independent of SEARCH_EVIDENCE_ROWS (which gates the
+        // row's existence -- also staging-only today). resolveFundingConceptGrants
+        // reads === "on". Relies on the same fundedPubMeshUi reindex as the gate above.
+        SEARCH_FUNDING_CONCEPT_GRANTS: env === "staging" ? "on" : "off",
         // #861 -- streams the /search shell so the header/tabs paint before the
         // cold MeSH precompute + the three badge-count searches resolve (the
         // 6-10s first-byte block). resolveSearchShellStreaming reads === "on".
@@ -1508,6 +1624,22 @@ export class AppStack extends Stack {
         //     Resolve-time only: no reindex. Flip is env-only via cdk deploy
         //     Sps-App-<env> (CD re-rolls the image only) -- the flag-parity rule.
         SEARCH_MESH_RESOLUTION_FALLBACK: env === "staging" ? "on" : "off",
+        // #1342 -- query-side morphology retry. When ON, resolveMeshDescriptor, after
+        //   the exact lookup misses, retries the SINGULARIZED query ("melanomas" ->
+        //   "melanoma") against the same index and, on a hit, returns the descriptor at
+        //   `partial` confidence. Closes the plural/possessive inflection tail (headline
+        //   lay-term wins additionally need the #1258 alias rows). Resolve-time only: no
+        //   reindex. STAGING ON to soak; PROD OFF pending eval. Flip env-only via cdk
+        //   deploy Sps-App-<env> (CD re-rolls the image only) -- the flag-parity rule.
+        SEARCH_MESH_QUERY_NORMALIZATION: env === "staging" ? "on" : "off",
+        // #1346 -- acronym wrong-sense guard. When ON, resolveMeshDescriptor suppresses a
+        //   short all-caps acronym (CAR/PET) that resolved ONLY via a common-word entry-
+        //   term synonym whose matched form is a plain Title-case word (CAR -> "Car" ->
+        //   Automobiles, PET -> "Pet" -> Pets) -- the wrong non-medical sense on a medical
+        //   search; it drops to BM25. Internal-caps acronyms (COPD/EHR) and exact NAME
+        //   matches (DNA/RNA) are kept. Resolve-time only: no reindex. STAGING ON; PROD
+        //   OFF pending eval. Flip env-only via cdk deploy Sps-App-<env> (flag-parity).
+        SEARCH_ACRONYM_SENSE_GUARD: env === "staging" ? "on" : "off",
         // #1026 -- surface soft-deleted doctoral-student co-authors as NON-LINKED
         // chips (name + headshot, no profile link, never faceted/searchable) on
         // publication chip surfaces site-wide (search, topic feeds, methods pages,
@@ -1885,6 +2017,16 @@ export class AppStack extends Stack {
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(appRwSecret),
         DATABASE_URL_RO: ecs.Secret.fromSecretsManager(appRoSecret),
+        // Cutover de-coupling (§8.4): when on, OPENSEARCH_NODE comes from the
+        // secret's `node` key instead of the dropped cross-stack export above.
+        ...(envConfig.openSearchNodeFromSecret
+          ? {
+              OPENSEARCH_NODE: ecs.Secret.fromSecretsManager(
+                opensearchAppSecret,
+                "node",
+              ),
+            }
+          : {}),
         OPENSEARCH_USER: ecs.Secret.fromSecretsManager(
           opensearchAppSecret,
           "username",
@@ -2145,19 +2287,29 @@ export class AppStack extends Stack {
     // subnets. Each ALB uses its own SG (NetworkStack-owned for public;
     // this-stack-owned for internal).
     // ------------------------------------------------------------------
+    // G15 (docs/cutover-item3-execution-runbook.md §0): the ALBs + target
+    // groups are VPC-coupled, so the useSharedVpc flip REPLACES them onto the
+    // shared VPC. A fixed physical name blocks CFN create-before-delete
+    // ("sps-public-<env> already exists" — the old one still holds the name).
+    // Auto-generate the name when shared; keep the exact env-prefixed name when
+    // standalone so flag-off synth stays byte-identical. Names are not
+    // externally referenced (NetScaler reads the ALB DNS, not the name).
+    const sharedReplaceName = (fixed: string): string | undefined =>
+      envConfig.useSharedVpc ? undefined : fixed;
+
     this.publicAlb = new elbv2.ApplicationLoadBalancer(this, "PublicAlb", {
-      loadBalancerName: `sps-public-${env}`,
+      loadBalancerName: sharedReplaceName(`sps-public-${env}`),
       vpc,
       internetFacing: true,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      vpcSubnets: albSubnets,
       securityGroup: albSecurityGroup,
     });
 
     this.internalAlb = new elbv2.ApplicationLoadBalancer(this, "InternalAlb", {
-      loadBalancerName: `sps-internal-${env}`,
+      loadBalancerName: sharedReplaceName(`sps-internal-${env}`),
       vpc,
       internetFacing: false,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      vpcSubnets: appSubnets,
       securityGroup: internalAlbSecurityGroup,
     });
 
@@ -2190,12 +2342,12 @@ export class AppStack extends Stack {
     const publicAppTargetGroup = new elbv2.ApplicationTargetGroup(
       this,
       "PublicAppTargetGroup",
-      { ...tgProps, targetGroupName: `sps-tg-pub-${env}` },
+      { ...tgProps, targetGroupName: sharedReplaceName(`sps-tg-pub-${env}`) },
     );
     const internalAppTargetGroup = new elbv2.ApplicationTargetGroup(
       this,
       "InternalAppTargetGroup",
-      { ...tgProps, targetGroupName: `sps-tg-int-${env}` },
+      { ...tgProps, targetGroupName: sharedReplaceName(`sps-tg-int-${env}`) },
     );
     // Public TG is the one ObservabilityStack alarms watch (RequestCount,
     // UnhealthyHostCount, etc. on the customer-facing path). The
@@ -2299,7 +2451,7 @@ export class AppStack extends Stack {
       taskDefinition: appTaskDefinition,
       desiredCount,
       assignPublicIp: false,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      vpcSubnets: appSubnets,
       securityGroups: [appSecurityGroup],
       minHealthyPercent: 100,
       maxHealthyPercent: 200,
@@ -2635,50 +2787,59 @@ export class AppStack extends Stack {
     // ingress -- adding the ETL Lambda SG ingress on each interface
     // endpoint at EtlStack time would re-touch this stack's SG.
     // ------------------------------------------------------------------
-    const vpcEndpointSecurityGroup = new ec2.SecurityGroup(
-      this,
-      "VpcEndpointSecurityGroup",
-      {
+    // Skipped when sharing its-reciter-vpc01 (plan §4.4 / §5.5 / G5): a
+    // privateDNS Secrets Manager endpoint flips VPC-wide private DNS, which
+    // would hijack the co-tenant ReCiter workloads' SM resolution, and a gateway
+    // endpoint mutates shared route tables SPS does not own. its-reciter already
+    // provides the S3/DynamoDB gateway + Lambda interface endpoints, and SPS
+    // reaches Secrets Manager over its-reciter's NAT. SPS owns these endpoints
+    // only in the standalone Sps VPC it creates.
+    if (!envConfig.useSharedVpc) {
+      const vpcEndpointSecurityGroup = new ec2.SecurityGroup(
+        this,
+        "VpcEndpointSecurityGroup",
+        {
+          vpc,
+          description: `SPS VPC interface endpoints (${env}) -- HTTPS from app + ETL SGs.`,
+          allowAllOutbound: false,
+        },
+      );
+      // Peer.securityGroupId is used instead of passing the L2 SG directly:
+      // L2 `addIngressRule(peerSg, ...)` auto-mirrors the rule by adding a
+      // matching egress on the peer SG. For peers in *another stack*, that
+      // mutates the other stack's resources and closes a Network -> App
+      // cycle. The Peer.securityGroupId variant treats the peer as a bare
+      // ID, suppressing the egress mirror.
+      vpcEndpointSecurityGroup.addIngressRule(
+        ec2.Peer.securityGroupId(appSecurityGroup.securityGroupId),
+        ec2.Port.tcp(443),
+        `App SG to interface endpoints HTTPS (${env})`,
+      );
+      vpcEndpointSecurityGroup.addIngressRule(
+        ec2.Peer.securityGroupId(etlSecurityGroup.securityGroupId),
+        ec2.Port.tcp(443),
+        `ETL SG to interface endpoints HTTPS (${env})`,
+      );
+
+      new ec2.InterfaceVpcEndpoint(this, "SecretsManagerEndpoint", {
         vpc,
-        description: `SPS VPC interface endpoints (${env}) -- HTTPS from app + ETL SGs.`,
-        allowAllOutbound: false,
-      },
-    );
-    // Peer.securityGroupId is used instead of passing the L2 SG directly:
-    // L2 `addIngressRule(peerSg, ...)` auto-mirrors the rule by adding a
-    // matching egress on the peer SG. For peers in *another stack*, that
-    // mutates the other stack's resources and closes a Network -> App
-    // cycle. The Peer.securityGroupId variant treats the peer as a bare
-    // ID, suppressing the egress mirror.
-    vpcEndpointSecurityGroup.addIngressRule(
-      ec2.Peer.securityGroupId(appSecurityGroup.securityGroupId),
-      ec2.Port.tcp(443),
-      `App SG to interface endpoints HTTPS (${env})`,
-    );
-    vpcEndpointSecurityGroup.addIngressRule(
-      ec2.Peer.securityGroupId(etlSecurityGroup.securityGroupId),
-      ec2.Port.tcp(443),
-      `ETL SG to interface endpoints HTTPS (${env})`,
-    );
+        service: ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
+        subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        securityGroups: [vpcEndpointSecurityGroup],
+        privateDnsEnabled: true,
+        // `open: false` suppresses CDK's default ingress that opens :443 to
+        // the whole VPC CIDR. The two SG-to-SG rules above are the
+        // intentional surface; nothing else inside the VPC should be able
+        // to reach the endpoint.
+        open: false,
+      });
 
-    new ec2.InterfaceVpcEndpoint(this, "SecretsManagerEndpoint", {
-      vpc,
-      service: ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-      securityGroups: [vpcEndpointSecurityGroup],
-      privateDnsEnabled: true,
-      // `open: false` suppresses CDK's default ingress that opens :443 to
-      // the whole VPC CIDR. The two SG-to-SG rules above are the
-      // intentional surface; nothing else inside the VPC should be able
-      // to reach the endpoint.
-      open: false,
-    });
-
-    new ec2.GatewayVpcEndpoint(this, "S3GatewayEndpoint", {
-      vpc,
-      service: ec2.GatewayVpcEndpointAwsService.S3,
-      subnets: [{ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }],
-    });
+      new ec2.GatewayVpcEndpoint(this, "S3GatewayEndpoint", {
+        vpc,
+        service: ec2.GatewayVpcEndpointAwsService.S3,
+        subnets: [{ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }],
+      });
+    }
 
     // ------------------------------------------------------------------
     // Outputs.
@@ -2746,6 +2907,27 @@ export class AppStack extends Stack {
       description:
         "SPS internal ALB security group id (consumed by EtlStack ingress).",
     });
+
+    // Item-3 pass 1 (publish; docs/cutover-item3-implementation-map-2026-06-30.md).
+    // Mirror the internal-ALB SG-id + DNS and the public-ALB DNS into SSM so pass-2
+    // consumers read them by id instead of the cross-stack handle / named export
+    // that locks at the useSharedVpc flip (both ALBs replace onto the shared VPC):
+    //   - EtlStack repoints to the internal-ALB DNS + SG-id params (edges 6/7). The
+    //     named CfnOutputs above stay, so those exports are never orphaned — no pin.
+    //   - EdgeStack repoints to the public-ALB DNS param (edge 8), whose current
+    //     source is the AUTO-generated FnGetAtt DNSName export from the handle Edge
+    //     imports today; pin it so dropping that import at pass 2 leaves no in-use
+    //     export for the flip to delete. (Removed in the pass-4 cleanup.)
+    const appParam = (name: string, value: string): void => {
+      new ssm.StringParameter(this, `App-${name}`, {
+        parameterName: `/sps/${env}/app/${name}`,
+        stringValue: value,
+      });
+    };
+    appParam("internal-alb-sg-id", internalAlbSecurityGroup.securityGroupId);
+    appParam("internal-alb-dns", this.internalAlb.loadBalancerDnsName);
+    appParam("public-alb-dns", this.publicAlb.loadBalancerDnsName);
+    this.exportValue(this.publicAlb.loadBalancerDnsName);
     new CfnOutput(this, "DeployRoleArn", {
       value: this.deployRole.roleArn,
       description: "SPS GitHub Actions deploy role ARN",

@@ -15,7 +15,11 @@
  */
 
 const NIH_API = "https://api.reporter.nih.gov/v2/projects/search";
+const NIH_PUBLICATIONS_API = "https://api.reporter.nih.gov/v2/publications/search";
 const PAGE_LIMIT = 500;
+/** core_project_nums per publications/search request. Keeps the criteria array
+ *  bounded; a candidate's cores are unioned across batches by the caller. */
+const CORE_NUMS_BATCH = 50;
 const REQ_DELAY_MS = 1000;
 const ORG_NAME = "WEILL MEDICAL COLL OF CORNELL UNIV";
 
@@ -248,4 +252,184 @@ export async function searchProjectsByProfileIds(
  *  without re-importing setTimeout. */
 export function sleepBetweenRequests(): Promise<void> {
   return sleep(REQ_DELAY_MS);
+}
+
+/** One RePORTER publication linkage row — a grant's `core_project_num` paired
+ *  with a PubMed id (and the linking application id). The PMID is what the v2
+ *  matcher intersects with a scholar's trusted PubMed set. */
+export type ReporterPublication = {
+  coreProjectNum: string | null;
+  pmid: number;
+  applId: number | null;
+};
+
+/**
+ * v2 PMID-overlap matcher (spec §4.3) — fetch the publications linked to a set of
+ * grant `core_project_num`s via RePORTER `POST /v2/publications/search`. Same
+ * public API + 1 req/s throttle as the project fetchers above. The core-num set
+ * is chunked (the criteria array is bounded) and each chunk is offset-paginated;
+ * the caller unions the returned PMIDs into a candidate's `grantPmids` Set, so
+ * cross-chunk duplicates are harmless. Returns one row per (core, pmid) linkage.
+ */
+export async function fetchPublicationsByCoreProjectNums(
+  coreNums: string[],
+): Promise<ReporterPublication[]> {
+  const cores = coreNums.filter((c) => !!c && c.trim().length > 0);
+  if (cores.length === 0) return [];
+  const out: ReporterPublication[] = [];
+
+  for (let i = 0; i < cores.length; i += CORE_NUMS_BATCH) {
+    const batch = cores.slice(i, i + CORE_NUMS_BATCH);
+    let offset = 0;
+    let total: number | null = null;
+    while (true) {
+      const resp = await fetch(NIH_PUBLICATIONS_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          criteria: { core_project_nums: batch },
+          limit: PAGE_LIMIT,
+          offset,
+        }),
+        cache: "no-store",
+      });
+      if (!resp.ok) {
+        throw new Error(
+          `NIH RePORTER /publications/search failed: HTTP ${resp.status} ` +
+            `(${batch.length} cores, offset ${offset})`,
+        );
+      }
+      const data = (await resp.json()) as {
+        meta?: { total?: number };
+        results?: Array<{
+          coreproject?: string | null;
+          pmid?: number | null;
+          applid?: number | null;
+        }>;
+      };
+      const results = data.results ?? [];
+      for (const r of results) {
+        // Drop rows without a usable PMID — they can't discriminate a candidate.
+        if (typeof r.pmid !== "number" || r.pmid <= 0) continue;
+        out.push({
+          coreProjectNum: r.coreproject ?? null,
+          pmid: r.pmid,
+          applId: typeof r.applid === "number" ? r.applid : null,
+        });
+      }
+      if (total === null) total = data.meta?.total ?? 0;
+      offset += results.length;
+      if (results.length < PAGE_LIMIT || offset >= total) break;
+      if (offset >= 9999) {
+        throw new Error(
+          `publications for cores [${batch.join(",")}] exceed the 9,999-offset ` +
+            `cap (total ${total}). Sub-batch before fetching further.`,
+        );
+      }
+      await sleep(REQ_DELAY_MS);
+    }
+    await sleep(REQ_DELAY_MS);
+  }
+  return out;
+}
+
+/** A RePORTER project row with the fiscal/financial fields the grant
+ *  materialization (`etl/reporter-grants`) needs to build a `Grant` row —
+ *  richer than {@link ReporterProject}, which only carries what the
+ *  profile-id resolver consumes. One row = one fiscal year of one award. */
+export type ReporterGrantProject = {
+  appl_id: number;
+  core_project_num: string | null;
+  project_num: string | null;
+  fiscal_year: number | null;
+  project_start_date: string | null;
+  project_end_date: string | null;
+  award_amount: number | null;
+  org_name: string | null;
+  project_title: string | null;
+};
+
+/**
+ * Fetch the full project history (every fiscal year of every award) for a set
+ * of eRA Commons `profile_id`s, with the fiscal/financial fields the grant
+ * materializer needs. Reuses the same `/projects/search` client + 1 req/s rate
+ * limit as the resolver; pass one scholar's confirmed profile_id(s) per call so
+ * the result is that person's union across institutions. Offset-paginated —
+ * a single person's set is tiny, well under the 9,999 cap (loud-fails if not).
+ */
+export async function fetchGrantProjectsByProfileIds(
+  profileIds: number[],
+): Promise<ReporterGrantProject[]> {
+  if (profileIds.length === 0) return [];
+  const out: ReporterGrantProject[] = [];
+  let offset = 0;
+  let total: number | null = null;
+  while (true) {
+    const resp = await fetch(NIH_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        criteria: { pi_profile_ids: profileIds },
+        include_fields: [
+          "ApplId",
+          "CoreProjectNum",
+          "ProjectNum",
+          "FiscalYear",
+          "ProjectStartDate",
+          "ProjectEndDate",
+          "AwardAmount",
+          "Organization",
+          "ProjectTitle",
+        ],
+        limit: PAGE_LIMIT,
+        offset,
+      }),
+      cache: "no-store",
+    });
+    if (!resp.ok) {
+      throw new Error(
+        `NIH RePORTER pi_profile_ids grant search failed: HTTP ${resp.status} ` +
+          `(${profileIds.length} ids, offset ${offset})`,
+      );
+    }
+    const data = (await resp.json()) as {
+      meta?: { total?: number };
+      results?: Array<{
+        appl_id: number;
+        core_project_num: string | null;
+        project_num: string | null;
+        fiscal_year: number | null;
+        project_start_date: string | null;
+        project_end_date: string | null;
+        award_amount: number | null;
+        organization?: { org_name?: string | null } | null;
+        project_title: string | null;
+      }>;
+    };
+    const results = data.results ?? [];
+    for (const r of results) {
+      out.push({
+        appl_id: r.appl_id,
+        core_project_num: r.core_project_num,
+        project_num: r.project_num,
+        fiscal_year: r.fiscal_year,
+        project_start_date: r.project_start_date,
+        project_end_date: r.project_end_date,
+        award_amount: r.award_amount,
+        org_name: r.organization?.org_name ?? null,
+        project_title: r.project_title,
+      });
+    }
+    if (total === null) total = data.meta?.total ?? 0;
+    offset += results.length;
+    if (results.length < PAGE_LIMIT || offset >= total) break;
+    if (offset >= 9999) {
+      throw new Error(
+        `profile_ids [${profileIds.join(",")}] exceed the 9,999-offset cap ` +
+          `(total ${total}). Sub-partition before fetching further.`,
+      );
+    }
+    await sleep(REQ_DELAY_MS);
+  }
+  return out;
 }

@@ -29,6 +29,7 @@
  * never want a stale-cache lag to fail the cadence and page on-call.
  */
 import { db } from "@/lib/db";
+import { withEtlRun } from "@/lib/etl-run";
 
 /**
  * Origins from which `/api/revalidate` may be reached. Each entry matches an
@@ -43,6 +44,15 @@ const ALLOWED_BASE_ORIGINS: ReadonlyArray<RegExp> = [
   // internal listener has no TLS). The trailing `\d+` is the LB suffix the
   // ALB construct appends to keep the name unique within an account/region.
   /^http:\/\/sps-internal-(?:staging|prod)-\d+\.[a-z0-9-]+\.elb\.amazonaws\.com$/,
+  // Post-VPC-consolidation the app stack's internal ALB is CDK-auto-named
+  // (`internal-Sps-Ap-Inter-<hash>-<num>`) instead of the older custom
+  // `sps-internal-{env}` name, so the pattern above no longer matched and every
+  // revalidation was skipped. Both env stacks share the same ALB construct path,
+  // so this construct-derived prefix covers staging and prod; the random
+  // `<hash>`/`<num>` are wildcarded so an ALB replacement won't re-break it.
+  // (Still specific to our own construct prefix — not a generic `*.elb`.)
+  // Matched lowercase: `new URL(baseUrl).origin` lower-cases the host.
+  /^http:\/\/internal-sps-ap-inter-[a-z0-9]+-\d+\.[a-z0-9-]+\.elb\.amazonaws\.com$/,
 ];
 
 /** Whether `baseUrl` parses + matches one of the allowed origins. */
@@ -74,16 +84,24 @@ async function requestRevalidate(p: string): Promise<void> {
     );
     return;
   }
+  // Bound every request: a hung POST (unreachable/slow app) must not stall the
+  // step. This is best-effort — the 6h ISR TTL is the safety net — so an abort
+  // is warned and swallowed like any other failure.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15_000);
   try {
     const resp = await fetch(`${baseUrl}/api/revalidate?path=${encodeURIComponent(p)}`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
+      signal: ctrl.signal,
     });
     if (!resp.ok) {
       console.warn(`[Revalidate] ${p} -> ${resp.status} ${resp.statusText}`);
     }
   } catch (err) {
     console.warn(`[Revalidate] ${p} threw:`, err);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -131,8 +149,17 @@ const isDirectInvocation =
   process.argv[1] !== undefined &&
   import.meta.url === `file://${process.argv[1]}`;
 if (isDirectInvocation) {
-  runRevalidate().catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+  withEtlRun("Revalidate", runRevalidate)
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    })
+    .finally(async () => {
+      // Mirror the other cadence entrypoints (etl/ed, etl/dynamodb, etl/asms,
+      // etl/coi): withEtlRun opens the db.write pool for the etlRun record, so
+      // the process cannot exit until it is disconnected. runRevalidate already
+      // closes db.read; without this the task hangs to the 4h step timeout
+      // (then retries), turning a best-effort skip into a ~12h nightly stall.
+      await db.write.$disconnect();
+    });
 }

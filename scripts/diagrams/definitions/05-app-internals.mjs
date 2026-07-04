@@ -18,8 +18,8 @@ const nodes = {
   // ---- API route handlers ----
   searchapi: { x: 64, y: 308, w: 216, h: 62, kind: "net", title: "Search API", sub: ["/api/search · /search/suggest"] },
   authapi:   { x: 296, y: 308, w: 216, h: 62, kind: "net", title: "Auth / SAML API", sub: ["/api/auth/* · session", "impersonation (superuser)"] },
-  editapi:   { x: 528, y: 308, w: 216, h: 62, kind: "net", title: "Edit / write API", sub: ["/api/edit/* · grant · suppress", "overview · roster · slugs"] },
-  dataapi:   { x: 760, y: 308, w: 216, h: 62, kind: "net", title: "Public-data API", sub: ["/api/scholars · pubs · topics", "methods · centers · units · NIH"] },
+  editapi:   { x: 528, y: 308, w: 216, h: 62, kind: "net", title: "Edit / write API", sub: ["/api/edit/* · grant · suppress · roster", "AI generation: overview · biosketch · CV"] },
+  dataapi:   { x: 760, y: 308, w: 216, h: 62, kind: "net", title: "Public-data API", sub: ["scholars · pubs · topics · methods", "centers/units · NIH · opportunities · collab"] },
   opsapi:    { x: 992, y: 308, w: 216, h: 62, kind: "net", title: "Ops API", sub: ["/api/revalidate · health", "analytics · csp-report"] },
   // ---- internal libraries ----
   searchcli: { x: 64, y: 414, w: 200, h: 66, kind: "aws", title: "Search client", sub: ["lib/search"] },
@@ -74,10 +74,12 @@ export const meta = {
   blurb:
     "Inside the single Next.js container: the public pages and staff <b>/edit</b> UI (React Server " +
     "Components), the <b>API route handlers</b> grouped by purpose — the public-data surface now spans " +
-    "scholars, publications, topics, <b>methods</b>, <b>centers / units</b>, and <b>NIH portfolio</b> — and " +
-    "the <b>internal libraries</b> they share, wired to Aurora (reader/writer), OpenSearch, the SAML IdP, " +
-    "and the WCM directory (LDAP authz + live headshots). <code>middleware.ts</code> gates every " +
-    "<code>/edit</code> path.",
+    "scholars, publications, topics, <b>methods</b>, <b>centers / units</b>, <b>NIH portfolio</b>, " +
+    "<b>funding opportunities</b>, and the <b>center-collaboration network</b> — and the <b>internal " +
+    "libraries</b> they share, wired to Aurora (reader/writer), OpenSearch, the SAML IdP, and the WCM " +
+    "directory (LDAP authz + live headshots). The <b>/edit</b> surface adds Bedrock-backed <b>AI " +
+    "generation</b> (overview · biosketch · CV) — the CV path reads clinical fields live from POPS " +
+    "(<code>lib/edit/pops.ts</code>). <code>middleware.ts</code> gates every <code>/edit</code> path.",
   legend: [
     { fill: "#e3faf3", stroke: "#0ca678", label: "Rendering (RSC) / middleware" },
     { fill: "#e7ecff", stroke: "#4263eb", label: "API route handler" },
@@ -85,5 +87,5 @@ export const meta = {
     { fill: "#fff4d6", stroke: "#f08c00", label: "Data store" },
     { fill: "#f1f3f5", stroke: "#adb5bd", label: "External system" },
   ],
-  source: "app/api/* (route handlers: search · methods · centers · units · nih-portfolio · analytics · impersonation) · lib/db.ts · lib/search.ts · lib/edit/* · lib/headshot.ts · middleware.ts",
+  source: "app/api/* (search · methods · centers/collaboration · units · nih-portfolio · opportunities · analytics · impersonation) · lib/api/{match-opportunities,search-funding,center-collaboration}.ts · lib/edit/{overview-generator,biosketch-generator,pops}.ts (Bedrock AI generation) · lib/db.ts · lib/search.ts · lib/headshot.ts · middleware.ts",
 };

@@ -31,6 +31,7 @@
  * Usage: `npm run etl:jenzabar:import-gs-faculty`
  */
 import { db } from "../../lib/db";
+import { assertPruneVolume } from "../../lib/etl-guard";
 import { closeJenzabarPool, getJenzabarPool } from "@/lib/sources/mssql-jenzabar";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
 import { appointmentContentKey } from "@/lib/etl/content-keys";
@@ -251,6 +252,13 @@ async function main() {
         data: { ...a, lastRefreshedAt: new Date() },
       });
     }
+    // Same shape as the InfoEd/ASMS stale guards: a truncated-but-successful
+    // source read would tombstone every missing GS-faculty appointment.
+    assertPruneVolume("jenzabar-gs-faculty:stale-appointments", {
+      pruning: plan.staleExternalIds.length,
+      of: await db.write.appointment.count({ where: { source: SOURCE } }),
+      maxPct: 10,
+    });
     let tombstoned = 0;
     if (plan.staleExternalIds.length > 0) {
       tombstoned = (

@@ -24,6 +24,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import { db } from "../../lib/db";
+import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { detectDivisionChief, type ChiefVerdict } from "./chief-detection";
 import {
   loadUnitOverridesForETL,
@@ -37,6 +38,7 @@ import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug, reconcileScholarSlug } from "@/lib/slug";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
 import { appointmentContentKey } from "@/lib/etl/content-keys";
+import { Prisma } from "@/lib/generated/prisma/client";
 import {
   collapseEmployeeRecordsByCwid,
   type EdFacultyAppointment,
@@ -228,8 +230,48 @@ async function refreshEdAppointments(
     existing,
     contentKey: appointmentContentKey,
   });
+  if (plan.duplicateExternalIds.length > 0) {
+    // Previously swallowed by createMany({ skipDuplicates }); surface it so a
+    // scholar with two ED SOR rows sharing one SORID is visible upstream.
+    console.warn(
+      `[ED appointments] ${cwid}: source emitted ${plan.duplicateExternalIds.length} ` +
+        `duplicate appointment SORID(s) (last wins): ${plan.duplicateExternalIds.join(", ")}`,
+    );
+  }
   if (plan.toCreate.length > 0) {
-    await db.write.appointment.createMany({ data: plan.toCreate });
+    try {
+      // Fast path: batch-insert the genuinely new rows.
+      await db.write.appointment.createMany({ data: plan.toCreate });
+    } catch (err) {
+      // external_id is GLOBALLY unique, but this reconcile runs per-cwid, so a
+      // toCreate row can collide with a row the same external_id already owns
+      // under a DIFFERENT cwid — an ED-FACULTY-{SORID} shared across people or
+      // migrated between them. That P2002 used to abort the entire ED nightly.
+      // Fall back to per-row upsert so the row is reassigned to this cwid, and
+      // log each reassignment: a genuinely shared SORID is a source anomaly to
+      // escalate to the ED owner, while a benign cwid migration just proceeds.
+      // createMany is one atomic statement (InnoDB), so nothing was inserted.
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002")) {
+        throw err;
+      }
+      for (const a of plan.toCreate) {
+        const clash = await db.write.appointment.findUnique({
+          where: { externalId: a.externalId },
+          select: { cwid: true },
+        });
+        if (clash && clash.cwid !== a.cwid) {
+          console.warn(
+            `[ED appointments] external_id ${a.externalId} reassigned cwid ` +
+              `${clash.cwid} -> ${a.cwid} (SORID shared across / migrated between people)`,
+          );
+        }
+        await db.write.appointment.upsert({
+          where: { externalId: a.externalId },
+          create: a,
+          update: { ...a, lastRefreshedAt: new Date() },
+        });
+      }
+    }
   }
   for (const a of plan.toUpdate) {
     await db.write.appointment.update({
@@ -367,6 +409,10 @@ async function main() {
     console.log("Fetching active academic faculty (this can take a moment)...");
     const facultyEntries = await fetchActiveFaculty(client);
     console.log(`ED returned ${facultyEntries.length} active academic entries.`);
+    // The bind DN can be silently scoped (ACL change, filter/base-DN drift) so
+    // the search SUCCEEDS with a truncated set; unguarded, that soft-deletes
+    // every missing scholar below. Current active feed is ~8,900 entries.
+    assertSourceVolume("ed:faculty", { incoming: facultyEntries.length, floor: 5000 });
 
     // Phase 2: doctoral students live under ou=students, not ou=people, so the
     // active-faculty filter excludes them. Pull them as a second branch and
@@ -385,6 +431,15 @@ async function main() {
     console.log("Fetching active faculty appointments from ou=faculty SOR...");
     const facultyAppointments = await fetchActiveFacultyAppointments(client);
     console.log(`ED returned ${facultyAppointments.length} active faculty appointment rows.`);
+    // A truncated appointment feed (same silent-ACL failure mode) would wipe
+    // each scholar's ED appointment rows via the refreshEdAppointments stale
+    // pass and clear department chairs. Nearly every faculty entry carries at
+    // least one appointment row, so well under half the faculty count means a
+    // truncated read.
+    assertSourceVolume("ed:appointments", {
+      incoming: facultyAppointments.length,
+      floor: Math.floor(facultyEntries.length / 2),
+    });
     const appointmentsByCwid = new Map<string, EdFacultyAppointment[]>();
     for (const a of facultyAppointments) {
       const arr = appointmentsByCwid.get(a.cwid) ?? [];
@@ -401,8 +456,13 @@ async function main() {
     // skips Path B and the override file fills in.
     console.log("Fetching active employee SOR records from ou=employees SOR...");
     let employeeRecords: Awaited<ReturnType<typeof fetchActiveEmployeeRecords>> = [];
+    // Tracked separately from `employeeRecords.length` so a swallowed fetch
+    // failure (empty map) doesn't drive the mentor pass / chief clearing below
+    // to mass-null previously detected values — mirrors nypFetchSucceeded.
+    let employeeFetchSucceeded = false;
     try {
       employeeRecords = await fetchActiveEmployeeRecords(client);
+      employeeFetchSucceeded = true;
       console.log(`ED returned ${employeeRecords.length} active employee SOR records.`);
     } catch (err) {
       console.warn(
@@ -871,6 +931,15 @@ async function main() {
     const departed = existing.filter(
       (s) => !s.deletedAt && !incomingCwids.has(s.cwid),
     );
+    // Normal nightly departures are a handful; hundreds at once means a
+    // truncated feed (this also catches a swallowed doctoral-student fetch
+    // failure, which would otherwise tombstone every PhD student). Bypass via
+    // ETL_GUARD_BYPASS for a genuine bulk offboarding.
+    assertPruneVolume("ed:scholar-soft-delete", {
+      pruning: departed.length,
+      of: existing.filter((s) => !s.deletedAt).length,
+      maxPct: 2,
+    });
     let softDeleted = 0;
     for (const s of departed) {
       await db.write.scholar.update({
@@ -900,8 +969,17 @@ async function main() {
     // known-cwid filter reflects the post-run active scholar set; this
     // way we don't attach NYP rows to soft-deleted scholars. Skip the
     // refresh entirely if the fetch failed — otherwise we'd wipe the
-    // existing NYP rows when LDAP is transiently unreachable.
-    if (nypFetchSucceeded) {
+    // existing NYP rows when LDAP is transiently unreachable. A SUCCESSFUL
+    // fetch returning zero rows gets the same treatment: the NYP SOR always
+    // has affiliates, so 0-with-success is a truncated/misscoped read, and
+    // the global delete+insert below would wipe every ED-NYP appointment
+    // (audit PR-3).
+    if (nypFetchSucceeded && nypAffiliateRows.length === 0) {
+      console.warn(
+        "[ED] NYP affiliate refresh skipped — fetch succeeded but returned 0 rows (suspected truncated read); existing rows retained",
+      );
+    }
+    if (nypFetchSucceeded && nypAffiliateRows.length > 0) {
       const activeCwids = new Set(
         (
           await db.write.scholar.findMany({
@@ -1082,7 +1160,15 @@ async function main() {
     // loop so faculty mentors are guaranteed present. Always write — even
     // when the value is null — so a postdoc whose mentor changes (or
     // graduates out) gets the field cleared on the next run.
-    {
+    //
+    // Gated on the employee-SOR fetch actually succeeding: the fetch failure
+    // above is swallowed (best-effort), and running this pass against an
+    // empty managerByCwid would mass-null every mentor pointer (audit PR-3).
+    if (!employeeFetchSucceeded) {
+      console.warn(
+        "[ED] postdoctoral mentor pass skipped — employee SOR fetch failed; existing pointers retained",
+      );
+    } else {
       const postdocs = await db.write.scholar.findMany({
         where: { roleCategory: "postdoc", deletedAt: null, status: "active" },
         select: { cwid: true },
@@ -1138,6 +1224,11 @@ async function main() {
     // already cleared / set the active-postdoc side.
     {
       let postdocRoleRecords: EdPostdocEmploymentRecord[] = [];
+      // Set when the active+expired fetch returns active rows but ZERO
+      // expired rows — the silently-scoped-ACL condition the warning below
+      // describes. The tombstone pass must not treat the missing alumni rows
+      // as "removed from the SOR" (audit PR-3).
+      let postdocFeedLikelyTruncated = false;
       try {
         console.log(
           "Fetching postdoc employment role records (active + expired)...",
@@ -1160,6 +1251,7 @@ async function main() {
         // missing from the chip surface until ACLs are widened. Warn loudly
         // so this doesn't get masked as "the source just had no alumni".
         if (fetchedActive > 0 && fetchedExpired === 0) {
+          postdocFeedLikelyTruncated = true;
           console.warn(
             "[ED] postdoc role-record fetch returned zero expired entries " +
               "despite an active+expired filter. The LDAP bind DN may be " +
@@ -1273,10 +1365,19 @@ async function main() {
         // Tombstone: any postdoc_mentor_relationship row whose externalId
         // was NOT in this LDAP pass is deleted. Matches the Jenzabar
         // PhD source's "what's in the SOR is canonical" stance — we don't
-        // retain rows for roles ED has removed.
-        const existing = await db.write.postdocMentorRelationship.findMany({
-          select: { externalId: true },
-        });
+        // retain rows for roles ED has removed. Skipped when the fetch shows
+        // the scoped-ACL truncation signature detected above — deleting the
+        // alumni rows then would act on data we know is incomplete.
+        const existing = postdocFeedLikelyTruncated
+          ? []
+          : await db.write.postdocMentorRelationship.findMany({
+              select: { externalId: true },
+            });
+        if (postdocFeedLikelyTruncated) {
+          console.warn(
+            "[ED] postdoc relationship tombstone skipped — truncated-feed signature detected; stale rows retained",
+          );
+        }
         const stale = existing
           .map((r) => r.externalId)
           .filter((eid) => !seenExternalIds.has(eid));
@@ -1405,7 +1506,11 @@ async function main() {
       // the override pass writes — keeps the table consistent with intent.
       // #540 — but first apply any `field_override(leaderCwid)` rows so an
       // explicit curator pin / vacancy survives even when Path B is off.
-      if (!chiefDetectionDisabled) {
+      // Gated on the employee-SOR fetch having actually succeeded with data:
+      // a swallowed fetch failure lands in this branch as "no employee SOR
+      // data", and blanket-nulling every division chief on a transient LDAP
+      // error is a mass-clear, not consistency (audit PR-3).
+      if (!chiefDetectionDisabled && employeeFetchSucceeded && employeeRecords.length > 0) {
         await db.write.division.updateMany({ data: { chiefCwid: null } });
         for (const div of divisionsForChief) {
           const leaderOverride = resolveUnitLeaderForETL(

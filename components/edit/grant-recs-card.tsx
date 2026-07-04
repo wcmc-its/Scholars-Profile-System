@@ -19,6 +19,9 @@
  */
 import { useEffect, useState } from "react";
 
+import { PrestigeBadge } from "@/components/edit/prestige-badge";
+import type { Prestige } from "@/lib/funding/prestige";
+
 type Axes = {
   topicAffinity: number;
   stageAppeal: number;
@@ -36,6 +39,7 @@ type Opportunity = {
   defaultScore: number;
   mechanism: string | null;
   awardCeiling: number | null;
+  prestige?: Prestige | null;
 };
 
 /** Subset of the `GET /api/opportunities/[id]` row used by the Details disclosure. */
@@ -48,12 +52,13 @@ type OpportunityDetail = {
   awardCeiling?: number | null;
 };
 
-type Sort = "fit" | "deadline" | "stage";
+type Sort = "fit" | "deadline" | "stage" | "prestige";
 
 const SORT_TABS: ReadonlyArray<{ key: Sort; label: string }> = [
   { key: "fit", label: "Fit" },
   { key: "deadline", label: "Deadline" },
   { key: "stage", label: "Stage" },
+  { key: "prestige", label: "Prestige" },
 ];
 
 const AXES: ReadonlyArray<{ key: keyof Axes; label: string }> = [
@@ -214,7 +219,10 @@ function OpportunityRow({ o }: { o: Opportunity }) {
   return (
     <div className="border-t border-border py-3 first:border-t-0">
       <div className="flex items-baseline justify-between gap-3">
-        <div className="text-base font-medium leading-snug">{o.title}</div>
+        <div className="flex flex-wrap items-baseline gap-2">
+          <span className="text-base font-medium leading-snug">{o.title}</span>
+          <PrestigeBadge prestige={o.prestige} />
+        </div>
         <span
           className="text-muted-foreground whitespace-nowrap font-mono text-xs"
           title="Overall fit (default blend over the distinct axes)"

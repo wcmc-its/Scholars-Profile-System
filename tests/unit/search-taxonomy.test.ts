@@ -51,6 +51,7 @@ import {
 import {
   matchesAtTokenBoundary,
   normalizeWithTokenStarts,
+  singularizeForMatch,
 } from "@/lib/api/normalize";
 
 beforeEach(() => {
@@ -1621,5 +1622,137 @@ describe("resolveMeshDescriptor — decompose-and-resolve fallback (SEARCH_MESH_
     process.env.SEARCH_MESH_RESOLUTION_FALLBACK = "on";
     mockMeshFindMany.mockResolvedValue([D_WEARABLE]);
     expect(await resolveMeshDescriptor("html parsing widget")).toBeNull();
+  });
+
+  it("#1348 flag ON: a single-token window to a GENERIC descriptor (Medicine) is blocked → null", async () => {
+    process.env.SEARCH_MESH_RESOLUTION_FALLBACK = "on";
+    const D_MEDICINE = {
+      descriptorUi: "D008511",
+      name: "Medicine",
+      entryTerms: [],
+      scopeNote: null,
+      dateRevised: null,
+      treeNumbers: ["H02.403"],
+    };
+    mockMeshFindMany.mockResolvedValue([D_MEDICINE]);
+    // "ai"/"in" are <5 chars (window guard); "medicine" is exact-name but generic → declines.
+    expect(await resolveMeshDescriptor("AI in medicine")).toBeNull();
+  });
+});
+
+describe("singularizeForMatch (#1342 pure helper)", () => {
+  it("strips a simple plural -s on a long-enough key", () => {
+    expect(singularizeForMatch("melanomas")).toBe("melanoma");
+    expect(singularizeForMatch("tumors")).toBe("tumor");
+    expect(singularizeForMatch("diseases")).toBe("disease");
+  });
+  it("-ies → y, and -es after sibilants drops -es", () => {
+    expect(singularizeForMatch("therapies")).toBe("therapy");
+    expect(singularizeForMatch("boxes")).toBe("box");
+    expect(singularizeForMatch("classes")).toBe("class");
+  });
+  it("leaves Latin/Greek -is/-us singulars and -ss words untouched", () => {
+    expect(singularizeForMatch("analysis")).toBe("analysis");
+    expect(singularizeForMatch("lupus")).toBe("lupus");
+    expect(singularizeForMatch("abscess")).toBe("abscess");
+  });
+  it("respects the stop-set and the min-length guard", () => {
+    expect(singularizeForMatch("aids")).toBe("aids");
+    expect(singularizeForMatch("measles")).toBe("measles");
+    expect(singularizeForMatch("cats")).toBe("cats"); // <5 chars → untouched
+  });
+});
+
+describe("resolveMeshDescriptor — query normalization (#1342, SEARCH_MESH_QUERY_NORMALIZATION)", () => {
+  const D_MELANOMA = {
+    descriptorUi: "D008545",
+    name: "Melanoma",
+    entryTerms: [],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["C04.557.665"],
+  };
+
+  afterEach(() => {
+    delete process.env.SEARCH_MESH_QUERY_NORMALIZATION;
+  });
+
+  it("flag OFF: a plural-only query stays null (byte-identical baseline)", async () => {
+    delete process.env.SEARCH_MESH_QUERY_NORMALIZATION;
+    mockMeshFindMany.mockResolvedValue([D_MELANOMA]);
+    expect(await resolveMeshDescriptor("melanomas")).toBeNull();
+  });
+
+  it("flag ON: the singularized query resolves at confidence 'partial'", async () => {
+    process.env.SEARCH_MESH_QUERY_NORMALIZATION = "on";
+    mockMeshFindMany.mockResolvedValue([D_MELANOMA]);
+    const r = await resolveMeshDescriptor("melanomas");
+    expect(r?.descriptorUi).toBe("D008545");
+    expect(r?.confidence).toBe("partial");
+  });
+
+  it("flag ON: an exact match never enters the singularize branch (stays 'exact')", async () => {
+    process.env.SEARCH_MESH_QUERY_NORMALIZATION = "on";
+    mockMeshFindMany.mockResolvedValue([D_MELANOMA]);
+    const r = await resolveMeshDescriptor("Melanoma");
+    expect(r?.confidence).toBe("exact");
+  });
+});
+
+describe("resolveMeshDescriptor — acronym wrong-sense guard (#1346, SEARCH_ACRONYM_SENSE_GUARD)", () => {
+  const D_AUTO = {
+    descriptorUi: "D001332",
+    name: "Automobiles",
+    entryTerms: ["Car"],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["J01.637.051"],
+  };
+  const D_PETS = {
+    descriptorUi: "D010372",
+    name: "Pets",
+    entryTerms: ["Pet"],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["B01.050.150.900"],
+  };
+  const D_EHR = {
+    descriptorUi: "D057286",
+    name: "Electronic Health Records",
+    entryTerms: ["EHR"],
+    scopeNote: null,
+    dateRevised: null,
+    treeNumbers: ["L01.700.508"],
+  };
+
+  afterEach(() => {
+    delete process.env.SEARCH_ACRONYM_SENSE_GUARD;
+  });
+
+  it("flag ON: CAR (common-word entry term 'Car') is suppressed → null", async () => {
+    process.env.SEARCH_ACRONYM_SENSE_GUARD = "on";
+    mockMeshFindMany.mockResolvedValue([D_AUTO]);
+    expect(await resolveMeshDescriptor("CAR")).toBeNull();
+  });
+
+  it("flag ON: PET (common-word entry term 'Pet') is suppressed → null", async () => {
+    process.env.SEARCH_ACRONYM_SENSE_GUARD = "on";
+    mockMeshFindMany.mockResolvedValue([D_PETS]);
+    expect(await resolveMeshDescriptor("PET")).toBeNull();
+  });
+
+  it("flag ON: an internal-caps acronym entry term (EHR) is kept", async () => {
+    process.env.SEARCH_ACRONYM_SENSE_GUARD = "on";
+    mockMeshFindMany.mockResolvedValue([D_EHR]);
+    const r = await resolveMeshDescriptor("EHR");
+    expect(r?.descriptorUi).toBe("D057286");
+    expect(r?.confidence).toBe("entry-term");
+  });
+
+  it("flag OFF: CAR still resolves to Automobiles (byte-identical baseline)", async () => {
+    delete process.env.SEARCH_ACRONYM_SENSE_GUARD;
+    mockMeshFindMany.mockResolvedValue([D_AUTO]);
+    const r = await resolveMeshDescriptor("CAR");
+    expect(r?.descriptorUi).toBe("D001332");
   });
 });

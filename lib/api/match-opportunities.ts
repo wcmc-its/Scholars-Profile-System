@@ -12,6 +12,7 @@
  */
 import { careerStageBucket, type CareerStage } from "@/lib/career-stage";
 import { db } from "@/lib/db";
+import { asPrestige, type Prestige } from "@/lib/funding/prestige";
 import { OPPORTUNITIES_INDEX, searchClient, type OpportunityTopicScore } from "@/lib/search";
 
 const RECITERAI_YEAR_FLOOR = 2020; // D-15; mirrors lib/api/topics.ts (module-local there).
@@ -23,12 +24,25 @@ export type MatchAxes = {
   stageAppeal: number;
   meshOverlap: number;
   deadlineProximity: number;
+  prestige: number;
 };
 
-export type MatchWeights = { topic: number; stage: number; mesh: number; deadline: number };
+export type MatchWeights = { topic: number; stage: number; mesh: number; deadline: number; prestige: number };
 
 /** Default blend (decision A) — a starting point, tuned in calibration (spec §10). */
-export const DEFAULT_WEIGHTS: MatchWeights = { topic: 1.0, stage: 0.5, mesh: 0.25, deadline: 0.1 };
+export const DEFAULT_WEIGHTS: MatchWeights = {
+  topic: 1.0,
+  stage: 0.5,
+  mesh: 0.25,
+  deadline: 0.1,
+  prestige: 0, // launch = badge+sort only; raise post Track-A eval
+};
+
+/** Effective prestige weight from env (PRESTIGE_AXIS_WEIGHT). Defaults to 0; never negative. */
+export function prestigeAxisWeight(): number {
+  const n = Number(process.env.PRESTIGE_AXIS_WEIGHT);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -76,7 +90,8 @@ export function combineScore(axes: MatchAxes, weights: MatchWeights = DEFAULT_WE
     weights.topic * axes.topicAffinity +
     weights.stage * axes.stageAppeal * axes.topicAffinity +
     weights.mesh * axes.meshOverlap +
-    weights.deadline * axes.deadlineProximity
+    weights.deadline * axes.deadlineProximity +
+    weights.prestige * axes.prestige * axes.topicAffinity
   );
 }
 
@@ -119,6 +134,7 @@ export type OpportunityCandidate = {
   /** Ingest source (e.g. `grants_gov` / `wcm_curated`) — feeds the honorific-prize
    *  filter (§2.9). Optional so pure-unit fixtures need not supply it. */
   source?: string | null;
+  prestige?: Prestige | null;
 };
 
 export type RankedOpportunity = {
@@ -133,9 +149,10 @@ export type RankedOpportunity = {
    *  actionability (the funding mechanism + award ceiling). `null` when absent. */
   mechanism: string | null;
   awardCeiling: number | null;
+  prestige: Prestige | null;
 };
 
-export type RankSort = "fit" | "deadline" | "stage";
+export type RankSort = "fit" | "deadline" | "stage" | "prestige";
 
 export type RankOptions = {
   now?: Date;
@@ -158,6 +175,7 @@ const SORT_KEY: Record<RankSort, (a: MatchAxes) => number> = {
   fit: () => NaN, // handled by defaultScore
   deadline: (a) => a.deadlineProximity,
   stage: (a) => a.stageAppeal,
+  prestige: (a) => a.prestige,
 };
 
 /**
@@ -184,6 +202,7 @@ export function rankCandidates(
       stageAppeal: c.appealByStage[scholarStage] ?? 0,
       meshOverlap: meshOverlap(scholarMeshUi, c.meshDescriptorUi),
       deadlineProximity: deadlineProximity(c.dueDate, now),
+      prestige: c.prestige?.score ?? 0,
     };
     if (axes.topicAffinity <= floor) continue;
     scored.push({
@@ -196,6 +215,7 @@ export function rankCandidates(
       defaultScore: combineScore(axes, weights),
       mechanism: c.mechanism ?? null,
       awardCeiling: c.awardCeiling ?? null,
+      prestige: c.prestige ?? null,
     });
   }
 
@@ -207,22 +227,56 @@ export function rankCandidates(
 
 // ── I/O wrappers (integration-gated; need MySQL + OpenSearch) ───────────────
 
-/** Aggregate a scholar's L2-normalized topic vector on demand from publication_topic. */
-export async function scholarTopicVector(cwid: string): Promise<Map<string, number>> {
+// Scholar topic-vector weighting (accuracy levers §2.1/§2.4,
+// docs/funding-matcher-accuracy.md). First/last author = the scholar's OWN research
+// footprint (full weight); a middle-author cameo is a weaker signal of their
+// direction, so it is down-weighted rather than dropped — the reverse matcher
+// hard-gates to first/last, but weighting keeps a mostly-middle (big-lab,
+// early-career) author mappable. Recency decay (half-life below) replaces the hard
+// year cliff so a scholar's CURRENT focus drives matches, not equal-weighted history.
+// ponytail: fixed weights + half-life; learn them from the QA-tab feedback set
+// (§2.7) once labels exist. Next lever = IDF down-weighting of ubiquitous topics
+// (§2.1), deferred — it needs a cached corpus document-frequency map, not a
+// per-request full-table scan.
+const TOPIC_RECENCY_HALF_LIFE_YEARS = 5;
+const AUTHOR_POSITION_WEIGHT: Record<string, number> = { first: 1, last: 1, penultimate: 0.5 };
+const MIDDLE_AUTHOR_WEIGHT = 0.25;
+
+/** Per-(topic, year, author-position) contribution to the scholar topic vector:
+ *  the base reciterAI impact score scaled by recency decay + authorship. Pure. */
+export function scholarTopicRowWeight(
+  baseScore: number,
+  pubYear: number,
+  authorPosition: string | null,
+  nowYear: number,
+): number {
+  if (!(baseScore > 0)) return 0;
+  const recency = Math.pow(0.5, Math.max(0, nowYear - pubYear) / TOPIC_RECENCY_HALF_LIFE_YEARS);
+  const author = AUTHOR_POSITION_WEIGHT[authorPosition ?? ""] ?? MIDDLE_AUTHOR_WEIGHT;
+  return baseScore * recency * author;
+}
+
+/** Aggregate a scholar's L2-normalized topic vector on demand from publication_topic,
+ *  weighting each contribution by recency + authorship (see `scholarTopicRowWeight`). */
+export async function scholarTopicVector(
+  cwid: string,
+  now: Date = new Date(),
+): Promise<Map<string, number>> {
+  // Group by topic × year × author position so each bucket carries the year +
+  // position needed to weight it before the per-topic sum.
   const rows = await db.read.publicationTopic.groupBy({
-    by: ["parentTopicId"],
+    by: ["parentTopicId", "year", "authorPosition"],
     where: { cwid, year: { gte: RECITERAI_YEAR_FLOOR }, scholar: { deletedAt: null, status: "active" } },
     _sum: { score: true },
   });
+  const nowYear = now.getFullYear();
   const raw = new Map<string, number>();
-  let norm = 0;
   for (const r of rows) {
-    const w = Number(r._sum.score ?? 0);
-    if (w > 0) {
-      raw.set(r.parentTopicId, w);
-      norm += w * w;
-    }
+    const w = scholarTopicRowWeight(Number(r._sum.score ?? 0), r.year ?? nowYear, r.authorPosition, nowYear);
+    if (w > 0) raw.set(r.parentTopicId, (raw.get(r.parentTopicId) ?? 0) + w);
   }
+  let norm = 0;
+  for (const v of raw.values()) norm += v * v;
   if (norm === 0) return raw;
   const inv = 1 / Math.sqrt(norm);
   for (const [k, v] of raw) raw.set(k, v * inv);
@@ -264,7 +318,7 @@ export async function matchOpportunitiesForScholar(
   opts: MatchOptions = {},
 ): Promise<RankedOpportunity[]> {
   const now = opts.now ?? new Date();
-  const [vector, stage] = await Promise.all([scholarTopicVector(cwid), scholarCareerStage(cwid, now)]);
+  const [vector, stage] = await Promise.all([scholarTopicVector(cwid, now), scholarCareerStage(cwid, now)]);
 
   // Scholar MeSH fingerprint (people index) — best-effort secondary axis.
   let scholarMeshUi: string[] = [];
@@ -298,6 +352,11 @@ export async function matchOpportunitiesForScholar(
     },
     { term: { eligibilityFlags: "us_eligible" } },
     { term: { eligibilityFlags: requiredEligibilityFlag(stage) } },
+    // Honorific gate (GRANT# contract v2): never recommend nomination-based prizes
+    // as "grants for you" — they're not applyable. `is_honorific` is the upstream
+    // data flag (supersedes the #1296 title heuristic). Absent/false ⇒ kept; only
+    // an explicit `true` is excluded. No-op until items are reprojected with the flag.
+    { bool: { must_not: { term: { isHonorific: true } } } },
   ];
   if (stage !== "grad") filters.push({ bool: { must_not: { term: { eligibilityFlags: "student_only" } } } });
 
@@ -326,6 +385,7 @@ export async function matchOpportunitiesForScholar(
       mechanism: src.mechanism != null ? String(src.mechanism) : null,
       awardCeiling: typeof src.awardCeiling === "number" ? src.awardCeiling : null,
       source: src.source != null ? String(src.source) : null,
+      prestige: asPrestige(src.prestige),
     };
   });
 
@@ -334,6 +394,14 @@ export async function matchOpportunitiesForScholar(
   // (pilot run #1: 63% of recs). The grants_gov NOFO feed is never filtered.
   const fundable = candidates.filter((c) => !isHonorificAward(c.title, c.source ?? null));
 
-  // Stage 2 — composite re-rank over the distinct axes.
-  return rankCandidates(vector, stage, scholarMeshUi, fundable, opts);
+  // Stage 2 — composite re-rank over the distinct axes. Inject the env-driven
+  // prestige weight only when the caller did not supply explicit weights, so
+  // DEFAULT_WEIGHTS (prestige: 0) keeps pure unit tests deterministic.
+  return rankCandidates(
+    vector,
+    stage,
+    scholarMeshUi,
+    fundable,
+    opts.weights ? opts : { ...opts, weights: { ...DEFAULT_WEIGHTS, prestige: prestigeAxisWeight() } },
+  );
 }

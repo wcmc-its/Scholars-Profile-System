@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Search-result snippets — all evidence cases (#824 follow-up)</title>
+<style>
+  :root{
+    --wcm-red:#b31b1b;
+    --ink:#1a1a1a; --ink2:#4a4a4a; --muted:#6b6b6b; --rule:#e3e2dd;
+    --bg:#ffffff; --row-hover:#fafaf8;
+    --role-bg:#f0eeea; --role-ink:#5f594d;
+    /* method accent (matches the existing "Methods and Tools" chip) */
+    --method-bg:#fbf4ea; --method-bd:#ecdcc8; --method-ink:#8a4a1f;
+    /* topic accent (existing research-areas treatment) */
+    --topic-bg:#eef2f6; --topic-bd:#d8e2ec; --topic-ink:#2c4f6e;
+    /* publication / concept accent (neutral document) */
+    --pub-ink:#55606b;
+    /* provenance pills */
+    --live-bg:#eaf5ec; --live-ink:#1f6b39; --live-bd:#cce6d3;
+    --mock-bg:#eef2f6; --mock-ink:#2c4f6e; --mock-bd:#d8e2ec;
+    --code-bg:#f6f0e6; --code-ink:#8a5a1f; --code-bd:#ecdcc8;
+    --intent-bg:#f3f2ef; --intent-ink:#6b6b6b; --intent-bd:#dcdad4;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .serif{font-family:Georgia,"Times New Roman",serif;}
+
+  header.bar{background:var(--wcm-red);color:#fff;display:flex;align-items:center;gap:18px;
+    padding:10px 26px;}
+  .brand{font-family:Georgia,serif;font-size:17px;font-weight:600;white-space:nowrap;}
+  .brand .beta{font-size:9px;background:#ffffff22;border:1px solid #ffffff55;border-radius:3px;
+    padding:1px 4px;margin-left:6px;vertical-align:2px;letter-spacing:.06em;}
+  .brand .sub{display:block;font-family:-apple-system,sans-serif;font-size:8.5px;letter-spacing:.14em;
+    font-weight:400;opacity:.85;margin-top:1px;}
+  .navlinks{margin-left:auto;display:flex;gap:18px;font-size:13px;}
+  .navlinks span{opacity:.92}
+
+  .wrap{max-width:1000px;margin:0 auto;padding:26px 26px 80px;}
+  h1.title{font-family:Georgia,serif;font-weight:600;font-size:25px;margin:6px 0 6px;}
+  .lede{font-size:13px;color:var(--ink2);line-height:1.55;max-width:78ch;margin:0 0 16px;}
+
+  /* provenance key */
+  .key{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 8px;font-size:11.5px;color:var(--muted);}
+  .pill{display:inline-flex;align-items:center;gap:5px;border-radius:11px;padding:2px 9px;font-size:10.5px;
+    font-weight:600;letter-spacing:.02em;border:1px solid transparent;}
+  .pill.live{background:var(--live-bg);color:var(--live-ink);border-color:var(--live-bd);}
+  .pill.mock{background:var(--mock-bg);color:var(--mock-ink);border-color:var(--mock-bd);}
+  .pill.code{background:var(--code-bg);color:var(--code-ink);border-color:var(--code-bd);}
+  .pill.intent{background:var(--intent-bg);color:var(--intent-ink);border-color:var(--intent-bd);border-style:dashed;}
+
+  /* case section */
+  .case{border:1px solid var(--rule);border-radius:10px;margin:18px 0;overflow:hidden;background:#fff;}
+  .case.illustrative{border-style:dashed;background:#fcfbf9;}
+  .case > .head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:12px 18px;background:#faf9f6;border-bottom:1px solid var(--rule);}
+  .case .ctag{font-family:Georgia,serif;font-size:15px;font-weight:600;color:var(--ink);}
+  .case .kind{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--pub-ink);
+    background:#eef0ee;border-radius:4px;padding:2px 7px;}
+  .case .q{font-size:12px;color:var(--muted);margin-left:auto;}
+  .case .q b{color:var(--ink2);font-weight:600;}
+  .case .body{padding:6px 18px 16px;}
+  .note{font-size:12.5px;color:var(--ink2);line-height:1.5;margin:10px 2px 2px;}
+  .note .em{color:var(--wcm-red);font-weight:600;}
+  .note code{background:#f0eeea;border-radius:3px;padding:1px 5px;font-size:11.5px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+
+  /* result row (mirrors the live search row) */
+  .row{display:grid;grid-template-columns:48px 1fr auto;gap:14px;padding:14px 6px;
+    border-bottom:1px solid var(--rule);}
+  .row:last-child{border-bottom:0;}
+  .row:hover{background:var(--row-hover);}
+  .av{width:48px;height:48px;border-radius:50%;background:#dfe4e1;display:flex;align-items:center;
+    justify-content:center;color:#6f7b73;font-size:13px;font-weight:600;}
+  .name{font-size:15px;font-weight:600;color:var(--ink);display:flex;align-items:baseline;flex-wrap:wrap;}
+  .name mark{background:#fff2a8;color:inherit;border-radius:2px;padding:0 1px;}
+  .roletag{margin-left:9px;font-size:9px;text-transform:uppercase;letter-spacing:.05em;
+    background:var(--role-bg);color:var(--role-ink);border-radius:3px;padding:2px 6px;font-weight:500;}
+  .ttl{font-size:12.5px;color:var(--ink2);margin-top:2px;}
+  .dept{font-size:11.5px;color:var(--muted);margin-top:1px;}
+  .stats{text-align:right;white-space:nowrap;color:var(--muted);font-size:11.5px;}
+  .stats b{display:block;font-size:15px;color:var(--ink);font-variant-numeric:tabular-nums;}
+
+  /* treatment label that prefixes each variant */
+  .variant{margin-top:9px;}
+  .variant + .variant{margin-top:11px;padding-top:10px;border-top:1px dashed #ececdf;}
+  .vlabel{font-size:9.5px;text-transform:uppercase;letter-spacing:.07em;font-weight:700;color:#9a958a;
+    display:inline-flex;align-items:center;gap:6px;margin-bottom:4px;}
+  .vlabel .tag{font-weight:600;}
+  .vlabel.bad{color:#a0522d;}
+  .vlabel.good{color:#1f6b39;}
+
+  /* TODAY raw slug dump */
+  .today{color:#777;font-size:12.5px;line-height:1.45;}
+  .today b{color:#1a1a1a;font-weight:700;} /* intentional ugly mid-word bolding */
+
+  /* PROPOSED match-aware "why" line */
+  .why{display:inline-flex;align-items:baseline;gap:8px;max-width:100%;font-size:13px;line-height:1.45;}
+  .badge{flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;border-radius:5px;
+    padding:2px 8px;font-size:10.5px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;
+    transform:translateY(-1px);}
+  .badge svg{width:12px;height:12px;}
+  .badge.method{background:var(--method-bg);border:1px solid var(--method-bd);color:var(--method-ink);}
+  .badge.topic{background:var(--topic-bg);border:1px solid var(--topic-bd);color:var(--topic-ink);}
+  .lead{color:var(--ink);font-weight:600;}
+  .tools{color:var(--muted);font-weight:400;}
+  .sep{color:#c9c4ba;padding:0 6px;}            /* §3b fix: real space around the middot */
+
+  /* publication / concept reason line */
+  .reason{display:flex;align-items:flex-start;gap:7px;font-size:12.5px;color:var(--pub-ink);line-height:1.45;}
+  .reason svg{width:14px;height:14px;flex:0 0 auto;margin-top:1px;opacity:.8;}
+  .reason .q{color:var(--ink2);font-style:italic;}
+  /* C2 representative pub — progressive disclosure */
+  .reppub{margin:3px 0 0 21px;font-size:12px;color:var(--muted);
+    max-height:7em;opacity:1;overflow:hidden;transition:max-height .22s ease,opacity .18s ease;}
+  .reppub .cite{font-style:italic;color:var(--ink2);}
+  .reppub .yr{font-variant-numeric:tabular-nums;}
+  .hint{font-size:10.5px;color:#a99;margin-left:6px;font-style:normal;}
+  /* signal-ranked exemplar selection */
+  .signals{display:flex;flex-wrap:wrap;gap:4px;margin:3px 0 0 21px;}
+  .sig{font-size:9.5px;background:#eef0ee;color:#5f6b5f;border-radius:9px;padding:1px 7px;font-variant-numeric:tabular-nums;}
+  .sig.win{background:#eaf5ec;color:#1f6b39;border:1px solid #cce6d3;font-weight:600;}
+  .sig.lose{background:#f6efe9;color:#9a6a3a;text-decoration:line-through;}
+  .illus{font-size:9.5px;color:#a99;font-style:italic;margin-left:6px;}
+  /* show-on-hover variant */
+  .ondemand .reppub,.ondemand .signals{max-height:0;opacity:0;overflow:hidden;transition:max-height .22s ease,opacity .18s ease;}
+  .ondemand:hover .reppub,.ondemand:focus-within .reppub,.ondemand:hover .signals,.ondemand:focus-within .signals{max-height:7em;opacity:1;}
+  .caret{color:#bbb;font-size:10px;}
+
+  /* bio sentence */
+  .bio{color:var(--ink2);font-size:13px;line-height:1.5;}
+  .bio b{color:#111;font-weight:600;}
+  .bio.frag{color:#777;}
+
+  /* areas */
+  .areas{color:var(--ink2);font-size:12.5px;line-height:1.5;}
+  .areas .a + .a::before{content:"·";color:#c9c4ba;padding:0 6px;}
+  .more{color:#9a958a;font-weight:600;margin-left:4px;}
+  /* E2 separate identity affordance (NOT a match reason) */
+  .empty-line{color:#bdbdbd;font-size:12px;font-style:italic;}
+  .identity{margin-top:8px;display:flex;align-items:baseline;gap:8px;font-size:12px;color:var(--muted);
+    background:#f7f6f3;border:1px solid var(--rule);border-radius:6px;padding:6px 10px;}
+  .identity .ilabel{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;color:#9a958a;}
+  .identity .ivals{color:var(--ink2);}
+
+  .footer{max-width:1000px;margin:0 auto;padding:8px 26px 50px;color:#9a958a;font-size:11px;line-height:1.5;}
+
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none !important;}
+    .ondemand .reppub,.ondemand .signals{max-height:7em;opacity:1;} /* never hide content when motion is reduced */
+  }
+  @media (max-width:640px){
+    .row{grid-template-columns:40px 1fr;}
+    .stats{grid-column:2;text-align:left;display:flex;gap:14px;margin-top:4px;}
+    .stats b{display:inline;font-size:13px;}
+    .case .q{margin-left:0;flex-basis:100%;}
+  }
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="brand">Scholars <span class="beta">BETA</span><span class="sub">WEILL CORNELL MEDICINE</span></div>
+  <div class="navlinks"><span>Browse</span><span>About</span><span>Sign in</span></div>
+</header>
+
+<div class="wrap">
+  <h1 class="title serif">Search-result snippets — every evidence case</h1>
+  <p class="lede">One mockup per case from §6 of the handoff brief. Each shows the <b>Today</b> line and the proposed
+    treatment(s). All values are real <code>scholars-staging</code> data unless tagged otherwise. The "why" line answers
+    <i>why this hit my query</i>; it is chosen by a single precedence function
+    (<code>name → method → topic → tagged-pub → bio → mention-pub → affiliation → areas/empty</code>).
+    Each hover reveals one <b>representative paper</b> for the matched thing, selected by quantitative signals (orig-research · citations · recency · author position · query relevance) — same mechanism for A/B/C.</p>
+
+  <div class="key">
+    <span class="pill live">LIVE</span> captured from the staging RSC payload (verbatim)
+    <span class="pill mock">MOCKUP</span> attested-real (bio/tools abbreviated)
+    <span class="pill code">CODE-SHAPE</span> object shape only — not observed live
+    <span class="pill intent">DESIGN INTENT</span> illustrative — no live example
+  </div>
+
+  <!-- ============ CASE A — METHOD ============ -->
+  <section class="case">
+    <div class="head">
+      <span class="ctag">Case A — Method</span>
+      <span class="kind">kind: method</span>
+      <span class="pill live">LIVE</span>
+      <span class="q">query: <b>single-cell RNA sequencing</b></span>
+    </div>
+    <div class="body">
+      <div class="row">
+        <div class="av">OE</div>
+        <div>
+          <div class="name">Olivier Elemento, PhD <span class="roletag">Full-time faculty</span></div>
+          <div class="ttl">Professor of Systems and Computational Biomedicine</div>
+          <div class="dept">Department of Systems and Computational Biomedicine</div>
+
+          <div class="variant">
+            <div class="vlabel">Today — raw <code style="font-size:10px">areas_of_interest</code> slug dump</div>
+            <div class="today">pulmonary_critical_care gi_cancer <b>single_cell</b>_spatial_biology <b>cell</b>_molecular_biology lung_cancer womens_health_reproductive_medicine</div>
+          </div>
+
+          <div class="variant">
+            <div class="vlabel bad">Live now — verbatim <code style="font-size:10px">cleanExemplarTools</code> (dedupe + cap only)</div>
+            <span class="why">
+              <span class="badge method"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/></svg>Method</span>
+              <span><span class="lead">Single-cell RNA sequencing</span><span class="tools"><span class="sep">·</span>Single-cell RNA sequencing (scRNA-seq)<span class="sep">·</span>single-cell transcriptomics<span class="sep">·</span>10x single-cell transcriptome analysis</span></span>
+            </span>
+          </div>
+
+          <div class="variant">
+            <div class="vlabel good">A1 — Target, tools inline (cleaned)</div>
+            <span class="why">
+              <span class="badge method"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/></svg>Method</span>
+              <span><span class="lead">Single-cell RNA sequencing</span><span class="tools"><span class="sep">·</span>scRNA-seq<span class="sep">·</span>single-cell transcriptomics<span class="sep">·</span>10x</span></span>
+            </span>
+          </div>
+
+          <div class="variant ondemand" tabindex="0">
+            <div class="vlabel">A2 — family inline, paper on hover <span class="hint">(the scholar's top paper using this method — same pattern as C2)</span></div>
+            <span class="why">
+              <span class="badge method"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/></svg>Method</span>
+              <span><span class="lead">Single-cell RNA sequencing</span> <span class="caret">▾</span></span>
+            </span>
+            <div class="reppub">↳ <span class="cite">“A molecular single-cell lung atlas of lethal COVID-19.”</span> <span class="yr">(2021)</span></div>
+            <div class="signals"><span class="sig">orig. research</span><span class="sig">citations</span><span class="sig">recency</span><span class="sig">first/senior author</span><span class="sig">query _score</span></div>
+          </div>
+        </div>
+        <div class="stats"><b>538</b>pubs<b>132</b>grants</div>
+      </div>
+
+      <div class="note"><span class="em">Cleaning rule</span> (in <code>cleanExemplarTools</code>): (1) dedupe the lead family against <code>tool[0]</code> — kills “Single-cell RNA sequencing” / “…(scRNA-seq)”; (2) prefer the parenthetical short form — “…(SnISOr-Seq)” → <code>SnISOr-Seq</code>; (3) prefer a leading platform token (<code>10x</code>, Visium, Slide-seq) — “10x single-cell transcriptome analysis” → <code>10x</code> <span class="hint">(without this, clause 4 yields “10x single-cell transcriptome”, not the “10x” shown)</span>; (4) else strip parens + cap ~3–4 words. <span class="em">A1 vs A2</span> mirrors C1/C2: A1 keeps the exemplar tools inline; A2 drops them for the family alone and reveals the scholar’s single most representative paper on hover (same signal-ranked mechanism as B2/C2 — one rep-pub derive, three kinds; real title shown, the auto-selection is the proposed #967 extension).</div>
+    </div>
+  </section>
+
+  <!-- ============ CASE B — TOPIC ============ -->
+  <section class="case">
+    <div class="head">
+      <span class="ctag">Case B — Topic</span>
+      <span class="kind">kind: topic</span>
+      <span class="pill mock">MOCKUP</span>
+      <span class="q">query: <b>single-cell RNA sequencing</b> · scholar has the area, no curated method family</span>
+    </div>
+    <div class="body">
+      <div class="row">
+        <div class="av">DL</div>
+        <div>
+          <div class="name">Dan A. Landau, MD, PhD <span class="roletag">Full-time faculty</span></div>
+          <div class="ttl">Professor of Medicine</div>
+          <div class="dept">Department of Medicine</div>
+          <div class="variant">
+            <div class="vlabel">Today</div>
+            <div class="today"><b>single_cell</b>_spatial_biology neuro_oncology hematology stem_<b>cell</b>_regenerative_medicine genetics_genomics_precision_medicine</div>
+          </div>
+          <div class="variant">
+            <div class="vlabel good">B1 — label only</div>
+            <span class="why">
+              <span class="badge topic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg>Topic</span>
+              <span class="lead">Single-cell &amp; spatial biology</span>
+            </span>
+          </div>
+
+          <div class="variant ondemand" tabindex="0">
+            <div class="vlabel">B2 — label + paper on hover <span class="hint">(the scholar's top paper in this topic — same pattern as A2/C2)</span></div>
+            <span class="why">
+              <span class="badge topic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg>Topic</span>
+              <span><span class="lead">Single-cell &amp; spatial biology</span> <span class="caret">▾</span></span>
+            </span>
+            <div class="reppub">↳ <span class="cite">“Somatic mutations and cell identity linked by Genotyping of Transcriptomes.”</span> <span class="yr">(2019)</span></div>
+            <div class="signals"><span class="sig">orig. research</span><span class="sig">citations</span><span class="sig">recency</span><span class="sig">first/senior author</span><span class="sig">query _score</span></div>
+          </div>
+        </div>
+        <div class="stats"><b>103</b>pubs<b>63</b>grants</div>
+      </div>
+      <div class="note">Parent-topic label (v1). A subtopic query (“spatial transcriptomics”) would still read “Single-cell &amp; spatial biology” — §5#4 probe: echo the matched subtopic as a payload field if <code>matchQueryToTaxonomy</code> already knows it (no reindex). <span class="em">B2</span> reveals the scholar’s single most representative paper in this topic on hover — the same signal-ranked mechanism as A2/C2, one derive shared across all three kinds.</div>
+    </div>
+  </section>
+
+  <!-- ============ CASE C — REPRESENTATIVE PUB ============ -->
+  <section class="case">
+    <div class="head">
+      <span class="ctag">Case C — Publication evidence</span>
+      <span class="kind">kind: publications (+ representative pub, #967)</span>
+      <span class="pill live">LIVE</span>
+      <span class="q">query: <b>melanoma</b></span>
+    </div>
+    <div class="body">
+      <div class="row">
+        <div class="av">PC</div>
+        <div>
+          <div class="name">Paul J Christos, DrPH <span class="roletag">Full-time faculty</span></div>
+          <div class="ttl">Professor of Research in Population Health Sciences</div>
+          <div class="dept">Population Health Sciences</div>
+
+          <div class="variant">
+            <div class="vlabel good">C1 — count only <span class="tag">(default)</span></div>
+            <div class="reason"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg><span><b>25</b> of 373 publications tagged Melanoma</span></div>
+          </div>
+
+          <div class="variant ondemand" tabindex="0">
+            <div class="vlabel">C2 — + paper on hover <span class="hint">(signal-ranked single pub — never always-on)</span></div>
+            <div class="reason"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg><span><b>25</b> of 373 publications tagged Melanoma <span class="caret">▾</span></span></div>
+            <div class="reppub">↳ <span class="cite">“Melanoma expression of matrix metalloproteinase-23 is associated with blunted tumor immunity and poor responses to immunotherapy.”</span> <span class="yr">(2014)</span></div>
+            <div class="signals"><span class="sig win">orig. research ✓</span><span class="sig">citations</span><span class="sig">recency</span><span class="sig">first/senior author</span><span class="sig">query _score</span></div>
+          </div>
+        </div>
+        <div class="stats"><b>373</b>pubs<b>32</b>grants</div>
+      </div>
+
+      <div class="row ondemand" tabindex="0">
+        <div class="av">SL</div>
+        <div>
+          <div class="name">Shari Lipner, MD, PhD <span class="roletag">Full-time faculty</span></div>
+          <div class="ttl">Professor of Clinical Dermatology</div>
+          <div class="dept">Dermatology</div>
+          <div class="variant">
+            <div class="vlabel bad">why signal-ranking matters — <code style="font-size:10px">top_hits[0]</code> picks this</div>
+            <div class="reason"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg><span><b>25</b> of 690 publications tagged Melanoma <span class="caret">▾</span></span></div>
+            <div class="reppub">↳ <span class="cite">“Evaluation and diagnosis of longitudinal melanonychia: A clinical review by a nail expert group.”</span> <span class="yr">(2025)</span></div>
+            <div class="signals"><span class="sig lose">review — downrank</span><span class="sig">→ signals pick a higher-impact original paper instead</span></div>
+          </div>
+        </div>
+        <div class="stats"><b>690</b>pubs<b>2</b>grants</div>
+      </div>
+
+      <div class="note"><span class="em">Decision — C1 default; the representative paper goes on hover, never always-on.</span> The count <i>is</i> the evidence; the title answers “which paper,” not “why this person.” <span class="em">Pick the exemplar by quantitative signals, not <code>top_hits[0]</code></span> — original-research&gt;review (the 2025 entry is literally <i>a clinical review</i>), citations, recency, first/senior authorship, query <code>_score</code>. Same signal-ranked mechanism feeds A2/B2 (extend #967’s rep-pub derive to method/topic matches — one derive, three kinds).</div>
+    </div>
+  </section>
+
+  <!-- ============ CASE C' — MENTION ============ -->
+  <section class="case">
+    <div class="head">
+      <span class="ctag">Case C′ — Mention (weaker sibling)</span>
+      <span class="kind">kind: publications (mention)</span>
+      <span class="pill live">LIVE</span>
+      <span class="q">query: <b>optogenetics</b></span>
+    </div>
+    <div class="body">
+      <div class="variant" style="margin-top:2px">
+        <div class="vlabel good">Strong — subject-tagged</div>
+        <div class="reason"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg><span><b>6</b> of 76 publications <b>tagged</b> Optogenetics &nbsp;<span class="hint">— Joshua Levitz, PhD</span></span></div>
+      </div>
+      <div class="variant">
+        <div class="vlabel bad">Weak — free-text mention (raise the threshold)</div>
+        <div class="reason"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg><span><b>1</b> of 133 publications <i>mention</i> “optogenetics”</span></div>
+      </div>
+      <div class="note"><span class="em">1 of 133 is the tell.</span> A free-text mention is much weaker than a subject tag. Raise its min-count threshold, or visually distinguish “mention” from “tagged,” or you’ll show noise as evidence.</div>
+    </div>
+  </section>
+
+  <!-- ============ CASE D — BIO ============ -->
+  <section class="case">
+    <div class="head">
+      <span class="ctag">Case D — Self-description (bio sentence)</span>
+      <span class="kind">kind: selfDescription</span>
+      <span class="pill mock">MOCKUP</span>
+      <span class="q">query: <b>single-cell RNA sequencing</b></span>
+    </div>
+    <div class="body">
+      <div class="row">
+        <div class="av">SJ</div>
+        <div>
+          <div class="name">Samie R. Jaffrey, MD, PhD <span class="roletag">Full-time faculty</span></div>
+          <div class="ttl">Professor of Pharmacology</div>
+          <div class="dept">Department of Pharmacology</div>
+          <div class="variant">
+            <div class="vlabel bad">Today — char-bounded fragment (cuts mid-word)</div>
+            <div class="bio frag">…identifying <b>RNA</b> regulatory pathways that control protein expr…</div>
+          </div>
+          <div class="variant">
+            <div class="vlabel good">Proposed — first matching sentence</div>
+            <div class="bio">The Jaffrey lab is interested in identifying <b>RNA</b> regulatory pathways that control protein expression.</div>
+          </div>
+        </div>
+        <div class="stats"><b>193</b>pubs<b>43</b>grants</div>
+      </div>
+      <div class="note">Implementation: request a larger <code>fragment_size</code>, trim to the first sentence containing the matched term, hard max-length guard for run-ons. Keep the matched term bold.</div>
+    </div>
+  </section>
+
+  <!-- ============ CASE E — AREAS (decision case) ============ -->
+  <section class="case">
+    <div class="head">
+      <span class="ctag">Case E — Areas fallback</span>
+      <span class="kind">kind: areas — the §5#1 decision</span>
+      <span class="pill live">LIVE</span>
+      <span class="q">query: <b>single-cell RNA sequencing</b> · nothing matched ⇒ areas is the only thing firing</span>
+    </div>
+    <div class="body">
+      <div class="row">
+        <div class="av">KS</div>
+        <div>
+          <div class="name">Karsten Suhre, PhD <span class="roletag">Full-time faculty</span></div>
+          <div class="ttl">Professor of Systems and Computational Biomedicine</div>
+          <div class="dept">Department of Systems and Computational Biomedicine</div>
+
+          <div class="variant">
+            <div class="vlabel bad">E0 — current live regression (uncapped, 10 labels, no emphasis)</div>
+            <div class="areas"><span class="a">Metabolic &amp; Endocrine Disease</span><span class="a">Mental Health &amp; Psychiatry</span><span class="a">Single-Cell &amp; Spatial Biology</span><span class="a">Genetics, Genomics &amp; Precision Medicine</span><span class="a">Transplantation Medicine</span><span class="a">Neurodegenerative Disease</span><span class="a">Nephrology &amp; Renal Disease</span><span class="a">Cell &amp; Molecular Biology</span><span class="a">Systems Biology</span><span class="a">Pulmonary &amp; Critical Care Medicine</span></div>
+          </div>
+
+          <div class="variant">
+            <div class="vlabel">E1 — cap N=4, score-desc, “+N more” (in the match slot)</div>
+            <div class="areas"><span class="a">Metabolic &amp; Endocrine Disease</span><span class="a">Mental Health &amp; Psychiatry</span><span class="a">Single-Cell &amp; Spatial Biology</span><span class="a">Genetics, Genomics &amp; Precision Medicine</span><span class="more">+6 more</span></div>
+          </div>
+
+          <div class="variant">
+            <div class="vlabel good">E2 — honest-empty match line + separate “Areas” identity hint (lean)</div>
+            <div class="empty-line">— no specific match for this query —</div>
+            <div class="identity">
+              <span class="ilabel">Areas</span>
+              <span class="ivals">Metabolic &amp; Endocrine Disease · Mental Health &amp; Psychiatry · Single-Cell &amp; Spatial Biology · Genetics, Genomics &amp; Precision Medicine <span class="more">+6 more</span></span>
+            </div>
+          </div>
+        </div>
+        <div class="stats"><b>319</b>pubs<b>10</b>grants</div>
+      </div>
+      <div class="note"><span class="em">Verified, by construction:</span> the matched topic is <i>never</i> in this list — if it were, the row would have been promoted to a Topic badge (Case B). So “matched-first” / matched-area bold are dropped (impossible here). E2 separates <i>why this matched</i> (empty — honest) from <i>who is this</i> (a labeled hint, not styled as match evidence). <span class="em">Ship gate = the fall-through count</span>, not which mock looks cleaner.</div>
+    </div>
+  </section>
+
+  <!-- ============ CASE F — CONCEPT ============ -->
+  <section class="case illustrative">
+    <div class="head">
+      <span class="ctag">Case F — Concept (MeSH expansion)</span>
+      <span class="kind">folds into publications — not its own kind</span>
+      <span class="pill code">CODE-SHAPE</span>
+      <span class="q">did not fire in a 6-query sweep</span>
+    </div>
+    <div class="body">
+      <div class="variant" style="margin-top:2px">
+        <div class="vlabel">Capability (keep), as a text variant of the publications line</div>
+        <div class="reason"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z"/></svg><span>via related concept <span class="q" style="font-style:italic">Melanoma</span></span></div>
+      </div>
+      <div class="note">Don’t reserve a <code>kind</code> for a path that didn’t fire in six queries. Keep the capability (render this string if it ever fires) but drop the dedicated branch + golden test. Revisit on telemetry.</div>
+    </div>
+  </section>
+
+  <!-- ============ CASE G — NAME (strong) vs AFFILIATION (weak) ============ -->
+  <section class="case">
+    <div class="head">
+      <span class="ctag">Case G — name (strong) vs affiliation (weak)</span>
+      <span class="kind">split from the old flat <code>highlight</code> tier</span>
+      <span class="pill live">LIVE</span>
+      <span class="q">same person, two queries</span>
+    </div>
+    <div class="body">
+      <div class="row">
+        <div class="av">RvH</div>
+        <div>
+          <div class="name">Roel <mark>van Herten</mark> - AI In Medical Imaging, PhD</div>
+          <div class="ttl">Postdoctoral Associate</div>
+          <div class="variant">
+            <div class="vlabel good">kind: <code style="font-size:10px">name</code> · rank 1 (top) — query: <b>van Herten</b></div>
+            <div class="bio">Roel <b>van Herten</b> — exact name hit, the single strongest signal in the system</div>
+          </div>
+        </div>
+        <div class="stats"><b>9</b>pubs</div>
+      </div>
+      <div class="row">
+        <div class="av">RvH</div>
+        <div>
+          <div class="name">Roel van Herten - AI In Medical <mark>Imaging</mark>, PhD</div>
+          <div class="ttl">Postdoctoral Associate</div>
+          <div class="variant">
+            <div class="vlabel bad">kind: <code style="font-size:10px">affiliation</code> · rank 7 (low) — query: <b>imaging</b></div>
+            <div class="bio frag">AI In Medical <b>Imaging</b> — the org unit matched, <i>not</i> the person’s work (could be an administrator); weak, ranks just above empty</div>
+          </div>
+        </div>
+        <div class="stats"><b>9</b>pubs</div>
+      </div>
+      <div class="row">
+        <div class="av">··</div>
+        <div>
+          <div class="name" style="color:var(--muted)">[synthetic scholar — no name/affiliation/area/pub/bio match]</div>
+          <div class="ttl">— truly-empty case (not observed live; constructed) —</div>
+          <div class="variant">
+            <div class="vlabel">kind: <code style="font-size:10px">none</code> · last resort</div>
+            <div class="empty-line">— under E2, a blank match line (+ optional “Areas” hint) —</div>
+          </div>
+        </div>
+        <div class="stats"><b>—</b></div>
+      </div>
+      <div class="note"><span class="em">The bimodality in <code>highlight</code>:</span> the old flat tier buried an exact <b>name</b> hit (strongest) next to an <b>affiliation</b> hit (weak/organizational). Split by source field — <code>name</code> to the top, <code>affiliation</code> near the bottom. Also: imaging is <i>not</i> a supercategory query, and there is <b>no</b> server-side streaming blind spot (earlier claim was a grep artifact). Synthetic row is labelled — the truly-empty case wasn’t observed live.</div>
+    </div>
+  </section>
+
+  <!-- ============ CASE H — SUPERCATEGORY ============ -->
+  <section class="case illustrative">
+    <div class="head">
+      <span class="ctag">Case H — Broad supercategory query</span>
+      <span class="kind">derive best-family-under-supercategory</span>
+      <span class="pill intent">DESIGN INTENT</span>
+      <span class="q">no confirmed live example yet</span>
+    </div>
+    <div class="body">
+      <div class="row">
+        <div class="av">··</div>
+        <div>
+          <div class="name" style="color:var(--muted)">[illustrative scholar]</div>
+          <div class="ttl">— a query that resolves to a supercategory spanning many families —</div>
+          <div class="variant">
+            <div class="vlabel bad">Don’t — dump areas / pick one arbitrary family</div>
+            <div class="areas"><span class="a">Imaging &amp; Microscopy</span><span class="a">Cancer Biology</span><span class="a">Neuroscience</span><span class="more">+5 more</span></div>
+          </div>
+          <div class="variant">
+            <div class="vlabel good">Target — their best family <i>under</i> the matched supercategory</div>
+            <span class="why">
+              <span class="badge method"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/></svg>Method</span>
+              <span><span class="lead">Their imaging work is specifically</span> <span class="tools">MRI · optical microscopy</span></span>
+            </span>
+          </div>
+        </div>
+        <div class="stats"><b>—</b></div>
+      </div>
+      <div class="note">Likely a <i>filter</i> on the existing #824 family derive (restrict families to those rolling up under the matched supercategory, take top by score) — probably smaller than “bigger change” implies. Entangled with §5#1: the areas fallback dies the moment areas are demoted. <b>Values above are illustrative, not real data.</b></div>
+    </div>
+  </section>
+
+</div>
+
+<div class="footer">
+  Mockup gallery for #824 follow-up · companion to <code>docs/search-snippet-handoff.md</code> §6 · reuses the
+  <code>match-aware-snippet.html</code> design tokens · names / families / tools / counts are real
+  <code>scholars-staging</code> data captured 2026-06-16 (Cases F &amp; H illustrative as tagged). Badge icons are
+  Lucide (FlaskConical / Tag / FileText / Sparkles), matching the live <code>match-reason.tsx</code>.
+</div>
+</body>
+</html>

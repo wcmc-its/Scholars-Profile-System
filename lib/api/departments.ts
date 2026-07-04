@@ -19,6 +19,7 @@
  *   - .planning/phases/03-topic-and-department-detail-pages/03-CONTEXT.md (D-01, D-03, D-10, D-12)
  */
 import { prisma } from "@/lib/db";
+import { cachedRead } from "@/lib/api/swr-cache";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -104,7 +105,7 @@ export type DepartmentDetail = {
   stats: DepartmentStats;
 };
 
-export async function getDepartment(slug: string): Promise<DepartmentDetail | null> {
+async function getDepartmentUncached(slug: string): Promise<DepartmentDetail | null> {
   const dept = await prisma.department.findUnique({ where: { slug } });
   if (!dept) return null;
 
@@ -265,6 +266,7 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
         where: {
           scholar: { deptCode: dept.code, deletedAt: null, status: "active" },
           endDate: { gte: now },
+          source: { not: "RePORTER" }, // exclude individual RePORTER history
         },
         select: { externalId: true, id: true },
       })
@@ -360,7 +362,7 @@ const normalizeRoleCategory = formatRoleCategory;
  *
  * No eligibility carve — all roles shown per UI-SPEC §6.10.
  */
-export async function getDepartmentFaculty(
+async function getDepartmentFacultyUncached(
   deptCode: string,
   opts: { divCode?: string; page?: number },
 ): Promise<DepartmentFacultyResult> {
@@ -458,7 +460,7 @@ export async function getDepartmentFaculty(
       }) as unknown as Promise<PubGroupRow[]>,
       prisma.grant.groupBy({
         by: ["cwid"],
-        where: { cwid: { in: cwids }, endDate: { gte: now } },
+        where: { cwid: { in: cwids }, endDate: { gte: now }, source: { not: "RePORTER" } },
         _count: { _all: true },
         orderBy: { cwid: "asc" },
       }) as unknown as Promise<GrantGroupRow[]>,
@@ -528,3 +530,17 @@ export async function getDepartmentFaculty(
     methodFacet,
   };
 }
+
+// --- Cached public wrappers (viewer-independent reads via lib/api/swr-cache;
+//     mirrors the center-page caching in lib/api/centers.ts). ---
+export const getDepartment = (slug: string) =>
+  cachedRead(`department:detail:${slug}`, () => getDepartmentUncached(slug));
+
+export const getDepartmentFaculty = (
+  deptCode: string,
+  opts: { divCode?: string; page?: number },
+) =>
+  cachedRead(
+    `department:faculty:${deptCode}:${opts.divCode ?? ""}:${Math.max(0, opts.page ?? 0)}`,
+    () => getDepartmentFacultyUncached(deptCode, opts),
+  );

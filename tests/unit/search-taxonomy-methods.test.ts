@@ -152,6 +152,37 @@ describe("matchQueryToTaxonomy — Method taxonomy candidates (#824)", () => {
     expect(fam!.publicationCount).toBe(3);
   });
 
+  it("perf #1405: caps method-family enrichment at 10 even when many families match", async () => {
+    // 12 distinct families all under ONE supercategory, each matching the query
+    // "assay". The supercategory label ("Genomics & Sequencing") does NOT contain
+    // the query, so only the 12 families are method matches. Enrichment (the
+    // per-family count findMany) must be pre-capped at METHOD_ENRICH_CAP = 10, not
+    // run for all 12.
+    const families = Array.from({ length: 12 }, (_, i) => ({
+      supercategory: "genomics_sequencing",
+      familyLabel: `Assay ${String(i + 1).padStart(2, "0")}`,
+      familyId: `fam_${String(i + 1).padStart(4, "0")}`,
+    }));
+    familyGroups(families);
+    // Per-family count read returns one scholar row so each family carries a count.
+    mockScholarFamilyFindMany.mockImplementation(
+      ({ where }: { where: { familyLabel?: string } }) =>
+        Promise.resolve(
+          where.familyLabel
+            ? [{ cwid: "a1", familyLabel: where.familyLabel, pmids: ["1"] }]
+            : [],
+        ),
+    );
+
+    const r = await matchQueryToTaxonomy("assay");
+    expect(r.state).toBe("matches");
+    if (r.state !== "matches") return;
+    // Exactly 10 families were enriched (the per-family count findMany), not 12.
+    expect(mockScholarFamilyFindMany).toHaveBeenCalledTimes(10);
+    // The displayed set is still bounded by SECONDARY_CAP + 1 = 5.
+    expect(r.methodMatches.length).toBeLessThanOrEqual(5);
+  });
+
   it("E2: a #800-suppressed family is NEVER a candidate", async () => {
     familyGroups([
       { supercategory: "genomics_sequencing", familyLabel: "Secret Assay", familyId: "fam_0002" },

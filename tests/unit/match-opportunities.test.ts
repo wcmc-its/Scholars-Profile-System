@@ -14,6 +14,7 @@ import {
   isHonorificAward,
   meshOverlap,
   rankCandidates,
+  scholarTopicRowWeight,
   topicAffinity,
   type OpportunityCandidate,
 } from "@/lib/api/match-opportunities";
@@ -56,15 +57,39 @@ describe("axis: deadlineProximity", () => {
 
 describe("combineScore — default blend over the axes", () => {
   it("stage multiplies topic so high-appeal-but-off-topic never floats up", () => {
-    const onTopic = combineScore({ topicAffinity: 0.9, stageAppeal: 0.2, meshOverlap: 0, deadlineProximity: 0 });
-    const offTopic = combineScore({ topicAffinity: 0.05, stageAppeal: 1.0, meshOverlap: 0, deadlineProximity: 0 });
+    const onTopic = combineScore({ topicAffinity: 0.9, stageAppeal: 0.2, meshOverlap: 0, deadlineProximity: 0, prestige: 0 });
+    const offTopic = combineScore({ topicAffinity: 0.05, stageAppeal: 1.0, meshOverlap: 0, deadlineProximity: 0, prestige: 0 });
     expect(onTopic).toBeGreaterThan(offTopic);
   });
   it("custom weights change the blend", () => {
-    const axes = { topicAffinity: 0.5, stageAppeal: 1, meshOverlap: 1, deadlineProximity: 1 };
+    const axes = { topicAffinity: 0.5, stageAppeal: 1, meshOverlap: 1, deadlineProximity: 1, prestige: 0 };
     const dflt = combineScore(axes);
     const meshHeavy = combineScore(axes, { ...DEFAULT_WEIGHTS, mesh: 4 });
     expect(meshHeavy).toBeGreaterThan(dflt);
+  });
+});
+
+describe("combineScore — prestige term (launch-gated, topic-gated)", () => {
+  const base = { topicAffinity: 0.8, stageAppeal: 0.5, meshOverlap: 0.3, deadlineProximity: 0.4 };
+
+  it("DEFAULT_WEIGHTS (prestige:0) — a candidate's prestige never moves the blend", () => {
+    expect(combineScore({ ...base, prestige: 1 })).toBe(combineScore({ ...base, prestige: 0 }));
+  });
+
+  it("with prestige weight > 0, the term contributes weights.prestige * prestige * topicAffinity", () => {
+    const W = 2;
+    const weights = { ...DEFAULT_WEIGHTS, prestige: W };
+    const lo = combineScore({ ...base, prestige: 0 }, weights);
+    const hi = combineScore({ ...base, prestige: 1 }, weights);
+    expect(hi - lo).toBeCloseTo(W * 1 * base.topicAffinity);
+  });
+
+  it("is gated by topicAffinity — prestige adds nothing when topicAffinity is 0", () => {
+    const weights = { ...DEFAULT_WEIGHTS, prestige: 2 };
+    const offTopic = { topicAffinity: 0, stageAppeal: 0, meshOverlap: 0, deadlineProximity: 0 };
+    expect(combineScore({ ...offTopic, prestige: 1 }, weights)).toBe(
+      combineScore({ ...offTopic, prestige: 0 }, weights),
+    );
   });
 });
 
@@ -140,6 +165,44 @@ describe("rankCandidates — distinct axes + sortable", () => {
     const heavyB = meshHeavy.find((r) => r.opportunityId === "b")!;
     expect(heavyB.axes).toEqual(baseB.axes);
     expect(meshHeavy[0].opportunityId).toBe("b"); // mesh-heavy promotes b
+  });
+
+  it("sort:'prestige' orders by axes.prestige (== candidate.prestige.score) descending", () => {
+    const flagship = candidate({ opportunityId: "flagship", prestige: { score: 0.9, label: "Flagship" } });
+    const major = candidate({ opportunityId: "major", prestige: { score: 0.5, label: "Major" } });
+    const none = candidate({ opportunityId: "none" }); // no prestige → axes.prestige 0, sorts last
+    const ranked = rankCandidates(scholarVec, "early", [], [major, none, flagship], { now: NOW, sort: "prestige" });
+    expect(ranked.map((r) => r.opportunityId)).toEqual(["flagship", "major", "none"]);
+    expect(ranked[0].axes.prestige).toBe(0.9);
+    expect(ranked[2].axes.prestige).toBe(0);
+  });
+
+  it("a candidate with prestige null/undefined yields axes.prestige 0 and prestige null (no crash)", () => {
+    const ranked = rankCandidates(scholarVec, "early", [], [candidate({ prestige: null })], { now: NOW });
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0].axes.prestige).toBe(0);
+    expect(ranked[0].prestige).toBeNull();
+  });
+});
+
+describe("scholarTopicRowWeight (vector weighting §2.1/§2.4)", () => {
+  it("full weight for a current first/last-author paper", () => {
+    expect(scholarTopicRowWeight(2, 2026, "first", 2026)).toBeCloseTo(2);
+    expect(scholarTopicRowWeight(2, 2026, "last", 2026)).toBeCloseTo(2);
+  });
+  it("halves at one recency half-life (5y) and quarters at two", () => {
+    expect(scholarTopicRowWeight(1, 2021, "first", 2026)).toBeCloseTo(0.5);
+    expect(scholarTopicRowWeight(1, 2016, "first", 2026)).toBeCloseTo(0.25);
+  });
+  it("down-weights penultimate / middle vs first / last", () => {
+    expect(scholarTopicRowWeight(1, 2026, "penultimate", 2026)).toBeCloseTo(0.5);
+    expect(scholarTopicRowWeight(1, 2026, "middle", 2026)).toBeCloseTo(0.25); // unknown → middle
+    expect(scholarTopicRowWeight(1, 2026, null, 2026)).toBeCloseTo(0.25);
+  });
+  it("future-dated papers cap at full weight; non-positive base is zero", () => {
+    expect(scholarTopicRowWeight(1, 2030, "first", 2026)).toBeCloseTo(1); // age floored at 0
+    expect(scholarTopicRowWeight(0, 2026, "first", 2026)).toBe(0);
+    expect(scholarTopicRowWeight(-3, 2026, "first", 2026)).toBe(0);
   });
 });
 

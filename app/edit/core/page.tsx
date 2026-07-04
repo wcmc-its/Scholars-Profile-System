@@ -52,11 +52,6 @@ export default async function EditCoresIndexPage() {
   const pendingSlugRequests = isSlugRequestEnabled()
     ? await countPendingSlugRequests(db.read)
     : null;
-  const self = await db.read.scholar.findUnique({
-    where: { cwid: session.cwid },
-    select: { deletedAt: true },
-  });
-  const selfEditHref = self && self.deletedAt === null ? "/edit" : null;
 
   return (
     <div className="min-h-screen bg-[var(--background)]" data-slot="edit-cores-index">
@@ -79,7 +74,6 @@ export default async function EditCoresIndexPage() {
         administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
         methodsTab={isMethodsTabVisible(session) ? 0 : null}
         dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
-        selfEditHref={selfEditHref}
       />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">

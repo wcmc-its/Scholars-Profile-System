@@ -17,7 +17,9 @@
  */
 import { useEffect, useState } from "react";
 
+import { PrestigeBadge } from "@/components/edit/prestige-badge";
 import type { CareerStage } from "@/lib/career-stage";
+import type { Prestige } from "@/lib/funding/prestige";
 import {
   buildResearcherCsv,
   careerStageLabel,
@@ -92,6 +94,8 @@ type OpportunityListItem = {
   dueDate: string | null;
   source: string | null;
   status: string | null;
+  prestige?: Prestige | null;
+  isHonorific?: boolean | null;
 };
 
 type MatchingTopic = { topicId: string; label: string; score: number };
@@ -147,14 +151,13 @@ function awardRange(floor: number | null, ceiling: number | null): string | null
   return null;
 }
 
-export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }) {
-  const toolName = unifiedNav ? "Funding matcher" : "Find researchers";
+export function FindResearchers() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   return (
     <div>
       <div className="mb-5">
-        <h1 className="text-2xl font-bold tracking-tight">{toolName}</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Funding matcher</h1>
         <p className="text-muted-foreground mt-1 text-sm">
           Browse funding opportunities — the hand-curated WCM awards first — and open one
           to rank Weill Cornell researchers by topic fit and career-stage appeal.
@@ -288,7 +291,10 @@ function OpportunityRow({
       className="block w-full border-t border-border py-3 text-left first:border-t-0 hover:bg-[var(--muted)]/40"
     >
       <div className="flex items-baseline justify-between gap-3">
-        <span className="font-medium leading-snug text-foreground">{o.title ?? o.opportunityId}</span>
+        <span className="flex flex-wrap items-baseline gap-2">
+          <span className="font-medium leading-snug text-foreground">{o.title ?? o.opportunityId}</span>
+          <PrestigeBadge prestige={o.prestige} />
+        </span>
         <SourceBadge source={o.source} />
       </div>
       {meta.length > 0 ? (
@@ -329,6 +335,7 @@ function MatchedView({
 }) {
   const [sort, setSort] = useState<Sort>("fit");
   const [stageLens, setStageLens] = useState(false);
+  const [esiOnly, setEsiOnly] = useState(false);
   const [limit, setLimit] = useState<number>(25);
   const [status, setStatus] = useState<Status>({ kind: "loading" });
 
@@ -338,6 +345,7 @@ function MatchedView({
     const qs = new URLSearchParams({
       sort,
       stageLens: stageLens ? "1" : "0",
+      esiOnly: esiOnly ? "1" : "0",
       limit: String(limit),
     });
     fetch(`/api/opportunities/${encodeURIComponent(opportunityId)}/researchers?${qs}`, {
@@ -370,7 +378,7 @@ function MatchedView({
     return () => {
       active = false;
     };
-  }, [opportunityId, sort, stageLens, limit]);
+  }, [opportunityId, sort, stageLens, esiOnly, limit]);
 
   return (
     <div>
@@ -392,6 +400,17 @@ function MatchedView({
           />
           <span title="Blend career-stage appeal into the default score (who would this suit). Researchers with an unknown career stage score 0 under the lens.">
             Weight by career-stage fit
+          </span>
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={esiOnly}
+            onChange={(e) => setEsiOnly(e.target.checked)}
+            className="size-4 accent-[var(--color-accent-slate)]"
+          />
+          <span title="Soft ESI gate: rank early-stage-investigator-eligible faculty above ineligible ones (no one is dropped). Useful for early-career-targeted grants.">
+            Prioritize ESI-eligible
           </span>
         </label>
         <div className="flex flex-col gap-1">

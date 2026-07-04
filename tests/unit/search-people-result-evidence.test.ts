@@ -298,9 +298,11 @@ describe("searchPeople — free-text publications:mention evidence (#1)", () => 
     expect(ev?.kind).toBe("publications");
     if (ev?.kind !== "publications") throw new Error("expected publications evidence");
     expect(ev.strength).toBe("mention");
-    // count is min(mention=7, pubCount=200) = 7; text is the human "N of M" line.
+    // count is min(mention=7, pubCount=200) = 7; #1361 — the prefix is the "N of M"
+    // line and the literal term is split into `term` (rendered semibold).
     expect(ev.count).toBe(7);
-    expect(ev.text).toBe('7 of 200 publications mention “16s rna”');
+    expect(ev.text).toBe("7 of 200 publications mention");
+    expect(ev.term).toBe("“16s rna”");
     expect(ev.pubs).toEqual([
       {
         pmid: "33144353",

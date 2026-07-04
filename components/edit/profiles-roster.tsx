@@ -50,9 +50,6 @@ export type ProfilesRosterProps = {
   /** Forwarded to the sub-nav: `null` hides the "Data quality" tab
    *  (flag + role-gated). */
   dataQualityTab?: number | null;
-  /** Link back to the viewer's own self-edit surface, forwarded to the
-   *  sub-nav; `null` when they have no profile of their own. */
-  selfEditHref?: string | null;
   /** Whether the viewer can launch "View as" (impersonation flag on + superuser, #729). */
   canImpersonate: boolean;
   /** The viewer's own cwid — the "View as" button is hidden on their own row. */
@@ -100,7 +97,6 @@ export function ProfilesRoster({
   administratorsTab,
   methodsTab,
   dataQualityTab,
-  selfEditHref,
   canImpersonate,
   viewerCwid,
   superuserSurfaces = true,
@@ -131,7 +127,6 @@ export function ProfilesRoster({
         administratorsTab={administratorsTab}
         methodsTab={methodsTab}
         dataQualityTab={dataQualityTab}
-        selfEditHref={selfEditHref}
         superuserSurfaces={superuserSurfaces}
         profilesTab={profilesTab}
         unitsTab={unitsTab}

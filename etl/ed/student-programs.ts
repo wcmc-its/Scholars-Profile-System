@@ -13,6 +13,7 @@
  * Usage: `npm run etl:ed:student-programs`
  */
 import { db } from "../../lib/db";
+import { assertSourceVolume } from "../../lib/etl-guard";
 import {
   collapsePhdStudentProgramRecords,
   fetchPhdStudentProgramRecords,
@@ -57,16 +58,30 @@ async function main() {
       endDate: r.endDate,
     }));
 
-    console.log("Truncating student_phd_program...");
-    await db.write.studentPhdProgram.deleteMany();
+    // An empty/truncated source read must not be mirrored as a table wipe
+    // via the truncate below (audit PR-3).
+    assertSourceVolume("ed-student-programs:phd-programs", {
+      incoming: rows.length,
+      existing: await db.write.studentPhdProgram.count(),
+      maxDropPct: 50,
+    });
 
-    console.log(`Inserting ${rows.length} rows...`);
-    for (const batch of chunks(rows, INSERT_BATCH)) {
-      await db.write.studentPhdProgram.createMany({
-        data: batch,
-        skipDuplicates: true,
-      });
-    }
+    // Truncate + repopulate in one transaction so a mid-write kill can't leave
+    // student_phd_program half-empty. Interactive-tx timeout raised above the
+    // 5 s default for the batched createMany.
+    console.log(`Truncating + inserting ${rows.length} rows in one transaction...`);
+    await db.write.$transaction(
+      async (tx) => {
+        await tx.studentPhdProgram.deleteMany();
+        for (const batch of chunks(rows, INSERT_BATCH)) {
+          await tx.studentPhdProgram.createMany({
+            data: batch,
+            skipDuplicates: true,
+          });
+        }
+      },
+      { timeout: 120_000, maxWait: 10_000 },
+    );
 
     await db.write.etlRun.update({
       where: { id: run.id },

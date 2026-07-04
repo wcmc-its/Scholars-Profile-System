@@ -388,12 +388,14 @@ async function computeDataQualityEntries(
       client.division.findMany({ select: { chiefCwid: true } }),
       client.grant.groupBy({
         by: ["cwid"],
-        where: { role: { in: [...PI_ROLES] } },
+        // PI prominence weights WCM-administered grants only; exclude RePORTER
+        // backfill so a recruit's prior-institution history doesn't inflate it.
+        where: { role: { in: [...PI_ROLES] }, source: { not: "RePORTER" } },
         _count: { _all: true },
       }),
       client.grant.groupBy({
         by: ["cwid"],
-        where: { role: { in: [...PI_ROLES] }, nihIc: { not: null } },
+        where: { role: { in: [...PI_ROLES] }, nihIc: { not: null }, source: { not: "RePORTER" } },
         _count: { _all: true },
       }),
       client.coiGapCandidate.groupBy({

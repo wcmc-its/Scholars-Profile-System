@@ -26,11 +26,17 @@
  * (`/aws/ecs/sps-etl-<env>`), which the operator opens from the alert.
  *
  * Tracked sources + SLAs are derived from the cadence definitions in
- * cdk/lib/etl-stack.ts. Only sources that WRITE an `etl_run` row are tracked
- * (revalidate / reporter / nsf / gates / nih-profile / search:index do not, so
- * they cannot be freshness-checked here — noted as a follow-up in
- * docs/etl-monitoring.md). Sources seen in `etl_run` but absent from the table
+ * cdk/lib/etl-stack.ts. Every deployed cadence step writes an `etl_run` row
+ * (the stragglers — search:index, revalidate, the weekly grant enrichers, the
+ * COI-statements backfill — were wrapped in `withEtlRun` by the
+ * reliability-audit PR-4). Sources seen in `etl_run` but absent from the table
  * below are reported as "untracked" and never alarm (manual/on-demand runs).
+ * Entries with an `envs` list are only checked in those envs — the cadences
+ * genuinely differ per env (InfoEd is excluded from the staging nightly over
+ * the 10.20/16 CIDR overlap; MeshAnchor is staging-only until its soak signs
+ * off). The env comes from SCHOLARS_ENV (EtlStack container env); when it is
+ * unset (local runs, pre-SCHOLARS_ENV deploys) env-scoped entries are skipped
+ * rather than false-alarmed.
  */
 import { db } from "@/lib/db";
 
@@ -57,23 +63,54 @@ const SLA_HOURS: Readonly<Record<Cadence, number>> = {
  * etl/), NOT the StepSpec ids in etl-stack.ts (e.g. step "Ed" writes source
  * "ED", step "Dynamodb" writes "ReCiterAI-projection").
  */
-const TRACKED: Readonly<Record<string, Cadence>> = {
+const TRACKED: Readonly<
+  Record<string, { cadence: Cadence; envs?: readonly string[] }>
+> = {
   // Nightly cadence (cron 0 7 * * ? *)
-  ED: "nightly",
-  ReCiter: "nightly",
-  ASMS: "nightly",
-  InfoEd: "nightly",
-  COI: "nightly",
-  "ReCiterAI-projection": "nightly",
-  MeshCoverage: "nightly",
+  ED: { cadence: "nightly" },
+  ReCiter: { cadence: "nightly" },
+  // PubMed competing-interest statements backfill — runs right after ReCiter.
+  "ReCiter-COI-Statements": { cadence: "nightly" },
+  ASMS: { cadence: "nightly" },
+  // Excluded from the STAGING cadence (10.20.91.8 overlaps the Sps VPC CIDR —
+  // see the nightlySteps comment in cdk/lib/etl-stack.ts); prod keeps the step.
+  InfoEd: { cadence: "nightly", envs: ["prod"] },
+  COI: { cadence: "nightly" },
+  "COI-Gap": { cadence: "nightly" },
+  // #608 — moved from the weekly machine to nightly (mentoring chips).
+  Jenzabar: { cadence: "nightly" },
+  "ReCiterAI-projection": { cadence: "nightly" },
+  // #918 — Scholar.orcid from the WCM Identity table.
+  "Identity-orcid": { cadence: "nightly" },
   // #794 — A2 tools taxonomy → scholar_tool. Writes a row every nightly run
   // (a 0-row success in ddb mode), so it is freshness-tracked from the start.
-  Tools: "nightly",
-  // Weekly cadence (cron 0 8 ? * SUN *)
-  Spotlight: "weekly",
-  Jenzabar: "weekly",
+  Tools: { cadence: "nightly" },
+  MeshCoverage: { cadence: "nightly" },
+  // #1258 — staging-only until the derived-anchor soak signs off (mirrors the
+  // nightlySteps env split).
+  MeshAnchor: { cadence: "nightly", envs: ["staging"] },
+  PubMedRetractions: { cadence: "nightly" },
+  // Terminal steps — run in BOTH cadences; the nightly SLA is the binding one.
+  SearchIndex: { cadence: "nightly" },
+  Revalidate: { cadence: "nightly" },
+  // PR-7 — terminal Integrity validator; self-records via withEtlRun("Integrity").
+  Integrity: { cadence: "nightly" },
+  // Weekly cadence (cron 0 12 ? * SUN *)
+  Completeness: { cadence: "weekly" },
+  Headshot: { cadence: "weekly" },
+  Spotlight: { cadence: "weekly" },
+  Reporter: { cadence: "weekly" },
+  NSF: { cadence: "weekly" },
+  Gates: { cadence: "weekly" },
+  NihProfile: { cadence: "weekly" },
+  // PR-7 — three newly-cadenced weekly sources. Their entrypoints record an
+  // etl_run row via withEtlRun ("ReporterGrants"/"ClinicalTrials") or inline
+  // ("POPS"); all three run in BOTH envs' weekly cadence (not env-scoped).
+  POPS: { cadence: "weekly" },
+  ReporterGrants: { cadence: "weekly" },
+  ClinicalTrials: { cadence: "weekly" },
   // Annual cadence (cron 0 9 1 7 ? *)
-  Hierarchy: "annual",
+  Hierarchy: { cadence: "annual" },
 };
 
 interface SourceStatus {
@@ -86,8 +123,17 @@ interface SourceStatus {
 }
 
 async function evaluate(now: number): Promise<SourceStatus[]> {
+  const env = process.env.SCHOLARS_ENV;
   const out: SourceStatus[] = [];
-  for (const [source, cadence] of Object.entries(TRACKED)) {
+  for (const [source, spec] of Object.entries(TRACKED)) {
+    const { cadence } = spec;
+    if (spec.envs !== undefined && (env === undefined || !spec.envs.includes(env))) {
+      console.log(
+        `[freshness] skip  ${source.padEnd(22)} (env-scoped to ${spec.envs.join("/")}; ` +
+          `SCHOLARS_ENV=${env ?? "unset"})`,
+      );
+      continue;
+    }
     // Most recent SUCCESSFUL run for this source. `completedAt` is the
     // freshness anchor (a 'running'/'failed' row does not advance freshness).
     const last = await db.read.etlRun.findFirst({

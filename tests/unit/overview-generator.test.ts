@@ -6,13 +6,12 @@
  * delimited untrusted block (never in the system prompt), and that the system
  * prompt carries the injection-guard override. No DB, no network.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   buildGroundingReference,
   buildOverviewUserPrompt,
   hasSparseResearchSignal,
-  isOverviewFaithfulnessPassEnabled,
   OVERVIEW_REVISE_SYSTEM_PROMPT,
   OVERVIEW_SYSTEM_PROMPT,
   OVERVIEW_SYSTEM_PROMPT_V3,
@@ -677,23 +676,5 @@ describe("OVERVIEW_VERIFY / REVISE system prompts (#742)", () => {
     const flat = OVERVIEW_REVISE_SYSTEM_PROMPT.replace(/\s+/g, " ");
     expect(flat).toContain("every ungrounded span is removed");
     expect(flat).toContain("NEVER add any new fact");
-  });
-});
-
-describe("isOverviewFaithfulnessPassEnabled (#742)", () => {
-  const prev = process.env.OVERVIEW_FAITHFULNESS_PASS;
-  afterEach(() => {
-    if (prev === undefined) delete process.env.OVERVIEW_FAITHFULNESS_PASS;
-    else process.env.OVERVIEW_FAITHFULNESS_PASS = prev;
-  });
-  it("is off by default / when unset", () => {
-    delete process.env.OVERVIEW_FAITHFULNESS_PASS;
-    expect(isOverviewFaithfulnessPassEnabled()).toBe(false);
-  });
-  it('is on only for exactly "on"', () => {
-    process.env.OVERVIEW_FAITHFULNESS_PASS = "on";
-    expect(isOverviewFaithfulnessPassEnabled()).toBe(true);
-    process.env.OVERVIEW_FAITHFULNESS_PASS = "true";
-    expect(isOverviewFaithfulnessPassEnabled()).toBe(false);
   });
 });

@@ -156,6 +156,17 @@ exports[`AppStack prod matches the snapshot 1`] = `
         ],
       },
     },
+    "ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9": {
+      "Export": {
+        "Name": "Sps-App-prod:ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "PublicAlb84330974",
+          "DNSName",
+        ],
+      },
+    },
     "ExportsOutputRefEcrRepository4D7B3EE140E01346": {
       "Export": {
         "Name": "Sps-App-prod:ExportsOutputRefEcrRepository4D7B3EE140E01346",
@@ -204,6 +215,18 @@ exports[`AppStack prod matches the snapshot 1`] = `
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
+    "SsmParameterValuespsprodnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/net/alb-sg-id",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/net/app-sg-id",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "SsmParameterValuespsprodnetetlsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/net/etl-sg-id",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
   },
   "Resources": {
     "AppIngressFromInternalAlb": {
@@ -211,7 +234,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
         "Description": "Internal ALB to SPS app tasks on container port (prod)",
         "FromPort": 3000,
         "GroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+          "Ref": "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "IpProtocol": "tcp",
         "SourceSecurityGroupId": {
@@ -229,11 +252,11 @@ exports[`AppStack prod matches the snapshot 1`] = `
         "Description": "Public ALB to SPS app tasks on container port (prod)",
         "FromPort": 3000,
         "GroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+          "Ref": "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "IpProtocol": "tcp",
         "SourceSecurityGroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
+          "Ref": "SsmParameterValuespsprodnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "ToPort": 3000,
       },
@@ -276,6 +299,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
               {
                 "Name": "SPS_ENV",
                 "Value": "prod",
+              },
+              {
+                "Name": "GRANT_MATCHER_SUBTOPIC_GRAIN",
+                "Value": "off",
               },
               {
                 "Name": "OPENSEARCH_NODE",
@@ -360,6 +387,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "PRESTIGE_AXIS_WEIGHT",
+                "Value": "0",
+              },
+              {
                 "Name": "EDIT_UNIT_ROSTER_EXPORT",
                 "Value": "off",
               },
@@ -412,20 +443,24 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
-                "Name": "OVERVIEW_FAITHFULNESS_PASS",
-                "Value": "off",
-              },
-              {
                 "Name": "EDIT_BIOSKETCH_GENERATE",
                 "Value": "off",
               },
               {
-                "Name": "SELF_EDIT_RAIL_RESTRUCTURE",
+                "Name": "EDIT_CV_EXPORT",
                 "Value": "off",
               },
               {
-                "Name": "ACCOUNT_CONSOLE_NAV_RESTRUCTURE",
-                "Value": "on",
+                "Name": "REPORTER_MATCH_V2",
+                "Value": "off",
+              },
+              {
+                "Name": "POPS_BASE_URL",
+                "Value": "http://pops.weillcornell.org",
+              },
+              {
+                "Name": "SELF_EDIT_RAIL_RESTRUCTURE",
+                "Value": "off",
               },
               {
                 "Name": "BIOSKETCH_FAITHFULNESS_PASS",
@@ -456,15 +491,23 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "https://scholars.weill.cornell.edu",
               },
               {
+                "Name": "SPS_USAGE_WORKGROUP",
+                "Value": "sps-usage-prod",
+              },
+              {
+                "Name": "SPS_USAGE_DATABASE",
+                "Value": "sps_usage_prod",
+              },
+              {
+                "Name": "SPS_USAGE_REGION",
+                "Value": "us-east-1",
+              },
+              {
                 "Name": "SHOW_BETA_BADGE",
                 "Value": "on",
               },
               {
                 "Name": "SEARCH_GENERIC_TERM_DEMOTE",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_PEOPLE_MATCH_PROVENANCE",
                 "Value": "on",
               },
               {
@@ -477,7 +520,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_REASON_FROM_DOC",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PUB_HIGHLIGHT",
@@ -496,6 +539,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_PUB_FACET_SPLIT",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_METHOD_FAMILY",
                 "Value": "off",
               },
@@ -508,12 +555,44 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_PEOPLE_CLINICAL",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_CLINICAL_FN",
+                "Value": "off",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
                 "Value": "off",
               },
               {
                 "Name": "SEARCH_RESULT_EVIDENCE",
                 "Value": "off",
+              },
+              {
+                "Name": "SEARCH_EVIDENCE_ROWS",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_EVIDENCE_REASON_COUNTS",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_AREA_BOOST",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_PHRASE_BOOST",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_DIVISION_SHAPE",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_FACULTY_PROMINENCE",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PEOPLE_CONCEPT_HINT",
@@ -526,6 +605,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_FUNDING_MESH_GATE",
                 "Value": "fundedPubMeshUi",
+              },
+              {
+                "Name": "SEARCH_FUNDING_CONCEPT_GRANTS",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_SHELL_STREAMING",
@@ -545,6 +628,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_MESH_RESOLUTION_FALLBACK",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_MESH_QUERY_NORMALIZATION",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_ACRONYM_SENSE_GUARD",
                 "Value": "off",
               },
               {
@@ -1088,7 +1179,7 @@ service:
             ],
           },
         ],
-        "Cpu": "1024",
+        "Cpu": "2048",
         "ExecutionRoleArn": {
           "Fn::GetAtt": [
             "TaskExecutionRole250D2532",
@@ -1096,7 +1187,7 @@ service:
           ],
         },
         "Family": "sps-app-prod",
-        "Memory": "2048",
+        "Memory": "4096",
         "NetworkMode": "awsvpc",
         "RequiresCompatibilities": [
           "FARGATE",
@@ -1109,6 +1200,45 @@ service:
         },
       },
       "Type": "AWS::ECS::TaskDefinition",
+    },
+    "AppinternalalbdnsEDBEA85B": {
+      "Properties": {
+        "Name": "/sps/prod/app/internal-alb-dns",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "InternalAlb58CEEAE8",
+            "DNSName",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "Appinternalalbsgid03BC738C": {
+      "Properties": {
+        "Name": "/sps/prod/app/internal-alb-sg-id",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "InternalAlbSecurityGroup32D71C5A",
+            "GroupId",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ApppublicalbdnsB3FF6E1F": {
+      "Properties": {
+        "Name": "/sps/prod/app/public-alb-dns",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "PublicAlb84330974",
+            "DNSName",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
     },
     "DbBootstrapLogGroupAF64F8C3": {
       "DeletionPolicy": "Retain",
@@ -1870,7 +2000,7 @@ service:
             "AssignPublicIp": "DISABLED",
             "SecurityGroups": [
               {
-                "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+                "Ref": "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
             ],
             "Subnets": [
@@ -2328,7 +2458,7 @@ service:
         "Scheme": "internet-facing",
         "SecurityGroups": [
           {
-            "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
+            "Ref": "SsmParameterValuespsprodnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
           },
         ],
         "Subnets": [
@@ -2349,7 +2479,7 @@ service:
         "Description": "Internet to SPS public ALB HTTP (prod) -- HTTPS lands with EdgeStack",
         "FromPort": 80,
         "GroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
+          "Ref": "SsmParameterValuespsprodnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "IpProtocol": "tcp",
         "ToPort": 80,
@@ -3266,7 +3396,7 @@ service:
             "FromPort": 443,
             "IpProtocol": "tcp",
             "SourceSecurityGroupId": {
-              "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+              "Ref": "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
             },
             "ToPort": 443,
           },
@@ -3275,7 +3405,7 @@ service:
             "FromPort": 443,
             "IpProtocol": "tcp",
             "SourceSecurityGroupId": {
-              "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
+              "Ref": "SsmParameterValuespsprodnetetlsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
             },
             "ToPort": 443,
           },
@@ -3473,6 +3603,17 @@ exports[`AppStack staging matches the snapshot 1`] = `
         ],
       },
     },
+    "ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9": {
+      "Export": {
+        "Name": "Sps-App-staging:ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "PublicAlb84330974",
+          "DNSName",
+        ],
+      },
+    },
     "ExportsOutputRefEcrRepository4D7B3EE140E01346": {
       "Export": {
         "Name": "Sps-App-staging:ExportsOutputRefEcrRepository4D7B3EE140E01346",
@@ -3527,9 +3668,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
       "Properties": {
         "Description": "Internal ALB to SPS app tasks on container port (staging)",
         "FromPort": 3000,
-        "GroupId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
-        },
+        "GroupId": "sg-010c270a395b4854b",
         "IpProtocol": "tcp",
         "SourceSecurityGroupId": {
           "Fn::GetAtt": [
@@ -3545,13 +3684,9 @@ exports[`AppStack staging matches the snapshot 1`] = `
       "Properties": {
         "Description": "Public ALB to SPS app tasks on container port (staging)",
         "FromPort": 3000,
-        "GroupId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
-        },
+        "GroupId": "sg-010c270a395b4854b",
         "IpProtocol": "tcp",
-        "SourceSecurityGroupId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
-        },
+        "SourceSecurityGroupId": "sg-0ab492e161a9e9976",
         "ToPort": 3000,
       },
       "Type": "AWS::EC2::SecurityGroupIngress",
@@ -3595,18 +3730,8 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "staging",
               },
               {
-                "Name": "OPENSEARCH_NODE",
-                "Value": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "https://",
-                      {
-                        "Fn::ImportValue": "Sps-Data-staging-OpenSearchDomainEndpoint",
-                      },
-                    ],
-                  ],
-                },
+                "Name": "GRANT_MATCHER_SUBTOPIC_GRAIN",
+                "Value": "on",
               },
               {
                 "Name": "SAML_IDP_ENTITY_ID",
@@ -3677,6 +3802,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "PRESTIGE_AXIS_WEIGHT",
+                "Value": "0",
+              },
+              {
                 "Name": "EDIT_UNIT_ROSTER_EXPORT",
                 "Value": "on",
               },
@@ -3729,19 +3858,23 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
-                "Name": "OVERVIEW_FAITHFULNESS_PASS",
-                "Value": "off",
-              },
-              {
                 "Name": "EDIT_BIOSKETCH_GENERATE",
                 "Value": "on",
               },
               {
-                "Name": "SELF_EDIT_RAIL_RESTRUCTURE",
+                "Name": "EDIT_CV_EXPORT",
                 "Value": "on",
               },
               {
-                "Name": "ACCOUNT_CONSOLE_NAV_RESTRUCTURE",
+                "Name": "REPORTER_MATCH_V2",
+                "Value": "on",
+              },
+              {
+                "Name": "POPS_BASE_URL",
+                "Value": "http://pops.weillcornell.org",
+              },
+              {
+                "Name": "SELF_EDIT_RAIL_RESTRUCTURE",
                 "Value": "on",
               },
               {
@@ -3773,15 +3906,23 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "https://scholars-staging.weill.cornell.edu",
               },
               {
+                "Name": "SPS_USAGE_WORKGROUP",
+                "Value": "sps-usage-staging",
+              },
+              {
+                "Name": "SPS_USAGE_DATABASE",
+                "Value": "sps_usage_staging",
+              },
+              {
+                "Name": "SPS_USAGE_REGION",
+                "Value": "us-east-1",
+              },
+              {
                 "Name": "SHOW_BETA_BADGE",
                 "Value": "on",
               },
               {
                 "Name": "SEARCH_GENERIC_TERM_DEMOTE",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_PEOPLE_MATCH_PROVENANCE",
                 "Value": "on",
               },
               {
@@ -3813,6 +3954,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SEARCH_PUB_FACET_SPLIT",
+                "Value": "on",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_METHOD_FAMILY",
                 "Value": "on",
               },
@@ -3825,12 +3970,44 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SEARCH_PEOPLE_CLINICAL",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_CLINICAL_FN",
+                "Value": "on",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
                 "Value": "on",
               },
               {
                 "Name": "SEARCH_RESULT_EVIDENCE",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_EVIDENCE_ROWS",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_EVIDENCE_REASON_COUNTS",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_AREA_BOOST",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_PHRASE_BOOST",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_DIVISION_SHAPE",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_FACULTY_PROMINENCE",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_PEOPLE_CONCEPT_HINT",
@@ -3843,6 +4020,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_FUNDING_MESH_GATE",
                 "Value": "fundedPubMeshUi",
+              },
+              {
+                "Name": "SEARCH_FUNDING_CONCEPT_GRANTS",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_SHELL_STREAMING",
@@ -3862,6 +4043,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_MESH_RESOLUTION_FALLBACK",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_MESH_QUERY_NORMALIZATION",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_ACRONYM_SENSE_GUARD",
                 "Value": "on",
               },
               {
@@ -4095,6 +4284,21 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/app-ro",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/app:node::",
                     ],
                   ],
                 },
@@ -4405,7 +4609,7 @@ service:
             ],
           },
         ],
-        "Cpu": "512",
+        "Cpu": "1024",
         "ExecutionRoleArn": {
           "Fn::GetAtt": [
             "TaskExecutionRole250D2532",
@@ -4413,7 +4617,7 @@ service:
           ],
         },
         "Family": "sps-app-staging",
-        "Memory": "1024",
+        "Memory": "2048",
         "NetworkMode": "awsvpc",
         "RequiresCompatibilities": [
           "FARGATE",
@@ -4426,6 +4630,45 @@ service:
         },
       },
       "Type": "AWS::ECS::TaskDefinition",
+    },
+    "AppinternalalbdnsEDBEA85B": {
+      "Properties": {
+        "Name": "/sps/staging/app/internal-alb-dns",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "InternalAlb58CEEAE8",
+            "DNSName",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "Appinternalalbsgid03BC738C": {
+      "Properties": {
+        "Name": "/sps/staging/app/internal-alb-sg-id",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "InternalAlbSecurityGroup32D71C5A",
+            "GroupId",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ApppublicalbdnsB3FF6E1F": {
+      "Properties": {
+        "Name": "/sps/staging/app/public-alb-dns",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "PublicAlb84330974",
+            "DNSName",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
     },
     "CustomAWSCDKOpenIdConnectProviderCustomResourceProviderHandlerF2C543E0": {
       "DependsOn": [
@@ -4513,7 +4756,7 @@ service:
             "Environment": [
               {
                 "Name": "GRANTEE_HOST",
-                "Value": "10.20.%",
+                "Value": "10.46.160.%",
               },
             ],
             "Essential": true,
@@ -5253,17 +5496,11 @@ service:
           "AwsvpcConfiguration": {
             "AssignPublicIp": "DISABLED",
             "SecurityGroups": [
-              {
-                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
-              },
+              "sg-010c270a395b4854b",
             ],
             "Subnets": [
-              {
-                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
-              },
-              {
-                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
-              },
+              "subnet-0c6593fb9c9a165c3",
+              "subnet-070cbc242efbddc3c",
             ],
           },
         },
@@ -5469,7 +5706,6 @@ service:
             "Value": "false",
           },
         ],
-        "Name": "sps-internal-staging",
         "Scheme": "internal",
         "SecurityGroups": [
           {
@@ -5480,12 +5716,8 @@ service:
           },
         ],
         "Subnets": [
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
-          },
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
-          },
+          "subnet-0c6593fb9c9a165c3",
+          "subnet-070cbc242efbddc3c",
         ],
         "Type": "application",
       },
@@ -5528,9 +5760,7 @@ service:
             "ToPort": 80,
           },
         ],
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
+        "VpcId": "vpc-08a1873fc8eebae28",
       },
       "Type": "AWS::EC2::SecurityGroup",
     },
@@ -5540,7 +5770,6 @@ service:
         "HealthCheckPath": "/api/health",
         "HealthCheckTimeoutSeconds": 5,
         "HealthyThresholdCount": 2,
-        "Name": "sps-tg-int-staging",
         "Port": 3000,
         "Protocol": "HTTP",
         "TargetGroupAttributes": [
@@ -5555,9 +5784,7 @@ service:
         ],
         "TargetType": "ip",
         "UnhealthyThresholdCount": 3,
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
+        "VpcId": "vpc-08a1873fc8eebae28",
       },
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
     },
@@ -5727,20 +5954,13 @@ service:
             "Value": "false",
           },
         ],
-        "Name": "sps-public-staging",
         "Scheme": "internet-facing",
         "SecurityGroups": [
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
-          },
+          "sg-0ab492e161a9e9976",
         ],
         "Subnets": [
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcpublicSubnet1Subnet2BB74ED74EB42ADC",
-          },
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcpublicSubnet2SubnetE34B022AC8BB6627",
-          },
+          "subnet-09a6fab648280ca19",
+          "subnet-0485fefe267b06736",
         ],
         "Type": "application",
       },
@@ -5751,9 +5971,7 @@ service:
         "CidrIp": "0.0.0.0/0",
         "Description": "Internet to SPS public ALB HTTP (staging) -- HTTPS lands with EdgeStack",
         "FromPort": 80,
-        "GroupId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
-        },
+        "GroupId": "sg-0ab492e161a9e9976",
         "IpProtocol": "tcp",
         "ToPort": 80,
       },
@@ -5785,7 +6003,6 @@ service:
         "HealthCheckPath": "/api/health",
         "HealthCheckTimeoutSeconds": 5,
         "HealthyThresholdCount": 2,
-        "Name": "sps-tg-pub-staging",
         "Port": 3000,
         "Protocol": "HTTP",
         "TargetGroupAttributes": [
@@ -5800,67 +6017,9 @@ service:
         ],
         "TargetType": "ip",
         "UnhealthyThresholdCount": 3,
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
+        "VpcId": "vpc-08a1873fc8eebae28",
       },
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
-    },
-    "S3GatewayEndpointE8BAF1BC": {
-      "Properties": {
-        "RouteTableIds": [
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1RouteTable1979EACBE1BD1DD4",
-          },
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2RouteTable4D0FFC8C36E62A4A",
-          },
-        ],
-        "ServiceName": {
-          "Fn::Join": [
-            "",
-            [
-              "com.amazonaws.",
-              {
-                "Ref": "AWS::Region",
-              },
-              ".s3",
-            ],
-          ],
-        },
-        "VpcEndpointType": "Gateway",
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
-      },
-      "Type": "AWS::EC2::VPCEndpoint",
-    },
-    "SecretsManagerEndpoint5E83C66B": {
-      "Properties": {
-        "PrivateDnsEnabled": true,
-        "SecurityGroupIds": [
-          {
-            "Fn::GetAtt": [
-              "VpcEndpointSecurityGroup02EA44AC",
-              "GroupId",
-            ],
-          },
-        ],
-        "ServiceName": "com.amazonaws.us-east-1.secretsmanager",
-        "SubnetIds": [
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
-          },
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
-          },
-        ],
-        "VpcEndpointType": "Interface",
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
-      },
-      "Type": "AWS::EC2::VPCEndpoint",
     },
     "TaskExecutionRole250D2532": {
       "Properties": {
@@ -6650,44 +6809,6 @@ service:
         },
       },
       "Type": "AWS::ECS::TaskDefinition",
-    },
-    "VpcEndpointSecurityGroup02EA44AC": {
-      "Properties": {
-        "GroupDescription": "SPS VPC interface endpoints (staging) -- HTTPS from app + ETL SGs.",
-        "SecurityGroupEgress": [
-          {
-            "CidrIp": "255.255.255.255/32",
-            "Description": "Disallow all traffic",
-            "FromPort": 252,
-            "IpProtocol": "icmp",
-            "ToPort": 86,
-          },
-        ],
-        "SecurityGroupIngress": [
-          {
-            "Description": "App SG to interface endpoints HTTPS (staging)",
-            "FromPort": 443,
-            "IpProtocol": "tcp",
-            "SourceSecurityGroupId": {
-              "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
-            },
-            "ToPort": 443,
-          },
-          {
-            "Description": "ETL SG to interface endpoints HTTPS (staging)",
-            "FromPort": 443,
-            "IpProtocol": "tcp",
-            "SourceSecurityGroupId": {
-              "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
-            },
-            "ToPort": 443,
-          },
-        ],
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
-      },
-      "Type": "AWS::EC2::SecurityGroup",
     },
   },
   "Rules": {

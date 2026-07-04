@@ -691,21 +691,33 @@ export async function searchFunding(opts: {
   // fragment (`number_of_fragments: 1`, default fragment_size) since abstracts
   // are long. Each field carries its OWN `highlight_query` `match` so the marks
   // reflect the literal text hit, independent of the concept-admission clause.
+  // #1351 — mark the literal query AND (when one resolved) the concept term the
+  // grant actually matched on. Widen the per-field `highlight_query` to a should of
+  // [literal `match`, concept `match_phrase`]; collapses to the bare literal `match`
+  // (byte-identical to before) when no concept resolved. Highlight-only — admission
+  // and ranking are untouched. `sponsorText` stays literal-only (a MeSH descriptor
+  // is not a sponsor name).
+  const conceptLabel = meshResolution?.name ?? "";
+  const hlFieldQuery = (field: string) =>
+    conceptLabel.length > 0
+      ? { bool: { should: [{ match: { [field]: trimmed } }, { match_phrase: { [field]: conceptLabel } }] } }
+      : { match: { [field]: trimmed } };
+
   const highlightFields: Record<string, unknown> = {};
   if (wantTitleHighlight) {
     highlightFields.title = {
       number_of_fragments: 0,
-      highlight_query: { match: { title: trimmed } },
+      highlight_query: hlFieldQuery("title"),
     };
   }
   if (wantTextEvidence) {
     highlightFields.abstract = {
       number_of_fragments: 1,
-      highlight_query: { match: { abstract: trimmed } },
+      highlight_query: hlFieldQuery("abstract"),
     };
     highlightFields.keywordsText = {
       number_of_fragments: 1,
-      highlight_query: { match: { keywordsText: trimmed } },
+      highlight_query: hlFieldQuery("keywordsText"),
     };
     highlightFields.sponsorText = {
       number_of_fragments: 1,
@@ -745,7 +757,7 @@ export async function searchFunding(opts: {
               }
             : {
                 fields: { title: { number_of_fragments: 0 } },
-                highlight_query: { match: { title: trimmed } },
+                highlight_query: hlFieldQuery("title"),
                 pre_tags: ["<mark>"],
                 post_tags: ["</mark>"],
               },

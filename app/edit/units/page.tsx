@@ -48,13 +48,6 @@ export default async function EditUnitsPage() {
     ? await loadAllUnitsDirectory(db.read, { includeRetired: session.isSuperuser })
     : [];
 
-  // Back-link to the actor's own self-edit surface — only when they have a
-  // (non-deleted) profile, so a staff superuser without one never hits a 404.
-  const self = await db.read.scholar.findUnique({
-    where: { cwid: session.cwid },
-    select: { deletedAt: true },
-  });
-  const selfEditHref = self && self.deletedAt === null ? "/edit" : null;
   // The shared console tab strip (role-aware-navigation-entry-points-spec.md): the
   // "Units" tab is active here, and every other surface the viewer can open is a
   // peer tab — so `/edit/units` is no longer a navigational dead end. A superuser
@@ -97,7 +90,6 @@ export default async function EditUnitsPage() {
             ? 0
             : null
         }
-        selfEditHref={selfEditHref}
       />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">

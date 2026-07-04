@@ -36,6 +36,8 @@ import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb
 import { coreProjectNum } from "@/lib/award-number";
 import { parseReporterTerms } from "@/lib/reporter-terms";
 import { resolveGrantKeywords } from "./mesh";
+import { withEtlRun } from "@/lib/etl-run";
+import { assertSourceVolume } from "../../lib/etl-guard";
 
 type ReporterRow = {
   core_project_num: string;
@@ -138,15 +140,20 @@ async function step1_GrantAbstracts() {
     // array; compare by canonical JSON since parseReporterTerms is deterministic.
     const keywordsChanged =
       JSON.stringify(g.keywords ?? null) !== JSON.stringify(keywords);
+    // A partially-populated grant_reporter_project mirror carries NULL
+    // abstract_text on rows RePORTER has already published abstracts for —
+    // never replace a real abstract with upstream NULL (applId/keywords
+    // still update normally).
+    const abstract = r.abstract_text ?? g.abstract;
     if (
       g.applId !== r.appl_id ||
-      g.abstract !== r.abstract_text ||
+      g.abstract !== abstract ||
       keywordsChanged
     ) {
       toUpdate.push({
         id: g.id,
         applId: r.appl_id,
-        abstract: r.abstract_text,
+        abstract,
         keywords,
       });
     }
@@ -292,6 +299,17 @@ async function step2_GrantPublications() {
     `${provNoGrant} skipped — (cwid, core) not in our grants).`
   );
 
+  // An empty/truncated grant_provenance read reaches here with toInsert=[] and
+  // would wipe the whole bridge below, then hit the "Nothing to insert" early
+  // return — the delete must not run on an implausibly shrunken rebuild set.
+  assertSourceVolume("reporter:grant-publication-bridge", {
+    incoming: toInsert.length,
+    existing: await db.write.grantPublication.count({
+      where: { grantId: { in: grants.map((g) => g.id) } },
+    }),
+    maxDropPct: 50,
+  });
+
   // Truncate-reload pattern, scoped to the grants we actually loaded.
   // deleteMany WHERE grantId IN (...) is safer than full TRUNCATE — leaves
   // other rows alone if our grant scope changes.
@@ -418,7 +436,7 @@ async function main() {
   console.log(`\nDone in ${((Date.now() - start) / 1000).toFixed(1)}s.`);
 }
 
-main().catch((e) => {
+withEtlRun("Reporter", main).catch((e) => {
   console.error(e);
   process.exit(1);
 });

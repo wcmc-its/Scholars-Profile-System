@@ -8,18 +8,18 @@ import { buildConsoleLinks } from "@/lib/auth/console-links";
  * single source of *which* links a viewer sees; these cases pin the matrix.
  */
 describe("buildConsoleLinks", () => {
-  it("superuser → 'Admin' only (the roster's AdminSubnav fans out to the rest)", () => {
+  it("superuser → 'Admin console' only (the roster's AdminSubnav fans out to the rest)", () => {
     const links = buildConsoleLinks({
       isSuperuser: true,
       canManageMethods: false,
       managesUnits: false,
     });
     expect(links).toEqual([
-      { id: "manage-profiles", label: "Admin", href: "/edit/scholars" },
+      { id: "manage-profiles", label: "Admin console", href: "/edit/scholars" },
     ]);
   });
 
-  it("superuser → still only 'Admin', even if also a steward / unit admin (no redundant rows)", () => {
+  it("superuser → still only 'Admin console', even if also a steward / unit admin (no redundant rows)", () => {
     const links = buildConsoleLinks({
       isSuperuser: true,
       canManageMethods: true,
@@ -90,37 +90,5 @@ describe("buildConsoleLinks", () => {
     for (const v of matrices) {
       expect(buildConsoleLinks(v).some((l) => l.href === "/edit/find-researchers")).toBe(false);
     }
-  });
-
-  // account-dropdown-nav handoff, Workstream B — the ACCOUNT_CONSOLE_NAV_RESTRUCTURE
-  // flag relabels the superuser roster row; ids / hrefs / gating are unchanged.
-  it("unifiedNav → 'Admin' becomes 'Admin console'", () => {
-    const links = buildConsoleLinks(
-      { isSuperuser: true, canManageMethods: false, managesUnits: false },
-      { unifiedNav: true },
-    );
-    expect(links).toEqual([
-      { id: "manage-profiles", label: "Admin console", href: "/edit/scholars" },
-    ]);
-  });
-
-  it("unifiedNav leaves the Method families / Org units labels unchanged", () => {
-    const links = buildConsoleLinks(
-      { isSuperuser: false, canManageMethods: true, managesUnits: true },
-      { unifiedNav: true },
-    );
-    expect(links).toEqual([
-      { id: "methods", label: "Method families", href: "/edit/methods" },
-      { id: "units", label: "Org units", href: "/edit/units" },
-    ]);
-  });
-
-  it("unifiedNav omitted → classic labels (flag off / prod default)", () => {
-    const links = buildConsoleLinks({
-      isSuperuser: true,
-      canManageMethods: false,
-      managesUnits: false,
-    });
-    expect(links.map((l) => l.label)).toEqual(["Admin"]);
   });
 });

@@ -41,6 +41,11 @@ export type GrantRecordInput = {
   appeal_by_stage?: unknown; // { grad, postdoc, early, mid, senior }
   is_research?: boolean;
   mesh_descriptor_ui?: unknown; // string[]
+  prestige?: unknown; // { score, mechanism_tier, size_bucket, sponsor_tier, selectivity, label, rationale }
+  match_dsl?: unknown; // compact-JSON `S` string: { require, penalize, pediatric_markers, pediatric_required }
+  match_query?: unknown; // compact-JSON `S` string: [{ q, w }] weighted BM25 terms
+  match_rel?: unknown; // compact-JSON `S` string: { pmid: cosine∈[0,1] } dense relevance map
+  is_honorific?: boolean;
   taxonomy_version?: string;
   ingested_at?: string; // ISO
   [key: string]: unknown;
@@ -70,6 +75,11 @@ export type OpportunityWrite = {
   appealByStage: Prisma.InputJsonValue;
   isResearch: boolean;
   meshDescriptorUi: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+  prestige: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+  matchDsl: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+  matchQuery: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+  matchRel: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+  isHonorific: boolean | null;
   taxonomyVersion: string;
   ingestedAt: Date;
 };
@@ -106,6 +116,25 @@ function toIntOrNull(n: number | null | undefined): number | null {
 
 function trimStr(s: unknown): string {
   return typeof s === "string" ? s.trim() : "";
+}
+
+/**
+ * ReciterAI persists `match_dsl`/`match_query` as compact-JSON DynamoDB `S` strings
+ * (the DocumentClient yields them as JS strings). Parse → JSON for the `Json?` column;
+ * fail-open to `JsonNull` on absent/blank/malformed so the matcher stays fail-closed.
+ * ponytail: also passes through an already-parsed object/array, so a future switch to
+ * native DDB maps/lists needs no change here.
+ */
+function parseJsonAttr(raw: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
+  if (raw && typeof raw === "object") return raw as Prisma.InputJsonValue;
+  const s = trimStr(raw);
+  if (!s) return Prisma.JsonNull;
+  try {
+    const v: unknown = JSON.parse(s);
+    return v && typeof v === "object" ? (v as Prisma.InputJsonValue) : Prisma.JsonNull;
+  } catch {
+    return Prisma.JsonNull;
+  }
 }
 
 /**
@@ -207,6 +236,14 @@ export function buildOpportunityWrites(items: GrantRecordInput[]): BuildOpportun
       meshDescriptorUi: Array.isArray(meshUi)
         ? (meshUi as Prisma.InputJsonValue)
         : Prisma.JsonNull,
+      prestige:
+        it.prestige && typeof it.prestige === "object" && !Array.isArray(it.prestige)
+          ? (it.prestige as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
+      matchDsl: parseJsonAttr(it.match_dsl),
+      matchQuery: parseJsonAttr(it.match_query),
+      matchRel: parseJsonAttr(it.match_rel),
+      isHonorific: typeof it.is_honorific === "boolean" ? it.is_honorific : null,
       taxonomyVersion: trimStr(it.taxonomy_version),
       ingestedAt: parseIsoDate(it.ingested_at) ?? new Date(0),
     });

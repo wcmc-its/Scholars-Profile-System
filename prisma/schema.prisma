@@ -67,6 +67,15 @@ model Scholar {
   /// URL on weillcornell.org/doctors-directory. Normalized to https:// at
   /// ETL time even when LDAP returns http://.
   clinicalProfileUrl     String?   @map("clinical_profile_url") @db.VarChar(512)
+  /// POPS clinical enrichment — nightly backfill via etl/pops/index.ts for
+  /// scholars where hasClinicalProfile = true. These columns feed the
+  /// clinicalSpecialties / clinicalExpertise / clinicalBoardSet fields on
+  /// the OpenSearch people document (search-index ETL layer). All nullable
+  /// so the migration applies cleanly; backfilled on the first POPS ETL run.
+  popsBoardCertifications Json?     @map("pops_board_certifications") // [{ board, specialty }]
+  popsSpecialties         Json?     @map("pops_specialties")          // string[] — board-cert ∪ primary, deduped
+  popsExpertise           Json?     @map("pops_expertise")            // string[] — problem_procedure
+  popsRefreshedAt         DateTime? @map("pops_refreshed_at")
   /// Issue #5 — postdoc mentor (manager) CWID, populated only when
   /// roleCategory === 'postdoc'. Sourced from the `manager` attribute on
   /// the scholar's ou=employees,ou=sors entry (parsed by parseManagerCwid).
@@ -111,6 +120,7 @@ model Scholar {
   coiActivities        CoiActivity[]
   coiGapCandidates     CoiGapCandidate[]
   nihProfiles          PersonNihProfile[]
+  reporterCandidates   ReporterProfileCandidate[]
   clinicalTrials       PersonClinicalTrial[]
   overviewGenerations  OverviewGeneration[]
   biosketchGenerations BiosketchGeneration[]
@@ -405,6 +415,21 @@ model Opportunity {
   isResearch       Boolean   @map("is_research")
   /// Optional MeSH descriptor UIs anchored to the opportunity's top topics.
   meshDescriptorUi Json?     @map("mesh_descriptor_ui")
+  /// Prestige signal from ReciterAI (GRANT# contract v2):
+  /// `{ score, mechanism_tier, size_bucket, sponsor_tier, selectivity, label, rationale }`.
+  prestige         Json?     @map("prestige")
+  /// LLM-compiled grant→researcher match DSL `{ require, penalize, pediatric_* }`
+  /// (SUBTOPIC slugs) — consumed by the flag-gated subtopic-grain reverse matcher.
+  matchDsl         Json?     @map("match_dsl")
+  /// LLM-compiled weighted BM25 query `[{ q, w }]` for the relevance boost.
+  matchQuery       Json?     @map("match_query")
+  /// Precomputed DENSE relevance map `{ pmid: cosine∈[0,1] }` (Titan v2) — a strictly
+  /// better alternative to the live BM25 boost for the same `{pmid: rel}` seam. The
+  /// matcher prefers it when present and falls back to `matchQuery` (BM25) when absent.
+  matchRel         Json?     @map("match_rel")
+  /// True for nomination-based honorific recognition (prize/medal/lectureship, or a
+  /// recognition "Award" with no NIH activity code) — excluded from recommendations.
+  isHonorific      Boolean?  @map("is_honorific")
   taxonomyVersion  String    @map("taxonomy_version") @db.VarChar(32)
   ingestedAt       DateTime  @map("ingested_at")
   lastRefreshedAt  DateTime  @default(now()) @map("last_refreshed_at")
@@ -487,6 +512,43 @@ model PersonNihProfile {
   @@id([cwid, nihProfileId])
   @@index([cwid, isPreferred])
   @@map("person_nih_profile")
+}
+
+/// A candidate NIH eRA `profile_id` proposed for a scholar by the v2 PMID-overlap
+/// matcher (`etl/reporter-grants` v2 branch), surfaced in /edit as an "Is this
+/// you?" confirm card. Distinct from `person_nih_profile`, which is the *resolved*
+/// mapping: this table is the proposal/adjudication ledger. A `confirmed`/`revoked`
+/// row flips whether a `person_nih_profile` row exists for (cwid,
+/// external_profile_id); `rejected`/`revoked` are terminal (never re-proposed).
+/// See docs/reporter-grants-v2-matcher-spec.md §5.
+model ReporterProfileCandidate {
+  id                String    @id @default(uuid()) @db.VarChar(64)
+  cwid              String    @db.VarChar(32)
+  scholar           Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  /// NIH eRA Commons profile_id this proposal resolves to.
+  externalProfileId Int       @map("external_profile_id")
+  candidateName     String    @map("candidate_name") @db.VarChar(255)
+  /// Comma-joined grantee orgs for the candidate's grants — recognition aid on the card.
+  candidateOrgs     String    @map("candidate_orgs") @db.VarChar(512)
+  /// # net-new grants riding on this match (card summary, post-InfoEd dedup).
+  grantCount        Int       @map("grant_count")
+  /// INTERNAL ONLY — PMID-overlap count for QA/audit; never projected to the card.
+  overlapK          Int       @map("overlap_k")
+  /// Up to 3 [{title, startYear, endYear}] for human recognition.
+  sampleGrants      Json      @map("sample_grants")
+  /// pending | confirmed | rejected | revoked.
+  status            String    @default("pending") @db.VarChar(16)
+  /// cwid of the human who adjudicated, or "system-autolock".
+  reviewedBy        String?   @map("reviewed_by") @db.VarChar(32)
+  reviewedAt        DateTime? @map("reviewed_at")
+  /// §6.2 reject-reason enum (not_me | name_only | cant_tell); null unless rejected.
+  rejectReason      String?   @map("reject_reason") @db.VarChar(24)
+  firstSeenAt       DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt        DateTime  @default(now()) @map("last_seen_at")
+
+  @@unique([cwid, externalProfileId])
+  @@index([cwid, status])
+  @@map("reporter_profile_candidate")
 }
 
 /// A clinical trial, deduplicated to one row per institutional protocol.
@@ -1354,6 +1416,7 @@ model PublicationTopic {
   @@index([parentTopicId, year(sort: Desc), score(sort: Desc)]) // /topics/{slug} Recent highlights
   @@index([cwid, year(sort: Desc)]) // profile most-recent feed (with D-16 dedup)
   @@index([parentTopicId, cwid]) // Top scholars chip row group-by
+  @@index([primarySubtopicId]) // subtopic-grain reverse matcher pool (grant→researcher)
   @@map("publication_topic")
 }
 
@@ -2455,4 +2518,28 @@ enum FeedbackRole {
   patient_or_public
   prefer_not_say
   other
+}
+
+/// Single-use ledger for consumed SAML assertions (issue #1439). One row per
+/// SAML assertion the ACS has already accepted, keyed by the assertion's own
+/// signature-covered ID (falling back to the response ID or a hash of the raw
+/// SAMLResponse). The insert uses the PK as a uniqueness guard: a duplicate PK
+/// means the same assertion is being presented a second time, so the callback
+/// rejects it instead of minting another session. This is the shared,
+/// instance-independent single-use guard — an in-memory cache would not catch a
+/// second presentation routed to a different Fargate task. `expiresAt` is the assertion's
+/// validity horizon (NotOnOrAfter + clock skew); rows past it can never gate a
+/// fresh login (node-saml already rejects a time-expired assertion) and are
+/// pruned opportunistically on each successful sign-in.
+model SamlAssertionSeen {
+  /// Stable unique id for the consumed assertion (assertion ID / response ID /
+  /// hash of the raw SAMLResponse). Primary key => the single-use guard.
+  id        String   @id @db.VarChar(255)
+  /// Validity horizon after which the row is safe to prune.
+  expiresAt DateTime @map("expires_at")
+  /// When the assertion was first consumed (audit / debugging).
+  seenAt    DateTime @default(now()) @map("seen_at")
+
+  @@index([expiresAt], map: "idx_saml_assertion_seen_expires_at")
+  @@map("saml_assertion_seen")
 }

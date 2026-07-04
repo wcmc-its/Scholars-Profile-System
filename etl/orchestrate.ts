@@ -82,6 +82,11 @@ async function main() {
     ["NSF", "etl/nsf/index.ts"],
     ["Gates", "etl/gates/index.ts"],
     ["NIH-Profile", "etl/nih-profile/index.ts"],
+    // RePORTER grant materialization. Runs after InfoEd (dedup needs its rows)
+    // and NIH-Profile (needs the resolved profile_ids), and before the search
+    // reindex below so new rows + their recency suppressions get indexed. A
+    // RePORTER outage must not fail the nightly — runScript isolates failures.
+    ["Reporter-Grants", "etl/reporter-grants/index.ts"],
     ["COI", "etl/coi/index.ts"],
     // COI-gap recommendations. Runs after both its inputs: the disclosed COI
     // (etl:coi, just above) and the PubMed statements (etl:reciter:coi-statements).
@@ -93,6 +98,10 @@ async function main() {
     // no-op-safe (0 rows when reciterdb is unreachable) like the other
     // reciterdb sources, so it is safe in the chain on the same footing.
     ["Clinical-Trials", "etl/clinical-trials/index.ts"],
+    // POPS clinical enrichment — depends on hasClinicalProfile set by the ED
+    // chain head above; must run before the search reindex below so the new
+    // clinicalSpecialties / clinicalExpertise fields land in the people doc.
+    ["POPS", "etl/pops/index.ts"],
     ["Hierarchy", "etl/hierarchy/index.ts"],
     ["Spotlight", "etl/spotlight/index.ts"],
     ["DynamoDB", "etl/dynamodb/index.ts"],

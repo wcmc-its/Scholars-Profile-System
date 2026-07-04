@@ -1,0 +1,1272 @@
+{
+  "meta": {
+    "capturedAtUtc": "2026-07-03T03:14:36Z",
+    "host": "https://scholars-staging.weill.cornell.edu",
+    "maxPages": 80,
+    "fixtures": {
+      "path": "scripts/search-eval/fixtures.json",
+      "queries": 20,
+      "expectedScholars": 102
+    },
+    "stagingImage": {
+      "repo": "scholars-app-staging",
+      "tag": "latest",
+      "digest": "sha256:944e368f9bc66fbf6795ee978572a9bcf56a014a2ce2c31ca6e93c32626cd4e8",
+      "gitSha": "816e417ff3b34b675f9fe016110d4deee3f5697c",
+      "taskDefinition": "sps-app-staging:107",
+      "pushedAt": "2026-07-02T20:30:29-04:00",
+      "note": "Mutable :latest tag; digest + gitSha pin the exact image evaluated. gitSha 816e417f == origin/master HEAD at capture time."
+    },
+    "interpretation": {
+      "meshMapped": 17,
+      "notMeshMapped": 3,
+      "total": 20
+    },
+    "overall": {
+      "meanMRR": 0.294,
+      "top20": 73,
+      "found": 96,
+      "n": 102
+    }
+  },
+  "results": [
+    {
+      "query": "diabetes",
+      "meshMapped": true,
+      "confidence": "entry-term",
+      "total": 692,
+      "expected": [
+        {
+          "re": "Aronne",
+          "cwid": "ljaronne",
+          "arch": "research-pi",
+          "rank": 11,
+          "name": "Louis J Aronne, MD",
+          "pubs": 208,
+          "matched": null
+        },
+        {
+          "re": "Shukla",
+          "cwid": "aps2004",
+          "arch": "clinician-expert",
+          "rank": 9,
+          "name": "Alpana P. Shukla, MB,BS, MD, MD",
+          "pubs": 80,
+          "matched": null
+        },
+        {
+          "re": "Tchang",
+          "cwid": "bgt9001",
+          "arch": "clinician-expert",
+          "rank": 5,
+          "name": "Beverly Tchang, MD",
+          "pubs": 34,
+          "matched": null
+        },
+        {
+          "re": "James C\\. Lo",
+          "cwid": "jal2063",
+          "arch": "clinician-expert",
+          "rank": 23,
+          "name": "James C. Lo, PhD, MD",
+          "pubs": 49,
+          "matched": null
+        },
+        {
+          "re": "Leon.*Igel",
+          "cwid": "lei9004",
+          "arch": "clinician-expert",
+          "rank": 17,
+          "name": "Leon I. Igel, MD",
+          "pubs": 29,
+          "matched": null
+        },
+        {
+          "re": "Mohini Aras",
+          "cwid": "moa9031",
+          "arch": "clinician-expert",
+          "rank": 384,
+          "name": "Mohini Aras, MD",
+          "pubs": 10,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 6,
+        "found": 6,
+        "top10": 2,
+        "top20": 4,
+        "medianRank": 17,
+        "mrr": 0.08448769316136644
+      }
+    },
+    {
+      "query": "CRISPR",
+      "meshMapped": true,
+      "confidence": "entry-term",
+      "total": 104,
+      "expected": [
+        {
+          "re": "Lukas.*Dow",
+          "cwid": "lud2005",
+          "arch": "methods-scientist",
+          "rank": 1,
+          "name": "Lukas Edward Dow, PhD",
+          "pubs": 98,
+          "matched": null
+        },
+        {
+          "re": "Sheth",
+          "cwid": "shethsu",
+          "arch": "clinician-expert",
+          "rank": 76,
+          "name": "Sujit Sheth, MB,BS, MD",
+          "pubs": 79,
+          "matched": null
+        },
+        {
+          "re": "Christopher.*Mason",
+          "cwid": "chm2042",
+          "arch": "methods-scientist",
+          "rank": null,
+          "name": null,
+          "pubs": null,
+          "matched": null
+        },
+        {
+          "re": "Li Gan",
+          "cwid": "lig2033",
+          "arch": "research-pi",
+          "rank": 79,
+          "name": "Li Gan, PhD",
+          "pubs": 141,
+          "matched": null
+        },
+        {
+          "re": "Chun-Jun Guo",
+          "cwid": "chg4001",
+          "arch": "methods-scientist",
+          "rank": 55,
+          "name": "Chun-Jun Guo, PhD",
+          "pubs": 52,
+          "matched": null
+        },
+        {
+          "re": "Vardhana",
+          "cwid": "sav2012",
+          "arch": "methods-scientist",
+          "rank": 32,
+          "name": "Santosha Adipudi Vardhana, PhD, MD",
+          "pubs": 87,
+          "matched": null
+        },
+        {
+          "re": "Artis",
+          "cwid": "daa2028",
+          "arch": "research-pi",
+          "rank": 81,
+          "name": "David Artis, PhD",
+          "pubs": 122,
+          "matched": null
+        },
+        {
+          "re": "Iliev",
+          "cwid": "ili2001",
+          "arch": "research-pi",
+          "rank": 44,
+          "name": "Iliyan D Iliev, PhD",
+          "pubs": 71,
+          "matched": null
+        },
+        {
+          "re": "Lyden",
+          "cwid": "dcl2001",
+          "arch": "clinician-expert",
+          "rank": null,
+          "name": null,
+          "pubs": null,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 9,
+        "found": 7,
+        "top10": 1,
+        "top20": 1,
+        "medianRank": 55,
+        "mrr": 0.12336898805626444
+      }
+    },
+    {
+      "query": "fecal microbiota transplantation",
+      "meshMapped": true,
+      "confidence": "exact",
+      "total": 115,
+      "expected": [
+        {
+          "re": "Peled",
+          "cwid": "jop9140",
+          "arch": "methods-scientist",
+          "rank": 3,
+          "name": "Jonathan U. Peled, MD, PhD",
+          "pubs": 27,
+          "matched": null
+        },
+        {
+          "re": "Longman",
+          "cwid": "ral2006",
+          "arch": "clinician-expert",
+          "rank": 1,
+          "name": "Randy Longman, PhD, MD",
+          "pubs": 87,
+          "matched": null
+        },
+        {
+          "re": "Crawford",
+          "cwid": "cvc9002",
+          "arch": "clinician-expert",
+          "rank": 2,
+          "name": "Carl V. Crawford, MD",
+          "pubs": 47,
+          "matched": null
+        },
+        {
+          "re": "Scherl",
+          "cwid": "ejs2005",
+          "arch": "clinician-expert",
+          "rank": 4,
+          "name": "Ellen J Scherl, MD",
+          "pubs": 126,
+          "matched": null
+        },
+        {
+          "re": "Vinita.*Jacob",
+          "cwid": "vij9004",
+          "arch": "clinician-expert",
+          "rank": 16,
+          "name": "Vinita Jacob, MD",
+          "pubs": 11,
+          "matched": null
+        },
+        {
+          "re": "Lukin",
+          "cwid": "djl9010",
+          "arch": "clinician-expert",
+          "rank": 14,
+          "name": "Dana Jeremy Lukin, PhD, MD",
+          "pubs": 78,
+          "matched": null
+        },
+        {
+          "re": "Battat",
+          "cwid": null,
+          "arch": null,
+          "rank": null,
+          "name": null,
+          "pubs": null,
+          "matched": null
+        },
+        {
+          "re": "Gogokhia",
+          "cwid": null,
+          "arch": null,
+          "rank": null,
+          "name": null,
+          "pubs": null,
+          "matched": null
+        },
+        {
+          "re": "Sonnenberg",
+          "cwid": "gfs2002",
+          "arch": "research-pi",
+          "rank": 31,
+          "name": "Gregory F Sonnenberg, PhD",
+          "pubs": 87,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 9,
+        "found": 7,
+        "top10": 4,
+        "top20": 6,
+        "medianRank": 4,
+        "mrr": 0.24994666325311485
+      }
+    },
+    {
+      "query": "single-cell RNA sequencing",
+      "meshMapped": true,
+      "confidence": "entry-term",
+      "total": 708,
+      "expected": [
+        {
+          "re": "Elemento",
+          "cwid": "ole2001",
+          "arch": "methods-scientist",
+          "rank": 28,
+          "name": "Olivier Elemento, PhD",
+          "pubs": 538,
+          "matched": null
+        },
+        {
+          "re": "Rafii",
+          "cwid": "srafii",
+          "arch": "methods-scientist",
+          "rank": 107,
+          "name": "Shahin Rafii, MD",
+          "pubs": 45,
+          "matched": null
+        },
+        {
+          "re": "Christopher.*Mason",
+          "cwid": "chm2042",
+          "arch": "methods-scientist",
+          "rank": 706,
+          "name": "Christopher E Mason, PhD",
+          "pubs": 0,
+          "matched": null
+        },
+        {
+          "re": "Betel",
+          "cwid": "dob2014",
+          "arch": "methods-scientist",
+          "rank": 11,
+          "name": "Doron Betel, PhD",
+          "pubs": 99,
+          "matched": null
+        },
+        {
+          "re": "Landau",
+          "cwid": "dal3005",
+          "arch": "clinician-expert",
+          "rank": 6,
+          "name": "Dan Avi Landau, MD, PhD",
+          "pubs": 103,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 5,
+        "found": 5,
+        "top10": 1,
+        "top20": 2,
+        "medianRank": 28,
+        "mrr": 0.06081045365549349
+      }
+    },
+    {
+      "query": "alzheimer's",
+      "meshMapped": true,
+      "confidence": "entry-term",
+      "total": 293,
+      "expected": [
+        {
+          "re": "Li Gan",
+          "cwid": "lig2033",
+          "arch": "research-pi",
+          "rank": 4,
+          "name": "Li Gan, PhD",
+          "pubs": 141,
+          "matched": null
+        },
+        {
+          "re": "Iadecola",
+          "cwid": "coi2001",
+          "arch": "research-pi",
+          "rank": 5,
+          "name": "Costantino Iadecola, MD",
+          "pubs": 459,
+          "matched": null
+        },
+        {
+          "re": "de Leon",
+          "cwid": null,
+          "arch": null,
+          "rank": null,
+          "name": null,
+          "pubs": null,
+          "matched": null
+        },
+        {
+          "re": "Mosconi",
+          "cwid": "lim2035",
+          "arch": "research-pi",
+          "rank": 18,
+          "name": "Lisa Mosconi, PhD",
+          "pubs": 135,
+          "matched": null
+        },
+        {
+          "re": "Luo",
+          "cwid": "wel2009",
+          "arch": "methods-scientist",
+          "rank": 52,
+          "name": "Wenjie Luo, PhD",
+          "pubs": 56,
+          "matched": null
+        },
+        {
+          "re": "Glodzik",
+          "cwid": "lig4005",
+          "arch": "methods-scientist",
+          "rank": 24,
+          "name": "Lidia Glodzik, MD, PhD",
+          "pubs": 108,
+          "matched": null
+        },
+        {
+          "re": "Anna.*Orr",
+          "cwid": "ago2002",
+          "arch": "methods-scientist",
+          "rank": 95,
+          "name": "Anna G Orr, PhD",
+          "pubs": 24,
+          "matched": null
+        },
+        {
+          "re": "Pereira",
+          "cwid": null,
+          "arch": null,
+          "rank": null,
+          "name": null,
+          "pubs": null,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 8,
+        "found": 6,
+        "top10": 2,
+        "top20": 3,
+        "medianRank": 24,
+        "mrr": 0.07212241340530814
+      }
+    },
+    {
+      "query": "hypertension",
+      "meshMapped": true,
+      "confidence": "exact",
+      "total": 510,
+      "expected": [
+        {
+          "re": "Devereux",
+          "cwid": "rbdevere",
+          "arch": "clinician-expert",
+          "rank": 1,
+          "name": "Richard B Devereux, MD",
+          "pubs": 975,
+          "matched": null
+        },
+        {
+          "re": "Alderman",
+          "cwid": "mia2003",
+          "arch": "research-pi",
+          "rank": 13,
+          "name": "Michael Harris Alderman, MD",
+          "pubs": 328,
+          "matched": null
+        },
+        {
+          "re": "Wachtell",
+          "cwid": "krw2003",
+          "arch": "methods-scientist",
+          "rank": 18,
+          "name": "Kristian Wachtell, MD",
+          "pubs": 253,
+          "matched": null
+        },
+        {
+          "re": "Okin",
+          "cwid": "pokin",
+          "arch": "clinician-expert",
+          "rank": 7,
+          "name": "Peter M Okin, MD",
+          "pubs": 289,
+          "matched": null
+        },
+        {
+          "re": "Robert.*Phillips",
+          "cwid": "rap2026",
+          "arch": "research-pi",
+          "rank": 51,
+          "name": "Robert Phillips, MD, PhD",
+          "pubs": 121,
+          "matched": null
+        },
+        {
+          "re": "Samuel.*Mann",
+          "cwid": "sjmann",
+          "arch": "research-pi",
+          "rank": 58,
+          "name": "Samuel J Mann, MD",
+          "pubs": 72,
+          "matched": null
+        },
+        {
+          "re": "Phyllis August",
+          "cwid": "paugust",
+          "arch": "research-pi",
+          "rank": 27,
+          "name": "Phyllis August, MD",
+          "pubs": 115,
+          "matched": null
+        },
+        {
+          "re": "Evelyn.*Horn",
+          "cwid": "horneve",
+          "arch": "clinician-expert",
+          "rank": 21,
+          "name": "Evelyn M. Horn, MD",
+          "pubs": 167,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 8,
+        "found": 8,
+        "top10": 2,
+        "top20": 4,
+        "medianRank": 21,
+        "mrr": 0.17460513530493244
+      }
+    },
+    {
+      "query": "obesity",
+      "meshMapped": true,
+      "confidence": "exact",
+      "total": 620,
+      "expected": [
+        {
+          "re": "Louis J Aronne",
+          "cwid": "ljaronne",
+          "arch": "research-pi",
+          "rank": 3,
+          "name": "Louis J Aronne, MD",
+          "pubs": 208,
+          "matched": null
+        },
+        {
+          "re": "Alpana.*Shukla",
+          "cwid": "aps2004",
+          "arch": "clinician-expert",
+          "rank": 1,
+          "name": "Alpana P. Shukla, MB,BS, MD, MD",
+          "pubs": 80,
+          "matched": null
+        },
+        {
+          "re": "Beverly Tchang",
+          "cwid": "bgt9001",
+          "arch": "clinician-expert",
+          "rank": 4,
+          "name": "Beverly Tchang, MD",
+          "pubs": 34,
+          "matched": null
+        },
+        {
+          "re": "Leon.*Igel",
+          "cwid": "lei9004",
+          "arch": "clinician-expert",
+          "rank": 16,
+          "name": "Leon I. Igel, MD",
+          "pubs": 29,
+          "matched": null
+        },
+        {
+          "re": "Mohini Aras",
+          "cwid": "moa9031",
+          "arch": "clinician-expert",
+          "rank": 53,
+          "name": "Mohini Aras, MD",
+          "pubs": 10,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 5,
+        "found": 5,
+        "top10": 3,
+        "top20": 4,
+        "medianRank": 4,
+        "mrr": 0.33294025157232704
+      }
+    },
+    {
+      "query": "pediatric congenital heart surgery",
+      "meshMapped": true,
+      "confidence": "partial",
+      "total": 4558,
+      "expected": [
+        {
+          "re": "Emile Bacha",
+          "cwid": "emb9016",
+          "arch": "research-pi",
+          "rank": 1,
+          "name": "Emile Bacha, MD",
+          "pubs": 223,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 1,
+        "found": 1,
+        "top10": 1,
+        "top20": 1,
+        "medianRank": 1,
+        "mrr": 1
+      }
+    },
+    {
+      "query": "CAR",
+      "meshMapped": false,
+      "confidence": null,
+      "total": 128,
+      "expected": [
+        {
+          "re": "Scheinberg",
+          "cwid": "das2027",
+          "arch": "research-pi",
+          "rank": 5,
+          "name": "David A. Scheinberg, MD, PhD",
+          "pubs": 301,
+          "matched": null
+        },
+        {
+          "re": "Perales",
+          "cwid": "mip2043",
+          "arch": "clinician-expert",
+          "rank": 3,
+          "name": "Miguel-Angel Perales, MD",
+          "pubs": 198,
+          "matched": null
+        },
+        {
+          "re": "Adusumilli",
+          "cwid": "psa2001",
+          "arch": "research-pi",
+          "rank": 4,
+          "name": "Prasad Adusumilli, MB,BS",
+          "pubs": 218,
+          "matched": null
+        },
+        {
+          "re": "Villena-Vargas",
+          "cwid": "jov9069",
+          "arch": "clinician-expert",
+          "rank": 9,
+          "name": "Jonathan Villena-Vargas, MD",
+          "pubs": 48,
+          "matched": null
+        },
+        {
+          "re": "Moonsoo Jin",
+          "cwid": "moj2005",
+          "arch": "methods-scientist",
+          "rank": 6,
+          "name": "Moonsoo Jin, PhD",
+          "pubs": 66,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 5,
+        "found": 5,
+        "top10": 5,
+        "top20": 5,
+        "medianRank": 5,
+        "mrr": 0.21222222222222223
+      }
+    },
+    {
+      "query": "PET",
+      "meshMapped": false,
+      "confidence": null,
+      "total": 338,
+      "expected": [
+        {
+          "re": "Osborne",
+          "cwid": "jro7001",
+          "arch": "clinician-expert",
+          "rank": 5,
+          "name": "Joseph R. Osborne, MD, PhD",
+          "pubs": 135,
+          "matched": null
+        },
+        {
+          "re": "Ivanidze",
+          "cwid": "jai9018",
+          "arch": "clinician-expert",
+          "rank": 1,
+          "name": "Jana Ivanidze, MD, PhD",
+          "pubs": 105,
+          "matched": null
+        },
+        {
+          "re": "Nehmeh",
+          "cwid": "san2028",
+          "arch": "methods-scientist",
+          "rank": 12,
+          "name": "Sadek Nehmeh, PhD",
+          "pubs": 74,
+          "matched": null
+        },
+        {
+          "re": "Karakatsanis",
+          "cwid": "nak2032",
+          "arch": "methods-scientist",
+          "rank": 6,
+          "name": "Nikolaos A. Karakatsanis, PhD",
+          "pubs": 73,
+          "matched": null
+        },
+        {
+          "re": "Jason S\\. Lewis",
+          "cwid": "jal9028",
+          "arch": "research-pi",
+          "rank": 37,
+          "name": "Jason S. Lewis, PhD",
+          "pubs": 356,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 5,
+        "found": 5,
+        "top10": 3,
+        "top20": 4,
+        "medianRank": 6,
+        "mrr": 0.2954054054054054
+      }
+    },
+    {
+      "query": "diabetic",
+      "meshMapped": false,
+      "confidence": null,
+      "total": 692,
+      "expected": [
+        {
+          "re": "Laura Alonso",
+          "cwid": "lca4001",
+          "arch": "research-pi",
+          "rank": 3,
+          "name": "Laura Alonso, MD",
+          "pubs": 73,
+          "matched": null
+        },
+        {
+          "re": "Kashyap",
+          "cwid": "srk4008",
+          "arch": "clinician-expert",
+          "rank": 2,
+          "name": "Sangeeta Kashyap, MD",
+          "pubs": 179,
+          "matched": null
+        },
+        {
+          "re": "Malik",
+          "cwid": "ram2045",
+          "arch": "research-pi",
+          "rank": 1,
+          "name": "Rayaz A. Malik, MB,ChB, PhD",
+          "pubs": 261,
+          "matched": null
+        },
+        {
+          "re": "Sinha Gregory",
+          "cwid": "sinhana",
+          "arch": "clinician-expert",
+          "rank": 5,
+          "name": "Naina Sinha Gregory, MD",
+          "pubs": 17,
+          "matched": null
+        },
+        {
+          "re": "Leon.*Igel",
+          "cwid": "lei9004",
+          "arch": "clinician-expert",
+          "rank": 9,
+          "name": "Leon I. Igel, MD",
+          "pubs": 29,
+          "matched": null
+        },
+        {
+          "re": "Tchang",
+          "cwid": "bgt9001",
+          "arch": "clinician-expert",
+          "rank": 10,
+          "name": "Beverly Tchang, MD",
+          "pubs": 34,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 6,
+        "found": 6,
+        "top10": 6,
+        "top20": 6,
+        "medianRank": 5,
+        "mrr": 0.37407407407407406
+      }
+    },
+    {
+      "query": "parkinsons",
+      "meshMapped": true,
+      "confidence": "entry-term",
+      "total": 193,
+      "expected": [
+        {
+          "re": "Harini Sarva",
+          "cwid": "has9059",
+          "arch": "clinician-expert",
+          "rank": 1,
+          "name": "Harini Sarva, MD",
+          "pubs": 73,
+          "matched": null
+        },
+        {
+          "re": "Kaplitt",
+          "cwid": "mik2002",
+          "arch": "research-pi",
+          "rank": 6,
+          "name": "Michael G Kaplitt, PhD, MD",
+          "pubs": 147,
+          "matched": null
+        },
+        {
+          "re": "Eliezer",
+          "cwid": "dae2005",
+          "arch": "methods-scientist",
+          "rank": 2,
+          "name": "David Eliezer, PhD",
+          "pubs": 131,
+          "matched": null
+        },
+        {
+          "re": "Marongiu",
+          "cwid": "rom2043",
+          "arch": "research-specialist",
+          "rank": 8,
+          "name": "Roberta Marongiu, PhD",
+          "pubs": 38,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 4,
+        "found": 4,
+        "top10": 4,
+        "top20": 4,
+        "medianRank": 6,
+        "mrr": 0.4479166666666667
+      }
+    },
+    {
+      "query": "blood disorders",
+      "meshMapped": true,
+      "confidence": "entry-term",
+      "total": 1239,
+      "expected": [
+        {
+          "re": "Juliet.*Barker",
+          "cwid": "jub2029",
+          "arch": "research-pi",
+          "rank": 7,
+          "name": "Juliet Barker, MB,BS",
+          "pubs": 169,
+          "matched": null
+        },
+        {
+          "re": "Canaani",
+          "cwid": "ygg9005",
+          "arch": "clinician-expert",
+          "rank": 4,
+          "name": "Jonathan Canaani, MD",
+          "pubs": 65,
+          "matched": null
+        },
+        {
+          "re": "Gomez Arteaga",
+          "cwid": "alg9117",
+          "arch": "clinician-expert",
+          "rank": 12,
+          "name": "Alexandra Gomez Arteaga, MD",
+          "pubs": 42,
+          "matched": null
+        },
+        {
+          "re": "DeSimone",
+          "cwid": "rod9096",
+          "arch": "clinician-expert",
+          "rank": 2,
+          "name": "Robert DeSimone, MD",
+          "pubs": 51,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 4,
+        "found": 4,
+        "top10": 3,
+        "top20": 4,
+        "medianRank": 7,
+        "mrr": 0.24404761904761904
+      }
+    },
+    {
+      "query": "gut bacteria",
+      "meshMapped": true,
+      "confidence": "entry-term",
+      "total": 63,
+      "expected": [
+        {
+          "re": "Iliev",
+          "cwid": "ili2001",
+          "arch": "research-pi",
+          "rank": 1,
+          "name": "Iliyan D Iliev, PhD",
+          "pubs": 71,
+          "matched": null
+        },
+        {
+          "re": "Longman",
+          "cwid": "ral2006",
+          "arch": "clinician-expert",
+          "rank": 2,
+          "name": "Randy Longman, PhD, MD",
+          "pubs": 87,
+          "matched": null
+        },
+        {
+          "re": "Chun-Jun Guo",
+          "cwid": "chg4001",
+          "arch": "methods-scientist",
+          "rank": 3,
+          "name": "Chun-Jun Guo, PhD",
+          "pubs": 52,
+          "matched": null
+        },
+        {
+          "re": "Sonnenberg",
+          "cwid": "gfs2002",
+          "arch": "research-pi",
+          "rank": 4,
+          "name": "Gregory F Sonnenberg, PhD",
+          "pubs": 87,
+          "matched": null
+        },
+        {
+          "re": "Artis",
+          "cwid": "daa2028",
+          "arch": "research-pi",
+          "rank": 7,
+          "name": "David Artis, PhD",
+          "pubs": 122,
+          "matched": null
+        },
+        {
+          "re": "Melody Zeng",
+          "cwid": "myz4001",
+          "arch": "methods-scientist",
+          "rank": 6,
+          "name": "Melody Zeng, PhD",
+          "pubs": 39,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 6,
+        "found": 6,
+        "top10": 6,
+        "top20": 6,
+        "medianRank": 4,
+        "mrr": 0.3988095238095237
+      }
+    },
+    {
+      "query": "computational drug discovery",
+      "meshMapped": true,
+      "confidence": "partial",
+      "total": 859,
+      "expected": [
+        {
+          "re": "Harel Weinstein",
+          "cwid": "haw2002",
+          "arch": "research-pi",
+          "rank": 12,
+          "name": "Harel Weinstein, DSc",
+          "pubs": 263,
+          "matched": null
+        },
+        {
+          "re": "Huggins",
+          "cwid": "djh2009",
+          "arch": "methods-scientist",
+          "rank": 7,
+          "name": "David Huggins, DPhil",
+          "pubs": 68,
+          "matched": null
+        },
+        {
+          "re": "Elemento",
+          "cwid": "ole2001",
+          "arch": "methods-scientist",
+          "rank": 2,
+          "name": "Olivier Elemento, PhD",
+          "pubs": 538,
+          "matched": null
+        },
+        {
+          "re": "Khurana",
+          "cwid": "ekk2003",
+          "arch": "methods-scientist",
+          "rank": 9,
+          "name": "Ekta Khurana, PhD",
+          "pubs": 73,
+          "matched": null
+        },
+        {
+          "re": "Moustafa Gabr",
+          "cwid": "mog4005",
+          "arch": "research-specialist",
+          "rank": 1,
+          "name": "Moustafa Gabr, PhD",
+          "pubs": 145,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 5,
+        "found": 5,
+        "top10": 4,
+        "top20": 5,
+        "medianRank": 7,
+        "mrr": 0.36746031746031743
+      }
+    },
+    {
+      "query": "pediatric cardiac surgery",
+      "meshMapped": true,
+      "confidence": "partial",
+      "total": 4458,
+      "expected": [
+        {
+          "re": "Emile Bacha",
+          "cwid": "emb9016",
+          "arch": "research-pi",
+          "rank": 4,
+          "name": "Emile Bacha, MD",
+          "pubs": 223,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 1,
+        "found": 1,
+        "top10": 1,
+        "top20": 1,
+        "medianRank": 4,
+        "mrr": 0.25
+      }
+    },
+    {
+      "query": "electrophysiology",
+      "meshMapped": true,
+      "confidence": "exact",
+      "total": 129,
+      "expected": [
+        {
+          "re": "Markowitz",
+          "cwid": "smarkow",
+          "arch": "clinician-expert",
+          "rank": 1,
+          "name": "Steven M Markowitz, MD",
+          "pubs": 170,
+          "matched": null
+        },
+        {
+          "re": "Jim W\\. Cheung",
+          "cwid": "jac9029",
+          "arch": "clinician-expert",
+          "rank": 3,
+          "name": "Jim W. Cheung, MD",
+          "pubs": 193,
+          "matched": null
+        },
+        {
+          "re": "Slotwiner",
+          "cwid": "djs2001",
+          "arch": "clinician-expert",
+          "rank": 2,
+          "name": "David J Slotwiner, MD",
+          "pubs": 121,
+          "matched": null
+        },
+        {
+          "re": "James E\\. Ip",
+          "cwid": "jei9008",
+          "arch": "clinician-expert",
+          "rank": 12,
+          "name": "James E. Ip, MD",
+          "pubs": 158,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 4,
+        "found": 4,
+        "top10": 3,
+        "top20": 4,
+        "medianRank": 3,
+        "mrr": 0.47916666666666663
+      }
+    },
+    {
+      "query": "interventional cardiology",
+      "meshMapped": true,
+      "confidence": "partial",
+      "total": 80,
+      "expected": [
+        {
+          "re": "Feldman",
+          "cwid": "dnf9001",
+          "arch": "clinician-expert",
+          "rank": 7,
+          "name": "Dmitriy N. Feldman, MD",
+          "pubs": 197,
+          "matched": null
+        },
+        {
+          "re": "Luke Kim",
+          "cwid": "luk9003",
+          "arch": "clinician-expert",
+          "rank": 10,
+          "name": "Luke Kim, MD",
+          "pubs": 113,
+          "matched": null
+        },
+        {
+          "re": "Khatri",
+          "cwid": "jak4033",
+          "arch": "clinician-expert",
+          "rank": 2,
+          "name": "Jaikirshan Khatri, MD",
+          "pubs": 141,
+          "matched": null
+        },
+        {
+          "re": "Harsimran Singh",
+          "cwid": "has9028",
+          "arch": "clinician-expert",
+          "rank": 5,
+          "name": "Harsimran Singh, MD",
+          "pubs": 81,
+          "matched": null
+        },
+        {
+          "re": "Manish.*Parikh",
+          "cwid": "map2007",
+          "arch": "clinician-expert",
+          "rank": 11,
+          "name": "Manish A Parikh, MD",
+          "pubs": 149,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 5,
+        "found": 5,
+        "top10": 4,
+        "top20": 5,
+        "medianRank": 7,
+        "mrr": 0.20675324675324674
+      }
+    },
+    {
+      "query": "resistant hypertension",
+      "meshMapped": true,
+      "confidence": "partial",
+      "total": 148,
+      "expected": [
+        {
+          "re": "Alderman",
+          "cwid": "mia2003",
+          "arch": "research-pi",
+          "rank": 10,
+          "name": "Michael Harris Alderman, MD",
+          "pubs": 328,
+          "matched": null
+        },
+        {
+          "re": "Samuel.*Mann",
+          "cwid": "sjmann",
+          "arch": "research-pi",
+          "rank": 21,
+          "name": "Samuel J Mann, MD",
+          "pubs": 72,
+          "matched": null
+        },
+        {
+          "re": "Wachtell",
+          "cwid": "krw2003",
+          "arch": "methods-scientist",
+          "rank": 39,
+          "name": "Kristian Wachtell, MD",
+          "pubs": 253,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 3,
+        "found": 3,
+        "top10": 1,
+        "top20": 1,
+        "medianRank": 21,
+        "mrr": 0.05775335775335775
+      }
+    },
+    {
+      "query": "irritable bowel syndrome",
+      "meshMapped": true,
+      "confidence": "exact",
+      "total": 18,
+      "expected": [
+        {
+          "re": "Quigley",
+          "cwid": "emq2004",
+          "arch": "clinician-expert",
+          "rank": 1,
+          "name": "Eamonn Quigley, MB,BCh, BAO, MD",
+          "pubs": 303,
+          "matched": null
+        },
+        {
+          "re": "Lucak",
+          "cwid": "lucaksu",
+          "arch": "clinician-expert",
+          "rank": 6,
+          "name": "Susan L. Lucak, MD",
+          "pubs": 14,
+          "matched": null
+        },
+        {
+          "re": "Frissora",
+          "cwid": "cfrissor",
+          "arch": "clinician-expert",
+          "rank": 5,
+          "name": "Christine L. Frissora, MD",
+          "pubs": 19,
+          "matched": null
+        }
+      ],
+      "summary": {
+        "n": 3,
+        "found": 3,
+        "top10": 3,
+        "top20": 3,
+        "medianRank": 5,
+        "mrr": 0.45555555555555555
+      }
+    }
+  ]
+}

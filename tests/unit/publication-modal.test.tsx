@@ -532,14 +532,16 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     // The snippet is only in the DOM while the HoverTooltip is visible, so hover.
     const trigger = screen.getByText("STORK-A");
-    fireEvent.mouseEnter(trigger.parentElement as HTMLElement);
+    fireEvent.focus(trigger.parentElement as HTMLElement);
     // Honest framing (the tool name does not appear verbatim here → no mark).
     await waitFor(() =>
-      expect(screen.getByText(/Verbatim, from the author's papers/i)).toBeDefined(),
+      expect(
+        screen.getAllByText(/Verbatim, from the author's papers/i).length,
+      ).toBeGreaterThan(0),
     );
     expect(
-      screen.getByText(/a non-invasive and automated method of embryo evaluation/),
-    ).toBeDefined();
+      screen.getAllByText(/a non-invasive and automated method of embryo evaluation/).length,
+    ).toBeGreaterThan(0);
   });
 
   it("frames the snippet as 'from this paper' when its source pmid is the viewed paper (#1158)", async () => {
@@ -566,9 +568,9 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     const trigger = screen.getByText("STORK-A");
-    fireEvent.mouseEnter(trigger.parentElement as HTMLElement);
+    fireEvent.focus(trigger.parentElement as HTMLElement);
     await waitFor(() =>
-      expect(screen.getByText(/Verbatim, from this paper/i)).toBeDefined(),
+      expect(screen.getAllByText(/Verbatim, from this paper/i).length).toBeGreaterThan(0),
     );
     // Must NOT use the representative framing when it is this paper.
     expect(screen.queryByText(/from the author's papers/i)).toBeNull();
@@ -598,7 +600,7 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     const trigger = screen.getByText("corneal confocal microscope");
-    fireEvent.mouseEnter(trigger.parentElement as HTMLElement);
+    fireEvent.focus(trigger.parentElement as HTMLElement);
     // The occurrence inside the sentence is wrapped in a <mark>, preserving the
     // snippet's own casing ("A corneal confocal microscope was used…").
     await waitFor(() => {

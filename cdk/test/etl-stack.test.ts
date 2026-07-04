@@ -1,31 +1,32 @@
 import { Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
+import type { SpsEnvConfig } from "../lib/config";
 import { EtlStack } from "../lib/etl-stack";
 import { NetworkStack } from "../lib/network-stack";
 import { makeFixture } from "./test-utils";
 
-function buildEtlStack(envName: "staging" | "prod"): {
+function buildEtlStack(
+  envName: "staging" | "prod",
+  envConfigOverride: Partial<SpsEnvConfig> = {},
+): {
   template: Template;
   stack: EtlStack;
 } {
   const fixture = makeFixture(envName);
+  const envConfig = { ...fixture.envConfig, ...envConfigOverride };
   const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
   });
   const appStack = new AppStack(fixture.app, `Sps-App-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     vpc: network.vpc,
-    appSecurityGroup: network.appSecurityGroup,
-    etlSecurityGroup: network.etlSecurityGroup,
-    albSecurityGroup: network.albSecurityGroup,
   });
   const stack = new EtlStack(fixture.app, `Sps-Etl-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     vpc: network.vpc,
-    etlSecurityGroup: network.etlSecurityGroup,
     ecsCluster: appStack.ecsCluster,
     etlEcrRepository: appStack.etlEcrRepository,
   });
@@ -39,7 +40,7 @@ const EC2_DESCRIPTION_ALLOWED = /^[a-zA-Z0-9. _\-:/()#,@[\]+=&;{}!$*]+$/;
 // EventBridge cron expressions confirmed in plan D7.
 const EXPECTED_CRONS: Readonly<Record<string, string>> = {
   nightly: "cron(0 7 * * ? *)",
-  weekly: "cron(0 8 ? * SUN *)",
+  weekly: "cron(0 12 ? * SUN *)",
   annual: "cron(0 9 1 7 ? *)",
 };
 
@@ -137,6 +138,48 @@ function getStateMachineDefinitionText(
 }
 
 describe("EtlStack", () => {
+  // Cutover de-coupling (§8.4): both the ETL container and the reconcile task
+  // move OPENSEARCH_NODE off the Data→Etl cross-stack export onto the opensearch
+  // secret's `node` key, so the OpenSearch-domain replace at cutover isn't
+  // blocked by the export-lock. The internal-ALB DNS is a separate edge (SSM).
+  describe("OPENSEARCH_NODE de-coupling (openSearchNodeFromSecret)", () => {
+    it("off (explicit): node is baked from the DataStack export, not a secret", () => {
+      const json = JSON.stringify(
+        buildEtlStack("staging", { openSearchNodeFromSecret: false }).template.toJSON(),
+      );
+      expect(json).toContain("Sps-Data-staging-OpenSearchDomainEndpoint");
+      expect(json).not.toContain(":node::");
+    });
+
+    it("on: node comes from the opensearch secret `node` key; the OpenSearch export is gone but SCHOLARS_BASE_URL still resolves", () => {
+      const json = JSON.stringify(
+        buildEtlStack("staging", { openSearchNodeFromSecret: true }).template.toJSON(),
+      );
+      expect(json).not.toContain("Sps-Data-staging-OpenSearchDomainEndpoint");
+      expect(json).toContain(":node::");
+      // SCHOLARS_BASE_URL rides the App internal-ALB DNS SSM param (item-3 pass 2b),
+      // a separate edge unaffected by openSearchNodeFromSecret.
+      expect(json).toContain("/sps/staging/app/internal-alb-dns");
+    });
+  });
+
+  // Estate consolidation (plan §4.4): with useSharedVpc on, every ETL task ENI
+  // lands in the app2 subnets (the cross-VPC relocation branch is gone — §8.8).
+  describe("shared VPC placement (useSharedVpc on)", () => {
+    const { template } = buildEtlStack("staging", { useSharedVpc: true });
+    const APP2 = ["subnet-0c6593fb9c9a165c3", "subnet-070cbc242efbddc3c"];
+
+    it("routes ETL task ENIs into the app2 subnets", () => {
+      const sms = Object.values(
+        template.findResources("AWS::StepFunctions::StateMachine"),
+      );
+      const allDefs = sms
+        .map((s) => JSON.stringify(s.Properties?.DefinitionString ?? ""))
+        .join("");
+      for (const subnet of APP2) expect(allDefs).toContain(subnet);
+    });
+  });
+
   describe("prod", () => {
     const { template } = buildEtlStack("prod");
 
@@ -145,13 +188,16 @@ describe("EtlStack", () => {
     });
 
     describe("Resource counts (B08 / B20 acceptance)", () => {
-      it("creates six state machines (3 cadence + #595 heartbeat + #393 reconciler + #353 cdn reconciler), six EventBridge rules, one SNS topic", () => {
+      it("creates six state machines (3 cadence + #595 heartbeat + #393 reconciler + #353 cdn reconciler), six EventBridge rules, two SNS topics", () => {
         // 3 cadence machines + the #595 heartbeat + the #393 reconciler +
         // the #353 cdn reconciler (PR-2).
         template.resourceCountIs("AWS::StepFunctions::StateMachine", 6);
         template.resourceCountIs("AWS::Events::Rule", 6);
-        // The heartbeat + both reconcilers reuse the cadence failure topic -- still one.
-        template.resourceCountIs("AWS::SNS::Topic", 1);
+        // The heartbeat + both reconcilers reuse the cadence failure topic; PR-7
+        // adds the etl-page P1 topic, so two total: etl-failures + etl-page.
+        template.resourceCountIs("AWS::SNS::Topic", 2);
+        template.hasResourceProperties("AWS::SNS::Topic", { TopicName: "etl-failures-prod" });
+        template.hasResourceProperties("AWS::SNS::Topic", { TopicName: "etl-page-prod" });
       });
 
       it("creates eleven CloudWatch alarms (4 status + nightly/weekly/heartbeat cadence + reconciler status/cadence + cdn reconciler status/cadence)", () => {
@@ -1222,8 +1268,8 @@ describe("EtlStack", () => {
 
       it("sets SCHOLARS_BASE_URL pointing at the internal ALB (#479)", () => {
         // The cadence revalidate step calls /api/revalidate on the VPC-private
-        // ALB. The value is an Fn::Join that interpolates the cross-stack
-        // import of InternalAlbDns; assert by string-matching the JSON shape
+        // ALB. The value is an Fn::Join that interpolates the internal-ALB DNS
+        // SSM param (item-3 pass 2b); assert by string-matching the JSON shape
         // rather than the resolved value (which is a CloudFormation token).
         const envEntries = (etlContainerDef().Environment ?? []) as Array<{
           Name?: string;
@@ -1233,7 +1279,10 @@ describe("EtlStack", () => {
         expect(baseUrl).toBeDefined();
         const valueJson = JSON.stringify(baseUrl?.Value ?? {});
         expect(valueJson).toContain("http://");
-        expect(valueJson).toContain("Sps-App-prod-InternalAlbDns");
+        // Value is `http://` + a Ref to the internal-alb-dns SSM CfnParameter
+        // (the `/sps/.../internal-alb-dns` path lives in the param's Default, not
+        // the env value); match the param's normalized logical-id fragment.
+        expect(valueJson).toContain("internalalbdns");
       });
     });
 
@@ -1518,4 +1567,5 @@ describe("EtlStack", () => {
       }
     });
   });
+
 });

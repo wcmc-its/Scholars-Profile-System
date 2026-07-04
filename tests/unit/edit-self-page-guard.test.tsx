@@ -119,6 +119,8 @@ function fakeCtx(cwid: string, roleCategory: string | null) {
     publications: [],
     unmatchedPubmedCoi: [],
     unmatchedPubmedCoiReviewed: [],
+    reporterProfileCandidates: [],
+    reporterProfileConfirmed: [],
     highlights: null,
   };
 }

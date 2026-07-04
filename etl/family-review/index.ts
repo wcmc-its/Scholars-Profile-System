@@ -41,8 +41,11 @@ function readTerms(): string[] {
     return parseTerms(readFileSync(abs, "utf-8"));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      log("terms_file_missing", { path: abs });
-      return [];
+      // animal-model-terms.txt is checked into the repo — absence is a
+      // packaging bug. Returning [] used to delete every lexical flag row and
+      // later re-create them with reset firstSeenAt/reviewedAt, losing steward
+      // review state (audit PR-3).
+      throw new Error(`[FamilyReview] terms file missing at ${abs} — refusing to treat as empty`);
     }
     throw err;
   }

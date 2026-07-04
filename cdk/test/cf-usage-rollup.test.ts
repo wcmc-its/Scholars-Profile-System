@@ -91,4 +91,25 @@ describe("buildRollupInsert", () => {
     expect(sql).not.toContain("c_ip");
     expect(sql).not.toContain("x_forwarded_for");
   });
+
+  it("counts profiles at the root vanity slug, not a nonexistent /scholar/ path", () => {
+    // SPS profiles live at a root slug (app/(public)/[slug]); there is no
+    // /scholar/<cwid> route, so the old pattern counted zero (bug: pageviews=0).
+    expect(sql).not.toContain("/scholar/");
+    // Single-segment, dot-free root path...
+    expect(sql).toContain("^/[^/?.]+/?$");
+    // ...minus the reserved app routes.
+    expect(sql).toContain("NOT IN ('about', 'browse'");
+  });
+
+  it("restricts the two profile arms to 2xx, leaves the traffic arms at <=3xx (#1476)", () => {
+    // A profile pageview must be a 2xx (content rendered); a 3xx redirect --
+    // e.g. bot probes to /docs, /actuator getting a 301 -- is not a view and
+    // must not count. The geo/device/referrer traffic-shape arms keep the wider
+    // range. So: exactly 2 arms at 200-299, exactly 3 at 200-399.
+    const twoxx = sql.match(/sc_status BETWEEN 200 AND 299/g) ?? [];
+    const upTo3xx = sql.match(/sc_status BETWEEN 200 AND 399/g) ?? [];
+    expect(twoxx).toHaveLength(2);
+    expect(upTo3xx).toHaveLength(3);
+  });
 });

@@ -26,8 +26,8 @@ by **Amazon OpenSearch Service**. All displayed data is *derived* — a nightly/
 **Step Functions ETL** pulls from WCM source systems (Enterprise Directory, InfoEd, COI,
 ReciterDB, ReciterAI) into Aurora and rebuilds the OpenSearch index. Writes happen only
 through staff-authenticated `/edit` endpoints (SAML SSO). The whole thing is defined as
-code in **AWS CDK** across nine stacks, deployed to **two separate AWS accounts** (staging
-and prod) via **GitHub Actions + OIDC**.
+code in **AWS CDK** across nine stacks, deployed to a **single AWS account**
+(`665083158573`) with **env-prefix isolation** (staging and prod) via **GitHub Actions + OIDC**.
 
 ## Request path (what a visitor hits)
 
@@ -135,11 +135,18 @@ flowchart LR
 ```
 
 - **Cadences** (`PRODUCTION_ADDENDUM.md § EtlStack`; authoritative step lists in
-  `cdk/lib/etl-stack.ts`): nightly (`ed → reciter → asms → infoed → coi → dynamodb →
-  mesh-coverage → search-index → revalidate`), weekly (`completeness → spotlight →
-  reporter → nsf → jenzabar → search-index → revalidate`), annual (`hierarchy` + manual
-  approval gate). Step Functions enforces ordering (`reciter` cascades into `dynamodb`
-  within the nightly run) and short-circuits on failure.
+  `cdk/lib/etl-stack.ts`): nightly (`ed → reciter → reciter-coi-statements → asms →
+  infoed → coi → coi-gap → jenzabar → dynamodb → identity → scholar-tool → mesh-coverage →
+  pubmed-retractions → search-index → revalidate → integrity`; staging drops `infoed` — its
+  `10.20.91.8` host overlaps the VPC CIDR — and inserts `mesh-anchors` before
+  `pubmed-retractions`), weekly (`completeness → headshot → spotlight → reporter → nsf →
+  gates → nih-profile → pops → reporter-grants → clinical-trials → search-index → revalidate
+  → integrity`), annual (`hierarchy` + manual approval gate). Step Functions enforces
+  ordering (`reciter` cascades into `dynamodb` within the nightly run) and classifies each
+  step by failure tier (reliability-audit #1438): an **abort**-tier step (the spine —
+  `ed`/`reciter`/`dynamodb`/`search-index` plus the terminal `integrity` gate) pages P1 via
+  `etl-page-<env>` and stops the chain, while a **continue**-tier step (the enrichers) warns
+  via `etl-failures-<env>` and proceeds to the next step.
 - Each source maps to a connector in [`lib/sources/`](../lib/sources/); the full list of
   upstreams and what fails if each is down is in
   [`dependency-outage-matrix.md`](./dependency-outage-matrix.md).
@@ -172,18 +179,24 @@ protection, so a bad `AppStack` deploy — which happens often — cannot tear d
 
 | | Staging | Production |
 |---|---|---|
-| AWS account | separate | separate |
+| AWS account | `665083158573` (shared; env-prefix isolation) | `665083158573` (shared) |
 | Region / DR region | us-east-1 / us-west-2 | us-east-1 / us-west-2 |
-| VPC CIDR | `10.20.0.0/16` | `10.10.0.0/16` |
-| App tasks | 1 × (512 CPU / 1024 MiB) | 2 × (1024 CPU / 2048 MiB) |
+| VPC | shared `its-reciter-vpc01`[^shared-vpc] | own, `10.10.0.0/16` |
+| App tasks | 1 × (1024 CPU / 2048 MiB) | 2 × (2048 CPU / 4096 MiB) |
 | Aurora Serverless v2 | 0.5–2 ACU, writer-only | 1–8 ACU, writer + 1 reader |
-| OpenSearch | 1 × `t3.small.search` | 2 × `m6g.large.search` (multi-AZ) |
+| OpenSearch | 1 × `t3.medium.search` (fresh shared-VPC domain) | 2 × `m6g.large.search` (multi-AZ) |
 | NAT gateways | 1 | 1 (EIP-cap-constrained; see `config.ts`) |
 | ETL schedules on first deploy | enabled | disabled (operator-driven first run) |
 | Public host | `scholars-staging.weill.cornell.edu` | `scholars.weill.cornell.edu` |
 
 Deploy mechanics, the staging-gates-prod rule, and the prod approval gate are in
 [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md). Sizing source: [`cdk/lib/config.ts`](../cdk/lib/config.ts).
+
+[^shared-vpc]: Staging cut over to the shared, TGW-attached `its-reciter-vpc01`
+    (`vpc-08a1873fc8eebae28`) via #1419 (2026-07-02); its old standalone `10.20.0.0/16`
+    VPC, Aurora cluster, and OpenSearch domain are `RETAIN`'d until the Phase G
+    decommission (tracker #1458). Prod still runs its own `10.10.0.0/16` VPC pending its
+    per-env cutover.
 
 ## Cross-cutting concerns → where to read
 

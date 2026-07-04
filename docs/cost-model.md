@@ -1,7 +1,7 @@
 # Cost model
 
 **Audience.** Operators, ITS colleagues, and budget owners answering *"what does Scholars
-cost to run, and what drives the bill?"*
+cost to run, what drives the bill, and how does it compare to VIVO?"*
 
 **What this doc is — and isn't.** It records the **audited baseline**, the **guardrails**
 that are actually deployed, and the **cost drivers** (with their IaC-defined sizes) so you
@@ -50,6 +50,7 @@ those sizes at on-demand `us-east-1` rates and are **directional, not invoice-ac
 | **NAT gateway** | 1 | 1 | hourly + per-GB processed | Single NAT per env (EIP-cap trade-off). VPC endpoints (Secrets Mgr, S3) keep AWS-service traffic *off* the NAT to limit per-GB charges. |
 | **ALBs** | 2 (public + internal) | 2 | LCU-hours (~$16/mo each `est.`) | Two-ALB split is a deliberate ~$16/mo cost for a clean SG boundary ([`PRODUCTION_ADDENDUM.md § Two-ALB topology`](./PRODUCTION_ADDENDUM.md)). |
 | **X-Ray (tracing)** | 5% sample + 100% errors/slow | same | per-trace recorded ($5/1M) | **< $2/mo** `est.` ([`tracing.md`](./tracing.md)). Sidecar adds ~0.25 vCPU + 256 MB/task. |
+| **Bedrock (LLM generators)** | Opus 4.8, on-demand | same | per-token (in/out) per draft | Overview + biosketch *generate* calls (`lib/edit/overview-generator.ts`, `lib/edit/biosketch-generator.ts`). Self-service, rate-limited 10/hr/scholar, **no bulk path**; outputs persisted (re-render never re-calls). ~$0.03–0.40/draft → **tens of $/mo** `est.` (see *Runtime LLM spend* below). |
 | **On-call relay Lambda** | 256 MB, per-alarm | same | per-invocation | Negligible (one POST per alarm). |
 | **Secrets Manager** | ~11 secrets/env | ~11 | per-secret-month + API calls | Small, flat. |
 | **S3** | CloudFront logs (90 d), backups | logs | storage + requests | Small; access-log bucket has a 90-day lifecycle. |
@@ -64,6 +65,54 @@ cache hit rate means the Fargate app and Aurora serve only the *first* request p
 TTL window (24 h for scholar pages). A bot crawling all ~9,000 profiles costs ~9,000 origin
 renders/day at most, not 9,000 × (crawler concurrency). So edge spend trades against origin
 compute — watch both lines together at the post-EdgeStack budget review.
+
+## Runtime LLM (Bedrock) spend
+
+The app calls **Claude Opus 4.8 on Bedrock** for two self-service generators — the
+overview/research-summary and the NIH biosketch (`lib/edit/overview-generator.ts`,
+`lib/edit/biosketch-generator.ts`). On-demand, per-scholar, **rate-limited to 10
+generations/hour per target** with **no app-side bulk path**; drafts are persisted, so a
+re-render never re-calls the model. The app computes its own per-draft estimate
+(`lib/edit/overview-prompt-versions.ts`, surfaced to superusers) at the Opus $5/$25-per-Mtok
+rate:
+
+- **Overview** — 1 call (~5k in / 300 out) → **~$0.03/draft** `est.` (faithfulness pass off in prod).
+- **Biosketch** — faithfulness pass on → up to ~18 calls/generation → **~$0.40/draft** `est.`,
+  but **prod-dark today** (staging only), so it adds **$0 to the prod bill** until it rolls out.
+
+At realistic adoption this is **tens of dollars/month** `est.` — small next to Aurora/OpenSearch,
+but it scales with *generate* volume, not page views, so a bulk backfill over the faculty would be
+a one-time spike (~$0.10 × N overviews) to plan for.
+
+## Compared to VIVO (the system Scholars replaces)
+
+VIVO has no published run-cost figure; the number below is **derived** `est.` from its provisioned
+sizing in `VIVO Architecture Overview - 2025-10-07` (EC2 `t3.xlarge` load-balanced pair, RDS
+`db.m5.xlarge` MySQL with 100 GB + 1,000 provisioned IOPS, ALB+WAF, CloudFront, NAT). On-demand
+`us-east-1`:
+
+| VIVO component | Monthly `est.` |
+|---|---|
+| EC2 2× `t3.xlarge` (24×7) | ~$243 |
+| RDS `db.m5.xlarge` single-AZ + io1 100 GB / 1,000 IOPS | ~$362 |
+| ALB + NAT + CloudFront/WAF + ECR/S3/CloudWatch | ~$100 |
+| **VIVO total** | **≈ $700/mo** (range ~$500–1,000 by RDS Multi-AZ and reserved pricing) |
+
+So Scholars (~$425/mo audited → $600/mo budget) **runs at roughly the same-or-lower infra cost than
+the system it replaces**, while removing the VIVO support burden
+([`vivo-incident-analysis.md`](./vivo-incident-analysis.md)). The build-vs-buy framing — building
+Scholars in-house vs. licensing Elsevier Pure Portal at **$192K–$246K/yr** — lives in the ASMS
+strategic-planning docs (*Updated Options Matrix — With Pure*), not in this repo.
+
+## Upstream: ReciterAI pipeline (separate, near-zero standing cost)
+
+ReciterAI (topic hierarchy, publication scoring, spotlight, methods entities) is an
+**on-demand/scheduled batch** system that publishes to S3 + DynamoDB for SPS to read; it runs
+**nothing 24/7**. Its **own** standing infra is essentially DynamoDB + S3 storage — **well under
+$10/mo** (its own `docs/cost-model.md`); its Bedrock spend is ~$15/mo steady-state plus ~$210 per
+annual full rebuild, tracked there too. **Don't fold it into the SPS budget:** SPS pays for
+*reading* the `reciterai` table/buckets; ReciterAI pays for the compute and storage that produce
+them. The two run in different accounts with separate cost models.
 
 ## Levers (to reduce cost, in rough order of impact)
 
@@ -98,4 +147,6 @@ compute — watch both lines together at the post-EdgeStack budget review.
 ---
 
 *Baseline as audited 2026-05-28 (Phase 0+1, ~$425/mo combined). Re-audit against Cost
-Explorer after EdgeStack + EtlStack are active in prod.*
+Explorer after EdgeStack + EtlStack are active in prod. Runtime-LLM, VIVO-comparison, and
+ReciterAI sections added 2026-06-24 — all `est.`/derived, not billed; re-ground from Cost
+Explorer (and the VIVO account) at the budget review.*

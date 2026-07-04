@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { sanitizePubTitle } from "@/lib/utils";
 import type { ProfilePayload } from "@/lib/api/profile";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
@@ -323,6 +324,7 @@ function GrantRow({
   applIdFallback: number | undefined;
 }) {
   const grant = group.primary;
+  const isReporter = group.members.some((m) => m.source === "RePORTER");
   const label = GRANT_ROLE_LABEL[grant.role] ?? grant.role;
   const title = GRANT_ROLE_TITLE[grant.role] ?? grant.role;
   const startYear = group.startDate.slice(0, 4);
@@ -387,6 +389,18 @@ function GrantRow({
               <span className="text-muted-foreground ml-2 text-xs">
                 · {group.members.length} renewals
               </span>
+            ) : null}
+            {isReporter ? (
+              <>
+                {" · "}
+                <Link
+                  href="/about#provenance"
+                  className="underline-offset-2 hover:underline"
+                  title="Sourced from NIH RePORTER, not WCM-administered InfoEd records"
+                >
+                  via NIH RePORTER
+                </Link>
+              </>
             ) : null}
           </div>
           {canExpand ? (

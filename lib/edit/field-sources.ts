@@ -24,6 +24,10 @@ export const FIELD_SOURCE: Record<RequestAttribute, string> = {
   appointments: "ASMS by way of Enterprise Directory",
   education: "ASMS",
   funding: "InfoEd",
+  // Request-only (no panel renders a source line keyed to it — the Funding
+  // header shows the combined "InfoEd and NIH RePORTER" when RePORTER rows are
+  // present). The entry exists for `RequestAttribute` Record totality.
+  "funding-reporter": "NIH RePORTER",
   publications: "PubMed (attributed by ReCiter)",
   // #728 Phase D — `org-unit` is a request-only pseudo-attribute (no `/edit`
   // panel renders a source line for it); the entry exists only because the map
@@ -42,4 +46,31 @@ export const FIELD_SOURCE: Record<RequestAttribute, string> = {
 /** The system-of-record label for a sourced `/edit` attribute. */
 export function fieldSource(attribute: RequestAttribute): string {
   return FIELD_SOURCE[attribute];
+}
+
+/**
+ * Source key for a single CV-outline record (the per-row provenance badge in the
+ * `/edit` "CV (WCM format)" preview). Reuses the panel `RequestAttribute`
+ * vocabulary above, extended with the CV origins that have no `/edit` panel:
+ * `pops` (POPS, the public WeillCornell.org physician directory), `nyp` (the
+ * NewYork-Presbyterian affiliate feed — `Appointment.source` "ED-NYP", carried
+ * through the Enterprise Directory), and `generated` (the M1 LLM summary).
+ */
+export type CvSourceKey = RequestAttribute | "pops" | "generated" | "nyp";
+
+/** Labels for the CV-only sources that aren't in {@link FIELD_SOURCE}. `pops`
+ *  rows surface as the public physician directory by its real name; `nyp` is the
+ *  NewYork-Presbyterian affiliate appointment feed; `generated` is the M1 LLM
+ *  summary. */
+const CV_EXTRA_SOURCE: Record<"pops" | "generated" | "nyp", string> = {
+  pops: "POPS / WeillCornell.org",
+  generated: "AI-drafted",
+  nyp: "NYP Directory",
+};
+
+/** The system-of-record label for one CV-outline record's source key. */
+export function cvFieldSource(key: CvSourceKey): string {
+  return key === "pops" || key === "generated" || key === "nyp"
+    ? CV_EXTRA_SOURCE[key]
+    : FIELD_SOURCE[key];
 }

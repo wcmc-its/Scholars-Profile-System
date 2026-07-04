@@ -11,7 +11,9 @@
  * divCode-keyed query, this file inlines the query rather than refactoring
  * the dept helpers (a follow-up commit can DRY the two paths).
  */
+import { cache } from "react";
 import { prisma } from "@/lib/db";
+import { cachedRead } from "@/lib/api/swr-cache";
 import { identityImageEndpoint } from "@/lib/headshot";
 import type { DepartmentTopicArea } from "@/lib/api/departments";
 import type {
@@ -64,10 +66,10 @@ const GRANT_PAGE_SIZE = 20;
  * `opts.source` is an optional shortcut for callers that already loaded the
  * division row; passing it elides one point lookup.
  */
-export async function loadDivisionMemberCwids(
+export const loadDivisionMemberCwids = cache(async (
   divCode: string,
   opts: { source?: string } = {},
-): Promise<string[]> {
+): Promise<string[]> => {
   const ldapRows = await prisma.scholar.findMany({
     where: { divCode, deletedAt: null, status: "active" },
     select: { cwid: true },
@@ -105,7 +107,7 @@ export async function loadDivisionMemberCwids(
     select: { cwid: true },
   });
   return activeRows.map((r) => r.cwid);
-}
+});
 
 export type DivisionChief = {
   cwid: string;
@@ -147,7 +149,7 @@ export type DivisionDetail = {
   stats: DivisionStats;
 };
 
-export async function getDivision(
+async function getDivisionUncached(
   deptSlug: string,
   divSlug: string,
 ): Promise<DivisionDetail | null> {
@@ -247,6 +249,7 @@ export async function getDivision(
             where: {
               endDate: { gte: new Date() },
               cwid: { in: memberCwids },
+              source: { not: "RePORTER" }, // exclude individual RePORTER history
             },
             select: { externalId: true, id: true },
           })
@@ -351,7 +354,7 @@ export type DivisionFacultyResult = {
   methodFacet?: FacetOption[];
 };
 
-export async function getDivisionFaculty(
+async function getDivisionFacultyUncached(
   divCode: string,
   opts: { page?: number },
 ): Promise<DivisionFacultyResult> {
@@ -440,7 +443,7 @@ export async function getDivisionFaculty(
           args: unknown,
         ) => Promise<Array<{ cwid: string; _count: { _all: number } }>>)({
           by: ["cwid"],
-          where: { cwid: { in: cwids } },
+          where: { cwid: { in: cwids }, source: { not: "RePORTER" } },
           _count: { _all: true },
           orderBy: { cwid: "asc" },
         }),
@@ -604,6 +607,7 @@ export async function getDivisionHighlights(divCode: string): Promise<DeptHighli
     where: {
       endDate: { gte: new Date() },
       cwid: { in: memberCwids },
+      source: { not: "RePORTER" }, // exclude individual RePORTER history
     },
     orderBy: [{ endDate: "desc" }],
     take: 12,
@@ -701,7 +705,7 @@ export async function getDivisionHighlights(divCode: string): Promise<DeptHighli
   return { publications, grants };
 }
 
-export async function getDivisionPublicationsList(
+async function getDivisionPublicationsListUncached(
   divCode: string,
   opts: { page?: number; sort?: PubSort } = {},
 ): Promise<DeptListPubResult> {
@@ -799,7 +803,7 @@ export async function getDivisionPublicationsList(
   return { hits, total, page, pageSize: PUB_PAGE_SIZE };
 }
 
-export async function getDivisionGrantsList(
+async function getDivisionGrantsListUncached(
   divCode: string,
   opts: { page?: number; sort?: GrantSort } = {},
 ): Promise<DeptListGrantResult> {
@@ -815,6 +819,7 @@ export async function getDivisionGrantsList(
   const baseWhere = {
     cwid: { in: memberCwids },
     endDate: { gte: now },
+    source: { not: "RePORTER" }, // exclude individual RePORTER history
   };
 
   const distinctRows = (await prisma.grant.findMany({
@@ -951,3 +956,34 @@ export async function getDivisionGrantsList(
 
   return { hits, total, page, pageSize: GRANT_PAGE_SIZE };
 }
+
+// --- Cached public wrappers (viewer-independent reads via lib/api/swr-cache;
+//     mirrors the center-page caching in lib/api/centers.ts). The cache() on
+//     loadDivisionMemberCwids above dedups its ~6 calls within one render. ---
+export const getDivision = (deptSlug: string, divSlug: string) =>
+  cachedRead(`division:detail:${deptSlug}:${divSlug}`, () =>
+    getDivisionUncached(deptSlug, divSlug),
+  );
+
+export const getDivisionFaculty = (divCode: string, opts: { page?: number }) =>
+  cachedRead(`division:faculty:${divCode}:${Math.max(0, opts.page ?? 0)}`, () =>
+    getDivisionFacultyUncached(divCode, opts),
+  );
+
+export const getDivisionPublicationsList = (
+  divCode: string,
+  opts: { page?: number; sort?: PubSort } = {},
+) =>
+  cachedRead(
+    `division:pubs:${divCode}:${Math.max(0, opts.page ?? 0)}:${opts.sort ?? "newest"}`,
+    () => getDivisionPublicationsListUncached(divCode, opts),
+  );
+
+export const getDivisionGrantsList = (
+  divCode: string,
+  opts: { page?: number; sort?: GrantSort } = {},
+) =>
+  cachedRead(
+    `division:grants:${divCode}:${Math.max(0, opts.page ?? 0)}:${opts.sort ?? "most_recent"}`,
+    () => getDivisionGrantsListUncached(divCode, opts),
+  );

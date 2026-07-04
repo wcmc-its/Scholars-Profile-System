@@ -76,6 +76,7 @@ const ctx: EditContext = {
       externalId: "grant-1",
       title: "R01 Investigating Things",
       role: "PI",
+      source: "InfoEd",
       funderLabel: "NCI",
       startYear: 2024,
       endYear: 2027,
@@ -107,6 +108,11 @@ const ctx: EditContext = {
   unmatchedPubmedCoiReviewed: [],
   // #1112 — flat mention set for the redesigned review surface; empty by default.
   unmatchedPubmedCoiMentions: [],
+  // REPORTER_MATCH_V2 — empty by default (loader returns [] unless the flag is on
+  // for a genuine self/superuser viewer); a dedicated case exercises the populated
+  // state in the card's own test.
+  reporterProfileCandidates: [],
+  reporterProfileConfirmed: [],
   // #836 — null unless SELF_EDIT_MANUAL_HIGHLIGHTS is on AND the viewer is self.
   highlights: null,
 };
@@ -465,13 +471,13 @@ describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)",
     );
   });
 
-  it("surfaces coi-gap in superuser mode when candidates are present (operator decision), with reframed rail label", () => {
+  it("surfaces coi-gap in superuser mode when candidates are present (operator decision), with the viewer-neutral rail label", () => {
     const suCtx: EditContext = { ...superuserCtx, unmatchedPubmedCoi: gapCtx.unmatchedPubmedCoi };
     render(<EditPage ctx={suCtx} mode="superuser" />);
     const rail = screen.getByTestId("rail-coi-gap");
     expect(rail).toBeTruthy();
-    // Reframed for the superuser — not the first-person "From your publications".
-    expect(rail.textContent).toContain("From the scholar");
+    // §7.4 — describes the thing, not the source/viewer; same label for self + superuser.
+    expect(rail.textContent).toContain("Disclosed in publications");
     // Nested UNDER Conflicts of Interest (like the self rail) — a sub-view, not a
     // flat sibling. The child marker is the indentation class.
     expect(rail.className).toContain("pl-7");

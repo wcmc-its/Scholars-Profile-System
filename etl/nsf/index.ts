@@ -27,6 +27,7 @@
 import { db } from "../../lib/db";
 import { nsfAwardId } from "@/lib/award-number";
 import { fetchNsfAward, sleepBetweenRequests } from "./fetcher";
+import { withEtlRun } from "@/lib/etl-run";
 
 const REFRESH_TTL_DAYS = 90;
 
@@ -180,7 +181,7 @@ async function main() {
   console.log(`Done in ${((Date.now() - start) / 1000).toFixed(1)}s.`);
 }
 
-main()
+withEtlRun("NSF", main)
   .catch((e) => {
     console.error(e);
     process.exit(1);

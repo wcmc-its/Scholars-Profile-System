@@ -38,7 +38,7 @@ Earlier the app had two pages both calling themselves "Browse." The A–Z direct
 **Robots:** `noindex, follow` — non-canonical
 **Render:** `force-dynamic` — every request renders fresh, no ISR
 
-**Tabs:** `?type=people` (default) | `?type=publications`
+**Tabs:** `?type=people` (default) | `?type=publications` | `?type=funding`
 
 **People tab UI:**
 - When `q=""`: an A–Z directory strip renders between the tabs and the results grid, with a subordinate "Or browse departments & centers →" link beneath it. Once the user types, the strip and cross-link hide.
@@ -49,6 +49,9 @@ Earlier the app had two pages both calling themselves "Browse." The A–Z direct
 - Default sort flips from Relevance to Year (newest first) when `q=""` — Relevance is meaningless without a query.
 - Left sidebar: **Sort** (Relevance, Most recent, Citation count) and Department / Year facets.
 - Main column: paginated publication list with author chips.
+
+**Grants tab UI:**
+- Left sidebar: **Sort** (Relevance, End date, Start date, Publication count).
 
 **Data:** `lib/api/search.ts` exposes `searchPeople` and `searchPublications` against OpenSearch. `getAZBuckets()` from `lib/api/browse.ts` is called only when `q="" && type="people"`. The empty-query state shows all active scholars, paginated.
 

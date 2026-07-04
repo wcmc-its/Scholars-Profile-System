@@ -31,8 +31,10 @@ import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-req
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import { isGrantRecsEnabled } from "@/lib/edit/grant-recs";
 import { isBiosketchGenerateEnabled } from "@/lib/edit/biosketch-generator";
+import { isCvEnabled } from "@/lib/edit/cv-export";
 import { isRailRestructureEnabled } from "@/lib/edit/rail-layout";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
+import { isReporterMatchV2Enabled } from "@/lib/edit/reporter-match";
 import { isReciterPendingHintEnabled } from "@/lib/edit/reciter-pending-hint";
 
 export const dynamic = "force-dynamic";
@@ -111,6 +113,10 @@ export default async function EditScholarPage({
   const selfOrSuperuser = isSelf || session.isSuperuser || session.isCommsSteward;
   const includeHighlights = isManualHighlightsEnabled() && selfOrSuperuser;
   const includeCoiGap = isCoiGapHintEnabled() && (isSelf || session.isSuperuser);
+  // RePORTER "Is this you?" matches — superuser parity with the COI-gap gate
+  // above (self OR a genuine superuser; the confirm/revoke routes re-authorize).
+  const includeReporterProfile =
+    isReporterMatchV2Enabled() && (isSelf || session.isSuperuser);
   // ReCiter pending-pubs nudge — superuser parity with the COI-gap hint above:
   // surfaced for the scholar themselves OR a (non-impersonating) superuser viewing
   // the target. The data is a LIVE client read against the ReCiter engine, fetched
@@ -121,6 +127,7 @@ export default async function EditScholarPage({
   const ctx = await loadEditContext(targetCwid, db.read, new Date(), undefined, {
     includeHighlights,
     includeCoiGap,
+    includeReporterProfile,
   });
   if (!ctx) {
     // The scholar row does not exist (or is soft-deleted). A 404 keeps the
@@ -170,6 +177,8 @@ export default async function EditScholarPage({
     ctx.highlights !== null,
     isGrantRecsEnabled(),
     isBiosketchGenerateEnabled(),
+    isCvEnabled(),
+    ctx.reporterProfileCandidates.length > 0 || ctx.reporterProfileConfirmed.length > 0,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect(basePath);
@@ -237,6 +246,7 @@ export default async function EditScholarPage({
       reciterPendingEnabled={reciterPendingEnabled}
       grantRecsEnabled={isGrantRecsEnabled()}
       biosketchEnabled={isBiosketchGenerateEnabled()}
+      cvEnabled={isCvEnabled()}
       railRestructureEnabled={isRailRestructureEnabled()}
     />
   );

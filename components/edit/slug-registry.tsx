@@ -59,8 +59,6 @@ export type SlugRegistryProps = {
   methodsTab?: number | null;
   /** Forwarded to the sub-nav: `null` hides the "Data quality" tab. */
   dataQualityTab?: number | null;
-  /** Link back to the viewer's own self-edit surface; `null` when none. */
-  selfEditHref?: string | null;
   /** Forwarded to the sub-nav: show the "Units" tab (true for a superuser). */
   unitsTab?: boolean;
 };
@@ -86,7 +84,6 @@ export function SlugRegistry({
   administratorsTab,
   methodsTab,
   dataQualityTab,
-  selfEditHref,
   unitsTab,
 }: SlugRegistryProps) {
   const start = total === 0 ? 0 : page * pageSize + 1;
@@ -124,7 +121,6 @@ export function SlugRegistry({
         administratorsTab={administratorsTab}
         methodsTab={methodsTab}
         dataQualityTab={dataQualityTab}
-        selfEditHref={selfEditHref}
       />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">

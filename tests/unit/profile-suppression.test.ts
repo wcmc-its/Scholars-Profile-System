@@ -205,6 +205,7 @@ function grant(externalId: string, title: string) {
     title,
     role: "PI",
     funder: "NIH",
+    source: "InfoEd",
     startDate: new Date("2020-01-01"),
     endDate: new Date("2030-01-01"),
     awardNumber: null,

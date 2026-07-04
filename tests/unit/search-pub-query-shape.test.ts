@@ -425,8 +425,12 @@ describe("pub-tab query shape — SEARCH_PUB_TAB_CONCEPT_MODE (§5)", () => {
     expect(result.queryShape).toBe("restructured_msm");
     const bool = topLevelBool(capturedBodies[0]);
     expect(bool).not.toHaveProperty("should");
-    expect(JSON.stringify(capturedBodies[0])).not.toContain("reciterParentTopicId");
-    expect(JSON.stringify(capturedBodies[0])).not.toContain("meshDescriptorUi");
+    // Scan every predicate part of the body (query / post_filter / aggs) for
+    // concept clauses — but not `_source`, whose fetch-field include list
+    // (#1407) legitimately names `meshDescriptorUi` without querying on it.
+    const { _source: _fetchFields, ...predicates } = capturedBodies[0];
+    expect(JSON.stringify(predicates)).not.toContain("reciterParentTopicId");
+    expect(JSON.stringify(predicates)).not.toContain("meshDescriptorUi");
   });
 
   it("case 7 — expanded + empty descendantUis: falls through to §1.2 + logs invariant violation", async () => {
@@ -442,8 +446,11 @@ describe("pub-tab query shape — SEARCH_PUB_TAB_CONCEPT_MODE (§5)", () => {
         meshResolution: RESOLUTION_EMPTY_DESCENDANTS,
       });
       // Defensive fall-through: not concept_expanded, body is the §1.2 shape.
+      // (`_source` excluded from the scan — its fetch-field include list names
+      // `meshDescriptorUi` without querying on it, see case 6.)
       expect(result.queryShape).toBe("restructured_msm");
-      expect(JSON.stringify(capturedBodies[0])).not.toContain("meshDescriptorUi");
+      const { _source: _fetchFields, ...predicates } = capturedBodies[0];
+      expect(JSON.stringify(predicates)).not.toContain("meshDescriptorUi");
       // Loud log fired exactly once with the descriptor UI for grep.
       expect(errorSpy).toHaveBeenCalledTimes(1);
       const payload = JSON.parse(errorSpy.mock.calls[0][0] as string);
