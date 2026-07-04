@@ -203,22 +203,56 @@ export function rankCandidates(
 
 // ── I/O wrappers (integration-gated; need MySQL + OpenSearch) ───────────────
 
-/** Aggregate a scholar's L2-normalized topic vector on demand from publication_topic. */
-export async function scholarTopicVector(cwid: string): Promise<Map<string, number>> {
+// Scholar topic-vector weighting (accuracy levers §2.1/§2.4,
+// docs/funding-matcher-accuracy.md). First/last author = the scholar's OWN research
+// footprint (full weight); a middle-author cameo is a weaker signal of their
+// direction, so it is down-weighted rather than dropped — the reverse matcher
+// hard-gates to first/last, but weighting keeps a mostly-middle (big-lab,
+// early-career) author mappable. Recency decay (half-life below) replaces the hard
+// year cliff so a scholar's CURRENT focus drives matches, not equal-weighted history.
+// ponytail: fixed weights + half-life; learn them from the QA-tab feedback set
+// (§2.7) once labels exist. Next lever = IDF down-weighting of ubiquitous topics
+// (§2.1), deferred — it needs a cached corpus document-frequency map, not a
+// per-request full-table scan.
+const TOPIC_RECENCY_HALF_LIFE_YEARS = 5;
+const AUTHOR_POSITION_WEIGHT: Record<string, number> = { first: 1, last: 1, penultimate: 0.5 };
+const MIDDLE_AUTHOR_WEIGHT = 0.25;
+
+/** Per-(topic, year, author-position) contribution to the scholar topic vector:
+ *  the base reciterAI impact score scaled by recency decay + authorship. Pure. */
+export function scholarTopicRowWeight(
+  baseScore: number,
+  pubYear: number,
+  authorPosition: string | null,
+  nowYear: number,
+): number {
+  if (!(baseScore > 0)) return 0;
+  const recency = Math.pow(0.5, Math.max(0, nowYear - pubYear) / TOPIC_RECENCY_HALF_LIFE_YEARS);
+  const author = AUTHOR_POSITION_WEIGHT[authorPosition ?? ""] ?? MIDDLE_AUTHOR_WEIGHT;
+  return baseScore * recency * author;
+}
+
+/** Aggregate a scholar's L2-normalized topic vector on demand from publication_topic,
+ *  weighting each contribution by recency + authorship (see `scholarTopicRowWeight`). */
+export async function scholarTopicVector(
+  cwid: string,
+  now: Date = new Date(),
+): Promise<Map<string, number>> {
+  // Group by topic × year × author position so each bucket carries the year +
+  // position needed to weight it before the per-topic sum.
   const rows = await db.read.publicationTopic.groupBy({
-    by: ["parentTopicId"],
+    by: ["parentTopicId", "year", "authorPosition"],
     where: { cwid, year: { gte: RECITERAI_YEAR_FLOOR }, scholar: { deletedAt: null, status: "active" } },
     _sum: { score: true },
   });
+  const nowYear = now.getFullYear();
   const raw = new Map<string, number>();
-  let norm = 0;
   for (const r of rows) {
-    const w = Number(r._sum.score ?? 0);
-    if (w > 0) {
-      raw.set(r.parentTopicId, w);
-      norm += w * w;
-    }
+    const w = scholarTopicRowWeight(Number(r._sum.score ?? 0), r.year ?? nowYear, r.authorPosition, nowYear);
+    if (w > 0) raw.set(r.parentTopicId, (raw.get(r.parentTopicId) ?? 0) + w);
   }
+  let norm = 0;
+  for (const v of raw.values()) norm += v * v;
   if (norm === 0) return raw;
   const inv = 1 / Math.sqrt(norm);
   for (const [k, v] of raw) raw.set(k, v * inv);
@@ -260,7 +294,7 @@ export async function matchOpportunitiesForScholar(
   opts: MatchOptions = {},
 ): Promise<RankedOpportunity[]> {
   const now = opts.now ?? new Date();
-  const [vector, stage] = await Promise.all([scholarTopicVector(cwid), scholarCareerStage(cwid, now)]);
+  const [vector, stage] = await Promise.all([scholarTopicVector(cwid, now), scholarCareerStage(cwid, now)]);
 
   // Scholar MeSH fingerprint (people index) — best-effort secondary axis.
   let scholarMeshUi: string[] = [];
