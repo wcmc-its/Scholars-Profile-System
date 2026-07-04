@@ -16,6 +16,22 @@ describe("isAllowedRevalidatePath", () => {
     expect(isAllowedRevalidatePath("/departments/medicine/divisions/cardiology")).toBe(true);
   });
 
+  it("allows underscore-delimited topic ids (Topic.id slug shape)", () => {
+    // Topic ids are underscore slugs (e.g. "cancer_genomics"); the ETL
+    // revalidates `/topics/{id}` per topic. These were 400-rejected before.
+    expect(isAllowedRevalidatePath("/topics/cancer_genomics")).toBe(true);
+    expect(isAllowedRevalidatePath("/topics/hematology_medical_oncology")).toBe(true);
+    expect(isAllowedRevalidatePath("/topics/gi_cancer")).toBe(true);
+  });
+
+  it("keeps underscores topic-only — other segments stay hyphen-strict", () => {
+    // The underscore allowance must not leak into the other patterns.
+    expect(isAllowedRevalidatePath("/scholars/jane_smith")).toBe(false);
+    expect(isAllowedRevalidatePath("/departments/foo_bar")).toBe(false);
+    expect(isAllowedRevalidatePath("/topics/_leading")).toBe(false);
+    expect(isAllowedRevalidatePath("/topics/trailing_")).toBe(false);
+  });
+
   it("allows center + center-program-page paths (#540 / #1117)", () => {
     expect(isAllowedRevalidatePath("/centers/meyer-cancer-center")).toBe(true);
     expect(isAllowedRevalidatePath("/centers/meyer-cancer-center/programs/CB")).toBe(true);
