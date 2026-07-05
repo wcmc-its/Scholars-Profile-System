@@ -1470,8 +1470,8 @@ export class AppStack extends Stack {
         // weight via SEARCH_PEOPLE_CLINICAL_FN_WEIGHT (code default 3). Staging-on after the
         // 2026-07-02 A/B (docs/search-area-boost-ab-2026-07-02.md): strict win over the
         // staging default — clinician-expert medRank 14->9, zero per-query regressions.
-        // Prod flip after staging soak.
-        SEARCH_PEOPLE_CLINICAL_FN: env === "staging" ? "on" : "off",
+        // Prod flipped on 2026-07-04 (#1466); clinicalSpecialties backfilled on prod (#1481).
+        SEARCH_PEOPLE_CLINICAL_FN: "on",
         // #824 follow-up -- match-aware People-results "why" line (method/topic/
         // humanized-areas snippet). APP-ONLY, no reindex: derives from
         // scholar_family + the topic taxonomy at query time. resolvePeopleMatch-
@@ -1484,22 +1484,22 @@ export class AppStack extends Stack {
         // evidence object per hit selected by one precedence function and rendered
         // by one <ResultEvidence> component. APP-ONLY, no reindex (same query-time
         // derive). resolveSearchResultEvidence reads === "on". STAGING-FIRST soak:
-        // on for staging, off for prod (handoff doc §8 -- flip prod after the soak).
-        SEARCH_RESULT_EVIDENCE: env === "staging" ? "on" : "off",
+        // Prod flipped on 2026-07-04 (#1464 evidence bundle: this + rows + reason-counts flip together).
+        SEARCH_RESULT_EVIDENCE: "on",
         // Generalized evidence rows -- surfaces a scholar's topic-matching grants
         // as a lazy "Funding" disclosure row (Key funding) on the Scholars card and
         // badges the publications flavor (Research area / Concept / Keyword). The
         // row is presence-gated (hide-when-empty) via a per-card /grants fetch.
         // APP-ONLY, no reindex. resolveSearchEvidenceRows reads === "on".
-        // STAGING-FIRST soak: on for staging, off for prod (flip prod after soak).
-        SEARCH_EVIDENCE_ROWS: env === "staging" ? "on" : "off",
+        // Prod flipped on 2026-07-04 (#1464 evidence bundle).
+        SEARCH_EVIDENCE_ROWS: "on",
         // #1366 -- counted, STACKED evidence reason lines on the People card:
         // method / tagged-concept / research-area each become a first-class line
         // prefixed "N of M publications" (keyword fallback; clinical label-only).
         // Method + area counts read precomputed people-doc maps (methodFamilyCounts
         // / areaCounts), populated by a reindex. resolveSearchEvidenceReasonCounts
-        // reads === "on". STAGING-FIRST soak: on for staging, off for prod.
-        SEARCH_EVIDENCE_REASON_COUNTS: env === "staging" ? "on" : "off",
+        // reads === "on". Prod flipped on 2026-07-04 (#1464 evidence bundle); methodFamilyCounts/areaCounts backfilled (#1481).
+        SEARCH_EVIDENCE_REASON_COUNTS: "on",
         // Research-Area concentration boost (docs/search-research-area-relevance-spec.md).
         // When on, a topic query that resolves to a Research Area lifts scholars by their
         // relevance×coverage ranking in that area (reorder-only, no reindex).
@@ -1533,8 +1533,8 @@ export class AppStack extends Stack {
         // TAIL of the evidence model changes (areas slot -> concepts slot); the
         // query-match kinds are untouched. resolveSearchPeopleConceptHint reads
         // === "on". APP-ONLY query derive, but the topMeshTerms index field needs
-        // a reindex to populate. STAGING-FIRST soak: on for staging, off for prod.
-        SEARCH_PEOPLE_CONCEPT_HINT: env === "staging" ? "on" : "off",
+        // a reindex to populate. Prod flipped on 2026-07-04 (#1465); topMeshTerms present on prod.
+        SEARCH_PEOPLE_CONCEPT_HINT: "on",
         // #295 / #723 -- funding-tab concept clause + result-SET gate field.
         // Enabled in both envs now that the funding index carries the descriptor
         // rollup. `fundedPubMeshUi` is the higher-fidelity gate (funded-pub MeSH)
