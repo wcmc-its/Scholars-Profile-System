@@ -372,7 +372,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "RECITER_REJECT_SEND",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SELF_EDIT_MANUAL_HIGHLIGHTS",
@@ -400,7 +400,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "UNIT_ADMIN_CENTER_PROXY",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "CENTER_PROGRAM_PAGES",
@@ -444,7 +444,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "EDIT_BIOSKETCH_GENERATE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "EDIT_CV_EXPORT",
