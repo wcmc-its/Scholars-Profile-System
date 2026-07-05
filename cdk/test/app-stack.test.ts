@@ -1708,10 +1708,10 @@ describe("AppStack", () => {
         expect(env.get("SCHOLARS_MAIL_FROM")).toBe("no-reply-scholars@weill.cornell.edu");
       });
 
-      it("keeps the ReCiter pending-suggestions nudge OFF in prod (SELF_EDIT_RECITER_PENDING_HINT — armed; staging flips first)", () => {
-        // Prod is armed but off: the live DynamoDB read is staging-on for the soak,
-        // and prod flips only on the next approval-gated Sps-App-prod deploy.
-        expect(appContainerEnv().get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("off");
+      it("activates the ReCiter pending-suggestions nudge in prod (SELF_EDIT_RECITER_PENDING_HINT — launch batch 1, #506)", () => {
+        // Prod flipped 2026-07-05: staging soak complete (read-only DynamoDB hint,
+        // offline-safe). Render-only; reversible via flag flip.
+        expect(appContainerEnv().get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("on");
       });
 
       it("keeps the ReCiter 'Not mine' reject OFF in prod during the staging-first rollout (#746)", () => {
@@ -1764,12 +1764,12 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("SELF_EDIT_OVERVIEW_GENERATE")).toBe("on");
       });
 
-      it("keeps overview streaming OFF in prod but defaults the audience (SELF_EDIT_OVERVIEW_GENERATE_STREAM=off, OVERVIEW_AUDIENCE_DEFAULT=informed)", () => {
-        // The base generator is already live in prod; the streamed response SHAPE is a
-        // separate staging-first sub-flag, off in prod until an approval-gated deploy.
+      it("activates overview streaming in prod and defaults the audience (SELF_EDIT_OVERVIEW_GENERATE_STREAM=on, OVERVIEW_AUDIENCE_DEFAULT=informed)", () => {
+        // Prod flipped 2026-07-05 (launch batch 1, #506): the base generator is already
+        // live in prod; the streamed response SHAPE sub-flag flips on after its staging soak.
         // The audience default ("informed") ships in both envs as the no-image-roll lever.
         const env = appContainerEnv();
-        expect(env.get("SELF_EDIT_OVERVIEW_GENERATE_STREAM")).toBe("off");
+        expect(env.get("SELF_EDIT_OVERVIEW_GENERATE_STREAM")).toBe("on");
         expect(env.get("OVERVIEW_AUDIENCE_DEFAULT")).toBe("informed");
       });
 
