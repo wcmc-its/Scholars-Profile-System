@@ -368,7 +368,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "EDIT_DATA_QUALITY_DASHBOARD",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "RECITER_REJECT_SEND",
@@ -392,11 +392,11 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "EDIT_UNIT_ROSTER_EXPORT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "PROFILE_CENTER_AFFILIATION",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "UNIT_ADMIN_CENTER_PROXY",
@@ -404,11 +404,11 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "CENTER_PROGRAM_PAGES",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "CENTER_COLLABORATION_NETWORK",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "CENTER_COLLABORATION_GRANT_AXIS",
@@ -420,7 +420,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "MENTORING_COPUB_BRIDGE",
@@ -440,7 +440,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_OVERVIEW_GENERATE_STREAM",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "EDIT_BIOSKETCH_GENERATE",
@@ -448,7 +448,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "EDIT_CV_EXPORT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "REPORTER_MATCH_V2",
@@ -460,7 +460,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_RAIL_RESTRUCTURE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "BIOSKETCH_FAITHFULNESS_PASS",
@@ -540,7 +540,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PUB_FACET_SPLIT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PEOPLE_METHOD_FAMILY",
@@ -564,7 +564,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_RESULT_EVIDENCE",
@@ -624,7 +624,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_CONCEPT_GRANT_AXIS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_MESH_RESOLUTION_FALLBACK",
@@ -724,7 +724,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLAR_LIST_EXPORT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "INTERNAL_VIEWER_NETWORK_SIGNAL",

@@ -1082,7 +1082,7 @@ export class AppStack extends Stack {
         // STAGING-FIRST: on in staging to soak, off in prod until sign-off. The
         // headshot column is populated by the weekly etl:headshot step (EtlStack);
         // until its first run, headshot cells render "— (not checked)".
-        EDIT_DATA_QUALITY_DASHBOARD: env === "staging" ? "on" : "off",
+        EDIT_DATA_QUALITY_DASHBOARD: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
         // #746 — self-edit "Not mine" → ReCiter gold-standard reject.
         // STAGING-FIRST rollout: ON in staging, OFF in prod until the staging
         // soak completes (prod flips in a follow-up). While off, "Not mine?"
@@ -1143,17 +1143,17 @@ export class AppStack extends Stack {
         //   CENTER_PROGRAM_PAGES       (#1105) per-program pages + leader. The schema
         //                              migration was applied by the CD migrate step on
         //                              the edbb70eb deploy, so the loader's new columns exist.
-        EDIT_UNIT_ROSTER_EXPORT: env === "staging" ? "on" : "off",
-        PROFILE_CENTER_AFFILIATION: env === "staging" ? "on" : "off",
+        EDIT_UNIT_ROSTER_EXPORT: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
+        PROFILE_CENTER_AFFILIATION: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
         UNIT_ADMIN_CENTER_PROXY: env === "staging" ? "on" : "off",
-        CENTER_PROGRAM_PAGES: env === "staging" ? "on" : "off",
+        CENTER_PROGRAM_PAGES: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
         // CENTER_COLLABORATION_NETWORK (#1137) — the public "Collaboration" tab
         // on the center page: an interactive, program-colored co-authorship
         // graph + standalone-HTML export. ADDITIONALLY gated data-driven on the
         // center having a CenterProgram taxonomy (today only the Meyer Cancer
         // Center), so "just the Cancer Center for now" needs no hardcoded code.
         // App-only, no reindex, no migration. Staging-on for soak; prod-off.
-        CENTER_COLLABORATION_NETWORK: env === "staging" ? "on" : "off",
+        CENTER_COLLABORATION_NETWORK: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
         // CENTER_COLLABORATION_GRANT_AXIS (#1137 Phase 2) — the SECOND
         // relationship axis on the same tab: grant co-investigation (members who
         // share a sponsor awardNumber), with an axis toggle (Publications /
@@ -1178,7 +1178,7 @@ export class AppStack extends Stack {
         // ON in staging (live rollout); OFF in prod (armed — flips on the next
         // approval-gated Sps-App-prod deploy after the staging soak). The nudge only
         // renders for a genuine (non-impersonating) self viewer with this flag on.
-        SELF_EDIT_RECITER_PENDING_HINT: env === "staging" ? "on" : "off",
+        SELF_EDIT_RECITER_PENDING_HINT: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
         // #443 -- mentee co-publication BRIDGE. getMenteesForMentor's per-mentee
         // co-pub count + 3-pub preview is a LIVE WCM ReciterDB query the in-VPC
         // app can't reach, so it degrades to "temporarily unavailable" in
@@ -1252,7 +1252,7 @@ export class AppStack extends Stack {
         // approval-gated Sps-App-prod deploy flips it; off ⇒ the buffered path, unchanged
         // (isOverviewGenerateStreamEnabled, lib/edit/overview-generator.ts). Takes effect
         // on a manual `cdk deploy --exclusively Sps-App-<env>`.
-        SELF_EDIT_OVERVIEW_GENERATE_STREAM: env === "staging" ? "on" : "off",
+        SELF_EDIT_OVERVIEW_GENERATE_STREAM: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
         // #917 v5 -- the NIH-biosketch generator on the /edit surface. Default-off
         // and staging-first: this is a NEW surface, so it stays "on" only in
         // staging while it bakes, and "off" in prod until an approval-gated
@@ -1264,7 +1264,7 @@ export class AppStack extends Stack {
         // section. NEW surface: staging-first, prod-dark until an approval-gated
         // `cdk deploy --exclusively Sps-App-<env>`. Same Bedrock task role (M1
         // reuses the overview generator) -- no new IAM.
-        EDIT_CV_EXPORT: env === "staging" ? "on" : "off",
+        EDIT_CV_EXPORT: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
         // REPORTER_MATCH_V2 -- the RePORTER PMID-overlap "Is this you?" card on the
         // /edit surface (the app side of the flag; the ETL side is set in
         // etl-stack.ts). Gates the EditContext load, the rail item, and the
@@ -1282,7 +1282,7 @@ export class AppStack extends Stack {
         // Default-off and staging-first: "on" in staging while it bakes, "off" in
         // prod until an approval-gated Sps-App-prod deploy flips it. Takes effect
         // on a manual `cdk deploy --exclusively Sps-App-<env>`.
-        SELF_EDIT_RAIL_RESTRUCTURE: env === "staging" ? "on" : "off",
+        SELF_EDIT_RAIL_RESTRUCTURE: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
         // #917 v6 -- post-generation faithfulness pass for the biosketch generator.
         // ON in BOTH envs: the biosketch is a grant document, and one fabricated
         // metric there dwarfs the ~3x cost (handoff §5). The route forces it on
@@ -1423,7 +1423,7 @@ export class AppStack extends Stack {
         // page- and sort-invariant facet counts and pays only the cheap hit
         // query. NO reindex prereq -- request-shape change only; flag-off is
         // byte-identical. STAGING-FIRST: soak on staging before prod.
-        SEARCH_PUB_FACET_SPLIT: env === "staging" ? "on" : "off",
+        SEARCH_PUB_FACET_SPLIT: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
         // #824 sec4c -- People-tab method-family ranking boost. Same
         // reindex-then-flip shape as SEARCH_PUB_DEPARTMENT_FILTER above: the
         // people index must be rebuilt so docs carry the `methodFamily` rollup
@@ -1478,7 +1478,7 @@ export class AppStack extends Stack {
         // AwareSnippet reads === "on"; off => today's snippet. STAGING-FIRST: on
         // for staging (pairs with SEARCH_PEOPLE_METHOD_FAMILY above so the method
         // badge has families to surface), off for prod.
-        SEARCH_PEOPLE_MATCH_AWARE_SNIPPET: env === "staging" ? "on" : "off",
+        SEARCH_PEOPLE_MATCH_AWARE_SNIPPET: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
         // #824 follow-up Phase 1 -- the coherent ResultEvidence snippet model
         // (#1056). When on, supersedes the match-aware chain above with one typed
         // evidence object per hit selected by one precedence function and rendered
@@ -1608,7 +1608,7 @@ export class AppStack extends Stack {
         // are open design follow-ups, NOT activation blockers); prod stays off
         // until that eval. Flip is env-only via `cdk deploy --exclusively
         // Sps-App-<env>` (CD re-rolls the image only) -- the flag-parity rule.
-        SEARCH_PEOPLE_CONCEPT_GRANT_AXIS: env === "staging" ? "on" : "off",
+        SEARCH_PEOPLE_CONCEPT_GRANT_AXIS: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
         //   SEARCH_MESH_RESOLUTION_FALLBACK -- decompose-and-resolve MeSH fallback.
         //     When ON, resolveMeshDescriptor -- after the exact name/entry-term/alias
         //     lookup misses -- retries the query's contiguous word-windows
@@ -1886,7 +1886,7 @@ export class AppStack extends Stack {
         // with the #866 email column below); prod OFF (ships dark in prod). Wire
         // in BOTH .env.local AND here per the flag-parity rule; `cdk deploy
         // Sps-App-<env>` required (CD re-rolls the image only).
-        SCHOLAR_LIST_EXPORT: env === "staging" ? "on" : "off",
+        SCHOLAR_LIST_EXPORT: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
         // #866 -- "internal viewer" gating (authenticated session OR on the WCM
         // network by source IP). STAGING soak ON (network signal + email column);
         // prod OFF (ships dark in prod, pending #876 authoritative ranges +
