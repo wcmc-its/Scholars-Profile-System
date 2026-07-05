@@ -1714,11 +1714,11 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("on");
       });
 
-      it("keeps the ReCiter 'Not mine' reject OFF in prod during the staging-first rollout (#746)", () => {
-        // Env-gated: ON in staging, OFF in prod until the staging soak
-        // completes. In prod the route 503s and "Not mine?" keeps the
-        // Publication-Manager off-ramp.
-        expect(appContainerEnv().get("RECITER_REJECT_SEND")).toBe("off");
+      it("activates the ReCiter 'Not mine' reject in prod (RECITER_REJECT_SEND, launch batch 2, #746/#506)", () => {
+        // Prod flipped 2026-07-05: staging soak complete + the item-3 VPC
+        // consolidation gave prod ReCiter connectivity. Best-effort writeback;
+        // failures record locally and are retried by etl:reciter-refresh.
+        expect(appContainerEnv().get("RECITER_REJECT_SEND")).toBe("on");
       });
 
       it("activates the Methods lens in prod (METHODS_LENS_ENABLED + METHODS_LENS_SENSITIVE_GATE both ON, #962/#1481 go-live)", () => {
@@ -1773,12 +1773,12 @@ describe("AppStack", () => {
         expect(env.get("OVERVIEW_AUDIENCE_DEFAULT")).toBe("informed");
       });
 
-      it("keeps the #917 v6 biosketch generator OFF in prod (EDIT_BIOSKETCH_GENERATE=off, staging-first; faithfulness pass ON; default version v6)", () => {
-        // New surface: default-off in prod, on in staging while it bakes. The #917 v6
-        // faithfulness pass is ON in both envs (grant document); the default prompt
-        // version is v7 in both envs (the generator stays dark in prod until the flag flips).
+      it("activates the #917 biosketch generator in prod (EDIT_BIOSKETCH_GENERATE=on, launch batch 2; faithfulness pass ON; default version v7)", () => {
+        // Prod flipped 2026-07-05 (#506): staging soak complete. The #917
+        // faithfulness pass stays ON in both envs (grant document); the default
+        // prompt version is v7 in both envs.
         const env = appContainerEnv();
-        expect(env.get("EDIT_BIOSKETCH_GENERATE")).toBe("off");
+        expect(env.get("EDIT_BIOSKETCH_GENERATE")).toBe("on");
         expect(env.get("BIOSKETCH_FAITHFULNESS_PASS")).toBe("on");
         expect(env.get("BIOSKETCH_PROMPT_VERSION_DEFAULT")).toBe("v7");
       });

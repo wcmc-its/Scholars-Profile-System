@@ -1090,7 +1090,7 @@ export class AppStack extends Stack {
         // ONLY in the ETL task, so the app just records the reject locally and
         // the etl:reciter-refresh scanner propagates it to the gold standard +
         // fires the delayed re-score.
-        RECITER_REJECT_SEND: env === "staging" ? "on" : "off",
+        RECITER_REJECT_SEND: "on", // Prod flipped 2026-07-05 (launch batch 2, #506; side-effect flag, staging-soaked).
         // #836 — SELF_EDIT_MANUAL_HIGHLIGHTS: the self-only opt-in to choose
         // profile Highlights manually (a frozen `field_override(selectedHighlightPmids)`
         // set that overrides the AI ranking at read time). Read via
@@ -1145,7 +1145,7 @@ export class AppStack extends Stack {
         //                              the edbb70eb deploy, so the loader's new columns exist.
         EDIT_UNIT_ROSTER_EXPORT: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
         PROFILE_CENTER_AFFILIATION: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
-        UNIT_ADMIN_CENTER_PROXY: env === "staging" ? "on" : "off",
+        UNIT_ADMIN_CENTER_PROXY: "on", // Prod flipped 2026-07-05 (launch batch 2, #506; side-effect flag, staging-soaked).
         CENTER_PROGRAM_PAGES: "on", // Prod flipped 2026-07-05 (launch flag-parity batch 1, #506; render-only, staging-soaked).
         // CENTER_COLLABORATION_NETWORK (#1137) — the public "Collaboration" tab
         // on the center page: an interactive, program-colored co-authorship
@@ -1259,7 +1259,7 @@ export class AppStack extends Stack {
         // Sps-App-prod deploy flips it. Same Bedrock task role as the overview
         // generator (no new IAM). Takes effect on a manual
         // `cdk deploy --exclusively Sps-App-<env>`.
-        EDIT_BIOSKETCH_GENERATE: env === "staging" ? "on" : "off",
+        EDIT_BIOSKETCH_GENERATE: "on", // Prod flipped 2026-07-05 (launch batch 2, #506; side-effect flag, staging-soaked).
         // EDIT_CV_EXPORT -- the "CV (WCM format)" generator on the /edit Tools
         // section. NEW surface: staging-first, prod-dark until an approval-gated
         // `cdk deploy --exclusively Sps-App-<env>`. Same Bedrock task role (M1
