@@ -1721,13 +1721,14 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("RECITER_REJECT_SEND")).toBe("off");
       });
 
-      it("keeps the Methods lens dark in prod (METHODS_LENS_ENABLED + METHODS_LENS_SENSITIVE_GATE both OFF, #799/#801 staging-first)", () => {
-        // Env-gated: both ON in staging, OFF in prod until the staging soak
-        // completes and the prod data steps (#794 cutover + #801 overlay seed)
-        // are done. Off in prod = loadScholarFamilies returns [] so nothing
-        // renders and no sensitive family leaks.
-        expect(appContainerEnv().get("METHODS_LENS_ENABLED")).toBe("off");
-        expect(appContainerEnv().get("METHODS_LENS_SENSITIVE_GATE")).toBe("off");
+      it("activates the Methods lens in prod (METHODS_LENS_ENABLED + METHODS_LENS_SENSITIVE_GATE both ON, #962/#1481 go-live)", () => {
+        // Prod go-live 2026-07-05: the staging soak is done and the prod data
+        // steps are complete -- scholar_family/family_entity loaded (#1481) and
+        // the #801 sensitivity overlay seeded on prod (38 rows mirrored from
+        // staging). SENSITIVE_GATE MUST be on with ENABLED so the curated
+        // live-animal families stay hidden on the public payload.
+        expect(appContainerEnv().get("METHODS_LENS_ENABLED")).toBe("on");
+        expect(appContainerEnv().get("METHODS_LENS_SENSITIVE_GATE")).toBe("on");
       });
 
       it("keeps the subtopic-grain grant matcher off in prod (GRANT_MATCHER_SUBTOPIC_GRAIN, staging-first)", () => {
@@ -1737,11 +1738,11 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("GRANT_MATCHER_SUBTOPIC_GRAIN")).toBe("off");
       });
 
-      it("keeps the family click-to-filter off in prod (METHODS_LENS_FAMILY_FILTER, #819)", () => {
-        // Staging-first like the sibling Methods-lens flags; off in prod until the
-        // pmids-bearing scholar_family rollup is loaded and the staging soak is done.
-        expect(appContainerEnv().get("METHODS_LENS_FAMILY_FILTER")).toBe("off");
-        expect(appContainerEnv().get("METHODS_LENS_PAGES")).toBe("on"); // #824 armed both envs (armed-not-live; ENABLED still gates prod)
+      it("activates the family click-to-filter in prod (METHODS_LENS_FAMILY_FILTER, #819/#962 go-live)", () => {
+        // Prod go-live 2026-07-05 with the sibling Methods-lens flags: the
+        // pmids-bearing scholar_family rollup is loaded (#1481) and the staging soak is done.
+        expect(appContainerEnv().get("METHODS_LENS_FAMILY_FILTER")).toBe("on");
+        expect(appContainerEnv().get("METHODS_LENS_PAGES")).toBe("on"); // #824 armed both envs (now live in prod with ENABLED on)
       });
 
       it("serves the root /{slug} canonical profile URL in prod (PROFILE_CANONICAL=root, #671 cutover)", () => {

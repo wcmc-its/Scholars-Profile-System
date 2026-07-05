@@ -1431,7 +1431,7 @@ export class AppStack extends Stack {
         // === "on"; a not-yet-reindexed cluster simply matches an absent field,
         // never a 500). STAGING-FIRST: on for staging (people index reindexed
         // 2026-06-16), off for prod (prod go-live is a separate reindex + flip).
-        SEARCH_PEOPLE_METHOD_FAMILY: env === "staging" ? "on" : "off",
+        SEARCH_PEOPLE_METHOD_FAMILY: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
         // #1269 -- People-tab method-family TIER boost. A MULTIPLICATIVE
         // function_score factor for scholars tagged with the SEARCHED family, so
         // an explicitly method-tagged scholar outranks a keyword/MeSH-only match
@@ -1443,7 +1443,7 @@ export class AppStack extends Stack {
         // on for staging (validate the #1269 spatial-transcriptomics repro), off
         // for prod -- prod go-live pairs with SEARCH_PEOPLE_METHOD_FAMILY's own
         // prod flip + reindex.
-        SEARCH_PEOPLE_METHOD_FAMILY_TIER: env === "staging" ? "on" : "off",
+        SEARCH_PEOPLE_METHOD_FAMILY_TIER: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
         // #1119 -- People-tab method-CONTEXT ranking boost (tool-usage snippet text
         // from ReciterAI tool_context). Same reindex-then-flip shape as
         // SEARCH_PEOPLE_METHOD_FAMILY. It is PROSE, so it must SOAK on staging
@@ -1453,7 +1453,7 @@ export class AppStack extends Stack {
         // `methodContext` field. Off for prod (prod go-live is a separate backfill +
         // reindex + flip). resolvePeopleMethodContextBoost reads === "on"; a
         // not-yet-reindexed cluster matches an absent field (never a 500).
-        SEARCH_PEOPLE_METHOD_CONTEXT: env === "staging" ? "on" : "off",
+        SEARCH_PEOPLE_METHOD_CONTEXT: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
         // POPS clinical specialty search -- indexes board-cert specialties, primary
         // specialties, and clinical expertise (problem_procedure) from POPS into the
         // people doc and adds a clinical:exact evidence kind when the query matches
@@ -1699,9 +1699,9 @@ export class AppStack extends Stack {
         // profile; ENABLED-on with the gate off would expose the sensitive
         // families. Deployed manually (cdk deploy --exclusively Sps-App-<env>);
         // the CD pipeline only re-rolls the image.
-        METHODS_LENS_ENABLED: env === "staging" ? "on" : "off",
-        METHODS_LENS_SENSITIVE_GATE: env === "staging" ? "on" : "off",
-        METHODS_LENS_FAMILY_FILTER: env === "staging" ? "on" : "off",
+        METHODS_LENS_ENABLED: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
+        METHODS_LENS_SENSITIVE_GATE: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
+        METHODS_LENS_FAMILY_FILTER: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
         //   METHODS_LENS_FAMILY_ROSTER_FALLBACK -- #862. Backfills the per-family
         //     "Top scholars" row with attributed non-faculty (postdocs/fellows/core
         //     staff), faculty-first, when the FT-faculty set is empty/short -- so a
@@ -1712,7 +1712,7 @@ export class AppStack extends Stack {
         //     tooltip copy reads faculty-only. doctoral_student/affiliate_alumni are
         //     NEVER surfaced regardless of this flag. Image-only/reversible (no data
         //     prereq); flip is env-only via cdk deploy Sps-App-<env>.
-        METHODS_LENS_FAMILY_ROSTER_FALLBACK: env === "staging" ? "on" : "off",
+        METHODS_LENS_FAMILY_ROSTER_FALLBACK: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
         //   METHODS_LENS_PAGES -- standalone cross-scholar Method pages
         //     (/methods/**), search surfacing, and the per-scholar inbound
         //     links. ARMED ON in BOTH envs. Staging is live (the master lens +
@@ -1741,7 +1741,7 @@ export class AppStack extends Stack {
         //     review; PROD stays dark until External Affairs signs off.
         //     RENDER-ONLY: never re-fed into any LLM/embedding/retrieval. Wire in
         //     BOTH .env.local AND here per the flag-parity rule.
-        METHODS_LENS_FAMILY_DEFINITIONS: env === "staging" ? "on" : "off",
+        METHODS_LENS_FAMILY_DEFINITIONS: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
         //   METHODS_LENS_TOOL_CONTEXT -- #1119. Surfaces the ReciterAI tool-usage
         //     CONTEXT snippets (scholar_family.exemplar_contexts /
         //     scholar_tool.sample_context) across the public Methods surfaces: a
@@ -1757,7 +1757,7 @@ export class AppStack extends Stack {
         //     migrate + run etl:scholar-tool (backfills exemplar_contexts/sample_context)
         //     -> flip staging-on here + cdk deploy Sps-App-staging to soak -> prod on.
         //     Wire in BOTH .env.local AND here per the flag-parity rule.
-        METHODS_LENS_TOOL_CONTEXT: env === "staging" ? "on" : "off",
+        METHODS_LENS_TOOL_CONTEXT: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
         //   METHODS_LENS_PUB_MODAL -- #917. The publication-detail modal "Methods"
         //     section (per-pmid method families, #800/#801-gated, linked to the
         //     Method pages). The families data layer + UI shipped in #938; this
@@ -1767,7 +1767,7 @@ export class AppStack extends Stack {
         //     no DB/ETL/reindex dependency. STAGING ON (preserves the surface live since
         //     #938 shipped dark behind the master flag), prod OFF until the gated lens
         //     go-live. Wire in BOTH .env.local AND here per the flag-parity rule.
-        METHODS_LENS_PUB_MODAL: env === "staging" ? "on" : "off",
+        METHODS_LENS_PUB_MODAL: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
         //   METHODS_LENS_FAMILY_SYNONYMS -- method-family search synonyms. When on,
         //     matchQueryToTaxonomy ALSO matches a family against its curated lay-term /
         //     brand / acronym synonyms (lib/methods/family-synonyms.ts) via whole-word
@@ -1779,7 +1779,7 @@ export class AppStack extends Stack {
         //     Sps-App-<env> (CD only re-rolls the image). STAGING ON (method lens is
         //     staging-live -> synonyms soak there); PROD OFF (inert anyway until the
         //     methods-lens go-live flips METHODS_LENS_ENABLED in prod).
-        METHODS_LENS_FAMILY_SYNONYMS: env === "staging" ? "on" : "off",
+        METHODS_LENS_FAMILY_SYNONYMS: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
         //   METHODS_LENS_CELL_LINE_ENTITIES -- #1166. Methods Surface B: the ranked
         //     "Specific cell lines used" strip + per-(pub x entity) relevance snippet
         //     + all-cell-lines directory on the method-family page, read from the
@@ -1790,7 +1790,7 @@ export class AppStack extends Stack {
         //     flips. App-only: env-only flip via cdk deploy Sps-App-<env> after a
         //     `etl:scholar-tool` backfill against a v4 manifest (CD only re-rolls the
         //     image). STAGING ON (soak there); PROD OFF (no entity data + gated).
-        METHODS_LENS_CELL_LINE_ENTITIES: env === "staging" ? "on" : "off",
+        METHODS_LENS_CELL_LINE_ENTITIES: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
         //   METHODS_LENS_ENTITY_USAGE -- #1168. SUPERSET of the cell-line flag:
         //     generalizes the same entity rail + per-paper usage snippet to ALL
         //     tool/method families and lights up the WS-C badge (mention_class ->
@@ -1802,7 +1802,7 @@ export class AppStack extends Stack {
         //     prod-rollout rehearsal switch. The all-tools surface stays empty until
         //     the producer emits non-cell-line entity layers + a backfill lands them.
         //     PROD OFF (gated -- no prod entity data, flipped at go-live).
-        METHODS_LENS_ENTITY_USAGE: env === "staging" ? "on" : "off",
+        METHODS_LENS_ENTITY_USAGE: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
         //   CENTER_METHODS_FACET -- #962. The center-roster "Methods & tools"
         //     multi-select facet + per-member tool chips on the GROUPED center
         //     roster. ADDITIONALLY gated on METHODS_LENS_ENABLED in code (the
@@ -1815,7 +1815,7 @@ export class AppStack extends Stack {
         //     lens substrate is staging-on); PROD OFF until the methods-lens
         //     go-live. Wire in BOTH .env.local AND here per the flag-parity rule;
         //     manual cdk deploy Sps-App-<env> required (CD only re-rolls image).
-        CENTER_METHODS_FACET: env === "staging" ? "on" : "off",
+        CENTER_METHODS_FACET: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
         //   ORG_UNIT_METHODS_CHIPS -- #974 Phase 1. Per-member "method chips"
         //     (top-3 public method families) on the DEPARTMENT + DIVISION roster
         //     rows. ADDITIONALLY gated on METHODS_LENS_ENABLED in code (the
@@ -1829,7 +1829,7 @@ export class AppStack extends Stack {
         //     staging-on); PROD OFF until the methods-lens go-live. Wire in BOTH
         //     .env.local AND here per the flag-parity rule; manual cdk deploy
         //     Sps-App-<env> required (CD only re-rolls the image).
-        ORG_UNIT_METHODS_CHIPS: env === "staging" ? "on" : "off",
+        ORG_UNIT_METHODS_CHIPS: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
         //   ORG_UNIT_METHODS_FACET -- #974 Phase 2. The DEPARTMENT + DIVISION
         //     roster "Methods & tools" multi-select FACET (server-aggregated
         //     buckets rendered with the cacheable page + a client-fetch to the
@@ -1846,7 +1846,7 @@ export class AppStack extends Stack {
         //     methods-lens go-live. Wire in BOTH .env.local AND here per the
         //     flag-parity rule; manual cdk deploy Sps-App-<env> required (CD only
         //     re-rolls the image).
-        ORG_UNIT_METHODS_FACET: env === "staging" ? "on" : "off",
+        ORG_UNIT_METHODS_FACET: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
         // Cores -- core-facility usage inference (publication_core substrate,
         // ReciterAI pipeline_cores #245; SPS #1161/#1163/#1165/#1176). Three
         // STANDALONE flags, all STAGING-FIRST, all default OFF until the engine
