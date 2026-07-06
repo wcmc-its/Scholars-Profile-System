@@ -22,7 +22,7 @@ are #1218 Track A.2 — CSV ingest, upstream — and #1203 rollout).
 **Split by ownership.** SPS owns the *submission* (UI, SAML authz, audit, instant
 duplicate check, status visibility). **ReciterAI owns all processing** — scrape,
 extraction, research/non-research judge, topic scoring, prestige, honorific, dedup,
-persist — exactly as it does for every other source. The round trip is a `SUBMISSION#`
+persist — exactly as it does for every other source. The round trip is a `SUBMISSION`
 queue item in the existing `reciterai` DynamoDB table.
 
 **Alternative considered — SPS-local pipeline (v1 of this spec):** scrape + LLM-extract
@@ -58,13 +58,13 @@ Same gate as `/edit/find-researchers` and `/api/opportunities`
 [/edit/find-researchers panel]                       SPS
   URL + optional note
     ├─ instant checks: https-only URL shape; normalized-URL dedup vs
-    │  opportunity.sourceUrl (projection) AND pending SUBMISSION# items
-    ├─ PutItem SUBMISSION#<uuid> {url, submitted_by, note, status: pending}
+    │  opportunity.sourceUrl (projection) AND pending SUBMISSION items
+    ├─ PutItem (PK=SUBMISSION, SK=<ISO ts>#<uuid8>) {url, submitted_by, note, status: pending}
     └─ audit append: opportunity_submission
   panel lists submissions w/ status chips (pending / processed→links / rejected+reason)
 
 [pipeline_grants.ingest_submissions]                 ReciterAI  (manual CLI today;
-  drain pending SUBMISSION# items:                    nightly once #269 lands)
+  drain pending SUBMISSION items:                    nightly once #269 lands)
     fetch URL (stdlib urllib, SSRF-guarded; JS-rendered pages reject as
       content_too_thin — no headless browser in v1, the WCM funding-DB Playwright
       scrape was external to the repo) → extract 1..N award programs (Bedrock; one
@@ -73,7 +73,7 @@ Same gate as `/edit/find-researchers` and `/api/opportunities`
     → existing pipeline per program: normalize → denoise judge (is_research,
       appeal_by_stage) → topic scorer → prestige/honorific → title-Jaccard dedup
       vs corpus → persist GRANT#manual_url:<slug>-<sha1[:6]>
-    → update SUBMISSION# status: processed {produced_opportunity_ids} | rejected {reason}
+    → update SUBMISSION item status: processed {produced_opportunity_ids} | rejected {reason}
 
 [nightly etl:dynamodb]                               SPS
   GRANT# projection upserts the new rows — zero new read-side code; the reverse
@@ -98,33 +98,44 @@ Checks, in order:
    (No server-side fetch happens in SPS — SSRF surface lives upstream, §8.)
 3. Normalize (lowercase scheme+host, strip fragment, trailing slash, `utm_*`/`fbclid`)
    and compare against (a) all `opportunity.sourceUrl` (~900 rows, in-process) and
-   (b) pending/processed `SUBMISSION#` items → 409 `duplicate_url` /
+   (b) pending/processed `SUBMISSION` items → 409 `duplicate_url` /
    `duplicate_submission`, payload includes the existing opportunityId or submission so
    the UI links to it.
 4. `PutItem` to the `reciterai` table + audit append (action `opportunity_submission`,
    `targetEntityType: "opportunity_submission"`, `targetEntityId` = submission id,
-   `afterValues` = {url, note}) → `201 { submissionId }`.
+   `afterValues` = {url, note}) → `200 { ok: true, submission }` (the standard
+   `editOk` shape).
 
 ### `GET /api/edit/opportunity-intake`
 
-Same authz. Scans `SUBMISSION#` (tiny), returns all submissions newest-first:
-`{ submissionId, url, note, submittedBy, submittedAt, status, producedOpportunityIds?,
-rejectReason? }`. Whole team sees all submissions — prevents duplicate effort.
+Same authz. One `Query` over the `SUBMISSION` partition (tiny; newest-first via
+`ScanIndexForward: false`), returns all submissions:
+`{ submissionId, url, note, submittedBy, submittedAt, status, producedOpportunityIds,
+rejectReason }`. Whole team sees all submissions — prevents duplicate effort.
 
-### `SUBMISSION#` item schema (new, in the existing `reciterai` table)
+### `SUBMISSION` item schema (new, in the existing `reciterai` table)
 
 ```
-PK: SUBMISSION#<uuid>   SK: META
+PK: SUBMISSION  (constant — one partition for the whole queue)
+SK: <ISO submitted_at>#<uuid8>  (time-ordered; doubles as the submission id)
 url, normalized_url, note?, submitted_by (cwid), submitted_at (ISO)
 status: pending | processed | rejected
 processed_at?, produced_opportunity_ids?: string[], reject_reason?
 ```
 
-### IAM (cdk `app-stack.ts`)
+The constant-PK shape is deliberate, not incidental: it makes the list a single
+`Query` **and** makes least-privilege IAM expressible — `dynamodb:LeadingKeys`
+can pin `Query`/`PutItem` to one exact partition key value, which it cannot do
+for a `Scan` or a `SUBMISSION#<uuid>`-per-item key space without a wildcard.
+The queue is human-paced (hundreds of items over years), so one partition is
+nowhere near any DynamoDB limit.
 
-App task role gains `dynamodb:PutItem`/`Query`/`Scan` on the `reciterai` table
-**scoped with a `dynamodb:LeadingKeys = ["SUBMISSION#*"]` condition** — the app can
-never touch `GRANT#` items. (The ETL task's existing read stays as-is.)
+### IAM (cdk `app-stack.ts` — `TaskRoleOpportunitySubmissionPolicy`)
+
+App task role gains `dynamodb:PutItem` + `dynamodb:Query` (only) on the
+`reciterai` table, **scoped with `ForAllValues:StringEquals
+dynamodb:LeadingKeys = ["SUBMISSION"]`** — the app credential can never read or
+write `GRANT#`/`PUB#` items. (The ETL task's existing read stays as-is.)
 
 ### UI
 
@@ -139,7 +150,7 @@ opportunity into the matcher picker; `rejected` shows the reason.
 New `pipeline_grants/ingest_submissions.py` (CLI: `python -m
 pipeline_grants.ingest_submissions [--dry-run]`), reusing existing stages:
 
-1. Query pending `SUBMISSION#` items.
+1. Query pending `SUBMISSION` items.
 2. Fetch page (`safe_fetch.py`, stdlib `urllib` — no new dependency): SSRF guard per
    §8, tags stripped. Text < 500 chars (JS-rendered/empty) → reject
    `content_too_thin`; PDF/paywalled → reject with reason. No headless browser in
@@ -155,7 +166,7 @@ pipeline_grants.ingest_submissions [--dry-run]`), reusing existing stages:
    `is_research=false` still rejects with the judge's reason) → `scoring.py` topic
    vector → `prestige.py` + honorific regex → title-Jaccard dedup vs corpus (funding-db
    runbook measure; token-identical drops, near-dups kept) → `persist.py` `GRANT#`.
-5. Update the `SUBMISSION#` item: `processed` + produced ids, or `rejected` + reason
+5. Update the `SUBMISSION` item: `processed` + produced ids, or `rejected` + reason
    (fetch failed / not research / all programs duplicate / extraction empty).
    One try/except per submission (resilient, per the #270 pattern).
 
@@ -189,7 +200,7 @@ in that repo, so the runbook stands alone).
   what lands (submissions panel + the matcher surface itself).
 - **Queue abuse.** Submissions are dev-role/superuser-gated, audit-logged with actor,
   URL-shape-validated, and deduped; the app's DDB write is `LeadingKeys`-scoped to
-  `SUBMISSION#` so a compromised app credential cannot alter the corpus.
+  `SUBMISSION` so a compromised app credential cannot alter the corpus.
 - **Stored XSS.** Extracted `title`/`synopsis` render as text in existing components;
   never `dangerouslySetInnerHTML` on pipeline-derived fields.
 
@@ -248,7 +259,7 @@ WHERE action = 'opportunity_submission' ORDER BY ts DESC;
 # queue state (DDB)
 aws dynamodb scan --table-name reciterai \
   --filter-expression "begins_with(PK, :p)" \
-  --expression-attribute-values '{":p":{"S":"SUBMISSION#"}}' \
+  --expression-attribute-values '{":p":{"S":"SUBMISSION"}}' \
   --query 'Items[].{id:PK.S,status:status.S,url:url.S}'
 ```
 
