@@ -143,11 +143,14 @@ ED chain head. It only reads SPS RDS + the `reciterai` table (both AWS-internal,
 on-prem dependency), so it succeeds where the full chain can't start:
 
 ```bash
+# Resolve $ETL_SUBNETS/$ETL_SG live (never hardcode -- the VPC cutover moved both;
+# stale ids launch into the dead VPC and time out). Same resolver as
+# data-population-runbook.md §3 -- run that snippet first with ENV=staging.
 aws ecs run-task \
   --cluster sps-cluster-staging \
   --task-definition sps-etl-staging \
   --launch-type FARGATE \
-  --network-configuration 'awsvpcConfiguration={subnets=[subnet-019afebef588ee4b3,subnet-03de6e3dfe190288b],securityGroups=[sg-09b494047547ea148],assignPublicIp=DISABLED}' \
+  --network-configuration "awsvpcConfiguration={subnets=[$ETL_SUBNETS],securityGroups=[$ETL_SG],assignPublicIp=DISABLED}" \
   --overrides '{"containerOverrides":[{"name":"etl","command":["npm","run","etl:dynamodb"]}]}' \
   --started-by "manual-cores-render"
 ```
