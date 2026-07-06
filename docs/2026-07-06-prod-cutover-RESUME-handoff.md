@@ -6,6 +6,21 @@ Resume from **step 9 (FGAC recreate)** below. Plan/step-detail source of truth:
 `docs/cutover-item3-prod-window-runbook.md` (this doc = current position + deltas from it).
 Tracker **#1458**.
 
+> ### UPDATE 2026-07-06 (continued session) — resume position now = **step 11 (App-cut)**
+> - **Step 9 FGAC recreate — DONE ✅** (reversible, verified). Provisioned NEW OS domain
+>   `opensearchshare-hr8gdfznbeww` from runbook §1a–§1d via a one-off ETL task (clone of
+>   `sps-etl-prod` + `node -e`, master/app secrets KMS-injected). All 6 PUTs `201 CREATED`;
+>   verify: internalusers `scholars-etl,sps_master,scholars-app`; rolesmappings `sps_etl→scholars-etl`,
+>   `sps_app→scholars-app`. **Cleanup done:** temp exec-role grant `tmp-cutover-fgac-os` REVOKED;
+>   one-off task-def `sps-etl-fgac-oneoff-prod:1` deregistered (INACTIVE).
+> - **Step 10 reindex — DONE ✅** (task `2a090a35…`, ~8 min, exit 0). `scholars/prod/opensearch/etl`
+>   node reseeded → NEW domain (app node still OLD ✅). `search:index` built + alias-swapped all 4
+>   indices on NEW domain; counts match staging ref: **people 8937 / pubs 177255 / funding 4858 /
+>   opps 1121** (pre-swap gates passed, N-vs-0-live). Non-blocking smoke: opps prestige.score 0%
+>   (ReciterAI producer track), 2 MeSH descriptors missing tree-numbers. NEW domain =
+>   `m6g.large.search`×2 + base td `NODE_OPTIONS=7168`/8GB ⇒ both #485 gotchas were pre-mitigated.
+> - **NEXT = step 11 App-cut = POINT OF NO EASY RETURN** — hold for explicit go after count verify.
+
 > ⚠️ **FREEZE IS HELD.** No `/edit` curator writes may land until the cutover completes — the
 > freeze snapshot `sps-data-prod-cutover-final-20260706t024926z` is the App-cut data source, and
 > a post-snapshot write would be lost. Pre-launch, so no real edit traffic expected. If the pause
