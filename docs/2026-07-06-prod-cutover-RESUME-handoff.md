@@ -6,7 +6,10 @@ Resume from **step 9 (FGAC recreate)** below. Plan/step-detail source of truth:
 `docs/cutover-item3-prod-window-runbook.md` (this doc = current position + deltas from it).
 Tracker **#1458**.
 
-> ### UPDATE 2026-07-06 (continued session) — resume position now = **step 13 (ETL cutover + lift freeze)**
+> ### UPDATE 2026-07-06 (continued session) — **CUTOVER COMPLETE ✅ (steps 9–13 done); FREEZE LIFTED**
+> **All in-window steps done + verified. App/search/DB/edge/ETL on the new consolidated tier.**
+> Remaining = post-cutover follow-ups only (Observability config PR, OS-master rotation, soak/decommission)
+> + two human-vantage verifications (see bottom).
 > - **Step 9 FGAC recreate — DONE ✅** (reversible, verified). Provisioned NEW OS domain
 >   `opensearchshare-hr8gdfznbeww` from runbook §1a–§1d via a one-off ETL task (clone of
 >   `sps-etl-prod` + `node -e`, master/app secrets KMS-injected). All 6 PUTs `201 CREATED`;
@@ -36,23 +39,47 @@ Tracker **#1458**.
 >   `sps-edge-prod-wcm-only` INTACT. Chain CF→new ALB→app 200. ⚠️ Literal `https://scholars.weill.cornell.edu/`
 >   200 STILL NEEDS a **WCM-network vantage** (edge WAF blocks the sandbox IP by design).
 >   NOTE: step-12's "reseed app node + redeploy App" was **folded into step 11** — already done.
-> - **REMAINING:**
->   1. **Step 13 ETL cutover** — `cdk deploy Sps-Etl-prod --exclusively -c env=prod` → one clean
->      supervised manual nightly run → **re-enable** `sps-reconcile-prod` + `sps-cdn-reconcile-prod`
->      (`aws events enable-rule`), leave nightly disabled until a supervised pass → confirm
->      `aws cloudformation list-imports` empty for old Data/App exports → **LIFT WRITE-FREEZE**.
->   2. **Step-11 tail — Observability redeploy** (DEFERRED, monitoring-only): needs a CONFIG PR to set
->      env-config `publicAlbFullName`/`publicTargetGroupFullName`/`auroraClusterIdentifier`/
->      `opensearchDomainName` to the NEW ids (auto-named ALB/TG only knowable post-cut), then
->      `cdk deploy Sps-Observability-prod`. Alarms currently reference the deleted old ALB/TG — app is
->      healthy, this is monitoring blindness only.
->   3. **Rotate** `scholars/{prod,staging}/opensearch/master` (leaked 07-05) — post-cutover.
->   4. Phase F soak (days) → Phase G decommission OLD tier (35-day retention, `Sps-Network-prod` LAST).
+> - **Step 13 ETL cutover + freeze lift — DONE ✅.**
+>   - `cdk deploy Sps-Etl-prod` `UPDATE_COMPLETE` (15:09Z): all 6 state machines
+>     (Nightly/Weekly/Annual/Heartbeat/Reconcile/CdnReconcile) task network-configs → shared VPC
+>     literals (`0c6593…/070cbc…`, etl SG `sg-03babbb…`); per-step abort→notify→continue retiering now
+>     active. No resource add/remove, no IAM change.
+>   - **Manual reconcile runs — both SUCCEEDED clean** against new tier: `scholars-reconcile-prod`
+>     (`search:reconcile`, ~1.5m) + `scholars-cdn-reconcile-prod` (`cdn:reconcile`, ~1.5m).
+>   - **Re-enabled** `sps-reconcile-prod` + `sps-cdn-reconcile-prod` (both ENABLED, rate 5min).
+>     Nightly/weekly/annual cadences REMAIN **DISABLED** (runbook-deferred — full nightly = separate
+>     supervised pass; NOT run here).
+>   - **Old exports DRAINED** — `list-imports` empty for every `Sps-Network-prod:*` + `Sps-Data-prod-*`
+>     export (old VPC/subnets/RTs/SGs + old OS endpoint). Severance complete ⇒ old tier decommissionable.
+>   - **WRITE-FREEZE LIFTED** — freeze was OPERATIONAL (no technical flag: app env has no
+>     MAINTENANCE/READ_ONLY/FREEZE). Purpose satisfied (app on new cluster = SOR; snapshot→app-cut window
+>     closed). App write path config-verified: `scholars/prod/db/app-rw` → NEW cluster `…ylbuldcja7bm`,
+>     grants preserved via snapshot restore. Curator `/edit` writes may resume.
+>   - NOTE: the "two `Sps-Ap-Publi-*` ALBs in the shared VPC" = prod (`dZ0soKIosV6j`) + **staging**
+>     (`28Px8J5FO9hH`, stack `Sps-App-staging`) co-tenancy — **NOT a stray**.
+>
+> - **POST-CUTOVER FOLLOW-UPS (not done here):**
+>   1. **Observability config PR** (monitoring-only; alarms currently point at the deleted old ALB/TG).
+>      Turnkey values → set env-config for prod:
+>      - `publicAlbFullName = app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643`
+>      - `publicTargetGroupFullName = targetgroup/Sps-Ap-Publi-TL07SCGAWNJM/4cc4b1d7b17c0f8c`
+>      - `auroraClusterIdentifier = sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm`
+>      - `opensearchDomainName = opensearchshare-hr8gdfznbeww`
+>      then `cdk deploy Sps-Observability-prod --exclusively -c env=prod`.
+>   2. **Rotate** `scholars/{prod,staging}/opensearch/master` (leaked to transcript 07-05; new domain is
+>      VPC-internal so exposure is bounded but rotate regardless). Use the runbook §1 master-reset trick.
+>   3. Phase F soak (days) → Phase G decommission OLD tier (Aurora `…naxambgndood`, OS
+>      `opensearch58799-fquptd67j2so`, 35-day retention; `Sps-Network-prod` LAST).
+>
+> - **⚠️ TWO HUMAN-VANTAGE VERIFICATIONS still open (sandbox can't do them):**
+>   1. `https://scholars.weill.cornell.edu/` → **200** from the **WCM network** (edge WAF allows only
+>      140.251/157.139; the CF→ALB→app chain is otherwise proven green).
+>   2. A real authenticated **`/edit` write** lands in the new cluster (write path is config-verified;
+>      a browser write from a curator confirms end-to-end).
 
-> ⚠️ **FREEZE IS HELD.** No `/edit` curator writes may land until the cutover completes — the
-> freeze snapshot `sps-data-prod-cutover-final-20260706t024926z` is the App-cut data source, and
-> a post-snapshot write would be lost. Pre-launch, so no real edit traffic expected. If the pause
-> runs long and you're unsure, re-take the snapshot at resume (no writes ⇒ current one is valid).
+> ✅ **FREEZE LIFTED 2026-07-06** (cutover complete — see UPDATE block above). `/edit` writes may resume;
+> they land in the new cluster `…ylbuldcja7bm` (SOR). *(Historical: the freeze protected the
+> snapshot `sps-data-prod-cutover-final-20260706t024926z`→App-cut window; that window is now closed.)*
 
 ---
 
