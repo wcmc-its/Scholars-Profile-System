@@ -206,11 +206,17 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --                         target_entity_type='reporter_profile_candidate',
 --                         target_entity_id is the candidate id). Appended LAST to
 --                         preserve existing ENUM ordinals.
+--   OPPORTUNITY_URL_INTAKE: + opportunity_submission  (a development-role member
+--                         queued a funding-opportunity URL for the ReciterAI
+--                         pipeline; docs/opportunity-url-intake-spec.md;
+--                         target_entity_type='opportunity_submission',
+--                         target_entity_id is the queue item's sort key).
+--                         Appended LAST to preserve existing ENUM ordinals.
 -- =============================================================================
 
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `action`
-    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke')
+    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission')
     NOT NULL;
 
 -- target_entity_type history:
@@ -232,9 +238,13 @@ ALTER TABLE `scholars_audit`.`manual_edit_audit`
 --                    match confirmed / rejected / revoked in /edit;
 --                    target_entity_id is the candidate id). Appended LAST to
 --                    preserve existing ENUM ordinals.
+--   OPPORTUNITY_URL_INTAKE: + opportunity_submission  (a funding-opportunity URL
+--                    submission queue item in the shared reciterai DynamoDB
+--                    table; target_entity_id is the item's time-ordered sort
+--                    key). Appended LAST to preserve existing ENUM ordinals.
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `target_entity_type`
-    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate')
+    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission')
     NOT NULL;
 
 -- #637 (View-as impersonation): the `impersonated_cwid` attribution column for
