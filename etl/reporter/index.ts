@@ -427,16 +427,22 @@ async function main() {
     await step2_GrantPublications();
     await step3_ResolveMeshDescriptors();
   } finally {
-    // Close both connection pools so the process exits cleanly. Without the
-    // Prisma disconnect the adapter's pool keeps the event loop alive and the
-    // script hangs after "Done in …s." rather than exiting.
+    // Close the ReciterDB pool here (withEtlRun never touches it). The Prisma
+    // db.write disconnect is deferred to the entrypoint below: withEtlRun writes
+    // the etl_run success/failure row AFTER main() returns, so disconnecting here
+    // would make that write auto-reopen the Prisma pool with nothing left to
+    // close it — the script would hang after "Done in …s." rather than exiting.
     await closeReciterPool();
-    await db.write.$disconnect();
   }
   console.log(`\nDone in ${((Date.now() - start) / 1000).toFixed(1)}s.`);
 }
 
-withEtlRun("Reporter", main).catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// Disconnect db.write only AFTER withEtlRun has written its etl_run row (on both
+// the success and failure paths), then let the empty event loop exit the process.
+// `process.exitCode` (not `process.exit`) so the `.finally` cleanup still runs.
+withEtlRun("Reporter", main)
+  .catch((e) => {
+    console.error(e);
+    process.exitCode = 1;
+  })
+  .finally(() => db.write.$disconnect());
