@@ -607,14 +607,14 @@ export class EtlStack extends Stack {
         TOOLS_BUCKET: "wcmc-reciterai-artifacts",
         TOOLS_PREFIX: "tools",
         // scholar_tool producer switch (#794). "ddb" (legacy DynamoDB Block 5)
-        // is the reversible default; "s3" makes etl:scholar-tool the sole
+        // was the reversible default; "s3" makes etl:scholar-tool the sole
         // scholar_tool writer over the A2 canonical taxonomy and also populates
-        // scholar_family (the #799 Methods lens). STAGING-FIRST cutover: "s3" in
-        // staging now, prod stays "ddb" until the staging soak completes and the
-        // prod cutover is signed off (it reverses a team deferral + unblocks
-        // ReciterAI's legacy TOOL# deletion). Applied via cdk deploy
-        // --exclusively Sps-Etl-<env>; run etl:scholar-tool after the deploy.
-        SCHOLAR_TOOL_SOURCE: env === "staging" ? "s3" : "ddb",
+        // scholar_family (the #799 Methods lens). Cutover complete for BOTH envs:
+        // staging soaked on "s3", prod signed off 2026-07-06 (reverses a team
+        // deferral + unblocks ReciterAI's legacy TOOL# deletion). Rollback = set
+        // back to "ddb". Applied via cdk deploy --exclusively Sps-Etl-<env>; run
+        // etl:scholar-tool after the deploy.
+        SCHOLAR_TOOL_SOURCE: "s3",
         // RePORTER grants v2 PMID-overlap matcher — step 0 of etl:reporter-grants.
         // Resolves lateral recruits with no person_nih_profile row (name →
         // candidate profile_ids → PMID overlap → auto-lock K≥3 / propose K=2). A
