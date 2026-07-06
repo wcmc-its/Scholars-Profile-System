@@ -1,8 +1,8 @@
 # Opportunity URL intake — spec (v2: ReciterAI-processed)
 
-**Status:** DRAFT — awaiting approval
-**Date:** 2026-07-06 (v2 same day; v1's SPS-local pipeline dropped per review)
-**Code refs:** SPS grounded against `origin/master` @ `55906d9c`; ReciterAI against its main + `feat/prestige-producer`.
+**Status:** IMPLEMENTED — SPS PR #1496 + ReciterAI PR wcm-its/ReciterAI#285 (both flag-dark/inert until the §9 rollout)
+**Date:** 2026-07-06 (v2 same day; v1's SPS-local pipeline dropped per review — see §2)
+**Code refs:** SPS grounded against `origin/master` @ `55906d9c`; ReciterAI against its `main` @ `53462e2`.
 
 ## 1. Problem
 
@@ -65,9 +65,11 @@ Same gate as `/edit/find-researchers` and `/api/opportunities`
 
 [pipeline_grants.ingest_submissions]                 ReciterAI  (manual CLI today;
   drain pending SUBMISSION# items:                    nightly once #269 lands)
-    fetch URL (requests; Playwright fallback — already in-repo for the WCM funding-DB
-      scrape) → extract 1..N award programs (Bedrock; one page can carry several —
-      the example URL has three: $50k/$50k/$25k, no deadline on page)
+    fetch URL (stdlib urllib, SSRF-guarded; JS-rendered pages reject as
+      content_too_thin — no headless browser in v1, the WCM funding-DB Playwright
+      scrape was external to the repo) → extract 1..N award programs (Bedrock; one
+      page can carry several — the example URL has three: $50k/$50k/$25k, no
+      deadline on page)
     → existing pipeline per program: normalize → denoise judge (is_research,
       appeal_by_stage) → topic scorer → prestige/honorific → title-Jaccard dedup
       vs corpus → persist GRANT#manual_url:<slug>-<sha1[:6]>
@@ -138,8 +140,11 @@ New `pipeline_grants/ingest_submissions.py` (CLI: `python -m
 pipeline_grants.ingest_submissions [--dry-run]`), reusing existing stages:
 
 1. Query pending `SUBMISSION#` items.
-2. Fetch page: `requests` first; Playwright fallback when text < 500 chars
-   (JS-rendered). SSRF guard per §8. PDF/paywalled → reject with reason.
+2. Fetch page (`safe_fetch.py`, stdlib `urllib` — no new dependency): SSRF guard per
+   §8, tags stripped. Text < 500 chars (JS-rendered/empty) → reject
+   `content_too_thin`; PDF/paywalled → reject with reason. No headless browser in
+   v1 — the WCM funding-DB Playwright scrape was external to the repo, so there is
+   no fallback to reuse; rejected submitters see the reason and can escalate.
 3. **New stage — page → programs:** Bedrock extraction returning 1..N
    `{title, sponsor, synopsis, award amounts, dates?, eligibility_raw}` (structured
    output; most fields nullable — the example page has no deadlines).
@@ -155,8 +160,9 @@ pipeline_grants.ingest_submissions [--dry-run]`), reusing existing stages:
    One try/except per submission (resilient, per the #270 pattern).
 
 Ops: until wcm-its/ReciterAI#269 (scheduler) lands, the drain runs manually alongside
-the other ingests; #269 makes it nightly. Docs: add a section to
-`docs/grant-opportunities-workflow-handoff.md`.
+the other ingests; #269 makes it nightly. Docs: committed runbook
+`docs/opportunity-url-submissions-runbook.md` (the workflow handoff doc is untracked
+in that repo, so the runbook stands alone).
 
 ## 7. Dedup summary
 
@@ -172,8 +178,11 @@ the other ingests; #269 makes it nightly. Docs: add a section to
   ReciterAI compute: `https:` only; resolve DNS and reject private/reserved ranges
   (`10/8`, `172.16/12`, `192.168/16`, `127/8`, `169.254/16`, `100.64/10`, `::1`,
   `fc00::/7`, `fe80::/10`); redirects re-validated per hop (max 3); 15 s timeout; 2 MB
-  cap; no cookies/auth sent. Playwright fallback runs with network access but the same
-  URL pre-validation, no persistent profile.
+  cap; no cookies/auth sent. (Implemented as "every DNS answer must be globally
+  routable" — `ipaddress.is_global` — which covers all the listed ranges.) Known
+  ceiling: resolve-then-connect leaves a DNS-rebinding TOCTOU; IP-pinning the
+  connection is the upgrade if the submitter population ever becomes adversarial —
+  today it is audited WCM staff.
 - **Prompt injection.** Page text is untrusted input to the extraction/judge prompts; a
   page could instruct the model. Mitigations: structured-output schemas (no free-form
   actions), the denoise judge as an independent second pass, and dev-role review of
@@ -210,7 +219,7 @@ malicious-staff DoS (trusted, audited population).
 | URL already in corpus (any source, normalized match) | SPS 409 `duplicate_url` + link; nothing queued |
 | URL already pending | SPS 409 `duplicate_submission` + link to the submission |
 | `http://` or malformed URL | SPS 400; nothing queued |
-| JS-rendered page | requests yields thin text → Playwright fallback extracts |
+| JS-rendered page (< 500 chars of text) | submission `rejected: content_too_thin` — headless-browser fallback is a noted v1 ceiling |
 | PDF URL / paywalled page | submission `rejected: fetch/content unusable` — visible on panel |
 | Travel/conference/symposium page | judge `is_research=false` → `rejected` with judge reason |
 | Prize/lectureship page | persisted with `is_honorific=true`; hidden from matcher/browse by existing gates |
