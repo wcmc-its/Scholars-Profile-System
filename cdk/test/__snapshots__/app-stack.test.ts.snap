@@ -305,20 +305,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
-                "Name": "OPENSEARCH_NODE",
-                "Value": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "https://",
-                      {
-                        "Fn::ImportValue": "Sps-Data-prod-OpenSearchDomainEndpoint",
-                      },
-                    ],
-                  ],
-                },
-              },
-              {
                 "Name": "SAML_IDP_ENTITY_ID",
                 "Value": "https://login-proxy.weill.cornell.edu/idp",
               },
@@ -869,6 +855,21 @@ exports[`AppStack prod matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/app-ro",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/app:node::",
                     ],
                   ],
                 },

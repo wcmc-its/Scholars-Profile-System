@@ -715,9 +715,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
       etlSgId: "sg-03babbb300ddb3b95",
       albSgId: "sg-06422c1b27dc4e17d",
     },
-    // Cutover de-coupling: OFF until the opensearch/{app,etl} `node` key is
-    // backfilled (else ECS task-start fails closed). See flag JSDoc.
-    openSearchNodeFromSecret: false,
+    // Cutover de-coupling: ON — prod `opensearch/{app,etl}` `node` seeded
+    // 2026-07-05 with the current prod endpoint, so App/Etl read OPENSEARCH_NODE
+    // from the secret (same endpoint → byte-identical) ahead of the topology flip.
+    openSearchNodeFromSecret: true,
     // #485 — match staging's 8 GB headroom for the search:index corpus build
     // (paired with the NODE_OPTIONS heap cap in EtlStack). Prod's 2-node
     // m6g.large.search domain already handles the bulk write rate.
@@ -729,14 +730,17 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
     cloudFrontDistributionId: "E28NKDFXC7K2ZL",
     cloudFrontLogsBucketName: "sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
-    // Observability metric-by-name decouple (cutover): OFF until the prod data
-    // tier is snapshot-restored with explicit cluster/domain identifiers. A
-    // dormant false keeps the DataStack-handle metric path, byte-identical.
-    observabilityMetricsByName: false,
-    auroraClusterIdentifier: "",
-    opensearchDomainName: "",
-    publicAlbFullName: "",
-    publicTargetGroupFullName: "",
+    // Observability metric-by-name decouple (cutover, item-3 prod window): ON.
+    // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-
+    // stack Ref exports so the useSharedVpc flip can replace those resources without
+    // "cannot update an export in use". Seeded with the CURRENT LIVE names so alarms
+    // stay functional through the freeze; swapped to the new snapshot-restored
+    // cluster / fresh domain / auto-named ALB+TG at Phase C (Observability redeploy).
+    observabilityMetricsByName: true,
+    auroraClusterIdentifier: "sps-data-prod-auroracluster23d869c0-naxambgndood",
+    opensearchDomainName: "opensearch58799-fquptd67j2so",
+    publicAlbFullName: "app/sps-public-prod/14016856c2b4f506",
+    publicTargetGroupFullName: "targetgroup/sps-tg-pub-prod/8522717eb2c2809d",
   },
 };
 
