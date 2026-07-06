@@ -145,16 +145,25 @@ describe("sharedVpc descriptor", () => {
     });
   }
 
-  // Per-env SG isolation: staging carries its own G8 SGs; prod stays empty
-  // until its cutover. If a future edit fills prod on the shared const, the two
-  // envs would collide on the same SGs — this catches that.
-  it("staging carries its own SGs; prod's remain empty", () => {
+  // Per-env SG isolation: each env carries its OWN G8 SGs in the shared VPC
+  // (staging item-3 2026-07-02, prod item-3 2026-07-05). Isolation is by per-env
+  // SG (plan §4.5), so if a future edit put both envs on the shared const's SGs
+  // they would collide — this asserts every tier's SG differs across envs.
+  it("staging and prod each carry their own distinct SGs", () => {
     const staging = resolveEnvConfig("staging").sharedVpc;
     const prod = resolveEnvConfig("prod").sharedVpc;
-    for (const sg of [staging.appSgId, staging.etlSgId, staging.albSgId]) {
+    for (const sg of [
+      staging.appSgId,
+      staging.etlSgId,
+      staging.albSgId,
+      prod.appSgId,
+      prod.etlSgId,
+      prod.albSgId,
+    ]) {
       expect(sg).toMatch(/^sg-/);
     }
-    expect([prod.appSgId, prod.etlSgId, prod.albSgId]).toEqual(["", "", ""]);
     expect(staging.appSgId).not.toBe(prod.appSgId);
+    expect(staging.etlSgId).not.toBe(prod.etlSgId);
+    expect(staging.albSgId).not.toBe(prod.albSgId);
   });
 });

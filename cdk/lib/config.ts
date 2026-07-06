@@ -703,7 +703,18 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // reviewer-gated (§8.9). A dormant `false` synthesizes exactly as the
     // standalone Sps-Network-prod VPC does today.
     useSharedVpc: false,
-    sharedVpc: SHARED_VPC,
+    // Prod's own pre-provisioned SGs in the shared VPC (item-3 prod cutover,
+    // created out-of-band 2026-07-05, allow-all egress / no ingress). Per-env
+    // override of SHARED_VPC's empty SG fields — isolation is by per-env SG (plan
+    // §4.5), so prod and staging cannot share SG ids even though they share the
+    // VPC + subnets. Inert while useSharedVpc is off (resolveSharedSg only reads
+    // these at flag-on); assertSharedVpcConfig gates the flip on them being non-empty.
+    sharedVpc: {
+      ...SHARED_VPC,
+      appSgId: "sg-098a71afdd462d988",
+      etlSgId: "sg-03babbb300ddb3b95",
+      albSgId: "sg-06422c1b27dc4e17d",
+    },
     // Cutover de-coupling: OFF until the opensearch/{app,etl} `node` key is
     // backfilled (else ECS task-start fails closed). See flag JSDoc.
     openSearchNodeFromSecret: false,
