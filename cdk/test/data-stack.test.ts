@@ -122,7 +122,14 @@ describe("DataStack", () => {
   });
 
   describe("prod", () => {
-    const { template } = buildDataStack("prod");
+    // Pin flag-off + no snapshot so this block keeps covering the STANDALONE
+    // Aurora (regular DatabaseCluster + canonical master secret). Prod's cutover
+    // DatabaseClusterFromSnapshot + shared-VPC synth is covered by the staging
+    // (flag-on) block + the regenerated snapshot + the pre-deploy cdk diff.
+    const { template } = buildDataStack("prod", {
+      useSharedVpc: false,
+      auroraSnapshotIdentifier: undefined,
+    });
 
     it("matches the snapshot", () => {
       expect(template.toJSON()).toMatchSnapshot();

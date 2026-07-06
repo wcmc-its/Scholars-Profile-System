@@ -135,8 +135,8 @@ describe("sharedVpc descriptor", () => {
   for (const env of ["staging", "prod"] as const) {
     it(`${env}: ships the expected useSharedVpc flag and a populated sharedVpc`, () => {
       const cfg = resolveEnvConfig(env);
-      // staging is cut over (item-3, 2026-07-02); prod stays standalone until its cutover.
-      expect(cfg.useSharedVpc).toBe(env === "staging");
+      // both envs cut over to the shared VPC (staging item-3 2026-07-02, prod 2026-07-05).
+      expect(cfg.useSharedVpc).toBe(true);
       expect(cfg.sharedVpc.vpcId).toMatch(/^vpc-/);
       expect(cfg.sharedVpc.appSubnetIds.length).toBeGreaterThan(0);
       expect(cfg.sharedVpc.dataSubnetIds.length).toBeGreaterThan(0);

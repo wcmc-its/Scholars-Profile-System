@@ -698,11 +698,15 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
       appSubnetIds: ["subnet-069dc77801ee2d8f3", "subnet-0ceec7bb2f059e162"],
     },
     edEmailVisibilityBridgeEnabled: false,
-    // Estate consolidation (docs/sps-vpc-consolidation-plan.md): OFF; flipped
-    // only after staging soaks and the prod data tier is migrated + reindexed,
-    // reviewer-gated (§8.9). A dormant `false` synthesizes exactly as the
-    // standalone Sps-Network-prod VPC does today.
-    useSharedVpc: false,
+    // Estate consolidation (docs/sps-vpc-consolidation-plan.md): ON — item-3 prod
+    // cutover 2026-07-05 (staging soaked clean 07-04/07-05). Every stack imports
+    // the shared its-reciter-vpc01 substrate; DataStack restores the FINAL
+    // freeze-time snapshot into a NEW DatabaseClusterFromSnapshot + fresh OS domain
+    // alongside the RETAIN'd old ones. assertCutoverGate requires the snapshot id.
+    useSharedVpc: true,
+    // Final freeze-time prod snapshot (taken after ETL quiesce + write-freeze,
+    // 2026-07-06 UTC). Selects the DatabaseClusterFromSnapshot data-bearing path.
+    auroraSnapshotIdentifier: "sps-data-prod-cutover-final-20260706t024926z",
     // Prod's own pre-provisioned SGs in the shared VPC (item-3 prod cutover,
     // created out-of-band 2026-07-05, allow-all egress / no ingress). Per-env
     // override of SHARED_VPC's empty SG fields — isolation is by per-env SG (plan

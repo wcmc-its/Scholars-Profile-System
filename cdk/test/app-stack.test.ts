@@ -143,7 +143,11 @@ describe("AppStack", () => {
   });
 
   describe("prod", () => {
-    const { template } = buildAppStack("prod");
+    // Pin flag-off so this block keeps covering the STANDALONE-VPC app topology
+    // (env-prefixed ALB names, own VPC endpoints). Prod's cutover shared-VPC
+    // synth (auto-named ALBs, no endpoints) is covered by the staging (flag-on)
+    // block + the regenerated snapshot + the pre-deploy cdk diff.
+    const { template } = buildAppStack("prod", { useSharedVpc: false });
 
     /** Inline IAM policies attached to the app TASK role (not the exec role). */
     function findTaskRolePolicies() {
