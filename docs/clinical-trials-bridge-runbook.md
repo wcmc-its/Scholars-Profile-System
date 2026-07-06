@@ -38,9 +38,9 @@ region `AWS_DEFAULT_REGION` (default us-east-1).
    ```
 2. **Import** in-VPC via `run-task` on `sps-cluster-staging`, task-def
    `sps-etl-staging`, container `etl`, command `npm run etl:clinical-trials:import`,
-   network config from the `scholars-nightly-staging` Step Function
-   (subnets `subnet-019afebef588ee4b3`,`subnet-03de6e3dfe190288b`,
-   SG `sg-09b494047547ea148`). Dry-run first:
+   network config resolved live from the `scholars-nightly-staging` Step Function
+   (`$ETL_SUBNETS`/`$ETL_SG` per [`data-population-runbook.md`](./data-population-runbook.md)
+   §3 — never hardcode: the VPC cutover moved both and stale ids time out). Dry-run first:
    ```
    ...command: ["npm","run","etl:clinical-trials:import","--","--dry-run"]
    ...command: ["npm","run","etl:clinical-trials:import"]
