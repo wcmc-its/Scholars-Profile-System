@@ -59,13 +59,15 @@ Tracker **#1458**.
 >     (`28Px8J5FO9hH`, stack `Sps-App-staging`) co-tenancy — **NOT a stray**.
 >
 > - **POST-CUTOVER FOLLOW-UPS (not done here):**
->   1. **Observability config PR** (monitoring-only; alarms currently point at the deleted old ALB/TG).
->      Turnkey values → set env-config for prod:
+>   1. **Observability config — DONE ✅** (PR **#1494** MERGED, `build`+`cdk` green; `cdk deploy
+>      Sps-Observability-prod` `UPDATE_COMPLETE` from master `1ce87c10`). Swapped the 4 prod
+>      `observabilityMetricsByName` values to the new resources (below); 7 alarms (3 ALB/2 Aurora/2 OS)
+>      + ReliabilityDashboard re-pointed, all alarms verified **state=OK** (metrics flowing, not
+>      INSUFFICIENT_DATA). Staging untouched. Values:
 >      - `publicAlbFullName = app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643`
 >      - `publicTargetGroupFullName = targetgroup/Sps-Ap-Publi-TL07SCGAWNJM/4cc4b1d7b17c0f8c`
 >      - `auroraClusterIdentifier = sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm`
 >      - `opensearchDomainName = opensearchshare-hr8gdfznbeww`
->      then `cdk deploy Sps-Observability-prod --exclusively -c env=prod`.
 >   2. **Rotate** `scholars/{prod,staging}/opensearch/master` (leaked to transcript 07-05; new domain is
 >      VPC-internal so exposure is bounded but rotate regardless). Use the runbook §1 master-reset trick.
 >   3. Phase F soak (days) → Phase G decommission OLD tier (Aurora `…naxambgndood`, OS
