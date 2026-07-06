@@ -39,7 +39,12 @@ describe("NetworkStack", () => {
     const fixture = makeFixture("prod");
     const stack = new NetworkStack(fixture.app, "Sps-Network-prod", {
       env: fixture.env,
-      envConfig: fixture.envConfig,
+      // Prod's NetworkStack stays STANDALONE-deployed until Phase G decommission
+      // (the useSharedVpc:true synth is an import that tears down the standalone
+      // VPC — not deployed in the cutover window). Pin flag-off so this block
+      // keeps covering the standalone topology; the shared-import synth is
+      // covered by the "shared VPC (useSharedVpc on)" + staging blocks.
+      envConfig: { ...fixture.envConfig, useSharedVpc: false },
     });
     const template = Template.fromStack(stack);
 
