@@ -131,7 +131,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         "Dimensions": [
           {
             "Name": "DBClusterIdentifier",
-            "Value": "sps-data-prod-auroracluster23d869c0-naxambgndood",
+            "Value": "sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm",
           },
         ],
         "EvaluationPeriods": 3,
@@ -158,7 +158,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         "Dimensions": [
           {
             "Name": "DBClusterIdentifier",
-            "Value": "sps-data-prod-auroracluster23d869c0-naxambgndood",
+            "Value": "sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm",
           },
         ],
         "EvaluationPeriods": 3,
@@ -722,7 +722,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
           },
           {
             "Name": "DomainName",
-            "Value": "opensearch58799-fquptd67j2so",
+            "Value": "opensearchshare-hr8gdfznbeww",
           },
         ],
         "EvaluationPeriods": 1,
@@ -753,7 +753,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
           },
           {
             "Name": "DomainName",
-            "Value": "opensearch58799-fquptd67j2so",
+            "Value": "opensearchshare-hr8gdfznbeww",
           },
         ],
         "EvaluationPeriods": 3,
@@ -787,7 +787,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
                 "Dimensions": [
                   {
                     "Name": "LoadBalancer",
-                    "Value": "app/sps-public-prod/14016856c2b4f506",
+                    "Value": "app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",
                   },
                 ],
                 "MetricName": "HTTPCode_Target_5XX_Count",
@@ -805,7 +805,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
                 "Dimensions": [
                   {
                     "Name": "LoadBalancer",
-                    "Value": "app/sps-public-prod/14016856c2b4f506",
+                    "Value": "app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",
                   },
                 ],
                 "MetricName": "RequestCount",
@@ -836,7 +836,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         "Dimensions": [
           {
             "Name": "LoadBalancer",
-            "Value": "app/sps-public-prod/14016856c2b4f506",
+            "Value": "app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",
           },
         ],
         "EvaluationPeriods": 3,
@@ -858,11 +858,11 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         "Dimensions": [
           {
             "Name": "LoadBalancer",
-            "Value": "app/sps-public-prod/14016856c2b4f506",
+            "Value": "app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",
           },
           {
             "Name": "TargetGroup",
-            "Value": "targetgroup/sps-tg-pub-prod/8522717eb2c2809d",
+            "Value": "targetgroup/Sps-Ap-Publi-TL07SCGAWNJM/4cc4b1d7b17c0f8c",
           },
         ],
         "EvaluationPeriods": 5,
@@ -885,11 +885,11 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/ApplicationELB","TargetResponseTime","LoadBalancer","app/sps-public-prod/14016856c2b4f506",{"label":"p50","stat":"p50"}],["AWS/ApplicationELB","TargetResponseTime","LoadBalancer","app/sps-public-prod/14016856c2b4f506",{"label":"p90","stat":"p90"}],["AWS/ApplicationELB","TargetResponseTime","LoadBalancer","app/sps-public-prod/14016856c2b4f506",{"label":"p99","stat":"p99"}]],"yAxis":{"left":{"min":0,"label":"seconds"}}}},{"type":"metric","width":12,"height":6,"x":12,"y":3,"properties":{"view":"timeSeries","title":"ALB requests + 5xx/4xx (5m sum)","region":"",
+              "","metrics":[["AWS/ApplicationELB","TargetResponseTime","LoadBalancer","app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",{"label":"p50","stat":"p50"}],["AWS/ApplicationELB","TargetResponseTime","LoadBalancer","app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",{"label":"p90","stat":"p90"}],["AWS/ApplicationELB","TargetResponseTime","LoadBalancer","app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",{"label":"p99","stat":"p99"}]],"yAxis":{"left":{"min":0,"label":"seconds"}}}},{"type":"metric","width":12,"height":6,"x":12,"y":3,"properties":{"view":"timeSeries","title":"ALB requests + 5xx/4xx (5m sum)","region":"",
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","app/sps-public-prod/14016856c2b4f506",{"label":"Requests","stat":"Sum"}],["AWS/ApplicationELB","HTTPCode_Target_5XX_Count","LoadBalancer","app/sps-public-prod/14016856c2b4f506",{"label":"Target 5xx","stat":"Sum","yAxis":"right"}],["AWS/ApplicationELB","HTTPCode_Target_4XX_Count","LoadBalancer","app/sps-public-prod/14016856c2b4f506",{"label":"Target 4xx","stat":"Sum","yAxis":"right"}],["AWS/ApplicationELB","HTTPCode_ELB_5XX_Count","LoadBalancer","app/sps-public-prod/14016856c2b4f506",{"label":"ELB 5xx","stat":"Sum","yAxis":"right"}]],"yAxis":{"left":{"min":0,"label":"requests"},"right":{"min":0,"label":"errors"}}}},{"type":"text","width":24,"height":1,"x":0,"y":9,"properties":{"markdown":"## CloudFront edge"}},{"type":"metric","width":8,"height":6,"x":0,"y":10,"properties":{"view":"timeSeries","title":"CloudFront origin latency (ms)","region":"",
+              "","metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",{"label":"Requests","stat":"Sum"}],["AWS/ApplicationELB","HTTPCode_Target_5XX_Count","LoadBalancer","app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",{"label":"Target 5xx","stat":"Sum","yAxis":"right"}],["AWS/ApplicationELB","HTTPCode_Target_4XX_Count","LoadBalancer","app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",{"label":"Target 4xx","stat":"Sum","yAxis":"right"}],["AWS/ApplicationELB","HTTPCode_ELB_5XX_Count","LoadBalancer","app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",{"label":"ELB 5xx","stat":"Sum","yAxis":"right"}]],"yAxis":{"left":{"min":0,"label":"requests"},"right":{"min":0,"label":"errors"}}}},{"type":"text","width":24,"height":1,"x":0,"y":9,"properties":{"markdown":"## CloudFront edge"}},{"type":"metric","width":8,"height":6,"x":0,"y":10,"properties":{"view":"timeSeries","title":"CloudFront origin latency (ms)","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -945,15 +945,15 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/RDS","CPUUtilization","DBClusterIdentifier","sps-data-prod-auroracluster23d869c0-naxambgndood",{"label":"CPU %"}]],"yAxis":{"left":{"min":0,"max":100,"label":"percent"}}}},{"type":"metric","width":8,"height":6,"x":8,"y":24,"properties":{"view":"timeSeries","title":"Aurora connections","region":"",
+              "","metrics":[["AWS/RDS","CPUUtilization","DBClusterIdentifier","sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm",{"label":"CPU %"}]],"yAxis":{"left":{"min":0,"max":100,"label":"percent"}}}},{"type":"metric","width":8,"height":6,"x":8,"y":24,"properties":{"view":"timeSeries","title":"Aurora connections","region":"",
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/RDS","DatabaseConnections","DBClusterIdentifier","sps-data-prod-auroracluster23d869c0-naxambgndood",{"label":"Connections (max)","stat":"Maximum"}]],"yAxis":{"left":{"min":0,"label":"connections"}}}},{"type":"metric","width":8,"height":6,"x":16,"y":24,"properties":{"view":"timeSeries","title":"Aurora SelectLatency (ms)","region":"",
+              "","metrics":[["AWS/RDS","DatabaseConnections","DBClusterIdentifier","sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm",{"label":"Connections (max)","stat":"Maximum"}]],"yAxis":{"left":{"min":0,"label":"connections"}}}},{"type":"metric","width":8,"height":6,"x":16,"y":24,"properties":{"view":"timeSeries","title":"Aurora SelectLatency (ms)","region":"",
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/RDS","SelectLatency","DBClusterIdentifier","sps-data-prod-auroracluster23d869c0-naxambgndood",{"label":"Select latency"}]],"yAxis":{"left":{"min":0,"label":"ms"}}}}]}",
+              "","metrics":[["AWS/RDS","SelectLatency","DBClusterIdentifier","sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm",{"label":"Select latency"}]],"yAxis":{"left":{"min":0,"label":"ms"}}}}]}",
             ],
           ],
         },
