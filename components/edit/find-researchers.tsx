@@ -122,6 +122,7 @@ const SOURCE_LABELS: Record<string, string> = {
   grants_gov: "Grants.gov",
   nih_guide: "NIH Guide",
   wcm_curated: "WCM curated",
+  manual_url: "Submitted URL",
 };
 
 function sourceLabel(source: string | null): string | null {

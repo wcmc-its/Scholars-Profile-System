@@ -861,6 +861,41 @@ export class AppStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // Opportunity URL intake -- the SUBMISSION queue write + list
+    // (docs/opportunity-url-intake-spec.md §5).
+    //
+    // /api/edit/opportunity-intake appends `PK=SUBMISSION` items to the shared
+    // `reciterai` table (development-role staff queueing funding-opportunity
+    // URLs for ReciterAI's ingest_submissions drain) and Queries them back for
+    // the status list. Least-privilege via the partition-key design: every
+    // queue item shares the literal partition key `SUBMISSION`, so a
+    // `dynamodb:LeadingKeys` condition pins BOTH actions to that single
+    // partition -- the app credential cannot read or write `GRANT#` /
+    // `PUB#` / any other engine item. (That key shape exists FOR this
+    // condition: a Scan can't be LeadingKeys-scoped, so the list is a Query.)
+    // Same account-shared table ARN + cross-account caveat as the writeback
+    // grant above. Gated in code by OPPORTUNITY_URL_INTAKE (default off;
+    // staging-first in the environment block below) -- grant and flag land in
+    // one deploy, no flip-before-grant window.
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "TaskRoleOpportunitySubmissionPolicy", {
+      policyName: `sps-task-${env}-opportunity-submission`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["dynamodb:PutItem", "dynamodb:Query"],
+          resources: [
+            `arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`,
+          ],
+          conditions: {
+            "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": ["SUBMISSION"] },
+          },
+        }),
+      ],
+    });
+
+    // ------------------------------------------------------------------
     // Internal ALB security group.
     //
     // The public ALB's SG (albSecurityGroup) is owned by NetworkStack;
@@ -1871,6 +1906,16 @@ export class AppStack extends Stack {
         CORE_PUB_MODAL: env === "staging" ? "on" : "off",
         CORE_PAGES: env === "staging" ? "on" : "off",
         CORE_CLAIM_WRITEBACK: env === "staging" ? "on" : "off",
+        // Opportunity URL intake (docs/opportunity-url-intake-spec.md). Gates
+        // the submit-a-URL panel on /edit/find-researchers + both
+        // /api/edit/opportunity-intake verbs (they 404 while off). The writes
+        // go to the SUBMISSION partition of the shared reciterai table
+        // (TaskRoleOpportunitySubmissionPolicy above -- grant + flag deploy
+        // atomically). STAGING-FIRST; before flipping prod ALSO run
+        // scripts/sql/opportunity-submission-audit-migration.sql there (the
+        // audit ENUMs must know `opportunity_submission` before the first
+        // write).
+        OPPORTUNITY_URL_INTAKE: env === "staging" ? "on" : "off",
         // Scholar-profile facet-filter redesign (PR-2). A BIG visual change to
         // the Topics/Methods facets + a unified filter bar, fully gated. ON in
         // staging to soak the real-data behavior (method rows + cross-facet
