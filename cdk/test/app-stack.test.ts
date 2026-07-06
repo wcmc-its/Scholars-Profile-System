@@ -569,9 +569,6 @@ describe("AppStack", () => {
               Environment: Match.arrayWith([
                 Match.objectLike({ Name: "NODE_ENV", Value: "production" }),
                 Match.objectLike({ Name: "PORT", Value: "3000" }),
-                // #447 -- OpenSearch endpoint imported from DataStack (value
-                // is an Fn::ImportValue token, so assert on Name only).
-                Match.objectLike({ Name: "OPENSEARCH_NODE" }),
               ]),
               Secrets: Match.arrayWith([
                 Match.objectLike({ Name: "DATABASE_URL" }),

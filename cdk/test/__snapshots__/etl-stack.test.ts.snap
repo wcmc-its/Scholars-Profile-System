@@ -1430,20 +1430,6 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
-                "Name": "OPENSEARCH_NODE",
-                "Value": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "https://",
-                      {
-                        "Fn::ImportValue": "Sps-Data-prod-OpenSearchDomainEndpoint",
-                      },
-                    ],
-                  ],
-                },
-              },
-              {
                 "Name": "SCHOLARS_BASE_URL",
                 "Value": {
                   "Fn::Join": [
@@ -1539,6 +1525,21 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/etl",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl:node::",
                     ],
                   ],
                 },
@@ -4290,20 +4291,6 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "NODE_ENV",
                 "Value": "production",
               },
-              {
-                "Name": "OPENSEARCH_NODE",
-                "Value": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "https://",
-                      {
-                        "Fn::ImportValue": "Sps-Data-prod-OpenSearchDomainEndpoint",
-                      },
-                    ],
-                  ],
-                },
-              },
             ],
             "Essential": true,
             "Image": {
@@ -4372,6 +4359,21 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/etl",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl:node::",
                     ],
                   ],
                 },

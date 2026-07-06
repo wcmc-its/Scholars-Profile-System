@@ -1127,7 +1127,9 @@ describe("SpsObservabilityStack — metric-by-name decouple (cutover increment 2
   });
 
   it("default (flag off) keeps the handle path → DataStack still exports the Aurora Ref", () => {
-    const { data } = buildObservabilityStack("prod");
+    const { data } = buildObservabilityStack("prod", {
+      observabilityMetricsByName: false,
+    });
     const json = JSON.stringify(Template.fromStack(data).toJSON());
     expect(json).toMatch(/ExportsOutputRefAuroraCluster/);
   });
@@ -1164,7 +1166,9 @@ describe("SpsObservabilityStack — metric-by-name decouple (cutover increment 2
   });
 
   it("default (flag off) keeps the ALB metric handles → App still exports the ALB/TG full names", () => {
-    const { appTemplate } = buildObservabilityStack("prod");
+    const { appTemplate } = buildObservabilityStack("prod", {
+      observabilityMetricsByName: false,
+    });
     const outputs = JSON.stringify(appTemplate.findOutputs("*"));
     expect(outputs).toMatch(/LoadBalancerFullName/);
     expect(outputs).toMatch(/TargetGroupFullName/);
@@ -1172,7 +1176,13 @@ describe("SpsObservabilityStack — metric-by-name decouple (cutover increment 2
 
   it("throws at synth when by-name is on but the cluster/domain identifiers are blank", () => {
     expect(() =>
-      buildObservabilityStack("prod", { observabilityMetricsByName: true }),
+      buildObservabilityStack("prod", {
+        observabilityMetricsByName: true,
+        auroraClusterIdentifier: "",
+        opensearchDomainName: "",
+        publicAlbFullName: "",
+        publicTargetGroupFullName: "",
+      }),
     ).toThrow(/auroraClusterIdentifier\/opensearchDomainName/);
   });
 });

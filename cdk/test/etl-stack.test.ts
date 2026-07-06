@@ -673,7 +673,7 @@ describe("EtlStack", () => {
         expect(td.Properties?.Memory).toBe("512");
       });
 
-      it("injects exactly the three secrets the worker reads, and no SCHOLARS_* / ETL_*_SECRET", () => {
+      it("injects exactly the four secrets the worker reads (incl OPENSEARCH_NODE from secret), and no SCHOLARS_* / ETL_*_SECRET", () => {
         const td = reconcileTaskDef();
         const container = (
           td.Properties?.ContainerDefinitions as
@@ -686,6 +686,7 @@ describe("EtlStack", () => {
         )?.map((s) => s.Name);
         expect((secretNames ?? []).sort()).toEqual([
           "DATABASE_URL",
+          "OPENSEARCH_NODE",
           "OPENSEARCH_PASS",
           "OPENSEARCH_USER",
         ]);
@@ -694,11 +695,12 @@ describe("EtlStack", () => {
           (n) => /^SCHOLARS_/.test(n ?? "") || /^ETL_.*_SECRET$/.test(n ?? ""),
         );
         expect(leaked).toEqual([]);
-        // OPENSEARCH_NODE rides in the plaintext environment block.
+        // Cutover (openSearchNodeFromSecret on): OPENSEARCH_NODE rides in the
+        // Secrets block (opensearch/etl `node` key), not the plaintext env.
         const envNames = (
           container?.Environment as Array<{ Name?: string }> | undefined
         )?.map((e) => e.Name);
-        expect(envNames).toContain("OPENSEARCH_NODE");
+        expect(envNames ?? []).not.toContain("OPENSEARCH_NODE");
       });
 
       it("the reconcile exec role lists exactly the 2 consumer ARNs (db/etl + opensearch/etl; no *)", () => {
@@ -1259,11 +1261,15 @@ describe("EtlStack", () => {
         }
       });
 
-      it("sets OPENSEARCH_NODE in the environment block (#447, imported from DataStack)", () => {
+      it("injects OPENSEARCH_NODE from the opensearch secret `node` key (openSearchNodeFromSecret on), not the env block", () => {
+        const secretEntries = (etlContainerDef().Secrets ?? []) as Array<{
+          Name?: string;
+        }>;
+        expect(secretEntries.map((s) => s.Name)).toContain("OPENSEARCH_NODE");
         const envEntries = (etlContainerDef().Environment ?? []) as Array<{
           Name?: string;
         }>;
-        expect(envEntries.map((e) => e.Name)).toContain("OPENSEARCH_NODE");
+        expect(envEntries.map((e) => e.Name)).not.toContain("OPENSEARCH_NODE");
       });
 
       it("sets SCHOLARS_BASE_URL pointing at the internal ALB (#479)", () => {
