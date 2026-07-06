@@ -737,14 +737,14 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // Observability metric-by-name decouple (cutover, item-3 prod window): ON.
     // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-
     // stack Ref exports so the useSharedVpc flip can replace those resources without
-    // "cannot update an export in use". Seeded with the CURRENT LIVE names so alarms
-    // stay functional through the freeze; swapped to the new snapshot-restored
-    // cluster / fresh domain / auto-named ALB+TG at Phase C (Observability redeploy).
+    // "cannot update an export in use". Swapped from the old transitional names to
+    // the new snapshot-restored cluster / fresh domain / auto-named ALB+TG after the
+    // 2026-07-06 prod cutover (App-cut + edge repoint complete; old tier retained).
     observabilityMetricsByName: true,
-    auroraClusterIdentifier: "sps-data-prod-auroracluster23d869c0-naxambgndood",
-    opensearchDomainName: "opensearch58799-fquptd67j2so",
-    publicAlbFullName: "app/sps-public-prod/14016856c2b4f506",
-    publicTargetGroupFullName: "targetgroup/sps-tg-pub-prod/8522717eb2c2809d",
+    auroraClusterIdentifier: "sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm",
+    opensearchDomainName: "opensearchshare-hr8gdfznbeww",
+    publicAlbFullName: "app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",
+    publicTargetGroupFullName: "targetgroup/Sps-Ap-Publi-TL07SCGAWNJM/4cc4b1d7b17c0f8c",
   },
 };
 
