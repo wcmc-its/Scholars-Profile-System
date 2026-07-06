@@ -6,7 +6,7 @@ Resume from **step 9 (FGAC recreate)** below. Plan/step-detail source of truth:
 `docs/cutover-item3-prod-window-runbook.md` (this doc = current position + deltas from it).
 Tracker **#1458**.
 
-> ### UPDATE 2026-07-06 (continued session) — resume position now = **step 11 (App-cut)**
+> ### UPDATE 2026-07-06 (continued session) — resume position now = **step 13 (ETL cutover + lift freeze)**
 > - **Step 9 FGAC recreate — DONE ✅** (reversible, verified). Provisioned NEW OS domain
 >   `opensearchshare-hr8gdfznbeww` from runbook §1a–§1d via a one-off ETL task (clone of
 >   `sps-etl-prod` + `node -e`, master/app secrets KMS-injected). All 6 PUTs `201 CREATED`;
@@ -19,7 +19,35 @@ Tracker **#1458**.
 >   opps 1121** (pre-swap gates passed, N-vs-0-live). Non-blocking smoke: opps prestige.score 0%
 >   (ReciterAI producer track), 2 MeSH descriptors missing tree-numbers. NEW domain =
 >   `m6g.large.search`×2 + base td `NODE_OPTIONS=7168`/8GB ⇒ both #485 gotchas were pre-mitigated.
-> - **NEXT = step 11 App-cut = POINT OF NO EASY RETURN** — hold for explicit go after count verify.
+> - **Step 11 App-cut — DONE ✅ + VALIDATED** (deploy `UPDATE_COMPLETE`, 705s). User-approved
+>   "fold OS node in" ⇒ reseeded `opensearch/app` node → NEW **before** the single App deploy (app
+>   came up already reading NEW OS; reachability pre-checked: NEW OS SG `sg-092aa345…` allows both
+>   etl+app SGs). Post-cut: ECS `sps-app-prod` **2/2 COMPLETED in shared VPC** `vpc-08a1873…`
+>   (subnets `0c6593…/070cbc…`, SG `sg-098a71…`); new `Sps-Ap-Publi-*`+`Sps-Ap-Inter-*` TGs healthy;
+>   old ALBs/TGs/listeners + 3 old-VPC endpoints DELETED. E2E via new public ALB
+>   `Sps-Ap-Publi-dZ0soKIosV6j-1850770008…` + `X-Origin-Verify`: `/api/health` **200**
+>   `{ok,warmed}`, `/api/search?q=cancer` **200 total=1941**, pubs **438**, no-header **403**. New
+>   internal ALB `internal-Sps-Ap-Inter-CvgsekjiZ9oN-484088083…` (sg `sg-0006fda123a38e654`).
+> - **Step 12 edge repoint — DONE ✅ + VALIDATED** (deploy 93s). Origin source =
+>   `ssm.valueForStringParameter('/sps/prod/app/public-alb-dns')` ⇒ App-cut updated that SSM param to
+>   the new ALB, and the Description em-dash change forced the re-resolve. `--strict` diff = **Description
+>   only, NO WAF/cert/alias delta** (3 ctx flags supplied). CloudFront `E28NKDFXC7K2ZL`: **Deployed**,
+>   origin now `Sps-Ap-Publi-dZ0soKIosV6j…`, alias `scholars.weill.cornell.edu` + WebACL
+>   `sps-edge-prod-wcm-only` INTACT. Chain CF→new ALB→app 200. ⚠️ Literal `https://scholars.weill.cornell.edu/`
+>   200 STILL NEEDS a **WCM-network vantage** (edge WAF blocks the sandbox IP by design).
+>   NOTE: step-12's "reseed app node + redeploy App" was **folded into step 11** — already done.
+> - **REMAINING:**
+>   1. **Step 13 ETL cutover** — `cdk deploy Sps-Etl-prod --exclusively -c env=prod` → one clean
+>      supervised manual nightly run → **re-enable** `sps-reconcile-prod` + `sps-cdn-reconcile-prod`
+>      (`aws events enable-rule`), leave nightly disabled until a supervised pass → confirm
+>      `aws cloudformation list-imports` empty for old Data/App exports → **LIFT WRITE-FREEZE**.
+>   2. **Step-11 tail — Observability redeploy** (DEFERRED, monitoring-only): needs a CONFIG PR to set
+>      env-config `publicAlbFullName`/`publicTargetGroupFullName`/`auroraClusterIdentifier`/
+>      `opensearchDomainName` to the NEW ids (auto-named ALB/TG only knowable post-cut), then
+>      `cdk deploy Sps-Observability-prod`. Alarms currently reference the deleted old ALB/TG — app is
+>      healthy, this is monitoring blindness only.
+>   3. **Rotate** `scholars/{prod,staging}/opensearch/master` (leaked 07-05) — post-cutover.
+>   4. Phase F soak (days) → Phase G decommission OLD tier (35-day retention, `Sps-Network-prod` LAST).
 
 > ⚠️ **FREEZE IS HELD.** No `/edit` curator writes may land until the cutover completes — the
 > freeze snapshot `sps-data-prod-cutover-final-20260706t024926z` is the App-cut data source, and
