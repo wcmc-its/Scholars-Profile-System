@@ -108,7 +108,12 @@ export type AuditAction =
   /** a scholar (or a genuine superuser) revoked a confirmed RePORTER match —
    *  deletes the `person_nih_profile` row (grants reconcile out next run);
    *  before/after carry the status transition. */
-  | "reporter_profile_revoke";
+  | "reporter_profile_revoke"
+  /** a development-role member (or superuser) queued a funding-opportunity URL
+   *  for the ReciterAI pipeline (`docs/opportunity-url-intake-spec.md`);
+   *  `targetEntityType='opportunity_submission'`, `targetEntityId` the queue
+   *  item's sort key, `afterValues` carries `{ url, note }`. */
+  | "opportunity_submission";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -137,7 +142,11 @@ export type AuditEntityType =
   /** a RePORTER PMID-overlap match candidate confirmed/rejected/revoked in /edit
    *  (`REPORTER_MATCH_V2`); `targetEntityId` is the
    *  `reporter_profile_candidate.id`. */
-  | "reporter_profile_candidate";
+  | "reporter_profile_candidate"
+  /** a funding-opportunity URL submission queue item in the shared `reciterai`
+   *  DynamoDB table (`OPPORTUNITY_URL_INTAKE`); `targetEntityId` is the item's
+   *  time-ordered sort key (`<ISO ts>#<uuid8>`). */
+  | "opportunity_submission";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

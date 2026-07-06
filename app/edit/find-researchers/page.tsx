@@ -21,12 +21,14 @@ import { Eye } from "lucide-react";
 import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { FindResearchers } from "@/components/edit/find-researchers";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { OpportunityIntakePanel } from "@/components/edit/opportunity-intake-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { logEditDenial } from "@/lib/edit/authz";
 import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
+import { isOpportunityIntakeEnabled } from "@/lib/edit/opportunity-submission";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { db } from "@/lib/db";
 
@@ -103,6 +105,7 @@ export default async function FindResearchersPage() {
           </AlertDescription>
         </Alert>
         <FindResearchers />
+        {isOpportunityIntakeEnabled() && <OpportunityIntakePanel />}
       </main>
     </div>
   );

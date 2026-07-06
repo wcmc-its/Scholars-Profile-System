@@ -705,6 +705,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "OPPORTUNITY_URL_INTAKE",
+                "Value": "off",
+              },
+              {
                 "Name": "PROFILE_FACET_REDESIGN",
                 "Value": "off",
               },
@@ -3122,6 +3126,37 @@ service:
       },
       "Type": "AWS::IAM::Policy",
     },
+    "TaskRoleOpportunitySubmissionPolicy51C9A514": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "dynamodb:PutItem",
+                "dynamodb:Query",
+              ],
+              "Condition": {
+                "ForAllValues:StringEquals": {
+                  "dynamodb:LeadingKeys": [
+                    "SUBMISSION",
+                  ],
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "arn:aws:dynamodb:us-east-1:123456789012:table/reciterai",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-prod-opportunity-submission",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "TaskRoleReciterReadPolicyE018B6D7": {
       "Properties": {
         "PolicyDocument": {
@@ -4132,6 +4167,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "CORE_CLAIM_WRITEBACK",
+                "Value": "on",
+              },
+              {
+                "Name": "OPPORTUNITY_URL_INTAKE",
                 "Value": "on",
               },
               {
@@ -6546,6 +6585,37 @@ service:
           "Version": "2012-10-17",
         },
         "PolicyName": "sps-task-staging-reciterai-writeback",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "TaskRoleOpportunitySubmissionPolicy51C9A514": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "dynamodb:PutItem",
+                "dynamodb:Query",
+              ],
+              "Condition": {
+                "ForAllValues:StringEquals": {
+                  "dynamodb:LeadingKeys": [
+                    "SUBMISSION",
+                  ],
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "arn:aws:dynamodb:us-east-1:123456789012:table/reciterai",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-staging-opportunity-submission",
         "Roles": [
           {
             "Ref": "TaskRole30FC0FBB",

@@ -18,8 +18,9 @@ import { asPrestige } from "@/lib/funding/prestige";
 export const dynamic = "force-dynamic";
 
 const MAX_LIMIT = 500;
-// Lower rank sorts first. Curated leads; everything else (grants.gov, …) trails.
-const SOURCE_RANK: Record<string, number> = { wcm_curated: 0 };
+// Lower rank sorts first. Curated leads — hand-vetted WCM awards and staff-submitted
+// URLs (`manual_url`, the opportunity-intake queue) — everything else trails.
+const SOURCE_RANK: Record<string, number> = { wcm_curated: 0, manual_url: 0 };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const session = await getEffectiveEditSession();

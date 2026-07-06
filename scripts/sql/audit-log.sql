@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- target, and the unit `code` for a department/division/center target; a
   -- per-author publication suppression carries the contributor CWID in the
   -- JSON payload.
-  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate') NOT NULL,
+  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission') NOT NULL,
   `target_entity_id`   VARCHAR(64)  NOT NULL,
 
   -- WHICH -- the action discriminator (#354). `field_override` is a scalar-field
@@ -99,8 +99,14 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- `family_tier_set` (a steward set a family's tier via the overlay) and
   -- `family_review` (a steward cleared the review nag without changing tier);
   -- both carry `target_entity_type='method_family'`, `target_entity_id` the
-  -- `supercategory:family_label` pair.
-  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke') NOT NULL,
+  -- `supercategory:family_label` pair. The opportunity URL intake
+  -- (`OPPORTUNITY_URL_INTAKE`, docs/opportunity-url-intake-spec.md) adds
+  -- `opportunity_submission` (a dev-role member queued a funding-opportunity
+  -- URL for the ReciterAI pipeline; `target_entity_type=
+  -- 'opportunity_submission'`, `target_entity_id` the queue item's sort key)
+  -- -- appended LAST to both ENUMs; migration:
+  -- scripts/sql/opportunity-submission-audit-migration.sql.
+  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission') NOT NULL,
 
   -- THE CHANGE.
   --   fields_changed -- JSON array of field names for a `field_override`
