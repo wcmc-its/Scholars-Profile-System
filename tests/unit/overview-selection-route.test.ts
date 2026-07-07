@@ -7,22 +7,33 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { NextRequest } from "next/server";
 
-const { mockResolveIdentity, mockAuthorize, mockLogDenial, mockEnabled, mockLoad, mockSave } =
-  vi.hoisted(() => ({
-    mockResolveIdentity: vi.fn(),
-    mockAuthorize: vi.fn(),
-    mockLogDenial: vi.fn(),
-    mockEnabled: vi.fn(),
-    mockLoad: vi.fn(),
-    mockSave: vi.fn(),
-  }));
+const {
+  mockResolveIdentity,
+  mockAuthorize,
+  mockLogDenial,
+  mockOrigin,
+  mockEnabled,
+  mockLoad,
+  mockSave,
+} = vi.hoisted(() => ({
+  mockResolveIdentity: vi.fn(),
+  mockAuthorize: vi.fn(),
+  mockLogDenial: vi.fn(),
+  mockOrigin: vi.fn(),
+  mockEnabled: vi.fn(),
+  mockLoad: vi.fn(),
+  mockSave: vi.fn(),
+}));
 
 vi.mock("@/lib/edit/request", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/edit/request")>();
   return { ...actual, resolveEditIdentity: mockResolveIdentity };
 });
 vi.mock("@/lib/edit/overview-authz", () => ({ authorizeOverviewWrite: mockAuthorize }));
-vi.mock("@/lib/edit/authz", () => ({ logEditDenial: mockLogDenial }));
+vi.mock("@/lib/edit/authz", () => ({
+  logEditDenial: mockLogDenial,
+  verifyRequestOrigin: mockOrigin,
+}));
 vi.mock("@/lib/db", () => ({ db: { read: {} } }));
 vi.mock("@/lib/edit/overview-generator", () => ({ isOverviewGenerateEnabled: mockEnabled }));
 vi.mock("@/lib/edit/overview-selection-store", () => ({
@@ -60,10 +71,12 @@ const putReq = (body: unknown, url = "http://localhost/api/edit/overview/selecti
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
   vi.spyOn(console, "error").mockImplementation(() => {});
   mockEnabled.mockReturnValue(true);
   mockResolveIdentity.mockResolvedValue(SELF_IDENTITY);
   mockAuthorize.mockResolvedValue({ ok: true });
+  mockOrigin.mockReturnValue({ ok: true });
   mockLoad.mockResolvedValue(DEFAULT_DELTAS);
   mockSave.mockResolvedValue(DEFAULT_DELTAS);
 });
@@ -145,5 +158,53 @@ describe("PUT /api/edit/overview/selection", () => {
     const res = await PUT(putReq({ deltas: {} }));
     expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({ error: "write_failed" });
+  });
+
+  // The R4 CSRF origin guard + R3 impersonation-readonly refusal every sibling
+  // write route gets via readEditRequest — this route owes them explicitly.
+  it("403 cross_origin and saves nothing when the origin check fails", async () => {
+    mockOrigin.mockReturnValue({ ok: false, reason: "cross_origin" });
+    const res = await PUT(putReq({ deltas: {} }));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "cross_origin" });
+    expect(mockResolveIdentity).not.toHaveBeenCalled();
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  it("415 when the content-type is not JSON", async () => {
+    mockOrigin.mockReturnValue({ ok: false, reason: "bad_content_type" });
+    const res = await PUT(putReq({ deltas: {} }));
+    expect(res.status).toBe(415);
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  it("does NOT origin-gate GET (read-only sibling behavior unchanged)", async () => {
+    mockOrigin.mockReturnValue({ ok: false, reason: "cross_origin" });
+    const res = await GET(getReq());
+    expect(res.status).toBe(200);
+  });
+
+  it("403 impersonation_readonly and saves nothing while impersonating with the flag on", async () => {
+    vi.stubEnv("IMPERSONATION_READONLY", "true");
+    mockResolveIdentity.mockResolvedValue({
+      session: { cwid: "target9", isSuperuser: false },
+      realCwid: "admin1",
+      impersonatedCwid: "target9",
+    });
+    const res = await PUT(putReq({ deltas: {} }));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "impersonation_readonly" });
+    expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  it("allows the impersonated write when IMPERSONATION_READONLY is off (default)", async () => {
+    mockResolveIdentity.mockResolvedValue({
+      session: { cwid: "target9", isSuperuser: false },
+      realCwid: "admin1",
+      impersonatedCwid: "target9",
+    });
+    const res = await PUT(putReq({ deltas: {} }));
+    expect(res.status).toBe(200);
+    expect(mockSave).toHaveBeenCalledWith("target9", "target9", {});
   });
 });

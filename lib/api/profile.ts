@@ -1352,6 +1352,7 @@ export async function getScholarOgData(slug: string): Promise<{
   primaryTitle: string | null;
   primaryDepartment: string | null;
   slug: string;
+  roleCategory: string | null;
 } | null> {
   const row = await prisma.scholar.findFirst({
     where: { slug, deletedAt: null, status: "active" },
@@ -1360,6 +1361,7 @@ export async function getScholarOgData(slug: string): Promise<{
       preferredName: true,
       primaryTitle: true,
       primaryDepartment: true,
+      roleCategory: true,
     },
   });
   return row ?? null;

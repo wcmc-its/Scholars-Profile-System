@@ -1,5 +1,6 @@
 import { ImageResponse } from "next/og";
 import { getScholarOgData } from "@/lib/api/profile";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 
 // Prisma is NOT compatible with Edge Runtime — must use nodejs.
 // (Phase 5 D-23, RESEARCH Pitfall 4)
@@ -19,7 +20,9 @@ export async function GET(
   const { slug } = await context.params;
   const scholar = await getScholarOgData(slug);
 
-  if (!scholar) {
+  // Hidden identity classes (doctoral students, affiliate alumni) 404 on the
+  // profile page and the jsonld route — the OG image must not out them either.
+  if (!scholar || !isPubliclyDisplayed(scholar.roleCategory)) {
     return new Response("Not found", { status: 404 });
   }
 
