@@ -301,6 +301,16 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "prod",
               },
               {
+                "Name": "NEXT_ISR_CACHE_BUCKET",
+                "Value": {
+                  "Ref": "IsrCacheBucket311880A1",
+                },
+              },
+              {
+                "Name": "NEXT_ISR_CACHE_S3",
+                "Value": "off",
+              },
+              {
                 "Name": "GRANT_MATCHER_SUBTOPIC_GRAIN",
                 "Value": "off",
               },
@@ -1957,6 +1967,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -2032,6 +2043,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -2079,6 +2091,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -2105,6 +2118,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -2292,6 +2306,85 @@ service:
         },
       },
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+    },
+    "IsrCacheBucket311880A1": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "ExpirationInDays": 7,
+              "Id": "expire-isr-cache",
+              "Prefix": "next-isr-cache/",
+              "Status": "Enabled",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "IsrCacheBucketPolicyF908ED16": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "IsrCacheBucket311880A1",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "IsrCacheBucket311880A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "IsrCacheBucket311880A1",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
     },
     "MigrationLogGroupFD140541": {
       "DeletionPolicy": "Retain",
@@ -3126,6 +3219,59 @@ service:
       },
       "Type": "AWS::IAM::Policy",
     },
+    "TaskRoleDefaultPolicy07FC53DE": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "IsrCacheBucket311880A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "IsrCacheBucket311880A1",
+                          "Arn",
+                        ],
+                      },
+                      "/next-isr-cache/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "TaskRoleDefaultPolicy07FC53DE",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "TaskRoleOpportunitySubmissionPolicy51C9A514": {
       "Properties": {
         "PolicyDocument": {
@@ -3764,6 +3910,16 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SPS_ENV",
                 "Value": "staging",
+              },
+              {
+                "Name": "NEXT_ISR_CACHE_BUCKET",
+                "Value": {
+                  "Ref": "IsrCacheBucket311880A1",
+                },
+              },
+              {
+                "Name": "NEXT_ISR_CACHE_S3",
+                "Value": "off",
               },
               {
                 "Name": "GRANT_MATCHER_SUBTOPIC_GRAIN",
@@ -5489,6 +5645,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -5558,6 +5715,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -5605,6 +5763,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -5631,6 +5790,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -5827,6 +5987,85 @@ service:
         "VpcId": "vpc-08a1873fc8eebae28",
       },
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+    },
+    "IsrCacheBucket311880A1": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "ExpirationInDays": 7,
+              "Id": "expire-isr-cache",
+              "Prefix": "next-isr-cache/",
+              "Status": "Enabled",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "IsrCacheBucketPolicyF908ED16": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "IsrCacheBucket311880A1",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "IsrCacheBucket311880A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "IsrCacheBucket311880A1",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
     },
     "MigrationLogGroupFD140541": {
       "DeletionPolicy": "Retain",
@@ -6585,6 +6824,59 @@ service:
           "Version": "2012-10-17",
         },
         "PolicyName": "sps-task-staging-reciterai-writeback",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "TaskRoleDefaultPolicy07FC53DE": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "IsrCacheBucket311880A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "IsrCacheBucket311880A1",
+                          "Arn",
+                        ],
+                      },
+                      "/next-isr-cache/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "TaskRoleDefaultPolicy07FC53DE",
         "Roles": [
           {
             "Ref": "TaskRole30FC0FBB",

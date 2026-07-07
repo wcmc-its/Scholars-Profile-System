@@ -15,6 +15,7 @@ import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
+import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
@@ -608,6 +609,30 @@ export class AppStack extends Stack {
     this.appTaskRole = taskRole;
 
     // ------------------------------------------------------------------
+    // Shared ISR cache bucket (#1503).
+    //
+    // Backs the S3 `cacheHandler` (lib/cache/s3-cache-handler.js) that lets all
+    // 2–6 app tasks share one incremental-cache store, so `revalidatePath` on
+    // one task can't be undone by the edge refilling a stale copy from another.
+    // Private, SSE-S3, TLS-only; objects self-expire after 7 days (the cache is
+    // derived + disposable, so lifecycle is the only cleanup). Provisioned in
+    // every env but INERT until NEXT_ISR_CACHE_S3="on" flips the handler on —
+    // so enabling the feature is a flag flip, not an infra race. RETAIN matches
+    // the house style for every other bucket in this account.
+    const isrCacheBucket = new s3.Bucket(this, "IsrCacheBucket", {
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+      lifecycleRules: [
+        { id: "expire-isr-cache", prefix: "next-isr-cache/", expiration: Duration.days(7) },
+      ],
+    });
+    // Scoped to the app's prefix only: object CRUD on next-isr-cache/* plus
+    // ListBucket (the handler never touches anything else).
+    isrCacheBucket.grantReadWrite(taskRole, "next-isr-cache/*");
+
+    // ------------------------------------------------------------------
     // X-Ray write grant (B24).
     //
     // The ADOT collector sidecar (added to the task definition below)
@@ -1052,6 +1077,14 @@ export class AppStack extends Stack {
         OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
         OTEL_PROPAGATORS: "tracecontext,xray",
         SPS_ENV: env,
+        // #1503 — shared S3 ISR cacheHandler. NEXT_ISR_CACHE_BUCKET is always
+        // wired so the app can read/write the store; NEXT_ISR_CACHE_S3 is the
+        // dark switch (default "off" both envs → Next's in-memory handler,
+        // byte-identical to today). next.config.ts activates the S3 handler only
+        // when the flag is "on" AND the bucket is present. Flip staging on first
+        // (soak), then prod, each via `cdk deploy Sps-App-<env>`.
+        NEXT_ISR_CACHE_BUCKET: isrCacheBucket.bucketName,
+        NEXT_ISR_CACHE_S3: "off",
         // Reverse grant→researcher matcher: subtopic-grain path vs. the proven
         // topic-vector path. Per-env (on in staging, off in prod until the prod
         // corpus carries match_dsl); lib/api/match-researchers.ts also self-gates
