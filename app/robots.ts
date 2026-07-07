@@ -1,8 +1,8 @@
 import type { MetadataRoute } from "next";
+import { siteBaseUrl } from "@/lib/site-url";
 
 export default function robots(): MetadataRoute.Robots {
-  const base =
-    process.env.NEXT_PUBLIC_SITE_URL ?? "https://scholars.weill.cornell.edu";
+  const base = siteBaseUrl();
   return {
     rules: {
       userAgent: "*",

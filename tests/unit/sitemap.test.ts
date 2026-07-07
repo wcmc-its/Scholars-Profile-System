@@ -51,6 +51,10 @@ vi.mock("@/lib/db", () => ({
 beforeEach(() => {
   vi.resetAllMocks();
   process.env.NEXT_PUBLIC_SITE_URL = "https://scholars.weill.cornell.edu";
+  // Runtime SITE_URL now takes precedence (#1514); keep it unset by default so
+  // these NEXT_PUBLIC_-based assertions hold. Tests that exercise precedence set
+  // it locally and this reset clears it before the next test.
+  delete process.env.SITE_URL;
 
   mockScholarFindMany.mockResolvedValue([
     { slug: "jane-doe", updatedAt: new Date("2026-01-15") },
@@ -110,12 +114,18 @@ describe("lib/sitemap — parseShardId", () => {
 });
 
 describe("lib/sitemap — siteBaseUrl", () => {
-  it("uses NEXT_PUBLIC_SITE_URL when set", () => {
+  it("prefers runtime SITE_URL over build-time NEXT_PUBLIC_SITE_URL (#1514)", () => {
+    process.env.SITE_URL = "https://scholars-staging.weill.cornell.edu";
+    process.env.NEXT_PUBLIC_SITE_URL = "https://scholars.weill.cornell.edu";
+    expect(siteBaseUrl()).toBe("https://scholars-staging.weill.cornell.edu");
+  });
+
+  it("uses NEXT_PUBLIC_SITE_URL when SITE_URL is unset", () => {
     process.env.NEXT_PUBLIC_SITE_URL = "https://custom.example.com";
     expect(siteBaseUrl()).toBe("https://custom.example.com");
   });
 
-  it("falls back to the default domain when unset", () => {
+  it("falls back to the default domain when both are unset", () => {
     delete process.env.NEXT_PUBLIC_SITE_URL;
     expect(siteBaseUrl()).toBe("https://scholars.weill.cornell.edu");
   });
