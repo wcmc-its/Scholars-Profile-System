@@ -209,7 +209,7 @@ describe("EvidenceLine — #1366 follow-up: de-dup empty-resolve drops the chevr
     // A sibling line already claimed a pmid ⇒ this line fetches with a non-empty
     // `exclude` and (here) gets nothing back: its papers are all shown under the
     // stronger sibling, so the chevron must drop rather than offer an empty panel.
-    const claimed = { current: new Set(["999"]) };
+    const claimed = new Set(["999"]);
     render(
       <EvidenceLine
         evidence={{ kind: "method", family: "Confocal microscopy", tools: [], count: 3 }}
@@ -237,7 +237,7 @@ describe("EvidenceLine — #1366 follow-up: de-dup empty-resolve drops the chevr
 
   it("the SAME line with NO sibling exclude keeps its fallback link on empty (genuine empty)", async () => {
     mockFetch({ pubs: [], total: 0 });
-    const claimed = { current: new Set<string>() }; // nothing claimed ⇒ exclude empty
+    const claimed = new Set<string>(); // nothing claimed ⇒ exclude empty
     render(
       <EvidenceLine
         evidence={{ kind: "method", family: "Confocal microscopy", tools: [], count: 3 }}
