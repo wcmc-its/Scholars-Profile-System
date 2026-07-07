@@ -234,7 +234,7 @@ export async function loadMethodExemplar(
   if (visible.length === 0) return EMPTY_EXEMPLAR;
 
   // #1119 — the family's representative tool-usage snippet (flag-gated inside).
-  const methodContext = pickMethodContext(visible);
+  let methodContext = pickMethodContext(visible);
 
   // (2) Candidate pmids — union across the matching public rows (a label can in
   // principle recur under two supercategories; both public here), bounded.
@@ -250,6 +250,20 @@ export async function loadMethodExemplar(
   const excludeSet = new Set(exclude ?? []);
   const candidatePmids = Array.from(pmidSet).filter((p) => !excludeSet.has(p));
   const result = await rankExemplarForPmids(id, candidatePmids, query);
+
+  // #1502 — pickMethodContext returns a verbatim sentence baked from `sourcePmid`
+  // by the tools ETL, served with NO suppression check (unlike the exemplar list,
+  // which rankExemplarForPmids already filters for dark/hidden). Re-check the
+  // source publication at read time so a post-publish takedown, a derived-dark
+  // pmid, or this scholar's own per-author hide can't keep the snippet + "Source
+  // publication" link live. Mirrors the list's dark+hidden stance.
+  if (methodContext?.sourcePmid) {
+    const sp = methodContext.sourcePmid;
+    const supp = await loadPublicationSuppressions([sp], prisma);
+    const dark = await resolveDarkPmids([sp], supp, prisma);
+    if (dark.has(sp) || isAuthorHidden(supp, sp, id)) methodContext = null;
+  }
+
   return { ...result, methodContext };
 }
 
