@@ -61,6 +61,20 @@ describe("getEffectiveOverview", () => {
     );
   });
 
+  it("sanitizes the ETL column for stored XSS — it renders raw via dangerouslySetInnerHTML", async () => {
+    // The legacy VIVO `overview` column is rich text that can carry unsanitized
+    // markup. `sanitizeVIVOHtml` only strips serializer artifacts, so the ETL
+    // branch must also go through DOMPurify like the override branch. (#1536.)
+    const result = await getEffectiveOverview(
+      "cwid1",
+      '<p>bio</p><script>alert(1)</script><img src=x onerror="alert(2)">',
+      client(null),
+    );
+    expect(result).not.toContain("<script");
+    expect(result).not.toContain("onerror");
+    expect(result).toContain("<p>bio</p>");
+  });
+
   it("returns null when there is neither an override nor an ETL column", async () => {
     expect(await getEffectiveOverview("cwid1", null, client(null))).toBeNull();
   });

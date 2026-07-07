@@ -39,7 +39,9 @@ type OverrideReadClient = Pick<PrismaClient, "fieldOverride">;
  * unsanitized (a second writer, a migration, direct SQL) must not pass through.
  *
  * With no override, the ETL-managed `Scholar.overview` column is used, cleaned
- * of legacy VIVO serializer artifacts.
+ * of legacy VIVO serializer artifacts and then DOMPurify-sanitized — the column
+ * is legacy VIVO rich text seeded from a source that can carry unsanitized
+ * markup, and it renders through the same raw `dangerouslySetInnerHTML`.
  *
  * Returns `null` for "no overview" — an absent column, or an override whose
  * sanitized value is the empty string.
@@ -66,7 +68,13 @@ export async function getEffectiveOverview(
     const clean = sanitizeOverviewHtml(override.value);
     return clean === "" ? null : clean;
   }
-  return etlOverview ? sanitizeVIVOHtml(etlOverview) : null;
+  if (!etlOverview) return null;
+  // `sanitizeVIVOHtml` only strips serializer artifacts — it is NOT an HTML
+  // sanitizer. The ETL branch renders through the same raw `dangerouslySetInnerHTML`
+  // as the override branch, so run it through DOMPurify too (strip artifacts
+  // first, then sanitize) to close the stored-XSS surface.
+  const clean = sanitizeOverviewHtml(sanitizeVIVOHtml(etlOverview));
+  return clean === "" ? null : clean;
 }
 
 // ---------------------------------------------------------------------------
