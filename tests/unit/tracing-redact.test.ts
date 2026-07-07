@@ -63,6 +63,33 @@ describe("redactAttributes", () => {
     expect(out["http.target"]).toBe("/api/health");
   });
 
+  // /edit/* routes interleave a static segment before the id parent. The walk
+  // must hash the CWID (the value after "scholar"), never the literal word
+  // "scholar" — the original walk matched "edit" first, hashed "scholar", and
+  // let the CWID through in plaintext.
+  it("hashes the CWID on /edit/scholar/<cwid>, preserving the static segments", () => {
+    const out = redactAttributes({ "http.target": "/edit/scholar/abc1234" });
+    expect(out["http.target"]).toMatch(/^\/edit\/scholar\/sha256:[0-9a-f]{12}$/);
+  });
+
+  it("hashes the pmid on /edit/publication/<pmid>/history", () => {
+    const out = redactAttributes({
+      "http.target": "/edit/publication/38670054/history",
+    });
+    expect(out["http.target"]).toMatch(
+      /^\/edit\/publication\/sha256:[0-9a-f]{12}\/history$/,
+    );
+  });
+
+  it("does not re-inspect a hashed value as a segment name", () => {
+    // "scholar" triggers → "person" (the VALUE) is hashed; the walk skips past
+    // it, so "publications" is not treated as person's value.
+    const out = redactAttributes({
+      "http.target": "/scholar/person/publications",
+    });
+    expect(out["http.target"]).toMatch(/^\/scholar\/sha256:[0-9a-f]{12}\/publications$/);
+  });
+
   it("leaves unrelated attributes alone", () => {
     const out = redactAttributes({
       "http.method": "GET",
