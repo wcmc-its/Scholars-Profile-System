@@ -58,8 +58,10 @@ Wrap every S3 `get`/`set`/`revalidateTag` in a **timeout (≈250 ms) + try/catch
 - Emit a structured `event: "isr_cache_s3_error"` log with op + key hash + error, and a CloudWatch metric so we can alarm if the fallback path is hot.
 
 ### 4e. Migration & rollout flag
-- Config gated: `next.config.ts` sets `cacheHandler` + `cacheMaxMemorySize: 0` **only when** `process.env.NEXT_ISR_CACHE_S3 === "on"` (a static literal read, per the flag-parity gate) **and** the cache bucket env is present. Off → today's in-memory handler, byte-identical behavior.
-- Because `cacheHandler` is a build-time config, the flag is read at build/boot; enabling it is a config change wired **per-env in `cdk/lib/app-stack.ts`** (not just `.env.local`) + an `app-stack.test.ts` snapshot regen, then `cdk deploy Sps-App-<env>` (CD only re-rolls the image; a new env key needs the stack deploy — the standing flag-parity rule).
+- Config gated: `next.config.ts` sets `cacheHandler` + `cacheMaxMemorySize: 0` **only when** `process.env.NEXT_ISR_CACHE_S3 === "on"`. Off → today's built-in FS/in-memory handler, byte-identical behavior.
+- **`cacheHandler` is a BUILD-time config, not runtime.** `output: standalone` bakes the resolved config into the image (`__NEXT_PRIVATE_STANDALONE_CONFIG`); the runtime server never re-evaluates `next.config.ts`. So the flag must be present at `next build`, i.e. it is passed as a **Docker `--build-arg NEXT_ISR_CACHE_S3`** (Dockerfile `ARG`/`ENV`), set **per env by the Deploy workflow** (`.github/workflows/deploy.yml`): staging soaks it `on`, prod stays `off` until the soak passes. A runtime task-def env can **not** flip it — the original design (a task-def literal + `cdk deploy`) was a no-op and is corrected here (#1503 wiring fix).
+- The gate is deliberately **not** conditioned on the bucket env: `NEXT_ISR_CACHE_BUCKET` is `isrCacheBucket.bucketName`, a CloudFormation ref only resolved at deploy time, so it can never be present at build. The bucket name is wired as a **task-def env** (runtime) and the handler reads it at module load, no-opping its S3 path if it is ever absent.
+- Provisioning order to enable an env: (1) `cdk deploy Sps-App-<env>` to create the `IsrCacheBucket` + wire `NEXT_ISR_CACHE_BUCKET` into the task def; (2) build+deploy an image with `NEXT_ISR_CACHE_S3=on` for that env (the workflow's per-env policy). Do (1) before (2) so the handler isn't briefly compiled-in with no bucket to reach.
 - **Phased** (de-risks the tag propagation): **Phase 1** — shared S3 `get`/`set`, `revalidateTag` best-effort. This alone kills the core divergence (one store → the edge can't refill a stale copy from another task); edits still reflect within the (shortened) route TTL. **Phase 2** — turn on the shared tag-timestamp propagation (4b) so edits reflect within seconds. Ship Phase 1, soak on staging, then Phase 2.
 
 ### 4f. Infra prerequisite (BLOCKER — must land first)
@@ -73,7 +75,7 @@ There is currently **no writable S3 bucket wired to the app task** (`analyticsBu
 - Load/latency: measure `get` p50/p99 with the in-process front on/off; confirm regeneration stays background (SWR) and TTFB is unaffected on the hot profile/topic/search paths (the #695/#1297 warmup concerns).
 
 ## 6. Rollback
-Clear `NEXT_ISR_CACHE_S3` (or scale the flag off) + `cdk deploy Sps-App-<env>` → the default in-memory handler returns; no data migration (ISR cache is derived, disposable). The lifecycle rule drains the bucket. Fully reversible.
+Set the env's `NEXT_ISR_CACHE_S3` build-arg back to `off` in the Deploy workflow + redeploy (rebuilds the image with `cacheHandler` unset) → the default FS/in-memory handler returns; no data migration (ISR cache is derived, disposable). Faster kill-switch without a rebuild: remove the `NEXT_ISR_CACHE_BUCKET` task-def env (or empty the bucket) → the compiled-in handler no-ops its S3 path. The lifecycle rule drains the bucket. Fully reversible.
 
 ## 7. Interim (LANDED with this spec)
 The interim ships in the same PR to reduce the staleness window now:

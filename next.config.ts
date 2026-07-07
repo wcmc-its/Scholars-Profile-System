@@ -22,16 +22,21 @@ const NODE_BUILTIN_EXTERNALS: Record<string, string> = {
 
 // #1503 — shared S3-backed ISR cacheHandler. Prod runs 2–6 app tasks and
 // Next's default incremental cache is per-process, so `revalidatePath` busts
-// only one task and the edge can refill a stale copy from another. When the
-// flag is "on" AND a cache bucket is wired, route all tasks through the shared
-// S3 store (`lib/cache/s3-cache-handler.js`) with in-process memory disabled so
-// S3 is the single source of truth. Off (default) → Next's in-memory handler,
-// byte-identical to today. Static `process.env` literal per the flag-parity
-// gate; read at server boot (standalone re-evaluates next.config), so flipping
-// it is a per-env cdk env change, not a rebuild. See docs/1503-shared-
-// cachehandler-spec.md.
-const isrCacheS3 =
-  process.env.NEXT_ISR_CACHE_S3 === "on" && !!process.env.NEXT_ISR_CACHE_BUCKET;
+// only one task and the edge can refill a stale copy from another. When "on",
+// route all tasks through the shared S3 store (`lib/cache/s3-cache-handler.js`)
+// with in-process memory disabled so S3 is the single source of truth. Off
+// (default) → Next's built-in FS/in-memory handler, byte-identical to today.
+//
+// IMPORTANT — this is read at `next build`, NOT at runtime. `output: standalone`
+// bakes the resolved config into the image (the runtime server uses the baked
+// `__NEXT_PRIVATE_STANDALONE_CONFIG`; it never re-evaluates next.config.ts), so
+// whether `cacheHandler` is wired is fixed at build. Enabling it is therefore a
+// BUILD-ARG: the Deploy workflow passes `--build-arg NEXT_ISR_CACHE_S3=on` per
+// env (Dockerfile ENV → this read). It is deliberately NOT gated on the bucket
+// env — the bucket name is a CloudFormation ref only known at deploy time, so it
+// can never be present at build; the handler reads NEXT_ISR_CACHE_BUCKET at
+// runtime and safely no-ops if it is absent. See docs/1503-shared-cachehandler-spec.md §4e.
+const isrCacheS3 = process.env.NEXT_ISR_CACHE_S3 === "on";
 
 const nextConfig: NextConfig = {
   // ADR-008: emit a standalone server bundle for the production container

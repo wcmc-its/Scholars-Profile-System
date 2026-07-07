@@ -307,10 +307,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 },
               },
               {
-                "Name": "NEXT_ISR_CACHE_S3",
-                "Value": "off",
-              },
-              {
                 "Name": "GRANT_MATCHER_SUBTOPIC_GRAIN",
                 "Value": "off",
               },
@@ -3916,10 +3912,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": {
                   "Ref": "IsrCacheBucket311880A1",
                 },
-              },
-              {
-                "Name": "NEXT_ISR_CACHE_S3",
-                "Value": "off",
               },
               {
                 "Name": "GRANT_MATCHER_SUBTOPIC_GRAIN",

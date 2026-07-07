@@ -1077,14 +1077,15 @@ export class AppStack extends Stack {
         OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
         OTEL_PROPAGATORS: "tracecontext,xray",
         SPS_ENV: env,
-        // #1503 — shared S3 ISR cacheHandler. NEXT_ISR_CACHE_BUCKET is always
-        // wired so the app can read/write the store; NEXT_ISR_CACHE_S3 is the
-        // dark switch (default "off" both envs → Next's in-memory handler,
-        // byte-identical to today). next.config.ts activates the S3 handler only
-        // when the flag is "on" AND the bucket is present. Flip staging on first
-        // (soak), then prod, each via `cdk deploy Sps-App-<env>`.
+        // #1503 — shared S3 ISR cacheHandler. NEXT_ISR_CACHE_BUCKET (the bucket
+        // name, a runtime CloudFormation ref) is always wired so the handler can
+        // read/write the store; the handler no-ops safely if it is ever absent.
+        // The on/off switch is NOT here: whether the handler is compiled in is a
+        // BUILD-time decision (next.config bakes it into the standalone image),
+        // so it is passed as `--build-arg NEXT_ISR_CACHE_S3` by the Deploy
+        // workflow, per env — a runtime task-def env could never flip it. See
+        // docs/1503-shared-cachehandler-spec.md §4e.
         NEXT_ISR_CACHE_BUCKET: isrCacheBucket.bucketName,
-        NEXT_ISR_CACHE_S3: "off",
         // Reverse grant→researcher matcher: subtopic-grain path vs. the proven
         // topic-vector path. Per-env (on in staging, off in prod until the prod
         // corpus carries match_dsl); lib/api/match-researchers.ts also self-gates
