@@ -109,6 +109,27 @@ export function fundingStatusLabel(status: FundingStatus | null | undefined): st
   return status ? FUNDING_STATUS_LABELS[status] : "";
 }
 
+const DAY_MS = 86_400_000;
+/** Due dates inside this window get the "soon" urgency tone. */
+const DUE_SOON_MS = 30 * DAY_MS;
+
+export type DueUrgency = "past" | "soon" | null;
+
+/**
+ * Urgency of an opportunity due date at `now` (epoch ms): "past" once behind
+ * us, "soon" within 30 days, null otherwise (or when unparseable/absent).
+ * Due dates are date-only (midnight UTC), so "past" starts a full day after
+ * the stamp — an opportunity is never "(passed)" on its own due day.
+ */
+export function dueUrgency(iso: string | null, now: number): DueUrgency {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  if (t + DAY_MS < now) return "past";
+  if (t - now <= DUE_SOON_MS) return "soon";
+  return null;
+}
+
 /** One researcher's row for the CSV export (selected rows in the matcher). */
 export type ResearcherCsvInput = {
   cwid: string;

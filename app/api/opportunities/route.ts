@@ -60,6 +60,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       status: true,
       prestige: true,
       isHonorific: true,
+      awardCeiling: true,
+      awardFloor: true,
     },
   });
 
@@ -76,7 +78,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (pa !== pb) return pb - pa;
     return (a.title ?? "").localeCompare(b.title ?? "");
   });
-  const opportunities = rows.slice(0, limit);
+  // BigInt award fields → number for JSON (mirrors the detail route).
+  const opportunities = rows.slice(0, limit).map((r) => ({
+    ...r,
+    awardCeiling: r.awardCeiling == null ? null : Number(r.awardCeiling),
+    awardFloor: r.awardFloor == null ? null : Number(r.awardFloor),
+  }));
 
   return NextResponse.json({ count: opportunities.length, opportunities });
 }
