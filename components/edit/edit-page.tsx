@@ -1013,10 +1013,17 @@ function renderPanel(
             scholarName={scholarName}
             appointments={ctx.appointments}
           />
-          {/* #1323 — reveal-to-show historical appointments. Only reveal-capable
-              editors (superuser / comms_steward / unit-admin curator) see the
-              control; the route enforces the same authorization. */}
-          {(isSuperuserLike(mode) || mode === "unit-admin") &&
+          {/* #1323 — reveal-to-show historical appointments. Every reveal-capable
+              editor sees the control: the scholar themselves (self, self-serve),
+              a superuser / comms_steward, a granted proxy, or a unit-admin curator
+              — the SAME set `authorizeOverviewWrite` authorizes at the route, so
+              the surface never drifts from the write gate. A self-actor only ever
+              sees + toggles their OWN history (the loader is per-scholar and the
+              route keys authz on the appointment's owner). */}
+          {(mode === "self" ||
+            isSuperuserLike(mode) ||
+            mode === "unit-admin" ||
+            mode === "proxy") &&
             ctx.historicalAppointments.length > 0 && (
               <HistoricalAppointmentsCard
                 scholarName={scholarName}

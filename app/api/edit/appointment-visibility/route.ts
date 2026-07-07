@@ -12,20 +12,25 @@
  * always shown and is refused here (409). The CV export ignores this flag
  * entirely (historical appointments are always exported).
  *
- * Authorization mirrors the suppress route's two-layer shape: the global base
- * gate (`authorizeAppointmentVisibility` — comms_steward / superuser), with the
- * UNIT-scoped curator path (`resolveEditableUnitViaUnitAdmin`) layered on top,
- * keyed on the REAL cwid and never while impersonating (IS-1). The update and
- * the B03 audit row commit in one transaction; the profile page is reflected
- * post-commit.
+ * Authorization rides the SAME `authorizeOverviewWrite` predicate as the bio +
+ * section-visibility (#1554), keyed on the OWNING scholar (`appointment.cwid`):
+ * self (a scholar reveals their OWN historical appointments) OR superuser OR
+ * comms_steward (profile parity) OR a granted proxy (#779) OR an org-unit
+ * owner/curator (#728). The delegated legs run only for a non-impersonating
+ * actor and are keyed on the REAL cwid (IS-1). Keying on the appointment's owner
+ * is the load-bearing self-ownership guard — a self-actor is authorized only
+ * when `session.cwid === appointment.cwid`, so a scholar can never toggle another
+ * scholar's appointment. The update and the B03 audit row commit in one
+ * transaction; the profile page is reflected post-commit.
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
-import { authorizeAppointmentVisibility, logEditDenial } from "@/lib/edit/authz";
+import { logEditDenial } from "@/lib/edit/authz";
+import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
+import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import {
-  resolveEditableUnitViaUnitAdmin,
   type EditableUnit,
   type UnitScholarLookup,
 } from "@/lib/edit/unit-scholar-authz";
@@ -66,23 +71,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(409, "not_historical", "appointmentExternalId");
   }
 
-  // --- authorization (403): base = comms_steward / superuser, then the
-  //     unit-admin curator path layered on top (Amendment 4, mirroring the
-  //     suppress route). The curator path is keyed on the REAL cwid and never
-  //     while impersonating (IS-1); the conferring unit is audited. ---
-  let authz = authorizeAppointmentVisibility(session);
-  let viaUnitAdminUnit: EditableUnit | null = null;
-  if (!authz.ok && impersonatedCwid === null) {
-    const unit = await resolveEditableUnitViaUnitAdmin(
-      realCwid,
-      appointment.cwid,
-      db.read as unknown as UnitScholarLookup,
-    );
-    if (unit) {
-      authz = { ok: true };
-      viaUnitAdminUnit = unit;
-    }
-  }
+  // --- authorization (403): reveal/hide rides the SAME "may edit this scholar's
+  //     profile" authz as the bio + section-visibility (#1554) —
+  //     `authorizeOverviewWrite`, keyed on the OWNING scholar (`appointment.cwid`):
+  //     self OR superuser OR comms_steward OR granted proxy (#779) OR org-unit
+  //     owner/curator (#728). The delegated legs run only for a non-impersonating
+  //     actor and are keyed on realCwid (IS-1). Keying on `appointment.cwid` is
+  //     the load-bearing self-ownership guard: a self-actor passes leg 1 only when
+  //     `session.cwid === appointment.cwid`, so a scholar can never reveal or hide
+  //     another scholar's appointment. A unit-admin allow carries the conferring
+  //     unit into the B03 audit for attribution. ---
+  const authz = await authorizeOverviewWrite({
+    session,
+    realCwid,
+    impersonatedCwid,
+    entityId: appointment.cwid,
+    proxyDb: db.read as unknown as ProxyLookup,
+    unitDb: db.read as unknown as UnitScholarLookup,
+  });
   if (!authz.ok) {
     logEditDenial({
       actorCwid: session.cwid,
@@ -92,6 +98,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
     return editError(403, authz.reason);
   }
+  const viaUnitAdminUnit: EditableUnit | null = authz.viaUnitAdminUnit;
 
   // --- write: the visibility flag + the B03 audit row, one transaction ---
   try {

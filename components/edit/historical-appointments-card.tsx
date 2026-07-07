@@ -1,14 +1,16 @@
 /**
  * #1323 — the Historical Appointments reveal panel. Lists a scholar's past
  * (source "ED-HISTORICAL") appointments, each hidden from the public profile
- * until a curator / comms_steward shows it. Unlike the active Appointments
- * panel (hide-to-suppress), this is reveal-to-show: the toggle flips
+ * until a reveal-capable editor shows it. Unlike the active Appointments panel
+ * (hide-to-suppress), this is reveal-to-show: the toggle flips
  * `Appointment.showOnProfile` via POST /api/edit/appointment-visibility.
  *
  * Display-only: it does not change the underlying record, and the CV export
- * always includes historical appointments regardless of this flag. Rendered
- * only for reveal-capable editors (superuser / comms_steward / unit-admin) —
- * the route enforces the same authorization, so an unauthorized POST 403s.
+ * always includes historical appointments regardless of this flag. Rendered for
+ * every editor the write route authorizes via `authorizeOverviewWrite` — the
+ * scholar themselves (self, self-serve), a superuser / comms_steward, a granted
+ * proxy, or a unit-admin curator — and the route re-enforces the same
+ * authorization, so an unauthorized POST 403s.
  */
 "use client";
 

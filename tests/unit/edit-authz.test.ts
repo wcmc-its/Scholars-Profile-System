@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  authorizeAppointmentVisibility,
   authorizeCommsStewardAction,
   authorizeFieldEdit,
   authorizeRevoke,
@@ -253,31 +252,10 @@ describe("authorizeCommsStewardAction", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// authorizeAppointmentVisibility  (#1323 — reveal a historical appointment)
-//
-// The GLOBAL base gate: comms_steward OR superuser allow; a plain scholar (self
-// or other) denies with `not_comms_steward`. The UNIT-scoped curator path is
-// layered on in the route (`resolveEditableUnitViaUnitAdmin`), not here — this
-// predicate is pure and turns only on the actor's tier, like its siblings.
-// ---------------------------------------------------------------------------
-
-describe("authorizeAppointmentVisibility", () => {
-  it("allows a comms_steward (profile parity)", () => {
-    expect(authorizeAppointmentVisibility(STEWARD)).toEqual({ ok: true });
-  });
-
-  it("allows a superuser", () => {
-    expect(authorizeAppointmentVisibility(ADMIN)).toEqual({ ok: true });
-  });
-
-  it("denies a plain scholar (self or other) with not_comms_steward", () => {
-    expect(authorizeAppointmentVisibility(SELF)).toEqual({
-      ok: false,
-      reason: "not_comms_steward",
-    });
-  });
-});
+// authorizeAppointmentVisibility (#1323) was RETIRED with self-serve reveal
+// (#1557): POST /api/edit/appointment-visibility now rides `authorizeOverviewWrite`
+// (self OR superuser OR comms_steward OR proxy OR unit-admin), covered end-to-end
+// in `appointment-visibility-route.test.ts` and `overview-authz.test.ts`.
 
 // ---------------------------------------------------------------------------
 // page-access predicates  (the GET-time re-check, edge case 15)
@@ -476,10 +454,6 @@ describe("INVARIANT: a superuser is allowed by every edit authorization predicat
 
   it("authorizeCommsStewardAction — allows a superuser even with isCommsSteward false (§3 superset)", () => {
     expect(authorizeCommsStewardAction(ADMIN)).toEqual({ ok: true });
-  });
-
-  it("authorizeAppointmentVisibility — allows a superuser even with isCommsSteward false (#1323)", () => {
-    expect(authorizeAppointmentVisibility(ADMIN)).toEqual({ ok: true });
   });
 
   it("unit-curation predicates — allow a superuser even with no UnitAdmin role (effectiveRole 'none')", () => {
