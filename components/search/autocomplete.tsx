@@ -3,7 +3,7 @@
 import { Loader2, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 
 import type { EntityKind } from "@/lib/api/search";
 import { EntityBadge } from "@/components/ui/entity-badge";
@@ -51,6 +51,11 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  // WAI-ARIA 1.2 combobox contract: a stable base id ties the input to the
+  // listbox (aria-controls) and the active option (aria-activedescendant),
+  // mirroring the edit-side comboboxes (unit-finder / department-picker).
+  const reactId = useId();
+  const listboxId = `search-ac-${reactId}-listbox`;
   const containerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const skipSuggestRef = useRef(false);
@@ -240,6 +245,13 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
           className={inputClass}
           aria-label="Search scholars"
           aria-busy={isPending}
+          role="combobox"
+          aria-expanded={open && suggestions.length > 0}
+          aria-controls={listboxId}
+          aria-autocomplete="list"
+          aria-activedescendant={
+            activeIndex >= 0 ? `${listboxId}-opt-${activeIndex}` : undefined
+          }
           autoComplete="off"
         />
         {isHero ? (
@@ -254,12 +266,14 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
       </div>
       {open && suggestions.length > 0 ? (
         <ul
+          id={listboxId}
           role="listbox"
           className="border-border absolute left-0 right-0 top-full z-30 mt-2 max-h-[60vh] overflow-y-auto overflow-x-hidden rounded-md border bg-background text-left shadow-[0_8px_24px_rgba(0,0,0,0.12),0_2px_6px_rgba(0,0,0,0.08)]"
         >
           {suggestions.map((s, i) => (
             <li
               key={`${s.kind}-${s.href}-${i}`}
+              id={`${listboxId}-opt-${i}`}
               role="option"
               aria-selected={i === activeIndex}
               className="border-t border-zinc-100 first:border-t-0 dark:border-zinc-800"
