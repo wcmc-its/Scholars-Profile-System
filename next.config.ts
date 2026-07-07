@@ -20,10 +20,32 @@ const NODE_BUILTIN_EXTERNALS: Record<string, string> = {
   "node:path": "commonjs path",
 };
 
+// #1503 — shared S3-backed ISR cacheHandler. Prod runs 2–6 app tasks and
+// Next's default incremental cache is per-process, so `revalidatePath` busts
+// only one task and the edge can refill a stale copy from another. When the
+// flag is "on" AND a cache bucket is wired, route all tasks through the shared
+// S3 store (`lib/cache/s3-cache-handler.js`) with in-process memory disabled so
+// S3 is the single source of truth. Off (default) → Next's in-memory handler,
+// byte-identical to today. Static `process.env` literal per the flag-parity
+// gate; read at server boot (standalone re-evaluates next.config), so flipping
+// it is a per-env cdk env change, not a rebuild. See docs/1503-shared-
+// cachehandler-spec.md.
+const isrCacheS3 =
+  process.env.NEXT_ISR_CACHE_S3 === "on" && !!process.env.NEXT_ISR_CACHE_BUCKET;
+
 const nextConfig: NextConfig = {
   // ADR-008: emit a standalone server bundle for the production container
   // image (see Dockerfile) — only traced dependencies are included.
   output: "standalone",
+  ...(isrCacheS3
+    ? {
+        cacheHandler: require.resolve("./lib/cache/s3-cache-handler.js"),
+        // S3 is the shared source of truth; disable the default in-memory LRU
+        // so a task can't serve its own stale copy past a shared revalidation.
+        // (The handler keeps its own small in-process front — §4c.)
+        cacheMaxMemorySize: 0,
+      }
+    : {}),
   // Pin the file-tracing root so the standalone bundle lands at a stable
   // path (.next/standalone/server.js). Without this, Next infers the root
   // from the nearest lockfile, which is ambiguous when the build runs from
