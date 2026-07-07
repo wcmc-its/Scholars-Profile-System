@@ -632,7 +632,7 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // #1507 -- HTTPS origin leg. INERT until edgeOriginCertArn is seeded
     // (operator issues the ALB-region cert for this hostname + points DNS at
     // the public ALB). Confirm the exact hostname before issuing the cert.
-    edgeOriginHostname: "origin.scholars-staging.weill.cornell.edu",
+    edgeOriginHostname: "scholars-staging-origin.weill.cornell.edu",
     edgeOriginCertArn: "",
     // Observability metric-by-name decouple (cutover, item-3 Phase B2): ON.
     // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-
@@ -772,7 +772,7 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // #1507 -- HTTPS origin leg. INERT until edgeOriginCertArn is seeded
     // (operator issues the ALB-region cert for this hostname + points DNS at
     // the public ALB). Confirm the exact hostname before issuing the cert.
-    edgeOriginHostname: "origin.scholars.weill.cornell.edu",
+    edgeOriginHostname: "scholars-origin.weill.cornell.edu",
     edgeOriginCertArn: "",
     // Observability metric-by-name decouple (cutover, item-3 prod window): ON.
     // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-

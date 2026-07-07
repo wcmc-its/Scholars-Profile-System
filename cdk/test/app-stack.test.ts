@@ -62,7 +62,7 @@ describe("AppStack", () => {
       "arn:aws:acm:us-east-1:123456789012:certificate/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     const { template } = buildAppStack("prod", {
       edgeOriginCertArn: CERT,
-      edgeOriginHostname: "origin.scholars.weill.cornell.edu",
+      edgeOriginHostname: "scholars-origin.weill.cornell.edu",
     });
 
     it("adds an HTTPS :443 listener (ALB cert) alongside the kept :80 listeners", () => {

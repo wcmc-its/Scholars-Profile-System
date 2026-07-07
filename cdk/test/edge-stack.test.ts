@@ -505,7 +505,7 @@ describe("EdgeStack", () => {
         const { template: httpsTemplate } = buildEdgeStack("prod", undefined, {
           edgeOriginCertArn:
             "arn:aws:acm:us-east-1:123456789012:certificate/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-          edgeOriginHostname: "origin.scholars.weill.cornell.edu",
+          edgeOriginHostname: "scholars-origin.weill.cornell.edu",
         });
         const dc = (
           Object.values(
@@ -514,7 +514,7 @@ describe("EdgeStack", () => {
         ).DistributionConfig as Record<string, unknown>;
         const ods = dc.Origins as Array<Record<string, unknown>>;
         const albOrigin = ods.find(
-          (o) => o.DomainName === "origin.scholars.weill.cornell.edu",
+          (o) => o.DomainName === "scholars-origin.weill.cornell.edu",
         );
         expect(albOrigin).toBeDefined();
         const config = albOrigin?.CustomOriginConfig as Record<string, unknown>;
