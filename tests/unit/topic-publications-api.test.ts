@@ -30,6 +30,7 @@ const {
   mockPublicationAuthorFindMany,
   mockSuppressionFindMany,
   mockTransaction,
+  mockQueryRaw,
 } = vi.hoisted(() => ({
   mockTopicFindUnique: vi.fn(),
   mockPublicationTopicFindMany: vi.fn(),
@@ -39,6 +40,7 @@ const {
   mockPublicationAuthorFindMany: vi.fn(),
   mockSuppressionFindMany: vi.fn(),
   mockTransaction: vi.fn(),
+  mockQueryRaw: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -52,6 +54,7 @@ vi.mock("@/lib/db", () => ({
     },
     publicationAuthor: { findMany: mockPublicationAuthorFindMany },
     suppression: { findMany: mockSuppressionFindMany },
+    $queryRaw: mockQueryRaw,
     $transaction: mockTransaction,
   },
 }));
@@ -174,17 +177,19 @@ function txn({
   parentTierStrongly?: number;
   parentTierAlso?: number;
 } = {}): unknown[] {
-  const distinct = (n: number) =>
-    Array.from({ length: n }, (_, i) => ({ pmid: `p${i}` }));
+  // #1504 — the seven count slots are now COUNT(DISTINCT pmid) raw-query
+  // results (a single `{ c: bigint }` row); the service derives each total via
+  // Number(r[0].c). Emit that shape so callers keep passing plain numbers.
+  const count = (n: number) => [{ c: BigInt(n) }];
   return [
     rows,
-    distinct(total),
-    distinct(totalAllTypes ?? total),
-    distinct(totalResearchOnly ?? total),
-    distinct(tierStrongly),
-    distinct(tierAlso),
-    distinct(parentTierStrongly ?? tierStrongly),
-    distinct(parentTierAlso ?? tierAlso),
+    count(total),
+    count(totalAllTypes ?? total),
+    count(totalResearchOnly ?? total),
+    count(tierStrongly),
+    count(tierAlso),
+    count(parentTierStrongly ?? tierStrongly),
+    count(parentTierAlso ?? tierAlso),
   ];
 }
 
@@ -582,15 +587,17 @@ describe("getTopicPublications", () => {
         { sort: "newest", subtopic: "gi_pancreatic" },
         NOW,
       );
-      // #651 — the 7th and 8th groupBy(["pmid"]) calls are the parent-scope
-      // tier counts. Their `where` must NOT contain `primarySubtopicId` so the
-      // parent counts span the whole topic regardless of subtopic selection.
-      const parentStronglyArgs = mockPublicationTopicGroupBy.mock.calls.at(-2)?.[0];
-      const parentAlsoArgs = mockPublicationTopicGroupBy.mock.calls.at(-1)?.[0];
-      expect(parentStronglyArgs.where.primarySubtopicId).toBeUndefined();
-      expect(parentStronglyArgs.where.score).toEqual({ gte: 0.5 });
-      expect(parentAlsoArgs.where.primarySubtopicId).toBeUndefined();
-      expect(parentAlsoArgs.where.score).toEqual({ lt: 0.5 });
+      // #1504 — the 6th & 7th $queryRaw calls are the parent-scope tier counts
+      // (COUNT(DISTINCT pmid) replaced the parent-scope groupBys). Their SQL
+      // must NOT reference primary_subtopic_id so the parent counts span the
+      // whole topic regardless of subtopic selection, and must carry the score
+      // threshold.
+      const parentStronglySql = (mockQueryRaw.mock.calls.at(-2)?.[1] as { sql: string }).sql;
+      const parentAlsoSql = (mockQueryRaw.mock.calls.at(-1)?.[1] as { sql: string }).sql;
+      expect(parentStronglySql).not.toContain("primary_subtopic_id");
+      expect(parentStronglySql).toContain("pt.score >=");
+      expect(parentAlsoSql).not.toContain("primary_subtopic_id");
+      expect(parentAlsoSql).toContain("pt.score <");
     });
 
     it("parentTierTotals count query respects the publication-type filter", async () => {
@@ -608,17 +615,14 @@ describe("getTopicPublications", () => {
         },
         NOW,
       );
-      const parentStronglyArgs = mockPublicationTopicGroupBy.mock.calls.at(-2)?.[0];
-      const parentAlsoArgs = mockPublicationTopicGroupBy.mock.calls.at(-1)?.[0];
-      // Pub-type filter SHOULD propagate into parent-scope counts so the
+      const parentStronglySql = (mockQueryRaw.mock.calls.at(-2)?.[1] as { sql: string }).sql;
+      const parentAlsoSql = (mockQueryRaw.mock.calls.at(-1)?.[1] as { sql: string }).sql;
+      // Pub-type filter SHOULD propagate into parent-scope counts (the
+      // research-only `publication_type NOT IN (...)` subquery) so the
       // select-visibility decision matches what the user could see under
       // the active filter.
-      expect(
-        parentStronglyArgs.where.publication?.publicationType?.notIn,
-      ).toBeDefined();
-      expect(
-        parentAlsoArgs.where.publication?.publicationType?.notIn,
-      ).toBeDefined();
+      expect(parentStronglySql).toContain("publication_type");
+      expect(parentAlsoSql).toContain("publication_type");
     });
   });
 
