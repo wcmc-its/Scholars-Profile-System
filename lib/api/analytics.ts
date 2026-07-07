@@ -45,6 +45,16 @@ export const VALID_EVENTS = new Set<string>([
   "search_mesh_restrict",
 ]);
 
+/** Max logged length for any user-controlled string field. The beacon is
+ *  unauthenticated (T-06-02-01), so an unbounded string would let a caller
+ *  balloon the structured-log stream. 512 is generous for a query/id/slug. */
+const MAX_STR = 512;
+
+/** Coerce to a length-bounded string, or null for non-strings. */
+function capStr(v: unknown): string | null {
+  return typeof v === "string" ? v.slice(0, MAX_STR) : null;
+}
+
 /**
  * Validates the beacon payload and emits a structured `search_click` log
  * line. Pure: no Next.js / fs / network dependencies. Safe to call from
@@ -66,10 +76,10 @@ export function handleAnalyticsBeacon(payload: unknown): void {
       : {};
   const filters = {
     ...(typeof rawFilters.department === "string"
-      ? { department: rawFilters.department }
+      ? { department: rawFilters.department.slice(0, MAX_STR) }
       : {}),
     ...(typeof rawFilters.personType === "string"
-      ? { personType: rawFilters.personType }
+      ? { personType: rawFilters.personType.slice(0, MAX_STR) }
       : {}),
     ...(typeof rawFilters.hasActiveGrants === "boolean"
       ? { hasActiveGrants: rawFilters.hasActiveGrants }
@@ -77,40 +87,39 @@ export function handleAnalyticsBeacon(payload: unknown): void {
   };
 
   // Only echo whitelisted fields. Never spread `payload` directly.
+  // All string fields are length-bounded via capStr (T-06-02-01): the beacon
+  // is unauthenticated, so raw user strings must never hit the log unbounded.
   console.log(
     JSON.stringify({
       event,
-      q: typeof p.q === "string" ? p.q : null,
+      q: capStr(p.q),
       position: typeof p.position === "number" ? p.position : null,
-      cwid: typeof p.cwid === "string" ? p.cwid : null,
+      cwid: capStr(p.cwid),
       // Funding tab clicks identify by InfoEd account number rather than
       // cwid since hits aggregate across multiple WCM scholars.
-      projectId: typeof p.projectId === "string" ? p.projectId : null,
-      resultType: typeof p.resultType === "string" ? p.resultType : null,
+      projectId: capStr(p.projectId),
+      resultType: capStr(p.resultType),
       resultCount: typeof p.resultCount === "number" ? p.resultCount : null,
       // mentoring_copubs_open fields. Null for other events.
-      mentorCwid: typeof p.mentorCwid === "string" ? p.mentorCwid : null,
-      menteeCwid: typeof p.menteeCwid === "string" ? p.menteeCwid : null,
+      mentorCwid: capStr(p.mentorCwid),
+      menteeCwid: capStr(p.menteeCwid),
       n: typeof p.n === "number" ? p.n : null,
       // person_popover_* fields (#242). Null for other events.
-      surface: typeof p.surface === "string" ? p.surface : null,
-      contextScholarCwid:
-        typeof p.contextScholarCwid === "string" ? p.contextScholarCwid : null,
-      contextPubPmid:
-        typeof p.contextPubPmid === "string" ? p.contextPubPmid : null,
-      contextTopicSlug:
-        typeof p.contextTopicSlug === "string" ? p.contextTopicSlug : null,
-      action: typeof p.action === "string" ? p.action : null,
+      surface: capStr(p.surface),
+      contextScholarCwid: capStr(p.contextScholarCwid),
+      contextPubPmid: capStr(p.contextPubPmid),
+      contextTopicSlug: capStr(p.contextTopicSlug),
+      action: capStr(p.action),
       // spotlight_paper_click fields (#343). Null for other events.
-      pmid: typeof p.pmid === "string" ? p.pmid : null,
+      pmid: capStr(p.pmid),
       slot: typeof p.slot === "number" ? p.slot : null,
-      cycleId: typeof p.cycleId === "string" ? p.cycleId : null,
-      subtopicId: typeof p.subtopicId === "string" ? p.subtopicId : null,
+      cycleId: capStr(p.cycleId),
+      subtopicId: capStr(p.subtopicId),
       // search_popover_* fields (#265). Null for other events.
-      mode: typeof p.mode === "string" ? p.mode : null,
-      descriptorId: typeof p.descriptorId === "string" ? p.descriptorId : null,
+      mode: capStr(p.mode),
+      descriptorId: capStr(p.descriptorId),
       // home_method_category_click — carries the category slug. Null otherwise.
-      slug: typeof p.slug === "string" ? p.slug : null,
+      slug: capStr(p.slug),
       filters,
       ts: typeof p.ts === "number" ? p.ts : Date.now(),
     }),
