@@ -33,6 +33,29 @@ import {
   loadPublicationSuppressions,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
+import { hiddenMenteeCwids } from "@/lib/mentee-suppression";
+
+/**
+ * #160 follow-up — the /edit "hide mentee" suppression (`entityType="mentee"`,
+ * `entityId` = `"{mentorCwid}:{menteeCwid}"`) must gate EVERY public mentoring
+ * surface, not just the profile Mentoring section: the co-pubs rollup page,
+ * both per-mentee pages, and their CSV/DOCX exports previously kept publishing
+ * a hidden mentee's name/program/year. ADR-005 immediacy: read per-request,
+ * never cached. A read failure throws (fail closed at the page/route level)
+ * rather than silently rendering the unfiltered list.
+ */
+async function loadHiddenMenteeSet(mentorCwid: string): Promise<Set<string>> {
+  const rows = await prisma.suppression.findMany({
+    where: {
+      entityType: "mentee",
+      entityId: { startsWith: `${mentorCwid}:` },
+      contributorCwid: null,
+      revokedAt: null,
+    },
+    select: { entityId: true },
+  });
+  return hiddenMenteeCwids(mentorCwid, rows);
+}
 
 export type CoPublication = {
   pmid: number;
@@ -876,7 +899,7 @@ export async function getMentorMenteePair(
       return [];
     }
   };
-  const [aocRows, jenzabarRow, postdocRow] = await Promise.all([
+  const [aocRows, jenzabarRow, postdocRow, hiddenMentees] = await Promise.all([
     loadAocPairRows(),
     prisma.phdMentorRelationship.findFirst({
       where: { mentorCwid, menteeCwid },
@@ -886,8 +909,13 @@ export async function getMentorMenteePair(
       where: { mentorCwid, menteeCwid },
       select: { menteeFirstName: true, menteeLastName: true },
     }),
+    loadHiddenMenteeSet(mentorCwid),
   ]);
   if (aocRows.length === 0 && !jenzabarRow && !postdocRow) return null;
+  // #160 follow-up — this validator is the shared 404 gate for the per-mentee
+  // co-pubs page and its export route; a mentor-hidden mentee must 404 there
+  // exactly like a stray URL, mirroring the profile Mentoring section.
+  if (hiddenMentees.has(menteeCwid)) return null;
 
   const first =
     aocRows[0]?.studentFirstName ??
@@ -1005,7 +1033,14 @@ export async function getAllMentorCoPublications(
   // We then drop mentees with copublicationCount=0 since they don't
   // contribute to this view.
   const { mentees: allMentees } = await getMenteesForMentor(mentorCwid);
-  const menteesWithCopubs = allMentees.filter((m) => m.copublicationCount > 0);
+  // #160 follow-up — drop mentor-hidden mentees BEFORE building the rollup so
+  // this page and its CSV/DOCX exports honor the same /edit choice the profile
+  // Mentoring section applies. Skip the read when there are no mentees.
+  const hiddenMentees =
+    allMentees.length > 0 ? await loadHiddenMenteeSet(mentorCwid) : new Set<string>();
+  const menteesWithCopubs = allMentees.filter(
+    (m) => m.copublicationCount > 0 && !hiddenMentees.has(m.cwid),
+  );
 
   if (menteesWithCopubs.length === 0) {
     return { groups: [], publicationCount: 0, menteeCount: 0 };

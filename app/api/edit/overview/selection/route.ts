@@ -15,11 +15,17 @@
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
-import { logEditDenial } from "@/lib/edit/authz";
+import { logEditDenial, verifyRequestOrigin } from "@/lib/edit/authz";
 import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 import { isOverviewGenerateEnabled } from "@/lib/edit/overview-generator";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
-import { editError, editOk, logEditFailure, resolveEditIdentity } from "@/lib/edit/request";
+import {
+  editError,
+  editOk,
+  impersonationReadonly,
+  logEditFailure,
+  resolveEditIdentity,
+} from "@/lib/edit/request";
 import {
   loadOverviewSelectionDeltas,
   saveOverviewSelectionDeltas,
@@ -32,7 +38,9 @@ const PATH = "/api/edit/overview/selection";
  *  return early (401 / 403 / 404). Shared by GET + PUT. */
 async function authorizeTarget(
   request: NextRequest,
-): Promise<{ targetCwid: string; actorCwid: string } | NextResponse> {
+): Promise<
+  { targetCwid: string; actorCwid: string; impersonatedCwid: string | null } | NextResponse
+> {
   if (!isOverviewGenerateEnabled()) return editError(404, "not_found");
 
   const id = await resolveEditIdentity();
@@ -54,7 +62,7 @@ async function authorizeTarget(
     logEditDenial({ actorCwid: session.cwid, targetCwid, path: PATH, reason: authz.reason });
     return editError(403, authz.reason);
   }
-  return { targetCwid, actorCwid: session.cwid };
+  return { targetCwid, actorCwid: session.cwid, impersonatedCwid };
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -70,8 +78,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
+  // This route reads its body via `request.json()` instead of `readEditRequest`,
+  // so the write-path guards every sibling gets for free are owed explicitly:
+  // the R4 same-origin + JSON content-type CSRF defense, and the R3
+  // impersonation-readonly refusal before any mutation.
+  const origin = verifyRequestOrigin(request);
+  if (!origin.ok) {
+    return editError(origin.reason === "bad_content_type" ? 415 : 403, origin.reason);
+  }
   const auth = await authorizeTarget(request);
   if (auth instanceof NextResponse) return auth;
+  if (auth.impersonatedCwid !== null && impersonationReadonly()) {
+    return editError(403, "impersonation_readonly");
+  }
   // Untrusted body — `saveOverviewSelectionDeltas` normalizes before persisting, so
   // a malformed / oversized payload is coerced rather than rejected.
   const body = await request.json().catch(() => ({}));
