@@ -600,20 +600,43 @@ async function main() {
       totalAuthorsByPmidFromList,
     );
 
-    console.log(`Clearing prior WCM authorship rows for ${sourcePmids.length} source PMIDs...`);
-    for (const batch of chunks(sourcePmids, IN_BATCH)) {
-      await db.write.publicationAuthor.deleteMany({ where: { pmid: { in: batch } } });
-    }
-
-    console.log(`Inserting ${authorshipRows.length} WCM authorship rows...`);
+    // Delete + reinsert the corpus-wide WCM authorships in ONE interactive
+    // transaction. Profile publication lists build from
+    // publicationAuthor.findMany, so the previous non-transactional
+    // wipe-then-reinsert let live readers see publications with zero WCM
+    // authors for the whole multi-minute rewrite, and a crash between the two
+    // phases stranded the corpus author-less until the next run. Inside the
+    // transaction readers keep the pre-commit snapshot until commit.
+    //
+    // This is the corpus-wide step (~minutes of writes), so the interactive-tx
+    // timeout is raised well above the 5 s default. It fails SAFE: if the write
+    // exceeds the ceiling the whole transaction rolls back (no partial state)
+    // and the next nightly run retries. If operations finds a multi-minute
+    // transaction too heavy for Aurora, the documented alternative is a keyed
+    // reconcile (delete only stale (pmid,cwid) keys, insert only new) that
+    // avoids the wipe entirely — deferred until measured to be necessary, as it
+    // trades the atomicity win for delta-diff logic that could silently drop
+    // authorships.
+    console.log(
+      `Rewriting WCM authorship rows for ${sourcePmids.length} source PMIDs ` +
+        `(${authorshipRows.length} rows, transactional)...`,
+    );
     let authInserted = 0;
-    for (const batch of chunks(authorshipRows, INSERT_BATCH)) {
-      await db.write.publicationAuthor.createMany({ data: batch, skipDuplicates: true });
-      authInserted += batch.length;
-      if (authInserted % (INSERT_BATCH * 20) === 0) {
-        console.log(`  ...${authInserted}/${authorshipRows.length}`);
-      }
-    }
+    await db.write.$transaction(
+      async (tx) => {
+        for (const batch of chunks(sourcePmids, IN_BATCH)) {
+          await tx.publicationAuthor.deleteMany({ where: { pmid: { in: batch } } });
+        }
+        for (const batch of chunks(authorshipRows, INSERT_BATCH)) {
+          await tx.publicationAuthor.createMany({ data: batch, skipDuplicates: true });
+          authInserted += batch.length;
+          if (authInserted % (INSERT_BATCH * 20) === 0) {
+            console.log(`  ...${authInserted}/${authorshipRows.length}`);
+          }
+        }
+      },
+      { timeout: 600_000, maxWait: 15_000 },
+    );
 
     // 7. Orphan cleanup — delete publications whose pmid is no longer in the
     //    ReCiter source. Cascade to publication_topic / publication_author /
