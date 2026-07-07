@@ -23,7 +23,7 @@ type FakeClient = {
   scholar: { findUnique: AnyMock };
   suppression: { findMany: AnyMock };
   publicationAuthor: { findMany: AnyMock };
-  fieldOverride: { findUnique: AnyMock };
+  fieldOverride: { findUnique: AnyMock; findMany: AnyMock };
   appointment: { findMany: AnyMock };
   education: { findMany: AnyMock };
   grant: { findMany: AnyMock };
@@ -47,7 +47,12 @@ function fakeClient(): FakeClient {
     scholar: { findUnique: vi.fn() },
     suppression: { findMany: vi.fn().mockResolvedValue([]) },
     publicationAuthor: { findMany: vi.fn().mockResolvedValue([]) },
-    fieldOverride: { findUnique: vi.fn().mockResolvedValue(null) },
+    // `findUnique` serves the overview + slug baselines; `findMany` serves the
+    // section-visibility overrides (default "none hidden").
+    fieldOverride: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     // #160 entity attributes — default to "no rows" so the existing tests
     // (which exercise only scholar + publications) trigger zero entity-
     // suppression queries (guarded on externalIds.length > 0) and stay green.

@@ -35,6 +35,7 @@ const ctx: EditContext = {
     roleCategory: "full_time_faculty",
     overview: "<p>Hi.</p>",
     slugOverride: null,
+    hiddenSections: [],
     suppression: { ownRow: null, adminRow: null },
   },
   publications: [

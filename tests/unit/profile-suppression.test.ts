@@ -4,6 +4,7 @@ const {
   mockScholarFindFirst,
   mockScholarFindUnique,
   mockFieldOverrideFindUnique,
+  mockFieldOverrideFindMany,
   mockPublicationAuthorFindMany,
   mockSuppressionFindMany,
   mockPersonNihProfileFindFirst,
@@ -11,6 +12,7 @@ const {
   mockScholarFindFirst: vi.fn(),
   mockScholarFindUnique: vi.fn(),
   mockFieldOverrideFindUnique: vi.fn(),
+  mockFieldOverrideFindMany: vi.fn(),
   mockPublicationAuthorFindMany: vi.fn(),
   mockSuppressionFindMany: vi.fn(),
   mockPersonNihProfileFindFirst: vi.fn(),
@@ -19,7 +21,7 @@ const {
 vi.mock("@/lib/db", () => ({
   prisma: {
     scholar: { findFirst: mockScholarFindFirst, findUnique: mockScholarFindUnique },
-    fieldOverride: { findUnique: mockFieldOverrideFindUnique },
+    fieldOverride: { findUnique: mockFieldOverrideFindUnique, findMany: mockFieldOverrideFindMany },
     publicationAuthor: { findMany: mockPublicationAuthorFindMany },
     suppression: { findMany: mockSuppressionFindMany },
     personNihProfile: { findFirst: mockPersonNihProfileFindFirst },
@@ -124,6 +126,8 @@ beforeEach(() => {
   mockScholarFindFirst.mockReset();
   mockScholarFindUnique.mockReset();
   mockFieldOverrideFindUnique.mockReset().mockResolvedValue(null);
+  // No section-visibility overrides by default (a fully-public profile).
+  mockFieldOverrideFindMany.mockReset().mockResolvedValue([]);
   mockPublicationAuthorFindMany.mockReset();
   mockSuppressionFindMany.mockReset().mockResolvedValue([]);
   mockPersonNihProfileFindFirst.mockReset().mockResolvedValue(null);
@@ -278,5 +282,70 @@ describe("getScholarFullProfileBySlug — entity suppression (#160)", () => {
     suppressByType({ grant: ["INFOED-2-owner001"] });
     const payload = await getScholarFullProfileBySlug("owner-one");
     expect((payload?.grants ?? []).map((g) => g.title)).toEqual(["Grant A"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// section-visibility: whole-section hide (section-visibility-spec.md)
+// ---------------------------------------------------------------------------
+
+describe("getScholarFullProfileBySlug — section visibility", () => {
+  it("empties the Education section from the payload when hideEducation is set", async () => {
+    mockScholarFindFirst.mockResolvedValue({
+      ...scholarRow(),
+      educations: [education("EDU-1", "MD"), education("EDU-2", "PhD")],
+      grants: [grant("INFOED-1-owner001", "Grant A")],
+    });
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    mockFieldOverrideFindMany.mockResolvedValue([{ fieldName: "hideEducation" }]);
+    const payload = await getScholarFullProfileBySlug("owner-one");
+    // Education is gone; Funding (not hidden) still renders.
+    expect(payload?.educations).toEqual([]);
+    expect((payload?.grants ?? []).map((g) => g.title)).toEqual(["Grant A"]);
+    // The hidden key is surfaced for the render body's mentoring / methods gates.
+    expect(payload?.hiddenSections).toContain("hideEducation");
+  });
+
+  it("empties Funding and surfaces hideMentoring while keeping Education visible", async () => {
+    mockScholarFindFirst.mockResolvedValue({
+      ...scholarRow(),
+      educations: [education("EDU-1", "MD")],
+      grants: [grant("INFOED-1-owner001", "Grant A"), grant("INFOED-2-owner001", "Grant B")],
+    });
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    mockFieldOverrideFindMany.mockResolvedValue([
+      { fieldName: "hideFunding" },
+      { fieldName: "hideMentoring" },
+    ]);
+    const payload = await getScholarFullProfileBySlug("owner-one");
+    expect(payload?.grants).toEqual([]);
+    expect((payload?.educations ?? []).map((e) => e.degree)).toEqual(["MD"]);
+    expect(payload?.hiddenSections).toEqual(
+      expect.arrayContaining(["hideFunding", "hideMentoring"]),
+    );
+    // Only rows the loader queried for value "true" are read; a "false" row is
+    // never returned by the query, so it never appears as hidden here.
+    expect(mockFieldOverrideFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          entityType: "scholar",
+          value: "true",
+        }),
+      }),
+    );
+  });
+
+  it("keeps every section visible when no section-visibility override is set", async () => {
+    mockScholarFindFirst.mockResolvedValue({
+      ...scholarRow(),
+      educations: [education("EDU-1", "MD")],
+      grants: [grant("INFOED-1-owner001", "Grant A")],
+    });
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    // default beforeEach: mockFieldOverrideFindMany resolves []
+    const payload = await getScholarFullProfileBySlug("owner-one");
+    expect((payload?.educations ?? []).length).toBe(1);
+    expect((payload?.grants ?? []).length).toBe(1);
+    expect(payload?.hiddenSections).toEqual([]);
   });
 });

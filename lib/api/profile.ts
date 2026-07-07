@@ -20,7 +20,7 @@ import {
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
 import { gateEmailForViewer } from "@/lib/profile/email-display-gate";
-import { MAX_SELECTED_HIGHLIGHTS } from "@/lib/edit/validators";
+import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/validators";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { coreProjectNum } from "@/lib/award-number";
@@ -589,6 +589,15 @@ export type ProfilePayload = {
    *  is off (the reverse query is never issued) or the scholar has no active
    *  membership. Prisma-sourced; carries no search-index/browse-facet key. */
   centers: ScholarCenterAffiliation[];
+  /** section-visibility-spec — the per-scholar section keys currently HIDDEN
+   *  (`field_override(scholar, <key>)` = "true"), a subset of
+   *  `SECTION_VISIBILITY_FIELDS`. The data for the six payload-carried sections
+   *  (education / funding / centers / postdoc mentor / clinical trials / methods)
+   *  is already emptied above when hidden, so nothing leaks; this array is
+   *  surfaced for the two the render body still gates itself — `hideMentoring`
+   *  (skip the separate live mentee fetch) and `hideMethods` (also suppress the
+   *  audience-gated sensitive-family reveal). Empty for a fully-public profile. */
+  hiddenSections: string[];
 };
 
 /**
@@ -800,6 +809,7 @@ export const getScholarFullProfileBySlug = cache(async (
     manualHighlightPmids,
     centers,
     leadershipTitles,
+    sectionOverrideRows,
   ] = await Promise.all([
       // The effective `overview` merges a manual `field_override` over the ETL
       // column at read time (#356, lib/api/manual-layer.ts). A self-edited bio is
@@ -930,7 +940,20 @@ export const getScholarFullProfileBySlug = cache(async (
             `${l.interim ? "Interim Leader" : "Leader"}, ${l.program.label} (${l.program.center.officialName ?? l.program.center.name})`,
         ),
       ]),
+      // section-visibility-spec — the per-scholar section-hide overrides. Only
+      // rows set to "true" (hidden) are read; a "false" row (or none) is "shown".
+      // Filters the payload below so a hidden section's data never ships.
+      prisma.fieldOverride.findMany({
+        where: {
+          entityType: "scholar",
+          entityId: scholar.cwid,
+          fieldName: { in: [...SECTION_VISIBILITY_FIELDS] },
+          value: "true",
+        },
+        select: { fieldName: true },
+      }),
     ]);
+  const hiddenSections = new Set(sectionOverrideRows.map((r) => r.fieldName));
 
   // #356 — publication suppression. A publication this scholar has hidden
   // (a per-author suppression on their own cwid), or one taken down whole,
@@ -1189,21 +1212,27 @@ export const getScholarFullProfileBySlug = cache(async (
       isActive: a.isActive,
       source: a.source,
     })),
-    educations: scholar.educations
-      // #160 — drop suppressed education entries from the sidebar.
-      .filter((e) => !suppressedEducationIds.has(e.externalId))
-      .map((e) => ({
-        degree: e.degree,
-        institution: e.institution,
-        year: e.year,
-        field: e.field,
-      })),
+    // section-visibility — `hideEducation` drops the whole Education section.
+    educations: hiddenSections.has("hideEducation")
+      ? []
+      : scholar.educations
+          // #160 — drop suppressed education entries from the sidebar.
+          .filter((e) => !suppressedEducationIds.has(e.externalId))
+          .map((e) => ({
+            degree: e.degree,
+            institution: e.institution,
+            year: e.year,
+            field: e.field,
+          })),
     // Issue #78 — runtime canonicalization fallback. When the stored
     // canonical short is null but the raw matches the current sponsor
     // lookup (e.g. due to alias / normalization additions made after the
     // last ETL run), promote it on the fly. Lets the profile section
     // reflect canonical-lookup updates without re-ingesting.
-    grants: scholar.grants
+    // section-visibility — `hideFunding` drops the whole Funding section.
+    grants: hiddenSections.has("hideFunding")
+      ? []
+      : scholar.grants
       // #160 — drop a suppressed grant role from the funding section.
       .filter((g) => !suppressedGrantIds.has(g.externalId))
       .map((g) => {
@@ -1269,7 +1298,9 @@ export const getScholarFullProfileBySlug = cache(async (
     // Withdrawn/never-enrolled trials are dropped; the rest sort active-first
     // then by most recent status date.
     clinicalTrials:
-      process.env.CLINICAL_TRIALS_SECTION === "on"
+      // section-visibility — `hideClinicalTrials` drops the whole section (in
+      // addition to the CLINICAL_TRIALS_SECTION dark-launch gate).
+      process.env.CLINICAL_TRIALS_SECTION === "on" && !hiddenSections.has("hideClinicalTrials")
         ? scholar.clinicalTrials
             .filter((ct) => !isWithdrawnTrialStatus(ct.trial.status))
             .map((ct) => ({
@@ -1296,7 +1327,10 @@ export const getScholarFullProfileBySlug = cache(async (
             })
         : [],
     keywords,
-    families,
+    // section-visibility — `hideMethods` drops the Methods & Tools lens from the
+    // (cached) payload. DISPLAY-ONLY: the Overview generator's methods facts are
+    // driven by `family_suppression_overlay`, not this, so they are untouched.
+    families: hiddenSections.has("hideMethods") ? [] : families,
     disclosures: scholar.coiActivities.map((c) => ({
       entity: c.entity,
       activityType: c.activityType,
@@ -1307,8 +1341,11 @@ export const getScholarFullProfileBySlug = cache(async (
     })),
     highlights,
     publications,
+    // section-visibility — `hidePostdocMentor` drops the sidebar mentor card.
     postdoctoralMentor:
-      scholar.postdoctoralMentor &&
+      hiddenSections.has("hidePostdocMentor")
+        ? null
+        : scholar.postdoctoralMentor &&
       scholar.postdoctoralMentor.deletedAt === null &&
       scholar.postdoctoralMentor.status === "active"
         ? {
@@ -1325,7 +1362,9 @@ export const getScholarFullProfileBySlug = cache(async (
           }
         : null,
     nihReporterProfileId: nihProfileRow?.nihProfileId ?? null,
-    centers,
+    // section-visibility — `hideCenters` drops the sidebar Centers card.
+    centers: hiddenSections.has("hideCenters") ? [] : centers,
+    hiddenSections: [...hiddenSections],
   };
 });
 

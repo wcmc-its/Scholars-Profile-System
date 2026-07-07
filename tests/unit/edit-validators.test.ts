@@ -6,8 +6,11 @@ import {
   isChairAppointment,
   isEditableField,
   isEditableUnitField,
+  isSectionVisibilityField,
   publicationAuthorshipExists,
   sanitizeOverview,
+  SECTION_VISIBILITY_FIELDS,
+  validateSectionVisibilityValue,
   validateSlugFormat,
   validateUnitFieldValue,
   validateUnitUrl,
@@ -26,9 +29,59 @@ describe("isEditableField", () => {
     expect(isEditableField("selectedHighlightPmids")).toBe(true);
   });
 
+  it("admits the seven section-visibility keys", () => {
+    for (const f of SECTION_VISIBILITY_FIELDS) {
+      expect(isEditableField(f)).toBe(true);
+    }
+  });
+
   it("rejects every other field name", () => {
     for (const f of ["email", "status", "preferredName", "orcid", "", "OVERVIEW"]) {
       expect(isEditableField(f)).toBe(false);
+    }
+  });
+
+  it("rejects hideDisclosures — COI is compliance-mandated, never hideable", () => {
+    // The deliberate omission from the allowlist is the 400 gate on the route.
+    expect(isEditableField("hideDisclosures")).toBe(false);
+    expect(isSectionVisibilityField("hideDisclosures")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// section visibility (section-visibility-spec.md)
+// ---------------------------------------------------------------------------
+
+describe("section visibility", () => {
+  it("SECTION_VISIBILITY_FIELDS lists exactly the seven hideable sections", () => {
+    expect([...SECTION_VISIBILITY_FIELDS]).toEqual([
+      "hideMentoring",
+      "hideEducation",
+      "hideFunding",
+      "hideCenters",
+      "hidePostdocMentor",
+      "hideClinicalTrials",
+      "hideMethods",
+    ]);
+  });
+
+  it("isSectionVisibilityField narrows only the seven keys", () => {
+    for (const f of SECTION_VISIBILITY_FIELDS) {
+      expect(isSectionVisibilityField(f)).toBe(true);
+    }
+    for (const f of ["overview", "slug", "hideDisclosures", "hidePublications", ""]) {
+      expect(isSectionVisibilityField(f)).toBe(false);
+    }
+  });
+
+  it("validateSectionVisibilityValue accepts exactly 'true' / 'false'", () => {
+    expect(validateSectionVisibilityValue("true")).toEqual({ ok: true, value: "true" });
+    expect(validateSectionVisibilityValue("false")).toEqual({ ok: true, value: "false" });
+  });
+
+  it("validateSectionVisibilityValue rejects any other value", () => {
+    for (const bad of ["True", "1", "yes", "", "hidden", "null"]) {
+      expect(validateSectionVisibilityValue(bad)).toEqual({ ok: false, error: "invalid_value" });
     }
   });
 });

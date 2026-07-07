@@ -965,6 +965,19 @@ function renderPanel(
           // purely to reframe its copy for a proxy / unit-admin (#955 #10).
           mode={childMode}
           thirdPerson={thirdPerson}
+          // section-visibility-spec — the Sections panel. Hidden keys come from
+          // the loader; the per-section hidden-RECORD counts are derived from the
+          // already-loaded edit-context suppression state (no new query). The
+          // "N records hidden →" links deep-link into each record card.
+          sections={{
+            hidden: ctx.scholar.hiddenSections,
+            hiddenRecordCounts: {
+              hideMentoring: ctx.mentees.filter((m) => m.state !== "shown").length,
+              hideEducation: ctx.educations.filter((e) => e.state !== "shown").length,
+              hideFunding: ctx.grants.filter((g) => g.state !== "shown").length,
+            },
+            basePath: detailBase,
+          }}
         />
       );
     case "publications":

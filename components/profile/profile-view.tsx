@@ -90,6 +90,16 @@ export async function ProfileView({ slug }: { slug: string }) {
 
   const jsonLd = buildProfileJsonLd(profile);
 
+  // section-visibility-spec — per-scholar whole-section hides. The six
+  // payload-carried sections (education / funding / centers / postdoc mentor /
+  // clinical trials / methods) are already emptied in the loader, so their
+  // existing `length > 0` guards below no-op automatically. Two need a render-
+  // body gate: `hideMentoring` (the mentee list is fetched here, not in the
+  // payload) and `hideMethods` (also disable the sensitive-family reveal so an
+  // internal viewer can't re-surface the hidden lens). `?? []` guards a
+  // loosely-typed / older cached payload that predates this field.
+  const hiddenSectionSet = new Set(profile.hiddenSections ?? []);
+
   const sparse = isSparseProfile(profile);
   const activeAppointments = profile.appointments.filter((a) => a.isActive);
 
@@ -105,8 +115,15 @@ export async function ProfileView({ slug }: { slug: string }) {
   // fallback zero, NOT a real count, so we suppress the co-pub affordances
   // (rollup link + per-chip badges) and show a muted "temporarily unavailable"
   // note instead of presenting an outage as "no co-publications".
-  const { mentees: menteesAll, copubSourceAvailable } =
-    await getMenteesForMentor(profile.cwid, { sort: "copubs" });
+  // section-visibility — when Mentoring is hidden, skip the live ReciterDB
+  // mentee fetch entirely (the data never even loads, let alone ships).
+  const emptyMentoring: Awaited<ReturnType<typeof getMenteesForMentor>> = {
+    mentees: [],
+    copubSourceAvailable: true,
+  };
+  const { mentees: menteesAll, copubSourceAvailable } = hiddenSectionSet.has("hideMentoring")
+    ? emptyMentoring
+    : await getMenteesForMentor(profile.cwid, { sort: "copubs" });
 
   // #160 follow-up — a mentor may HIDE a mentee from their public profile. The
   // suppression layer is the SOR for that choice (ADR-005 immediacy: per-
@@ -468,7 +485,9 @@ export async function ProfileView({ slug }: { slug: string }) {
                   publications={profile.publications}
                   keywords={profile.keywords.keywords}
                   families={profile.families}
-                  sensitiveGateActive={isMethodsLensSensitiveGateOn()}
+                  sensitiveGateActive={
+                    isMethodsLensSensitiveGateOn() && !hiddenSectionSet.has("hideMethods")
+                  }
                   familyFilterEnabled={isMethodsLensFamilyFilterOn()}
                   methodPagesEnabled={isMethodPagesEnabled()}
                   facetRedesignEnabled={isProfileFacetRedesignEnabled()}
