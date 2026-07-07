@@ -103,9 +103,13 @@ describe("GET /api/opportunities/[opportunityId]/researchers (reverse, admin-gat
 
   it("returns results for a development-role member who is not a superuser (Phase 4 gate)", async () => {
     getEffectiveEditSession.mockResolvedValue({ cwid: "dev", isSuperuser: false, isDeveloper: true });
-    rankResearchersForOpportunity.mockResolvedValue([
-      { cwid: "bbb", slug: "b", axes: { topicFit: 4.2, stageAppeal: 0.5 }, topicContributions: [], defaultScore: 4.2 },
-    ]);
+    rankResearchersForOpportunity.mockResolvedValue({
+      scholars: [
+        { cwid: "bbb", slug: "b", axes: { topicFit: 4.2, stageAppeal: 0.5 }, topicContributions: [], defaultScore: 4.2 },
+      ],
+      abstain: false,
+      meanTopRel: 0,
+    });
     const resp = await reverseGET(req("/api/opportunities/g:1/researchers"), { params: p({ opportunityId: "g:1" }) });
     expect(resp.status).toBe(200);
     expect(rankResearchersForOpportunity).toHaveBeenCalledTimes(1);
@@ -113,18 +117,22 @@ describe("GET /api/opportunities/[opportunityId]/researchers (reverse, admin-gat
 
   it("returns the view-model (card + matching-on chips + topic labels) and passes stageLens through", async () => {
     getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
-    rankResearchersForOpportunity.mockResolvedValue([
-      {
-        cwid: "aaa",
-        slug: "a",
-        careerStage: "early",
-        title: "Assistant Professor",
-        department: "Medicine",
-        axes: { topicFit: 9.7, stageAppeal: 0 },
-        topicContributions: [{ topicId: "t1", contribution: 9.7, pubCount: 3, minYear: 2021 }],
-        defaultScore: 9.7,
-      },
-    ]);
+    rankResearchersForOpportunity.mockResolvedValue({
+      scholars: [
+        {
+          cwid: "aaa",
+          slug: "a",
+          careerStage: "early",
+          title: "Assistant Professor",
+          department: "Medicine",
+          axes: { topicFit: 9.7, stageAppeal: 0 },
+          topicContributions: [{ topicId: "t1", contribution: 9.7, pubCount: 3, minYear: 2021 }],
+          defaultScore: 9.7,
+        },
+      ],
+      abstain: false,
+      meanTopRel: 0,
+    });
     findUnique.mockResolvedValue({
       title: "Opp T",
       mechanism: "R01",
@@ -146,6 +154,24 @@ describe("GET /api/opportunities/[opportunityId]/researchers (reverse, admin-gat
     expect(body.matchingOn).toEqual([{ topicId: "t1", label: "Topic One", score: 0.8 }]);
     expect(body.topicLabels).toMatchObject({ t1: "Topic One" });
     expect(rankResearchersForOpportunity).toHaveBeenCalledWith("g:1", expect.objectContaining({ stageLens: true }));
+  });
+
+  it("passes the abstention flag through to the response body", async () => {
+    getEffectiveEditSession.mockResolvedValue({ cwid: "admin", isSuperuser: true });
+    rankResearchersForOpportunity.mockResolvedValue({
+      scholars: [
+        { cwid: "aaa", slug: "a", axes: { topicFit: 0.3, stageAppeal: 0 }, topicContributions: [], defaultScore: 0.3 },
+      ],
+      abstain: true,
+      meanTopRel: 0.04,
+    });
+    findUnique.mockResolvedValue({ title: "Weak Opp", status: "open", topicVector: [] });
+    const resp = await reverseGET(req("/api/opportunities/g:1/researchers"), { params: p({ opportunityId: "g:1" }) });
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.abstain).toBe(true);
+    expect(body.meanTopRel).toBe(0.04);
+    expect(body.count).toBe(1); // the weak list is still returned (Option A: banner over the list)
   });
 });
 

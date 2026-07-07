@@ -59,7 +59,7 @@ export async function GET(
     limit = Math.min(n, MAX_LIMIT);
   }
 
-  const results = await rankResearchersForOpportunity(opportunityId, {
+  const { scholars: results, abstain, meanTopRel } = await rankResearchersForOpportunity(opportunityId, {
     sort: sortRaw as ResearcherSort,
     stageLens,
     esiOnly,
@@ -139,6 +139,11 @@ export async function GET(
   return NextResponse.json({
     opportunityId,
     count: results.length,
+    // Weak-coverage flag: true when the top matches fall below the abstention floor
+    // (`GRANT_MATCHER_ABSTAIN_FLOOR`). The screen renders a "no strong WCM match" banner
+    // above the list; always false when the floor is off, so this is a strict add.
+    abstain,
+    meanTopRel,
     opportunity,
     matchingOn,
     topicLabels,
