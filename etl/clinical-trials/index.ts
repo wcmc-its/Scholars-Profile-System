@@ -78,7 +78,6 @@ async function main() {
     );
   } finally {
     await closeReciterPool();
-    await db.write.$disconnect();
   }
 
   console.log(`\nDone in ${((Date.now() - start) / 1000).toFixed(1)}s.`);
@@ -86,9 +85,15 @@ async function main() {
 
 // Records an etl_run row (source "ClinicalTrials", distinct from the bridge
 // import's "ClinicalTrials-Import") so the freshness heartbeat tracks this
-// weekly step (PR-7). main() disconnects db.write in its own finally; the
-// trailing etl_run update reconnects lazily, matching etl/reporter (#1426).
-withEtlRun("ClinicalTrials", main).catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// weekly step (PR-7). withEtlRun writes the etl_run success/failure row AFTER
+// main() returns, so db.write.$disconnect() is deferred to the .finally below —
+// disconnecting inside main() made that trailing update auto-reopen the Prisma
+// pool with nothing left to close it, hanging the process after "Done in …s."
+// (same exit-hang as etl/reporter #1497). process.exitCode (not process.exit)
+// so the .finally cleanup still runs on the failure path.
+withEtlRun("ClinicalTrials", main)
+  .catch((e) => {
+    console.error(e);
+    process.exitCode = 1;
+  })
+  .finally(() => db.write.$disconnect());
