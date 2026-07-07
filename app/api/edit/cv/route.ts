@@ -42,7 +42,8 @@ import {
 import { loadOverviewSelectionDeltas } from "@/lib/edit/overview-selection-store";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import { type UnitScholarLookup } from "@/lib/edit/unit-scholar-authz";
-import { editError, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import { editError, editRateLimited, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import { recordCvExportAttempt } from "@/lib/edit/rate-limit";
 import { getScholarFullProfileBySlug, type ProfilePayload } from "@/lib/api/profile";
 import { getMenteesForMentor, type MenteeChip } from "@/lib/api/mentoring";
 import { filterHiddenMentees, hiddenMenteeCwids } from "@/lib/mentee-suppression";
@@ -121,6 +122,26 @@ export async function POST(request: NextRequest): Promise<Response> {
       reason: authz.reason,
     });
     return editError(403, authz.reason);
+  }
+
+  // --- rate limit (mirrors the overview/biosketch generators): every export is
+  //     a fresh Bedrock generation, so count the attempt BEFORE any assembly or
+  //     gateway cost. Keyed on the TARGET scholar under the distinct `cv:`
+  //     namespace, so the cap holds regardless of which authorized actor
+  //     exports and never collides with the sibling generator caps. ---
+  const rate = await recordCvExportAttempt(entityId);
+  if (!rate.allowed) {
+    console.warn(
+      JSON.stringify({
+        event: "cv_export_rate_limited",
+        path: PATH,
+        actor_cwid: session.cwid,
+        target_cwid: entityId,
+        count: rate.count,
+        limit: rate.limit,
+      }),
+    );
+    return editRateLimited(rate.retryAfterSeconds);
   }
 
   // --- assemble (DB reads). The CV's content sections all come from the

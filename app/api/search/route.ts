@@ -68,12 +68,19 @@ export async function GET(request: NextRequest) {
   return runWithOsRoundTripCounter(() => handleSearch(request));
 }
 
+// DoS/robustness via deep paging (mirrors the topics route's T-03-05-05 clamp):
+// `from = page * PAGE_SIZE` past `index.max_result_window` (100k) makes the
+// OpenSearch client throw — an uncaught 500 — and every deep `from` is a cheap
+// CPU amplifier for the caller. 500 pages × 20 rows = 10k results, far past any
+// legitimate pagination depth.
+const MAX_PAGE = 500;
+
 async function handleSearch(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const q = params.get("q") ?? "";
   const type = params.get("type") ?? "people";
   const rawPage = parseInt(params.get("page") ?? "0", 10);
-  const page = Number.isFinite(rawPage) ? Math.max(0, rawPage) : 0;
+  const page = Number.isFinite(rawPage) ? Math.min(Math.max(0, rawPage), MAX_PAGE) : 0;
 
   // Issue #259 §1.5 — taxonomy match (curated + MeSH resolution) computed
   // once at the top so all three branches can log resolution outcome.

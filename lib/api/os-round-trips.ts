@@ -41,3 +41,13 @@ export function recordOsRoundTrip(): void {
 export function getOsRoundTripCount(): number {
   return storage.getStore()?.count ?? 0;
 }
+
+/**
+ * Whether the current async context is inside a request scope. The search
+ * client wrapper (lib/search.ts) uses this to apply the interactive request
+ * timeout ONLY to request-path `.search()` calls — never to ETL / index-build
+ * traffic flowing through the same client singleton.
+ */
+export function isInOsRequestScope(): boolean {
+  return storage.getStore() !== undefined;
+}
