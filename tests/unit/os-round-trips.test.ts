@@ -12,6 +12,7 @@ import {
   runWithOsRoundTripCounter,
   recordOsRoundTrip,
   getOsRoundTripCount,
+  isInOsRequestScope,
 } from "@/lib/api/os-round-trips";
 
 describe("os-round-trips counter", () => {
@@ -61,5 +62,17 @@ describe("os-round-trips counter", () => {
       recordOsRoundTrip();
     });
     expect(getOsRoundTripCount()).toBe(0);
+  });
+
+  // The search client applies its interactive fail-fast timeout only when this
+  // probe is true — ETL/index-build calls (no scope) must read false.
+  it("isInOsRequestScope: false outside, true inside (surviving awaits), false after", async () => {
+    expect(isInOsRequestScope()).toBe(false);
+    await runWithOsRoundTripCounter(async () => {
+      expect(isInOsRequestScope()).toBe(true);
+      await Promise.resolve();
+      expect(isInOsRequestScope()).toBe(true);
+    });
+    expect(isInOsRequestScope()).toBe(false);
   });
 });

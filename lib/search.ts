@@ -11,9 +11,19 @@
  * Local dev: docker container at OPENSEARCH_NODE.
  */
 import { Client, type ClientOptions } from "@opensearch-project/opensearch";
-import { recordOsRoundTrip } from "@/lib/api/os-round-trips";
+import { isInOsRequestScope, recordOsRoundTrip } from "@/lib/api/os-round-trips";
 
 let _client: Client | null = null;
+
+// Interactive-path request timeout. Without an override the client waits its
+// 30s default on a wedged node/shard — an eternity for a user-facing search.
+// Applied per-call (only inside a request scope), NOT on the client options,
+// because ETL index builds share this singleton and legitimately run long.
+// Env-tunable; 5s is ~10× the healthy p99 of the heaviest people query.
+const OS_REQUEST_PATH_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.SEARCH_OS_REQUEST_TIMEOUT_MS);
+  return Number.isInteger(raw) && raw > 0 ? raw : 5_000;
+})();
 
 /**
  * Build the OpenSearch client options from the environment.
@@ -47,11 +57,23 @@ export function searchClient(): Client {
   // OpenSearch round-trip increments the active per-request counter
   // (lib/api/os-round-trips.ts). `recordOsRoundTrip` is inert outside a
   // `runWithOsRoundTripCounter` scope, so ETL / index-build calls through the
-  // same singleton are unaffected. Behavior-neutral: we delegate to the
-  // original `.search` and return its result untouched.
+  // same singleton are unaffected.
+  //
+  // Inside a request scope the wrapper also injects a fail-fast transport
+  // timeout (+ a single retry) so a wedged node degrades a user search in
+  // seconds, not the client's 30s default. Explicit per-call options win over
+  // the injected defaults; out-of-scope (ETL) calls pass through untouched.
   const originalSearch = client.search.bind(client);
   client.search = function (...args: Parameters<typeof originalSearch>) {
     recordOsRoundTrip();
+    if (isInOsRequestScope()) {
+      const [params, options] = args as unknown as [unknown, Record<string, unknown> | undefined];
+      return originalSearch(params as Parameters<typeof originalSearch>[0], {
+        requestTimeout: OS_REQUEST_PATH_TIMEOUT_MS,
+        maxRetries: 1,
+        ...options,
+      });
+    }
     return originalSearch(...args);
   } as typeof client.search;
   _client = client;

@@ -145,3 +145,30 @@ export async function recordBiosketchGenerateAttempt(
 ): Promise<RateLimitResult> {
   return recordAttempt(`biosketch:${cwid}`, biosketchGenerateRateLimit(), now);
 }
+
+/** Default per-cwid hourly cap for a CV export's M1 research-summary generation.
+ *  Same reasoning as the overview/biosketch caps — every export is a fresh
+ *  Bedrock call (cost), and a scholar rarely needs a dozen CV downloads an hour.
+ *  Env-tunable. */
+export const DEFAULT_CV_EXPORT_LIMIT = 10;
+
+/** The per-cwid hourly CV-export cap. Reads `EDIT_CV_EXPORT_RATE_LIMIT`; falls
+ *  back to {@link DEFAULT_CV_EXPORT_LIMIT} when unset or not a positive integer. */
+export function cvExportRateLimit(): number {
+  const raw = Number(process.env.EDIT_CV_EXPORT_RATE_LIMIT);
+  return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_CV_EXPORT_LIMIT;
+}
+
+/**
+ * Per-cwid hourly rate limit for the CV export's research-summary gateway call.
+ * The same fixed-window mechanism, in its own bucket — the key is namespaced
+ * `cv:${cwid}` so CV exports never share a counter with the other generators or
+ * request-change sends. Keyed on the TARGET scholar like the biosketch cap, so
+ * the cap holds regardless of which authorized actor exports.
+ */
+export async function recordCvExportAttempt(
+  cwid: string,
+  now: Date = new Date(),
+): Promise<RateLimitResult> {
+  return recordAttempt(`cv:${cwid}`, cvExportRateLimit(), now);
+}
