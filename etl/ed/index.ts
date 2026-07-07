@@ -1510,7 +1510,14 @@ async function main() {
       // a swallowed fetch failure lands in this branch as "no employee SOR
       // data", and blanket-nulling every division chief on a transient LDAP
       // error is a mass-clear, not consistency (audit PR-3).
-      if (!chiefDetectionDisabled && employeeFetchSucceeded && employeeRecords.length > 0) {
+      //
+      // #1511: this else-branch is reached only when chief detection was
+      // DISABLED or there were no employee records — so the guard must key on
+      // `chiefDetectionDisabled`, not `!chiefDetectionDisabled`. With the
+      // negation the condition was unsatisfiable (detection-enabled + records
+      // present would have taken the Path B `if`), so disabling chief detection
+      // silently stopped clearing stale chiefs and applying leader overrides.
+      if (chiefDetectionDisabled && employeeFetchSucceeded && employeeRecords.length > 0) {
         await db.write.division.updateMany({ data: { chiefCwid: null } });
         for (const div of divisionsForChief) {
           const leaderOverride = resolveUnitLeaderForETL(
