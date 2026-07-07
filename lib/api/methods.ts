@@ -506,16 +506,26 @@ export async function getFamilyCellLineUsageFacts(
       mentionClass: true,
     },
   });
-  return rows.map((r) => ({
-    pmid: r.pmid,
-    sentence: r.usageSentence,
-    matchedSpan:
-      r.matchedSpanStart != null && r.matchedSpanEnd != null
-        ? { start: r.matchedSpanStart, end: r.matchedSpanEnd }
-        : null,
-    centrality: r.centralityScore != null ? Number(r.centralityScore) : null,
-    mentionClass: r.mentionClass,
-  }));
+  if (rows.length === 0) return [];
+  // #1502 — usageSentence is baked from `pmid` by the tools ETL, whose sha256
+  // short-circuit is blind to Aurora-side ADR-005 takedowns. Drop darkened
+  // source pubs at read time so a suppressed paper's verbatim sentence + link
+  // can't stay live between artifact republishes (mirrors the exemplar list).
+  const factPmids = rows.map((r) => r.pmid);
+  const factSuppressions = await loadPublicationSuppressions(factPmids, prisma);
+  const factDark = await resolveDarkPmids(factPmids, factSuppressions, prisma);
+  return rows
+    .filter((r) => !factDark.has(r.pmid))
+    .map((r) => ({
+      pmid: r.pmid,
+      sentence: r.usageSentence,
+      matchedSpan:
+        r.matchedSpanStart != null && r.matchedSpanEnd != null
+          ? { start: r.matchedSpanStart, end: r.matchedSpanEnd }
+          : null,
+      centrality: r.centralityScore != null ? Number(r.centralityScore) : null,
+      mentionClass: r.mentionClass,
+    }));
 }
 
 /** The best (highest-centrality) usage sentence for an entity — the strip's hover/
@@ -548,8 +558,16 @@ export async function getFamilyCellLineRailPreviews(
       pmid: true,
     },
   });
+  // #1502 — same read-time suppression gate as getFamilyCellLineUsageFacts: drop
+  // darkened source pubs BEFORE picking the highest-centrality preview per entity,
+  // so a suppressed top sentence yields to a clean fallback rather than the entity
+  // going dark or (worse) quoting a taken-down paper.
+  const previewPmids = rows.map((r) => r.pmid);
+  const previewSuppressions = await loadPublicationSuppressions(previewPmids, prisma);
+  const previewDark = await resolveDarkPmids(previewPmids, previewSuppressions, prisma);
   const out: Record<string, CellLineRailPreview> = {};
   for (const r of rows) {
+    if (previewDark.has(r.pmid)) continue; // #1502 — skip suppressed source pubs
     if (out[r.normalizedEntityId]) continue; // rows are centrality-desc → first wins
     out[r.normalizedEntityId] = {
       sentence: r.usageSentence,
