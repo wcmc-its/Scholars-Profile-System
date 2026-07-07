@@ -247,19 +247,34 @@ export class EdgeStack extends Stack {
     // injected none). The X-Origin-Verify header is the whole origin-protection
     // contract — the ALB listener default-denies 403 and forwards only the
     // matching secret — and is unchanged.
-    const origin = new origins.HttpOrigin(
-      ssm.StringParameter.valueForStringParameter(
-        this,
-        `/sps/${env}/app/public-alb-dns`,
-      ),
-      {
-        protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
-        httpPort: 80,
-        customHeaders: {
-          "X-Origin-Verify": originVerifyToken,
-        },
-      },
-    );
+    // #1507 -- when edgeOriginCertArn is seeded, CloudFront talks HTTPS to a
+    // custom origin hostname the public ALB's :443 listener presents a cert for
+    // (the ALB DNS name can't carry a public cert). Otherwise it stays HTTP_ONLY
+    // on the ALB DNS name (today's behavior). The X-Origin-Verify shared-secret
+    // origin-protection contract is unchanged on both paths.
+    const originHttps = envConfig.edgeOriginCertArn.length > 0;
+    const origin = originHttps
+      ? new origins.HttpOrigin(envConfig.edgeOriginHostname, {
+          protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
+          httpsPort: 443,
+          originSslProtocols: [cloudfront.OriginSslPolicy.TLS_V1_2],
+          customHeaders: {
+            "X-Origin-Verify": originVerifyToken,
+          },
+        })
+      : new origins.HttpOrigin(
+          ssm.StringParameter.valueForStringParameter(
+            this,
+            `/sps/${env}/app/public-alb-dns`,
+          ),
+          {
+            protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+            httpPort: 80,
+            customHeaders: {
+              "X-Origin-Verify": originVerifyToken,
+            },
+          },
+        );
 
     // ------------------------------------------------------------------
     // Static-asset S3 origin (Layer 2 of the /about chunk-404 fix).

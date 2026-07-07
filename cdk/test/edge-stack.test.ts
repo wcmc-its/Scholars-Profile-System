@@ -4,6 +4,7 @@ import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
 import { EdgeStack } from "../lib/edge-stack";
 import { NetworkStack } from "../lib/network-stack";
+import { type SpsEnvConfig } from "../lib/config";
 import { makeFixture } from "./test-utils";
 
 interface BuildResult {
@@ -14,8 +15,10 @@ interface BuildResult {
 function buildEdgeStack(
   envName: "staging" | "prod",
   options?: { customDomain?: string; certArn?: string; allowedCidrs?: string },
+  envConfigOverride: Partial<SpsEnvConfig> = {},
 ): BuildResult {
   const fixture = makeFixture(envName);
+  const envConfig = { ...fixture.envConfig, ...envConfigOverride };
   if (options?.customDomain) {
     fixture.app.node.setContext("edgeCustomDomain", options.customDomain);
   }
@@ -27,16 +30,16 @@ function buildEdgeStack(
   }
   const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
   });
   const app = new AppStack(fixture.app, `Sps-App-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     vpc: network.vpc,
   });
   const stack = new EdgeStack(fixture.app, `Sps-Edge-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     deployRoleArn: app.deployRole.roleArn,
   });
   return { template: Template.fromStack(stack), stack };
@@ -496,6 +499,33 @@ describe("EdgeStack", () => {
         const s3Origin = ods.find((o) => o.CustomOriginConfig === undefined);
         expect(s3Origin?.OriginAccessControlId).toBeDefined();
         expect(s3Origin?.S3OriginConfig).toBeDefined();
+      });
+
+      it("with edgeOriginCertArn seeded, the ALB origin runs HTTPS_ONLY on the custom hostname over TLSv1.2, keeping X-Origin-Verify (#1507)", () => {
+        const { template: httpsTemplate } = buildEdgeStack("prod", undefined, {
+          edgeOriginCertArn:
+            "arn:aws:acm:us-east-1:123456789012:certificate/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          edgeOriginHostname: "scholars-origin.weill.cornell.edu",
+        });
+        const dc = (
+          Object.values(
+            httpsTemplate.findResources("AWS::CloudFront::Distribution"),
+          )[0].Properties as Record<string, unknown>
+        ).DistributionConfig as Record<string, unknown>;
+        const ods = dc.Origins as Array<Record<string, unknown>>;
+        const albOrigin = ods.find(
+          (o) => o.DomainName === "scholars-origin.weill.cornell.edu",
+        );
+        expect(albOrigin).toBeDefined();
+        const config = albOrigin?.CustomOriginConfig as Record<string, unknown>;
+        expect(config.OriginProtocolPolicy).toBe("https-only");
+        expect(config.HTTPSPort).toBe(443);
+        expect(config.OriginSSLProtocols).toEqual(["TLSv1.2"]);
+        // The origin-protection contract (X-Origin-Verify) survives the flip.
+        const headers =
+          (albOrigin?.OriginCustomHeaders as Array<{ HeaderName?: string }>) ??
+          [];
+        expect(headers.map((h) => h.HeaderName)).toContain("X-Origin-Verify");
       });
 
       it("origin sends an X-Origin-Verify custom header (acceptance #7)", () => {

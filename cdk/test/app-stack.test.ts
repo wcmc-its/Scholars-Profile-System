@@ -53,6 +53,60 @@ describe("AppStack", () => {
     });
   });
 
+  // #1507 -- HTTPS origin leg. Off by default (edgeOriginCertArn ""); the
+  // default prod/staging builds still show HTTP-only :80 (asserted elsewhere).
+  // These assert the flag-on shape: a :443 listener + ingress + forward rule,
+  // added WITHOUT removing :80 (its removal is a follow-up).
+  describe("#1507 -- HTTPS origin leg (edgeOriginCertArn seeded)", () => {
+    const CERT =
+      "arn:aws:acm:us-east-1:123456789012:certificate/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const { template } = buildAppStack("prod", {
+      edgeOriginCertArn: CERT,
+      edgeOriginHostname: "scholars-origin.weill.cornell.edu",
+    });
+
+    it("adds an HTTPS :443 listener (ALB cert) alongside the kept :80 listeners", () => {
+      const ports = Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::Listener"),
+      ).map((l) => l.Properties?.Port as number);
+      expect(ports).toContain(443);
+      // public :80 + internal :80 are both kept.
+      expect(ports.filter((p) => p === 80).length).toBeGreaterThanOrEqual(2);
+      template.hasResourceProperties(
+        "AWS::ElasticLoadBalancingV2::Listener",
+        {
+          Port: 443,
+          Protocol: "HTTPS",
+          Certificates: [{ CertificateArn: CERT }],
+        },
+      );
+    });
+
+    it("the :443 listener forwards X-Origin-Verify-matching requests to the app TG (a second origin-verify rule)", () => {
+      const originVerifyForwards = Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::ListenerRule"),
+      ).filter((r) => {
+        const conds =
+          (r.Properties?.Conditions as Array<Record<string, unknown>>) ?? [];
+        return conds.some(
+          (c) =>
+            (c.HttpHeaderConfig as { HttpHeaderName?: string } | undefined)
+              ?.HttpHeaderName === "X-Origin-Verify",
+        );
+      });
+      // one for :80 (existing), one for :443 (added).
+      expect(originVerifyForwards).toHaveLength(2);
+    });
+
+    it("opens a :443 internet ingress on the public ALB SG", () => {
+      template.hasResourceProperties("AWS::EC2::SecurityGroupIngress", {
+        FromPort: 443,
+        ToPort: 443,
+        CidrIp: "0.0.0.0/0",
+      });
+    });
+  });
+
   // Estate consolidation (plan §4.4/§5.5): with useSharedVpc on, compute lands
   // in app2, the public ALB in dmz, and SPS owns no VPC interface/gateway
   // endpoints (it rides its-reciter's; a privateDNS SM endpoint would hijack
