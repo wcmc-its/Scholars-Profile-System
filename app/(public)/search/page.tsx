@@ -855,6 +855,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             ) : (
               <PeopleResults
                 q={q}
+                letter={letter}
                 page={page}
                 sort={sort as PeopleSort}
                 deptDiv={deptDiv}
@@ -1126,6 +1127,7 @@ function deptDivLabel(key: string, map: Map<string, string>): string {
 
 async function PeopleResults({
   q,
+  letter,
   page,
   sort,
   deptDiv,
@@ -1142,6 +1144,8 @@ async function PeopleResults({
   evidenceRows,
 }: {
   q: string;
+  /** #1513 — A–Z last-name-initial browse; preserved across facet/sort/page links. */
+  letter: string;
   page: number;
   sort: PeopleSort;
   deptDiv: string[];
@@ -1190,6 +1194,10 @@ async function PeopleResults({
     const sp = new URLSearchParams();
     sp.set("q", q);
     sp.set("type", "people");
+    // #1513 — preserve the A–Z last-name-initial scope across every facet/sort/
+    // pagination link, so navigating the filtered browse doesn't silently revert
+    // to the full people list (mirrors the #396 searchMode preservation).
+    if (letter) sp.set("letter", letter);
     if (sort !== "relevance") sp.set("sort", sort);
     for (const v of deptDiv) sp.append("deptDiv", v);
     for (const v of personType) sp.append("personType", v);
@@ -1241,6 +1249,9 @@ async function PeopleResults({
     });
 
   const clearAllParams = new URLSearchParams({ q, type: "people" });
+  // #1513 — "clear all filters" clears facets but stays within the letter browse
+  // (letter is the browse scope, like q — not a facet).
+  if (letter) clearAllParams.set("letter", letter);
   if (scope !== "expanded") clearAllParams.set("match", scope);
   const clearAllHref = `/search?${clearAllParams.toString()}`;
 
