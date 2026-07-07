@@ -140,6 +140,8 @@ describe("HighlightsCard — #895 redesigned editor", () => {
     renderCard(makeHighlights({ manualEnabled: true, manualPmids: ["1"] }));
     expect(screen.getByTestId("highlights-opt-in").textContent).toBe("Reset to automatic");
     fireEvent.click(screen.getByTestId("highlights-opt-in"));
+    // The destructive clear is now gated behind the confirm dialog.
+    fireEvent.click(await screen.findByRole("button", { name: "Discard and reset" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/edit/clear-field");
@@ -166,5 +168,24 @@ describe("HighlightsCard — #895 redesigned editor", () => {
     renderCard(makeHighlights({ pickable: [] }));
     expect(screen.queryByTestId("highlights-picker")).toBeNull();
     expect(screen.getByText(/nothing to highlight/)).toBeTruthy();
+  });
+
+  // 2026-07-07 review fix: flipping back to automatic destroyed a persisted
+  // manual selection with no confirmation. The destructive clear must now be
+  // gated behind the dialog — no server write happens on the bare toggle.
+  it("does NOT clear the saved manual selection until the reset is confirmed", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okJson({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderCard(makeHighlights({ manualEnabled: true, manualPmids: ["1"] }));
+
+    // The bare "Reset to automatic" toggle opens the dialog but writes nothing.
+    fireEvent.click(screen.getByTestId("highlights-opt-in"));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await screen.findByRole("button", { name: "Discard and reset" })).toBeTruthy();
+
+    // Only confirming issues the clear-field POST.
+    fireEvent.click(screen.getByRole("button", { name: "Discard and reset" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/edit/clear-field");
   });
 });

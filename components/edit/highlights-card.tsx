@@ -34,6 +34,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { CheckIcon, CopyIcon } from "lucide-react";
 
+import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -89,6 +90,9 @@ export function HighlightsCard({ cwid, mode, scholarName, highlights }: Highligh
   const [error, setError] = React.useState<string | null>(null);
   const [justSaved, setJustSaved] = React.useState(false);
   const [copied, setCopied] = React.useState<string | null>(null);
+  // Gate the destructive "reset to automatic" clear (which drops a persisted
+  // manual override server-side) behind a confirmation dialog.
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
 
   const dirty =
     !auto && (selection.length !== saved.length || selection.some((p, i) => p !== saved[i]));
@@ -140,7 +144,7 @@ export function HighlightsCard({ cwid, mode, scholarName, highlights }: Highligh
     setSelection((cur) => (cur.length === 0 ? [...highlights.aiPmids] : cur));
   }
 
-  async function goAuto() {
+  function requestAuto() {
     clearTransient();
     if (!savedManual) {
       // Nothing persisted yet — just flip back to the automatic preview.
@@ -148,7 +152,14 @@ export function HighlightsCard({ cwid, mode, scholarName, highlights }: Highligh
       setSelection([...highlights.aiPmids]);
       return;
     }
-    // A manual override is stored; reverting to automatic clears it server-side.
+    // A manual override is stored; discarding it is destructive and can't be
+    // undone (toggling back re-seeds from the AI picks), so confirm first.
+    setConfirmOpen(true);
+  }
+
+  async function confirmAuto() {
+    // Clear any prior failure banner before a retry from the open dialog.
+    setError(null);
     setBusy(true);
     try {
       const res = await fetch("/api/edit/clear-field", {
@@ -161,17 +172,18 @@ export function HighlightsCard({ cwid, mode, scholarName, highlights }: Highligh
         }),
       });
       const data = (await res.json()) as { ok: boolean };
-      if (!res.ok || data.ok !== true) {
-        setError(GENERIC_ERROR);
-        return;
-      }
+      if (!res.ok || data.ok !== true) throw new Error("clear_failed");
       setAuto(true);
       setSavedManual(false);
       setSaved([]);
       setSelection([...highlights.aiPmids]);
+      setConfirmOpen(false);
       router.refresh();
-    } catch {
+    } catch (e) {
       setError(GENERIC_ERROR);
+      // Re-throw so the ConfirmDialog resets its "Working…" state and stays
+      // open for the user to retry or cancel.
+      throw e;
     } finally {
       setBusy(false);
     }
@@ -179,7 +191,7 @@ export function HighlightsCard({ cwid, mode, scholarName, highlights }: Highligh
 
   function onToggleAuto(checked: boolean) {
     if (busy) return;
-    if (checked) void goAuto();
+    if (checked) requestAuto();
     else goManual();
   }
 
@@ -506,7 +518,7 @@ export function HighlightsCard({ cwid, mode, scholarName, highlights }: Highligh
               data-testid="highlights-opt-in"
               onClick={() => {
                 if (auto) goManual();
-                else void goAuto();
+                else requestAuto();
               }}
               disabled={busy}
             >
@@ -524,6 +536,17 @@ export function HighlightsCard({ cwid, mode, scholarName, highlights }: Highligh
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Reset to automatic?"
+        description="The manual selection will be discarded and cannot be recovered — ReCiterAI will choose the highlights again."
+        reasonMode="none"
+        confirmLabel="Discard and reset"
+        confirmVariant="destructive"
+        onConfirm={confirmAuto}
+      />
     </EditPanel>
   );
 }
