@@ -15,6 +15,7 @@ import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
+import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
@@ -608,6 +609,53 @@ export class AppStack extends Stack {
     this.appTaskRole = taskRole;
 
     // ------------------------------------------------------------------
+    // Shared ISR cache bucket (#1503).
+    //
+    // Backs the Next.js `cacheHandler` (lib/cache/isr-s3-cache-handler.js) so
+    // the 2–6-task app fleet shares ONE ISR store and `revalidatePath`
+    // propagates across tasks — the default per-task in-process cache lets the
+    // edge refill a stale copy from a task whose store was never busted.
+    // Private, SSE-S3, TLS-only. A 7-day lifecycle expiry bounds cost and
+    // self-cleans stale entries: the ISR cache is derived/disposable, so
+    // nothing here is a source of record (rollback = drop the flag; the bucket
+    // drains itself). Created unconditionally; the `isrCacheS3` flag gates
+    // whether the app uses it (next.config), so a dark bucket is a no-op.
+    // See docs/1503-shared-cachehandler-spec.md.
+    // ------------------------------------------------------------------
+    const isrCacheBucket = new s3.Bucket(this, "IsrCacheBucket", {
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+      lifecycleRules: [
+        {
+          id: "expire-isr-cache",
+          prefix: "next-isr-cache/",
+          expiration: Duration.days(7),
+          abortIncompleteMultipartUploadAfter: Duration.days(1),
+        },
+      ],
+    });
+
+    // Least-privilege grant: the handler only GETs/PUTs objects by key under
+    // next-isr-cache/* — no list (it addresses keys directly) and no delete (it
+    // overwrites on set and lets the lifecycle rule expire entries). Inline +
+    // scoped for auditability, matching the other TaskRole* policies; contains
+    // no secretsmanager reference so the "zero secretsmanager on the task role"
+    // assertion still holds.
+    new iam.Policy(this, "TaskRoleIsrCachePolicy", {
+      policyName: `sps-task-${env}-isr-cache`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["s3:GetObject", "s3:PutObject"],
+          resources: [isrCacheBucket.arnForObjects("next-isr-cache/*")],
+        }),
+      ],
+    });
+
+    // ------------------------------------------------------------------
     // X-Ray write grant (B24).
     //
     // The ADOT collector sidecar (added to the task definition below)
@@ -1059,6 +1107,14 @@ export class AppStack extends Stack {
         GRANT_MATCHER_SUBTOPIC_GRAIN: envConfig.grantMatcherSubtopicGrain
           ? "on"
           : "off",
+        // #1503 — shared S3 ISR cacheHandler. NEXT_ISR_CACHE_S3 gates it on
+        // ("off" => Next's built-in in-process handler, byte-identical to
+        // today); the bucket name always rides along so flipping the flag needs
+        // no further wiring. next.config.ts reads NEXT_ISR_CACHE_S3 as a static
+        // literal at build/boot, so a flip needs a `cdk deploy Sps-App-<env>`
+        // (CD only re-rolls the image). Ships dark in both envs.
+        NEXT_ISR_CACHE_S3: envConfig.isrCacheS3 ? "on" : "off",
+        NEXT_ISR_CACHE_BUCKET: isrCacheBucket.bucketName,
         // OpenSearch domain endpoint (https://...). Default: a plaintext env
         // baked from the DataStack cross-stack export. When
         // openSearchNodeFromSecret is on (consolidation cutover de-coupling,

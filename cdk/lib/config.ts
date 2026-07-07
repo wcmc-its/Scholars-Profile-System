@@ -250,6 +250,20 @@ export interface SpsEnvConfig {
    */
   readonly grantMatcherSubtopicGrain: boolean;
   /**
+   * Whether the app uses the shared S3-backed Next.js ISR `cacheHandler` (#1503)
+   * so all app tasks read/write one ISR store and `revalidatePath` propagates
+   * across the 2–6-task fleet. Surfaced to the app container as
+   * `NEXT_ISR_CACHE_S3` ("on"/"off"); the dedicated `isrCacheBucket` name rides
+   * alongside as `NEXT_ISR_CACHE_BUCKET`. **Default `false` in both envs** — off
+   * means Next uses its built-in in-process handler, byte-identical to today, so
+   * a dormant `false` is a no-op against the live envs. Flip staging first to
+   * soak, then prod. The bucket + IAM grant are created unconditionally in
+   * AppStack; only this flag (a build/boot-time config, so it needs a
+   * `cdk deploy Sps-App-<env>`) gates whether next.config wires the handler.
+   * See docs/1503-shared-cachehandler-spec.md.
+   */
+  readonly isrCacheS3: boolean;
+  /**
    * The externally-created, TGW-attached VPC that on-prem-reachable ETL tasks
    * run in — specifically the ED LDAP → S3 email-visibility export (#443).
    * Created out-of-band by WCM networking (NOT by our CDK): staging →
@@ -599,6 +613,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // grant→researcher matcher: subtopic-grain path ON in staging (corpus
     // backfilled + reprojected). Self-gates on per-opportunity match_dsl.
     grantMatcherSubtopicGrain: true,
+    // #1503 — shared S3 ISR cacheHandler ships dark; flip to true to soak on
+    // staging first (needs a `cdk deploy Sps-App-staging`), then prod.
+    isrCacheS3: false,
     // #443 — staging runs the ED email-visibility bridge in scholars-dev, whose
     // on-prem LDAP reach is proven (2026-06-18: in-VPC LDAPS bind + 2440-unit
     // search). Only the two private `app` subnets (TGW + NAT routes) are listed.
@@ -745,6 +762,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // grant→researcher matcher: subtopic-grain path OFF in prod until the prod
     // corpus carries match_dsl/match_query and staging soaks clean.
     grantMatcherSubtopicGrain: false,
+    // #1503 — shared S3 ISR cacheHandler ships dark; flip prod only after the
+    // staging soak (needs a `cdk deploy Sps-App-prod`).
+    isrCacheS3: false,
     // #443 — prod's on-prem-reachable VPC is scholars-prod. Wired but NOT yet
     // activated: edEmailVisibilityBridgeEnabled stays false until the
     // scholars-prod path is verified end-to-end (the same in-VPC bind probe as

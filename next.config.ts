@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 import { buildSecurityHeaders } from "./lib/security-headers";
 
@@ -29,6 +30,25 @@ const nextConfig: NextConfig = {
   // from the nearest lockfile, which is ambiguous when the build runs from
   // a nested checkout.
   outputFileTracingRoot: process.cwd(),
+  // #1503 — shared S3-backed ISR cacheHandler so all app tasks read/write one
+  // store and `revalidatePath` propagates across tasks (prod runs 2–6 tasks).
+  // Gated OFF by default: without the flag Next uses its built-in in-process
+  // handler, byte-identical to today. The flag is a STATIC literal read
+  // (flag-parity gate); the flag + `NEXT_ISR_CACHE_BUCKET` are wired per-env in
+  // cdk/lib/app-stack.ts. Absolute path: Next relativizes it to distDir and
+  // traces the file (+ its @aws-sdk/client-s3 dep) into the standalone bundle
+  // (build/collect-build-traces.ts), so the runtime container can load it.
+  // `cacheMaxMemorySize: 0` disables Next's own LRU — the handler keeps its own
+  // bounded per-task front cache. See docs/1503-shared-cachehandler-spec.md.
+  ...(process.env.NEXT_ISR_CACHE_S3 === "on"
+    ? {
+        cacheHandler: path.join(
+          process.cwd(),
+          "lib/cache/isr-s3-cache-handler.js",
+        ),
+        cacheMaxMemorySize: 0,
+      }
+    : {}),
   // The CV (WCM format) generator reads the official WCM template `.docx` at
   // runtime via a cwd-relative path (lib/edit/cv-template.ts). Next can't trace
   // a dynamic readFile, so force the asset into the standalone bundle or the
