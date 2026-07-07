@@ -127,13 +127,14 @@ jobs:
           # NEXT_ISR_CACHE_S3 (#1503) = whether the shared S3 ISR cacheHandler is
           # compiled into the image. next.config reads it at `next build` (the
           # standalone config is baked), so it is a build-arg, not a task-def env.
-          # Per-env activation policy lives here: staging soaks it on; prod stays
-          # off until the soak passes — flip prod to "on" below when ready. The
-          # env's IsrCacheBucket must be provisioned (cdk deploy Sps-App-<env>)
-          # before turning it on, else the handler runs cold (no bucket → no
-          # shared store).
+          # Per-env activation policy lives here. Both envs now build "on" (staging
+          # soaked; prod activated 2026-07-07). The if/else is kept so either env
+          # can be flipped back to "off" independently as a no-rebuild-needed
+          # rollback lever. Provisioning order still holds: the env's IsrCacheBucket
+          # must exist (cdk deploy Sps-App-<env>) before an "on" image runs there,
+          # else the handler runs cold (no bucket → per-task in-memory only).
           if [ "${{ steps.target.outputs.env }}" = "prod" ]; then
-            ISR_CACHE_S3="off"
+            ISR_CACHE_S3="on"
           else
             ISR_CACHE_S3="on"
           fi
