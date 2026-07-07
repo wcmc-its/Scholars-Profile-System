@@ -12,13 +12,14 @@
  * llms.txt spec. Served as text/plain with a 24h revalidate.
  */
 import { prisma } from "@/lib/db";
+import { siteBaseUrl } from "@/lib/site-url";
 
 export const revalidate = 86400;
 
-const BASE =
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://scholars.weill.cornell.edu";
-
 export async function GET() {
+  // Read at request time — `revalidate` can prerender this route at build,
+  // where a module-scope const would capture the build-time fallback (#1514).
+  const BASE = siteBaseUrl();
   let topics: Array<{ id: string; label: string }> = [];
   let departments: Array<{ slug: string; name: string }> = [];
   let centers: Array<{ slug: string; name: string }> = [];
