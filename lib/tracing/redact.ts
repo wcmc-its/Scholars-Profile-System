@@ -54,11 +54,17 @@ const PRISMA_PARAMETERS_KEY = "db.statement.parameters";
  * `/scholar/sha256:abcdef012345` and the route stays human-readable in
  * X-Ray's UI.
  */
+// Only segments whose FOLLOWING segment is an identifier value belong here.
+// "edit" was wrong on both counts: it is a static segment whose successor is
+// another static name (/edit/scholar/<cwid>, /edit/publication/<pmid>), so
+// matching it hashed the literal word "scholar" and — because the walk then
+// re-inspected the hashed segment instead of skipping it — let the actual
+// CWID through in plaintext. The id-bearing parents below cover the /edit
+// routes on their own.
 const REDACT_PATH_SEGMENTS = new Set<string>([
   "scholar",
   "publication",
   "person",
-  "edit",
 ]);
 
 const PATH_BEARING_KEYS = new Set<string>([
@@ -100,6 +106,9 @@ function redactPath(value: string): string {
     const seg = parts[i]!.toLowerCase();
     if (REDACT_PATH_SEGMENTS.has(seg) && parts[i + 1]!.length > 0) {
       parts[i + 1] = shaPrefix(parts[i + 1]!);
+      // The hashed value is data, not a segment name — skip past it so the
+      // walk never re-inspects (and mis-matches) what it just rewrote.
+      i++;
     }
   }
   return parts.join("/");

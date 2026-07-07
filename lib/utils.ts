@@ -36,19 +36,24 @@ export function sanitizeVIVOHtml(html: string): string {
  * 200-char excerpt truncation (CSV exports want the full string).
  */
 export function htmlToPlainText(html: string, maxLength = 200): string {
-  const decoded = sanitizeVIVOHtml(html)
+  // Strip markup FIRST, while real tags still use literal < >. Decoding
+  // entities first turned escaped comparators — routine in clinical titles,
+  // "aged &lt;18 … improvement &gt;10%" — into bare < / > that the tag-strip
+  // regex then consumed as one giant fake tag, deleting the text between them.
+  // Decoded entities are data, never markup, so they decode after the strip.
+  const stripped = sanitizeVIVOHtml(html)
+    // Inline scientific markup → no replacement (preserve `H2O`).
+    .replace(/<\/?(?:i|em|b|strong|sup|sub)\b[^>]*>/gi, "")
+    // Everything else (block tags, unknown markup) → single space.
+    .replace(/<[^>]+>/g, " ");
+  const plain = stripped
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/&[a-z]+;/g, " "); // catch remaining named entities
-  const plain = decoded
-    // Inline scientific markup → no replacement (preserve `H2O`).
-    .replace(/<\/?(?:i|em|b|strong|sup|sub)\b[^>]*>/gi, "")
-    // Everything else (block tags, unknown markup) → single space.
-    .replace(/<[^>]+>/g, " ")
+    .replace(/&[a-z]+;/g, " ") // catch remaining named entities
     .replace(/\s+/g, " ")
     .trim();
   if (plain.length <= maxLength) return plain;
