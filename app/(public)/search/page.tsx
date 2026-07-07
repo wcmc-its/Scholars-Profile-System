@@ -1248,15 +1248,26 @@ async function PeopleResults({
       if (clamped !== PI_MIN_FLOOR) sp.set("pi_min", String(clamped));
     });
 
+  // #1513 — "Clear all" drops the letter too (it renders as a chip below, so
+  // clearing all must remove every chip). Individual facet ✕ and pagination keep
+  // the letter (that's the buildUrl preservation); only the letter chip's own ✕
+  // and "Clear all" exit the letter browse.
   const clearAllParams = new URLSearchParams({ q, type: "people" });
-  // #1513 — "clear all filters" clears facets but stays within the letter browse
-  // (letter is the browse scope, like q — not a facet).
-  if (letter) clearAllParams.set("letter", letter);
   if (scope !== "expanded") clearAllParams.set("match", scope);
   const clearAllHref = `/search?${clearAllParams.toString()}`;
 
   // One chip per selected value.
   const chips: Array<{ label: React.ReactNode; ariaLabel?: string; removeHref: string }> = [];
+  // #1513 — the A–Z last-name-initial scope renders as the first chip so the
+  // filtered browse is visible and clearable; its ✕ exits to the full people list.
+  if (letter) {
+    const initial = letter.toUpperCase();
+    chips.push({
+      label: `Last name: ${initial}`,
+      ariaLabel: `Remove last-name filter (${initial})`,
+      removeHref: buildUrl((sp) => sp.delete("letter")),
+    });
+  }
   for (const v of personType) {
     chips.push({
       label: formatRoleCategory(v) ?? v,
