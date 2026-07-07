@@ -9,6 +9,7 @@
  * by actor; the data contract and write calls are layout-independent.
  */
 import { AppointmentsCard } from "@/components/edit/appointments-card";
+import { HistoricalAppointmentsCard } from "@/components/edit/historical-appointments-card";
 import { CoiCard } from "@/components/edit/coi-card";
 import { CoiGapCard } from "@/components/edit/coi-gap-card";
 import { ReporterProfileCard } from "@/components/edit/reporter-profile-card";
@@ -1005,12 +1006,31 @@ function renderPanel(
       );
     case "appointments":
       return (
-        <AppointmentsCard
-          cwid={cwid}
-          mode={voiceMode}
-          scholarName={scholarName}
-          appointments={ctx.appointments}
-        />
+        <div className="flex flex-col gap-8">
+          <AppointmentsCard
+            cwid={cwid}
+            mode={voiceMode}
+            scholarName={scholarName}
+            appointments={ctx.appointments}
+          />
+          {/* #1323 — reveal-to-show historical appointments. Every reveal-capable
+              editor sees the control: the scholar themselves (self, self-serve),
+              a superuser / comms_steward, a granted proxy, or a unit-admin curator
+              — the SAME set `authorizeOverviewWrite` authorizes at the route, so
+              the surface never drifts from the write gate. A self-actor only ever
+              sees + toggles their OWN history (the loader is per-scholar and the
+              route keys authz on the appointment's owner). */}
+          {(mode === "self" ||
+            isSuperuserLike(mode) ||
+            mode === "unit-admin" ||
+            mode === "proxy") &&
+            ctx.historicalAppointments.length > 0 && (
+              <HistoricalAppointmentsCard
+                scholarName={scholarName}
+                appointments={ctx.historicalAppointments}
+              />
+            )}
+        </div>
       );
     case "education":
       return (

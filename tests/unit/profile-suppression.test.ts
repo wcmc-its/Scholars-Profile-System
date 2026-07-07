@@ -349,3 +349,48 @@ describe("getScholarFullProfileBySlug — section visibility", () => {
     expect(payload?.hiddenSections).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// historical appointments: reveal split (#1323)
+// ---------------------------------------------------------------------------
+
+/** An `ED-HISTORICAL` (expired) appointment row from the WOOFA SOR. Hidden by
+ *  default; only surfaces in `pastAppointments` when `showOnProfile` is true. */
+function historicalAppointment(externalId: string, title: string, showOnProfile: boolean) {
+  return {
+    externalId,
+    title,
+    organization: "Weill Cornell",
+    startDate: new Date("2008-01-01"),
+    endDate: new Date("2012-12-31"),
+    isPrimary: false,
+    isInterim: false,
+    source: "ED-HISTORICAL",
+    showOnProfile,
+  };
+}
+
+describe("getScholarFullProfileBySlug — historical appointment reveal split (#1323)", () => {
+  it("keeps historical rows out of `appointments` and surfaces only the revealed one in `pastAppointments`", async () => {
+    mockScholarFindFirst.mockResolvedValue({
+      ...scholarRow(),
+      appointments: [
+        appointment("APPT-1", "Professor"), // active ED — must stay in `appointments`
+        historicalAppointment("HIST-1", "Resident", false), // hidden — excluded everywhere
+        historicalAppointment("HIST-2", "Fellow", true), // revealed — only in `pastAppointments`
+      ],
+    });
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    suppressByType({});
+    const payload = await getScholarFullProfileBySlug("owner-one");
+
+    // Active pipeline is untouched: the ED appointment is the only `appointments` entry.
+    expect((payload?.appointments ?? []).map((a) => a.title)).toEqual(["Professor"]);
+    // Both historical rows are absent from the active list (zero regression).
+    expect((payload?.appointments ?? []).map((a) => a.title)).not.toContain("Resident");
+    expect((payload?.appointments ?? []).map((a) => a.title)).not.toContain("Fellow");
+
+    // Only the revealed historical row appears in `pastAppointments`.
+    expect((payload?.pastAppointments ?? []).map((a) => a.title)).toEqual(["Fellow"]);
+  });
+});

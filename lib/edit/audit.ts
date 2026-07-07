@@ -113,7 +113,14 @@ export type AuditAction =
    *  for the ReciterAI pipeline (`docs/opportunity-url-intake-spec.md`);
    *  `targetEntityType='opportunity_submission'`, `targetEntityId` the queue
    *  item's sort key, `afterValues` carries `{ url, note }`. */
-  | "opportunity_submission";
+  | "opportunity_submission"
+  /** a curator / comms_steward (or a superuser) set a historical
+   *  (`source = "ED-HISTORICAL"`) appointment's public visibility via /edit
+   *  (#1323); `targetEntityType='appointment'`, `targetEntityId` is the
+   *  appointment `externalId`, `afterValues` carries `show_on_profile` (+ the
+   *  conferring unit on a unit-admin reveal). Requires the `scholars_audit`
+   *  action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "appointment_visibility_set";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
