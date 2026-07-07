@@ -50,4 +50,19 @@ describe("withEtlRun", () => {
     expect(arg.data.status).toBe("failed");
     expect(arg.data.errorMessage).toBe("upstream exploded");
   });
+
+  it("re-throws the ORIGINAL error (not the status-write error) when the failed-status update itself throws", async () => {
+    const boom = new Error("upstream exploded");
+    const writeFail = new Error("db unreachable");
+    update.mockRejectedValueOnce(writeFail);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(
+      withEtlRun("TestSource", async () => {
+        throw boom;
+      }),
+    ).rejects.toBe(boom); // the original cause, not `writeFail`
+    // the strand is surfaced, not swallowed
+    expect(errSpy).toHaveBeenCalled();
+    errSpy.mockRestore();
+  });
 });

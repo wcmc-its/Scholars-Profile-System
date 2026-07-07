@@ -31,14 +31,28 @@ export async function withEtlRun(
       },
     });
   } catch (err) {
-    await db.write.etlRun.update({
-      where: { id: run.id },
-      data: {
-        status: "failed",
-        completedAt: new Date(),
-        errorMessage: err instanceof Error ? err.message : String(err),
-      },
-    });
+    // Guard the failure-status write: if it throws too (commonly the SAME DB
+    // outage that felled `fn`), it must not replace `err` — that would mask the
+    // real failure cause AND, because the update never lands, silently strand
+    // the row as 'running'. Log the strand loudly and always re-throw the
+    // ORIGINAL error so the `.catch(...) -> process.exit(1)` entrypoints and the
+    // Step Functions Catch -> SNS path still fire on the true cause.
+    try {
+      await db.write.etlRun.update({
+        where: { id: run.id },
+        data: {
+          status: "failed",
+          completedAt: new Date(),
+          errorMessage: err instanceof Error ? err.message : String(err),
+        },
+      });
+    } catch (statusErr) {
+      console.error(
+        `[etl-run] could not mark run ${run.id} (${source}) as failed; ` +
+          `row may be stranded as 'running'`,
+        statusErr,
+      );
+    }
     throw err;
   }
 }
