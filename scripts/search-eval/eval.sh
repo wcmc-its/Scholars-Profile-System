@@ -44,4 +44,4 @@ jq -r '
   }) | sort_by(.arch) | .[] |
   "   \(.arch)  found=\(.found)/\(.n)  top20=\(.top20)/\(.n)  medRank=\(.medianRank // "-")  MRR=\((.mrr*1000|floor)/1000)"
 ' <<<"$acc"
-[[ -n "${JSON_OUT:-}" ]] && { echo "$acc" > "$JSON_OUT"; echo "wrote $JSON_OUT"; }
+if [[ -n "${JSON_OUT:-}" ]]; then echo "$acc" > "$JSON_OUT"; echo "wrote $JSON_OUT"; fi
