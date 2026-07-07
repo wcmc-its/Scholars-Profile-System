@@ -630,3 +630,73 @@ describe("POST /api/edit/field — selectedHighlightPmids (#836)", () => {
     expect(mockReflectOverviewEdit).toHaveBeenCalled(); // the Highlights surface lives on the profile
   });
 });
+
+// ---------------------------------------------------------------------------
+// section-visibility (section-visibility-spec.md) — the seven whole-section
+// hide booleans ride the same POST /api/edit/field, allowlist, and B03 audit.
+// ---------------------------------------------------------------------------
+
+describe("POST /api/edit/field — section visibility", () => {
+  it("self may hide a section (hideMentoring=true): upsert 'true' + one audit row + revalidate", async () => {
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "self01", fieldName: "hideMentoring", value: "true" }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.fieldName).toBe("hideMentoring");
+    expect(body.value).toBe("true");
+    expect(mockFieldOverrideUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ fieldName: "hideMentoring", value: "true" }),
+      }),
+    );
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1); // the B03 audit row
+    expect(mockReflectOverviewEdit).toHaveBeenCalled(); // the section change alters the public profile
+    // NOT a slug change → no Scholar.slug reconcile.
+    expect(mockTxScholarUpdate).not.toHaveBeenCalled();
+  });
+
+  it("self may show a section (hideEducation=false): upsert 'false', still audited", async () => {
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "self01", fieldName: "hideEducation", value: "false" }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.value).toBe("false");
+    expect(mockFieldOverrideUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ fieldName: "hideEducation", value: "false" }),
+      }),
+    );
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects hideDisclosures with 400 (off the allowlist — COI is never hideable)", async () => {
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "self01", fieldName: "hideDisclosures", value: "true" }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_field");
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-boolean section value with 400 (invalid_value)", async () => {
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "self01", fieldName: "hideMethods", value: "yes" }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_value");
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a cross-scholar section hide with 403 and writes nothing", async () => {
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "other9", fieldName: "hideFunding", value: "true" }),
+    );
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+});

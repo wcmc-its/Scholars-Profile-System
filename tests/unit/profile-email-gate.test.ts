@@ -30,7 +30,7 @@ const {
 vi.mock("@/lib/db", () => ({
   prisma: {
     scholar: { findFirst: mockScholarFindFirst, findUnique: vi.fn() },
-    fieldOverride: { findUnique: mockFieldOverrideFindUnique },
+    fieldOverride: { findUnique: mockFieldOverrideFindUnique, findMany: vi.fn(async () => []) },
     publicationAuthor: { findMany: mockPublicationAuthorFindMany },
     suppression: { findMany: mockSuppressionFindMany },
     personNihProfile: { findFirst: mockPersonNihProfileFindFirst },

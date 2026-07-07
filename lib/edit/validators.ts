@@ -32,18 +32,70 @@ import { isChairTitleFor } from "@/lib/leadership";
 import { isNameBasedSlug, RESERVED_SLUGS } from "@/lib/slug";
 
 /**
+ * The seven per-scholar SECTION-VISIBILITY keys (`section-visibility-spec.md`).
+ * Each is a boolean `field_override(scholar, <key>)`: value `"true"` hides the
+ * whole profile section, absent (or `"false"`, or a revoked row) shows it. This
+ * is the middle hide tier between per-record `suppression` and whole-profile
+ * suppression.
+ *
+ * DISPLAY-ONLY: a hidden section stays fully searchable (no people-doc
+ * reflection, unlike whole-profile suppression), and `hideMethods` hides only
+ * the profile's Methods & Tools section — never the Overview generator's methods
+ * facts (those stay driven by `family_suppression_overlay`).
+ *
+ * COI/Disclosures is deliberately NOT hideable (compliance-mandated public), so
+ * `hideDisclosures` is intentionally absent — the route rejects it `400`.
+ */
+export const SECTION_VISIBILITY_FIELDS = [
+  "hideMentoring",
+  "hideEducation",
+  "hideFunding",
+  "hideCenters",
+  "hidePostdocMentor",
+  "hideClinicalTrials",
+  "hideMethods",
+] as const;
+export type SectionVisibilityField = (typeof SECTION_VISIBILITY_FIELDS)[number];
+
+/** Narrow an untrusted `fieldName` to the section-visibility allowlist. */
+export function isSectionVisibilityField(value: string): value is SectionVisibilityField {
+  return (SECTION_VISIBILITY_FIELDS as readonly string[]).includes(value);
+}
+
+/**
  * The scholar `field_override.fieldName` allowlist. `overview` + `slug` are the
  * v1 set (`self-edit-spec.md`); `selectedHighlightPmids` is the #836 opt-in
  * manual Highlights override (a JSON array of PMIDs), gated by the
- * `SELF_EDIT_MANUAL_HIGHLIGHTS` flag at the route — the allowlist only narrows
- * the field name; the flag governs whether the write is accepted.
+ * `SELF_EDIT_MANUAL_HIGHLIGHTS` flag at the route; the seven
+ * `SECTION_VISIBILITY_FIELDS` are the section-visibility booleans. The allowlist
+ * only narrows the field name; per-field validation + flags govern acceptance.
  */
-export const EDITABLE_FIELDS = ["overview", "slug", "selectedHighlightPmids"] as const;
+export const EDITABLE_FIELDS = [
+  "overview",
+  "slug",
+  "selectedHighlightPmids",
+  ...SECTION_VISIBILITY_FIELDS,
+] as const;
 export type EditableField = (typeof EDITABLE_FIELDS)[number];
 
 /** Narrow an untrusted `fieldName` to the allowlist. */
 export function isEditableField(value: string): value is EditableField {
   return (EDITABLE_FIELDS as readonly string[]).includes(value);
+}
+
+export type SectionVisibilityResult =
+  | { ok: true; value: "true" | "false" }
+  | { ok: false; error: "invalid_value" };
+
+/**
+ * Validate a section-visibility override value — exactly `"true"` (hidden) or
+ * `"false"` (shown). Any other value is `400 invalid_value`. The value is stored
+ * as the string; the profile read (`lib/api/profile.ts`) treats `"true"` as
+ * hidden and everything else — a `"false"` row or no row at all — as shown.
+ */
+export function validateSectionVisibilityValue(input: string): SectionVisibilityResult {
+  if (input === "true" || input === "false") return { ok: true, value: input };
+  return { ok: false, error: "invalid_value" };
 }
 
 // ---------------------------------------------------------------------------

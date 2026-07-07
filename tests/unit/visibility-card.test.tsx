@@ -327,4 +327,86 @@ describe("VisibilityCard — props default ('self') is unchanged behavior", () =
       "self",
     );
   });
+
+  it("omitting `sections` renders no Sections panel", () => {
+    render(<VisibilityCard cwid={CWID} suppression={NEITHER} />);
+    expect(document.querySelector('[data-slot="visibility-sections"]')).toBeNull();
+    expect(screen.queryByTestId("section-toggle-hideMentoring")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// section-visibility-spec — the Sections panel (7 whole-section hide switches)
+// ---------------------------------------------------------------------------
+
+const SECTIONS = {
+  hidden: [] as string[],
+  hiddenRecordCounts: { hideMentoring: 3, hideEducation: 0, hideFunding: 0 },
+  basePath: "/edit",
+};
+
+const SECTION_KEYS = [
+  "hideMentoring",
+  "hideEducation",
+  "hideFunding",
+  "hideCenters",
+  "hidePostdocMentor",
+  "hideClinicalTrials",
+  "hideMethods",
+];
+
+describe("VisibilityCard — Sections panel", () => {
+  it("renders one switch per section (7) and the per-section hidden-record count", () => {
+    render(<VisibilityCard cwid={CWID} suppression={NEITHER} sections={SECTIONS} />);
+    expect(document.querySelector('[data-slot="visibility-sections"]')).toBeTruthy();
+    for (const key of SECTION_KEYS) {
+      expect(screen.getByTestId(`section-toggle-${key}`)).toBeTruthy();
+    }
+    // Mentoring has 3 records hidden inside it — surfaced as a deep-link count.
+    const link = screen.getByRole("link", { name: /3 records hidden/ });
+    expect(link.getAttribute("href")).toBe("/edit?attr=mentees");
+  });
+
+  it("Hide (switch → on) opens a confirm dialog, then POSTs value 'true' to /api/edit/field", async () => {
+    const f = stubFetch({ body: { ok: true } });
+    render(<VisibilityCard cwid={CWID} suppression={NEITHER} sections={SECTIONS} />);
+    fireEvent.click(screen.getByTestId("section-toggle-hideMethods"));
+    // Confirm dialog gates the hide.
+    const confirm = await screen.findByRole("button", { name: "Hide section" });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    const [url, opts] = f.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/edit/field");
+    expect(JSON.parse(opts.body as string)).toEqual({
+      entityType: "scholar",
+      entityId: CWID,
+      fieldName: "hideMethods",
+      value: "true",
+    });
+    expect(mockRefresh).toHaveBeenCalled();
+  });
+
+  it("Show (switch → off) POSTs value 'false' with NO confirm dialog", async () => {
+    const f = stubFetch({ body: { ok: true } });
+    render(
+      <VisibilityCard
+        cwid={CWID}
+        suppression={NEITHER}
+        sections={{ ...SECTIONS, hidden: ["hideEducation"] }}
+      />,
+    );
+    // The Education switch starts on (hidden). Toggling it off shows the section.
+    fireEvent.click(screen.getByTestId("section-toggle-hideEducation"));
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    const [url, opts] = f.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/edit/field");
+    expect(JSON.parse(opts.body as string)).toEqual({
+      entityType: "scholar",
+      entityId: CWID,
+      fieldName: "hideEducation",
+      value: "false",
+    });
+    // Restoration is never gated — no "Hide section" confirm button appeared.
+    expect(screen.queryByRole("button", { name: "Hide section" })).toBeNull();
+  });
 });

@@ -55,7 +55,40 @@ import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import type { EditContextScholar } from "@/lib/api/edit-context";
+
+/**
+ * section-visibility-spec — the state the Sections panel renders. When
+ * `VisibilityCard` receives it, a second "Sections" panel renders below the
+ * whole-profile control with one switch per hideable section.
+ */
+export type SectionVisibilityCardState = {
+  /** Section keys (`SECTION_VISIBILITY_FIELDS`) currently hidden. */
+  hidden: readonly string[];
+  /** Per-section hidden-RECORD counts from the edit-context suppression state
+   *  (no new query) — only the three sections with per-record hiding carry one. */
+  hiddenRecordCounts: {
+    hideMentoring: number;
+    hideEducation: number;
+    hideFunding: number;
+  };
+  /** Base path for the "N records hidden →" deep-link into each record card
+   *  (`/edit` for self, `/edit/scholar/<cwid>` for a superuser / proxy). */
+  basePath: string;
+};
+
+/** The seven hideable sections, in display order. `recordAttr` links the audit
+ *  count to that section's record-level card; `null` = no per-record hiding. */
+const SECTION_PANEL_DEFS = [
+  { key: "hideMentoring", label: "Mentoring", recordAttr: "mentees", countKey: "hideMentoring" },
+  { key: "hideEducation", label: "Education", recordAttr: "education", countKey: "hideEducation" },
+  { key: "hideFunding", label: "Funding", recordAttr: "funding", countKey: "hideFunding" },
+  { key: "hideCenters", label: "Centers", recordAttr: null, countKey: null },
+  { key: "hidePostdocMentor", label: "Postdoctoral Mentor", recordAttr: null, countKey: null },
+  { key: "hideClinicalTrials", label: "Clinical trials", recordAttr: null, countKey: null },
+  { key: "hideMethods", label: "Methods & Tools", recordAttr: null, countKey: null },
+] as const;
 
 type SuppressionRow = { id: string; reason: string };
 type AdminRow = SuppressionRow & { createdAt: Date };
@@ -85,6 +118,13 @@ export type VisibilityCardProps = {
    * `mode='superuser'`.
    */
   thirdPerson?: boolean;
+  /**
+   * section-visibility-spec — the Sections panel state (the seven whole-section
+   * hide toggles). When provided, a second "Sections" panel renders below the
+   * whole-profile control. Omitted ⇒ the panel is not rendered, so existing
+   * callers / tests that pass only `suppression` are unaffected.
+   */
+  sections?: SectionVisibilityCardState;
 };
 
 export function VisibilityCard({
@@ -93,6 +133,7 @@ export function VisibilityCard({
   scholarName,
   mode = "self",
   thirdPerson = false,
+  sections,
 }: VisibilityCardProps) {
   const router = useRouter();
   const [ownRow, setOwnRow] = React.useState<SuppressionRow | null>(initial.ownRow);
@@ -256,6 +297,157 @@ export function VisibilityCard({
         confirmLabel={showThirdPerson ? "Hide profile" : "Hide my profile"}
         confirmVariant="destructive"
         onConfirm={suppressTarget}
+      />
+
+      {sections ? (
+        <SectionsPanel
+          cwid={cwid}
+          state={sections}
+          showThirdPerson={showThirdPerson}
+          scholarName={scholarName}
+        />
+      ) : null}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// section-visibility-spec — the Sections panel: one switch per hideable section
+// (7), each toggling a boolean `field_override(scholar, <key>)` via
+// POST /api/edit/field. Hide → confirm dialog (optional-preset, matching the
+// profile-hide pattern); show → no dialog (never gate restoration). A per-
+// section read-only "N records hidden →" count links to that section's record
+// card; the counts come from the edit-context suppression state (no new query).
+// ---------------------------------------------------------------------------
+
+function SectionsPanel({
+  cwid,
+  state,
+  showThirdPerson,
+  scholarName,
+}: {
+  cwid: string;
+  state: SectionVisibilityCardState;
+  showThirdPerson: boolean;
+  scholarName?: string;
+}) {
+  const router = useRouter();
+  const [hidden, setHidden] = React.useState<Set<string>>(() => new Set(state.hidden));
+  const [confirmKey, setConfirmKey] = React.useState<string | null>(null);
+  const [pendingKey, setPendingKey] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  async function writeSection(key: string, hide: boolean) {
+    setError(null);
+    setPendingKey(key);
+    try {
+      const res = await fetch("/api/edit/field", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entityType: "scholar",
+          entityId: cwid,
+          fieldName: key,
+          value: hide ? "true" : "false",
+        }),
+      });
+      const data = (await res.json()) as { ok?: boolean };
+      if (!res.ok || data.ok !== true) {
+        setError("We couldn't update that section. Please try again.");
+        return;
+      }
+      setHidden((prev) => {
+        const next = new Set(prev);
+        if (hide) next.add(key);
+        else next.delete(key);
+        return next;
+      });
+      router.refresh();
+    } catch {
+      setError("We couldn't update that section. Please try again.");
+    } finally {
+      setPendingKey(null);
+    }
+  }
+
+  // Hide (switch → on) gates on a confirm dialog; show (switch → off) applies
+  // immediately (UI-SPEC § Feedback — never gate restoration).
+  function onToggle(key: string, checked: boolean) {
+    if (checked) setConfirmKey(key);
+    else void writeSection(key, false);
+  }
+
+  const poss = showThirdPerson ? `${scholarName ?? "this scholar"}'s` : "your";
+  const confirmDef = SECTION_PANEL_DEFS.find((d) => d.key === confirmKey);
+
+  return (
+    <>
+      <EditPanel
+        slot="visibility-sections"
+        heading="Sections"
+        description={`Hide a whole section from ${poss} public profile. Hidden sections stay in Scholars and remain searchable — nothing is deleted, and you can show them again at any time.`}
+      >
+        <ul className="divide-border flex flex-col divide-y">
+          {SECTION_PANEL_DEFS.map((def) => {
+            const isHidden = hidden.has(def.key);
+            const count = def.countKey ? state.hiddenRecordCounts[def.countKey] : 0;
+            return (
+              <li
+                key={def.key}
+                className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">{def.label}</div>
+                  <div className="text-muted-foreground text-xs">
+                    {isHidden ? "Hidden" : "Visible"}
+                    {def.recordAttr && count > 0 ? (
+                      <>
+                        {" · "}
+                        <a
+                          href={`${state.basePath}?attr=${def.recordAttr}`}
+                          className="underline-offset-4 hover:underline"
+                        >
+                          {count} {count === 1 ? "record" : "records"} hidden →
+                        </a>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+                <Switch
+                  checked={isHidden}
+                  disabled={pendingKey === def.key}
+                  onCheckedChange={(checked) => onToggle(def.key, checked)}
+                  aria-label={`Hide the ${def.label} section`}
+                  data-testid={`section-toggle-${def.key}`}
+                />
+              </li>
+            );
+          })}
+        </ul>
+
+        {error && (
+          <Alert variant="destructive" className="mt-3">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+      </EditPanel>
+
+      <ConfirmDialog
+        open={confirmKey !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmKey(null);
+        }}
+        title={`Hide the ${confirmDef?.label ?? "section"} section?`}
+        description={`The ${confirmDef?.label ?? "section"} section will be removed from ${poss} public profile. The underlying data stays in Scholars and remains searchable — you can show it again at any time.`}
+        reasonMode="optional-preset"
+        confirmLabel="Hide section"
+        confirmVariant="destructive"
+        onConfirm={async () => {
+          const key = confirmKey;
+          if (!key) return;
+          await writeSection(key, true);
+          setConfirmKey(null);
+        }}
       />
     </>
   );

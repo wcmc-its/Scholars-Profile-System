@@ -31,7 +31,7 @@
 import { getEffectiveOverview, getSelectedHighlightPmids } from "@/lib/api/manual-layer";
 import { getMenteesForMentor } from "@/lib/api/mentoring";
 import { rankForSelectedHighlights } from "@/lib/ranking";
-import { MAX_SELECTED_HIGHLIGHTS } from "@/lib/edit/validators";
+import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/validators";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { isFundingActive } from "@/lib/funding-active";
 import { isChairTitleFor } from "@/lib/leadership";
@@ -94,6 +94,13 @@ export type EditContextScholar = {
    * the slug card has a server-fetched baseline (no client round-trip).
    */
   slugOverride: string | null;
+  /**
+   * section-visibility-spec — the profile section keys currently HIDDEN
+   * (`field_override(scholar, <key>)` = "true"), a subset of
+   * `SECTION_VISIBILITY_FIELDS`. Drives the Visibility card's Sections panel
+   * switches; absent key = shown. Read suppression-OFF like every other field.
+   */
+  hiddenSections: string[];
   suppression: {
     /** A self-applied, un-revoked whole-scholar suppression — drives the "Make my profile visible" control. */
     ownRow: { id: string; reason: string } | null;
@@ -664,6 +671,7 @@ export async function loadEditContext(
     chairedDept,
     authorships,
     menteeRows,
+    sectionOverrideRows,
   ] = await Promise.all([
     // Phase 7 — the slug-card baseline. `null` = no override; superuser slug card
     // shows the "no override" state. The self surface does not surface this field
@@ -788,9 +796,22 @@ export async function loadEditContext(
       );
       return [] as EditContextMenteeSource[];
     }),
+    // section-visibility-spec — the per-scholar section-hide overrides currently
+    // set to "true" (hidden). Drives the Visibility card's Sections panel; a
+    // "false" row (or none) is "shown", so only "true" is read.
+    client.fieldOverride.findMany({
+      where: {
+        entityType: "scholar",
+        entityId: cwid,
+        fieldName: { in: [...SECTION_VISIBILITY_FIELDS] },
+        value: "true",
+      },
+      select: { fieldName: true },
+    }),
   ]);
 
   const slugOverride = slugOverrideRow?.value ?? null;
+  const hiddenSections = sectionOverrideRows.map((r) => r.fieldName);
 
   // Defensive: multiple un-revoked rows of either kind shouldn't occur (the
   // suppress endpoint is idempotent — edge case 19), but a superuser row +
@@ -1323,6 +1344,7 @@ export async function loadEditContext(
         roleCategory: scholar.roleCategory,
         overview: effectiveOverview ?? "",
         slugOverride,
+        hiddenSections,
         suppression: {
           ownRow: ownRow ? { id: ownRow.id, reason: ownRow.reason } : null,
           adminRow: adminRow
@@ -1486,6 +1508,7 @@ export async function loadEditContext(
       roleCategory: scholar.roleCategory,
       overview: effectiveOverview ?? "",
       slugOverride,
+      hiddenSections,
       suppression: {
         ownRow: ownRow ? { id: ownRow.id, reason: ownRow.reason } : null,
         adminRow: adminRow
