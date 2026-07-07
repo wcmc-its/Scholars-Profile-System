@@ -1,6 +1,6 @@
 "use client";
 
-import { type MutableRefObject, useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { RepresentativePapers, type ExemplarFetchStatus } from "@/components/search/match-reason";
 import { ResultEvidence } from "@/components/search/result-evidence";
 import { profilePath } from "@/lib/profile-url";
@@ -47,7 +47,7 @@ export function EvidenceLine({
   hasQuery: boolean;
   badged: boolean;
   /** Shared across a card's stacked lines for exemplar de-dup. */
-  claimedPmids: MutableRefObject<Set<string>>;
+  claimedPmids: Set<string>;
   /** #1381 follow-up — mount this line already expanded (and kick its lazy fetch on
    *  mount), so a LONE "Also matched" secondary reveals its records in one click on
    *  the umbrella toggle rather than two. Default false ⇒ unchanged. */
@@ -106,13 +106,14 @@ export function EvidenceLine({
 
   // #1366 — the pmids already shown on a sibling line drive `exclude` so this
   // line's fetch stays disjoint (cumulative; whoever resolves first owns a shared
-  // paper). `claimedPmids` is a stable ref, so reading/mutating `.current` inside
-  // the callbacks needs no dependency (helpers are inlined to keep deps honest).
+  // paper). `claimedPmids` is a Set shared across this card's lines, stable for a
+  // given query (the parent mints a fresh one per query via useMemo) and remounted
+  // with the card lines on a query change, so reading/mutating it needs no reset here.
   const inlinePubs = evidence.kind === "publications" ? (evidence.pubs ?? null) : null;
   // Inline pubs (legacy agg path) claim immediately so lazy siblings exclude them.
   useEffect(() => {
     if (inlinePubs)
-      for (const p of inlinePubs) claimedPmids.current.add(p.pmid);
+      for (const p of inlinePubs) claimedPmids.add(p.pmid);
     // claim once per line; `evidence` is stable for a card line.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -127,13 +128,13 @@ export function EvidenceLine({
       descriptorUis: keyPaperMentionOnly ? "" : keyPaperConfig!.descriptorUis.join(","),
       label: keyPaperMentionOnly ? "" : (keyPaperConfig!.conceptLabel ?? ""),
     });
-    const ex = Array.from(claimedPmids.current).join(",");
+    const ex = Array.from(claimedPmids).join(",");
     if (ex) params.set("exclude", ex);
     fetch(`/api/search/key-paper?${params.toString()}`)
       .then((r) => (r.ok ? r.json() : { pubs: [] }))
       .then((d: { pubs?: EvidencePub[] }) => {
         const pubs = d?.pubs ?? [];
-        for (const p of pubs) claimedPmids.current.add(p.pmid);
+        for (const p of pubs) claimedPmids.add(p.pmid);
         setKeyPapers(pubs);
       })
       .catch(() => setKeyPapers([]))
@@ -144,7 +145,7 @@ export function EvidenceLine({
     if (!exemplarQuery || exemplarFetched.current) return;
     exemplarFetched.current = true;
     setExemplarStatus("loading");
-    const ex = Array.from(claimedPmids.current).join(",");
+    const ex = Array.from(claimedPmids).join(",");
     exemplarExcluded.current = ex.length > 0;
     const url = `/api/scholar/${encodeURIComponent(cwid)}/method-exemplar?${exemplarQuery}${
       ex ? `&exclude=${encodeURIComponent(ex)}` : ""
@@ -153,7 +154,7 @@ export function EvidenceLine({
       .then((r) => (r.ok ? r.json() : { pubs: [], total: 0 }))
       .then((d: ExemplarPayload) => {
         const pubs = d?.pubs ?? [];
-        for (const p of pubs) claimedPmids.current.add(p.pmid);
+        for (const p of pubs) claimedPmids.add(p.pmid);
         setExemplar({ pubs, total: d?.total ?? 0 });
       })
       .catch(() => setExemplar({ pubs: [], total: 0 }))
