@@ -335,17 +335,19 @@ export class EdgeStack extends Stack {
     // ------------------------------------------------------------------
     // Custom domain + ACM certificate (plan D2, bootstrap two-step).
     //
-    // Both context flags must be present for the alias + cert to attach;
+    // Alias + cert now come from committed config (#1506) so a bare
+    // `cdk deploy` no longer strips them; a `-c edgeCustomDomain/edgeCertArn`
+    // flag still overrides. Both must resolve for the alias to attach;
     // otherwise the distribution ships on `*.cloudfront.net`. ACM certs
     // for CloudFront must live in us-east-1, which is also the primary
     // region -- no `crossRegionReferences` needed.
     // ------------------------------------------------------------------
-    const customDomain = this.node.tryGetContext("edgeCustomDomain") as
-      | string
-      | undefined;
-    const certArn = this.node.tryGetContext("edgeCertArn") as
-      | string
-      | undefined;
+    const customDomain =
+      (this.node.tryGetContext("edgeCustomDomain") as string | undefined) ??
+      envConfig.edgeCustomDomain;
+    const certArn =
+      (this.node.tryGetContext("edgeCertArn") as string | undefined) ??
+      envConfig.edgeCertArn;
     const viewerCert =
       customDomain && certArn
         ? acm.Certificate.fromCertificateArn(this, "ViewerCert", certArn)
@@ -766,10 +768,11 @@ export class EdgeStack extends Stack {
     // CloudFront layer via an AWS WAFv2 WebACL -- the ALB SG can't do it
     // because CloudFront is the only client the ALB ever sees.
     //
-    // Toggle: `-c edgeAllowedCidrs=140.251.0.0/16,157.139.0.0/16` builds the
-    // WebACL and attaches it. Omit the flag and redeploy to remove the whole
-    // WebACL (unrestricted) -- no code change. WAFv2 WebACLs with CLOUDFRONT
-    // scope must live in us-east-1, which is EdgeStack's region.
+    // Source: the seeded SSM StringList by default, or `-c edgeAllowedCidrs=
+    // 140.251.0.0/16,157.139.0.0/16` to override (see the block below). The
+    // WebACL is always built now (#1506) -- to open to the public, delete the
+    // block, not the flag. WAFv2 WebACLs with CLOUDFRONT scope must live in
+    // us-east-1, which is EdgeStack's region.
     //
     // Layering (priority order): the WebACL defaults to ALLOW; a priority-0
     // `block-non-wcm` rule drops anything outside the WCM IP set (so only WCM
@@ -781,19 +784,34 @@ export class EdgeStack extends Stack {
     //
     // ponytail: managed rules live inside this allowlist gate because we only
     // ever run WCM-only. If the front end is opened to the public, move them
-    // OUT of the `if` so payload inspection survives without the allowlist.
+    // OUT of the block so payload inspection survives without the allowlist.
     // ------------------------------------------------------------------
+    // The internal WCM/WCM-Qatar/NYP ranges are NOT committed to this public
+    // repo (#876/#502/#1506). Default source is the operator-seeded SSM
+    // StringList `/sps/<env>/edge/allowed-cidrs` (a deploy-time token -- fine
+    // for a WAF IPSet); a `-c edgeAllowedCidrs=1.2.0.0/16,...` flag overrides
+    // (the escape hatch before the param is seeded). The WebACL is now ALWAYS
+    // built, so a bare deploy no longer strips it. To open the front end to the
+    // public, delete this block (per the #461 note above) -- omitting the flag
+    // no longer removes it.
     const allowedCidrsCtx = this.node.tryGetContext("edgeAllowedCidrs") as
       | string
       | undefined;
-    const allowedCidrs = allowedCidrsCtx
+    const overrideCidrs = allowedCidrsCtx
       ? allowedCidrsCtx
           .split(",")
           .map((c) => c.trim())
           .filter((c) => c.length > 0)
-      : [];
-    let webAclArn: string | undefined;
-    if (allowedCidrs.length > 0) {
+      : undefined;
+    const allowedCidrs =
+      overrideCidrs && overrideCidrs.length > 0
+        ? overrideCidrs
+        : ssm.StringListParameter.valueForTypedListParameter(
+            this,
+            `/sps/${env}/edge/allowed-cidrs`,
+          );
+    let webAclArn: string;
+    {
       const ipAllowSet = new wafv2.CfnIPSet(this, "WcmIpAllowSet", {
         name: `sps-edge-${env}-wcm-allow`,
         scope: "CLOUDFRONT",
@@ -897,7 +915,7 @@ export class EdgeStack extends Stack {
       comment: `SPS edge -- ${env}`,
       domainNames: customDomain ? [customDomain] : undefined,
       certificate: viewerCert,
-      // Temporary WCM-only allowlist (#461); undefined => unrestricted.
+      // WCM-only allowlist (#461/#1506); always attached now (see WAF block).
       webAclId: webAclArn,
       defaultBehavior: {
         origin,
