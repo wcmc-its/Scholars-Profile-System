@@ -34,6 +34,32 @@ layer you measure:
 A healthy CloudFront cache hit rate is **>85%**; below **50%** is an incident signal
 ([`PRODUCTION.md § Incident: pages are slow`](./PRODUCTION.md)).
 
+### Multi-task ISR cache consistency — the shared S3 cacheHandler (#1503)
+
+Prod runs 2–6 app tasks ([§ Scaling characteristics](#scaling-characteristics)), and Next's
+default ISR cache is **in-process, per-task**. So an on-demand `revalidatePath` (an ETL
+`/api/revalidate` call or a curator edit) busted **one** task's store; the CloudFront
+invalidation then refilled the edge from a **random** task — often one whose store was never
+busted — which re-cached the stale copy for up to the route TTL. The visible symptom was
+edits not reliably appearing, **not** slowness.
+
+The fix routes every task through **one shared S3 store** (`lib/cache/s3-cache-handler.js`),
+with revalidation propagated via a shared tag→last-revalidated-timestamp map. The handler
+runs only on an origin miss/regeneration (CloudFront still fronts the app), behind a 250 ms
+timeout + fail-open so a slow/unavailable S3 never blocks a render or 500s an edit.
+
+**This is primarily a correctness win, not a user-latency one.** Edge cache hits are
+unchanged, and the origin ISR *read* is a hair slower (an S3 round-trip vs in-memory,
+mitigated by an in-process LRU front). The secondary performance benefit is **fewer redundant
+origin regenerations across the fleet**: once any task regenerates a heavy ISR page (e.g. a
+`/topics/[slug]` `groupBy`), the others read it from S3 instead of re-running the work — most
+valuable right after a deploy or an autoscale-up, when per-task caches are cold.
+
+**Status (2026-07-07):** active on staging (verified — an uncached ISR route wrote a
+well-formed S3 entry, re-hit returned a get-hit); prod bucket + wiring deployed (`cdk deploy
+Sps-App-prod`), **dark** until a prod image built with `NEXT_ISR_CACHE_S3=on` ships (#1558
+flipped the prod build arm on).
+
 ## Targets and alarm thresholds (the brackets of "normal")
 
 These are real and enforced today (`cdk/lib/observability-stack.ts`, [`SLOs.md`](./SLOs.md)):
@@ -112,7 +138,9 @@ changes cut it on the hot concept-People path (fix plan: `.planning/perf-audit.m
 > served `force-dynamic` and lands on no cacheable CloudFront behavior, so today it is an
 > origin miss every view (audit F1 / C1). The fix (force-static + edge-behavior carve) is
 > **#914, held** pending its prod prerequisites (`PROFILE_EMAIL_RELEASE_GATE` on in prod
-> first + a shared multi-task ISR cacheHandler). This is the single biggest site-wide win.
+> first + a shared multi-task ISR cacheHandler — the latter is now **built and deployed**,
+> #1503, staging-active/prod-dark, see [§ Multi-task ISR cache consistency](#multi-task-isr-cache-consistency--the-shared-s3-cachehandler-1503)).
+> This is the single biggest site-wide win.
 
 ### Search performance findings (2026-06-26)
 
