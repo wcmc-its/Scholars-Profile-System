@@ -32,7 +32,12 @@ import { SearchAutocomplete } from "@/components/search/autocomplete";
 import { SiteHeader } from "@/components/site/header";
 import { SiteFooter } from "@/components/site/footer";
 
-export const revalidate = 21600; // 6 hours
+// #1503 interim — 2h fallback TTL (was 6h). Prod runs 2–6 app tasks with no
+// shared cacheHandler, so `revalidatePath("/")` busts only one task's ISR store
+// and CloudFront can refill the edge from a still-stale task. Shortening the TTL
+// bounds that cross-task staleness window until the shared S3 cacheHandler lands
+// (docs/1503-shared-cachehandler-spec.md). Regeneration is background (SWR).
+export const revalidate = 7200; // 2 hours
 export const dynamicParams = true;
 
 // methodCategories drives BOTH the hero "N methods" stat (in HomeStatsStrip)

@@ -20,8 +20,14 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 
-// 6h fallback TTL; on-demand revalidation triggered by ETL writes (Plan 09).
-export const revalidate = 21600;
+// 2h fallback TTL; on-demand revalidation triggered by ETL writes (Plan 09).
+// #1503 interim — cut from 6h: `revalidatePath` busts only one of 2–6 app tasks'
+// ISR store (no shared cacheHandler), so the edge can refill from a stale task;
+// a shorter TTL bounds the cross-task staleness until the S3 cacheHandler lands
+// (docs/1503-shared-cachehandler-spec.md). Kept at 2h (not lower) because the
+// topic page runs the getDistinctScholarCountForTopic groupBy (#1514 E6) on
+// regeneration, so a deeper cut would amplify that known-heavy query.
+export const revalidate = 7200;
 export const dynamicParams = true;
 
 export async function generateMetadata({
