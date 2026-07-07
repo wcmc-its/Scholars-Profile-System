@@ -322,12 +322,54 @@ export class EtlStack extends Stack {
         src.secretName,
       ),
     );
-    const allConsumerSecretArns: string[] = [
+    // #1508 -- secrets grouped by the task def that injects them, so no ETL
+    // step carries a credential it doesn't use. Base secrets ride every def;
+    // each per-source secret rides only its group's def (and that def's
+    // execution role reads only those ARNs). The group membership below is the
+    // authoritative source→step mapping: verified against which lib/sources/*
+    // loader each cadence step's npm script imports.
+    const baseSecretArns = [
       dbEtlSecret.secretArn,
       opensearchEtlSecret.secretArn,
       revalidateTokenSecret.secretArn,
-      ...perSourceSecrets.map((s) => s.secretArn),
     ];
+    const perSourceByConstructId = new Map(
+      credentialedSources.map((src, i) => [
+        src.constructId,
+        { src, secret: perSourceSecrets[i] },
+      ]),
+    );
+    // Which per-source secrets each non-base task def carries (by construct id).
+    const SOURCES_SECRET_IDS = [
+      "EtlSecretAsms",
+      "EtlSecretInfoed",
+      "EtlSecretCoi",
+      "EtlSecretReciter",
+      "EtlSecretJenzabar",
+    ];
+    const LDAP_SECRET_IDS = ["EtlSecretEd"];
+    const RECITER_API_SECRET_IDS = ["EtlSecretReciterApi"];
+    const secretArnsFor = (ids: string[]): string[] =>
+      ids.map((id) => {
+        const e = perSourceByConstructId.get(id);
+        if (!e) throw new Error(`unknown ETL secret construct id: ${id}`);
+        return e.secret.secretArn;
+      });
+    // Fan a group's per-source secrets into the granular `SCHOLARS_*` env vars
+    // its config loaders read (#442). The injected env-var name equals the
+    // secret's JSON key; a key absent from the seeded secret fails task-start,
+    // so `keys` must match the seeded shape exactly.
+    const fanSecrets = (ids: string[]): { [k: string]: ecs.Secret } => {
+      const out: { [k: string]: ecs.Secret } = {};
+      for (const id of ids) {
+        const e = perSourceByConstructId.get(id);
+        if (!e) throw new Error(`unknown ETL secret construct id: ${id}`);
+        for (const key of e.src.keys) {
+          out[key] = ecs.Secret.fromSecretsManager(e.secret, key);
+        }
+      }
+      return out;
+    };
 
     // ------------------------------------------------------------------
     // CloudWatch log group for the ETL task family.
@@ -344,8 +386,10 @@ export class EtlStack extends Stack {
     // IAM role split — same execution/task pattern AppStack uses (B06).
     //
     // - Execution role: ECR pull, secret injection at task-start, log
-    //   stream write. `secretsmanager:GetSecretValue` resource list is the
-    //   eight concrete ARNs above -- never `*`. Asserted in the tests.
+    //   stream write. This BASE role's `secretsmanager:GetSecretValue` lists
+    //   ONLY the three base ARNs -- never `*`, never a per-source secret
+    //   (#1508). The sources/ldap/reciter-api defs get their own scoped roles
+    //   below. Asserted in the tests.
     // - Task role: identity the running ETL Node process assumes. Today
     //   the scripts read secrets via env vars (injected by ECS), so the
     //   task role itself has zero AWS-API permissions.
@@ -377,7 +421,7 @@ export class EtlStack extends Stack {
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: ["secretsmanager:GetSecretValue"],
-        resources: allConsumerSecretArns,
+        resources: baseSecretArns,
       }),
     );
     taskExecutionRole.addToPolicy(
@@ -530,7 +574,11 @@ export class EtlStack extends Stack {
         taskRole,
       },
     );
-    const containerSecrets: { [k: string]: ecs.Secret } = {
+    // Base secrets every ETL task def carries (#1508). Per-source secrets are
+    // NOT fanned in here -- they go only on the task def whose steps read them
+    // (see the task-def units below), so a public-API/IAM step never receives
+    // the LDAP bind password or the ReCiter admin key.
+    const baseSecrets: { [k: string]: ecs.Secret } = {
       DATABASE_URL: ecs.Secret.fromSecretsManager(dbEtlSecret),
       // Cutover de-coupling (§8.4): when on, OPENSEARCH_NODE comes from the
       // secret's `node` key instead of the dropped cross-stack export.
@@ -555,20 +603,91 @@ export class EtlStack extends Stack {
       SCHOLARS_REVALIDATE_TOKEN:
         ecs.Secret.fromSecretsManager(revalidateTokenSecret),
     };
-    // Fan each per-source secret out into the granular `SCHOLARS_*` env
-    // vars its config loader reads (#442). The injected env-var name equals
-    // the secret's JSON key; ECS only injects keys whose secret the
-    // execution role can read (resource list above), and a key absent from
-    // the secret JSON fails task-start -- so `keys` must match the seeded
-    // shape exactly.
-    for (const [i, src] of credentialedSources.entries()) {
-      for (const key of src.keys) {
-        containerSecrets[key] = ecs.Secret.fromSecretsManager(
-          perSourceSecrets[i],
-          key,
-        );
-      }
-    }
+    // Non-secret config the IAM-based sources read, shared by every ETL task
+    // def (#442/#1508). Values match the source-script defaults; pinned here so
+    // the deployed config is explicit rather than implicit in code. These
+    // resources are reached via the task role (IAM), not an injected credential
+    // -- the EtlTaskRoleReciterAiPolicy above is the matching read grant:
+    //   dynamodb  -> ReciterAI publication table (task-role scan)
+    //   spotlight -> ReciterAI artifacts bucket + key prefix
+    //   hierarchy -> ReciterAI hierarchy bucket
+    const baseEnvironment: { [k: string]: string } = {
+      NODE_ENV: "production",
+      // Deployment env name for steps whose behavior is env-scoped —
+      // etl:freshness skips SLA entries for sources a given env's cadence
+      // deliberately omits (InfoEd on staging, MeshAnchor on prod).
+      SCHOLARS_ENV: env,
+      // #485 — the search:index build holds the full corpus graph in memory
+      // (178k+ publications). Node's default old-space cap (~2 GB) OOM-kills
+      // the task well under the container limit; pin the heap to ~85% of the
+      // 8 GB task memory (etlTaskMemoryMiB) so it can use what's allocated.
+      NODE_OPTIONS: "--max-old-space-size=7168",
+      SCHOLARS_DYNAMODB_TABLE: "reciterai",
+      // #918 — etl:identity scans this table for ORCID iDs → Scholar.orcid.
+      SCHOLARS_IDENTITY_TABLE: "Identity",
+      ARTIFACTS_BUCKET: "wcmc-reciterai-artifacts",
+      ARTIFACT_PREFIX: "spotlight",
+      HIERARCHY_BUCKET: "wcmc-reciterai-hierarchy",
+      // #794 — A2 canonical tools taxonomy (etl:scholar-tool). Same shared
+      // artifacts bucket as spotlight, under the tools/ prefix.
+      TOOLS_BUCKET: "wcmc-reciterai-artifacts",
+      TOOLS_PREFIX: "tools",
+      // scholar_tool producer switch (#794). "ddb" (legacy DynamoDB Block 5)
+      // was the reversible default; "s3" makes etl:scholar-tool the sole
+      // scholar_tool writer over the A2 canonical taxonomy and also populates
+      // scholar_family (the #799 Methods lens). Cutover complete for BOTH envs:
+      // staging soaked on "s3", prod signed off 2026-07-06 (reverses a team
+      // deferral + unblocks ReciterAI's legacy TOOL# deletion). Rollback = set
+      // back to "ddb". Applied via cdk deploy --exclusively Sps-Etl-<env>; run
+      // etl:scholar-tool after the deploy.
+      SCHOLAR_TOOL_SOURCE: "s3",
+      // RePORTER grants v2 PMID-overlap matcher — step 0 of etl:reporter-grants.
+      // Resolves lateral recruits with no person_nih_profile row (name →
+      // candidate profile_ids → PMID overlap → auto-lock K≥3 / propose K=2). A
+      // per-run scholar cap (REPORTER_MATCH_V2_MAX_PER_RUN, code default 500)
+      // bounds the nightly RePORTER call volume; tune it once the staging cohort
+      // is sized. STAGING-FIRST: "on" in staging now, prod stays "off" until the
+      // staging soak signs off. Applied via cdk deploy --exclusively
+      // Sps-Etl-<env> (CD only rolls the image, never deploys infra).
+      REPORTER_MATCH_V2: env === "staging" ? "on" : "off",
+      // OpenSearch domain endpoint (https://...). Default: plaintext env from
+      // the DataStack export. When openSearchNodeFromSecret is on (cutover
+      // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is
+      // injected from the opensearch secret's `node` key (baseSecrets).
+      // lib/search.ts reads OPENSEARCH_NODE; USER/PASS come from secrets. #447
+      ...(envConfig.openSearchNodeFromSecret
+        ? {}
+        : {
+            OPENSEARCH_NODE: `https://${Fn.importValue(
+              `Sps-Data-${env}-OpenSearchDomainEndpoint`,
+            )}`,
+          }),
+      // #479 — cadence revalidate step POSTs to /api/revalidate on the
+      // VPC-private internal ALB (HTTP :80; no TLS on the internal listener).
+      // The ETL SG -> internal-ALB-SG :80 ingress is already opened at the
+      // top of this stack. `etl/revalidate/index.ts` validates this origin
+      // against its allowlist before sending the bearer token.
+      SCHOLARS_BASE_URL: `http://${ssm.StringParameter.valueForStringParameter(
+        this,
+        `/sps/${env}/app/internal-alb-dns`,
+      )}`,
+      // #746 — the etl:reciter-refresh scanner (operator-run for now) reads
+      // this to deliver any deferred ReCiter rejects and fire the delayed,
+      // per-uid feature-generator re-score. STAGING-FIRST: ON in staging, OFF
+      // in prod until the staging soak completes; the EventBridge → Step
+      // Function schedule is a follow-up.
+      RECITER_REJECT_SEND: env === "staging" ? "on" : "off",
+      // #1258 — gate for the MeSH derived-anchor producer (etl:mesh-anchors).
+      // "0.9" mines descriptor→topic anchors from publication_topic.score ≥ 0.9
+      // papers; a value > 1 is the kill-switch (zero derived rows, curated-only).
+      // STAGING-FIRST: on in staging now, prod held at "2" until the staging
+      // soak signs off — then drop this override to enable prod.
+      MESH_ANCHOR_SCORE_MIN: env === "staging" ? "0.9" : "2",
+      // Destination bucket for the `backup:curated` logical-dump step. The
+      // task role is granted PutObject on exactly this bucket above; the
+      // script defaults the key prefix to "sps-curation-backups".
+      CURATION_BACKUP_BUCKET: curationBackupBucket.bucketName,
+    };
     const etlContainer = this.etlTaskDefinition.addContainer("etl", {
       image: containerImage,
       containerName: "etl",
@@ -577,93 +696,130 @@ export class EtlStack extends Stack {
         logGroup: etlLogGroup,
         streamPrefix: "etl",
       }),
-      // Non-secret config the IAM-based sources read. Values match the
-      // source-script defaults; pinned here so the deployed config is
-      // explicit rather than implicit in code (#442). These resources are
-      // reached via the task role (IAM), not an injected credential -- the
-      // EtlTaskRoleReciterAiPolicy above is the matching read grant:
-      //   dynamodb  -> ReciterAI publication table (task-role scan)
-      //   spotlight -> ReciterAI artifacts bucket + key prefix
-      //   hierarchy -> ReciterAI hierarchy bucket
-      environment: {
-        NODE_ENV: "production",
-        // Deployment env name for steps whose behavior is env-scoped —
-        // etl:freshness skips SLA entries for sources a given env's cadence
-        // deliberately omits (InfoEd on staging, MeshAnchor on prod).
-        SCHOLARS_ENV: env,
-        // #485 — the search:index build holds the full corpus graph in memory
-        // (178k+ publications). Node's default old-space cap (~2 GB) OOM-kills
-        // the task well under the container limit; pin the heap to ~85% of the
-        // 8 GB task memory (etlTaskMemoryMiB) so it can use what's allocated.
-        NODE_OPTIONS: "--max-old-space-size=7168",
-        SCHOLARS_DYNAMODB_TABLE: "reciterai",
-        // #918 — etl:identity scans this table for ORCID iDs → Scholar.orcid.
-        SCHOLARS_IDENTITY_TABLE: "Identity",
-        ARTIFACTS_BUCKET: "wcmc-reciterai-artifacts",
-        ARTIFACT_PREFIX: "spotlight",
-        HIERARCHY_BUCKET: "wcmc-reciterai-hierarchy",
-        // #794 — A2 canonical tools taxonomy (etl:scholar-tool). Same shared
-        // artifacts bucket as spotlight, under the tools/ prefix.
-        TOOLS_BUCKET: "wcmc-reciterai-artifacts",
-        TOOLS_PREFIX: "tools",
-        // scholar_tool producer switch (#794). "ddb" (legacy DynamoDB Block 5)
-        // was the reversible default; "s3" makes etl:scholar-tool the sole
-        // scholar_tool writer over the A2 canonical taxonomy and also populates
-        // scholar_family (the #799 Methods lens). Cutover complete for BOTH envs:
-        // staging soaked on "s3", prod signed off 2026-07-06 (reverses a team
-        // deferral + unblocks ReciterAI's legacy TOOL# deletion). Rollback = set
-        // back to "ddb". Applied via cdk deploy --exclusively Sps-Etl-<env>; run
-        // etl:scholar-tool after the deploy.
-        SCHOLAR_TOOL_SOURCE: "s3",
-        // RePORTER grants v2 PMID-overlap matcher — step 0 of etl:reporter-grants.
-        // Resolves lateral recruits with no person_nih_profile row (name →
-        // candidate profile_ids → PMID overlap → auto-lock K≥3 / propose K=2). A
-        // per-run scholar cap (REPORTER_MATCH_V2_MAX_PER_RUN, code default 500)
-        // bounds the nightly RePORTER call volume; tune it once the staging cohort
-        // is sized. STAGING-FIRST: "on" in staging now, prod stays "off" until the
-        // staging soak signs off. Applied via cdk deploy --exclusively
-        // Sps-Etl-<env> (CD only rolls the image, never deploys infra).
-        REPORTER_MATCH_V2: env === "staging" ? "on" : "off",
-        // OpenSearch domain endpoint (https://...). Default: plaintext env from
-        // the DataStack export. When openSearchNodeFromSecret is on (cutover
-        // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is
-        // injected from the opensearch secret's `node` key (containerSecrets).
-        // lib/search.ts reads OPENSEARCH_NODE; USER/PASS come from secrets. #447
-        ...(envConfig.openSearchNodeFromSecret
-          ? {}
-          : {
-              OPENSEARCH_NODE: `https://${Fn.importValue(
-                `Sps-Data-${env}-OpenSearchDomainEndpoint`,
-              )}`,
-            }),
-        // #479 — cadence revalidate step POSTs to /api/revalidate on the
-        // VPC-private internal ALB (HTTP :80; no TLS on the internal listener).
-        // The ETL SG -> internal-ALB-SG :80 ingress is already opened at the
-        // top of this stack. `etl/revalidate/index.ts` validates this origin
-        // against its allowlist before sending the bearer token.
-        SCHOLARS_BASE_URL: `http://${ssm.StringParameter.valueForStringParameter(
-          this,
-          `/sps/${env}/app/internal-alb-dns`,
-        )}`,
-        // #746 — the etl:reciter-refresh scanner (operator-run for now) reads
-        // this to deliver any deferred ReCiter rejects and fire the delayed,
-        // per-uid feature-generator re-score. STAGING-FIRST: ON in staging, OFF
-        // in prod until the staging soak completes; the EventBridge → Step
-        // Function schedule is a follow-up.
-        RECITER_REJECT_SEND: env === "staging" ? "on" : "off",
-        // #1258 — gate for the MeSH derived-anchor producer (etl:mesh-anchors).
-        // "0.9" mines descriptor→topic anchors from publication_topic.score ≥ 0.9
-        // papers; a value > 1 is the kill-switch (zero derived rows, curated-only).
-        // STAGING-FIRST: on in staging now, prod held at "2" until the staging
-        // soak signs off — then drop this override to enable prod.
-        MESH_ANCHOR_SCORE_MIN: env === "staging" ? "0.9" : "2",
-        // Destination bucket for the `backup:curated` logical-dump step. The
-        // task role is granted PutObject on exactly this bucket above; the
-        // script defaults the key prefix to "sps-curation-backups".
-        CURATION_BACKUP_BUCKET: curationBackupBucket.bucketName,
-      },
-      secrets: containerSecrets,
+      environment: baseEnvironment,
+      secrets: baseSecrets,
     });
+
+    // ------------------------------------------------------------------
+    // #1508 — the other three task defs, one per credential group, so no ETL
+    // step carries a credential it doesn't use. Each has its OWN execution role
+    // scoped to only the secret ARNs its def injects (base + group); the task
+    // role (runtime identity) is shared -- it holds no secrets. `taskUnitFor`
+    // (below) routes each step to the right def by npm script.
+    // ------------------------------------------------------------------
+    const makeEtlExecRole = (
+      idSuffix: string,
+      familySuffix: string,
+      perSourceArns: string[],
+    ): iam.Role => {
+      const role = new iam.Role(this, `Etl${idSuffix}TaskExecutionRole`, {
+        roleName: `sps-etl-${familySuffix}-task-exec-${env}`,
+        assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+        description: `SPS ETL ${familySuffix} ECS task-execution role (${env}). Pulls images, injects only the ${familySuffix}-group secrets, writes logs.`,
+      });
+      role.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["ecr:GetAuthorizationToken"],
+          resources: ["*"],
+        }),
+      );
+      role.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            "ecr:BatchCheckLayerAvailability",
+            "ecr:GetDownloadUrlForLayer",
+            "ecr:BatchGetImage",
+          ],
+          resources: [etlEcrRepository.repositoryArn],
+        }),
+      );
+      role.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["secretsmanager:GetSecretValue"],
+          resources: [...baseSecretArns, ...perSourceArns],
+        }),
+      );
+      role.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["logs:CreateLogStream", "logs:PutLogEvents"],
+          resources: [etlLogGroup.logGroupArn, `${etlLogGroup.logGroupArn}:*`],
+        }),
+      );
+      return role;
+    };
+    const makeEtlTaskUnit = (
+      idSuffix: string,
+      familySuffix: string,
+      secretIds: string[],
+    ): { taskDefinition: ecs.FargateTaskDefinition; container: ecs.ContainerDefinition } => {
+      const td = new ecs.FargateTaskDefinition(
+        this,
+        `Etl${idSuffix}TaskDefinition`,
+        {
+          family: `sps-etl-${familySuffix}-${env}`,
+          cpu: envConfig.etlTaskCpu,
+          memoryLimitMiB: envConfig.etlTaskMemoryMiB,
+          executionRole: makeEtlExecRole(
+            idSuffix,
+            familySuffix,
+            secretArnsFor(secretIds),
+          ),
+          taskRole,
+        },
+      );
+      const container = td.addContainer("etl", {
+        image: containerImage,
+        containerName: "etl",
+        essential: true,
+        logging: ecs.LogDriver.awsLogs({
+          logGroup: etlLogGroup,
+          streamPrefix: "etl",
+        }),
+        environment: baseEnvironment,
+        secrets: { ...baseSecrets, ...fanSecrets(secretIds) },
+      });
+      return { taskDefinition: td, container };
+    };
+    const baseUnit = {
+      taskDefinition: this.etlTaskDefinition,
+      container: etlContainer,
+    };
+    const sourcesUnit = makeEtlTaskUnit("Sources", "sources", SOURCES_SECRET_IDS);
+    const ldapUnit = makeEtlTaskUnit("Ldap", "ldap", LDAP_SECRET_IDS);
+    // reciter-api def: no cadence step runs on it -- the ReCiter admin key
+    // (#746) is used only by the operator-run `etl:reciter-refresh`, which the
+    // operator launches via `run-task --task-definition sps-etl-reciter-api-<env>`
+    // (see OPERATIONS-RUNBOOK). Isolating it here keeps the admin key off every
+    // cadence step. Created for its side effect (the task def + role).
+    makeEtlTaskUnit("ReciterApi", "reciter-api", RECITER_API_SECRET_IDS);
+    // Route each step's npm script to the task def whose secrets it needs;
+    // everything not listed runs on the base def (base secrets only).
+    const LDAP_SCRIPTS = new Set([
+      "etl:ed",
+      "etl:ed:export-email-visibility",
+    ]);
+    const SOURCES_SCRIPTS = new Set([
+      "etl:reciter",
+      "etl:reciter:coi-statements",
+      "etl:asms",
+      "etl:infoed",
+      "etl:coi",
+      "etl:jenzabar",
+      "etl:reporter",
+      "etl:clinical-trials",
+    ]);
+    const taskUnitFor = (
+      npmScript: string,
+    ): { taskDefinition: ecs.FargateTaskDefinition; container: ecs.ContainerDefinition } =>
+      LDAP_SCRIPTS.has(npmScript)
+        ? ldapUnit
+        : SOURCES_SCRIPTS.has(npmScript)
+          ? sourcesUnit
+          : baseUnit;
 
     // ------------------------------------------------------------------
     // SNS topic. No subscriptions in this PR; B23 wires PagerDuty.
@@ -713,10 +869,12 @@ export class EtlStack extends Stack {
     // which only the chaining loop knows -- PR-7).
     // ------------------------------------------------------------------
     const buildStep = (spec: StepSpec): sfn.TaskStateBase => {
+      // #1508 — run on the task def whose secrets this step's script needs.
+      const unit = taskUnitFor(spec.npmScript);
       const task = new tasks.EcsRunTask(this, `Task${spec.id}`, {
         integrationPattern: sfn.IntegrationPattern.RUN_JOB,
         cluster: ecsCluster,
-        taskDefinition: this.etlTaskDefinition,
+        taskDefinition: unit.taskDefinition,
         launchTarget: new tasks.EcsFargateLaunchTarget({
           platformVersion: ecs.FargatePlatformVersion.LATEST,
         }),
@@ -726,7 +884,7 @@ export class EtlStack extends Stack {
         securityGroups: etlTaskSecurityGroups,
         containerOverrides: [
           {
-            containerDefinition: etlContainer,
+            containerDefinition: unit.container,
             command: ["npm", "run", spec.npmScript],
           },
         ],
@@ -1903,10 +2061,11 @@ export class EtlStack extends Stack {
     // flag flips. See docs/curation-backup-runbook.md § Prod.
     // ------------------------------------------------------------------
     if (envConfig.curationBackupScheduleEnabled) {
+      const backupUnit = taskUnitFor("backup:curated"); // base (no source creds)
       const backupTask = new tasks.EcsRunTask(this, "TaskCurationBackup", {
         integrationPattern: sfn.IntegrationPattern.RUN_JOB,
         cluster: ecsCluster,
-        taskDefinition: this.etlTaskDefinition,
+        taskDefinition: backupUnit.taskDefinition,
         launchTarget: new tasks.EcsFargateLaunchTarget({
           platformVersion: ecs.FargatePlatformVersion.LATEST,
         }),
@@ -1915,7 +2074,7 @@ export class EtlStack extends Stack {
         securityGroups: [etlSecurityGroup],
         containerOverrides: [
           {
-            containerDefinition: etlContainer,
+            containerDefinition: backupUnit.container,
             command: ["npm", "run", "backup:curated"],
           },
         ],
@@ -2038,10 +2197,11 @@ export class EtlStack extends Stack {
     // task def + SG + private-egress subnets (same placement as the nightly step).
     // ------------------------------------------------------------------
     if (envConfig.opportunityProjectionScheduleEnabled) {
+      const projectionUnit = taskUnitFor("etl:dynamodb"); // base (IAM scan, no creds)
       const projectionTask = new tasks.EcsRunTask(this, "TaskOpportunityProjection", {
         integrationPattern: sfn.IntegrationPattern.RUN_JOB,
         cluster: ecsCluster,
-        taskDefinition: this.etlTaskDefinition,
+        taskDefinition: projectionUnit.taskDefinition,
         launchTarget: new tasks.EcsFargateLaunchTarget({
           platformVersion: ecs.FargatePlatformVersion.LATEST,
         }),
@@ -2050,7 +2210,7 @@ export class EtlStack extends Stack {
         securityGroups: [etlSecurityGroup],
         containerOverrides: [
           {
-            containerDefinition: etlContainer,
+            containerDefinition: projectionUnit.container,
             command: ["npm", "run", "etl:dynamodb"],
           },
         ],
@@ -2222,10 +2382,13 @@ export class EtlStack extends Stack {
         subnets: ec2.SubnetSelection,
         securityGroups: ec2.ISecurityGroup[],
       ): tasks.EcsRunTask => {
+        // #1508 — the export leg reads LDAP (ldap def); the import leg is
+        // base (S3 + Aurora). taskUnitFor routes by script.
+        const unit = taskUnitFor(npmScript);
         const task = new tasks.EcsRunTask(this, `Task${idSuffix}`, {
           integrationPattern: sfn.IntegrationPattern.RUN_JOB,
           cluster: ecsCluster,
-          taskDefinition: this.etlTaskDefinition,
+          taskDefinition: unit.taskDefinition,
           launchTarget: new tasks.EcsFargateLaunchTarget({
             platformVersion: ecs.FargatePlatformVersion.LATEST,
           }),
@@ -2234,7 +2397,7 @@ export class EtlStack extends Stack {
           securityGroups,
           containerOverrides: [
             {
-              containerDefinition: etlContainer,
+              containerDefinition: unit.container,
               command: ["npm", "run", npmScript],
             },
           ],

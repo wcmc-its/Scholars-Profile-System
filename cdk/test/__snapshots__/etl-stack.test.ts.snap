@@ -1306,49 +1306,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::SNS::TopicPolicy",
     },
-    "EtlLogGroup90825D1C": {
-      "DeletionPolicy": "Retain",
-      "Properties": {
-        "LogGroupName": "/aws/ecs/sps-etl-prod",
-        "RetentionInDays": 90,
-      },
-      "Type": "AWS::Logs::LogGroup",
-      "UpdateReplacePolicy": "Retain",
-    },
-    "EtlPageTopic608308D6": {
-      "Properties": {
-        "DisplayName": "SPS ETL page (prod)",
-        "TopicName": "etl-page-prod",
-      },
-      "Type": "AWS::SNS::Topic",
-    },
-    "EtlPageTopicPolicy8BB2A686": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sns:Publish",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "states.amazonaws.com",
-              },
-              "Resource": {
-                "Ref": "EtlPageTopic608308D6",
-              },
-              "Sid": "0",
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "Topics": [
-          {
-            "Ref": "EtlPageTopic608308D6",
-          },
-        ],
-      },
-      "Type": "AWS::SNS::TopicPolicy",
-    },
-    "EtlTaskDefinition32654FF8": {
+    "EtlLdapTaskDefinition72D462EA": {
       "Properties": {
         "ContainerDefinitions": [
           {
@@ -1602,6 +1560,1000 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/ed:SCHOLARS_LDAP_BIND_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        "Cpu": "2048",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "EtlLdapTaskExecutionRoleFC00742B",
+            "Arn",
+          ],
+        },
+        "Family": "sps-etl-ldap-prod",
+        "Memory": "8192",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "EtlTaskRoleD514E3A1",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+    },
+    "EtlLdapTaskExecutionRoleDefaultPolicy73D8DA17": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecr:GetAuthorizationToken",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+              },
+            },
+            {
+              "Action": "secretsmanager:GetSecretValue",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/etl",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/revalidate-token",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/ed",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlLogGroup90825D1C",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "EtlLogGroup90825D1C",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EtlLogGroup90825D1C",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/etl-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/revalidate-token-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/ed-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EtlLdapTaskExecutionRoleDefaultPolicy73D8DA17",
+        "Roles": [
+          {
+            "Ref": "EtlLdapTaskExecutionRoleFC00742B",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "EtlLdapTaskExecutionRoleFC00742B": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS ETL ldap ECS task-execution role (prod). Pulls images, injects only the ldap-group secrets, writes logs.",
+        "RoleName": "sps-etl-ldap-task-exec-prod",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EtlLogGroup90825D1C": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/ecs/sps-etl-prod",
+        "RetentionInDays": 90,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "EtlPageTopic608308D6": {
+      "Properties": {
+        "DisplayName": "SPS ETL page (prod)",
+        "TopicName": "etl-page-prod",
+      },
+      "Type": "AWS::SNS::Topic",
+    },
+    "EtlPageTopicPolicy8BB2A686": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "states.amazonaws.com",
+              },
+              "Resource": {
+                "Ref": "EtlPageTopic608308D6",
+              },
+              "Sid": "0",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Topics": [
+          {
+            "Ref": "EtlPageTopic608308D6",
+          },
+        ],
+      },
+      "Type": "AWS::SNS::TopicPolicy",
+    },
+    "EtlReciterApiTaskDefinition7044B7AA": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "Environment": [
+              {
+                "Name": "NODE_ENV",
+                "Value": "production",
+              },
+              {
+                "Name": "SCHOLARS_ENV",
+                "Value": "prod",
+              },
+              {
+                "Name": "NODE_OPTIONS",
+                "Value": "--max-old-space-size=7168",
+              },
+              {
+                "Name": "SCHOLARS_DYNAMODB_TABLE",
+                "Value": "reciterai",
+              },
+              {
+                "Name": "SCHOLARS_IDENTITY_TABLE",
+                "Value": "Identity",
+              },
+              {
+                "Name": "ARTIFACTS_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
+              {
+                "Name": "ARTIFACT_PREFIX",
+                "Value": "spotlight",
+              },
+              {
+                "Name": "HIERARCHY_BUCKET",
+                "Value": "wcmc-reciterai-hierarchy",
+              },
+              {
+                "Name": "TOOLS_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
+              {
+                "Name": "TOOLS_PREFIX",
+                "Value": "tools",
+              },
+              {
+                "Name": "SCHOLAR_TOOL_SOURCE",
+                "Value": "s3",
+              },
+              {
+                "Name": "REPORTER_MATCH_V2",
+                "Value": "off",
+              },
+              {
+                "Name": "SCHOLARS_BASE_URL",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsprodappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_REJECT_SEND",
+                "Value": "off",
+              },
+              {
+                "Name": "MESH_ANCHOR_SCORE_MIN",
+                "Value": "2",
+              },
+              {
+                "Name": "CURATION_BACKUP_BUCKET",
+                "Value": {
+                  "Ref": "CurationBackupBucketE5A802A9",
+                },
+              },
+            ],
+            "Essential": true,
+            "Image": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      4,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".dkr.ecr.",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".",
+                  {
+                    "Ref": "AWS::URLSuffix",
+                  },
+                  "/",
+                  {
+                    "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefEtlEcrRepository058F5EEC7A385183",
+                  },
+                  ":latest",
+                ],
+              ],
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "EtlLogGroup90825D1C",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "etl",
+              },
+            },
+            "Name": "etl",
+            "Secrets": [
+              {
+                "Name": "DATABASE_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/etl",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl:node::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_USER",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl:username::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_PASS",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl:password::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_REVALIDATE_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/revalidate-token",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_API_BASE_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api:RECITER_API_BASE_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api:RECITER_API_KEY::",
+                    ],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        "Cpu": "2048",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "EtlReciterApiTaskExecutionRole01C464D1",
+            "Arn",
+          ],
+        },
+        "Family": "sps-etl-reciter-api-prod",
+        "Memory": "8192",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "EtlTaskRoleD514E3A1",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+    },
+    "EtlReciterApiTaskExecutionRole01C464D1": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS ETL reciter-api ECS task-execution role (prod). Pulls images, injects only the reciter-api-group secrets, writes logs.",
+        "RoleName": "sps-etl-reciter-api-task-exec-prod",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EtlReciterApiTaskExecutionRoleDefaultPolicy9DF58371": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecr:GetAuthorizationToken",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+              },
+            },
+            {
+              "Action": "secretsmanager:GetSecretValue",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/etl",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/revalidate-token",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlLogGroup90825D1C",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "EtlLogGroup90825D1C",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EtlLogGroup90825D1C",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/etl-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/revalidate-token-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EtlReciterApiTaskExecutionRoleDefaultPolicy9DF58371",
+        "Roles": [
+          {
+            "Ref": "EtlReciterApiTaskExecutionRole01C464D1",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "EtlSourcesTaskDefinition49849C9D": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "Environment": [
+              {
+                "Name": "NODE_ENV",
+                "Value": "production",
+              },
+              {
+                "Name": "SCHOLARS_ENV",
+                "Value": "prod",
+              },
+              {
+                "Name": "NODE_OPTIONS",
+                "Value": "--max-old-space-size=7168",
+              },
+              {
+                "Name": "SCHOLARS_DYNAMODB_TABLE",
+                "Value": "reciterai",
+              },
+              {
+                "Name": "SCHOLARS_IDENTITY_TABLE",
+                "Value": "Identity",
+              },
+              {
+                "Name": "ARTIFACTS_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
+              {
+                "Name": "ARTIFACT_PREFIX",
+                "Value": "spotlight",
+              },
+              {
+                "Name": "HIERARCHY_BUCKET",
+                "Value": "wcmc-reciterai-hierarchy",
+              },
+              {
+                "Name": "TOOLS_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
+              {
+                "Name": "TOOLS_PREFIX",
+                "Value": "tools",
+              },
+              {
+                "Name": "SCHOLAR_TOOL_SOURCE",
+                "Value": "s3",
+              },
+              {
+                "Name": "REPORTER_MATCH_V2",
+                "Value": "off",
+              },
+              {
+                "Name": "SCHOLARS_BASE_URL",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsprodappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_REJECT_SEND",
+                "Value": "off",
+              },
+              {
+                "Name": "MESH_ANCHOR_SCORE_MIN",
+                "Value": "2",
+              },
+              {
+                "Name": "CURATION_BACKUP_BUCKET",
+                "Value": {
+                  "Ref": "CurationBackupBucketE5A802A9",
+                },
+              },
+            ],
+            "Essential": true,
+            "Image": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      4,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".dkr.ecr.",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".",
+                  {
+                    "Ref": "AWS::URLSuffix",
+                  },
+                  "/",
+                  {
+                    "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefEtlEcrRepository058F5EEC7A385183",
+                  },
+                  ":latest",
+                ],
+              ],
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "EtlLogGroup90825D1C",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "etl",
+              },
+            },
+            "Name": "etl",
+            "Secrets": [
+              {
+                "Name": "DATABASE_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/etl",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl:node::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_USER",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl:username::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_PASS",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl:password::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_REVALIDATE_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/revalidate-token",
                     ],
                   ],
                 },
@@ -1951,47 +2903,17 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                   ],
                 },
               },
-              {
-                "Name": "RECITER_API_BASE_URL",
-                "ValueFrom": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api:RECITER_API_BASE_URL::",
-                    ],
-                  ],
-                },
-              },
-              {
-                "Name": "RECITER_API_KEY",
-                "ValueFrom": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api:RECITER_API_KEY::",
-                    ],
-                  ],
-                },
-              },
             ],
           },
         ],
         "Cpu": "2048",
         "ExecutionRoleArn": {
           "Fn::GetAtt": [
-            "EtlTaskExecutionRoleC745E2CD",
+            "EtlSourcesTaskExecutionRole3FE3CBC4",
             "Arn",
           ],
         },
-        "Family": "sps-etl-prod",
+        "Family": "sps-etl-sources-prod",
         "Memory": "8192",
         "NetworkMode": "awsvpc",
         "RequiresCompatibilities": [
@@ -2006,7 +2928,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::ECS::TaskDefinition",
     },
-    "EtlTaskExecutionRoleC745E2CD": {
+    "EtlSourcesTaskExecutionRole3FE3CBC4": {
       "Properties": {
         "AssumeRolePolicyDocument": {
           "Statement": [
@@ -2020,12 +2942,12 @@ exports[`EtlStack prod matches the snapshot 1`] = `
           ],
           "Version": "2012-10-17",
         },
-        "Description": "SPS ETL ECS task-execution role (prod). Pulls images, injects secrets, writes logs.",
-        "RoleName": "sps-etl-task-exec-prod",
+        "Description": "SPS ETL sources ECS task-execution role (prod). Pulls images, injects only the sources-group secrets, writes logs.",
+        "RoleName": "sps-etl-sources-task-exec-prod",
       },
       "Type": "AWS::IAM::Role",
     },
-    "EtlTaskExecutionRoleDefaultPolicy79B74B63": {
+    "EtlSourcesTaskExecutionRoleDefaultPolicyB6483E7D": {
       "Properties": {
         "PolicyDocument": {
           "Statement": [
@@ -2093,18 +3015,6 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/ed",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/asms",
                     ],
                   ],
@@ -2154,18 +3064,6 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/jenzabar",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api",
                     ],
                   ],
                 },
@@ -2284,25 +3182,6 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/ed-??????",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/asms-??????",
                   ],
                 ],
@@ -2384,6 +3263,379 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 ],
               },
             },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EtlSourcesTaskExecutionRoleDefaultPolicyB6483E7D",
+        "Roles": [
+          {
+            "Ref": "EtlSourcesTaskExecutionRole3FE3CBC4",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "EtlTaskDefinition32654FF8": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "Environment": [
+              {
+                "Name": "NODE_ENV",
+                "Value": "production",
+              },
+              {
+                "Name": "SCHOLARS_ENV",
+                "Value": "prod",
+              },
+              {
+                "Name": "NODE_OPTIONS",
+                "Value": "--max-old-space-size=7168",
+              },
+              {
+                "Name": "SCHOLARS_DYNAMODB_TABLE",
+                "Value": "reciterai",
+              },
+              {
+                "Name": "SCHOLARS_IDENTITY_TABLE",
+                "Value": "Identity",
+              },
+              {
+                "Name": "ARTIFACTS_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
+              {
+                "Name": "ARTIFACT_PREFIX",
+                "Value": "spotlight",
+              },
+              {
+                "Name": "HIERARCHY_BUCKET",
+                "Value": "wcmc-reciterai-hierarchy",
+              },
+              {
+                "Name": "TOOLS_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
+              {
+                "Name": "TOOLS_PREFIX",
+                "Value": "tools",
+              },
+              {
+                "Name": "SCHOLAR_TOOL_SOURCE",
+                "Value": "s3",
+              },
+              {
+                "Name": "REPORTER_MATCH_V2",
+                "Value": "off",
+              },
+              {
+                "Name": "SCHOLARS_BASE_URL",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsprodappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_REJECT_SEND",
+                "Value": "off",
+              },
+              {
+                "Name": "MESH_ANCHOR_SCORE_MIN",
+                "Value": "2",
+              },
+              {
+                "Name": "CURATION_BACKUP_BUCKET",
+                "Value": {
+                  "Ref": "CurationBackupBucketE5A802A9",
+                },
+              },
+            ],
+            "Essential": true,
+            "Image": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      4,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".dkr.ecr.",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".",
+                  {
+                    "Ref": "AWS::URLSuffix",
+                  },
+                  "/",
+                  {
+                    "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefEtlEcrRepository058F5EEC7A385183",
+                  },
+                  ":latest",
+                ],
+              ],
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "EtlLogGroup90825D1C",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "etl",
+              },
+            },
+            "Name": "etl",
+            "Secrets": [
+              {
+                "Name": "DATABASE_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/etl",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl:node::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_USER",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl:username::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_PASS",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl:password::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_REVALIDATE_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/revalidate-token",
+                    ],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        "Cpu": "2048",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "EtlTaskExecutionRoleC745E2CD",
+            "Arn",
+          ],
+        },
+        "Family": "sps-etl-prod",
+        "Memory": "8192",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "EtlTaskRoleD514E3A1",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+    },
+    "EtlTaskExecutionRoleC745E2CD": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS ETL ECS task-execution role (prod). Pulls images, injects secrets, writes logs.",
+        "RoleName": "sps-etl-task-exec-prod",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EtlTaskExecutionRoleDefaultPolicy79B74B63": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecr:GetAuthorizationToken",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+              },
+            },
+            {
+              "Action": "secretsmanager:GetSecretValue",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/etl",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/revalidate-token",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlLogGroup90825D1C",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "EtlLogGroup90825D1C",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EtlLogGroup90825D1C",
+                  "Arn",
+                ],
+              },
+            },
             {
               "Action": [
                 "secretsmanager:GetSecretValue",
@@ -2398,7 +3650,45 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api-??????",
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/etl-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/etl-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/revalidate-token-??????",
                   ],
                 ],
               },
@@ -3053,7 +4343,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskReciter":{"Next":"TaskReciterCoiStatements","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciter"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-ldap-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskReciter":{"Next":"TaskReciterCoiStatements","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciter"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -3061,7 +4351,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskReciterCoiStatements":{"Next":"TaskAsms","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciterCoiStatements"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskReciterCoiStatements":{"Next":"TaskAsms","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciterCoiStatements"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -3069,7 +4359,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter:coi-statements"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskAsms":{"Next":"TaskInfoed","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyAsms"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter:coi-statements"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskAsms":{"Next":"TaskInfoed","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyAsms"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -3077,7 +4367,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:asms"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReciterCoiStatements":{"Next":"TaskAsms","Type":"Task","Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:asms"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReciterCoiStatements":{"Next":"TaskAsms","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -3093,7 +4383,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:infoed"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyAsms":{"Next":"TaskInfoed","Type":"Task","Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:infoed"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyAsms":{"Next":"TaskInfoed","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -3109,7 +4399,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:coi"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyInfoed":{"Next":"TaskCoi","Type":"Task","Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:coi"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyInfoed":{"Next":"TaskCoi","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -3141,7 +4431,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:jenzabar"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyCoiGap":{"Next":"TaskJenzabarNightly","Type":"Task","Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:jenzabar"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyCoiGap":{"Next":"TaskJenzabarNightly","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -3381,6 +4671,309 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                           "Fn::Split": [
                             ":",
                             {
+                              "Ref": "EtlLdapTaskDefinition72D462EA",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        2,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlLdapTaskDefinition72D462EA",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        3,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlLdapTaskDefinition72D462EA",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        4,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlLdapTaskDefinition72D462EA",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        0,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlLdapTaskDefinition72D462EA",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    "/",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlLdapTaskDefinition72D462EA",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ecs:StopTask",
+                "ecs:DescribeTasks",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskRoleD514E3A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlLdapTaskExecutionRoleFC00742B",
+                    "Arn",
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "events:PutTargets",
+                "events:PutRule",
+                "events:DescribeRule",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "ecs:RunTask",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        2,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        3,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        4,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        0,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlSourcesTaskDefinition49849C9D",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    "/",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlSourcesTaskDefinition49849C9D",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskRoleD514E3A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlSourcesTaskExecutionRole3FE3CBC4",
+                    "Arn",
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+            },
+            {
+              "Action": "ecs:RunTask",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
                               "Ref": "EtlTaskDefinition32654FF8",
                             },
                           ],
@@ -3483,14 +5076,6 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               },
             },
             {
-              "Action": [
-                "ecs:StopTask",
-                "ecs:DescribeTasks",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
               "Action": "iam:PassRole",
               "Effect": "Allow",
               "Resource": [
@@ -3507,33 +5092,6 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                   ],
                 },
               ],
-            },
-            {
-              "Action": [
-                "events:PutTargets",
-                "events:PutRule",
-                "events:DescribeRule",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": "sns:Publish",
-              "Effect": "Allow",
-              "Resource": {
-                "Ref": "EtlFailureTopic8361D0D0",
-              },
             },
             {
               "Action": "sns:Publish",
@@ -4478,7 +6036,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reporter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifySpotlight":{"Next":"TaskReporterWeekly","Type":"Task","Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reporter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifySpotlight":{"Next":"TaskReporterWeekly","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -4574,7 +6132,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:clinical-trials"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReporterGrantsWeekly":{"Next":"TaskClinicalTrialsWeekly","Type":"Task","Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:clinical-trials"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReporterGrantsWeekly":{"Next":"TaskClinicalTrialsWeekly","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -4911,6 +6469,140 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               "Resource": {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
+            },
+            {
+              "Action": "ecs:RunTask",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        2,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        3,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        4,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        0,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlSourcesTaskDefinition49849C9D",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    "/",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlSourcesTaskDefinition49849C9D",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskRoleD514E3A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlSourcesTaskExecutionRole3FE3CBC4",
+                    "Arn",
+                  ],
+                },
+              ],
             },
             {
               "Action": "sns:Publish",
@@ -6769,7 +8461,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-08cab06d3084fba41","subnet-07ffed73356c01f6c"],"SecurityGroups":["",
+              "","TaskDefinition":"sps-etl-ldap-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-08cab06d3084fba41","subnet-07ffed73356c01f6c"],"SecurityGroups":["",
               {
                 "Fn::GetAtt": [
                   "EdExportSg72D4CEF3",
@@ -6894,6 +8586,168 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                           "Fn::Split": [
                             ":",
                             {
+                              "Ref": "EtlLdapTaskDefinition72D462EA",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        2,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlLdapTaskDefinition72D462EA",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        3,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlLdapTaskDefinition72D462EA",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        4,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlLdapTaskDefinition72D462EA",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        0,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlLdapTaskDefinition72D462EA",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    "/",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlLdapTaskDefinition72D462EA",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ecs:StopTask",
+                "ecs:DescribeTasks",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskRoleD514E3A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlLdapTaskExecutionRoleFC00742B",
+                    "Arn",
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "events:PutTargets",
+                "events:PutRule",
+                "events:DescribeRule",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "ecs:RunTask",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
                               "Ref": "EtlTaskDefinition32654FF8",
                             },
                           ],
@@ -6996,14 +8850,6 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
             },
             {
-              "Action": [
-                "ecs:StopTask",
-                "ecs:DescribeTasks",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
               "Action": "iam:PassRole",
               "Effect": "Allow",
               "Resource": [
@@ -7020,26 +8866,6 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                   ],
                 },
               ],
-            },
-            {
-              "Action": [
-                "events:PutTargets",
-                "events:PutRule",
-                "events:DescribeRule",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
-                  ],
-                ],
-              },
             },
             {
               "Action": "sns:Publish",
@@ -7148,49 +8974,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::SNS::TopicPolicy",
     },
-    "EtlLogGroup90825D1C": {
-      "DeletionPolicy": "Retain",
-      "Properties": {
-        "LogGroupName": "/aws/ecs/sps-etl-staging",
-        "RetentionInDays": 30,
-      },
-      "Type": "AWS::Logs::LogGroup",
-      "UpdateReplacePolicy": "Retain",
-    },
-    "EtlPageTopic608308D6": {
-      "Properties": {
-        "DisplayName": "SPS ETL page (staging)",
-        "TopicName": "etl-page-staging",
-      },
-      "Type": "AWS::SNS::Topic",
-    },
-    "EtlPageTopicPolicy8BB2A686": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sns:Publish",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "states.amazonaws.com",
-              },
-              "Resource": {
-                "Ref": "EtlPageTopic608308D6",
-              },
-              "Sid": "0",
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "Topics": [
-          {
-            "Ref": "EtlPageTopic608308D6",
-          },
-        ],
-      },
-      "Type": "AWS::SNS::TopicPolicy",
-    },
-    "EtlTaskDefinition32654FF8": {
+    "EtlLdapTaskDefinition72D462EA": {
       "Properties": {
         "ContainerDefinitions": [
           {
@@ -7444,6 +9228,1000 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed:SCHOLARS_LDAP_BIND_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        "Cpu": "2048",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "EtlLdapTaskExecutionRoleFC00742B",
+            "Arn",
+          ],
+        },
+        "Family": "sps-etl-ldap-staging",
+        "Memory": "8192",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "EtlTaskRoleD514E3A1",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+    },
+    "EtlLdapTaskExecutionRoleDefaultPolicy73D8DA17": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecr:GetAuthorizationToken",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+              },
+            },
+            {
+              "Action": "secretsmanager:GetSecretValue",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/etl",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlLogGroup90825D1C",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "EtlLogGroup90825D1C",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EtlLogGroup90825D1C",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/etl-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EtlLdapTaskExecutionRoleDefaultPolicy73D8DA17",
+        "Roles": [
+          {
+            "Ref": "EtlLdapTaskExecutionRoleFC00742B",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "EtlLdapTaskExecutionRoleFC00742B": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS ETL ldap ECS task-execution role (staging). Pulls images, injects only the ldap-group secrets, writes logs.",
+        "RoleName": "sps-etl-ldap-task-exec-staging",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EtlLogGroup90825D1C": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/ecs/sps-etl-staging",
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "EtlPageTopic608308D6": {
+      "Properties": {
+        "DisplayName": "SPS ETL page (staging)",
+        "TopicName": "etl-page-staging",
+      },
+      "Type": "AWS::SNS::Topic",
+    },
+    "EtlPageTopicPolicy8BB2A686": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "states.amazonaws.com",
+              },
+              "Resource": {
+                "Ref": "EtlPageTopic608308D6",
+              },
+              "Sid": "0",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Topics": [
+          {
+            "Ref": "EtlPageTopic608308D6",
+          },
+        ],
+      },
+      "Type": "AWS::SNS::TopicPolicy",
+    },
+    "EtlReciterApiTaskDefinition7044B7AA": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "Environment": [
+              {
+                "Name": "NODE_ENV",
+                "Value": "production",
+              },
+              {
+                "Name": "SCHOLARS_ENV",
+                "Value": "staging",
+              },
+              {
+                "Name": "NODE_OPTIONS",
+                "Value": "--max-old-space-size=7168",
+              },
+              {
+                "Name": "SCHOLARS_DYNAMODB_TABLE",
+                "Value": "reciterai",
+              },
+              {
+                "Name": "SCHOLARS_IDENTITY_TABLE",
+                "Value": "Identity",
+              },
+              {
+                "Name": "ARTIFACTS_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
+              {
+                "Name": "ARTIFACT_PREFIX",
+                "Value": "spotlight",
+              },
+              {
+                "Name": "HIERARCHY_BUCKET",
+                "Value": "wcmc-reciterai-hierarchy",
+              },
+              {
+                "Name": "TOOLS_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
+              {
+                "Name": "TOOLS_PREFIX",
+                "Value": "tools",
+              },
+              {
+                "Name": "SCHOLAR_TOOL_SOURCE",
+                "Value": "s3",
+              },
+              {
+                "Name": "REPORTER_MATCH_V2",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_BASE_URL",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsstagingappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_REJECT_SEND",
+                "Value": "on",
+              },
+              {
+                "Name": "MESH_ANCHOR_SCORE_MIN",
+                "Value": "0.9",
+              },
+              {
+                "Name": "CURATION_BACKUP_BUCKET",
+                "Value": {
+                  "Ref": "CurationBackupBucketE5A802A9",
+                },
+              },
+            ],
+            "Essential": true,
+            "Image": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      4,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".dkr.ecr.",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".",
+                  {
+                    "Ref": "AWS::URLSuffix",
+                  },
+                  "/",
+                  {
+                    "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefEtlEcrRepository058F5EEC7A385183",
+                  },
+                  ":latest",
+                ],
+              ],
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "EtlLogGroup90825D1C",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "etl",
+              },
+            },
+            "Name": "etl",
+            "Secrets": [
+              {
+                "Name": "DATABASE_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/etl",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl:node::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_USER",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl:username::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_PASS",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl:password::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_REVALIDATE_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_API_BASE_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api:RECITER_API_BASE_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api:RECITER_API_KEY::",
+                    ],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        "Cpu": "2048",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "EtlReciterApiTaskExecutionRole01C464D1",
+            "Arn",
+          ],
+        },
+        "Family": "sps-etl-reciter-api-staging",
+        "Memory": "8192",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "EtlTaskRoleD514E3A1",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+    },
+    "EtlReciterApiTaskExecutionRole01C464D1": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS ETL reciter-api ECS task-execution role (staging). Pulls images, injects only the reciter-api-group secrets, writes logs.",
+        "RoleName": "sps-etl-reciter-api-task-exec-staging",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EtlReciterApiTaskExecutionRoleDefaultPolicy9DF58371": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecr:GetAuthorizationToken",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+              },
+            },
+            {
+              "Action": "secretsmanager:GetSecretValue",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/etl",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlLogGroup90825D1C",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "EtlLogGroup90825D1C",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EtlLogGroup90825D1C",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/etl-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EtlReciterApiTaskExecutionRoleDefaultPolicy9DF58371",
+        "Roles": [
+          {
+            "Ref": "EtlReciterApiTaskExecutionRole01C464D1",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "EtlSourcesTaskDefinition49849C9D": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "Environment": [
+              {
+                "Name": "NODE_ENV",
+                "Value": "production",
+              },
+              {
+                "Name": "SCHOLARS_ENV",
+                "Value": "staging",
+              },
+              {
+                "Name": "NODE_OPTIONS",
+                "Value": "--max-old-space-size=7168",
+              },
+              {
+                "Name": "SCHOLARS_DYNAMODB_TABLE",
+                "Value": "reciterai",
+              },
+              {
+                "Name": "SCHOLARS_IDENTITY_TABLE",
+                "Value": "Identity",
+              },
+              {
+                "Name": "ARTIFACTS_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
+              {
+                "Name": "ARTIFACT_PREFIX",
+                "Value": "spotlight",
+              },
+              {
+                "Name": "HIERARCHY_BUCKET",
+                "Value": "wcmc-reciterai-hierarchy",
+              },
+              {
+                "Name": "TOOLS_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
+              {
+                "Name": "TOOLS_PREFIX",
+                "Value": "tools",
+              },
+              {
+                "Name": "SCHOLAR_TOOL_SOURCE",
+                "Value": "s3",
+              },
+              {
+                "Name": "REPORTER_MATCH_V2",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_BASE_URL",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsstagingappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_REJECT_SEND",
+                "Value": "on",
+              },
+              {
+                "Name": "MESH_ANCHOR_SCORE_MIN",
+                "Value": "0.9",
+              },
+              {
+                "Name": "CURATION_BACKUP_BUCKET",
+                "Value": {
+                  "Ref": "CurationBackupBucketE5A802A9",
+                },
+              },
+            ],
+            "Essential": true,
+            "Image": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      4,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".dkr.ecr.",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".",
+                  {
+                    "Ref": "AWS::URLSuffix",
+                  },
+                  "/",
+                  {
+                    "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefEtlEcrRepository058F5EEC7A385183",
+                  },
+                  ":latest",
+                ],
+              ],
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "EtlLogGroup90825D1C",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "etl",
+              },
+            },
+            "Name": "etl",
+            "Secrets": [
+              {
+                "Name": "DATABASE_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/etl",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl:node::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_USER",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl:username::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_PASS",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl:password::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_REVALIDATE_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token",
                     ],
                   ],
                 },
@@ -7793,47 +10571,17 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                   ],
                 },
               },
-              {
-                "Name": "RECITER_API_BASE_URL",
-                "ValueFrom": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api:RECITER_API_BASE_URL::",
-                    ],
-                  ],
-                },
-              },
-              {
-                "Name": "RECITER_API_KEY",
-                "ValueFrom": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api:RECITER_API_KEY::",
-                    ],
-                  ],
-                },
-              },
             ],
           },
         ],
         "Cpu": "2048",
         "ExecutionRoleArn": {
           "Fn::GetAtt": [
-            "EtlTaskExecutionRoleC745E2CD",
+            "EtlSourcesTaskExecutionRole3FE3CBC4",
             "Arn",
           ],
         },
-        "Family": "sps-etl-staging",
+        "Family": "sps-etl-sources-staging",
         "Memory": "8192",
         "NetworkMode": "awsvpc",
         "RequiresCompatibilities": [
@@ -7848,7 +10596,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::ECS::TaskDefinition",
     },
-    "EtlTaskExecutionRoleC745E2CD": {
+    "EtlSourcesTaskExecutionRole3FE3CBC4": {
       "Properties": {
         "AssumeRolePolicyDocument": {
           "Statement": [
@@ -7862,12 +10610,12 @@ exports[`EtlStack staging matches the snapshot 1`] = `
           ],
           "Version": "2012-10-17",
         },
-        "Description": "SPS ETL ECS task-execution role (staging). Pulls images, injects secrets, writes logs.",
-        "RoleName": "sps-etl-task-exec-staging",
+        "Description": "SPS ETL sources ECS task-execution role (staging). Pulls images, injects only the sources-group secrets, writes logs.",
+        "RoleName": "sps-etl-sources-task-exec-staging",
       },
       "Type": "AWS::IAM::Role",
     },
-    "EtlTaskExecutionRoleDefaultPolicy79B74B63": {
+    "EtlSourcesTaskExecutionRoleDefaultPolicyB6483E7D": {
       "Properties": {
         "PolicyDocument": {
           "Statement": [
@@ -7935,18 +10683,6 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/asms",
                     ],
                   ],
@@ -7996,18 +10732,6 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/jenzabar",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api",
                     ],
                   ],
                 },
@@ -8126,25 +10850,6 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed-??????",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/asms-??????",
                   ],
                 ],
@@ -8226,6 +10931,379 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 ],
               },
             },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "EtlSourcesTaskExecutionRoleDefaultPolicyB6483E7D",
+        "Roles": [
+          {
+            "Ref": "EtlSourcesTaskExecutionRole3FE3CBC4",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "EtlTaskDefinition32654FF8": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "Environment": [
+              {
+                "Name": "NODE_ENV",
+                "Value": "production",
+              },
+              {
+                "Name": "SCHOLARS_ENV",
+                "Value": "staging",
+              },
+              {
+                "Name": "NODE_OPTIONS",
+                "Value": "--max-old-space-size=7168",
+              },
+              {
+                "Name": "SCHOLARS_DYNAMODB_TABLE",
+                "Value": "reciterai",
+              },
+              {
+                "Name": "SCHOLARS_IDENTITY_TABLE",
+                "Value": "Identity",
+              },
+              {
+                "Name": "ARTIFACTS_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
+              {
+                "Name": "ARTIFACT_PREFIX",
+                "Value": "spotlight",
+              },
+              {
+                "Name": "HIERARCHY_BUCKET",
+                "Value": "wcmc-reciterai-hierarchy",
+              },
+              {
+                "Name": "TOOLS_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
+              {
+                "Name": "TOOLS_PREFIX",
+                "Value": "tools",
+              },
+              {
+                "Name": "SCHOLAR_TOOL_SOURCE",
+                "Value": "s3",
+              },
+              {
+                "Name": "REPORTER_MATCH_V2",
+                "Value": "on",
+              },
+              {
+                "Name": "SCHOLARS_BASE_URL",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "http://",
+                      {
+                        "Ref": "SsmParameterValuespsstagingappinternalalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
+                      },
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_REJECT_SEND",
+                "Value": "on",
+              },
+              {
+                "Name": "MESH_ANCHOR_SCORE_MIN",
+                "Value": "0.9",
+              },
+              {
+                "Name": "CURATION_BACKUP_BUCKET",
+                "Value": {
+                  "Ref": "CurationBackupBucketE5A802A9",
+                },
+              },
+            ],
+            "Essential": true,
+            "Image": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      4,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".dkr.ecr.",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".",
+                  {
+                    "Ref": "AWS::URLSuffix",
+                  },
+                  "/",
+                  {
+                    "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefEtlEcrRepository058F5EEC7A385183",
+                  },
+                  ":latest",
+                ],
+              ],
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "EtlLogGroup90825D1C",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "etl",
+              },
+            },
+            "Name": "etl",
+            "Secrets": [
+              {
+                "Name": "DATABASE_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/etl",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl:node::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_USER",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl:username::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_PASS",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl:password::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_REVALIDATE_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token",
+                    ],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        "Cpu": "2048",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "EtlTaskExecutionRoleC745E2CD",
+            "Arn",
+          ],
+        },
+        "Family": "sps-etl-staging",
+        "Memory": "8192",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "EtlTaskRoleD514E3A1",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+    },
+    "EtlTaskExecutionRoleC745E2CD": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS ETL ECS task-execution role (staging). Pulls images, injects secrets, writes logs.",
+        "RoleName": "sps-etl-task-exec-staging",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "EtlTaskExecutionRoleDefaultPolicy79B74B63": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecr:GetAuthorizationToken",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
+              },
+            },
+            {
+              "Action": "secretsmanager:GetSecretValue",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/etl",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlLogGroup90825D1C",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "EtlLogGroup90825D1C",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EtlLogGroup90825D1C",
+                  "Arn",
+                ],
+              },
+            },
             {
               "Action": [
                 "secretsmanager:GetSecretValue",
@@ -8240,7 +11318,45 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api-??????",
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/etl-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/etl-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token-??????",
                   ],
                 ],
               },
@@ -8900,7 +12016,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskReciter":{"Next":"TaskReciterCoiStatements","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciter"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-ldap-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskReciter":{"Next":"TaskReciterCoiStatements","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciter"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -8908,7 +12024,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskReciterCoiStatements":{"Next":"TaskAsms","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciterCoiStatements"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskReciterCoiStatements":{"Next":"TaskAsms","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciterCoiStatements"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -8916,7 +12032,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter:coi-statements"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskAsms":{"Next":"TaskCoi","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyAsms"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter:coi-statements"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskAsms":{"Next":"TaskCoi","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyAsms"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -8924,7 +12040,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:asms"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReciterCoiStatements":{"Next":"TaskAsms","Type":"Task","Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:asms"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReciterCoiStatements":{"Next":"TaskAsms","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -8940,7 +12056,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:coi"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyAsms":{"Next":"TaskCoi","Type":"Task","Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:coi"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyAsms":{"Next":"TaskCoi","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -8972,7 +12088,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:jenzabar"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyCoiGap":{"Next":"TaskJenzabarNightly","Type":"Task","Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:jenzabar"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyCoiGap":{"Next":"TaskJenzabarNightly","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -9228,6 +12344,309 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                           "Fn::Split": [
                             ":",
                             {
+                              "Ref": "EtlLdapTaskDefinition72D462EA",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        2,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlLdapTaskDefinition72D462EA",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        3,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlLdapTaskDefinition72D462EA",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        4,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlLdapTaskDefinition72D462EA",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        0,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlLdapTaskDefinition72D462EA",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    "/",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlLdapTaskDefinition72D462EA",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ecs:StopTask",
+                "ecs:DescribeTasks",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskRoleD514E3A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlLdapTaskExecutionRoleFC00742B",
+                    "Arn",
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "events:PutTargets",
+                "events:PutRule",
+                "events:DescribeRule",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "ecs:RunTask",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        2,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        3,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        4,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        0,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlSourcesTaskDefinition49849C9D",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    "/",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlSourcesTaskDefinition49849C9D",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskRoleD514E3A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlSourcesTaskExecutionRole3FE3CBC4",
+                    "Arn",
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+            },
+            {
+              "Action": "ecs:RunTask",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
                               "Ref": "EtlTaskDefinition32654FF8",
                             },
                           ],
@@ -9330,14 +12749,6 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
             },
             {
-              "Action": [
-                "ecs:StopTask",
-                "ecs:DescribeTasks",
-              ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
               "Action": "iam:PassRole",
               "Effect": "Allow",
               "Resource": [
@@ -9354,33 +12765,6 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                   ],
                 },
               ],
-            },
-            {
-              "Action": [
-                "events:PutTargets",
-                "events:PutRule",
-                "events:DescribeRule",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":events:us-east-1:123456789012:rule/StepFunctionsGetEventsForECSTaskRule",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": "sns:Publish",
-              "Effect": "Allow",
-              "Resource": {
-                "Ref": "EtlFailureTopic8361D0D0",
-              },
             },
             {
               "Action": "sns:Publish",
@@ -10718,7 +14102,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reporter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifySpotlight":{"Next":"TaskReporterWeekly","Type":"Task","Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reporter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifySpotlight":{"Next":"TaskReporterWeekly","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -10814,7 +14198,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:clinical-trials"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReporterGrantsWeekly":{"Next":"TaskClinicalTrialsWeekly","Type":"Task","Resource":"arn:",
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:clinical-trials"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyReporterGrantsWeekly":{"Next":"TaskClinicalTrialsWeekly","Type":"Task","Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -11151,6 +14535,140 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               "Resource": {
                 "Ref": "EtlFailureTopic8361D0D0",
               },
+            },
+            {
+              "Action": "ecs:RunTask",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        2,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        3,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        4,
+                        {
+                          "Fn::Split": [
+                            ":",
+                            {
+                              "Ref": "EtlSourcesTaskDefinition49849C9D",
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":",
+                    {
+                      "Fn::Select": [
+                        0,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlSourcesTaskDefinition49849C9D",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    "/",
+                    {
+                      "Fn::Select": [
+                        1,
+                        {
+                          "Fn::Split": [
+                            "/",
+                            {
+                              "Fn::Select": [
+                                5,
+                                {
+                                  "Fn::Split": [
+                                    ":",
+                                    {
+                                      "Ref": "EtlSourcesTaskDefinition49849C9D",
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    ":*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "iam:PassRole",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EtlTaskRoleD514E3A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlSourcesTaskExecutionRole3FE3CBC4",
+                    "Arn",
+                  ],
+                },
+              ],
             },
             {
               "Action": "sns:Publish",
