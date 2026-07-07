@@ -170,8 +170,14 @@ export interface SpsEnvConfig {
    * annual state machines are enabled at deploy time. `true` in staging so
    * the cadence runs immediately after the first deploy; `false` in prod so
    * the first deploy never auto-starts a run before the runbook is reviewed.
-   * Flipped to `true` post-launch via `aws events enable-rule` (out of band)
-   * or by changing this flag and redeploying.
+   *
+   * To turn prod schedules on: flip THIS flag to `true` and
+   * `cdk deploy Sps-Etl-prod`. Do NOT enable the rules out of band with
+   * `aws events enable-rule` — the rules synthesize `enabled:
+   * envConfig.etlSchedulesEnabled` (etl-stack.ts), so an out-of-band enable
+   * drifts from the template and the next Sps-Etl-prod deploy that touches a
+   * rule silently reverts it to DISABLED. The config flag is the single source
+   * of truth (#1512).
    */
   readonly etlSchedulesEnabled: boolean;
   /**
@@ -665,8 +671,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // flip back + cdk deploy.
     cspMode: "enforce",
     // Prod schedules ship disabled — first run is operator-driven after
-    // runbook review, then `aws events enable-rule` flips them on (see
-    // PRODUCTION_ADDENDUM § EtlStack).
+    // runbook review. To turn them on, flip this flag to true and
+    // `cdk deploy Sps-Etl-prod` (NOT `aws events enable-rule` — see the flag
+    // JSDoc: out-of-band enable drifts and gets reverted by the next deploy).
+    // Verified DISABLED in AWS 2026-07-07, so config == live state (no drift).
     etlSchedulesEnabled: false,
     // #393 — the reconciler backstop runs in prod from launch (empty-queue-safe
     // pre-launch), unlike the runbook-gated cadences above. See flag JSDoc.
