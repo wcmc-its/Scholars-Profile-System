@@ -20,7 +20,7 @@
  *    applied in code.
  */
 import { sanitizeOverviewHtml, validateSelectedHighlightPmids } from "@/lib/edit/validators";
-import type { PrismaClient } from "@/lib/generated/prisma/client";
+import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 import { sanitizeVIVOHtml } from "@/lib/utils";
 
 /** The Prisma surface `getEffectiveOverview` needs — a client or a tx satisfies it. */
@@ -430,6 +430,41 @@ export async function resolveDarkPmids(
     }
   }
   return dark;
+}
+
+/**
+ * #1505 — the dark pmids (whole-publication takedown or derived-dark) that
+ * belong to a member-scoped unit. Inverts the direction of the older
+ * "materialize the whole 50k-100k-pmid unit pool, then suppress" path: the
+ * active publication-suppression set is TINY (takedowns are rare superuser
+ * actions), so resolve the sitewide dark set from {@link loadAllPublicationSuppressions}
+ * and intersect it with the unit via one bounded query (tens of rows, never the
+ * full pool). Callers push membership into the page query / count and pass this
+ * small set as `pmid: { notIn }`.
+ *
+ * `membershipWhere` is the publicationAuthor predicate that defines the unit —
+ * e.g. `{ scholar: { deptCode, deletedAt: null, status: "active" } }` (dept) or
+ * `{ cwid: { in: memberCwids } }` (center). This adds `isConfirmed: true` and the
+ * dark-pmid scope itself.
+ */
+export async function resolveUnitDarkPmids(
+  suppressions: PublicationSuppressions,
+  membershipWhere: Prisma.PublicationAuthorWhereInput,
+  client: Pick<PrismaClient, "publicationAuthor">,
+): Promise<string[]> {
+  const suppressedPmids = [
+    ...suppressions.darkPmids,
+    ...suppressions.hiddenAuthorsByPmid.keys(),
+  ];
+  if (suppressedPmids.length === 0) return [];
+  const sitewideDark = await resolveDarkPmids(suppressedPmids, suppressions, client);
+  if (sitewideDark.size === 0) return [];
+  const rows = await client.publicationAuthor.findMany({
+    where: { ...membershipWhere, isConfirmed: true, pmid: { in: [...sitewideDark] } },
+    select: { pmid: true },
+    distinct: ["pmid"],
+  });
+  return rows.map((r) => r.pmid);
 }
 
 // ---------------------------------------------------------------------------
