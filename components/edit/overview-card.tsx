@@ -6,12 +6,13 @@
  * success/failure feedback. POSTs `/api/edit/field` (Phase 2 contract,
  * `app/api/edit/field/route.ts`).
  *
- * The counter measures `currentHtml.length` directly — the SPEC's 20,000 cap
- * is on the *stored* sanitized HTML, and the editor emits the same byte shape
- * the server stores (link rel/target attributes are in both). Saved becomes
- * the server's *response* value, not what we sent, so a sanitize-time
- * normalization (a dropped href, a whitespace collapse) updates the dirty
- * baseline correctly.
+ * The counter measures the *visible text* length (tags stripped) — the human
+ * editorial cap (2,500) and its amber warning gate on what the reader sees, not
+ * the markup byte count. The SPEC's 20,000 cap is a separate hard ceiling on the
+ * *stored* sanitized HTML, so `overLimit` still measures `currentHtml.length`.
+ * Saved becomes the server's *response* value, not what we sent, so a
+ * sanitize-time normalization (a dropped href, a whitespace collapse) updates
+ * the dirty baseline correctly.
  *
  * Phase 7 — the `readOnly` arm. The superuser surface
  * (`/edit/scholar/[other-cwid]`) renders the merged sanitized HTML through a
@@ -84,6 +85,14 @@ const OVERVIEW_MAX_CHARS = 20000;
 const OVERVIEW_EDITORIAL_MAX = 2500;
 /** ~80% of the editorial cap — the amber-warning threshold. */
 const OVERVIEW_WARN_CHARS = 2000;
+
+/** Strip HTML tags so the counter and the editorial cap measure the *visible*
+ *  text the reader sees, not the markup byte count (a bio full of links/emphasis
+ *  otherwise trips the 2,500 cap far below 2,500 visible characters). The 20,000
+ *  server ceiling still measures raw HTML — this is only the human-facing count. */
+function stripTags(html: string): string {
+  return html.replace(/<[^>]*>/g, "");
+}
 
 // #742 generator copy — verbatim from
 // `overview-statement-generator-spec.md` § Copy (initial). Kept as named
@@ -399,8 +408,11 @@ function OverviewEditorCard({
 // ---------------------------------------------------------------------------
 
 type UseOverviewEditor = {
-  /** Live editor HTML (the counter + dirty source). */
+  /** Live editor HTML (the dirty baseline + the save payload). */
   currentHtml: string;
+  /** Visible text length (tags stripped) — what the counter displays and what the
+   *  editorial cap / near-limit gate measure. */
+  textLength: number;
   /** Bump-to-remount key — drives a re-seed of the (uncontrolled) Tiptap editor. */
   editorKey: number;
   isSaving: boolean;
@@ -443,8 +455,13 @@ function useOverviewEditor({
   const [justSaved, setJustSaved] = React.useState(false);
 
   const dirty = currentHtml !== savedHtml;
-  const overEditorialLimit = currentHtml.length > OVERVIEW_EDITORIAL_MAX;
-  const nearLimit = currentHtml.length >= OVERVIEW_WARN_CHARS;
+  // The human-facing editorial measures gate on VISIBLE text length (tags
+  // stripped), not the markup byte count. `overLimit` stays on the raw HTML
+  // length — the 20,000 ceiling is on the stored sanitized HTML (mirrors the
+  // server `sanitizeOverview` cap).
+  const textLength = stripTags(currentHtml).length;
+  const overEditorialLimit = textLength > OVERVIEW_EDITORIAL_MAX;
+  const nearLimit = textLength >= OVERVIEW_WARN_CHARS;
   const overLimit = currentHtml.length > OVERVIEW_MAX_CHARS;
 
   function handleChange(html: string) {
@@ -512,6 +529,7 @@ function useOverviewEditor({
 
   return {
     currentHtml,
+    textLength,
     editorKey,
     isSaving,
     error,
@@ -1205,8 +1223,8 @@ function OverviewEditorBody({
           data-testid="overview-counter"
         >
           {editor.nearLimit
-            ? `${editor.currentHtml.length.toLocaleString()}/${OVERVIEW_EDITORIAL_MAX.toLocaleString()}`
-            : editor.currentHtml.length.toLocaleString()}
+            ? `${editor.textLength.toLocaleString()}/${OVERVIEW_EDITORIAL_MAX.toLocaleString()}`
+            : editor.textLength.toLocaleString()}
         </span>
         <div className="flex flex-wrap items-center gap-3">
           {editor.justSaved && (
