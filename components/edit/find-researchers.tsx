@@ -278,11 +278,81 @@ type BrowseStatus =
 
 type BrowseSort = "curated" | "deadline";
 
+/** Client-side browse filters (search box + Duke-style sidebar). */
+export type BrowseFilters = {
+  q: string;
+  /** Hide opportunities whose due day is fully behind us (undated stay visible). */
+  openOnly: boolean;
+  /** Due-date range, `yyyy-mm-dd` or "" — a set range only matches dated opportunities. */
+  dueFrom: string;
+  dueTo: string;
+  sponsors: ReadonlySet<string>;
+  mechanisms: ReadonlySet<string>;
+};
+
+export const EMPTY_BROWSE_FILTERS: BrowseFilters = {
+  q: "",
+  openOnly: false,
+  dueFrom: "",
+  dueTo: "",
+  sponsors: new Set(),
+  mechanisms: new Set(),
+};
+
+/**
+ * Does one opportunity pass the browse filters? OR within a checkbox group,
+ * AND across groups. `skip` omits one group's own selections — used for that
+ * group's facet counts, so unchecked options stay discoverable.
+ */
+export function matchesBrowseFilters(
+  o: OpportunityListItem,
+  f: BrowseFilters,
+  now: number,
+  skip?: "sponsors" | "mechanisms",
+): boolean {
+  const q = f.q.trim().toLowerCase();
+  if (
+    q &&
+    !(o.title ?? "").toLowerCase().includes(q) &&
+    !(o.sponsor ?? "").toLowerCase().includes(q)
+  ) {
+    return false;
+  }
+  if (f.openOnly && dueUrgency(o.dueDate, now) === "past") return false;
+  if (f.dueFrom || f.dueTo) {
+    const t = o.dueDate ? new Date(o.dueDate).getTime() : NaN;
+    if (Number.isNaN(t)) return false;
+    // Date-only strings parse as midnight UTC on both sides, so bounds are inclusive.
+    if (f.dueFrom && t < Date.parse(f.dueFrom)) return false;
+    if (f.dueTo && t > Date.parse(f.dueTo)) return false;
+  }
+  if (skip !== "sponsors" && f.sponsors.size > 0 && !f.sponsors.has(o.sponsor ?? "")) return false;
+  if (skip !== "mechanisms" && f.mechanisms.size > 0 && !f.mechanisms.has(o.mechanism ?? "")) {
+    return false;
+  }
+  return true;
+}
+
+/** `[value, count]` facet options for one group, most-frequent first. */
+function facetOptions(
+  all: readonly OpportunityListItem[],
+  f: BrowseFilters,
+  now: number,
+  group: "sponsors" | "mechanisms",
+  key: (o: OpportunityListItem) => string | null,
+): Array<[string, number]> {
+  const counts = new Map<string, number>();
+  for (const o of all) {
+    const k = key(o);
+    if (k && matchesBrowseFilters(o, f, now, group)) counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
 function BrowseList({ onSelect }: { onSelect: (id: string) => void }) {
-  const [query, setQuery] = useState("");
   const [includeGrantsGov, setIncludeGrantsGov] = useState(false);
   const [sort, setSort] = useState<BrowseSort>("curated");
-  const [hidePassed, setHidePassed] = useState(false);
+  const [filters, setFilters] = useState<BrowseFilters>(EMPTY_BROWSE_FILTERS);
   const [status, setStatus] = useState<BrowseStatus>({ kind: "loading" });
 
   useEffect(() => {
@@ -316,15 +386,8 @@ function BrowseList({ onSelect }: { onSelect: (id: string) => void }) {
   }, [includeGrantsGov]);
 
   const all = status.kind === "ok" ? status.opportunities : [];
-  const q = query.trim().toLowerCase();
   const now = Date.now();
-  let shown = q
-    ? all.filter(
-        (o) =>
-          (o.title ?? "").toLowerCase().includes(q) || (o.sponsor ?? "").toLowerCase().includes(q),
-      )
-    : all;
-  if (hidePassed) shown = shown.filter((o) => dueUrgency(o.dueDate, now) !== "past");
+  let shown = all.filter((o) => matchesBrowseFilters(o, filters, now));
   if (sort === "deadline") {
     // Soonest first; undated (rolling) opportunities trail.
     shown = [...shown].sort((a, b) => {
@@ -334,41 +397,22 @@ function BrowseList({ onSelect }: { onSelect: (id: string) => void }) {
     });
   }
 
+  const sponsorOptions = facetOptions(all, filters, now, "sponsors", (o) => o.sponsor);
+  const mechanismOptions = facetOptions(all, filters, now, "mechanisms", (o) => o.mechanism);
+
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
         <input
           type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          value={filters.q}
+          onChange={(e) => setFilters((f) => ({ ...f, q: e.target.value }))}
           placeholder="Search funding opportunities"
           aria-label="Search funding opportunities"
           className="border-border h-9 w-80 rounded-md border bg-background px-3 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]"
           autoComplete="off"
           spellCheck={false}
         />
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={includeGrantsGov}
-            onChange={(e) => setIncludeGrantsGov(e.target.checked)}
-            className="size-4 accent-[var(--color-accent-slate)]"
-          />
-          <span title="Off by default — the curated WCM awards are the focus; Grants.gov NOFOs are public and far more numerous.">
-            Include Grants.gov
-          </span>
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={hidePassed}
-            onChange={(e) => setHidePassed(e.target.checked)}
-            className="size-4 accent-[var(--color-accent-slate)]"
-          />
-          <span title="Hide opportunities whose due date is behind us. Undated (rolling) opportunities stay visible.">
-            Hide passed deadlines
-          </span>
-        </label>
         <label className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground text-xs font-medium">Sort</span>
           <select
@@ -382,29 +426,222 @@ function BrowseList({ onSelect }: { onSelect: (id: string) => void }) {
         </label>
       </div>
 
-      {status.kind === "loading" ? (
-        <ListSkeleton label="Loading opportunities…" />
-      ) : status.kind === "error" ? (
-        <div className="text-muted-foreground py-8 text-sm">{status.message}</div>
-      ) : shown.length === 0 ? (
-        <div className="text-muted-foreground py-8 text-sm">
-          No opportunities match{q ? ` “${query.trim()}”` : ""}.
+      <div className="flex flex-col gap-x-10 gap-y-6 lg:flex-row">
+        <div className="min-w-0 flex-1">
+          {status.kind === "loading" ? (
+            <ListSkeleton label="Loading opportunities…" />
+          ) : status.kind === "error" ? (
+            <div className="text-muted-foreground py-8 text-sm">{status.message}</div>
+          ) : shown.length === 0 ? (
+            <div className="text-muted-foreground py-8 text-sm">
+              No opportunities match the current filters.
+            </div>
+          ) : (
+            <>
+              <p className="text-muted-foreground mb-2 text-xs">
+                {shown.length} opportunit{shown.length === 1 ? "y" : "ies"}
+              </p>
+              <ul className="space-y-3">
+                {shown.map((o) => (
+                  <li key={o.opportunityId}>
+                    <OpportunityRow o={o} onSelect={onSelect} />
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </div>
-      ) : (
-        <>
-          <p className="text-muted-foreground mb-2 text-xs">
-            {shown.length} opportunit{shown.length === 1 ? "y" : "ies"}
-          </p>
-          <ul className="space-y-3">
-            {shown.map((o) => (
-              <li key={o.opportunityId}>
-                <OpportunityRow o={o} onSelect={onSelect} />
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+
+        <FilterRail
+          filters={filters}
+          setFilters={setFilters}
+          sponsorOptions={sponsorOptions}
+          mechanismOptions={mechanismOptions}
+          includeGrantsGov={includeGrantsGov}
+          setIncludeGrantsGov={setIncludeGrantsGov}
+        />
+      </div>
     </div>
+  );
+}
+
+const dateInputClass =
+  "border-border h-9 w-full rounded-md border bg-background px-2 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]";
+
+// Duke-style right-rail filters: availability, deadline range, then checkbox
+// facet groups with counts. All client-side over the fetched corpus.
+function FilterRail({
+  filters,
+  setFilters,
+  sponsorOptions,
+  mechanismOptions,
+  includeGrantsGov,
+  setIncludeGrantsGov,
+}: {
+  filters: BrowseFilters;
+  setFilters: React.Dispatch<React.SetStateAction<BrowseFilters>>;
+  sponsorOptions: Array<[string, number]>;
+  mechanismOptions: Array<[string, number]>;
+  includeGrantsGov: boolean;
+  setIncludeGrantsGov: (v: boolean) => void;
+}) {
+  const active =
+    filters.openOnly ||
+    filters.dueFrom !== "" ||
+    filters.dueTo !== "" ||
+    filters.sponsors.size > 0 ||
+    filters.mechanisms.size > 0;
+
+  function toggleIn(group: "sponsors" | "mechanisms", value: string) {
+    setFilters((f) => {
+      const next = new Set(f[group]);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return { ...f, [group]: next };
+    });
+  }
+
+  return (
+    <aside className="w-full shrink-0 space-y-5 lg:w-64" aria-label="Filter opportunities">
+      <div className="flex items-baseline justify-between">
+        <h3 className="text-sm font-semibold">Filters</h3>
+        {active ? (
+          <button
+            type="button"
+            onClick={() => setFilters((f) => ({ ...EMPTY_BROWSE_FILTERS, q: f.q }))}
+            className="text-xs text-[var(--color-accent-slate)] hover:underline"
+          >
+            reset all
+          </button>
+        ) : null}
+      </div>
+
+      <fieldset className="space-y-1.5">
+        <legend className="mb-1.5 text-sm font-medium">Availability</legend>
+        {(
+          [
+            [false, "Open and past"],
+            [true, "Only open"],
+          ] as const
+        ).map(([value, label]) => (
+          <label key={label} className="flex items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name="availability"
+              checked={filters.openOnly === value}
+              onChange={() => setFilters((f) => ({ ...f, openOnly: value }))}
+              className="size-4 accent-[var(--color-accent-slate)]"
+            />
+            {label}
+          </label>
+        ))}
+      </fieldset>
+
+      <fieldset className="space-y-1.5">
+        <legend className="mb-1.5 text-sm font-medium">Deadline</legend>
+        <label className="block text-xs">
+          <span className="text-muted-foreground">From</span>
+          <input
+            type="date"
+            value={filters.dueFrom}
+            onChange={(e) => setFilters((f) => ({ ...f, dueFrom: e.target.value }))}
+            className={dateInputClass}
+          />
+        </label>
+        <label className="block text-xs">
+          <span className="text-muted-foreground">To</span>
+          <input
+            type="date"
+            value={filters.dueTo}
+            onChange={(e) => setFilters((f) => ({ ...f, dueTo: e.target.value }))}
+            className={dateInputClass}
+          />
+        </label>
+      </fieldset>
+
+      <FacetGroup
+        title="Sponsor"
+        options={sponsorOptions}
+        selected={filters.sponsors}
+        onToggle={(v) => toggleIn("sponsors", v)}
+      />
+      <FacetGroup
+        title="Mechanism"
+        options={mechanismOptions}
+        selected={filters.mechanisms}
+        onToggle={(v) => toggleIn("mechanisms", v)}
+      />
+
+      <fieldset>
+        <legend className="mb-1.5 text-sm font-medium">Sources</legend>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={includeGrantsGov}
+            onChange={(e) => setIncludeGrantsGov(e.target.checked)}
+            className="size-4 accent-[var(--color-accent-slate)]"
+          />
+          <span title="Off by default — the curated WCM awards are the focus; Grants.gov NOFOs are public and far more numerous.">
+            Include Grants.gov
+          </span>
+        </label>
+      </fieldset>
+    </aside>
+  );
+}
+
+// ponytail: fixed collapse threshold; a per-group search box only if a real
+// corpus ever makes "show all" unwieldy.
+const FACET_COLLAPSED = 8;
+
+function FacetGroup({
+  title,
+  options,
+  selected,
+  onToggle,
+}: {
+  title: string;
+  options: Array<[string, number]>;
+  selected: ReadonlySet<string>;
+  onToggle: (value: string) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  if (options.length === 0) return null;
+  // Keep checked options visible even when collapsed.
+  const shown = showAll
+    ? options
+    : options.filter(([v], i) => i < FACET_COLLAPSED || selected.has(v));
+  return (
+    <fieldset>
+      <legend className="mb-1.5 text-sm font-medium">{title}</legend>
+      <div className="space-y-1">
+        {shown.map(([value, count]) => (
+          <label key={value} className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={selected.has(value)}
+              onChange={() => onToggle(value)}
+              className="size-4 shrink-0 accent-[var(--color-accent-slate)]"
+            />
+            <span className="min-w-0 flex-1 truncate" title={value}>
+              {value}
+            </span>
+            <span className="text-muted-foreground rounded-full bg-muted px-1.5 py-0.5 text-xs tabular-nums">
+              {count}
+            </span>
+          </label>
+        ))}
+      </div>
+      {options.length > FACET_COLLAPSED ? (
+        <button
+          type="button"
+          onClick={() => setShowAll((s) => !s)}
+          className="mt-1 text-xs text-[var(--color-accent-slate)] hover:underline"
+        >
+          {showAll ? "show fewer" : `show all (${options.length})`}
+        </button>
+      ) : null}
+    </fieldset>
   );
 }
 
