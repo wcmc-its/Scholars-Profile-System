@@ -396,6 +396,23 @@ export interface SpsEnvConfig {
    */
   readonly cloudFrontDistributionId: string;
   /**
+   * CloudFront custom domain (alias) attached to the EdgeStack distribution.
+   * Committed here (non-secret -- it is the public URL) so a bare
+   * `cdk deploy Sps-Edge-<env>` no longer strips the alias off the live
+   * distribution (#1506). A `-c edgeCustomDomain=...` context flag still wins
+   * when supplied. Paired with {@link edgeCertArn}; both must be present for the
+   * alias to attach.
+   */
+  readonly edgeCustomDomain: string;
+  /**
+   * ACM certificate ARN for {@link edgeCustomDomain}. MUST be in us-east-1
+   * (CloudFront viewer-cert requirement). Committed for the same
+   * bare-deploy-no-strip reason as {@link edgeCustomDomain} (#1506); the ARN
+   * carries only the already-committed account id, no secret. `-c edgeCertArn=...`
+   * still overrides.
+   */
+  readonly edgeCertArn: string;
+  /**
    * CloudFront standard-access-log S3 bucket name (EdgeStack-owned; raw logs at
    * `cf/<env>/`). Referenced by NAME (s3.Bucket.fromBucketName) by AnalyticsStack
    * for the same Edge-decoupling reason as {@link cloudFrontDistributionId}.
@@ -606,6 +623,11 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // Live EdgeStack-owned resources, referenced by name to decouple the
     // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
     cloudFrontDistributionId: "E17NRWINXLP3B3",
+    // Committed edge alias + us-east-1 viewer cert so a bare Edge deploy stops
+    // stripping them (#1506). Live values read from the distribution config.
+    edgeCustomDomain: "scholars-staging.weill.cornell.edu",
+    edgeCertArn:
+      "arn:aws:acm:us-east-1:665083158573:certificate/f50f0b04-dc62-4d8e-97b8-2761d1efdd0f",
     cloudFrontLogsBucketName: "sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz",
     // Observability metric-by-name decouple (cutover, item-3 Phase B2): ON.
     // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-
@@ -741,6 +763,11 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // Live EdgeStack-owned resources, referenced by name to decouple the
     // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
     cloudFrontDistributionId: "E28NKDFXC7K2ZL",
+    // Committed edge alias + us-east-1 viewer cert so a bare Edge deploy stops
+    // stripping them (#1506). Live values read from the distribution config.
+    edgeCustomDomain: "scholars.weill.cornell.edu",
+    edgeCertArn:
+      "arn:aws:acm:us-east-1:665083158573:certificate/95f77e69-4abc-4d2c-b081-b8b5b8572fd6",
     cloudFrontLogsBucketName: "sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
     // Observability metric-by-name decouple (cutover, item-3 prod window): ON.
     // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-
