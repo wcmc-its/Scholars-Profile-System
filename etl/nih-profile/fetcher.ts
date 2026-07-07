@@ -45,11 +45,50 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// #1514 — RePORTER intermittently returns a transient 429/5xx or drops the
+// connection; without a retry a single blip aborted the entire NihProfile run
+// mid-backfill. Retry those (and network throws) with exponential backoff off
+// the 1 req/s base. Non-retryable statuses (4xx other than 408/429) return
+// immediately so the caller still throws its own contextual `HTTP <status>`
+// error. Retry-After isn't parsed — exponential backoff is enough for a nightly
+// job already throttled to 1 req/s.
+const MAX_FETCH_RETRIES = 4;
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
+
+async function fetchReporterWithRetry(
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= MAX_FETCH_RETRIES; attempt++) {
+    if (attempt > 0) {
+      // 1s, 2s, 4s, 8s (capped at 15s) — off the same 1 req/s base delay.
+      await sleep(Math.min(REQ_DELAY_MS * 2 ** (attempt - 1), 15_000));
+    }
+    let resp: Response;
+    try {
+      resp = await fetch(url, init);
+    } catch (err) {
+      lastErr = err; // network/DNS/timeout — transient, retry
+      continue;
+    }
+    if (resp.ok || !RETRYABLE_STATUS.has(resp.status)) return resp;
+    // Retryable status: on the final attempt hand the response back so the
+    // caller throws its contextual error; otherwise loop and back off.
+    if (attempt === MAX_FETCH_RETRIES) return resp;
+  }
+  // Only reached when every attempt threw (network errors, never an HTTP resp).
+  throw new Error(
+    `NIH RePORTER request to ${url} failed after ${MAX_FETCH_RETRIES + 1} attempts: ` +
+      (lastErr instanceof Error ? lastErr.message : String(lastErr)),
+  );
+}
+
 async function fetchOnePage(
   fiscalYear: number,
   offset: number,
 ): Promise<{ results: ReporterProject[]; total: number }> {
-  const resp = await fetch(NIH_API, {
+  const resp = await fetchReporterWithRetry(NIH_API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -154,7 +193,7 @@ export async function searchProjectsByPiName(opts: {
   firstName: string;
   lastName: string;
 }): Promise<ReporterProject[]> {
-  const resp = await fetch(NIH_API, {
+  const resp = await fetchReporterWithRetry(NIH_API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -209,7 +248,7 @@ export async function searchProjectsByProfileIds(
   profileIds: number[],
 ): Promise<ReporterProject[]> {
   if (profileIds.length === 0) return [];
-  const resp = await fetch(NIH_API, {
+  const resp = await fetchReporterWithRetry(NIH_API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -283,7 +322,7 @@ export async function fetchPublicationsByCoreProjectNums(
     let offset = 0;
     let total: number | null = null;
     while (true) {
-      const resp = await fetch(NIH_PUBLICATIONS_API, {
+      const resp = await fetchReporterWithRetry(NIH_PUBLICATIONS_API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -365,7 +404,7 @@ export async function fetchGrantProjectsByProfileIds(
   let offset = 0;
   let total: number | null = null;
   while (true) {
-    const resp = await fetch(NIH_API, {
+    const resp = await fetchReporterWithRetry(NIH_API, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
