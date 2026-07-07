@@ -1017,6 +1017,11 @@ export async function getFamilyScholars(
       },
     },
     orderBy: [{ pmidCount: "desc" }, { familyId: "asc" }],
+    // Only the top TARGET rows are ever rendered as chips; fetching every
+    // eligible FT-faculty row just to slice 7 is wasteful. Safe because
+    // TARGET (7) >= FLOOR (3): a family with >= FLOOR eligible scholars still
+    // returns >= FLOOR rows, so the sparse-state floor check below is intact.
+    take: TOP_SCHOLARS_TARGET,
     select: {
       pmidCount: true,
       scholar: {
