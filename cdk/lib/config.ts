@@ -403,6 +403,28 @@ export interface SpsEnvConfig {
    */
   readonly cloudFrontLogsBucketName: string;
 
+  // --- Edge -> ALB origin TLS (#1507) ---
+
+  /**
+   * Custom origin hostname CloudFront uses when the origin leg runs over HTTPS
+   * (#1507). The public ALB's AWS-assigned `*.elb.amazonaws.com` DNS name cannot
+   * carry a public ACM cert, so an HTTPS origin needs a hostname we control that
+   * DNS-resolves to the ALB and whose cert the ALB's :443 listener presents.
+   * Committed (public URL) but INERT until {@link edgeOriginCertArn} is set.
+   */
+  readonly edgeOriginHostname: string;
+  /**
+   * ACM certificate ARN (ALB region, us-east-1) for {@link edgeOriginHostname},
+   * presented by the public ALB's :443 listener (#1507). This is the *regional*
+   * ALB cert -- distinct from the us-east-1 CloudFront *viewer* cert. Empty =
+   * feature OFF: the ALB stays HTTP-:80-only and CloudFront talks HTTP_ONLY to
+   * the origin (today's behavior). Set it (operator, after issuing the cert +
+   * pointing DNS at the ALB) to add the :443 listener and flip the CloudFront
+   * origin to HTTPS_ONLY. Ships dark. Deploy Sps-App-<env> (adds :443) and
+   * verify :443 serves BEFORE Sps-Edge-<env> (flips the origin).
+   */
+  readonly edgeOriginCertArn: string;
+
   // --- Observability metric-by-name decouple (cutover) ---
 
   /**
@@ -607,6 +629,11 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
     cloudFrontDistributionId: "E17NRWINXLP3B3",
     cloudFrontLogsBucketName: "sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz",
+    // #1507 -- HTTPS origin leg. INERT until edgeOriginCertArn is seeded
+    // (operator issues the ALB-region cert for this hostname + points DNS at
+    // the public ALB). Confirm the exact hostname before issuing the cert.
+    edgeOriginHostname: "origin.scholars-staging.weill.cornell.edu",
+    edgeOriginCertArn: "",
     // Observability metric-by-name decouple (cutover, item-3 Phase B2): ON.
     // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-
     // stack Ref exports so the useSharedVpc flip can replace those resources without
@@ -742,6 +769,11 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
     cloudFrontDistributionId: "E28NKDFXC7K2ZL",
     cloudFrontLogsBucketName: "sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
+    // #1507 -- HTTPS origin leg. INERT until edgeOriginCertArn is seeded
+    // (operator issues the ALB-region cert for this hostname + points DNS at
+    // the public ALB). Confirm the exact hostname before issuing the cert.
+    edgeOriginHostname: "origin.scholars.weill.cornell.edu",
+    edgeOriginCertArn: "",
     // Observability metric-by-name decouple (cutover, item-3 prod window): ON.
     // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-
     // stack Ref exports so the useSharedVpc flip can replace those resources without

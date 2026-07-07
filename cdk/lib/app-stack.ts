@@ -941,6 +941,18 @@ export class AppStack extends Stack {
       cidrIp: "0.0.0.0/0",
       description: `Internet to SPS public ALB HTTP (${env}) -- HTTPS lands with EdgeStack`,
     });
+    // #1507 -- :443 ingress for the HTTPS origin leg, added only once the ALB
+    // cert is seeded (the :443 listener below is gated the same way).
+    if (envConfig.edgeOriginCertArn.length > 0) {
+      new ec2.CfnSecurityGroupIngress(this, "PublicAlbIngressFromInternetHttps", {
+        groupId: albSecurityGroup.securityGroupId,
+        ipProtocol: "tcp",
+        fromPort: 443,
+        toPort: 443,
+        cidrIp: "0.0.0.0/0",
+        description: `Internet to SPS public ALB HTTPS (${env}) -- #1507 origin TLS`,
+      });
+    }
     new ec2.CfnSecurityGroupIngress(this, "AppIngressFromPublicAlb", {
       groupId: appSecurityGroup.securityGroupId,
       ipProtocol: "tcp",
@@ -2463,6 +2475,36 @@ export class AppStack extends Stack {
         action: elbv2.ListenerAction.forward([publicAppTargetGroup]),
       },
     );
+    // #1507 -- HTTPS :443 listener alongside :80 (kept; :80 removal is a
+    // follow-up) so CloudFront's origin leg can run over TLS. Same 403-default
+    // + X-Origin-Verify-forward shape as :80, onto the same target group. Added
+    // only once the ALB-region cert (edgeOriginCertArn) is seeded; ships dark.
+    if (envConfig.edgeOriginCertArn.length > 0) {
+      const publicHttpsListener = this.publicAlb.addListener(
+        "PublicHttpsListener",
+        {
+          port: 443,
+          protocol: elbv2.ApplicationProtocol.HTTPS,
+          certificates: [
+            elbv2.ListenerCertificate.fromArn(envConfig.edgeOriginCertArn),
+          ],
+          defaultAction: elbv2.ListenerAction.fixedResponse(403, {
+            contentType: "text/plain",
+            messageBody: "Forbidden",
+          }),
+        },
+      );
+      new elbv2.ApplicationListenerRule(this, "OriginVerifiedForwardHttps", {
+        listener: publicHttpsListener,
+        priority: 1,
+        conditions: [
+          elbv2.ListenerCondition.httpHeader("X-Origin-Verify", [
+            originSharedSecretValue.unsafeUnwrap(),
+          ]),
+        ],
+        action: elbv2.ListenerAction.forward([publicAppTargetGroup]),
+      });
+    }
     const internalListener = this.internalAlb.addListener("InternalHttpListener", {
       port: 80,
       protocol: elbv2.ApplicationProtocol.HTTP,
