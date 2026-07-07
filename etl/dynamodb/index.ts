@@ -59,6 +59,7 @@ import { db } from "../../lib/db";
 import { clearTopicRebuildWindow } from "../../lib/etl-state";
 import { resolveTopTopicByPmid } from "./top-topic-resolver";
 import { assertPublicationTopicPopulated } from "./publication-topic-guard";
+import { planPublicationTopicPrune } from "./publication-topic-prune";
 import { buildPublicationTopicWrites } from "./publication-topic-mapper";
 import { buildScholarToolWrites } from "./scholar-tool-mapper";
 import { buildPublicationCoreWrites } from "./publication-core-mapper";
@@ -362,6 +363,51 @@ async function main() {
       upsertedCount: pubTopicRowsUpserted,
     });
     console.log(`publication_topic guard OK: ${pubTopicTableCount} total rows.`);
+
+    // ----- Block 2 keyed prune (#1511) ---------------------------------
+    // The upsert loop only ADDS/updates triples; a (pmid, cwid, parentTopicId)
+    // that ReciterAI dropped this run (a paper that fell out of a topic) is
+    // never removed, so the stale row persists and keeps the paper on a
+    // subtopic page it no longer belongs to. Delete the existing keys absent
+    // from this run's write set -- but only when the write set clears the
+    // guardedReplace floor, so a partial/truncated TOPIC# scan can never
+    // mass-delete (mirrors the sibling projections' floor semantics). The guard
+    // above already failed the run on an empty table / all-rejected scan, so
+    // this only runs after a plausibly-complete upsert. Delete-only, so it needs
+    // no transaction: a partial prune is safe (the next run finishes it).
+    const existingPubTopicKeys = await db.write.publicationTopic.findMany({
+      select: { pmid: true, cwid: true, parentTopicId: true },
+    });
+    const prunePlan = planPublicationTopicPrune(
+      writes,
+      existingPubTopicKeys,
+      pubTopicTableCount,
+    );
+    if (!prunePlan.prune) {
+      console.warn(
+        `publication_topic prune SKIPPED -- ${prunePlan.reason}; likely a ` +
+          "partial TOPIC# scan, retaining stale rows this run.",
+      );
+    } else if (prunePlan.stale.length === 0) {
+      console.log("publication_topic prune: no stale associations.");
+    } else {
+      let pruned = 0;
+      const PRUNE_BATCH = 200;
+      for (let i = 0; i < prunePlan.stale.length; i += PRUNE_BATCH) {
+        const chunk = prunePlan.stale.slice(i, i + PRUNE_BATCH);
+        const res = await db.write.publicationTopic.deleteMany({
+          where: {
+            OR: chunk.map((k) => ({
+              pmid: k.pmid,
+              cwid: k.cwid,
+              parentTopicId: k.parentTopicId,
+            })),
+          },
+        });
+        pruned += res.count;
+      }
+      console.log(`publication_topic prune: removed ${pruned} stale association(s).`);
+    }
 
     // ===================================================================
     // Block 2b: TOPIC#.top_topic_id → publication.top_topic_id  (issue #325)
