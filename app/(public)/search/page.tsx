@@ -180,6 +180,11 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
   const q = (Array.isArray(sp.q) ? sp.q[0] : sp.q) ?? "";
   const type = (Array.isArray(sp.type) ? sp.type[0] : sp.type) ?? "people";
+  // Issue #1513 — the A–Z directory overflow link ("View all N scholars with
+  // last name starting with X") passes a single last-name initial. Validated to
+  // one A–Z letter; anything else is ignored (falls back to normal browse).
+  const rawLetter = (Array.isArray(sp.letter) ? sp.letter[0] : sp.letter) ?? "";
+  const letter = /^[A-Za-z]$/.test(rawLetter) ? rawLetter : "";
   const rawPage = parseInt((Array.isArray(sp.page) ? sp.page[0] : sp.page) ?? "0", 10);
   const page = Number.isFinite(rawPage) ? Math.max(0, rawPage) : 0;
   const rawSort = Array.isArray(sp.sort) ? sp.sort[0] : sp.sort;
@@ -205,7 +210,9 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
         : emptyPeopleDefault
       : "relevance");
 
-  const showAZ = q === "" && type === "people";
+  // A single-letter `letter` browse shows the filtered people list, not the A–Z
+  // grid (which is the entry point the overflow link drills down from).
+  const showAZ = q === "" && type === "people" && letter === "";
   // Issue #294 PR-5 — time the taxonomy resolver. `taxonomyMatchMs` is null
   // when q is under 3 chars: the resolver call is skipped entirely, so the
   // log records "skipped" rather than a misleading ~0ms measurement.
@@ -469,6 +476,8 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           q,
           page,
           sort: sort as PeopleSort,
+          // #1513 — last-name-initial browse (A–Z overflow link).
+          letter: letter || undefined,
           filters: {
             deptDiv: effectiveDeptDiv.length > 0 ? effectiveDeptDiv : undefined,
             personType: personType.length > 0 ? personType : undefined,

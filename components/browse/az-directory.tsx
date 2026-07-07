@@ -100,7 +100,7 @@ export function AZDirectory({ buckets }: { buckets: AZBucket[] }) {
               </ul>
               {openBucket.count > 10 && (
                 <a
-                  href={`/search?q=${openLetter}&tab=people`}
+                  href={`/search?letter=${openLetter}&type=people`}
                   className="mt-4 block text-sm text-[var(--color-accent-slate)] hover:underline"
                 >
                   View all {openBucket.count} scholars with last name
