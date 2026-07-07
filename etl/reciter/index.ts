@@ -43,6 +43,11 @@ import { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "../../lib/db";
 import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { markTopicRebuildStarted } from "../../lib/etl-state";
+import {
+  publicationSignature,
+  planAuthorshipReconcile,
+  type IncomingAuthorship,
+} from "./change-detection";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
 type AuthorRow = {
@@ -570,11 +575,64 @@ async function main() {
 
     // 5. Upsert publications keyed on pmid. Parallel-chunk pattern mirrors
     //    etl/dynamodb/index.ts:300-336.
-    console.log(`Upserting ${pubRows.length} publications...`);
-    let upserted = 0;
+    console.log(`Upserting ${pubRows.length} publications (change-detection)...`);
+    // The reciter-written fields only — the same set publicationSignature reads.
+    // `synopsis` / `impact*` / `topTopicId` are owned by other ETLs; excluding
+    // them keeps this comparison from ever thinking another ETL's write is a
+    // reciter change (and vice versa).
+    const PUB_SELECT = {
+      pmid: true,
+      title: true,
+      authorsString: true,
+      fullAuthorsString: true,
+      journal: true,
+      year: true,
+      publicationType: true,
+      citationCount: true,
+      relativeCitationRatio: true,
+      nihPercentile: true,
+      citedByCount: true,
+      dateAddedToEntrez: true,
+      doi: true,
+      pmcid: true,
+      volume: true,
+      issue: true,
+      pages: true,
+      journalAbbrev: true,
+      pubmedUrl: true,
+      abstract: true,
+      meshTerms: true,
+      source: true,
+    } as const;
+    let pubCreated = 0;
+    let pubUpdated = 0;
+    let pubUnchanged = 0;
     for (const batch of chunks(pubRows, INSERT_BATCH)) {
+      const existingRows = await db.write.publication.findMany({
+        where: { pmid: { in: batch.map((p) => p.pmid) } },
+        select: PUB_SELECT,
+      });
+      const existingSig = new Map(
+        existingRows.map((r) => [r.pmid, publicationSignature(r)]),
+      );
+      // Only new / content-changed rows are written (and their lastRefreshedAt
+      // bumped); an unchanged row is skipped so the corpus isn't rewritten
+      // wholesale every night (100k+ full-row upserts incl. 15KB abstracts).
+      const changed = batch.filter((p) => {
+        const prev = existingSig.get(p.pmid);
+        if (prev === undefined) {
+          pubCreated += 1;
+          return true;
+        }
+        if (prev !== publicationSignature(p)) {
+          pubUpdated += 1;
+          return true;
+        }
+        pubUnchanged += 1;
+        return false;
+      });
       await Promise.all(
-        batch.map((p) => {
+        changed.map((p) => {
           const { pmid, ...rest } = p;
           return db.write.publication.upsert({
             where: { pmid },
@@ -583,59 +641,113 @@ async function main() {
           });
         }),
       );
-      upserted += batch.length;
-      if (upserted % (INSERT_BATCH * 10) === 0) {
-        console.log(`  ...${upserted}/${pubRows.length}`);
-      }
     }
+    console.log(
+      `publications: ${pubCreated} created, ${pubUpdated} updated, ` +
+        `${pubUnchanged} unchanged (skipped).`,
+    );
 
-    // 6. Scoped refresh of PublicationAuthor rows. Delete WCM authorships only
-    //    for the source PMID set, then bulk insert the freshly-computed rows.
-    //    PublicationAuthor has no inbound FK references, so the scoped delete
-    //    doesn't cascade anywhere.
+    // 6. Reconcile PublicationAuthor rows by (pmid, cwid) instead of wiping and
+    //    reinserting the whole corpus every night. The old wipe re-stamped
+    //    lastRefreshedAt (@default(now())) on EVERY row, which defeated
+    //    etl/coi-gap's incremental watermark (it selects
+    //    publicationAuthor.lastRefreshedAt > watermark, so every run became a
+    //    full-cohort recompute). Keyed reconcile touches only real deltas —
+    //    create new authorships, update changed ones (+bump lastRefreshedAt),
+    //    delete stale ones — and LEAVES unchanged rows untouched so their
+    //    timestamp is preserved. Per-pmid-batch transactions keep each
+    //    publication's author set atomically consistent (no author-less window)
+    //    without holding one multi-minute corpus-wide transaction. (Supersedes
+    //    #1511c's single-transaction wipe+reinsert, which fixed atomicity but
+    //    still re-stamped every row.)
     const authorshipRows = buildAuthorshipRows(
       authorRows,
       ourCwidSet,
       rankByPmidCwid,
       totalAuthorsByPmidFromList,
     );
-
-    // Delete + reinsert the corpus-wide WCM authorships in ONE interactive
-    // transaction. Profile publication lists build from
-    // publicationAuthor.findMany, so the previous non-transactional
-    // wipe-then-reinsert let live readers see publications with zero WCM
-    // authors for the whole multi-minute rewrite, and a crash between the two
-    // phases stranded the corpus author-less until the next run. Inside the
-    // transaction readers keep the pre-commit snapshot until commit.
-    //
-    // This is the corpus-wide step (~minutes of writes), so the interactive-tx
-    // timeout is raised well above the 5 s default. It fails SAFE: if the write
-    // exceeds the ceiling the whole transaction rolls back (no partial state)
-    // and the next nightly run retries. If operations finds a multi-minute
-    // transaction too heavy for Aurora, the documented alternative is a keyed
-    // reconcile (delete only stale (pmid,cwid) keys, insert only new) that
-    // avoids the wipe entirely — deferred until measured to be necessary, as it
-    // trades the atomicity win for delta-diff logic that could silently drop
-    // authorships.
+    const incomingByPmid = new Map<string, IncomingAuthorship[]>();
+    for (const r of authorshipRows) {
+      const arr = incomingByPmid.get(r.pmid) ?? [];
+      arr.push(r);
+      incomingByPmid.set(r.pmid, arr);
+    }
     console.log(
-      `Rewriting WCM authorship rows for ${sourcePmids.length} source PMIDs ` +
-        `(${authorshipRows.length} rows, transactional)...`,
+      `Reconciling WCM authorships for ${sourcePmids.length} source PMIDs ` +
+        `(${authorshipRows.length} incoming)...`,
     );
-    let authInserted = 0;
-    await db.write.$transaction(
-      async (tx) => {
-        for (const batch of chunks(sourcePmids, IN_BATCH)) {
-          await tx.publicationAuthor.deleteMany({ where: { pmid: { in: batch } } });
-        }
-        for (const batch of chunks(authorshipRows, INSERT_BATCH)) {
-          await tx.publicationAuthor.createMany({ data: batch, skipDuplicates: true });
-          authInserted += batch.length;
-          if (authInserted % (INSERT_BATCH * 20) === 0) {
-            console.log(`  ...${authInserted}/${authorshipRows.length}`);
+    let authCreated = 0;
+    let authUpdated = 0;
+    let authDeleted = 0;
+    let authUnchanged = 0;
+    for (const batch of chunks(sourcePmids, IN_BATCH)) {
+      const existing = await db.write.publicationAuthor.findMany({
+        where: { pmid: { in: batch } },
+        select: {
+          id: true,
+          pmid: true,
+          cwid: true,
+          position: true,
+          totalAuthors: true,
+          isFirst: true,
+          isLast: true,
+          isPenultimate: true,
+          isConfirmed: true,
+        },
+      });
+      const incoming = batch.flatMap((pmid) => incomingByPmid.get(pmid) ?? []);
+      const plan = planAuthorshipReconcile(existing, incoming);
+      authUnchanged += plan.unchanged;
+      if (
+        plan.toCreate.length === 0 &&
+        plan.toUpdate.length === 0 &&
+        plan.toDeleteIds.length === 0
+      ) {
+        continue; // steady-state batch — no writes, timestamps preserved
+      }
+      await db.write.$transaction(
+        async (tx) => {
+          for (const idBatch of chunks(plan.toDeleteIds, IN_BATCH)) {
+            await tx.publicationAuthor.deleteMany({ where: { id: { in: idBatch } } });
           }
-        }
-      },
-      { timeout: 600_000, maxWait: 15_000 },
+          if (plan.toCreate.length > 0) {
+            await tx.publicationAuthor.createMany({
+              data: plan.toCreate.map((r) => ({
+                pmid: r.pmid,
+                cwid: r.cwid,
+                position: r.position,
+                totalAuthors: r.totalAuthors,
+                isFirst: r.isFirst,
+                isLast: r.isLast,
+                isPenultimate: r.isPenultimate,
+                isConfirmed: r.isConfirmed,
+              })),
+            });
+          }
+          for (const u of plan.toUpdate) {
+            await tx.publicationAuthor.update({
+              where: { id: u.id },
+              data: {
+                position: u.row.position,
+                totalAuthors: u.row.totalAuthors,
+                isFirst: u.row.isFirst,
+                isLast: u.row.isLast,
+                isPenultimate: u.row.isPenultimate,
+                isConfirmed: u.row.isConfirmed,
+                lastRefreshedAt: new Date(),
+              },
+            });
+          }
+        },
+        { timeout: 120_000, maxWait: 10_000 },
+      );
+      authCreated += plan.toCreate.length;
+      authUpdated += plan.toUpdate.length;
+      authDeleted += plan.toDeleteIds.length;
+    }
+    console.log(
+      `WCM authorships: ${authCreated} created, ${authUpdated} updated, ` +
+        `${authDeleted} deleted, ${authUnchanged} unchanged.`,
     );
 
     // 7. Orphan cleanup — delete publications whose pmid is no longer in the
