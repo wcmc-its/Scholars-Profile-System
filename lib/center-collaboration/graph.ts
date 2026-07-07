@@ -278,3 +278,23 @@ export function yearExtent(papers: CollabGroup[]): [number, number] | null {
   if (!isFinite(lo) || !isFinite(hi)) return null;
   return [lo, hi];
 }
+
+/**
+ * The single member to select+focus for a "find a member" search query, chosen
+ * ONLY from the currently-rendered node ids. The people view filters the vis
+ * DataSet (by program / hide-unconnected), so focusing a member that isn't
+ * rendered throws inside vis-network and crashes the tab (#review-0707) — this
+ * restricts candidates to `renderedIds` so a hidden match is a no-op, not a
+ * crash. First case-insensitive name-substring match wins; empty query ⇒ null.
+ */
+export function findSearchTarget(
+  query: string,
+  nodes: readonly { i: number; name: string }[],
+  renderedIds: ReadonlySet<number | string>,
+): { i: number; name: string } | null {
+  const q = query.trim().toLowerCase();
+  if (!q) return null;
+  return (
+    nodes.find((n) => renderedIds.has(n.i) && n.name.toLowerCase().includes(q)) ?? null
+  );
+}

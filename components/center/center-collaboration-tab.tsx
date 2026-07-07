@@ -28,6 +28,7 @@ import {
   buildPeopleEdges,
   buildProgramEdges,
   countOmittedHyperauthored,
+  findSearchTarget,
   nodeRadius,
   programKey,
   yearExtent,
@@ -444,15 +445,25 @@ export function CenterCollaborationTab({ centerSlug }: { centerSlug: string }) {
   // Focus a searched member (people view only). Uses the live vis selection so
   // it does not rebuild/refit the graph on every keystroke.
   useEffect(() => {
-    if (!graphReady || view !== "people") return;
-    const q = search.trim().toLowerCase();
-    if (!q) return;
-    const node = payload?.nodes.find((n) => n.name.toLowerCase().includes(q));
+    if (!graphReady || view !== "people" || !payload) return;
+    // Match only against the RENDERED node set. The vis DataSet holds just the
+    // filtered nodes (selectedProgram / hideUnconnected), so selecting an id
+    // that isn't in it throws a RangeError inside this passive effect — which
+    // propagates to the error boundary and blanks the whole center page. A
+    // member outside the current filters is simply not focused (no crash); the
+    // try/catch is a backstop for a filter change racing this effect.
+    const renderedIds = new Set(computed.nodes.map((n) => n.id));
+    const node = findSearchTarget(search, payload.nodes, renderedIds);
     if (node && networkRef.current) {
-      networkRef.current.selectNodes([node.i]);
-      networkRef.current.focus(node.i, { scale: 1.1, animation: true });
+      try {
+        networkRef.current.selectNodes([node.i]);
+        networkRef.current.focus(node.i, { scale: 1.1, animation: true });
+      } catch {
+        // id not in the live DataSet (filters changed between render and here);
+        // ignore — the next keystroke / filter change re-runs this.
+      }
     }
-  }, [search, graphReady, view, payload]);
+  }, [search, graphReady, view, payload, computed]);
 
   const resetAll = useCallback(() => {
     setView("people");
