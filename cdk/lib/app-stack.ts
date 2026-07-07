@@ -1911,10 +1911,10 @@ export class AppStack extends Stack {
         // /api/edit/opportunity-intake verbs (they 404 while off). The writes
         // go to the SUBMISSION partition of the shared reciterai table
         // (TaskRoleOpportunitySubmissionPolicy above -- grant + flag deploy
-        // atomically). STAGING-FIRST; before flipping prod ALSO run
-        // scripts/sql/opportunity-submission-audit-migration.sql there (the
-        // audit ENUMs must know `opportunity_submission` before the first
-        // write).
+        // atomically). STAGING-FIRST. The audit-ENUM widening the first write
+        // needs (`opportunity_submission`) rides audit-log.sql's idempotent
+        // MODIFY COLUMN block via the sps-db-bootstrap task, so any deploy at
+        // or after that commit has already applied it -- no manual DDL step.
         OPPORTUNITY_URL_INTAKE: env === "staging" ? "on" : "off",
         // Scholar-profile facet-filter redesign (PR-2). A BIG visual change to
         // the Topics/Methods facets + a unified filter bar, fully gated. ON in

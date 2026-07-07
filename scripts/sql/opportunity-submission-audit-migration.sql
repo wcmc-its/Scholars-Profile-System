@@ -1,12 +1,17 @@
 -- Opportunity URL intake (docs/opportunity-url-intake-spec.md) -- extend the
 -- B03 audit ENUMs with the `opportunity_submission` action + entity type.
 --
--- Run as a schema-privileged user (NOT the app role) against each env's
--- scholars_audit BEFORE flipping OPPORTUNITY_URL_INTAKE on -- while the flag
--- is off nothing writes the new values, so ordering is: migrate, then flip.
+-- NORMALLY YOU DO NOT RUN THIS BY HAND. The codified path (#493) applies it:
+-- the trailing idempotent `MODIFY COLUMN` blocks in audit-log.sql carry these
+-- exact widenings, and the one-shot `sps-db-bootstrap-<env>` Fargate task
+-- replays that file (as `sps_bootstrap`, which holds ALTER on scholars_audit.*)
+-- in the deploy pipeline BEFORE `sps-migrate` -- so any staging/prod deploy at
+-- or after this commit has already widened the ENUMs. Kept only as a manual
+-- fallback for a DB that cannot take a deploy; the `etl` and app users cannot
+-- run it (no ALTER on scholars_audit -- verified 2026-07-06, error 1142).
 -- Appending values to the END of a MySQL ENUM is an in-place metadata change
--- (no table rebuild, no row rewrites); appending (never reordering) also keeps
--- existing rows' stored ordinals stable. Canonical DDL: audit-log.sql.
+-- (no table rebuild); appending (never reordering) keeps stored ordinals
+-- stable. Canonical DDL: audit-log.sql.
 
 ALTER TABLE scholars_audit.manual_edit_audit
   MODIFY COLUMN `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family','core','reporter_profile_candidate','opportunity_submission') NOT NULL;

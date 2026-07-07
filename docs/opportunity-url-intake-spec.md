@@ -214,6 +214,12 @@ malicious-staff DoS (trusted, audited population).
   **and** `cdk/lib/app-stack.ts` per-env; regenerate the cdk snapshot
   (`cd cdk && npm test -- -u`).
 - The IAM change (§5) ships in the same `cdk deploy Sps-App-<env>`.
+- The audit-ENUM widening (`opportunity_submission` on `action` +
+  `target_entity_type`) rides audit-log.sql's trailing idempotent `MODIFY COLUMN`
+  block, which the one-shot `sps-db-bootstrap-<env>` task replays on every deploy
+  (#493 codified path) — no manual DDL; `scripts/sql/opportunity-submission-
+  audit-migration.sql` is only a fallback (the `etl`/app users cannot run it —
+  no ALTER on `scholars_audit`, verified error 1142).
 - Rollout: staging flag on → submit skincancer.org URL → run the ReciterAI drain against
   staging DDB → staging nightly ETL → verify 3 opportunities in Find Researchers →
   dev-office user validates → prod flip (post-#475 approval).
