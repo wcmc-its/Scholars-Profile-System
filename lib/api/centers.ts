@@ -33,9 +33,9 @@ import type {
 import {
   isAuthorHidden,
   isUnitSuppressed,
-  loadPublicationSuppressions,
+  loadAllPublicationSuppressions,
   resolveActiveGrantSuppression,
-  resolveDarkPmids,
+  resolveUnitDarkPmids,
 } from "@/lib/api/manual-layer";
 import {
   loadPublicFamiliesForMembers,
@@ -769,17 +769,18 @@ async function getCenterPublicationsListUncached(
     return { hits: [], total: 0, page, pageSize: PUB_PAGE_SIZE };
   }
 
-  const pmidRows = (await prisma.publicationAuthor.findMany({
-    where: { isConfirmed: true, cwid: { in: memberCwids } },
-    select: { pmid: true },
-    distinct: ["pmid"],
-  })) as Array<{ pmid: string }>;
-  const poolPmids = pmidRows.map((r) => r.pmid);
-  // #356 — drop taken-down / derived-dark publications before paginating.
-  const suppressions = await loadPublicationSuppressions(poolPmids, prisma);
-  const darkPmids = await resolveDarkPmids(poolPmids, suppressions, prisma);
-  const allPmids = poolPmids.filter((p) => !darkPmids.has(p));
-  const total = allPmids.length;
+  // #1505 — push center membership into the page query/count via an
+  // `authors: { some }` relation filter instead of materializing every distinct
+  // member pmid; invert suppression (see resolveUnitDarkPmids). #356 — total and
+  // the page window are both computed over this visible set.
+  const membership = { cwid: { in: memberCwids } };
+  const suppressions = await loadAllPublicationSuppressions(prisma);
+  const unitDarkPmids = await resolveUnitDarkPmids(suppressions, membership, prisma);
+  const visibleWhere = {
+    authors: { some: { isConfirmed: true, ...membership } },
+    ...(unitDarkPmids.length > 0 ? { pmid: { notIn: unitDarkPmids } } : {}),
+  };
+  const total = await prisma.publication.count({ where: visibleWhere });
   if (total === 0) {
     return { hits: [], total: 0, page, pageSize: PUB_PAGE_SIZE };
   }
@@ -790,7 +791,7 @@ async function getCenterPublicationsListUncached(
       : [{ dateAddedToEntrez: "desc" as const }, { pmid: "asc" as const }];
 
   const pubs = await prisma.publication.findMany({
-    where: { pmid: { in: allPmids } },
+    where: visibleWhere,
     orderBy,
     skip: page * PUB_PAGE_SIZE,
     take: PUB_PAGE_SIZE,
@@ -936,20 +937,17 @@ export async function getCenterHighlights(
   }
 
   // Top 3 publications by citation × recency among member-authored work.
-  const poolPmids = await prisma.publicationAuthor
-    .findMany({
-      where: { isConfirmed: true, cwid: { in: memberCwids } },
-      select: { pmid: true },
-      distinct: ["pmid"],
-    })
-    .then((r) => r.map((x) => x.pmid));
-  // #356 — exclude publications taken down or derived-dark from the pool.
-  const suppressions = await loadPublicationSuppressions(poolPmids, prisma);
-  const darkPmids = await resolveDarkPmids(poolPmids, suppressions, prisma);
-  const memberPmids = poolPmids.filter((p) => !darkPmids.has(p));
+  // #1505 — push membership into the query; invert suppression (see
+  // resolveUnitDarkPmids). No pagination/total here — just the top 3 visible.
+  const membership = { cwid: { in: memberCwids } };
+  const suppressions = await loadAllPublicationSuppressions(prisma);
+  const unitDarkPmids = await resolveUnitDarkPmids(suppressions, membership, prisma);
 
   const pubs = await prisma.publication.findMany({
-    where: { pmid: { in: memberPmids } },
+    where: {
+      authors: { some: { isConfirmed: true, ...membership } },
+      ...(unitDarkPmids.length > 0 ? { pmid: { notIn: unitDarkPmids } } : {}),
+    },
     orderBy: [{ citationCount: "desc" }, { dateAddedToEntrez: "desc" }],
     take: 3,
     select: {
