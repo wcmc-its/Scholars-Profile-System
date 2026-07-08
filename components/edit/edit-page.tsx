@@ -10,6 +10,7 @@
  */
 import { AppointmentsCard } from "@/components/edit/appointments-card";
 import { HistoricalAppointmentsCard } from "@/components/edit/historical-appointments-card";
+import { ProfileAppointmentsCard } from "@/components/edit/profile-appointments-card";
 import { CoiCard } from "@/components/edit/coi-card";
 import { CoiGapCard } from "@/components/edit/coi-gap-card";
 import { ReporterProfileCard } from "@/components/edit/reporter-profile-card";
@@ -1030,6 +1031,19 @@ function renderPanel(
                 appointments={ctx.historicalAppointments}
               />
             )}
+          {/* #1568 — self-service editor for self-asserted appointments (internal
+              WCM roles the ED feed omits + prior/other-institution positions).
+              Shown to every actor the write route authorizes (self, superuser /
+              comms_steward, unit-admin, proxy — the SAME set as the historical
+              reveal above); the card fetches its own rows and each write is
+              re-authorized server-side. These render ONLY on the owner's profile,
+              never on a center / department / division / search surface. */}
+          {(mode === "self" ||
+            isSuperuserLike(mode) ||
+            mode === "unit-admin" ||
+            mode === "proxy") && (
+            <ProfileAppointmentsCard cwid={cwid} mode={voiceMode} scholarName={scholarName} />
+          )}
         </div>
       );
     case "education":

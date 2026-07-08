@@ -66,6 +66,7 @@ function scholarRow(emailVisibility: string | null, email: string | null = EMAIL
     deletedAt: null,
     status: "active",
     appointments: [],
+    profileAppointments: [],
     educations: [],
     grants: [],
     coiActivities: [],

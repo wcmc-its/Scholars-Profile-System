@@ -56,6 +56,7 @@ function scholarRow() {
     deletedAt: null,
     status: "active",
     appointments: [],
+    profileAppointments: [],
     educations: [],
     grants: [],
     coiActivities: [],

@@ -38,6 +38,7 @@ import {
   type ScholarCenterAffiliation,
 } from "@/lib/api/centers";
 import { isProfileCenterAffiliationEnabled } from "@/lib/profile/center-affiliation-flag";
+import type { ProfileAppointmentEntry } from "@/lib/profile/profile-appointments";
 import {
   rankForSelectedHighlights,
   scorePublication,
@@ -469,6 +470,14 @@ export type ProfilePayload = {
     endDate: string | null;
     isPrimary: boolean;
   }>;
+  /** Issue #1568 — self-asserted appointments the scholar (or a curator) entered
+   *  on `/edit`: internal WCM roles the ED feed omits, and current/historical
+   *  positions at other institutions. A SEPARATE store from `appointments` above
+   *  (the ETL never touches it), and PROFILE-ONLY — carried here so the profile
+   *  view can group them by category, and read by no other serializer. Every
+   *  row is carried (hidden ones included); `groupProfileAppointments` applies
+   *  the `showOnProfile` gate + the category split at render. */
+  profileAppointments: ProfileAppointmentEntry[];
   educations: Array<{
     degree: string;
     institution: string;
@@ -742,6 +751,12 @@ export const getScholarFullProfileBySlug = cache(async (
     include: {
       appointments: {
         orderBy: [{ isPrimary: "desc" }, { startDate: "desc" }],
+      },
+      // #1568 — self-asserted appointments (profile-only). Ordered to match the
+      // editor + GET route (manual sortOrder, then entry time). Hidden rows are
+      // carried and dropped at render by `groupProfileAppointments`.
+      profileAppointments: {
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
       },
       educations: {
         orderBy: [{ year: "desc" }],
@@ -1249,6 +1264,20 @@ export const getScholarFullProfileBySlug = cache(async (
         endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
         isPrimary: a.isPrimary,
       })),
+    // #1568 — self-asserted appointments, in the loader's (sortOrder, createdAt)
+    // order. `showOnProfile` is carried so `groupProfileAppointments` applies the
+    // hide gate + category split at render; the `@db.Date` columns become
+    // `YYYY-MM-DD` like the other appointment dates.
+    profileAppointments: scholar.profileAppointments.map((a) => ({
+      category: a.category,
+      title: a.title,
+      organization: a.organization,
+      unit: a.unit,
+      location: a.location,
+      startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
+      endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
+      showOnProfile: a.showOnProfile,
+    })),
     // section-visibility — `hideEducation` drops the whole Education section.
     educations: hiddenSections.has("hideEducation")
       ? []
