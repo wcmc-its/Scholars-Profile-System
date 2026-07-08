@@ -10,6 +10,7 @@ import {
   collectTaggedCwids,
   filterUnitsByActiveMembers,
   grantKey,
+  isManualOwnerProtected,
   selectStaleRows,
   type ResolvedUnit,
 } from "@/etl/ed-admins/index";
@@ -62,6 +63,17 @@ describe("buildEdAdminGrants", () => {
     expect(unmatchedCodes).toEqual(new Set(["N9"]));
   });
 
+  it("stamps role per population: DA + DivA-IAMDELA → owner, DivA + IAMDELA → curator", () => {
+    const { grants } = buildEdAdminGrants(
+      [unit("N1", { da: ["a"], diva: ["b"], iamdela: ["c"] }), unit("N2", { "diva-iamdela": ["d"] })],
+      resolver,
+    );
+    expect(grants.get(grantKey("department", "N1", "a"))).toMatchObject({ source: "ED:DA", role: "owner" });
+    expect(grants.get(grantKey("department", "N1", "b"))).toMatchObject({ source: "ED:DivA", role: "curator" });
+    expect(grants.get(grantKey("department", "N1", "c"))).toMatchObject({ source: "ED:IAMDELA", role: "curator" });
+    expect(grants.get(grantKey("division", "N2", "d"))).toMatchObject({ source: "ED:DivA-IAMDELA", role: "owner" });
+  });
+
   it("collapses one cwid holding two tags on one unit to a single grant present in BOTH seen sets", () => {
     const { grants, seenBySource } = buildEdAdminGrants(
       [unit("N1", { iamdela: ["dave"], "diva-iamdela": ["dave"] })],
@@ -72,6 +84,7 @@ describe("buildEdAdminGrants", () => {
     const key = grantKey("department", "N1", "dave");
     expect(grants.size).toBe(1);
     expect(grants.get(key)?.source).toBe("ED:DivA-IAMDELA");
+    expect(grants.get(key)?.role).toBe("owner"); // diva-iamdela wins → owner, not iamdela's curator
 
     // ...but both populations' reconcile sets include the key, so neither
     // population's reconcile deletes it while it is in the other.
@@ -154,6 +167,20 @@ describe("filterUnitsByActiveMembers (active-member guard)", () => {
         seenDA,
       ),
     ).toEqual([{ entityType: "department", entityId: "N1", cwid: "stale" }]);
+  });
+});
+
+describe("isManualOwnerProtected (MUST-9)", () => {
+  it("protects a manual-owner key even when ED now writes an owner for it", () => {
+    const g = { entityType: "department", entityId: "N1", cwid: "alice", source: "ED:DA", role: "owner" } as const;
+    const manualOwnerKeys = new Set([grantKey("department", "N1", "alice")]);
+    // ED would write owner for this exact key — still skipped; the manual owner wins.
+    expect(isManualOwnerProtected(g, manualOwnerKeys)).toBe(true);
+  });
+
+  it("does not protect keys with no manual owner", () => {
+    const g = { entityType: "division", entityId: "N2", cwid: "bob" } as const;
+    expect(isManualOwnerProtected(g, new Set([grantKey("department", "N1", "alice")]))).toBe(false);
   });
 });
 
