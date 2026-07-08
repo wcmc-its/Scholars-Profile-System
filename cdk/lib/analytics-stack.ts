@@ -285,6 +285,37 @@ export class AnalyticsStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // App workgroup -- used ONLY by the in-app /edit/usage dashboard
+    // (lib/analytics/athena-client.ts, via SPS_USAGE_WORKGROUP). Its results
+    // land under a DEDICATED `athena-results/app/` prefix, NOT the shared
+    // `athena-results/` root the operator + rollup workgroups write to. That
+    // isolation is the whole point: the app task role is granted S3 read only
+    // on `athena-results/app/*` below, so it can never read an operator's
+    // ad-hoc query results over the PII-bearing raw `cf_access_logs` table.
+    // The app only ever queries the pre-aggregated `daily_usage` table, so the
+    // 1 GiB cap (mirroring the operator workgroup) is never approached.
+    // ------------------------------------------------------------------
+    // Referenced by NAME (SPS_USAGE_WORKGROUP env in app-stack), not by
+    // construct — no local binding needed.
+    new athena.CfnWorkGroup(this, "AppUsageWorkGroup", {
+      name: `sps-usage-app-${env}`,
+      description: `SPS in-app usage dashboard workgroup (${env}). /edit/usage only -- reads the pre-aggregated daily_usage table; results isolated under athena-results/app/.`,
+      recursiveDeleteOption: true,
+      state: "ENABLED",
+      workGroupConfiguration: {
+        enforceWorkGroupConfiguration: true,
+        publishCloudWatchMetricsEnabled: true,
+        bytesScannedCutoffPerQuery: 1_073_741_824, // 1 GiB cost guard
+        resultConfiguration: {
+          outputLocation: this.analyticsBucket.s3UrlForObject(
+            `${athenaResultsPrefix}/app`,
+          ),
+          encryptionConfiguration: { encryptionOption: "SSE_S3" },
+        },
+      },
+    });
+
+    // ------------------------------------------------------------------
     // Rollup workgroup -- used ONLY by the nightly rollup Lambda. It has NO
     // bytes-scanned cap on purpose: the rollup INSERT scans the unpartitioned
     // cf_access_logs corpus (~6x per run across the UNION arms), which grows
@@ -510,7 +541,9 @@ export class AnalyticsStack extends Stack {
             this.formatArn({
               service: "athena",
               resource: "workgroup",
-              resourceName: `sps-usage-${env}`,
+              // App-only workgroup — results land under athena-results/app/, NOT
+              // the shared root the operator/rollup workgroups use.
+              resourceName: `sps-usage-app-${env}`,
             }),
           ],
         }),
@@ -550,7 +583,13 @@ export class AnalyticsStack extends Stack {
         new iam.PolicyStatement({
           sid: "S3AthenaResultsReadWrite",
           actions: ["s3:GetObject", "s3:PutObject"],
-          resources: [this.analyticsBucket.arnForObjects(`${athenaResultsPrefix}/*`)],
+          // Scoped to the app workgroup's OWN result prefix. Previously
+          // `athena-results/*` — the shared root where operator ad-hoc queries
+          // (over PII-bearing raw cf_access_logs) also write, which the app
+          // task role could then read. The app now reads/writes only its own.
+          resources: [
+            this.analyticsBucket.arnForObjects(`${athenaResultsPrefix}/app/*`),
+          ],
         }),
       ],
     });

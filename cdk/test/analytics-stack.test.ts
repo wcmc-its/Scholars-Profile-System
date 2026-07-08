@@ -144,8 +144,8 @@ describe("AnalyticsStack", () => {
       });
 
       // ---- Athena ----------------------------------------------------
-      it("creates two workgroups: operator (1 GiB cap) + rollup (uncapped)", () => {
-        template.resourceCountIs("AWS::Athena::WorkGroup", 2);
+      it("creates three workgroups: operator (1 GiB cap) + rollup (uncapped) + app (isolated results)", () => {
+        template.resourceCountIs("AWS::Athena::WorkGroup", 3);
         // Operator workgroup: enforced config, SSE-S3, 1 GiB scan cap (guards
         // an interactive no-predicate scan of the unpartitioned raw table).
         template.hasResourceProperties("AWS::Athena::WorkGroup", {
@@ -159,6 +159,30 @@ describe("AnalyticsStack", () => {
             },
           },
         });
+        // App workgroup: same enforced config + cap, but results land under a
+        // DEDICATED athena-results/app/ prefix so the app role's scoped S3 read
+        // can never reach an operator's ad-hoc results over the raw PII table.
+        const appWg = Object.values(
+          template.findResources("AWS::Athena::WorkGroup"),
+        ).find(
+          (w) =>
+            (w.Properties as { Name?: string })?.Name === `sps-usage-app-${env}`,
+        );
+        expect(appWg).toBeDefined();
+        const appCfg = (
+          appWg!.Properties as {
+            WorkGroupConfiguration?: {
+              EnforceWorkGroupConfiguration?: boolean;
+              BytesScannedCutoffPerQuery?: number;
+              ResultConfiguration?: { OutputLocation?: unknown };
+            };
+          }
+        ).WorkGroupConfiguration;
+        expect(appCfg?.EnforceWorkGroupConfiguration).toBe(true);
+        expect(appCfg?.BytesScannedCutoffPerQuery).toBe(1073741824);
+        expect(JSON.stringify(appCfg?.ResultConfiguration?.OutputLocation)).toContain(
+          "athena-results/app",
+        );
         // Rollup workgroup: enforced config + SSE-S3 but NO scan cap -- the
         // nightly rollup must scan the full corpus, and a cap would silently
         // fail the job as traffic grows (finding #2).
@@ -219,15 +243,20 @@ describe("AnalyticsStack", () => {
         );
         expect(docs).toHaveLength(1);
         const json = JSON.stringify(docs[0]);
-        // Query is on the capped usage workgroup, not the rollup workgroup.
-        expect(json).toContain(`workgroup/sps-usage-${env}`);
+        // Query is on the app-only workgroup — NOT the operator workgroup (whose
+        // ad-hoc results over the raw PII table share athena-results/ root) and
+        // NOT the rollup workgroup.
+        expect(json).toContain(`workgroup/sps-usage-app-${env}`);
+        expect(json).not.toContain(`workgroup/sps-usage-${env}"`);
         expect(json).not.toContain(`workgroup/sps-usage-rollup-${env}`);
         // Glue read is scoped to daily_usage only — never the raw PII table.
         expect(json).toContain("daily_usage");
         expect(json).not.toContain("cf_access_logs");
-        // S3 is scoped to the aggregate rollup + athena-results prefixes; the app
-        // must NEVER get read on the raw CloudFront `cf/` log prefix (client IPs).
+        // S3 read on results is scoped to the app's OWN prefix (athena-results/app/),
+        // never the shared athena-results/ root, and never the raw `cf/` log prefix.
         expect(json).toContain("rollup/daily-usage/*");
+        expect(json).toContain("athena-results/app/*");
+        expect(json).not.toMatch(/"[^"]*athena-results\/\*"/);
         expect(json).not.toMatch(/"[^"]*\/cf\/\*?"/);
       });
 
