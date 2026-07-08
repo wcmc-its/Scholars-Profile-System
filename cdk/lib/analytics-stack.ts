@@ -295,7 +295,9 @@ export class AnalyticsStack extends Stack {
     // The app only ever queries the pre-aggregated `daily_usage` table, so the
     // 1 GiB cap (mirroring the operator workgroup) is never approached.
     // ------------------------------------------------------------------
-    const appWorkGroup = new athena.CfnWorkGroup(this, "AppUsageWorkGroup", {
+    // Referenced by NAME (SPS_USAGE_WORKGROUP env in app-stack), not by
+    // construct — no local binding needed.
+    new athena.CfnWorkGroup(this, "AppUsageWorkGroup", {
       name: `sps-usage-app-${env}`,
       description: `SPS in-app usage dashboard workgroup (${env}). /edit/usage only -- reads the pre-aggregated daily_usage table; results isolated under athena-results/app/.`,
       recursiveDeleteOption: true,
