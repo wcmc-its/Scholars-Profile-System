@@ -484,7 +484,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SPS_USAGE_WORKGROUP",
-                "Value": "sps-usage-prod",
+                "Value": "sps-usage-app-prod",
               },
               {
                 "Name": "SPS_USAGE_DATABASE",
@@ -4091,7 +4091,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SPS_USAGE_WORKGROUP",
-                "Value": "sps-usage-staging",
+                "Value": "sps-usage-app-staging",
               },
               {
                 "Name": "SPS_USAGE_DATABASE",

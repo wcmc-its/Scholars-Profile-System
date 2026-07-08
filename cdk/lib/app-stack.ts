@@ -1421,11 +1421,13 @@ export class AppStack extends Stack {
         SITE_URL: new URL(envConfig.samlSpAcsUrl).origin,
         // In-app Usage dashboard (/edit/usage) — the workgroup + Glue database the
         // app queries for the daily_usage rollup. Stable, config-derived names
-        // (AnalyticsStack creates `sps-usage-${env}` / `sps_usage_${env}`); the
+        // (AnalyticsStack creates `sps-usage-app-${env}` / `sps_usage_${env}`); the
         // matching Athena/Glue/S3 grant on THIS task role is attached in
         // AnalyticsStack. Region is pinned so the Athena client targets the same
         // region the workgroup lives in regardless of the task's default chain.
-        SPS_USAGE_WORKGROUP: `sps-usage-${env}`,
+        // Uses the app-only workgroup (results isolated under athena-results/app/)
+        // so this role can never read an operator's PII-bearing ad-hoc results.
+        SPS_USAGE_WORKGROUP: `sps-usage-app-${env}`,
         SPS_USAGE_DATABASE: `sps_usage_${env}`,
         SPS_USAGE_REGION: this.region,
         // #760 -- launch-period "Beta" pill beside the Scholars wordmark.
