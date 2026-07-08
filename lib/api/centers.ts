@@ -242,6 +242,10 @@ export type CenterMemberFamily = MemberMethodFamily;
  *  classification (#552) the facet sidebar + per-row badge consume. */
 export type CenterMemberHit = DepartmentFacultyHit & {
   membershipType: CenterMembershipType | null;
+  /** #1570 — ASMS professorial rank ("Professor" / "Associate Professor" /
+   *  "Assistant Professor"), or null for members without one. Powers the
+   *  "Professorial rank" facet in the roster sidebar. */
+  professorialRank: string | null;
   /** #962 — ALL public method families for this member, pmidCount desc. Facet
    *  membership reads this set. Present only when CENTER_METHODS_FACET is on AND
    *  the member has ≥1 public family; undefined otherwise (so the OFF-path payload
@@ -393,14 +397,16 @@ type CenterScholarRow = {
   primaryDepartment: string | null;
   roleCategory: string | null;
   overview: string | null;
+  professorialRank: string | null;
   department: { name: string } | null;
   division: { name: string } | null;
 };
 
-/** Hydrate scholar rows into `DepartmentFacultyHit`s with pub/grant counts. */
+/** Hydrate scholar rows into `DepartmentFacultyHit`s (plus the #1570 professorial
+ *  rank the center facet reads) with pub/grant counts. */
 async function buildCenterMemberHits(
   rows: CenterScholarRow[],
-): Promise<DepartmentFacultyHit[]> {
+): Promise<Array<DepartmentFacultyHit & { professorialRank: string | null }>> {
   const cwids = rows.map((s) => s.cwid);
   const now = new Date();
   const [pubCounts, grantRows] = cwids.length > 0
@@ -445,6 +451,7 @@ async function buildCenterMemberHits(
     identityImageEndpoint: identityImageEndpoint(s.cwid),
     roleCategory: formatRoleCategory(s.roleCategory),
     overview: s.overview,
+    professorialRank: s.professorialRank,
     pubCount: pubMap.get(s.cwid) ?? 0,
     grantCount: grantMap.get(s.cwid) ?? 0,
   }));
@@ -503,7 +510,9 @@ async function getCenterMembersUncached(
   for (const m of activeMemberships) {
     membershipTypeByCwid.set(m.cwid, m.membershipType);
   }
-  const attachType = (hs: DepartmentFacultyHit[]): CenterMemberHit[] =>
+  const attachType = (
+    hs: Array<DepartmentFacultyHit & { professorialRank: string | null }>,
+  ): CenterMemberHit[] =>
     hs.map((h) => ({
       ...h,
       membershipType: membershipTypeByCwid.get(h.cwid) ?? null,
@@ -541,6 +550,7 @@ async function getCenterMembersUncached(
       primaryDepartment: true,
       roleCategory: true,
       overview: true,
+      professorialRank: true,
       department: { select: { name: true } },
       division: { select: { name: true } },
     },
