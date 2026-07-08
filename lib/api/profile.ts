@@ -754,8 +754,10 @@ export const getScholarFullProfileBySlug = cache(async (
       },
       // #1568 — self-asserted appointments (profile-only). Ordered to match the
       // editor + GET route (manual sortOrder, then entry time). Hidden rows are
-      // carried and dropped at render by `groupProfileAppointments`.
+      // dropped at LOAD (like `hideEducation`) so they never enter the public
+      // payload — the editor reads hidden rows separately via GET /api/edit/appointment.
       profileAppointments: {
+        where: { showOnProfile: true },
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
       },
       educations: {
