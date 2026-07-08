@@ -335,14 +335,18 @@ function GroupedRoster({
             onToggle={makeToggle(selDepts, setSelDepts)}
             collapseAfter={8}
           />
-          {/* #1570 — "Professorial rank" renders LAST. Vanishes when no member
-              carries a rank (RosterFacet returns null on empty options). */}
-          <RosterFacet
-            title="Professorial rank"
-            options={rankOptions}
-            selected={selRanks}
-            onToggle={makeToggle(selRanks, setSelRanks)}
-          />
+          {/* #1570 — "Professorial rank" renders LAST. Hidden unless ≥2 distinct
+              ranks are present: rankKey always buckets a missing rank under the
+              NO_RANK sentinel, so rankOptions is never empty when rows exist, and
+              a one-option facet can't filter anything. Mirrors the ≥2 guards above. */}
+          {rankOptions.length >= 2 && (
+            <RosterFacet
+              title="Professorial rank"
+              options={rankOptions}
+              selected={selRanks}
+              onToggle={makeToggle(selRanks, setSelRanks)}
+            />
+          )}
         </div>
       </aside>
 
