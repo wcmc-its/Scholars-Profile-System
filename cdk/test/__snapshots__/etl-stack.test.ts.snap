@@ -3488,6 +3488,21 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                   ],
                 },
               },
+              {
+                "Name": "DATABASE_URL_RO",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/app-ro",
+                    ],
+                  ],
+                },
+              },
             ],
           },
         ],
@@ -3592,6 +3607,18 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/app-ro",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -3689,6 +3716,25 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/revalidate-token-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/app-ro-??????",
                   ],
                 ],
               },
@@ -11156,6 +11202,21 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                   ],
                 },
               },
+              {
+                "Name": "DATABASE_URL_RO",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/app-ro",
+                    ],
+                  ],
+                },
+              },
             ],
           },
         ],
@@ -11260,6 +11321,18 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/app-ro",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -11357,6 +11430,25 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/app-ro-??????",
                   ],
                 ],
               },

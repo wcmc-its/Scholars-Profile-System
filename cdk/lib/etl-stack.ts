@@ -211,6 +211,17 @@ export class EtlStack extends Stack {
       "EtlDbSecret",
       `scholars/${env}/db/etl`,
     );
+    // Read-only app DSN — injected ONLY into the main `sps-etl-${env}` task def
+    // (below) as DATABASE_URL_RO, so `scripts/run-staging-probe.sh` runs its
+    // "READ-ONLY probe" against the SELECT-only Aurora user instead of the
+    // read-write ETL DSN. Not fanned into baseSecrets (the fan-out defs never
+    // run probes and must not carry it) and its exec-role grant is scoped to
+    // this def's execution role only.
+    const appRoSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "AppRoSecret",
+      `scholars/${env}/db/app-ro`,
+    );
     const opensearchEtlSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
       "EtlOpensearchSecret",
@@ -421,7 +432,9 @@ export class EtlStack extends Stack {
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: ["secretsmanager:GetSecretValue"],
-        resources: baseSecretArns,
+        // appRoSecret rides the base execution role (main `sps-etl-${env}` def)
+        // only — NOT baseSecretArns, which the fan-out defs' roles also read.
+        resources: [...baseSecretArns, appRoSecret.secretArn],
       }),
     );
     taskExecutionRole.addToPolicy(
@@ -697,7 +710,9 @@ export class EtlStack extends Stack {
         streamPrefix: "etl",
       }),
       environment: baseEnvironment,
-      secrets: baseSecrets,
+      // DATABASE_URL_RO is on THIS def only (the probe target); the fan-out
+      // defs below get baseSecrets without it.
+      secrets: { ...baseSecrets, DATABASE_URL_RO: ecs.Secret.fromSecretsManager(appRoSecret) },
     });
 
     // ------------------------------------------------------------------

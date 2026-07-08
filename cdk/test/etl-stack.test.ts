@@ -994,15 +994,22 @@ describe("EtlStack", () => {
           : [secretsStmt?.Resource];
       }
 
-      it("the BASE ETL exec role lists ONLY the 3 base secret ARNs -- never a per-source cred, never * (#1508)", () => {
+      it("the BASE ETL exec role lists the 3 base secret ARNs + the app-ro probe DSN -- never a per-source cred, never * (#1508)", () => {
         // The dynamodb/spotlight/hierarchy sources are IAM-based (task role) and
         // read no injected secret. After the #1508 split the base role no longer
-        // reads ANY of the 7 per-source secrets -- that is the whole point.
+        // reads ANY of the 7 per-source secrets -- that is the whole point. The
+        // one addition is the SELECT-only app-ro DSN (DATABASE_URL_RO) injected
+        // into the main sps-etl def for run-staging-probe.sh -- a DB DSN, not a
+        // per-source WCM credential.
         const arns = execRoleSecretArns("EtlTaskExecutionRole");
-        expect(arns).toHaveLength(3);
+        expect(arns).toHaveLength(4);
         for (const r of arns) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
         }
+        const joined = JSON.stringify(arns);
+        expect(joined).toMatch(/db\/app-ro/);
+        // Still no per-source WCM-DB credential on the base role.
+        expect(joined).not.toMatch(/asms|infoed|coi|jenzabar/i);
       });
 
       it.each([

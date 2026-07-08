@@ -7,8 +7,10 @@
 # to /tmp inside the container, and runs it with tsx. Output goes to the task's
 # CloudWatch log stream, which this script tails back.
 #
-# Use ONLY for read-only probes (SELECT-only). Anything that writes must go through
-# the normal migrate/ETL path with explicit operator sign-off.
+# Use ONLY for read-only probes (SELECT-only). This is now ENFORCED, not just a
+# convention: the container points DATABASE_URL at the SELECT-only Aurora user
+# (DATABASE_URL_RO, scholars/<env>/db/app-ro) so a probe physically cannot write.
+# Anything that writes must go through the normal migrate/ETL path with sign-off.
 #
 # Usage:
 #   scripts/run-staging-probe.sh scripts/faculty-coverage-metric.ts          # staging
@@ -36,6 +38,11 @@ B64="$(gzip -9 -c "$PROBE" | base64 | tr -d '\n')"
 OVERRIDES="$(B64="$B64" CONTAINER="$CONTAINER" python3 - <<'PY'
 import json, os
 decoder = ("const z=require('zlib'),fs=require('fs'),cp=require('child_process'),p=require('path');"
+           # Force the probe onto the SELECT-only Aurora user: the sps-etl task def
+           # injects DATABASE_URL_RO (scholars/<env>/db/app-ro). Point every DB
+           # client (which reads DATABASE_URL) at it so a probe physically cannot
+           # write. Falls back to the RW DSN only if RO is not wired (older image).
+           "if(process.env.DATABASE_URL_RO)process.env.DATABASE_URL=process.env.DATABASE_URL_RO;"
            "const f='/tmp/__probe.ts';"
            "fs.writeFileSync(f,z.gunzipSync(Buffer.from(process.env.PROBE_B64,'base64')));"
            "cp.execSync('node_modules/.bin/tsx --tsconfig '+p.join(process.cwd(),'tsconfig.json')+' '+f,{stdio:'inherit'})")
