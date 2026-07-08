@@ -343,6 +343,7 @@ function ModalContent({
           pmid={pub.pmid}
           pmcid={pub.pmcid}
           doi={pub.doi}
+          ecommonsLink={pub.ecommonsLink}
           pubmedUrl={pub.pubmedUrl}
         />
         <AuthorsLine fullAuthors={pub.fullAuthorsString} />
@@ -786,11 +787,13 @@ function IdentifiersLine({
   pmid,
   pmcid,
   doi,
+  ecommonsLink,
   pubmedUrl,
 }: {
   pmid: string;
   pmcid: string | null;
   doi: string | null;
+  ecommonsLink: string | null;
   pubmedUrl: string | null;
 }) {
   // Identifiers flow inside the header citation block as a small meta row.
@@ -840,6 +843,20 @@ function IdentifiersLine({
         className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
       >
         DOI
+      </a>,
+    );
+  }
+  if (ecommonsLink) {
+    blocks.push(
+      <a
+        key="ecommons"
+        href={ecommonsLink}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="eCommons institutional repository record"
+        className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
+      >
+        eCommons
       </a>,
     );
   }

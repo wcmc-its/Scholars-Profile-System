@@ -777,6 +777,13 @@ model Publication {
   /// bibliography export; falls back to `journal` (full title) when null.
   journalAbbrev       String?   @map("journal_abbrev") @db.VarChar(200)
   pubmedUrl           String?   @map("pubmed_url") @db.VarChar(512)
+  /// #1567 — canonical handle URL in Cornell's eCommons institutional
+  /// repository (e.g. "https://hdl.handle.net/1813/124348") when this PMID is
+  /// deposited there. Sourced from `reciterdb.ecommons_pmid_link.ecommonslink`,
+  /// joined by the weekly reciter ETL. NULL for the vast majority of pubs (not
+  /// in the repository). Surfaced as an "eCommons" linkout on publication cards
+  /// and the detail modal; never indexed.
+  ecommonsLink        String?   @map("ecommons_link") @db.VarChar(255)
   /// MeSH keywords from accepted publications, used by the profile Topics
   /// section (issue #73). Format: `[{ ui: "D015316", label: "Genetic Therapy" }, ...]`.
   /// `ui` is null for the rare label that doesn't resolve to a `mesh.DescriptorUI`

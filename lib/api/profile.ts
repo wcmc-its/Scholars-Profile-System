@@ -354,6 +354,10 @@ export type ProfilePublication = ScoredPublication<{
   doi: string | null;
   pmcid: string | null;
   pubmedUrl: string | null;
+  /** #1567 — eCommons institutional-repository handle URL, or null when this
+   *  publication is not deposited there. Rendered as an "eCommons" linkout after
+   *  DOI in the meta row. */
+  ecommonsLink: string | null;
   authorship: { isFirst: boolean; isLast: boolean; isPenultimate: boolean };
   isConfirmed: boolean;
   /** MeSH keywords on this publication, used by the profile Topics filter
@@ -856,6 +860,7 @@ export const getScholarFullProfileBySlug = cache(async (
               doi: true,
               pmcid: true,
               pubmedUrl: true,
+              ecommonsLink: true,
               meshTerms: true,
               abstract: true,
               impactScore: true,
@@ -1038,6 +1043,7 @@ export const getScholarFullProfileBySlug = cache(async (
     doi: a.publication.doi,
     pmcid: a.publication.pmcid,
     pubmedUrl: a.publication.pubmedUrl,
+    ecommonsLink: a.publication.ecommonsLink,
     authorship: {
       isFirst: a.isFirst,
       isLast: a.isLast,
