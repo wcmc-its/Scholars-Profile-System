@@ -5,7 +5,14 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { buildEdAdminGrants, grantKey, selectStaleRows, type ResolvedUnit } from "@/etl/ed-admins/index";
+import {
+  buildEdAdminGrants,
+  collectTaggedCwids,
+  filterUnitsByActiveMembers,
+  grantKey,
+  selectStaleRows,
+  type ResolvedUnit,
+} from "@/etl/ed-admins/index";
 import type { EdOrgUnitAdmins } from "@/lib/sources/ldap";
 
 /** Build a unit fixture; absent tags default to []. */
@@ -77,6 +84,76 @@ describe("buildEdAdminGrants", () => {
     expect(grants.size).toBe(0);
     expect(seenBySource.size).toBe(0);
     expect(skippedNoUnit).toBe(0);
+  });
+});
+
+describe("collectTaggedCwids", () => {
+  it("returns every tagged CWID across units + tags, deduped and lowercased", () => {
+    const cwids = collectTaggedCwids([
+      unit("N1", { da: ["Alice", "bob"], iamdela: ["bob"] }),
+      unit("N2", { diva: ["ALICE"], "diva-iamdela": ["carol"] }),
+    ]);
+    expect(new Set(cwids)).toEqual(new Set(["alice", "bob", "carol"]));
+    expect(cwids.length).toBe(3);
+  });
+
+  it("returns nothing for units with no tagged CWIDs", () => {
+    expect(collectTaggedCwids([unit("N1", {})])).toEqual([]);
+  });
+});
+
+describe("filterUnitsByActiveMembers (active-member guard)", () => {
+  it("drops tagged CWIDs whose ED person is not an active member", () => {
+    const active = new Map<string, boolean>([
+      ["alice", true],
+      ["bob", false], // expired person — ED left the tag on
+      // "carol" absent from the map → treated as not active
+    ]);
+    const { units, droppedInactive } = filterUnitsByActiveMembers(
+      [unit("N1", { da: ["alice", "bob"], iamdela: ["carol"] })],
+      active,
+    );
+    expect(units[0].byTag.da).toEqual(["alice"]);
+    expect(units[0].byTag.iamdela).toEqual([]);
+    expect(droppedInactive).toBe(2); // bob + carol
+  });
+
+  it("keeps units untouched when every tagged member is active", () => {
+    const active = new Map<string, boolean>([["alice", true]]);
+    const { units, droppedInactive } = filterUnitsByActiveMembers(
+      [unit("N1", { da: ["alice"] })],
+      active,
+    );
+    expect(units[0].byTag.da).toEqual(["alice"]);
+    expect(droppedInactive).toBe(0);
+  });
+
+  it("an inactive tagged CWID is excluded from BOTH grants and the reconcile `seen` set", () => {
+    // Compose the real pipeline: filter → build. The inactive member must not
+    // upsert AND must be absent from `seen` so the per-source reconcile deletes
+    // its stale UnitAdmin row on this run (self-healing revocation).
+    const active = new Map<string, boolean>([
+      ["alice", true],
+      ["stale", false],
+    ]);
+    const { units } = filterUnitsByActiveMembers(
+      [unit("N1", { da: ["alice", "stale"] })],
+      active,
+    );
+    const { grants, seenBySource } = buildEdAdminGrants(units, resolver);
+
+    expect(grants.has(grantKey("department", "N1", "alice"))).toBe(true);
+    expect(grants.has(grantKey("department", "N1", "stale"))).toBe(false);
+    // `stale` absent from ED:DA seen → selectStaleRows would flag its DB row.
+    const seenDA = seenBySource.get("ED:DA") ?? new Set<string>();
+    expect(seenDA.has(grantKey("department", "N1", "alice"))).toBe(true);
+    expect(seenDA.has(grantKey("department", "N1", "stale"))).toBe(false);
+    expect(
+      selectStaleRows(
+        [{ entityType: "department", entityId: "N1", cwid: "stale" }],
+        seenDA,
+      ),
+    ).toEqual([{ entityType: "department", entityId: "N1", cwid: "stale" }]);
   });
 });
 

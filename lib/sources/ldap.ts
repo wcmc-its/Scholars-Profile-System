@@ -1207,6 +1207,74 @@ export async function fetchDirectoryPeopleByCwid(
 }
 
 // ---------------------------------------------------------------------------
+// active-member guard  (ED-sourced org-unit role imports)
+//
+// ED does NOT remove a person's org-unit admin tag / chair / chief appointment
+// when their person entry expires — `weillCornellEduActiveMember` flips to FALSE
+// on the `ou=people` entry, but the role tag stays. Every ED-sourced role import
+// (unit admins, dept chair, division chief) must therefore consult this flag
+// before granting, or a stale/expired person keeps unit-edit access forever.
+//
+// Minimal attribute list: CWID + the active flag, nothing else.
+// ---------------------------------------------------------------------------
+
+const ACTIVE_MEMBER_ATTRS = [
+  "weillCornellEduCWID",
+  "weillCornellEduActiveMember",
+] as const;
+
+/**
+ * Batch-resolve `weillCornellEduActiveMember` for a set of CWIDs against
+ * `ou=people`. Chunks the OR-of-CWIDs filter at 100 per query (mirrors
+ * `fetchDirectoryPeopleByCwid`) so a long list doesn't blow the LDAP
+ * filter-length limit. Takes an already-bound client — the caller owns its
+ * lifecycle.
+ *
+ * Returns a `Map<lowercased cwid, boolean>` with an entry for EVERY input CWID.
+ * The value is `true` iff the person entry exists in `ou=people` AND carries
+ * `weillCornellEduActiveMember === "TRUE"`. A CWID not found in `ou=people`, or
+ * with a missing / non-"TRUE" value, is `false` — fail-closed: treat as NOT an
+ * active member (so a stale role grant is dropped rather than retained).
+ */
+export async function fetchActiveMembersByCwid(
+  client: Client,
+  cwids: string[],
+): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>();
+  const unique = Array.from(
+    new Set(cwids.map((c) => c.trim().toLowerCase()).filter((c) => c.length > 0)),
+  );
+  if (unique.length === 0) return out;
+
+  // Default every requested CWID to `false` (fail-closed). A search hit that
+  // carries `weillCornellEduActiveMember=TRUE` upgrades it; anything not found
+  // or not TRUE stays false.
+  for (const c of unique) out.set(c, false);
+
+  const searchBase = process.env.SCHOLARS_LDAP_SEARCH_BASE ?? DEFAULT_SEARCH_BASE;
+  const batchSize = 100;
+  for (let i = 0; i < unique.length; i += batchSize) {
+    const batch = unique.slice(i, i + batchSize);
+    const filter =
+      "(&(objectClass=eduPerson)(|" +
+      batch.map((c) => `(weillCornellEduCWID=${escapeLdapFilter(c)})`).join("") +
+      "))";
+    const { searchEntries } = await client.search(searchBase, {
+      scope: "sub",
+      filter,
+      attributes: [...ACTIVE_MEMBER_ATTRS],
+      paged: { pageSize: 500 },
+    });
+    for (const e of searchEntries) {
+      const cwid = firstString(e.weillCornellEduCWID);
+      if (!cwid) continue;
+      out.set(cwid.toLowerCase(), firstString(e.weillCornellEduActiveMember) === "TRUE");
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // org-unit admin populations  (#728 — ED admin-role org-unit managers)
 //
 // WCM ED carries each org unit's administrators as OPTION-TAGGED subtypes of

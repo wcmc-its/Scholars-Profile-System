@@ -47,6 +47,7 @@ import {
   type EdPostdocEmploymentRecord,
   fetchActiveEmployeeRecords,
   fetchActiveFaculty,
+  fetchActiveMembersByCwid,
   fetchActiveFacultyAppointments,
   fetchActiveNypAffiliates,
   fetchHistoricalFacultyAppointments,
@@ -86,6 +87,30 @@ import {
  * a PHD student pulled from ou=students with a residual personTypeCode does
  * not get re-classified.
  */
+/**
+ * Active-member guard for an ED-detected unit leader (dept chair / division
+ * chief). ED does NOT drop a chair/chief appointment title when a person
+ * expires, so a title-matched candidate can be someone whose person entry is
+ * `weillCornellEduActiveMember=FALSE`. Returns the CWID to write, or `null`
+ * when the candidate is not an active member — so the direct upsert self-clears
+ * the stale assignment.
+ *
+ * `guardApplied` is false when the active-member lookup could NOT run (e.g. the
+ * LDAP query threw). In that case the candidate is retained unchanged, so a
+ * transient directory error never mass-clears every chair/chief.
+ *
+ * Exported for unit tests (tests/unit/etl-ed-active-leader-guard.test.ts).
+ */
+export function guardActiveLeaderCwid(
+  candidateCwid: string | null,
+  activeByCwid: Map<string, boolean>,
+  guardApplied: boolean,
+): string | null {
+  if (!candidateCwid) return null;
+  if (!guardApplied) return candidateCwid;
+  return activeByCwid.get(candidateCwid.toLowerCase()) === true ? candidateCwid : null;
+}
+
 // Exported for unit tests (tests/unit/etl-ed-role-category.test.ts).
 export function deriveRoleCategory(f: EdFacultyEntry): RoleCategory {
   if (f.ou === "students" && f.degreeCode === "PHD") return "doctoral_student";
@@ -1136,6 +1161,12 @@ async function main() {
     const chairTitleVariants = new Set<string>();
     let chairAssignments = 0;
     let deptLeaderOverridesApplied = 0;
+    // Two-pass so the active-member guard is ONE batched LDAP lookup: pass 1
+    // resolves overrides (written immediately — a curator pin is authoritative,
+    // not ED-sourced) and collects the title-matched candidates; pass 2 guards
+    // the candidates against `weillCornellEduActiveMember` and writes.
+    const chairCandidates: Array<{ deptCode: string; cwid: string; title: string }> = [];
+    const chairDeptsToClear: string[] = [];
     for (const dept of seenDepts.values()) {
       // #540 — a `field_override(department, code, 'leaderCwid')` row wins
       // outright. Non-empty value writes the curated CWID; `""` writes null
@@ -1199,21 +1230,64 @@ async function main() {
         orderBy: [{ isPrimary: "desc" }, { startDate: "desc" }],
         select: { cwid: true, title: true },
       });
-      // Ensure we always clear stale assignments first — if no candidate
-      // matches this run, the dept gets chair_cwid=null instead of keeping
-      // the wrong scholar from a prior run.
-      await db.write.department.update({
-        where: { code: dept.code },
-        data: { chairCwid: candidate?.cwid ?? null },
-      });
       if (candidate) {
-        chairTitleVariants.add(candidate.title);
-        chairAssignments += 1;
+        chairCandidates.push({ deptCode: dept.code, cwid: candidate.cwid, title: candidate.title });
+      } else {
+        // Always clear stale assignments — if no candidate matches this run the
+        // dept gets chair_cwid=null instead of keeping a prior run's scholar.
+        chairDeptsToClear.push(dept.code);
       }
+    }
+
+    // Active-member guard (pass 2). ED keeps a "Chair of X" title on an expired
+    // person, so a title-matched candidate whose person is
+    // `weillCornellEduActiveMember != TRUE` is stale — drop it so the upsert
+    // self-clears. Fail-open on an LDAP error of the guard lookup: retain the
+    // candidate unchanged rather than mass-clear every chair on a transient blip.
+    let chairActive = new Map<string, boolean>();
+    let chairGuardApplied = false;
+    let chairGuardDropped = 0;
+    if (chairCandidates.length > 0) {
+      try {
+        const guardClient = await openLdap();
+        try {
+          chairActive = await fetchActiveMembersByCwid(
+            guardClient,
+            chairCandidates.map((c) => c.cwid),
+          );
+          chairGuardApplied = true;
+        } finally {
+          await guardClient.unbind().catch(() => {});
+        }
+      } catch (err) {
+        console.warn(
+          `[ED] chair active-member guard skipped (LDAP unavailable) — chairs retained unguarded this run: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    for (const c of chairCandidates) {
+      const cwidToWrite = guardActiveLeaderCwid(c.cwid, chairActive, chairGuardApplied);
+      await db.write.department.update({
+        where: { code: c.deptCode },
+        data: { chairCwid: cwidToWrite },
+      });
+      if (cwidToWrite) {
+        chairTitleVariants.add(c.title);
+        chairAssignments += 1;
+      } else {
+        chairGuardDropped += 1;
+      }
+    }
+    for (const deptCode of chairDeptsToClear) {
+      await db.write.department.update({
+        where: { code: deptCode },
+        data: { chairCwid: null },
+      });
     }
     console.log(
       `[ED] assigned leaders to ${chairAssignments}/${seenDepts.size} departments ` +
-        `(field_override consult: ${deptLeaderOverridesApplied} dept rows wrote from override)`,
+        `(field_override consult: ${deptLeaderOverridesApplied} dept rows wrote from override; ` +
+        `active-member guard dropped ${chairGuardDropped} inactive chair candidate(s))`,
     );
     console.log(`[ED] distinct leader-title variants observed:`, [...chairTitleVariants]);
 
@@ -1554,7 +1628,13 @@ async function main() {
     };
     let chiefAssignments = 0;
     let divLeaderOverridesApplied = 0;
+    let chiefGuardDropped = 0;
     if (!chiefDetectionDisabled && employeeRecords.length > 0) {
+      // Two-pass (see the chair loop): overrides write immediately, Path-B
+      // detections are collected then guarded against `weillCornellEduActiveMember`
+      // in ONE batched LDAP lookup.
+      const chiefCandidates: Array<{ divCode: string; cwid: string }> = [];
+      const chiefDivsToClear: string[] = [];
       for (const div of divisionsForChief) {
         // #540 — a `field_override(division, code, 'leaderCwid')` row wins
         // over Path B and Path C both. Non-empty -> that CWID; "" ->
@@ -1585,17 +1665,58 @@ async function main() {
         // Threshold gate: only HIGH and MEDIUM auto-write the pick.
         // LOW/NONE/GAP all clear to null — the override file (Path C) is
         // the escape hatch for divisions Path B can't decide on.
+        if (result.valueToWrite) {
+          chiefCandidates.push({ divCode: div.code, cwid: result.valueToWrite });
+        } else {
+          chiefDivsToClear.push(div.code);
+        }
+      }
+
+      // Active-member guard. ED keeps a chief's appointment/manager graph on an
+      // expired person; a detected chief who is not `weillCornellEduActiveMember`
+      // TRUE is stale — drop it so the upsert self-clears. Fail-open on an LDAP
+      // error: retain the detection unchanged rather than mass-clear.
+      let chiefActive = new Map<string, boolean>();
+      let chiefGuardApplied = false;
+      if (chiefCandidates.length > 0) {
+        try {
+          const guardClient = await openLdap();
+          try {
+            chiefActive = await fetchActiveMembersByCwid(
+              guardClient,
+              chiefCandidates.map((c) => c.cwid),
+            );
+            chiefGuardApplied = true;
+          } finally {
+            await guardClient.unbind().catch(() => {});
+          }
+        } catch (err) {
+          console.warn(
+            `[ED] chief active-member guard skipped (LDAP unavailable) — chiefs retained unguarded this run: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      for (const c of chiefCandidates) {
+        const cwidToWrite = guardActiveLeaderCwid(c.cwid, chiefActive, chiefGuardApplied);
         await db.write.division.update({
-          where: { code: div.code },
-          data: { chiefCwid: result.valueToWrite },
+          where: { code: c.divCode },
+          data: { chiefCwid: cwidToWrite },
         });
-        if (result.valueToWrite) chiefAssignments += 1;
+        if (cwidToWrite) chiefAssignments += 1;
+        else chiefGuardDropped += 1;
+      }
+      for (const divCode of chiefDivsToClear) {
+        await db.write.division.update({
+          where: { code: divCode },
+          data: { chiefCwid: null },
+        });
       }
       console.log(
         `[ED] Path B: assigned chiefs to ${chiefAssignments}/${divisionsForChief.length} divisions ` +
           `(verdicts — HIGH=${chiefVerdictTally.HIGH} MEDIUM=${chiefVerdictTally.MEDIUM} ` +
           `LOW=${chiefVerdictTally.LOW} NONE=${chiefVerdictTally.NONE} GAP=${chiefVerdictTally.GAP}; ` +
-          `field_override consult: ${divLeaderOverridesApplied} divisions wrote from override)`,
+          `field_override consult: ${divLeaderOverridesApplied} divisions wrote from override; ` +
+          `active-member guard dropped ${chiefGuardDropped} inactive chief candidate(s))`,
       );
     } else {
       console.log(
