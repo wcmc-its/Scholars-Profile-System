@@ -311,14 +311,36 @@ export async function fetchArticleRows(
       citationCount: true,
       publicationType: true,
       authorsString: true,
+      // Confirmed, active WCM authors — needed only to derive publication
+      // darkness (a pub whose every confirmed WCM author is hidden is dark).
+      // Same author carve as fetchAuthorshipRows.
+      authors: {
+        where: {
+          isConfirmed: true,
+          cwid: { not: null },
+          scholar: { deletedAt: null, status: "active" },
+        },
+        select: { scholar: { select: { cwid: true } } },
+      },
     },
   });
   const byPmid = new Map(pubs.map((p) => [p.pmid, p]));
+
+  // Honor query-time whole-publication takedowns exactly as fetchAuthorshipRows
+  // does: a suppression added since the last nightly reindex must not leak into
+  // the article-granularity CSV either. Per-author hiding does NOT apply here —
+  // an article row carries only the raw PubMed byline (authorsString), not a
+  // WCM-scholar-specific author column — so only publication darkness matters.
+  const suppressions = await loadPublicationSuppressions(pmids, prisma);
 
   const rows: ArticleRow[] = [];
   for (const pmid of pmids) {
     const pub = byPmid.get(pmid);
     if (!pub) continue;
+    const confirmedWcmCwids = pub.authors
+      .filter((a) => a.scholar)
+      .map((a) => a.scholar!.cwid);
+    if (isPublicationDark(suppressions, pub.pmid, confirmedWcmCwids)) continue;
     rows.push({
       pmid: pub.pmid,
       title: plainTitleForCsv(pub.title),
