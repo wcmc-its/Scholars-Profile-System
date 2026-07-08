@@ -1248,7 +1248,7 @@ export class AppStack extends Stack {
         // (#clinical-trials). Dark on prod; staging-on for soak. The profile
         // payload returns [] when off, so this is safe to leave off even after
         // the etl:clinical-trials backfill lands.
-        CLINICAL_TRIALS_SECTION: env === "staging" ? "on" : "off",
+        CLINICAL_TRIALS_SECTION: "on", // Prod flipped 2026-07-07 (presence-gated, hidden when empty).
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
@@ -1499,7 +1499,7 @@ export class AppStack extends Stack {
         // exact the moment the flag flips. App-only; gated additionally on
         // `?searchMode=mesh-only` so a stale URL is inert when off.
         // STAGING-FIRST: on for staging, off for prod (separate gated flip).
-        SEARCH_PUB_MESH_ONLY_FILTER: env === "staging" ? "on" : "off",
+        SEARCH_PUB_MESH_ONLY_FILTER: "on", // Prod flipped 2026-07-07 (no reindex; opt-in ?searchMode=mesh-only).
         // Pub-tab perf -- split the facet aggregation off the hit-list request
         // (resolvePubFacetSplit): hits (Request A) + cached/time-capped facets
         // (Request B) in parallel, so paginating/re-sorting a query reuses the
@@ -1587,14 +1587,14 @@ export class AppStack extends Stack {
         // When on, a topic query that resolves to a Research Area lifts scholars by their
         // relevance×coverage ranking in that area (reorder-only, no reindex).
         // resolveSearchPeopleAreaBoost reads === "on". Staging-first.
-        SEARCH_PEOPLE_AREA_BOOST: env === "staging" ? "on" : "off",
+        SEARCH_PEOPLE_AREA_BOOST: "on", // Prod flipped 2026-07-07 (reorder-only, no reindex).
         // #1344 -- multi-word topic phrase boost. When on, a topic People query adds
         //   match_phrase should-clauses over publicationTitles (slop 8) + areasOfInterest
         //   (slop 4) so a multi-word specialty ("pediatric congenital heart surgery") is
         //   not diluted by the min_should_match over-broadening. resolvePeopleTopicPhraseBoost
         //   reads === "on"; flag-OFF => empty spread => body byte-identical (never admits,
         //   no msm on the bool). Query-time, no reindex. Staging-first for the #1344 A/B.
-        SEARCH_PEOPLE_PHRASE_BOOST: env === "staging" ? "on" : "off",
+        SEARCH_PEOPLE_PHRASE_BOOST: "on", // Prod flipped 2026-07-07 (#1344; query-time; +0.022 validated).
         // #1347 -- division-shape routing. When on, a bare clinical-division-name People
         //   query (Cardiology) routes to the department template AND is scoped to that
         //   division's roster (deptDivKey filter), instead of falling to topic_template.
@@ -1643,7 +1643,7 @@ export class AppStack extends Stack {
         // today (the body is awaited before the shell, exactly as now). No data
         // prereq; flip is env-only via cdk deploy Sps-App-<env> (CD re-rolls the
         // image only) -- the flag-parity rule.
-        SEARCH_SHELL_STREAMING: env === "staging" ? "on" : "off",
+        SEARCH_SHELL_STREAMING: "on", // Prod flipped 2026-07-07 (#861; no data prereq).
         // #878 -- MeSH-concept rows in the autocomplete dropdown. Reuses the
         // results-page MeSH resolver (getMeshMap().byForm: descriptor names + NLM
         // entry terms + #642 aliases) so the dropdown surfaces a "Flow Cytometry
@@ -1714,7 +1714,7 @@ export class AppStack extends Stack {
         //   lay-term wins additionally need the #1258 alias rows). Resolve-time only: no
         //   reindex. STAGING ON to soak; PROD OFF pending eval. Flip env-only via cdk
         //   deploy Sps-App-<env> (CD re-rolls the image only) -- the flag-parity rule.
-        SEARCH_MESH_QUERY_NORMALIZATION: env === "staging" ? "on" : "off",
+        SEARCH_MESH_QUERY_NORMALIZATION: "on", // Prod flipped 2026-07-07 (resolve-time, no reindex).
         // #1346 -- acronym wrong-sense guard. When ON, resolveMeshDescriptor suppresses a
         //   short all-caps acronym (CAR/PET) that resolved ONLY via a common-word entry-
         //   term synonym whose matched form is a plain Title-case word (CAR -> "Car" ->
@@ -1722,7 +1722,7 @@ export class AppStack extends Stack {
         //   search; it drops to BM25. Internal-caps acronyms (COPD/EHR) and exact NAME
         //   matches (DNA/RNA) are kept. Resolve-time only: no reindex. STAGING ON; PROD
         //   OFF pending eval. Flip env-only via cdk deploy Sps-App-<env> (flag-parity).
-        SEARCH_ACRONYM_SENSE_GUARD: env === "staging" ? "on" : "off",
+        SEARCH_ACRONYM_SENSE_GUARD: "on", // Prod flipped 2026-07-07 (#1346; resolve-time, no reindex).
         // #1026 -- surface soft-deleted doctoral-student co-authors as NON-LINKED
         // chips (name + headshot, no profile link, never faceted/searchable) on
         // publication chip surfaces site-wide (search, topic feeds, methods pages,
@@ -1734,7 +1734,7 @@ export class AppStack extends Stack {
         // hydration matches no one new). STAGING-FIRST: on in staging to soak pending
         // the WCGS sign-off (docs/outreach/wave3-doctoral-students.md Q2); prod stays
         // off until then. Env-only flip via `cdk deploy --exclusively Sps-App-<env>`.
-        COAUTHOR_HIDDEN_STUDENT_CHIPS: env === "staging" ? "on" : "off",
+        COAUTHOR_HIDDEN_STUDENT_CHIPS: "on", // Prod flipped 2026-07-07 (#1026 FERPA non-linked chips; operator-approved).
         // #637 "View as" impersonation -- the global feature gate. The code
         // checks `=== "true"` exactly (lib/auth/effective-identity.ts,
         // middleware.ts, the /api/impersonation* routes, the /api/auth/session
@@ -1963,7 +1963,7 @@ export class AppStack extends Stack {
         // needs (`opportunity_submission`) rides audit-log.sql's idempotent
         // MODIFY COLUMN block via the sps-db-bootstrap task, so any deploy at
         // or after that commit has already applied it -- no manual DDL step.
-        OPPORTUNITY_URL_INTAKE: env === "staging" ? "on" : "off",
+        OPPORTUNITY_URL_INTAKE: "on", // Prod flipped 2026-07-07 (enum rides db-bootstrap; IAM rides deploy).
         // Scholar-profile facet-filter redesign (PR-2). A BIG visual change to
         // the Topics/Methods facets + a unified filter bar, fully gated. ON in
         // staging to soak the real-data behavior (method rows + cross-facet
@@ -1971,7 +1971,7 @@ export class AppStack extends Stack {
         // rendered output is byte-identical to today. Applying a change here
         // needs cdk deploy Sps-App-<env> (CD only re-rolls the image) — the
         // flag-parity rule.
-        PROFILE_FACET_REDESIGN: env === "staging" ? "on" : "off",
+        PROFILE_FACET_REDESIGN: "on", // Prod flipped 2026-07-07 (facet redesign go-live).
         // #847 -- internal "download the leading scholars" CSV export. When
         // "on", the POST /api/export/scholars/{scope} endpoint accepts
         // authenticated requests and the download button renders; method scopes
@@ -2000,9 +2000,9 @@ export class AppStack extends Stack {
         //     authoritative WCM/Qatar/NYP ranges from #876, sourced together with
         //     EdgeStack edgeAllowedCidrs (#461). Prod EMPTY (network half matches
         //     nobody -- default-safe).
-        INTERNAL_VIEWER_NETWORK_SIGNAL: env === "staging" ? "on" : "off",
-        SCHOLAR_LIST_EXPORT_EMAIL: env === "staging" ? "on" : "off",
-        INTERNAL_VIEWER_CIDRS: env === "staging" ? "157.139.83.164/32" : "",
+        INTERNAL_VIEWER_NETWORK_SIGNAL: "on", // Prod flipped 2026-07-07 (paired w/ prod CIDRs below; IP signal spoofable — accepted).
+        SCHOLAR_LIST_EXPORT_EMAIL: "on", // Prod flipped 2026-07-07 (adds email col to internal roster CSV; operator-approved).
+        INTERNAL_VIEWER_CIDRS: env === "staging" ? "157.139.83.164/32" : "140.251.0.0/16,157.139.0.0/16",
         // PROFILE_EMAIL_RELEASE_GATE -- when "on", the Web Directory
         // `weillCornellEduReleaseCode;mail` audience (email_visibility) is
         // respected across both profile-email DISPLAY (table A) and the #847
