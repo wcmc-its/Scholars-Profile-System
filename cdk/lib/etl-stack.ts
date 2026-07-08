@@ -700,6 +700,16 @@ export class EtlStack extends Stack {
       // task role is granted PutObject on exactly this bucket above; the
       // script defaults the key prefix to "sps-curation-backups".
       CURATION_BACKUP_BUCKET: curationBackupBucket.bucketName,
+      // #728 — write gate for the ED delegated-admin importer (etl:ed:admins,
+      // the EdAdmins nightly step). "on" enables per-unit UnitAdmin `curator`
+      // upserts + reconcile; anything else keeps the job in dry-run (no writes,
+      // no deletes). Read only by etl/ed-admins/index.ts, which runs on the
+      // LDAP task def — every task def shares baseEnvironment, but only that
+      // step consumes it. Enabled unconditionally in BOTH envs (a live dry-run
+      // resolved ~618 grants with the #1576 active-member guard working). The
+      // app-stack copy (app-stack.ts, "off") is documentation-only — no app
+      // runtime code reads it — and is deliberately left untouched here.
+      SELF_EDIT_ED_ADMINS_IMPORT: "on",
     };
     const etlContainer = this.etlTaskDefinition.addContainer("etl", {
       image: containerImage,
@@ -815,6 +825,11 @@ export class EtlStack extends Stack {
     // everything not listed runs on the base def (base secrets only).
     const LDAP_SCRIPTS = new Set([
       "etl:ed",
+      // #728 — the ED delegated-admin importer reads the same Web Directory
+      // over LDAP as etl:ed (the #443 in-VPC bind), so it must route to the
+      // LDAP task def to carry SCHOLARS_LDAP_*. Runs in the nightly right
+      // after Ed (needs the Department/Division/Center rows etl:ed creates).
+      "etl:ed:admins",
       "etl:ed:export-email-visibility",
     ]);
     const SOURCES_SCRIPTS = new Set([
@@ -1052,6 +1067,15 @@ export class EtlStack extends Stack {
     // ------------------------------------------------------------------
     const nightlySteps: ReadonlyArray<StepSpec> = [
       { id: "Ed", npmScript: "etl:ed", external: true, tier: "abort" },
+      // #728 — ED delegated-admin importer. Reads Web Directory delegated-admin
+      // tags over LDAP → per-unit `curator` UnitAdmin grants (fail-closed,
+      // best-effort). external:true (needs the LDAP secret; routed to the LDAP
+      // task def via LDAP_SCRIPTS above). MUST follow Ed: it needs the
+      // Department/Division/Center rows etl:ed creates; unresolvable N-codes
+      // are skipped-and-logged. tier:"continue" — a failure warns and proceeds;
+      // it must NOT abort the nightly. Writes are enabled by
+      // SELF_EDIT_ED_ADMINS_IMPORT="on" in baseEnvironment (else dry-run).
+      { id: "EdAdmins", npmScript: "etl:ed:admins", external: true, tier: "continue" },
       { id: "Reciter", npmScript: "etl:reciter", external: true, tier: "abort" },
       // PubMed competing-interest statements — same WCM-ReciterDB path as Reciter
       // (reads reporting_conflicts), so external:true and placed right after it.

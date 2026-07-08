@@ -1387,6 +1387,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                   "Ref": "CurationBackupBucketE5A802A9",
                 },
               },
+              {
+                "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
+                "Value": "on",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -1935,6 +1939,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                   "Ref": "CurationBackupBucketE5A802A9",
                 },
               },
+              {
+                "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
+                "Value": "on",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -2425,6 +2433,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": {
                   "Ref": "CurationBackupBucketE5A802A9",
                 },
+              },
+              {
+                "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
+                "Value": "on",
               },
             ],
             "Essential": true,
@@ -3355,6 +3367,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": {
                   "Ref": "CurationBackupBucketE5A802A9",
                 },
+              },
+              {
+                "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
+                "Value": "on",
               },
             ],
             "Essential": true,
@@ -4381,7 +4397,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Infoed"}],"Next":"TaskInfoed"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CoiGap"}],"Next":"TaskCoiGap"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarNightly"}],"Next":"TaskJenzabarNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityNightly"}],"Next":"TaskIntegrityNightly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"NightlyStateMachineUnknownStartFrom"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskReciter","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"EdAdmins"}],"Next":"TaskEdAdmins"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Infoed"}],"Next":"TaskInfoed"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CoiGap"}],"Next":"TaskCoiGap"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarNightly"}],"Next":"TaskJenzabarNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityNightly"}],"Next":"TaskIntegrityNightly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"NightlyStateMachineUnknownStartFrom"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskEdAdmins","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -4389,7 +4405,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-ldap-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskReciter":{"Next":"TaskReciterCoiStatements","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciter"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-ldap-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskEdAdmins":{"Next":"TaskReciter","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEdAdmins"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -4397,7 +4413,23 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskReciterCoiStatements":{"Next":"TaskAsms","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciterCoiStatements"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-ldap-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed:admins"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskReciter":{"Next":"TaskReciterCoiStatements","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciter"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-sources-prod","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-03babbb300ddb3b95"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyEdAdmins":{"Next":"TaskReciter","Type":"Task","Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"prod","step":"EdAdmins","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL prod -- EdAdmins failed"}},"TaskReciterCoiStatements":{"Next":"TaskAsms","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciterCoiStatements"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -9101,6 +9133,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                   "Ref": "CurationBackupBucketE5A802A9",
                 },
               },
+              {
+                "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
+                "Value": "on",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -9649,6 +9685,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                   "Ref": "CurationBackupBucketE5A802A9",
                 },
               },
+              {
+                "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
+                "Value": "on",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -10139,6 +10179,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": {
                   "Ref": "CurationBackupBucketE5A802A9",
                 },
+              },
+              {
+                "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
+                "Value": "on",
               },
             ],
             "Essential": true,
@@ -11069,6 +11113,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": {
                   "Ref": "CurationBackupBucketE5A802A9",
                 },
+              },
+              {
+                "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
+                "Value": "on",
               },
             ],
             "Essential": true,
@@ -12100,7 +12148,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
           "Fn::Join": [
             "",
             [
-              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CoiGap"}],"Next":"TaskCoiGap"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarNightly"}],"Next":"TaskJenzabarNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAnchorNightly"}],"Next":"TaskMeshAnchorNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityNightly"}],"Next":"TaskIntegrityNightly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"NightlyStateMachineUnknownStartFrom"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskReciter","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              "{"StartAt":"NightlyStateMachineStartFromChoice","States":{"NightlyStateMachineStartFromChoice":{"Type":"Choice","Choices":[{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Ed"}],"Next":"TaskEd"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"EdAdmins"}],"Next":"TaskEdAdmins"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Reciter"}],"Next":"TaskReciter"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"ReciterCoiStatements"}],"Next":"TaskReciterCoiStatements"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Asms"}],"Next":"TaskAsms"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Coi"}],"Next":"TaskCoi"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"CoiGap"}],"Next":"TaskCoiGap"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"JenzabarNightly"}],"Next":"TaskJenzabarNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Dynamodb"}],"Next":"TaskDynamodb"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Identity"}],"Next":"TaskIdentity"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"Tools"}],"Next":"TaskTools"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshCoverageNightly"}],"Next":"TaskMeshCoverageNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"MeshAnchorNightly"}],"Next":"TaskMeshAnchorNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"PubMedRetractions"}],"Next":"TaskPubMedRetractions"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"SearchIndexNightly"}],"Next":"TaskSearchIndexNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"RevalidateNightly"}],"Next":"TaskRevalidateNightly"},{"And":[{"Variable":"$.startFrom","IsPresent":true},{"Variable":"$.startFrom","StringEquals":"IntegrityNightly"}],"Next":"TaskIntegrityNightly"},{"Variable":"$.startFrom","IsPresent":true,"Next":"NightlyStateMachineUnknownStartFrom"}],"Default":"TaskEd"},"TaskEd":{"Next":"TaskEdAdmins","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEd"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -12108,7 +12156,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-ldap-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskReciter":{"Next":"TaskReciterCoiStatements","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciter"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-ldap-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskEdAdmins":{"Next":"TaskReciter","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyEdAdmins"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
@@ -12116,7 +12164,23 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
               },
-              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskReciterCoiStatements":{"Next":"TaskAsms","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciterCoiStatements"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              "","TaskDefinition":"sps-etl-ldap-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:ed:admins"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"TaskReciter":{"Next":"TaskReciterCoiStatements","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciter"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::ecs:runTask.sync","Parameters":{"Cluster":"",
+              {
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsCluster97242B84ArnEAEDD48A",
+              },
+              "","TaskDefinition":"sps-etl-sources-staging","NetworkConfiguration":{"AwsvpcConfiguration":{"Subnets":["subnet-0c6593fb9c9a165c3","subnet-070cbc242efbddc3c"],"SecurityGroups":["sg-016b62e11314e7050"]}},"Overrides":{"ContainerOverrides":[{"Name":"etl","Command":["npm","run","etl:reciter"]}]},"LaunchType":"FARGATE","PlatformVersion":"LATEST"}},"NotifyEdAdmins":{"Next":"TaskReciter","Type":"Task","Resource":"arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":states:::sns:publish","Parameters":{"TopicArn":"",
+              {
+                "Ref": "EtlFailureTopic8361D0D0",
+              },
+              "","Message":{"env":"staging","step":"EdAdmins","stateMachine.$":"$$.StateMachine.Name","execution.$":"$$.Execution.Name","error.$":"$.error"},"Subject":"SPS ETL staging -- EdAdmins failed"}},"TaskReciterCoiStatements":{"Next":"TaskAsms","Retry":[{"ErrorEquals":["States.TaskFailed","States.Timeout"],"IntervalSeconds":30,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"NotifyReciterCoiStatements"}],"Type":"Task","TimeoutSeconds":14400,"Resource":"arn:",
               {
                 "Ref": "AWS::Partition",
               },
