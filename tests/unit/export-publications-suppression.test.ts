@@ -124,3 +124,37 @@ describe("export-publications — authorship export honors per-author suppressio
     expect(rows).toHaveLength(0);
   });
 });
+
+describe("export-publications — article export honors whole-publication takedowns", () => {
+  it("emits one article row when no suppression is active (control)", async () => {
+    (await suppressionMock()).mockResolvedValue([]);
+
+    const { fetchArticleRows } = await import("@/lib/api/export-publications");
+    const rows = await fetchArticleRows({ q: "" });
+
+    expect(rows.map((r) => r.pmid)).toEqual([PMID]);
+  });
+
+  it("omits the article row for a whole-publication takedown (contributorCwid null)", async () => {
+    (await suppressionMock()).mockResolvedValue([
+      { entityId: PMID, contributorCwid: null },
+    ] as never);
+
+    const { fetchArticleRows } = await import("@/lib/api/export-publications");
+    const rows = await fetchArticleRows({ q: "" });
+
+    expect(rows).toHaveLength(0);
+  });
+
+  it("omits a derived-dark article row (every confirmed WCM author hidden)", async () => {
+    (await suppressionMock()).mockResolvedValue([
+      { entityId: PMID, contributorCwid: VISIBLE_CWID },
+      { entityId: PMID, contributorCwid: HIDDEN_CWID },
+    ] as never);
+
+    const { fetchArticleRows } = await import("@/lib/api/export-publications");
+    const rows = await fetchArticleRows({ q: "" });
+
+    expect(rows).toHaveLength(0);
+  });
+});
