@@ -36,6 +36,7 @@ import { db } from "../../lib/db";
 import {
   ED_ADMIN_SOURCE,
   ED_ADMIN_TAGS,
+  fetchActiveMembersByCwid,
   fetchOrgUnitAdmins,
   openLdap,
   type EdOrgUnitAdmins,
@@ -64,6 +65,48 @@ export type EdAdminGrant = {
  *  N-code, or a CWID — so the key is collision-free. */
 export function grantKey(entityType: string, entityId: string, cwid: string): string {
   return `${entityType}|${entityId}|${cwid}`;
+}
+
+/** Pure: every unique lowercased CWID tagged as an admin across all fetched
+ *  units + tags. Feeds the one-shot active-member lookup. */
+export function collectTaggedCwids(units: EdOrgUnitAdmins[]): string[] {
+  const set = new Set<string>();
+  for (const u of units) {
+    for (const tag of ED_ADMIN_TAGS) {
+      for (const cwid of u.byTag[tag]) set.add(cwid.toLowerCase());
+    }
+  }
+  return Array.from(set);
+}
+
+/**
+ * Pure: drop every tagged CWID whose ED person is not an active member
+ * (`activeByCwid.get(cwid) !== true`). Returns units with filtered `byTag`
+ * arrays plus the count of dropped (unit, tag, cwid) tuples.
+ *
+ * ED never removes an admin tag when a person expires, so an inactive tagged
+ * CWID is a stale grant. Filtering it out of `byTag` HERE means it never enters
+ * `buildEdAdminGrants` — so it is neither upserted nor added to any source's
+ * `seen` set, and the per-source reconcile deletes its existing `UnitAdmin` row
+ * on this run (self-healing revocation, no manual SQL).
+ */
+export function filterUnitsByActiveMembers(
+  units: EdOrgUnitAdmins[],
+  activeByCwid: Map<string, boolean>,
+): { units: EdOrgUnitAdmins[]; droppedInactive: number } {
+  let droppedInactive = 0;
+  const filtered = units.map((u) => {
+    const byTag = {} as Record<(typeof ED_ADMIN_TAGS)[number], string[]>;
+    for (const tag of ED_ADMIN_TAGS) {
+      byTag[tag] = u.byTag[tag].filter((cwid) => {
+        const active = activeByCwid.get(cwid.toLowerCase()) === true;
+        if (!active) droppedInactive++;
+        return active;
+      });
+    }
+    return { ...u, byTag };
+  });
+  return { units: filtered, droppedInactive };
 }
 
 /**
@@ -169,9 +212,27 @@ async function main(): Promise<void> {
     const units = await fetchOrgUnitAdmins(client);
     console.log(`[ed-admins] ${units.length} org-unit entries carry an imported admin tag.`);
 
+    // Active-member guard: ED does NOT drop an admin tag when a person expires,
+    // so a tagged CWID whose `weillCornellEduActiveMember` is not TRUE is a stale
+    // grant. Filter those out BEFORE grants/seen are built — they never upsert and
+    // never enter any source's `seen` set, so the per-source reconcile below
+    // deletes their existing UnitAdmin rows this run (no manual SQL). The
+    // empty-source guard still protects against a total-fetch failure; this filter
+    // only ever removes a strict subset of one source's members.
+    const taggedCwids = collectTaggedCwids(units);
+    const activeByCwid = await fetchActiveMembersByCwid(client, taggedCwids);
+    const { units: activeUnits, droppedInactive } = filterUnitsByActiveMembers(
+      units,
+      activeByCwid,
+    );
+    console.log(
+      `[ed-admins] active-member guard: ${taggedCwids.length} distinct tagged CWID(s), ` +
+        `dropped ${droppedInactive} inactive tagged grant(s) (weillCornellEduActiveMember != TRUE).`,
+    );
+
     const resolver = await loadUnitResolver();
     const { grants, seenBySource, skippedNoUnit, unmatchedCodes } = buildEdAdminGrants(
-      units,
+      activeUnits,
       resolver,
     );
 
