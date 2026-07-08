@@ -18,15 +18,20 @@
 "use client";
 
 import * as React from "react";
-import { Check, Copy, Download } from "lucide-react";
+import { Check, Copy, Download, TriangleAlert } from "lucide-react";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   biosketchCharCap,
   type BiosketchEntry,
   type BiosketchMode,
 } from "@/lib/edit/biosketch-params";
-import type { BiosketchProduct, BiosketchProducts } from "@/lib/edit/biosketch-products";
+import type {
+  BiosketchProduct,
+  BiosketchProducts,
+  SuggestedPub,
+} from "@/lib/edit/biosketch-products";
 import type { BiosketchContributionSources } from "@/lib/edit/biosketch-sources";
 import { cn } from "@/lib/utils";
 
@@ -51,9 +56,32 @@ export type BiosketchGenerateResult = {
   generationId: string | null;
 };
 
-/** Format a product as a single export/display line: "title · venue · year". */
-function productLine(p: BiosketchProduct): string {
+/** Format a product / suggested pub as a single export/display line: "title · venue · year".
+ *  Takes only the shared identity fields so both `BiosketchProduct` and `SuggestedPub` (#1569)
+ *  can reuse it. */
+function productLine(p: { title: string; venue: string | null; year: number | null }): string {
   return [p.title, p.venue, p.year != null ? String(p.year) : null].filter(Boolean).join(" · ");
+}
+
+/**
+ * #1569 — the prominent AI-content warning. NIH increasingly scrutinizes AI-generated grant
+ * content, and this narrative is a first draft the model wrote, NOT the scholar's own voice.
+ * A destructive Alert (unmissable) shown at the top of the result card — directly above the
+ * Copy / Download actions — and near the generate action in the tool. Kept GENERIC about NIH;
+ * it names no model or provider. Callers pass `className` to tune spacing per placement.
+ */
+export function BiosketchAiWarning({ className }: { className?: string }) {
+  return (
+    <Alert variant="destructive" className={className} data-testid="biosketch-ai-warning">
+      <TriangleAlert className="size-4" aria-hidden="true" />
+      <AlertTitle>Rewrite this in your own voice before submitting to NIH.</AlertTitle>
+      <AlertDescription>
+        This is an AI-drafted starting point, not your own words. NIH scrutinizes AI-generated
+        content in grant applications — review and rewrite every line in your own voice, and verify
+        every claim against your work, before you copy it into a submission.
+      </AlertDescription>
+    </Alert>
+  );
 }
 
 export function BiosketchResultCard({ result }: { result: BiosketchGenerateResult }) {
@@ -107,6 +135,11 @@ export function BiosketchResultCard({ result }: { result: BiosketchGenerateResul
       data-slot="biosketch-result-card"
       data-testid="biosketch-result"
     >
+      {/* #1569 — the AI-content warning sits at the TOP of the card, directly above the
+          Download-all action and every per-entry Copy button, so it can't be missed before
+          the content leaves for a submission. */}
+      <BiosketchAiWarning />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-0.5">
           <h2 className="text-foreground text-base font-semibold">
@@ -380,5 +413,62 @@ function BiosketchEntryItem({
         </p>
       )}
     </li>
+  );
+}
+
+/** The muted secondary line for a suggested pub: "Impact: NN · Matched: term1, term2". Each
+ *  piece is dropped when absent, so a pub with neither renders no second line. */
+function suggestedPubMeta(p: SuggestedPub): string {
+  return [
+    typeof p.impact === "number" ? `Impact: ${Math.round(p.impact)}` : null,
+    p.matchedTerms.length > 0 ? `Matched: ${p.matchedTerms.join(", ")}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
+ * #1569 — the DETERMINISTIC "suggest pubs from your own statement" result: the scholar's own
+ * indexed publications ranked by token overlap with the free text they wrote, rendered in the
+ * Products card layout. There is deliberately NO AI-content warning here — nothing was
+ * AI-drafted; the statement is the user's own words and every pmid is grounded in their record.
+ */
+export function BiosketchSuggestedPubsCard({ pubs }: { pubs: SuggestedPub[] }) {
+  return (
+    <div
+      className="border-apollo-border bg-apollo-surface flex flex-col gap-4 rounded-lg border p-4"
+      data-slot="biosketch-suggested-pubs-card"
+      data-testid="biosketch-suggested-pubs"
+    >
+      <div className="flex flex-col gap-0.5">
+        <h2 className="text-foreground text-base font-semibold">Suggested publications</h2>
+        <p className="text-muted-foreground text-xs">
+          Your indexed publications ranked by overlap with your statement. Grounded from your
+          Scholars record — nothing here was AI-generated.
+        </p>
+      </div>
+      {pubs.length === 0 ? (
+        <p className="text-muted-foreground text-sm" data-testid="biosketch-suggested-pubs-empty">
+          No publications overlapped your statement. Try adding more specific themes, methods, or
+          topics from your work.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-2.5">
+          {pubs.map((p) => {
+            const meta = suggestedPubMeta(p);
+            return (
+              <li
+                key={p.pmid}
+                className="text-sm"
+                data-testid={`biosketch-suggested-pub-${p.pmid}`}
+              >
+                <span className="text-foreground">{productLine(p)}</span>
+                {meta && <span className="text-muted-foreground block text-xs">{meta}</span>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
