@@ -110,6 +110,7 @@ model Scholar {
 
   appointments         Appointment[]
   educations           Education[]
+  profileAppointments  ProfileAppointment[]
   grants               Grant[]
   authorships          PublicationAuthor[]
   topicAssignments     TopicAssignment[]
@@ -167,6 +168,42 @@ model Appointment {
   @@index([cwid])
   @@index([cwid, isPrimary, endDate])
   @@map("appointment")
+}
+
+/// Self-asserted appointments a scholar (or a curator on their behalf) enters on
+/// `/edit` (#1568) — internal WCM roles the ED feed omits (Program Director,
+/// Head of Section) and current/historical positions at OTHER institutions. A
+/// SEPARATE store from `appointment` by design: the ED/Jenzabar ETL never
+/// touches this table (structurally wipe-safe), and it is PROFILE-ONLY by
+/// construction — the center/department/division/search serializers never read
+/// it, so a self-asserted row can never surface on a third-party or aggregate
+/// page (no per-row `source` guard to forget). `category` alone is controlled;
+/// `title`/`organization` are free text. `source` = SELF | CURATOR (who entered).
+model ProfileAppointment {
+  id            String                     @id @default(uuid()) @db.VarChar(64)
+  cwid          String                     @db.VarChar(32)
+  scholar       Scholar                    @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  category      ProfileAppointmentCategory
+  title         String                     @db.VarChar(255) // free text: "Program Director", "Assistant Professor"
+  organization  String                     @db.VarChar(255) // "Weill Cornell Medicine" or an external institution
+  unit          String?                    @db.VarChar(255) // optional scope: WCM section/division/program, or external dept
+  location      String?                    @db.VarChar(255) // optional city/country (mainly EXTERNAL)
+  startDate     DateTime?                  @map("start_date") @db.Date
+  endDate       DateTime?                  @map("end_date") @db.Date // NULL = current
+  sortOrder     Int                        @default(0) @map("sort_order")
+  showOnProfile Boolean                    @default(true) @map("show_on_profile")
+  source        String                     @default("SELF") @db.VarChar(16) // SELF | CURATOR (who entered it)
+  enteredByCwid String                     @map("entered_by_cwid") @db.VarChar(32)
+  createdAt     DateTime                   @default(now()) @map("created_at")
+  updatedAt     DateTime                   @updatedAt @map("updated_at")
+
+  @@index([cwid, showOnProfile, sortOrder])
+  @@map("profile_appointment")
+}
+
+enum ProfileAppointmentCategory {
+  WCM_LEADERSHIP // internal WCM role not carried by ED (Program Director, Head of Section, ...)
+  EXTERNAL // appointment at another institution (prior or current — dates say which)
 }
 
 /// Education and training entries from ASMS.
