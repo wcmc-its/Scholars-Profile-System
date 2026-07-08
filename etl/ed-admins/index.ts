@@ -4,14 +4,18 @@
  * Imports four WCM Enterprise Directory delegated-admin populations — option-tagged
  * `weillCornellEduCWID;{da,diva,iamdela,diva-iamdela}` on the org-unit entries under
  * `ou=orgunits,ou=Groups` (see `fetchOrgUnitAdmins` in lib/sources/ldap.ts) — and
- * provisions each member as a per-unit `curator` `UnitAdmin` grant LOCKED to the org
- * unit they administer. The org unit is the entry's canonical N-code (`cn`), resolved
- * to a Scholars `Department`/`Division`/`Center` row; codes with no Scholars row
- * (the deep level-3–6 divisions the model doesn't carry) are skipped-and-logged (D4).
+ * provisions each member as a per-unit `UnitAdmin` grant LOCKED to the org unit they
+ * administer. Role is per population (`ED_ADMIN_ROLE`): DA and DivA-IAMDELA get
+ * `owner`, DivA and IAMDELA get `curator`. The org unit is the entry's canonical
+ * N-code (`cn`), resolved to a Scholars `Department`/`Division`/`Center` row; codes
+ * with no Scholars row (the deep level-3–6 divisions the model doesn't carry) are
+ * skipped-and-logged (D4).
  *
- * Locking comes entirely from the existing RBAC: `curator` can edit/proxy-edit the
- * unit but cannot grant/delegate (`canGrant` rejects any curator grant), and the row
- * names exactly one unit — so a member can never widen scope or self-escalate.
+ * Scope locking comes from the row naming exactly ONE unit: a `curator` can only
+ * edit/proxy-edit it; an `owner` may additionally grant/delegate WITHIN that unit
+ * (`canGrant`, lib/edit/authz.ts) but cannot reach a unit they don't hold — neither
+ * role can widen to another unit. Making DA/DivA-IAMDELA owners is a deliberate
+ * grant of that in-unit delegate capability.
  *
  * Idempotent: upserts on the (entityType, entityId, cwid) PK. Per-source reconcile
  * (#393 pattern) removes a member dropped from population P (their `ED:<P>` row),
@@ -34,6 +38,7 @@ import type { Client } from "ldapts";
 
 import { db } from "../../lib/db";
 import {
+  ED_ADMIN_ROLE,
   ED_ADMIN_SOURCE,
   ED_ADMIN_TAGS,
   fetchActiveMembersByCwid,
@@ -58,6 +63,7 @@ export type EdAdminGrant = {
   entityId: string;
   cwid: string;
   source: string;
+  role: "owner" | "curator";
 };
 
 /** Stable composite key for a (unit, cwid) grant. The `|` separator is printable
@@ -151,6 +157,7 @@ export function buildEdAdminGrants(
           entityId: resolved.entityId,
           cwid,
           source,
+          role: ED_ADMIN_ROLE[tag],
         });
       }
     }
@@ -165,6 +172,17 @@ export function selectStaleRows<T extends { entityType: string; entityId: string
   seen: Set<string>,
 ): T[] {
   return rows.filter((r) => !seen.has(grantKey(r.entityType, r.entityId, r.cwid)));
+}
+
+/** MUST-9 (OQ-6): a deliberate manual `owner` on a key is never overwritten — the
+ *  ED grant for that same (entityType, entityId, cwid) is skipped entirely, whatever
+ *  role ED would write (owner OR curator). `manualOwnerKeys` are the grantKey()s of
+ *  the `source='manual' role='owner'` rows. */
+export function isManualOwnerProtected(
+  g: Pick<EdAdminGrant, "entityType" | "entityId" | "cwid">,
+  manualOwnerKeys: ReadonlySet<string>,
+): boolean {
+  return manualOwnerKeys.has(grantKey(g.entityType, g.entityId, g.cwid));
 }
 
 /**
@@ -267,7 +285,7 @@ async function main(): Promise<void> {
     let upserts = 0;
     let skippedManualOwner = 0;
     for (const g of grants.values()) {
-      if (manualOwnerKeys.has(grantKey(g.entityType, g.entityId, g.cwid))) {
+      if (isManualOwnerProtected(g, manualOwnerKeys)) {
         skippedManualOwner++;
         continue;
       }
@@ -283,11 +301,11 @@ async function main(): Promise<void> {
           entityType: g.entityType,
           entityId: g.entityId,
           cwid: g.cwid,
-          role: "curator",
+          role: g.role,
           grantedBy: GRANTED_BY,
           source: g.source,
         },
-        update: { role: "curator", grantedBy: GRANTED_BY, source: g.source },
+        update: { role: g.role, grantedBy: GRANTED_BY, source: g.source },
       });
       upserts++;
     }

@@ -1302,6 +1302,16 @@ export const ED_ADMIN_SOURCE: Record<EdAdminTag, string> = {
   "diva-iamdela": "ED:DivA-IAMDELA",
 };
 
+/** `UnitAdmin.role` granted per population. DA and DivA-IAMDELA administer their
+ *  unit as `owner` (may grant/delegate WITHIN their one locked unit); DivA and
+ *  IAMDELA are `curator` (edit/proxy only, cannot grant). */
+export const ED_ADMIN_ROLE: Record<EdAdminTag, "owner" | "curator"> = {
+  da: "owner",
+  diva: "curator",
+  iamdela: "curator",
+  "diva-iamdela": "owner",
+};
+
 const DEFAULT_ORGUNITS_BASE = "ou=orgunits,ou=Groups,dc=weill,dc=cornell,dc=edu";
 
 /** One org-unit entry's admin assignments. `code` is the canonical N-code (`cn`). */
