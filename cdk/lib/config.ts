@@ -51,6 +51,19 @@ export interface SpsEnvConfig {
   readonly opensearchDataNodes: number;
   /** OpenSearch data-node instance type. */
   readonly opensearchDataNodeInstanceType: string;
+  /**
+   * Number of dedicated OpenSearch master nodes; 0 = none (#1509). Prod runs 3
+   * so cluster coordination moves off the data path and survives losing one
+   * data node/AZ (quorum 2-of-3) instead of the current 2-data-node domain's
+   * 2-of-2 vote, where either node's loss takes search fully down. Other envs
+   * run 0 — a single/low-traffic domain gains nothing from dedicated masters.
+   * NB: the VPC has two AZs, so three masters distribute 2+1 across those two
+   * AZs; full 3-AZ master placement would need NetworkStack at three AZs (same
+   * out-of-scope caveat as the data-node count above).
+   */
+  readonly opensearchMasterNodes: number;
+  /** Dedicated master instance type; ignored when opensearchMasterNodes is 0. */
+  readonly opensearchMasterNodeInstanceType: string;
 
   // --- AWS Backup (B10) ---
 
@@ -544,6 +557,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // (4 GB, ~2 GB heap, more burst credits) gives the rebuild headroom, paired
     // with the paced bulk writer (#627). Still single-node — staging is low-traffic.
     opensearchDataNodeInstanceType: "t3.medium.search",
+    // Single-node staging domain — no dedicated masters (#1509 is a prod HA fix).
+    opensearchMasterNodes: 0,
+    opensearchMasterNodeInstanceType: "m6g.large.search",
     awsBackupRetentionDays: 14,
     appDesiredCount: 1,
     // #596 — staging is low-traffic (internal QA + VPN circulation); a small
@@ -690,6 +706,13 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     auroraBackupRetentionDays: 14,
     opensearchDataNodes: 2,
     opensearchDataNodeInstanceType: "m6g.large.search",
+    // #1509 — 3 dedicated masters so a single data-node/AZ loss degrades search
+    // to yellow (quorum holds) instead of red. Blocks the #731 RI purchase until
+    // the topology settles. Stateful blue/green: deploy in a low-traffic window,
+    // and verify every index has number_of_replicas >= 1 FIRST (else a data-node
+    // loss goes red anyway).
+    opensearchMasterNodes: 3,
+    opensearchMasterNodeInstanceType: "m6g.large.search",
     awsBackupRetentionDays: 35,
     appDesiredCount: 2,
     // #596 — 3x the 2-task floor gives room to absorb a Wave-4 (WCM-wide,
