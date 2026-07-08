@@ -408,7 +408,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "CLINICAL_TRIALS_SECTION",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
@@ -528,7 +528,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PUB_MESH_ONLY_FILTER",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PUB_FACET_SPLIT",
@@ -572,11 +572,11 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_AREA_BOOST",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PEOPLE_PHRASE_BOOST",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PEOPLE_DIVISION_SHAPE",
@@ -604,7 +604,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_SHELL_STREAMING",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_SUGGEST_MESH_CONCEPT",
@@ -624,15 +624,15 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_MESH_QUERY_NORMALIZATION",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_ACRONYM_SENSE_GUARD",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "COAUTHOR_HIDDEN_STUDENT_CHIPS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "IMPERSONATION_ENABLED",
@@ -712,11 +712,11 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "OPPORTUNITY_URL_INTAKE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "PROFILE_FACET_REDESIGN",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLAR_LIST_EXPORT",
@@ -724,15 +724,15 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "INTERNAL_VIEWER_NETWORK_SIGNAL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLAR_LIST_EXPORT_EMAIL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "INTERNAL_VIEWER_CIDRS",
-                "Value": "",
+                "Value": "140.251.0.0/16,157.139.0.0/16",
               },
               {
                 "Name": "PROFILE_EMAIL_RELEASE_GATE",
