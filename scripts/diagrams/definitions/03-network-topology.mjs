@@ -10,8 +10,7 @@
  * because this repo is public. A fuller internal version with the concrete CIDRs
  * is available on request. Keep specific ranges OUT of this file — same norm as
  * the #461 campus allowlist (SSM, not source).
- * Source: cdk/lib/network-stack.ts, cdk/lib/config.ts, docs/sps-vpc-consolidation-plan.md,
- * docs/network-security-topology.md.
+ * Source: cdk/lib/network-stack.ts, cdk/lib/config.ts, docs/network-security-topology.md.
  */
 import { A } from "../lib.mjs";
 
@@ -28,7 +27,7 @@ const nodes = {
   aur:    { x: 410, y: 402, w: 210, h: 58, kind: "data", title: "Aurora MySQL", sub: ["SG: aurora"] },
   os:     { x: 410, y: 490, w: 210, h: 58, kind: "data", title: "OpenSearch", sub: ["SG: opensearch · private ENI"] },
   vpce:   { x: 410, y: 578, w: 300, h: 80, kind: "aws", title: "VPC endpoints", sub: ["Secrets Mgr · :443 (from app, etl)", "S3 gateway · ECR layers"] },
-  // Settled direction (docs/sps-vpc-consolidation-plan.md, 2026-06-30 "full
+  // Settled direction (docs/network-security-topology.md; 2026-06-30 "full
   // consolidation, no peering" decision): the two per-env Sps VPCs are replaced
   // by ONE shared, TGW-attached its-reciter-vpc01 that hosts the whole estate
   // (App + Data + ETL, both envs). Env isolation is by per-env security groups in
@@ -109,7 +108,7 @@ export const meta = {
           <li>Edge front door = <b>NetScaler</b> (CloudFront + WAF → NetScaler → ALB → Fargate; View ④),
             inserted as a follow-on decoupled from this move.</li>
           <li>Cutover is <b>flag-gated and reversible</b> (data moves by snapshot-restore into a fresh
-            cluster alongside the live one) — pending. Plan: <code>docs/sps-vpc-consolidation-plan.md</code>.</li>
+            cluster alongside the live one) — pending. See <code>docs/network-security-topology.md</code>.</li>
         </ul>
       </div>
       <div class="panel">
@@ -125,8 +124,8 @@ export const meta = {
         </table>
         <p class="foot">Env isolation by <b>per-env security groups</b>: both envs share
           one VPC, so isolation is SG-reference (SG-to-SG), not CIDR. Consolidation supersedes
-          the earlier VPC-peering design (#1229 / #1310). Plan: <code>docs/sps-vpc-consolidation-plan.md</code>.</p>
+          the earlier VPC-peering design (#1229 / #1310). See <code>docs/network-security-topology.md</code>.</p>
       </div>
     </div>`,
-  source: "cdk/lib/network-stack.ts · cdk/lib/config.ts · docs/sps-vpc-consolidation-plan.md · docs/network-security-topology.md",
+  source: "cdk/lib/network-stack.ts · cdk/lib/config.ts · docs/network-security-topology.md",
 };

@@ -126,7 +126,7 @@
           <li>Edge front door = <b>NetScaler</b> (CloudFront + WAF → NetScaler → ALB → Fargate; View ④),
             inserted as a follow-on decoupled from this move.</li>
           <li>Cutover is <b>flag-gated and reversible</b> (data moves by snapshot-restore into a fresh
-            cluster alongside the live one) — pending. Plan: <code>docs/sps-vpc-consolidation-plan.md</code>.</li>
+            cluster alongside the live one) — pending. See <code>docs/network-security-topology.md</code>.</li>
         </ul>
       </div>
       <div class="panel">
@@ -142,10 +142,10 @@
         </table>
         <p class="foot">Env isolation by <b>per-env security groups</b>: both envs share
           one VPC, so isolation is SG-reference (SG-to-SG), not CIDR. Consolidation supersedes
-          the earlier VPC-peering design (#1229 / #1310). Plan: <code>docs/sps-vpc-consolidation-plan.md</code>.</p>
+          the earlier VPC-peering design (#1229 / #1310). See <code>docs/network-security-topology.md</code>.</p>
       </div>
     </div>
-    <p class="src">Sources: <code>cdk/lib/network-stack.ts</code> · <code>cdk/lib/config.ts</code> · <code>docs/sps-vpc-consolidation-plan.md</code> · <code>docs/network-security-topology.md</code></p>
+    <p class="src">Sources: <code>cdk/lib/network-stack.ts</code> · <code>cdk/lib/config.ts</code> · <code>docs/network-security-topology.md</code></p>
   </section>
 <section class="card" id="edge-topology-fork">
     <div class="kicker">View 4 · the edge decision — resolved (#502)</div>
@@ -157,7 +157,7 @@
     
     
     
-    <p class="src">Sources: docs/cutover-item3-execution-runbook.md (§1 edge · Fabrice 2026-07-02, #1400) · <code>docs/network-security-topology.md</code> · <code>docs/waf-request-RITM0792011.md</code> · #502</p>
+    <p class="src">Sources: docs/network-security-topology.md § WAF · Fabrice 2026-07-02 (#1400) · #502</p>
   </section>
 <section class="card" id="app-internals">
     <div class="kicker">View 5 · inside the app (C4 component)</div>
