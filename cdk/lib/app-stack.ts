@@ -49,8 +49,7 @@ const ADOT_COLLECTOR_IMAGE =
  * injected from Secrets Manager (`scholars/<env>/saml/idp-cert`).
  */
 const WCM_IDP_ENTITY_ID = "https://login-proxy.weill.cornell.edu/idp";
-const WCM_IDP_SSO_URL =
-  "https://login-proxy.weill.cornell.edu/idp/profile/SAML2/Redirect/SSO";
+const WCM_IDP_SSO_URL = "https://login-proxy.weill.cornell.edu/idp/profile/SAML2/Redirect/SSO";
 /**
  * The assertion attribute carrying the bare CWID (#466). Confirmed against a
  * live WCM assertion: a `CWID` attribute resolves to the un-suffixed CWID
@@ -192,12 +191,7 @@ export class AppStack extends Stack {
     // the dmz tier, when useSharedVpc is on; else the standalone Sps VPC's
     // PRIVATE_WITH_EGRESS / PUBLIC tiers — byte-identical otherwise.
     const appSubnets = resolveTierSubnets(this, envConfig, "app", "AppSubnet");
-    const albSubnets = resolveTierSubnets(
-      this,
-      envConfig,
-      "alb",
-      "PublicAlbSubnet",
-    );
+    const albSubnets = resolveTierSubnets(this, envConfig, "alb", "PublicAlbSubnet");
 
     // ------------------------------------------------------------------
     // Secrets lookup. SecretsStack defines the full set; AppStack reads the
@@ -570,10 +564,7 @@ export class AppStack extends Stack {
           "ecr:GetDownloadUrlForLayer",
           "ecr:BatchGetImage",
         ],
-        resources: [
-          this.ecrRepository.repositoryArn,
-          this.etlEcrRepository.repositoryArn,
-        ],
+        resources: [this.ecrRepository.repositoryArn, this.etlEcrRepository.repositoryArn],
       }),
     );
     // Secrets -- exactly the four deploy ARNs (incl. the migrate DSN, which is
@@ -878,9 +869,7 @@ export class AppStack extends Stack {
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
           actions: ["dynamodb:UpdateItem"],
-          resources: [
-            `arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`,
-          ],
+          resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`],
         }),
       ],
     });
@@ -910,9 +899,7 @@ export class AppStack extends Stack {
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
           actions: ["dynamodb:PutItem", "dynamodb:Query"],
-          resources: [
-            `arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`,
-          ],
+          resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`],
           conditions: {
             "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": ["SUBMISSION"] },
           },
@@ -931,15 +918,11 @@ export class AppStack extends Stack {
     // that ingress the internal listener exists but is unreachable —
     // the documented merge-window state per the plan.
     // ------------------------------------------------------------------
-    const internalAlbSecurityGroup = new ec2.SecurityGroup(
-      this,
-      "InternalAlbSecurityGroup",
-      {
-        vpc,
-        description: `SPS internal ALB (${env}) -- intra-VPC /api/revalidate ingress.`,
-        allowAllOutbound: true,
-      },
-    );
+    const internalAlbSecurityGroup = new ec2.SecurityGroup(this, "InternalAlbSecurityGroup", {
+      vpc,
+      description: `SPS internal ALB (${env}) -- intra-VPC /api/revalidate ingress.`,
+      allowAllOutbound: true,
+    });
 
     // ------------------------------------------------------------------
     // SG ingress rules that the ALBs need to function.
@@ -1017,17 +1000,11 @@ export class AppStack extends Stack {
     // account holder pushes the bootstrap image manually, then re-runs
     // `cdk deploy` with appDesiredCount back to the env default.
     // ------------------------------------------------------------------
-    const containerImage = ecs.ContainerImage.fromEcrRepository(
-      this.ecrRepository,
-      "latest",
-    );
+    const containerImage = ecs.ContainerImage.fromEcrRepository(this.ecrRepository, "latest");
     // The ETL batch image (#454) — the only image with `tsx` + the source tree +
     // the `mariadb` client, so it is what runs the tsx-based db-bootstrap script
     // (#493). The standalone app image has none of those.
-    const etlContainerImage = ecs.ContainerImage.fromEcrRepository(
-      this.etlEcrRepository,
-      "latest",
-    );
+    const etlContainerImage = ecs.ContainerImage.fromEcrRepository(this.etlEcrRepository, "latest");
 
     // ------------------------------------------------------------------
     // App task definition.
@@ -1038,17 +1015,13 @@ export class AppStack extends Stack {
     // on the execution role at task-start time, never embedding the
     // value in the synth output.
     // ------------------------------------------------------------------
-    const appTaskDefinition = new ecs.FargateTaskDefinition(
-      this,
-      "AppTaskDefinition",
-      {
-        family: `sps-app-${env}`,
-        cpu: envConfig.appCpu,
-        memoryLimitMiB: envConfig.appMemoryMiB,
-        executionRole: taskExecutionRole,
-        taskRole,
-      },
-    );
+    const appTaskDefinition = new ecs.FargateTaskDefinition(this, "AppTaskDefinition", {
+      family: `sps-app-${env}`,
+      cpu: envConfig.appCpu,
+      memoryLimitMiB: envConfig.appMemoryMiB,
+      executionRole: taskExecutionRole,
+      taskRole,
+    });
     appTaskDefinition.addContainer("app", {
       image: containerImage,
       containerName: "app",
@@ -1056,9 +1029,7 @@ export class AppStack extends Stack {
         logGroup: appLogGroup,
         streamPrefix: "app",
       }),
-      portMappings: [
-        { containerPort: 3000, protocol: ecs.Protocol.TCP },
-      ],
+      portMappings: [{ containerPort: 3000, protocol: ecs.Protocol.TCP }],
       environment: {
         NODE_ENV: "production",
         PORT: "3000",
@@ -1090,9 +1061,14 @@ export class AppStack extends Stack {
         // topic-vector path. Per-env (on in staging, off in prod until the prod
         // corpus carries match_dsl); lib/api/match-researchers.ts also self-gates
         // on the opportunity's compiled match_dsl, so "on" is safe pre-reproject.
-        GRANT_MATCHER_SUBTOPIC_GRAIN: envConfig.grantMatcherSubtopicGrain
-          ? "on"
-          : "off",
+        GRANT_MATCHER_SUBTOPIC_GRAIN: envConfig.grantMatcherSubtopicGrain ? "on" : "off",
+        // Translational-IP re-rank: boost researchers holding CTL licensable IP,
+        // but ONLY on translational mechanisms (R41-44/U01/UH2/UH3). Dark
+        // everywhere until the scholar_technology load has soaked and the
+        // ★ column has been eyeballed on /edit/find-researchers — the row count
+        // it depends on is attached regardless of this flag, so the signal is
+        // observable before it is trusted.
+        GRANT_MATCHER_IP_SIGNAL: "off",
         // OpenSearch domain endpoint (https://...). Default: a plaintext env
         // baked from the DataStack cross-stack export. When
         // openSearchNodeFromSecret is on (consolidation cutover de-coupling,
@@ -1249,6 +1225,11 @@ export class AppStack extends Stack {
         // payload returns [] when off, so this is safe to leave off even after
         // the etl:clinical-trials backfill lands.
         CLINICAL_TRIALS_SECTION: "on", // Prod flipped 2026-07-07 (presence-gated, hidden when empty).
+        // AVAILABLE_TECHNOLOGIES_SECTION — the profile "Available technologies"
+        // section, sourced from the CTL portfolio via `npm run etl:technologies`.
+        // Staging-on for soak; prod-off until CTL signs off on the attributions.
+        // The profile payload returns [] when off, so the seed can land first.
+        AVAILABLE_TECHNOLOGIES_SECTION: env === "staging" ? "on" : "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
@@ -2002,7 +1983,8 @@ export class AppStack extends Stack {
         //     nobody -- default-safe).
         INTERNAL_VIEWER_NETWORK_SIGNAL: "on", // Prod flipped 2026-07-07 (paired w/ prod CIDRs below; IP signal spoofable — accepted).
         SCHOLAR_LIST_EXPORT_EMAIL: "on", // Prod flipped 2026-07-07 (adds email col to internal roster CSV; operator-approved).
-        INTERNAL_VIEWER_CIDRS: env === "staging" ? "157.139.83.164/32" : "140.251.0.0/16,157.139.0.0/16",
+        INTERNAL_VIEWER_CIDRS:
+          env === "staging" ? "157.139.83.164/32" : "140.251.0.0/16,157.139.0.0/16",
         // PROFILE_EMAIL_RELEASE_GATE -- when "on", the Web Directory
         // `weillCornellEduReleaseCode;mail` audience (email_visibility) is
         // respected across both profile-email DISPLAY (table A) and the #847
@@ -2114,24 +2096,14 @@ export class AppStack extends Stack {
         // secret's `node` key instead of the dropped cross-stack export above.
         ...(envConfig.openSearchNodeFromSecret
           ? {
-              OPENSEARCH_NODE: ecs.Secret.fromSecretsManager(
-                opensearchAppSecret,
-                "node",
-              ),
+              OPENSEARCH_NODE: ecs.Secret.fromSecretsManager(opensearchAppSecret, "node"),
             }
           : {}),
-        OPENSEARCH_USER: ecs.Secret.fromSecretsManager(
-          opensearchAppSecret,
-          "username",
-        ),
-        OPENSEARCH_PASS: ecs.Secret.fromSecretsManager(
-          opensearchAppSecret,
-          "password",
-        ),
+        OPENSEARCH_USER: ecs.Secret.fromSecretsManager(opensearchAppSecret, "username"),
+        OPENSEARCH_PASS: ecs.Secret.fromSecretsManager(opensearchAppSecret, "password"),
         // Read by lib/revalidate-auth.ts / app/api/revalidate as
         // SCHOLARS_REVALIDATE_TOKEN -- the env-var name is the contract. #447
-        SCHOLARS_REVALIDATE_TOKEN:
-          ecs.Secret.fromSecretsManager(revalidateTokenSecret),
+        SCHOLARS_REVALIDATE_TOKEN: ecs.Secret.fromSecretsManager(revalidateTokenSecret),
         // iron-session key read by lib/auth/config.ts getSessionConfig (#100).
         // Required by the /edit middleware gate and the SAML callback's
         // session minting; without it the callback 500s after a valid login.
@@ -2211,9 +2183,7 @@ export class AppStack extends Stack {
         // the app) and read as ${env:NEW_RELIC_LICENSE_KEY} in that config.
         // Pull from Secrets Manager via the execution role -- the ARN is in
         // consumerSecretArns above.
-        NEW_RELIC_LICENSE_KEY: ecs.Secret.fromSecretsManager(
-          newRelicLicenseKeySecret,
-        ),
+        NEW_RELIC_LICENSE_KEY: ecs.Secret.fromSecretsManager(newRelicLicenseKeySecret),
       },
     });
 
@@ -2227,17 +2197,13 @@ export class AppStack extends Stack {
     // visibly distinct from app/. Invocation lives in the (later)
     // GitHub Actions workflow; CDK ships the task family only.
     // ------------------------------------------------------------------
-    this.migrationTaskDefinition = new ecs.FargateTaskDefinition(
-      this,
-      "MigrationTaskDefinition",
-      {
-        family: `sps-migrate-${env}`,
-        cpu: envConfig.migrationTaskCpu,
-        memoryLimitMiB: envConfig.migrationTaskMemoryMiB,
-        executionRole: deployTaskExecutionRole,
-        taskRole,
-      },
-    );
+    this.migrationTaskDefinition = new ecs.FargateTaskDefinition(this, "MigrationTaskDefinition", {
+      family: `sps-migrate-${env}`,
+      cpu: envConfig.migrationTaskCpu,
+      memoryLimitMiB: envConfig.migrationTaskMemoryMiB,
+      executionRole: deployTaskExecutionRole,
+      taskRole,
+    });
     this.migrationTaskDefinition.addContainer("migrate", {
       image: containerImage,
       containerName: "migrate",
@@ -2432,11 +2398,10 @@ export class AppStack extends Stack {
     // TG names: bounded at 32 chars (asserted in app-stack.test.ts).
     // `sps-tg-pub-${env}` / `sps-tg-int-${env}` keep room for any future
     // env literal up to ~16 chars before the limit bites.
-    const publicAppTargetGroup = new elbv2.ApplicationTargetGroup(
-      this,
-      "PublicAppTargetGroup",
-      { ...tgProps, targetGroupName: sharedReplaceName(`sps-tg-pub-${env}`) },
-    );
+    const publicAppTargetGroup = new elbv2.ApplicationTargetGroup(this, "PublicAppTargetGroup", {
+      ...tgProps,
+      targetGroupName: sharedReplaceName(`sps-tg-pub-${env}`),
+    });
     const internalAppTargetGroup = new elbv2.ApplicationTargetGroup(
       this,
       "InternalAppTargetGroup",
@@ -2497,39 +2462,30 @@ export class AppStack extends Stack {
     // 403, not a forward), so it is the resource that satisfies AWS's
     // "target group must have an associated load balancer" check on the
     // public side -- see the EcsService dependency comment further down.
-    const originVerifiedRule = new elbv2.ApplicationListenerRule(
-      this,
-      "OriginVerifiedForward",
-      {
-        listener: publicListener,
-        priority: 1,
-        conditions: [
-          elbv2.ListenerCondition.httpHeader("X-Origin-Verify", [
-            originSharedSecretValue.unsafeUnwrap(),
-          ]),
-        ],
-        action: elbv2.ListenerAction.forward([publicAppTargetGroup]),
-      },
-    );
+    const originVerifiedRule = new elbv2.ApplicationListenerRule(this, "OriginVerifiedForward", {
+      listener: publicListener,
+      priority: 1,
+      conditions: [
+        elbv2.ListenerCondition.httpHeader("X-Origin-Verify", [
+          originSharedSecretValue.unsafeUnwrap(),
+        ]),
+      ],
+      action: elbv2.ListenerAction.forward([publicAppTargetGroup]),
+    });
     // #1507 -- HTTPS :443 listener alongside :80 (kept; :80 removal is a
     // follow-up) so CloudFront's origin leg can run over TLS. Same 403-default
     // + X-Origin-Verify-forward shape as :80, onto the same target group. Added
     // only once the ALB-region cert (edgeOriginCertArn) is seeded; ships dark.
     if (envConfig.edgeOriginCertArn.length > 0) {
-      const publicHttpsListener = this.publicAlb.addListener(
-        "PublicHttpsListener",
-        {
-          port: 443,
-          protocol: elbv2.ApplicationProtocol.HTTPS,
-          certificates: [
-            elbv2.ListenerCertificate.fromArn(envConfig.edgeOriginCertArn),
-          ],
-          defaultAction: elbv2.ListenerAction.fixedResponse(403, {
-            contentType: "text/plain",
-            messageBody: "Forbidden",
-          }),
-        },
-      );
+      const publicHttpsListener = this.publicAlb.addListener("PublicHttpsListener", {
+        port: 443,
+        protocol: elbv2.ApplicationProtocol.HTTPS,
+        certificates: [elbv2.ListenerCertificate.fromArn(envConfig.edgeOriginCertArn)],
+        defaultAction: elbv2.ListenerAction.fixedResponse(403, {
+          contentType: "text/plain",
+          messageBody: "Forbidden",
+        }),
+      });
       new elbv2.ApplicationListenerRule(this, "OriginVerifiedForwardHttps", {
         listener: publicHttpsListener,
         priority: 1,
@@ -2729,15 +2685,14 @@ export class AppStack extends Stack {
     // is ecr:GetAuthorizationToken, which has no resource-level ARN.
     // ------------------------------------------------------------------
     const githubOidcIssuerHost = "token.actions.githubusercontent.com";
-    const githubOidcProviderArnContext = this.node.tryGetContext(
-      "githubOidcProviderArn",
-    ) as string | undefined;
+    const githubOidcProviderArnContext = this.node.tryGetContext("githubOidcProviderArn") as
+      | string
+      | undefined;
     // staging owns/creates the account-scoped provider; every other env imports
     // it. `-c createGithubOidcProvider=true` forces creation for a fresh-account
     // bootstrap from a non-staging env.
     const ownsGithubOidcProvider =
-      env === "staging" ||
-      `${this.node.tryGetContext("createGithubOidcProvider")}` === "true";
+      env === "staging" || `${this.node.tryGetContext("createGithubOidcProvider")}` === "true";
     const githubOidcProvider = ownsGithubOidcProvider
       ? new iam.OpenIdConnectProvider(this, "GithubOidcProvider", {
           url: `https://${githubOidcIssuerHost}`,
@@ -2746,8 +2701,7 @@ export class AppStack extends Stack {
       : iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn(
           this,
           "GithubOidcProvider",
-          githubOidcProviderArnContext &&
-            githubOidcProviderArnContext.length > 0
+          githubOidcProviderArnContext && githubOidcProviderArnContext.length > 0
             ? githubOidcProviderArnContext
             : `arn:aws:iam::${this.account}:oidc-provider/${githubOidcIssuerHost}`,
         );
@@ -2797,10 +2751,7 @@ export class AppStack extends Stack {
         ],
         // Both image repos: the standalone app image and the dedicated
         // ETL batch image (#454) the deploy workflow builds + pushes.
-        resources: [
-          this.ecrRepository.repositoryArn,
-          this.etlEcrRepository.repositoryArn,
-        ],
+        resources: [this.ecrRepository.repositoryArn, this.etlEcrRepository.repositoryArn],
       }),
     );
     this.deployRole.addToPolicy(
@@ -2918,15 +2869,11 @@ export class AppStack extends Stack {
     // reaches Secrets Manager over its-reciter's NAT. SPS owns these endpoints
     // only in the standalone Sps VPC it creates.
     if (!envConfig.useSharedVpc) {
-      const vpcEndpointSecurityGroup = new ec2.SecurityGroup(
-        this,
-        "VpcEndpointSecurityGroup",
-        {
-          vpc,
-          description: `SPS VPC interface endpoints (${env}) -- HTTPS from app + ETL SGs.`,
-          allowAllOutbound: false,
-        },
-      );
+      const vpcEndpointSecurityGroup = new ec2.SecurityGroup(this, "VpcEndpointSecurityGroup", {
+        vpc,
+        description: `SPS VPC interface endpoints (${env}) -- HTTPS from app + ETL SGs.`,
+        allowAllOutbound: false,
+      });
       // Peer.securityGroupId is used instead of passing the L2 SG directly:
       // L2 `addIngressRule(peerSg, ...)` auto-mirrors the rule by adding a
       // matching egress on the peer SG. For peers in *another stack*, that
@@ -2999,8 +2946,7 @@ export class AppStack extends Stack {
     });
     new CfnOutput(this, "EcsDbBootstrapTaskFamily", {
       value: this.dbBootstrapTaskDefinition.family,
-      description:
-        "SPS one-shot scholars_audit bootstrap task family — run before migrate (#493)",
+      description: "SPS one-shot scholars_audit bootstrap task family — run before migrate (#493)",
     });
     new CfnOutput(this, "EcsVerifyGrantsTaskFamily", {
       value: this.verifyGrantsTaskDefinition.family,
@@ -3027,8 +2973,7 @@ export class AppStack extends Stack {
     new CfnOutput(this, "InternalAlbSecurityGroupId", {
       value: internalAlbSecurityGroup.securityGroupId,
       exportName: `Sps-App-${env}-InternalAlbSecurityGroupId`,
-      description:
-        "SPS internal ALB security group id (consumed by EtlStack ingress).",
+      description: "SPS internal ALB security group id (consumed by EtlStack ingress).",
     });
 
     // Item-3 pass 1 (publish; docs/cutover-item3-implementation-map-2026-06-30.md).

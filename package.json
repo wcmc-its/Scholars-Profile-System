@@ -90,6 +90,7 @@
     "etl:mesh": "tsx etl/mesh-descriptors/index.ts",
     "etl:mesh-anchors": "tsx etl/mesh-anchors/index.ts",
     "etl:mesh-aliases": "tsx etl/mesh-aliases/index.ts",
+    "etl:technologies": "tsx etl/technologies/index.ts",
     "etl:resolve-anchor-candidates": "tsx scripts/resolve-anchor-candidates.ts",
     "etl:derive-anchors-dryrun": "tsx scripts/derive-anchors-dryrun.ts",
     "etl:family-sensitivity": "tsx etl/family-sensitivity/index.ts",

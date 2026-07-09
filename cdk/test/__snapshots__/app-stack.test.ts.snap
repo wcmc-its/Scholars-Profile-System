@@ -311,6 +311,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "GRANT_MATCHER_IP_SIGNAL",
+                "Value": "off",
+              },
+              {
                 "Name": "SAML_IDP_ENTITY_ID",
                 "Value": "https://login-proxy.weill.cornell.edu/idp",
               },
@@ -409,6 +413,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
               {
                 "Name": "CLINICAL_TRIALS_SECTION",
                 "Value": "on",
+              },
+              {
+                "Name": "AVAILABLE_TECHNOLOGIES_SECTION",
+                "Value": "off",
               },
               {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
@@ -3918,6 +3926,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "GRANT_MATCHER_IP_SIGNAL",
+                "Value": "off",
+              },
+              {
                 "Name": "SAML_IDP_ENTITY_ID",
                 "Value": "https://login-proxy.weill.cornell.edu/idp",
               },
@@ -4015,6 +4027,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "CLINICAL_TRIALS_SECTION",
+                "Value": "on",
+              },
+              {
+                "Name": "AVAILABLE_TECHNOLOGIES_SECTION",
                 "Value": "on",
               },
               {
