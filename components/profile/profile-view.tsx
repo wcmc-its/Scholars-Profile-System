@@ -31,6 +31,10 @@ import {
   type ProfilePublication,
 } from "@/lib/api/profile";
 import { serializeJsonLd } from "@/lib/seo/jsonld";
+import {
+  groupProfileAppointments,
+  type ProfileAppointmentEntry,
+} from "@/lib/profile/profile-appointments";
 import { groupPublicationsByYear } from "@/lib/profile-pub-grouping";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import {
@@ -102,6 +106,10 @@ export async function ProfileView({ slug }: { slug: string }) {
 
   const sparse = isSparseProfile(profile);
   const activeAppointments = profile.appointments.filter((a) => a.isActive);
+  // #1568 — self-asserted appointments render ONLY here, on the owner's own
+  // profile (no aggregate/third-party serializer reads them). Split into the two
+  // headings; hidden rows (`showOnProfile === false`) are dropped by the helper.
+  const selfAppointments = groupProfileAppointments(profile.profileAppointments ?? []);
 
   // v2b — Mentoring section. Fetches AOC mentees from reciterdb. Returns []
   // for scholars with no recorded mentor relationships, in which case the
@@ -377,6 +385,22 @@ export async function ProfileView({ slug }: { slug: string }) {
                     );
                   })}
                 </ul>
+              </SidebarCard>
+            ) : null}
+
+            {/* #1568 — self-asserted roles/leadership the ED feed doesn't carry
+                (WCM_LEADERSHIP). Owner-entered on /edit, profile-only. */}
+            {selfAppointments.leadership.length > 0 ? (
+              <SidebarCard title="Roles & Leadership">
+                <SelfAppointmentList entries={selfAppointments.leadership} />
+              </SidebarCard>
+            ) : null}
+
+            {/* #1568 — self-asserted appointments at other institutions
+                (EXTERNAL), prior or current — dates say which. */}
+            {selfAppointments.external.length > 0 ? (
+              <SidebarCard title="Previous / Other Appointments">
+                <SelfAppointmentList entries={selfAppointments.external} />
               </SidebarCard>
             ) : null}
 
@@ -732,6 +756,43 @@ function Section({
       )}
       {children}
     </section>
+  );
+}
+
+/** #1568 — a `start–end` year range for a self-asserted appointment. A missing
+ *  end reads as ongoing ("2019–"); a missing start with an end reads "–2019".
+ *  Mirrors the Past Appointments range logic above. */
+function selfAppointmentYearRange(startDate: string | null, endDate: string | null): string {
+  const start = startDate ? startDate.slice(0, 4) : null;
+  const end = endDate ? endDate.slice(0, 4) : null;
+  if (start && end) return `${start}–${end}`;
+  if (start) return `${start}–`;
+  if (end) return `–${end}`;
+  return "";
+}
+
+/** #1568 — the sidebar list for one self-asserted appointment group. Title is
+ *  the bold line; the muted meta joins organization / unit / location and the
+ *  year range with the sidebar's "·" separator (each part omitted when absent).
+ *  Presentational only — the owner-only trust boundary is upstream (this data is
+ *  read by no aggregate serializer). */
+function SelfAppointmentList({ entries }: { entries: ReadonlyArray<ProfileAppointmentEntry> }) {
+  return (
+    <ul className="flex flex-col gap-3">
+      {entries.map((a, i) => {
+        const meta = [a.organization, a.unit, a.location].filter(Boolean);
+        const range = selfAppointmentYearRange(a.startDate, a.endDate);
+        if (range) meta.push(range);
+        return (
+          <li key={i} className="leading-snug">
+            <div className="font-semibold">{a.title}</div>
+            {meta.length > 0 ? (
+              <div className="text-muted-foreground mt-0.5 text-xs">{meta.join(" · ")}</div>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

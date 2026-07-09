@@ -120,7 +120,17 @@ export type AuditAction =
    *  appointment `externalId`, `afterValues` carries `show_on_profile` (+ the
    *  conferring unit on a unit-admin reveal). Requires the `scholars_audit`
    *  action ENUM be extended — see `scripts/sql/audit-log.sql`. */
-  | "appointment_visibility_set";
+  | "appointment_visibility_set"
+  /** a scholar (or a curator on their behalf) added / edited / removed a
+   *  self-asserted `profile_appointment` row on /edit (#1568) — an internal WCM
+   *  role the ED feed omits, or a current/historical external appointment.
+   *  `targetEntityType='profile_appointment'`, `targetEntityId` is the row `id`;
+   *  before/after carry the row snapshot. Its own store → its own audit action,
+   *  never `field_override`. Requires the `scholars_audit` action ENUM be
+   *  extended — see `scripts/sql/audit-log.sql`. */
+  | "profile_appointment_create"
+  | "profile_appointment_update"
+  | "profile_appointment_delete";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -153,7 +163,10 @@ export type AuditEntityType =
   /** a funding-opportunity URL submission queue item in the shared `reciterai`
    *  DynamoDB table (`OPPORTUNITY_URL_INTAKE`); `targetEntityId` is the item's
    *  time-ordered sort key (`<ISO ts>#<uuid8>`). */
-  | "opportunity_submission";
+  | "opportunity_submission"
+  /** a self-asserted `profile_appointment` row edited on /edit (#1568);
+   *  `targetEntityId` is the `profile_appointment.id`. */
+  | "profile_appointment";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {
