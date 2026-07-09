@@ -40,28 +40,6 @@ code in **AWS CDK** across nine stacks, deployed to a **single AWS account**
 
 ## Request path (what a visitor hits)
 
-```mermaid
-flowchart TD
-  user([Browser / crawler]):::ext
-  cf["CloudFront CDN + AWS WAF<br/>(EdgeStack)<br/>caches HTML per-route s-maxage"]:::edge
-  albp["Public ALB<br/>sps-public-{env}<br/>(X-Origin-Verify gate)"]:::net
-  ecs["ECS Fargate task: sps-app-{env}<br/>Next.js (Node 22, next start)<br/>+ OTel collector sidecar"]:::app
-  aur[("Aurora MySQL Serverless v2<br/>writer + reader endpoints")]:::data
-  os[("OpenSearch Service<br/>alias: scholars")]:::data
-
-  user -->|"HTTPS"| cf
-  cf -->|"cache miss only<br/>+ shared-secret header"| albp
-  albp --> ecs
-  ecs -->|"db.read (profiles)<br/>db.write (/api/edit)"| aur
-  ecs -->|"/search, /api/search/suggest"| os
-
-  classDef ext fill:#eee,stroke:#999,color:#222;
-  classDef edge fill:#fde7e7,stroke:#7d1c1c,color:#222;
-  classDef net fill:#eef2ff,stroke:#3b5bdb,color:#222;
-  classDef app fill:#e6fcf5,stroke:#0ca678,color:#222;
-  classDef data fill:#fff3bf,stroke:#f08c00,color:#222;
-```
-
 - **Cacheable routes** (`/`, `/scholars/*`, `/topics/*`, `/departments/*`, `/centers/*`,
   `/sitemap.xml`) are served from the CloudFront edge for the route's TTL (24 h for
   scholar pages, 6 h for the rest). The Fargate task only renders the *first* request per
@@ -123,36 +101,6 @@ flowchart TD
 The request path serves data; this pipeline *produces* it. It runs on a schedule, entirely
 off the request path, orchestrated by **Step Functions** (one state machine per cadence)
 running **ECS Fargate tasks** (not Lambda — see corrections below).
-
-```mermaid
-flowchart LR
-  subgraph src["WCM source systems"]
-    ed2["Enterprise Directory (LDAPS)"]:::ext
-    infoed["InfoEd (MS SQL)"]:::ext
-    coi["COI Portal (MySQL)"]:::ext
-    asms["ASMS (MS SQL)"]:::ext
-    jenz["Jenzabar (MS SQL)"]:::ext
-    rdb["ReciterDB (MariaDB)"]:::ext
-    rai["ReciterAI (DynamoDB + S3)"]:::ext
-    nih["NIH RePORTER / NSF / NLM MeSH (HTTPS)"]:::ext
-  end
-  sfn["Step Functions<br/>nightly / weekly / annual<br/>(EventBridge cron)"]:::app
-  etltask["sps-etl-{env} Fargate task<br/>npm run etl:&lt;source&gt;"]:::app
-  aur2[("Aurora MySQL")]:::data
-  os2[("OpenSearch (alias swap)")]:::data
-  rev["POST /api/revalidate<br/>(internal ALB) — busts CDN"]:::net
-
-  src --> etltask
-  sfn --> etltask
-  etltask --> aur2
-  etltask --> os2
-  etltask --> rev
-
-  classDef ext fill:#eee,stroke:#999,color:#222;
-  classDef app fill:#e6fcf5,stroke:#0ca678,color:#222;
-  classDef data fill:#fff3bf,stroke:#f08c00,color:#222;
-  classDef net fill:#eef2ff,stroke:#3b5bdb,color:#222;
-```
 
 - **Cadences** (`PRODUCTION_ADDENDUM.md § EtlStack`; authoritative step lists in
   `cdk/lib/etl-stack.ts`): nightly (`ed → reciter → reciter-coi-statements → asms →
