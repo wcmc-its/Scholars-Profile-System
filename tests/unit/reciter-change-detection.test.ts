@@ -160,4 +160,22 @@ describe("planAuthorshipReconcile", () => {
     expect(plan.toDeleteIds).toEqual(["id-dup"]);
     expect(plan.unchanged).toBe(1);
   });
+
+  // The coi-gap watermark invariant, stated directly: on a steady-state nightly
+  // (the common case — incoming byte-identical to existing across several pmids),
+  // the plan must emit ZERO writes. The caller relies on exactly this to `continue`
+  // past the timestamp-bumping transaction (etl/reciter/index.ts), leaving every
+  // lastRefreshedAt untouched so etl/coi-gap's `lastRefreshedAt > watermark` scan
+  // stays bounded to the genuine delta. The pre-#1535 wipe-and-reinsert would have
+  // deleted all three rows and re-created them (re-stamping every timestamp), so it
+  // could never satisfy this — this asserts the fix, not just per-row diffing.
+  it("emits no writes for a fully-unchanged batch (watermark preserved)", () => {
+    const existing = [ea("id-a", "1", "a"), ea("id-b", "1", "b"), ea("id-c", "2", "a")];
+    const incoming = [ia("1", "a"), ia("1", "b"), ia("2", "a")];
+    const plan = planAuthorshipReconcile(existing, incoming);
+    expect(plan.toCreate).toEqual([]);
+    expect(plan.toUpdate).toEqual([]);
+    expect(plan.toDeleteIds).toEqual([]);
+    expect(plan.unchanged).toBe(3);
+  });
 });
