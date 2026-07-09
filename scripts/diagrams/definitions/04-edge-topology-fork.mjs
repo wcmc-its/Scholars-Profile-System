@@ -18,7 +18,7 @@ const nodes = {
   cfT:  { x: 140, y: 238, w: 320, h: 56, kind: "edge", title: "CloudFront + AWS WAF",
           sub: ["WCM-only gate (#461) · caching · managed rules"] },
   nsT:  { x: 140, y: 322, w: 320, h: 56, kind: "ext",  title: "NetScaler",
-          sub: ["on-prem · inserted edge layer (WCM)"], chip: { tone: "planned", text: "to insert" } },
+          sub: ["AWS VPX · inserted edge layer (WCM)"], chip: { tone: "planned", text: "to insert" } },
   albT: { x: 140, y: 406, w: 320, h: 56, kind: "net",  title: "Public ALB",
           sub: ["X-Origin-Verify origin guard"], chip: { tone: "live", text: "stays" } },
   ecsT: { x: 140, y: 490, w: 320, h: 40, kind: "app",  title: "ECS Fargate app" },
@@ -31,7 +31,7 @@ const nodes = {
   plan:  { x: 632, y: 340, w: 696, h: 108, kind: "good", title: "Insertion — decoupled follow-on",
            sub: ["Repoint the CloudFront origin to the new ALB in-window — SPS-only, no WCM dependency.",
                  "Then WCM inserts NetScaler in front of the ALB as a separate follow-on step.",
-                 "Reversible; pending WCM scheduling."] },
+                 "Requested 2026-07-08 · RITM0801140 · prod+staging, staging-first."] },
 };
 
 const groups = [
