@@ -83,6 +83,7 @@ in **§10**.
 | Doc | Answers |
 |---|---|
 | [`performance-baseline.md`](./performance-baseline.md) | The measured side of latency: per-surface baseline, alarm thresholds, and how to (re)measure. The counterpart to the SLO *targets* in `SLOs.md`. |
+| [`scripts/perf/`](../scripts/perf/) | Committed load-test tooling: `sps-loadtest.sh` (concurrency C-ramp, ttfb+total percentiles) and `sps-satcheck.sh` (node-saturation isolator) for the `/search` origin path. |
 | [`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md) | The authoritative CloudFront cache-behavior spec: every behavior, cache policy, and TTL in front of `scholars.weill.cornell.edu`. **The first stop for "why is this slow / stale / not updating?"** |
 | [`ADR-001`](./ADR-001-runtime-dal-vs-etl-transform.md) | Why the runtime data-access layer mirrors the ETL transform — the core read-path design that governs page latency. |
 | [`ADR-006`](./ADR-006-image-optimization-strategy.md) | Why there is **no runtime image optimizer**, and what that means for image delivery and cost. |

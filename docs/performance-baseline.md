@@ -268,6 +268,13 @@ alongside each number you write back.
    that single test fills most of the per-surface table.
 5. **Trace attribution.** For "where did the time go in one slow render," open the X-Ray
    trace and find the longest Prisma span ([`tracing.md`](./tracing.md)).
+6. **Search concurrency / `/search` origin latency.** [`scripts/perf/sps-loadtest.sh`](../scripts/perf/sps-loadtest.sh)
+   runs a concurrency C-ramp against `GET /api/search?type=people` (ttfb + total p50/p90/max
+   and non-200 count per level); [`scripts/perf/sps-satcheck.sh`](../scripts/perf/sps-satcheck.sh)
+   isolates whether a slow concurrent number is the OpenSearch node saturating or the app.
+   These fill the `/search` / autocomplete origin cells above — but a staging number
+   under-reports prod (single `t3.medium` node); see the cluster-sizing caveat in
+   [`search-people-concurrency-performance.md`](./search-people-concurrency-performance.md).
 
 ## Review cadence
 
