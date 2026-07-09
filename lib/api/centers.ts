@@ -643,6 +643,9 @@ export type ProgramLeader = {
   identityImageEndpoint: string;
   /** Interim/acting qualifier — renders "Interim Leader". */
   isInterim: boolean;
+  /** #1570 — "leader" (a program lead) or "coe_liaison" (rendered as a separate
+   *  "COE Liaison" card AFTER the leaders). */
+  role: "leader" | "coe_liaison";
 };
 
 /** #1105 — a dedicated per-program page detail. */
@@ -691,16 +694,20 @@ export async function getCenterProgram(
       description: true,
       leaders: {
         orderBy: [{ sortOrder: "asc" }, { cwid: "asc" }],
-        select: { cwid: true, interim: true },
+        select: { cwid: true, interim: true, role: true },
       },
     },
   });
   if (!program) return null;
 
-  // Leaders (#1117) — 0..N rows in display order. Each `cwid` resolves to a WCM
-  // scholar (profile-linked) or the external-leader fallback keyed
-  // `<centerCode>:<programCode>` (used only when that entry names THIS cwid).
-  // A cwid that resolves to neither is dropped — never fabricate a name.
+  // Leaders (#1117) + COE liaisons (#1570) — 0..N rows in display order. Each
+  // `cwid` resolves to a WCM scholar (profile-linked) or the external-leader
+  // fallback keyed `<centerCode>:<programCode>` (used only when that entry names
+  // THIS cwid). A cwid that resolves to neither is dropped — never fabricate a
+  // name. Leaders render first, then COE liaisons; within each group the join's
+  // `sortOrder` (then cwid) order is preserved. We order by an explicit
+  // role RANK (leader=0, coe_liaison=1), NOT alphabetically by the role string
+  // ("coe_liaison" sorts BEFORE "leader" lexically — the wrong order).
   let leaders: ProgramLeader[] = [];
   if (program.leaders.length > 0) {
     const scholars = await prisma.scholar.findMany({
@@ -709,7 +716,14 @@ export async function getCenterProgram(
     });
     const scholarByCwid = new Map(scholars.map((s) => [s.cwid, s]));
     const ext = EXTERNAL_LEADERS[`${center.code}:${code}`];
-    leaders = program.leaders.flatMap((row): ProgramLeader[] => {
+    const roleRank = (role: string): number => (role === "coe_liaison" ? 1 : 0);
+    // Stable sort: leaders (rank 0) before liaisons (rank 1); the join already
+    // ordered by sortOrder,cwid so the within-group order is preserved.
+    const orderedRows = [...program.leaders].sort(
+      (a, b) => roleRank(a.role) - roleRank(b.role),
+    );
+    leaders = orderedRows.flatMap((row): ProgramLeader[] => {
+      const role: "leader" | "coe_liaison" = row.role === "coe_liaison" ? "coe_liaison" : "leader";
       const scholar = scholarByCwid.get(row.cwid);
       if (scholar) {
         return [
@@ -720,6 +734,7 @@ export async function getCenterProgram(
             primaryTitle: scholar.primaryTitle,
             identityImageEndpoint: identityImageEndpoint(scholar.cwid),
             isInterim: row.interim,
+            role,
           },
         ];
       }
@@ -732,6 +747,7 @@ export async function getCenterProgram(
             primaryTitle: ext.primaryTitle,
             identityImageEndpoint: identityImageEndpoint(ext.cwid),
             isInterim: row.interim,
+            role,
           },
         ];
       }

@@ -89,7 +89,15 @@ export async function CenterProgramPage({
           <LeaderCard
             key={leader.cwid}
             leader={leader}
-            role={leader.isInterim ? "Interim Leader" : "Leader"}
+            role={
+              // #1570 — COE liaisons (ordered after the Leaders by the loader)
+              // carry a distinct "COE Liaison" label.
+              leader.role === "coe_liaison"
+                ? "COE Liaison"
+                : leader.isInterim
+                  ? "Interim Leader"
+                  : "Leader"
+            }
           />
         ))}
 

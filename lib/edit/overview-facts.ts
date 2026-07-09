@@ -1001,7 +1001,9 @@ async function loadLeadershipFkCandidates(cwid: string): Promise<FkLeadershipCan
       select: { code: true, name: true, officialName: true, leaderInterim: true },
     }),
     db.read.centerProgramLeader.findMany({
-      where: { cwid },
+      // #1570 — a `coe_liaison` row is not a leadership title; only program
+      // LEADS synthesize a "Leader, {program}" candidate here.
+      where: { cwid, role: "leader" },
       select: {
         centerCode: true,
         programCode: true,
