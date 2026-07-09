@@ -19,18 +19,21 @@
 "use client";
 
 import * as React from "react";
-import { Braces, Sparkles } from "lucide-react";
+import { Braces, Search, Sparkles } from "lucide-react";
 
 import {
   BiosketchGenerateControls,
 } from "@/components/edit/biosketch-generate-controls";
 import {
+  BiosketchAiWarning,
   BiosketchResultCard,
+  BiosketchSuggestedPubsCard,
   type BiosketchGenerateResult,
 } from "@/components/edit/biosketch-result-card";
 import { BiosketchProgress } from "@/components/edit/biosketch-progress";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   readBiosketchStream,
   type BiosketchProgressState,
@@ -42,7 +45,7 @@ import {
   type BiosketchEntry,
   type BiosketchParams,
 } from "@/lib/edit/biosketch-params";
-import { type BiosketchProducts } from "@/lib/edit/biosketch-products";
+import { type BiosketchProducts, type SuggestedPub } from "@/lib/edit/biosketch-products";
 import { type BiosketchContributionSources } from "@/lib/edit/biosketch-sources";
 import { type BiosketchPromptVersionMeta } from "@/lib/edit/biosketch-prompt-versions";
 import { humanizeModelId } from "@/lib/edit/overview-prompt-versions";
@@ -56,6 +59,7 @@ const MISSING_INPUTS =
   "Add a proposed project title and specific aims to draft a Personal Statement.";
 const FAILED = "We couldn't generate a biosketch just now. Please try again.";
 const DEBUG_FAILED = "We couldn't assemble the prompt payload just now. Please try again.";
+const SUGGEST_FAILED = "We couldn't find matching publications just now. Please try again.";
 
 export type BiosketchToolProps = {
   /** The scholar the biosketch is generated for (self cwid or the delegated `[cwid]`). */
@@ -110,6 +114,14 @@ export function BiosketchTool({
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<BiosketchGenerateResult | null>(null);
   const [generations, setGenerations] = React.useState<BiosketchGenerationItem[]>([]);
+
+  // #1569 — the two tool modes: the AI generator (default) and the DETERMINISTIC
+  // "write your own statement → suggested publications" mode (no model call).
+  const [toolMode, setToolMode] = React.useState<"generate" | "suggest">("generate");
+  const [statement, setStatement] = React.useState("");
+  const [isSuggesting, setIsSuggesting] = React.useState(false);
+  const [suggestError, setSuggestError] = React.useState<string | null>(null);
+  const [suggestions, setSuggestions] = React.useState<SuggestedPub[] | null>(null);
 
   // Mirror the route's required-input gate so a request it would 400 never fires.
   const missing = missingPersonalStatementInputs(params);
@@ -194,6 +206,40 @@ export function BiosketchTool({
     } finally {
       setIsGenerating(false);
       setProgress(null);
+    }
+  }
+
+  /**
+   * #1569 — the DETERMINISTIC counterpart to {@link generate}: POST the user's OWN written
+   * statement to `/api/edit/biosketch/suggest-pubs`, which ranks the scholar's publications by
+   * token overlap and returns the top matches. There is NO model call and nothing is drafted —
+   * the endpoint just scores grounded pmids — so this needs no progress stream, cost line, or
+   * AI-content warning. Errors surface in a dedicated alert.
+   */
+  async function suggestPubs() {
+    if (isSuggesting) return;
+    setIsSuggesting(true);
+    setSuggestError(null);
+    setSuggestions(null);
+    try {
+      const res = await fetch("/api/edit/biosketch/suggest-pubs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entityId, statement }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | { ok: true; pubs: SuggestedPub[] }
+        | { ok: false }
+        | null;
+      if (!res.ok || !data || data.ok !== true || !Array.isArray(data.pubs)) {
+        setSuggestError(SUGGEST_FAILED);
+        return;
+      }
+      setSuggestions(data.pubs);
+    } catch {
+      setSuggestError(SUGGEST_FAILED);
+    } finally {
+      setIsSuggesting(false);
     }
   }
 
@@ -339,74 +385,155 @@ export function BiosketchTool({
 
   return (
     <div className="flex flex-col gap-4" data-slot="biosketch-tool">
-      <BiosketchGenerateControls
-        value={params}
-        onChange={setParams}
-        disabled={isGenerating}
-        canSeeCost={canSeeCost}
-        model={model}
-        versions={versions}
-        canSelectVersion={canSelectVersion}
-      />
-
-      <div className="flex flex-wrap items-center gap-3">
+      {/* #1569 — switch between the AI generator and the deterministic "suggest pubs from your
+          own statement" mode. Two toggle buttons rather than a heavier tab primitive, matching
+          the button-driven controls the tool already uses. */}
+      <div className="flex flex-wrap gap-2">
         <Button
           type="button"
-          variant="apollo"
-          onClick={generate}
-          disabled={disabled}
-          data-testid="biosketch-generate"
+          variant={toolMode === "generate" ? "apollo" : "outline"}
+          size="sm"
+          onClick={() => setToolMode("generate")}
+          aria-pressed={toolMode === "generate"}
+          data-testid="biosketch-mode-generate"
         >
           <Sparkles className="size-4" />
-          {isGenerating
-            ? "Generating…"
-            : params.mode === "personal_statement"
-              ? "Generate personal statement"
-              : "Generate biosketch contributions"}
+          Generate a draft
         </Button>
-        {canDebug && (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={downloadDebugPayload}
-            disabled={isDebugLoading || isGenerating}
-            data-testid="biosketch-debug-payload"
-            title="Download the exact system prompt, user prompt, and FACTS payload these settings would send to the model (superusers only)."
-          >
-            <Braces className="size-4" />
-            {isDebugLoading ? "Preparing…" : "View prompt & payload"}
-          </Button>
-        )}
-        <span className="text-muted-foreground text-sm">
-          Drafted from your Scholars publications, topics, methods, and grants. Review every entry
-          before submitting it.
-        </span>
+        <Button
+          type="button"
+          variant={toolMode === "suggest" ? "apollo" : "outline"}
+          size="sm"
+          onClick={() => setToolMode("suggest")}
+          aria-pressed={toolMode === "suggest"}
+          data-testid="biosketch-mode-suggest"
+        >
+          <Search className="size-4" />
+          Suggest pubs from your statement
+        </Button>
       </div>
 
-      {isGenerating && progress && (
-        <BiosketchProgress state={progress} mode={params.mode} elapsedMs={elapsedMs} />
+      {toolMode === "generate" && (
+        <>
+          <BiosketchGenerateControls
+            value={params}
+            onChange={setParams}
+            disabled={isGenerating}
+            canSeeCost={canSeeCost}
+            model={model}
+            versions={versions}
+            canSelectVersion={canSelectVersion}
+          />
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="apollo"
+              onClick={generate}
+              disabled={disabled}
+              data-testid="biosketch-generate"
+            >
+              <Sparkles className="size-4" />
+              {isGenerating
+                ? "Generating…"
+                : params.mode === "personal_statement"
+                  ? "Generate personal statement"
+                  : "Generate biosketch contributions"}
+            </Button>
+            {canDebug && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={downloadDebugPayload}
+                disabled={isDebugLoading || isGenerating}
+                data-testid="biosketch-debug-payload"
+                title="Download the exact system prompt, user prompt, and FACTS payload these settings would send to the model (superusers only)."
+              >
+                <Braces className="size-4" />
+                {isDebugLoading ? "Preparing…" : "View prompt & payload"}
+              </Button>
+            )}
+            <span className="text-muted-foreground text-sm">
+              Drafted from your Scholars publications, topics, methods, and grants. Review every
+              entry before submitting it.
+            </span>
+          </div>
+
+          {/* #1569 — the AI-content warning at the generate action (the second placement is at
+              the top of the result card). Shown for the whole generate flow so it is seen before
+              any content exists to copy. */}
+          <BiosketchAiWarning />
+
+          {isGenerating && progress && (
+            <BiosketchProgress state={progress} mode={params.mode} elapsedMs={elapsedMs} />
+          )}
+
+          {error && (
+            <Alert variant="destructive" data-testid="biosketch-error">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          {result && <BiosketchResultCard result={result} />}
+
+          {generations.length > 0 && (
+            <div className="flex flex-col gap-3" data-testid="biosketch-versions-panel">
+              {renderGenSection(
+                "Earlier personal statements",
+                personalStatements,
+                "biosketch-versions-personal-statement",
+              )}
+              {renderGenSection(
+                "Earlier contributions to science",
+                contributions,
+                "biosketch-versions-contributions",
+              )}
+            </div>
+          )}
+        </>
       )}
 
-      {error && (
-        <Alert variant="destructive" data-testid="biosketch-error">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      {toolMode === "suggest" && (
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="biosketch-statement" className="text-foreground text-sm font-medium">
+              Your statement or themes
+            </label>
+            <Textarea
+              id="biosketch-statement"
+              value={statement}
+              onChange={(e) => setStatement(e.target.value)}
+              disabled={isSuggesting}
+              rows={6}
+              placeholder="Write or paste the narrative, aims, or themes in your own words. We'll surface your publications that overlap it — nothing is generated."
+              data-testid="biosketch-statement"
+            />
+            <span className="text-muted-foreground text-sm">
+              A grounded, deterministic match against your indexed publications — no text is
+              AI-generated.
+            </span>
+          </div>
 
-      {result && <BiosketchResultCard result={result} />}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="apollo"
+              onClick={suggestPubs}
+              disabled={isSuggesting || statement.trim().length === 0}
+              data-testid="biosketch-suggest"
+            >
+              <Search className="size-4" />
+              {isSuggesting ? "Finding…" : "Suggest publications"}
+            </Button>
+          </div>
 
-      {generations.length > 0 && (
-        <div className="flex flex-col gap-3" data-testid="biosketch-versions-panel">
-          {renderGenSection(
-            "Earlier personal statements",
-            personalStatements,
-            "biosketch-versions-personal-statement",
+          {suggestError && (
+            <Alert variant="destructive" data-testid="biosketch-suggest-error">
+              <AlertDescription>{suggestError}</AlertDescription>
+            </Alert>
           )}
-          {renderGenSection(
-            "Earlier contributions to science",
-            contributions,
-            "biosketch-versions-contributions",
-          )}
+
+          {suggestions && <BiosketchSuggestedPubsCard pubs={suggestions} />}
         </div>
       )}
     </div>

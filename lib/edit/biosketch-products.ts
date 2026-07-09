@@ -43,6 +43,20 @@ export type BiosketchProducts = {
   relatedFromAims: boolean;
 };
 
+/** One publication ranked against a user-written free-text statement (#1569). Deterministic —
+ *  no model call: the rank is token overlap, tie-broken by blended impact. */
+export type SuggestedPub = {
+  pmid: string;
+  title: string;
+  venue: string | null;
+  year: number | null;
+  impact: number | null;
+  /** Token-overlap count against the statement — the primary rank signal. */
+  overlap: number;
+  /** The distinct statement terms this publication matched (the "why matched" line). */
+  matchedTerms: string[];
+};
+
 type CandidatePub = OverviewFacts["representativePublications"][number];
 
 /** A blended impact score: the ReciterAI impact score (recency-robust) plus a log-scaled
@@ -83,6 +97,52 @@ function aimsOverlapScore(p: CandidatePub, aimsTokens: Set<string>): number {
   let n = 0;
   for (const t of pubTokens) if (aimsTokens.has(t)) n++;
   return n;
+}
+
+/** The distinct statement tokens a publication's text (title + synopsis + topicRationale)
+ *  matches. Same token basis as {@link aimsOverlapScore}; that returns the COUNT, this returns
+ *  the TERMS — the "why matched" surface for the suggest-pubs mode (#1569). */
+function matchedStatementTerms(p: CandidatePub, statementTokens: Set<string>): string[] {
+  if (statementTokens.size === 0) return [];
+  const pubTokens = new Set([
+    ...tokenize(p.title),
+    ...tokenize(p.synopsis),
+    ...tokenize(p.topicRationale),
+  ]);
+  const out: string[] = [];
+  for (const t of pubTokens) if (statementTokens.has(t)) out.push(t);
+  return out.sort();
+}
+
+/**
+ * Rank a scholar's publications against a user-written free-text statement by token overlap,
+ * most-overlapping first, ties broken by blended impact. DETERMINISTIC — reuses `tokenize()` +
+ * `aimsOverlapScore()`; there is NO model/LLM call, and every returned pmid is one of the
+ * scholar's own indexed publications (nothing invented). Only publications that overlap the
+ * statement are returned, capped at `limit` (default 10). Powers the "write your own statement
+ * → suggested publications" mode (#1569).
+ */
+export function suggestPubsFromStatement(
+  pubs: CandidatePub[],
+  statement: string,
+  limit = 10,
+): SuggestedPub[] {
+  const statementTokens = new Set(tokenize(statement));
+  if (statementTokens.size === 0) return [];
+  return pubs
+    .map((p) => ({ p, overlap: aimsOverlapScore(p, statementTokens) }))
+    .filter((x) => x.overlap > 0)
+    .sort((a, b) => b.overlap - a.overlap || blendedImpactScore(b.p) - blendedImpactScore(a.p))
+    .slice(0, Math.max(0, limit))
+    .map((x) => ({
+      pmid: x.p.pmid,
+      title: x.p.title.replace(/<[^>]+>/g, ""),
+      venue: x.p.venue,
+      year: x.p.year,
+      impact: typeof x.p.impact === "number" ? x.p.impact : null,
+      overlap: x.overlap,
+      matchedTerms: matchedStatementTerms(x.p, statementTokens),
+    }));
 }
 
 function toProduct(p: CandidatePub): BiosketchProduct {
