@@ -52,6 +52,7 @@ export type PublicationComparable = {
   pages: string | null;
   journalAbbrev: string | null;
   pubmedUrl: string | null;
+  ecommonsLink: string | null;
   abstract: string | null;
   meshTerms: unknown; // JSON value, Prisma.DbNull/JsonNull, or null
   source: string;
@@ -96,6 +97,7 @@ export function publicationSignature(row: PublicationComparable): string {
     row.pages ?? null,
     row.journalAbbrev ?? null,
     row.pubmedUrl ?? null,
+    row.ecommonsLink ?? null,
     row.abstract ?? null,
     jsonNorm(row.meshTerms),
     row.source,

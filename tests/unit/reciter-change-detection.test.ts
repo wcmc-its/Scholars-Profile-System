@@ -33,6 +33,7 @@ const basePub = (over: Partial<PublicationComparable> = {}): PublicationComparab
   pages: "1-10",
   journalAbbrev: "Nature",
   pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/1/",
+  ecommonsLink: null,
   abstract: "Some abstract",
   meshTerms: [{ ui: "D1", label: "Term" }],
   source: "ReciterDB",
@@ -50,6 +51,13 @@ describe("publicationSignature", () => {
     );
     expect(publicationSignature(basePub())).not.toBe(
       publicationSignature(basePub({ abstract: "different" })),
+    );
+    // #1567 — a pub GAINING an eCommons handle must read as changed, or the
+    // nightly upsert would skip it and never persist the linkout.
+    expect(publicationSignature(basePub({ ecommonsLink: null }))).not.toBe(
+      publicationSignature(
+        basePub({ ecommonsLink: "https://hdl.handle.net/1813/124348" }),
+      ),
     );
   });
 

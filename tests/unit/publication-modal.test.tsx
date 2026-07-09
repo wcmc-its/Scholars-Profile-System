@@ -48,6 +48,7 @@ function makePayload(
       citationCount: 2,
       pmcid: "PMC123",
       doi: "10.1234/widgets",
+      ecommonsLink: "https://hdl.handle.net/1813/124348",
       pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/12345/",
       meshTerms: [
         { ui: "D001", label: "Widgets" },
@@ -384,6 +385,42 @@ describe("PublicationModal — content sections", { retry: 2 }, () => {
     expect(idLine?.querySelector('a[href*="pubmed.ncbi.nlm.nih.gov"]')).not.toBeNull();
     expect(idLine?.querySelector('a[href*="pmc/articles/"]')).not.toBeNull();
     expect(idLine?.querySelector('a[href*="doi.org/"]')).not.toBeNull();
+  });
+
+  it("renders an eCommons linkout after DOI when the handle is present, and nothing when it is null (#1567)", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const idLine = screen
+      .getByRole("dialog")
+      .querySelector('header [aria-label="Identifiers"]') as HTMLElement | null;
+    const ecommons = idLine?.querySelector(
+      'a[href="https://hdl.handle.net/1813/124348"]',
+    ) as HTMLAnchorElement | null;
+    expect(ecommons).not.toBeNull();
+    expect(ecommons?.textContent).toBe("eCommons");
+    expect(ecommons?.getAttribute("target")).toBe("_blank");
+    expect(ecommons?.getAttribute("rel")).toContain("noopener");
+    // Placed AFTER the DOI link in the row.
+    const doi = idLine?.querySelector('a[href*="doi.org/"]');
+    expect(
+      doi && ecommons
+        ? doi.compareDocumentPosition(ecommons) & Node.DOCUMENT_POSITION_FOLLOWING
+        : 0,
+    ).toBeTruthy();
+  });
+
+  it("omits the eCommons linkout when the handle is null (#1567)", async () => {
+    mockFetch(makePayload({ pub: { ...makePayload().pub, ecommonsLink: null } }));
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const idLine = screen
+      .getByRole("dialog")
+      .querySelector('header [aria-label="Identifiers"]') as HTMLElement | null;
+    expect(idLine?.querySelector('a[href*="hdl.handle.net"]')).toBeNull();
+    expect(idLine?.textContent).not.toContain("eCommons");
   });
 
   it("carries copy buttons next to PMID and PMCID in the header", async () => {

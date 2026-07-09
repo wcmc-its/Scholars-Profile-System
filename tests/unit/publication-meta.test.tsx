@@ -164,3 +164,39 @@ describe("PublicationMeta — impact / concept inline (issue #284)", () => {
     expect(container.querySelector('[tabindex="0"]')).toBeNull();
   });
 });
+
+// Issue #1567 — an "eCommons" linkout renders (after DOI) when the publication
+// carries an institutional-repository handle, and nothing when it is null.
+describe("PublicationMeta — eCommons linkout (issue #1567)", () => {
+  it("renders an eCommons link after DOI when ecommonsLink is present", () => {
+    const { container } = render(
+      <PublicationMeta
+        pmid="123"
+        doi="10.0/example"
+        ecommonsLink="https://hdl.handle.net/1813/124348"
+      />,
+    );
+    const link = container.querySelector(
+      'a[href="https://hdl.handle.net/1813/124348"]',
+    ) as HTMLAnchorElement | null;
+    expect(link).not.toBeNull();
+    expect(link!.textContent).toBe("eCommons");
+    expect(link!.getAttribute("target")).toBe("_blank");
+    expect(link!.getAttribute("rel")).toContain("noopener");
+    const text = container.textContent ?? "";
+    expect(text.indexOf("eCommons")).toBeGreaterThan(text.indexOf("DOI"));
+  });
+
+  it("renders nothing for eCommons when the link is null or omitted", () => {
+    const { container: nullContainer } = render(
+      <PublicationMeta pmid="123" doi="10.0/example" ecommonsLink={null} />,
+    );
+    expect(nullContainer.textContent).not.toContain("eCommons");
+    expect(nullContainer.querySelector('a[href*="hdl.handle.net"]')).toBeNull();
+
+    const { container: omittedContainer } = render(
+      <PublicationMeta pmid="123" doi="10.0/example" />,
+    );
+    expect(omittedContainer.textContent).not.toContain("eCommons");
+  });
+});

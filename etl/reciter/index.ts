@@ -87,6 +87,12 @@ type JournalAbbrevRow = {
 
 type AbstractRow = { pmid: number; abstractVarchar: string | null };
 
+/** #1567 — eCommons institutional-repository crosswalk from
+ *  `reciterdb.ecommons_pmid_link` (columns `pmid`, `ecommonslink`). `pmid` is a
+ *  varchar in the source; the mariadb driver returns it as a string, coerced to
+ *  a number for the map key like every other pmid keyed read here. */
+type EcommonsRow = { pmid: number; ecommonslink: string | null };
+
 /** #917 v6 — NIH iCite bibliometrics from `reciterdb.analysis_nih` (keyed by pmid).
  *  `relative_citation_ratio` is the field- and time-normalized influence figure used by
  *  the NIH-biosketch impact grounding; `nih_percentile` and the iCite `citation_count`
@@ -397,6 +403,43 @@ async function main() {
       maxDropPct: 30,
     });
 
+    // #1567 — eCommons institutional-repository handle URLs for the same pmid
+    // set, from `reciterdb.ecommons_pmid_link` (pmid → ecommonslink). Rides this
+    // weekly refresh so a publication deposited in Cornell's eCommons gets an
+    // "eCommons" linkout on its card/modal. Best-effort per batch (mirrors the
+    // analysis_nih fallback above): a missing or unreadable crosswalk simply
+    // leaves `ecommonsLink` null — the linkout just doesn't render — so it never
+    // fails the run (issue #1567 AC). Deliberately NO assertSourceVolume guard:
+    // this is a pure linkout enrichment, and the AC requires a failed/empty read
+    // to degrade to null rather than abort. One handle per pmid in practice;
+    // keep the first non-empty sighting defensively.
+    const ecommonsLinkByPmid = new Map<number, string>();
+    for (const batch of chunks(distinctPmids, IN_BATCH)) {
+      try {
+        await withReciterConnection(async (conn) => {
+          const rows = (await conn.query(
+            `SELECT pmid, ecommonslink
+             FROM ecommons_pmid_link
+             WHERE pmid IN (?) AND ecommonslink IS NOT NULL AND ecommonslink <> ''`,
+            [batch],
+          )) as EcommonsRow[];
+          for (const r of rows) {
+            const key = Number(r.pmid);
+            if (!ecommonsLinkByPmid.has(key) && r.ecommonslink) {
+              ecommonsLinkByPmid.set(key, r.ecommonslink);
+            }
+          }
+        });
+      } catch (err) {
+        console.warn(
+          `ecommons_pmid_link fetch failed for a batch (continuing without eCommons links for it): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    console.log(`Got ${ecommonsLinkByPmid.size} eCommons links.`);
+
     // Issue #89 — full author list for the Word bibliography. We pull
     // structured per-rank rows from analysis_summary_author_list (which
     // has full first names like "Gregory A") so we can derive proper
@@ -565,6 +608,9 @@ async function main() {
         pages: a.pages,
         journalAbbrev: journalAbbrevByPmid.get(Number(a.pmid)) ?? null,
         pubmedUrl: `https://pubmed.ncbi.nlm.nih.gov/${a.pmid}/`,
+        // #1567 — eCommons handle URL (null when this pmid is not in the repo,
+        // or when the crosswalk read failed for its batch above).
+        ecommonsLink: ecommonsLinkByPmid.get(Number(a.pmid)) ?? null,
         abstract: abstractByPmid.get(Number(a.pmid)) ?? null,
         meshTerms: keywordsByPmid.get(Number(a.pmid)) ?? Prisma.DbNull,
         source: "ReciterDB",
@@ -600,6 +646,7 @@ async function main() {
       pages: true,
       journalAbbrev: true,
       pubmedUrl: true,
+      ecommonsLink: true,
       abstract: true,
       meshTerms: true,
       source: true,
