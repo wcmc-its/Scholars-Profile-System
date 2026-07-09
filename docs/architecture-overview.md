@@ -34,6 +34,10 @@ through staff-authenticated `/edit` endpoints (SAML SSO). The whole thing is def
 code in **AWS CDK** across nine stacks, deployed to a **single AWS account**
 (`665083158573`) with **env-prefix isolation** (staging and prod) via **GitHub Actions + OIDC**.
 
+[![System context — SPS, its users, and the WCM source systems it derives from](./architecture/system-context.svg)](./architecture/system-context.svg)
+
+*System context. Full interactive gallery: [`architecture/`](./architecture/index.html).*
+
 ## Request path (what a visitor hits)
 
 ```mermaid
@@ -72,8 +76,11 @@ flowchart TD
   straight at their ALB, and NetScaler provisioning is requested (RITM0801140, prod + staging,
   staging-first). Insertion is a decoupled WCM edge change (no CDK change); the #461 WCM-only WAF
   gate and the `:80` default-403 origin guard stay until NetScaler enforces equivalent filtering.
-  See the **edge-topology** diagram in [`architecture/`](./architecture/index.html) and
-  [`network-security-topology.md`](./network-security-topology.md).
+  Full detail: [`network-security-topology.md`](./network-security-topology.md).
+
+[![Edge topology, resolved (#502) — CloudFront + WAF then NetScaler then ALB then Fargate; NetScaler not yet in the path](./architecture/edge-topology-fork.svg)](./architecture/edge-topology-fork.svg)
+
+*Edge topology — resolved (#502): a WCM-managed NetScaler (AWS VPX) sits between the WAF and the ALB. It is **not yet in the request path** — both CloudFront distributions still point straight at their ALB.*
 
 ## Write path (staff editing)
 
@@ -210,6 +217,16 @@ Deploy mechanics, the staging-gates-prod rule, and the prod approval gate are in
     VPC, Aurora cluster, and OpenSearch domain are `RETAIN`'d until the Phase G
     decommission (tracker #1458). Prod still runs its own `10.x.0.0/16` VPC pending its
     per-env cutover.
+
+### Topology & internals
+
+[![Application & AWS topology — ECS Fargate, ALBs, Aurora, OpenSearch, and the nine CDK stacks per environment](./architecture/app-aws-topology.svg)](./architecture/app-aws-topology.svg)
+
+[![Network topology — the shared its-reciter-vpc01, public/private subnets, security groups, and NAT egress](./architecture/network-topology.svg)](./architecture/network-topology.svg)
+
+[![Application internals — inside the Next.js container: public pages, staff /edit UI, API route groups, and shared libraries](./architecture/app-internals.svg)](./architecture/app-internals.svg)
+
+*These are the generated views under [`architecture/`](./architecture/index.html) — regenerate with `npm run diagrams` after editing `scripts/diagrams/definitions/*.mjs`.*
 
 ## Cross-cutting concerns → where to read
 
