@@ -1302,6 +1302,11 @@ model CenterProgramLeader {
   programCode String  @map("program_code") @db.VarChar(16)
   cwid        String  @db.VarChar(32)
   interim     Boolean @default(false)
+  /// #1570 — role within the program: "leader" (a program lead, the default) or
+  /// "coe_liaison" (the Community Outreach & Engagement liaison, rendered as a
+  /// separate "COE Liaison" card AFTER the leaders). Kept as a String (not a
+  /// Prisma enum) so the additive column is a plain default-backfilled VARCHAR.
+  role        String  @default("leader") @map("role") @db.VarChar(32)
   sortOrder   Int     @default(0) @map("sort_order")
 
   program CenterProgram @relation(fields: [centerCode, programCode], references: [centerCode, code], onDelete: Cascade)

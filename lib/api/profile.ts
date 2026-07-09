@@ -950,7 +950,9 @@ export const getScholarFullProfileBySlug = cache(async (
           select: { name: true, officialName: true, leaderInterim: true },
         }),
         prisma.centerProgramLeader.findMany({
-          where: { cwid: scholar.cwid },
+          // #1570 — only program LEADS produce a "Leader, {program}" title line;
+          // a `coe_liaison` row is NOT a leadership title and is excluded here.
+          where: { cwid: scholar.cwid, role: "leader" },
           select: {
             interim: true,
             program: {

@@ -16,7 +16,10 @@ export type LeaderRole =
   // #1105 — center program leader (and its interim qualifier). The card renders
   // the role string verbatim in the eyebrow.
   | "Leader"
-  | "Interim Leader";
+  | "Interim Leader"
+  // #1570 — Community Outreach & Engagement liaison for a Meyer Cancer Center
+  // program (rendered as a separate card after the Leaders).
+  | "COE Liaison";
 
 export type Leader = {
   cwid: string;
