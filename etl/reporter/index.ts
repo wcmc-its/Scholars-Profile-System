@@ -30,7 +30,7 @@
  *
  * Usage: `npm run etl:reporter`
  */
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 import { coreProjectNum } from "@/lib/award-number";
@@ -440,12 +440,12 @@ async function main() {
   console.log(`\nDone in ${((Date.now() - start) / 1000).toFixed(1)}s.`);
 }
 
-// Disconnect db.write only AFTER withEtlRun has written its etl_run row (on both
-// the success and failure paths), then let the empty event loop exit the process.
+// Disconnect only AFTER withEtlRun has written its etl_run row (on both the
+// success and failure paths), then let the empty event loop exit the process.
 // `process.exitCode` (not `process.exit`) so the `.finally` cleanup still runs.
 withEtlRun("Reporter", main)
   .catch((e) => {
     console.error(e);
     process.exitCode = 1;
   })
-  .finally(() => db.write.$disconnect());
+  .finally(disconnect);

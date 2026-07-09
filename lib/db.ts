@@ -53,6 +53,17 @@ if (process.env.NODE_ENV !== "production") {
 export const db = { read: readClient, write: writeClient } as const;
 
 /**
+ * Close every distinct pool. Long-running scripts (ETL entrypoints) must call
+ * this rather than `db.write.$disconnect()`: when DATABASE_URL_RO is set,
+ * `db.read` is a second client whose mariadb pool keeps the event loop alive,
+ * so the process hangs after main() resolves instead of exiting. The Set
+ * collapses to a single $disconnect on the unsplit (reader-falls-back) posture.
+ */
+export async function disconnect(): Promise<void> {
+  await Promise.all([...new Set([db.write, db.read])].map((c) => c.$disconnect()));
+}
+
+/**
  * @deprecated Use `db.read` for queries or `db.write` for mutations.
  *
  * Alias of `db.read`, retained so reader call sites can migrate incrementally.

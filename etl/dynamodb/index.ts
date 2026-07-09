@@ -55,7 +55,7 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { Prisma } from "@/lib/generated/prisma/client";
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
 import { clearTopicRebuildWindow } from "../../lib/etl-state";
 import { resolveTopTopicByPmid } from "./top-topic-resolver";
 import { assertPublicationTopicPopulated } from "./publication-topic-guard";
@@ -851,6 +851,4 @@ main()
     console.error(err);
     process.exit(1);
   })
-  .finally(async () => {
-    await db.write.$disconnect();
-  });
+  .finally(disconnect);
