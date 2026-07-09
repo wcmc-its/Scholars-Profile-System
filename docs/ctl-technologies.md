@@ -40,8 +40,14 @@ retired. That is the same work as their ask (2), and it keeps this import alive.
 
 ## ETL
 
-`npm run etl:technologies` → `etl/technologies/index.ts`, wired into the nightly
-chain in `etl/orchestrate.ts` after `Clinical-Trials`.
+`npm run etl:technologies` → `etl/technologies/index.ts`.
+
+**Cadence: weekly**, as `TechnologyWeekly` in the deployed Step Function
+(`cdk/lib/etl-stack.ts`), `tier: "continue"` so a CTL outage never aborts the
+chain. It is also listed in `etl/orchestrate.ts`, but that file is only the
+in-process prototype runner (`npm run etl:daily`) — a step there is **not**
+scheduled in staging or prod. Wiring the deployed cadence requires
+`cdk deploy Sps-Etl-<env>`.
 
 Each run scrapes CTL live, validates (origin-pinned URL, well-formed CWID), drops
 rows whose CWID has no `scholar` row (logged as `droppedUnknownCwid`, currently
@@ -52,7 +58,7 @@ rows whose CWID has no `scholar` row (logged as `droppedUnknownCwid`, currently
   change or partial outage aborts loudly instead of blanking the section.
 - **No-op short-circuit** — if the scrape is identical to the table's current
   contents, no write happens at all. CTL's portfolio changes a few times a year,
-  so nearly every nightly run lands here: no truncate/insert churn, no
+  so nearly every weekly run lands here: no truncate/insert churn, no
   `refreshed_at` bump. The comparison is against the table, not a stored hash, so
   there is nothing to drift out of sync.
 - Otherwise a full replace inside one transaction.

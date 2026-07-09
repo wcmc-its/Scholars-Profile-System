@@ -101,10 +101,13 @@ async function main() {
     // CTL available technologies. Scrapes innovation.weill.cornell.edu (public
     // internet, not the WCM network) and joins on the cwid CTL embeds in each
     // PI's VIVO link. Its cwid FK targets `scholar`, so it must run after the ED
-    // chain head. No-op on the overwhelming majority of nights — the portfolio
-    // changes a few times a year — and volume-guarded so a CTL markup change
-    // aborts instead of blanking the section. A CTL outage must not fail the
-    // nightly; runScript isolates the failure.
+    // chain head. Volume-guarded, and a no-op write when the scrape matches the
+    // table. A CTL outage must not fail the chain; runScript isolates it.
+    //
+    // NOTE: this file is the in-process prototype runner (`npm run etl:daily`).
+    // The DEPLOYED cadence is the WEEKLY Step Function (`TechnologyWeekly` in
+    // cdk/lib/etl-stack.ts) — adding a step here does not schedule it in
+    // staging/prod.
     ["Technology", "etl/technologies/index.ts"],
     // POPS clinical enrichment — depends on hasClinicalProfile set by the ED
     // chain head above; must run before the search reindex below so the new
