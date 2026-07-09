@@ -234,32 +234,6 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /api/health/refresh-status:
-    get:
-      operationId: getRefreshStatus
-      summary: Get ETL refresh health status
-      description: |
-        Returns the freshness status of all six ETL data sources and the latest
-        profile completeness snapshot. Returns HTTP 200 when all sources are fresh
-        (last successful run within 26 hours), HTTP 503 otherwise.
-
-        The `completenessPercent` and `belowThreshold` fields are null before
-        the first weekly completeness snapshot has been computed.
-      security: []  # TODO Phase 7: gate behind admin SAML (T-07-health-auth)
-      responses:
-        "200":
-          description: All ETL sources are fresh.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HealthResponse"
-        "503":
-          description: One or more ETL sources are stale.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HealthResponse"
-
 components:
   schemas:
     ScholarPayload:
@@ -606,61 +580,6 @@ components:
         pageSize:
           type: integer
           description: Number of results per page (fixed at 20).
-
-    HealthResponse:
-      type: object
-      required:
-        - allFresh
-        - sources
-      properties:
-        allFresh:
-          type: boolean
-          description: True when all ETL sources have run successfully within the past 26 hours.
-        completenessPercent:
-          type: ["number", "null"]
-          description: Latest weekly profile completeness percentage (0-100). Null before the first weekly snapshot has been computed.
-        belowThreshold:
-          type: ["boolean", "null"]
-          description: True when completenessPercent is below 70%. Null before the first weekly snapshot.
-        sources:
-          type: array
-          description: Per-source ETL freshness detail.
-          items:
-            $ref: "#/components/schemas/HealthSourceStatus"
-
-    HealthSourceStatus:
-      type: object
-      required:
-        - source
-        - fresh
-      properties:
-        source:
-          type: string
-          description: ETL data source identifier.
-          enum:
-            - ED
-            - ReCiter
-            - ASMS
-            - InfoEd
-            - COI
-            - ReCiterAI-projection
-            - OpenSearch-index
-        lastSuccessAt:
-          type: ["string", "null"]
-          format: date-time
-          description: ISO 8601 datetime of the last successful ETL run for this source.
-        hoursSinceSuccess:
-          type: ["number", "null"]
-          description: Hours elapsed since the last successful ETL run. Null if never run.
-        fresh:
-          type: boolean
-          description: True when the source has run successfully within the past 26 hours.
-        lastStatus:
-          type: ["string", "null"]
-          description: Status message from the most recent ETL run.
-        rowsProcessed:
-          type: ["integer", "null"]
-          description: Number of rows processed in the most recent ETL run.
 
     ErrorResponse:
       type: object
