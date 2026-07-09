@@ -930,6 +930,21 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "SCHOLARS_HEALTH_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/health-token",
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "SESSION_COOKIE_SECRET",
                 "ValueFrom": {
                   "Fn::Join": [
@@ -2785,6 +2800,18 @@ service:
                       {
                         "Ref": "AWS::Partition",
                       },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/health-token",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/saml-sp/prod/private-key",
                     ],
                   ],
@@ -2985,6 +3012,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/revalidate-token-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/health-token-??????",
                   ],
                 ],
               },
@@ -4532,6 +4578,21 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_HEALTH_TOKEN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/health-token",
                     ],
                   ],
                 },
@@ -6394,6 +6455,18 @@ service:
                       {
                         "Ref": "AWS::Partition",
                       },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/health-token",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/saml-sp/staging/private-key",
                     ],
                   ],
@@ -6594,6 +6667,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/revalidate-token-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/health-token-??????",
                   ],
                 ],
               },

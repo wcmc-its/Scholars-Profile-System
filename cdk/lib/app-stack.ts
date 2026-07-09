@@ -251,6 +251,15 @@ export class AppStack extends Stack {
       "RevalidateTokenSecret",
       `scholars/${env}/revalidate-token`,
     );
+    // /api/health/refresh-status bearer (#1514). Read as SCHOLARS_HEALTH_TOKEN;
+    // once wired, the route requires a matching Bearer instead of serving the
+    // ETL-freshness debug payload open when the env var is unset. Seed the
+    // secret value out-of-band before deploy or the task fails to resolve it.
+    const healthTokenSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "HealthTokenSecret",
+      `scholars/${env}/health-token`,
+    );
     // SSO session-cookie encryption key (#100). getSessionConfig() requireEnv's
     // SESSION_COOKIE_SECRET; the middleware gate and the SAML callback both read
     // it, so without it the callback 500s minting the session (the gap sibling
@@ -330,6 +339,7 @@ export class AppStack extends Stack {
       appRoSecret.secretArn,
       opensearchAppSecret.secretArn,
       revalidateTokenSecret.secretArn,
+      healthTokenSecret.secretArn,
       samlSpPrivateKeySecret.secretArn,
       etlReciterSecret.secretArn,
       samlIdpCertSecret.secretArn,
@@ -2132,6 +2142,10 @@ export class AppStack extends Stack {
         // SCHOLARS_REVALIDATE_TOKEN -- the env-var name is the contract. #447
         SCHOLARS_REVALIDATE_TOKEN:
           ecs.Secret.fromSecretsManager(revalidateTokenSecret),
+        // Read by app/api/health/refresh-status as SCHOLARS_HEALTH_TOKEN
+        // (#1514); once set the route requires a Bearer instead of serving open.
+        SCHOLARS_HEALTH_TOKEN:
+          ecs.Secret.fromSecretsManager(healthTokenSecret),
         // iron-session key read by lib/auth/config.ts getSessionConfig (#100).
         // Required by the /edit middleware gate and the SAML callback's
         // session minting; without it the callback 500s after a valid login.

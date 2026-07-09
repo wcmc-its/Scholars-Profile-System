@@ -7,8 +7,10 @@ export const dynamic = "force-dynamic";
 
 /**
  * Phase 4h: ETL health endpoint per Q5'. Returns the last successful run per
- * source and a freshness flag (>26h stale = not green). Production CloudWatch
- * alarm queries this.
+ * source and a freshness flag (>26h stale = not green). Manual/debug endpoint;
+ * production ETL-freshness monitoring is the in-VPC #595 heartbeat (a daily
+ * etl:freshness Step Functions step that reads etl_run directly), not this
+ * HTTP route — nothing automated probes it.
  *
  * Auth: Phase 7 will gate this behind admin SAML (T-07-health-auth).
  * Stopgap: if SCHOLARS_HEALTH_TOKEN is set, require a matching

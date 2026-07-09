@@ -143,6 +143,12 @@ export class SecretsStack extends Stack {
         description:
           "SPS /api/revalidate shared bearer (B04). Quarterly calendar rotation per docs/revalidate-token-rotation.md.",
       },
+      {
+        constructId: "HealthToken",
+        name: `scholars/${env}/health-token`,
+        description:
+          "SPS /api/health/refresh-status bearer — gates the ETL-freshness debug endpoint. Seed out-of-band with a random value.",
+      },
       // iron-session encryption password for the SSO session cookie (B01 #100).
       // getSessionConfig() requireEnv's SESSION_COOKIE_SECRET (>=32 chars), so
       // the SAML callback 500s minting the session without it -- the gate gap

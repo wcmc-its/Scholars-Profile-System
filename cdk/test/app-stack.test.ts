@@ -827,10 +827,11 @@ describe("AppStack", () => {
     });
 
     describe("IAM role split (B06)", () => {
-      it("the app task-execution role policy lists exactly the ten app consumer secret ARNs (ADR-009: no migrate, no bootstrap)", () => {
+      it("the app task-execution role policy lists exactly the eleven app consumer secret ARNs (ADR-009: no migrate, no bootstrap)", () => {
         // No `*` resource on secretsmanager:* (Phase 1 hard rule).
-        // The ten ARNs are scholars/prod/db/app-rw, db/app-ro, opensearch/app,
-        // revalidate-token, session-cookie-key, the SAML SP private key,
+        // The eleven ARNs are scholars/prod/db/app-rw, db/app-ro, opensearch/app,
+        // revalidate-token, health-token (#1514, the /api/health/refresh-status
+        // bearer), session-cookie-key, the SAML SP private key,
         // etl/reciter (ReciterDB connection for funding/mentoring surfaces),
         // saml/idp-cert (the IdP signing-cert trust anchor, #466),
         // saml-sp/prod/cert (the SP public cert for metadata, #466), and
@@ -860,7 +861,7 @@ describe("AppStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        expect(resourceList).toHaveLength(10);
+        expect(resourceList).toHaveLength(11);
         // No `*` ever appears in the resource list.
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
