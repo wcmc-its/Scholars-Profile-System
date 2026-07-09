@@ -9,9 +9,21 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { listingPaths, parseDetail, scrapePortfolio } from "@/etl/technologies/scrape";
+import {
+  listingPaths,
+  normalizePatentStatus,
+  parseDetail,
+  scrapePortfolio,
+} from "@/etl/technologies/scrape";
 
-const detail = (opts: { title: string; ref?: string; pi: string; cwid?: string }) => `
+const detail = (opts: {
+  title: string;
+  ref?: string;
+  pi: string;
+  cwid?: string;
+  patent?: string;
+  pmids?: string[];
+}) => `
 <html><head><title>${opts.title} | Enterprise Innovation</title></head><body>
 <div class="panel-pane pane-entity-field">
   <div class="field-label">Principal Investigator:&nbsp;</div>
@@ -22,17 +34,34 @@ const detail = (opts: { title: string; ref?: string; pi: string; cwid?: string }
   }</p></div>
 </div>
 <div class="panel-pane pane-node-body"><div class="field-content-items">
+${opts.patent ? `<p><strong>Patents</strong></p><ul><li><a href="https://patents.google.com/patent/X/en">${opts.patent}</a></li></ul>` : ""}
 ${opts.ref ? `<p><strong>Cornell Reference</strong></p><ul><li>${opts.ref}</li></ul>` : ""}
-</div></div></body></html>`;
+</div></div>
+${
+  opts.pmids
+    ? `<div class="panel-pane pane-node-field-technology-publications"><h3 class="pane-title">Publications</h3>
+       <div class="field-technology-publications"><div class="field-content-items">
+       ${opts.pmids.map((p) => `<a href="https://pubmed.ncbi.nlm.nih.gov/${p}/">Clement et al.</a>`).join("")}
+       </div></div></div>`
+    : ""
+}
+</body></html>`;
 
 const P1 = "/industry-investors-partners/technology-portfolio/alpha-tech";
 const P2 = "/industry-investors-partners/technology-portfolio/beta-tech";
 
 describe("parseDetail", () => {
-  it("extracts cwid, reference, title, and absolute url", () => {
+  it("extracts cwid, reference, title, url, patent status and pmids", () => {
     const rows = parseDetail(
       P1,
-      detail({ title: "Alpha Tech", ref: "11166", pi: "Zhen Zhao", cwid: "zhz9010" }),
+      detail({
+        title: "Alpha Tech",
+        ref: "11166",
+        pi: "Zhen Zhao",
+        cwid: "zhz9010",
+        patent: "PCT Application Filed",
+        pmids: ["34290243"],
+      }),
     );
     expect(rows).toEqual([
       {
@@ -40,8 +69,41 @@ describe("parseDetail", () => {
         reference: "11166",
         title: "Alpha Tech",
         url: "https://innovation.weill.cornell.edu" + P1,
+        patentStatus: "PCT filed",
+        pmids: ["34290243"],
       },
     ]);
+  });
+
+  it("returns null patentStatus and empty pmids when the page has neither", () => {
+    const [r] = parseDetail(P1, detail({ title: "Alpha", pi: "X", cwid: "abc1234" }));
+    expect(r.patentStatus).toBeNull();
+    expect(r.pmids).toEqual([]);
+  });
+
+  it("collects several pmids and de-duplicates them", () => {
+    const [r] = parseDetail(
+      P1,
+      detail({ title: "A", pi: "X", cwid: "abc1234", pmids: ["111111", "222222", "111111"] }),
+    );
+    expect(r.pmids).toEqual(["111111", "222222"]);
+  });
+
+  // A PubMed link in body prose is not CTL's claim about this invention.
+  it("ignores a PubMed link outside the publications pane", () => {
+    const html =
+      detail({ title: "A", pi: "X", cwid: "abc1234" }) +
+      '<p>See <a href="https://pubmed.ncbi.nlm.nih.gov/99999999/">this</a>.</p>';
+    expect(parseDetail(P1, html)[0].pmids).toEqual([]);
+  });
+
+  // A pending application must never be labelled as an issued patent.
+  it("does not overstate a pending application as Issued", () => {
+    const [r] = parseDetail(
+      P1,
+      detail({ title: "A", pi: "X", cwid: "abc1234", patent: "US Patent Application: US2022" }),
+    );
+    expect(r.patentStatus).toBe("Application filed");
   });
 
   it("yields NO row when the PI carries no VIVO link (departed faculty)", () => {
@@ -134,5 +196,37 @@ describe("scrapePortfolio", () => {
 
   it("throws when the listing yields nothing", async () => {
     await expect(scrapePortfolio(async () => "")).rejects.toThrow(/listing yielded no pages/);
+  });
+});
+
+describe("normalizePatentStatus", () => {
+  // Every string below was observed verbatim in CTL's portfolio.
+  it.each([
+    ["PCT Application Filed", "PCT filed"],
+    ["US Application Filed", "Application filed"],
+    ["Provisional Application Filed", "Provisional filed"],
+    ["Provisional Filed", "Provisional filed"],
+    ["provisional application filed", "Provisional filed"],
+    ['US Patent 9,943,506 . "BCL6 inhibitors as anticancer agents." Issued', "Issued"],
+    ["Issued US Patent 7,499,578 .", "Issued"],
+    ['JP Patent: JP7165357B2 ."Gene therapy"', "Issued"],
+    ['PCT Application Filed WO2025015305A1 : "Ratiometric imaging"', "PCT filed"],
+  ])("classifies %s as %s", (raw, expected) => {
+    expect(normalizePatentStatus(raw)).toBe(expected);
+  });
+
+  // The ordering trap: a pending application mentions "US Patent" too. Labelling
+  // it "Issued" would overstate the protection to a commercial partner.
+  it("does not call a pending application Issued", () => {
+    expect(normalizePatentStatus('US Patent Application: US20220208194A1 : "Devices"')).toBe(
+      "Application filed",
+    );
+    expect(normalizePatentStatus("Provisional Application Filed")).toBe("Provisional filed");
+  });
+
+  it("returns null for empty or unrecognized prose, rather than guessing", () => {
+    expect(normalizePatentStatus("")).toBeNull();
+    expect(normalizePatentStatus("   ")).toBeNull();
+    expect(normalizePatentStatus("Contact us for details")).toBeNull();
   });
 });

@@ -3,9 +3,15 @@
  *
  * Attribution comes from the VIVO link CTL already prints beside each
  * "Principal Investigator" (`vivo.{weill,med}.cornell.edu/display/cwid-<cwid>`),
- * so a technology is joined to a scholar by identifier, never by name. Pages
- * with no VIVO link are skipped: as of 2026-07-09 that is 60 of 279, and those
- * inventors are overwhelmingly departed faculty with no `scholar` row.
+ * so a technology is joined to a scholar by identifier, never by name.
+ *
+ * Pages with no VIVO link are skipped — 60 of 279 as of 2026-07-09. They are a
+ * mix: departed faculty (Cantley, Silverstein, Vahdat, Hla), people who would
+ * never hold a `scholar` row (a resident, a senior technician), and current
+ * faculty CTL simply did not link (Michelle Bradbury, `msb2006`). Recovering
+ * them is a data-quality ask for CTL, NOT a name-matching problem — do not be
+ * tempted to fuzzy-match, and do not attribute by PMID either: CTL's linked
+ * papers average 3.2 scholar-authors, of whom at most one is the inventor.
  *
  * ponytail: this parses Drupal HTML with regexes because CTL exposes no
  * structured feed (`/jsonapi` 404s; sitemap.xml omits the portfolio). Every
@@ -35,9 +41,30 @@ export type ScrapeResult = {
 
 type Fetcher = (url: string) => Promise<string | null>;
 
+/**
+ * Fetch one page, or null when it is genuinely unavailable.
+ *
+ * Retries transient failures: a single reset socket partway through a ~280-page
+ * sequential walk would otherwise abort the whole weekly run. A page that is
+ * still failing after the retries returns null and is counted in `fetchFailed`,
+ * which shrinks the row count — the importer's volume guard is the backstop that
+ * stops a bad crawl from truncating the table.
+ */
 const defaultFetch: Fetcher = async (url) => {
-  const res = await fetch(url, { headers: { "user-agent": "WCM-Scholars-ETL/1.0" } });
-  return res.ok ? res.text() : null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: { "user-agent": "WCM-Scholars-ETL/1.0" },
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (res.status === 404) return null; // CTL links a few dead nodes (e.g. /rpe)
+      if (res.ok) return await res.text();
+    } catch {
+      // transient: DNS, reset socket, timeout — fall through to the backoff
+    }
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
+  }
+  return null;
 };
 
 /** Collect every detail-page path across the paginated listing. */
@@ -68,6 +95,34 @@ function stripTags(s: string): string {
     .trim();
 }
 
+/**
+ * Collapse CTL's free-text patent line into one of four display labels.
+ *
+ * The raw text is prose, not an enum: it ranges from "PCT Application Filed" to
+ * `US Patent 9,943,506 . "BCL6 inhibitors as anticancer agents." Issued...`.
+ * Truncating that to fit a chip cuts mid-word, so classify instead.
+ *
+ * Order matters. "Provisional Application Filed" and "US Patent Application:
+ * US2022..." both contain words that would otherwise match a later rule — a
+ * pending application must never be labelled as an issued patent.
+ *
+ * Unrecognized text yields null (no chip) rather than an error: CTL is free to
+ * invent new phrasing, and a missing chip is a far better failure than a wrong
+ * one or a broken weekly run.
+ */
+export function normalizePatentStatus(raw: string): string | null {
+  const s = raw.toLowerCase();
+  if (!s.trim()) return null;
+  if (/provisional/.test(s)) return "Provisional filed";
+  if (/\bpct\b/.test(s)) return "PCT filed";
+  if (/application/.test(s)) return "Application filed";
+  // A bare patent number with no "application" nearby means it granted.
+  if (/\bissued\b|\bgranted\b|patent\s*(no\.?|#)?\s*[\d,]{5,}|patent:\s*[a-z]{2}\d/.test(s)) {
+    return "Issued";
+  }
+  return null;
+}
+
 /** The markup block following a `<div class="field-label">LABEL:</div>`. */
 function fieldBlock(html: string, label: string): string {
   const re = new RegExp(
@@ -85,8 +140,32 @@ export function parseDetail(path: string, html: string): TechnologyRow[] {
   );
   if (!title) return [];
 
-  const reference =
-    html.match(/Cornell Reference<\/strong><\/p><ul><li>([\s\S]*?)<\/li>/)?.[1]?.trim() || null;
+  // Editors wrap the docket number in stray inline markup on some pages
+  // (`<span>9220</span>`, `<p><span>11171 </span></p>`, `<span>7932<br></span>`),
+  // so strip tags rather than trusting the <li> to hold a bare number. A few
+  // pages legitimately carry prose ("3901 and 4055" — one invention, two dockets).
+  const referenceRaw = html.match(/Cornell Reference<\/strong><\/p><ul><li>([\s\S]*?)<\/li>/)?.[1];
+  const reference = referenceRaw ? stripTags(referenceRaw) || null : null;
+
+  // Patent status. Same `<strong>LABEL</strong></p><ul><li>` shape as the
+  // reference, but the <li> usually wraps the status in a Google Patents link
+  // ("<a href=...>US Application Filed</a>"), so strip tags for the text and
+  // ignore the href — CTL's own page is where someone goes for the patent.
+  const patentRaw = html.match(/Patents<\/strong><\/p><ul><li>([\s\S]*?)<\/li>/)?.[1];
+  const patentStatus = patentRaw ? normalizePatentStatus(stripTags(patentRaw)) : null;
+
+  // Related papers. Scoped to CTL's dedicated publications pane, NOT the whole
+  // page: a stray PubMed link in prose is not a claim about this invention.
+  const pubPane = html.match(
+    /field-technology-publications"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/,
+  )?.[0];
+  const pmids = pubPane
+    ? [
+        ...new Set(
+          [...pubPane.matchAll(/pubmed\.ncbi\.nlm\.nih\.gov\/(\d{6,9})/g)].map((m) => m[1]),
+        ),
+      ]
+    : [];
 
   const pi = fieldBlock(html, "Principal Investigator");
   const cwids = new Set<string>();
@@ -95,7 +174,14 @@ export function parseDetail(path: string, html: string): TechnologyRow[] {
     if (m) cwids.add(m[1].toLowerCase());
   }
 
-  return [...cwids].map((cwid) => ({ cwid, reference, title, url: ORIGIN + path }));
+  return [...cwids].map((cwid) => ({
+    cwid,
+    reference,
+    title,
+    url: ORIGIN + path,
+    patentStatus,
+    pmids,
+  }));
 }
 
 /** Fetch the whole portfolio. Throws when the markup stops yielding rows. */
@@ -121,6 +207,15 @@ export async function scrapePortfolio(get: Fetcher = defaultFetch): Promise<Scra
 
   if (rows.length === 0) {
     throw new Error("[Technology] no page carried a VIVO cwid link — markup changed?");
+  }
+
+  // The importer's volume guard cannot protect the FIRST load into an empty
+  // table, so a half-finished crawl must fail here rather than persist a partial
+  // portfolio. CTL links a couple of dead nodes, hence a tolerance rather than 0.
+  if (fetchFailed > Math.max(5, paths.length * 0.05)) {
+    throw new Error(
+      `[Technology] ${fetchFailed}/${paths.length} detail pages failed to fetch — CTL down or rate-limiting?`,
+    );
   }
 
   rows.sort((a, b) => a.cwid.localeCompare(b.cwid) || a.title.localeCompare(b.title));
