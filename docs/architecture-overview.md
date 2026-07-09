@@ -13,6 +13,10 @@ decisions), this doc is correct and the divergences are called out in
 > Sources of truth this doc consolidates: [`ADR-008`](./ADR-008-infrastructure-as-code.md)
 > (nine-stack CDK), [`cdk/lib/config.ts`](../cdk/lib/config.ts) (sizing), [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md)
 > (auth, ETL, secrets), [`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md) (edge).
+>
+> **Visual diagrams:** [`architecture/`](./architecture/index.html) — system context, app & AWS
+> topology, app internals, network topology, and the **edge-topology decision** (#502). Open the
+> gallery for the pictures this prose describes.
 
 ---
 
@@ -20,7 +24,8 @@ decisions), this doc is correct and the divergences are called out in
 
 SPS is a **read-mostly Next.js application** that renders ~9,000 public WCM scholar
 profiles plus topic, department, center, and search pages. It runs as a container on
-**ECS Fargate** behind an **Application Load Balancer**, fronted by **CloudFront + WAF**.
+**ECS Fargate** behind an **Application Load Balancer**, fronted by **CloudFront + WAF** (with a
+WCM-managed **NetScaler** edge layer resolved but not yet inserted — #502).
 Its primary store is **Aurora MySQL (Serverless v2)**; search and autocomplete are served
 by **Amazon OpenSearch Service**. All displayed data is *derived* — a nightly/weekly
 **Step Functions ETL** pulls from WCM source systems (Enterprise Directory, InfoEd, COI,
@@ -61,6 +66,14 @@ flowchart TD
 - `/search` is `force-dynamic` — every request hits the app and OpenSearch (search-as-you-type, by design).
 - **Origin protection:** CloudFront injects an `X-Origin-Verify` shared-secret header; the
   public ALB rejects (403) any request that lacks it, so the ALB DNS can't be used to bypass the CDN/WAF.
+- **Edge topology (resolved 2026-07-02, #502):** the settled production edge is **CloudFront + WAF
+  → NetScaler → ALB → Fargate** — a WCM-managed **NetScaler** (AWS VPX) inserted between the WAF and
+  the public ALB. It is **not yet in the request path**: both CloudFront distributions still point
+  straight at their ALB, and NetScaler provisioning is requested (RITM0801140, prod + staging,
+  staging-first). Insertion is a decoupled WCM edge change (no CDK change); the #461 WCM-only WAF
+  gate and the `:80` default-403 origin guard stay until NetScaler enforces equivalent filtering.
+  See the **edge-topology** diagram in [`architecture/`](./architecture/index.html) and
+  [`network-security-topology.md`](./network-security-topology.md).
 
 ## Write path (staff editing)
 
@@ -167,7 +180,7 @@ change cadence ([`ADR-008`](./ADR-008-infrastructure-as-code.md)):
 | `SecretsStack` | Secrets Manager definitions, RDS rotation | rare | [`access-control-rbac.md`](./access-control-rbac.md) |
 | `AppStack` | ECR, ECS cluster/service/tasks, public + internal ALB, migration task, IAM role split | every deploy | [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md) |
 | `EtlStack` | Step Functions, EventBridge schedules, ETL SG, `etl-failures` SNS | per ETL change | [`PRODUCTION_ADDENDUM.md § EtlStack`](./PRODUCTION_ADDENDUM.md) |
-| `EdgeStack` | CloudFront, WAF, security-headers policy, legacy-VIVO redirects | occasional | [`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md) |
+| `EdgeStack` | CloudFront, WAF, security-headers policy, legacy-VIVO redirects. **NetScaler edge layer decided (#502) but not yet inserted** — CloudFront points straight at the ALB today | occasional | [`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md), [`network-security-topology.md`](./network-security-topology.md) |
 | `ObservabilityStack` | CloudWatch alarms, SNS page/notify topics, cost guardrails, on-call relay Lambda, reliability dashboard | occasional | [`SLOs.md`](./SLOs.md), [`oncall.md`](./oncall.md) |
 | `AnalyticsStack` | Glue + Athena over CloudFront access logs, nightly usage-rollup Lambda, durable (no-expiry) analytics bucket | occasional | — |
 
