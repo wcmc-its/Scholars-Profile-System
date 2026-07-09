@@ -21,7 +21,7 @@ A typical end-to-end deploy looks like this:
 
 Total wall-clock for a staging deploy with no pending migrations: ~7-9 minutes. A migration adds whatever Prisma needs to apply it. The 3-minute rolling-replacement step is the constant cost of zero-downtime for ECS Fargate.
 
-> ⚠️ **A branch→staging deploy reverts master-only ETL fixes.** `gh workflow run deploy.yml --ref <branch> -f env=staging` is permitted (the "refuse non-master" guard fires only for prod) and rebuilds **both** `scholars-app-staging:latest` **and** `scholars-etl-staging:latest` from that branch. The nightly Step Functions pull `scholars-etl-staging:latest`, so deploying a feature branch silently rolls staging ETL back to that branch's last master merge-base until master is redeployed. Before/after a branch deploy: `git merge-base --is-ancestor <fixSHA> <deployed-sha-tag>` on the ECR image tag, and redeploy master when done. (Bit us 2026-07-04: a feature-branch deploy reverted merged revalidate fixes #1473/#1474 — see [`./ed-nightly-revalidate-handoff-2026-07-04.md`](./ed-nightly-revalidate-handoff-2026-07-04.md).)
+> ⚠️ **A branch→staging deploy reverts master-only ETL fixes.** `gh workflow run deploy.yml --ref <branch> -f env=staging` is permitted (the "refuse non-master" guard fires only for prod) and rebuilds **both** `scholars-app-staging:latest` **and** `scholars-etl-staging:latest` from that branch. The nightly Step Functions pull `scholars-etl-staging:latest`, so deploying a feature branch silently rolls staging ETL back to that branch's last master merge-base until master is redeployed. Before/after a branch deploy: `git merge-base --is-ancestor <fixSHA> <deployed-sha-tag>` on the ECR image tag, and redeploy master when done. (Bit us 2026-07-04: a feature-branch deploy reverted merged revalidate fixes #1473/#1474.)
 
 To promote a tested build to **production**:
 
@@ -104,7 +104,7 @@ aws cloudfront get-distribution-config --id <dist-id> \
   --query 'DistributionConfig.WebACLId'   # -> then read that WebACL's IPSet
 # seed (comma-separated, StringList):
 aws ssm put-parameter --name /sps/<env>/edge/allowed-cidrs --type StringList \
-  --value "140.251.0.0/16,157.139.0.0/16" --overwrite
+  --value "<WCM-campus-CIDRs>" --overwrite   # actual ranges kept out of source
 ```
 
 Then deploy — no per-flag context needed:
@@ -116,7 +116,7 @@ npx cdk diff --strict --exclusively Sps-Edge-<env> -c env=<env>
 npx cdk deploy --require-approval never --exclusively Sps-Edge-<env> -c env=<env>
 ```
 
-Pre-seed escape hatch: pass `-c edgeAllowedCidrs=140.251.0.0/16,...` to both commands to supply the CIDRs inline instead of via SSM. CloudFront updates take ~5–15 min; background the deploy. `--exclusively` is mandatory (avoids touching sibling stacks).
+Pre-seed escape hatch: pass `-c edgeAllowedCidrs=<WCM-campus-CIDRs>` to both commands to supply the CIDRs inline instead of via SSM. CloudFront updates take ~5–15 min; background the deploy. `--exclusively` is mandatory (avoids touching sibling stacks).
 
 ### Ordering: AppStack BEFORE EdgeStack when a cross-stack ref is added
 

@@ -4,7 +4,7 @@
 **Tracking issue:** [#742](https://github.com/wcmc-its/Scholars-Profile-System/issues/742) — implementation tracker (validation run, ratification of the decisions below, then build).
 **Date:** 2026-06-01
 **Authors:** Scholars Profile System development team
-**Builds on:** [self-edit-launch-spec.md](./self-edit-launch-spec.md) (the `/edit` Overview attribute + the Tiptap `OverviewEditor` this feature feeds) · [ADR-005](./ADR-005-manual-override-layer.md) (the `field_override` write path + read-merge a generated draft is saved through) · [overview-coverage-scope.md](./overview-coverage-scope.md) (why this exists: 2,051 full-time faculty have no overview and a one-time seed can't keep them fresh).
+**Builds on:** [self-edit-launch-spec.md](./self-edit-launch-spec.md) (the `/edit` Overview attribute + the Tiptap `OverviewEditor` this feature feeds) · [ADR-005](./ADR-005-manual-override-layer.md) (the `field_override` write path + read-merge a generated draft is saved through) · why this exists: 2,051 full-time faculty have no overview and a one-time seed can't keep them fresh.
 **Reuses:** the Vercel **AI Gateway** (`AI_GATEWAY_API_KEY`, `feat/594-llm-answer-rank`) for the in-SPS path; an internal **research-summary prototype** (the in-SPS UI/control-surface v0), **ReciterAI** (Bedrock harness + spotlight `lede_generator` pattern + grounding artifacts + publish path), and **CViche** `llm_client.py` (a fallback Bedrock layer). See [§ Reuse](#reuse-existing-tooling-dont-build-the-engine-from-scratch). *(CViche CV-parsing was evaluated and dropped — no CVs, and they'd be stale.)*
 **Closes the durable half of:** the overview-coverage gap (the one-time Grad School seed closes the prominent slice; this closes the long tail and keeps everything fresh).
 

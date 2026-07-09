@@ -4,7 +4,7 @@ This is the operational counterpart to the local-dev `README.md`. It describes t
 
 The headline reason this matters: during development we observed `/topics/{slug}` responses dropping from ~150 ms to 30+ seconds after the dev server had compiled dozens of routes interleaved with concurrent requests. That is a **`next dev` artifact**, not a code regression. Production builds (`next build` + `next start`) and the runbook below sidestep it entirely. This document explains the moving parts and the load-shedding model so the prod deploy never lives or dies on a single Node process the way a dev box does.
 
-> **Companion docs:** [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md) covers auth/secrets, ETL orchestration, and schema-migration policy — the three areas this document underspecifies. [`PRODUCTION_BACKLOG.md`](./PRODUCTION_BACKLOG.md) tracks the production-readiness work as P0/P1/P2 issues.
+> **Companion docs:** [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md) covers auth/secrets, ETL orchestration, and schema-migration policy — the three areas this document underspecifies.
 
 ## Why `next dev` is not production
 

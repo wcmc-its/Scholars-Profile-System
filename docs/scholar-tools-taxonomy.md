@@ -159,4 +159,4 @@ multiple tools in the same family).
 
 - **Issues:** #794 (source repoint, migration gate) · #799/#800/#801 (Methods lens display, suppression, audience gating) · #765 (slug-mangling fixed by canonical `display_name`)
 - **ReciterAI (producer) docs:** `docs/tools-a2-architecture.md`, `docs/tool-classifier-spec.md`, `docs/tools-producer-model.md`
-- **SPS docs:** [`dependency-outage-matrix.md`](./dependency-outage-matrix.md) (ReciterAI as an upstream), [`data-dictionary.md`](./data-dictionary.md) (`scholar_tool` table), [`spotlight-integration-plan.md`](./spotlight-integration-plan.md) (the analogous ReciterAI→S3→SPS integration)
+- **SPS docs:** [`dependency-outage-matrix.md`](./dependency-outage-matrix.md) (ReciterAI as an upstream), [`data-dictionary.md`](./data-dictionary.md) (`scholar_tool` table), [`spotlight-runbook.md`](./spotlight-runbook.md) (the analogous ReciterAI→S3→SPS integration)

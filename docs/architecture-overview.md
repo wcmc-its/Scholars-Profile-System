@@ -138,7 +138,7 @@ flowchart LR
   `cdk/lib/etl-stack.ts`): nightly (`ed → reciter → reciter-coi-statements → asms →
   infoed → coi → coi-gap → jenzabar → dynamodb → identity → scholar-tool → mesh-coverage →
   pubmed-retractions → search-index → revalidate → integrity`; staging drops `infoed` — its
-  `10.20.91.8` host overlaps the VPC CIDR — and inserts `mesh-anchors` before
+  internal host overlaps the VPC CIDR — and inserts `mesh-anchors` before
   `pubmed-retractions`), weekly (`completeness → headshot → spotlight → reporter → nsf →
   gates → nih-profile → pops → reporter-grants → clinical-trials → search-index → revalidate
   → integrity`), annual (`hierarchy` + manual approval gate). Step Functions enforces
@@ -181,7 +181,7 @@ protection, so a bad `AppStack` deploy — which happens often — cannot tear d
 |---|---|---|
 | AWS account | `665083158573` (shared; env-prefix isolation) | `665083158573` (shared) |
 | Region / DR region | us-east-1 / us-west-2 | us-east-1 / us-west-2 |
-| VPC | shared `its-reciter-vpc01`[^shared-vpc] | own, `10.10.0.0/16` |
+| VPC | shared `its-reciter-vpc01`[^shared-vpc] | own, `10.x.0.0/16` (internal) |
 | App tasks | 1 × (1024 CPU / 2048 MiB) | 2 × (2048 CPU / 4096 MiB) |
 | Aurora Serverless v2 | 0.5–2 ACU, writer-only | 1–8 ACU, writer + 1 reader |
 | OpenSearch | 1 × `t3.medium.search` (fresh shared-VPC domain) | 2 × `m6g.large.search` (multi-AZ) |
@@ -193,9 +193,9 @@ Deploy mechanics, the staging-gates-prod rule, and the prod approval gate are in
 [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md). Sizing source: [`cdk/lib/config.ts`](../cdk/lib/config.ts).
 
 [^shared-vpc]: Staging cut over to the shared, TGW-attached `its-reciter-vpc01`
-    (`vpc-08a1873fc8eebae28`) via #1419 (2026-07-02); its old standalone `10.20.0.0/16`
+    (`vpc-08a1873fc8eebae28`) via #1419 (2026-07-02); its old standalone `10.x.0.0/16`
     VPC, Aurora cluster, and OpenSearch domain are `RETAIN`'d until the Phase G
-    decommission (tracker #1458). Prod still runs its own `10.10.0.0/16` VPC pending its
+    decommission (tracker #1458). Prod still runs its own `10.x.0.0/16` VPC pending its
     per-env cutover.
 
 ## Cross-cutting concerns → where to read

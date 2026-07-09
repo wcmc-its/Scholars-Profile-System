@@ -27,7 +27,7 @@ ingress and endpoints added by AppStack/EtlStack/DataStack
 
 | | Staging | Production |
 |---|---|---|
-| VPC CIDR | `10.20.0.0/16` | `10.10.0.0/16` |
+| VPC CIDR | `10.x.0.0/16` (internal) | `10.x.0.0/16` (internal) |
 | AZs | `us-east-1a`, `us-east-1b` | same |
 | Public subnets | /24 per AZ — ALB + NAT only | same |
 | Private-with-egress subnets | /22 per AZ — ECS tasks, Aurora, OpenSearch, ETL | same |
@@ -129,8 +129,7 @@ two halves:
 - **AWS WAF** attaches to the distribution: a rate-based rule (1000 req / 5 min / IP) plus
   AWS Managed Rules. The production WAF topology is decided (#502): CloudFront + AWS WAF →
   NetScaler → ALB → Fargate, with the NetScaler (AWS VPX, WCM network team) being provisioned
-  via RITM0801140 (prod+staging, staging-first; see
-  [`waf-request-RITM0792011.md`](./waf-request-RITM0792011.md)). A WCM-only access gate (#461)
+  via RITM0801140 (prod+staging, staging-first). A WCM-only access gate (#461)
   stays in place meanwhile. **Do not lift the WCM-only gate until the NetScaler enforces
   equivalent filtering.**
 - **TLS:** ACM certs for `scholars[-staging].weill.cornell.edu` are provisioned and rotated
