@@ -2,7 +2,7 @@
 
 **Issue:** #514 (companion) · **Status:** analysis · **Relationship:** validates and extends `feedback-handling-matrix.md`.
 
-**Data:** ServiceNow "VIVO support" incident export, opened 2016‑08‑29 → 2026‑05‑15. 604 records exported; **N = 594** after excluding 10 infra/non‑feedback records (AWS‑backup alarms, a Wiz Kubernetes finding, a closed‑ticket comment echo). Analyzed 2026‑05‑27.
+**Data:** ServiceNow "VIVO support" incident export, opened 2016‑08‑29 → 2026‑05‑15. 604 records exported; **N = 594** after excluding 10 infra/non‑feedback records (AWS‑backup alarms, a Kubernetes security‑scan finding, a closed‑ticket comment echo). Analyzed 2026‑05‑27.
 
 > The raw export contains PII (faculty names, emails, CWIDs, personal phone numbers) and is **not committed**. Every example below is paraphrased to role level. Keep the export out of the repo.
 
@@ -19,7 +19,7 @@ This analysis answers three questions about the predecessor system (VIVO) that t
 The incidents are free‑text emails. Two methodology choices were load‑bearing; without them the aggregate is wrong by 5–15×.
 
 - **Subjects are useless for classification.** The most common subject lines are "VIVO profile" (×13), "VIVO" (×9), "Vivo error" (×5). Classification has to read the email *body*.
-- **Signatures and quoted reply chains must be stripped first.** A body that ends `— Jane Smith, MD, PhD, Professor, Department of Medicine, Division of …` makes a naive keyword match report ~39% "degree" complaints and ~33% "title" complaints. After stripping signatures and quoted threads, those fall to ~3% and ~6% — the boilerplate was the signal. The same hazard inflates "name" (the `My name is X, I'd like to…` self‑introduction wraps an *unrelated* complaint) and "department/division".
+- **Signatures and quoted reply chains must be stripped first.** A body that ends `— [Faculty Name], MD, PhD, Professor, Department of Medicine, Division of …` makes a naive keyword match report ~39% "degree" complaints and ~33% "title" complaints. After stripping signatures and quoted threads, those fall to ~3% and ~6% — the boilerplate was the signal. The same hazard inflates "name" (the `My name is X, I'd like to…` self‑introduction wraps an *unrelated* complaint) and "department/division".
 - **Multi‑label, then de‑noise.** Each incident is tagged with every theme its *ask* touches, then ambiguous buckets are corrected by sampling (below). Free‑text classification is inherently fuzzy: treat all figures as ±a few points and lead with the themes that are stable across independent runs.
 
 **Buckets corrected after sampling** (do not trust their naive counts):

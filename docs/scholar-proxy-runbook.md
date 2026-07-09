@@ -49,7 +49,7 @@ are confirmed applied there. **Prod** has not yet had #779 deployed (prod CD is 
 > `ldaps://` directory search** (`searchDirectoryPeopleByName`); when WCM LDAP is unreachable
 > from the SPS VPC the API returns `503 directory_unavailable` and the UI shows **"search
 > failed."** This is the same WCM-network routing gap that blocks #443 / #746
-> (`project_sps_vpc_wcm_connectivity` — needs TGW + WCM firewall for `10.20.0.0/16`). Until ED
+> (`project_sps_vpc_wcm_connectivity` — needs TGW + WCM firewall for the SPS VPC CIDR). Until ED
 > is routable, you cannot pick a person, so **Step 1 (and the name display in the panel) cannot
 > run via the UI**. Workaround for a functional smoke test: POST the grant directly with a known
 > cwid — `POST /api/edit/proxy {scholarCwid:"ras2022", proxyCwid:"bec4010", action:"grant"}` —

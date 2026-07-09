@@ -198,7 +198,7 @@ so the cache needs ETL-versioning or a short TTL, not a blunt freeze. Worth doin
 go-live concurrency makes it bind.
 
 **4. 2026-07-02 update — the lever above was (partly) built, and the numbers moved.** A
-full search/faceting audit ([`search-facet-perf-audit-2026-07-02.md`](./search-facet-perf-audit-2026-07-02.md),
+full search/faceting audit ([`search-facet-perf-audit-2026-07-02.md`](./audits/search-facet-perf-audit-2026-07-02.md),
 tracker **#1415**) landed nine PRs the same day, deployed to staging:
 
 - **`getCounts` is now SWR-cached** cross-request (15-min fresh / 1-h stale) and
