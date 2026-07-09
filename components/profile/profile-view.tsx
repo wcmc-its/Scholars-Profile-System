@@ -455,7 +455,7 @@ export async function ProfileView({ slug }: { slug: string }) {
           {profile.overview ? (
             <Section title="Overview">
               <div
-                className="text-base leading-relaxed text-zinc-800 dark:text-zinc-200 [&_a]:text-[var(--color-accent-slate)] [&_a]:underline-offset-4 [&_a:hover]:underline [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:mb-1"
+                className="text-base leading-relaxed text-zinc-800 dark:text-zinc-200 [&_a]:text-[var(--color-accent-slate)] [&_a]:underline [&_a]:underline-offset-4 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:mb-1"
                 dangerouslySetInnerHTML={{ __html: profile.overview }}
               />
             </Section>
