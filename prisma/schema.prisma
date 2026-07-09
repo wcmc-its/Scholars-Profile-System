@@ -129,6 +129,7 @@ model Scholar {
   overviewSelection    OverviewSourceSelection?
   scholarTools         ScholarTool[]
   scholarFamilies      ScholarFamily[]
+  technologies         ScholarTechnology[]
   department           Department?              @relation(fields: [deptCode], references: [code], onDelete: SetNull)
   division             Division?                @relation(fields: [divCode], references: [code], onDelete: SetNull)
   postdoctoralMentor   Scholar?                 @relation("PostdocMentor", fields: [postdoctoralMentorCwid], references: [cwid], onDelete: SetNull)
@@ -2163,6 +2164,39 @@ model ScholarTool {
   @@unique([cwid, toolName])
   @@index([cwid, pmidCount(sort: Desc)])
   @@map("scholar_tool")
+}
+
+/// One licensable invention from the WCM Center for Technology Licensing's
+/// public technology portfolio (innovation.weill.cornell.edu), attributed to a
+/// scholar. Loaded by `npm run etl:technologies` from the checked-in
+/// `etl/technologies/technologies.json` seed; full-replacement each run.
+///
+/// Attribution comes from the VIVO link CTL already prints beside each
+/// "Principal Investigator" (`vivo.weill.cornell.edu/display/cwid-<cwid>`), so
+/// the join is an identifier join, never a name match. 60 of 279 portfolio
+/// pages carry no such link — those inventors are overwhelmingly departed
+/// faculty (Cantley, Silverstein, Vahdat) with no `scholar` row, so they are
+/// dropped rather than fuzzy-matched.
+///
+/// Denormalized on purpose: one row per (scholar, technology). A technology
+/// with several PIs repeats its title across rows. At 235 rows a join table
+/// would cost a file and buy nothing.
+model ScholarTechnology {
+  id   String @id @default(uuid()) @db.VarChar(64)
+  cwid String @db.VarChar(32)
+  /// CTL's "Cornell Reference" docket number (e.g. "11166"). Null on ~35% of
+  /// portfolio pages, which simply omit it.
+  reference   String?  @map("reference") @db.VarChar(32)
+  title       String   @db.Text
+  /// Absolute URL of the public technology detail page.
+  url         String   @db.VarChar(512)
+  refreshedAt DateTime @default(now()) @map("refreshed_at")
+
+  scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+
+  @@unique([cwid, url])
+  @@index([cwid])
+  @@map("scholar_technology")
 }
 
 /// Per-(scholar, method-family) rollup from the A2 canonical taxonomy (#799).

@@ -48,15 +48,60 @@ type MatchDsl = { require: string[]; penalize: string[] };
 function parseMatchDsl(raw: unknown): MatchDsl | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
-  const require = Array.isArray(o.require) ? o.require.filter((s): s is string => typeof s === "string") : [];
+  const require = Array.isArray(o.require)
+    ? o.require.filter((s): s is string => typeof s === "string")
+    : [];
   if (require.length === 0) return null;
-  const penalize = Array.isArray(o.penalize) ? o.penalize.filter((s): s is string => typeof s === "string") : [];
+  const penalize = Array.isArray(o.penalize)
+    ? o.penalize.filter((s): s is string => typeof s === "string")
+    : [];
   return { require, penalize };
 }
 
 // Dense relevance (match_rel) is preferred over the live BM25 boost when present. This opt-out
 // knob reverts to BM25 without a reproject (set "off"), the rollback lever for the ranking change.
 const grantMatcherDenseRel = () => process.env.GRANT_MATCHER_DENSE_REL !== "off";
+
+/**
+ * NIH activity codes on which holding licensable IP is allowed to move the rank:
+ * SBIR/STTR (R41-R44) and the phased exploratory/development awards (UH2/UH3).
+ *
+ * MEASURED: on the local corpus, IP holders are ~2.7x over-represented in the
+ * top-10 for bench/translational TOPICS (gene therapy 5/10, immunology 6/10,
+ * genomics 6/10) and 0/10 for health-services, implementation-science, and
+ * workforce topics. That is evidence the signal must NOT be applied corpus-wide,
+ * where it would inject noise exactly where it has none to give.
+ *
+ * JUDGED, not measured: which mechanisms belong in this set. The corpus used for
+ * the measurement above carries no `mechanism`, so nothing here is validated by
+ * it. U01 is deliberately EXCLUDED — it is a general cooperative agreement
+ * spanning trials and epidemiology consortia, not a tech-development vehicle.
+ * Revisit against a real grants.gov corpus before widening.
+ */
+const TRANSLATIONAL_MECHANISMS: ReadonlySet<string> = new Set([
+  "R41",
+  "R42",
+  "R43",
+  "R44",
+  "UH2",
+  "UH3",
+]);
+
+/** Translational-IP re-rank (flag-gated, ships dark). Off ⇒ ipBoost = 0 everywhere. */
+const grantMatcherIpSignal = () => process.env.GRANT_MATCHER_IP_SIGNAL === "on";
+
+/** Boost strength: defaultScore × (1 + IP_BOOST) for IP holders. ponytail: one env knob. */
+const grantMatcherIpBoost = () => {
+  const n = Number(process.env.GRANT_MATCHER_IP_BOOST);
+  return Number.isFinite(n) && n >= 0 ? n : 0.15;
+};
+
+/** The boost applies only on translational mechanisms, and only when flagged on. */
+export function ipBoostFor(mechanism: string | null): number {
+  if (!grantMatcherIpSignal()) return 0;
+  if (!mechanism || !TRANSLATIONAL_MECHANISMS.has(mechanism.toUpperCase())) return 0;
+  return grantMatcherIpBoost();
+}
 
 /** Parse the stored match_rel JSON → `{pmid: cosine∈[0,1]}` as a Map (same shape as the BM25
  *  `relevanceScoresForQuery`, a drop-in rel source); null when absent/empty so the matcher falls
@@ -117,6 +162,10 @@ export type RankedScholar = {
   fundingStatus?: FundingStatus;
   /** Cross-ref: this opportunity is among the scholar's top-N forward matches. */
   inMyTopMatches?: boolean;
+  /** Count of CTL licensable technologies this scholar holds. 0 when none. */
+  technologyCount?: number;
+  /** True when the translational-IP boost actually moved this row's defaultScore. */
+  ipBoosted?: boolean;
 };
 
 export type FundingStatus = "funded" | "unfunded";
@@ -161,8 +210,11 @@ export type GrantSignals = {
 export function deriveGrantSignals(input: GrantSignalInput, now: Date): GrantSignals {
   const grants = input.grants ?? [];
   const isActive = (g: GrantSignalInput["grants"][number]) =>
-    g.endDate instanceof Date && !Number.isNaN(g.endDate.getTime()) && isFundingActive(g.endDate, now);
-  const isLead = (g: GrantSignalInput["grants"][number]) => LEAD_GRANT_ROLES.has((g.role ?? "").trim());
+    g.endDate instanceof Date &&
+    !Number.isNaN(g.endDate.getTime()) &&
+    isFundingActive(g.endDate, now);
+  const isLead = (g: GrantSignalInput["grants"][number]) =>
+    LEAD_GRANT_ROLES.has((g.role ?? "").trim());
 
   const fundingStatus: FundingStatus = grants.some(isActive) ? "funded" : "unfunded";
 
@@ -176,7 +228,8 @@ export function deriveGrantSignals(input: GrantSignalInput, now: Date): GrantSig
     now,
   );
   const hasMajorPiAward = grants.some(
-    (g) => isLead(g) && MAJOR_PI_MECHANISMS.some((m) => (g.mechanism ?? "").toUpperCase().startsWith(m)),
+    (g) =>
+      isLead(g) && MAJOR_PI_MECHANISMS.some((m) => (g.mechanism ?? "").toUpperCase().startsWith(m)),
   );
   const esiEligible =
     yearsSinceDegree !== null && yearsSinceDegree < DEGREE_EARLY_MAX_YEARS && !hasMajorPiAward;
@@ -202,6 +255,20 @@ export type RankResearchersOptions = {
   esiOnly?: boolean;
   /** ESI eligibility per candidate cwid; read only by the esiOnly demote. */
   esiEligibleByCwid?: Map<string, boolean>;
+  /** CTL licensable-IP count per candidate cwid. Attached to every row for display;
+   *  read by the `ipBoost` re-rank only when that is > 0. */
+  technologyCountByCwid?: Map<string, number>;
+  /**
+   * Translational-IP boost: multiply `defaultScore` by (1 + ipBoost) for scholars
+   * holding CTL IP, applied BEFORE `limit` so a boosted scholar can enter the
+   * top-N rather than merely reshuffle it. 0 (default) disables it.
+   *
+   * ponytail: binary has-IP, not count-scaled. A 12-invention portfolio reflects
+   * career length and CTL bookkeeping, not relevance to THIS opportunity; scaling
+   * by count would just re-rank by seniority. Scale by topic-matched IP if the
+   * binary signal proves too coarse.
+   */
+  ipBoost?: number;
   sort?: ResearcherSort;
   limit?: number;
 };
@@ -228,9 +295,13 @@ export function rankResearchers(
   for (const tr of topicResults) {
     for (const s of tr.scholars) {
       const contribution = tr.topicWeight * s.variantBScore;
-      const acc =
-        byCwid.get(s.cwid) ??
-        { cwid: s.cwid, slug: s.slug, preferredName: s.preferredName, topicFit: 0, contributions: [] };
+      const acc = byCwid.get(s.cwid) ?? {
+        cwid: s.cwid,
+        slug: s.slug,
+        preferredName: s.preferredName,
+        topicFit: 0,
+        contributions: [],
+      };
       acc.topicFit += contribution;
       acc.contributions.push({
         topicId: tr.topicId,
@@ -245,10 +316,16 @@ export function rankResearchers(
   const appeal = opts.appealByStage ?? {};
   const stageByCwid = opts.stageByCwid;
   const ranked: RankedScholar[] = [];
+  const ipBoost = opts.ipBoost ?? 0;
   for (const acc of byCwid.values()) {
     const stage = stageByCwid?.get(acc.cwid);
     const stageAppeal = stage ? (appeal[stage] ?? 0) : 0;
-    const defaultScore = opts.stageLens ? acc.topicFit * stageAppeal : acc.topicFit;
+    const technologyCount = opts.technologyCountByCwid?.get(acc.cwid) ?? 0;
+    // The boost moves `defaultScore` (the ordering) only. `axes.topicFit` stays the
+    // untouched topical evidence, so the row's rationale never claims the scholar
+    // is a better topical match than the corpus says.
+    const ipBoosted = ipBoost > 0 && technologyCount > 0;
+    const base = opts.stageLens ? acc.topicFit * stageAppeal : acc.topicFit;
     ranked.push({
       cwid: acc.cwid,
       slug: acc.slug,
@@ -256,7 +333,9 @@ export function rankResearchers(
       careerStage: stage ?? null,
       axes: { topicFit: acc.topicFit, stageAppeal },
       topicContributions: acc.contributions,
-      defaultScore,
+      defaultScore: ipBoosted ? base * (1 + ipBoost) : base,
+      technologyCount,
+      ipBoosted,
     });
   }
 
@@ -277,9 +356,15 @@ export function rankResearchers(
 // ── I/O wrapper (integration-gated; needs MySQL) ───────────────────────────
 
 /** Top topics of an opportunity (score ≥ gate), as {topicId, weight}. */
-export function opportunityTopTopics(topicVector: OpportunityTopicScore[], gate: number, k: number) {
+export function opportunityTopTopics(
+  topicVector: OpportunityTopicScore[],
+  gate: number,
+  k: number,
+) {
   return topicVector
-    .filter((t) => t && typeof t.topic_id === "string" && typeof t.score === "number" && t.score >= gate)
+    .filter(
+      (t) => t && typeof t.topic_id === "string" && typeof t.score === "number" && t.score >= gate,
+    )
     .sort((a, b) => b.score - a.score)
     .slice(0, k)
     .map((t) => ({ topicId: t.topic_id, topicWeight: t.score }));
@@ -309,7 +394,11 @@ async function topicVectorResults(
           parentTopicId: topicId,
           authorPosition: { in: ["first", "last"] },
           year: { gte: RECITERAI_YEAR_FLOOR },
-          scholar: { deletedAt: null, status: "active", roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] } },
+          scholar: {
+            deletedAt: null,
+            status: "active",
+            roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] },
+          },
           publication: { publicationType: { notIn: [...FEED_EXCLUDED_TYPES] } },
         },
         include: {
@@ -336,21 +425,20 @@ async function topicVectorResults(
           isConfirmed: true,
         };
         const inc = scorePublication(rankable, "top_scholars", true, now);
-        const slot =
-          byScholar.get(r.scholar.cwid) ??
-          {
-            entry: {
-              cwid: r.scholar.cwid,
-              slug: r.scholar.slug,
-              preferredName: r.scholar.preferredName ?? undefined,
-              variantBScore: 0,
-            },
-            pmids: new Set<string>(),
-            minYear: null as number | null,
-          };
+        const slot = byScholar.get(r.scholar.cwid) ?? {
+          entry: {
+            cwid: r.scholar.cwid,
+            slug: r.scholar.slug,
+            preferredName: r.scholar.preferredName ?? undefined,
+            variantBScore: 0,
+          },
+          pmids: new Set<string>(),
+          minYear: null as number | null,
+        };
         slot.entry.variantBScore += inc;
         slot.pmids.add(r.publication.pmid);
-        if (r.year != null) slot.minYear = slot.minYear == null ? r.year : Math.min(slot.minYear, r.year);
+        if (r.year != null)
+          slot.minYear = slot.minYear == null ? r.year : Math.min(slot.minYear, r.year);
         byScholar.set(r.scholar.cwid, slot);
       }
       return {
@@ -393,7 +481,11 @@ async function subtopicPoolResults(
       OR: dsl.require.map((p) => ({ primarySubtopicId: { contains: p } })),
       authorPosition: { in: ["first", "last"] },
       year: { gte: RECITERAI_YEAR_FLOOR },
-      scholar: { deletedAt: null, status: "active", roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] } },
+      scholar: {
+        deletedAt: null,
+        status: "active",
+        roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] },
+      },
       publication: { publicationType: { notIn: [...FEED_EXCLUDED_TYPES] } },
     },
     include: {
@@ -443,28 +535,31 @@ async function subtopicPoolResults(
     const inc = scorePublication(rankable, "top_scholars", true, now);
     const nr = rel.get(r.publication.pmid) ?? 0; // pubs absent from the rel set keep pure Variant-B
     const boosted = inc * (1 + relBoost * nr);
-    const slot =
-      byScholar.get(r.scholar.cwid) ??
-      {
-        entry: {
-          cwid: r.scholar.cwid,
-          slug: r.scholar.slug,
-          preferredName: r.scholar.preferredName ?? undefined,
-          variantBScore: 0,
-        },
-        pmids: new Set<string>(),
-        minYear: null as number | null,
-      };
+    const slot = byScholar.get(r.scholar.cwid) ?? {
+      entry: {
+        cwid: r.scholar.cwid,
+        slug: r.scholar.slug,
+        preferredName: r.scholar.preferredName ?? undefined,
+        variantBScore: 0,
+      },
+      pmids: new Set<string>(),
+      minYear: null as number | null,
+    };
     slot.entry.variantBScore += boosted;
     slot.pmids.add(r.publication.pmid);
-    if (r.year != null) slot.minYear = slot.minYear == null ? r.year : Math.min(slot.minYear, r.year);
+    if (r.year != null)
+      slot.minYear = slot.minYear == null ? r.year : Math.min(slot.minYear, r.year);
     byScholar.set(r.scholar.cwid, slot);
   }
   return [
     {
       topicId: SUBTOPIC_SYNTHETIC_TOPIC_ID,
       topicWeight: 1,
-      scholars: [...byScholar.values()].map((s) => ({ ...s.entry, pubCount: s.pmids.size, minYear: s.minYear })),
+      scholars: [...byScholar.values()].map((s) => ({
+        ...s.entry,
+        pubCount: s.pmids.size,
+        minYear: s.minYear,
+      })),
     },
   ];
 }
@@ -491,7 +586,14 @@ export async function rankResearchersForOpportunity(
   const now = opts.now ?? new Date();
   const opp = await db.read.opportunity.findUnique({
     where: { opportunityId },
-    select: { topicVector: true, appealByStage: true, matchDsl: true, matchQuery: true, matchRel: true },
+    select: {
+      topicVector: true,
+      appealByStage: true,
+      matchDsl: true,
+      matchQuery: true,
+      matchRel: true,
+      mechanism: true,
+    },
   });
   if (!opp) return [];
 
@@ -503,7 +605,8 @@ export async function rankResearchersForOpportunity(
   let topicResults: TopicResult[];
   if (dsl) {
     const pooled = await subtopicPoolResults(dsl, opp.matchQuery, opp.matchRel, now);
-    topicResults = pooled[0].scholars.length > 0 ? pooled : await topicVectorResults(opp, opts, now);
+    topicResults =
+      pooled[0].scholars.length > 0 ? pooled : await topicVectorResults(opp, opts, now);
   } else {
     topicResults = await topicVectorResults(opp, opts, now);
   }
@@ -533,13 +636,34 @@ export async function rankResearchersForOpportunity(
       stageByCwid.set(
         s.cwid,
         careerStageBucket(
-          { roleCategory: s.roleCategory, title: s.primaryTitle, appointments: s.appointments, educations: s.educations },
+          {
+            roleCategory: s.roleCategory,
+            title: s.primaryTitle,
+            appointments: s.appointments,
+            educations: s.educations,
+          },
           now,
         ),
       );
       profileByCwid.set(s.cwid, { title: s.primaryTitle, department: s.primaryDepartment });
-      signalsByCwid.set(s.cwid, deriveGrantSignals({ grants: s.grants, educations: s.educations }, now));
+      signalsByCwid.set(
+        s.cwid,
+        deriveGrantSignals({ grants: s.grants, educations: s.educations }, now),
+      );
     }
+  }
+
+  // CTL licensable-IP counts. Attached to every row for the ★ column regardless of
+  // the flag; they only move the ordering when `ipBoost` > 0 (translational
+  // mechanisms, flag on), so the signal can be observed before it is trusted.
+  const technologyCountByCwid = new Map<string, number>();
+  if (cwids.length > 0) {
+    const grouped = await db.read.scholarTechnology.groupBy({
+      by: ["cwid"],
+      where: { cwid: { in: cwids } },
+      _count: { _all: true },
+    });
+    for (const g of grouped) technologyCountByCwid.set(g.cwid, g._count._all);
   }
 
   const ranked = rankResearchers(topicResults, {
@@ -548,6 +672,8 @@ export async function rankResearchersForOpportunity(
     stageLens: opts.stageLens,
     esiOnly: opts.esiOnly,
     esiEligibleByCwid: new Map([...signalsByCwid].map(([c, s]) => [c, s.esiEligible])),
+    technologyCountByCwid,
+    ipBoost: ipBoostFor(opp.mechanism),
     sort: opts.sort,
     limit: opts.limit,
   });
@@ -584,7 +710,8 @@ const OPEN_OPPORTUNITY_STATUSES = ["open", "forecasted", "continuous"];
 function vectorFromTopicScores(v: OpportunityTopicScore[]): Map<string, number> {
   const m = new Map<string, number>();
   for (const t of v) {
-    if (t && typeof t.topic_id === "string" && typeof t.score === "number") m.set(t.topic_id, t.score);
+    if (t && typeof t.topic_id === "string" && typeof t.score === "number")
+      m.set(t.topic_id, t.score);
   }
   return m;
 }
@@ -627,7 +754,9 @@ export async function opportunitiesInTopMatches(
   });
   const oppVectors = opps.map((o) => ({
     id: o.opportunityId,
-    vec: vectorFromTopicScores((Array.isArray(o.topicVector) ? o.topicVector : []) as OpportunityTopicScore[]),
+    vec: vectorFromTopicScores(
+      (Array.isArray(o.topicVector) ? o.topicVector : []) as OpportunityTopicScore[],
+    ),
   }));
 
   // One grouped query → each scholar's topic-weight vector (same source/floor as

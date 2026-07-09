@@ -1,0 +1,1412 @@
+[
+ {
+  "cwid": "ahding",
+  "reference": null,
+  "title": "Grn(flox)Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/grnfloxmouse"
+ },
+ {
+  "cwid": "amg4017",
+  "reference": "11338",
+  "title": "Portable, Self-contained Upright PET Imaging System with Integrated Augmented Reality and Motion Tracking",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/portable-self-contained-upright-pet-imaging-system"
+ },
+ {
+  "cwid": "amm2014",
+  "reference": null,
+  "title": "Inhibitors of MALT1 for the Treatment of Lymphomas",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/inhibitors-malt1-treatment-lymphomas"
+ },
+ {
+  "cwid": "amm2014",
+  "reference": "10374",
+  "title": "Mutations in BCL10 as a Biomarker for Precision Therapy in DLBCL",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/mutations-bcl10-biomarker-precision-therapy-dlbcl"
+ },
+ {
+  "cwid": "amm2014",
+  "reference": "5879",
+  "title": "Small Molecule BCL6 Inhibitors as Therapeutic Agents for B-Cell Lymphomas",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/small-molecule-bcl6-inhibitors-therapeutic-agents-b"
+ },
+ {
+  "cwid": "anr2783",
+  "reference": "8520",
+  "title": "Non-Invasive Device for Voice Restoration After Laryngectomy",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/non-invasive-device-voice-restoration-after"
+ },
+ {
+  "cwid": "apr2003",
+  "reference": "3137",
+  "title": "Algorithm Composition for Characterizing Small Pulmonary Nodule from CT Scans",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/algorithm-composition-characterizing-small"
+ },
+ {
+  "cwid": "babette",
+  "reference": "3680",
+  "title": "Blood Brain Barrier Model System: Immortalized Human Brain Endothelial Cell Line",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/blood-brain-barrier-model-system-immortalized-human"
+ },
+ {
+  "cwid": "barany",
+  "reference": "5250",
+  "title": "Methods, Devices and System for DNA Sequencing and Molecular Diagnostics",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/methods-devices-and-system-dna-sequencing-and"
+ },
+ {
+  "cwid": "bjk2007",
+  "reference": null,
+  "title": "Anti-PfASF1 Polyclonal Antibody",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-pfasf1-polyclonal-antibody"
+ },
+ {
+  "cwid": "bjk2007",
+  "reference": null,
+  "title": "Anti-PfPMT Polyclonal Antibody",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-pfpmt-polyclonal-antibody"
+ },
+ {
+  "cwid": "bjk2007",
+  "reference": null,
+  "title": "Anti-PfSAHH Polyclonal Antibody",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-pfsahh-polyclonal-antibody"
+ },
+ {
+  "cwid": "bjk2007",
+  "reference": null,
+  "title": "Anti-PfSAMS Polyclonal Antibody",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-pfsams-polyclonal-antibody"
+ },
+ {
+  "cwid": "blhempst",
+  "reference": "2851",
+  "title": "Proneurotrophins as Targets for Treatments for CNS Trauma",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/proneurotrophins-targets-treatments-cns-trauma"
+ },
+ {
+  "cwid": "bom2008",
+  "reference": "9607",
+  "title": "Mixed Reality Image Guidance for Cardiac Interventional Surgery",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/mixed-reality-image-guidance-cardiac-interventional"
+ },
+ {
+  "cwid": "bom2008",
+  "reference": null,
+  "title": "Real-Time Roll Angle Prediction for Device Tracking in Six Degrees of Freedom",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/real-time-roll-angle-prediction-device-tracking-six"
+ },
+ {
+  "cwid": "bom2008",
+  "reference": "9430",
+  "title": "Scalable Production of Flexible Electronics for Anatomical Mapping and Sensors",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/scalable-production-flexible-electronics-anatomical"
+ },
+ {
+  "cwid": "ceintur",
+  "reference": "4382",
+  "title": "Selective Inhibition of ERK2 for Persistent Inflammatory and Neuropathic Pain",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/selective-inhibition-erk2-persistent-inflammatory"
+ },
+ {
+  "cwid": "chb9074",
+  "reference": null,
+  "title": "R26(F133V)Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/r26f133vmouse"
+ },
+ {
+  "cwid": "chg4001",
+  "reference": null,
+  "title": "Platform for Targeted Genetic Manipulation of Non-Model Gut Microbes",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/platform-targeted-genetic-manipulation-non-model"
+ },
+ {
+  "cwid": "chm2042",
+  "reference": null,
+  "title": "Single Sperm Sequencing Assay for Prediction of Autism Risk",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/single-sperm-sequencing-assay-prediction-autism"
+ },
+ {
+  "cwid": "chsung",
+  "reference": null,
+  "title": "Anti-CLIC4 Polyclonal Antibody",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-clic4-polyclonal-antibody"
+ },
+ {
+  "cwid": "chsung",
+  "reference": "10740",
+  "title": "Early Detection of Parkinson's Disease using Noninvasive Retinal Imaging Biomarkers",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/early-detection-parkinsons-disease-using"
+ },
+ {
+  "cwid": "chsung",
+  "reference": "4685",
+  "title": "Promoter Region as Stem Cell Marker",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/promoter-region-stem-cell-marker"
+ },
+ {
+  "cwid": "cht2018",
+  "reference": "7463",
+  "title": "Sono Membrane Rupture Therapy",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/sono-membrane-rupture-therapy"
+ },
+ {
+  "cwid": "chz4007",
+  "reference": "<span>10971</span>",
+  "title": "Single-Cell Platform for Mapping DNA Damage in Disease and Aging",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/single-cell-platform-mapping-dna-damage-disease-and"
+ },
+ {
+  "cwid": "cnathan",
+  "reference": null,
+  "title": "MyD88-5-Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/myd88-5-mouse"
+ },
+ {
+  "cwid": "cnathan",
+  "reference": "3915",
+  "title": "Novel Target and Inhibitors for prevention and treatment of Tuberculosis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/novel-target-and-inhibitors-prevention-and"
+ },
+ {
+  "cwid": "cnathan",
+  "reference": null,
+  "title": "PGRN KO Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/pgrn-ko-mouse"
+ },
+ {
+  "cwid": "col2004",
+  "reference": "11081",
+  "title": "Circuit-Guided Approach for Identifying Synergistic Drug Combinations for Treatment-Resistant Depression",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/circuit-guided-approach-identifying-synergistic"
+ },
+ {
+  "cwid": "col2004",
+  "reference": "7578",
+  "title": "Neuroimaging Biomarkers for Diagnosing Depression Subtypes and Predicting Treatment Response",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/neuroimaging-biomarkers-diagnosing-depression"
+ },
+ {
+  "cwid": "col2004",
+  "reference": "9771",
+  "title": "START - Psychiatric Symptom Tracker and Resources for Treatment",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/start-psychiatric-symptom-tracker-and-resources"
+ },
+ {
+  "cwid": "daa2028",
+  "reference": null,
+  "title": "Microbiome Therapy for the Treatment of Neurological or Behavioral Disorders",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/microbiome-therapy-treatment-neurological-or"
+ },
+ {
+  "cwid": "daa2028",
+  "reference": null,
+  "title": "Nmur1(iCre-eGFP)Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/nmur1icre-egfpmouse"
+ },
+ {
+  "cwid": "dal3005",
+  "reference": null,
+  "title": "An Organotypic Tumor Microenvironment (oTME) Model for High-throughput Discovery of Anti-cancer Therapeutics",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/organotypic-tumor-microenvironment-otme-model-high"
+ },
+ {
+  "cwid": "dal3005",
+  "reference": "11042",
+  "title": "DnD-Seq: A Versatile Platform for High-Resolution Protein-DNA Interaction Mapping in Single Cells",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/dnd-seq-versatile-platform-high-resolution-protein"
+ },
+ {
+  "cwid": "dal3005",
+  "reference": "9978",
+  "title": "GoTChA: Genotyping of Targeted loci with single-cell Chromatin Accessibility",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/gotcha-genotyping-targeted-loci-single-cell"
+ },
+ {
+  "cwid": "dal3005",
+  "reference": "7874",
+  "title": "MR-Detect: Genome-wide Mutation Integration for Ultra-Sensitive Detection of ctDNA",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/mr-detect-genome-wide-mutation-integration-ultra"
+ },
+ {
+  "cwid": "dal3005",
+  "reference": null,
+  "title": "MRD-EDGE: Ultra-Sensitive Detection of Circulating Tumor DNA for Cancer Screening and Diagnosis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/mrd-edge-ultra-sensitive-detection-circulating"
+ },
+ {
+  "cwid": "dchristi",
+  "reference": "2763",
+  "title": "Dynamic, Beat to Beat Detection and Control of Electrical Alternans",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/dynamic-beat-beat-detection-and-control-electrical"
+ },
+ {
+  "cwid": "dchristi",
+  "reference": "7882",
+  "title": "Platform for High-Throughput Cardiotoxicity Drug Screening",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/platform-high-throughput-cardiotoxicity-drug"
+ },
+ {
+  "cwid": "dcl2001",
+  "reference": "5392",
+  "title": "Circulating Exosomes as Diagnostic/Prognostic Indicators and Therapeutic Targets of Tumor Metastasis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/circulating-exosomes-diagnosticprognostic"
+ },
+ {
+  "cwid": "dcl2001",
+  "reference": "6628",
+  "title": "Double-stranded DNA in Exosomes as a Biomarker for Cancer Diagnosis and Prognosis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/double-stranded-dna-exosomes-biomarker-cancer"
+ },
+ {
+  "cwid": "dcl2001",
+  "reference": "<span>7932<br></span>",
+  "title": "Exosomal CEMIP and Anti-CEMIP Antibodies for Detection, Prevention and Treatment of Brain Metastasis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/exosomal-cemip-and-anti-cemip-antibodies-detection"
+ },
+ {
+  "cwid": "dcl2001",
+  "reference": "7003",
+  "title": "Methods and Reagents for Determination and Treatment of Organotropic Metastasis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/methods-and-reagents-determination-and-treatment"
+ },
+ {
+  "cwid": "dcl2001",
+  "reference": "3501",
+  "title": "Predicting and Treating Cancer Metastasis Before the Formation of Pre-metastatic Clusters",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/predicting-and-treating-cancer-metastasis-formation"
+ },
+ {
+  "cwid": "dcl2001",
+  "reference": "8035",
+  "title": "Tumor-Derived Exomeres as Biomarkers for Cancer Detection and Monitoring",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/tumor-derived-exomeres-biomarkers-cancer-detection"
+ },
+ {
+  "cwid": "dis2003",
+  "reference": "9126",
+  "title": "Conditionally Replicating M. bovis for Treating Bladder Cancer and Tuberculosis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/conditionally-replicating-m-bovis-treating-bladder"
+ },
+ {
+  "cwid": "djb2001",
+  "reference": "7033",
+  "title": "Systems and Methods for MR Microscopy and Pathological Analysis of Resected Tissue",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/systems-and-methods-mr-microscopy-and-pathological"
+ },
+ {
+  "cwid": "dpc2003",
+  "reference": "10869",
+  "title": "Arousal Units: A Framework for Measuring and Tracking Levels of Consciousness During Recovery",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/arousal-units-framework-measuring-and-tracking"
+ },
+ {
+  "cwid": "duw2001",
+  "reference": "10417",
+  "title": "Improved Cell Culture Media for the Derivation and Maintenance of Murine Embryonic Stem Cells",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/improved-cell-culture-media-derivation-and"
+ },
+ {
+  "cwid": "ecesarm",
+  "reference": "6918",
+  "title": "6-Ethylthioinosine for the Treatment of Cancers that Overexpress Adenosine Kinase (ADK)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/6-ethylthioinosine-treatment-cancers-overexpress"
+ },
+ {
+  "cwid": "elm4010",
+  "reference": "9669",
+  "title": "Flexible and Stretchable Radiofrequency Coils for Improved Magnetic Resonance Imaging",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/flexible-and-stretchable-radiofrequency-coils"
+ },
+ {
+  "cwid": "few2001",
+  "reference": "11405",
+  "title": "EmulatRx: A Multi-Agent System for Intelligent Clinical Trial Design",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/emulatrx-multi-agent-system-intelligent-clinical"
+ },
+ {
+  "cwid": "few2001",
+  "reference": "11038",
+  "title": "NerveAI: An ML-enabled Platform for Identification of Nerve Pain",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/nerveai-ml-enabled-platform-identification-nerve"
+ },
+ {
+  "cwid": "fisch",
+  "reference": null,
+  "title": "Monoclonal Antibody for Adult Myosin Heavy Chain (MF14)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/monoclonal-antibody-adult-myosin-heavy-chain-mf14"
+ },
+ {
+  "cwid": "fisch",
+  "reference": null,
+  "title": "Monoclonal Antibody for Desmin (D3)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/monoclonal-antibody-desmin-d3"
+ },
+ {
+  "cwid": "fisch",
+  "reference": null,
+  "title": "Monoclonal Antibody for Desmin (D76)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/monoclonal-antibody-desmin-d76"
+ },
+ {
+  "cwid": "fisch",
+  "reference": null,
+  "title": "Monoclonal Antibody for Muscle Fast C-Protein (MF1)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/monoclonal-antibody-muscle-fast-c-protein-mf1"
+ },
+ {
+  "cwid": "fisch",
+  "reference": null,
+  "title": "Monoclonal Antibody for Muscle Slow C-Protein (ALD66)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/monoclonal-antibody-muscle-slow-c-protein-ald66"
+ },
+ {
+  "cwid": "fisch",
+  "reference": null,
+  "title": "Monoclonal Antibody for Myosin Fast Muscle Light Chain 2 (MF5)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/monoclonal-antibody-myosin-fast-muscle-light-chain"
+ },
+ {
+  "cwid": "fisch",
+  "reference": null,
+  "title": "Monoclonal Antibody for Myosin Heavy Chain (ALD58)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/monoclonal-antibody-myosin-heavy-chain-ald58"
+ },
+ {
+  "cwid": "fisch",
+  "reference": null,
+  "title": "Monoclonal Antibody for Myosin Heavy Chain (MF20)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/monoclonal-antibody-myosin-heavy-chain-mf20"
+ },
+ {
+  "cwid": "fisch",
+  "reference": null,
+  "title": "Monoclonal Antibody for Neonatal and Adult Myosin Heavy Chain (MF30)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/monoclonal-antibody-neonatal-and-adult-myosin-heavy"
+ },
+ {
+  "cwid": "frmaxfie",
+  "reference": "9361",
+  "title": "ApHID: pH-Sensitive Fluorescent Dye Resistant to Photobleaching and Oxidation",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/aphid-ph-sensitive-fluorescent-dye-resistant"
+ },
+ {
+  "cwid": "frmaxfie",
+  "reference": "4800",
+  "title": "Cyclodextrin Polymers Targeted to Late Endosomes and Their Use",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/cyclodextrin-polymers-targeted-late-endosomes-and"
+ },
+ {
+  "cwid": "fslee",
+  "reference": null,
+  "title": "BDNF(Met) Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/bdnfmet-mouse"
+ },
+ {
+  "cwid": "fslee",
+  "reference": "4346",
+  "title": "Method to Promote Normal Brain Development and Decrease Risk for Psychiatric Disorders in Pre-adults with a Mutation in BDNF",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/method-promote-normal-brain-development-and"
+ },
+ {
+  "cwid": "gal2005",
+  "reference": "9516",
+  "title": "Artemisinin-Proteasome Inhibitor Conjugates for the Treatment of Malaria and Multiple Myeloma",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/artemisinin-proteasome-inhibitor-conjugates"
+ },
+ {
+  "cwid": "gcc9004",
+  "reference": "11338",
+  "title": "Portable, Self-contained Upright PET Imaging System with Integrated Augmented Reality and Motion Tracking",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/portable-self-contained-upright-pet-imaging-system"
+ },
+ {
+  "cwid": "gdpalerm",
+  "reference": "5760",
+  "title": "Automated Intracytoplasmic Sperm Injection Device",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/automated-intracytoplasmic-sperm-injection-device"
+ },
+ {
+  "cwid": "ges9006",
+  "reference": "4742",
+  "title": "System and Method for Radiation Dose Reporting",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/system-and-method-radiation-dose-reporting"
+ },
+ {
+  "cwid": "gew4002",
+  "reference": "<p><span>11171 </span></p>",
+  "title": "StaBle: Reducing Aliasing Errors in Doppler Ultrasound for High-Velocity Blood Flow Imaging",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/stable-reducing-aliasing-errors-doppler-ultrasound"
+ },
+ {
+  "cwid": "gfs2002",
+  "reference": "7744",
+  "title": "Employing Lymphoid Resident Commensal Bacteria to Modulate Chronic Inflammatory Diseases",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/employing-lymphoid-resident-commensal-bacteria"
+ },
+ {
+  "cwid": "gfs2002",
+  "reference": null,
+  "title": "IL-22-eGFP Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/il-22-egfp-mouse"
+ },
+ {
+  "cwid": "ggi9001",
+  "reference": null,
+  "title": "PDX Models of Lymphoma",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/pdx-models-lymphoma"
+ },
+ {
+  "cwid": "ggibson",
+  "reference": "6462",
+  "title": "Treatment of Alzheimer's Disease with Benfotiamine and its Derivatives",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/treatment-alzheimers-disease-benfotiamine-and-its"
+ },
+ {
+  "cwid": "gim2004",
+  "reference": null,
+  "title": "Human Cytochrome c Oxidase (COX) Deficient Cell Lines",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/human-cytochrome-c-oxidase-cox-deficient-cell-lines"
+ },
+ {
+  "cwid": "haf9016",
+  "reference": "10734",
+  "title": "GLICO Platform: Patient-Specific Brain Tumor Organoids for Precision Drug Development",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/glico-platform-patient-specific-brain-tumor"
+ },
+ {
+  "cwid": "han2005",
+  "reference": "7266",
+  "title": "MicroRNA Mimics for the Treatment of Cardiometabolic Diseases",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/microrna-mimics-treatment-cardiometabolic-diseases"
+ },
+ {
+  "cwid": "han2005",
+  "reference": "9897",
+  "title": "Switchable mRNAs with Enhanced Translational Efficiency for Tissue-Specific Expression",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/switchable-mrnas-enhanced-translational-efficiency"
+ },
+ {
+  "cwid": "hes2011",
+  "reference": null,
+  "title": "Egfl7:eGFP Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/egfl7egfp-mouse"
+ },
+ {
+  "cwid": "ili2001",
+  "reference": "10421",
+  "title": "Pan-Cancer Mycobiome Analysis Platform to Predict Survival and Treatment Response",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/pan-cancer-mycobiome-analysis-platform-predict"
+ },
+ {
+  "cwid": "ili2001",
+  "reference": null,
+  "title": "Theranostic Test for Antifungal Treatment of Inflammatory Diseases",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/theranostic-test-antifungal-treatment-inflammatory"
+ },
+ {
+  "cwid": "ili2001",
+  "reference": "10153",
+  "title": "Treatment of Fungal-Associated Irritable Bowel Disease Using IL-1 Inhibitors",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/treatment-fungal-associated-irritable-bowel-disease"
+ },
+ {
+  "cwid": "imh2003",
+  "reference": "10145",
+  "title": "Integrated Framework for Human Embryo Ploidy Prediction Using Artificial Intelligence",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/integrated-framework-human-embryo-ploidy-prediction"
+ },
+ {
+  "cwid": "jag4016",
+  "reference": "11190",
+  "title": "Affinity Map: Global Protein-Ligand Binding Affinity Profiling Using Photocatalytic Labeling",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/affinity-map-global-protein-ligand-binding-affinity"
+ },
+ {
+  "cwid": "jak2046",
+  "reference": "11437",
+  "title": "Dual HPLC-TLC Platform for Enhanced Quality Control of Alpha-Emitting Radiotherapeutics",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/dual-hplc-tlc-platform-enhanced-quality-control"
+ },
+ {
+  "cwid": "jak2046",
+  "reference": "10961",
+  "title": "Efficient Radiohalogenation of Aromatic Rings for Nuclear Medicine",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/efficient-radiohalogenation-aromatic-rings-nuclear"
+ },
+ {
+  "cwid": "jas2037",
+  "reference": "7976",
+  "title": "3D Biomimetic Platform",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/3d-biomimetic-platform"
+ },
+ {
+  "cwid": "jas2037",
+  "reference": "10273",
+  "title": "Breast Implant with Macroporous Shell for Improved Safety and Stability",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/breast-implant-macroporous-shell-improved-safety"
+ },
+ {
+  "cwid": "jdw2003",
+  "reference": "9361",
+  "title": "ApHID: pH-Sensitive Fluorescent Dye Resistant to Photobleaching and Oxidation",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/aphid-ph-sensitive-fluorescent-dye-resistant"
+ },
+ {
+  "cwid": "jei9008",
+  "reference": "5261",
+  "title": "Algorithm to Distinguish between Different Tachycardias Caused by Pacemakers/Defibrillators",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/algorithm-distinguish-between-different"
+ },
+ {
+  "cwid": "jek4011",
+  "reference": "<p><span>11171 </span></p>",
+  "title": "StaBle: Reducing Aliasing Errors in Doppler Ultrasound for High-Velocity Blood Flow Imaging",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/stable-reducing-aliasing-errors-doppler-ultrasound"
+ },
+ {
+  "cwid": "jhzippin",
+  "reference": "7464",
+  "title": "Modulation of soluble Adenylyl Cyclase (sAC) as a Method of Altering Melanocyte Pigmentation",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/modulation-soluble-adenylyl-cyclase-sac-method"
+ },
+ {
+  "cwid": "jhzippin",
+  "reference": "9143",
+  "title": "Soluble Adenylyl Cyclase (sAC) Inhibitors for Psoriasis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/soluble-adenylyl-cyclase-sac-inhibitors-psoriasis"
+ },
+ {
+  "cwid": "jimperat",
+  "reference": "8812",
+  "title": "Wearable Sensor for Monitoring Respiratory Failure in Sleep Disorders",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/wearable-sensor-monitoring-respiratory-failure"
+ },
+ {
+  "cwid": "jms2003",
+  "reference": null,
+  "title": "Methods for Stimulating Hematopoietic Recovery by Inhibiting TGF Beta Signaling",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/methods-stimulating-hematopoietic-recovery"
+ },
+ {
+  "cwid": "jms2003",
+  "reference": null,
+  "title": "Robust Ex Vivo Expansion of Human Hematopoietic Stem Cells for Clinical and Research Use",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/robust-ex-vivo-expansion-human-hematopoietic-stem"
+ },
+ {
+  "cwid": "job2064",
+  "reference": "11084",
+  "title": "Synthetic Peptide Inhibitors of FABP5 for Treatment of Diet-Associated Cancer and Metabolic Disease",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/synthetic-peptide-inhibitors-fabp5-treatment-diet"
+ },
+ {
+  "cwid": "jobuck",
+  "reference": null,
+  "title": "Anti-sAC Monoclonal Antibody (R21)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-sac-monoclonal-antibody-r21"
+ },
+ {
+  "cwid": "jobuck",
+  "reference": null,
+  "title": "Anti-sAC Monoclonal Antibody (R37)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-sac-monoclonal-antibody-r37"
+ },
+ {
+  "cwid": "jobuck",
+  "reference": null,
+  "title": "Anti-sAC Monoclonal Antibody (R41)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-sac-monoclonal-antibody-r41"
+ },
+ {
+  "cwid": "jobuck",
+  "reference": null,
+  "title": "Anti-sAC Monoclonal Antibody (R5)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-sac-monoclonal-antibody-r5"
+ },
+ {
+  "cwid": "jobuck",
+  "reference": "3373",
+  "title": "Chemical Inhibitors of Soluble Adenylyl Cyclase (sAC)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/chemical-inhibitors-soluble-adenylyl-cyclase-sac"
+ },
+ {
+  "cwid": "jobuck",
+  "reference": "4585",
+  "title": "Inhibition of sAC to Treat Hyperproliferative Dermatological Conditions",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/inhibition-sac-treat-hyperproliferative"
+ },
+ {
+  "cwid": "jobuck",
+  "reference": "3901 and 4055",
+  "title": "Modulating Adenylyl Cyclase for the Treatment of Bacterial or Eukaryotic Infections",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/modulating-adenylyl-cyclase-treatment-bacterial-or"
+ },
+ {
+  "cwid": "jobuck",
+  "reference": "9143",
+  "title": "Soluble Adenylyl Cyclase (sAC) Inhibitors for Psoriasis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/soluble-adenylyl-cyclase-sac-inhibitors-psoriasis"
+ },
+ {
+  "cwid": "jom4010",
+  "reference": "10168",
+  "title": "Improving the Efficacy of PARP1 Inhibitors by Targeting the Tumor Stroma",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/improving-efficacy-parp1-inhibitors-targeting-tumor"
+ },
+ {
+  "cwid": "jrw9011",
+  "reference": "8534",
+  "title": "Novel Anti-Infective Urinary Catheter and Drainage System",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/novel-anti-infective-urinary-catheter-and-drainage"
+ },
+ {
+  "cwid": "jtl2003",
+  "reference": "11081",
+  "title": "Circuit-Guided Approach for Identifying Synergistic Drug Combinations for Treatment-Resistant Depression",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/circuit-guided-approach-identifying-synergistic"
+ },
+ {
+  "cwid": "jtl2003",
+  "reference": "11177",
+  "title": "Opto-Opioids: Light-Activated Compounds for Locally-restricted and Reversible Pain Management",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/opto-opioids-light-activated-compounds-locally"
+ },
+ {
+  "cwid": "jub2031",
+  "reference": "8328",
+  "title": "Bacterial RNAs As Vaccine Adjuvants",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/bacterial-rnas-vaccine-adjuvants"
+ },
+ {
+  "cwid": "jub2031",
+  "reference": "8473",
+  "title": "Inflammasome Agonists for Vaccine and Immunotherapy",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/inflammasome-agonists-vaccine-and-immunotherapy"
+ },
+ {
+  "cwid": "jur2016",
+  "reference": "10981",
+  "title": "Preserving TAGLN2 Function in T-cells to Enhance Immunotherapy against Solid Tumors",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/preserving-tagln2-function-t-cells-enhance"
+ },
+ {
+  "cwid": "kab2060",
+  "reference": null,
+  "title": "Des-acyl Ghrelin and Analogs as Cancer Therapies",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/des-acyl-ghrelin-and-analogs-cancer-therapies"
+ },
+ {
+  "cwid": "las4011",
+  "reference": "9689",
+  "title": "3-HKA Analogs for the Treatment of Autoimmune Diseases",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/3-hka-analogs-treatment-autoimmune-diseases"
+ },
+ {
+  "cwid": "lgr2002",
+  "reference": null,
+  "title": "Epigenetic Modifying Agents Sensitize EBV+ Lymphomas to Immunotherapy",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/epigenetic-modifying-agents-sensitize-ebv-lymphomas"
+ },
+ {
+  "cwid": "lig2033",
+  "reference": "10763",
+  "title": "Inhibition of the UFMylation Cascade for Treatment of Alzheimer's Disease and 4R Tauopathies",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/inhibition-ufmylation-cascade-treatment-alzheimers"
+ },
+ {
+  "cwid": "lig2033",
+  "reference": null,
+  "title": "hTREM2-CV Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/htrem2-cv-mouse"
+ },
+ {
+  "cwid": "lig2033",
+  "reference": null,
+  "title": "hTREM2-R47H Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/htrem2-r47h-mouse"
+ },
+ {
+  "cwid": "lig4013",
+  "reference": "11038",
+  "title": "NerveAI: An ML-enabled Platform for Identification of Nerve Pain",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/nerveai-ml-enabled-platform-identification-nerve"
+ },
+ {
+  "cwid": "llevin",
+  "reference": null,
+  "title": "Anti-sAC Monoclonal Antibody (R21)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-sac-monoclonal-antibody-r21"
+ },
+ {
+  "cwid": "llevin",
+  "reference": null,
+  "title": "Anti-sAC Monoclonal Antibody (R37)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-sac-monoclonal-antibody-r37"
+ },
+ {
+  "cwid": "llevin",
+  "reference": null,
+  "title": "Anti-sAC Monoclonal Antibody (R41)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-sac-monoclonal-antibody-r41"
+ },
+ {
+  "cwid": "llevin",
+  "reference": null,
+  "title": "Anti-sAC Monoclonal Antibody (R5)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-sac-monoclonal-antibody-r5"
+ },
+ {
+  "cwid": "llevin",
+  "reference": "9143",
+  "title": "Soluble Adenylyl Cyclase (sAC) Inhibitors for Psoriasis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/soluble-adenylyl-cyclase-sac-inhibitors-psoriasis"
+ },
+ {
+  "cwid": "lndhlovu",
+  "reference": "11459",
+  "title": "HERV-K Expression as a Biomarker for Predicting Immunotherapy Response",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/herv-k-expression-biomarker-predicting"
+ },
+ {
+  "cwid": "lndhlovu",
+  "reference": null,
+  "title": "Retroelement-Based Epigenetic Clock as a Biomarker of Biological Aging",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/retroelement-based-epigenetic-clock-biomarker"
+ },
+ {
+  "cwid": "lud2005",
+  "reference": null,
+  "title": "Genetically Engineered KRAS Organoids",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/genetically-engineered-kras-organoids"
+ },
+ {
+  "cwid": "lud2005",
+  "reference": null,
+  "title": "Inducible Base Editor (IBE) Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/inducible-base-editor-ibe-mouse"
+ },
+ {
+  "cwid": "lud2005",
+  "reference": null,
+  "title": "LSL-KrasG12C Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/lsl-krasg12c-mouse"
+ },
+ {
+  "cwid": "lud2005",
+  "reference": null,
+  "title": "LSL-KrasG12R Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/lsl-krasg12r-mouse"
+ },
+ {
+  "cwid": "lud2005",
+  "reference": null,
+  "title": "LSL-KrasG13D Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/lsl-krasg13d-mouse"
+ },
+ {
+  "cwid": "mag3003",
+  "reference": "7658",
+  "title": "Targeting the SLIT3 Pathway to Promote Bone Formation",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/targeting-slit3-pathway-promote-bone-formation"
+ },
+ {
+  "cwid": "map2008",
+  "reference": "10591",
+  "title": "Automated Organ Volume Measurement Tool for Improved Clinical Decision-Making",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/automated-organ-volume-measurement-tool-improved"
+ },
+ {
+  "cwid": "map2008",
+  "reference": "3108",
+  "title": "Improved Contrast-Enhanced MRA with Mask or Arterial Phase Averaging",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/improved-contrast-enhanced-mra-mask-or-arterial"
+ },
+ {
+  "cwid": "mas2189",
+  "reference": "8438",
+  "title": "Iron Chelators for the Treatment of Adult Neuronal Ceroid Lipofuscinosis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/iron-chelators-treatment-adult-neuronal-ceroid"
+ },
+ {
+  "cwid": "mbd4001",
+  "reference": "8495",
+  "title": "DARC Diagnostic Test for Tumor Immunotherapy",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/darc-diagnostic-test-tumor-immunotherapy"
+ },
+ {
+  "cwid": "mecharl",
+  "reference": "6867",
+  "title": "The Charlson Comorbidity Index: A System for Identifying Patients with High Future Healthcare Costs",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/charlson-comorbidity-index-system-identifying"
+ },
+ {
+  "cwid": "mik2002",
+  "reference": "8560",
+  "title": "Non-Invasive Delivery of CNS Gene Therapy Using Focused Ultrasound",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/non-invasive-delivery-cns-gene-therapy-using"
+ },
+ {
+  "cwid": "mik2002",
+  "reference": "8361",
+  "title": "Non-Invasive Delivery of Oncolytic Viruses Using Focused Ultrasound",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/non-invasive-delivery-oncolytic-viruses-using"
+ },
+ {
+  "cwid": "mjc4002",
+  "reference": null,
+  "title": "Retroelement-Based Epigenetic Clock as a Biomarker of Biological Aging",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/retroelement-based-epigenetic-clock-biomarker"
+ },
+ {
+  "cwid": "mnociari",
+  "reference": "9745",
+  "title": "Small Molecules that Protect Against Lipofuscin Toxicity to Prevent Blindness",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/small-molecules-protect-against-lipofuscin-toxicity"
+ },
+ {
+  "cwid": "msuthan",
+  "reference": null,
+  "title": "MicroRNA Expression Levels are Predictive of Human Allograft Status",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/microrna-expression-levels-are-predictive-human"
+ },
+ {
+  "cwid": "msuthan",
+  "reference": "5936",
+  "title": "RNA Signature for Noninvasive Diagnosis of Fibrosis in Kidney Transplants",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/rna-signature-noninvasive-diagnosis-fibrosis-kidney"
+ },
+ {
+  "cwid": "mtd4001",
+  "reference": "10168",
+  "title": "Improving the Efficacy of PARP1 Inhibitors by Targeting the Tumor Stroma",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/improving-efficacy-parp1-inhibitors-targeting-tumor"
+ },
+ {
+  "cwid": "myz4001",
+  "reference": null,
+  "title": "IgG KO Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/igg-ko-mouse"
+ },
+ {
+  "cwid": "nad2012",
+  "reference": "9146",
+  "title": "Low-dose Carbon Monoxide in Treating Metastatic Cancer",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/low-dose-carbon-monoxide-treating-metastatic-cancer"
+ },
+ {
+  "cwid": "nad2012",
+  "reference": "9369",
+  "title": "Nanotherapy Targeting Metastatic Factor RHAMM Positive Tumors",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/nanotherapy-targeting-metastatic-factor-rhamm"
+ },
+ {
+  "cwid": "nds2001",
+  "reference": "8839",
+  "title": "Upregulation of GABA Signaling for the Treatment of Acquired Cognitive Deficits",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/upregulation-gaba-signaling-treatment-acquired"
+ },
+ {
+  "cwid": "nid4009",
+  "reference": "10455",
+  "title": "Repurposing of Reverse Transcriptase Inhibitors to Alleviate TLR5-mediated Inflammation in Cystic Fibrosis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/repurposing-reverse-transcriptase-inhibitors"
+ },
+ {
+  "cwid": "ole2001",
+  "reference": null,
+  "title": "Patient-Derived Solid Tumor Organoids",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/patient-derived-solid-tumor-organoids"
+ },
+ {
+  "cwid": "pag2015",
+  "reference": "8125",
+  "title": "A Novel Highly Specific and Sensitive Digital Droplet PCR Assay for the Detection of Androgen Receptor and Its Variants",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/novel-highly-specific-and-sensitive-digital-droplet"
+ },
+ {
+  "cwid": "pag2015",
+  "reference": "5706",
+  "title": "Androgen Receptor Variants as Predictive Biomarker of Taxane Sensitivity in Prostate Cancer Patients",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/androgen-receptor-variants-predictive-biomarker"
+ },
+ {
+  "cwid": "pez2001",
+  "reference": "5002",
+  "title": "Protein Knockout Platform",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/protein-knockout-platform"
+ },
+ {
+  "cwid": "pez2001",
+  "reference": null,
+  "title": "Small Molecule Inhibitors of CRL4 Ubiquitin Ligase for Cancer Treatment",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/small-molecule-inhibitors-crl4-ubiquitin-ligase"
+ },
+ {
+  "cwid": "piz2001",
+  "reference": "6399",
+  "title": "Prohibitin Gene Therapy for the Treatment of Alzheimer's Disease",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/prohibitin-gene-therapy-treatment-alzheimers"
+ },
+ {
+  "cwid": "rak2007",
+  "reference": "8542",
+  "title": "Actionable Taxonomy to Identify Patients with High Healthcare Utilization and Potential Interventions",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/actionable-taxonomy-identify-patients-high"
+ },
+ {
+  "cwid": "ral2006",
+  "reference": "11070",
+  "title": "Microbiome Theranostic for Sulfasalazine Treatment in Patients with IBD-Associated Spondyloarthritis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/microbiome-theranostic-sulfasalazine-treatment"
+ },
+ {
+  "cwid": "ral2006",
+  "reference": "9296",
+  "title": "Transferable Microbiota for the Treatment of Ulcerative Colitis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/transferable-microbiota-treatment-ulcerative"
+ },
+ {
+  "cwid": "raz2002",
+  "reference": "6121",
+  "title": "Endoscopically Deployable Temporary Anti-Reflux Device",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/endoscopically-deployable-temporary-anti-reflux"
+ },
+ {
+  "cwid": "raz2002",
+  "reference": "6986",
+  "title": "Self-collapsing Feeding Tube with Cleaning Mechanism",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/self-collapsing-feeding-tube-cleaning-mechanism"
+ },
+ {
+  "cwid": "rbjones",
+  "reference": "10876",
+  "title": "Repurposing Atovaquone for Eliminating HIV-Infected T-Cells",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/repurposing-atovaquone-eliminating-hiv-infected-t"
+ },
+ {
+  "cwid": "res2025",
+  "reference": null,
+  "title": "Human Hepatocyte-Like Cell Line (iPS-H)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/human-hepatocyte-cell-line-ips-h"
+ },
+ {
+  "cwid": "rgcryst",
+  "reference": "9885",
+  "title": "A Novel Adenovirus-based Vaccine for the Treatment of Fentanyl Addiction",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/novel-adenovirus-based-vaccine-treatment-fentanyl"
+ },
+ {
+  "cwid": "rgcryst",
+  "reference": "5891",
+  "title": "Adenovirus Hexon-Based Anti-Nicotine Vaccine to Treat Nicotine Addiction",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/adenovirus-hexon-based-anti-nicotine-vaccine-treat"
+ },
+ {
+  "cwid": "rgcryst",
+  "reference": "7690",
+  "title": "Gene Therapy for Alpha 1-Antitrypsin (AAT) Deficiency",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/gene-therapy-alpha-1-antitrypsin-aat-deficiency"
+ },
+ {
+  "cwid": "rgcryst",
+  "reference": null,
+  "title": "Gene Therapy for Prevention of Esophageal Cancer and Osteoporosis in ALDH2-Deficient Patients",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/gene-therapy-prevention-esophageal-cancer-and"
+ },
+ {
+  "cwid": "rgcryst",
+  "reference": "6985",
+  "title": "Gene Therapy to Prevent Reactions to Allergens",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/gene-therapy-prevent-reactions-allergens"
+ },
+ {
+  "cwid": "rgcryst",
+  "reference": null,
+  "title": "Human Airway Basal Cell Progenitor Cell Line (BCi-NS1)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/human-airway-basal-cell-progenitor-cell-line-bci"
+ },
+ {
+  "cwid": "rgcryst",
+  "reference": null,
+  "title": "Human Small Airway Epithelium Basal Cell Line (hSABCi-NS1.1)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/human-small-airway-epithelium-basal-cell-line"
+ },
+ {
+  "cwid": "rgcryst",
+  "reference": "8258",
+  "title": "Modified AAV5 Capsid for Enhanced Organ-Specific Gene Therapy Delivery",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/modified-aav5-capsid-enhanced-organ-specific-gene"
+ },
+ {
+  "cwid": "rgcryst",
+  "reference": null,
+  "title": "Optimized Gene Therapy for Hereditary Angioedema",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/optimized-gene-therapy-hereditary-angioedema"
+ },
+ {
+  "cwid": "rgcryst",
+  "reference": "7909",
+  "title": "Vectorized Anti-Eosinophil Antibodies for Treatment of Eosinophilic Leukemias and Inflammatory Disorders",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/vectorized-anti-eosinophil-antibodies-treatment"
+ },
+ {
+  "cwid": "rgcryst",
+  "reference": "5835",
+  "title": "Vectorized Anti-Nicotine Antibody for Smoking Cessation",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/vectorized-anti-nicotine-antibody-smoking-cessation"
+ },
+ {
+  "cwid": "rgcryst",
+  "reference": "6050",
+  "title": "Vectorized Antibodies for the Treatment of Solid Tumors",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/vectorized-antibodies-treatment-solid-tumors"
+ },
+ {
+  "cwid": "rig4007",
+  "reference": "10621",
+  "title": "Microbiome-Derived Therapies for Treatment and Prevention Viral Infections",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/microbiome-derived-therapies-treatment-and"
+ },
+ {
+  "cwid": "rms2002",
+  "reference": null,
+  "title": "Flexible Cavity-Filling Device with Fiducial Markers for Patients Undergoing Lumpectomy",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/flexible-cavity-filling-device-fiducial-markers"
+ },
+ {
+  "cwid": "roh2002",
+  "reference": null,
+  "title": "Novel Methods for 3D Imaging and Quenching Tissue Autofluorescence",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/novel-methods-3d-imaging-and-quenching-tissue"
+ },
+ {
+  "cwid": "roh9005",
+  "reference": null,
+  "title": "Tissue-Engineered Intervertebral Discs for the Treatment of Degenerative Disc Disease",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/tissue-engineered-intervertebral-discs-treatment"
+ },
+ {
+  "cwid": "rrr2001",
+  "reference": "5083",
+  "title": "Cell-based Assay for NRF2 Activators & NRF2 Activator Scaffolds as Neuroprotective/Antioxidant Agents",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/cell-based-assay-nrf2-activators-nrf2-activator"
+ },
+ {
+  "cwid": "rrr2001",
+  "reference": "3792",
+  "title": "Compounds that Induce Arginase 1 to Enhance Neuroprotection",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/compounds-induce-arginase-1-enhance-neuroprotection"
+ },
+ {
+  "cwid": "rrr2001",
+  "reference": "6127",
+  "title": "Eradicating Hemorrhage by Inhibiting Prolyl Hydroxylase",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/eradicating-hemorrhage-inhibiting-prolyl"
+ },
+ {
+  "cwid": "rrr2001",
+  "reference": "3829",
+  "title": "p21 Inducers as Neuroprotective and Anticancer Agents",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/p21-inducers-neuroprotective-and-anticancer-agents"
+ },
+ {
+  "cwid": "rub2001",
+  "reference": "9678",
+  "title": "Whole Cell Active Inhibitors of Mycobacterium Tuberculosis Lipoamide Dehydrogenase",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/whole-cell-active-inhibitors-mycobacterium"
+ },
+ {
+  "cwid": "sas2068",
+  "reference": "9361",
+  "title": "ApHID: pH-Sensitive Fluorescent Dye Resistant to Photobleaching and Oxidation",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/aphid-ph-sensitive-fluorescent-dye-resistant"
+ },
+ {
+  "cwid": "sbl2004",
+  "reference": "7086",
+  "title": "Peptide Nanofibers for Targeted Delivery of Anti-Cancer Therapeutic and Diagnostic Agents",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/peptide-nanofibers-targeted-delivery-anti-cancer"
+ },
+ {
+  "cwid": "scb2005",
+  "reference": "6234",
+  "title": "Methods and Reagents for Analyzing Riboswitches",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/methods-and-reagents-analyzing-riboswitches"
+ },
+ {
+  "cwid": "scb2005",
+  "reference": "5468",
+  "title": "New Ribosomal Target for Antibiotic Drug Discovery",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/new-ribosomal-target-antibiotic-drug-discovery"
+ },
+ {
+  "cwid": "scb2005",
+  "reference": "5464",
+  "title": "Reagents and Methods for Assaying Protein Synthesis and Amino Acid Transport",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/reagents-and-methods-assaying-protein-synthesis-and"
+ },
+ {
+  "cwid": "scb2005",
+  "reference": "5942",
+  "title": "Reagents and Methods to Discover anti-HIV-1 Drugs",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/reagents-and-methods-discover-anti-hiv-1-drugs"
+ },
+ {
+  "cwid": "scb2005",
+  "reference": "5467",
+  "title": "Single Molecule Imaging Techniques to Aid Crystallization",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/single-molecule-imaging-techniques-aid"
+ },
+ {
+  "cwid": "schwarh",
+  "reference": "4029",
+  "title": "Subdural Device for Monitoring Seizures and Mapping Brain Function",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/subdural-device-monitoring-seizures-and-mapping"
+ },
+ {
+  "cwid": "sckiang",
+  "reference": "3467",
+  "title": "Assessing Proliferative Potential of Cancers by Immunohistochemical Analysis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/assessing-proliferative-potential-cancers"
+ },
+ {
+  "cwid": "sckiang",
+  "reference": "6915",
+  "title": "Combination Therapy for B-cell Cancers",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/combination-therapy-b-cell-cancers"
+ },
+ {
+  "cwid": "scp2002",
+  "reference": "9891",
+  "title": "Customizable Skull Prosthesis for Protection Following Craniectomy",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/customizable-skull-prosthesis-protection-following"
+ },
+ {
+  "cwid": "scp2002",
+  "reference": "9511",
+  "title": "NeuroVis: Mixed Reality System for Neurosurgery Case Planning",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/neurovis-mixed-reality-system-neurosurgery-case"
+ },
+ {
+  "cwid": "scwong",
+  "reference": "8159",
+  "title": "Radial Access Sheath for Minimally Invasive Vascular Interventions",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/radial-access-sheath-minimally-invasive-vascular"
+ },
+ {
+  "cwid": "shc2034",
+  "reference": "7608",
+  "title": "Discovery of Drug Candidates that Inhibit and Eliminate Zika Virus Infection",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/discovery-drug-candidates-inhibit-and-eliminate"
+ },
+ {
+  "cwid": "shc2034",
+  "reference": null,
+  "title": "Method of Differentiation from Human Pluripotent Stem Cells to Monohormonal Cells",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/method-differentiation-human-pluripotent-stem-cells"
+ },
+ {
+  "cwid": "shc2034",
+  "reference": "8784",
+  "title": "Platform for Screening for Chemotherapy-Induced Cardiotoxicity",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/platform-screening-chemotherapy-induced"
+ },
+ {
+  "cwid": "shc2034",
+  "reference": null,
+  "title": "hPSC-Derived Lung and Colon Organoids",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/hpsc-derived-lung-and-colon-organoids"
+ },
+ {
+  "cwid": "shg3006",
+  "reference": "10763",
+  "title": "Inhibition of the UFMylation Cascade for Treatment of Alzheimer's Disease and 4R Tauopathies",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/inhibition-ufmylation-cascade-treatment-alzheimers"
+ },
+ {
+  "cwid": "sid2012",
+  "reference": "9430",
+  "title": "Scalable Production of Flexible Electronics for Anatomical Mapping and Sensors",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/scalable-production-flexible-electronics-anatomical"
+ },
+ {
+  "cwid": "sjmann",
+  "reference": "4279",
+  "title": "Urine Dipstick for Monitoring Dietary Salt Intake for Hypertensive Patients",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/urine-dipstick-monitoring-dietary-salt-intake"
+ },
+ {
+  "cwid": "srafii",
+  "reference": "<span>9220</span>",
+  "title": "Generation of Human Glomerular Endothelial Cells for Kidney Disease Research and Treatment",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/generation-human-glomerular-endothelial-cells"
+ },
+ {
+  "cwid": "srafii",
+  "reference": null,
+  "title": "Mouse CD34+ Testicular Stromal Cell Line",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/mouse-cd34-testicular-stromal-cell-line"
+ },
+ {
+  "cwid": "srj2003",
+  "reference": null,
+  "title": "Antibody for Immunopurification of Peptides Derived from Ubiquitinated Proteins (GX41)",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/antibody-immunopurification-peptides-derived"
+ },
+ {
+  "cwid": "srj2003",
+  "reference": "10643",
+  "title": "Engineered Vectors and Virus-like Particles for Circular mRNA Expression",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/engineered-vectors-and-virus-particles-circular"
+ },
+ {
+  "cwid": "srj2003",
+  "reference": "9108",
+  "title": "Live Cell Imaging using RNA-Stabilized Fluorogenic Proteins",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/live-cell-imaging-using-rna-stabilized-fluorogenic"
+ },
+ {
+  "cwid": "srj2003",
+  "reference": null,
+  "title": "Method of Enhancing Translation Ability and Stability of RNA Molecules, Treatments and Kits",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/method-enhancing-translation-ability-and-stability"
+ },
+ {
+  "cwid": "srj2003",
+  "reference": null,
+  "title": "Methods for the Efficient Identification of Ubiquitination Sites by Proteomics",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/methods-efficient-identification-ubiquitination"
+ },
+ {
+  "cwid": "srj2003",
+  "reference": null,
+  "title": "Nicotinamide Riboside for the Prevention and Treatment of Hearing Loss",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/nicotinamide-riboside-prevention-and-treatment"
+ },
+ {
+  "cwid": "srj2003",
+  "reference": "11080",
+  "title": "Platform for Aptamer-Mediated Cellular Regulation using Circular RNA Nanodevices",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/platform-aptamer-mediated-cellular-regulation-using"
+ },
+ {
+  "cwid": "srj2003",
+  "reference": null,
+  "title": "Synthesis of RNAs Containing Methylated Adenosine Residues and Their Use in Enhancing Translation",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/synthesis-rnas-containing-methylated-adenosine"
+ },
+ {
+  "cwid": "srj2003",
+  "reference": "10850",
+  "title": "Tunable Gene Therapy Expression System Regulated by Acyclovir",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/tunable-gene-therapy-expression-system-regulated"
+ },
+ {
+  "cwid": "srj2003",
+  "reference": null,
+  "title": "Viral Method to Express Regenerative Proteins in Spinal Cord Injured Axons",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/viral-method-express-regenerative-proteins-spinal"
+ },
+ {
+  "cwid": "ssgross",
+  "reference": "2918",
+  "title": "Compounds to Treat Diabetic Complications",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/compounds-treat-diabetic-complications"
+ },
+ {
+  "cwid": "stw2006",
+  "reference": "5758",
+  "title": "Methods to Decrease Susceptibility to Asthmatic Bronchoconstriction",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/methods-decrease-susceptibility-asthmatic"
+ },
+ {
+  "cwid": "suc2002",
+  "reference": "5134",
+  "title": "CD36 Inhibition to Reduce Visceral Fat Accumulation and Increase Insulin Sensitivity",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/cd36-inhibition-reduce-visceral-fat-accumulation"
+ },
+ {
+  "cwid": "szj2001",
+  "reference": null,
+  "title": "Method for Biopsy-Free Enrichment and Analysis of Peripheral Blood Mononuclear Cells",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/method-biopsy-free-enrichment-and-analysis"
+ },
+ {
+  "cwid": "tai9015",
+  "reference": null,
+  "title": "Improved Epigenetic Signatures for Breast Cancer Prognosis and Treatment Selection",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/improved-epigenetic-signatures-breast-cancer"
+ },
+ {
+  "cwid": "taryan",
+  "reference": "4634",
+  "title": "Methods and Compositions for Measuring ATP in Subcellular Compartments",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/methods-and-compositions-measuring-atp-subcellular"
+ },
+ {
+  "cwid": "temcgraw",
+  "reference": null,
+  "title": "Gene Signature Panel for Predicting Response to Immune Checkpoint Blockade in Solid Tumors",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/gene-signature-panel-predicting-response-immune"
+ },
+ {
+  "cwid": "tjfahey",
+  "reference": "4416",
+  "title": "Gene Profiling for Accurate Diagnosis of Thyroid Cancer Nodules",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/gene-profiling-accurate-diagnosis-thyroid-cancer"
+ },
+ {
+  "cwid": "tre2003",
+  "reference": "8431",
+  "title": "A Small Molecule Promotes Bone Healing via P38 Activation",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/small-molecule-promotes-bone-healing-p38-activation"
+ },
+ {
+  "cwid": "varmus",
+  "reference": null,
+  "title": "MGS34F Mouse",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/mgs34f-mouse"
+ },
+ {
+  "cwid": "vim2010",
+  "reference": null,
+  "title": "Enhancing Performance of Checkpoint Inhibitors in TNBC through Copper Depletion",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/enhancing-performance-checkpoint-inhibitors-tnbc"
+ },
+ {
+  "cwid": "vim2010",
+  "reference": "6106",
+  "title": "MicroRNA-708 as a Therapeutic Agent against Metastatic Breast Cancer",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/microrna-708-therapeutic-agent-against-metastatic"
+ },
+ {
+  "cwid": "xih4001",
+  "reference": "9894",
+  "title": "CRISPR-Mediated SATB2 Inhibition for the Treatment of Short Bowel Syndrome",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/crispr-mediated-satb2-inhibition-treatment-short"
+ },
+ {
+  "cwid": "xih4001",
+  "reference": null,
+  "title": "Generation of Glucose-Responsive Stomach Cells for the Treatment of Diabetes",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/generation-glucose-responsive-stomach-cells"
+ },
+ {
+  "cwid": "xyhuang",
+  "reference": "3896",
+  "title": "siRNA Agents that Reduce Tumor Growth and Angiogenesis",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/sirna-agents-reduce-tumor-growth-and-angiogenesis"
+ },
+ {
+  "cwid": "yiwang",
+  "reference": "3733",
+  "title": "ECG Ordered Contrast Enhanced MRA",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/ecg-ordered-contrast-enhanced-mra"
+ },
+ {
+  "cwid": "zhz9010",
+  "reference": "11166",
+  "title": "AI-Powered, Point-of-Care Testing for Preeclampsia Prediction",
+  "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/ai-powered-point-care-testing-preeclampsia"
+ }
+]

@@ -575,6 +575,17 @@ export type ProfilePayload = {
      *  third-party swap-point. */
     enrichmentSource: string | null;
   }>;
+  /** Licensable inventions from the WCM Center for Technology Licensing's public
+   *  portfolio, attributed to this scholar by the CWID in the VIVO link CTL
+   *  prints beside each PI. Ships dark behind AVAILABLE_TECHNOLOGIES_SECTION, so
+   *  an unflagged env returns [] even after the ETL seed lands. */
+  technologies: Array<{
+    /** CTL's "Cornell Reference" docket number; null when the page omits it. */
+    reference: string | null;
+    title: string;
+    /** Absolute URL of the public technology detail page on CTL's site. */
+    url: string;
+  }>;
   keywords: ProfileKeywords;
   /** #799 — family-primary Methods lens rows. Empty when the lens flag is off
    *  or the `scholar_family` rollup has no rows for this scholar (dormant until
@@ -793,6 +804,13 @@ export const getScholarFullProfileBySlug = cache(async (
       // CLINICAL_TRIALS_SECTION off returns [] even after the ETL backfill lands.
       clinicalTrials: {
         include: { trial: true },
+      },
+      // CTL available technologies. Always joined (a small, usually-empty
+      // relation); the payload is gated dark in the mapper below, so an env
+      // with AVAILABLE_TECHNOLOGIES_SECTION off returns [] even after the ETL
+      // seed lands.
+      technologies: {
+        orderBy: [{ title: "asc" }],
       },
       // Issue #167 — surface the division name so the sidebar can render
       // "<Division> (<Department>)". Department display still comes from
@@ -1401,6 +1419,18 @@ export const getScholarFullProfileBySlug = cache(async (
               if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
               return (b.statusDate ?? "").localeCompare(a.statusDate ?? "");
             })
+        : [],
+    // CTL available technologies. Dark unless AVAILABLE_TECHNOLOGIES_SECTION is
+    // on: an unflagged env returns [] regardless of the table contents, so the
+    // ETL seed can land before the flag flip without exposing the section.
+    // Ordering comes from the query (title asc).
+    technologies:
+      process.env.AVAILABLE_TECHNOLOGIES_SECTION === "on"
+        ? scholar.technologies.map((t) => ({
+            reference: t.reference,
+            title: t.title,
+            url: t.url,
+          }))
         : [],
     keywords,
     // section-visibility — `hideMethods` drops the Methods & Tools lens from the

@@ -19,6 +19,7 @@ import { EditMyProfileButton } from "@/components/scholar/edit-my-profile-button
 import { Suspense } from "react";
 import { GrantsSection } from "@/components/profile/grants-section";
 import { ClinicalTrialsSection } from "@/components/profile/clinical-trials-section";
+import { TechnologiesSection } from "@/components/profile/technologies-section";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { ProfilePubsCluster } from "@/components/profile/profile-pubs-cluster";
 import { PublicationRow } from "@/components/profile/publication-row";
@@ -596,6 +597,32 @@ export async function ProfileView({ slug }: { slug: string }) {
               }
             >
               <ClinicalTrialsSection trials={profile.clinicalTrials} />
+            </Section>
+          ) : null}
+
+          {profile.technologies.length > 0 ? (
+            <Section
+              title="Available technologies"
+              headingLg
+              count={
+                <>
+                  {profile.technologies.length}{" "}
+                  {profile.technologies.length === 1 ? "technology" : "technologies"}
+                </>
+              }
+              headerAction={
+                <a
+                  href="https://innovation.weill.cornell.edu/technology-portfolio"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Opens the WCM Center for Technology Licensing portfolio"
+                  className="text-sm whitespace-nowrap text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                >
+                  View full portfolio ↗
+                </a>
+              }
+            >
+              <TechnologiesSection technologies={profile.technologies} />
             </Section>
           ) : null}
 
