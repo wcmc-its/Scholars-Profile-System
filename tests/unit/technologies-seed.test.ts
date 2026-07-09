@@ -1,6 +1,6 @@
 /**
  * Tests for parseSeed (etl/technologies/seed.ts) — the validator standing
- * between CTL's scraped portfolio and an `href` on a public profile.
+ * between CTL's scraped portfolio and a public profile.
  *
  * Pure module, no Prisma: the importer's `main()` lives in index.ts.
  */
@@ -13,6 +13,8 @@ const row = (over: Record<string, unknown> = {}) => ({
   reference: "11166",
   title: "AI-Powered, Point-of-Care Testing for Preeclampsia Prediction",
   url: "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/ai-powered-point-care-testing-preeclampsia",
+  patentStatus: "PCT filed",
+  pmids: ["34290243"],
   ...over,
 });
 
@@ -26,14 +28,25 @@ describe("parseSeed", () => {
         reference: "11166",
         title: "AI-Powered, Point-of-Care Testing for Preeclampsia Prediction",
         url: row().url,
+        patentStatus: "PCT filed",
+        pmids: ["34290243"],
       },
     ]);
   });
 
-  it("accepts a legacy letter-only cwid and a null reference", () => {
-    const [parsed] = parseSeed(seed([row({ cwid: "cnathan", reference: null })]));
+  it("accepts a legacy letter-only cwid and null reference/patentStatus", () => {
+    const [parsed] = parseSeed(
+      seed([row({ cwid: "cnathan", reference: null, patentStatus: null })]),
+    );
     expect(parsed.cwid).toBe("cnathan");
     expect(parsed.reference).toBeNull();
+    expect(parsed.patentStatus).toBeNull();
+  });
+
+  it("defaults a missing pmids array to empty", () => {
+    const r = { ...row() } as Record<string, unknown>;
+    delete r.pmids;
+    expect(parseSeed(seed([r]))[0].pmids).toEqual([]);
   });
 
   it("trims the title", () => {
@@ -52,10 +65,54 @@ describe("parseSeed", () => {
     expect(() => parseSeed(seed([row({ url })]))).toThrow(/url must start with/);
   });
 
+  // Regression: `<span>9220</span>` reached staging and rendered as escaped tags.
+  it.each([["<span>9220</span>"], ["<p><span>11171 </span></p>"], ["<span>7932<br></span>"]])(
+    "rejects a reference still containing markup: %s",
+    (reference) => {
+      expect(() => parseSeed(seed([row({ reference })]))).toThrow(/reference must be plain text/);
+    },
+  );
+
+  it("accepts a reference that is legitimately prose (two dockets)", () => {
+    expect(parseSeed(seed([row({ reference: "3901 and 4055" })]))[0].reference).toBe(
+      "3901 and 4055",
+    );
+  });
+
+  // patentStatus is a chip label from a closed vocabulary. Raw CTL prose must
+  // never reach the page.
+  it.each(["Provisional filed", "PCT filed", "Application filed", "Issued"])(
+    "accepts patentStatus %s",
+    (patentStatus) => {
+      expect(parseSeed(seed([row({ patentStatus })]))[0].patentStatus).toBe(patentStatus);
+    },
+  );
+
+  it.each([
+    ['US Patent 9,943,506 . "BCL6 inhibitors as anticancer agents." Issued'],
+    ["PCT Application Filed"],
+    ["issued"],
+  ])("rejects un-normalized patentStatus %s", (patentStatus) => {
+    expect(() => parseSeed(seed([row({ patentStatus })]))).toThrow(/patentStatus must be one of/);
+  });
+
+  // A pmid becomes a pubmed.ncbi.nlm.nih.gov path segment.
+  it.each([
+    ["a path escape", "12345678/../../etc"],
+    ["a non-digit", "abc12345"],
+    ["too short", "123"],
+    ["a non-string", 34290243],
+  ])("rejects a pmid with %s", (_label, pmid) => {
+    expect(() => parseSeed(seed([row({ pmids: [pmid] })]))).toThrow(/invalid pmid/);
+  });
+
+  it("rejects a non-array pmids", () => {
+    expect(() => parseSeed(seed([row({ pmids: "34290243" })]))).toThrow(/pmids must be an array/);
+  });
+
   it.each([
     ["a bad cwid", { cwid: "not a cwid!" }, /invalid cwid/],
     ["an empty title", { title: "   " }, /title is required/],
-    ["a non-string reference", { reference: 11166 }, /reference must be/],
   ])("rejects %s", (_label, over, re) => {
     expect(() => parseSeed(seed([row(over)]))).toThrow(re);
   });
@@ -79,5 +136,9 @@ describe("parseSeed", () => {
     const rows = parseSeed(readFileSync("etl/technologies/technologies.json", "utf-8"));
     expect(rows.length).toBeGreaterThan(200);
     expect(new Set(rows.map((r) => r.cwid)).size).toBeGreaterThan(100);
+    // The regression that shipped to staging: no reference may carry markup.
+    expect(rows.filter((r) => r.reference?.includes("<"))).toHaveLength(0);
+    expect(rows.some((r) => r.pmids.length > 0)).toBe(true);
+    expect(rows.some((r) => r.patentStatus !== null)).toBe(true);
   });
 });

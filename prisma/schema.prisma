@@ -2191,6 +2191,14 @@ model ScholarTechnology {
   title       String   @db.Text
   /// Absolute URL of the public technology detail page.
   url         String   @db.VarChar(512)
+  /// CTL's patent status for the invention ("US Application Filed", "PCT
+  /// Application Filed", "Issued"). Null on ~61% of portfolio pages.
+  patentStatus String? @map("patent_status") @db.VarChar(64)
+  /// PMIDs of the papers CTL lists under the technology's "Publications" pane,
+  /// as a JSON array of digit strings. `[]` when the page lists none (~25%).
+  /// Rendered as PubMed links: 95% of these papers are authored by the very PI
+  /// CTL names on the page, which independently corroborates the cwid join.
+  pmids       Json
   refreshedAt DateTime @default(now()) @map("refreshed_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
