@@ -837,8 +837,12 @@ export class EdgeStack extends Stack {
         description: `Temporary #461 SPS front-end allowlist ${env} - remove after testing`,
       });
       // AWS managed rule groups -- application-layer inspection (SQLi/XSS/
-      // known-bad-inputs) the IP allowlist never did. COUNT-mode first so we
-      // see what they would block on real WCM traffic before enforcing.
+      // known-bad-inputs) the IP allowlist never did. ENFORCED since #1434:
+      // the 06-27..07-04 count-mode window showed zero matches for
+      // KnownBadInputs/SQLi/rate-limit; the only CommonRuleSet sub-rule firing
+      // was SizeRestrictions_Body, and only on legitimate large /edit saves
+      // (overview/biosketch POSTs > 8 KB), so that one sub-rule stays in count
+      // while its group enforces.
       const managedGroups = [
         "AWSManagedRulesCommonRuleSet",
         "AWSManagedRulesKnownBadInputsRuleSet",
@@ -873,11 +877,24 @@ export class EdgeStack extends Stack {
           ...managedGroups.map((groupName, i) => ({
             name: groupName,
             priority: i + 1,
-            // ponytail: COUNT-mode -- flip a group to `overrideAction:
-            // { none: {} }` once its *-count metric shows no false positives.
-            overrideAction: { count: {} },
+            // Enforced (#1434, after the count-mode soak). SizeRestrictions_Body
+            // alone stays in count: it fires on legitimate >8 KB /edit saves.
+            overrideAction: { none: {} },
             statement: {
-              managedRuleGroupStatement: { vendorName: "AWS", name: groupName },
+              managedRuleGroupStatement: {
+                vendorName: "AWS",
+                name: groupName,
+                ...(groupName === "AWSManagedRulesCommonRuleSet"
+                  ? {
+                      ruleActionOverrides: [
+                        {
+                          name: "SizeRestrictions_Body",
+                          actionToUse: { count: {} },
+                        },
+                      ],
+                    }
+                  : {}),
+              },
             },
             visibilityConfig: {
               cloudWatchMetricsEnabled: true,
@@ -885,15 +902,64 @@ export class EdgeStack extends Stack {
               sampledRequestsEnabled: true,
             },
           })),
+          // #125 -- Bot Control runs label-only (count override): its
+          // `awswaf:managed:aws:bot-control:bot:verified` label exempts
+          // verified crawlers/AI fetchers (Googlebot, Bingbot, GPTBot, ...)
+          // from the rate limit below. Labels are visible only to LATER rules,
+          // so this must precede rate-limit. Pre-launch the #461 block above
+          // still drops all non-WCM traffic incl. bots; at launch that block
+          // is deleted (#432) and this exemption becomes load-bearing for
+          // SEO + AI-answer visibility (#594 measured both pinned at zero).
+          // Cost: Bot Control bills per WebACL/month + per request inspected.
+          {
+            name: "AWSManagedRulesBotControlRuleSet",
+            priority: managedGroups.length + 1,
+            overrideAction: { count: {} },
+            statement: {
+              managedRuleGroupStatement: {
+                vendorName: "AWS",
+                name: "AWSManagedRulesBotControlRuleSet",
+                managedRuleGroupConfigs: [
+                  {
+                    awsManagedRulesBotControlRuleSet: {
+                      inspectionLevel: "COMMON",
+                    },
+                  },
+                ],
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-AWSManagedRulesBotControlRuleSet`,
+              sampledRequestsEnabled: true,
+            },
+          },
           {
             name: "rate-limit",
-            priority: managedGroups.length + 1,
-            // ponytail: COUNT-mode. WCM egresses via shared NAT IPs, so a
-            // per-IP limit can pool a whole office onto one counter -- watch
-            // the *-rate-limit metric before flipping to `{ block: {} }`.
-            action: { count: {} },
+            priority: managedGroups.length + 2,
+            // Enforced (#1434): zero rate matches in the count window -- the
+            // WCM shared-NAT pooling worry did not materialize at pre-launch
+            // volume. Re-check the per-IP aggregation once launch traffic
+            // ramps (#1455 also rides this).
+            action: { block: {} },
             statement: {
-              rateBasedStatement: { limit: 5000, aggregateKeyType: "IP" },
+              rateBasedStatement: {
+                limit: 5000,
+                aggregateKeyType: "IP",
+                // #125: verified bots burst legitimately; a per-IP cap that
+                // blocks them zeroes SEO/AI visibility. Everything except
+                // Bot-Control-verified bots stays subject to the limit.
+                scopeDownStatement: {
+                  notStatement: {
+                    statement: {
+                      labelMatchStatement: {
+                        scope: "LABEL",
+                        key: "awswaf:managed:aws:bot-control:bot:verified",
+                      },
+                    },
+                  },
+                },
+              },
             },
             visibilityConfig: {
               cloudWatchMetricsEnabled: true,
@@ -907,7 +973,7 @@ export class EdgeStack extends Stack {
           metricName: `sps-edge-${env}-wcm-only`,
           sampledRequestsEnabled: true,
         },
-        description: `SPS front end ${env} - WCM-only IP allow plus AWS managed rule groups in count mode`,
+        description: `SPS front end ${env} - WCM-only IP allow, AWS managed rule groups enforced, bot-aware rate limit`,
       });
       webAclArn = webAcl.attrArn;
     }
