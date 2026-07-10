@@ -125,9 +125,15 @@ function TechnologyRow({ tech }: { tech: EditContextTechnology }) {
 }
 
 export function TechnologyEditCard({ mode, scholarName, technologies }: TechnologyEditCardProps) {
-  const possessive = mode === "superuser" ? `${scholarName}'s` : "your";
+  // Absolute possessive ("yours" / "Alex's") — it stands alone in the "Inventions
+  // of ___" slot below, so the self form is "yours", not the determiner "your".
+  const possessive = mode === "superuser" ? `${scholarName}'s` : "yours";
 
   return (
+    // ponytail: no `attribute` (so no "Source: …" line) — CTL isn't a
+    // `RequestAttribute`, and provenance is already carried by the LockedBadge,
+    // the description (names CTL), and the footer note. Not worth a dead
+    // REQUEST_A_CHANGE entry just to render the source chrome.
     <EditPanel
       slot="technologies-panel"
       heading="Available technologies"

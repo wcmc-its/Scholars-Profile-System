@@ -113,4 +113,13 @@ describe("TechnologyEditCard — read-only CTL technologies", () => {
     expect(panel?.textContent).toContain("Alex Other's");
     expect(panel?.textContent).not.toContain("of your that");
   });
+
+  it("uses the grammatical possessive (\"of yours\", never \"of your\") in self mode", () => {
+    render(
+      <TechnologyEditCard cwid="self01" mode="self" scholarName="Alex Self" technologies={TECHS} />,
+    );
+    const panel = document.querySelector('[data-slot="technologies-panel"]');
+    expect(panel?.textContent).toContain("Inventions of yours that");
+    expect(panel?.textContent).not.toContain("of your that");
+  });
 });
