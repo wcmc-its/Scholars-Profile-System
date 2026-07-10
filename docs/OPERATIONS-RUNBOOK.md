@@ -107,7 +107,7 @@ outage makes data *stale*, not the site *down*. All infrastructure is **AWS CDK 
 | **Mission critical?** | _TBD — Ops to classify._ Working assumption: **No** — public, read-mostly; an outage is reputational / SEO, not patient-care or safety |
 | **Locations / URLs** | Prod `scholars.weill.cornell.edu` · staging `scholars-staging.weill.cornell.edu`; AWS `us-east-1` (DR `us-west-2`) |
 | **Normal operating hours** | 24×7, public internet-facing |
-| **Scheduled maintenance window** | None required — rolling zero-downtime deploys (§2). Aurora / OpenSearch managed maintenance windows: _TBD — confirm in console / `cdk/lib/data-stack.ts`_ |
+| **Scheduled maintenance window** | None required — rolling zero-downtime deploys (§2). AWS-managed windows (defaults, not pinned in CDK): Aurora maintenance prod `Sun 05:27–05:57 UTC`, staging `Thu 10:24–10:54 UTC`; Aurora backup `03:00–04:00 UTC` (14-day retention); AWS Backup daily `05:00 UTC`; OpenSearch is AWS-managed (blue/green, no fixed window) |
 | **IT support / assignment group** | _TBD — Ops to assign (ServiceNow group)_ |
 | **Service Owner (emergency IT contact)** | Today: `paa2013@med.cornell.edu` / GitHub `paulalbert1`; mobile _TBD_. **Post-launch owner TBD (likely ITS management)** — see §5 |
 | **Emergency business contacts** | _TBD — business stakeholders to supply_ |
@@ -123,7 +123,7 @@ outage makes data *stale*, not the site *down*. All infrastructure is **AWS CDK 
 
 **Maintenance & patch windows**
 - **App image / deps** — re-rolled on every deploy (§2); runtime = Node 22 on Fargate, patched by redeploying an updated image.
-- **Aurora MySQL / OpenSearch** — AWS-managed minor-version windows; _TBD: confirm the configured windows in `cdk/lib/data-stack.ts` / console_.
+- **Aurora MySQL / OpenSearch** — AWS-managed minor-version windows (AWS defaults; not pinned in CDK): Aurora prod `Sun 05:27–05:57 UTC`, staging `Thu 10:24–10:54 UTC`; Aurora automated backup `03:00–04:00 UTC` (retention 14 d); AWS Backup daily `05:00 UTC`. OpenSearch updates are AWS-managed blue/green with no fixed window.
 - **Release management** — continuous: merge to `master` ships staging automatically; prod is manual, approval-gated, **fix-forward** (no scheduled release train).
 
 **Failover guide**
