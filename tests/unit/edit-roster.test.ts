@@ -91,20 +91,50 @@ describe("loadEditRoster — filters", () => {
     expect(c.scholar.findMany.mock.calls[0][0].where.status).toEqual({ not: "active" });
   });
 
-  it("query builds a name/CWID OR search (trimmed)", async () => {
+  it("query builds a name/CWID search as an AND clause (trimmed, single token)", async () => {
     const c = fakeClient();
     await loadEditRoster({ query: "  smith  " }, asClient(c));
-    expect(c.scholar.findMany.mock.calls[0][0].where.OR).toEqual([
-      { preferredName: { contains: "smith" } },
-      { fullName: { contains: "smith" } },
-      { cwid: { contains: "smith" } },
+    const where = c.scholar.findMany.mock.calls[0][0].where;
+    expect(where.OR).toBeUndefined();
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { preferredName: { contains: "smith" } },
+          { fullName: { contains: "smith" } },
+          { cwid: { contains: "smith" } },
+        ],
+      },
     ]);
   });
 
-  it("an empty/whitespace query adds no OR filter", async () => {
+  it("a multi-word query is tokenized into AND-ed clauses (First Last)", async () => {
+    const c = fakeClient();
+    await loadEditRoster({ query: "jane smith" }, asClient(c));
+    const where = c.scholar.findMany.mock.calls[0][0].where;
+    expect(where.AND).toEqual([
+      {
+        OR: [
+          { preferredName: { contains: "jane" } },
+          { fullName: { contains: "jane" } },
+          { cwid: { contains: "jane" } },
+        ],
+      },
+      {
+        OR: [
+          { preferredName: { contains: "smith" } },
+          { fullName: { contains: "smith" } },
+          { cwid: { contains: "smith" } },
+        ],
+      },
+    ]);
+  });
+
+  it("an empty/whitespace query adds no name filter", async () => {
     const c = fakeClient();
     await loadEditRoster({ query: "   " }, asClient(c));
-    expect(c.scholar.findMany.mock.calls[0][0].where.OR).toBeUndefined();
+    const where = c.scholar.findMany.mock.calls[0][0].where;
+    expect(where.OR).toBeUndefined();
+    expect(where.AND).toBeUndefined();
   });
 
   it("unitCodeScope (B3) restricts to dept/div codes; omitting it (superuser) does not", async () => {
