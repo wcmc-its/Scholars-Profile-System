@@ -15,19 +15,35 @@ const GROUPS_BASE = "ou=Groups,dc=weill,dc=cornell,dc=edu";
 
 const mockedOpenLdap = vi.mocked(openLdap);
 
+const GROUP_DN = `cn=${GROUP_CN},ou=application security,${GROUPS_BASE}`;
+
 type SearchImpl = (
   base: string,
   options: { scope: string; filter: string; attributes: string[] },
 ) => Promise<{ searchEntries: unknown[] }>;
+type CompareImpl = (dn: string, attr: string, value: string) => Promise<boolean>;
 
-function fakeClient(search: SearchImpl) {
-  return { search: vi.fn(search), unbind: vi.fn(async (): Promise<void> => {}) };
+/**
+ * The membership check is a two-step: resolve the group DN by `cn`, then an LDAP
+ * `compare` at that DN. Defaults mirror the live directory — the group resolves,
+ * and `compare` decides membership.
+ */
+function fakeClient(opts: { search?: SearchImpl; compare?: CompareImpl } = {}) {
+  return {
+    search: vi.fn(opts.search ?? (async () => groupFound())),
+    compare: vi.fn(opts.compare ?? (async () => true)),
+    unbind: vi.fn(async (): Promise<void> => {}),
+  };
 }
 function asClient(c: ReturnType<typeof fakeClient>) {
   return c as unknown as Awaited<ReturnType<typeof openLdap>>;
 }
-function entries(n: number): { searchEntries: unknown[] } {
-  return { searchEntries: Array.from({ length: n }, () => ({ cn: GROUP_CN })) };
+/** The group-DN resolve step's result: found (1 entry) or not (0). */
+function groupFound(): { searchEntries: unknown[] } {
+  return { searchEntries: [{ cn: GROUP_CN, dn: GROUP_DN }] };
+}
+function groupMissing(): { searchEntries: unknown[] } {
+  return { searchEntries: [] };
 }
 
 beforeEach(() => {
@@ -70,36 +86,70 @@ describe("isDeveloper", () => {
   });
 
   it("is true when the group lists the CWID as a member", async () => {
-    mockedOpenLdap.mockResolvedValue(asClient(fakeClient(async () => entries(1))));
+    mockedOpenLdap.mockResolvedValue(asClient(fakeClient({ compare: async () => true })));
     expect(await isDeveloper("abc1234")).toBe(true);
   });
 
   it("is false when the group does not list the CWID", async () => {
-    mockedOpenLdap.mockResolvedValue(asClient(fakeClient(async () => entries(0))));
+    mockedOpenLdap.mockResolvedValue(asClient(fakeClient({ compare: async () => false })));
     expect(await isDeveloper("abc1234")).toBe(false);
   });
 
-  it("searches ou=Groups for the group cn carrying the member DN, asking for `cn` only", async () => {
-    const client = fakeClient(async () => entries(1));
+  it("resolves the group DN by cn ALONE — no `member` predicate in the search", async () => {
+    const client = fakeClient();
     mockedOpenLdap.mockResolvedValue(asClient(client));
     await isDeveloper("abc1234");
     expect(client.search).toHaveBeenCalledWith(GROUPS_BASE, {
       scope: "sub",
-      filter: `(&(cn=${GROUP_CN})(member=uid=abc1234,ou=people,dc=weill,dc=cornell,dc=edu))`,
+      filter: `(cn=${GROUP_CN})`,
       attributes: ["cn"],
     });
+    // Regression guard: a `member` predicate in a subtree search forces the
+    // dynlist overlay to expand every dynamic group under ou=Groups, which
+    // timed out (20–30s) against the live directory.
+    const [, options] = client.search.mock.calls[0];
+    expect(options.filter).not.toContain("member");
   });
 
-  it("escapes LDAP filter metacharacters in the CWID (injection guard)", async () => {
-    const client = fakeClient(async () => entries(0));
+  it("asks the directory to compare `member` at the resolved group DN", async () => {
+    const client = fakeClient();
     mockedOpenLdap.mockResolvedValue(asClient(client));
-    await isDeveloper("a*b)(uid=*");
-    expect(client.search).toHaveBeenCalledWith(
-      GROUPS_BASE,
-      expect.objectContaining({
-        filter: `(&(cn=${GROUP_CN})(member=uid=a\\2ab\\29\\28uid=\\2a,ou=people,dc=weill,dc=cornell,dc=edu))`,
-      }),
+    await isDeveloper("abc1234");
+    expect(client.compare).toHaveBeenCalledWith(
+      GROUP_DN,
+      "member",
+      "uid=abc1234,ou=people,dc=weill,dc=cornell,dc=edu",
     );
+  });
+
+  it("fails closed on a CWID that is not DN-safe, before any directory work (injection guard)", async () => {
+    const client = fakeClient();
+    mockedOpenLdap.mockResolvedValue(asClient(client));
+    // The membership question is an LDAP `compare`, not a filter, so escaping is
+    // the wrong tool — an unsafe CWID is rejected outright instead.
+    expect(await isDeveloper("a*b)(uid=*")).toBe(false);
+    expect(await isDeveloper("abc1234,ou=people,dc=x")).toBe(false);
+    expect(client.compare).not.toHaveBeenCalled();
+    expect(mockedOpenLdap).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the group cn is not present in the directory", async () => {
+    const client = fakeClient({ search: async () => groupMissing() });
+    mockedOpenLdap.mockResolvedValue(asClient(client));
+    expect(await isDeveloper("abc1234")).toBe(false);
+    expect(client.compare).not.toHaveBeenCalled();
+    expect(client.unbind).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed (and unbinds) when the compare throws", async () => {
+    const client = fakeClient({
+      compare: async () => {
+        throw new Error("LDAP timeout");
+      },
+    });
+    mockedOpenLdap.mockResolvedValue(asClient(client));
+    expect(await isDeveloper("abc1234")).toBe(false);
+    expect(client.unbind).toHaveBeenCalledTimes(1);
   });
 
   it("is false and never touches LDAP when the group cn is unset (and not allowlisted)", async () => {
@@ -114,8 +164,10 @@ describe("isDeveloper", () => {
   });
 
   it("fails closed (and unbinds) when the search throws", async () => {
-    const client = fakeClient(async () => {
-      throw new Error("LDAP timeout");
+    const client = fakeClient({
+      search: async () => {
+        throw new Error("LDAP timeout");
+      },
     });
     mockedOpenLdap.mockResolvedValue(asClient(client));
     expect(await isDeveloper("abc1234")).toBe(false);
