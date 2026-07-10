@@ -898,12 +898,16 @@ export class AppStack extends Stack {
     // /api/edit/opportunity-intake appends `PK=SUBMISSION` items to the shared
     // `reciterai` table (development-role staff queueing funding-opportunity
     // URLs for ReciterAI's ingest_submissions drain) and Queries them back for
-    // the status list. Least-privilege via the partition-key design: every
-    // queue item shares the literal partition key `SUBMISSION`, so a
-    // `dynamodb:LeadingKeys` condition pins BOTH actions to that single
-    // partition -- the app credential cannot read or write `GRANT#` /
-    // `PUB#` / any other engine item. (That key shape exists FOR this
-    // condition: a Scan can't be LeadingKeys-scoped, so the list is a Query.)
+    // the status list. DeleteItem/UpdateItem cover the Submissions-tab cleanup
+    // verbs (DELETE a pending/rejected item outright; PATCH-suppress a
+    // processed one -- status='suppressed', which ReciterAI's drain companion
+    // honors by removing the produced GRANT# items). Least-privilege via the
+    // partition-key design: every queue item shares the literal partition key
+    // `SUBMISSION`, so a `dynamodb:LeadingKeys` condition pins ALL FOUR
+    // actions to that single partition -- the app credential cannot read or
+    // write `GRANT#` / `PUB#` / any other engine item. (That key shape exists
+    // FOR this condition: a Scan can't be LeadingKeys-scoped, so the list is a
+    // Query.)
     // Same account-shared table ARN + cross-account caveat as the writeback
     // grant above. Gated in code by OPPORTUNITY_URL_INTAKE (default off;
     // staging-first in the environment block below) -- grant and flag land in
@@ -915,7 +919,12 @@ export class AppStack extends Stack {
       statements: [
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
-          actions: ["dynamodb:PutItem", "dynamodb:Query"],
+          actions: [
+            "dynamodb:PutItem",
+            "dynamodb:Query",
+            "dynamodb:DeleteItem",
+            "dynamodb:UpdateItem",
+          ],
           resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`],
           conditions: {
             "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": ["SUBMISSION"] },

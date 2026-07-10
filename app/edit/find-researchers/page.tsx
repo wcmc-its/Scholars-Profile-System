@@ -20,8 +20,8 @@ import { Eye } from "lucide-react";
 
 import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { FindResearchers } from "@/components/edit/find-researchers";
+import { FindResearchersTabs } from "@/components/edit/find-researchers-tabs";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
-import { OpportunityIntakePanel } from "@/components/edit/opportunity-intake-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
@@ -104,8 +104,11 @@ export default async function FindResearchersPage() {
             </p>
           </AlertDescription>
         </Alert>
-        <FindResearchers />
-        {isOpportunityIntakeEnabled() && <OpportunityIntakePanel />}
+        {/* With the intake flag on, the page splits into Browse / Submissions
+            sub-tabs (the URL intake + team queue history get their own surface,
+            `?tab=submissions`). Flag off → the bare matcher, no tab strip — the
+            dark-ship posture unchanged. */}
+        {isOpportunityIntakeEnabled() ? <FindResearchersTabs /> : <FindResearchers />}
       </main>
     </div>
   );

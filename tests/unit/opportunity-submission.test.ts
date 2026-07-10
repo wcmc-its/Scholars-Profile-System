@@ -10,12 +10,16 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  deleteSubmission,
   findDuplicate,
+  getSubmission,
+  isConditionalCheckFailed,
   isOpportunityIntakeEnabled,
   listSubmissions,
   normalizeOpportunityUrl,
   putSubmission,
   SUBMISSION_PK,
+  suppressSubmission,
   type OpportunitySubmission,
 } from "@/lib/edit/opportunity-submission";
 
@@ -110,7 +114,7 @@ describe("findDuplicate", () => {
     expect(result.submission).toBeNull();
   });
 
-  it("matches pending and processed submissions but never rejected ones", () => {
+  it("matches pending and processed submissions but never rejected or suppressed ones", () => {
     const url = "https://x.org/grants";
     expect(
       findDuplicate(url, [], [submission({ status: "pending" })]).submission?.status,
@@ -119,6 +123,8 @@ describe("findDuplicate", () => {
       findDuplicate(url, [], [submission({ status: "processed" })]).submission?.status,
     ).toBe("processed");
     expect(findDuplicate(url, [], [submission({ status: "rejected" })]).submission).toBeNull();
+    // suppression means "this was a mistake" — a deliberate resubmit must work
+    expect(findDuplicate(url, [], [submission({ status: "suppressed" })]).submission).toBeNull();
   });
 
   it("returns empty-handed on a fresh URL", () => {
@@ -214,5 +220,105 @@ describe("listSubmissions", () => {
     });
     // an unknown status degrades to pending rather than lying about an outcome
     expect(result[1].status).toBe("pending");
+  });
+
+  it("maps the SPS-written suppressed status through", async () => {
+    const send = vi.fn().mockResolvedValue({
+      Items: [
+        {
+          PK: SUBMISSION_PK,
+          SK: "2026-07-07T09:00:00.000Z#33333333",
+          url: "https://z.org/rfa",
+          status: "suppressed",
+        },
+      ],
+    });
+    const result = await listSubmissions({ ddb: { send } });
+    expect(result[0].status).toBe("suppressed");
+  });
+});
+
+describe("getSubmission", () => {
+  it("targets one sort key with a Query (stays inside the LeadingKeys pin)", async () => {
+    const send = vi.fn().mockResolvedValue({
+      Items: [
+        {
+          PK: SUBMISSION_PK,
+          SK: "2026-07-06T12:00:00.000Z#ab12cd34",
+          url: "https://x.org/grants",
+          status: "pending",
+        },
+      ],
+    });
+    const result = await getSubmission("2026-07-06T12:00:00.000Z#ab12cd34", { ddb: { send } });
+
+    const query = send.mock.calls[0][0];
+    expect(query.input.KeyConditionExpression).toBe("PK = :pk AND SK = :sk");
+    expect(query.input.ExpressionAttributeValues).toEqual({
+      ":pk": SUBMISSION_PK,
+      ":sk": "2026-07-06T12:00:00.000Z#ab12cd34",
+    });
+    expect(result?.status).toBe("pending");
+  });
+
+  it("returns null for a missing item", async () => {
+    const send = vi.fn().mockResolvedValue({ Items: [] });
+    expect(await getSubmission("nope", { ddb: { send } })).toBeNull();
+  });
+});
+
+describe("deleteSubmission", () => {
+  it("Deletes the item, condition-pinned to pending/rejected", async () => {
+    const send = vi.fn().mockResolvedValue({});
+    await deleteSubmission("2026-07-06T12:00:00.000Z#ab12cd34", { ddb: { send } });
+
+    const command = send.mock.calls[0][0];
+    expect(command.input.Key).toEqual({
+      PK: SUBMISSION_PK,
+      SK: "2026-07-06T12:00:00.000Z#ab12cd34",
+    });
+    expect(command.input.ConditionExpression).toBe(
+      "attribute_exists(SK) AND #s IN (:pending, :rejected)",
+    );
+    expect(command.input.ExpressionAttributeNames).toEqual({ "#s": "status" });
+  });
+
+  it("propagates a DynamoDB failure", async () => {
+    const send = vi.fn().mockRejectedValue(new Error("denied"));
+    await expect(deleteSubmission("sk", { ddb: { send } })).rejects.toThrow("denied");
+  });
+});
+
+describe("suppressSubmission", () => {
+  it("sets status/suppressed_at/suppressed_by, condition-pinned to processed", async () => {
+    const send = vi.fn().mockResolvedValue({});
+    const now = new Date("2026-07-09T15:00:00.000Z");
+    await suppressSubmission(
+      "2026-07-06T12:00:00.000Z#ab12cd34",
+      { suppressedBy: "flm4001" },
+      { ddb: { send }, now },
+    );
+
+    const command = send.mock.calls[0][0];
+    expect(command.input.UpdateExpression).toBe(
+      "SET #s = :suppressed, suppressed_at = :at, suppressed_by = :by",
+    );
+    expect(command.input.ConditionExpression).toBe("attribute_exists(SK) AND #s = :processed");
+    expect(command.input.ExpressionAttributeValues).toEqual({
+      ":suppressed": "suppressed",
+      ":processed": "processed",
+      ":at": "2026-07-09T15:00:00.000Z",
+      ":by": "flm4001",
+    });
+  });
+});
+
+describe("isConditionalCheckFailed", () => {
+  it("recognizes only the conditional-check error name", () => {
+    const conditional = new Error("The conditional request failed");
+    conditional.name = "ConditionalCheckFailedException";
+    expect(isConditionalCheckFailed(conditional)).toBe(true);
+    expect(isConditionalCheckFailed(new Error("denied"))).toBe(false);
+    expect(isConditionalCheckFailed("string")).toBe(false);
   });
 });
