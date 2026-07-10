@@ -131,9 +131,10 @@ const OVERVIEW_MAX = 8000;
  *
  * ponytail: regex over Drupal HTML, the same tax the rest of this file pays. The
  * overview is bounded by the next section header (a `<p>`/`<div>`-wrapped
- * `<strong>`, e.g. "Technology Applications") or a figure; prose additionally
- * stops at the first `<ul>`, which on these pages is a trailing citation list,
- * never overview text. If CTL ships a structured export, delete this.
+ * `<strong>`, e.g. "Technology Applications"; an `<h3 class="pane-title">` pane
+ * header, e.g. "Publications") or a figure; prose additionally stops at the first
+ * `<ul>`, which on these pages is a trailing citation list, never overview text.
+ * If CTL ships a structured export, delete this.
  */
 export function parseOverview(html: string): { overview: string | null; hasPocData: boolean } {
   const headEnd = html.indexOf("</head>");
@@ -147,10 +148,17 @@ export function parseOverview(html: string): { overview: string | null; hasPocDa
     .slice(anchor.index + anchor[0].length)
     .replace(/^\s*<\/(?:p|div)>/i, "");
 
-  // A `<p>`/`<div>`-wrapped `<strong>` (or a figure) starts the next section and
-  // ends the overview. `<li><strong>…` bullets are NOT `<p>`/`<div>`, so this
-  // never cuts the overview short at "The Technology:" or "PoC Data:".
-  const headerEnd = firstIndex(rest, /<(?:p|div)\b[^>]*>\s*(?:<br\s*\/?>\s*)*<strong>|<img\b/i);
+  // A `<p>`/`<div>`-wrapped `<strong>`, a figure, or CTL's `<h3 class="pane-title">`
+  // pane header starts the next section and ends the overview. `<li><strong>…`
+  // bullets are NOT `<p>`/`<div>`, so this never cuts the overview short at "The
+  // Technology:" or "PoC Data:". The pane-title arm matters for prose pages whose
+  // next section (Publications, Resources, Intellectual Property) is an `<h3>`
+  // followed by paragraphs, not a `<p><strong>` — without it the prose region ran
+  // to a later citation `<ul>` and swallowed those sections' text.
+  const headerEnd = firstIndex(
+    rest,
+    /<(?:p|div)\b[^>]*>\s*(?:<br\s*\/?>\s*)*<strong>|<h3\b[^>]*class="[^"]*pane-title|<img\b/i,
+  );
 
   let text: string;
   let hasPocData = false;

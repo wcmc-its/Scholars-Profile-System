@@ -70,6 +70,29 @@ describe("parseOverview — prose form", () => {
     expect(overview).toBe("Approximately 70 million CT studies are performed each year in the US.");
     expect(overview).not.toContain("Roentgenol");
   });
+
+  // Real CTL shape (MALT1, ML-network pages): the section after the prose is an
+  // <h3 class="pane-title"> pane header (Publications, then Resources), NOT a
+  // <p><strong>. The Publications citations are paragraphs, and the first <ul>
+  // belongs to a later Resources download list. Without an <h3> boundary the
+  // region ran to that <ul> and swallowed both sections' text.
+  it("stops prose at an <h3 class=\"pane-title\"> section header", () => {
+    const body =
+      "<p><strong>Technology Overview</strong></p>" +
+      "<p>MALT1 is a protease that activates NF-kB pathways in B cell lymphomas. (D-7251)</p>" +
+      '<div class="panel-pane pane-node-field-technology-publications">' +
+      '<h3 class="pane-title">Publications</h3>' +
+      "<p>Fontan et al. J Clin Invest. 2018.</p></div>" +
+      '<div class="panel-pane"><h3 class="pane-title">Resources</h3>' +
+      '<ul><li><a href="d7251.pdf">Tech Brief.pdf</a></li></ul></div>';
+    const { overview } = parseOverview(page("", body));
+    expect(overview).toBe(
+      "MALT1 is a protease that activates NF-kB pathways in B cell lymphomas. (D-7251)",
+    );
+    expect(overview).not.toContain("Publications");
+    expect(overview).not.toContain("Fontan");
+    expect(overview).not.toContain("Resources");
+  });
 });
 
 describe("parseOverview — negatives", () => {
