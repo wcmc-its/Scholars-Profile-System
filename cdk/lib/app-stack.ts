@@ -2128,12 +2128,13 @@ export class AppStack extends Stack {
         //   SCHOLARS_DEVELOPMENT_ALLOWLIST -- the operative membership mechanism
         //     while the group search is off. STAGING carries flm4001 (a real
         //     development-role group member) so the surface is reachable to a
-        //     non-superuser operator for testing; prod stays empty: the role is
-        //     on there, but its only members are superusers (no non-superuser
-        //     dev-role operator provisioned on prod).
+        //     non-superuser operator for testing. lmp2006 (CTL senior managing
+        //     director) gets the matcher surfaces per the 2026-07-09 CTL asks
+        //     (docs/2026-07-09-ctl-technologies-handoff.md §1) — staging now,
+        //     prod when the gated App deploy ships this.
         DEVELOPMENT_ENABLED: env === "staging" || env === "prod" ? "on" : "off",
         SCHOLARS_DEVELOPMENT_GROUP_CN: "",
-        SCHOLARS_DEVELOPMENT_ALLOWLIST: env === "staging" ? "flm4001" : "",
+        SCHOLARS_DEVELOPMENT_ALLOWLIST: env === "staging" ? "flm4001,lmp2006" : "lmp2006",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
         // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
         // ships the policy as `Content-Security-Policy-Report-Only` (the
