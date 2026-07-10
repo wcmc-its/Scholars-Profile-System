@@ -3284,6 +3284,8 @@ service:
               "Action": [
                 "dynamodb:PutItem",
                 "dynamodb:Query",
+                "dynamodb:DeleteItem",
+                "dynamodb:UpdateItem",
               ],
               "Condition": {
                 "ForAllValues:StringEquals": {
@@ -6901,6 +6903,8 @@ service:
               "Action": [
                 "dynamodb:PutItem",
                 "dynamodb:Query",
+                "dynamodb:DeleteItem",
+                "dynamodb:UpdateItem",
               ],
               "Condition": {
                 "ForAllValues:StringEquals": {

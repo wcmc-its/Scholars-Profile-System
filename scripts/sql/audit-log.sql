@@ -114,8 +114,12 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- `profile_appointment_delete` (a scholar / curator added / edited / removed a
   -- self-asserted `profile_appointment` row on /edit; `target_entity_type=
   -- 'profile_appointment'`, `target_entity_id` the row `id`) -- appended LAST
-  -- after `appointment_visibility_set`.
-  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete') NOT NULL,
+  -- after `appointment_visibility_set`. The intake Submissions sub-tab then
+  -- adds `opportunity_submission_delete` / `opportunity_submission_suppress`
+  -- (a dev-role member deleted a pending/rejected submission or suppressed a
+  -- processed one; same target type/id as `opportunity_submission`) --
+  -- appended LAST after `profile_appointment_delete`.
+  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress') NOT NULL,
 
   -- THE CHANGE.
   --   fields_changed -- JSON array of field names for a `field_override`
@@ -234,9 +238,17 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --                         `profile_appointment` row on /edit; target_entity_type=
 --                         'profile_appointment', target_entity_id the row id).
 --                         Appended LAST to preserve existing ENUM ordinals.
+--   OPPORTUNITY_URL_INTAKE (Submissions sub-tab): + opportunity_submission_delete
+--                         · opportunity_submission_suppress  (a dev-role member
+--                         deleted an unconsumed pending/rejected submission, or
+--                         suppressed a processed one so ReciterAI's drain
+--                         companion retracts its produced GRANT# items;
+--                         target_entity_type='opportunity_submission',
+--                         target_entity_id the queue item's sort key). Appended
+--                         LAST to preserve existing ENUM ordinals.
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `action`
-    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete')
+    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review','coi_gap_feedback','core_claim','reporter_profile_confirm','reporter_profile_reject','reporter_profile_revoke','opportunity_submission','appointment_visibility_set','profile_appointment_create','profile_appointment_update','profile_appointment_delete','opportunity_submission_delete','opportunity_submission_suppress')
     NOT NULL;
 
 -- target_entity_type history:

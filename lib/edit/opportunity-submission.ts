@@ -26,7 +26,13 @@
 import { randomUUID } from "node:crypto";
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import {
+  DeleteCommand,
+  DynamoDBDocumentClient,
+  PutCommand,
+  QueryCommand,
+  UpdateCommand,
+} from "@aws-sdk/lib-dynamodb";
 
 /** The shared ReciterAI table (same default as the ETL and the cores writeback). */
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
@@ -90,7 +96,14 @@ export function normalizeOpportunityUrl(raw: string): NormalizeUrlResult {
 // Queue items
 // ---------------------------------------------------------------------------
 
-export type SubmissionStatus = "pending" | "processed" | "rejected";
+/**
+ * `pending` / `processed` / `rejected` are written by the drain round trip;
+ * `suppressed` is SPS-written (an accidental submission the team retracted
+ * AFTER processing — see {@link suppressSubmission}). A pending/rejected
+ * mistake is simply deleted ({@link deleteSubmission}), so it never needs a
+ * status of its own.
+ */
+export type SubmissionStatus = "pending" | "processed" | "rejected" | "suppressed";
 
 /** The `SUBMISSION` item contract shared with ReciterAI's drain (spec §5/§6). */
 export interface OpportunitySubmission {
@@ -110,7 +123,7 @@ export interface OpportunitySubmission {
 /** The minimal `.send()` surface this module uses; injectable for tests. */
 export interface SubmissionDdbClient {
   send(
-    command: PutCommand | QueryCommand,
+    command: PutCommand | QueryCommand | DeleteCommand | UpdateCommand,
     options?: { abortSignal?: AbortSignal },
   ): Promise<{ Items?: Record<string, unknown>[] }>;
 }
@@ -173,6 +186,28 @@ function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+/** Defensive read-side mapping — one raw `SUBMISSION` item → the contract shape. */
+function mapSubmissionItem(item: Record<string, unknown>): OpportunitySubmission {
+  const status = item.status;
+  return {
+    submissionId: asString(item.SK) ?? "",
+    url: asString(item.url) ?? "",
+    normalizedUrl: asString(item.normalized_url) ?? "",
+    note: asString(item.note),
+    submittedBy: asString(item.submitted_by) ?? "",
+    submittedAt: asString(item.submitted_at) ?? "",
+    status:
+      status === "processed" || status === "rejected" || status === "suppressed"
+        ? status
+        : ("pending" as const),
+    processedAt: asString(item.processed_at),
+    producedOpportunityIds: Array.isArray(item.produced_opportunity_ids)
+      ? item.produced_opportunity_ids.filter((id): id is string => typeof id === "string")
+      : [],
+    rejectReason: asString(item.reject_reason),
+  };
+}
+
 /**
  * All submissions, newest-first (the SK is ISO-time-prefixed, so key order IS
  * time order). The queue is human-paced — a page of 200 covers years; no
@@ -192,24 +227,98 @@ export async function listSubmissions(
     }),
     { abortSignal: AbortSignal.timeout(DDB_TIMEOUT_MS) },
   );
-  return (result.Items ?? []).map((item) => {
-    const status = item.status;
-    return {
-      submissionId: asString(item.SK) ?? "",
-      url: asString(item.url) ?? "",
-      normalizedUrl: asString(item.normalized_url) ?? "",
-      note: asString(item.note),
-      submittedBy: asString(item.submitted_by) ?? "",
-      submittedAt: asString(item.submitted_at) ?? "",
-      status:
-        status === "processed" || status === "rejected" ? status : ("pending" as const),
-      processedAt: asString(item.processed_at),
-      producedOpportunityIds: Array.isArray(item.produced_opportunity_ids)
-        ? item.produced_opportunity_ids.filter((id): id is string => typeof id === "string")
-        : [],
-      rejectReason: asString(item.reject_reason),
-    };
-  });
+  return (result.Items ?? []).map(mapSubmissionItem);
+}
+
+/**
+ * One submission by its sort key — a targeted Query (not GetItem) so the read
+ * stays inside the existing `dynamodb:Query` + `LeadingKeys=SUBMISSION` IAM
+ * pin. `null` when no such item exists.
+ */
+export async function getSubmission(
+  submissionId: string,
+  opts: { ddb?: SubmissionDdbClient } = {},
+): Promise<OpportunitySubmission | null> {
+  const ddb = opts.ddb ?? defaultDdb();
+  const result = await ddb.send(
+    new QueryCommand({
+      TableName: TABLE,
+      KeyConditionExpression: "PK = :pk AND SK = :sk",
+      ExpressionAttributeValues: { ":pk": SUBMISSION_PK, ":sk": submissionId },
+      Limit: 1,
+    }),
+    { abortSignal: AbortSignal.timeout(DDB_TIMEOUT_MS) },
+  );
+  const item = (result.Items ?? [])[0];
+  return item ? mapSubmissionItem(item) : null;
+}
+
+/**
+ * `true` when a DynamoDB write was refused by its `ConditionExpression` — the
+ * route maps this to a `409` (the drain raced us and changed the status, or
+ * the item vanished) rather than a `502`.
+ */
+export function isConditionalCheckFailed(err: unknown): boolean {
+  return err instanceof Error && err.name === "ConditionalCheckFailedException";
+}
+
+/**
+ * Hard-delete an accidental submission that the pipeline has NOT consumed —
+ * status `pending` or `rejected` only, enforced atomically by the condition
+ * expression (the route pre-checks too, but the drain may process an item
+ * between that read and this write). A `processed` item must be
+ * {@link suppressSubmission}-ed instead: its produced `GRANT#` rows exist and
+ * need the drain's cooperation to retract.
+ */
+export async function deleteSubmission(
+  submissionId: string,
+  opts: { ddb?: SubmissionDdbClient } = {},
+): Promise<void> {
+  const ddb = opts.ddb ?? defaultDdb();
+  await ddb.send(
+    new DeleteCommand({
+      TableName: TABLE,
+      Key: { PK: SUBMISSION_PK, SK: submissionId },
+      ConditionExpression: "attribute_exists(SK) AND #s IN (:pending, :rejected)",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: { ":pending": "pending", ":rejected": "rejected" },
+    }),
+    { abortSignal: AbortSignal.timeout(DDB_TIMEOUT_MS) },
+  );
+}
+
+/**
+ * Retract a PROCESSED submission: set `status = 'suppressed'` on the
+ * `SUBMISSION` item (never a delete — the item is the retraction's record).
+ * ReciterAI's drain companion honors `suppressed` by removing the
+ * `GRANT#manual_url:*` items this submission produced (separate ReciterAI PR,
+ * in flight), and the vanished rows fall out of SPS on the next nightly
+ * projection. Condition-pinned to `processed` so a double-suppress or a
+ * pending item can't take this path.
+ */
+export async function suppressSubmission(
+  submissionId: string,
+  input: { suppressedBy: string },
+  opts: { ddb?: SubmissionDdbClient; now?: Date } = {},
+): Promise<void> {
+  const ddb = opts.ddb ?? defaultDdb();
+  const now = opts.now ?? new Date();
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: { PK: SUBMISSION_PK, SK: submissionId },
+      UpdateExpression: "SET #s = :suppressed, suppressed_at = :at, suppressed_by = :by",
+      ConditionExpression: "attribute_exists(SK) AND #s = :processed",
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: {
+        ":suppressed": "suppressed",
+        ":processed": "processed",
+        ":at": now.toISOString(),
+        ":by": input.suppressedBy,
+      },
+    }),
+    { abortSignal: AbortSignal.timeout(DDB_TIMEOUT_MS) },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +336,11 @@ export interface DuplicateCheckResult {
  * Compare a normalized URL against the projected corpus and the existing queue.
  * Corpus URLs are stored raw → normalize each at compare time (the corpus is
  * ~900 rows; in-process is fine). A `rejected` submission does NOT block — the
- * whole point of a rejection reason is fixing and resubmitting.
+ * whole point of a rejection reason is fixing and resubmitting. Neither does a
+ * `suppressed` one: suppression means "this was a mistake", and a later
+ * DELIBERATE submission of the same URL must stay possible. (Until the drain
+ * removes the suppressed items' `GRANT#` rows and the nightly projection
+ * catches up, the corpus check above still 409s — a transient, honest window.)
  */
 export function findDuplicate(
   normalizedUrl: string,
@@ -243,7 +356,8 @@ export function findDuplicate(
     }
   }
   const match = submissions.find(
-    (s) => s.status !== "rejected" && s.normalizedUrl === normalizedUrl,
+    (s) =>
+      s.status !== "rejected" && s.status !== "suppressed" && s.normalizedUrl === normalizedUrl,
   );
   return {
     opportunity,

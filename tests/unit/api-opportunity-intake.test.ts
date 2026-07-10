@@ -14,6 +14,9 @@ const {
   mockReadEditRequest,
   mockPutSubmission,
   mockListSubmissions,
+  mockGetSubmission,
+  mockDeleteSubmission,
+  mockSuppressSubmission,
   mockOpportunityFindMany,
   mockTransaction,
   mockAppendAuditRow,
@@ -23,6 +26,9 @@ const {
   mockReadEditRequest: vi.fn(),
   mockPutSubmission: vi.fn(),
   mockListSubmissions: vi.fn(),
+  mockGetSubmission: vi.fn(),
+  mockDeleteSubmission: vi.fn(),
+  mockSuppressSubmission: vi.fn(),
   mockOpportunityFindMany: vi.fn(),
   mockTransaction: vi.fn(),
   mockAppendAuditRow: vi.fn(),
@@ -40,6 +46,9 @@ vi.mock("@/lib/edit/opportunity-submission", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/edit/opportunity-submission")>()),
   putSubmission: mockPutSubmission,
   listSubmissions: mockListSubmissions,
+  getSubmission: mockGetSubmission,
+  deleteSubmission: mockDeleteSubmission,
+  suppressSubmission: mockSuppressSubmission,
 }));
 vi.mock("@/lib/db", () => ({
   db: {
@@ -50,7 +59,7 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/edit/audit", () => ({ appendAuditRow: mockAppendAuditRow }));
 vi.mock("@/lib/edit/authz", () => ({ logEditDenial: mockLogEditDenial }));
 
-import { GET, POST } from "@/app/api/edit/opportunity-intake/route";
+import { DELETE, GET, PATCH, POST } from "@/app/api/edit/opportunity-intake/route";
 
 const developerCtx = {
   session: { cwid: "flm4001", isSuperuser: false, isDeveloper: true },
@@ -84,10 +93,14 @@ beforeEach(() => {
 });
 
 describe("flag gate", () => {
-  it("404s both verbs while the flag is off", async () => {
+  it("404s all four verbs while the flag is off", async () => {
     process.env.OPPORTUNITY_URL_INTAKE = "off";
     expect((await GET()).status).toBe(404);
     expect((await POST(postRequest({ url: "https://x.org" }))).status).toBe(404);
+    expect((await DELETE(postRequest({ submissionId: "sk" }))).status).toBe(404);
+    expect((await PATCH(postRequest({ submissionId: "sk", action: "suppress" }))).status).toBe(
+      404,
+    );
     expect(mockReadEditRequest).not.toHaveBeenCalled();
   });
 });
@@ -206,6 +219,206 @@ describe("POST", () => {
     const res = await POST(postRequest({ url: "https://x.org/grants" }));
     expect(res.status).toBe(502);
     expect((await res.json()).error).toBe("queue_write_failed");
+    expect(mockAppendAuditRow).not.toHaveBeenCalled();
+  });
+});
+
+const SK = "2026-07-06T12:00:00.000Z#ab12cd34";
+
+function queueItem(overrides: Record<string, unknown> = {}) {
+  return {
+    submissionId: SK,
+    url: "https://x.org/grants",
+    normalizedUrl: "https://x.org/grants",
+    note: "oops",
+    submittedBy: "flm4001",
+    submittedAt: "2026-07-06T12:00:00.000Z",
+    status: "pending",
+    processedAt: null,
+    producedOpportunityIds: [],
+    rejectReason: null,
+    ...overrides,
+  };
+}
+
+function conditionalCheckError() {
+  const err = new Error("The conditional request failed");
+  err.name = "ConditionalCheckFailedException";
+  return err;
+}
+
+describe("DELETE", () => {
+  it("403s + logs a denial for a non-developer", async () => {
+    mockReadEditRequest.mockResolvedValue({
+      ok: true,
+      ctx: {
+        ...developerCtx,
+        session: { cwid: "abc1234", isSuperuser: false, isDeveloper: false },
+        body: { submissionId: SK },
+      },
+    });
+    const res = await DELETE({} as NextRequest);
+    expect(res.status).toBe(403);
+    expect(mockLogEditDenial).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "not_developer_delete" }),
+    );
+    expect(mockDeleteSubmission).not.toHaveBeenCalled();
+  });
+
+  it("400s a missing submissionId, 404s an unknown one", async () => {
+    const bad = await DELETE(postRequest({}));
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toBe("invalid_submission_id");
+
+    mockGetSubmission.mockResolvedValue(null);
+    const missing = await DELETE(postRequest({ submissionId: SK }));
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).error).toBe("not_found");
+    expect(mockDeleteSubmission).not.toHaveBeenCalled();
+  });
+
+  it("409s a processed (and a suppressed) submission without touching the queue", async () => {
+    mockGetSubmission.mockResolvedValue(queueItem({ status: "processed" }));
+    const processed = await DELETE(postRequest({ submissionId: SK }));
+    expect(processed.status).toBe(409);
+    expect((await processed.json()).error).toBe("submission_processed");
+
+    mockGetSubmission.mockResolvedValue(queueItem({ status: "suppressed" }));
+    const suppressed = await DELETE(postRequest({ submissionId: SK }));
+    expect(suppressed.status).toBe(409);
+    expect(mockDeleteSubmission).not.toHaveBeenCalled();
+  });
+
+  it("deletes a pending item, then appends the audit row", async () => {
+    mockGetSubmission.mockResolvedValue(queueItem());
+    mockDeleteSubmission.mockResolvedValue(undefined);
+    const res = await DELETE(postRequest({ submissionId: SK }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, submissionId: SK });
+
+    expect(mockDeleteSubmission).toHaveBeenCalledWith(SK);
+    expect(mockAppendAuditRow).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        actorCwid: "flm4001",
+        targetEntityType: "opportunity_submission",
+        targetEntityId: SK,
+        action: "opportunity_submission_delete",
+        beforeValues: expect.objectContaining({ url: "https://x.org/grants", status: "pending" }),
+        afterValues: null,
+      }),
+    );
+  });
+
+  it("also deletes a rejected item", async () => {
+    mockGetSubmission.mockResolvedValue(queueItem({ status: "rejected" }));
+    mockDeleteSubmission.mockResolvedValue(undefined);
+    expect((await DELETE(postRequest({ submissionId: SK }))).status).toBe(200);
+  });
+
+  it("409s when the drain processed the item between the read and the write", async () => {
+    mockGetSubmission.mockResolvedValue(queueItem());
+    mockDeleteSubmission.mockRejectedValue(conditionalCheckError());
+    const res = await DELETE(postRequest({ submissionId: SK }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("submission_processed");
+    expect(mockAppendAuditRow).not.toHaveBeenCalled();
+  });
+
+  it("502s on a queue failure, 500s on an audit failure", async () => {
+    mockGetSubmission.mockResolvedValue(queueItem());
+    mockDeleteSubmission.mockRejectedValue(new Error("denied"));
+    expect((await DELETE(postRequest({ submissionId: SK }))).status).toBe(502);
+
+    mockDeleteSubmission.mockResolvedValue(undefined);
+    mockTransaction.mockRejectedValue(new Error("mysql down"));
+    const res = await DELETE(postRequest({ submissionId: SK }));
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toBe("write_failed");
+  });
+});
+
+describe("PATCH (suppress)", () => {
+  it("403s + logs a denial for a non-developer", async () => {
+    mockReadEditRequest.mockResolvedValue({
+      ok: true,
+      ctx: {
+        ...developerCtx,
+        session: { cwid: "abc1234", isSuperuser: false, isDeveloper: false },
+        body: { submissionId: SK, action: "suppress" },
+      },
+    });
+    const res = await PATCH({} as NextRequest);
+    expect(res.status).toBe(403);
+    expect(mockLogEditDenial).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "not_developer_patch" }),
+    );
+    expect(mockSuppressSubmission).not.toHaveBeenCalled();
+  });
+
+  it("400s a missing or unknown action", async () => {
+    mockGetSubmission.mockResolvedValue(queueItem({ status: "processed" }));
+    const missing = await PATCH(postRequest({ submissionId: SK }));
+    expect(missing.status).toBe(400);
+    expect((await missing.json()).error).toBe("invalid_action");
+    expect(
+      (await PATCH(postRequest({ submissionId: SK, action: "resubmit" }))).status,
+    ).toBe(400);
+    expect(mockSuppressSubmission).not.toHaveBeenCalled();
+  });
+
+  it("409s a pending item (not_processed) and a double-suppress (already_suppressed)", async () => {
+    mockGetSubmission.mockResolvedValue(queueItem());
+    const pending = await PATCH(postRequest({ submissionId: SK, action: "suppress" }));
+    expect(pending.status).toBe(409);
+    expect((await pending.json()).error).toBe("not_processed");
+
+    mockGetSubmission.mockResolvedValue(queueItem({ status: "suppressed" }));
+    const twice = await PATCH(postRequest({ submissionId: SK, action: "suppress" }));
+    expect(twice.status).toBe(409);
+    expect((await twice.json()).error).toBe("already_suppressed");
+    expect(mockSuppressSubmission).not.toHaveBeenCalled();
+  });
+
+  it("suppresses a processed item, then appends the audit row", async () => {
+    mockGetSubmission.mockResolvedValue(
+      queueItem({ status: "processed", producedOpportunityIds: ["manual_url:x-abc123"] }),
+    );
+    mockSuppressSubmission.mockResolvedValue(undefined);
+    const res = await PATCH(postRequest({ submissionId: SK, action: "suppress" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, submissionId: SK });
+
+    expect(mockSuppressSubmission).toHaveBeenCalledWith(
+      SK,
+      { suppressedBy: "flm4001" },
+      expect.anything(),
+    );
+    expect(mockAppendAuditRow).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "opportunity_submission_suppress",
+        targetEntityId: SK,
+        beforeValues: expect.objectContaining({
+          status: "processed",
+          produced_opportunity_ids: ["manual_url:x-abc123"],
+        }),
+        afterValues: { status: "suppressed" },
+      }),
+    );
+  });
+
+  it("409s when the drain raced the condition, 502s on a queue failure", async () => {
+    mockGetSubmission.mockResolvedValue(queueItem({ status: "processed" }));
+    mockSuppressSubmission.mockRejectedValue(conditionalCheckError());
+    expect(
+      (await PATCH(postRequest({ submissionId: SK, action: "suppress" }))).status,
+    ).toBe(409);
+
+    mockSuppressSubmission.mockRejectedValue(new Error("denied"));
+    expect(
+      (await PATCH(postRequest({ submissionId: SK, action: "suppress" }))).status,
+    ).toBe(502);
     expect(mockAppendAuditRow).not.toHaveBeenCalled();
   });
 });

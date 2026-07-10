@@ -130,7 +130,21 @@ export type AuditAction =
    *  extended — see `scripts/sql/audit-log.sql`. */
   | "profile_appointment_create"
   | "profile_appointment_update"
-  | "profile_appointment_delete";
+  | "profile_appointment_delete"
+  /** a development-role member (or superuser) DELETED an accidental
+   *  funding-opportunity submission the pipeline had not consumed (status
+   *  pending/rejected — Submissions sub-tab cleanup); DynamoDB DeleteItem on
+   *  the SUBMISSION item. `targetEntityType='opportunity_submission'`,
+   *  `targetEntityId` the queue item's sort key, `beforeValues` the deleted
+   *  row's `{ url, status, note, submitted_by }`. Requires the `scholars_audit`
+   *  action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "opportunity_submission_delete"
+  /** a development-role member (or superuser) SUPPRESSED a processed
+   *  submission — `status='suppressed'` on the SUBMISSION item; ReciterAI's
+   *  drain companion then removes the produced `GRANT#` items. before/after
+   *  carry the status transition (+ `produced_opportunity_ids`). Same ENUM
+   *  note as `opportunity_submission_delete`. */
+  | "opportunity_submission_suppress";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
