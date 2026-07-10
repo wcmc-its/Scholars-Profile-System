@@ -42,6 +42,7 @@ vi.mock("@/components/edit/directory-people-typeahead", () => ({
 }));
 
 import { CenterProgramCard } from "@/components/edit/center-program-card";
+import { COE_EXPANSION, COE_HELP } from "@/lib/center-program-roles";
 
 const PROGRAMS = [
   {
@@ -211,5 +212,16 @@ describe("CenterProgramCard (#1117)", () => {
     render(<CenterProgramCard centerCode="meyer_cancer_center" programs={PROGRAMS} />);
     fireEvent.click(screen.getByTestId("leader-down-CB-lead002")); // disabled + guarded
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("offers a help affordance defining COE beside the leadership dropdowns", () => {
+    global.fetch = okFetch() as unknown as typeof fetch;
+    render(<CenterProgramCard centerCode="meyer_cancer_center" programs={PROGRAMS} />);
+    // A native <option> can't host a tooltip, so the definition sits next to the
+    // heading. The tooltip body is portaled on hover; assert the trigger + its
+    // accessible name, and that the copy actually expands the abbreviation.
+    const help = screen.getByTestId("leadership-help-CB");
+    expect(help.getAttribute("aria-label")).toBe("What is a COE Liaison?");
+    expect(COE_HELP).toContain(COE_EXPANSION);
   });
 });
