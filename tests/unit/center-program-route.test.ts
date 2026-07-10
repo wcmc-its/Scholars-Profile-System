@@ -104,8 +104,18 @@ beforeEach(() => {
   ]);
   mockCenterProgramFindUnique.mockResolvedValue({ code: "CB", description: "Old blurb." });
   mockCenterProgramLeaderFindUnique.mockResolvedValue(null);
-  mockTxLeaderCreate.mockResolvedValue({ cwid: "lead001", interim: false, sortOrder: 0 });
-  mockTxLeaderUpdate.mockResolvedValue({ cwid: "lead001", interim: true, sortOrder: 0 });
+  mockTxLeaderCreate.mockResolvedValue({
+    cwid: "lead001",
+    interim: false,
+    role: "leader",
+    sortOrder: 0,
+  });
+  mockTxLeaderUpdate.mockResolvedValue({
+    cwid: "lead001",
+    interim: true,
+    role: "leader",
+    sortOrder: 0,
+  });
   mockTxLeaderDelete.mockResolvedValue({ cwid: "lead001" });
   mockTxProgramUpdate.mockResolvedValue({ code: "CB" });
 });
@@ -124,6 +134,7 @@ describe("/api/edit/center-program — leaders", () => {
           programCode: "CB",
           cwid: "lead001",
           interim: false,
+          role: "leader", // written explicitly, not left to the column default
           sortOrder: 0,
         },
       }),
@@ -176,6 +187,67 @@ describe("/api/edit/center-program — leaders", () => {
     const res = await POST(post({ ...BASE, action: "set_leader", cwid: "lead001", interim: true }));
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ ok: false, error: "leader_not_found" });
+  });
+
+  // -------------------------------------------------------- #1570 leadership type
+
+  it("add_leader accepts role=coe_liaison", async () => {
+    const res = await POST(
+      post({ ...BASE, action: "add_leader", cwid: "liai001", role: "coe_liaison", sortOrder: 0 }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxLeaderCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ role: "coe_liaison" }) }),
+    );
+  });
+
+  it("set_leader changes an existing leader's role", async () => {
+    mockCenterProgramLeaderFindUnique.mockResolvedValue({
+      cwid: "lead001",
+      interim: false,
+      role: "leader",
+      sortOrder: 0,
+    });
+    const res = await POST(
+      post({ ...BASE, action: "set_leader", cwid: "lead001", role: "coe_liaison" }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxLeaderUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { role: "coe_liaison" } }),
+    );
+  });
+
+  it("set_leader without `role` leaves an existing liaison's role untouched", async () => {
+    // The partial-update footgun: toggling interim (or reordering) on a COE liaison
+    // must not silently demote them back to `leader`.
+    mockCenterProgramLeaderFindUnique.mockResolvedValue({
+      cwid: "liai001",
+      interim: false,
+      role: "coe_liaison",
+      sortOrder: 0,
+    });
+    const res = await POST(post({ ...BASE, action: "set_leader", cwid: "liai001", interim: true }));
+    expect(res.status).toBe(200);
+    expect(mockTxLeaderUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { interim: true } }), // no `role` key
+    );
+    const data = mockTxLeaderUpdate.mock.calls[0][0].data as Record<string, unknown>;
+    expect("role" in data).toBe(false);
+  });
+
+  it("an unknown role → 400 invalid_value (no write)", async () => {
+    mockCenterProgramLeaderFindUnique.mockResolvedValue({
+      cwid: "lead001",
+      interim: false,
+      role: "leader",
+      sortOrder: 0,
+    });
+    const res = await POST(
+      post({ ...BASE, action: "set_leader", cwid: "lead001", role: "director" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_value", field: "role" });
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 });
 

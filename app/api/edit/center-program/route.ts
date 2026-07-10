@@ -6,11 +6,15 @@
  *
  * A center program may be CO-LED, so leaders are rows in `CenterProgramLeader`
  * (0..N), not a single column. Actions:
- *   - `add_leader`     — insert a leader (`cwid`, optional `interim` / `sortOrder`).
- *                        No-op if the leader already exists.
+ *   - `add_leader`     — insert a leader (`cwid`, optional `interim` / `role` /
+ *                        `sortOrder`). No-op if the leader already exists.
  *   - `remove_leader`  — delete a leader (`cwid`). No-op if absent.
- *   - `set_leader`     — update an existing leader's `interim` / `sortOrder`
+ *   - `set_leader`     — update an existing leader's `interim` / `role` / `sortOrder`
  *                        (partial; absent fields unchanged). 400 if absent.
+ *
+ * `role` (#1570) is `"leader"` or `"coe_liaison"` — the program page renders the
+ * liaisons as a separate card after the leaders. It is settable here so the
+ * assignments are managed in the editor rather than by a backfill script.
  *   - `set_description`— in-row update of `CenterProgram.description`
  *                        (`""` → null).
  *
@@ -56,6 +60,13 @@ function isProgramAction(value: string): value is ProgramAction {
 
 const MAX_SORT_ORDER = 9_999;
 
+/** #1570 — `CenterProgramLeader.role`. A VarChar in the schema, closed set here. */
+const LEADER_ROLES = ["leader", "coe_liaison"] as const;
+type LeaderRole = (typeof LEADER_ROLES)[number];
+function isLeaderRole(value: unknown): value is LeaderRole {
+  return typeof value === "string" && (LEADER_ROLES as readonly string[]).includes(value);
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
@@ -83,16 +94,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     cwid = body.cwid;
   }
 
-  // interim / sortOrder apply to add_leader + set_leader; each is optional and
-  // only mutated when present in the body.
+  // interim / role / sortOrder apply to add_leader + set_leader; each is optional
+  // and only mutated when present in the body.
   const interimPresent = (action === "add_leader" || action === "set_leader") && "interim" in body;
+  const rolePresent = (action === "add_leader" || action === "set_leader") && "role" in body;
   const sortOrderPresent =
     (action === "add_leader" || action === "set_leader") && "sortOrder" in body;
   let interim = false;
+  let role: LeaderRole = "leader";
   let sortOrder = 0;
   if (interimPresent) {
     if (typeof body.interim !== "boolean") return editError(400, "invalid_value", "interim");
     interim = body.interim;
+  }
+  if (rolePresent) {
+    if (!isLeaderRole(body.role)) return editError(400, "invalid_value", "role");
+    role = body.role;
   }
   if (sortOrderPresent) {
     if (
@@ -155,7 +172,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       where: {
         centerCode_programCode_cwid: { centerCode, programCode, cwid },
       },
-      select: { cwid: true, interim: true, sortOrder: true },
+      select: { cwid: true, interim: true, role: true, sortOrder: true },
     });
 
     if (action === "add_leader" && existing) {
@@ -171,7 +188,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     try {
       await db.write.$transaction(async (tx) => {
         const before = existing
-          ? { programCode, cwid: existing.cwid, interim: existing.interim, sortOrder: existing.sortOrder }
+          ? {
+              programCode,
+              cwid: existing.cwid,
+              interim: existing.interim,
+              role: existing.role,
+              sortOrder: existing.sortOrder,
+            }
           : null;
         let after: Record<string, unknown> | null;
 
@@ -182,21 +205,34 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           after = null;
         } else if (action === "add_leader") {
           const row = await tx.centerProgramLeader.create({
-            data: { centerCode, programCode, cwid, interim, sortOrder },
-            select: { cwid: true, interim: true, sortOrder: true },
+            data: { centerCode, programCode, cwid, interim, role, sortOrder },
+            select: { cwid: true, interim: true, role: true, sortOrder: true },
           });
-          after = { programCode, cwid: row.cwid, interim: row.interim, sortOrder: row.sortOrder };
+          after = {
+            programCode,
+            cwid: row.cwid,
+            interim: row.interim,
+            role: row.role,
+            sortOrder: row.sortOrder,
+          };
         } else {
           // set_leader — update only the fields present in the body.
           const row = await tx.centerProgramLeader.update({
             where: { centerCode_programCode_cwid: { centerCode, programCode, cwid } },
             data: {
               ...(interimPresent ? { interim } : {}),
+              ...(rolePresent ? { role } : {}),
               ...(sortOrderPresent ? { sortOrder } : {}),
             },
-            select: { cwid: true, interim: true, sortOrder: true },
+            select: { cwid: true, interim: true, role: true, sortOrder: true },
           });
-          after = { programCode, cwid: row.cwid, interim: row.interim, sortOrder: row.sortOrder };
+          after = {
+            programCode,
+            cwid: row.cwid,
+            interim: row.interim,
+            role: row.role,
+            sortOrder: row.sortOrder,
+          };
         }
 
         await appendAuditRow(tx, {
