@@ -29,10 +29,12 @@ describe("isEditableField", () => {
     expect(isEditableField("selectedHighlightPmids")).toBe(true);
   });
 
-  it("admits the seven section-visibility keys", () => {
+  it("admits every section-visibility key", () => {
     for (const f of SECTION_VISIBILITY_FIELDS) {
       expect(isEditableField(f)).toBe(true);
     }
+    // The #1639 CTL section joins the allowlist (a whole-section hide toggle).
+    expect(isEditableField("hideTechnologies")).toBe(true);
   });
 
   it("rejects every other field name", () => {
@@ -53,7 +55,7 @@ describe("isEditableField", () => {
 // ---------------------------------------------------------------------------
 
 describe("section visibility", () => {
-  it("SECTION_VISIBILITY_FIELDS lists exactly the seven hideable sections", () => {
+  it("SECTION_VISIBILITY_FIELDS lists exactly the eight hideable sections", () => {
     expect([...SECTION_VISIBILITY_FIELDS]).toEqual([
       "hideMentoring",
       "hideEducation",
@@ -62,13 +64,16 @@ describe("section visibility", () => {
       "hidePostdocMentor",
       "hideClinicalTrials",
       "hideMethods",
+      "hideTechnologies",
     ]);
   });
 
-  it("isSectionVisibilityField narrows only the seven keys", () => {
+  it("isSectionVisibilityField narrows only the eight keys", () => {
     for (const f of SECTION_VISIBILITY_FIELDS) {
       expect(isSectionVisibilityField(f)).toBe(true);
     }
+    // The #1639 CTL section-hide key narrows in.
+    expect(isSectionVisibilityField("hideTechnologies")).toBe(true);
     for (const f of ["overview", "slug", "hideDisclosures", "hidePublications", ""]) {
       expect(isSectionVisibilityField(f)).toBe(false);
     }

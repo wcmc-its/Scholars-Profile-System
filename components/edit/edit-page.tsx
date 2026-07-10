@@ -1011,6 +1011,10 @@ function renderPanel(
               hideFunding: ctx.grants.filter((g) => g.state !== "shown").length,
             },
             basePath: detailBase,
+            // The `hideTechnologies` toggle only applies when the scholar has a
+            // CTL technologies section — the SAME non-empty gate the #1639 rail
+            // item uses (flag on AND ≥1 invention).
+            availableTechnologies: ctx.technologies.length > 0,
           }}
         />
       );

@@ -32,7 +32,7 @@ import { isChairTitleFor } from "@/lib/leadership";
 import { isNameBasedSlug, RESERVED_SLUGS } from "@/lib/slug";
 
 /**
- * The seven per-scholar SECTION-VISIBILITY keys (`section-visibility-spec.md`).
+ * The eight per-scholar SECTION-VISIBILITY keys (`section-visibility-spec.md`).
  * Each is a boolean `field_override(scholar, <key>)`: value `"true"` hides the
  * whole profile section, absent (or `"false"`, or a revoked row) shows it. This
  * is the middle hide tier between per-record `suppression` and whole-profile
@@ -41,7 +41,9 @@ import { isNameBasedSlug, RESERVED_SLUGS } from "@/lib/slug";
  * DISPLAY-ONLY: a hidden section stays fully searchable (no people-doc
  * reflection, unlike whole-profile suppression), and `hideMethods` hides only
  * the profile's Methods & Tools section — never the Overview generator's methods
- * facts (those stay driven by `family_suppression_overlay`).
+ * facts (those stay driven by `family_suppression_overlay`). `hideTechnologies`
+ * drops the CTL "Available technologies" section from the public profile; the
+ * /edit read-only mirror stays visible so the scholar can un-hide it.
  *
  * COI/Disclosures is deliberately NOT hideable (compliance-mandated public), so
  * `hideDisclosures` is intentionally absent — the route rejects it `400`.
@@ -54,6 +56,7 @@ export const SECTION_VISIBILITY_FIELDS = [
   "hidePostdocMentor",
   "hideClinicalTrials",
   "hideMethods",
+  "hideTechnologies",
 ] as const;
 export type SectionVisibilityField = (typeof SECTION_VISIBILITY_FIELDS)[number];
 
@@ -66,7 +69,7 @@ export function isSectionVisibilityField(value: string): value is SectionVisibil
  * The scholar `field_override.fieldName` allowlist. `overview` + `slug` are the
  * v1 set (`self-edit-spec.md`); `selectedHighlightPmids` is the #836 opt-in
  * manual Highlights override (a JSON array of PMIDs), gated by the
- * `SELF_EDIT_MANUAL_HIGHLIGHTS` flag at the route; the seven
+ * `SELF_EDIT_MANUAL_HIGHLIGHTS` flag at the route; the eight
  * `SECTION_VISIBILITY_FIELDS` are the section-visibility booleans. The allowlist
  * only narrows the field name; per-field validation + flags govern acceptance.
  */
