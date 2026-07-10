@@ -33,17 +33,10 @@ import {
   isMethodsLensToolContextOn,
 } from "@/lib/profile/methods-lens-flags";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
-import {
-  getScholarCenterAffiliations,
-  type ScholarCenterAffiliation,
-} from "@/lib/api/centers";
+import { getScholarCenterAffiliations, type ScholarCenterAffiliation } from "@/lib/api/centers";
 import { isProfileCenterAffiliationEnabled } from "@/lib/profile/center-affiliation-flag";
 import type { ProfileAppointmentEntry } from "@/lib/profile/profile-appointments";
-import {
-  rankForSelectedHighlights,
-  scorePublication,
-  type ScoredPublication,
-} from "@/lib/ranking";
+import { rankForSelectedHighlights, scorePublication, type ScoredPublication } from "@/lib/ranking";
 
 // `isFundingActive` (issue #78, decision Q6) moved to the Prisma-free
 // `@/lib/funding-active` so the profile, the funding search index, and the
@@ -575,6 +568,21 @@ export type ProfilePayload = {
      *  third-party swap-point. */
     enrichmentSource: string | null;
   }>;
+  /** Licensable inventions from the WCM Center for Technology Licensing's public
+   *  portfolio, attributed to this scholar by the CWID in the VIVO link CTL
+   *  prints beside each PI. Ships dark behind AVAILABLE_TECHNOLOGIES_SECTION, so
+   *  an unflagged env returns [] even after the ETL seed lands. */
+  technologies: Array<{
+    /** CTL's "Cornell Reference" docket number; null when the page omits it. */
+    reference: string | null;
+    title: string;
+    /** Absolute URL of the public technology detail page on CTL's site. */
+    url: string;
+    /** CTL patent status ("US Application Filed"); null on ~61% of pages. */
+    patentStatus: string | null;
+    /** PMIDs of the papers CTL lists for the invention. Empty when none. */
+    pmids: string[];
+  }>;
   keywords: ProfileKeywords;
   /** #799 — family-primary Methods lens rows. Empty when the lens flag is off
    *  or the `scholar_family` rollup has no rows for this scholar (dormant until
@@ -683,9 +691,7 @@ function collapseToSingleVisiblePrimary<
       return xs - ys;
     });
   const winner = ranked[0].a;
-  return appts.map((a) =>
-    a.isPrimary && a !== winner ? { ...a, isPrimary: false } : a,
-  );
+  return appts.map((a) => (a.isPrimary && a !== winner ? { ...a, isPrimary: false } : a));
 }
 
 /**
@@ -704,10 +710,7 @@ function collapseToSingleVisiblePrimary<
  * still need to be corrected during the ETL.
  */
 const CHIP_CAP_VISIBLE = 5;
-function ensureOwnerInChipWindow<T extends { cwid: string }>(
-  authors: T[],
-  ownerCwid: string,
-): T[] {
+function ensureOwnerInChipWindow<T extends { cwid: string }>(authors: T[], ownerCwid: string): T[] {
   const idx = authors.findIndex((a) => a.cwid === ownerCwid);
   if (idx < 0 || idx < CHIP_CAP_VISIBLE) return authors;
   const owner = authors[idx];
@@ -746,103 +749,108 @@ export function isActiveTrialStatus(status: string | null): boolean {
   );
 }
 
-export const getScholarFullProfileBySlug = cache(async (
-  slug: string,
-  now: Date = new Date(),
-): Promise<ProfilePayload | null> => {
-  const scholar = await prisma.scholar.findFirst({
-    where: { slug, deletedAt: null, status: "active" },
-    include: {
-      appointments: {
-        orderBy: [{ isPrimary: "desc" }, { startDate: "desc" }],
-      },
-      // #1568 — self-asserted appointments (profile-only). Ordered to match the
-      // editor + GET route (manual sortOrder, then entry time). Hidden rows are
-      // dropped at LOAD (like `hideEducation`) so they never enter the public
-      // payload — the editor reads hidden rows separately via GET /api/edit/appointment.
-      profileAppointments: {
-        where: { showOnProfile: true },
-        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-      },
-      educations: {
-        orderBy: [{ year: "desc" }],
-      },
-      grants: {
-        orderBy: [{ endDate: "desc" }, { startDate: "desc" }],
-        include: {
-          publications: {
-            include: {
-              publication: {
-                select: {
-                  pmid: true,
-                  title: true,
-                  journal: true,
-                  year: true,
-                  citationCount: true,
+export const getScholarFullProfileBySlug = cache(
+  async (slug: string, now: Date = new Date()): Promise<ProfilePayload | null> => {
+    const scholar = await prisma.scholar.findFirst({
+      where: { slug, deletedAt: null, status: "active" },
+      include: {
+        appointments: {
+          orderBy: [{ isPrimary: "desc" }, { startDate: "desc" }],
+        },
+        // #1568 — self-asserted appointments (profile-only). Ordered to match the
+        // editor + GET route (manual sortOrder, then entry time). Hidden rows are
+        // dropped at LOAD (like `hideEducation`) so they never enter the public
+        // payload — the editor reads hidden rows separately via GET /api/edit/appointment.
+        profileAppointments: {
+          where: { showOnProfile: true },
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        },
+        educations: {
+          orderBy: [{ year: "desc" }],
+        },
+        grants: {
+          orderBy: [{ endDate: "desc" }, { startDate: "desc" }],
+          include: {
+            publications: {
+              include: {
+                publication: {
+                  select: {
+                    pmid: true,
+                    title: true,
+                    journal: true,
+                    year: true,
+                    citationCount: true,
+                  },
                 },
               },
             },
           },
         },
-      },
-      coiActivities: {
-        orderBy: [{ activityGroup: "asc" }, { entity: "asc" }],
-      },
-      // Clinical trials (#clinical-trials). Always joined (a small, usually-empty
-      // relation); the payload is gated dark in the mapper below, so an env with
-      // CLINICAL_TRIALS_SECTION off returns [] even after the ETL backfill lands.
-      clinicalTrials: {
-        include: { trial: true },
-      },
-      // Issue #167 — surface the division name so the sidebar can render
-      // "<Division> (<Department>)". Department display still comes from
-      // the existing `primaryDepartment` text column.
-      division: { select: { name: true } },
-      // #684 — the department page slug, so the sidebar department name can
-      // link to /departments/<slug> (null when the scholar's deptCode has no
-      // joined Department row). `officialName` is the curated ceremonial name
-      // (e.g. ED "Library" -> "Samuel J. Wood Library") preferred over the raw
-      // `primaryDepartment` string for display; falls back when NULL.
-      department: { select: { slug: true, officialName: true } },
-      // Issue #5 — surface the postdoctoral mentor on the sidebar. Hide
-      // soft-deleted / suppressed mentors at the API layer so the card
-      // never points at a hidden profile.
-      postdoctoralMentor: {
-        select: {
-          cwid: true,
-          slug: true,
-          preferredName: true,
-          postnominal: true,
-          primaryTitle: true,
-          deletedAt: true,
-          status: true,
-          roleCategory: true,
+        coiActivities: {
+          orderBy: [{ activityGroup: "asc" }, { entity: "asc" }],
+        },
+        // Clinical trials (#clinical-trials). Always joined (a small, usually-empty
+        // relation); the payload is gated dark in the mapper below, so an env with
+        // CLINICAL_TRIALS_SECTION off returns [] even after the ETL backfill lands.
+        clinicalTrials: {
+          include: { trial: true },
+        },
+        // CTL available technologies. Always joined (a small, usually-empty
+        // relation); the payload is gated dark in the mapper below, so an env
+        // with AVAILABLE_TECHNOLOGIES_SECTION off returns [] even after the ETL
+        // seed lands.
+        technologies: {
+          orderBy: [{ title: "asc" }],
+        },
+        // Issue #167 — surface the division name so the sidebar can render
+        // "<Division> (<Department>)". Department display still comes from
+        // the existing `primaryDepartment` text column.
+        division: { select: { name: true } },
+        // #684 — the department page slug, so the sidebar department name can
+        // link to /departments/<slug> (null when the scholar's deptCode has no
+        // joined Department row). `officialName` is the curated ceremonial name
+        // (e.g. ED "Library" -> "Samuel J. Wood Library") preferred over the raw
+        // `primaryDepartment` string for display; falls back when NULL.
+        department: { select: { slug: true, officialName: true } },
+        // Issue #5 — surface the postdoctoral mentor on the sidebar. Hide
+        // soft-deleted / suppressed mentors at the API layer so the card
+        // never points at a hidden profile.
+        postdoctoralMentor: {
+          select: {
+            cwid: true,
+            slug: true,
+            preferredName: true,
+            postnominal: true,
+            primaryTitle: true,
+            deletedAt: true,
+            status: true,
+            roleCategory: true,
+          },
         },
       },
-    },
-  });
-  if (!scholar) return null;
+    });
+    if (!scholar) return null;
 
-  // These reads are all keyed only on the (already-fetched) scholar cwid and
-  // have no data dependency on one another, so they run concurrently in one
-  // round of awaits rather than serially. Anything that consumes `authorships`
-  // (suppressions, ranking) stays sequential below, after this resolves.
-  //   - effectiveOverview      — field_override('overview') merge (#356)
-  //   - authorships            — drives the publications list (#63 type filter)
-  //   - nihProfileRow          — preferred NIH RePORTER profile_id (#90)
-  //   - families               — gated Methods-lens rows (#799); [] when off
-  //   - manualHighlightPmids   — field_override('selectedHighlightPmids') (#836);
-  //                              read only when the flag is on, else null (dark)
-  const [
-    effectiveOverview,
-    authorships,
-    nihProfileRow,
-    families,
-    manualHighlightPmids,
-    centers,
-    leadershipTitles,
-    sectionOverrideRows,
-  ] = await Promise.all([
+    // These reads are all keyed only on the (already-fetched) scholar cwid and
+    // have no data dependency on one another, so they run concurrently in one
+    // round of awaits rather than serially. Anything that consumes `authorships`
+    // (suppressions, ranking) stays sequential below, after this resolves.
+    //   - effectiveOverview      — field_override('overview') merge (#356)
+    //   - authorships            — drives the publications list (#63 type filter)
+    //   - nihProfileRow          — preferred NIH RePORTER profile_id (#90)
+    //   - families               — gated Methods-lens rows (#799); [] when off
+    //   - manualHighlightPmids   — field_override('selectedHighlightPmids') (#836);
+    //                              read only when the flag is on, else null (dark)
+    const [
+      effectiveOverview,
+      authorships,
+      nihProfileRow,
+      families,
+      manualHighlightPmids,
+      centers,
+      leadershipTitles,
+      sectionOverrideRows,
+    ] = await Promise.all([
       // The effective `overview` merges a manual `field_override` over the ETL
       // column at read time (#356, lib/api/manual-layer.ts). A self-edited bio is
       // sanitized on write, so it is rendered as-is.
@@ -988,461 +996,477 @@ export const getScholarFullProfileBySlug = cache(async (
         select: { fieldName: true },
       }),
     ]);
-  const hiddenSections = new Set(sectionOverrideRows.map((r) => r.fieldName));
+    const hiddenSections = new Set(sectionOverrideRows.map((r) => r.fieldName));
 
-  // #356 — publication suppression. A publication this scholar has hidden
-  // (a per-author suppression on their own cwid), or one taken down whole,
-  // drops from their record entirely: the publications list, Selected
-  // highlights, and the keyword cloud all derive from `visibleAuthorships`.
-  // The grant-linked publications in the Funding section are filtered the same
-  // way below, so every profile pmid is covered by this one suppression load.
-  const grantPmids = scholar.grants.flatMap((g) =>
-    g.publications.map((gp) => gp.publication.pmid),
-  );
-  const suppressions = await loadPublicationSuppressions(
-    [...authorships.map((a) => a.publication.pmid), ...grantPmids],
-    prisma,
-  );
-  const visibleAuthorships = authorships.filter(
-    (a) =>
-      !isAuthorHidden(suppressions, a.publication.pmid, scholar.cwid) &&
-      !suppressions.darkPmids.has(a.publication.pmid),
-  );
+    // #356 — publication suppression. A publication this scholar has hidden
+    // (a per-author suppression on their own cwid), or one taken down whole,
+    // drops from their record entirely: the publications list, Selected
+    // highlights, and the keyword cloud all derive from `visibleAuthorships`.
+    // The grant-linked publications in the Funding section are filtered the same
+    // way below, so every profile pmid is covered by this one suppression load.
+    const grantPmids = scholar.grants.flatMap((g) =>
+      g.publications.map((gp) => gp.publication.pmid),
+    );
+    const suppressions = await loadPublicationSuppressions(
+      [...authorships.map((a) => a.publication.pmid), ...grantPmids],
+      prisma,
+    );
+    const visibleAuthorships = authorships.filter(
+      (a) =>
+        !isAuthorHidden(suppressions, a.publication.pmid, scholar.cwid) &&
+        !suppressions.darkPmids.has(a.publication.pmid),
+    );
 
-  // #160 — whole-entity suppressions. A hidden education / appointment / grant
-  // drops from the profile (sidebars + funding section). Keyed on the stable
-  // `externalId` (#352). A grant row is per-investigator, so suppressing it
-  // hides that one role from this profile.
-  const [suppressedEducationIds, suppressedAppointmentIds, suppressedGrantIds] =
-    await Promise.all([
-      loadEntitySuppressions(
-        "education",
-        scholar.educations.map((e) => e.externalId),
-        prisma,
-      ),
-      loadEntitySuppressions(
-        "appointment",
-        scholar.appointments.map((a) => a.externalId),
-        prisma,
-      ),
-      loadEntitySuppressions(
-        "grant",
-        scholar.grants.map((g) => g.externalId),
-        prisma,
-      ),
-    ]);
+    // #160 — whole-entity suppressions. A hidden education / appointment / grant
+    // drops from the profile (sidebars + funding section). Keyed on the stable
+    // `externalId` (#352). A grant row is per-investigator, so suppressing it
+    // hides that one role from this profile.
+    const [suppressedEducationIds, suppressedAppointmentIds, suppressedGrantIds] =
+      await Promise.all([
+        loadEntitySuppressions(
+          "education",
+          scholar.educations.map((e) => e.externalId),
+          prisma,
+        ),
+        loadEntitySuppressions(
+          "appointment",
+          scholar.appointments.map((a) => a.externalId),
+          prisma,
+        ),
+        loadEntitySuppressions(
+          "grant",
+          scholar.grants.map((g) => g.externalId),
+          prisma,
+        ),
+      ]);
 
-  const rankablePubs = visibleAuthorships.map((a) => {
-    // ReCiterAI publication score for this scholar+pmid pair (D-08). Source
-    // chain after issue #316 PR-A: prefer the per-scholar PublicationScore
-    // (currently empty in prototype — populated by a future per-(cwid, pmid)
-    // projection), then fall back to the per-pmid global `Publication.impactScore`
-    // landed by the IMPACT# DynamoDB ETL block. Pre-2020 papers and papers
-    // ReCiterAI didn't score yield 0, which legitimately excludes them from
-    // Selected highlights per D-15.
-    //
-    // The previous fallback ran a MAX-collapse over `publication_topic.impact_score`
-    // because the global score had no home column; that workaround was retired in
-    // PR-B of #316 once `Publication.impactScore` came online.
-    const pubImpact =
-      a.publication.impactScore !== null && a.publication.impactScore !== undefined
-        ? Number(a.publication.impactScore)
-        : 0;
-    return {
-    pmid: a.publication.pmid,
-    title: a.publication.title,
-    authorsString: a.publication.authorsString,
-    journal: a.publication.journal,
-    year: a.publication.year,
-    publicationType: a.publication.publicationType,
-    citationCount: a.publication.citationCount, // display-only — NOT used by Variant B ranking
-    reciteraiImpact:
-      a.publication.publicationScores[0]?.score ?? pubImpact,
-    dateAddedToEntrez: a.publication.dateAddedToEntrez,
-    doi: a.publication.doi,
-    pmcid: a.publication.pmcid,
-    pubmedUrl: a.publication.pubmedUrl,
-    ecommonsLink: a.publication.ecommonsLink,
-    authorship: {
-      isFirst: a.isFirst,
-      isLast: a.isLast,
-      isPenultimate: a.isPenultimate,
-    },
-    isConfirmed: a.isConfirmed,
-    meshTerms: normalizeMeshTerms(a.publication.meshTerms),
-    abstract: a.publication.abstract ?? null,
-    // All confirmed WCM authors on this publication, including the profile
-    // owner. Same chip-row shape as topic/search; the page renders chips and
-    // omits the plain authorsString to avoid duplicating WCM author names.
-    wcmAuthors: ensureOwnerInChipWindow(
-      a.publication.authors
-        .filter(
-          (au) =>
-            au.scholar &&
-            !au.scholar.deletedAt &&
-            au.scholar.status === "active" &&
-            // #356 — a co-author who hid this publication drops from its chips.
-            !isAuthorHidden(suppressions, a.publication.pmid, au.scholar.cwid),
-        )
-        .map((au) => ({
-          name: au.scholar!.preferredName,
-          cwid: au.scholar!.cwid,
-          slug: au.scholar!.slug,
-          identityImageEndpoint: identityImageEndpoint(au.scholar!.cwid),
-          isFirst: au.isFirst,
-          isLast: au.isLast,
-          position: au.position,
-          roleCategory: au.scholar!.roleCategory,
-        })),
-      scholar.cwid,
-    ),
-    };
-  });
-
-  // AI-selected Highlights — the top-N first/senior pubs by the
-  // `selected_highlights` curve. `rankablePubs` is already suppression-filtered
-  // (it derives from `visibleAuthorships`), so neither these nor any manual
-  // override below can resurface a hidden publication.
-  const aiHighlights = rankForSelectedHighlights(rankablePubs, now).slice(
-    0,
-    MAX_SELECTED_HIGHLIGHTS,
-  );
-  // #836 — `manualHighlightPmids` (the scholar's stored override, or null when
-  // the flag is off / no override) was fetched in the cwid-only Promise.all
-  // above. When the flag is on it takes precedence over the AI selection, in
-  // stored order, restricted to their still-visible publications
-  // (`pickManualHighlights` drops any suppressed/out-of-set pmid and falls back
-  // to the AI set if none survive). Flag off ⇒ the read was never issued, so the
-  // feature is fully dark.
-  let highlights: ProfilePublication[];
-  if (manualHighlightPmids && manualHighlightPmids.length > 0) {
-    // Only when a manual override is actually present do we build the pickable
-    // pool — every visible pub (not just the AI-positive ones), carrying its
-    // `selected_highlights` score so the picked `ProfilePublication` has the same
-    // `score` shape the AI highlights do. A manual pick the AI filter would have
-    // scored 0 (e.g. a 2nd-author paper) is still honoured — the scholar chose it
-    // deliberately. Skipping this map on the (overwhelmingly common) no-override
-    // path keeps the hot profile render off an O(pubs) re-score.
-    const scoredPool: ProfilePublication[] = rankablePubs.map((p) => ({
-      ...p,
-      score: scorePublication(p, "selected_highlights", true, now),
-    }));
-    highlights = pickManualHighlights(scoredPool, aiHighlights, manualHighlightPmids);
-  } else {
-    highlights = aiHighlights;
-  }
-
-  // Issue #73 — aggregate keywords from this scholar's accepted publications.
-  // Operates over `visibleAuthorships` (which includes `publication.meshTerms`
-  // via the earlier include) so we don't re-query, and so a suppressed
-  // publication contributes no keywords. Excludes Retraction/Erratum types
-  // from per-keyword counts unconditionally, ahead of issue #63 fully landing
-  // the same exclusion in the publications list.
-  const keywords: ProfileKeywords = aggregateKeywords(
-    visibleAuthorships.map((a) => ({
-      publicationType: a.publication.publicationType,
-      publication: { meshTerms: a.publication.meshTerms },
-    })),
-  );
-
-  // Full publications record: every confirmed authorship, no scholar-centric
-  // filter. The year-grouped Publications list is the canonical "papers by
-  // this person" record — middle-author and penultimate papers belong here
-  // even though they don't surface as Selected highlights (D-13 first/senior
-  // filter applies to the highlight surface only).
-  //
-  // Sort key is `dateAddedToEntrez` for ALL chronological ordering, not the
-  // PubMed PubDate `year` — `year` is the journal-issue label (used for
-  // bucketing) but `dateAddedToEntrez` is the canonical signal for "when this
-  // paper became known" and is the more reliable per-paper sort across edge
-  // cases (e-pub-ahead-of-print, missing year, retroactive indexing).
-  const publications: ProfilePublication[] = rankablePubs
-    .map((p) => ({ ...p, score: 0 } satisfies ProfilePublication))
-    .sort((a, b) => {
-      const ad = a.dateAddedToEntrez?.getTime() ?? 0;
-      const bd = b.dateAddedToEntrez?.getTime() ?? 0;
-      return bd - ad;
+    const rankablePubs = visibleAuthorships.map((a) => {
+      // ReCiterAI publication score for this scholar+pmid pair (D-08). Source
+      // chain after issue #316 PR-A: prefer the per-scholar PublicationScore
+      // (currently empty in prototype — populated by a future per-(cwid, pmid)
+      // projection), then fall back to the per-pmid global `Publication.impactScore`
+      // landed by the IMPACT# DynamoDB ETL block. Pre-2020 papers and papers
+      // ReCiterAI didn't score yield 0, which legitimately excludes them from
+      // Selected highlights per D-15.
+      //
+      // The previous fallback ran a MAX-collapse over `publication_topic.impact_score`
+      // because the global score had no home column; that workaround was retired in
+      // PR-B of #316 once `Publication.impactScore` came online.
+      const pubImpact =
+        a.publication.impactScore !== null && a.publication.impactScore !== undefined
+          ? Number(a.publication.impactScore)
+          : 0;
+      return {
+        pmid: a.publication.pmid,
+        title: a.publication.title,
+        authorsString: a.publication.authorsString,
+        journal: a.publication.journal,
+        year: a.publication.year,
+        publicationType: a.publication.publicationType,
+        citationCount: a.publication.citationCount, // display-only — NOT used by Variant B ranking
+        reciteraiImpact: a.publication.publicationScores[0]?.score ?? pubImpact,
+        dateAddedToEntrez: a.publication.dateAddedToEntrez,
+        doi: a.publication.doi,
+        pmcid: a.publication.pmcid,
+        pubmedUrl: a.publication.pubmedUrl,
+        ecommonsLink: a.publication.ecommonsLink,
+        authorship: {
+          isFirst: a.isFirst,
+          isLast: a.isLast,
+          isPenultimate: a.isPenultimate,
+        },
+        isConfirmed: a.isConfirmed,
+        meshTerms: normalizeMeshTerms(a.publication.meshTerms),
+        abstract: a.publication.abstract ?? null,
+        // All confirmed WCM authors on this publication, including the profile
+        // owner. Same chip-row shape as topic/search; the page renders chips and
+        // omits the plain authorsString to avoid duplicating WCM author names.
+        wcmAuthors: ensureOwnerInChipWindow(
+          a.publication.authors
+            .filter(
+              (au) =>
+                au.scholar &&
+                !au.scholar.deletedAt &&
+                au.scholar.status === "active" &&
+                // #356 — a co-author who hid this publication drops from its chips.
+                !isAuthorHidden(suppressions, a.publication.pmid, au.scholar.cwid),
+            )
+            .map((au) => ({
+              name: au.scholar!.preferredName,
+              cwid: au.scholar!.cwid,
+              slug: au.scholar!.slug,
+              identityImageEndpoint: identityImageEndpoint(au.scholar!.cwid),
+              isFirst: au.isFirst,
+              isLast: au.isLast,
+              position: au.position,
+              roleCategory: au.scholar!.roleCategory,
+            })),
+          scholar.cwid,
+        ),
+      };
     });
 
-  // Issue #162, #193 — three-tier active-appointments order. The Prisma
-  // query orders by isPrimary/startDate within each source; a stable
-  // secondary pass groups by source tier. Unknown sources sort to the end
-  // (?? 99) — defensive when new sources are added without updating this
-  // map. To add a tier, insert one entry; nothing else here needs to change.
-  const APPOINTMENT_TIER_ORDER: Record<string, number> = {
-    ED: 0, // WCM College faculty (LDAP ou=faculty)
-    "JENZABAR-GSFACULTY": 1, // Weill Cornell Graduate School (#193)
-    "ED-NYP": 2, // NYP affiliates (#162)
-  };
-  const tier = (s: string) => APPOINTMENT_TIER_ORDER[s] ?? 99;
-  const sortedAppointments = [...scholar.appointments]
-    // #1323 — historical (`ED-HISTORICAL`) rows never enter the active
-    // annotate/collapse pipeline; they surface separately via pastAppointments.
-    .filter((a) => a.source !== "ED-HISTORICAL")
-    // #160 — drop suppressed appointments before annotate/collapse so a hidden
-    // primary can't win the single-visible-primary collapse.
-    .filter((a) => !suppressedAppointmentIds.has(a.externalId))
-    .sort((a, b) => tier(a.source) - tier(b.source));
-  const annotatedAppointments = annotateAppointments(sortedAppointments, now);
+    // AI-selected Highlights — the top-N first/senior pubs by the
+    // `selected_highlights` curve. `rankablePubs` is already suppression-filtered
+    // (it derives from `visibleAuthorships`), so neither these nor any manual
+    // override below can resurface a hidden publication.
+    const aiHighlights = rankForSelectedHighlights(rankablePubs, now).slice(
+      0,
+      MAX_SELECTED_HIGHLIGHTS,
+    );
+    // #836 — `manualHighlightPmids` (the scholar's stored override, or null when
+    // the flag is off / no override) was fetched in the cwid-only Promise.all
+    // above. When the flag is on it takes precedence over the AI selection, in
+    // stored order, restricted to their still-visible publications
+    // (`pickManualHighlights` drops any suppressed/out-of-set pmid and falls back
+    // to the AI set if none survive). Flag off ⇒ the read was never issued, so the
+    // feature is fully dark.
+    let highlights: ProfilePublication[];
+    if (manualHighlightPmids && manualHighlightPmids.length > 0) {
+      // Only when a manual override is actually present do we build the pickable
+      // pool — every visible pub (not just the AI-positive ones), carrying its
+      // `selected_highlights` score so the picked `ProfilePublication` has the same
+      // `score` shape the AI highlights do. A manual pick the AI filter would have
+      // scored 0 (e.g. a 2nd-author paper) is still honoured — the scholar chose it
+      // deliberately. Skipping this map on the (overwhelmingly common) no-override
+      // path keeps the hot profile render off an O(pubs) re-score.
+      const scoredPool: ProfilePublication[] = rankablePubs.map((p) => ({
+        ...p,
+        score: scorePublication(p, "selected_highlights", true, now),
+      }));
+      highlights = pickManualHighlights(scoredPool, aiHighlights, manualHighlightPmids);
+    } else {
+      highlights = aiHighlights;
+    }
 
-  // `nihProfileRow` (#90 — preferred NIH RePORTER profile_id, drives the
-  // "View NIH portfolio on RePORTER" link) and `families` (#799 — gated +
-  // overlay-filtered Methods-lens rows, [] when the lens flag is off) were both
-  // fetched in the cwid-only Promise.all above.
+    // Issue #73 — aggregate keywords from this scholar's accepted publications.
+    // Operates over `visibleAuthorships` (which includes `publication.meshTerms`
+    // via the earlier include) so we don't re-query, and so a suppressed
+    // publication contributes no keywords. Excludes Retraction/Erratum types
+    // from per-keyword counts unconditionally, ahead of issue #63 fully landing
+    // the same exclusion in the publications list.
+    const keywords: ProfileKeywords = aggregateKeywords(
+      visibleAuthorships.map((a) => ({
+        publicationType: a.publication.publicationType,
+        publication: { meshTerms: a.publication.meshTerms },
+      })),
+    );
 
-  return {
-    cwid: scholar.cwid,
-    slug: scholar.slug,
-    preferredName: scholar.preferredName,
-    roleCategory: scholar.roleCategory,
-    postnominal: scholar.postnominal,
-    publishedName: scholar.postnominal
-      ? `${scholar.preferredName}, ${scholar.postnominal}`
-      : scholar.preferredName,
-    fullName: scholar.fullName,
-    primaryTitle: scholar.primaryTitle,
-    primaryDepartment: scholar.primaryDepartment,
-    departmentSlug: scholar.department?.slug ?? null,
-    departmentOfficialName: scholar.department?.officialName ?? null,
-    // Issue #167 — belt-and-suspenders filter for the "Administration"
-    // division label. The ED ETL drops Administration at the divCode level
-    // (EXCLUDED_DIV_NAMES), so this typically only matters when divCode
-    // exists but the joined Division row's name is "Administration" (e.g.
-    // a row that pre-dates the ETL filter).
-    division:
-      scholar.division && scholar.division.name !== "Administration"
-        ? scholar.division.name
-        : null,
-    leadershipTitles,
-    // email-visibility-spec § A + Cache-safety — this payload is rendered into
-    // the CloudFront PATH-cached profile page, so it MUST be viewer-independent.
-    // Bake only the cache-safe email: when the gate is on, `public` survives and
-    // `institution`/`none`/null are withheld (gateEmailForViewer with
-    // internalViewer=false). `institution` emails are revealed to internal
-    // viewers out-of-band via the uncacheable /api/profile/[cwid]/contact-email
-    // endpoint (see `contactEmailRevealable`). No-op (raw email) while off.
-    email: gateEmailForViewer(
-      scholar.email,
-      scholar.emailVisibility,
-      false,
-      isEmailReleaseGateEnabled(),
-    ),
-    // True when the gate is on and the scholar has an email withheld above
-    // because it is not `public` — the Contact card mounts the client reveal
-    // island. Covers `institution` (revealed to internal viewers) and `none`
-    // (endpoint returns nothing); both fetch so an external viewer cannot tell
-    // them apart. Carries no address. False when gate off / public / no email.
-    contactEmailRevealable:
-      isEmailReleaseGateEnabled() &&
-      scholar.email != null &&
-      scholar.emailVisibility !== "public",
-    identityImageEndpoint: identityImageEndpoint(scholar.cwid),
-    hasClinicalProfile: scholar.hasClinicalProfile,
-    clinicalProfileUrl: scholar.clinicalProfileUrl,
-    orcid: scholar.orcid,
-    overview: effectiveOverview,
-    appointments: collapseToSingleVisiblePrimary(annotatedAppointments).map((a) => ({
-      title: a.title,
-      organization: a.organization,
-      startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
-      endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
-      isPrimary: a.isPrimary,
-      isInterim: a.isInterim,
-      isActive: a.isActive,
-      source: a.source,
-    })),
-    // #1323 — REVEALED historical appointments only (`ED-HISTORICAL` +
-    // showOnProfile). Hidden rows are omitted so this CloudFront PATH-cached
-    // payload stays viewer-independent. Sorted by end date descending (most
-    // recent first; nulls last).
-    pastAppointments: scholar.appointments
-      .filter(
-        (a) =>
-          a.source === "ED-HISTORICAL" &&
-          a.showOnProfile === true &&
-          !suppressedAppointmentIds.has(a.externalId),
-      )
+    // Full publications record: every confirmed authorship, no scholar-centric
+    // filter. The year-grouped Publications list is the canonical "papers by
+    // this person" record — middle-author and penultimate papers belong here
+    // even though they don't surface as Selected highlights (D-13 first/senior
+    // filter applies to the highlight surface only).
+    //
+    // Sort key is `dateAddedToEntrez` for ALL chronological ordering, not the
+    // PubMed PubDate `year` — `year` is the journal-issue label (used for
+    // bucketing) but `dateAddedToEntrez` is the canonical signal for "when this
+    // paper became known" and is the more reliable per-paper sort across edge
+    // cases (e-pub-ahead-of-print, missing year, retroactive indexing).
+    const publications: ProfilePublication[] = rankablePubs
+      .map((p) => ({ ...p, score: 0 }) satisfies ProfilePublication)
       .sort((a, b) => {
-        const ae = a.endDate ? a.endDate.getTime() : -Infinity;
-        const be = b.endDate ? b.endDate.getTime() : -Infinity;
-        return be - ae;
-      })
-      .map((a) => ({
+        const ad = a.dateAddedToEntrez?.getTime() ?? 0;
+        const bd = b.dateAddedToEntrez?.getTime() ?? 0;
+        return bd - ad;
+      });
+
+    // Issue #162, #193 — three-tier active-appointments order. The Prisma
+    // query orders by isPrimary/startDate within each source; a stable
+    // secondary pass groups by source tier. Unknown sources sort to the end
+    // (?? 99) — defensive when new sources are added without updating this
+    // map. To add a tier, insert one entry; nothing else here needs to change.
+    const APPOINTMENT_TIER_ORDER: Record<string, number> = {
+      ED: 0, // WCM College faculty (LDAP ou=faculty)
+      "JENZABAR-GSFACULTY": 1, // Weill Cornell Graduate School (#193)
+      "ED-NYP": 2, // NYP affiliates (#162)
+    };
+    const tier = (s: string) => APPOINTMENT_TIER_ORDER[s] ?? 99;
+    const sortedAppointments = [...scholar.appointments]
+      // #1323 — historical (`ED-HISTORICAL`) rows never enter the active
+      // annotate/collapse pipeline; they surface separately via pastAppointments.
+      .filter((a) => a.source !== "ED-HISTORICAL")
+      // #160 — drop suppressed appointments before annotate/collapse so a hidden
+      // primary can't win the single-visible-primary collapse.
+      .filter((a) => !suppressedAppointmentIds.has(a.externalId))
+      .sort((a, b) => tier(a.source) - tier(b.source));
+    const annotatedAppointments = annotateAppointments(sortedAppointments, now);
+
+    // `nihProfileRow` (#90 — preferred NIH RePORTER profile_id, drives the
+    // "View NIH portfolio on RePORTER" link) and `families` (#799 — gated +
+    // overlay-filtered Methods-lens rows, [] when the lens flag is off) were both
+    // fetched in the cwid-only Promise.all above.
+
+    return {
+      cwid: scholar.cwid,
+      slug: scholar.slug,
+      preferredName: scholar.preferredName,
+      roleCategory: scholar.roleCategory,
+      postnominal: scholar.postnominal,
+      publishedName: scholar.postnominal
+        ? `${scholar.preferredName}, ${scholar.postnominal}`
+        : scholar.preferredName,
+      fullName: scholar.fullName,
+      primaryTitle: scholar.primaryTitle,
+      primaryDepartment: scholar.primaryDepartment,
+      departmentSlug: scholar.department?.slug ?? null,
+      departmentOfficialName: scholar.department?.officialName ?? null,
+      // Issue #167 — belt-and-suspenders filter for the "Administration"
+      // division label. The ED ETL drops Administration at the divCode level
+      // (EXCLUDED_DIV_NAMES), so this typically only matters when divCode
+      // exists but the joined Division row's name is "Administration" (e.g.
+      // a row that pre-dates the ETL filter).
+      division:
+        scholar.division && scholar.division.name !== "Administration"
+          ? scholar.division.name
+          : null,
+      leadershipTitles,
+      // email-visibility-spec § A + Cache-safety — this payload is rendered into
+      // the CloudFront PATH-cached profile page, so it MUST be viewer-independent.
+      // Bake only the cache-safe email: when the gate is on, `public` survives and
+      // `institution`/`none`/null are withheld (gateEmailForViewer with
+      // internalViewer=false). `institution` emails are revealed to internal
+      // viewers out-of-band via the uncacheable /api/profile/[cwid]/contact-email
+      // endpoint (see `contactEmailRevealable`). No-op (raw email) while off.
+      email: gateEmailForViewer(
+        scholar.email,
+        scholar.emailVisibility,
+        false,
+        isEmailReleaseGateEnabled(),
+      ),
+      // True when the gate is on and the scholar has an email withheld above
+      // because it is not `public` — the Contact card mounts the client reveal
+      // island. Covers `institution` (revealed to internal viewers) and `none`
+      // (endpoint returns nothing); both fetch so an external viewer cannot tell
+      // them apart. Carries no address. False when gate off / public / no email.
+      contactEmailRevealable:
+        isEmailReleaseGateEnabled() &&
+        scholar.email != null &&
+        scholar.emailVisibility !== "public",
+      identityImageEndpoint: identityImageEndpoint(scholar.cwid),
+      hasClinicalProfile: scholar.hasClinicalProfile,
+      clinicalProfileUrl: scholar.clinicalProfileUrl,
+      orcid: scholar.orcid,
+      overview: effectiveOverview,
+      appointments: collapseToSingleVisiblePrimary(annotatedAppointments).map((a) => ({
         title: a.title,
         organization: a.organization,
         startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
         endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
         isPrimary: a.isPrimary,
+        isInterim: a.isInterim,
+        isActive: a.isActive,
+        source: a.source,
       })),
-    // #1568 — self-asserted appointments, in the loader's (sortOrder, createdAt)
-    // order. `showOnProfile` is carried so `groupProfileAppointments` applies the
-    // hide gate + category split at render; the `@db.Date` columns become
-    // `YYYY-MM-DD` like the other appointment dates.
-    profileAppointments: scholar.profileAppointments.map((a) => ({
-      category: a.category,
-      title: a.title,
-      organization: a.organization,
-      unit: a.unit,
-      location: a.location,
-      startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
-      endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
-      showOnProfile: a.showOnProfile,
-    })),
-    // section-visibility — `hideEducation` drops the whole Education section.
-    educations: hiddenSections.has("hideEducation")
-      ? []
-      : scholar.educations
-          // #160 — drop suppressed education entries from the sidebar.
-          .filter((e) => !suppressedEducationIds.has(e.externalId))
-          .map((e) => ({
-            degree: e.degree,
-            institution: e.institution,
-            year: e.year,
-            field: e.field,
-          })),
-    // Issue #78 — runtime canonicalization fallback. When the stored
-    // canonical short is null but the raw matches the current sponsor
-    // lookup (e.g. due to alias / normalization additions made after the
-    // last ETL run), promote it on the fly. Lets the profile section
-    // reflect canonical-lookup updates without re-ingesting.
-    // section-visibility — `hideFunding` drops the whole Funding section.
-    grants: hiddenSections.has("hideFunding")
-      ? []
-      : scholar.grants
-      // #160 — drop a suppressed grant role from the funding section.
-      .filter((g) => !suppressedGrantIds.has(g.externalId))
-      .map((g) => {
-      const lowerConfidenceCutoff = new Date(now);
-      lowerConfidenceCutoff.setMonth(lowerConfidenceCutoff.getMonth() - 12);
-      const pubs = g.publications
-        // #356 — drop a publication this scholar has hidden, or one taken
-        // down whole, from the grant's publication list too.
+      // #1323 — REVEALED historical appointments only (`ED-HISTORICAL` +
+      // showOnProfile). Hidden rows are omitted so this CloudFront PATH-cached
+      // payload stays viewer-independent. Sorted by end date descending (most
+      // recent first; nulls last).
+      pastAppointments: scholar.appointments
         .filter(
-          (gp) =>
-            !isAuthorHidden(suppressions, gp.publication.pmid, scholar.cwid) &&
-            !suppressions.darkPmids.has(gp.publication.pmid),
+          (a) =>
+            a.source === "ED-HISTORICAL" &&
+            a.showOnProfile === true &&
+            !suppressedAppointmentIds.has(a.externalId),
         )
-        .map((gp) => ({
-          pmid: gp.publication.pmid,
-          title: gp.publication.title,
-          journal: gp.publication.journal,
-          year: gp.publication.year,
-          citationCount: gp.publication.citationCount,
-          sourceReporter: gp.sourceReporter,
-          sourceReciterdb: gp.sourceReciterdb,
-          // "Lower confidence" trigger per #85/#86: reciterdb has had this
-          // linkage for 12+ months but RePORTER still hasn't confirmed it.
-          isLowerConfidence:
-            gp.sourceReciterdb &&
-            !gp.sourceReporter &&
-            gp.reciterdbFirstSeen !== null &&
-            gp.reciterdbFirstSeen < lowerConfidenceCutoff,
-        }))
         .sort((a, b) => {
-          // Year desc, then citation count desc, then pmid asc for stability.
-          if ((b.year ?? 0) !== (a.year ?? 0)) return (b.year ?? 0) - (a.year ?? 0);
-          if (b.citationCount !== a.citationCount) return b.citationCount - a.citationCount;
-          return a.pmid.localeCompare(b.pmid);
-        });
-      return {
-        title: g.title,
-        role: g.role,
-        funder: g.funder,
-        source: g.source,
-        startDate: g.startDate.toISOString().slice(0, 10),
-        endDate: g.endDate.toISOString().slice(0, 10),
-        isActive: isFundingActive(g.endDate, now),
-        awardNumber: g.awardNumber ?? null,
-        programType: g.programType,
-        primeSponsor: g.primeSponsor ?? canonicalizeSponsor(g.primeSponsorRaw),
-        primeSponsorRaw: g.primeSponsorRaw ?? null,
-        directSponsor: g.directSponsor ?? canonicalizeSponsor(g.directSponsorRaw),
-        directSponsorRaw: g.directSponsorRaw ?? null,
-        mechanism: g.mechanism ?? null,
-        nihIc: g.nihIc ?? null,
-        isSubaward: g.isSubaward,
-        coreProjectNum: coreProjectNum(g.awardNumber),
-        applId: g.applId ?? null,
-        abstract: g.abstract ?? null,
-        abstractSource: g.abstractSource ?? null,
-        publications: pubs,
-      };
-    }),
-    // Clinical trials (#clinical-trials). Dark unless CLINICAL_TRIALS_SECTION is
-    // on: an unflagged env returns [] regardless of the table contents, so the
-    // ETL backfill can land before the flag flip without exposing the section.
-    // Withdrawn/never-enrolled trials are dropped; the rest sort active-first
-    // then by most recent status date.
-    clinicalTrials:
-      // section-visibility — `hideClinicalTrials` drops the whole section (in
-      // addition to the CLINICAL_TRIALS_SECTION dark-launch gate).
-      process.env.CLINICAL_TRIALS_SECTION === "on" && !hiddenSections.has("hideClinicalTrials")
-        ? scholar.clinicalTrials
-            .filter((ct) => !isWithdrawnTrialStatus(ct.trial.status))
-            .map((ct) => ({
-              protocolNumber: ct.trial.protocolNumber,
-              nctNumber: ct.trial.nctNumber,
-              title: ct.trial.title,
-              status: ct.trial.status,
-              isActive: isActiveTrialStatus(ct.trial.status),
-              statusDate: ct.trial.statusDate
-                ? ct.trial.statusDate.toISOString().slice(0, 10)
-                : null,
-              phase: ct.trial.phase,
-              studyType: ct.trial.studyType,
-              principalSponsor: ct.trial.principalSponsor,
-              role: ct.role,
-              conditions: ct.trial.conditions,
-              briefSummary: ct.trial.briefSummary,
-              enrollment: ct.trial.enrollment,
-              enrichmentSource: ct.trial.enrichmentSource,
+          const ae = a.endDate ? a.endDate.getTime() : -Infinity;
+          const be = b.endDate ? b.endDate.getTime() : -Infinity;
+          return be - ae;
+        })
+        .map((a) => ({
+          title: a.title,
+          organization: a.organization,
+          startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
+          endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
+          isPrimary: a.isPrimary,
+        })),
+      // #1568 — self-asserted appointments, in the loader's (sortOrder, createdAt)
+      // order. `showOnProfile` is carried so `groupProfileAppointments` applies the
+      // hide gate + category split at render; the `@db.Date` columns become
+      // `YYYY-MM-DD` like the other appointment dates.
+      profileAppointments: scholar.profileAppointments.map((a) => ({
+        category: a.category,
+        title: a.title,
+        organization: a.organization,
+        unit: a.unit,
+        location: a.location,
+        startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
+        endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
+        showOnProfile: a.showOnProfile,
+      })),
+      // section-visibility — `hideEducation` drops the whole Education section.
+      educations: hiddenSections.has("hideEducation")
+        ? []
+        : scholar.educations
+            // #160 — drop suppressed education entries from the sidebar.
+            .filter((e) => !suppressedEducationIds.has(e.externalId))
+            .map((e) => ({
+              degree: e.degree,
+              institution: e.institution,
+              year: e.year,
+              field: e.field,
+            })),
+      // Issue #78 — runtime canonicalization fallback. When the stored
+      // canonical short is null but the raw matches the current sponsor
+      // lookup (e.g. due to alias / normalization additions made after the
+      // last ETL run), promote it on the fly. Lets the profile section
+      // reflect canonical-lookup updates without re-ingesting.
+      // section-visibility — `hideFunding` drops the whole Funding section.
+      grants: hiddenSections.has("hideFunding")
+        ? []
+        : scholar.grants
+            // #160 — drop a suppressed grant role from the funding section.
+            .filter((g) => !suppressedGrantIds.has(g.externalId))
+            .map((g) => {
+              const lowerConfidenceCutoff = new Date(now);
+              lowerConfidenceCutoff.setMonth(lowerConfidenceCutoff.getMonth() - 12);
+              const pubs = g.publications
+                // #356 — drop a publication this scholar has hidden, or one taken
+                // down whole, from the grant's publication list too.
+                .filter(
+                  (gp) =>
+                    !isAuthorHidden(suppressions, gp.publication.pmid, scholar.cwid) &&
+                    !suppressions.darkPmids.has(gp.publication.pmid),
+                )
+                .map((gp) => ({
+                  pmid: gp.publication.pmid,
+                  title: gp.publication.title,
+                  journal: gp.publication.journal,
+                  year: gp.publication.year,
+                  citationCount: gp.publication.citationCount,
+                  sourceReporter: gp.sourceReporter,
+                  sourceReciterdb: gp.sourceReciterdb,
+                  // "Lower confidence" trigger per #85/#86: reciterdb has had this
+                  // linkage for 12+ months but RePORTER still hasn't confirmed it.
+                  isLowerConfidence:
+                    gp.sourceReciterdb &&
+                    !gp.sourceReporter &&
+                    gp.reciterdbFirstSeen !== null &&
+                    gp.reciterdbFirstSeen < lowerConfidenceCutoff,
+                }))
+                .sort((a, b) => {
+                  // Year desc, then citation count desc, then pmid asc for stability.
+                  if ((b.year ?? 0) !== (a.year ?? 0)) return (b.year ?? 0) - (a.year ?? 0);
+                  if (b.citationCount !== a.citationCount) return b.citationCount - a.citationCount;
+                  return a.pmid.localeCompare(b.pmid);
+                });
+              return {
+                title: g.title,
+                role: g.role,
+                funder: g.funder,
+                source: g.source,
+                startDate: g.startDate.toISOString().slice(0, 10),
+                endDate: g.endDate.toISOString().slice(0, 10),
+                isActive: isFundingActive(g.endDate, now),
+                awardNumber: g.awardNumber ?? null,
+                programType: g.programType,
+                primeSponsor: g.primeSponsor ?? canonicalizeSponsor(g.primeSponsorRaw),
+                primeSponsorRaw: g.primeSponsorRaw ?? null,
+                directSponsor: g.directSponsor ?? canonicalizeSponsor(g.directSponsorRaw),
+                directSponsorRaw: g.directSponsorRaw ?? null,
+                mechanism: g.mechanism ?? null,
+                nihIc: g.nihIc ?? null,
+                isSubaward: g.isSubaward,
+                coreProjectNum: coreProjectNum(g.awardNumber),
+                applId: g.applId ?? null,
+                abstract: g.abstract ?? null,
+                abstractSource: g.abstractSource ?? null,
+                publications: pubs,
+              };
+            }),
+      // Clinical trials (#clinical-trials). Dark unless CLINICAL_TRIALS_SECTION is
+      // on: an unflagged env returns [] regardless of the table contents, so the
+      // ETL backfill can land before the flag flip without exposing the section.
+      // Withdrawn/never-enrolled trials are dropped; the rest sort active-first
+      // then by most recent status date.
+      clinicalTrials:
+        // section-visibility — `hideClinicalTrials` drops the whole section (in
+        // addition to the CLINICAL_TRIALS_SECTION dark-launch gate).
+        process.env.CLINICAL_TRIALS_SECTION === "on" && !hiddenSections.has("hideClinicalTrials")
+          ? scholar.clinicalTrials
+              .filter((ct) => !isWithdrawnTrialStatus(ct.trial.status))
+              .map((ct) => ({
+                protocolNumber: ct.trial.protocolNumber,
+                nctNumber: ct.trial.nctNumber,
+                title: ct.trial.title,
+                status: ct.trial.status,
+                isActive: isActiveTrialStatus(ct.trial.status),
+                statusDate: ct.trial.statusDate
+                  ? ct.trial.statusDate.toISOString().slice(0, 10)
+                  : null,
+                phase: ct.trial.phase,
+                studyType: ct.trial.studyType,
+                principalSponsor: ct.trial.principalSponsor,
+                role: ct.role,
+                conditions: ct.trial.conditions,
+                briefSummary: ct.trial.briefSummary,
+                enrollment: ct.trial.enrollment,
+                enrichmentSource: ct.trial.enrichmentSource,
+              }))
+              .sort((a, b) => {
+                if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+                return (b.statusDate ?? "").localeCompare(a.statusDate ?? "");
+              })
+          : [],
+      // CTL available technologies. Dark unless AVAILABLE_TECHNOLOGIES_SECTION is
+      // on: an unflagged env returns [] regardless of the table contents, so the
+      // ETL seed can land before the flag flip without exposing the section.
+      // Ordering comes from the query (title asc).
+      technologies:
+        process.env.AVAILABLE_TECHNOLOGIES_SECTION === "on"
+          ? scholar.technologies.map((t) => ({
+              reference: t.reference,
+              title: t.title,
+              url: t.url,
+              patentStatus: t.patentStatus,
+              // `pmids` is a Json column; narrow it here rather than trusting the
+              // shape. The ETL validates every entry as /^\d{6,9}$/, and the guard
+              // repeats it so a hand-edited row can't put junk into a PubMed href.
+              pmids: Array.isArray(t.pmids)
+                ? t.pmids.filter((p): p is string => typeof p === "string" && /^\d{6,9}$/.test(p))
+                : [],
             }))
-            .sort((a, b) => {
-              if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
-              return (b.statusDate ?? "").localeCompare(a.statusDate ?? "");
-            })
-        : [],
-    keywords,
-    // section-visibility — `hideMethods` drops the Methods & Tools lens from the
-    // (cached) payload. DISPLAY-ONLY: the Overview generator's methods facts are
-    // driven by `family_suppression_overlay`, not this, so they are untouched.
-    families: hiddenSections.has("hideMethods") ? [] : families,
-    disclosures: scholar.coiActivities.map((c) => ({
-      entity: c.entity,
-      activityType: c.activityType,
-      value: c.value,
-      activityRelatesTo: c.activityRelatesTo,
-      activityGroup: c.activityGroup,
-      description: c.description,
-    })),
-    highlights,
-    publications,
-    // section-visibility — `hidePostdocMentor` drops the sidebar mentor card.
-    postdoctoralMentor:
-      hiddenSections.has("hidePostdocMentor")
+          : [],
+      keywords,
+      // section-visibility — `hideMethods` drops the Methods & Tools lens from the
+      // (cached) payload. DISPLAY-ONLY: the Overview generator's methods facts are
+      // driven by `family_suppression_overlay`, not this, so they are untouched.
+      families: hiddenSections.has("hideMethods") ? [] : families,
+      disclosures: scholar.coiActivities.map((c) => ({
+        entity: c.entity,
+        activityType: c.activityType,
+        value: c.value,
+        activityRelatesTo: c.activityRelatesTo,
+        activityGroup: c.activityGroup,
+        description: c.description,
+      })),
+      highlights,
+      publications,
+      // section-visibility — `hidePostdocMentor` drops the sidebar mentor card.
+      postdoctoralMentor: hiddenSections.has("hidePostdocMentor")
         ? null
         : scholar.postdoctoralMentor &&
-      scholar.postdoctoralMentor.deletedAt === null &&
-      scholar.postdoctoralMentor.status === "active"
-        ? {
-            cwid: scholar.postdoctoralMentor.cwid,
-            slug: scholar.postdoctoralMentor.slug,
-            publishedName: scholar.postdoctoralMentor.postnominal
-              ? `${scholar.postdoctoralMentor.preferredName}, ${scholar.postdoctoralMentor.postnominal}`
-              : scholar.postdoctoralMentor.preferredName,
-            primaryTitle: scholar.postdoctoralMentor.primaryTitle ?? null,
-            identityImageEndpoint: identityImageEndpoint(
-              scholar.postdoctoralMentor.cwid,
-            ),
-            roleCategory: scholar.postdoctoralMentor.roleCategory,
-          }
-        : null,
-    nihReporterProfileId: nihProfileRow?.nihProfileId ?? null,
-    // section-visibility — `hideCenters` drops the sidebar Centers card.
-    centers: hiddenSections.has("hideCenters") ? [] : centers,
-    hiddenSections: [...hiddenSections],
-  };
-});
+            scholar.postdoctoralMentor.deletedAt === null &&
+            scholar.postdoctoralMentor.status === "active"
+          ? {
+              cwid: scholar.postdoctoralMentor.cwid,
+              slug: scholar.postdoctoralMentor.slug,
+              publishedName: scholar.postdoctoralMentor.postnominal
+                ? `${scholar.postdoctoralMentor.preferredName}, ${scholar.postdoctoralMentor.postnominal}`
+                : scholar.postdoctoralMentor.preferredName,
+              primaryTitle: scholar.postdoctoralMentor.primaryTitle ?? null,
+              identityImageEndpoint: identityImageEndpoint(scholar.postdoctoralMentor.cwid),
+              roleCategory: scholar.postdoctoralMentor.roleCategory,
+            }
+          : null,
+      nihReporterProfileId: nihProfileRow?.nihProfileId ?? null,
+      // section-visibility — `hideCenters` drops the sidebar Centers card.
+      centers: hiddenSections.has("hideCenters") ? [] : centers,
+      hiddenSections: [...hiddenSections],
+    };
+  },
+);
 
 /**
  * Slugs of all active, non-deleted, non-suppressed scholars — used by Next.js
@@ -1488,9 +1512,7 @@ export async function getScholarOgData(slug: string): Promise<{
  * (components/profile/profile-view.tsx) and the standalone `/{slug}/jsonld`
  * endpoint (app/(public)/[slug]/jsonld/route.ts) so the two can't drift.
  */
-export function buildProfileJsonLd(
-  profile: ProfilePayload,
-): Record<string, unknown> {
+export function buildProfileJsonLd(profile: ProfilePayload): Record<string, unknown> {
   return buildPersonJsonLd({
     slug: profile.slug,
     preferredName: profile.publishedName,

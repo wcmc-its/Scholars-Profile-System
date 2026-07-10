@@ -40,7 +40,7 @@
  * Usage: `npm run etl:reciter`
  */
 import { Prisma } from "@/lib/generated/prisma/client";
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
 import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { markTopicRebuildStarted } from "../../lib/etl-state";
 import {
@@ -866,7 +866,7 @@ if (!process.env.VITEST) {
       process.exit(1);
     })
     .finally(async () => {
-      await db.write.$disconnect();
+      await disconnect();
       await closeReciterPool();
     });
 }

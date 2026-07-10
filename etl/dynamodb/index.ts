@@ -55,7 +55,7 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { Prisma } from "@/lib/generated/prisma/client";
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
 import { clearTopicRebuildWindow } from "../../lib/etl-state";
 import { resolveTopTopicByPmid } from "./top-topic-resolver";
 import { assertPublicationTopicPopulated } from "./publication-topic-guard";
@@ -67,91 +67,10 @@ import { CORE_CATALOG, CORE_CATALOG_SOURCE } from "./core-catalog";
 import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
 import { projectGrantOpportunities } from "./grant-opportunity-etl";
 import { guardedReplace } from "./projection-replace";
+import { partitionRecords } from "./partition";
 
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
-
-type FacultyRecord = {
-  PK: string; // FACULTY#cwid_<cwid>
-  SK?: string;
-  top_topics?: Array<{ topic_id?: string; topic?: string; score: number }> | unknown;
-  // #742 v3.1 C3 — ReciterAI scale metrics on the FACULTY#…/PROFILE item.
-  h_index?: number;
-  first_author_count?: number;
-  last_author_count?: number;
-  scored_pub_count?: number;
-  [key: string]: unknown;
-};
-
-type ToolRecord = {
-  PK: string; // TOOL#<tool_id>
-  SK?: string;
-  faculty_uid?: string; // "cwid_<cwid>"
-  pmid?: string | number;
-  tool_category?: string;
-  context?: string;
-  score?: number; // normalized confidence [0,1]
-  [key: string]: unknown;
-};
-
-type TaxonomyRecord = {
-  PK: string; // TAXONOMY#taxonomy_v2
-  SK?: string;
-  taxonomy_version?: string;
-  topic_count?: number;
-  topics?: Array<{ id: string; label: string; description?: string }>;
-  [key: string]: unknown;
-};
-
-type TopicRecord = {
-  PK: string; // TOPIC#<parent_topic_id>
-  SK?: string;
-  pmid?: string | number;
-  faculty_uid?: string; // "cwid_<cwid>" — the cwid_ prefix is DynamoDB-specific (see etl/reciter/index.ts:7)
-  primary_subtopic_id?: string;
-  subtopic_ids?: unknown;
-  subtopic_confidences?: unknown;
-  score?: number;
-  impact_score?: number;
-  rationale?: string; // issue #316: per-topic "why this paper maps here" — persisted to publication_topic.rationale
-  synopsis?: string; // issue #316: one-line plain-language synopsis — persisted to publication_topic.synopsis
-  /// issue #325: per-paper argmax of the topic-score vector (above the
-  /// 0.3 floor; deterministic tiebreak upstream). Denormalized across
-  /// the N TOPIC# rows for one pmid; the same value is expected on
-  /// every row. Persisted once per pmid to publication.top_topic_id.
-  top_topic_id?: string;
-  author_position?: string;
-  year?: number;
-  [key: string]: unknown;
-};
-
-type ImpactRecord = {
-  PK: string; // IMPACT#pmid_<pmid>
-  SK?: string; // "SCORE" (only seen value as of probe 2026-05-15)
-  pmid?: string | number;
-  impact_score?: number;
-  justification?: string;
-  model?: string;
-  [key: string]: unknown;
-};
-
-type CoreRecord = {
-  PK: string; // PUB#{pmid} — note: partition is the publication, not the core
-  SK: string; // CORE#{core_id}
-  pmid?: string | number;
-  core_id?: string;
-  likelihood?: number;
-  status?: string; // candidate | confirmed | below_threshold
-  scored_at?: string;
-  signal_coauthors?: unknown; // string[] of core-staff CWIDs
-  signal_ack?: boolean;
-  ack_alias?: string;
-  ack_snippet?: string;
-  llm_score?: number;
-  llm_rationale?: string;
-  author_affinity?: number;
-  [key: string]: unknown;
-};
 
 async function main() {
   const start = Date.now();
@@ -163,25 +82,54 @@ async function main() {
     const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }));
 
     // ===================================================================
-    // Block 1: TAXONOMY# → topic  (Phase 2 D-02 candidate (e))
+    // Single unfiltered table scan (#1514)
     // ===================================================================
-    console.log(`Scanning ${TABLE} for TAXONOMY# records...`);
-    const taxItems: TaxonomyRecord[] = [];
+    // A filtered DynamoDB Scan still reads (and bills) the ENTIRE table — the
+    // FilterExpression runs server-side AFTER the read. This ETL used to run six
+    // separate `begins_with` scans over the same table (one per prefix, Blocks
+    // 1–6), for ~6× the table read + wall-clock per run. Collapse them to ONE
+    // unfiltered paginated scan and partition the items in memory
+    // (./partition.ts). Blocks below read their bucket instead of re-scanning;
+    // Block 7 (GRANT#) still runs its own scan in grant-opportunity-etl.ts.
+    //
+    // ponytail: this buffers the whole table into `all` before partitioning —
+    // the ceiling is task memory. It is fine at today's volumes (topics ~78k is
+    // the dominant bucket either way, and the six buckets share item objects
+    // with `all` rather than copying). If the table outgrows the task's memory,
+    // the upgrade path is streaming / per-page partitioning (partition each page
+    // and drain buckets as blocks finish) rather than materializing `all`.
+    console.log(`Scanning ${TABLE} in a single unfiltered pass (paginated)...`);
+    const all: Array<Record<string, unknown>> = [];
+    let scanned = 0;
     {
       let lastKey: Record<string, unknown> | undefined;
+      let pages = 0;
       do {
         const resp = await ddb.send(
-          new ScanCommand({
-            TableName: TABLE,
-            FilterExpression: "begins_with(PK, :prefix)",
-            ExpressionAttributeValues: { ":prefix": "TAXONOMY#" },
-            ExclusiveStartKey: lastKey,
-          }),
+          new ScanCommand({ TableName: TABLE, ExclusiveStartKey: lastKey }),
         );
-        for (const it of (resp.Items ?? []) as TaxonomyRecord[]) taxItems.push(it);
+        for (const it of resp.Items ?? []) all.push(it as Record<string, unknown>);
+        scanned += resp.ScannedCount ?? 0;
+        pages += 1;
+        if (pages % 10 === 0) {
+          console.log(`  ...scanned ${all.length} items so far (${pages} pages)`);
+        }
         lastKey = resp.LastEvaluatedKey;
       } while (lastKey);
     }
+    const buckets = partitionRecords(all);
+    console.log(
+      `Single scan complete: ~${scanned} items examined; partitioned into ` +
+        `tax=${buckets.tax.length}, topics=${buckets.topics.length}, ` +
+        `faculty=${buckets.faculty.length}, impact=${buckets.impact.length}, ` +
+        `tools=${buckets.tools.length}, cores=${buckets.cores.length}.`,
+    );
+
+    // ===================================================================
+    // Block 1: TAXONOMY# → topic  (Phase 2 D-02 candidate (e))
+    // ===================================================================
+    console.log(`Scanning ${TABLE} for TAXONOMY# records...`);
+    const taxItems = buckets.tax;
     console.log(`Found ${taxItems.length} TAXONOMY# record(s).`);
 
     // The probe confirms there is exactly one TAXONOMY#taxonomy_v2 record carrying
@@ -254,27 +202,7 @@ async function main() {
     const knownPmidSet = new Set(knownPubs.map((p) => p.pmid));
 
     console.log(`Scanning ${TABLE} for TOPIC# records (paginated)...`);
-    const topicItems: TopicRecord[] = [];
-    {
-      let lastKey: Record<string, unknown> | undefined;
-      let pages = 0;
-      do {
-        const resp = await ddb.send(
-          new ScanCommand({
-            TableName: TABLE,
-            FilterExpression: "begins_with(PK, :prefix)",
-            ExpressionAttributeValues: { ":prefix": "TOPIC#" },
-            ExclusiveStartKey: lastKey,
-          }),
-        );
-        for (const it of (resp.Items ?? []) as TopicRecord[]) topicItems.push(it);
-        pages += 1;
-        if (pages % 10 === 0) {
-          console.log(`  ...scanned ${topicItems.length} TOPIC# items so far (${pages} pages)`);
-        }
-        lastKey = resp.LastEvaluatedKey;
-      } while (lastKey);
-    }
+    const topicItems = buckets.topics;
     console.log(`Found ${topicItems.length} TOPIC# records (expected ~78,103 per probe).`);
 
     // Map TOPIC# records to publication_topic writes. The per-record
@@ -508,23 +436,7 @@ async function main() {
     // once the Phase 2 surfaces validate against publication_topic.
     console.log(`Active scholars: ${ourCwidSet.size}; scanning ${TABLE} for FACULTY# records...`);
 
-    const items: FacultyRecord[] = [];
-    let lastKey: Record<string, unknown> | undefined;
-    let scanned = 0;
-
-    do {
-      const resp = await ddb.send(
-        new ScanCommand({
-          TableName: TABLE,
-          FilterExpression: "begins_with(PK, :prefix)",
-          ExpressionAttributeValues: { ":prefix": "FACULTY#cwid_" },
-          ExclusiveStartKey: lastKey,
-        }),
-      );
-      for (const it of (resp.Items ?? []) as FacultyRecord[]) items.push(it);
-      scanned += resp.ScannedCount ?? 0;
-      lastKey = resp.LastEvaluatedKey;
-    } while (lastKey);
+    const items = buckets.faculty;
     console.log(`Scanned ~${scanned} items, kept ${items.length} FACULTY# records.`);
 
     if (items.length > 0) {
@@ -635,22 +547,7 @@ async function main() {
     // these as denormalized fields on Publication; PMIDs not in our publication
     // table are skipped (same fail-isolated pattern as Block 2).
     console.log(`Scanning ${TABLE} for IMPACT# records (paginated)...`);
-    const impactItems: ImpactRecord[] = [];
-    {
-      let lastKey: Record<string, unknown> | undefined;
-      do {
-        const resp = await ddb.send(
-          new ScanCommand({
-            TableName: TABLE,
-            FilterExpression: "begins_with(PK, :prefix)",
-            ExpressionAttributeValues: { ":prefix": "IMPACT#pmid_" },
-            ExclusiveStartKey: lastKey,
-          }),
-        );
-        for (const it of (resp.Items ?? []) as ImpactRecord[]) impactItems.push(it);
-        lastKey = resp.LastEvaluatedKey;
-      } while (lastKey);
-    }
+    const impactItems = buckets.impact;
     console.log(`Found ${impactItems.length} IMPACT# records (expected ~7,097 per probe).`);
 
     let impactSkippedMissingPublication = 0;
@@ -753,27 +650,7 @@ async function main() {
       // generator's `methods` + a future "Methods & Tools" view. Full rebuild
       // (deleteMany + createMany), same shape as the topic_assignment block.
       console.log(`Scanning ${TABLE} for TOOL# records (paginated)...`);
-      const toolItems: ToolRecord[] = [];
-      {
-        let lastKey: Record<string, unknown> | undefined;
-        let pages = 0;
-        do {
-          const resp = await ddb.send(
-            new ScanCommand({
-              TableName: TABLE,
-              FilterExpression: "begins_with(PK, :prefix)",
-              ExpressionAttributeValues: { ":prefix": "TOOL#" },
-              ExclusiveStartKey: lastKey,
-            }),
-          );
-          for (const it of (resp.Items ?? []) as ToolRecord[]) toolItems.push(it);
-          pages += 1;
-          if (pages % 10 === 0) {
-            console.log(`  ...scanned ${toolItems.length} TOOL# items so far (${pages} pages)`);
-          }
-          lastKey = resp.LastEvaluatedKey;
-        } while (lastKey);
-      }
+      const toolItems = buckets.tools;
       console.log(`Found ${toolItems.length} TOOL# records.`);
 
       // The TOOL# PK carries the (sanitized) tool name and each item its
@@ -859,22 +736,7 @@ async function main() {
     );
 
     console.log(`Scanning ${TABLE} for CORE# records (begins_with SK, paginated)...`);
-    const coreItems: CoreRecord[] = [];
-    {
-      let lastKey: Record<string, unknown> | undefined;
-      do {
-        const resp = await ddb.send(
-          new ScanCommand({
-            TableName: TABLE,
-            FilterExpression: "begins_with(SK, :prefix)",
-            ExpressionAttributeValues: { ":prefix": "CORE#" },
-            ExclusiveStartKey: lastKey,
-          }),
-        );
-        for (const it of (resp.Items ?? []) as CoreRecord[]) coreItems.push(it);
-        lastKey = resp.LastEvaluatedKey;
-      } while (lastKey);
-    }
+    const coreItems = buckets.cores;
     console.log(`Found ${coreItems.length} CORE# records.`);
 
     // Pure, unit-tested per-record mapping + FK guards; see ./publication-core-mapper.ts.
@@ -989,6 +851,4 @@ main()
     console.error(err);
     process.exit(1);
   })
-  .finally(async () => {
-    await db.write.$disconnect();
-  });
+  .finally(disconnect);

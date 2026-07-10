@@ -8,7 +8,7 @@
  * snapshot independent of the daily chain. Exits 0 on success, 1 on
  * failure. STDOUT carries the structured result line for log drains.
  */
-import { prisma } from "../../lib/db";
+import { disconnect } from "../../lib/db";
 import { computeCompletenessSnapshot } from "../../lib/analytics/completeness";
 import { withEtlRun } from "@/lib/etl-run";
 
@@ -28,6 +28,4 @@ withEtlRun("Completeness", main)
     console.error("[Completeness] failed:", err);
     process.exit(1);
   })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+  .finally(disconnect);
