@@ -95,25 +95,36 @@ export function combineScore(axes: MatchAxes, weights: MatchWeights = DEFAULT_WE
   );
 }
 
-// Honorific-prize filter (accuracy lever §2.9, docs/funding-matcher-accuracy.md).
-// Pilot run #1 found 63% of "Grants for me" recs were prizes / medals /
-// lectureships (Shaw Prize, AACR awards, Kovalenko Medal…) a PI cannot apply to —
-// they ranked high on topic affinity alone. The grants_gov NOFO feed is trusted
-// (never a prize); for every other source a title carrying an NIH activity code is
-// a real mechanism, otherwise prize/medal/lectureship/award wording marks an honor.
-// ponytail: title heuristic, not a typed field (upstream has none). Ceiling: a
-// real fundable grant titled "…Award" with no activity code (some foundation
-// awards) is wrongly dropped — tighten with an upstream `opportunityType` if
-// curators flag misses.
-const NIH_ACTIVITY_CODE = /\b(?:[RUKPF]\d{2}|DP\d|U[GHM]\d|T\d{2})\b/i;
-const HONORIFIC_TITLE = /\b(?:prize|medal|laureate|lectureship|award)\b/i;
-
-/** True when an opportunity is an honorific prize/award rather than a fundable
- *  grant a PI applies to. `grants_gov` is trusted as always-fundable. Pure. */
-export function isHonorificAward(title: string, source: string | null): boolean {
-  if (source === "grants_gov") return false;
-  if (NIH_ACTIVITY_CODE.test(title)) return false;
-  return HONORIFIC_TITLE.test(title);
+/** Hard filters for the candidate-retrieval query. Pure, so the honorific gate
+ *  is assertable without an OpenSearch client. */
+export function candidateQueryFilters(stage: CareerStage, now: Date): unknown[] {
+  const nowIso = now.toISOString();
+  const filters: unknown[] = [
+    { terms: { status: ["open", "forecasted", "continuous"] } },
+    {
+      bool: {
+        should: [
+          { range: { dueDate: { gte: nowIso } } },
+          { term: { status: "continuous" } },
+          { bool: { must_not: { exists: { field: "dueDate" } } } },
+        ],
+        minimum_should_match: 1,
+      },
+    },
+    { term: { eligibilityFlags: "us_eligible" } },
+    { term: { eligibilityFlags: requiredEligibilityFlag(stage) } },
+    // Honorific gate (GRANT# contract v2): never recommend nomination-based prizes
+    // as "grants for you" — they're not applyable. `isHonorific` is the upstream
+    // data flag and the SOLE honorific gate. #1296's title heuristic used to run on
+    // top of it and was removed in #1628: among candidates that reach this point it
+    // had zero true positives and dropped 18 applyable items (career-development
+    // awards, fellowships, WCM Bridge Funding). Absent/false ⇒ kept; only an
+    // explicit `true` is excluded. Do NOT re-add a title-text filter here — fix
+    // `is_honorific` upstream in ReciterAI instead.
+    { bool: { must_not: { term: { isHonorific: true } } } },
+  ];
+  if (stage !== "grad") filters.push({ bool: { must_not: { term: { eligibilityFlags: "student_only" } } } });
+  return filters;
 }
 
 // ── Ranking core (pure) ────────────────────────────────────────────────────
@@ -131,9 +142,6 @@ export type OpportunityCandidate = {
    *  fixtures need not supply them; null-safe on the ranked result below. */
   mechanism?: string | null;
   awardCeiling?: number | null;
-  /** Ingest source (e.g. `grants_gov` / `wcm_curated`) — feeds the honorific-prize
-   *  filter (§2.9). Optional so pure-unit fixtures need not supply it. */
-  source?: string | null;
   prestige?: Prestige | null;
 };
 
@@ -389,28 +397,7 @@ export async function matchOpportunitiesForScholar(
 
   // Stage 1 — candidate retrieval under hard filters + coarse topic relevance.
   const topTopics = [...vector.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
-  const nowIso = now.toISOString();
-  const filters: unknown[] = [
-    { terms: { status: ["open", "forecasted", "continuous"] } },
-    {
-      bool: {
-        should: [
-          { range: { dueDate: { gte: nowIso } } },
-          { term: { status: "continuous" } },
-          { bool: { must_not: { exists: { field: "dueDate" } } } },
-        ],
-        minimum_should_match: 1,
-      },
-    },
-    { term: { eligibilityFlags: "us_eligible" } },
-    { term: { eligibilityFlags: requiredEligibilityFlag(stage) } },
-    // Honorific gate (GRANT# contract v2): never recommend nomination-based prizes
-    // as "grants for you" — they're not applyable. `is_honorific` is the upstream
-    // data flag (supersedes the #1296 title heuristic). Absent/false ⇒ kept; only
-    // an explicit `true` is excluded. No-op until items are reprojected with the flag.
-    { bool: { must_not: { term: { isHonorific: true } } } },
-  ];
-  if (stage !== "grad") filters.push({ bool: { must_not: { term: { eligibilityFlags: "student_only" } } } });
+  const filters = candidateQueryFilters(stage, now);
 
   const should = topTopics.map(([topic_id, w]) => ({ term: { topicIds: { value: topic_id, boost: w } } }));
 
@@ -436,25 +423,20 @@ export async function matchOpportunitiesForScholar(
       meshDescriptorUi: Array.isArray(src.meshDescriptorUi) ? (src.meshDescriptorUi as string[]) : [],
       mechanism: src.mechanism != null ? String(src.mechanism) : null,
       awardCeiling: typeof src.awardCeiling === "number" ? src.awardCeiling : null,
-      source: src.source != null ? String(src.source) : null,
       prestige: asPrestige(src.prestige),
     };
   });
 
-  // §2.9 — drop honorific prizes/awards before ranking. They are not fundable
-  // opportunities a PI applies to, yet dominate the top-N on topic affinity alone
-  // (pilot run #1: 63% of recs). The grants_gov NOFO feed is never filtered.
-  const fundable = candidates.filter((c) => !isHonorificAward(c.title, c.source ?? null));
-
   // Stage 2 — composite re-rank over the distinct axes. Inject the env-driven
   // prestige weight only when the caller did not supply explicit weights, so
   // DEFAULT_WEIGHTS (prestige: 0) keeps pure unit tests deterministic.
+  // §2.9 honorifics are already excluded by the `isHonorific` query filter above.
   const rankOpts = { ...opts, pubCountByTopic };
   return rankCandidates(
     vector,
     stage,
     scholarMeshUi,
-    fundable,
+    candidates,
     opts.weights ? rankOpts : { ...rankOpts, weights: { ...DEFAULT_WEIGHTS, prestige: prestigeAxisWeight() } },
   );
 }
