@@ -114,8 +114,8 @@ describe("UnitAccessCard", () => {
 
   it("shows the ED sentinel grantedBy 'ED-ETL' as 'Web Directory'", () => {
     const edRow = {
-      cwid: "kjadams",
-      name: "kjadams",
+      cwid: "abc1234",
+      name: "abc1234",
       title: null,
       role: "curator" as const,
       grantedBy: "ED-ETL",
