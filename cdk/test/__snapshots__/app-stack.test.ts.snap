@@ -768,7 +768,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_DEVELOPMENT_GROUP_CN",
-                "Value": "ITS:Library:Scholars/development-role",
+                "Value": "",
               },
               {
                 "Name": "SCHOLARS_DEVELOPMENT_ALLOWLIST",
@@ -1068,6 +1068,51 @@ exports[`AppStack prod matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter:SCHOLARS_RECITERDB_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_LDAP_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/ed:SCHOLARS_LDAP_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_LDAP_BIND_DN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/ed:SCHOLARS_LDAP_BIND_DN::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_LDAP_BIND_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/ed:SCHOLARS_LDAP_BIND_PASSWORD::",
                     ],
                   ],
                 },
@@ -2857,6 +2902,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/ed",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -3088,6 +3145,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/ed-??????",
                   ],
                 ],
               },
@@ -4385,7 +4461,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_DEVELOPMENT_GROUP_CN",
-                "Value": "ITS:Library:Scholars/development-role",
+                "Value": "",
               },
               {
                 "Name": "SCHOLARS_DEVELOPMENT_ALLOWLIST",
@@ -4685,6 +4761,51 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter:SCHOLARS_RECITERDB_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_LDAP_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed:SCHOLARS_LDAP_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_LDAP_BIND_DN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed:SCHOLARS_LDAP_BIND_DN::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_LDAP_BIND_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed:SCHOLARS_LDAP_BIND_PASSWORD::",
                     ],
                   ],
                 },
@@ -6476,6 +6597,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -6707,6 +6840,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed-??????",
                   ],
                 ],
               },

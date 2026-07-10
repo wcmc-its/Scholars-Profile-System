@@ -195,10 +195,11 @@ export class AppStack extends Stack {
 
     // ------------------------------------------------------------------
     // Secrets lookup. SecretsStack defines the full set; AppStack reads the
-    // eleven the app + sidecars consume (db read/write, opensearch app,
+    // twelve the app + sidecars consume (db read/write, opensearch app,
     // revalidate token, session-cookie secret, SAML SP private key, ReciterDB
-    // connection, SAML IdP cert, SAML SP cert, db-bootstrap DSN, and the New
-    // Relic ingest key consumed by the ADOT collector). Looked up by name so the two
+    // connection, SAML IdP cert, SAML SP cert, db-bootstrap DSN, the New
+    // Relic ingest key consumed by the ADOT collector, and the read-only ED
+    // bind #1592). Looked up by name so the two
     // stacks stay loosely coupled — no
     // shared stack prop, no cross-stack export. ARNs feed both the
     // task-execution role's tightly-scoped policy and the task definition's
@@ -304,6 +305,30 @@ export class AppStack extends Stack {
       "NewRelicLicenseKeySecret",
       `scholars/${env}/newrelic-license-key`,
     );
+    // Read-only WCM Enterprise Directory (ED) bind (#1592, #1595). The SAME
+    // secret + JSON keys the nightly ETL consumes (cdk/lib/etl-stack.ts
+    // "EtlSecretEd"): SCHOLARS_LDAP_URL / _BIND_DN / _BIND_PASSWORD. The app
+    // injects these so lib/sources/ldap.ts openLdap() can bind for the
+    // SSO-gated GET /api/directory/people — both of its modes: `?cwids=`
+    // (unit-access-card CWID→name/title hydration) and `?q=` (the Add-admin
+    // DirectoryPeopleTypeahead). Without them openLdap() throws
+    // "SCHOLARS_LDAP_URL is not set" and BOTH surfaces fail closed.
+    // Read-only bind, no DDL. The "/ed" tail (2 chars) is clear of the Secrets
+    // Manager 6-char-tail partial-ARN gotcha.
+    //
+    // Deliberately does NOT activate the other openLdap() consumers: all three
+    // role checks (superuser, comms_steward, development) short-circuit on an
+    // empty/unset *_GROUP_CN before reaching openLdap(). See the role-flag block
+    // below — SCHOLARS_DEVELOPMENT_GROUP_CN is pinned "" for exactly this reason.
+    // ponytail: reuses the ETL's ED bind account instead of a distinct app-
+    // scoped read-only bind. Ceiling: the 24/7 app's larger RCE window now
+    // shares the SOR-critical ETL credential -- prefer a separate ED service
+    // account for prod (ADR-009 exposure-window logic) when one is cheap to get.
+    const edSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "AppEtlEdSecret",
+      `scholars/${env}/etl/ed`,
+    );
 
     // ADR-009 exec-role split -- two execution roles, two secret-ARN lists:
     //
@@ -332,6 +357,13 @@ export class AppStack extends Stack {
       // New Relic ingest key (B24): consumed by the ADOT collector sidecar,
       // not the app container. Execution role still needs GetSecretValue on it.
       newRelicLicenseKeySecret.secretArn,
+      // Read-only ED bind (#1592, #1595): the app task-execution role must
+      // GetSecretValue on the ED secret to inject SCHOLARS_LDAP_* into the app
+      // container (the SSO-gated /api/directory/people directory route).
+      // Read-only bind, no DDL -- same class as the other app-consumer secrets
+      // (ADR-009: still no migrate, no bootstrap). Lands on the EXECUTION role
+      // only; the task role keeps zero secretsmanager:* (asserted in tests).
+      edSecret.secretArn,
     ];
     // The deploy-time tasks' DSNs (ADR-009). migrate injects only the migrate
     // DSN; verify-grants injects all four role DSNs; db-bootstrap injects
@@ -460,8 +492,10 @@ export class AppStack extends Stack {
     // - **Task-execution role** (`taskExecutionRole`) is the role ECS assumes
     //   for the 24/7 APP task to pull the image, inject secrets, and write log
     //   streams. Tightly scoped: ECR auth + Batch* on the app repo only;
-    //   secrets:GetSecretValue on the ten app consumer ARNs only (ADR-009: no
-    //   migrate, no bootstrap); logs on the app + ADOT-sidecar groups only.
+    //   secrets:GetSecretValue on the eleven app consumer ARNs only (ADR-009: no
+    //   migrate, no bootstrap) -- the eleventh is the read-only ED bind secret
+    //   (#1592) the app injects for the SSO-gated /api/directory/people route;
+    //   logs on the app + ADOT-sidecar groups only.
     // - **Deploy execution role** (`deployTaskExecutionRole`, ADR-009) is the
     //   parallel role for the short-lived deploy-time tasks (migrate,
     //   verify-grants, db-bootstrap). It -- and only it -- can read the migrate
@@ -502,7 +536,7 @@ export class AppStack extends Stack {
         resources: [this.ecrRepository.repositoryArn],
       }),
     );
-    // Secrets -- exactly the ten app consumer ARNs (ADR-009 split: no migrate,
+    // Secrets -- exactly the eleven app consumer ARNs (ADR-009 split: no migrate,
     // no bootstrap). Asserted in tests.
     taskExecutionRole.addToPolicy(
       new iam.PolicyStatement({
@@ -2005,17 +2039,23 @@ export class AppStack extends Stack {
         // BOTH .env.local AND here per the flag-parity rule -- a manual
         // `cdk deploy Sps-App-<env>` is required (CD re-rolls the image only).
         PROFILE_EMAIL_RELEASE_GATE: env === "staging" ? "on" : "off",
-        // #443 INTERIM superuser allowlist. The live LDAP superuser check
-        // (lib/auth/superuser.ts, R1) cannot succeed in any deployed env: the
-        // SPS VPC has no route to the WCM directory (10.63.x) -- TGW attachment
-        // + WCM firewall are pending the network team, the same gap that blocks
-        // ETL #443. SCHOLARS_SUPERUSER_GROUP_CN is therefore intentionally left
-        // UNSET (setting it would make every authenticated user's session probe
-        // hang ~10s on the LDAPS connect timeout). This comma-separated CWID
-        // allowlist confers the superuser tier WITHOUT LDAP so a tightly-scoped
-        // operator set can use the admin features (incl. #637 "View as") now.
-        // REMOVE this and set SCHOLARS_SUPERUSER_GROUP_CN once VPC->WCM LDAPS
-        // routing lands. CWIDs are directory usernames, not secrets.
+        // Superuser allowlist. SCHOLARS_SUPERUSER_GROUP_CN is intentionally left
+        // UNSET, so isSuperuser() (lib/auth/superuser.ts, R1) short-circuits on
+        // the empty cn and never calls openLdap(). This comma-separated CWID
+        // allowlist is the operative superuser tier, letting a tightly-scoped
+        // operator set use the admin features (incl. #637 "View as").
+        //
+        // The original reason was a routing gap (#443: no SPS VPC -> WCM LDAPS
+        // route, so the live check could not succeed). That gap is CLOSED -- the
+        // app and the ED ETL now share its-reciter-vpc01 and the same subnets,
+        // and a Fargate task launched into the app's subnets + the app's SG
+        // bound edprovider/ed.weill.cornell.edu successfully in both envs
+        // (probe, 2026-07-09; the app service itself carries the credential only
+        // as of #1592). Leaving the cn UNSET is therefore now a DELIBERATE
+        // choice, not a limitation: a live group search here would put an LDAPS
+        // bind on every authenticated session probe. Setting it is a separate,
+        // reviewable decision -- do not treat it as merely "unblocked".
+        // CWIDs are directory usernames, not secrets.
         SCHOLARS_SUPERUSER_CWIDS: "paa2013,drw2004,mrj4001,ved4006,mom2021",
         // comms_steward Method-Family visibility role + surface
         // (docs/comms-steward-methods-visibility-spec.md §3/§9). Three vars,
@@ -2065,22 +2105,34 @@ export class AppStack extends Stack {
         //     the flag is inert until the prod image carries the find-researchers
         //     feature (#1185), so it ships with the next full prod release.
         //   SCHOLARS_DEVELOPMENT_GROUP_CN -- the ED group whose `member` list
-        //     confers the role: ITS:Library:Scholars/development-role (created
-        //     under ou=application security,ou=Groups; the subtree search from
-        //     ou=Groups reaches it). Set in anticipation of the live group
-        //     search, BUT that path is dormant today: the SPS app VPC has no
-        //     route to WCM LDAPS (#443) and the app task def carries no
-        //     SCHOLARS_LDAP_URL / bind password, so isDeveloper()'s openLdap()
-        //     fails closed before any search. Until directory routing lands the
-        //     allowlist below is the operative membership source.
-        //   SCHOLARS_DEVELOPMENT_ALLOWLIST -- interim no-LDAP allowlist, the
-        //     operative membership mechanism while the group search is dormant.
-        //     STAGING carries flm4001 (a real development-role group member) so
-        //     the surface is reachable to a non-superuser operator for testing;
-        //     prod stays empty: the role is on there, but its only members are
-        //     superusers (no non-superuser dev-role operator provisioned on prod).
+        //     would confer the role: ITS:Library:Scholars/development-role
+        //     (created under ou=application security,ou=Groups; a subtree search
+        //     from ou=Groups reaches it). Pinned "" -- the live group search is
+        //     deliberately OFF, and isDeveloper() short-circuits on the empty cn
+        //     (lib/auth/development.ts) before it ever calls openLdap().
+        //
+        //     This used to be self-enforcing: the app task def carried no LDAP
+        //     credential, so openLdap() threw and the search failed closed no
+        //     matter what this held. #1592 injects SCHOLARS_LDAP_* (the
+        //     `secrets:` block below) for the directory route, which removes
+        //     that accident. Were this left set to the group cn, isDeveloper()
+        //     -- called unconditionally by getEffectiveEditSession() -- would
+        //     run a real LDAPS bind + ou=Groups search on EVERY /edit GET and
+        //     guarded API call (React cache() dedupes within one request only),
+        //     and prod dev-role membership would silently shift from
+        //     "superusers only" to live ED group membership. Both are real
+        //     changes that belong in their own PR, gated on an audit of that
+        //     group's members. So the cn is pinned "" here, mirroring
+        //     SCHOLARS_COMMS_STEWARD_GROUP_CN above. To activate later: set the
+        //     cn, audit the group first, and expect the per-request bind.
+        //   SCHOLARS_DEVELOPMENT_ALLOWLIST -- the operative membership mechanism
+        //     while the group search is off. STAGING carries flm4001 (a real
+        //     development-role group member) so the surface is reachable to a
+        //     non-superuser operator for testing; prod stays empty: the role is
+        //     on there, but its only members are superusers (no non-superuser
+        //     dev-role operator provisioned on prod).
         DEVELOPMENT_ENABLED: env === "staging" || env === "prod" ? "on" : "off",
-        SCHOLARS_DEVELOPMENT_GROUP_CN: "ITS:Library:Scholars/development-role",
+        SCHOLARS_DEVELOPMENT_GROUP_CN: "",
         SCHOLARS_DEVELOPMENT_ALLOWLIST: env === "staging" ? "flm4001" : "",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
         // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
@@ -2142,6 +2194,22 @@ export class AppStack extends Stack {
         SCHOLARS_RECITERDB_PASSWORD: ecs.Secret.fromSecretsManager(
           etlReciterSecret,
           "SCHOLARS_RECITERDB_PASSWORD",
+        ),
+        // WCM Enterprise Directory bind (#1592, #1595). The env-var name == the
+        // secret's JSON key; the app reads these via lib/sources/ldap.ts. The
+        // read-only bind backs the SSO-gated GET /api/directory/people -- the
+        // SAME secret the nightly ED ETL consumes.
+        SCHOLARS_LDAP_URL: ecs.Secret.fromSecretsManager(
+          edSecret,
+          "SCHOLARS_LDAP_URL",
+        ),
+        SCHOLARS_LDAP_BIND_DN: ecs.Secret.fromSecretsManager(
+          edSecret,
+          "SCHOLARS_LDAP_BIND_DN",
+        ),
+        SCHOLARS_LDAP_BIND_PASSWORD: ecs.Secret.fromSecretsManager(
+          edSecret,
+          "SCHOLARS_LDAP_BIND_PASSWORD",
         ),
       },
     });
