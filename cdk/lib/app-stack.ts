@@ -195,9 +195,10 @@ export class AppStack extends Stack {
 
     // ------------------------------------------------------------------
     // Secrets lookup. SecretsStack defines the full set; AppStack reads the
-    // eleven the app + sidecars consume (db read/write, opensearch app,
+    // twelve the app + sidecars consume (db read/write, opensearch app,
     // revalidate token, session-cookie secret, SAML SP private key, ReciterDB
-    // connection, SAML IdP cert, SAML SP cert, db-bootstrap DSN, and the New
+    // connection, WCM directory bind, SAML IdP cert, SAML SP cert, db-bootstrap
+    // DSN, and the New
     // Relic ingest key consumed by the ADOT collector). Looked up by name so the two
     // stacks stay loosely coupled — no
     // shared stack prop, no cross-stack export. ARNs feed both the
@@ -274,6 +275,21 @@ export class AppStack extends Stack {
       "EtlReciterSecret",
       `scholars/${env}/etl/reciter`,
     );
+    // WCM Enterprise Directory bind creds — same secret the ED ETL consumes
+    // (etl-stack `EtlSecretEd`). The running app reads SCHOLARS_LDAP_* at
+    // request time for the live directory lookup backing /api/directory/people
+    // (name/title hydration on the unit-access + proxy cards, and the
+    // add-admin typeahead) via lib/sources/ldap.ts openLdap(). Without these
+    // the lookup throws and the route returns 503, so the UI silently falls
+    // back to bare CWIDs. Mirrors the etlReciterSecret precedent above (the app
+    // already consumes an etl-scoped secret). Only the connection creds are
+    // wired — the superuser/steward/developer group checks stay gated on their
+    // (unset) *_GROUP_CN envs, so this does NOT flip them to live LDAP.
+    const etlEdLdapSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "EtlEdLdapSecret",
+      `scholars/${env}/etl/ed`,
+    );
     // SAML IdP signing cert — the trust anchor for assertion-signature
     // verification (#466). Injected as SAML_IDP_CERT; a secret (not env) so
     // the 2026-08-19 IdP cert rollover is a value rotation, not a code
@@ -326,6 +342,7 @@ export class AppStack extends Stack {
       revalidateTokenSecret.secretArn,
       samlSpPrivateKeySecret.secretArn,
       etlReciterSecret.secretArn,
+      etlEdLdapSecret.secretArn,
       samlIdpCertSecret.secretArn,
       samlSpCertSecret.secretArn,
       sessionCookieSecret.secretArn,
@@ -460,7 +477,7 @@ export class AppStack extends Stack {
     // - **Task-execution role** (`taskExecutionRole`) is the role ECS assumes
     //   for the 24/7 APP task to pull the image, inject secrets, and write log
     //   streams. Tightly scoped: ECR auth + Batch* on the app repo only;
-    //   secrets:GetSecretValue on the ten app consumer ARNs only (ADR-009: no
+    //   secrets:GetSecretValue on the eleven app consumer ARNs only (ADR-009: no
     //   migrate, no bootstrap); logs on the app + ADOT-sidecar groups only.
     // - **Deploy execution role** (`deployTaskExecutionRole`, ADR-009) is the
     //   parallel role for the short-lived deploy-time tasks (migrate,
@@ -502,7 +519,7 @@ export class AppStack extends Stack {
         resources: [this.ecrRepository.repositoryArn],
       }),
     );
-    // Secrets -- exactly the ten app consumer ARNs (ADR-009 split: no migrate,
+    // Secrets -- exactly the eleven app consumer ARNs (ADR-009 split: no migrate,
     // no bootstrap). Asserted in tests.
     taskExecutionRole.addToPolicy(
       new iam.PolicyStatement({
@@ -2137,6 +2154,17 @@ export class AppStack extends Stack {
         SCHOLARS_RECITERDB_PASSWORD: ecs.Secret.fromSecretsManager(
           etlReciterSecret,
           "SCHOLARS_RECITERDB_PASSWORD",
+        ),
+        // WCM directory bind creds for the live /api/directory/people lookup
+        // (lib/sources/ldap.ts openLdap). env-var name == the secret's JSON key.
+        SCHOLARS_LDAP_URL: ecs.Secret.fromSecretsManager(etlEdLdapSecret, "SCHOLARS_LDAP_URL"),
+        SCHOLARS_LDAP_BIND_DN: ecs.Secret.fromSecretsManager(
+          etlEdLdapSecret,
+          "SCHOLARS_LDAP_BIND_DN",
+        ),
+        SCHOLARS_LDAP_BIND_PASSWORD: ecs.Secret.fromSecretsManager(
+          etlEdLdapSecret,
+          "SCHOLARS_LDAP_BIND_PASSWORD",
         ),
       },
     });
