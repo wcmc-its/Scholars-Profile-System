@@ -1192,38 +1192,64 @@ describe("EdgeStack", () => {
         expect(stmt).toContain("IPSetReferenceStatement");
       });
 
-      it("layers AWS managed rule groups (SQLi/known-bad/common) in COUNT mode", () => {
+      it("ENFORCES the SQLi/known-bad/common managed groups, keeping only SizeRestrictions_Body in count (#1434)", () => {
         const acl = Object.values(
           template.findResources("AWS::WAFv2::WebACL"),
         )[0]?.Properties as Record<string, unknown>;
         const rules = acl.Rules as Array<Record<string, unknown>>;
-        const managed = rules.filter((r) =>
-          JSON.stringify(r.Statement ?? {}).includes("ManagedRuleGroupStatement"),
-        );
-        const names = managed
-          .map((r) => JSON.stringify(r.Statement))
-          .join(",");
-        expect(names).toContain("AWSManagedRulesCommonRuleSet");
-        expect(names).toContain("AWSManagedRulesKnownBadInputsRuleSet");
-        expect(names).toContain("AWSManagedRulesSQLiRuleSet");
-        // Observe-only: every managed group overrides to Count (no enforcement
-        // until the metrics prove no false positives on real WCM traffic).
-        for (const r of managed) {
-          expect(r.OverrideAction).toHaveProperty("Count");
-          expect(r.Action).toBeUndefined();
+        const enforceGroups = [
+          "AWSManagedRulesCommonRuleSet",
+          "AWSManagedRulesKnownBadInputsRuleSet",
+          "AWSManagedRulesSQLiRuleSet",
+        ];
+        for (const name of enforceGroups) {
+          const r = rules.find((x) => x.Name === name);
+          expect(r).toBeDefined();
+          // Enforced: no Count override on the group.
+          expect(r?.OverrideAction).toHaveProperty("None");
+          expect(r?.Action).toBeUndefined();
         }
+        // The one metrics-proven false positive (large /edit saves > 8 KB)
+        // stays observe-only inside the otherwise-enforced CommonRuleSet.
+        const common = rules.find(
+          (x) => x.Name === "AWSManagedRulesCommonRuleSet",
+        );
+        const overrides = JSON.stringify(common?.Statement);
+        expect(overrides).toContain("SizeRestrictions_Body");
+        expect(overrides).toContain('"Count"');
       });
 
-      it("adds a per-IP rate-based rule in COUNT mode", () => {
+      it("runs Bot Control label-only BEFORE the rate rule (#125 verified-bot exemption)", () => {
         const acl = Object.values(
           template.findResources("AWS::WAFv2::WebACL"),
         )[0]?.Properties as Record<string, unknown>;
         const rules = acl.Rules as Array<Record<string, unknown>>;
-        const rate = rules.find((r) =>
-          JSON.stringify(r.Statement ?? {}).includes("RateBasedStatement"),
+        const bot = rules.find(
+          (x) => x.Name === "AWSManagedRulesBotControlRuleSet",
         );
+        expect(bot).toBeDefined();
+        // Label-only: Bot Control itself never blocks; its bot:verified label
+        // feeds the rate rule's scope-down.
+        expect(bot?.OverrideAction).toHaveProperty("Count");
+        const rate = rules.find((x) => x.Name === "rate-limit");
+        // Labels are visible only to later-priority rules.
+        expect(Number(bot?.Priority)).toBeLessThan(Number(rate?.Priority));
+      });
+
+      it("ENFORCES the per-IP rate rule, exempting verified bots (#1434 + #125)", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        const rules = acl.Rules as Array<Record<string, unknown>>;
+        const rate = rules.find((r) => r.Name === "rate-limit");
         expect(rate).toBeDefined();
-        expect(rate?.Action).toHaveProperty("Count");
+        expect(rate?.Action).toHaveProperty("Block");
+        const stmt = JSON.stringify(rate?.Statement);
+        expect(stmt).toContain("RateBasedStatement");
+        // Verified crawlers/AI fetchers are scoped OUT of the limit.
+        expect(stmt).toContain("ScopeDownStatement");
+        expect(stmt).toContain("awswaf:managed:aws:bot-control:bot:verified");
+        expect(stmt).toContain("NotStatement");
       });
 
       it("attaches the WebACL to the distribution (WebACLId set)", () => {
