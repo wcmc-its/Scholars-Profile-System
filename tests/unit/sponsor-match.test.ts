@@ -17,6 +17,8 @@ const {
   mockPublicationTopicFindMany,
   mockScholarFindMany,
   mockTechnologyGroupBy,
+  mockPublicationFindMany,
+  mockTopicFindMany,
   mockReadEditRequest,
   mockLogEditDenial,
   mockRankForDescription,
@@ -25,6 +27,8 @@ const {
   mockPublicationTopicFindMany: vi.fn(),
   mockScholarFindMany: vi.fn(),
   mockTechnologyGroupBy: vi.fn(),
+  mockPublicationFindMany: vi.fn(),
+  mockTopicFindMany: vi.fn(),
   mockReadEditRequest: vi.fn(),
   mockLogEditDenial: vi.fn(),
   mockRankForDescription: vi.fn(),
@@ -39,6 +43,8 @@ vi.mock("@/lib/db", () => ({
       publicationTopic: { findMany: mockPublicationTopicFindMany },
       scholar: { findMany: mockScholarFindMany },
       scholarTechnology: { groupBy: mockTechnologyGroupBy },
+      publication: { findMany: mockPublicationFindMany },
+      topic: { findMany: mockTopicFindMany },
     },
   },
 }));
@@ -84,6 +90,8 @@ beforeEach(() => {
   process.env.SPONSOR_MATCH = "on";
   mockScholarFindMany.mockResolvedValue([]);
   mockTechnologyGroupBy.mockResolvedValue([]);
+  mockPublicationFindMany.mockResolvedValue([]);
+  mockTopicFindMany.mockResolvedValue([]);
 });
 
 describe("rankResearchersForDescription (engine)", () => {
@@ -139,6 +147,45 @@ describe("rankResearchersForDescription (engine)", () => {
 
     const [r] = await rankResearchersForDescription("crispr", { now: NOW });
     expect(r).toMatchObject({ title: "Professor", department: "Medicine", technologyCount: 3 });
+  });
+
+  it("attaches top-paper + matched-topic evidence post-ranking, ordered by contribution/coverage", async () => {
+    mockRelevanceScoresForQuery.mockResolvedValue(
+      new Map([
+        ["p1", 1],
+        ["p2", 0.2],
+      ]),
+    );
+    // Scholar a: p1 carries topics t1+t2 (dedup credits it once, but the topic
+    // EVIDENCE counts it under both); p2 carries t1 only.
+    mockPublicationTopicFindMany.mockResolvedValue([
+      row("a", "p1", "t1", 5),
+      row("a", "p1", "t2", 3),
+      row("a", "p2", "t1", 5),
+    ]);
+    mockPublicationFindMany.mockResolvedValue([
+      { pmid: "p1", title: "Paper One", year: 2024, journal: "Blood" },
+      { pmid: "p2", title: "Paper Two", year: 2023, journal: "Cell" },
+    ]);
+    mockTopicFindMany.mockResolvedValue([
+      { id: "t1", label: "Topic One" },
+      { id: "t2", label: "Topic Two" },
+    ]);
+
+    const [r] = await rankResearchersForDescription("car t exhaustion", { now: NOW });
+    // p1 (rel 1) contributed more than p2 (rel 0.2) — evidence sorts by contribution.
+    expect(r.topPapers.map((p) => p.pmid)).toEqual(["p1", "p2"]);
+    expect(r.topPapers[0]).toMatchObject({
+      title: "Paper One",
+      journal: "Blood",
+      year: 2024,
+      relevance: 1,
+    });
+    // t1 covers 2 papers, t2 covers 1 — ordered by coverage, labeled from the topic table.
+    expect(r.matchedTopics).toEqual([
+      { topicId: "t1", label: "Topic One", pubCount: 2 },
+      { topicId: "t2", label: "Topic Two", pubCount: 1 },
+    ]);
   });
 
   it("returns [] for empty/whitespace/control-char input WITHOUT an OpenSearch call", async () => {

@@ -10,9 +10,20 @@
  * is not exported and carries stage/ESI/CSV machinery this surface rejects):
  * linked name → public profile, title/department, the paper-count evidence,
  * and a CTL-IP count badge when the researcher already holds licensable IP.
+ * On top of that, the console carries:
+ *  - per-row EVIDENCE — matched parent-topic chips and the top matching papers
+ *    (PubMed-linked, with the BM25 relevance that drove the rank), so an
+ *    officer sees WHY someone ranked;
+ *  - client-side FACETS (department / matched topic / CTL-IP) over the long
+ *    server list — narrowing never re-queries, and each row keeps its original
+ *    rank number so "#7 overall" stays legible under a filter;
+ *  - a search HISTORY in localStorage ONLY. Descriptions are commercially
+ *    sensitive; the server never persists them (route contract), so history
+ *    lives in the officer's own browser and nowhere else.
  */
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { Skeleton } from "@/components/ui/skeleton";
 import { initials } from "@/lib/utils";
 
@@ -23,6 +34,16 @@ type TopicContribution = {
   minYear: number | null;
 };
 
+type MatchedPaper = {
+  pmid: string;
+  title: string;
+  year: number | null;
+  journal: string | null;
+  relevance: number;
+};
+
+type MatchedTopic = { topicId: string; label: string; pubCount: number };
+
 type RankedResearcher = {
   cwid: string;
   slug: string;
@@ -32,6 +53,8 @@ type RankedResearcher = {
   topicContributions: TopicContribution[];
   defaultScore: number;
   technologyCount?: number;
+  topPapers?: MatchedPaper[];
+  matchedTopics?: MatchedTopic[];
 };
 
 type Status =
@@ -40,24 +63,92 @@ type Status =
   | { kind: "ok"; researchers: RankedResearcher[] }
   | { kind: "error"; message: string };
 
+type HistoryEntry = { d: string; at: string };
+
+const HISTORY_KEY = "sponsor-match-history";
+const HISTORY_MAX = 20;
+
+/** Topic facet stays scannable: top-N topics by researcher coverage. */
+const TOPIC_FACET_MAX = 12;
+
+function toggled(set: ReadonlySet<string>, value: string): Set<string> {
+  const next = new Set(set);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  return next;
+}
+
 export function SponsorMatchPanel() {
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [deptSel, setDeptSel] = useState<ReadonlySet<string>>(new Set());
+  const [topicSel, setTopicSel] = useState<ReadonlySet<string>>(new Set());
+  const [ctlOnly, setCtlOnly] = useState(false);
   const pending = status.kind === "loading";
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (pending || description.trim().length === 0) return;
+  // SSR-safe history load: start empty, read localStorage in an effect (no
+  // hydration mismatch — same pattern as the COI-gap card's sticky group-by).
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(HISTORY_KEY);
+      const parsed: unknown = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed))
+        setHistory(
+          parsed.filter(
+            (h): h is HistoryEntry =>
+              !!h && typeof h === "object" && typeof (h as HistoryEntry).d === "string",
+          ),
+        );
+    } catch {
+      /* private mode / disabled storage / corrupt entry — start empty. */
+    }
+  }, []);
+
+  function saveHistory(text: string) {
+    setHistory((prev) => {
+      const next = [
+        { d: text, at: new Date().toISOString() },
+        ...prev.filter((h) => h.d !== text),
+      ].slice(0, HISTORY_MAX);
+      try {
+        window.localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }
+
+  function clearHistory() {
+    setHistory([]);
+    try {
+      window.localStorage.removeItem(HISTORY_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function clearFilters() {
+    setDeptSel(new Set());
+    setTopicSel(new Set());
+    setCtlOnly(false);
+  }
+
+  async function runSearch(text: string) {
+    if (pending || text.trim().length === 0) return;
     setStatus({ kind: "loading" });
     try {
       const r = await fetch("/api/edit/sponsor-match", {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ description }),
+        body: JSON.stringify({ description: text }),
       });
       if (r.ok) {
         const data = (await r.json()) as { researchers?: RankedResearcher[] };
+        clearFilters(); // stale facet selections must not silently hide fresh results
+        saveHistory(text.trim());
         setStatus({ kind: "ok", researchers: data.researchers ?? [] });
         return;
       }
@@ -73,6 +164,46 @@ export function SponsorMatchPanel() {
     }
   }
 
+  const researchers = useMemo(
+    () => (status.kind === "ok" ? status.researchers : []),
+    [status],
+  );
+
+  const deptFacet = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of researchers)
+      if (r.department) counts.set(r.department, (counts.get(r.department) ?? 0) + 1);
+    return [...counts].sort((a, b) => b[1] - a[1]);
+  }, [researchers]);
+
+  const topicFacet = useMemo(() => {
+    const counts = new Map<string, { label: string; count: number }>();
+    for (const r of researchers)
+      for (const t of r.matchedTopics ?? []) {
+        const c = counts.get(t.topicId) ?? { label: t.label, count: 0 };
+        c.count += 1;
+        counts.set(t.topicId, c);
+      }
+    return [...counts].sort((a, b) => b[1].count - a[1].count).slice(0, TOPIC_FACET_MAX);
+  }, [researchers]);
+
+  const ctlHolderCount = useMemo(
+    () => researchers.filter((r) => (r.technologyCount ?? 0) > 0).length,
+    [researchers],
+  );
+
+  const hasFilters = deptSel.size > 0 || topicSel.size > 0 || ctlOnly;
+  // Original rank travels with the row so a filtered view still reads
+  // "this person is #7 overall", not "#1 of the filtered three".
+  const visible = researchers
+    .map((r, i) => ({ r, rank: i + 1 }))
+    .filter(
+      ({ r }) =>
+        (deptSel.size === 0 || (r.department != null && deptSel.has(r.department))) &&
+        (topicSel.size === 0 || (r.matchedTopics ?? []).some((t) => topicSel.has(t.topicId))) &&
+        (!ctlOnly || (r.technologyCount ?? 0) > 0),
+    );
+
   return (
     <div data-slot="sponsor-match-panel">
       <div className="mb-5">
@@ -84,7 +215,13 @@ export function SponsorMatchPanel() {
         </p>
       </div>
 
-      <form onSubmit={submit} className="mb-6">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void runSearch(description);
+        }}
+        className="mb-4"
+      >
         <label htmlFor="sponsor-description" className="mb-1.5 block text-sm font-medium">
           Sponsor&rsquo;s description
         </label>
@@ -106,6 +243,41 @@ export function SponsorMatchPanel() {
         </button>
       </form>
 
+      {history.length > 0 ? (
+        <details data-slot="sponsor-match-history" className="mb-6">
+          <summary className="text-muted-foreground cursor-pointer text-sm select-none">
+            Recent searches ({history.length})
+          </summary>
+          <ul className="mt-2 space-y-1">
+            {history.map((h) => (
+              <li key={h.d} className="flex items-baseline gap-2">
+                <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                  {new Date(h.at).toLocaleDateString()}
+                </span>
+                <button
+                  type="button"
+                  title={h.d}
+                  onClick={() => {
+                    setDescription(h.d);
+                    void runSearch(h.d);
+                  }}
+                  className="min-w-0 truncate text-left text-sm text-foreground/90 underline-offset-4 hover:underline"
+                >
+                  {h.d}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={clearHistory}
+            className="text-muted-foreground mt-2 text-xs underline-offset-4 hover:underline"
+          >
+            Clear history
+          </button>
+        </details>
+      ) : null}
+
       {status.kind === "loading" ? (
         <div aria-busy="true">
           <p className="text-muted-foreground py-3 text-sm">Ranking researchers…</p>
@@ -123,26 +295,112 @@ export function SponsorMatchPanel() {
           {status.message}
         </p>
       ) : status.kind === "ok" ? (
-        status.researchers.length === 0 ? (
+        researchers.length === 0 ? (
           <p className="text-muted-foreground py-4 text-sm">
             No researchers matched this description.
           </p>
         ) : (
           <>
+            <div data-slot="sponsor-match-facets" className="border-border mb-4 rounded-lg border p-3">
+              {deptFacet.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-muted-foreground mr-1 text-xs font-medium">Department</span>
+                  {deptFacet.map(([dept, n]) => (
+                    <FacetChip
+                      key={dept}
+                      active={deptSel.has(dept)}
+                      onClick={() => setDeptSel(toggled(deptSel, dept))}
+                    >
+                      {dept} · {n}
+                    </FacetChip>
+                  ))}
+                </div>
+              ) : null}
+              {topicFacet.length > 0 ? (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-muted-foreground mr-1 text-xs font-medium">
+                    Matched topic
+                  </span>
+                  {topicFacet.map(([id, t]) => (
+                    <FacetChip
+                      key={id}
+                      active={topicSel.has(id)}
+                      onClick={() => setTopicSel(toggled(topicSel, id))}
+                    >
+                      {t.label} · {t.count}
+                    </FacetChip>
+                  ))}
+                </div>
+              ) : null}
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <FacetChip
+                  active={ctlOnly}
+                  onClick={() => setCtlOnly(!ctlOnly)}
+                  title="Only researchers who already hold licensable technology in the CTL portfolio."
+                >
+                  ★ Holds CTL technology · {ctlHolderCount}
+                </FacetChip>
+                {hasFilters ? (
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="text-muted-foreground ml-1 text-xs underline-offset-4 hover:underline"
+                  >
+                    Clear filters
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
             <h2 className="text-base font-semibold">
-              Researchers for this description ({status.researchers.length})
+              Researchers for this description (
+              {hasFilters ? `${visible.length} of ${researchers.length}` : researchers.length})
             </h2>
-            <ul className="mt-1">
-              {status.researchers.map((r, i) => (
-                <li key={r.cwid}>
-                  <ResearcherRow r={r} rank={i + 1} />
-                </li>
-              ))}
-            </ul>
+            {visible.length === 0 ? (
+              <p className="text-muted-foreground py-4 text-sm">
+                No researchers match the selected filters.
+              </p>
+            ) : (
+              <ul className="mt-1">
+                {visible.map(({ r, rank }) => (
+                  <li key={r.cwid}>
+                    <ResearcherRow r={r} rank={rank} />
+                  </li>
+                ))}
+              </ul>
+            )}
           </>
         )
       ) : null}
     </div>
+  );
+}
+
+function FacetChip({
+  active,
+  onClick,
+  title,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      title={title}
+      onClick={onClick}
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+        active
+          ? "border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
+          : "border-border bg-background text-foreground/80 hover:border-[var(--color-accent-slate)]"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -151,6 +409,8 @@ function ResearcherRow({ r, rank }: { r: RankedResearcher; rank: number }) {
   // One synthetic topic, so the first contribution IS the whole evidence.
   const evidence = r.topicContributions[0];
   const techCount = r.technologyCount ?? 0;
+  const topPapers = r.topPapers ?? [];
+  const matchedTopics = r.matchedTopics ?? [];
   return (
     <div className="border-t border-border flex gap-3 py-4 first:border-t-0">
       <div className="text-muted-foreground w-5 pt-1 text-right text-sm tabular-nums">{rank}</div>
@@ -176,6 +436,50 @@ function ResearcherRow({ r, rank }: { r: RankedResearcher; rank: number }) {
             {evidence.pubCount} matching paper{evidence.pubCount === 1 ? "" : "s"}
             {evidence.minYear ? ` since ${evidence.minYear}` : ""}
           </p>
+        ) : null}
+        {matchedTopics.length > 0 ? (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {matchedTopics.map((t) => (
+              <span
+                key={t.topicId}
+                title={`${t.pubCount} matching paper${t.pubCount === 1 ? "" : "s"} in this topic`}
+                className="border-border text-muted-foreground rounded-full border px-2 py-0.5 text-xs"
+              >
+                {t.label}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {topPapers.length > 0 ? (
+          <details className="mt-1.5">
+            <summary className="text-muted-foreground cursor-pointer text-xs select-none">
+              Why this match — top paper{topPapers.length === 1 ? "" : "s"}
+            </summary>
+            <ul className="mt-1 space-y-1">
+              {topPapers.map((p) => (
+                <li key={p.pmid} className="text-xs">
+                  <a
+                    href={`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(p.pmid)}/`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-foreground/90 underline-offset-4 hover:underline"
+                  >
+                    <PubTitle value={p.title} />
+                  </a>{" "}
+                  <span className="text-muted-foreground">
+                    {p.journal ? (
+                      <>
+                        <PubJournal value={p.journal} className="not-italic" />
+                        {" · "}
+                      </>
+                    ) : null}
+                    {(p.year ? `${p.year} · ` : "") +
+                      `${Math.round(p.relevance * 100)}% match`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </details>
         ) : null}
         {techCount > 0 ? (
           <span
