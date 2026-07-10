@@ -2,7 +2,7 @@
  * `lib/api/edit-context.ts` — the suppression-OFF read for the `/edit` self
  * surface (Phase 6 C1, D6.1).
  */
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 // `loadEditContext`'s default mentee-loader calls `getMenteesForMentor`, which
 // opens a live reporting-DB connection. Mock it to an empty list so the suite
@@ -32,6 +32,7 @@ type FakeClient = {
   coiGapCandidate: { findMany: AnyMock };
   publication: { findMany: AnyMock };
   publicationConflictStatement: { findMany: AnyMock };
+  scholarTechnology: { findMany: AnyMock };
 };
 type EditContextClient = Parameters<typeof loadEditContext>[1];
 
@@ -71,6 +72,10 @@ function fakeClient(): FakeClient {
     // #1112 — the COI-gap loader joins this by pmid for Paper view's verbatim
     // `fullText`. Default to "no statement row" (fullText falls back to clause).
     publicationConflictStatement: { findMany: vi.fn().mockResolvedValue([]) },
+    // CTL "Available technologies" — default to "no rows". Only queried when
+    // AVAILABLE_TECHNOLOGIES_SECTION is on (else the loader returns [] and never
+    // touches this delegate).
+    scholarTechnology: { findMany: vi.fn().mockResolvedValue([]) },
   };
 }
 
@@ -738,6 +743,74 @@ describe("loadEditContext — COI disclosures (read-only)", () => {
     c.scholar.findUnique.mockResolvedValue(scholarRow());
     const ctx = await loadEditContext(SELF, asClient(c));
     expect(ctx!.coiDisclosures).toEqual([]);
+  });
+});
+
+describe("loadEditContext — CTL technologies (read-only, flag-gated)", () => {
+  const TECH_ROWS = [
+    {
+      reference: "11166",
+      title: "A Licensable Widget",
+      url: "https://innovation.weill.cornell.edu/technology-portfolio/widget",
+      patentStatus: "US Application Filed",
+      // Json column — a valid pmid plus junk that must be filtered out.
+      pmids: ["31508198", "not-a-pmid", 12345],
+      overview: "The Technology: a widget.",
+      hasPocData: true,
+    },
+  ];
+
+  // Set/restore the flag per test — the loader reads it at call time.
+  let prevFlag: string | undefined;
+  beforeEach(() => {
+    prevFlag = process.env.AVAILABLE_TECHNOLOGIES_SECTION;
+  });
+  afterEach(() => {
+    if (prevFlag === undefined) delete process.env.AVAILABLE_TECHNOLOGIES_SECTION;
+    else process.env.AVAILABLE_TECHNOLOGIES_SECTION = prevFlag;
+  });
+
+  it("populates technologies (flag on) using the profile select + title-asc order, coercing pmids", async () => {
+    process.env.AVAILABLE_TECHNOLOGIES_SECTION = "on";
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.scholarTechnology.findMany.mockResolvedValue(TECH_ROWS);
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.technologies).toEqual([
+      {
+        url: "https://innovation.weill.cornell.edu/technology-portfolio/widget",
+        title: "A Licensable Widget",
+        reference: "11166",
+        patentStatus: "US Application Filed",
+        pmids: ["31508198"], // junk + non-strings filtered out
+        overview: "The Technology: a widget.",
+        hasPocData: true,
+      },
+    ]);
+    // Same cwid scope + title-asc order the public profile uses.
+    expect(c.scholarTechnology.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { cwid: SELF }, orderBy: [{ title: "asc" }] }),
+    );
+  });
+
+  it("returns [] and never queries scholar_technology when the flag is off", async () => {
+    delete process.env.AVAILABLE_TECHNOLOGIES_SECTION;
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.scholarTechnology.findMany.mockResolvedValue(TECH_ROWS);
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.technologies).toEqual([]);
+    expect(c.scholarTechnology.findMany).not.toHaveBeenCalled();
+  });
+
+  it("returns [] (flag on) when the scholar has no technologies", async () => {
+    process.env.AVAILABLE_TECHNOLOGIES_SECTION = "on";
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    // fakeClient defaults scholarTechnology.findMany to [].
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.technologies).toEqual([]);
+    expect(c.scholarTechnology.findMany).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -59,6 +59,7 @@ type EditContextReadClient = Pick<
   | "publication"
   | "publicationConflictStatement"
   | "reporterProfileCandidate"
+  | "scholarTechnology"
 >;
 
 export type EditContextScholar = {
@@ -203,6 +204,29 @@ export type EditContextGrant = {
 export type EditContextCoiDisclosure = {
   entity: string | null;
   activityGroup: string | null;
+};
+
+/**
+ * One CTL "Available technologies" row, narrowed to what the read-only /edit
+ * card renders — mirrors the `lib/api/profile.ts` technologies shape field-for-
+ * field. The Center for Technology Licensing owns this data (the invention
+ * portfolio), so — like COI — it carries no `state` / `suppressionId`: it is
+ * view-only here, corrections happen at CTL, not on Scholars.
+ */
+export type EditContextTechnology = {
+  /** Absolute URL of the public technology detail page on CTL's site (row key). */
+  url: string;
+  title: string;
+  /** CTL's "Cornell Reference" docket number; null when the page omits it. */
+  reference: string | null;
+  /** CTL patent status ("US Application Filed"); null on ~61% of pages. */
+  patentStatus: string | null;
+  /** PMIDs of the papers CTL lists for the invention. Empty when none. */
+  pmids: string[];
+  /** CTL's "Technology Overview" as plain text; null when the page has none. */
+  overview: string | null;
+  /** True when the overview lists a "PoC Data" bullet; drives the PoC chip. */
+  hasPocData: boolean;
 };
 
 /**
@@ -490,6 +514,12 @@ export type EditContext = {
   grants: ReadonlyArray<EditContextGrant>;
   /** Read-only COI disclosures (the Weill Research Gateway is the SOR). */
   coiDisclosures: ReadonlyArray<EditContextCoiDisclosure>;
+  /**
+   * Read-only CTL "Available technologies" (the Center for Technology Licensing
+   * is the SOR). Empty unless `AVAILABLE_TECHNOLOGIES_SECTION` is on AND the
+   * scholar has inventions — the same gate the public profile section uses.
+   */
+  technologies: ReadonlyArray<EditContextTechnology>;
   /** Suppressible mentees (derived from training records; mentor may hide). */
   mentees: ReadonlyArray<EditContextMentee>;
   /**
@@ -858,6 +888,45 @@ export async function loadEditContext(
     entity: c.entity,
     activityGroup: c.activityGroup,
   }));
+
+  // CTL "Available technologies" — a read-only mirror of the public profile's
+  // section (`lib/api/profile.ts`), using the SAME gate + select + order. Dark
+  // unless `AVAILABLE_TECHNOLOGIES_SECTION` is on, so an unflagged env returns []
+  // even after the ETL seed lands and the query never runs. CTL is the SOR, so
+  // this carries no suppression state — the /edit card is view-only. Loaded for
+  // EVERY caller (the row is public info, like publications/coi), so a small
+  // dedicated cwid query rather than widening the scholar select (which uses
+  // `select`, not `include`, and would fetch the relation even flag-off).
+  const technologies: EditContextTechnology[] =
+    process.env.AVAILABLE_TECHNOLOGIES_SECTION === "on"
+      ? (
+          await client.scholarTechnology.findMany({
+            where: { cwid },
+            select: {
+              reference: true,
+              title: true,
+              url: true,
+              patentStatus: true,
+              pmids: true,
+              overview: true,
+              hasPocData: true,
+            },
+            orderBy: [{ title: "asc" }],
+          })
+        ).map((t) => ({
+          url: t.url,
+          title: t.title,
+          reference: t.reference,
+          patentStatus: t.patentStatus,
+          // `pmids` is a Json column; narrow + validate exactly like the profile
+          // mapper so a hand-edited row can't put junk into a PubMed href.
+          pmids: Array.isArray(t.pmids)
+            ? t.pmids.filter((p): p is string => typeof p === "string" && /^\d{6,9}$/.test(p))
+            : [],
+          overview: t.overview,
+          hasPocData: t.hasPocData,
+        }))
+      : [];
 
   // Publication-derived COI-gap candidates (`SELF_EDIT_COI_GAP_HINT`) — SELF-
   // ONLY, and the opt-in IS the self guard: only the self page passes
@@ -1404,6 +1473,7 @@ export async function loadEditContext(
       educations,
       grants,
       coiDisclosures,
+      technologies,
       mentees,
       unmatchedPubmedCoi,
       unmatchedPubmedCoiLower,
@@ -1569,6 +1639,7 @@ export async function loadEditContext(
     educations,
     grants,
     coiDisclosures,
+    technologies,
     mentees,
     unmatchedPubmedCoi,
     unmatchedPubmedCoiLower,

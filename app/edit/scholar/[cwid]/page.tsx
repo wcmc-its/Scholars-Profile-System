@@ -179,6 +179,9 @@ export default async function EditScholarPage({
     isBiosketchGenerateEnabled(),
     isCvEnabled(),
     ctx.reporterProfileCandidates.length > 0 || ctx.reporterProfileConfirmed.length > 0,
+    // Available technologies is valid only when the scholar has ≥1 CTL invention
+    // (the loader gates the array on AVAILABLE_TECHNOLOGIES_SECTION).
+    ctx.technologies.length > 0,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect(basePath);

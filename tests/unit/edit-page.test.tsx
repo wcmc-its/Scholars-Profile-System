@@ -91,6 +91,10 @@ const ctx: EditContext = {
     { entity: "Acme Therapeutics", activityGroup: "Ownership" },
     { entity: "Globex Pharma", activityGroup: "Leadership Roles" },
   ],
+  // AVAILABLE_TECHNOLOGIES_SECTION — empty by default (loader returns [] unless
+  // the flag is on AND the scholar has inventions); a dedicated describe block
+  // below exercises the populated case.
+  technologies: [],
   mentees: [
     {
       externalId: "self01:mentee9",
@@ -524,6 +528,59 @@ describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)",
     expect(screen.getByTestId("coi-gap-back").getAttribute("href")).toBe(
       "/edit/scholar/other7?attr=coi",
     );
+  });
+});
+
+describe("EditPage router — Available technologies rail (AVAILABLE_TECHNOLOGIES_SECTION)", () => {
+  const withTech: EditContext = {
+    ...ctx,
+    technologies: [
+      {
+        url: "https://innovation.weill.cornell.edu/technology-portfolio/widget",
+        title: "A Licensable Widget",
+        reference: "11166",
+        patentStatus: "US Application Filed",
+        pmids: ["31508198"],
+        overview: "The Technology: a widget.",
+        hasPocData: true,
+      },
+    ],
+  };
+
+  it("does NOT show the technologies rail item when the scholar has none (default)", () => {
+    render(<EditPage ctx={ctx} mode="self" />);
+    expect(screen.queryByTestId("rail-technologies")).toBeNull();
+  });
+
+  it("an ?attr=technologies with no inventions canonicalizes away (Home renders instead)", () => {
+    render(<EditPage ctx={ctx} mode="self" attr="technologies" />);
+    expect(document.querySelector('[data-slot="technologies-panel"]')).toBeNull();
+    expect(document.querySelector('[data-slot="home-panel"]')).not.toBeNull();
+  });
+
+  it("shows the technologies rail item ONLY when the scholar has ≥1 invention, read-only", () => {
+    render(<EditPage ctx={withTech} mode="self" />);
+    const item = screen.getByTestId("rail-technologies");
+    expect(item).toBeTruthy();
+    // CTL-owned → read-only rail cue (same kind as coi).
+    expect(item.textContent).toMatch(/read-only, from WCM systems/i);
+  });
+
+  it("?attr=technologies renders the read-only card with a row + the CTL contact note", () => {
+    render(<EditPage ctx={withTech} mode="self" attr="technologies" />);
+    expect(document.querySelector('[data-slot="technologies-panel"]')).not.toBeNull();
+    expect(screen.getByText("A Licensable Widget")).toBeTruthy();
+    expect(screen.getByText("This section is not editable.")).toBeTruthy();
+    // No write control anywhere in the panel.
+    expect(screen.queryByRole("button", { name: /hide/i })).toBeNull();
+    expect(screen.queryByTestId("request-a-change-toggle")).toBeNull();
+  });
+
+  it("surfaces the technologies rail item in superuser mode too when populated", () => {
+    const suCtx: EditContext = { ...superuserCtx, technologies: withTech.technologies };
+    render(<EditPage ctx={suCtx} mode="superuser" />);
+    const item = screen.getByTestId("rail-technologies") as HTMLAnchorElement;
+    expect(item.getAttribute("href")).toBe("/edit/scholar/other7?attr=technologies");
   });
 });
 

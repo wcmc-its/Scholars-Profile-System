@@ -30,6 +30,7 @@ import {
 } from "@/components/edit/proxy-editor-card";
 import { PublicationsCard } from "@/components/edit/publications-card";
 import { ReadonlyAttributePanel } from "@/components/edit/readonly-attribute-panel";
+import { TechnologyEditCard } from "@/components/edit/technology-edit-card";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { SlugCard } from "@/components/edit/slug-card";
 import { SlugRequestCard, type SlugRequestSummary } from "@/components/edit/slug-request-card";
@@ -73,6 +74,7 @@ type AttrKey =
   | "visibility"
   | "publications"
   | "funding"
+  | "technologies"
   | "grant-recs"
   | "biosketch"
   | "cv"
@@ -118,6 +120,11 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // reject routes re-authorize the actor.
   { key: "publications", label: "Publications", modes: ["self", "superuser"] },
   { key: "funding", label: "Funding", modes: ["self", "superuser"] },
+  // Available technologies — CTL-sourced (Center for Technology Licensing) and
+  // read-only; appears only when the scholar has ≥1 invention (the loader gates
+  // it on AVAILABLE_TECHNOLOGIES_SECTION, so the array is empty otherwise). Public
+  // info like publications/coi, so it stays visible to proxy / unit-admin too.
+  { key: "technologies", label: "Available technologies", readonly: true, modes: ["self", "superuser"] },
   // Grants for me (GrantRecs Phase 3, SELF_EDIT_GRANT_RECS) — owner-facing
   // funding-opportunity recommendations. Self OR superuser (on the scholar's
   // behalf); never a proxy / unit-admin. Rail item appears only when the flag is on.
@@ -250,6 +257,10 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "publications",
   "funding",
   "reporter-profile",
+  // Available technologies sits right after the Funding block. It follows
+  // "reporter-profile" (Funding's nested sub-view) rather than sitting between
+  // them, so that sub-view keeps nesting under Funding, not under this flat item.
+  "technologies",
   "mentees",
   "coi",
   "coi-gap",
@@ -270,6 +281,8 @@ const SELF_RAIL_KIND: Record<AttrKey, RailKind> = {
   "profile-url": "owned",
   publications: "sourced",
   funding: "sourced",
+  // Read-only, CTL-owned — same kind as the other SOR-owned read-only items (coi).
+  technologies: "readonly",
   "reporter-profile": "readonly",
   // "Services" group (#917 v5) — owner-facing tools, distinct from sourced data.
   "grant-recs": "service",
@@ -317,6 +330,9 @@ const RAIL_V2_ORDER: ReadonlyArray<AttrKey> = [
   "publications",
   "funding",
   "reporter-profile",
+  // After the Funding block (see SELF_RAIL_ORDER) — kept out from between Funding
+  // and its nested "reporter-profile" sub-view so that nesting survives.
+  "technologies",
   "mentees",
   "coi",
   "coi-gap",
@@ -339,6 +355,7 @@ const RAIL_V2_PLACEMENT: Record<AttrKey, { group: string }> = {
   education: { group: RAIL_V2_WCM_GROUP },
   publications: { group: RAIL_V2_WCM_GROUP },
   funding: { group: RAIL_V2_WCM_GROUP },
+  technologies: { group: RAIL_V2_WCM_GROUP },
   "reporter-profile": { group: RAIL_V2_WCM_GROUP },
   mentees: { group: RAIL_V2_WCM_GROUP },
   coi: { group: RAIL_V2_WCM_GROUP },
@@ -386,6 +403,9 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "proxy-editors",
   "funding",
   "reporter-profile",
+  // After the Funding block — placed after "reporter-profile" (Funding's nested
+  // sub-view) so that sub-view keeps nesting under Funding.
+  "technologies",
   "grant-recs",
   "biosketch",
   "cv",
@@ -483,6 +503,7 @@ export function visibleAttrKeys(
   biosketchEnabled = false,
   cvEnabled = false,
   hasReporterProfile = false,
+  hasTechnologies = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
   return (
@@ -522,6 +543,11 @@ export function visibleAttrKeys(
       // (flag on + genuine self). Off ⇒ dropped from both the rail and the valid-
       // attr set, so the feature is fully dark.
       .filter((a) => a.key !== "highlights" || hasHighlights)
+      // Available technologies appears only when the scholar has ≥1 CTL invention
+      // (the loader populates them behind AVAILABLE_TECHNOLOGIES_SECTION). Empty ⇒
+      // dropped from the rail and the valid-attr set, so `?attr=technologies`
+      // canonicalizes away rather than rendering an empty panel.
+      .filter((a) => a.key !== "technologies" || hasTechnologies)
       .map((a) => a.key)
   );
 }
@@ -568,6 +594,11 @@ export function EditPage({
   const hasReporterProfile =
     (mode === "self" || isSuperuserLike(mode)) &&
     (ctx.reporterProfileCandidates.length > 0 || ctx.reporterProfileConfirmed.length > 0);
+  // Available technologies — CTL is the SOR and the row is public info (visible to
+  // every edit mode, like publications/coi), so the ONLY gate is "has ≥1 invention".
+  // The loader already gates the array on AVAILABLE_TECHNOLOGIES_SECTION, so a
+  // non-empty array here means the flag is on and the scholar has inventions.
+  const hasTechnologies = ctx.technologies.length > 0;
   // GrantRecs Phase 3 — "Grants for me" shows on self / superuser surfaces. A genuine
   // superuser ALWAYS sees it (QA lens, flag-independent) so the recommendations can be
   // judged per scholar while the owner-facing SELF_EDIT_GRANT_RECS stays off for users;
@@ -590,7 +621,8 @@ export function EditPage({
     .filter((a) => a.key !== "highlights" || hasHighlights)
     .filter((a) => a.key !== "grant-recs" || showGrantRecs)
     .filter((a) => a.key !== "biosketch" || showBiosketch)
-    .filter((a) => a.key !== "cv" || showCv);
+    .filter((a) => a.key !== "cv" || showCv)
+    .filter((a) => a.key !== "technologies" || hasTechnologies);
   // A proxy (#779) and a unit admin (Amendment 4) reuse the SELF rail/cards on
   // the scholar's route (D4). Treated like self for layout; the distinct chrome
   // (banner, breadcrumb, no account menu) is the shell's job.
@@ -1004,6 +1036,19 @@ function renderPanel(
     case "funding":
       return (
         <FundingCard cwid={cwid} mode={voiceMode} scholarName={scholarName} grants={ctx.grants} />
+      );
+    case "technologies":
+      // Read-only CTL "Available technologies" — the loader populates
+      // `ctx.technologies` only when AVAILABLE_TECHNOLOGIES_SECTION is on AND the
+      // scholar has inventions, and the rail item is dropped when the array is
+      // empty. `voiceMode` reframes the intro copy for a third-person editor.
+      return (
+        <TechnologyEditCard
+          cwid={cwid}
+          mode={voiceMode}
+          scholarName={scholarName}
+          technologies={ctx.technologies}
+        />
       );
     case "appointments":
       return (
