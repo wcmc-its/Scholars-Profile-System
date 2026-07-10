@@ -190,6 +190,9 @@ export default async function EditSelfPage({
     // RePORTER "Is this you?" is valid when there are pending matches OR confirmed
     // history to revoke — mirroring the rail-gating rule in EditPage.
     ctx.reporterProfileCandidates.length > 0 || ctx.reporterProfileConfirmed.length > 0,
+    // Available technologies is valid only when the scholar has ≥1 CTL invention
+    // (the loader gates the array on AVAILABLE_TECHNOLOGIES_SECTION).
+    ctx.technologies.length > 0,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect("/edit");
