@@ -22,6 +22,7 @@
 import { toCsv } from "@/lib/csv";
 import { formatRoleCategory } from "@/lib/role-display";
 import type { EditRosterUnitFilter } from "@/lib/api/edit-roster";
+import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
 import type { DataQualityScope } from "@/lib/edit/data-quality";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 
@@ -265,18 +266,11 @@ function buildWhere(
   const and: Prisma.ScholarWhereInput[] = [];
   const where: Prisma.ScholarWhereInput = { deletedAt: null, status: "active" };
 
-  // Name / CWID free-text search (#3) — its own AND clause so it never clobbers
-  // the scope / unit / hidden-roles OR groups.
+  // Name / CWID free-text search (#3) — each whitespace token is its own AND
+  // clause so it never clobbers the scope / unit / hidden-roles OR groups, and
+  // a multi-word "First Last" query matches regardless of a stored middle name.
   const q = opts.query?.trim();
-  if (q) {
-    and.push({
-      OR: [
-        { preferredName: { contains: q } },
-        { fullName: { contains: q } },
-        { cwid: { contains: q } },
-      ],
-    });
-  }
+  if (q) and.push(...buildScholarNameClauses(q));
 
   // Person-type multi-select (#4). An explicit selection governs; the hidden-roles
   // toggle is then moot (the viewer asked for exactly these types).

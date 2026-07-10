@@ -35,6 +35,7 @@ import { canImpersonate } from "@/lib/auth/effective-identity";
 import { isSuperuser } from "@/lib/auth/superuser";
 import { listCommsStewardCwids } from "@/lib/auth/comms-steward";
 import { pickDisplayGrant, type ImpersonationUnitKind } from "@/lib/edit/impersonation-display";
+import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
 import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -105,23 +106,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const q = (searchParams.get("q") ?? "").trim();
   const kindFilter = parseKind(searchParams.get("kind"));
 
-  // Candidate scholars: non-departed, name/cwid `contains` (case-insensitive by
-  // the column's MariaDB collation, as in `lib/api/edit-roster.ts`). Over-fetch
-  // is unnecessary — the role/unit labels and the superuser pre-filter both run
-  // in memory over this bounded page.
+  // Candidate scholars: non-departed, name/cwid search — the query is tokenized
+  // on whitespace and AND'd (`buildScholarNameClauses`), so "First Last" matches
+  // regardless of a stored middle name; still `contains`, case-insensitive by the
+  // column's MariaDB collation. Over-fetch is unnecessary — the role/unit labels
+  // and the superuser pre-filter both run in memory over this bounded page.
   const rows = await db.read.scholar
     .findMany({
       where: {
         deletedAt: null,
-        ...(q
-          ? {
-              OR: [
-                { preferredName: { contains: q } },
-                { fullName: { contains: q } },
-                { cwid: { contains: q } },
-              ],
-            }
-          : {}),
+        ...(q ? { AND: buildScholarNameClauses(q) } : {}),
       },
       select: {
         cwid: true,

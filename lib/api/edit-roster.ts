@@ -19,6 +19,7 @@
  * loads under vitest with a fake client, matching `edit-context.ts`.
  */
 import { formatRoleCategory } from "@/lib/role-display";
+import { buildScholarNameClauses } from "@/lib/api/scholar-name-search";
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 
 /** The Prisma surface the roster query needs — a client or tx satisfies it.
@@ -88,6 +89,9 @@ const MAX_LIMIT = 200;
 
 function buildWhere(opts: EditRosterOptions): Prisma.ScholarWhereInput {
   const where: Prisma.ScholarWhereInput = { deletedAt: null };
+  // Independent OR-groups compose here so none clobbers another (the name search
+  // and the unit scope are both OR-groups AND'd together).
+  const and: Prisma.ScholarWhereInput[] = [];
 
   if (opts.status === "visible") {
     where.status = "active";
@@ -98,13 +102,7 @@ function buildWhere(opts: EditRosterOptions): Prisma.ScholarWhereInput {
   }
 
   const q = opts.query?.trim();
-  if (q) {
-    where.OR = [
-      { preferredName: { contains: q } },
-      { fullName: { contains: q } },
-      { cwid: { contains: q } },
-    ];
-  }
+  if (q) and.push(...buildScholarNameClauses(q));
 
   if (opts.roleCategory) {
     where.roleCategory = opts.roleCategory;
@@ -120,13 +118,14 @@ function buildWhere(opts: EditRosterOptions): Prisma.ScholarWhereInput {
   }
 
   if (opts.unitCodeScope) {
-    // AND'd with the search OR-group above: in-scope iff the scholar's dept or
-    // division is one the admin manages. An empty scope → `in: []` → no rows.
-    where.AND = [
-      { OR: [{ deptCode: { in: [...opts.unitCodeScope] } }, { divCode: { in: [...opts.unitCodeScope] } }] },
-    ];
+    // In-scope iff the scholar's dept or division is one the admin manages. An
+    // empty scope → `in: []` → no rows.
+    and.push({
+      OR: [{ deptCode: { in: [...opts.unitCodeScope] } }, { divCode: { in: [...opts.unitCodeScope] } }],
+    });
   }
 
+  if (and.length > 0) where.AND = and;
   return where;
 }
 
