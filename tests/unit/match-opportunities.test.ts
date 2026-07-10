@@ -185,6 +185,48 @@ describe("rankCandidates — distinct axes + sortable", () => {
   });
 });
 
+describe("rankCandidates — matchedTopics explanation chips (#1610)", () => {
+  it("emits the top contributing SHARED topics as ids+pubCounts, strongest term first", () => {
+    const vs = new Map([["a", 0.9], ["b", 0.2], ["c", 0.5]]);
+    const c = candidate({
+      topicVector: [
+        { topic_id: "a", score: 0.1 }, // term 0.09
+        { topic_id: "b", score: 0.9 }, // term 0.18 → leads
+        { topic_id: "z", score: 1 }, // not shared → excluded
+      ],
+    });
+    const ranked = rankCandidates(vs, "early", [], [c], {
+      now: NOW,
+      pubCountByTopic: new Map([["a", 7], ["b", 3]]),
+    });
+    expect(ranked[0].matchedTopics).toEqual([
+      { topicId: "b", pubCount: 3 },
+      { topicId: "a", pubCount: 7 },
+    ]);
+  });
+
+  it("caps at 3 topics and defaults pubCount to 0 when the count map is absent", () => {
+    const vs = new Map([["a", 1], ["b", 0.8], ["c", 0.6], ["d", 0.4]]);
+    const c = candidate({
+      topicVector: ["a", "b", "c", "d"].map((t) => ({ topic_id: t, score: 0.5 })),
+    });
+    const ranked = rankCandidates(vs, "early", [], [c], { now: NOW });
+    expect(ranked[0].matchedTopics.map((t) => t.topicId)).toEqual(["a", "b", "c"]);
+    expect(ranked[0].matchedTopics.every((t) => t.pubCount === 0)).toBe(true);
+  });
+
+  it("carries topic ids + counts ONLY — no per-topic score field (house rule)", () => {
+    const vs = new Map([["a", 0.9]]);
+    const ranked = rankCandidates(vs, "early", [], [candidate()], {
+      now: NOW,
+      pubCountByTopic: new Map([["a", 2]]),
+    });
+    for (const t of ranked[0].matchedTopics) {
+      expect(Object.keys(t).sort()).toEqual(["pubCount", "topicId"]);
+    }
+  });
+});
+
 describe("scholarTopicRowWeight (vector weighting §2.1/§2.4)", () => {
   it("full weight for a current first/last-author paper", () => {
     expect(scholarTopicRowWeight(2, 2026, "first", 2026)).toBeCloseTo(2);
