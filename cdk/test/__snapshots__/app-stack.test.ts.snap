@@ -772,7 +772,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_DEVELOPMENT_ALLOWLIST",
-                "Value": "",
+                "Value": "lmp2006",
               },
               {
                 "Name": "SECURITY_CSP_MODE",
@@ -4465,7 +4465,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_DEVELOPMENT_ALLOWLIST",
-                "Value": "flm4001",
+                "Value": "flm4001,lmp2006",
               },
               {
                 "Name": "SECURITY_CSP_MODE",
