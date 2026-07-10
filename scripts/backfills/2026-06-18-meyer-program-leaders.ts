@@ -1,10 +1,16 @@
 /**
  * #1117 — seed the Meyer Cancer Center program leaders.
  *
+ * SUPERSEDED — historical one-shot, already run in staging and prod (2026-07-10).
+ * Program leaders AND their leadership type (`role`: leader / COE liaison) are now
+ * managed in the editor at `/edit/center/meyer_cancer_center?attr=programs`, which
+ * is the source of truth. Re-running this script would upsert the literals below
+ * over whatever the comms office has since set in the UI — so don't, unless you are
+ * re-seeding an empty environment. Kept for provenance of the initial assignments.
+ *
  * #1105 added per-program pages; #1117 adds multi-leader support (a program may
  * be co-led) + the edit UI. This backfill loads the initial leader assignments
- * the comms office provided, into `CenterProgramLeader`. It writes NOTHING that
- * couldn't also be set through `/edit/center/meyer_cancer_center` → Programs.
+ * the comms office provided, into `CenterProgramLeader`.
  *
  * Assignments (center `meyer_cancer_center`):
  *   CB  Cancer Biology                 — Juan Cubillos-Ruiz (jur2016), Tim McGraw (temcgraw)
