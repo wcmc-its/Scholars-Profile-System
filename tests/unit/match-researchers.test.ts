@@ -8,7 +8,12 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { deriveGrantSignals, rankResearchers, type TopicResult } from "@/lib/api/match-researchers";
+import {
+  deriveGrantSignals,
+  meanTopRelevance,
+  rankResearchers,
+  type TopicResult,
+} from "@/lib/api/match-researchers";
 
 const TOPICS: TopicResult[] = [
   {
@@ -249,5 +254,36 @@ describe("deriveGrantSignals — grant-history display signals", () => {
   it("falls back to all education rows when no degree string parses as a doctorate", () => {
     const s = deriveGrantSignals({ grants: [], educations: [{ year: 2022, degree: "Residency" }] }, NOW);
     expect(s.yearsSinceDegree).toBe(4); // no doctorate → use the row we have
+  });
+});
+
+describe("meanTopRelevance (abstention signal)", () => {
+  it("averages the top-3 relevances per scholar across the top-k ranked", () => {
+    const rel = new Map<string, number[]>([
+      ["aaa", [0.9, 0.8, 0.7, 0.1]], // top-3 = 0.9,0.8,0.7 (the 0.1 is dropped)
+      ["bbb", [0.6, 0.5]], // fewer than 3 → both count
+    ]);
+    // (0.9+0.8+0.7 + 0.6+0.5) / 5 = 3.5/5
+    expect(meanTopRelevance(["aaa", "bbb"], rel)).toBeCloseTo(0.7, 6);
+  });
+
+  it("only counts the top-k scholars", () => {
+    const rel = new Map<string, number[]>([
+      ["aaa", [0.5]],
+      ["zzz", [0.0]], // outside k=1 → ignored
+    ]);
+    expect(meanTopRelevance(["aaa", "zzz"], rel, 1)).toBeCloseTo(0.5, 6);
+  });
+
+  it("returns 0 when no ranked scholar carries relevance (dead grant / empty pool)", () => {
+    expect(meanTopRelevance(["aaa"], new Map())).toBe(0);
+    expect(meanTopRelevance([], new Map([["aaa", [0.9]]]))).toBe(0);
+  });
+
+  it("separates a dead grant from a strong one at the 0.10 floor", () => {
+    const dead = new Map<string, number[]>([["a", [0.04]], ["b", [0.03]]]);
+    const strong = new Map<string, number[]>([["a", [0.6]], ["b", [0.4]]]);
+    expect(meanTopRelevance(["a", "b"], dead)).toBeLessThan(0.1);
+    expect(meanTopRelevance(["a", "b"], strong)).toBeGreaterThan(0.1);
   });
 });

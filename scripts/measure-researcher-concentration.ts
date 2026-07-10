@@ -96,7 +96,7 @@ async function main() {
       );
       let row: Row;
       try {
-        const ranked = await Promise.race([
+        const { scholars: ranked } = await Promise.race([
           rankResearchersForOpportunity(o.opportunityId, { limit: TOP_N }),
           new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout180s")), 180000)),
         ]);
