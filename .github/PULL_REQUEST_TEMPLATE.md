@@ -2,6 +2,14 @@
 
 <!-- 1–3 bullets on what this PR changes and why. -->
 
+## Linked issues
+
+<!-- `Closes #N` when this PR fully satisfies the issue — GitHub auto-closes it on
+     merge. Use `Refs #N` ONLY for partial work, and say what remains.
+     A feature that ships dark (flag off in an env) is NOT done: use `Refs #N` and
+     keep the issue open, narrowed to the rollout step (flip/deploy/backfill).
+     Stale open-but-done issues cause duplicate work — when in doubt, `Closes`. -->
+
 ## Test plan
 
 <!-- Bulleted checklist of what was verified locally / in staging. -->
