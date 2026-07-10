@@ -19,9 +19,9 @@
  * The development group is a real Enterprise Directory group object under
  * `ou=Groups` (cn env `SCHOLARS_DEVELOPMENT_GROUP_CN`, e.g.
  * `ITS:Library:Scholars/development-role`); membership is the group's `member`
- * attribute, which lists person DNs (`uid=<cwid>,ou=people,…`). The check is one
- * subtree search under `ou=Groups`: does the named group carry this CWID's
- * person DN in `member`?
+ * attribute, which lists person DNs (`uid=<cwid>,ou=people,…`). It is a *dynamic*
+ * group, so the check is a group-DN resolve + an LDAP `compare` — see
+ * `lib/auth/ldap-group.ts` for why the single filtered search it replaced timed out.
  *
  * Node-runtime only. Reuses `lib/sources/ldap.ts` (`ldapts` — Node sockets and
  * TLS): this module, and anything importing it, must never be pulled into the
@@ -36,10 +36,7 @@
  * a developer". A directory problem can never *grant* the role.
  */
 import { cache } from "react";
-import { DEFAULT_SEARCH_BASE, openLdap } from "@/lib/sources/ldap";
-
-/** The Enterprise Directory container holding group objects. */
-const GROUPS_BASE = "ou=Groups,dc=weill,dc=cornell,dc=edu";
+import { isGroupMember } from "@/lib/auth/ldap-group";
 
 /**
  * Whether the `development` role is enabled at all (master kill switch).
@@ -49,28 +46,6 @@ const GROUPS_BASE = "ou=Groups,dc=weill,dc=cornell,dc=edu";
  */
 export function isDevelopmentEnabled(): boolean {
   return process.env.DEVELOPMENT_ENABLED === "on";
-}
-
-/**
- * Escape a value for safe interpolation into an LDAP search filter (RFC 4515).
- * The CWID comes from the validated SAML assertion, but an authorization
- * filter must not be injectable regardless. NUL — the fifth RFC 4515
- * metacharacter — cannot occur in a CWID (XML character data forbids it) and
- * is not handled here.
- */
-function escapeLdapFilterValue(value: string): string {
-  return value.replace(/[\\*()]/g, (c) => {
-    switch (c) {
-      case "\\":
-        return "\\5c";
-      case "*":
-        return "\\2a";
-      case "(":
-        return "\\28";
-      default:
-        return "\\29";
-    }
-  });
 }
 
 /**
@@ -104,12 +79,12 @@ function logCheckFailed(cwid: string, reason: string): void {
 }
 
 /**
- * Whether `cwid` is a member of the development group, by a live LDAPS search of
+ * Whether `cwid` is a member of the development group, by a live LDAPS lookup of
  * the group's `member` attribute. Never throws — every failure mode (incl. the
  * disabled kill switch) resolves to `false`.
  *
  * Wrapped in React `cache()`, keyed on `cwid` (mirroring `isSuperuser`), so a
- * given CWID is resolved at most once per server request — the LDAPS bind/search
+ * given CWID is resolved at most once per server request — the LDAPS bind/lookup
  * is deduped when the same CWID is checked by both `getEffectiveEditSession` and
  * the per-route gate within one request. Request-scoped only: it does NOT cache
  * across requests or for the session, so the verdict is re-evaluated live on
@@ -127,34 +102,5 @@ export const isDeveloper = cache(async (cwid: string): Promise<boolean> => {
   const groupCn = process.env.SCHOLARS_DEVELOPMENT_GROUP_CN;
   // Group cn not configured yet — the role is dormant, not broken.
   if (!groupCn) return false;
-
-  let client: Awaited<ReturnType<typeof openLdap>>;
-  try {
-    client = await openLdap();
-  } catch {
-    // No LDAP config, host unreachable, or bind rejected — fail closed.
-    logCheckFailed(cwid, "ldap_unavailable");
-    return false;
-  }
-
-  try {
-    const peopleBase =
-      process.env.SCHOLARS_LDAP_SEARCH_BASE ?? DEFAULT_SEARCH_BASE;
-    const userDn = `uid=${escapeLdapFilterValue(cwid)},${peopleBase}`;
-    // One subtree search under ou=Groups: the named group, carrying this
-    // person's DN in `member`. `cn` only — existence is the whole answer.
-    const filter = `(&(cn=${escapeLdapFilterValue(groupCn)})(member=${userDn}))`;
-    const { searchEntries } = await client.search(GROUPS_BASE, {
-      scope: "sub",
-      filter,
-      attributes: ["cn"],
-    });
-    return searchEntries.length > 0;
-  } catch {
-    // Search timed out or the directory returned an error — fail closed.
-    logCheckFailed(cwid, "ldap_search_failed");
-    return false;
-  } finally {
-    await client.unbind().catch(() => {});
-  }
+  return isGroupMember(groupCn, cwid, (reason) => logCheckFailed(cwid, reason));
 });

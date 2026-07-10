@@ -78,28 +78,38 @@ type SearchImpl = (
   base: string,
   options: { scope: string; filter: string; attributes: string[] },
 ) => Promise<{ searchEntries: unknown[] }>;
+type CompareImpl = (dn: string, attr: string, value: string) => Promise<boolean>;
 
-function fakeClient(search: SearchImpl) {
-  return { search: vi.fn(search), unbind: vi.fn(async (): Promise<void> => {}) };
+function fakeClient(search: SearchImpl, compare: CompareImpl) {
+  return {
+    search: vi.fn(search),
+    compare: vi.fn(compare),
+    unbind: vi.fn(async (): Promise<void> => {}),
+  };
 }
 
 function asClient(c: ReturnType<typeof fakeClient>) {
   return c as unknown as Awaited<ReturnType<typeof openLdap>>;
 }
 
+const GROUP_DN = `cn=${GROUP_CN},ou=application security,ou=Groups,dc=weill,dc=cornell,dc=edu`;
+
 /**
  * Script `isSuperuser` so it reports `true` for exactly the CWIDs in
- * `superusers`. The search filter embeds the member DN `uid=<cwid>,…`, so the
- * double parses the cwid back out of the filter to decide membership.
+ * `superusers`. Mirrors the real two-step protocol: the search resolves the group
+ * DN by `cn` (it carries no cwid), and the `compare` assertion value is the member
+ * DN `uid=<cwid>,…`, so the double parses the cwid out of *that* to decide.
  */
 function ldapReturnsSuperusersFor(superusers: Set<string>) {
   mockedOpenLdap.mockResolvedValue(
     asClient(
-      fakeClient(async (_base, { filter }) => {
-        const m = filter.match(/member=uid=([^,]+),/);
-        const cwid = m?.[1] ?? "";
-        return { searchEntries: superusers.has(cwid) ? [{ cn: GROUP_CN }] : [] };
-      }),
+      fakeClient(
+        async () => ({ searchEntries: [{ cn: GROUP_CN, dn: GROUP_DN }] }),
+        async (_dn, _attr, value) => {
+          const cwid = value.match(/^uid=([^,]+),/)?.[1] ?? "";
+          return superusers.has(cwid);
+        },
+      ),
     ),
   );
 }
