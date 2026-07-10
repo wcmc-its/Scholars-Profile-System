@@ -3,8 +3,11 @@
  *
  * Covers (1) the `SELF_EDIT_GRANT_RECS` flag, (2) the rail-gating rule in
  * `visibleAttrKeys` (self/superuser only, flag-gated — mirrors the coi-gap /
- * highlights gating), and (3) the `GrantRecsCard` render states (results with
- * distinct per-axis meters, empty, error) + the sort re-query.
+ * highlights gating), and (3) the `GrantRecsCard` render states: explanation
+ * chips + qualitative fit tier (raw blend never renders, #1608/#1610), the
+ * UTC-rendered deadline, header count honesty, urgency toning, loading/error
+ * roles, per-axis meters demoted into Details, empty, error, and the sort
+ * re-query (browser-cacheable — no `no-store`).
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
@@ -23,6 +26,10 @@ const OPP = {
   defaultScore: 1.05,
   mechanism: "R01",
   awardCeiling: 500_000,
+  matchedTopics: [
+    { topicId: "t-informatics", label: "Clinical informatics", pubCount: 12 },
+    { topicId: "t-nlp", label: "Clinical natural language processing", pubCount: 1 },
+  ],
 };
 
 const DETAIL = {
@@ -87,26 +94,79 @@ describe("GrantRecsCard", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => vi.unstubAllGlobals());
 
-  it("renders ranked opportunities with inline facts, distinct per-axis meters + sort chips", async () => {
+  it("renders ranked opportunities: explanation chips + fit tier + UTC deadline (never the raw blend)", async () => {
     vi.stubGlobal("fetch", routedFetch([OPP]));
     render(<GrantRecsCard cwid="thc2015" />);
+    // loading state announces itself to assistive tech (#1608)
+    expect(screen.getByRole("status")).toBeTruthy();
 
     expect(await screen.findByText("Biomedical Informatics Research")).toBeTruthy();
-    expect(screen.getByText("1.05")).toBeTruthy(); // default-blend fit
-    // inline at-a-glance facts: mechanism + award ceiling on the header line
+    // #1608: due dates are midnight-UTC instants — a local format in
+    // US-Eastern would render "Due Jul 31, 2026" for this stamp.
+    expect(screen.getByText(/Due Aug 1, 2026/)).toBeTruthy();
+    // #1608: the raw internal blend never renders; the qualitative tier does.
+    expect(screen.queryByText("1.05")).toBeNull();
+    expect(screen.getByText("Strong match")).toBeTruthy();
+    // #1610: explanation chips lead — topic label + pub count (singular pluralizes)
+    expect(
+      screen.getByText("Matches your work on Clinical informatics (12 pubs)"),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Matches your work on Clinical natural language processing (1 pub)"),
+    ).toBeTruthy();
+    // inline at-a-glance facts: mechanism + award ceiling on the facts line
     expect(screen.getByText(/R01/)).toBeTruthy();
     expect(screen.getByText(/up to \$500K/)).toBeTruthy();
-    // distinct axes are surfaced as labelled meters
-    for (const axis of ["topic", "stage", "mesh", "deadline"]) {
-      expect(screen.getByText(axis)).toBeTruthy();
-    }
+    // header count honesty: one result ≠ a full page → "1 recommended"
+    expect(screen.getByText("1 recommended")).toBeTruthy();
+    // the per-axis meters are demoted into the Details disclosure (#1610)
+    expect(screen.queryAllByRole("meter")).toHaveLength(0);
+    expect(screen.queryByText("topic")).toBeNull();
     // sort chips re-query
     expect(screen.getByText("Fit")).toBeTruthy();
     expect(screen.getByText("Deadline")).toBeTruthy();
     expect(screen.getByText("Stage")).toBeTruthy();
   });
 
-  it("lazily loads the detail route on expand: synopsis, award count, and a link out", async () => {
+  it("labels the header 'Top N' when the response fills the requested limit", async () => {
+    const page = Array.from({ length: 25 }, (_, i) => ({ ...OPP, opportunityId: `DEMO-${i}` }));
+    vi.stubGlobal("fetch", routedFetch(page));
+    render(<GrantRecsCard cwid="thc2015" />);
+    expect(await screen.findByText("Top 25")).toBeTruthy();
+    expect(screen.queryByText(/recommended$/)).toBeNull();
+  });
+
+  it("labels a forecasted item without a date 'Forecasted · date TBD', not rolling (#1608)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch([
+        { ...OPP, opportunityId: "F1", dueDate: null, status: "forecasted" },
+        { ...OPP, opportunityId: "C1", dueDate: null, status: "continuous" },
+      ]),
+    );
+    render(<GrantRecsCard cwid="thc2015" />);
+    expect(await screen.findByText("Forecasted · date TBD")).toBeTruthy();
+    expect(screen.getByText("Rolling · continuous")).toBeTruthy();
+  });
+
+  it("tones a ≤30-day deadline amber; far-out deadlines stay plain (#1608)", async () => {
+    const day = 86_400_000;
+    const soon = new Date(Date.now() + 10 * day).toISOString().slice(0, 10);
+    const far = new Date(Date.now() + 90 * day).toISOString().slice(0, 10);
+
+    vi.stubGlobal("fetch", routedFetch([{ ...OPP, dueDate: soon }]));
+    const { unmount } = render(<GrantRecsCard cwid="thc2015" />);
+    const soonEl = await screen.findByText(/^Due /);
+    expect(soonEl.className).toContain("text-amber-700");
+    unmount();
+
+    vi.stubGlobal("fetch", routedFetch([{ ...OPP, dueDate: far }]));
+    render(<GrantRecsCard cwid="thc2015" />);
+    const farEl = await screen.findByText(/^Due /);
+    expect(farEl.className).not.toContain("text-amber-700");
+  });
+
+  it("lazily loads the detail route on expand: synopsis, award count, link out + demoted meters", async () => {
     const fetchMock = routedFetch([OPP]);
     vi.stubGlobal("fetch", fetchMock);
     render(<GrantRecsCard cwid="thc2015" />);
@@ -120,9 +180,14 @@ describe("GrantRecsCard", () => {
     expect(screen.getByText(/5 awards/)).toBeTruthy();
     const link = screen.getByText("View opportunity ↗") as HTMLAnchorElement;
     expect(link.getAttribute("href")).toBe(DETAIL.sourceUrl);
+    // the four per-axis meters live in Details now, as real a11y meters (#1608/#1610)
+    expect(screen.getAllByRole("meter")).toHaveLength(4);
+    for (const axis of ["topic", "stage", "mesh", "deadline"]) {
+      expect(screen.getByText(axis)).toBeTruthy();
+    }
   });
 
-  it("re-fetches with the chosen sort when a chip is clicked", async () => {
+  it("re-fetches with the chosen sort — browser-cacheable (no cache:'no-store' on the list)", async () => {
     const fetchMock = vi.fn().mockResolvedValue(okJson({ results: [OPP] }));
     vi.stubGlobal("fetch", fetchMock);
     render(<GrantRecsCard cwid="thc2015" />);
@@ -132,6 +197,13 @@ describe("GrantRecsCard", () => {
     await waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes("sort=deadline"))).toBe(true),
     );
+    // #1608: chip toggles ride the route's max-age=300 browser cache — the
+    // list fetch must not opt out with `no-store`.
+    const listCalls = fetchMock.mock.calls.filter(([u]) => String(u).includes("/opportunities?"));
+    expect(listCalls.length).toBeGreaterThan(0);
+    for (const [, init] of listCalls) {
+      expect((init as RequestInit | undefined)?.cache).toBeUndefined();
+    }
   });
 
   it("renders an empty state when there are no matches (never an empty heading flash for the owner)", async () => {
@@ -140,9 +212,10 @@ describe("GrantRecsCard", () => {
     expect(await screen.findByText(/No matching opportunities yet/i)).toBeTruthy();
   });
 
-  it("renders an error state when the route fails", async () => {
+  it("renders an error state (role=alert) when the route fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 } as unknown as Response));
     render(<GrantRecsCard cwid="thc2015" />);
     expect(await screen.findByText(/unavailable right now/i)).toBeTruthy();
+    expect(screen.getByRole("alert")).toBeTruthy();
   });
 });

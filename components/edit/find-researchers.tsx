@@ -35,6 +35,7 @@ import {
   buildResearcherCsv,
   careerStageLabel,
   dueUrgency,
+  formatDue,
   fundingStatusLabel,
   researcherBlurb,
   stageFit,
@@ -142,20 +143,6 @@ const SOURCE_LABELS: Record<string, string> = {
 function sourceLabel(source: string | null): string | null {
   if (!source) return null;
   return SOURCE_LABELS[source] ?? source.replace(/_/g, " ");
-}
-
-function formatDue(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  // Date-only DB columns arrive as midnight UTC; format in UTC so the day
-  // doesn't shift back one in US-Eastern.
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
 }
 
 function formatMoney(n: number | null): string | null {

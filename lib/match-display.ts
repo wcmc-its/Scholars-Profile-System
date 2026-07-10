@@ -1,7 +1,8 @@
 /**
- * Display formatters for the reverse funding matcher ("Researchers for this
- * opportunity"). Pure and client-safe (no db / no server imports) so the row
- * component can call them directly.
+ * Display formatters for the funding-matcher surfaces (the reverse
+ * "Researchers for this opportunity" admin tool and the scholar-facing
+ * "Grants for me" card). Pure and client-safe (no db / no server imports) so
+ * the row components can call them directly.
  *
  * The calibration constants are best-guess defaults read off the target mockup.
  * They're the most tunable thing here — revisit once we've eyeballed real score
@@ -22,6 +23,27 @@ export function topicFitScores(rawTopicFits: number[]): number[] {
   const max = Math.max(0, ...rawTopicFits);
   if (max <= 0) return rawTopicFits.map(() => 0);
   return rawTopicFits.map((v) => Math.round((100 * v) / max));
+}
+
+// Relative-fit tier cutoffs (share of the strongest defaultScore in the set).
+// ponytail: eyeballed thirds-ish; tune once curators review real blends.
+const FIT_STRONG = 0.75;
+const FIT_GOOD = 0.45;
+
+export type FitTierLabel = "Strong match" | "Good match" | "Possible match";
+
+/**
+ * Qualitative fit tier for the scholar card. `defaultScore` is an unbounded
+ * internal blend (house rule: ranking math never renders), so — like
+ * `topicFitScores` above — bucket RELATIVE to the strongest match in the
+ * returned set instead of surfacing the raw number.
+ */
+export function fitTier(score: number, maxScore: number): FitTierLabel {
+  if (maxScore <= 0 || !(score > 0)) return "Possible match";
+  const rel = score / maxScore;
+  if (rel >= FIT_STRONG) return "Strong match";
+  if (rel >= FIT_GOOD) return "Good match";
+  return "Possible match";
 }
 
 export type StageTone = "strong" | "moderate" | "weak" | "none";
@@ -112,6 +134,23 @@ export function fundingStatusLabel(status: FundingStatus | null | undefined): st
 const DAY_MS = 86_400_000;
 /** Due dates inside this window get the "soon" urgency tone. */
 const DUE_SOON_MS = 30 * DAY_MS;
+
+/**
+ * "Jun 12, 2026" from an ISO due-date stamp; null when absent/unparseable.
+ * Date-only DB columns arrive as midnight UTC; format in UTC so the day
+ * doesn't shift back one in US-Eastern.
+ */
+export function formatDue(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
 
 export type DueUrgency = "past" | "soon" | null;
 

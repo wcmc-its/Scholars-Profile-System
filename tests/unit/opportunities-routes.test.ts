@@ -67,6 +67,34 @@ describe("GET /api/scholars/[cwid]/opportunities (forward, public)", () => {
     expect(matchOpportunitiesForScholar).toHaveBeenCalledWith("abc1234", expect.objectContaining({ sort: "deadline" }));
   });
 
+  it("resolves matchedTopics chip labels — ids+labels+pubCounts only, never scores (#1610)", async () => {
+    matchOpportunitiesForScholar.mockResolvedValue([
+      {
+        opportunityId: "g:1",
+        axes: { topicAffinity: 0.9, stageAppeal: 0.8, meshOverlap: 0, deadlineProximity: 1 },
+        defaultScore: 1.6,
+        matchedTopics: [
+          { topicId: "t1", pubCount: 4 },
+          { topicId: "t2", pubCount: 2 },
+        ],
+      },
+    ]);
+    topicFindMany.mockResolvedValue([{ id: "t1", label: "Topic One" }]);
+    const resp = await forwardGET(req("/api/scholars/abc1234/opportunities"), {
+      params: p({ cwid: "abc1234" }),
+    });
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.results[0].matchedTopics).toEqual([
+      { topicId: "t1", pubCount: 4, label: "Topic One" },
+      { topicId: "t2", pubCount: 2, label: "t2" }, // unknown id → label falls back to the id
+    ]);
+    // Contract: the chips never carry per-topic ranking math.
+    for (const t of body.results[0].matchedTopics) {
+      expect(Object.keys(t).sort()).toEqual(["label", "pubCount", "topicId"]);
+    }
+  });
+
   it("400s on an invalid sort", async () => {
     const resp = await forwardGET(req("/api/scholars/abc1234/opportunities?sort=bogus"), { params: p({ cwid: "abc1234" }) });
     expect(resp.status).toBe(400);

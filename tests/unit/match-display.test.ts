@@ -4,6 +4,8 @@ import {
   buildResearcherCsv,
   careerStageLabel,
   dueUrgency,
+  fitTier,
+  formatDue,
   fundingStatusLabel,
   researcherBlurb,
   stageFit,
@@ -17,6 +19,33 @@ describe("topicFitScores", () => {
   it("returns zeros when there is no signal", () => {
     expect(topicFitScores([0, 0])).toEqual([0, 0]);
     expect(topicFitScores([])).toEqual([]);
+  });
+});
+
+describe("fitTier", () => {
+  it("buckets relative to the strongest match in the set", () => {
+    expect(fitTier(1.05, 1.05)).toBe("Strong match");
+    expect(fitTier(0.8, 1.0)).toBe("Strong match");
+    expect(fitTier(0.5, 1.0)).toBe("Good match");
+    expect(fitTier(0.2, 1.0)).toBe("Possible match");
+  });
+  it("never divides by zero / never renders a number", () => {
+    expect(fitTier(0, 0)).toBe("Possible match");
+    expect(fitTier(0.5, 0)).toBe("Possible match");
+    expect(fitTier(0, 1)).toBe("Possible match");
+  });
+});
+
+describe("formatDue", () => {
+  it("formats midnight-UTC date stamps in UTC (no US-Eastern day shift)", () => {
+    // A date-only column arrives as midnight UTC; a local format in
+    // US-Eastern would render the PREVIOUS day (Aug 31 for Sep 1).
+    expect(formatDue("2026-09-01")).toBe("Sep 1, 2026");
+    expect(formatDue("2026-09-01T00:00:00.000Z")).toBe("Sep 1, 2026");
+  });
+  it("is null for absent or unparseable input", () => {
+    expect(formatDue(null)).toBeNull();
+    expect(formatDue("not-a-date")).toBeNull();
   });
 });
 
