@@ -1127,18 +1127,34 @@ function projectDirectoryPerson(entry: Record<string, unknown>): DirectoryPerson
 }
 
 /**
- * Search the directory by name fragment. Builds a substring filter across
- * `givenName`, `sn`, and `displayName`; caps the result at `limit` (default
- * 20). The fragment is RFC-4515-escaped before the wildcards are added so a
- * `*` typed by the user is literal, not an injection.
+ * Build the RFC-4515 directory name-search filter for a typed query. The query
+ * is split on whitespace and the tokens are AND-ed; each token is matched
+ * (substring) against `givenName` / `sn` / `displayName` and (exact) against
+ * `weillCornellEduCWID`. AND-ing the tokens is what makes a "First Last" query
+ * resolve a `displayName` stored "First MI Last" — "Curtis Cole" matches
+ * "Curtis L Cole" because the middle initial no longer sits between the two
+ * literal substrings — and shrinks the result set so the caller's cap stops
+ * hiding the intended person. The CWID clause lets a bare CWID ("ccole")
+ * resolve too. Each token is escaped before wildcards are added, so a `*` the
+ * user types is literal, not an injection.
+ */
+export function buildDirectoryNameFilter(q: string): string {
+  const tokens = q.trim().split(/\s+/).filter(Boolean).map(escapeLdapFilter);
+  const perToken = (t: string) =>
+    `(|(givenName=*${t}*)(sn=*${t}*)(displayName=*${t}*)(weillCornellEduCWID=${t}))`;
+  return `(&(objectClass=eduPerson)${tokens.map(perToken).join("")})`;
+}
+
+/**
+ * Search the directory by name. See {@link buildDirectoryNameFilter} for the
+ * token/attribute matching; caps the result at `limit` (default 20).
  */
 export async function searchDirectoryPeopleByName(
   q: string,
   limit = 20,
 ): Promise<DirectoryPerson[]> {
-  const frag = escapeLdapFilter(q);
   const searchBase = process.env.SCHOLARS_LDAP_SEARCH_BASE ?? DEFAULT_SEARCH_BASE;
-  const filter = `(&(objectClass=eduPerson)(|(givenName=*${frag}*)(sn=*${frag}*)(displayName=*${frag}*)))`;
+  const filter = buildDirectoryNameFilter(q);
   const client = await openLdap();
   try {
     const { searchEntries } = await client.search(searchBase, {
