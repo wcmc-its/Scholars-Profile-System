@@ -96,6 +96,97 @@ function stripTags(s: string): string {
 }
 
 /**
+ * Drop C0/C7F control bytes, keeping the newlines we join bullets with. A stray
+ * NUL once made git treat a source file as binary (#1602); the same byte must
+ * never reach the DB or a public profile either. \x09/\x0a/\x0d are already
+ * collapsed to spaces by `stripTags` within each item, so the only newline that
+ * survives to here is the one we insert between bullets — preserve it.
+ */
+function stripControl(s: string): string {
+  return s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
+}
+
+/** Index of the first match of `re` in `s`, or `s.length` when it never matches. */
+function firstIndex(s: string, re: RegExp): number {
+  const m = re.exec(s);
+  return m ? m.index : s.length;
+}
+
+const OVERVIEW_MAX = 8000;
+
+/**
+ * The page's "Technology Overview" section as plain text, plus whether it lists
+ * a "PoC Data" bullet. Pure — exported for tests.
+ *
+ * Two markup shapes, both anchored on `<strong>Technology Overview</strong>`:
+ * bullet form (134 of 260 harvested pages) follows the header with a `<ul>`
+ * whose `<li>` items are the overview; prose form (23) follows it with `<p>` (or
+ * `<div>`) paragraphs. Bullets are joined one per line, labels ("The
+ * Technology:") kept inline as CTL wrote them, so the profile can render the
+ * block with `whitespace-pre-line`.
+ *
+ * Scoped to the page BODY: the literal string "Technology Overview" also sits in
+ * `<meta name="description">` on 103 pages that carry no section, so a body-wide
+ * text match would fabricate an overview for ~40% of the portfolio.
+ *
+ * ponytail: regex over Drupal HTML, the same tax the rest of this file pays. The
+ * overview is bounded by the next section header (a `<p>`/`<div>`-wrapped
+ * `<strong>`, e.g. "Technology Applications"; an `<h3 class="pane-title">` pane
+ * header, e.g. "Publications") or a figure; prose additionally stops at the first
+ * `<ul>`, which on these pages is a trailing citation list, never overview text.
+ * If CTL ships a structured export, delete this.
+ */
+export function parseOverview(html: string): { overview: string | null; hasPocData: boolean } {
+  const headEnd = html.indexOf("</head>");
+  const body = headEnd >= 0 ? html.slice(headEnd + "</head>".length) : html;
+
+  const anchor = /<strong>\s*Technology Overview\s*<\/strong>/i.exec(body);
+  if (!anchor) return { overview: null, hasPocData: false };
+
+  // Drop the header element's own closing tag (`</p>` or `</div>`).
+  const rest = body
+    .slice(anchor.index + anchor[0].length)
+    .replace(/^\s*<\/(?:p|div)>/i, "");
+
+  // A `<p>`/`<div>`-wrapped `<strong>`, a figure, or CTL's `<h3 class="pane-title">`
+  // pane header starts the next section and ends the overview. `<li><strong>…`
+  // bullets are NOT `<p>`/`<div>`, so this never cuts the overview short at "The
+  // Technology:" or "PoC Data:". The pane-title arm matters for prose pages whose
+  // next section (Publications, Resources, Intellectual Property) is an `<h3>`
+  // followed by paragraphs, not a `<p><strong>` — without it the prose region ran
+  // to a later citation `<ul>` and swallowed those sections' text.
+  const headerEnd = firstIndex(
+    rest,
+    /<(?:p|div)\b[^>]*>\s*(?:<br\s*\/?>\s*)*<strong>|<h3\b[^>]*class="[^"]*pane-title|<img\b/i,
+  );
+
+  let text: string;
+  let hasPocData = false;
+  if (/^\s*(?:<br\s*\/?>\s*)*<ul\b/i.test(rest)) {
+    // Bullet form: every `<li>` from the run of `<ul>` blocks before the header.
+    const region = rest.slice(0, headerEnd);
+    const bullets: string[] = [];
+    for (const m of region.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
+      const t = stripTags(m[1]);
+      if (t) bullets.push(t);
+    }
+    text = bullets.join("\n");
+    hasPocData = /<li\b[^>]*>\s*<strong>\s*PoC Data\s*:/i.test(region);
+  } else {
+    // Prose form: bounded by the header OR the first `<ul>` (a citation list),
+    // whichever comes first. Flowing paragraphs, collapsed to one blob.
+    const region = rest.slice(0, Math.min(headerEnd, firstIndex(rest, /<ul\b/i)));
+    text = stripTags(region);
+  }
+
+  text = stripControl(text).trim();
+  if (!text) return { overview: null, hasPocData };
+  // Cap generously — the harvested max is ~2k, so this never truncates in
+  // practice; slice rather than reject so a future long page still yields text.
+  return { overview: text.slice(0, OVERVIEW_MAX), hasPocData };
+}
+
+/**
  * Collapse CTL's free-text patent line into one of four display labels.
  *
  * The raw text is prose, not an enum: it ranges from "PCT Application Filed" to
@@ -167,6 +258,9 @@ export function parseDetail(path: string, html: string): TechnologyRow[] {
       ]
     : [];
 
+  // The "Technology Overview" section (bullets or prose) + its "PoC Data" flag.
+  const { overview, hasPocData } = parseOverview(html);
+
   const pi = fieldBlock(html, "Principal Investigator");
   const cwids = new Set<string>();
   for (const href of pi.match(/href="([^"]+)"/g) ?? []) {
@@ -181,6 +275,8 @@ export function parseDetail(path: string, html: string): TechnologyRow[] {
     url: ORIGIN + path,
     patentStatus,
     pmids,
+    overview,
+    hasPocData,
   }));
 }
 

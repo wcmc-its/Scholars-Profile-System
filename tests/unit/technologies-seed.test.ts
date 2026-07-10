@@ -30,6 +30,8 @@ describe("parseSeed", () => {
         url: row().url,
         patentStatus: "PCT filed",
         pmids: ["34290243"],
+        overview: null,
+        hasPocData: false,
       },
     ]);
   });
@@ -110,6 +112,53 @@ describe("parseSeed", () => {
     expect(() => parseSeed(seed([row({ pmids: "34290243" })]))).toThrow(/pmids must be an array/);
   });
 
+  it("defaults a missing overview to null and hasPocData to false", () => {
+    const [parsed] = parseSeed(seed([row()]));
+    expect(parsed.overview).toBeNull();
+    expect(parsed.hasPocData).toBe(false);
+  });
+
+  it("keeps a multi-line overview and the PoC flag", () => {
+    const overview = "The Technology: A method\nPoC Data: shown in mouse models";
+    const [parsed] = parseSeed(seed([row({ overview, hasPocData: true })]));
+    expect(parsed.overview).toBe(overview);
+    expect(parsed.hasPocData).toBe(true);
+  });
+
+  // Angle brackets are legitimate in overview prose ("LC50 < 50nM") — it renders
+  // as React-escaped text, not markup, so it must NOT be rejected like reference.
+  it("accepts angle brackets in the overview", () => {
+    expect(parseSeed(seed([row({ overview: "Inhibitor with LC50 < 50nM" })]))[0].overview).toBe(
+      "Inhibitor with LC50 < 50nM",
+    );
+  });
+
+  it("rejects a non-string overview", () => {
+    expect(() => parseSeed(seed([row({ overview: 42 })]))).toThrow(/overview must be a string/);
+  });
+
+  // A NUL byte once made git treat a source file as binary (#1602); it must not
+  // reach the DB or a profile either.
+  it("rejects control characters in the overview", () => {
+    // Build the NUL at runtime — never a literal control byte in source (#1602).
+    const overview = "bad" + String.fromCharCode(0) + "byte";
+    expect(() => parseSeed(seed([row({ overview })]))).toThrow(
+      /overview carries control characters/,
+    );
+  });
+
+  it("rejects an over-length overview rather than silently storing it", () => {
+    expect(() => parseSeed(seed([row({ overview: "x".repeat(8001) })]))).toThrow(
+      /overview exceeds 8000 chars/,
+    );
+  });
+
+  it("rejects a non-boolean hasPocData", () => {
+    expect(() => parseSeed(seed([row({ hasPocData: "yes" })]))).toThrow(
+      /hasPocData must be a boolean/,
+    );
+  });
+
   it.each([
     ["a bad cwid", { cwid: "not a cwid!" }, /invalid cwid/],
     ["an empty title", { title: "   " }, /title is required/],
@@ -140,5 +189,8 @@ describe("parseSeed", () => {
     expect(rows.filter((r) => r.reference?.includes("<"))).toHaveLength(0);
     expect(rows.some((r) => r.pmids.length > 0)).toBe(true);
     expect(rows.some((r) => r.patentStatus !== null)).toBe(true);
+    // The regenerated fixture carries the new overview + PoC data.
+    expect(rows.some((r) => r.overview !== null)).toBe(true);
+    expect(rows.some((r) => r.hasPocData)).toBe(true);
   });
 });

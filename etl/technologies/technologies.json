@@ -7,7 +7,9 @@
   "patentStatus": null,
   "pmids": [
    "20026663"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "amg4017",
@@ -15,7 +17,9 @@
   "title": "Portable, Self-contained Upright PET Imaging System with Integrated Augmented Reality and Motion Tracking",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/portable-self-contained-upright-pet-imaging-system",
   "patentStatus": "Provisional filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "Technology: A portable, upright PET imaging system featuring integrated motion tracking and augmented reality capabilities, designed for seated or partially reclined imaging positions.\nA prototype system has been designed and constructed to validate the concept\nThe system features a compact upright gantry mounted on a mobile cart with an integrated foldable chair\nReal-time electromagnetic tracking enables sub-millimeter motion correction during scanning\nBuilt-in lead shielding provides radiation protection for nearby personnel\nAn integrated AR headset enhances patient engagement and comfort during procedures\nA comprehensive control center manages synchronized data acquisition and system monitoring",
+  "hasPocData": false
  },
  {
   "cwid": "amm2014",
@@ -26,7 +30,9 @@
   "pmids": [
    "32785655",
    "30024860"
-  ]
+  ],
+  "overview": "MALT1 is a protease that is part of an oncogenic complex that activates NF-κB pathways in B cell lymphomas. There are no MALT1-inhibiting drugs on the market. The Melnick lab and its collaborators have developed four lead compounds from discovery campaigns. One is a peptide-mimetic compound that irreversibly inhibits MALT1. It inhibits the growth of the OCI-Ly3 DLBL cancer cell line by decreasing proliferation and increasing apoptosis. It suppressed growth of DLBCL patient-derived xenografts ex vivo and was efficacious in vivo against DLBCL xenografted tumors in mice. It has a half-life of 4.3 hours in whole mouse blood. (D-7251) Another lead uses PROTAC chemistry, targeting both MALT1 and an E3 ubiquitin ligase, labeling MALT1 for degradation by the ubiquitin proteasome system. These have been tested in the OCI-Ly3 cell line. (D-7556) The third and fourth are allosteric inhibitors of MALT1, one a quinoline and the other a thiazolopyridine. Both are potent, with IC50 values of 10 nM and 13 nM, respectively. They have been tested on the OCI-Ly3 cell line and initial pharmacokinetics and pharmacodynamics have been evaluated in mice. (D-7602) Publications Fontán et al. \"Specific covalent inhibition of MALT1 paracaspase suppresses B cell lymphoma growth.\" J Clin Invest. 2018. Scott et al. Bioorg Med Chem Lett. 2019. Hatcher et al. \"Peptide-based covalent inhibitors of MALT1 paracaspase.\" Bioorg Med Chem Lett. 2019. Fontan et al. Blood. 2021. Xia et al. \"BCL10 mutations define distinct dependencies guiding precision therapy for DLBCL.\" Cancer Discov. 2022. Resources",
+  "hasPocData": false
  },
  {
   "cwid": "amm2014",
@@ -36,7 +42,9 @@
   "patentStatus": null,
   "pmids": [
    "35658124"
-  ]
+  ],
+  "overview": "The Technology: Use of BCL-10 as a biomarker to guide precision therapy for ABC DLBCL\nThe Discovery: Genome sequencing revealed that mutations in BCL10 are most common in ABC-DLBCLs\nBCL10 is a part of the CBM complex, which activates NF-kB signaling downstream of BCR\nBiochemical, structural, and functional analysis demonstrated that BCL10 mutations fall into two distinct classes: a)Missense mutations in the CARD domain b)Truncating mutations in the C-terminal\nPoC Data: Both BCL10 mutants with truncating and with missense mutations demonstrate resistance to BTK inhibitors\nMutants with BCL10 truncating mutations are hypersensitive to MALT1 inhibitors, whereas missense BCL10 mutants are not",
+  "hasPocData": true
  },
  {
   "cwid": "amm2014",
@@ -47,7 +55,9 @@
   "pmids": [
    "27482887",
    "23911289"
-  ]
+  ],
+  "overview": "The Technology: Small molecule inhibitor of BCL6 as a therapeutic candidate for B-cell lymphomas and other BCL6-dependent cancers\nIn silico functional group mapping led to the design of improved small molecules which bind BCL6, disrupt formation of BCL6 repression complex, and induce de-repression of BCL6 target genes\nFX1 is highly specific, 10x more potent than endogenous co-repressors, and 100x more potent than the previous generation of BCL6 inhibitors\nFX1 enhances response to doxorubicin, including in chemotherapy-resistant ABC-DLBCLs\nPoC Data: Low, non-toxic doses of FX1 induced regression in 95% of established tumors in mice bearing GCB-DLBCL xenografts\nFX1 suppressed ABC-DLBCL cells in vitro and in vivo, as well as primary human ABC-DLBCL specimens ex vivo",
+  "hasPocData": true
  },
  {
   "cwid": "anr2783",
@@ -57,7 +67,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "31876090"
-  ]
+  ],
+  "overview": "The Technology: a novel, personalized device for voice restoration using machine learning applied to surface EMG (sEMG) signal\nThe inventors have created a tailored device to conform to a patient's unique anatomy with sensors on the articulatory muscles of the face and neck\nThe device detects the sEMG signals and applies a predictive machine-learning model to translate silent speech into words\nPoC Data: The inventors collected data using this device from a laryngectomy patient silently articulating ‘Tedd’ and ‘Ed’\nThe team trained a predictive model for automatic speech recognition of these words, which had an 86.4% word recognition accuracy",
+  "hasPocData": true
  },
  {
   "cwid": "apr2003",
@@ -65,7 +77,9 @@
   "title": "Algorithm Composition for Characterizing Small Pulmonary Nodule from CT Scans",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/algorithm-composition-characterizing-small",
   "patentStatus": "Issued",
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "babette",
@@ -78,7 +92,9 @@
    "17609686",
    "17586731",
    "16141364"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "barany",
@@ -86,7 +102,9 @@
   "title": "Methods, Devices and System for DNA Sequencing and Molecular Diagnostics",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/methods-devices-and-system-dna-sequencing-and",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "bjk2007",
@@ -94,7 +112,9 @@
   "title": "Anti-PfASF1 Polyclonal Antibody",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-pfasf1-polyclonal-antibody",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "bjk2007",
@@ -102,7 +122,9 @@
   "title": "Anti-PfPMT Polyclonal Antibody",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-pfpmt-polyclonal-antibody",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "bjk2007",
@@ -110,7 +132,9 @@
   "title": "Anti-PfSAHH Polyclonal Antibody",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/anti-pfsahh-polyclonal-antibody",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "bjk2007",
@@ -120,7 +144,9 @@
   "patentStatus": null,
   "pmids": [
    "37068249"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "blhempst",
@@ -130,7 +156,9 @@
   "patentStatus": null,
   "pmids": [
    "16855103"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "bom2008",
@@ -138,7 +166,9 @@
   "title": "Mixed Reality Image Guidance for Cardiac Interventional Surgery",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/mixed-reality-image-guidance-cardiac-interventional",
   "patentStatus": "Application filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: A novel, mixed reality guidance system which combines holographic representations of the heart and tracking of catheter position in real time\nA 3D, holographic representation of the heart is generated using preoperative cardiac CT images\nThe catheter is tracked via intra-operative fluoroscopy, and machine learning is used to locate the depth of catheter in 3D space from a single angled view\nThe position of the tracker and 3D image of the heart are co-registered and transferred into an MR image in real-time, visualized by see-through video glasses\nPoC Data: Optimized machine learning models for locating the catheter have demonstrated a Euclidian distance error of <2 mm for certain test data sets",
+  "hasPocData": true
  },
  {
   "cwid": "bom2008",
@@ -146,7 +176,9 @@
   "title": "Real-Time Roll Angle Prediction for Device Tracking in Six Degrees of Freedom",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/real-time-roll-angle-prediction-device-tracking-six",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: A machine learning model for roll angle prediction using distinct coordinate points along an object's length paired with imaging or sensing data\nThe model was trained using 360 paired bi-plane fluoroscopic images obtained during mock procedures in a clinical catheterization lab\nPoC Data: In mock cardiac catheterization procedures, the model demonstrated a low error rate and a high degree of accuracy with:\nNormalized Mean Square Error values of ~3×10−3\nAn average error of ~1.25% with Mean Absolute Error values of ~4.5 degrees\nA standard deviation of less than 5 degrees\nThese errors are considered acceptable for practical purposes, including for surgeons carrying out cardiac catheterization procedures",
+  "hasPocData": true
  },
  {
   "cwid": "bom2008",
@@ -157,7 +189,9 @@
   "pmids": [
    "37421117",
    "33188028"
-  ]
+  ],
+  "overview": "The Technology: A method for scalable generation of soft robotic sensor arrays (SRSA) with the ability to conform to anatomical structures using a conventional laser cutting tool\nThe inventors leverage the thermal masking principle to selectively remove insulation of electronic circuits, allowing for production of SRSAs with increased flexibility\nPoC Data: Postprocessing of flex-printed circuit boards (PCBs) using this method led to increased flexibility of SRSAs based on stress strain assessments\nSRSAs successfully mapped four 3D printed left cardiac atria with an average of 85-90% conformability between the sensors and atrial surface\nSRSAs maintained mechanical integrity based on the ability of the array to withstand 100 cycles of actuation without reduction of performance",
+  "hasPocData": true
  },
  {
   "cwid": "ceintur",
@@ -167,7 +201,9 @@
   "patentStatus": "Issued",
   "pmids": [
    "19109491"
-  ]
+  ],
+  "overview": "The Technology: Methods and compositions for treating pain by administering a neurotropic recombinant adeno-associated virus (rAAV) encoding a nucleic acid inhibitor of ERK2 expression\nDiscovery: Selective inhibition of ERK2 expression in neurons of the SCDH in mice with a small interfering RNA (siRNA) protects against pain\nPoC Data: The ERK2 siRNA protected mice against mechanical allodynia and thermal hypersensitivity following the induction of peripheral inflammation in the hind paw\nFindings demonstrate that ERK2 in SCDH neurons is critical for signaling the development of pain hypersensitivity and that ERK2 inhibition can reduce or inhibit pain transmission in the CNS",
+  "hasPocData": true
  },
  {
   "cwid": "chb9074",
@@ -177,7 +213,9 @@
   "patentStatus": null,
   "pmids": [
    "26374986"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "chg4001",
@@ -187,7 +225,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "35051369"
-  ]
+  ],
+  "overview": "The Technology: Genetic manipulation pipeline to identify gene transfer methodology and build a genetic tool for nonmodel human gut commensals\nThe pipeline efficiently identified the gene transfer methods for 88 (mostly nonmodel) gut bacterial isolates and built their tool for targeted gene manipulation\nVia a multifactorial optimization of their conjugation/transformation conditions, gene transfer methods were identified for 38 nonmodel gut Clostridia, with genetic tools successfully implemented in 27 of the Clostridia strains\nPoC Data: Using the platform, the team demonstrated that deletion of a commensal gene for bile acid synthesis (bai) in a Clostridia commensal uncovered a role for the bai gene in mediating colon inflammation and host gut microbiome composition",
+  "hasPocData": true
  },
  {
   "cwid": "chm2042",
@@ -197,7 +237,9 @@
   "patentStatus": "Issued",
   "pmids": [
    "32133155"
-  ]
+  ],
+  "overview": "The Technology: Single cell sperm sequencing assay for offspring disease risk assessments and IVF sperm sampling procedures\nUsing the 10x Genomics Chromium platform, the inventors performed single-cell RNA sequencing on six donor sperm samples (scSperm-RNA-seq)\nPoC Data: Differences between the ASD and control samples revealed distinct expression landscapes and pathways that have potential to be used as biomarkers for sperm health or function\nASD samples exhibited enrichment of genes for mTOR signaling, which has been shown to be a potential target for autism, and eIF2 signaling, which is involved in the inhibition of CREB, a transcription factor being investigated in connection with multiple neurodegenerative disorders\nThis method could also be used to replace manual sperm analysis procedures performed as part of an infertility evaluation",
+  "hasPocData": true
  },
  {
   "cwid": "chsung",
@@ -207,7 +249,9 @@
   "patentStatus": null,
   "pmids": [
    "26786190"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "chsung",
@@ -217,7 +261,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "39043666"
-  ]
+  ],
+  "overview": "The Technology: A method for early detection of Parkinson’s Disease using fundus imaging to measure autofluorescent microglia in the retina\nThe Discovery: In a mouse model of PD, retinal microglia engulf lipofuscins from rod cells and express phospho-a-synuclein-positive inclusions and bright autofluorescence\nThese microglia can be seen via fundus autofluorescence imaging or confocal laser scanning ophthalmoscopy as bright foci\nThe emergence of autofluorescent foci temporally coincides with onset and progression of disease as well as Lewy body deposition\nPoC Data: In a mouse model of PD, diseased mice had significantly more autofluorescent foci in the eye (p<0.001) than control mice at 2 months old\nThe number of autofluorescent foci increases over time in diseased mice, matching retinal degeneration, a measure of PD disease progression",
+  "hasPocData": true
  },
  {
   "cwid": "chsung",
@@ -228,7 +274,9 @@
   "pmids": [
    "16628620",
    "20575070"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "cht2018",
@@ -236,7 +284,9 @@
   "title": "Sono Membrane Rupture Therapy",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/sono-membrane-rupture-therapy",
   "patentStatus": "Issued",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: A new type of sonoexcitable drug that can be paired with low intensity ultrasound for tumor ablation\nThe Discovery: A derivative of Rose Bengal, RB-4, was identified to have low-intensity, ultrasound-inducible cell killing capability\nRB4 appears to act as a membrane destabilizer and induces a complete loss of membrane integrity when combined with ultrasound\nPoC Data: RB4 and ultrasound in combination killed 90% of cells in a TNBC line, compared to less than 20% of cells killed by either treatment alone\nExperiments in TNBC xenograft models showed that the average size of the RB4/ultrasound treated tumors were only 20% of that of the control tumor",
+  "hasPocData": true
  },
  {
   "cwid": "chz4007",
@@ -246,7 +296,9 @@
   "patentStatus": "Provisional filed",
   "pmids": [
    "40128288"
-  ]
+  ],
+  "overview": "The Technology: A high-throughput method, termed Paired-Damage-seq, that enables simultaneous mapping of oxidative & ssDNA damage with transcriptomes at single-cell resolution\nThe \"labeling-by-repair\" approach uses DNA repair proteins to remove existing DNA damage sites, followed by incorporation of biotin-modified dUTPs at the damaged sites\nThe method combines Paired-Tag RNA sequencing with split-pool barcoding to enable high-throughput analysis of hundreds of thousands to million of cells\nPoC Data: Validated in HeLa cells with strong agreement to existing bulk methods, showing 87% correspondence with RNA-seq and 72% similarity to CLAPS-seq DNA damage profiles\nSuccessfully applied to mouse brain tissue demonstrating cell-type specific damage patterns\nDemonstrated connection between DNA damage accumulation and epigenetic information loss",
+  "hasPocData": true
  },
  {
   "cwid": "cnathan",
@@ -256,7 +308,9 @@
   "patentStatus": null,
   "pmids": [
    "17724133"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "cnathan",
@@ -267,7 +321,9 @@
   "pmids": [
    "18329613",
    "11799204"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "cnathan",
@@ -277,7 +333,9 @@
   "patentStatus": null,
   "pmids": [
    "20026663"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "col2004",
@@ -285,7 +343,9 @@
   "title": "Circuit-Guided Approach for Identifying Synergistic Drug Combinations for Treatment-Resistant Depression",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/circuit-guided-approach-identifying-synergistic",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: A therapeutic strategy targeting multiple GPCRs to achieve synergistic antidepressant effects\nThe Discovery: Ketamine’s antidepressant effects are initiated through Gi/o signaling via mu-opioid receptors within somatostatin (Sst) interneurons\nRNA-seq identified several GPCRs enriched in Sst+ interneurons after chronic unpredictable stress (CUS)\nThe inventors developed a drug cocktail that synergistically targets three Sst+ interneuron-enriched GPCRs\nPoC Data: The drug cocktail produced rapid antidepressant effects within 60 minutes that persisted for at least 24 hours in stress-treated mice\nThe drug cocktail demonstrated superior safety compared to ketamine, showing no impairment in motor coordination, normal locomotion, and anxiolytic effects",
+  "hasPocData": true
  },
  {
   "cwid": "col2004",
@@ -295,7 +355,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "27918562"
-  ]
+  ],
+  "overview": "The Technology: Diagnostic biomarkers for depression biotypes based on whole-brain patterns of dysfunctional connectivity evaluated by functional magnetic resonance imaging (fMRI)\nThe Discovery: Using fMRI in a large multisite sample (n = 1,188), the inventors demonstrated that patients may be divided into four distinct subtypes defined by patterns of dysfunctional connectivity in limbic and frontostriatal networks\nPoC Data: Clustering patients on this basis generated diagnostic biomarkers with high sensitivity and specificity (>80%) for depression subtypes\nDepression biotypes were stable over time and were replicated in an independent cohort\nBiotypes predicted response to targeted neurostimulation therapy for medication-resistant depression more effectively than relying on clinical symptoms",
+  "hasPocData": true
  },
  {
   "cwid": "col2004",
@@ -303,7 +365,9 @@
   "title": "START - Psychiatric Symptom Tracker and Resources for Treatment",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/start-psychiatric-symptom-tracker-and-resources",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: An efficient, easy-to-use online tool that objectively measures mood, anxiety, and trauma symptoms, provides immediate feedback to participants, allows tracking mental health over time, and connects users with existing mental health resources\nThe START tool was developed using novel machine learning methods and a large dataset of fMRI scans of >1,200 patients with mood and anxiety disorders\nSelf-reported clinical symptoms are denoised using a proprietary method and projected into a low-dimensional space constrained by brain biology, producing quantitative scores reliably quantifying mood-related brain circuit functions\nPoC Data: In a pilot study, implementation of START led to a significant increase (>2x) in utilization of urgent counseling services, leading to numerous referrals",
+  "hasPocData": true
  },
  {
   "cwid": "daa2028",
@@ -313,7 +377,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "31645720"
-  ]
+  ],
+  "overview": "The Technology: Microbiome-based therapies with the potential to prevent and treat numerous neurological and behavioral disorders\nDiscovery: Germ-free mice develop significantly altered neuronal activity and behaviors, particularly in fear extinction learning\nSelective reintroduction of the microbiota restored behavioral deficits in adult mice\nSeveral microbiome-derived metabolites were shown to be significantly down-regulated in germ-free mice\nMay be particularly relevant for individuals at risk of developing altered microbiota",
+  "hasPocData": false
  },
  {
   "cwid": "daa2028",
@@ -323,7 +389,9 @@
   "patentStatus": null,
   "pmids": [
    "36323781"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "dal3005",
@@ -331,7 +399,9 @@
   "title": "An Organotypic Tumor Microenvironment (oTME) Model for High-throughput Discovery of Anti-cancer Therapeutics",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/organotypic-tumor-microenvironment-otme-model-high",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": "The development and growth of solid tumors relies on their surrounding tumor microenvironment (TME), which consists of several types of non-malignant cells. One of these cell types, named tumor-associated macrophages (TAMs), are of great interest to biomedical studies because they are critical to enhance proliferation, angiogenesis, and immune evasion of tumor cells. While the immunosuppressive TAMs are considered a highly promising therapeutic target for various solid tumors, researchers must rely on systems that are either non-scalable (e.g., mouse models) or incapable of accurately recapitulating the TME in patients (e.g., in vitro cell culture) when screening for drugs and drug targets. As such, there is a need for research tools that accurately model the TME to accelerate the discovery of therapeutics targeting the pro-tumorigenic functions of TAMs. This technology provides an organotypic TME (oTME) model with remarkable scalability and a high resemblance to the TME in patients. The oTME is an ex vivo system derived from murine mammary tumors by integrating the tumor cells with the TME components (e.g., stromal cells, immune cells including T cells, NK cells and macrophages) from the same tumor, allowing for the maintenance of the intercellular interactions between tumor cells and other cells. Therefore, the oTME can recapitulate the human TME in vivo with high fidelity. Moreover, unlike conventional in vitro cell cultures, the oTME is exceptionally stable in culture (>2 month), scalable, self-sustained, with minimal requirement for the addition of growth factors or basement membrane proteins, which makes it suitable for high-throughput screening of TME immune-targeting therapeutics. In a proof-of-concept study, the inventors successfully identified novel anti-cancer drug targets and drug candidates that can revert TAMs to immuno-reactive state, block TAM proliferation and significantly inhibit tumor growth.",
+  "hasPocData": false
  },
  {
   "cwid": "dal3005",
@@ -341,7 +411,9 @@
   "patentStatus": "Provisional filed",
   "pmids": [
    "39803441"
-  ]
+  ],
+  "overview": "The Technology: A sequencing method (DnD-seq) that combines nanobody-directed targeting with controlled DNA deamination to record protein-DNA binding events at single-cell resolution\nThe technology utilizes an engineered split DddA enzyme with nanobody targeting enables controlled, protein-specific DNA modification that permanently marks binding sites\nThe system remains inactive until deliberately activated, ensuring specific recording of protein-DNA interactions\nPoC Data: Demonstrated high specificity with clear identification of transcription factor footprints and concordance with ChIP-seq reference data\nDemonstrated CTCF profiling in primary human CD8 T cells, revealing how IDH2 mutations alter CTCF binding patterns and chromatin organization across different cell types, validated by genotype-specific analysis",
+  "hasPocData": true
  },
  {
   "cwid": "dal3005",
@@ -349,7 +421,9 @@
   "title": "GoTChA: Genotyping of Targeted loci with single-cell Chromatin Accessibility",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/gotcha-genotyping-targeted-loci-single-cell",
   "patentStatus": "Provisional filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: GoTChA (Genotyping of Targeted loci with Chromatin Accessibility) is a novel high-throughput method of single-cell genotyping from genomic DNA\nGoTChA allows identification of mutant and wild type cells at the single cell resolution, independently of gene expression and genomic position\nThe comprehensive processing pipeline applies noise correction and provides accurate genotyping integrated with chromatin accessibility information\nGoTChA is compatible with other single cell technologies such as mtscATAC-seq for mitochondrial DNA genotyping and ASAP-seq for multiomic protein measurements\nPoC Data: In a PoC study, GoTChA genotyped 50–60% of cells for TP53 or JAK2 mutations with >96% accuracy\nGoTChA was also utilized to probe the therapeutic effect of ruxolitinib at the single-cell level",
+  "hasPocData": true
  },
  {
   "cwid": "dal3005",
@@ -359,7 +433,9 @@
   "patentStatus": null,
   "pmids": [
    "32483360"
-  ]
+  ],
+  "overview": "The Technology: MRDetect, a tumor-informed method for ultra-sensitive ctDNA detection using genome-wide mutational integration and an advanced error suppression framework\nMRDetect is available via non-exclusive license\nMRDetect uses average depth whole genome sequencing (WGS) to pool information across multiple sites in the genome, increasing the effective ceiling of sequencing depth\nRead-level error suppression frameworks address noise associated with lower quality sequencing metrics and read depth in single nucleotide variants (SNVs) and copy number variants (CNVs)\nPoC Data: MRDetect enables ctDNA detection in fractions as low as 10-5 with a modest sequencing depth (35x), with assay-level specificity of 95%\nPoC data has been generated in clinical plasma samples from patients with lung adenocarcinoma, colorectal cancer, and metastatic melanoma",
+  "hasPocData": true
  },
  {
   "cwid": "dal3005",
@@ -369,7 +445,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "38877116"
-  ]
+  ],
+  "overview": "The Technology: MRD-EDGE is an ultra-sensitive machine learning-guided ctDNA analysis platform for MRD detection in low tumor fraction cancers\nMRD-EDGE incorporates simultaneous profiling of single nucleotide variants (SNV) and copy number variants (CNV) to enhance ctDNA detection\nThe deep learning SNV classifier integrates properties of somatic mutations to distinguish ctDNA from sequencing error, enabling ctDNA detection even in the parts per million range and below\nThe CNV module couples read-depth denoising with fragmentomics and an allelic imbalance classifier to detect ctDNA even at low aneuploidy levels\nPoC Data: MRD-EDGE enabled tracking tumor burden changes in response to immunotherapy in non-small cell lung cancer (NSCLC), ctDNA shedding in precancerous colorectal adenomas, and de novo mutation calling in melanoma, yielding clinically informative tumor fraction monitoring",
+  "hasPocData": true
  },
  {
   "cwid": "dchristi",
@@ -377,7 +455,9 @@
   "title": "Dynamic, Beat to Beat Detection and Control of Electrical Alternans",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/dynamic-beat-beat-detection-and-control-electrical",
   "patentStatus": "Issued",
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "dchristi",
@@ -387,7 +467,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "30447994"
-  ]
+  ],
+  "overview": "Cardiovascular toxicity is a leading cause of drug development failure and market withdrawal across multiple drug classes including anti-cancer, antibiotics, antidepressants, and antipsychotics. Drug safety regulations mandate cardiac testing of all drug candidates. Current platforms for preclinical cardiotoxicity screening largely rely on nonhuman models that do not faithfully recapitulate human physiology. Induced pluripotent stem cell-derived cardiomyocytes (iPSC-CMs) are a renewable source of human cardiomyocytes for preclinical studies and can be derived from target patient populations. However, iPSC-CMs exhibit low levels of the inward rectifier potassium current, leading to an immature electrophysiological phenotype and limiting their relevance to adult arrhythmogenesis. Electrode-based dynamic clamp (EDC) is used to inject current and produce more adult-like electrophysiology in iPSC-CMs, but this technology does not scale for high-throughput applications. Cornell inventors developed an optical dynamic clamp (ODC) which uses light to deliver the current necessary to induce adult-like action potential morphology in iPSC-CMs in a precise and contactless manner. Similar to EDC, ODC is able to inhibit spontaneous activity, allowing for accurate measurement of AP characteristics. These results are consistent at different frequencies and in the presence of ion-channel modulators, validating the use of ODC as a platform for high-throughput cardiotoxicity drug screening.",
+  "hasPocData": false
  },
  {
   "cwid": "dcl2001",
@@ -395,7 +477,9 @@
   "title": "Circulating Exosomes as Diagnostic/Prognostic Indicators and Therapeutic Targets of Tumor Metastasis",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/circulating-exosomes-diagnosticprognostic",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "dcl2001",
@@ -405,7 +489,9 @@
   "patentStatus": null,
   "pmids": [
    "24710597"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "dcl2001",
@@ -415,7 +501,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "31685984"
-  ]
+  ],
+  "overview": "The Technology: A method to predict likelihood of brain metastasis based on the expression of cell migration-inducing and hyaluronan-binding protein (CEMIP) on tumor exosomes\nA therapeutic antibody targeting for prevention and treatment of cancer metastasis to the brain\nThe Discovery: CEMIP is enriched in brain metastatic breast and lung tumor-derived exosomes\nTumor-secreted factors, including exosomes, can reshape distant microenvironments, such as pre-metastatic niches, in order to drive organ-specific metastasis\nCEMIP remodels the brain microenvironment by inducing inflammation in the vascular niche, which promotes brain metastasis\nDepletion of CEMIP in tumors impairs brain metastasis, disrupting invasion and tumor cell association with the brain vasculature\nPoC Data: CEMIP was found to be enriched in the exosomes from brain metastatic cells\nLoss of CEMIP in brain-tropic breast cancer cells reduced the number of brain metastatic foci by 70%\nPatients with brain metastasis had significantly higher CEMIP expression, and metastases of the brain had higher CEMIP expression than other sites\nPatients with high levels of CEMIP expression had a shorter latency period for metastasis and significantly poorer prognoses\nMice with brain-trophic metastatic breast cancer cells (BrT1) without CEMIP expression (KO) had 70% fewer metastatic foci and reduced metastatic burden in the brain 4 weeks post-injection compared to those with full CEMIP expression\nAntibodies to CEMIP have been generated in collaboration with the Tri-I TDI and tested for blocking capacity in vitro",
+  "hasPocData": true
  },
  {
   "cwid": "dcl2001",
@@ -425,7 +513,9 @@
   "patentStatus": null,
   "pmids": [
    "26524530"
-  ]
+  ],
+  "overview": "Stephen Paget first proposed the “seed-and-soil” hypothesis in 1889 that organ distribution of metastases is a non-random event. Experimental metastasis assays provided support for Paget’s organ-specific metastasis theory, but a deeper understanding of the molecular basis of organ-specific metastasis is essential for prognosing metastasis and provided potential therapeutics. Exosomes are small membrane vesicles containing functional biomolecules. Cornell researchers demonstrated that molecules present on tumor-derived exosome are “addressing” them to specific organs. The researchers revealed that distinct integrin expression patterns are associated with organotropic metastasis: exosomal integrins α6β4 and α6β1 are associated with lung metastasis while exosomal integrin αvβ5is linked to liver metastasis (Fig. 1). The researchers confirmed these findings by exosome proteomics for 28 organ-specific metastatic cell lines. The researchers also showed that tumor-derived exosomes uptaken by organ-specific cells prepares the pre-metastatic niche and activates Src phosphorylation and pro-inflammatory S100 gene expression (Fig. 1). Targeting the integrins decreases exosomal uptake, as well as lung and liver metastasis. Their clinical data also demonstrated that exosomal integrins in cancer patient plasmas correlate with and predict likely sites of metastasis. This study, published in Nature , provides potential biomarkers for prognosing metastasis and also provides potential therapeutics for the treatment and prevention of metastasis.",
+  "hasPocData": false
  },
  {
   "cwid": "dcl2001",
@@ -439,7 +529,9 @@
    "17186383",
    "17145848",
    "17197241"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "dcl2001",
@@ -449,7 +541,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "29459780"
-  ]
+  ],
+  "overview": "The Technology: The use of a newly identified class of particles, called exomeres, as biomarkers for diagnosis, prognosis, and treatment of cancer\nThe Discovery: The inventors used asymmetric field-flow fractionation techniques to identify and characterize EVPs by size\nThey identified three sub-types with distinct proteomic, N-glycan, lipid, and nucleic acid compositions\nThese classes were Exo-S, Exo-L, and a nanoparticle class called exomeres\nPoC Data: Exomeres were found to be enriched in metabolic enzymes and specific pathways, such as glycolysis and mTOR signaling, indicating that they may modify the metabolism of target cells\nExomeres were also found to contain proteins related to hypoxia, microtubule function and coagulation",
+  "hasPocData": true
  },
  {
   "cwid": "dis2003",
@@ -457,7 +551,9 @@
   "title": "Conditionally Replicating M. bovis for Treating Bladder Cancer and Tuberculosis",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/conditionally-replicating-m-bovis-treating-bladder",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: M. bovis BCG strains whose replication can be precisely controlled using a TetON/TetOFF system\nThe TetON/TetOFF system either requires a tetracycline to grow (TetOFF) or are efficiently killed in the presence of tetracyclines (TetON)\nThe inventors constructed and validated both TetON and TetOFF M. bovis strains\nPoC Data: The constructed double lysin TetON M. bovis BCG strain provided similar protection to wild-type BCG in a Mtb challenge study in mice but was rapidly eliminated in the presence of doxycycline\nSimilarly, the constructed double lysin TetOFF M. bovis BCG strain induced faster bacterial death and is rapidly eliminated from immunodeficient mice in the absence of doxycycline",
+  "hasPocData": true
  },
  {
   "cwid": "djb2001",
@@ -467,7 +563,9 @@
   "patentStatus": "Issued",
   "pmids": [
    "26639673"
-  ]
+  ],
+  "overview": "Standard magnetic resonance imaging (MRI) is a sensitive (94%) screening test for detecting breast cancer but can lack specificity (26%). To obtain a definitive diagnosis, patients undergo percutaneous biopsy and/or surgical resection of suspicious lesions. However, preparation for pathological analysis takes at least 12 hours, which limits the value to the surgeon. Subjective selection of slices by the pathologist also introduces the possibility of sampling error. This technology includes systems and methods to image resected tissue at high resolution using MR imaging. The methods include tissue preparation, a custom-built transmission/receiving coil and an MRI system to obtain ex-vivo images from tissue. Benign and malignant breast tissues and lymph nodes were imaged using this system. This technology can achieve an imaging resolution of 60 x 60 x 90 μm3, which is orders of magnitude better than conventional breast MR imaging. This process enables rapid imaging analysis, with results achieved in approximately 1 hour. As such, this technology may provide a tool for intra-operative decision-making in addition to standard pathological analysis.",
+  "hasPocData": false
  },
  {
   "cwid": "dpc2003",
@@ -477,7 +575,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "40324087"
-  ]
+  ],
+  "overview": "The Technology: \"Arousal Units\" (AU), a biomarker for quantitative assessment and monitoring of consciousness levels using EEG\nAUs are repeated, temporally discrete cortical patterns that link to behavioral and breathing changes\nThese cortical patterns consist of interactions between three spectral variables: fractional gamma, delta, and gamma power that can be sequentially identified within specific windows\nPoC Data: Arousal indices reflected arousal levels and predicted dominant motor movements in mice during recovery from hypoglycemic coma (accuracy of ~89%, sensitivity of ~75%) and brain injury (accuracy of ~ 87%, sensitivity ~76%)\nArousal indices also reflected arousal levels in human patients, including neonates and older patients emerging from anesthesia",
+  "hasPocData": true
  },
  {
   "cwid": "duw2001",
@@ -485,7 +585,9 @@
   "title": "Improved Cell Culture Media for the Derivation and Maintenance of Murine Embryonic Stem Cells",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/improved-cell-culture-media-derivation-and",
   "patentStatus": "Provisional filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: Novel serum-free cell culture media that improves genomic stability and promotes full potency in mESCs, and the mESCs that are derived using it\nThe Discovery: Lipid supplementation to 2i/LIF cell culture media results positive long term culture outcomes in mESCs\nPoC Data: This media reduces the incidence of abnormal numbers of chromosomes, preserves DNA methylation, maintains mESC developmental potential, and allows the derivation of fully potent female mESCs through preservation of X-chromosomes beyond 40 cell passages\nmESCs cultured in this media can be used to produce fertile all-ESC adults, providing a platform that is readily available for the development of specific genetic lines for R&D of various therapeutics",
+  "hasPocData": true
  },
  {
   "cwid": "ecesarm",
@@ -495,7 +597,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "28504647"
-  ]
+  ],
+  "overview": "The Technology: Identification of 6-ethylthioinosine (6-ETI) as a potent inhibitor of cancers that overexpress adenosine kinase (ADK)\n6-ETI was identified through a high throughput screen of compounds that selectively inhibit NF-κB in a KSHV-infected PEL cell line (LC50=50nM)\nThe inventors then demonstrated that 6-ETI is converted into phosphor-6-ETI by ADK, which is commonly overexpressed in several cancers\nPoC Data: 6-ETI is highly effective in both PEL and disseminated multiple myeloma (MM) xenograft mouse models, with significant reduction in tumor burden and prolonged survival\n6-ETI was also demonstrated to be effective against solid tumors that overexpress ADK, including those with resistance to 1L therapies\n6-ETI is therefore a promising lead compound for targeted treatment of ADK positive cancers",
+  "hasPocData": true
  },
  {
   "cwid": "elm4010",
@@ -505,7 +609,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "34376703"
-  ]
+  ],
+  "overview": "The Technology: The inventors have developed astretchable and autotuning RF coil array for MRI\nIn this RF coil, liquid metal is embedded in a softpolymer, which allows it to conform to a variety ofpatient shapes\nThe design of the proposed coil includes astretchable interdigital capacitor, which reducesresonance frequency shift with stretching\nPoC Data: In bench measurements, the proposedcoil had a frequency shift of only 0.4% at 27%stretch, compared to the control coil at 4%\nIn vivo, the proposed coil showed a 60% SNRincrease compared to a dedicated knee coil array",
+  "hasPocData": true
  },
  {
   "cwid": "few2001",
@@ -513,7 +619,9 @@
   "title": "EmulatRx: A Multi-Agent System for Intelligent Clinical Trial Design",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/emulatrx-multi-agent-system-intelligent-clinical",
   "patentStatus": "Provisional filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: EmulatRx is a multiagent system which allows insights to be extracted from RWD to perform target trial emulation\nEmulatRx is comprised of distinct computational nodes—a “Supervisor,” “Trialist,” “Clinician,” “Informatician,” and “Statistician”—each handling specialized tasks\nEmulatRx’s multiagent design can address common obstacles in using RWD, such as missing data, sample size limitations, and covariate imbalances\nPoC Data: In a PoC study, EmulatRx emulated a historical trial evaluating the effectiveness of corticosteroids in managing sepsis within the ICU using the MIMIC-IV database\nEmulatRx identified and relaxed eligibility criteria to maximize the sample size, addressed missing key variables, and refined potential covariates\nThe average treatment effect and hazard ratio identified were consistent with the actual RCT",
+  "hasPocData": true
  },
  {
   "cwid": "few2001",
@@ -524,7 +632,9 @@
   "pmids": [
    "36696328",
    "32970009"
-  ]
+  ],
+  "overview": "The Technology: Platform for screening patients for nerve pain using a digital 3D model of the head on which patients draw their pain\nThe platform leverages AI-based pattern recognition to automatically evaluate pain drawings to diagnose nerve pain and identify patients that are candidates for headache surgery\nA prototype of the platform has been developed and trained on 1,300 3D pain drawings\nPoC Data: The highest performing model, a multilayer perceptron (MLP) model, distinguished nerve pain from other types of head and neck pain with an AUROC of 0.879, precision of 0.943, specificity of 0.611, and sensitivity of 0.640\nAnother model, XGBoost, performed exceptionally well in detecting different types of nerve pain such Trigeminal Neuralgia (AUROC: 0.954), occipital nerve pain (AUROC: 0.928), and frontal nerve pain (AUROC: 0.930)",
+  "hasPocData": true
  },
  {
   "cwid": "fisch",
@@ -534,7 +644,9 @@
   "patentStatus": null,
   "pmids": [
    "6185504"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "fisch",
@@ -542,7 +654,9 @@
   "title": "Monoclonal Antibody for Desmin (D3)",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/monoclonal-antibody-desmin-d3",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "fisch",
@@ -550,7 +664,9 @@
   "title": "Monoclonal Antibody for Desmin (D76)",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/monoclonal-antibody-desmin-d76",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "fisch",
@@ -560,7 +676,9 @@
   "patentStatus": null,
   "pmids": [
    "6183271"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "fisch",
@@ -570,7 +688,9 @@
   "patentStatus": null,
   "pmids": [
    "6183271"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "fisch",
@@ -580,7 +700,9 @@
   "patentStatus": null,
   "pmids": [
    "2580100"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "fisch",
@@ -590,7 +712,9 @@
   "patentStatus": null,
   "pmids": [
    "6738576"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "fisch",
@@ -600,7 +724,9 @@
   "patentStatus": null,
   "pmids": [
    "6185504"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "fisch",
@@ -610,7 +736,9 @@
   "patentStatus": null,
   "pmids": [
    "6185504"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "frmaxfie",
@@ -618,7 +746,9 @@
   "title": "ApHID: pH-Sensitive Fluorescent Dye Resistant to Photobleaching and Oxidation",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/aphid-ph-sensitive-fluorescent-dye-resistant",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: Acidic pH indicator Dye (ApHID) with high resistance to oxidation and photobleaching\nApHID is composed of a BODIPY core and determines pH of the environment using an aniline moiety that has two methyl groups attached\nOptimized for use between pH 4.0 – 6.0, ApHID’s fluorescence emission increases sharply in amplitude with increasing acidity\nApHID has pKa of 5.4 and excitation max at 506 nm\nPoC Data: ApHID fluorescence is 12-fold greater at pH 4.0 relative to pH 6.0\nApHID fluorescence output showed no decrease after photobleaching in live cells and decreased by only 12% in fixed cells, compared to an 83% and 82% decrease with fluorescein and Oregon Green\nApHID exhibits the greatest fluorescent dynamic range at the physiological pH range of LE/Lys compared to currently available commercial dyes",
+  "hasPocData": true
  },
  {
   "cwid": "frmaxfie",
@@ -626,7 +756,9 @@
   "title": "Cyclodextrin Polymers Targeted to Late Endosomes and Their Use",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/cyclodextrin-polymers-targeted-late-endosomes-and",
   "patentStatus": "Application filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "Nieman-Pick type C disease (NPC) is a lysosomal storage disorder causing accumulation of unesterified cholesterol in lysosomal storage organelles (LSO). Recent studies have shown that hydroxypropyl-β-cyclodextrin (HPβCD) is effective in treating NPC. The inventors studied the mechanisms and demonstrated that reduction in cholesterol accumulation in NPC is due to CD action from inside late endosomes/lysosomes. They demonstrated that CDs were delivered to LSO and were effective at reducing the cholesterol accumulation inside LSO. They also demonstrated that methyl-β-cyclodextrin (MβCD) is more potent than HPβCD in reducing cholesterol. Based on their discoveries, the inventors have designed and synthesized MβCD polymers containing cell targeting agents. These novel polymers increase cellular uptake and reduce elimination via the kidney. The cell targeting agent effectively delivers MβCD to a specific cellular location, such as LSOs, and reduces the concentration of CD needed for an effect. These novel polymers effectively correct NPC deficiency in cells. The invention provides compositions and methods to treat patients suffering from an elevated cholesterol level or suffering from a lysosomal storage disorder.",
+  "hasPocData": false
  },
  {
   "cwid": "fslee",
@@ -637,7 +769,9 @@
   "pmids": [
    "17023662",
    "20075215"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "fslee",
@@ -645,7 +779,9 @@
   "title": "Method to Promote Normal Brain Development and Decrease Risk for Psychiatric Disorders in Pre-adults with a Mutation in BDNF",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/method-promote-normal-brain-development-and",
   "patentStatus": "Issued",
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "gal2005",
@@ -655,7 +791,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "37148884"
-  ]
+  ],
+  "overview": "Malaria\nThe Technology: ART and Pf20S inhibitor hybrids (Artezomibs, ATZs) as dual mechanism therapies for the treatment of wild type and resistant Pf strains\nThe inventors first demonstrated that conjugation of an ART moiety to a proteasome inhibitor did not interfere with the binding and inhibition of Pf20S\nThe inventors then designed four new ATZs, in which the artesunate analog WZ-1840 is conjugated to a proteasome inhibitor via a propionate linker\nPoC Data: In growth inhibition assays of Pf Dd2 and two proteasome inhibitor-resistant strains, the ATZs substantially overcame resistance to the proteasome inhibitor moiety alone conferred by Pf20s point mutations\nThe ATZs demonstrated ~5x improvement for Dd2 mutant β6A117D and ~100x improvement for Dd2 mutant β5A49S compared to the proteasome inhibitor WZ-1839 alone\nMultiple Myeloma\nThe Technology: Artemisinin and proteasome inhibitor hybrids (Artezomibs, ATZs) for treatment of human cancers, including multiple myeloma\nThe inventors have designed a series of Artezomibs, wherein Artemisinin analog Artesunate is conjugated to a proteasome inhibitor via a linker\nArtemisinin is known to cause degradation of Ferritin, which may in turn cause Ferroptosis, an iron-dependent programed cell death\nThe longer, peptide-based proteasome inhibitors may overcome the resistance conferred via the mutations in proteasome subunits\nPoC Data: Proteasome inhibition assays demonstrated inhibitory activity of the Artezomibs against a variety of proteasome subunits\nArtezomibs demonstrated cytotoxicity against a panel of multiple myeloma cell lines, including MM.1S, CAG, and RPMI8226",
+  "hasPocData": true
  },
  {
   "cwid": "gcc9004",
@@ -663,7 +801,9 @@
   "title": "Portable, Self-contained Upright PET Imaging System with Integrated Augmented Reality and Motion Tracking",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/portable-self-contained-upright-pet-imaging-system",
   "patentStatus": "Provisional filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "Technology: A portable, upright PET imaging system featuring integrated motion tracking and augmented reality capabilities, designed for seated or partially reclined imaging positions.\nA prototype system has been designed and constructed to validate the concept\nThe system features a compact upright gantry mounted on a mobile cart with an integrated foldable chair\nReal-time electromagnetic tracking enables sub-millimeter motion correction during scanning\nBuilt-in lead shielding provides radiation protection for nearby personnel\nAn integrated AR headset enhances patient engagement and comfort during procedures\nA comprehensive control center manages synchronized data acquisition and system monitoring",
+  "hasPocData": false
  },
  {
   "cwid": "gdpalerm",
@@ -671,7 +811,9 @@
   "title": "Automated Intracytoplasmic Sperm Injection Device",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/automated-intracytoplasmic-sperm-injection-device",
   "patentStatus": "Issued",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: Automated microfluidic platform for ICSI\nCombines all aspects of ICSI into a single, easy to use microfluidics platform\nThe device consists of an oocyte (egg) reservoir, an oocyte cumulus removal channel, an oocyte immobilizing station, a sperm reservoir, a motile sperm isolation channel and station, and an embryo culturing chamber\nCompared to manual ICSI procedures, this technology promises to reduce labor intensity and costs and improve ICSI consistency",
+  "hasPocData": false
  },
  {
   "cwid": "ges9006",
@@ -681,7 +823,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "22021511"
-  ]
+  ],
+  "overview": "Approximately 70 million CT studies are performed each year in the US. These studies account for about 50% of the radiation dose exposure administered in the healthcare setting. However, it is still a challenge to systematically track and assess radiation exposure from CT studies. The radiation dose index provided by older CT equipment is not digital but, rather, is “burned” into an image in the DICOM file, making it difficult to share these data with other information systems. Cornell researchers have developed an algorithm, and software executing the algorithm, that accurately extracts the radiation dose index data from the image file and stores it both in the data file of the DICOM file, and in an external database. The software accurately extracted dose index information from 518 out of 518 CTDI reports in the inventors’ study. The inventors also have developed a system that (i) extracts dose index information from image files within DICOM files or from the data file; (ii) converts the radiation dose index into the absorbed dose for a given patient and procedure; (iii) can compile the data in order to provide automatic reporting to other systems, such as EHRs and workflow systems, or upon demand. The system is useful for performing quality control and assurance on a given CT machine, image center, technician, or ordering doctor, and can provide automated alerts when cumulative dosing for a given patient approaches or exceeds a given threshold. The algorithm and software will be useful as part of the field's mission to Image Safely.",
+  "hasPocData": false
  },
  {
   "cwid": "gew4002",
@@ -689,7 +833,9 @@
   "title": "StaBle: Reducing Aliasing Errors in Doppler Ultrasound for High-Velocity Blood Flow Imaging",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/stable-reducing-aliasing-errors-doppler-ultrasound",
   "patentStatus": "Provisional filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: StaBle (Staggered PRF with douBle Transmission), a method to increase the maximum velocity measurement range of Doppler ultrasound\nThis technique combines staggered PRF (Pulse Repetition Frequency) and double transmission to detect true velocities from aliased measurements\nPoC Data: StaBle is able to achieve a 6-12 times higher velocity limit compared to sequential angle transmission techniques\nIn a phantom spinning disc experiment, StaBle demonstrated a 9-fold improvement in detecting peak axial velocity over sequential angle transmission techniques\nIn vivo, StaBle enabled measurement of an unaliased vector field in the left ventricle of a mouse heart, and consistent measurement of vorticity, kinetic energy, and energy loss",
+  "hasPocData": true
  },
  {
   "cwid": "gfs2002",
@@ -699,7 +845,9 @@
   "patentStatus": "Issued",
   "pmids": [
    "26982365"
-  ]
+  ],
+  "overview": "The Technology: Lymphoid-tissue-resident commensal bacteria (LRCs) as key regulators of the pro-inflammatory response and potential biotherapeutic agents to treat chronic inflammatory disease\nLRCs colonize and persist within murine dendritic cells (DCs) and modulate cytokine production to curb inflammation\nThe induced cytokines protected mice from lethal intestinal damage",
+  "hasPocData": false
  },
  {
   "cwid": "gfs2002",
@@ -709,7 +857,9 @@
   "patentStatus": null,
   "pmids": [
    "31586011"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "ggi9001",
@@ -719,7 +869,9 @@
   "patentStatus": null,
   "pmids": [
    "33861502"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "ggibson",
@@ -732,7 +884,9 @@
    "34947984",
    "33074237",
    "29860433"
-  ]
+  ],
+  "overview": "The Technology: Method to treat AD by administering benfotiamine (BFT) or its derivatives\nBFT is a synthetic thiamine precursor which raises blood thiamine levels, and was shown in a Phase 2a trial to improve patient outcomes based on multiple clinical and biological markers of AD\nBFT or a placebo was administered orally for 12 months to patients with mild cognitive impairment (MCI) or mild AD\nMean blood thiamine levels increased 120-fold higher in treatment group than placebo\nPoC Data: The increase in ADAS-Cog was 43% lower in the treatment group, indicating less cognitive decline (p = 0.125)\nClinical dementia rating was 77% lower in treatment group (p = 0.034)\nIncrease in AGE was significantly reduced in treatment group (p = 0.044)",
+  "hasPocData": true
  },
  {
   "cwid": "gim2004",
@@ -742,7 +896,9 @@
   "patentStatus": null,
   "pmids": [
    "11595737"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "haf9016",
@@ -753,7 +909,9 @@
   "pmids": [
    "32253265",
    "30893594"
-  ]
+  ],
+  "overview": "The Technology: A patient-specific platform for modeling GBM and its TME in an organoid culture\nTumor-bearing organoids are generated by co-culturing patient-derived glioma stem cells (GSCs) with hESC-derived cerebral organoids\nThe resulting organoids have tumors grown from from patient-derived GSCs embedded within them\nPoC Data: GLICO models demonstrate tumor proliferation and infiltration, with 20% of tumor cells staining positive for Ki67\nGLICO organoids display similar pathology to GBM patients, like spontaneous microtubule formation\nResponse rates to GBM drugs in GLICOs are closer to in vivo rates compared to 2D cultures (24-43% GLICO vs 80-90% cell line), and vary by patient\nRNA-seq data shows that GLICO transcriptomes are significantly more correlated to those of patient tumors than current GBM models",
+  "hasPocData": true
  },
  {
   "cwid": "han2005",
@@ -761,7 +919,9 @@
   "title": "MicroRNA Mimics for the Treatment of Cardiometabolic Diseases",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/microrna-mimics-treatment-cardiometabolic-diseases",
   "patentStatus": "Application filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: miRNA-33a-3p mimics that lower LDL and reduced hepatic steatosis for the treatment of cardiometabolic diseases such as NAFLD\nThe Discovery: miRNA-33a, encoded within the SREBP-2 gene, acts to promote LDLR expression and LDL-uptake through direct targeting of PCSK9, IDOL and ANGPTL3.\nPoC Data: Liver-targeted delivery of miRNA-33a-3p mimics into mouse models of diet-induced obesity resulted in reduced hepatic and circulating PCSK9 levels as well as serum ANGPTL3 levels\nmiRNA-33a-3p mimics significantly lower LDL, and ameliorate hepatic steatosis while increasing HDL\nmiRNA-33a-3p mimics therefore represent alternative therapeutic inhibitors of PCSK9, ANGPTL3, and LDL-cholesterol for reducing hypercholesterolemia and steatohepatitis",
+  "hasPocData": true
  },
  {
   "cwid": "han2005",
@@ -769,7 +929,9 @@
   "title": "Switchable mRNAs with Enhanced Translational Efficiency for Tissue-Specific Expression",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/switchable-mrnas-enhanced-translational-efficiency",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: A novel design strategy for functionally switchable mRNAs that allow for tissue and cell-specific expression\nMicroRNA binding elements are incorporated in the 5’-UTR, which respond to endogenous microRNAs\nUpon binding to microRNAs, the secondary structure of the mRNA unwinds into to a linear conformation, switching mRNAs from an ‘off’ to an ‘on’ state\nThe linearized conformation of the mRNA promotes translation initiation only in cells and tissues which contains the endogenous microRNA\nPoC Data: A miR-148-dependent LDLR-coding mRNA was constructed (miR-148 is a liver enriched microRNA)\nTreatment with switchable LDLR mRNA significantly reduced non-HDL cholesterol levels compared to generic LDLR mRNAs in severely hypercholesteremic male LDLR knockout mice",
+  "hasPocData": true
  },
  {
   "cwid": "hes2011",
@@ -779,7 +941,9 @@
   "patentStatus": null,
   "pmids": [
    "24740971"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "ili2001",
@@ -789,7 +953,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "36179671"
-  ]
+  ],
+  "overview": "The Technology: A computational platform to extract fungal sequences from sequencing data of human tumor samples\nThe Discovery: Candida-to-S.Cerevisae ratio were predictive of metastatic colon cancer\nFungal species, specifically C. albicans and S. Cerevisae species, are prognostic markers of disease progression and worse clinical outcomes of GI cancers\nPoC Data: Fungal species associate with primary tumor samples and with different stages of disease, specifically in GI tumors\nThe technology provides a novel method of screening and stratifying cancer patients who may be candidates for antifungal therapy",
+  "hasPocData": true
  },
  {
   "cwid": "ili2001",
@@ -799,7 +965,9 @@
   "patentStatus": null,
   "pmids": [
    "29326275"
-  ]
+  ],
+  "overview": "The Technology: A method for identifying IBD patients who may benefit from antifungal therapy based on the presence of CX3CR1 mutations\nThe Discovery: CX3CR1+ mononuclear phagocytes (MNPs) are essential for the initiation of innate and adaptive immune responses to intestinal fungi\nIn mouse models that lacked CX3CR1 signaling, the inventors observed a significant decrease in antibodies against S. cerevisiae as well as CX3CR1+ MNP populations\nThese mice were susceptible to induced colitis in the presence of C. albicans and C. tropicalis\nPoC Data: Administration of the antifungal gent fluconazole in these mice reduced symptoms of colitis",
+  "hasPocData": true
  },
  {
   "cwid": "ili2001",
@@ -809,7 +977,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "35296857"
-  ]
+  ],
+  "overview": "The Technology: Method to identify and treat IBD patients harboring specific C. albicans strains with IL-1 inhibitors\nUsing a proprietary platform that combines high-resolution sequencing, culturing, genomics, and in vitro and in vivo models, the inventors identified opportunistic C. albicans strains that dominate the colonic mucosa of ulcerative colitis (UC) patients\nThe Discovery: C. albicans strains that secrete the toxin candidalysin drive intestinal inflammation through an IL-1β dependent manner\nPoC Data: IL-1R blockade using an anti-IL-1R antibody dramatically reduced neutrophil recruitment, inflammatory Th17 cell accumulation and colonic inflammation in C. albicans colonized mice",
+  "hasPocData": true
  },
  {
   "cwid": "imh2003",
@@ -819,7 +989,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "36543475"
-  ]
+  ],
+  "overview": "The Technology: A machine-learning based method, called STORK-A, to non-invasively predict embryo ploidy status\nUses time-lapse microscopy images of embryos and clinical information (e.g., maternal age & morphological assessments) as inputs and outputs a probability of euploid vs aneuploid for each embryo\nPoC Data: The STORK-A algorithm was trained using a dataset of images and clinical information for >10k embryos with confirmed ploidy status and was then also tested on two independent external datasets\nSTORK-A classified embryo ploidy status with accuracies of ~70% for both the training and independent datasets\nIVF transferred embryos that were predicted to be euploid by STORK-A exhibited a livebirth rate of 48%, which is very similar to that of the transferred embryos classified as euploid by PGT-A (49%)",
+  "hasPocData": true
  },
  {
   "cwid": "jag4016",
@@ -829,7 +1001,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "40631297"
-  ]
+  ],
+  "overview": "The Technology: Affinity Map is a novel platform that enables robust measurement of binding affinities between ligands and proteins across the proteome using photocatalytic labeling and high-throughput mass spectrometry\nA “hot” ligand conjugated to a photocatalyst and a “cold” unmodified ligand are used to covalently label proteins, enabling competitive binding assays that yield quantitative affinity measurements\nAffinity Map is applicable to major classes of ligands: small molecules, linear and cyclic peptides, proteins\nPoC Data: Affinity Map measured Kd values for the protein interactions of dasatinib, a tyrosine inhibitor, and JQ1, a selective bromodomain binding compound, with high accuracy and selectivity, even identifying previously unknown interactions\nAffinity Map was used to measure Kd values for the macrocyclic cRBDfk peptide and human IgG on live cell surfaces, finding close concurrence with reported literature values",
+  "hasPocData": true
  },
  {
   "cwid": "jak2046",
@@ -837,7 +1011,9 @@
   "title": "Dual HPLC-TLC Platform for Enhanced Quality Control of Alpha-Emitting Radiotherapeutics",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/dual-hplc-tlc-platform-enhanced-quality-control",
   "patentStatus": "Provisional filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: An integrated HPLC-radioTLC analysis platform for precise radiopharmaceutical quality control\nThe platform features a chemically resistant moving stage with protective cover, compatible with multiple radioTLC scanner models\nThe system uses disposable inserts with absorption-lined wells to prevent cross-contamination\nPoC Data: A working prototype has been validated across multiple radionuclides (225Ac and 134Ce) and diverse radiopharmaceutical types including small molecules, peptides, antibodies, and nanoparticles.\nThe platform demonstrates rapid analysis times (~30 minutes) while maintaining robust analytical integrity",
+  "hasPocData": true
  },
  {
   "cwid": "jak2046",
@@ -847,7 +1023,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "40973050"
-  ]
+  ],
+  "overview": "The Technology: Method for rapid and quantitative radiohalogenation of aryl and heteroaryl rings at room temperature by reductive elimination from bismuth complexes\nThis method enables regioselective radiohalogenation of electron-rich, electron-deficient, and/or sterically hindered (hetero)aryl rings with nearly quantitative halide incorporation and reaction times of less than 30 minutes\nPoC Data: The inventors performed bismuth-mediated radiohalogenation of aryl boronic acids and aryl tetrafluoroborates with Na[125I]I and Na[211At]At at room temperature and with NH4[77Br]Br at 80 °C in mild conditions with 35-99% radiochemical conversion\nThe method has also been used to synthesize [124I]MIP-1095 and [124I]MIBG with high radiochemical yield, high molar activity, and >99 percent radiochemical and chemical purity",
+  "hasPocData": true
  },
  {
   "cwid": "jas2037",
@@ -855,7 +1033,9 @@
   "title": "3D Biomimetic Platform",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/3d-biomimetic-platform",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "jas2037",
@@ -863,7 +1043,9 @@
   "title": "Breast Implant with Macroporous Shell for Improved Safety and Stability",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/breast-implant-macroporous-shell-improved-safety",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: A novel silicone breast implant with a macro-well surface architecture for implant positional stability\nThe Discovery: Anecdotal observations in revision cranioplasty cases using implants with macro-well surfaces have revealed that soft tissue ingrowth into the cranioplasty implants held them in position\nBy incorporating macro-pores into smooth breast implant shells, capsular tissue can grow into the pores, thereby anchoring the implant to the surrounding tissue securely\nPoC Data: In an in vivo rat model, rats receiving the experimental macro-well implants demonstrated in-growth of soft tissue into the wells\nRats implanted with anatomically shaped experimental implants, consisting of soft silicone gel inside a macro-well shell, demonstrated decreased rotation over a four-week period compared to those receiving smooth implants",
+  "hasPocData": true
  },
  {
   "cwid": "jdw2003",
@@ -871,7 +1053,9 @@
   "title": "ApHID: pH-Sensitive Fluorescent Dye Resistant to Photobleaching and Oxidation",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/aphid-ph-sensitive-fluorescent-dye-resistant",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: Acidic pH indicator Dye (ApHID) with high resistance to oxidation and photobleaching\nApHID is composed of a BODIPY core and determines pH of the environment using an aniline moiety that has two methyl groups attached\nOptimized for use between pH 4.0 – 6.0, ApHID’s fluorescence emission increases sharply in amplitude with increasing acidity\nApHID has pKa of 5.4 and excitation max at 506 nm\nPoC Data: ApHID fluorescence is 12-fold greater at pH 4.0 relative to pH 6.0\nApHID fluorescence output showed no decrease after photobleaching in live cells and decreased by only 12% in fixed cells, compared to an 83% and 82% decrease with fluorescein and Oregon Green\nApHID exhibits the greatest fluorescent dynamic range at the physiological pH range of LE/Lys compared to currently available commercial dyes",
+  "hasPocData": true
  },
  {
   "cwid": "jei9008",
@@ -881,7 +1065,9 @@
   "patentStatus": null,
   "pmids": [
    "21376834"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "jek4011",
@@ -889,7 +1075,9 @@
   "title": "StaBle: Reducing Aliasing Errors in Doppler Ultrasound for High-Velocity Blood Flow Imaging",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/stable-reducing-aliasing-errors-doppler-ultrasound",
   "patentStatus": "Provisional filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: StaBle (Staggered PRF with douBle Transmission), a method to increase the maximum velocity measurement range of Doppler ultrasound\nThis technique combines staggered PRF (Pulse Repetition Frequency) and double transmission to detect true velocities from aliased measurements\nPoC Data: StaBle is able to achieve a 6-12 times higher velocity limit compared to sequential angle transmission techniques\nIn a phantom spinning disc experiment, StaBle demonstrated a 9-fold improvement in detecting peak axial velocity over sequential angle transmission techniques\nIn vivo, StaBle enabled measurement of an unaliased vector field in the left ventricle of a mouse heart, and consistent measurement of vorticity, kinetic energy, and energy loss",
+  "hasPocData": true
  },
  {
   "cwid": "jhzippin",
@@ -899,7 +1087,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "30401788"
-  ]
+  ],
+  "overview": "The Technology: Methods to modulate melanin production via soluble Adenylyl Cyclase (sAC) by altering melanosome pH\nThe Discovery: The inventor has discovered that sAC, a non-canonical source of cAMP, acts as a pH sensor in a second cAMP-signaling pathway which regulates pigmentation\nThrough this pathway, the loss or inhibition of sAC-specific cAMP increases melanin production\nAs the most common forms of OCA are due to improper melanosome pH levels, treatment with sAC inhibitors can rescue abnormal pH and pigmentation\nPoC Data: Topical treatment of mice with sAC inhibitors has been shown to increase pigmentation in the skin, eyes and hair\nIntraperitoneal injection of sAC inhibitors restored melanosomal pH to normal levels and increased pigmentation of eyes in a mouse model of OCA type 2",
+  "hasPocData": true
  },
  {
   "cwid": "jhzippin",
@@ -910,7 +1100,9 @@
   "pmids": [
    "34413957",
    "37039485"
-  ]
+  ],
+  "overview": "The Technology: sAC inhibitors that prevent the induction of Th17-mediated psoriasis when topically administered\nThe Discovery: Th17 cell polarization and growth were prevented by loss of sAC activity\nBased on previous high throughput screening studies that identified LRE1 as an allosteric inhibitor of sAC, TDI chemists developed a series of potent analogs with <100 nM EC50 and attractive PK characteristics\nPoC Data: In a 7-day murine imiquimod (IMQ) induced psoriasis model, topically administered TDI-11861 (EC50=1 nM) showed comparable efficacy to steroid control clobetasol but without induction of weight loss\nSafety: No overt toxicity was observed in in vivo studies, and TDI-11861 showed no significant activity against >310 kinases or 47 other well-known targets",
+  "hasPocData": true
  },
  {
   "cwid": "jimperat",
@@ -920,7 +1112,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "30788431"
-  ]
+  ],
+  "overview": "The Technology: A non-invasive, non-contact and low-cost wearable sensor that uses a near-field coherent (NCS) sensing multiplexing antenna to monitor respiratory failure and provide alert signals\nThe NCS techniques work on the principle that body movement can be clearly and unambiguously retrieved from the RF antenna characteristics, and then be correlated with vital signs\nPoC Data: The vital signs are digitally recorded and broadcasted by the tag in the outdoor environment, and a ceiling-mounted reader connects to the sensing tag to retrieve the wearer’s vital signs (Fig. 1)\nThe sensor successfully detects different respiratory events (Fig. 2)\nThe initial data showed that the invention’s accuracy in cardiopulmonary functions is comparable to respiratory inductive plethysmography (RIP) and phonocardiogram (PCG) measurements (Fig. 3)",
+  "hasPocData": true
  },
  {
   "cwid": "jms2003",
@@ -930,7 +1124,9 @@
   "patentStatus": null,
   "pmids": [
    "23440043"
-  ]
+  ],
+  "overview": "Hematopoietic stem cells (HSCs) are required for lifelong blood cell production. Normally, the majority of HSCs are deeply quiescent but during times of hematologic stress—for example after chemotherapy, bone marrow transplantation, massive infection or bleeding—HSCs undergo extensive self-renewal and differentiation to meet increased hematopoietic demands. Cornell researchers studied the mechanism for how these processes wind down after stress. This had never been studied previously. They found that transforming growth factor-β (TGFβ) signals drive activated HSCs back to homeostasis during recovery from the stress. Blockade of TGFβ after a hematopoietic stress delayed the return of HSCs to quiescence and accelerated hematopoietic reconstitution. The outcome was faster recovery of all blood cell counts after myelosuppressive chemotherapy and faster hematopoietic engraftment after transplantation. . This discovery provides a novel approach to promote hematopoietic recovery by blocking the TGFβ signaling. This invention provides novel methods for stimulating hematopoietic regeneration by administering an inhibitor of TGFβ signaling to a subject with hematopoietic deficiencies such as after chemotherapy, hematopoietic stem cell transplant or other causes of hematopoietic stress and/or deficiency.",
+  "hasPocData": false
  },
  {
   "cwid": "jms2003",
@@ -940,7 +1136,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "32548608"
-  ]
+  ],
+  "overview": "The Technology: Cornell inventors have identified several methods that allow for robust ex vivo expansion of HSCs for research and clinical use\nPoC Data: Human-derived HSCs cultured under hypoxic conditions (1% O2) demonstrated increased expression of CD34+ cells, a phosphoglycoprotein which is used clinically to quantify HSCs levels (see Figure 1A)\nCo-culturing HSCs with endothelial feeder cells (ECs) also increased CD34+ expression in addition to similar markers of HSC levels (CD45, iHSC), see Figure 1B\nTreating cell cultures with N-acetyl cysteine (NAC), an antioxidant that reduces cellular damage from reactive oxygen species, likewise enhances expression of markers of HSC availability (see Figure 1C)",
+  "hasPocData": true
  },
  {
   "cwid": "job2064",
@@ -950,7 +1148,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "40080571"
-  ]
+  ],
+  "overview": "The Technology: A novel therapeutic approach targeting FABP5's activation of mTORC1 for treating triple-negative breast cancer (TNBC) and metabolic disorders.\nThe inventors have engineered synthetic peptides targeting key epitopes of FABP5 that competitively inhibit its interaction with mTORC1\nThe Discovery: FABP5 is significantly upregulated in TNBC, with elevated protein levels in both patient-derived xenografts and serum from TNBC patients\nFABP5 contains a conserved N-terminal motif that mediates direct interaction with mTORC1\nPoC Data: siRNA-mediated knockdown of FABP5 blocked ω6 LA-induced mTORC1 activation and reduced cancer cell proliferation.\nFABP5-targeting peptides selectively inhibited ω6-LA-stimulated growth in aggressive TNBC cells (HCC1806), while sparing normal breast cells",
+  "hasPocData": true
  },
  {
   "cwid": "jobuck",
@@ -960,7 +1160,9 @@
   "patentStatus": null,
   "pmids": [
    "18806876"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "jobuck",
@@ -970,7 +1172,9 @@
   "patentStatus": null,
   "pmids": [
    "18806876"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "jobuck",
@@ -980,7 +1184,9 @@
   "patentStatus": null,
   "pmids": [
    "12475901"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "jobuck",
@@ -990,7 +1196,9 @@
   "patentStatus": null,
   "pmids": [
    "16054031"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "jobuck",
@@ -998,7 +1206,9 @@
   "title": "Chemical Inhibitors of Soluble Adenylyl Cyclase (sAC)",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/chemical-inhibitors-soluble-adenylyl-cyclase-sac",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "jobuck",
@@ -1008,7 +1218,9 @@
   "patentStatus": null,
   "pmids": [
    "20130594"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "jobuck",
@@ -1016,7 +1228,9 @@
   "title": "Modulating Adenylyl Cyclase for the Treatment of Bacterial or Eukaryotic Infections",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/modulating-adenylyl-cyclase-treatment-bacterial-or",
   "patentStatus": "Issued",
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "jobuck",
@@ -1027,7 +1241,9 @@
   "pmids": [
    "34413957",
    "37039485"
-  ]
+  ],
+  "overview": "The Technology: sAC inhibitors that prevent the induction of Th17-mediated psoriasis when topically administered\nThe Discovery: Th17 cell polarization and growth were prevented by loss of sAC activity\nBased on previous high throughput screening studies that identified LRE1 as an allosteric inhibitor of sAC, TDI chemists developed a series of potent analogs with <100 nM EC50 and attractive PK characteristics\nPoC Data: In a 7-day murine imiquimod (IMQ) induced psoriasis model, topically administered TDI-11861 (EC50=1 nM) showed comparable efficacy to steroid control clobetasol but without induction of weight loss\nSafety: No overt toxicity was observed in in vivo studies, and TDI-11861 showed no significant activity against >310 kinases or 47 other well-known targets",
+  "hasPocData": true
  },
  {
   "cwid": "jom4010",
@@ -1037,7 +1253,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "35545049"
-  ]
+  ],
+  "overview": "The Technology: Combination therapies to increase the effectiveness of PARP1 inhibitors by inhibiting activation of tumor stroma and CAFs\nThe Discovery: PARP1 inhibitors generate a feedback loop that activates CAFs by downregulating master regulator p62\nTherefore, combination treatment with a PARP1 inhibitor and an inhibitor of stromal activation may revert stroma activation and enhance anti-tumor activity\nPoC Data: Treatment with a stroma-targeted hyaluronidase significantly enhanced olaparib antitumor activity both in vitro and in vivo models of prostate cancer\nThis co-targeting mechanism is applicable in additional cancers such as lung, breast, and endometrium and for combinations of PARP1 and other stromal inhibitors, such as anti-TNFa, IL-6, and JAK molecules",
+  "hasPocData": true
  },
  {
   "cwid": "jrw9011",
@@ -1045,7 +1263,9 @@
   "title": "Novel Anti-Infective Urinary Catheter and Drainage System",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/novel-anti-infective-urinary-catheter-and-drainage",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: A novel urinary catheter and drainage system designed to reduce the risk of developing CA-UTIs by using soft robotic actuation to actively open the drainage eyelet without changing the cost of catheter production\nThe revised catheter has a drainage eyelet that resembles a slit, such that it is closed during introduction into the urethra, partially open once in the bladder, and fully open once inflated (as one would do for the retention balloon)\nThis novel design reduces the likelihood of a biofilm being loaded into the eyelet during introduction as is the case with conventional catheters\nPoC Data: In a simulated experiment, the novel catheter significantly reduced contamination (12x less) compared to a standard catheter\nThe novel catheter was also shown to not impair flow rate compared to a standard catheter, and retained its actuation ability after repeated usage",
+  "hasPocData": true
  },
  {
   "cwid": "jtl2003",
@@ -1053,7 +1273,9 @@
   "title": "Circuit-Guided Approach for Identifying Synergistic Drug Combinations for Treatment-Resistant Depression",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/circuit-guided-approach-identifying-synergistic",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: A therapeutic strategy targeting multiple GPCRs to achieve synergistic antidepressant effects\nThe Discovery: Ketamine’s antidepressant effects are initiated through Gi/o signaling via mu-opioid receptors within somatostatin (Sst) interneurons\nRNA-seq identified several GPCRs enriched in Sst+ interneurons after chronic unpredictable stress (CUS)\nThe inventors developed a drug cocktail that synergistically targets three Sst+ interneuron-enriched GPCRs\nPoC Data: The drug cocktail produced rapid antidepressant effects within 60 minutes that persisted for at least 24 hours in stress-treated mice\nThe drug cocktail demonstrated superior safety compared to ketamine, showing no impairment in motor coordination, normal locomotion, and anxiolytic effects",
+  "hasPocData": true
  },
  {
   "cwid": "jtl2003",
@@ -1061,7 +1283,9 @@
   "title": "Opto-Opioids: Light-Activated Compounds for Locally-restricted and Reversible Pain Management",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/opto-opioids-light-activated-compounds-locally",
   "patentStatus": "Provisional filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: Opioid analgesic compounds that can be locally and reversibly activated and deactivated with light, reducing addiction potential\nThe Discovery: The inventors developed a morphine-based compound, azo-morphine-3 (AM-3), which has substantially stronger agonism for the mu-opioid receptor in the light-activated cis form than in the relaxed trans configuration\nPoC Data: Administration of cis-AM-3, but not trans-AM3, increased paw withdrawal latency (PWL) in the radiant-heat test with identical effect size to morphine (P>0.001 vs. vehicle)\nIn vivo activation of AM-3 via paw illumination increased PWL in the same test (P>0.05), and demonstrated reversible and repeatable analgesic effects in the spared nerve injury model (SNI) of chronic neuropathic pain (P<.001)\ncis-AM-3 does not promote hyperlocomotion in the open field test, demonstrating lack of CNS activation",
+  "hasPocData": true
  },
  {
   "cwid": "jub2031",
@@ -1072,7 +1296,9 @@
   "pmids": [
    "29548673",
    "21602824"
-  ]
+  ],
+  "overview": "The Technology: Bacterial mRNAs as adjuvants to induce robust immune response in both prophylactic and therapeutic vaccines\nThe Discovery: The inventors showed that RNA is destroyed when a pathogen is heat-killed prior to injection, and that heat-killed bacteria alone elicit poor immune response\nAddition of purified bacterial RNA to heat-killed E. coli (HKEC) vaccines induced strong cytokine production and increases adaptive immune response\nPoC Data: Compared to HKEC alone, HKEC + RNA induced higher levels of IL-1β and IFN-β in dendritic cells\nHKEC + RNA stimulated an increase of class-switched IgG antibody titers in mice (p ≤ 0.01)\nHKEC + RNA improved both primary and memory T cell responses, as well as increased death of infected cells",
+  "hasPocData": false
  },
  {
   "cwid": "jub2031",
@@ -1080,7 +1306,9 @@
   "title": "Inflammasome Agonists for Vaccine and Immunotherapy",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/inflammasome-agonists-vaccine-and-immunotherapy",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: Use of bacterial needle and rod proteins as adjuvants to activate the innate immune inflammasome pathway\nThe Discovery: The bacterial proteins PrgI (Needle) and PrgJ (Rod) lead to robust activation of the inflammasome, a process that produces pro-inflammatory cytokines and acts as a mediator of adaptive immunity\nThe inflammasome agonist effect was demonstrated in both human macrophages and dendritic cells\nPoC Data: Inflammasome activation led to the adaptive anti-tumor T cell immunity and priming of antibody production against tumor and bacterial pathogens\nThe identified adjuvants may be directly delivered alongside vaccines or immunotherapies, fused to antigens and/or a TLR ligand, or genetically encoded for in vivo or ex vivo induction in dendritic cells",
+  "hasPocData": true
  },
  {
   "cwid": "jur2016",
@@ -1090,7 +1318,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "39443795"
-  ]
+  ],
+  "overview": "The Technology: A method for restoring transgelin 2 (TAGLN2) expression to promote the anti-tumor effects of T cells in an immunosuppressive environment\nThe Discovery: The cytoskeletal organizer TAGLN2 is necessary for optimal T cell fatty acid uptake and mitochondrial respiration in nutrient-restricted environments\nTAGLN2 interacts with cytoplasmic FABP5, an importer of extracellular fatty acids, enabling its optimal surface localization and function\nPoC Data: T cells present in solid tumors and ascites of HGSOC patients demonstrate low TAGLN2 expression that was associated with their dysfunction/exhaustion (p<0.0001)\nAdoptive immunotherapy using TAGLN2-overpressing chimeric endocrine receptors (CER) T cells demonstrated improved capacity to control metastatic HGSOC progression",
+  "hasPocData": true
  },
  {
   "cwid": "kab2060",
@@ -1103,7 +1333,9 @@
    "27423512",
    "28119851",
    "25056185"
-  ]
+  ],
+  "overview": "Breast cancer is the most common cancer diagnosed in women and is second only to lung cancer in terms of mortality. Although most breast tumors occur after menopause when ovarian estrogen synthesis has ceased, most of these tumors remain estrogen dependent. The aromatase enzyme catalyzes the conversion of androgens to estrogens and is thus a major driver of estrogen-dependent breast cancer after menopause and a promising therapeutic target. However, currently approved aromatase inhibitors used in first-line therapy are associated with serious side effects due to the global inhibition of estrogen, leading a proportion of patients to discontinue treatment. Additionally, select patients have or develop resistant cancers, or are poor candidates for targeted therapies, such as those with triple-negative breast cancers (TNBCs). This technology describes the use of the gut-derived peptide hormone des-acyl ghrelin and analogs for the treatment of cancer, including breast and colorectal. This technology is based on the finding that des-acyl ghrelin and the analog AZP-531 suppress the growth of patient-derived breast and colorectal cancer cells at picomolar doses. The inventor demonstrated des-acyl ghrelin acts by a novel mechanism of action via activation of Gαi, suppression of cAMP production, and inhibition of MAPK and Akt signaling. Importantly, the inhibitory effects were demonstrated in 3D cell culture with a biologically relevant extracellular matrix (ECM), as well as in vivo preclinical models of breast cancer, suggesting the results may translate to clinical studies. Of note, inhibition was not observed in cells with a BRAF or KRAS mutation, suggesting des-acyl ghrelin acts upstream of these proteins. As such, des-acyl ghrelin and analogs may lead to improved treatment for patients with breast and colorectal cancer.",
+  "hasPocData": false
  },
  {
   "cwid": "las4011",
@@ -1113,7 +1345,9 @@
   "patentStatus": "Provisional filed",
   "pmids": [
    "34290243"
-  ]
+  ],
+  "overview": "The Technology: Method to treat autoimmune diseases using 3-HKA and its analogs\nThe Discovery: 3-hydroxykynurenine (3-HKA) is a previously undescribed biogenic amine with anti-inflammatory and immunosuppressive capabilities in vivo and in vitro\nPoC Data: 3-HKA inhibits the IFN-g-receptor and NF-kB activation (pro-inflammatory cytokines) and decreases inflammatory T-cell proliferation in mouse models of psoriasis, nephrotoxic lupus, and Chron’s disease\nIDO1 knockout (which thus abolishes 3-HKA production) leads to an increase in inflammation, and exacerbates psoriasis in mice models\nThe inventors also showed that 3-HKA is the most abundant Trp metabolite in multiple solid tumor types, suggesting antagonism of 3-HKA may have therapeutic applications in cancer immunotherapy",
+  "hasPocData": true
  },
  {
   "cwid": "lgr2002",
@@ -1123,7 +1357,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "32157281"
-  ]
+  ],
+  "overview": "The Technology: Use of epigenetic modifying agents to convert treatment-resistant latency I lymphomas into immunotherapy-responsive latency II/III lymphomas\nThe Discovery: A high throughput screen with follow-up tests was used to identify the hypomethylating agents decitabine and 5-azacytidine as potent inducers of immunogenic EBV proteins (Figure 1)\nDecitabine treatment of latency I BL cells in vitro sensitized them to lysis by EBV-specific cytotoxic T-cells (EBV-CTLs; Figure 2A)\nPoC Data: Decitabine treatment of mice with latency I BL xenografts followed by EBV-CTLs resulted in T-cells effectively targeting and inhibiting tumor growth (Figure 2B)\nCombination treatment method is applicable to additional modes of immunotherapy (e.g., CAR-T, checkpoint inhibitors)",
+  "hasPocData": true
  },
  {
   "cwid": "lig2033",
@@ -1131,7 +1367,9 @@
   "title": "hTREM2-CV Mouse",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/htrem2-cv-mouse",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "lig2033",
@@ -1141,7 +1379,9 @@
   "patentStatus": null,
   "pmids": [
    "34851693"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "lig2033",
@@ -1151,7 +1391,9 @@
   "patentStatus": "Provisional filed",
   "pmids": [
    "38582079"
-  ]
+  ],
+  "overview": "The Technology: Inhibition of the UFMylation cascade for treatment of 4R tauopathies such as AD of FTLD-Tau\nThe Discovery: The inventors engineered a novel model for 4R tauopathies using iPSCs expressing 4R-tau carrying the P301S MAPT mutation, an FTLD-tau-related mutation\nA CRISPRi screen of genes associated with Tau pathobiology identified the UFMylation cascade as top modifier of seeding-induced Tau propagation\nPoC Data: Inhibition of the UFMylation pathway via shRNA knockdown of UBA5 significantly reduces seeding-induced Tau propagation in vitro and in vivo\nFree UFM, an inverse measure of UFMylation cascade activity, is reduced in tangle-bearing neurons in human AD brains, indicating that the UFMylation pathway promotes Tau pathology in AD",
+  "hasPocData": true
  },
  {
   "cwid": "lig4013",
@@ -1162,7 +1404,9 @@
   "pmids": [
    "36696328",
    "32970009"
-  ]
+  ],
+  "overview": "The Technology: Platform for screening patients for nerve pain using a digital 3D model of the head on which patients draw their pain\nThe platform leverages AI-based pattern recognition to automatically evaluate pain drawings to diagnose nerve pain and identify patients that are candidates for headache surgery\nA prototype of the platform has been developed and trained on 1,300 3D pain drawings\nPoC Data: The highest performing model, a multilayer perceptron (MLP) model, distinguished nerve pain from other types of head and neck pain with an AUROC of 0.879, precision of 0.943, specificity of 0.611, and sensitivity of 0.640\nAnother model, XGBoost, performed exceptionally well in detecting different types of nerve pain such Trigeminal Neuralgia (AUROC: 0.954), occipital nerve pain (AUROC: 0.928), and frontal nerve pain (AUROC: 0.930)",
+  "hasPocData": true
  },
  {
   "cwid": "llevin",
@@ -1172,7 +1416,9 @@
   "patentStatus": null,
   "pmids": [
    "18806876"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "llevin",
@@ -1182,7 +1428,9 @@
   "patentStatus": null,
   "pmids": [
    "18806876"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "llevin",
@@ -1192,7 +1440,9 @@
   "patentStatus": null,
   "pmids": [
    "12475901"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "llevin",
@@ -1202,7 +1452,9 @@
   "patentStatus": null,
   "pmids": [
    "16054031"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "llevin",
@@ -1213,7 +1465,9 @@
   "pmids": [
    "34413957",
    "37039485"
-  ]
+  ],
+  "overview": "The Technology: sAC inhibitors that prevent the induction of Th17-mediated psoriasis when topically administered\nThe Discovery: Th17 cell polarization and growth were prevented by loss of sAC activity\nBased on previous high throughput screening studies that identified LRE1 as an allosteric inhibitor of sAC, TDI chemists developed a series of potent analogs with <100 nM EC50 and attractive PK characteristics\nPoC Data: In a 7-day murine imiquimod (IMQ) induced psoriasis model, topically administered TDI-11861 (EC50=1 nM) showed comparable efficacy to steroid control clobetasol but without induction of weight loss\nSafety: No overt toxicity was observed in in vivo studies, and TDI-11861 showed no significant activity against >310 kinases or 47 other well-known targets",
+  "hasPocData": true
  },
  {
   "cwid": "lndhlovu",
@@ -1221,7 +1475,9 @@
   "title": "HERV-K Expression as a Biomarker for Predicting Immunotherapy Response",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/herv-k-expression-biomarker-predicting",
   "patentStatus": "Provisional filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: HERV-K/HML2 provirus expression as a biomarker for predicting response to ICB therapy\nThe Discovery: An extreme boosted gradient machine learning model (XGBOOST) was developed to identify bacterial and viral signatures associated with ICB response among RNA from 139 melanoma, NSCLC, RCC, and GBM tumor samples\nSupport vector machine framework and recursive feature elimination were used to develop a separate model (SVM) based on DNA from 385 melanoma, NSCLC, and RCC tumor samples were used to train had available TME-derived DNA\nPoC Data: The models identified identified HERV-K/HML2 expression as a key factor for ICB response\nThe XGBoost model identified 8 proviruses which classify participants by ICB response (AUC-ROC=0.801)",
+  "hasPocData": true
  },
  {
   "cwid": "lndhlovu",
@@ -1231,7 +1487,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "39092674"
-  ]
+  ],
+  "overview": "The Technology: Biomarker of biological aging based on the DNA methylation states of HERVs and LINE-1 retroelements\nHERV-Age, LINE-1-Age, and a composite Retroelement-Age clocks were developed using data from >12 K individuals based on the DNA methylation states of HERV and/or LINE-1 elements\n100% of HERV-Age and 99.9% of LINE-1-Age methylation sites were unique and not part of existing epigenetic clocks*\nPoC Data: All three epigenetic clocks were subsequently validated in >2 K samples, with high fidelity to chronological age\nRetroelement-Age was able to measured the impact of therapeutic intervention, demonstrated by (i) a reduction in the biological age of samples from HIV patients undergoing retroviral treatment and (ii) human cortical organoids epigenetically rejuvenated through transient reprogramming",
+  "hasPocData": true
  },
  {
   "cwid": "lud2005",
@@ -1241,7 +1499,9 @@
   "patentStatus": null,
   "pmids": [
    "32792368"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "lud2005",
@@ -1251,7 +1511,9 @@
   "patentStatus": null,
   "pmids": [
    "37563300"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "lud2005",
@@ -1261,7 +1523,9 @@
   "patentStatus": null,
   "pmids": [
    "32792368"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "lud2005",
@@ -1271,7 +1535,9 @@
   "patentStatus": null,
   "pmids": [
    "32792368"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "lud2005",
@@ -1281,7 +1547,9 @@
   "patentStatus": null,
   "pmids": [
    "32792368"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "mag3003",
@@ -1291,7 +1559,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "29785024"
-  ]
+  ],
+  "overview": "The Technology: Novel methods that involves targeted administration of osteoanabolic agents to promote bone formation, boost bone strength, and enhance bone healing\nDiscovery: Slit guidance ligand 3 (SLIT3) is a potent proangiogenic factor that enhances bone fracture healing and counteracts bone loss\nPoC Data: In a mouse model of osteoporosis, SLIT3 had comparable efficacy to PTH-based anabolic agents\nLocal therapeutic delivery was achieved using a SLIT3-loaded collagen sponge, which limits potential for extra-skeletal toxicities\nSLIT3 provides a complementary pathway to PTH-based agents, suggesting they may be used sequentially or in combination to enhance efficacy",
+  "hasPocData": true
  },
  {
   "cwid": "map2008",
@@ -1302,7 +1572,9 @@
   "pmids": [
    "36645114",
    "37798206"
-  ]
+  ],
+  "overview": "The Technology:\nAn automated, deep learning-based method for measuring organ volumes using averages to reduce variability\nOrgan volume is calculated using a 2D U-net model trained on pulsed sequences of MRI images\nPatients are scanned using T2-weighted fast spin echo (axial, coronal), steady state free precession (axial, coronal), and T1-weighted 3D gradient echo (axial)\nThese automated measurements are averaged for an improved and reproducible measurement of TKV\nPoC Data: Automated measurements were calculated significantly faster than manual measurements (2:49 mins vs 11:34 mins), but did not statistically differ from the manual calculation\nAveraging measurements from the five models significantly reduced variability to an average of 2.5% (compared to an average of 5.9% for five manual observers)",
+  "hasPocData": true
  },
  {
   "cwid": "map2008",
@@ -1312,7 +1584,9 @@
   "patentStatus": null,
   "pmids": [
    "12465110"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "mas2189",
@@ -1322,7 +1596,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "32042150"
-  ]
+  ],
+  "overview": "The Technology: Use of iron chelators to disrupt CSPα aggregation for the treatment of ANCL\nThe Discovery: The normally palmitoylated cysteine string region of CSPα loses palmitoylation in ANCL mutants, enabling oligomerization via ectopic binding of iron-sulfur (Fe-S) clusters\nPharmacological iron chelation with deferiprone (L1) and deferoxamine (Dfx) mitigates the oligomerization of mutant CSPα\nIron chelation also led to partial rescue of downstream SNARE defects and the pathological hallmark of lipofuscin accumulation",
+  "hasPocData": false
  },
  {
   "cwid": "mbd4001",
@@ -1332,7 +1608,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "30944146"
-  ]
+  ],
+  "overview": "The Technology: Method for measuring DARC expression levels as a prognostic indicator of a patient’s response to tumor immunotherapy\nThe Discovery: Breast cancer patients with DARC-high tumors had significantly longer overall survival (OS) and relapse-free survival (RFS) compared to patients with DARC-low tumors\nDARC-high tumors were also found to have significantly higher levels of the chemokine CCL2 but significantly lower levels of the chemokine CXCL8\nTumor immune cell populations were also found to be directly correlated to DARC expression, in all intrinsic tumor subtypes\nPatients with DARC-high tumors may be more responsive to immunotherapies (e.g., checkpoint inhibitors), whereas patients with DARC-low tumors may benefit from chemotherapy, radiation therapy, and surgery",
+  "hasPocData": false
  },
  {
   "cwid": "mecharl",
@@ -1343,7 +1621,9 @@
   "pmids": [
    "25469987",
    "25395056"
-  ]
+  ],
+  "overview": "The Technology: Application of the Charlson Comorbidity Index (CCI) to identify patients who will incur high future healthcare costs\nThe CCI was originally developed to predict survival, and is a measure of aggregate chronic disease burden\nHere, the CCI was used to predict health costs in the subsequent year, performing as well as prior cost and Diagnostic Cost Group (DCG) in identifying patients in the top 5% or 10%\nAs the comorbidity index increased, total yearly costs increased significantly (P<.001)\nThe CCI may therefore be used prospectively to identify patients who are likely to incur high costs, and aid in the development of cost mitigation strategies",
+  "hasPocData": false
  },
  {
   "cwid": "mik2002",
@@ -1351,7 +1631,9 @@
   "title": "Non-Invasive Delivery of CNS Gene Therapy Using Focused Ultrasound",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/non-invasive-delivery-cns-gene-therapy-using",
   "patentStatus": "Application filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: Method for transitory disruption of the BBB and targeted delivery of gene therapy using MRgFUS\nGene therapy delivery can be further restricted by:\nEncapsulation in vesicles specifically disrupted by FUS\nAddition of a tissue-specific microRNA to silence off-target gene expression\nSequential vector delivery for selective therapy activation\nPoC Study: Successfully introduced GFP transgene into the brains of live rats, with stable gene expression up to 16 months after treatment\nGene expression was shown to be limited to target brain regions and did not provoke long-term inflammation",
+  "hasPocData": false
  },
  {
   "cwid": "mik2002",
@@ -1359,7 +1641,9 @@
   "title": "Non-Invasive Delivery of Oncolytic Viruses Using Focused Ultrasound",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/non-invasive-delivery-oncolytic-viruses-using",
   "patentStatus": "Application filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: Method for delivering oncolytic viruses to the brain using focused ultrasound\nUnlike direct injection, this approach is non-invasive and enables finer control over therapeutic delivery\nPoC Data: Rats treated with single or repeat sessions of FUS-mediated OV therapy showed efficient therapy transduction and no evidence of brain injury or systemic illness\nThe OVs may be genetically modified to express immunomodulators, such as IL-12, to enhance the therapeutic effect",
+  "hasPocData": true
  },
  {
   "cwid": "mjc4002",
@@ -1369,7 +1653,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "39092674"
-  ]
+  ],
+  "overview": "The Technology: Biomarker of biological aging based on the DNA methylation states of HERVs and LINE-1 retroelements\nHERV-Age, LINE-1-Age, and a composite Retroelement-Age clocks were developed using data from >12 K individuals based on the DNA methylation states of HERV and/or LINE-1 elements\n100% of HERV-Age and 99.9% of LINE-1-Age methylation sites were unique and not part of existing epigenetic clocks*\nPoC Data: All three epigenetic clocks were subsequently validated in >2 K samples, with high fidelity to chronological age\nRetroelement-Age was able to measured the impact of therapeutic intervention, demonstrated by (i) a reduction in the biological age of samples from HIV patients undergoing retroviral treatment and (ii) human cortical organoids epigenetically rejuvenated through transient reprogramming",
+  "hasPocData": true
  },
  {
   "cwid": "mnociari",
@@ -1379,7 +1665,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "34782457"
-  ]
+  ],
+  "overview": "The Technology: Identification of compounds that protect the retina against lipofuscin toxicity\nThe Discovery: Lipofuscin promotes retinal degeneration via a light-independent atypical necroptotic cascade\nLipofuscin was shown to form aggregates in lysosomes, triggering lysosomal membrane permeabilization (LMP) and subsequent atypical necroptosis\nNecrosulfonamide, necrostatin-7, and arimoclomol were all shown to effectively block lipofuscin toxicity, by targeting different steps in the necroptotic cascade\nPoC Data: The identified compounds successfully protected against cell death induced by A2E accumulation and LMP induced by the lysosomotropic peptide LLOMe",
+  "hasPocData": true
  },
  {
   "cwid": "msuthan",
@@ -1389,7 +1677,9 @@
   "patentStatus": null,
   "pmids": [
    "19289845"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "msuthan",
@@ -1397,7 +1687,9 @@
   "title": "RNA Signature for Noninvasive Diagnosis of Fibrosis in Kidney Transplants",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/rna-signature-noninvasive-diagnosis-fibrosis-kidney",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "mtd4001",
@@ -1407,7 +1699,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "35545049"
-  ]
+  ],
+  "overview": "The Technology: Combination therapies to increase the effectiveness of PARP1 inhibitors by inhibiting activation of tumor stroma and CAFs\nThe Discovery: PARP1 inhibitors generate a feedback loop that activates CAFs by downregulating master regulator p62\nTherefore, combination treatment with a PARP1 inhibitor and an inhibitor of stromal activation may revert stroma activation and enhance anti-tumor activity\nPoC Data: Treatment with a stroma-targeted hyaluronidase significantly enhanced olaparib antitumor activity both in vitro and in vivo models of prostate cancer\nThis co-targeting mechanism is applicable in additional cancers such as lung, breast, and endometrium and for combinations of PARP1 and other stromal inhibitors, such as anti-TNFa, IL-6, and JAK molecules",
+  "hasPocData": true
  },
  {
   "cwid": "myz4001",
@@ -1417,7 +1711,9 @@
   "patentStatus": null,
   "pmids": [
    "35687695"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "nad2012",
@@ -1428,7 +1724,9 @@
   "pmids": [
    "31615996",
    "35868533"
-  ]
+  ],
+  "overview": "The Technology: A method to treat or prevent metastatic cancer via administration of low-dose carbon monoxide separately or in combination with additional therapeutic agents\nBy perturbing cancer cell metabolism, low-dose carbon monoxide (CO) treatment decreases metastatic potential in multiple cancer types including breast, colon, and prostate\nCO decreases cancer cell migration in vitro without affecting activity of non-malignant cells\nCO can be administered by gas inhalation, nanoparticle delivery, or other carbon-monoxide releasing molecules (CORMs)\nPoC Data: Pre-clinical testing via inhalation of low-dose CO reduced metastatic tumor burden completely in pancreatic ductal adenocarcinoma (PDAC) 8988T-bearing mice (p < 0.05) and by 50% in triple-negative breast cancer (TNBC) MBA-MB-231-bearing mice (p < 0.0001)",
+  "hasPocData": true
  },
  {
   "cwid": "nad2012",
@@ -1436,7 +1734,9 @@
   "title": "Nanotherapy Targeting Metastatic Factor RHAMM Positive Tumors",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/nanotherapy-targeting-metastatic-factor-rhamm",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: Nanoparticle-based methods and compositions for the treatment of RHAMM-positive cancers\nThe Discovery: Identification of an isoform of Receptor for Hyaluronic Acid Mediated Motility (RHAMMB) as being consistently upregulated in various high-grade tumors and metastases including PNETs\nThe inventors designed gold nanoparticles (AuNP) that carry the pro-apoptotic peptide KLA and silencing RNA for Bcl-xL (siBcl-xL) to specifically target RHAMMB+ PNETs\nPoC Data: The nanoparticles successfully targeted RHAMMB+ PNETs and led to a significant reduction in tumor weight and volume during in vivo studies\nA synergistic killing effect was achieved with co-delivery of siBcl-xL and KLA peptide compared to either agent alone",
+  "hasPocData": true
  },
  {
   "cwid": "nds2001",
@@ -1446,7 +1746,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "30778326"
-  ]
+  ],
+  "overview": "The Technology: Treatment of acquired cognitive deficits through upregulation of GABAB signaling\nThe Discovery: Administration of sodium oxybate (SO) in mice right before sleep generated an increase in the delta oscillations (1-4Hz) LFP power in the non-REM\nAdministration of SO at night increased beta (20-40Hz) and gamma (>40Hz) LFP during the subsequent wakeful period\nAn increase in beta and gamma frequency power is associated with the recovery of complex behaviors in a wakeful state",
+  "hasPocData": false
  },
  {
   "cwid": "nid4009",
@@ -1456,7 +1758,9 @@
   "patentStatus": "Provisional filed",
   "pmids": [
    "36645307"
-  ]
+  ],
+  "overview": "The Technology: Repurposed reverse transcriptase inhibitors (RTis) to alleviate TLR5-driven inflammation in severe cystic fibrosis\nThe Discovery: Expression of endogenous retroelements is significantly altered in the peripheral blood mononuclear cells (PBMCs) of CF patients\nFlagellum (FLA) delivery results in signaling through TLR5, affecting endogenous retroelements (EREs) downstream\nReverse transcriptase inhibitors (RTis) selectively inhibit TLR5-induced immunity through expression of TEs\nPoC Data: Four RTis inhibited endogenous reverse transcriptase activity and the resulting TLR5-induced inflammatory response in response to FLA, including inflammatory cytokines TNFa and IL-1B\nRTis inhibited TNFa production at all concentrations tested (0.025uM-2.5 uM), and IL-1B at the highest concentration (2.5 uM)",
+  "hasPocData": true
  },
  {
   "cwid": "ole2001",
@@ -1466,7 +1770,9 @@
   "patentStatus": null,
   "pmids": [
    "28331002"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "pag2015",
@@ -1474,7 +1780,9 @@
   "title": "A Novel Highly Specific and Sensitive Digital Droplet PCR Assay for the Detection of Androgen Receptor and Its Variants",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/novel-highly-specific-and-sensitive-digital-droplet",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "Prostate cancer is the second most common cancer diagnosed in men (after skin cancer). Although the cancer can be treated successfully if detected early, metastatic prostate cancer is almost always lethal. The aberrant functioning of androgen receptor (AR) signaling is a central driving force behind prostatic tumorigenesis and its transition into metastatic castration resistant prostate cancer (mCRPC). Androgen deprivation therapy (ADT) is usually employed, along with the use of AR signaling inhibitors such as abiraterone and enzalutamide. Patients often develop resistance to these therapies, leading to the next line of treatment, taxane chemotherapy. However, many patients also develop resistance to taxanes, ultimately resulting in death. Prostate cancer drug resistance is due to the expression of AR splice variants (AR-Vs) that lack the ligand-binding domain and are constitutively active in the nucleus. Expression of AR-V7, in circulating tumor cells (CTCs) isolated from the blood of patients has been associated with resistance to AR inhibitors. Hence, assessment of the presence and/or amounts of different AR-Vs has clinical utility. Clinical trial results indicate that response to taxane treatment is significantly associated with lower AR expression in CTCs, and that this was predictive of the biochemical response to taxane treatment for the individual patient. The inventors have devised sensitive assay methods for capturing CTCs, extracting mRNAs and detecting and quantifying full-length AR (AR-FL), AR-V7 and AR-V567 variants via parallel digital droplet PCR assays.",
+  "hasPocData": false
  },
  {
   "cwid": "pag2015",
@@ -1484,7 +1792,9 @@
   "patentStatus": null,
   "pmids": [
    "24556717"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "pez2001",
@@ -1495,7 +1805,9 @@
   "pmids": [
    "14516475",
    "15090077"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "pez2001",
@@ -1508,7 +1820,9 @@
    "27974468",
    "26344709",
    "19481525"
-  ]
+  ],
+  "overview": "The Technology: Specific inhibitors of CUL4 for treatment of CUL4-expressing cancers\nThe Discovery: CUL4 inhibitors were identified through a robust high-throughput screening and assay workflow of ~240K compounds\nLead compounds were subsequently optimized via several rounds of SAR to produce the current lead compounds PA-201 and PA-1\nCompounds are currently in the hit-to-lead stage, with additional medicinal chemistry to improve potency ongoing\nPoC Data: PA-1 demonstrates tumor killing ability in vitro and in in vivo xenograft models of MDA-MB-468 breast cancer cells, a CUL4-high cell line\nshRNA CUL4 inhibition sensitizes tumors to the topoisomerase 1 inhibitor topotecan (P=9.1E-3), suggesting that CUL4 inhibitors may be combined with chemotherapy",
+  "hasPocData": true
  },
  {
   "cwid": "piz2001",
@@ -1521,7 +1835,9 @@
    "32152200",
    "24619393",
    "22238093"
-  ]
+  ],
+  "overview": "The Technology: Method to treat AD through upregulation of PHB1\nDiscovery: Baseline PHB1 expression in reduced in Tg2576 mice, a mouse model of AD\nPHB1 knockout mice exhibit significant behavioral abnormalities, and display features consistent with neurodegeneration (e.g., protein aggregation, Tau hyperphosphorylation)\nThe inventors also identified a novel regulatory mechanism for PHB1, based on nitric oxide (NO) mediated protein S-nitrosylation on residue Cys69\nPHB1 Cys69 S-nitrosylation is significantly reduced in the brains of APP mice and AD patients\nPoC Data: Administration of an AAV-based gene therapy to increase PHB1 expression induced functional improvements in AD symptoms and increased synaptic long-term potentiation (LTP)",
+  "hasPocData": true
  },
  {
   "cwid": "rak2007",
@@ -1534,7 +1850,9 @@
    "32520834",
    "32103440",
    "31918975"
-  ]
+  ],
+  "overview": "The Technology: A new taxonomy which integrates both claims data and social determinants of health to identify high-cost patients and potential interventions\nThe new groups are classified by differentiated patient attributes, including the presence of chronic conditions, substance use disorders, mental illness, and social vulnerability\nPoC Data: In a cross-sectional study of a Medicare fee-for-service cohort in NYC, patients were sorted into 10 overlapping categories\nThe study identified “multiple chronic conditions” as the category with the most high-cost patients, and found that 73% of high-cost patients fell into multiple of these categories\nIn another study, the group found that patients with both the highest preventable utilization and highest costs represented only 1.9% of patients but 33% of preventable costs among Medicare patients",
+  "hasPocData": true
  },
  {
   "cwid": "ral2006",
@@ -1544,7 +1862,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "38378002"
-  ]
+  ],
+  "overview": "The Technology: A theranostic for predicting and rescuing treatment response to Sulfasalazine in patients with IBD-SpA\nThe Discovery: A small clinical trial identified enrichment of Faecalibacterium prausnitzii (F. prau) and other ‘folate trap’ bacteria as a biomarker for Sulfasalazine response in IBD-SpA patients\nMechanistically, Sulfasalazine therapy enhances butyrate synthesis via F. prau, which limits colitis in responder microbiomes\nPoC Data: Relative abundance of F. prau alone and with additional taxa demonstrates strong ability to discriminate between Sulfasalazine responders and non-responders (AUC of ROC curve: 0.78, p<0.05 and 0.095, p<0.01, respectively)\nAdministration of folate trap bacteria F. prau in non-responder mouse models of IBD rescues response to Sulfasalazine, marked by reduced weight loss and cecal lipocalin, a biomarker of intestinal inflammation",
+  "hasPocData": true
  },
  {
   "cwid": "ral2006",
@@ -1554,7 +1874,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "34606847"
-  ]
+  ],
+  "overview": "The Technology: Method for treating UC by administration of immune-reactive microbiota (TIM)\nThe inventors analyzed fecal samples from UC patients before and 4 weeks post-FMT\nSingle cell sorting was used to culture individual IgA-coated bacteria that were then identified by 16S rDNA gene sequencing\nAnalysis of the sequencing data revealed a core TIM that correlated with clinical response\nPoC Data: Colonization of germ-free mice with the core TIM strains Odoribacter splanchnicus and Alistipes finegoldi reduced the severity of T cell colitis through an IL-10-dependent mechanism\nThe identified microbial compositions may lead to improved treatment of UC and other disorders associated with imbalanced gut microbiota",
+  "hasPocData": true
  },
  {
   "cwid": "raz2002",
@@ -1562,7 +1884,9 @@
   "title": "Endoscopically Deployable Temporary Anti-Reflux Device",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/endoscopically-deployable-temporary-anti-reflux",
   "patentStatus": "Application filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: A temporary, endoscopically-placed device that mimics surgery by artificially recreating a normal lower esophageal sphincter\nThe device spans the gastroesophageal junction, and includes an inset two-way valve that allows food to pass but prevents reflux of stomach contents\nAfter placement of the device, patients may be monitored for up to 30 days to assess impact on symptoms\nSuccessful symptom resolution increases confidence in a GERD diagnosis and indicates that a patient is likely to respond to therapeutic or surgical intervention",
+  "hasPocData": false
  },
  {
   "cwid": "raz2002",
@@ -1570,7 +1894,9 @@
   "title": "Self-collapsing Feeding Tube with Cleaning Mechanism",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/self-collapsing-feeding-tube-cleaning-mechanism",
   "patentStatus": "Application filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: J-tube that includes external and internal anchors to prevent migration and dislodgement, plus a cleaning mechanism to clear blockages\nThe device includes a flexible intra-peritoneal “anchoring” bumper that lies between the small intestine and intra-abdominal wall\nThis anchor prevents inadvertent retrograde displacement of the tube but is flexible enough so that the J-tube can be safely removed by a clinician\nIn addition, the device is compatible with a fixed-length bristle brush that can be inserted into the lumen of the tube to clear obstructions\nImportantly, the cleaning brush is the same length as the J-tube, preventing accidental damage to the small intestine",
+  "hasPocData": false
  },
  {
   "cwid": "rbjones",
@@ -1578,7 +1904,9 @@
   "title": "Repurposing Atovaquone for Eliminating HIV-Infected T-Cells",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/repurposing-atovaquone-eliminating-hiv-infected-t",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: Repurposing of Atovaquone (ATQ), as a treatment strategy for eliminating HIV viral reservoir\nThe Discovery: HIV-infected CD4+ T-cells resistant to cytotoxic T-lymphocytes (CTL) have lower expression of gene-sets defining active metabolism and oxidative stress​\nThese cells have lower levels of intracellular ROS, making them more susceptible to agents that induce oxidative stress (e.g., ROS inducers)\nPoC Data: ATQ induces oxidative stress on human CD4+ T cells​\nATQ sensitizes infected CD4+ T-cells from multiple donors to CTL-mediated killing\nCurrently evaluating effectiveness of ATQ in mouse models using patient-derive xenografts models of HIV infection",
+  "hasPocData": true
  },
  {
   "cwid": "res2025",
@@ -1588,7 +1916,9 @@
   "patentStatus": null,
   "pmids": [
    "26592180"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "rgcryst",
@@ -1596,7 +1926,9 @@
   "title": "A Novel Adenovirus-based Vaccine for the Treatment of Fentanyl Addiction",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/novel-adenovirus-based-vaccine-treatment-fentanyl",
   "patentStatus": "Application filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: Cornell inventors have devised an adenovirus-based vaccine conjugated with fentanyl analogs which causes the immune system to recognize and respond to fentanyl\nAdenoviruses are highly immunogenic, and coupling a small molecule to adenovirus capsid proteins results in a vaccine that induces an immune response to the presence of that molecule\nThe antibodies generated in response to fentanyl sequester it in the blood and stop it from reaching the brain, preventing a lethal overdose\nPoC Data: Administration of the adenovirus-based vaccine conjugated with a fentanyl analog (dAd5-CF) resulted in high-titer levels of anti-fentanyl antibodies in mice within two weeks\nThe anti-fentanyl vaccine dAd5-CF sequestered injected fentanyl within peripheral plasma and prevented fentanyl from reaching the brain, blocking the addictive effects of fentanyl",
+  "hasPocData": true
  },
  {
   "cwid": "rgcryst",
@@ -1606,7 +1938,9 @@
   "patentStatus": "Issued",
   "pmids": [
    "23611296"
-  ]
+  ],
+  "overview": "The Technology: A conjugate of an isolated adenovirus hexon protein coupled to nicotine or a nicotine analog as a smoking cessation strategy\nThe Discovery: Coupling the highly immunogenic adenovirus (Ad) hexon protein to the nicotine hapten AM1 increases the immunogenicity of a nicotine vaccine\nPoC Data: Mice vaccinated with the conjugate, HexonAM1, generated high titers of anti-nicotine antibodies\nWhen the mice were challenged with nicotine, IgG-bound serum nicotine increased 5.2-fold compared to naïve control mice and nicotine levels in the brain were reduced by 53%\nThe HexonAM1 vaccinated mice also showed significant alleviation of nicotine-suppressed locomotor behavior",
+  "hasPocData": true
  },
  {
   "cwid": "rgcryst",
@@ -1617,7 +1951,9 @@
   "pmids": [
    "32759494",
    "36606685"
-  ]
+  ],
+  "overview": "The Technology: AAV8 gene transfer vector coding for an oxidant-resistant form of AAT for the treatment of AAT deficiency\nThe oxidation-resistant AAT (A213/V351/L358) maintains antiprotease activity under oxidant stress compared to wild-type and other engineered variants\nPoC Data: A single dose of 8/AVL afforded sustained serum AAT levels, in both male and female mice, with similar absolute AAT levels for both IV and IPL delivery\nHowever, IPL delivery provided a significantly higher lung epithelial lining fluid (ELF) to serum ratio of AAT than IV delivery, suggesting IPL is the preferred delivery route\nMice administered the 8/AVL vector retain anti-NE activity in the ELF 24 weeks after treatment, whereas mice receiving the WT 8/AMM vector display no anti-NE activity under oxidizing conditions",
+  "hasPocData": true
  },
  {
   "cwid": "rgcryst",
@@ -1630,7 +1966,9 @@
    "34799722",
    "31801381",
    "31649957"
-  ]
+  ],
+  "overview": "The Technology: AAV gene therapy that provides sustained expression of wild-type human ALDH2 to eliminate the symptoms of ALDH2 deficiency\nThe DNA sequence encoding for human ALDH2 was inserted into an AAV gene transfer vector (AAVrh.10hALDh2) and administered intravenously to mice in a single dose\nThe AAVrh.10 serotype was chosen because it predominately targets the liver, the primary site of ethanol and acetaldehyde metabolism\nPoC Data: Delivery of the gene therapy to the liver reconstitutes wild-type enzymatic activity and normalizes acetaldehyde levels and behavior after acute ethanol consumption to near wild-type levels\nIn a mouse model of chronic ALDH2 deficiency, the gene therapy prevented reduced performance in locomotor activity tests, loss of body weight, accumulation of esophageal DNA damage, and development of osteopenia",
+  "hasPocData": true
  },
  {
   "cwid": "rgcryst",
@@ -1640,7 +1978,9 @@
   "patentStatus": "Issued",
   "pmids": [
    "27372563"
-  ]
+  ],
+  "overview": "The Technology: AAV gene therapy that provides sustained delivery of anti-IgE antibodies for the prevention of IgE-mediated allergic reactions\nThe DNA sequence encoding for omalizumab was inserted into an AAV gene transfer vector (AAVrh.10anti-hIgE) and introduced into mice\nA humanized murine model of peanut allergy was generated by reconstituting immunodeficient mice with peanut-allergic human blood mononuclear cells\nPoC Data: A single dose of the gene therapy was sufficient for persistent prevention of peanut-induced sever allergy, both for prophylaxis and therapy after mice exhibit the peanut-induced anaphylaxis-related symptomology\nThe inventors have also developed novel human anti-IgE antibodies with demonstrated efficacy that are ready to be incorporated into the AAV platform for further testing",
+  "hasPocData": true
  },
  {
   "cwid": "rgcryst",
@@ -1650,7 +1990,9 @@
   "patentStatus": null,
   "pmids": [
    "24298994"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "rgcryst",
@@ -1660,7 +2002,9 @@
   "patentStatus": null,
   "pmids": [
    "31443657"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "rgcryst",
@@ -1670,7 +2014,9 @@
   "patentStatus": "Issued",
   "pmids": [
    "35018834"
-  ]
+  ],
+  "overview": "The Technology: Recombinant AAV vector with altered tropism for enhanced targeting of specific organs\nThe Discovery: Adding positively charged lysine residues to the AAV capsid enhances the ability of the virus to adhere to negatively charged glycans, commonly distributed on lung capillary endothelium\nPoC Data: AAV5-PK2-hAAT (containing two lysine residues after amino acid position 575 in the capsid protein) provided 2.5x log higher lung-to-liver ratio compared to a standard AAV5 vector\nAAV5-PK2-hAAT had 79x less vector genomes in the liver, 21x less vector in the spleen, and 52x less in the ileum\nVector distribution of AAV5-PK2-hAAT was similar in the heart, brain, and kidney\nhAAT mRNA liver distribution was significantly lower for the AAV5-PK2 (197x less) with modestly increased hAAT mRNA in the lung (1.3x more)",
+  "hasPocData": true
  },
  {
   "cwid": "rgcryst",
@@ -1678,7 +2024,9 @@
   "title": "Optimized Gene Therapy for Hereditary Angioedema",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/optimized-gene-therapy-hereditary-angioedema",
   "patentStatus": "Issued",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: A novel AAV vector encoding a functional, human C1EI gene for treatment of HAE\nThe Discovery: The team first created and validated a murine model of HAE by inducing CRISPR-mediated deletions in the SERPING1 gene\nAn optimized C1EI gene was generated by removing mRNA instability elements, high and low GC regions, splice signals, and in-sequence translation initiation sequences to increase stability of the gene\nAn AAVrh.10hC1EI vector encoding the optimized hC1EI gene under a CAG promoter was generated to restore C1EI activity in deficient mice\nPoC Data: Expression of hC1Ei in AAVrh.10hC1EI-treated mice persisted for at least 24 weeks\nVascular permeability, a hallmark of HAE, was significantly reduced (p<0.05) in rear paws and internal organs of AAVrh.10hC1EI-treated mice at 24 weeks (except for lung and intestines in female mice)",
+  "hasPocData": true
  },
  {
   "cwid": "rgcryst",
@@ -1689,7 +2037,9 @@
   "pmids": [
    "34545183",
    "33748982"
-  ]
+  ],
+  "overview": "The Technology: AAV gene therapy that provides sustained in situ expression of an anti-eosinophil monoclonal antibody for eosinophilic disorders\nVarious anti-eosinophil antibodies for targets such as Siglec-8 or IL-5 may be incorporated in the vector\nAAVrh.10mAnti-Eos is an rh.10 AAV vector encoding antibody Siglec F, which induces eosinophil apoptosis\nPoC Data: A single dose of AAVrh.10mAnti-Eos resulted in high, persistent serum levels of Siglec-F\nIn a mouse model of CEL-NOS, a single dose of AAVrh.10mAnti-Eos provided long-term suppression of eosinophils in blood and increased survival\nIn a mouse model of EoE, AAVrh.10mAnti-Eos administration reduced blood and esophageal eosinophil numbers (P < 0.02 and P < 0.002, respectively), protected from esophageal tissue remodeling, and minimized food impaction",
+  "hasPocData": true
  },
  {
   "cwid": "rgcryst",
@@ -1699,7 +2049,9 @@
   "patentStatus": "Issued",
   "pmids": [
    "22745437"
-  ]
+  ],
+  "overview": "The Technology: An adeno-associated virus (AAV) vector encoding an anti-nicotine antibody to induce immune response against nicotine\nPoC Data: Mice injected with this vector produced high concentrations of antibodies with high specificity and affinity for nicotine\nThe antibodies effectively sequestered serum nicotine with systemic administration in mice, reducing brain nicotine concentrations to only 15% of those in untreated mice\nNicotine-induced suppression of the cardiovascular and locomotive activity were abolished or greatly reduced in mice that expressed the antibodies",
+  "hasPocData": true
  },
  {
   "cwid": "rgcryst",
@@ -1711,7 +2063,9 @@
    "27711187",
    "25501993",
    "25108232"
-  ]
+  ],
+  "overview": "The Technology: AAV vector encoding therapeutic antibodies to treat solid tumors\nThe AAV vector, AAVrh.10, can encode therapeutic antibodies for VEGF, EGFR, and CXCL12 for in situ production\nUnlike traditional antibody therapy, the vectorized antibody mediates persistent local expression of the encoded antibody\nPoC Data: Administration of the vector encoding bevacizumab (AAVrh10.BevMab) via intraperitoneal injection mediates persistent and high levels of the antibody in the peritoneal cavity\nAdministration of AAVrh10.BevMab reduced tumor growth, increased mouse survival of ovarian cancer, and is synergistic with chemotherapy\nDelivery of encoded VEGF or EGFR via the AAVrh.10 vector directly into the brain of xenograft mouse models of GBM showed reduction in tumor size and increased survival of mice",
+  "hasPocData": true
  },
  {
   "cwid": "rig4007",
@@ -1721,7 +2075,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "38659737"
-  ]
+  ],
+  "overview": "The Technology: Methods of preventing viral infection, including HIV or CMV, using an aryl hydrocarbon receptor (AhR) agonist or Lachnospriaceae family bacteria\nThe Discovery: Lachnospriaceae family members Clostridium immunis (C. immunis) and Ruminococcus gnavus (R. gnavus) metabolize tryptophan into 3-indolelactic acid (3-ILA) via Aromatic Amino Acid Aminotransferase (ArAT)\n3-ILA and FICZ (an alternative agonist) can prevent HIV infection by binding to aryl hydrocarbon receptor (AhR)\nPoC Data: Administration of C. immunis as a live biotherapeutic suppresses active HIV replication by up to 80-90% in vitro in an ArAT dependent manner\nAdministration of FICZ suppresses active HIV replication by up to 50% in vitro",
+  "hasPocData": true
  },
  {
   "cwid": "rms2002",
@@ -1729,7 +2085,9 @@
   "title": "Flexible Cavity-Filling Device with Fiducial Markers for Patients Undergoing Lumpectomy",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/flexible-cavity-filling-device-fiducial-markers",
   "patentStatus": "Issued",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: A flexible ribbon-like implant comprising a hydrogel material imbedded with a radiopaque marker\nThe hydrogel material may be either bioresorbable or non-bioresorbable, and is intended to match the density and elasticity of human subcutaneous breast tissue\nThe radiopaque marker may be configured as a wire that runs the length of the ribbon, and may be used to demark the cavity for future radiotherapy\nUnlike rigid implant designs, the flexibility of the implant is expected to reduce patient anxiety and increase patient comfort\nFurthermore, the flexibility of the implant reduces the possibility of fragmentation into sharp pieces that require removal\nThe small thickness of the ribbon may accelerate reabsorption compared to current implant designs",
+  "hasPocData": false
  },
  {
   "cwid": "roh2002",
@@ -1739,7 +2097,9 @@
   "patentStatus": "Issued",
   "pmids": [
    "41916297"
-  ]
+  ],
+  "overview": "The Technology: Two complementary techniques to address current imaging limitations of 3D tissue\nAtacama Clear: Makes tissue optically transparent, enabling 3D imaging of whole organs\nAtacama Quench: Eliminates tissue autofluorescence to improve signal-to-noise ratio\nPoC Data:\nAtacama Clear: 50% greater signal-to-noise ratio than CUBIC during imaging of 1mm murine heart sections\nAtacama Quench: 10x more blood vessel signal compared to TrueBlack during immunostaining of a murine brain section\nTissue preparation protocols are easy to follow and do not require the use of toxic solvents",
+  "hasPocData": true
  },
  {
   "cwid": "roh9005",
@@ -1749,7 +2109,9 @@
   "patentStatus": "Issued",
   "pmids": [
    "29053719"
-  ]
+  ],
+  "overview": "The Technology: Tissue-Engineered IVDs (TE-IVDs) combined with a bioresorbable stabilization system for improved treatment of DDD\nThe bioresorbable support structure keeps the implant in place during the healing process but allows for segmental movement after the stabilization system dissolves\nPoC Data: In a canine model, the TE-IVD implants engrafted successfully and persisted in the spine for 16 weeks\nThe TE-IVDs were stable and maintained disc height up to 70% of adjacent normal discs\nThe TE-IVD implants did not generate a chronic immune response, supporting the use of allogeneic cells",
+  "hasPocData": true
  },
  {
   "cwid": "rrr2001",
@@ -1757,7 +2119,9 @@
   "title": "Cell-based Assay for NRF2 Activators & NRF2 Activator Scaffolds as Neuroprotective/Antioxidant Agents",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/cell-based-assay-nrf2-activators-nrf2-activator",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "rrr2001",
@@ -1765,7 +2129,9 @@
   "title": "Compounds that Induce Arginase 1 to Enhance Neuroprotection",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/compounds-induce-arginase-1-enhance-neuroprotection",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "rrr2001",
@@ -1777,7 +2143,9 @@
    "26936506",
    "27148687",
    "31911115"
-  ]
+  ],
+  "overview": "The Technology: Novel inhibitors of HIF-PHDs for the treatment of TBI and brain ischemia\nThe Discovery: The inventors have discovered a class of selective inhibitors of PHDs which protect against oxidative damage\nThese branched oxyquinolines coordinate iron at the active site of HIF-PHDs, blocking their function\nThese inhibitors suppress the ATF4 pro-death pathway and exhibit protective effects on mitochondrial function, indicating that they afford neuroprotection by an HIF-independent pathway\nPoC Data: In a mouse model of ICH, mice treated with PHD inhibitors had reduced numbers of degenerating neurons (p<0.001) and behavioral deficits (p<0.05)\nIn a model of oxytosis, a cell death pathway involving oxidative stress, PHD inhibitors restored mitochondrial ATP production and increased cell viability (p<0.001)",
+  "hasPocData": true
  },
  {
   "cwid": "rrr2001",
@@ -1785,7 +2153,9 @@
   "title": "p21 Inducers as Neuroprotective and Anticancer Agents",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/p21-inducers-neuroprotective-and-anticancer-agents",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "rub2001",
@@ -1795,7 +2165,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "33527832"
-  ]
+  ],
+  "overview": "The Technology: Improved sulfonamide-based Lpd inhibitors that exhibit acceptable Mtb permeability and phenocopy lpd genetic deletion in vitro\nThrough an extensive structure-activity relationship (SAR) campaign, compound 13 emerged as the lead candidate with the lowest minimum inhibitory concentration (MIC) and highest pyruvate fold increase\nCompound 13 was shown to be a potent, time-dependent, slowly dissociating inhibitor of Mtb Lpd\nPoC Data: Compound 13 selectively kills Mtb under nitrosative stress and inhibits the growth of Mtb inside mouse bone marrow-derived macrophages (BMDM)\nNB: Compound 13 not tested for efficacy in TB mouse model due to high susceptibility to mouse microsomal metabolism\nDevelopment of next-generation analogs is ongoing",
+  "hasPocData": true
  },
  {
   "cwid": "sas2068",
@@ -1803,7 +2175,9 @@
   "title": "ApHID: pH-Sensitive Fluorescent Dye Resistant to Photobleaching and Oxidation",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/aphid-ph-sensitive-fluorescent-dye-resistant",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: Acidic pH indicator Dye (ApHID) with high resistance to oxidation and photobleaching\nApHID is composed of a BODIPY core and determines pH of the environment using an aniline moiety that has two methyl groups attached\nOptimized for use between pH 4.0 – 6.0, ApHID’s fluorescence emission increases sharply in amplitude with increasing acidity\nApHID has pKa of 5.4 and excitation max at 506 nm\nPoC Data: ApHID fluorescence is 12-fold greater at pH 4.0 relative to pH 6.0\nApHID fluorescence output showed no decrease after photobleaching in live cells and decreased by only 12% in fixed cells, compared to an 83% and 82% decrease with fluorescein and Oregon Green\nApHID exhibits the greatest fluorescent dynamic range at the physiological pH range of LE/Lys compared to currently available commercial dyes",
+  "hasPocData": true
  },
  {
   "cwid": "sbl2004",
@@ -1814,7 +2188,9 @@
   "pmids": [
    "32301996",
    "30505260"
-  ]
+  ],
+  "overview": "The Technology: Self-assembling peptide-based nanofiber (NFP) that provides a platform for targeted delivery of therapeutics and diagnostic agents\nThe NFP can be functionalized with a variety of imaging and therapeutic agents for on-demand customization\nWhen functionalized with glutathione, GSH-NFP demonstrated enhanced tumoral uptake and tumor penetration, reduced clearance rate and off-target distribution at the infusion site, and a longer local retention time in mice bearing human breast cancer\nPoC Data: Compared to free aldoxorubicin (aldox), mice injected with aldox-loaded GSH-NFP had a smaller tumor size and a longer survival time (see Figure 2)\nCompared to free Emtansine (DM1), DM1-NFP dramatically slowed glioma growth and doubled the median survival in mice with diffuse intrinsic pontine glioma (see Figure 3)",
+  "hasPocData": true
  },
  {
   "cwid": "scb2005",
@@ -1824,7 +2200,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "23440214"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "scb2005",
@@ -1832,7 +2210,9 @@
   "title": "New Ribosomal Target for Antibiotic Drug Discovery",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/new-ribosomal-target-antibiotic-drug-discovery",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "scb2005",
@@ -1840,7 +2220,9 @@
   "title": "Reagents and Methods for Assaying Protein Synthesis and Amino Acid Transport",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/reagents-and-methods-assaying-protein-synthesis-and",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "scb2005",
@@ -1848,7 +2230,9 @@
   "title": "Reagents and Methods to Discover anti-HIV-1 Drugs",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/reagents-and-methods-discover-anti-hiv-1-drugs",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "scb2005",
@@ -1856,7 +2240,9 @@
   "title": "Single Molecule Imaging Techniques to Aid Crystallization",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/single-molecule-imaging-techniques-aid",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "schwarh",
@@ -1864,7 +2250,9 @@
   "title": "Subdural Device for Monitoring Seizures and Mapping Brain Function",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/subdural-device-monitoring-seizures-and-mapping",
   "patentStatus": "Issued",
-  "pmids": []
+  "pmids": [],
+  "overview": "Epilepsy is a neurological disorder characterized by abnormal brain activity that results in seizures and periods of altered behavior or loss of awareness. Treatment of epilepsy commonly requires surgery and noninvasive brain imaging techniques (e.g., MRI, PET, or SPECT) are generally used prior to surgery to localize the source of the seizures within the patient’s brain. However, for some patients noninvasive imaging techniques provide insufficient spatiotemporal resolution for identifying epileptic foci and subsequently they cannot be treated or can only have surgery performed at great personal risk. Cornell inventors have responded to the pitfalls of noninvasive brain imaging techniques by designing a subdurally implantable device consisting of electro-optical grids and sensors. This device consists of electrodes to monitor neuronal activity in addition to photoemitters and photodiodes to monitor blood flow and oxygenation. The device is implanted within the layers of membranes that protect the brain, providing higher spatiotemporal resolution than noninvasive techniques and can be left in place for 2 – 3 weeks in freely moving patients to allow for longitudinal monitoring of neural activity and blood flow. The comprehensive brain activity data would allow assessment of seizure localization in epileptic patients and may indicate clinically concerning changes in blood flow and oxygenation in patients suffering from other conditions such as traumatic brain injury or hemorrhagic stroke. Implanted monitors in these patients may enable earlier therapeutic intervention and therefore reduce morbidity and mortality.",
+  "hasPocData": false
  },
  {
   "cwid": "sckiang",
@@ -1875,7 +2263,9 @@
   "pmids": [
    "16885367",
    "16357141"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "sckiang",
@@ -1883,7 +2273,9 @@
   "title": "Combination Therapy for B-cell Cancers",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/combination-therapy-b-cell-cancers",
   "patentStatus": "Issued",
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "scp2002",
@@ -1891,7 +2283,9 @@
   "title": "Customizable Skull Prosthesis for Protection Following Craniectomy",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/customizable-skull-prosthesis-protection-following",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: An external skull prosthesis that offers localized protection of the brain at the surgical site after cranial bone removal\nThe prosthesis is designed to curve around the skull, providing a cranial protection at a specific surgical site\nThis skull protective prosthesis has a precise joint system for size adjustment, and incorporates holes for breathability and future attachment capability\nPoC Data: A prototype of the device was successfully produced using 3D printing and incorporated into multiple cranial attachment systems, including a head wrap, wig, and skull cap\nCompared to bulky protective devices such as helmets, this technology offers targeted protection that reduces weight, improves patient comfort, and is more aesthetically pleasing",
+  "hasPocData": true
  },
  {
   "cwid": "scp2002",
@@ -1899,7 +2293,9 @@
   "title": "NeuroVis: Mixed Reality System for Neurosurgery Case Planning",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/neurovis-mixed-reality-system-neurosurgery-case",
   "patentStatus": "Application filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: A system for visualization of neural anatomy which uses augmented reality to render 3D images of scans\nVolumes of neural structures are obtained by CT/MRI and are processed to build a holographic model resembling the intracranial structures\nA computer program precisely renders the anatomy and allows the user to reconstruct regions of interest, which is projected via a Microsoft HoloLens headset\nPoC Data: Interactive models of neuro-oncologic scenarios have been created, which have demonstrated 3D identification of the following structures:Intercranial metastases,Resection cavity with metastasis,Intraventricular lesion",
+  "hasPocData": true
  },
  {
   "cwid": "scwong",
@@ -1907,7 +2303,9 @@
   "title": "Radial Access Sheath for Minimally Invasive Vascular Interventions",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/radial-access-sheath-minimally-invasive-vascular",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "Coronary artery disease is the most common type of heart disease and affects over 18M adults in the US. Over 1M percutaneous coronary interventions (PCIs, also known as angioplasty) are performed annually to treat obstructive coronary artery disease by relieving the occlusion of the coronary artery and improving blood supply. Coronary arteries can be accessed through the femoral approach (artery in the groin) or the radial approach (artery in the wrist). The radial access is used in 50% of PCIs and increasing. The radial access is preferred due to a lower risk of major bleeding and other complications, and a shorter recovery time. However, the radial artery approach requires the patient to remain in an uncomfortable position lying down with the palm facing up and can result in unexpected shifts during the procedure. This technology is a radial access sheath adapter optimized for patient comfort during radial access PCIs. The preformed curved flexible introducer sheath conforms to the patient’s wrist anatomy and may be secured via a wristband attachment. Once introduced, the novel sheath system enables percutaneous radial vascular access while the patients lie comfortably with their palms facing in or down. This enhanced design improves patient comfort without compromising clinician’s access during radial access procedures.",
+  "hasPocData": false
  },
  {
   "cwid": "shc2034",
@@ -1917,7 +2315,9 @@
   "patentStatus": null,
   "pmids": [
    "28736217"
-  ]
+  ],
+  "overview": "ZIKV, a mosquito-borne positive-sense single-stranded RNA virus, infects fetal and adult human brains, and is associated with serious neurological complications including microcephaly and Guillain-Barr̩ Syndrome (GBS). To date, no prophylactic or therapeutic treatment is available to prevent or treat ZIKV infection. The inventors performed a high content chemical screen using a library containing FDA-approved drugs or drug candidates. Two compounds, hippeastrine hydrobromide (HH) and amodiaquine dihydrochloride dihydrate (AQ) were discovered to inhibit ZIKV infection in human cortical neuron progenitor cells (hNPCs). HH was further validated to inhibit ZIKV infection and to rescue ZIKV-induced growth and differentiation defects in human fetal-like forebrain organoids, while preserving normal neural architecture. HH and AQ also suppressed ZIKV infection in adult mouse brain in vivo . Strikingly, HH and AQ fully rescued the severe limb paralysis syndrome developed in ZIKV infected adult mice. This study identifies drug candidates for treatment of ZIKV infection and ZIKV-related neurological complications in fetal and adult patients.",
+  "hasPocData": false
  },
  {
   "cwid": "shc2034",
@@ -1927,7 +2327,9 @@
   "patentStatus": null,
   "pmids": [
    "33116299"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "shc2034",
@@ -1935,7 +2337,9 @@
   "title": "Method of Differentiation from Human Pluripotent Stem Cells to Monohormonal Cells",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/method-differentiation-human-pluripotent-stem-cells",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "shc2034",
@@ -1946,7 +2350,9 @@
   "pmids": [
    "35434558",
    "31173076"
-  ]
+  ],
+  "overview": "The Technology: A human stem cell-based platform to screen for cardioprotective drugs\nThe Discovery: The inventors have developed a method of generating and isolating sinoatrial node (SAN) cells, also known as pacemaker cells, from human embryonic stem cells\nThese SAN cells can be used as part of a platform for screening chemotherapeutic drugs for cardiotoxicity\nPoC Data: SAN cells generated using this system demonstrate molecular and electrophysiological characteristics of pacemaker cells\nA candidate cardioprotective drug, CardioPro, has been identified which protects heart cells from doxorubicin-induced cardiotoxicity in vitro and in vivo",
+  "hasPocData": true
  },
  {
   "cwid": "shg3006",
@@ -1956,7 +2362,9 @@
   "patentStatus": "Provisional filed",
   "pmids": [
    "38582079"
-  ]
+  ],
+  "overview": "The Technology: Inhibition of the UFMylation cascade for treatment of 4R tauopathies such as AD of FTLD-Tau\nThe Discovery: The inventors engineered a novel model for 4R tauopathies using iPSCs expressing 4R-tau carrying the P301S MAPT mutation, an FTLD-tau-related mutation\nA CRISPRi screen of genes associated with Tau pathobiology identified the UFMylation cascade as top modifier of seeding-induced Tau propagation\nPoC Data: Inhibition of the UFMylation pathway via shRNA knockdown of UBA5 significantly reduces seeding-induced Tau propagation in vitro and in vivo\nFree UFM, an inverse measure of UFMylation cascade activity, is reduced in tangle-bearing neurons in human AD brains, indicating that the UFMylation pathway promotes Tau pathology in AD",
+  "hasPocData": true
  },
  {
   "cwid": "sid2012",
@@ -1967,7 +2375,9 @@
   "pmids": [
    "37421117",
    "33188028"
-  ]
+  ],
+  "overview": "The Technology: A method for scalable generation of soft robotic sensor arrays (SRSA) with the ability to conform to anatomical structures using a conventional laser cutting tool\nThe inventors leverage the thermal masking principle to selectively remove insulation of electronic circuits, allowing for production of SRSAs with increased flexibility\nPoC Data: Postprocessing of flex-printed circuit boards (PCBs) using this method led to increased flexibility of SRSAs based on stress strain assessments\nSRSAs successfully mapped four 3D printed left cardiac atria with an average of 85-90% conformability between the sensors and atrial surface\nSRSAs maintained mechanical integrity based on the ability of the array to withstand 100 cycles of actuation without reduction of performance",
+  "hasPocData": true
  },
  {
   "cwid": "sjmann",
@@ -1980,7 +2390,9 @@
    "20433530",
    "22238239",
    "24673968"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "srafii",
@@ -1990,7 +2402,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "31836710"
-  ]
+  ],
+  "overview": "The Technology: Method to reprogram human umbilical vein endothelial cells (HUVECs) into human glomerular endothelial cells (HGECs) by expressing the transcription factor Tbx3\nTbx3 can be used alone or in combination with additional transcription factors—Prdm1, Gata5, and Pbx1—with the best results observed when all four factors are co-expressed\nHGECs could, for example, be co-cultured with kidney podocytes and mesangial cells to construct functional glomeruli\nThe Discovery: Tbx3 was identified as a crucial mediator of glomerular development and function through high-throughput bulk single-cell RNA sequencing of kidney vasculature\nPoC Data: Overexpression of Tbx3, alone or in combination with Prdm1, Gata5, and Pbx1, in HUVECs results in gene expression profiles that closely match those found in the human glomerulus",
+  "hasPocData": true
  },
  {
   "cwid": "srafii",
@@ -2000,7 +2414,9 @@
   "patentStatus": null,
   "pmids": [
    "18669907"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "srj2003",
@@ -2010,7 +2426,9 @@
   "patentStatus": null,
   "pmids": [
    "20639865"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "srj2003",
@@ -2020,7 +2438,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "37883972"
-  ]
+  ],
+  "overview": "The Technology: Optimized vectors and virus-like particles for high efficiency expression of circular mRNAs in mammalian cells\nThe inventors have expanded their RNA expression system, Tornado, to generate mRNAs by using an internal ribosomal entry site (IRES)\nThis system can be used as a VLP transfer plasmid to generate VLPs packaging a circular mRNA\nIn their proof-of-concept construct, the VLP transfer plasmid encodes a fluorescent reporter system for circular mRNA-specific translation\nPoC Data: Experimental VLPs increased levels of protein expression, producing >5-fold luminescence than controls 24 hours after transduction\nSpike-pseudotyped VLPs demonstrated selective delivery into ACE-2-expressing cells, showing that experimental VLPs can achieve cell-type specificity",
+  "hasPocData": true
  },
  {
   "cwid": "srj2003",
@@ -2030,7 +2450,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "31471614"
-  ]
+  ],
+  "overview": "The Technology: A method for imaging mRNA using genetically encoded fluorogenic proteins that are specifically activated by an RNA aptamer named “Pepper”\nThe inventors converted constitutively active fluorescent proteins, such EYFP and mNeonGreen, into conditionally fluorescent proteins through incorporation of a degradation tag (tDEG) that contains an RNA-binding site\nIn the absence of Pepper RNA, tDeg-tagged proteins are rapidly degraded, enabling RNA-dependent imaging with fluorescent proteins\nPoC Data: EYFP-tDEG construct exhibits 38-fold increase in fluorescence in presence of Pepper RNA\nDoesn’t require addition of nuclear localization elements to the fluorescent protein\nIdeal tool for tracking and quantifying RNA expression in live cells",
+  "hasPocData": true
  },
  {
   "cwid": "srj2003",
@@ -2040,7 +2462,9 @@
   "patentStatus": null,
   "pmids": [
    "28002401"
-  ]
+  ],
+  "overview": "mRNAs hold great promise in research and gene therapy but face two major drawbacks, namely low translation levels due to competition with endogenous mRNAs and lack of stability due to rapid degradation upon entering cells. m6Am is a modified base and is found in some mRNAs immediately after the m7G cap at the 5' end. The inventors have shown that the introduction of m6Am into the 5' UTR of transcripts dramatically increases their stability (2-3 fold), thereby allowing it to persist for a longer period of time in cells. It also raises translation levels by promoting translation initiation. This technology requires a single m6Am, which can be easily incorporated into mRNAs using specific polymerases or enzymatic reactions. This invention therefore, facilitates the production of large amounts of a desired protein using in vitro protein production systems.",
+  "hasPocData": false
  },
  {
   "cwid": "srj2003",
@@ -2050,7 +2474,9 @@
   "patentStatus": null,
   "pmids": [
    "20639865"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "srj2003",
@@ -2060,7 +2486,9 @@
   "patentStatus": "Issued",
   "pmids": [
    "25470550"
-  ]
+  ],
+  "overview": "The Technology: Method of preventing and treating hearing loss by administering agents that increase intracellular NAD+ levels\nDiscovery: Augmentation of intracochlear NAD+ levels protects mice from noise-induced hearing loss (NIHL)\nAdministration of nicotinamide riboside (NR) provides an efficient route to increase NAD+ levels in the cochlea in mice and protects from NIHL\nNR also prevented retraction of spiral ganglia neurites from the inner hair cells, demonstrated that NR activates a NAD+-SIRT3 pathway that reduces neurite degeneration caused by noise exposure",
+  "hasPocData": false
  },
  {
   "cwid": "srj2003",
@@ -2068,7 +2496,9 @@
   "title": "Platform for Aptamer-Mediated Cellular Regulation using Circular RNA Nanodevices",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/platform-aptamer-mediated-cellular-regulation-using",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: A platform for generating acyclovir-controlled RNA nanodevices that can be used for controlling cell physiology\nThe nanodevice incorporates two aptamers: the first aptamer (input) exhibits a conformational change upon binding acyclovir, which stabilizes the second aptamer (output) in a folded conformation that binds to an effector or performs an effector function\nPoC Data: Engineered an RNA nanodevice that successfully demonstrated acyclovir-dependent control of Broccoli, a fluorogenic aptamer\nEngineered an RNA nanodevice containing an iron response element (IRE), an aptamer that binds to the major undruggable iron-regulatory proteins (IRPs), enabling tunable repression of free iron levels and thus the inhibition of ferroptosis\nCompared to samples without acyclovir, those with acyclovir exhibited up to a 126% increase in FTH levels and up to a 22% decrease in TfR expression",
+  "hasPocData": true
  },
  {
   "cwid": "srj2003",
@@ -2078,7 +2508,9 @@
   "patentStatus": "Issued",
   "pmids": [
    "26593424"
-  ]
+  ],
+  "overview": "The Technology: A method for enhancing mRNA translation by incorporating N6-methyladenosine (m6A) in the 5’ UTR\nThe Discovery: m6A is a reversible base modification seen in the 5’ UTR of many eukaryotic mRNAs which functions as an alternative to the 5’ cap to stimulate mRNA translation\nm6A can be incorporated in this position by including an adenosine methylation motif in the 5’ UTR\nm6A can then bind eukaryotic initiation factor 3 (eIF3), which is sufficient to recruit the 43S complex to initiate translation in the absence of the cap-binding factor eIF4E\nPoC Data: In the absence of eIF4E, m6A is sufficient to initiate translation in uncapped mRNA (p<0.01)\nInduction of cellular stress via heat shock increases cellular expression of mRNAs containing m6A in the 5’UTR",
+  "hasPocData": true
  },
  {
   "cwid": "srj2003",
@@ -2088,7 +2520,9 @@
   "patentStatus": "PCT filed",
   "pmids": [
    "41184552"
-  ]
+  ],
+  "overview": "The Technology: A system that utilizes acyclovir to regulate gene expression via alternative splicing of a poison exon\nA novel splicing cassette which incorporates exon 7 of survival motor neuron 1 (SMN1) as a poison exon\nThe poison exon contains an in-frame stop codon, and a TSL2 stem loop modified with an acyclovir binding aptamer that can control inclusion of the exon\nIn the presence of acyclovir, the poison exon is removed from mature mRNA allowing functional protein expression\nAcyclovir is an FDA-approved antiviral that is known to be well tolerated during chronic dosage\nPoC Data: Insertion of the splicing cassette into a luciferase reporter gene led to significant repression of reporter expression, with dose-dependent induction up to 300-fold upon acyclovir addition",
+  "hasPocData": true
  },
  {
   "cwid": "srj2003",
@@ -2098,7 +2532,9 @@
   "patentStatus": "Issued",
   "pmids": [
    "18193038"
-  ]
+  ],
+  "overview": "The Technology: Method for targeted gene expression in axons using expression of regenerative proteins from an alphavirus vector\nThe Discovery: Protein translation occurs in the axons of neuronal cells when axonal ribosomes are presented with an RNA including an internal ribosome entry site (IRES)\nRNA alphaviruses successfully enter axons and induce the express of genes linked to an IRES\nTechnology may be used to express a variety of regenerative proteins, such as dominant-negative variants of RhoA or RhoA-activated kinase, adenylyl cyclase, src kinase, and cyclic AMP-response element-binding protein (CREB)",
+  "hasPocData": false
  },
  {
   "cwid": "ssgross",
@@ -2110,7 +2546,9 @@
    "11181410",
    "12089067",
    "12819819"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "stw2006",
@@ -2120,7 +2558,9 @@
   "patentStatus": null,
   "pmids": [
    "23698380"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "suc2002",
@@ -2128,7 +2568,9 @@
   "title": "CD36 Inhibition to Reduce Visceral Fat Accumulation and Increase Insulin Sensitivity",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/cd36-inhibition-reduce-visceral-fat-accumulation",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "szj2001",
@@ -2139,7 +2581,9 @@
   "pmids": [
    "37597510",
    "40446799"
-  ]
+  ],
+  "overview": "The Technology: Methods for the enrichment and analysis of rare circulating HSPCs in blood samples\nThe Discovery: While rare (0.05%), HSPCs do circulate in blood and accurately capture the diversity of stem cells that reside in the bone marrow\nPBMC-PIE (Peripheral Blood Mononuclear Cell analysis with Progenitor Input Enrichment) recapitulates bone marrow HSPC subsets, enables HSPC gene expression analysis, and reveals disease signatures of blood stem cells\nPBMC-PIE serves as a powerful tool to study hematopoiesis, epigenetic programming of HSPCs, and innate immune memory of inflammation without directly accessing the bone marrow\nPoC Data: Blood from 112 COVID-19 patients and 47 controls was analyzed using PBMC-PIE coupled with chromatin and expression analysis, enabling detailed single cell profiling of HSPCs and revealing increased myelopoiesis, neutrophil differentiation, and durable epigenetic signatures persisting in HSPCs up to a year post COVID-19",
+  "hasPocData": false
  },
  {
   "cwid": "tai9015",
@@ -2150,7 +2594,9 @@
   "pmids": [
    "36672285",
    "36038558"
-  ]
+  ],
+  "overview": "The Technology: Epigenetic tumor (ET) signature was identified as a prognostic marker for breast cancer independent of patient characteristics\nThe Discovery: ZNF92 overexpression is strongly associated with breast cancer and can predict patient outcomes\nPoC Data: The ET-9/ZNF92 signature identified patients with 8.7 years shorter overall survival (p=1.56e-5) and 6.3 years shorter relapse free survival (p=1.63e-4)\nET/ZNF92 correlates with outcome in lymph-node positive, HER2+, post-chemotherapy and triple-negative breast cancers. These features distinguish ET-9/ZNF92 since standard prognostic signatures correlate with outcome only in ER-positive, HER2-negative, and lymph-node negative breast cancers\nZNF92 over-expression is even more specific for breast cancer compared to common benchmarks such as estrogen receptor (ER) and HER2\nThe inventor has developed a second signature that is synergistic with ET/ZNF92 (manuscript in preparation)",
+  "hasPocData": true
  },
  {
   "cwid": "taryan",
@@ -2158,7 +2604,9 @@
   "title": "Methods and Compositions for Measuring ATP in Subcellular Compartments",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/methods-and-compositions-measuring-atp-subcellular",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "temcgraw",
@@ -2168,7 +2616,9 @@
   "patentStatus": null,
   "pmids": [
    "38401548"
-  ]
+  ],
+  "overview": "The Technology: A 140-gene signature identifying a molecular subclass likely to respond to immune checkpoint blockade across various solid tumors\nThe Discovery: RNA-seq data from a phase II trial of stereotactic body radiation therapy (SBRT) combined with anti-PD-L1 (durvalumab) in NSCLC revealed genes linked to highly proliferating cells\nThis subclass is dominated by increased expression of cell cycle genes, as well as increased glycolysis, TMB, and immune suppression\nPoC Data: The 140-gene set was associated with reduced DFS and OS in lung adenocarcinoma with a hazard ratio of 1.6 (p = 3.04 × 10⁻⁶)\n140-gene set was also tested against an additional five TCGA solid tumor types and demonstrated correlation with survival in breast, prostate, melanoma, and pancreatic cancer\nThis molecular subclass is present in one-quarter to two-thirds of tumors, varying by disease",
+  "hasPocData": true
  },
  {
   "cwid": "tjfahey",
@@ -2178,7 +2628,9 @@
   "patentStatus": "Issued",
   "pmids": [
    "19658182"
-  ]
+  ],
+  "overview": "Thyroid cancer typically presents as a thyroid nodule, with 5 – 15% of all thyroid nodules proving to be malignant. Microscopic examination of a thyroid biopsy sample, typically obtained by the fine needle aspiration (FNA) procedure, has been the gold standard in preoperative diagnosis of thyroid nodules. However, this procedure remains subjective, and does not always provide a definitive answer on the tumor malignancy. Of note, the method often struggles to differentiate follicular variant papillary thyroid carcinomas (FVPTCs) from benign follicular adenomas. Up to 10% of surgically excised thyroid nodules receive a definitive classification upon histopathologic review by pathologists. This technology is diagnostic method for streamlined classification of thyroid nodules using gene profiling with microarray analysis. The inventors identified a group of 73 genes that discriminate between benign and malignant tumors, in addition to a new class called FACA (follicular adenoma with cytologic atypia) that may be pre-malignant tumors. These tumors, not previously classified, have a distinct molecular profile and may represent an early stage in the progression of benign nodules to FVPTC. The technology is applicable to both FNA tissue samples and histopathology after surgery. Since current methods cannot accurately discriminate thyroid tumors, this technology may aid in further classification and prevent overtreatment.",
+  "hasPocData": false
  },
  {
   "cwid": "tre2003",
@@ -2189,7 +2641,9 @@
   "pmids": [
    "31031140",
    "33895139"
-  ]
+  ],
+  "overview": "The Technology: Small molecule inhibitors that activate osteoblast differentiation\nThe Discovery: A high-throughput screen for activators of osteogenesis markers led to the identification of DIPQUO\nDIPQUO drives osteoblast differentiation by activating the β isoform of P38, leading to MAPK signaling and subsequent inhibition of GSK3-β\nPoC Data: DIPQUO treatment accelerated the differentiation of mouse myoblasts and bone-marrow derived human mesenchymal stem cells into mature osteoblasts\nDIPQUO increased the number of osteoblast cells in the caudal fins of zebrafish larvae and increased the mineralization of vertebrae in zebrafish regeneration models\nIn addition to the P38 mechanism of action, DIPQUO synergized with other GSK3-β inhibitors to promote osteoblast differentiation",
+  "hasPocData": true
  },
  {
   "cwid": "varmus",
@@ -2199,7 +2653,9 @@
   "patentStatus": null,
   "pmids": [
    "30322915"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "vim2010",
@@ -2211,7 +2667,9 @@
    "34426581",
    "34911956",
    "27769988"
-  ]
+  ],
+  "overview": "The Technology: A therapeutic strategy for TNBC combining copper depletion via Tetrathiomolybdate (TM) with pembrolizumab and chemotherapy\nPoC Data: A 75-patient phase II pilot trial in late-stage cancer met its primary endpoints of decreased copper levels and reduction of VEGFR2+ endothelial progenitor cells, which initiate the ‘angiogenic switch’\nAmong stage II/III and stage IV TNBC patients with no signs of disease after standard treatment, the event-free survival rates after an average follow-up of 6.3 years were 90% and 50%, respectively\nThis far surpasses the average survival rate of 11% at 5 years for distant metastatic TNBC patients1\nPreclinical studies demonstrate that TM reverses key resistance pathways by decreasing collagen density, increasing immune cell infiltration, and shifting cells towards glycolysis\nA phase Ib/II clinical trial assessing this combination strategy in patients with residual TNBC is planned",
+  "hasPocData": true
  },
  {
   "cwid": "vim2010",
@@ -2219,7 +2677,9 @@
   "title": "MicroRNA-708 as a Therapeutic Agent against Metastatic Breast Cancer",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/microrna-708-therapeutic-agent-against-metastatic",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "xih4001",
@@ -2230,7 +2690,9 @@
   "pmids": [
    "34582804",
    "38678016"
-  ]
+  ],
+  "overview": "The Technology: Inhibition of SATB2 as a therapeutic strategy for the treatment of SBS, exemplified using CRISPR gene therapy\nThe Discovery: Loss of the transcription factor SATB2 transforms colonic epithelium into ileum-like tissue in mice and human colonic organoids\nIntestinal deletion of SATB2 in mice led to significant remodeling of colonic tissue, with marked changes in tissue morphology, gene expression, and cell type composition\nPoC Data: Of note, SATB2 inhibition led to the generation of bona fide nutrient-absorbing enterocytes, with significantly enhanced nutrient absorption in Satb2cKO mice colon compared to negative control\nCRISPR-mediated deletion of SATB2 using an optimized guide RNA (gRNA) replicated the findings observed in mice, suggesting a potential therapeutic strategy for SBS patients",
+  "hasPocData": true
  },
  {
   "cwid": "xih4001",
@@ -2240,7 +2702,9 @@
   "patentStatus": "Application filed",
   "pmids": [
    "37163124"
-  ]
+  ],
+  "overview": "The Technology: A method of generating gastric insulin-secreting (GINS) cells from human gastric stem cells (hGSCs) as a transplantable therapeutic for diabetes\nThe Discovery: The inventors have developed a novel differentiation path which induces hGSCs to develop β-cell identity\nPoC Data: Cultured hGSCs differentiate into islet-like cells at an efficiency of approximately 70%\nGINS organoids were able to produce insulin upon glucose stimulation 8-10 days after induction\nGINS organoids were stable for the duration of the 6-month period monitored after transplantation\nTransplantation of GINS organoids reversed diabetes in mice and provided glucose homeostasis for over 100 days",
+  "hasPocData": true
  },
  {
   "cwid": "xyhuang",
@@ -2250,7 +2714,9 @@
   "patentStatus": null,
   "pmids": [
    "16740474"
-  ]
+  ],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "yiwang",
@@ -2258,7 +2724,9 @@
   "title": "ECG Ordered Contrast Enhanced MRA",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/ecg-ordered-contrast-enhanced-mra",
   "patentStatus": null,
-  "pmids": []
+  "pmids": [],
+  "overview": null,
+  "hasPocData": false
  },
  {
   "cwid": "zhz9010",
@@ -2266,6 +2734,8 @@
   "title": "AI-Powered, Point-of-Care Testing for Preeclampsia Prediction",
   "url": "https://innovation.weill.cornell.edu/industry-investors-partners/technology-portfolio/ai-powered-point-care-testing-preeclampsia",
   "patentStatus": "PCT filed",
-  "pmids": []
+  "pmids": [],
+  "overview": "The Technology: Integrated system combining blood testing and predictive modeling using AI and machine learning algorithms to accurately predict the risk of preeclampsia in pregnant women\nThe model integrates data on maternal characteristics (e.g., age, race, gestational age, medical history) and routine lab results (e.g., CBC, basic metabolic panel, urine protein analysis)\nThe model generates a rolling risk estimates at different gestational age windows between 28-40 weeks, forecasting preeclampsia onset within 1, 2, and 4 weeks\nThis provides dynamic, short-term prediction of preeclampsia in late gestation using routine data\nPoC Data: The model was trained on ~36k patient records across three demographically distinct hospitals, achieving rolling AUCs between 0.75-0.88 across gestational weeks from 28 to 40",
+  "hasPocData": true
  }
 ]

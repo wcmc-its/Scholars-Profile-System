@@ -89,7 +89,16 @@ function readSeedFile(path: string): TechnologyRow[] {
 export function fingerprint(rows: TechnologyRow[]): string {
   return rows
     .map((r) =>
-      JSON.stringify([r.cwid, r.url, r.reference, r.title, r.patentStatus, [...r.pmids].sort()]),
+      JSON.stringify([
+        r.cwid,
+        r.url,
+        r.reference,
+        r.title,
+        r.patentStatus,
+        [...r.pmids].sort(),
+        r.overview,
+        r.hasPocData,
+      ]),
     )
     .sort()
     .join("\n");
@@ -109,6 +118,8 @@ async function replaceTechnologies(rows: TechnologyRow[]): Promise<void> {
             url: t.url,
             patentStatus: t.patentStatus,
             pmids: t.pmids,
+            overview: t.overview,
+            hasPocData: t.hasPocData,
             refreshedAt: new Date(),
           })),
         });
@@ -149,6 +160,8 @@ async function main(): Promise<void> {
         url: true,
         patentStatus: true,
         pmids: true,
+        overview: true,
+        hasPocData: true,
       },
     })
   ).map((t) => ({
