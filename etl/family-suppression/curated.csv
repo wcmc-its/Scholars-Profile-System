@@ -1,1 +1,9 @@
 supercategory,family_label,source_note
+computational_statistical,Conventional statistical testing,#800 non-distinctive generic significance testing (t-test/chi-square/ANOVA)
+computational_statistical,Regression modeling,#800 non-distinctive generic statistical method (near-universal across the corpus)
+computational_statistical,Predictive model validation,#800 non-distinctive generic modeling step (cross-validation/holdout) rather than a research expertise
+computational_statistical,Model selection and hyperparameter optimization,#800 non-distinctive generic ML hygiene step rather than a research expertise
+computational_statistical,Observational study design,#800 non-distinctive generic study design
+computational_statistical,Case-control study designs,#800 non-distinctive generic study design
+computational_statistical,Longitudinal study design,#800 non-distinctive generic study design
+computational_statistical,Quasi-experimental study design,#800 non-distinctive generic study design
