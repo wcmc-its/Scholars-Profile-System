@@ -27,10 +27,7 @@ import { isCommsSteward } from "@/lib/auth/comms-steward";
 import { isDeveloper } from "@/lib/auth/development";
 import { getSuperuserAllowlist, getSuperuserConfig } from "@/lib/auth/config";
 import { getSession } from "@/lib/auth/session-server";
-import { DEFAULT_SEARCH_BASE, openLdap } from "@/lib/sources/ldap";
-
-/** The Enterprise Directory container holding group objects. */
-const GROUPS_BASE = "ou=Groups,dc=weill,dc=cornell,dc=edu";
+import { isGroupMember } from "@/lib/auth/ldap-group";
 
 /**
  * B01 identity (`cwid`) paired with the live authorization verdicts:
@@ -55,27 +52,6 @@ export interface EditSession {
   isDeveloper?: boolean;
 }
 
-/**
- * Escape a value for safe interpolation into an LDAP search filter (RFC 4515).
- * The CWID comes from the validated SAML assertion, but an authorization
- * filter must not be injectable regardless. NUL — the fifth RFC 4515
- * metacharacter — cannot occur in a CWID (XML character data forbids it) and
- * is not handled here.
- */
-function escapeLdapFilterValue(value: string): string {
-  return value.replace(/[\\*()]/g, (c) => {
-    switch (c) {
-      case "\\":
-        return "\\5c";
-      case "*":
-        return "\\2a";
-      case "(":
-        return "\\28";
-      default:
-        return "\\29";
-    }
-  });
-}
 
 /** One structured log line for a directory-side failure of the superuser check. */
 function logCheckFailed(cwid: string, reason: string): void {
@@ -112,35 +88,7 @@ export const isSuperuser = cache(async (cwid: string): Promise<boolean> => {
   // Group cn not configured yet — the admin tier is dormant, not broken.
   if (!groupCn) return false;
 
-  let client: Awaited<ReturnType<typeof openLdap>>;
-  try {
-    client = await openLdap();
-  } catch {
-    // No LDAP config, host unreachable, or bind rejected — fail closed.
-    logCheckFailed(cwid, "ldap_unavailable");
-    return false;
-  }
-
-  try {
-    const peopleBase =
-      process.env.SCHOLARS_LDAP_SEARCH_BASE ?? DEFAULT_SEARCH_BASE;
-    const userDn = `uid=${escapeLdapFilterValue(cwid)},${peopleBase}`;
-    // One subtree search under ou=Groups: the named group, carrying this
-    // person's DN in `member`. `cn` only — existence is the whole answer.
-    const filter = `(&(cn=${escapeLdapFilterValue(groupCn)})(member=${userDn}))`;
-    const { searchEntries } = await client.search(GROUPS_BASE, {
-      scope: "sub",
-      filter,
-      attributes: ["cn"],
-    });
-    return searchEntries.length > 0;
-  } catch {
-    // Search timed out or the directory returned an error — fail closed.
-    logCheckFailed(cwid, "ldap_search_failed");
-    return false;
-  } finally {
-    await client.unbind().catch(() => {});
-  }
+  return isGroupMember(groupCn, cwid, (reason) => logCheckFailed(cwid, reason));
 });
 
 /**

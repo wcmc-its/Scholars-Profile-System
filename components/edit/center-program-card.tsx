@@ -11,8 +11,14 @@
  *   - add a leader (directory pick → `add_leader`),
  *   - remove a leader (`remove_leader`),
  *   - toggle a leader's interim flag (`set_leader`),
- *   - reorder leaders (`set_leader` on the two swapped `sortOrder`s),
+ *   - change a person's leadership type (`set_leader` with `role`),
+ *   - reorder within a leadership type (`set_leader` on the two swapped `sortOrder`s),
  *   - edit the program description (`set_description`, Save-gated).
+ *
+ * Leadership type (#1570) is `leader` or `coe_liaison`. The public program page
+ * renders leaders first, then a separate "COE Liaison" card, so this list is sorted
+ * the same way and reordering is confined to a single type — moving a leader "down"
+ * past a liaison would swap `sortOrder` without changing the rendered order.
  *
  * Authz is enforced server-side (Curator/Owner/Superuser of the center); this card
  * is only ever rendered for an actor who already passed that gate.
@@ -23,7 +29,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronDown, ChevronUp, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, HelpCircle, X } from "lucide-react";
 
 import {
   DirectoryPeopleTypeahead,
@@ -33,7 +39,9 @@ import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { Textarea } from "@/components/ui/textarea";
+import { COE_HELP } from "@/lib/center-program-roles";
 import { cn } from "@/lib/utils";
 
 /** Mirrors `PROGRAM_PAGE_EXCLUDED_CODES` in `lib/api/centers.ts` (server-only,
@@ -42,11 +50,32 @@ const EXCLUDED_PROGRAM_CODES = new Set(["ZY"]);
 
 const DESCRIPTION_MAX_CHARS = 4000;
 
+/** #1570 — mirrors `CenterProgramLeader.role`. Leaders render before liaisons. */
+type LeaderRole = "leader" | "coe_liaison";
+
+const ROLE_OPTIONS: ReadonlyArray<{ value: LeaderRole; label: string }> = [
+  { value: "leader", label: "Leader" },
+  { value: "coe_liaison", label: "COE Liaison" },
+];
+
+/** Rank, not the role string — "coe_liaison" sorts BEFORE "leader" lexically. */
+const roleRank = (role: LeaderRole): number => (role === "coe_liaison" ? 1 : 0);
+
+function sortLeaders(rows: ReadonlyArray<LeaderState>): LeaderState[] {
+  return [...rows].sort(
+    (a, b) =>
+      roleRank(a.role) - roleRank(b.role) ||
+      a.sortOrder - b.sortOrder ||
+      a.cwid.localeCompare(b.cwid),
+  );
+}
+
 type LeaderState = {
   cwid: string;
   name: string | null;
   title: string | null;
   interim: boolean;
+  role: LeaderRole;
   sortOrder: number;
 };
 
@@ -90,9 +119,7 @@ function ProgramEditor({
   centerCode: string;
   program: CenterProgramCardProps["programs"][number];
 }) {
-  const [leaders, setLeaders] = React.useState<LeaderState[]>(() =>
-    [...program.leaders].sort((a, b) => a.sortOrder - b.sortOrder || a.cwid.localeCompare(b.cwid)),
-  );
+  const [leaders, setLeaders] = React.useState<LeaderState[]>(() => sortLeaders(program.leaders));
   const [adding, setAdding] = React.useState<DirectoryValue | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -134,20 +161,41 @@ function ProgramEditor({
       return;
     }
     setBusy(true);
-    const nextSort = leaders.length ? Math.max(...leaders.map((l) => l.sortOrder)) + 1 : 0;
-    const ok = await post("add_leader", { cwid: adding.cwid, interim: false, sortOrder: nextSort });
+    // `sortOrder` is scoped to a leadership type, so the new row sorts after the
+    // existing rows of ITS type (always "leader" — switch it with the dropdown).
+    const peers = leaders.filter((l) => l.role === "leader");
+    const nextSort = peers.length ? Math.max(...peers.map((l) => l.sortOrder)) + 1 : 0;
+    const ok = await post("add_leader", {
+      cwid: adding.cwid,
+      interim: false,
+      role: "leader",
+      sortOrder: nextSort,
+    });
     if (ok) {
-      setLeaders((prev) => [
-        ...prev,
-        {
-          cwid: adding.cwid,
-          name: adding.name,
-          title: adding.title,
-          interim: false,
-          sortOrder: nextSort,
-        },
-      ]);
+      setLeaders((prev) =>
+        sortLeaders([
+          ...prev,
+          {
+            cwid: adding.cwid,
+            name: adding.name,
+            title: adding.title,
+            interim: false,
+            role: "leader",
+            sortOrder: nextSort,
+          },
+        ]),
+      );
       setAdding(null);
+    }
+    setBusy(false);
+  }
+
+  async function changeRole(cwid: string, role: LeaderRole) {
+    if (busy) return;
+    setBusy(true);
+    const ok = await post("set_leader", { cwid, role });
+    if (ok) {
+      setLeaders((prev) => sortLeaders(prev.map((l) => (l.cwid === cwid ? { ...l, role } : l))));
     }
     setBusy(false);
   }
@@ -171,23 +219,27 @@ function ProgramEditor({
   async function move(index: number, dir: -1 | 1) {
     const other = index + dir;
     if (busy || other < 0 || other >= leaders.length) return;
-    setBusy(true);
     const a = leaders[index];
     const b = leaders[other];
+    // Only within one leadership type: the rendered order is (role, sortOrder), so
+    // swapping across the boundary would write two rows and change nothing on screen.
+    if (a.role !== b.role) return;
+    setBusy(true);
     // Swap the two rows' sortOrder values (two writes).
     const ok1 = await post("set_leader", { cwid: a.cwid, sortOrder: b.sortOrder });
     const ok2 = ok1 && (await post("set_leader", { cwid: b.cwid, sortOrder: a.sortOrder }));
     if (ok2) {
-      setLeaders((prev) => {
-        const next = prev.map((l) =>
-          l.cwid === a.cwid
-            ? { ...l, sortOrder: b.sortOrder }
-            : l.cwid === b.cwid
-              ? { ...l, sortOrder: a.sortOrder }
-              : l,
-        );
-        return next.sort((x, y) => x.sortOrder - y.sortOrder || x.cwid.localeCompare(y.cwid));
-      });
+      setLeaders((prev) =>
+        sortLeaders(
+          prev.map((l) =>
+            l.cwid === a.cwid
+              ? { ...l, sortOrder: b.sortOrder }
+              : l.cwid === b.cwid
+                ? { ...l, sortOrder: a.sortOrder }
+                : l,
+          ),
+        ),
+      );
     }
     setBusy(false);
   }
@@ -215,7 +267,21 @@ function ProgramEditor({
 
       {/* Leaders */}
       <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">{leaders.length === 1 ? "Leader" : "Leaders"}</span>
+        <span className="flex items-center gap-1 text-sm font-medium">
+          Leadership
+          {/* #1570 — "COE" isn't self-evident, and a native <option> can't host a
+              tooltip, so the definition lives beside the dropdowns. */}
+          <HoverTooltip text={COE_HELP} wide>
+            <button
+              type="button"
+              aria-label="What is a COE Liaison?"
+              className="text-muted-foreground hover:text-foreground inline-flex size-5 items-center justify-center rounded-full"
+              data-testid={`leadership-help-${program.code}`}
+            >
+              <HelpCircle className="size-4" />
+            </button>
+          </HoverTooltip>
+        </span>
         {leaders.length === 0 ? (
           <p className="text-muted-foreground text-sm">No leaders set.</p>
         ) : (
@@ -232,6 +298,23 @@ function ProgramEditor({
                     <span className="text-muted-foreground truncate text-xs">{l.title}</span>
                   )}
                 </div>
+                <label className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
+                  <span className="sr-only">{`Leadership type for ${l.name ?? l.cwid}`}</span>
+                  <select
+                    value={l.role}
+                    disabled={busy}
+                    onChange={(e) => changeRole(l.cwid, e.target.value as LeaderRole)}
+                    className="border-apollo-border bg-apollo-surface-2 text-foreground rounded border px-2 py-1 text-xs"
+                    aria-label={`Leadership type for ${l.name ?? l.cwid}`}
+                    data-testid={`leader-role-${program.code}-${l.cwid}`}
+                  >
+                    {ROLE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="flex items-center gap-1.5 text-xs">
                   <Checkbox
                     checked={l.interim}
@@ -246,7 +329,7 @@ function ProgramEditor({
                     type="button"
                     variant="ghost"
                     size="icon"
-                    disabled={busy || i === 0}
+                    disabled={busy || i === 0 || leaders[i - 1].role !== l.role}
                     onClick={() => move(i, -1)}
                     aria-label={`Move ${l.name ?? l.cwid} up`}
                     data-testid={`leader-up-${program.code}-${l.cwid}`}
@@ -257,7 +340,7 @@ function ProgramEditor({
                     type="button"
                     variant="ghost"
                     size="icon"
-                    disabled={busy || i === leaders.length - 1}
+                    disabled={busy || i === leaders.length - 1 || leaders[i + 1].role !== l.role}
                     onClick={() => move(i, 1)}
                     aria-label={`Move ${l.name ?? l.cwid} down`}
                     data-testid={`leader-down-${program.code}-${l.cwid}`}

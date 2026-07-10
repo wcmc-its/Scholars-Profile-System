@@ -137,6 +137,12 @@ export type OpportunityCandidate = {
   prestige?: Prestige | null;
 };
 
+/** One explanation chip on the scholar card (#1610): a topic that drives this
+ *  match + the scholar's pub count there. Topic ids + counts ONLY — the
+ *  per-topic cosine terms stay internal (house rule: ranking math never
+ *  surfaces). Labels resolve in the route from the topic table. */
+export type MatchedTopic = { topicId: string; pubCount: number };
+
 export type RankedOpportunity = {
   opportunityId: string;
   title: string;
@@ -150,6 +156,9 @@ export type RankedOpportunity = {
   mechanism: string | null;
   awardCeiling: number | null;
   prestige: Prestige | null;
+  /** Top contributing SHARED topics (≤3), strongest first — the card's
+   *  "Matches your work on ⟨topic⟩ (N pubs)" chips (#1610). */
+  matchedTopics: MatchedTopic[];
 };
 
 export type RankSort = "fit" | "deadline" | "stage" | "prestige";
@@ -161,6 +170,9 @@ export type RankOptions = {
   /** Drop candidates whose topicAffinity is ≤ this (relevance floor). */
   topicFloor?: number;
   limit?: number;
+  /** Scholar's distinct-pub count per topic id — evidence for the matchedTopics
+   *  chips, never a scoring input. Absent (pure-unit fixtures) → counts of 0. */
+  pubCountByTopic?: ReadonlyMap<string, number>;
 };
 
 function toVectorMap(v: OpportunityTopicScore[]): Map<string, number> {
@@ -169,6 +181,23 @@ function toVectorMap(v: OpportunityTopicScore[]): Map<string, number> {
     if (t && typeof t.topic_id === "string" && typeof t.score === "number") m.set(t.topic_id, t.score);
   }
   return m;
+}
+
+/** How many matchedTopics chips a ranked opportunity carries (#1610). */
+const MATCHED_TOPICS_K = 3;
+
+/** Top contributing SHARED topics of one scholar×opportunity pair: the
+ *  per-topic cosine terms (scholarWeight × opportunityWeight) rank which
+ *  topics drive `topicAffinity`; only the topic ids leave this function —
+ *  the terms themselves are internal ranking math and never surface. */
+function topContributingTopics(vs: Map<string, number>, vo: Map<string, number>): string[] {
+  const terms: Array<[string, number]> = [];
+  for (const [t, w] of vo) {
+    const sw = vs.get(t);
+    if (sw) terms.push([t, sw * w]);
+  }
+  terms.sort((a, b) => b[1] - a[1]);
+  return terms.slice(0, MATCHED_TOPICS_K).map(([t]) => t);
 }
 
 const SORT_KEY: Record<RankSort, (a: MatchAxes) => number> = {
@@ -197,8 +226,9 @@ export function rankCandidates(
 
   const scored: RankedOpportunity[] = [];
   for (const c of candidates) {
+    const voMap = toVectorMap(c.topicVector);
     const axes: MatchAxes = {
-      topicAffinity: topicAffinity(scholarVector, toVectorMap(c.topicVector)),
+      topicAffinity: topicAffinity(scholarVector, voMap),
       stageAppeal: c.appealByStage[scholarStage] ?? 0,
       meshOverlap: meshOverlap(scholarMeshUi, c.meshDescriptorUi),
       deadlineProximity: deadlineProximity(c.dueDate, now),
@@ -216,6 +246,10 @@ export function rankCandidates(
       mechanism: c.mechanism ?? null,
       awardCeiling: c.awardCeiling ?? null,
       prestige: c.prestige ?? null,
+      matchedTopics: topContributingTopics(scholarVector, voMap).map((topicId) => ({
+        topicId,
+        pubCount: opts.pubCountByTopic?.get(topicId) ?? 0,
+      })),
     });
   }
 
@@ -283,6 +317,20 @@ export async function scholarTopicVector(
   return raw;
 }
 
+/** Distinct contributing publications per parent topic for one scholar — the
+ *  same evidence base as `scholarTopicVector` (year ≥ floor, active scholar).
+ *  Row count per topic = distinct pmids: the PK is (pmid, cwid, parentTopicId).
+ *  Feeds the "Matches your work on ⟨topic⟩ (N pubs)" chips (#1610); counts are
+ *  evidence for display, never a scoring input. */
+export async function scholarTopicPubCounts(cwid: string): Promise<Map<string, number>> {
+  const rows = await db.read.publicationTopic.groupBy({
+    by: ["parentTopicId"],
+    where: { cwid, year: { gte: RECITERAI_YEAR_FLOOR }, scholar: { deletedAt: null, status: "active" } },
+    _count: { _all: true },
+  });
+  return new Map(rows.map((r) => [r.parentTopicId, r._count._all]));
+}
+
 /** roleCategory + appointment/education dates → the scholar's 5-bucket career stage. */
 export async function scholarCareerStage(cwid: string, now: Date = new Date()): Promise<CareerStage> {
   const s = await db.read.scholar.findUnique({
@@ -318,7 +366,11 @@ export async function matchOpportunitiesForScholar(
   opts: MatchOptions = {},
 ): Promise<RankedOpportunity[]> {
   const now = opts.now ?? new Date();
-  const [vector, stage] = await Promise.all([scholarTopicVector(cwid, now), scholarCareerStage(cwid, now)]);
+  const [vector, stage, pubCountByTopic] = await Promise.all([
+    scholarTopicVector(cwid, now),
+    scholarCareerStage(cwid, now),
+    scholarTopicPubCounts(cwid),
+  ]);
 
   // Scholar MeSH fingerprint (people index) — best-effort secondary axis.
   let scholarMeshUi: string[] = [];
@@ -397,11 +449,12 @@ export async function matchOpportunitiesForScholar(
   // Stage 2 — composite re-rank over the distinct axes. Inject the env-driven
   // prestige weight only when the caller did not supply explicit weights, so
   // DEFAULT_WEIGHTS (prestige: 0) keeps pure unit tests deterministic.
+  const rankOpts = { ...opts, pubCountByTopic };
   return rankCandidates(
     vector,
     stage,
     scholarMeshUi,
     fundable,
-    opts.weights ? opts : { ...opts, weights: { ...DEFAULT_WEIGHTS, prestige: prestigeAxisWeight() } },
+    opts.weights ? rankOpts : { ...rankOpts, weights: { ...DEFAULT_WEIGHTS, prestige: prestigeAxisWeight() } },
   );
 }

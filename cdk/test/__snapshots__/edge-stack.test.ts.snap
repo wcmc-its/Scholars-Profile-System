@@ -837,7 +837,7 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
         "DefaultAction": {
           "Allow": {},
         },
-        "Description": "SPS front end prod - WCM-only IP allow plus AWS managed rule groups in count mode",
+        "Description": "SPS front end prod - WCM-only IP allow, AWS managed rule groups enforced, bot-aware rate limit",
         "Name": "sps-edge-prod-wcm-only",
         "Rules": [
           {
@@ -869,12 +869,20 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
           {
             "Name": "AWSManagedRulesCommonRuleSet",
             "OverrideAction": {
-              "Count": {},
+              "None": {},
             },
             "Priority": 1,
             "Statement": {
               "ManagedRuleGroupStatement": {
                 "Name": "AWSManagedRulesCommonRuleSet",
+                "RuleActionOverrides": [
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SizeRestrictions_Body",
+                  },
+                ],
                 "VendorName": "AWS",
               },
             },
@@ -887,7 +895,7 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
           {
             "Name": "AWSManagedRulesKnownBadInputsRuleSet",
             "OverrideAction": {
-              "Count": {},
+              "None": {},
             },
             "Priority": 2,
             "Statement": {
@@ -905,7 +913,7 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
           {
             "Name": "AWSManagedRulesSQLiRuleSet",
             "OverrideAction": {
-              "Count": {},
+              "None": {},
             },
             "Priority": 3,
             "Statement": {
@@ -921,15 +929,50 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
             },
           },
           {
-            "Action": {
+            "Name": "AWSManagedRulesBotControlRuleSet",
+            "OverrideAction": {
               "Count": {},
             },
-            "Name": "rate-limit",
             "Priority": 4,
+            "Statement": {
+              "ManagedRuleGroupStatement": {
+                "ManagedRuleGroupConfigs": [
+                  {
+                    "AWSManagedRulesBotControlRuleSet": {
+                      "InspectionLevel": "COMMON",
+                    },
+                  },
+                ],
+                "Name": "AWSManagedRulesBotControlRuleSet",
+                "VendorName": "AWS",
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-AWSManagedRulesBotControlRuleSet",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Block": {},
+            },
+            "Name": "rate-limit",
+            "Priority": 5,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
                 "Limit": 5000,
+                "ScopeDownStatement": {
+                  "NotStatement": {
+                    "Statement": {
+                      "LabelMatchStatement": {
+                        "Key": "awswaf:managed:aws:bot-control:bot:verified",
+                        "Scope": "LABEL",
+                      },
+                    },
+                  },
+                },
               },
             },
             "VisibilityConfig": {
@@ -2201,7 +2244,7 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
         "DefaultAction": {
           "Allow": {},
         },
-        "Description": "SPS front end staging - WCM-only IP allow plus AWS managed rule groups in count mode",
+        "Description": "SPS front end staging - WCM-only IP allow, AWS managed rule groups enforced, bot-aware rate limit",
         "Name": "sps-edge-staging-wcm-only",
         "Rules": [
           {
@@ -2233,12 +2276,20 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
           {
             "Name": "AWSManagedRulesCommonRuleSet",
             "OverrideAction": {
-              "Count": {},
+              "None": {},
             },
             "Priority": 1,
             "Statement": {
               "ManagedRuleGroupStatement": {
                 "Name": "AWSManagedRulesCommonRuleSet",
+                "RuleActionOverrides": [
+                  {
+                    "ActionToUse": {
+                      "Count": {},
+                    },
+                    "Name": "SizeRestrictions_Body",
+                  },
+                ],
                 "VendorName": "AWS",
               },
             },
@@ -2251,7 +2302,7 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
           {
             "Name": "AWSManagedRulesKnownBadInputsRuleSet",
             "OverrideAction": {
-              "Count": {},
+              "None": {},
             },
             "Priority": 2,
             "Statement": {
@@ -2269,7 +2320,7 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
           {
             "Name": "AWSManagedRulesSQLiRuleSet",
             "OverrideAction": {
-              "Count": {},
+              "None": {},
             },
             "Priority": 3,
             "Statement": {
@@ -2285,15 +2336,50 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
             },
           },
           {
-            "Action": {
+            "Name": "AWSManagedRulesBotControlRuleSet",
+            "OverrideAction": {
               "Count": {},
             },
-            "Name": "rate-limit",
             "Priority": 4,
+            "Statement": {
+              "ManagedRuleGroupStatement": {
+                "ManagedRuleGroupConfigs": [
+                  {
+                    "AWSManagedRulesBotControlRuleSet": {
+                      "InspectionLevel": "COMMON",
+                    },
+                  },
+                ],
+                "Name": "AWSManagedRulesBotControlRuleSet",
+                "VendorName": "AWS",
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-AWSManagedRulesBotControlRuleSet",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Block": {},
+            },
+            "Name": "rate-limit",
+            "Priority": 5,
             "Statement": {
               "RateBasedStatement": {
                 "AggregateKeyType": "IP",
                 "Limit": 5000,
+                "ScopeDownStatement": {
+                  "NotStatement": {
+                    "Statement": {
+                      "LabelMatchStatement": {
+                        "Key": "awswaf:managed:aws:bot-control:bot:verified",
+                        "Scope": "LABEL",
+                      },
+                    },
+                  },
+                },
               },
             },
             "VisibilityConfig": {

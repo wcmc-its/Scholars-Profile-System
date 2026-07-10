@@ -7,6 +7,8 @@
  * underline-on-hover name link to the scholar profile.
  */
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { AbbrTooltip } from "@/components/ui/abbr-tooltip";
+import { COE_ABBR, COE_EXPANSION } from "@/lib/center-program-roles";
 import { profilePath } from "@/lib/profile-url";
 
 export type LeaderRole =
@@ -48,7 +50,16 @@ export function LeaderCard({
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="mb-[3px] text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-          {role}
+          {/* #1570 — "COE" is the one eyebrow that isn't self-evident; expand it on
+              hover/focus. Every other role renders as plain text, unchanged. */}
+          {role === "COE Liaison" ? (
+            <>
+              <AbbrTooltip short={COE_ABBR} expand={COE_EXPANSION} />
+              {" Liaison"}
+            </>
+          ) : (
+            role
+          )}
         </div>
         {leader.slug ? (
           <a

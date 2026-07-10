@@ -42,7 +42,7 @@ type Opts = {
     label: string;
     sortOrder: number;
     description: string | null;
-    leaders: Array<{ cwid: string; interim: boolean; sortOrder: number }>;
+    leaders: Array<{ cwid: string; interim: boolean; role?: string; sortOrder: number }>;
   }>;
   divisionMembers?: Array<{ cwid: string; source: string }>;
 };
@@ -303,11 +303,18 @@ describe("loadUnitEditContext — center", () => {
               label: "Cancer Biology",
               sortOrder: 10,
               description: "Cancer biology.",
-              leaders: [{ cwid: "dir001", interim: false, sortOrder: 0 }],
+              leaders: [
+                // #1570 — an explicit liaison, plus a pre-#1570 row with no `role`.
+                { cwid: "dir001", interim: false, sortOrder: 0 },
+                { cwid: "liai001", interim: false, role: "coe_liaison", sortOrder: 0 },
+              ],
             },
             { code: "CT", label: "Cancer Therapeutics", sortOrder: 40, description: null, leaders: [] },
           ],
-          scholars: [{ cwid: "dir001", preferredName: "Dr Director", primaryTitle: "MD" }],
+          scholars: [
+            { cwid: "dir001", preferredName: "Dr Director", primaryTitle: "MD" },
+            { cwid: "liai001", preferredName: "Dr Liaison", primaryTitle: null },
+          ],
         }),
       ),
     );
@@ -331,7 +338,8 @@ describe("loadUnitEditContext — center", () => {
       },
     ]);
     // #552/#1117 — the program taxonomy rides along (sorted by sortOrder) with
-    // each program's description + resolved leaders.
+    // each program's description + resolved leaders. #1570 — each leader carries
+    // its `role`; a row written before #1570 (no `role`) narrows to "leader".
     expect(ctx!.programs).toEqual([
       {
         code: "CB",
@@ -339,7 +347,22 @@ describe("loadUnitEditContext — center", () => {
         sortOrder: 10,
         description: "Cancer biology.",
         leaders: [
-          { cwid: "dir001", name: "Dr Director", title: "MD", interim: false, sortOrder: 0 },
+          {
+            cwid: "dir001",
+            name: "Dr Director",
+            title: "MD",
+            interim: false,
+            role: "leader",
+            sortOrder: 0,
+          },
+          {
+            cwid: "liai001",
+            name: "Dr Liaison",
+            title: null,
+            interim: false,
+            role: "coe_liaison",
+            sortOrder: 0,
+          },
         ],
       },
       { code: "CT", label: "Cancer Therapeutics", sortOrder: 40, description: null, leaders: [] },

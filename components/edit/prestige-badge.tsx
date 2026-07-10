@@ -4,10 +4,11 @@
  * Small inline prestige pill for funding-opportunity cards on `/edit`.
  *
  * Renders only the prestige LABEL, with the producer's rationale as the
- * hover/title tooltip (omitted when null). Per the shared contract, this badge
- * deliberately does NOT surface per-topic scores; the funding mechanism and
- * award ceiling already render elsewhere on the card, so the badge is
- * label + rationale only.
+ * hover/title tooltip (omitted when null) plus a visually-hidden copy so the
+ * rationale reaches screen readers too — `title` alone never does (#1608).
+ * Per the shared contract, this badge deliberately does NOT surface per-topic
+ * scores; the funding mechanism and award ceiling already render elsewhere on
+ * the card, so the badge is label + rationale only.
  *
  * Reuses the shared `Badge` and the same `outline` + apollo-slate-tint styling
  * the sibling funding-card status pill ("Active"/"Past") uses, so the prestige
@@ -25,6 +26,7 @@ export function PrestigeBadge({ prestige }: { prestige: Prestige | null | undefi
       title={prestige.rationale ?? undefined}
     >
       {prestige.label}
+      {prestige.rationale ? <span className="sr-only">{`: ${prestige.rationale}`}</span> : null}
     </Badge>
   );
 }

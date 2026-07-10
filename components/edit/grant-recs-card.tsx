@@ -4,13 +4,16 @@
  * GrantRecs Phase 3 — the "Grants for me" panel on the `/edit` surface.
  *
  * Renders the forward matcher (`GET /api/scholars/[cwid]/opportunities`,
- * Phase 2) as a ranked list of open funding opportunities for the scholar,
- * each card carrying the DISTINCT per-axis sub-scores (topic / stage / mesh /
- * deadline) the engine emits plus the default-blend fit, the funding mechanism
- * and award ceiling inline, and an expandable Details disclosure (lazy-fetched
- * from `GET /api/opportunities/[id]`) with the synopsis, eligibility, award
- * count, and a link out to the opportunity. Sort chips re-query (Fit / Deadline
- * / Stage) — the route re-orders server-side, no client-side axis mutation.
+ * Phase 2) as a ranked list of open funding opportunities for the scholar.
+ * Each row leads with plain-language explanation chips ("Matches your work on
+ * ⟨topic⟩ (N pubs)", #1610) plus a qualitative fit tier (relative to the
+ * strongest match in the list — the raw blend never renders), the funding
+ * mechanism / deadline / award ceiling inline, and an expandable Details
+ * disclosure (lazy-fetched from `GET /api/opportunities/[id]`) with the
+ * synopsis, eligibility, award count, a link out, and the four per-axis
+ * meters (demoted from the row body). Sort chips re-query (Fit / Deadline /
+ * Stage / Prestige) — the route re-orders server-side; repeat chip toggles are
+ * absorbed by the browser cache (the route sets `max-age=300`).
  *
  * No auth gate here: `/edit` is SSO-authenticated and owner-scoped server-side
  * (self → `getEffectiveCwid`; superuser → the `[cwid]` param), and the rail item
@@ -21,6 +24,7 @@ import { useEffect, useState } from "react";
 
 import { PrestigeBadge } from "@/components/edit/prestige-badge";
 import type { Prestige } from "@/lib/funding/prestige";
+import { dueUrgency, fitTier, formatDue, type FitTierLabel } from "@/lib/match-display";
 
 type Axes = {
   topicAffinity: number;
@@ -28,6 +32,10 @@ type Axes = {
   meshOverlap: number;
   deadlineProximity: number;
 };
+
+/** Explanation chip (#1610): topic id + resolved label + the scholar's pub
+ *  count there. Ids/labels/counts only — no per-topic scores. */
+type MatchedTopic = { topicId: string; label: string; pubCount: number };
 
 type Opportunity = {
   opportunityId: string;
@@ -40,6 +48,7 @@ type Opportunity = {
   mechanism: string | null;
   awardCeiling: number | null;
   prestige?: Prestige | null;
+  matchedTopics?: MatchedTopic[];
 };
 
 /** Subset of the `GET /api/opportunities/[id]` row used by the Details disclosure. */
@@ -71,14 +80,14 @@ const AXES: ReadonlyArray<{ key: keyof Axes; label: string }> = [
 const LIMIT = 25;
 
 function deadlineLabel(dueDate: string | null, status: string): string {
-  if (status === "continuous" || dueDate === null) return "Rolling · continuous";
-  const t = Date.parse(dueDate);
-  if (Number.isNaN(t)) return "—";
-  const formatted = new Date(t).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  if (status === "continuous") return "Rolling · continuous";
+  // A forecasted item without a date yet is NOT rolling — it has a date TBD.
+  if (dueDate === null)
+    return status === "forecasted" ? "Forecasted · date TBD" : "Rolling · continuous";
+  // formatDue renders in UTC: due dates are midnight-UTC instants, so a local
+  // format would show the previous day in US-Eastern (#1608).
+  const formatted = formatDue(dueDate);
+  if (!formatted) return "—";
   return status === "forecasted" ? `Forecasted · ${formatted}` : `Due ${formatted}`;
 }
 
@@ -97,11 +106,17 @@ export function GrantRecsCard({ cwid }: { cwid: string }) {
   const [items, setItems] = useState<Opportunity[] | null>(null);
   const [errored, setErrored] = useState(false);
 
+  // Strongest default blend in the returned set — the fit tiers are RELATIVE
+  // to it (the raw score is internal and never renders, #1608).
+  const maxScore = items?.length ? Math.max(...items.map((i) => i.defaultScore)) : 0;
+
   useEffect(() => {
     let active = true;
+    // No `cache: "no-store"` here (deliberate, #1608): the route serves
+    // `Cache-Control: public, max-age=300`, so flipping sort chips back and
+    // forth re-reads the browser cache instead of re-running the full match.
     fetch(
       `/api/scholars/${encodeURIComponent(cwid)}/opportunities?sort=${sort}&limit=${LIMIT}`,
-      { cache: "no-store" },
     )
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((data: { results?: Opportunity[] } | null) => {
@@ -129,7 +144,9 @@ export function GrantRecsCard({ cwid }: { cwid: string }) {
             Grants for me
             {items && items.length > 0 ? (
               <span className="text-muted-foreground text-sm font-normal tracking-normal">
-                {items.length} recommended
+                {/* A full page = more may exist beyond the requested limit, so
+                    "Top N" is honest where "N recommended" would overclaim. */}
+                {items.length === LIMIT ? `Top ${LIMIT}` : `${items.length} recommended`}
               </span>
             ) : null}
           </h2>
@@ -163,9 +180,11 @@ export function GrantRecsCard({ cwid }: { cwid: string }) {
       </div>
 
       {items === null ? (
-        <div className="text-muted-foreground py-8 text-sm">Loading recommendations…</div>
+        <div role="status" className="text-muted-foreground py-8 text-sm">
+          Loading recommendations…
+        </div>
       ) : errored ? (
-        <div className="text-muted-foreground py-8 text-sm">
+        <div role="alert" className="text-muted-foreground py-8 text-sm">
           Recommendations are unavailable right now. Please try again later.
         </div>
       ) : items.length === 0 ? (
@@ -177,7 +196,7 @@ export function GrantRecsCard({ cwid }: { cwid: string }) {
         <ul>
           {items.map((o) => (
             <li key={o.opportunityId}>
-              <OpportunityRow o={o} />
+              <OpportunityRow o={o} tier={fitTier(o.defaultScore, maxScore)} />
             </li>
           ))}
         </ul>
@@ -186,7 +205,7 @@ export function GrantRecsCard({ cwid }: { cwid: string }) {
   );
 }
 
-function OpportunityRow({ o }: { o: Opportunity }) {
+function OpportunityRow({ o, tier }: { o: Opportunity; tier: FitTierLabel }) {
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<OpportunityDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -205,10 +224,12 @@ function OpportunityRow({ o }: { o: Opportunity }) {
   }
 
   // Inline at-a-glance facts: sponsor · mechanism · deadline · award ceiling.
-  const facts = [o.sponsor];
-  if (o.mechanism) facts.push(o.mechanism);
-  facts.push(deadlineLabel(o.dueDate, o.status));
-  if (o.awardCeiling) facts.push(`up to ${formatUsd(o.awardCeiling)}`);
+  // The deadline renders as its own span so a ≤30-day due date can take the
+  // admin surface's amber urgency tone (#1608).
+  const lead = [o.sponsor];
+  if (o.mechanism) lead.push(o.mechanism);
+  const urgency = dueUrgency(o.dueDate, Date.now());
+  const chips = o.matchedTopics ?? [];
 
   const awards =
     detail?.numberOfAwards != null && detail.numberOfAwards > 0
@@ -224,18 +245,37 @@ function OpportunityRow({ o }: { o: Opportunity }) {
           <PrestigeBadge prestige={o.prestige} />
         </div>
         <span
-          className="text-muted-foreground whitespace-nowrap font-mono text-xs"
-          title="Overall fit (default blend over the distinct axes)"
+          className="text-muted-foreground whitespace-nowrap text-xs"
+          title="Fit relative to your strongest recommendation in this list"
         >
-          {o.defaultScore.toFixed(2)}
+          {tier}
         </span>
       </div>
-      <div className="text-muted-foreground mt-0.5 text-sm">{facts.join(" · ")}</div>
-      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1.5">
-        {AXES.map(({ key, label }) => (
-          <AxisMeter key={key} label={label} value={o.axes[key]} />
-        ))}
+      <div className="text-muted-foreground mt-0.5 text-sm">
+        {`${lead.join(" · ")} · `}
+        <span
+          className={
+            urgency === "soon" ? "font-medium text-amber-700 dark:text-amber-400" : undefined
+          }
+        >
+          {deadlineLabel(o.dueDate, o.status)}
+        </span>
+        {o.awardCeiling ? ` · up to ${formatUsd(o.awardCeiling)}` : null}
       </div>
+      {chips.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {chips.map((t) => (
+            <span
+              key={t.topicId}
+              className="border-border-strong rounded-full border bg-background px-2.5 py-0.5 text-xs text-foreground"
+            >
+              {`Matches your work on ${t.label}${
+                t.pubCount > 0 ? ` (${t.pubCount} ${t.pubCount === 1 ? "pub" : "pubs"})` : ""
+              }`}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       <button
         type="button"
@@ -253,8 +293,17 @@ function OpportunityRow({ o }: { o: Opportunity }) {
 
       {open ? (
         <div className="mt-2 ml-4 border-l border-border pl-4 text-sm">
+          {/* The per-axis meters live here, demoted from the row body — the
+              matchedTopics chips are the primary explanation (#1610). */}
+          <div className="mb-2 flex flex-wrap gap-x-5 gap-y-1.5">
+            {AXES.map(({ key, label }) => (
+              <AxisMeter key={key} label={label} value={o.axes[key]} />
+            ))}
+          </div>
           {loadingDetail ? (
-            <div className="text-muted-foreground py-1">Loading details…</div>
+            <div role="status" className="text-muted-foreground py-1">
+              Loading details…
+            </div>
           ) : (
             <>
               {detail?.synopsis ? (
@@ -284,12 +333,20 @@ function OpportunityRow({ o }: { o: Opportunity }) {
   );
 }
 
-/** A labelled 0..1 sub-score bar — one per distinct matching axis. */
+/** A labelled 0..1 sub-score bar — one per distinct matching axis. Exposed to
+ *  assistive tech as a real meter (the old title-only div was invisible to
+ *  screen readers, #1608). */
 function AxisMeter({ label, value }: { label: string; value: number }) {
-  const pct = Math.max(0, Math.min(1, value)) * 100;
+  const clamped = Math.max(0, Math.min(1, value));
+  const pct = clamped * 100;
   return (
     <div
       className="flex items-center gap-1.5"
+      role="meter"
+      aria-label={`${label} match signal`}
+      aria-valuemin={0}
+      aria-valuemax={1}
+      aria-valuenow={Number(clamped.toFixed(2))}
       title={`${label}: ${value.toFixed(2)}`}
     >
       <span className="text-muted-foreground w-12 text-[11px] uppercase tracking-wide">

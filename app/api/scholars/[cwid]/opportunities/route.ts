@@ -21,6 +21,7 @@ import {
   type MatchWeights,
   type RankSort,
 } from "@/lib/api/match-opportunities";
+import { db } from "@/lib/db";
 
 const CWID_RE = /^[a-zA-Z0-9_-]{1,32}$/;
 const SORT_ALLOWLIST: ReadonlySet<RankSort> = new Set(["fit", "deadline", "stage", "prestige"]);
@@ -75,8 +76,29 @@ export async function GET(
     limit,
   });
 
+  // #1610 — resolve human labels for the explanation chips. The matcher emits
+  // topic ids + pub counts only; one IN query on the topic table (mirrors the
+  // reverse route's topicLabels lookup). Label falls back to the id.
+  const topicIds = new Set<string>();
+  for (const r of results) for (const t of r.matchedTopics ?? []) topicIds.add(t.topicId);
+  const labels: Record<string, string> = {};
+  if (topicIds.size > 0) {
+    const rows = await db.read.topic.findMany({
+      where: { id: { in: [...topicIds] } },
+      select: { id: true, label: true },
+    });
+    for (const t of rows) labels[t.id] = t.label;
+  }
+  const payload = results.map((r) => ({
+    ...r,
+    matchedTopics: (r.matchedTopics ?? []).map((t) => ({
+      ...t,
+      label: labels[t.topicId] ?? t.topicId,
+    })),
+  }));
+
   return NextResponse.json(
-    { cwid, count: results.length, results },
+    { cwid, count: results.length, results: payload },
     { headers: { "Cache-Control": "public, max-age=300, stale-while-revalidate=3600" } },
   );
 }

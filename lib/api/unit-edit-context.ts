@@ -135,6 +135,7 @@ export type UnitEditContext = {
       name: string | null;
       title: string | null;
       interim: boolean;
+      role: "leader" | "coe_liaison";
       sortOrder: number;
     }>;
   }> | null;
@@ -347,7 +348,7 @@ export async function loadUnitEditContext(
     label: string;
     sortOrder: number;
     description: string | null;
-    leaders: Array<{ cwid: string; interim: boolean; sortOrder: number }>;
+    leaders: Array<{ cwid: string; interim: boolean; role: string; sortOrder: number }>;
   };
   let programRowsRaw: ProgramRowRaw[] | null = null;
   if (hasRoster) {
@@ -372,7 +373,7 @@ export async function loadUnitEditContext(
           sortOrder: true,
           description: true,
           leaders: {
-            select: { cwid: true, interim: true, sortOrder: true },
+            select: { cwid: true, interim: true, role: true, sortOrder: true },
             orderBy: [{ sortOrder: "asc" }, { cwid: "asc" }],
           },
         },
@@ -451,6 +452,9 @@ export async function loadUnitEditContext(
           name: nameMap.get(l.cwid)?.name ?? null,
           title: nameMap.get(l.cwid)?.title ?? null,
           interim: l.interim,
+          // `role` is a VarChar, not an enum — narrow it the same way the public
+          // program page does (`lib/api/centers.ts`): anything unrecognized is a leader.
+          role: l.role === "coe_liaison" ? ("coe_liaison" as const) : ("leader" as const),
           sortOrder: l.sortOrder,
         })),
       }))

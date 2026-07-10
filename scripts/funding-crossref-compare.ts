@@ -32,7 +32,7 @@ async function pickOpportunity(): Promise<string | null> {
   });
   let fallback: string | null = null;
   for (const o of opps) {
-    const ranked = await rankResearchersForOpportunity(o.opportunityId, { limit: 3 });
+    const { scholars: ranked } = await rankResearchersForOpportunity(o.opportunityId, { limit: 3 });
     if (ranked.length < 3) continue;
     fallback ??= o.opportunityId;
     const eligible =
@@ -58,7 +58,7 @@ async function main() {
   console.log(`  status: ${opp?.status}   due: ${opp?.dueDate?.toISOString().slice(0, 10) ?? "—"}   source: ${opp?.source}`);
   console.log(`  topN=${TOP_N}  sample=${SAMPLE}\n`);
 
-  const ranked = await rankResearchersForOpportunity(oppId, { limit: SAMPLE });
+  const { scholars: ranked } = await rankResearchersForOpportunity(oppId, { limit: SAMPLE });
   const cwids = ranked.map((r) => r.cwid);
   const cheapSet = await opportunitiesInTopMatches(oppId, cwids, TOP_N);
 
