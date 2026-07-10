@@ -2199,6 +2199,14 @@ model ScholarTechnology {
   /// Rendered as PubMed links: 95% of these papers are authored by the very PI
   /// CTL names on the page, which independently corroborates the cwid join.
   pmids       Json
+  /// The page's "Technology Overview" section as plain text. Bullet form: the
+  /// bullets joined one per line, labels ("The Technology:") kept inline as CTL
+  /// wrote them; prose form: the paragraph text. Null when the page carries no
+  /// overview section (~44% of pages). Rendered behind a per-row expander.
+  overview    String?  @db.Text
+  /// True when the overview lists a "PoC Data" (proof-of-concept) bullet. Only
+  /// ever set on bullet-form overviews; ~41% of the portfolio.
+  hasPocData  Boolean  @default(false) @map("has_poc_data")
   refreshedAt DateTime @default(now()) @map("refreshed_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)

@@ -18,6 +18,11 @@ export type TechnologyRow = {
   patentStatus: string | null;
   /** PMIDs of the papers CTL lists for this invention. Empty when none. */
   pmids: string[];
+  /** CTL's "Technology Overview" as plain text; bullets joined one per line.
+   *  Null when the page carries no overview section. */
+  overview: string | null;
+  /** True when the overview lists a "PoC Data" bullet. */
+  hasPocData: boolean;
 };
 
 /** CTL's portfolio origin. Pinned — see `parseSeed`. */
@@ -61,7 +66,8 @@ export function validateRows(raw: unknown[]): TechnologyRow[] {
   return raw.map((r, i) => {
     if (typeof r !== "object" || r === null)
       throw new Error(`[Technology] row ${i}: not an object`);
-    const { cwid, reference, title, url, patentStatus, pmids } = r as Record<string, unknown>;
+    const { cwid, reference, title, url, patentStatus, pmids, overview, hasPocData } =
+      r as Record<string, unknown>;
 
     // CWIDs are lowercased directory usernames; legacy portfolio entries use
     // pre-2010 letter-only ids ("fisch", "cnathan"), so no digit is required.
@@ -112,6 +118,26 @@ export function validateRows(raw: unknown[]): TechnologyRow[] {
       }
     }
 
+    // `overview` renders as TEXT (React escapes it), so angle brackets are fine —
+    // they come from `&lt;`/`&gt;` in CTL's prose (e.g. "LC50 < 50nM"). Guard only
+    // type, control bytes (the newlines that join bullets are exempt), and a
+    // length ceiling matching the scraper's slice, so a tampered seed can't smuggle
+    // a NUL onto a profile or blow the TEXT column.
+    if (overview !== null && overview !== undefined) {
+      if (typeof overview !== "string") {
+        throw new Error(`[Technology] row ${i} (${cwid}): overview must be a string or null`);
+      }
+      if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(overview)) {
+        throw new Error(`[Technology] row ${i} (${cwid}): overview carries control characters`);
+      }
+      if (overview.length > 8000) {
+        throw new Error(`[Technology] row ${i} (${cwid}): overview exceeds 8000 chars`);
+      }
+    }
+    if (hasPocData !== undefined && typeof hasPocData !== "boolean") {
+      throw new Error(`[Technology] row ${i} (${cwid}): hasPocData must be a boolean`);
+    }
+
     // (cwid, url) is the table's unique key — a dupe would fail mid-transaction.
     const key = `${cwid} ${url}`;
     if (seen.has(key)) throw new Error(`[Technology] row ${i}: duplicate (cwid, url) for ${cwid}`);
@@ -124,6 +150,8 @@ export function validateRows(raw: unknown[]): TechnologyRow[] {
       url,
       patentStatus: (patentStatus as string | null | undefined) ?? null,
       pmids: pmidList as string[],
+      overview: (overview as string | null | undefined) ?? null,
+      hasPocData: hasPocData === true,
     };
   });
 }

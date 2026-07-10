@@ -582,6 +582,12 @@ export type ProfilePayload = {
     patentStatus: string | null;
     /** PMIDs of the papers CTL lists for the invention. Empty when none. */
     pmids: string[];
+    /** CTL's "Technology Overview" as plain text (bullets joined one per line);
+     *  null when the page has no overview section. Rendered behind a per-row
+     *  "Overview" expander. */
+    overview: string | null;
+    /** True when the overview lists a "PoC Data" bullet; drives the POC DATA chip. */
+    hasPocData: boolean;
   }>;
   keywords: ProfileKeywords;
   /** #799 — family-primary Methods lens rows. Empty when the lens flag is off
@@ -1426,6 +1432,8 @@ export const getScholarFullProfileBySlug = cache(
               pmids: Array.isArray(t.pmids)
                 ? t.pmids.filter((p): p is string => typeof p === "string" && /^\d{6,9}$/.test(p))
                 : [],
+              overview: t.overview,
+              hasPocData: t.hasPocData,
             }))
           : [],
       keywords,

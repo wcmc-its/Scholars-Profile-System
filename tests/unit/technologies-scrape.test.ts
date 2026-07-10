@@ -71,6 +71,8 @@ describe("parseDetail", () => {
         url: "https://innovation.weill.cornell.edu" + P1,
         patentStatus: "PCT filed",
         pmids: ["34290243"],
+        overview: null,
+        hasPocData: false,
       },
     ]);
   });
