@@ -1230,6 +1230,9 @@ export class AppStack extends Stack {
         // Staging-on for soak; prod-off until CTL signs off on the attributions.
         // The profile payload returns [] when off, so the seed can land first.
         AVAILABLE_TECHNOLOGIES_SECTION: env === "staging" ? "on" : "off",
+        // SPONSOR_MATCH — the /edit/sponsor-match CTL surface (paste a sponsor's
+        // description → researchers ranked on topical fit alone). Staging-on for soak; prod-off.
+        SPONSOR_MATCH: env === "staging" ? "on" : "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
