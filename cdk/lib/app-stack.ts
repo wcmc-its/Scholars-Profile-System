@@ -15,6 +15,7 @@ import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
+import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import { type Construct } from "constructs";
@@ -48,8 +49,7 @@ const ADOT_COLLECTOR_IMAGE =
  * injected from Secrets Manager (`scholars/<env>/saml/idp-cert`).
  */
 const WCM_IDP_ENTITY_ID = "https://login-proxy.weill.cornell.edu/idp";
-const WCM_IDP_SSO_URL =
-  "https://login-proxy.weill.cornell.edu/idp/profile/SAML2/Redirect/SSO";
+const WCM_IDP_SSO_URL = "https://login-proxy.weill.cornell.edu/idp/profile/SAML2/Redirect/SSO";
 /**
  * The assertion attribute carrying the bare CWID (#466). Confirmed against a
  * live WCM assertion: a `CWID` attribute resolves to the un-suffixed CWID
@@ -191,12 +191,7 @@ export class AppStack extends Stack {
     // the dmz tier, when useSharedVpc is on; else the standalone Sps VPC's
     // PRIVATE_WITH_EGRESS / PUBLIC tiers — byte-identical otherwise.
     const appSubnets = resolveTierSubnets(this, envConfig, "app", "AppSubnet");
-    const albSubnets = resolveTierSubnets(
-      this,
-      envConfig,
-      "alb",
-      "PublicAlbSubnet",
-    );
+    const albSubnets = resolveTierSubnets(this, envConfig, "alb", "PublicAlbSubnet");
 
     // ------------------------------------------------------------------
     // Secrets lookup. SecretsStack defines the full set; AppStack reads the
@@ -569,10 +564,7 @@ export class AppStack extends Stack {
           "ecr:GetDownloadUrlForLayer",
           "ecr:BatchGetImage",
         ],
-        resources: [
-          this.ecrRepository.repositoryArn,
-          this.etlEcrRepository.repositoryArn,
-        ],
+        resources: [this.ecrRepository.repositoryArn, this.etlEcrRepository.repositoryArn],
       }),
     );
     // Secrets -- exactly the four deploy ARNs (incl. the migrate DSN, which is
@@ -606,6 +598,30 @@ export class AppStack extends Stack {
       description: `SPS ECS task role (${env}). Application runtime identity; X-Ray write only.`,
     });
     this.appTaskRole = taskRole;
+
+    // ------------------------------------------------------------------
+    // Shared ISR cache bucket (#1503).
+    //
+    // Backs the S3 `cacheHandler` (lib/cache/s3-cache-handler.js) that lets all
+    // 2–6 app tasks share one incremental-cache store, so `revalidatePath` on
+    // one task can't be undone by the edge refilling a stale copy from another.
+    // Private, SSE-S3, TLS-only; objects self-expire after 7 days (the cache is
+    // derived + disposable, so lifecycle is the only cleanup). Provisioned in
+    // every env but INERT until NEXT_ISR_CACHE_S3="on" flips the handler on —
+    // so enabling the feature is a flag flip, not an infra race. RETAIN matches
+    // the house style for every other bucket in this account.
+    const isrCacheBucket = new s3.Bucket(this, "IsrCacheBucket", {
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+      lifecycleRules: [
+        { id: "expire-isr-cache", prefix: "next-isr-cache/", expiration: Duration.days(7) },
+      ],
+    });
+    // Scoped to the app's prefix only: object CRUD on next-isr-cache/* plus
+    // ListBucket (the handler never touches anything else).
+    isrCacheBucket.grantReadWrite(taskRole, "next-isr-cache/*");
 
     // ------------------------------------------------------------------
     // X-Ray write grant (B24).
@@ -853,9 +869,7 @@ export class AppStack extends Stack {
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
           actions: ["dynamodb:UpdateItem"],
-          resources: [
-            `arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`,
-          ],
+          resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`],
         }),
       ],
     });
@@ -867,12 +881,16 @@ export class AppStack extends Stack {
     // /api/edit/opportunity-intake appends `PK=SUBMISSION` items to the shared
     // `reciterai` table (development-role staff queueing funding-opportunity
     // URLs for ReciterAI's ingest_submissions drain) and Queries them back for
-    // the status list. Least-privilege via the partition-key design: every
-    // queue item shares the literal partition key `SUBMISSION`, so a
-    // `dynamodb:LeadingKeys` condition pins BOTH actions to that single
-    // partition -- the app credential cannot read or write `GRANT#` /
-    // `PUB#` / any other engine item. (That key shape exists FOR this
-    // condition: a Scan can't be LeadingKeys-scoped, so the list is a Query.)
+    // the status list. DeleteItem/UpdateItem cover the Submissions-tab cleanup
+    // verbs (DELETE a pending/rejected item outright; PATCH-suppress a
+    // processed one -- status='suppressed', which ReciterAI's drain companion
+    // honors by removing the produced GRANT# items). Least-privilege via the
+    // partition-key design: every queue item shares the literal partition key
+    // `SUBMISSION`, so a `dynamodb:LeadingKeys` condition pins ALL FOUR
+    // actions to that single partition -- the app credential cannot read or
+    // write `GRANT#` / `PUB#` / any other engine item. (That key shape exists
+    // FOR this condition: a Scan can't be LeadingKeys-scoped, so the list is a
+    // Query.)
     // Same account-shared table ARN + cross-account caveat as the writeback
     // grant above. Gated in code by OPPORTUNITY_URL_INTAKE (default off;
     // staging-first in the environment block below) -- grant and flag land in
@@ -884,10 +902,13 @@ export class AppStack extends Stack {
       statements: [
         new iam.PolicyStatement({
           effect: iam.Effect.ALLOW,
-          actions: ["dynamodb:PutItem", "dynamodb:Query"],
-          resources: [
-            `arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`,
+          actions: [
+            "dynamodb:PutItem",
+            "dynamodb:Query",
+            "dynamodb:DeleteItem",
+            "dynamodb:UpdateItem",
           ],
+          resources: [`arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`],
           conditions: {
             "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": ["SUBMISSION"] },
           },
@@ -906,15 +927,11 @@ export class AppStack extends Stack {
     // that ingress the internal listener exists but is unreachable —
     // the documented merge-window state per the plan.
     // ------------------------------------------------------------------
-    const internalAlbSecurityGroup = new ec2.SecurityGroup(
-      this,
-      "InternalAlbSecurityGroup",
-      {
-        vpc,
-        description: `SPS internal ALB (${env}) -- intra-VPC /api/revalidate ingress.`,
-        allowAllOutbound: true,
-      },
-    );
+    const internalAlbSecurityGroup = new ec2.SecurityGroup(this, "InternalAlbSecurityGroup", {
+      vpc,
+      description: `SPS internal ALB (${env}) -- intra-VPC /api/revalidate ingress.`,
+      allowAllOutbound: true,
+    });
 
     // ------------------------------------------------------------------
     // SG ingress rules that the ALBs need to function.
@@ -941,6 +958,18 @@ export class AppStack extends Stack {
       cidrIp: "0.0.0.0/0",
       description: `Internet to SPS public ALB HTTP (${env}) -- HTTPS lands with EdgeStack`,
     });
+    // #1507 -- :443 ingress for the HTTPS origin leg, added only once the ALB
+    // cert is seeded (the :443 listener below is gated the same way).
+    if (envConfig.edgeOriginCertArn.length > 0) {
+      new ec2.CfnSecurityGroupIngress(this, "PublicAlbIngressFromInternetHttps", {
+        groupId: albSecurityGroup.securityGroupId,
+        ipProtocol: "tcp",
+        fromPort: 443,
+        toPort: 443,
+        cidrIp: "0.0.0.0/0",
+        description: `Internet to SPS public ALB HTTPS (${env}) -- #1507 origin TLS`,
+      });
+    }
     new ec2.CfnSecurityGroupIngress(this, "AppIngressFromPublicAlb", {
       groupId: appSecurityGroup.securityGroupId,
       ipProtocol: "tcp",
@@ -980,17 +1009,11 @@ export class AppStack extends Stack {
     // account holder pushes the bootstrap image manually, then re-runs
     // `cdk deploy` with appDesiredCount back to the env default.
     // ------------------------------------------------------------------
-    const containerImage = ecs.ContainerImage.fromEcrRepository(
-      this.ecrRepository,
-      "latest",
-    );
+    const containerImage = ecs.ContainerImage.fromEcrRepository(this.ecrRepository, "latest");
     // The ETL batch image (#454) — the only image with `tsx` + the source tree +
     // the `mariadb` client, so it is what runs the tsx-based db-bootstrap script
     // (#493). The standalone app image has none of those.
-    const etlContainerImage = ecs.ContainerImage.fromEcrRepository(
-      this.etlEcrRepository,
-      "latest",
-    );
+    const etlContainerImage = ecs.ContainerImage.fromEcrRepository(this.etlEcrRepository, "latest");
 
     // ------------------------------------------------------------------
     // App task definition.
@@ -1001,17 +1024,13 @@ export class AppStack extends Stack {
     // on the execution role at task-start time, never embedding the
     // value in the synth output.
     // ------------------------------------------------------------------
-    const appTaskDefinition = new ecs.FargateTaskDefinition(
-      this,
-      "AppTaskDefinition",
-      {
-        family: `sps-app-${env}`,
-        cpu: envConfig.appCpu,
-        memoryLimitMiB: envConfig.appMemoryMiB,
-        executionRole: taskExecutionRole,
-        taskRole,
-      },
-    );
+    const appTaskDefinition = new ecs.FargateTaskDefinition(this, "AppTaskDefinition", {
+      family: `sps-app-${env}`,
+      cpu: envConfig.appCpu,
+      memoryLimitMiB: envConfig.appMemoryMiB,
+      executionRole: taskExecutionRole,
+      taskRole,
+    });
     appTaskDefinition.addContainer("app", {
       image: containerImage,
       containerName: "app",
@@ -1019,9 +1038,7 @@ export class AppStack extends Stack {
         logGroup: appLogGroup,
         streamPrefix: "app",
       }),
-      portMappings: [
-        { containerPort: 3000, protocol: ecs.Protocol.TCP },
-      ],
+      portMappings: [{ containerPort: 3000, protocol: ecs.Protocol.TCP }],
       environment: {
         NODE_ENV: "production",
         PORT: "3000",
@@ -1040,13 +1057,20 @@ export class AppStack extends Stack {
         OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
         OTEL_PROPAGATORS: "tracecontext,xray",
         SPS_ENV: env,
+        // #1503 — shared S3 ISR cacheHandler. NEXT_ISR_CACHE_BUCKET (the bucket
+        // name, a runtime CloudFormation ref) is always wired so the handler can
+        // read/write the store; the handler no-ops safely if it is ever absent.
+        // The on/off switch is NOT here: whether the handler is compiled in is a
+        // BUILD-time decision (next.config bakes it into the standalone image),
+        // so it is passed as `--build-arg NEXT_ISR_CACHE_S3` by the Deploy
+        // workflow, per env — a runtime task-def env could never flip it. See
+        // docs/1503-shared-cachehandler-spec.md §4e.
+        NEXT_ISR_CACHE_BUCKET: isrCacheBucket.bucketName,
         // Reverse grant→researcher matcher: subtopic-grain path vs. the proven
         // topic-vector path. Per-env (on in staging, off in prod until the prod
         // corpus carries match_dsl); lib/api/match-researchers.ts also self-gates
         // on the opportunity's compiled match_dsl, so "on" is safe pre-reproject.
-        GRANT_MATCHER_SUBTOPIC_GRAIN: envConfig.grantMatcherSubtopicGrain
-          ? "on"
-          : "off",
+        GRANT_MATCHER_SUBTOPIC_GRAIN: envConfig.grantMatcherSubtopicGrain ? "on" : "off",
         // OpenSearch domain endpoint (https://...). Default: a plaintext env
         // baked from the DataStack cross-stack export. When
         // openSearchNodeFromSecret is on (consolidation cutover de-coupling,
@@ -1202,7 +1226,15 @@ export class AppStack extends Stack {
         // (#clinical-trials). Dark on prod; staging-on for soak. The profile
         // payload returns [] when off, so this is safe to leave off even after
         // the etl:clinical-trials backfill lands.
-        CLINICAL_TRIALS_SECTION: env === "staging" ? "on" : "off",
+        CLINICAL_TRIALS_SECTION: "on", // Prod flipped 2026-07-07 (presence-gated, hidden when empty).
+        // AVAILABLE_TECHNOLOGIES_SECTION — the profile "Available technologies"
+        // section, sourced from the CTL portfolio via `npm run etl:technologies`.
+        // Staging-on for soak; prod-off until CTL signs off on the attributions.
+        // The profile payload returns [] when off, so the seed can land first.
+        AVAILABLE_TECHNOLOGIES_SECTION: env === "staging" ? "on" : "off",
+        // SPONSOR_MATCH — the /edit/sponsor-match CTL surface (paste a sponsor's
+        // description → researchers ranked on topical fit alone). Staging-on for soak; prod-off.
+        SPONSOR_MATCH: env === "staging" ? "on" : "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
@@ -1375,11 +1407,13 @@ export class AppStack extends Stack {
         SITE_URL: new URL(envConfig.samlSpAcsUrl).origin,
         // In-app Usage dashboard (/edit/usage) — the workgroup + Glue database the
         // app queries for the daily_usage rollup. Stable, config-derived names
-        // (AnalyticsStack creates `sps-usage-${env}` / `sps_usage_${env}`); the
+        // (AnalyticsStack creates `sps-usage-app-${env}` / `sps_usage_${env}`); the
         // matching Athena/Glue/S3 grant on THIS task role is attached in
         // AnalyticsStack. Region is pinned so the Athena client targets the same
         // region the workgroup lives in regardless of the task's default chain.
-        SPS_USAGE_WORKGROUP: `sps-usage-${env}`,
+        // Uses the app-only workgroup (results isolated under athena-results/app/)
+        // so this role can never read an operator's PII-bearing ad-hoc results.
+        SPS_USAGE_WORKGROUP: `sps-usage-app-${env}`,
         SPS_USAGE_DATABASE: `sps_usage_${env}`,
         SPS_USAGE_REGION: this.region,
         // #760 -- launch-period "Beta" pill beside the Scholars wordmark.
@@ -1451,7 +1485,7 @@ export class AppStack extends Stack {
         // exact the moment the flag flips. App-only; gated additionally on
         // `?searchMode=mesh-only` so a stale URL is inert when off.
         // STAGING-FIRST: on for staging, off for prod (separate gated flip).
-        SEARCH_PUB_MESH_ONLY_FILTER: env === "staging" ? "on" : "off",
+        SEARCH_PUB_MESH_ONLY_FILTER: "on", // Prod flipped 2026-07-07 (no reindex; opt-in ?searchMode=mesh-only).
         // Pub-tab perf -- split the facet aggregation off the hit-list request
         // (resolvePubFacetSplit): hits (Request A) + cached/time-capped facets
         // (Request B) in parallel, so paginating/re-sorting a query reuses the
@@ -1539,14 +1573,14 @@ export class AppStack extends Stack {
         // When on, a topic query that resolves to a Research Area lifts scholars by their
         // relevance×coverage ranking in that area (reorder-only, no reindex).
         // resolveSearchPeopleAreaBoost reads === "on". Staging-first.
-        SEARCH_PEOPLE_AREA_BOOST: env === "staging" ? "on" : "off",
+        SEARCH_PEOPLE_AREA_BOOST: "on", // Prod flipped 2026-07-07 (reorder-only, no reindex).
         // #1344 -- multi-word topic phrase boost. When on, a topic People query adds
         //   match_phrase should-clauses over publicationTitles (slop 8) + areasOfInterest
         //   (slop 4) so a multi-word specialty ("pediatric congenital heart surgery") is
         //   not diluted by the min_should_match over-broadening. resolvePeopleTopicPhraseBoost
         //   reads === "on"; flag-OFF => empty spread => body byte-identical (never admits,
         //   no msm on the bool). Query-time, no reindex. Staging-first for the #1344 A/B.
-        SEARCH_PEOPLE_PHRASE_BOOST: env === "staging" ? "on" : "off",
+        SEARCH_PEOPLE_PHRASE_BOOST: "on", // Prod flipped 2026-07-07 (#1344; query-time; +0.022 validated).
         // #1347 -- division-shape routing. When on, a bare clinical-division-name People
         //   query (Cardiology) routes to the department template AND is scoped to that
         //   division's roster (deptDivKey filter), instead of falling to topic_template.
@@ -1595,7 +1629,7 @@ export class AppStack extends Stack {
         // today (the body is awaited before the shell, exactly as now). No data
         // prereq; flip is env-only via cdk deploy Sps-App-<env> (CD re-rolls the
         // image only) -- the flag-parity rule.
-        SEARCH_SHELL_STREAMING: env === "staging" ? "on" : "off",
+        SEARCH_SHELL_STREAMING: "on", // Prod flipped 2026-07-07 (#861; no data prereq).
         // #878 -- MeSH-concept rows in the autocomplete dropdown. Reuses the
         // results-page MeSH resolver (getMeshMap().byForm: descriptor names + NLM
         // entry terms + #642 aliases) so the dropdown surfaces a "Flow Cytometry
@@ -1666,7 +1700,7 @@ export class AppStack extends Stack {
         //   lay-term wins additionally need the #1258 alias rows). Resolve-time only: no
         //   reindex. STAGING ON to soak; PROD OFF pending eval. Flip env-only via cdk
         //   deploy Sps-App-<env> (CD re-rolls the image only) -- the flag-parity rule.
-        SEARCH_MESH_QUERY_NORMALIZATION: env === "staging" ? "on" : "off",
+        SEARCH_MESH_QUERY_NORMALIZATION: "on", // Prod flipped 2026-07-07 (resolve-time, no reindex).
         // #1346 -- acronym wrong-sense guard. When ON, resolveMeshDescriptor suppresses a
         //   short all-caps acronym (CAR/PET) that resolved ONLY via a common-word entry-
         //   term synonym whose matched form is a plain Title-case word (CAR -> "Car" ->
@@ -1674,7 +1708,7 @@ export class AppStack extends Stack {
         //   search; it drops to BM25. Internal-caps acronyms (COPD/EHR) and exact NAME
         //   matches (DNA/RNA) are kept. Resolve-time only: no reindex. STAGING ON; PROD
         //   OFF pending eval. Flip env-only via cdk deploy Sps-App-<env> (flag-parity).
-        SEARCH_ACRONYM_SENSE_GUARD: env === "staging" ? "on" : "off",
+        SEARCH_ACRONYM_SENSE_GUARD: "on", // Prod flipped 2026-07-07 (#1346; resolve-time, no reindex).
         // #1026 -- surface soft-deleted doctoral-student co-authors as NON-LINKED
         // chips (name + headshot, no profile link, never faceted/searchable) on
         // publication chip surfaces site-wide (search, topic feeds, methods pages,
@@ -1686,7 +1720,7 @@ export class AppStack extends Stack {
         // hydration matches no one new). STAGING-FIRST: on in staging to soak pending
         // the WCGS sign-off (docs/outreach/wave3-doctoral-students.md Q2); prod stays
         // off until then. Env-only flip via `cdk deploy --exclusively Sps-App-<env>`.
-        COAUTHOR_HIDDEN_STUDENT_CHIPS: env === "staging" ? "on" : "off",
+        COAUTHOR_HIDDEN_STUDENT_CHIPS: "on", // Prod flipped 2026-07-07 (#1026 FERPA non-linked chips; operator-approved).
         // #637 "View as" impersonation -- the global feature gate. The code
         // checks `=== "true"` exactly (lib/auth/effective-identity.ts,
         // middleware.ts, the /api/impersonation* routes, the /api/auth/session
@@ -1915,7 +1949,7 @@ export class AppStack extends Stack {
         // needs (`opportunity_submission`) rides audit-log.sql's idempotent
         // MODIFY COLUMN block via the sps-db-bootstrap task, so any deploy at
         // or after that commit has already applied it -- no manual DDL step.
-        OPPORTUNITY_URL_INTAKE: env === "staging" ? "on" : "off",
+        OPPORTUNITY_URL_INTAKE: "on", // Prod flipped 2026-07-07 (enum rides db-bootstrap; IAM rides deploy).
         // Scholar-profile facet-filter redesign (PR-2). A BIG visual change to
         // the Topics/Methods facets + a unified filter bar, fully gated. ON in
         // staging to soak the real-data behavior (method rows + cross-facet
@@ -1923,7 +1957,7 @@ export class AppStack extends Stack {
         // rendered output is byte-identical to today. Applying a change here
         // needs cdk deploy Sps-App-<env> (CD only re-rolls the image) — the
         // flag-parity rule.
-        PROFILE_FACET_REDESIGN: env === "staging" ? "on" : "off",
+        PROFILE_FACET_REDESIGN: "on", // Prod flipped 2026-07-07 (facet redesign go-live).
         // #847 -- internal "download the leading scholars" CSV export. When
         // "on", the POST /api/export/scholars/{scope} endpoint accepts
         // authenticated requests and the download button renders; method scopes
@@ -1952,9 +1986,10 @@ export class AppStack extends Stack {
         //     authoritative WCM/Qatar/NYP ranges from #876, sourced together with
         //     EdgeStack edgeAllowedCidrs (#461). Prod EMPTY (network half matches
         //     nobody -- default-safe).
-        INTERNAL_VIEWER_NETWORK_SIGNAL: env === "staging" ? "on" : "off",
-        SCHOLAR_LIST_EXPORT_EMAIL: env === "staging" ? "on" : "off",
-        INTERNAL_VIEWER_CIDRS: env === "staging" ? "157.139.83.164/32" : "",
+        INTERNAL_VIEWER_NETWORK_SIGNAL: "on", // Prod flipped 2026-07-07 (paired w/ prod CIDRs below; IP signal spoofable — accepted).
+        SCHOLAR_LIST_EXPORT_EMAIL: "on", // Prod flipped 2026-07-07 (adds email col to internal roster CSV; operator-approved).
+        INTERNAL_VIEWER_CIDRS:
+          env === "staging" ? "157.139.83.164/32" : "140.251.0.0/16,157.139.0.0/16",
         // PROFILE_EMAIL_RELEASE_GATE -- when "on", the Web Directory
         // `weillCornellEduReleaseCode;mail` audience (email_visibility) is
         // respected across both profile-email DISPLAY (table A) and the #847
@@ -2066,24 +2101,14 @@ export class AppStack extends Stack {
         // secret's `node` key instead of the dropped cross-stack export above.
         ...(envConfig.openSearchNodeFromSecret
           ? {
-              OPENSEARCH_NODE: ecs.Secret.fromSecretsManager(
-                opensearchAppSecret,
-                "node",
-              ),
+              OPENSEARCH_NODE: ecs.Secret.fromSecretsManager(opensearchAppSecret, "node"),
             }
           : {}),
-        OPENSEARCH_USER: ecs.Secret.fromSecretsManager(
-          opensearchAppSecret,
-          "username",
-        ),
-        OPENSEARCH_PASS: ecs.Secret.fromSecretsManager(
-          opensearchAppSecret,
-          "password",
-        ),
+        OPENSEARCH_USER: ecs.Secret.fromSecretsManager(opensearchAppSecret, "username"),
+        OPENSEARCH_PASS: ecs.Secret.fromSecretsManager(opensearchAppSecret, "password"),
         // Read by lib/revalidate-auth.ts / app/api/revalidate as
         // SCHOLARS_REVALIDATE_TOKEN -- the env-var name is the contract. #447
-        SCHOLARS_REVALIDATE_TOKEN:
-          ecs.Secret.fromSecretsManager(revalidateTokenSecret),
+        SCHOLARS_REVALIDATE_TOKEN: ecs.Secret.fromSecretsManager(revalidateTokenSecret),
         // iron-session key read by lib/auth/config.ts getSessionConfig (#100).
         // Required by the /edit middleware gate and the SAML callback's
         // session minting; without it the callback 500s after a valid login.
@@ -2163,9 +2188,7 @@ export class AppStack extends Stack {
         // the app) and read as ${env:NEW_RELIC_LICENSE_KEY} in that config.
         // Pull from Secrets Manager via the execution role -- the ARN is in
         // consumerSecretArns above.
-        NEW_RELIC_LICENSE_KEY: ecs.Secret.fromSecretsManager(
-          newRelicLicenseKeySecret,
-        ),
+        NEW_RELIC_LICENSE_KEY: ecs.Secret.fromSecretsManager(newRelicLicenseKeySecret),
       },
     });
 
@@ -2179,17 +2202,13 @@ export class AppStack extends Stack {
     // visibly distinct from app/. Invocation lives in the (later)
     // GitHub Actions workflow; CDK ships the task family only.
     // ------------------------------------------------------------------
-    this.migrationTaskDefinition = new ecs.FargateTaskDefinition(
-      this,
-      "MigrationTaskDefinition",
-      {
-        family: `sps-migrate-${env}`,
-        cpu: envConfig.migrationTaskCpu,
-        memoryLimitMiB: envConfig.migrationTaskMemoryMiB,
-        executionRole: deployTaskExecutionRole,
-        taskRole,
-      },
-    );
+    this.migrationTaskDefinition = new ecs.FargateTaskDefinition(this, "MigrationTaskDefinition", {
+      family: `sps-migrate-${env}`,
+      cpu: envConfig.migrationTaskCpu,
+      memoryLimitMiB: envConfig.migrationTaskMemoryMiB,
+      executionRole: deployTaskExecutionRole,
+      taskRole,
+    });
     this.migrationTaskDefinition.addContainer("migrate", {
       image: containerImage,
       containerName: "migrate",
@@ -2384,11 +2403,10 @@ export class AppStack extends Stack {
     // TG names: bounded at 32 chars (asserted in app-stack.test.ts).
     // `sps-tg-pub-${env}` / `sps-tg-int-${env}` keep room for any future
     // env literal up to ~16 chars before the limit bites.
-    const publicAppTargetGroup = new elbv2.ApplicationTargetGroup(
-      this,
-      "PublicAppTargetGroup",
-      { ...tgProps, targetGroupName: sharedReplaceName(`sps-tg-pub-${env}`) },
-    );
+    const publicAppTargetGroup = new elbv2.ApplicationTargetGroup(this, "PublicAppTargetGroup", {
+      ...tgProps,
+      targetGroupName: sharedReplaceName(`sps-tg-pub-${env}`),
+    });
     const internalAppTargetGroup = new elbv2.ApplicationTargetGroup(
       this,
       "InternalAppTargetGroup",
@@ -2449,11 +2467,32 @@ export class AppStack extends Stack {
     // 403, not a forward), so it is the resource that satisfies AWS's
     // "target group must have an associated load balancer" check on the
     // public side -- see the EcsService dependency comment further down.
-    const originVerifiedRule = new elbv2.ApplicationListenerRule(
-      this,
-      "OriginVerifiedForward",
-      {
-        listener: publicListener,
+    const originVerifiedRule = new elbv2.ApplicationListenerRule(this, "OriginVerifiedForward", {
+      listener: publicListener,
+      priority: 1,
+      conditions: [
+        elbv2.ListenerCondition.httpHeader("X-Origin-Verify", [
+          originSharedSecretValue.unsafeUnwrap(),
+        ]),
+      ],
+      action: elbv2.ListenerAction.forward([publicAppTargetGroup]),
+    });
+    // #1507 -- HTTPS :443 listener alongside :80 (kept; :80 removal is a
+    // follow-up) so CloudFront's origin leg can run over TLS. Same 403-default
+    // + X-Origin-Verify-forward shape as :80, onto the same target group. Added
+    // only once the ALB-region cert (edgeOriginCertArn) is seeded; ships dark.
+    if (envConfig.edgeOriginCertArn.length > 0) {
+      const publicHttpsListener = this.publicAlb.addListener("PublicHttpsListener", {
+        port: 443,
+        protocol: elbv2.ApplicationProtocol.HTTPS,
+        certificates: [elbv2.ListenerCertificate.fromArn(envConfig.edgeOriginCertArn)],
+        defaultAction: elbv2.ListenerAction.fixedResponse(403, {
+          contentType: "text/plain",
+          messageBody: "Forbidden",
+        }),
+      });
+      new elbv2.ApplicationListenerRule(this, "OriginVerifiedForwardHttps", {
+        listener: publicHttpsListener,
         priority: 1,
         conditions: [
           elbv2.ListenerCondition.httpHeader("X-Origin-Verify", [
@@ -2461,8 +2500,8 @@ export class AppStack extends Stack {
           ]),
         ],
         action: elbv2.ListenerAction.forward([publicAppTargetGroup]),
-      },
-    );
+      });
+    }
     const internalListener = this.internalAlb.addListener("InternalHttpListener", {
       port: 80,
       protocol: elbv2.ApplicationProtocol.HTTP,
@@ -2651,15 +2690,14 @@ export class AppStack extends Stack {
     // is ecr:GetAuthorizationToken, which has no resource-level ARN.
     // ------------------------------------------------------------------
     const githubOidcIssuerHost = "token.actions.githubusercontent.com";
-    const githubOidcProviderArnContext = this.node.tryGetContext(
-      "githubOidcProviderArn",
-    ) as string | undefined;
+    const githubOidcProviderArnContext = this.node.tryGetContext("githubOidcProviderArn") as
+      | string
+      | undefined;
     // staging owns/creates the account-scoped provider; every other env imports
     // it. `-c createGithubOidcProvider=true` forces creation for a fresh-account
     // bootstrap from a non-staging env.
     const ownsGithubOidcProvider =
-      env === "staging" ||
-      `${this.node.tryGetContext("createGithubOidcProvider")}` === "true";
+      env === "staging" || `${this.node.tryGetContext("createGithubOidcProvider")}` === "true";
     const githubOidcProvider = ownsGithubOidcProvider
       ? new iam.OpenIdConnectProvider(this, "GithubOidcProvider", {
           url: `https://${githubOidcIssuerHost}`,
@@ -2668,8 +2706,7 @@ export class AppStack extends Stack {
       : iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn(
           this,
           "GithubOidcProvider",
-          githubOidcProviderArnContext &&
-            githubOidcProviderArnContext.length > 0
+          githubOidcProviderArnContext && githubOidcProviderArnContext.length > 0
             ? githubOidcProviderArnContext
             : `arn:aws:iam::${this.account}:oidc-provider/${githubOidcIssuerHost}`,
         );
@@ -2719,10 +2756,7 @@ export class AppStack extends Stack {
         ],
         // Both image repos: the standalone app image and the dedicated
         // ETL batch image (#454) the deploy workflow builds + pushes.
-        resources: [
-          this.ecrRepository.repositoryArn,
-          this.etlEcrRepository.repositoryArn,
-        ],
+        resources: [this.ecrRepository.repositoryArn, this.etlEcrRepository.repositoryArn],
       }),
     );
     this.deployRole.addToPolicy(
@@ -2840,15 +2874,11 @@ export class AppStack extends Stack {
     // reaches Secrets Manager over its-reciter's NAT. SPS owns these endpoints
     // only in the standalone Sps VPC it creates.
     if (!envConfig.useSharedVpc) {
-      const vpcEndpointSecurityGroup = new ec2.SecurityGroup(
-        this,
-        "VpcEndpointSecurityGroup",
-        {
-          vpc,
-          description: `SPS VPC interface endpoints (${env}) -- HTTPS from app + ETL SGs.`,
-          allowAllOutbound: false,
-        },
-      );
+      const vpcEndpointSecurityGroup = new ec2.SecurityGroup(this, "VpcEndpointSecurityGroup", {
+        vpc,
+        description: `SPS VPC interface endpoints (${env}) -- HTTPS from app + ETL SGs.`,
+        allowAllOutbound: false,
+      });
       // Peer.securityGroupId is used instead of passing the L2 SG directly:
       // L2 `addIngressRule(peerSg, ...)` auto-mirrors the rule by adding a
       // matching egress on the peer SG. For peers in *another stack*, that
@@ -2921,8 +2951,7 @@ export class AppStack extends Stack {
     });
     new CfnOutput(this, "EcsDbBootstrapTaskFamily", {
       value: this.dbBootstrapTaskDefinition.family,
-      description:
-        "SPS one-shot scholars_audit bootstrap task family — run before migrate (#493)",
+      description: "SPS one-shot scholars_audit bootstrap task family — run before migrate (#493)",
     });
     new CfnOutput(this, "EcsVerifyGrantsTaskFamily", {
       value: this.verifyGrantsTaskDefinition.family,
@@ -2949,8 +2978,7 @@ export class AppStack extends Stack {
     new CfnOutput(this, "InternalAlbSecurityGroupId", {
       value: internalAlbSecurityGroup.securityGroupId,
       exportName: `Sps-App-${env}-InternalAlbSecurityGroupId`,
-      description:
-        "SPS internal ALB security group id (consumed by EtlStack ingress).",
+      description: "SPS internal ALB security group id (consumed by EtlStack ingress).",
     });
 
     // Item-3 pass 1 (publish; docs/cutover-item3-implementation-map-2026-06-30.md).

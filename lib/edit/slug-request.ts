@@ -10,10 +10,11 @@
 import type { PrismaClient, SlugRequestStatus } from "@/lib/generated/prisma/client";
 import { checkSlugCollision, RESERVED_SLUGS } from "@/lib/edit/validators";
 import { canonicalProfilePath } from "@/lib/profile-url";
+import { siteBaseUrl } from "@/lib/site-url";
 
-/** Canonical public base URL — mirrors `lib/seo/jsonld.ts`. */
+/** Canonical public base URL — runtime `SITE_URL`-aware via `@/lib/site-url`. */
 export function publicSiteUrl(): string {
-  return process.env.NEXT_PUBLIC_SITE_URL ?? "https://scholars.weill.cornell.edu";
+  return siteBaseUrl();
 }
 
 /**

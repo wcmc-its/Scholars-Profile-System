@@ -22,6 +22,7 @@
  */
 
 import { canonicalProfilePath } from "@/lib/profile-url";
+import { siteBaseUrl } from "@/lib/site-url";
 
 /** ROR identifier for Weill Cornell Medicine. Source: ror.org/02r109517. */
 const WCM_ROR = "https://ror.org/02r109517";
@@ -127,8 +128,7 @@ export function splitPersonName(name: string | null | undefined): {
 export function buildPersonJsonLd(
   profile: PersonJsonLdInput,
 ): Record<string, unknown> {
-  const baseUrl =
-    process.env.NEXT_PUBLIC_SITE_URL ?? "https://scholars.weill.cornell.edu";
+  const baseUrl = siteBaseUrl();
 
   const worksFor: Record<string, unknown> = {
     "@type": "Organization",
@@ -213,8 +213,7 @@ export type OrganizationJsonLdInput = {
 export function buildOrganizationJsonLd(
   org: OrganizationJsonLdInput,
 ): Record<string, unknown> {
-  const baseUrl =
-    process.env.NEXT_PUBLIC_SITE_URL ?? "https://scholars.weill.cornell.edu";
+  const baseUrl = siteBaseUrl();
   const out: Record<string, unknown> = {
     "@context": "https://schema.org",
     "@type": "Organization",
@@ -250,8 +249,7 @@ export type DefinedTermJsonLdInput = {
 export function buildDefinedTermJsonLd(
   topic: DefinedTermJsonLdInput,
 ): Record<string, unknown> {
-  const baseUrl =
-    process.env.NEXT_PUBLIC_SITE_URL ?? "https://scholars.weill.cornell.edu";
+  const baseUrl = siteBaseUrl();
   const out: Record<string, unknown> = {
     "@context": "https://schema.org",
     "@type": "DefinedTerm",

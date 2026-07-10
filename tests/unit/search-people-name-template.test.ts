@@ -310,3 +310,39 @@ describe("people-index name-shape template — SPEC §6.1.2 (#309)", () => {
     expect(must[0]).toEqual({ match_all: {} });
   });
 });
+
+describe("people-index A–Z last-name-initial browse — #1513", () => {
+  beforeEach(() => {
+    capturedBodies.length = 0;
+    groupByMock.mockResolvedValue([]);
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** The always-on `queryFilter` array attached as `query.bool.filter`. */
+  function filterClauses(body: Record<string, unknown>): Record<string, unknown>[] {
+    return (rootQuery(body).bool as { filter?: Record<string, unknown>[] }).filter ?? [];
+  }
+  const hasLetterPrefix = (body: Record<string, unknown>) =>
+    filterClauses(body).some((c) => "prefix" in c);
+
+  it("a single letter scopes the browse to a lowercased lastNameSort prefix", async () => {
+    // The overflow link passes an uppercase letter; the index keyword is
+    // lowercased, so the clause must be lowercased to match.
+    await searchPeople({ q: "", letter: "C", sort: "lastname" });
+    expect(filterClauses(capturedBodies[0])).toContainEqual({
+      prefix: { lastNameSort: "c" },
+    });
+  });
+
+  it("ignores a non-single-letter value (no prefix clause)", async () => {
+    await searchPeople({ q: "", letter: "Ab", sort: "lastname" });
+    expect(hasLetterPrefix(capturedBodies[0])).toBe(false);
+  });
+
+  it("adds no prefix clause when no letter is given", async () => {
+    await searchPeople({ q: "", sort: "lastname" });
+    expect(hasLetterPrefix(capturedBodies[0])).toBe(false);
+  });
+});

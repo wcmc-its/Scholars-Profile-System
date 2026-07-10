@@ -108,6 +108,6 @@ If a future high-RPS write path makes progressive traffic-shifting load-bearing,
 
 - [`ADR-004`](./ADR-004-deploy-strategy.md) — deploy strategy (ECS rolling); the deploy architecture this IaC expresses.
 - [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md) — writer-endpoint auth and secret layout, Step Functions ETL orchestration, schema-migration pipeline.
-- [`PRODUCTION_BACKLOG.md`](./PRODUCTION_BACKLOG.md) / #99 — the production-readiness backlog; the infra B-series (B05–B26) provisioned under this ADR.
+- #99 — the production-readiness backlog; the infra B-series (B05–B26) provisioned under this ADR.
 - AWS Well-Architected Framework, Security Pillar — IAM least privilege; the ECS task-execution-role / task-role split.
 - B05 (#104), B06 (#105), B07 (#106), B08 (#107), B09 (#108), B10 (#109), B13 (#112), B17 (#116), B20 (#119), B22 (#121), B23 (#122), B24 (#123), B26 (#125) — the infra items mapped onto the six stacks.

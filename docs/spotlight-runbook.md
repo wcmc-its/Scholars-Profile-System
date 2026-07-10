@@ -177,8 +177,6 @@ Drill down by adding `subtopicId` (per-spotlight) or `pmid` (which paper drew th
 | `AUTO_ADVANCE_MS` | 10 000 | `components/home/spotlight-section.tsx` |
 
 ## Cross-references
-
-- Phase plan: [`docs/spotlight-integration-plan.md`](spotlight-integration-plan.md)
 - Cross-repo contract: `~/Dropbox/GitHub/ReciterAI/docs/spotlight-contract.md`
 - SPS coding-agent brief: `~/Dropbox/GitHub/ReciterAI/docs/sps-spotlight-handoff.md`
 - Launch handoff: `~/Dropbox/GitHub/ReciterAI/docs/spotlight-launch-handoff.md`

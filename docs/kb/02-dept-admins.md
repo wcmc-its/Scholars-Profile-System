@@ -11,7 +11,7 @@ Per **#506 Gate D3**, this article **cannot be finalized until #540 (unit curati
 
 **Trigger to draft:** #540 Phases 1, 2, 5, 7 live (the schema + authz + grant endpoint + curation surfaces). **Pin the article to that phase boundary** ("behavior as of …") when written.
 
-In the meantime, the pilot-dept-admin and center-admin outreach drafts ([`../outreach/wave1-pilot-dept-admins.md`](../outreach/wave1-pilot-dept-admins.md), [`../outreach/wave1-center-admins.md`](../outreach/wave1-center-admins.md)) carry the interim can/can't language and are the user-language source material for this article.
+In the meantime, the center-admin outreach draft ([`../outreach/wave1-center-admins.md`](../outreach/wave1-center-admins.md)) carries the interim can/can't language and are the user-language source material for this article.
 
 ## Intended structure (when unblocked)
 

@@ -214,6 +214,48 @@ describe("loadMethodExemplar — methodContext + #1158 sourcePmid", () => {
     });
   });
 
+  // #1502 — the snippet is a verbatim sentence baked from `sourcePmid` by the
+  // tools ETL, whose sha256 short-circuit can skip a rebuild after a takedown.
+  // The loader must re-check the source publication's suppression at read time.
+  const familyWithSnippet = {
+    supercategory: "x",
+    familyLabel: "F",
+    pmids: ["1"],
+    exemplarTools: ["CheXpert"],
+    exemplarContexts: { CheXpert: "labels chest radiographs" },
+    exemplarContextPmids: { CheXpert: "33144353" },
+  };
+
+  it("#1502 — drops methodContext when the sourcePmid is dark (post-publish takedown)", async () => {
+    scholarFamilyFindMany.mockResolvedValue([familyWithSnippet]);
+    publicationFindMany.mockResolvedValue([pub({ pmid: "1", title: "P1" })]);
+    // sourcePmid 33144353 is dark; the list pmid "1" is not, so the list survives.
+    resolveDarkPmids.mockResolvedValue(new Set(["33144353"]));
+    const r = await loadMethodExemplar("abc", "F");
+    expect(r.methodContext).toBeNull();
+    expect(r.pubs.map((p) => p.pmid)).toEqual(["1"]); // only the snippet dropped
+  });
+
+  it("#1502 — drops methodContext when this scholar per-author-hid the sourcePmid", async () => {
+    scholarFamilyFindMany.mockResolvedValue([familyWithSnippet]);
+    publicationFindMany.mockResolvedValue([pub({ pmid: "1", title: "P1" })]);
+    isAuthorHidden.mockImplementation((_s: unknown, pmid: string) => pmid === "33144353");
+    const r = await loadMethodExemplar("abc", "F");
+    expect(r.methodContext).toBeNull();
+    expect(r.pubs.map((p) => p.pmid)).toEqual(["1"]);
+  });
+
+  it("#1502 — keeps methodContext when the sourcePmid is not suppressed", async () => {
+    scholarFamilyFindMany.mockResolvedValue([familyWithSnippet]);
+    publicationFindMany.mockResolvedValue([pub({ pmid: "1", title: "P1" })]);
+    const r = await loadMethodExemplar("abc", "F");
+    expect(r.methodContext).toEqual({
+      tool: "CheXpert",
+      context: "labels chest radiographs",
+      sourcePmid: "33144353",
+    });
+  });
+
   it("returns sourcePmid:null when the chosen tool has a snippet but no pmid (back-compat / partial map)", async () => {
     scholarFamilyFindMany.mockResolvedValue([
       {

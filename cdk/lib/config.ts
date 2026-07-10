@@ -51,6 +51,19 @@ export interface SpsEnvConfig {
   readonly opensearchDataNodes: number;
   /** OpenSearch data-node instance type. */
   readonly opensearchDataNodeInstanceType: string;
+  /**
+   * Number of dedicated OpenSearch master nodes; 0 = none (#1509). Prod runs 3
+   * so cluster coordination moves off the data path and survives losing one
+   * data node/AZ (quorum 2-of-3) instead of the current 2-data-node domain's
+   * 2-of-2 vote, where either node's loss takes search fully down. Other envs
+   * run 0 — a single/low-traffic domain gains nothing from dedicated masters.
+   * NB: the VPC has two AZs, so three masters distribute 2+1 across those two
+   * AZs; full 3-AZ master placement would need NetworkStack at three AZs (same
+   * out-of-scope caveat as the data-node count above).
+   */
+  readonly opensearchMasterNodes: number;
+  /** Dedicated master instance type; ignored when opensearchMasterNodes is 0. */
+  readonly opensearchMasterNodeInstanceType: string;
 
   // --- AWS Backup (B10) ---
 
@@ -170,8 +183,14 @@ export interface SpsEnvConfig {
    * annual state machines are enabled at deploy time. `true` in staging so
    * the cadence runs immediately after the first deploy; `false` in prod so
    * the first deploy never auto-starts a run before the runbook is reviewed.
-   * Flipped to `true` post-launch via `aws events enable-rule` (out of band)
-   * or by changing this flag and redeploying.
+   *
+   * To turn prod schedules on: flip THIS flag to `true` and
+   * `cdk deploy Sps-Etl-prod`. Do NOT enable the rules out of band with
+   * `aws events enable-rule` — the rules synthesize `enabled:
+   * envConfig.etlSchedulesEnabled` (etl-stack.ts), so an out-of-band enable
+   * drifts from the template and the next Sps-Etl-prod deploy that touches a
+   * rule silently reverts it to DISABLED. The config flag is the single source
+   * of truth (#1512).
    */
   readonly etlSchedulesEnabled: boolean;
   /**
@@ -390,12 +409,51 @@ export interface SpsEnvConfig {
    */
   readonly cloudFrontDistributionId: string;
   /**
+   * CloudFront custom domain (alias) attached to the EdgeStack distribution.
+   * Committed here (non-secret -- it is the public URL) so a bare
+   * `cdk deploy Sps-Edge-<env>` no longer strips the alias off the live
+   * distribution (#1506). A `-c edgeCustomDomain=...` context flag still wins
+   * when supplied. Paired with {@link edgeCertArn}; both must be present for the
+   * alias to attach.
+   */
+  readonly edgeCustomDomain: string;
+  /**
+   * ACM certificate ARN for {@link edgeCustomDomain}. MUST be in us-east-1
+   * (CloudFront viewer-cert requirement). Committed for the same
+   * bare-deploy-no-strip reason as {@link edgeCustomDomain} (#1506); the ARN
+   * carries only the already-committed account id, no secret. `-c edgeCertArn=...`
+   * still overrides.
+   */
+  readonly edgeCertArn: string;
+  /**
    * CloudFront standard-access-log S3 bucket name (EdgeStack-owned; raw logs at
    * `cf/<env>/`). Referenced by NAME (s3.Bucket.fromBucketName) by AnalyticsStack
    * for the same Edge-decoupling reason as {@link cloudFrontDistributionId}.
    * CFN-generated name, stable (the bucket is RETAIN).
    */
   readonly cloudFrontLogsBucketName: string;
+
+  // --- Edge -> ALB origin TLS (#1507) ---
+
+  /**
+   * Custom origin hostname CloudFront uses when the origin leg runs over HTTPS
+   * (#1507). The public ALB's AWS-assigned `*.elb.amazonaws.com` DNS name cannot
+   * carry a public ACM cert, so an HTTPS origin needs a hostname we control that
+   * DNS-resolves to the ALB and whose cert the ALB's :443 listener presents.
+   * Committed (public URL) but INERT until {@link edgeOriginCertArn} is set.
+   */
+  readonly edgeOriginHostname: string;
+  /**
+   * ACM certificate ARN (ALB region, us-east-1) for {@link edgeOriginHostname},
+   * presented by the public ALB's :443 listener (#1507). This is the *regional*
+   * ALB cert -- distinct from the us-east-1 CloudFront *viewer* cert. Empty =
+   * feature OFF: the ALB stays HTTP-:80-only and CloudFront talks HTTP_ONLY to
+   * the origin (today's behavior). Set it (operator, after issuing the cert +
+   * pointing DNS at the ALB) to add the :443 listener and flip the CloudFront
+   * origin to HTTPS_ONLY. Ships dark. Deploy Sps-App-<env> (adds :443) and
+   * verify :443 serves BEFORE Sps-Edge-<env> (flips the origin).
+   */
+  readonly edgeOriginCertArn: string;
 
   // --- Observability metric-by-name decouple (cutover) ---
 
@@ -499,6 +557,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // (4 GB, ~2 GB heap, more burst credits) gives the rebuild headroom, paired
     // with the paced bulk writer (#627). Still single-node — staging is low-traffic.
     opensearchDataNodeInstanceType: "t3.medium.search",
+    // Single-node staging domain — no dedicated masters (#1509 is a prod HA fix).
+    opensearchMasterNodes: 0,
+    opensearchMasterNodeInstanceType: "m6g.large.search",
     awsBackupRetentionDays: 14,
     appDesiredCount: 1,
     // #596 — staging is low-traffic (internal QA + VPN circulation); a small
@@ -600,7 +661,17 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // Live EdgeStack-owned resources, referenced by name to decouple the
     // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
     cloudFrontDistributionId: "E17NRWINXLP3B3",
+    // Committed edge alias + us-east-1 viewer cert so a bare Edge deploy stops
+    // stripping them (#1506). Live values read from the distribution config.
+    edgeCustomDomain: "scholars-staging.weill.cornell.edu",
+    edgeCertArn:
+      "arn:aws:acm:us-east-1:665083158573:certificate/f50f0b04-dc62-4d8e-97b8-2761d1efdd0f",
     cloudFrontLogsBucketName: "sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz",
+    // #1507 -- HTTPS origin leg. INERT until edgeOriginCertArn is seeded
+    // (operator issues the ALB-region cert for this hostname + points DNS at
+    // the public ALB). Confirm the exact hostname before issuing the cert.
+    edgeOriginHostname: "scholars-staging-origin.weill.cornell.edu",
+    edgeOriginCertArn: "",
     // Observability metric-by-name decouple (cutover, item-3 Phase B2): ON.
     // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-
     // stack Ref exports so the useSharedVpc flip can replace those resources without
@@ -635,6 +706,13 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     auroraBackupRetentionDays: 14,
     opensearchDataNodes: 2,
     opensearchDataNodeInstanceType: "m6g.large.search",
+    // #1509 — 3 dedicated masters so a single data-node/AZ loss degrades search
+    // to yellow (quorum holds) instead of red. Blocks the #731 RI purchase until
+    // the topology settles. Stateful blue/green: deploy in a low-traffic window,
+    // and verify every index has number_of_replicas >= 1 FIRST (else a data-node
+    // loss goes red anyway).
+    opensearchMasterNodes: 3,
+    opensearchMasterNodeInstanceType: "m6g.large.search",
     awsBackupRetentionDays: 35,
     appDesiredCount: 2,
     // #596 — 3x the 2-task floor gives room to absorb a Wave-4 (WCM-wide,
@@ -665,8 +743,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // flip back + cdk deploy.
     cspMode: "enforce",
     // Prod schedules ship disabled — first run is operator-driven after
-    // runbook review, then `aws events enable-rule` flips them on (see
-    // PRODUCTION_ADDENDUM § EtlStack).
+    // runbook review. To turn them on, flip this flag to true and
+    // `cdk deploy Sps-Etl-prod` (NOT `aws events enable-rule` — see the flag
+    // JSDoc: out-of-band enable drifts and gets reverted by the next deploy).
+    // Verified DISABLED in AWS 2026-07-07, so config == live state (no drift).
     etlSchedulesEnabled: false,
     // #393 — the reconciler backstop runs in prod from launch (empty-queue-safe
     // pre-launch), unlike the runbook-gated cadences above. See flag JSDoc.
@@ -733,7 +813,17 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // Live EdgeStack-owned resources, referenced by name to decouple the
     // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
     cloudFrontDistributionId: "E28NKDFXC7K2ZL",
+    // Committed edge alias + us-east-1 viewer cert so a bare Edge deploy stops
+    // stripping them (#1506). Live values read from the distribution config.
+    edgeCustomDomain: "scholars.weill.cornell.edu",
+    edgeCertArn:
+      "arn:aws:acm:us-east-1:665083158573:certificate/95f77e69-4abc-4d2c-b081-b8b5b8572fd6",
     cloudFrontLogsBucketName: "sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
+    // #1507 -- HTTPS origin leg. INERT until edgeOriginCertArn is seeded
+    // (operator issues the ALB-region cert for this hostname + points DNS at
+    // the public ALB). Confirm the exact hostname before issuing the cert.
+    edgeOriginHostname: "scholars-origin.weill.cornell.edu",
+    edgeOriginCertArn: "",
     // Observability metric-by-name decouple (cutover, item-3 prod window): ON.
     // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-
     // stack Ref exports so the useSharedVpc flip can replace those resources without

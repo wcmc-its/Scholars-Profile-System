@@ -263,7 +263,7 @@ cd cdk && npm ci && npm test -- -u   # commit only the .snap
 npx cdk diff --strict --exclusively Sps-Edge-<env> \
   -c env=<env> -c edgeCustomDomain=<domain> \
   -c edgeCertArn=<acm-arn-us-east-1> \
-  -c edgeAllowedCidrs=140.251.0.0/16,157.139.0.0/16
+  -c edgeAllowedCidrs=<WCM-campus-CIDRs>   # actual ranges kept out of source (SSM /sps/<env>/edge/allowed-cidrs)
 # verify NO destroy/Removed, then:
 npx cdk deploy --require-approval never --exclusively Sps-Edge-<env> <same -c flags>
 ```
@@ -326,7 +326,7 @@ npm run db:reset       # drop + recreate local DB and re-run migrations
 Search index (local): `npm run search:index` (all three) or `:people` / `:publications` / `:funding`.
 ETL (local, reads prod sources over VPN): `npm run etl:daily` (chain head `etl:ed` must succeed first) / `npm run etl:revalidate`.
 
-> Deeper: [`./DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md), [`./rollback-runbook.md`](./rollback-runbook.md), [`./staging-cutover.md`](./staging-cutover.md), [`./revalidate-token-rotation.md`](./revalidate-token-rotation.md), [`../README.md`](../README.md).
+> Deeper: [`./DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md), [`./rollback-runbook.md`](./rollback-runbook.md), [`./revalidate-token-rotation.md`](./revalidate-token-rotation.md), [`../README.md`](../README.md).
 
 ## 3. What to monitor
 
@@ -461,7 +461,13 @@ Two operator surfaces beyond the live `sps-reliability-${env}` dashboard + alarm
 | 10 | Home "Selected research" empty/hidden/wrong authors/404 links | Spotlight ETL no-op / floor / author join / wrong link shape | `EtlRun` most-recent `Spotlight` row: `status="success"` & `rows_processed>0` (`0` = sha256-unchanged short-circuit). `SELECT COUNT(*) FROM spotlight` (≤25). Floor `SPOTLIGHT_FLOOR=6` hides if < 6 survive. Authors render only `cwid IS NOT NULL`. Browse links must be `/topics/{parent}?subtopic={sub}`. Re-publish upstream in ReciterAI (`python3 backfill_spotlight.py --publish`) then `npm run etl:spotlight`. → [`./spotlight-runbook.md`](./spotlight-runbook.md) |
 | 11 | DB data loss / corruption (not app code) | Outside app-rollback scope — Aurora PITR | Targets **RPO ≤ 24 h, RTO ≤ 4 h**. Variant A — PITR `aws rds restore-db-cluster-to-point-in-time … --use-latest-restorable-time` then add a `db.serverless` writer (~20–40 min). Variant B — snapshot restore from DR vault `sps-dr-backup-vault-${env}` (us-west-2). → [`./restore-drill-runbook.md`](./restore-drill-runbook.md) |
 | 12 | `POST /api/revalidate` returns 401 / 500 | 401 = no/wrong token or non-Bearer scheme; 500 `server misconfigured` = `SCHOLARS_REVALIDATE_TOKEN` unset; mid-rotation 401 = old process cached old token | During rotation stage **both** `SCHOLARS_REVALIDATE_TOKEN` (new) + `SCHOLARS_REVALIDATE_TOKEN_PREVIOUS` (old) in `scholars/revalidate-token`, redeploy app to re-read, roll ETL callers, verify both 200, drop previous after ≥24 h + redeploy. → [`./revalidate-token-rotation.md`](./revalidate-token-rotation.md) |
-| 13 | ETL step fails `[etl-guard:<name>] … refusing to proceed` (e.g. `ed:scholar-soft-delete` with a large departed count) | Fail-safe tripped: the source returned far fewer records than the DB holds. Either the upstream shrank/restructured (e.g. ED moved students to `ou=students,ou=sors`, 2026-06) **or** a genuine offboarding backlog accumulated while nightlies were failing | **Verify before bypassing.** Reproduce the departed set read-only and spot-check a sample upstream (ED case: all LDAP `faculty:expired`, none active ⇒ genuine). Genuine ⇒ one-time rerun with `ETL_GUARD_BYPASS="<guard-name>"` (comma-list or `"all"`; set via `containerOverrides.environment` on a one-off `run-task` — never permanently), then confirm the next nightly is clean. Not genuine ⇒ fix the fetch, don't bypass (see PR #1456 for the ED repoint pattern). → [`./ed-nightly-revalidate-handoff-2026-07-04.md`](./ed-nightly-revalidate-handoff-2026-07-04.md) |
+| 13 | ETL step fails `[etl-guard:<name>] … refusing to proceed` (e.g. `ed:scholar-soft-delete` with a large departed count) | Fail-safe tripped: the source returned far fewer records than the DB holds. Either the upstream shrank/restructured (e.g. ED moved students to `ou=students,ou=sors`, 2026-06) **or** a genuine offboarding backlog accumulated while nightlies were failing | **Verify before bypassing.** Reproduce the departed set read-only and spot-check a sample upstream (ED case: all LDAP `faculty:expired`, none active ⇒ genuine). Genuine ⇒ one-time rerun with `ETL_GUARD_BYPASS="<guard-name>"` (comma-list or `"all"`; set via `containerOverrides.environment` on a one-off `run-task` — never permanently), then confirm the next nightly is clean. Not genuine ⇒ fix the fetch, don't bypass (see PR #1456 for the ED repoint pattern). |
+
+**ETL manual `run-task` — pick the family by credential group (#1508).** The single ETL task def was split four ways so no step carries a credential it does not need (LDAP bind pw / WCM-DB creds / ReCiter admin key). A one-off `run-task` (rows #2/#9/#13) MUST target the family whose secrets the step reads, or ECS fails it at task-start with a missing key. Rule: LDAP read → `-ldap`; a WCM DB → `-sources`; the ReCiter REST API → `-reciter-api`; everything else (public API / IAM / DB-only) → base. Authoritative mapping is `LDAP_SCRIPTS` / `SOURCES_SCRIPTS` in `cdk/lib/etl-stack.ts`:
+- `sps-etl-$ENV` (base) — `search:index`, `backup:curated`, `etl:dynamodb`, `etl:identity`, `etl:spotlight`, `etl:hierarchy`, `etl:scholar-tool`, `etl:mesh-*`, `etl:pubmed-retractions`, `etl:reporter-grants`, `etl:nsf/gates/nih-profile/pops`, `etl:revalidate/integrity/completeness/headshot/freshness`, `etl:coi-gap`, `etl:ed:import-email-visibility`.
+- `sps-etl-sources-$ENV` — `etl:reciter`, `etl:reciter:coi-statements`, `etl:asms`, `etl:infoed`, `etl:coi`, `etl:jenzabar`, `etl:reporter`, `etl:clinical-trials`.
+- `sps-etl-ldap-$ENV` — `etl:ed`, `etl:ed:export-email-visibility` (any `etl:ed:*` that binds LDAP).
+- `sps-etl-reciter-api-$ENV` — `etl:reciter-refresh` only (holds the #746 ReCiter admin key; was previously run on `sps-etl-$ENV`).
 
 **Quick alarm → entry index:** 5xx-rate / unhealthy-hosts / ecs-task-shortfall → #6; latency-p99 → #1/#6; aurora-cpu / aurora-connections → #2/#6; opensearch-red / jvm-pressure → #4/#9; etl-*-status/-cadence/-heartbeat → #3; oncall-relay-errors → #8; budget/anomaly (notify, email) = cost guardrail, not a service incident.
 

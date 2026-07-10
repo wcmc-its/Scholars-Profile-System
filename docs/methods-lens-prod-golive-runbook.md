@@ -27,7 +27,7 @@ The methods flags are coded `env === "staging" ? "on" : "off"` (`cdk/lib/app-sta
 ### `Sps-Edge-prod` (`/tmp/diff-edge-prod.txt`, 136 lines)
 - **Non-destructive** — strict diff with prod context (`scholars.weill.cornell.edu`, cert `95f77e69…`, WAF `sps-edge-prod-wcm-only`): **WAF + cert + alias all preserved** (no destroy lines).
 - Adds 5 CloudFront behaviors (also behind): `/api/units/*/*/members` (#974), `/api/methods/*/*/publications` + `/methods/*/*/scholars` (#824), `/api/profile/*` + `InternalViewerOrp` (#866). The `/api/units` behavior forwards `?method` to the origin (required, or the dept/division facet is inert). Inert until the App flags flip.
-- Edge context flags (prod): `env=prod`, `prodAccount=665083158573`, `edgeCustomDomain=scholars.weill.cornell.edu`, `edgeCertArn=arn:aws:acm:us-east-1:665083158573:certificate/95f77e69-4abc-4d2c-b081-b8b5b8572fd6`, `edgeAllowedCidrs=140.251.0.0/16,157.139.0.0/16`. (See `project_edgestack_manual_deploy_context` — omitting these STRIPS WAF/cert/alias.)
+- Edge context flags (prod): `env=prod`, `prodAccount=665083158573`, `edgeCustomDomain=scholars.weill.cornell.edu`, `edgeCertArn=arn:aws:acm:us-east-1:665083158573:certificate/95f77e69-4abc-4d2c-b081-b8b5b8572fd6`, `edgeAllowedCidrs=<WCM-campus-CIDRs>` (actual ranges kept out of source). (See `project_edgestack_manual_deploy_context` — omitting these STRIPS WAF/cert/alias.)
 
 ### `Sps-Etl-prod` (`/tmp/diff-etl-prod.txt`, 960 lines)
 - Adds the **`tools/*` S3 GetObject grant** to `EtlTaskRole` (needed for `etl:scholar-tool`), alongside `citations/*`, `mentoring/*`, `ed/*`.

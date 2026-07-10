@@ -182,6 +182,17 @@ export function authorizeCommsStewardAction(session: EditSession): AuthzResult {
   return { ok: false, reason: "not_comms_steward" };
 }
 
+// `POST /api/edit/appointment-visibility` — reveal/hide a historical
+// (`source = "ED-HISTORICAL"`) appointment on the public profile (#1323 /
+// #1557) — no longer has a dedicated predicate here. Self-serve reveal (a
+// scholar reveals their OWN history) means it now rides the SAME
+// `authorizeOverviewWrite` predicate as the bio + section-visibility (#1554),
+// keyed on the owning scholar: self OR superuser OR comms_steward OR granted
+// proxy (#779) OR org-unit owner/curator (#728). The earlier steward-only
+// `authorizeAppointmentVisibility` was removed rather than left dead — its
+// "not scholar-self" contract is the deliberate OPPOSITE of the new behavior,
+// so keeping it would only invite a miswire (cf. the retired `canProxyEdit`).
+
 // ---------------------------------------------------------------------------
 // page-access predicates  (the GET-time superuser re-check)
 // ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ A typical end-to-end deploy looks like this:
 
 Total wall-clock for a staging deploy with no pending migrations: ~7-9 minutes. A migration adds whatever Prisma needs to apply it. The 3-minute rolling-replacement step is the constant cost of zero-downtime for ECS Fargate.
 
-> ⚠️ **A branch→staging deploy reverts master-only ETL fixes.** `gh workflow run deploy.yml --ref <branch> -f env=staging` is permitted (the "refuse non-master" guard fires only for prod) and rebuilds **both** `scholars-app-staging:latest` **and** `scholars-etl-staging:latest` from that branch. The nightly Step Functions pull `scholars-etl-staging:latest`, so deploying a feature branch silently rolls staging ETL back to that branch's last master merge-base until master is redeployed. Before/after a branch deploy: `git merge-base --is-ancestor <fixSHA> <deployed-sha-tag>` on the ECR image tag, and redeploy master when done. (Bit us 2026-07-04: a feature-branch deploy reverted merged revalidate fixes #1473/#1474 — see [`./ed-nightly-revalidate-handoff-2026-07-04.md`](./ed-nightly-revalidate-handoff-2026-07-04.md).)
+> ⚠️ **A branch→staging deploy reverts master-only ETL fixes.** `gh workflow run deploy.yml --ref <branch> -f env=staging` is permitted (the "refuse non-master" guard fires only for prod) and rebuilds **both** `scholars-app-staging:latest` **and** `scholars-etl-staging:latest` from that branch. The nightly Step Functions pull `scholars-etl-staging:latest`, so deploying a feature branch silently rolls staging ETL back to that branch's last master merge-base until master is redeployed. Before/after a branch deploy: `git merge-base --is-ancestor <fixSHA> <deployed-sha-tag>` on the ECR image tag, and redeploy master when done. (Bit us 2026-07-04: a feature-branch deploy reverted merged revalidate fixes #1473/#1474.)
 
 To promote a tested build to **production**:
 
@@ -89,21 +89,34 @@ Any out-of-band deploy (e.g. an operator running `aws ecs update-service` manual
 
 `Sps-Edge-${env}` (the CloudFront distribution) is **deliberately not in `deploy.yml`**. Pushing to `master` deploys only AppStack's app image (staging); the distribution is changed by a human running `cdk deploy` from the repo. The app deploy and the EdgeStack deploy are **two separate mechanisms** — a change touching both (e.g. the #700 static-asset split) is rolled out as: merge → `cdk deploy` the stacks → app deploy populates anything CI-side.
 
-### Footgun: a bare `cdk diff/deploy` STRIPS the WAF + cert + custom domain
+### Alias + cert are committed; the WAF sources its CIDRs from SSM (#1506)
 
-The custom domain, ACM cert, and #461 WCM-only WAF are all gated on **optional CDK context**. Omit the flags and they synthesize as *absent* → the diff shows `[-] destroy WebACL/IPSet` and `Removed: Aliases/ViewerCertificate/WebACLId`, and deploying that takes the site offline. **Always** diff `--strict` with all flags first and confirm the diff is non-destructive before deploying:
+The bare-deploy footgun (alias/cert/WAF stripped when the `-c` flags were omitted) is **fixed**:
+
+- `edgeCustomDomain` + `edgeCertArn` are now committed to `SpsEnvConfig` (`config.ts`), so a bare deploy keeps the alias and viewer cert. A `-c edgeCustomDomain=/-c edgeCertArn=` flag still overrides if ever needed.
+- The #461 WCM-only WAF is now **always built**. Its allowlist CIDRs (internal WCM/Qatar/NYP ranges, kept out of this public repo) are read at deploy time from an SSM StringList: `/sps/<env>/edge/allowed-cidrs`.
+
+**One-time prerequisite — seed the SSM param before the first bare deploy.** If the param is absent, CloudFormation cannot resolve `AWS::SSM::Parameter::Value<List<String>>` and the deploy rolls back. Seed it with the **currently-live** IPSet contents so the deploy makes no access change (source of record for the full set is #876):
 
 ```
-npx cdk diff --strict --exclusively Sps-Edge-<env> \
-  -c env=<env> \
-  -c edgeCustomDomain=<domain> \
-  -c edgeCertArn=<acm-arn-us-east-1> \
-  -c edgeAllowedCidrs=140.251.0.0/16,157.139.0.0/16
-# verify: NO destroy/Removed of WebACL/IPSet/Aliases/ViewerCertificate, then:
-npx cdk deploy --require-approval never --exclusively Sps-Edge-<env> <same -c flags>
+# read the live set first (guarantees no one loses access on cutover):
+aws cloudfront get-distribution-config --id <dist-id> \
+  --query 'DistributionConfig.WebACLId'   # -> then read that WebACL's IPSet
+# seed (comma-separated, StringList):
+aws ssm put-parameter --name /sps/<env>/edge/allowed-cidrs --type StringList \
+  --value "<WCM-campus-CIDRs>" --overwrite   # actual ranges kept out of source
 ```
 
-Derive the live `edgeCustomDomain` / `edgeCertArn` / WebACL from `aws cloudfront get-distribution-config --id <dist-id>` to guarantee the diff matches. CloudFront updates take ~5–15 min; background the deploy. `--exclusively` is mandatory (avoids touching sibling stacks).
+Then deploy — no per-flag context needed:
+
+```
+npx cdk diff --strict --exclusively Sps-Edge-<env> -c env=<env>
+# verify: only [+] the SSM Parameter and [~] IPSet Addresses (literal -> Ref);
+# NO destroy/Removed of WebACL/IPSet/Aliases/ViewerCertificate, then:
+npx cdk deploy --require-approval never --exclusively Sps-Edge-<env> -c env=<env>
+```
+
+Pre-seed escape hatch: pass `-c edgeAllowedCidrs=<WCM-campus-CIDRs>` to both commands to supply the CIDRs inline instead of via SSM. CloudFront updates take ~5–15 min; background the deploy. `--exclusively` is mandatory (avoids touching sibling stacks).
 
 ### Ordering: AppStack BEFORE EdgeStack when a cross-stack ref is added
 

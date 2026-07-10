@@ -74,5 +74,7 @@ Single-query latency improved markedly (C=1: 2.27 → 1.32 s). But C=10 stayed ~
 
 ## 8. Reusable load-test tooling
 
-- `/tmp/sps-loadtest.sh ‹label›` — C-ramp (1→10), reports ttfb + total p50/p90/max and non-200 count per level. Rotates broad concepts to defeat the response cache so OpenSearch is actually loaded. macOS-safe (percentile via `sort -n` + index, not gawk `asort`; `gunzip -c` not `zcat`). Base: `https://scholars-staging.weill.cornell.edu/search`.
-- `/tmp/sps-satcheck.sh` — sequential-vs-concurrent saturation isolator (the probe that proved the node-capacity wall).
+Committed under [`scripts/perf/`](../scripts/perf/) (read-only GETs; run from the WCM network; `--selftest` for a no-network sanity check):
+
+- [`scripts/perf/sps-loadtest.sh`](../scripts/perf/sps-loadtest.sh) `‹label›` — C-ramp (default `1 5 8 10`), reports ttfb + total p50/p90/max and non-200 count per level. Rotates broad concepts to defeat the response cache so OpenSearch is actually loaded. macOS-safe (percentile via `sort -n` + index, not gawk `asort`). Hits `GET $HOST/api/search?type=people&q=…` (default `HOST=https://scholars-staging.weill.cornell.edu`; set `HOST=…scholars.weill.cornell.edu` for prod, or `PATH_TMPL` for the streamed `/search` page).
+- [`scripts/perf/sps-satcheck.sh`](../scripts/perf/sps-satcheck.sh) — sequential-vs-concurrent saturation isolator (the probe that proved the node-capacity wall): a large sequential→concurrent per-query gap means the OpenSearch node is the wall, not the app.

@@ -99,7 +99,7 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":athena:us-east-1:123456789012:workgroup/sps-usage-prod",
+                    ":athena:us-east-1:123456789012:workgroup/sps-usage-app-prod",
                   ],
                 ],
               },
@@ -203,7 +203,7 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
                         "Arn",
                       ],
                     },
-                    "/athena-results/*",
+                    "/athena-results/app/*",
                   ],
                 ],
               },
@@ -218,6 +218,37 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
         ],
       },
       "Type": "AWS::IAM::Policy",
+    },
+    "AppUsageWorkGroup": {
+      "Properties": {
+        "Description": "SPS in-app usage dashboard workgroup (prod). /edit/usage only -- reads the pre-aggregated daily_usage table; results isolated under athena-results/app/.",
+        "Name": "sps-usage-app-prod",
+        "RecursiveDeleteOption": true,
+        "State": "ENABLED",
+        "WorkGroupConfiguration": {
+          "BytesScannedCutoffPerQuery": 1073741824,
+          "EnforceWorkGroupConfiguration": true,
+          "PublishCloudWatchMetricsEnabled": true,
+          "ResultConfiguration": {
+            "EncryptionConfiguration": {
+              "EncryptionOption": "SSE_S3",
+            },
+            "OutputLocation": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/athena-results/app",
+                ],
+              ],
+            },
+          },
+        },
+      },
+      "Type": "AWS::Athena::WorkGroup",
     },
     "CfAccessLogsTable": {
       "DependsOn": [
@@ -1221,7 +1252,7 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":athena:us-east-1:123456789012:workgroup/sps-usage-staging",
+                    ":athena:us-east-1:123456789012:workgroup/sps-usage-app-staging",
                   ],
                 ],
               },
@@ -1325,7 +1356,7 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
                         "Arn",
                       ],
                     },
-                    "/athena-results/*",
+                    "/athena-results/app/*",
                   ],
                 ],
               },
@@ -1340,6 +1371,37 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
         ],
       },
       "Type": "AWS::IAM::Policy",
+    },
+    "AppUsageWorkGroup": {
+      "Properties": {
+        "Description": "SPS in-app usage dashboard workgroup (staging). /edit/usage only -- reads the pre-aggregated daily_usage table; results isolated under athena-results/app/.",
+        "Name": "sps-usage-app-staging",
+        "RecursiveDeleteOption": true,
+        "State": "ENABLED",
+        "WorkGroupConfiguration": {
+          "BytesScannedCutoffPerQuery": 1073741824,
+          "EnforceWorkGroupConfiguration": true,
+          "PublishCloudWatchMetricsEnabled": true,
+          "ResultConfiguration": {
+            "EncryptionConfiguration": {
+              "EncryptionOption": "SSE_S3",
+            },
+            "OutputLocation": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/athena-results/app",
+                ],
+              ],
+            },
+          },
+        },
+      },
+      "Type": "AWS::Athena::WorkGroup",
     },
     "CfAccessLogsTable": {
       "DependsOn": [

@@ -4,14 +4,18 @@
  * Imports four WCM Enterprise Directory delegated-admin populations — option-tagged
  * `weillCornellEduCWID;{da,diva,iamdela,diva-iamdela}` on the org-unit entries under
  * `ou=orgunits,ou=Groups` (see `fetchOrgUnitAdmins` in lib/sources/ldap.ts) — and
- * provisions each member as a per-unit `curator` `UnitAdmin` grant LOCKED to the org
- * unit they administer. The org unit is the entry's canonical N-code (`cn`), resolved
- * to a Scholars `Department`/`Division`/`Center` row; codes with no Scholars row
- * (the deep level-3–6 divisions the model doesn't carry) are skipped-and-logged (D4).
+ * provisions each member as a per-unit `UnitAdmin` grant LOCKED to the org unit they
+ * administer. Role is per population (`ED_ADMIN_ROLE`): DA and DivA-IAMDELA get
+ * `owner`, DivA and IAMDELA get `curator`. The org unit is the entry's canonical
+ * N-code (`cn`), resolved to a Scholars `Department`/`Division`/`Center` row; codes
+ * with no Scholars row (the deep level-3–6 divisions the model doesn't carry) are
+ * skipped-and-logged (D4).
  *
- * Locking comes entirely from the existing RBAC: `curator` can edit/proxy-edit the
- * unit but cannot grant/delegate (`canGrant` rejects any curator grant), and the row
- * names exactly one unit — so a member can never widen scope or self-escalate.
+ * Scope locking comes from the row naming exactly ONE unit: a `curator` can only
+ * edit/proxy-edit it; an `owner` may additionally grant/delegate WITHIN that unit
+ * (`canGrant`, lib/edit/authz.ts) but cannot reach a unit they don't hold — neither
+ * role can widen to another unit. Making DA/DivA-IAMDELA owners is a deliberate
+ * grant of that in-unit delegate capability.
  *
  * Idempotent: upserts on the (entityType, entityId, cwid) PK. Per-source reconcile
  * (#393 pattern) removes a member dropped from population P (their `ED:<P>` row),
@@ -34,8 +38,10 @@ import type { Client } from "ldapts";
 
 import { db } from "../../lib/db";
 import {
+  ED_ADMIN_ROLE,
   ED_ADMIN_SOURCE,
   ED_ADMIN_TAGS,
+  fetchActiveMembersByCwid,
   fetchOrgUnitAdmins,
   openLdap,
   type EdOrgUnitAdmins,
@@ -57,6 +63,7 @@ export type EdAdminGrant = {
   entityId: string;
   cwid: string;
   source: string;
+  role: "owner" | "curator";
 };
 
 /** Stable composite key for a (unit, cwid) grant. The `|` separator is printable
@@ -64,6 +71,48 @@ export type EdAdminGrant = {
  *  N-code, or a CWID — so the key is collision-free. */
 export function grantKey(entityType: string, entityId: string, cwid: string): string {
   return `${entityType}|${entityId}|${cwid}`;
+}
+
+/** Pure: every unique lowercased CWID tagged as an admin across all fetched
+ *  units + tags. Feeds the one-shot active-member lookup. */
+export function collectTaggedCwids(units: EdOrgUnitAdmins[]): string[] {
+  const set = new Set<string>();
+  for (const u of units) {
+    for (const tag of ED_ADMIN_TAGS) {
+      for (const cwid of u.byTag[tag]) set.add(cwid.toLowerCase());
+    }
+  }
+  return Array.from(set);
+}
+
+/**
+ * Pure: drop every tagged CWID whose ED person is not an active member
+ * (`activeByCwid.get(cwid) !== true`). Returns units with filtered `byTag`
+ * arrays plus the count of dropped (unit, tag, cwid) tuples.
+ *
+ * ED never removes an admin tag when a person expires, so an inactive tagged
+ * CWID is a stale grant. Filtering it out of `byTag` HERE means it never enters
+ * `buildEdAdminGrants` — so it is neither upserted nor added to any source's
+ * `seen` set, and the per-source reconcile deletes its existing `UnitAdmin` row
+ * on this run (self-healing revocation, no manual SQL).
+ */
+export function filterUnitsByActiveMembers(
+  units: EdOrgUnitAdmins[],
+  activeByCwid: Map<string, boolean>,
+): { units: EdOrgUnitAdmins[]; droppedInactive: number } {
+  let droppedInactive = 0;
+  const filtered = units.map((u) => {
+    const byTag = {} as Record<(typeof ED_ADMIN_TAGS)[number], string[]>;
+    for (const tag of ED_ADMIN_TAGS) {
+      byTag[tag] = u.byTag[tag].filter((cwid) => {
+        const active = activeByCwid.get(cwid.toLowerCase()) === true;
+        if (!active) droppedInactive++;
+        return active;
+      });
+    }
+    return { ...u, byTag };
+  });
+  return { units: filtered, droppedInactive };
 }
 
 /**
@@ -108,6 +157,7 @@ export function buildEdAdminGrants(
           entityId: resolved.entityId,
           cwid,
           source,
+          role: ED_ADMIN_ROLE[tag],
         });
       }
     }
@@ -122,6 +172,17 @@ export function selectStaleRows<T extends { entityType: string; entityId: string
   seen: Set<string>,
 ): T[] {
   return rows.filter((r) => !seen.has(grantKey(r.entityType, r.entityId, r.cwid)));
+}
+
+/** MUST-9 (OQ-6): a deliberate manual `owner` on a key is never overwritten — the
+ *  ED grant for that same (entityType, entityId, cwid) is skipped entirely, whatever
+ *  role ED would write (owner OR curator). `manualOwnerKeys` are the grantKey()s of
+ *  the `source='manual' role='owner'` rows. */
+export function isManualOwnerProtected(
+  g: Pick<EdAdminGrant, "entityType" | "entityId" | "cwid">,
+  manualOwnerKeys: ReadonlySet<string>,
+): boolean {
+  return manualOwnerKeys.has(grantKey(g.entityType, g.entityId, g.cwid));
 }
 
 /**
@@ -169,9 +230,27 @@ async function main(): Promise<void> {
     const units = await fetchOrgUnitAdmins(client);
     console.log(`[ed-admins] ${units.length} org-unit entries carry an imported admin tag.`);
 
+    // Active-member guard: ED does NOT drop an admin tag when a person expires,
+    // so a tagged CWID whose `weillCornellEduActiveMember` is not TRUE is a stale
+    // grant. Filter those out BEFORE grants/seen are built — they never upsert and
+    // never enter any source's `seen` set, so the per-source reconcile below
+    // deletes their existing UnitAdmin rows this run (no manual SQL). The
+    // empty-source guard still protects against a total-fetch failure; this filter
+    // only ever removes a strict subset of one source's members.
+    const taggedCwids = collectTaggedCwids(units);
+    const activeByCwid = await fetchActiveMembersByCwid(client, taggedCwids);
+    const { units: activeUnits, droppedInactive } = filterUnitsByActiveMembers(
+      units,
+      activeByCwid,
+    );
+    console.log(
+      `[ed-admins] active-member guard: ${taggedCwids.length} distinct tagged CWID(s), ` +
+        `dropped ${droppedInactive} inactive tagged grant(s) (weillCornellEduActiveMember != TRUE).`,
+    );
+
     const resolver = await loadUnitResolver();
     const { grants, seenBySource, skippedNoUnit, unmatchedCodes } = buildEdAdminGrants(
-      units,
+      activeUnits,
       resolver,
     );
 
@@ -206,7 +285,7 @@ async function main(): Promise<void> {
     let upserts = 0;
     let skippedManualOwner = 0;
     for (const g of grants.values()) {
-      if (manualOwnerKeys.has(grantKey(g.entityType, g.entityId, g.cwid))) {
+      if (isManualOwnerProtected(g, manualOwnerKeys)) {
         skippedManualOwner++;
         continue;
       }
@@ -222,11 +301,11 @@ async function main(): Promise<void> {
           entityType: g.entityType,
           entityId: g.entityId,
           cwid: g.cwid,
-          role: "curator",
+          role: g.role,
           grantedBy: GRANTED_BY,
           source: g.source,
         },
-        update: { role: "curator", grantedBy: GRANTED_BY, source: g.source },
+        update: { role: g.role, grantedBy: GRANTED_BY, source: g.source },
       });
       upserts++;
     }

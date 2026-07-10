@@ -23,6 +23,13 @@ in **§10**.
 > add a one-line row here. Promotion of a draft from §9 into §1–§8 happens when the
 > feature ships and the doc starts answering an operational question. When you close a
 > §10 item, note it or remove it.
+>
+> **What belongs in this public repo:** the live system's docs (architecture, ADRs, ops,
+> security, cost) and specs for **shipped** features. **Not here:** transient working notes
+> (handoffs, debriefs), build-time R&D (plans, analyses, findings), and specs for
+> **unshipped** features — those go to the private working area (`~/Dropbox/Projects/…`).
+> Dated audits/snapshots worth keeping go under [`audits/`](./audits/) (§9a) with an
+> `as-of` label — never as a current-state reference. See `CONTRIBUTING.md`.
 
 ---
 
@@ -48,14 +55,14 @@ in **§10**.
 | Where does the data come from / how is it refreshed? | [`dependency-outage-matrix.md`](./dependency-outage-matrix.md), [`data-population-runbook.md`](./data-population-runbook.md) |
 | Where do the **Methods & tools** come from? Is the tools taxonomy in DynamoDB? | [`scholar-tools-taxonomy.md`](./scholar-tools-taxonomy.md) (no — it's a ReciterAI S3 artifact) |
 | What does this field mean / where is it from? | [`data-dictionary.md`](./data-dictionary.md) |
-| What's the VPC / network / security picture? | [`network-security-topology.md`](./network-security-topology.md) — **staging cut over to the shared `its-reciter-vpc01` 2026-07-02 (#1419);** interim [`sps-vpc-consolidation-plan.md`](./sps-vpc-consolidation-plan.md) / [`cutover-item3-execution-runbook.md`](./cutover-item3-execution-runbook.md) until the topology doc is reconciled |
+| What's the VPC / network / security picture? | [`network-security-topology.md`](./network-security-topology.md) — **staging cut over to the shared `its-reciter-vpc01` 2026-07-02 (#1419)** |
 | What does it cost to run? | [`cost-model.md`](./cost-model.md) |
-| Why does search rank things this way? | [`search.md`](./search.md), [`people-relevance-baseline.md`](./people-relevance-baseline.md) |
+| Why does search rank things this way? | [`search.md`](./search.md) |
 | Why doesn't searching `covid19` or `tylenol` find the obvious people? | [`search-recall.md`](./search-recall.md) |
 | What are the match-reason line and the KEY PAPERS/METHODS/FUNDING rows under a result? | [`search-evidence-rows.md`](./search-evidence-rows.md) |
 | Why doesn't this (retracted) paper show up? | [`retracted-publications.md`](./retracted-publications.md) |
 | Can a scholar hide a publication / grant / their whole profile / a **method**? What can be hidden? | [`what-can-be-hidden.md`](./what-can-be-hidden.md) (the catalog — by section and by record) |
-| What is the WAF / firewall posture? | [`network-security-topology.md`](./network-security-topology.md), [`waf-request-RITM0792011.md`](./waf-request-RITM0792011.md) |
+| What is the WAF / firewall posture? | [`network-security-topology.md`](./network-security-topology.md) |
 | Can we restore from backup? | [`restore-drill-runbook.md`](./restore-drill-runbook.md) (whole-cluster Aurora PITR), [`curation-backup-runbook.md`](./curation-backup-runbook.md) (curated-tables logical backup) |
 
 ---
@@ -67,18 +74,16 @@ in **§10**.
 | [`architecture-overview.md`](./architecture-overview.md) | **The one-page map** — request path, write path, ETL pipeline (with diagrams), the nine CDK stacks, environments, and a "which doc for which concern" index. **Read this first.** |
 | [`architecture/index.html`](./architecture/index.html) | **Five presentation-grade diagrams** — system context, app & AWS topology, app internals (C4 component), network topology, and the edge-topology decision (#502). Open in a browser or export to slides; `.svg`/`.png` per view sit alongside. Regenerate with `npm run diagrams` (source: [`scripts/diagrams/`](../scripts/diagrams/)). |
 | [`PRODUCTION.md`](./PRODUCTION.md) | The operational counterpart to the dev README: the shape of production, why each piece exists, and how it runs. (Predates a couple of decisions — see the corrections note in `architecture-overview.md`.) |
-| [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md) | Closes the biggest gaps in `PRODUCTION.md`: how writer endpoints authenticate, observability wiring, and other operational specifics. |
-| [`dependency-outage-matrix.md`](./dependency-outage-matrix.md) | Every external system SPS depends on and exactly what breaks (vs stays up) if each is unavailable. |
+| [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md) | Closes the biggest gaps in `PRODUCTION.md`: how writer endpoints authenticate and where their secrets come from, ETL orchestration/recovery, and schema-migration policy. || [`dependency-outage-matrix.md`](./dependency-outage-matrix.md) | Every external system SPS depends on and exactly what breaks (vs stays up) if each is unavailable. |
 | [`cost-model.md`](./cost-model.md) | What it costs to run, the deployed budget/anomaly guardrails, and the cost drivers. |
-| [`STAGING.md`](./STAGING.md) | What staging is. **Diverged from prod since the 2026-07-02 shared-VPC cutover (#1419):** staging datastores now live in the shared `its-reciter-vpc01` while prod stays per-env pending its own cutover, so it is no longer a full structural mirror. Otherwise the same CDK stacks, Aurora/OpenSearch engine + version, secret layout, and backups. Interim topology: [`sps-vpc-consolidation-plan.md`](./sps-vpc-consolidation-plan.md) / [`cutover-item3-execution-runbook.md`](./cutover-item3-execution-runbook.md). |
-| [`PRODUCTION_BACKLOG.md`](./PRODUCTION_BACKLOG.md) | What's still outstanding for production-readiness — the B-series backlog. Use it to answer "is X done yet?" |
-| [`proposal-fidelity.md`](./proposal-fidelity.md) | How faithful the built system is to the original proposal — useful for stakeholder/leadership questions. |
+| [`STAGING.md`](./STAGING.md) | What staging is. **Diverged from prod since the 2026-07-02 shared-VPC cutover (#1419):** staging datastores now live in the shared `its-reciter-vpc01` while prod stays per-env pending its own cutover, so it is no longer a full structural mirror. Otherwise the same CDK stacks, Aurora/OpenSearch engine + version, secret layout, and backups. || [`proposal-fidelity.md`](./proposal-fidelity.md) | How faithful the built system is to the original proposal — useful for stakeholder/leadership questions. |
 
 ## 2. Performance, caching & rendering
 
 | Doc | Answers |
 |---|---|
 | [`performance-baseline.md`](./performance-baseline.md) | The measured side of latency: per-surface baseline, alarm thresholds, and how to (re)measure. The counterpart to the SLO *targets* in `SLOs.md`. |
+| [`scripts/perf/`](../scripts/perf/) | Committed load-test tooling: `sps-loadtest.sh` (concurrency C-ramp, ttfb+total percentiles) and `sps-satcheck.sh` (node-saturation isolator) for the `/search` origin path. |
 | [`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md) | The authoritative CloudFront cache-behavior spec: every behavior, cache policy, and TTL in front of `scholars.weill.cornell.edu`. **The first stop for "why is this slow / stale / not updating?"** |
 | [`ADR-001`](./ADR-001-runtime-dal-vs-etl-transform.md) | Why the runtime data-access layer mirrors the ETL transform — the core read-path design that governs page latency. |
 | [`ADR-006`](./ADR-006-image-optimization-strategy.md) | Why there is **no runtime image optimizer**, and what that means for image delivery and cost. |
@@ -105,9 +110,7 @@ in **§10**.
 | [`rollback-runbook.md`](./rollback-runbook.md) | How to roll the prod ECS service back to the previous task-definition revision. |
 | [`restore-drill-runbook.md`](./restore-drill-runbook.md) | How to verify the Aurora cluster can actually be restored from backup. |
 | [`curation-backup-runbook.md`](./curation-backup-runbook.md) | The daily logical backup of the human-curated tables — the one dataset SPS is system-of-record for — and how to restore them (distinct from the whole-cluster Aurora PITR in `restore-drill-runbook.md`). |
-| [`data-population-runbook.md`](./data-population-runbook.md) | How to bring an environment from "serves empty" to "serves real data + search index." |
-| [`staging-cutover.md`](./staging-cutover.md) | The first-ever `cdk deploy` of AppStack against a fresh account, plus rolled-back recovery. |
-| [`spotlight-runbook.md`](./spotlight-runbook.md) | How the home-page "Selected research" section gets its data, how to re-publish, and where to look when it breaks. |
+| [`data-population-runbook.md`](./data-population-runbook.md) | How to bring an environment from "serves empty" to "serves real data + search index." || [`spotlight-runbook.md`](./spotlight-runbook.md) | How the home-page "Selected research" section gets its data, how to re-publish, and where to look when it breaks. |
 | [`revalidate-token-rotation.md`](./revalidate-token-rotation.md) | Rotating the `/api/revalidate` webhook bearer token. |
 
 ## 5. Security, auth & compliance
@@ -115,14 +118,10 @@ in **§10**.
 | Doc | Answers |
 |---|---|
 | [`access-control-rbac.md`](./access-control-rbac.md) | **Who can do what** — the three authorization layers (application RBAC: self / superuser / unit Owner / Curator; AWS IAM; database roles — see [`ADR-009`](./ADR-009-database-role-separation.md) for the `app_rw` DML / `sps_migrate` DDL split) plus the deploy gate and break-glass procedures. |
-| [`network-security-topology.md`](./network-security-topology.md) | The review-ready VPC / subnet / security-group / egress / edge picture, with diagram and threat-model summary. **Predates the 2026-07-02 staging shared-VPC cutover (#1419) — until reconciled see** [`sps-vpc-consolidation-plan.md`](./sps-vpc-consolidation-plan.md) / [`cutover-item3-execution-runbook.md`](./cutover-item3-execution-runbook.md). |
-| [`saml-sp.md`](./saml-sp.md) | Operator runbook for the SAML service provider that terminates WCM SSO in front of `/api/edit*` and `/edit/*`. |
-| [`466-saml-deploy-debrief.md`](./466-saml-deploy-debrief.md) | Debrief of the SAML SP wiring + staging/prod rollout — context for how the SSO integration was landed. |
-| [`b03-audit-log.md`](./b03-audit-log.md) | The manual-edit audit log: schema and how every `/api/edit` write is recorded (who/what/when). The answer to "who changed this?" |
+| [`network-security-topology.md`](./network-security-topology.md) | The review-ready VPC / subnet / security-group / egress / edge picture, with diagram and threat-model summary. |
+| [`saml-sp.md`](./saml-sp.md) | Operator runbook for the SAML service provider that terminates WCM SSO in front of `/api/edit*` and `/edit/*`. || [`b03-audit-log.md`](./b03-audit-log.md) | The manual-edit audit log: schema and how every `/api/edit` write is recorded (who/what/when). The answer to "who changed this?" |
 | [`ADR-005`](./ADR-005-manual-override-layer.md) | The manual-override layer — the design behind self-edit, slugs, and suppression, including authz. |
-| [`ADR-007`](./ADR-007-csp-script-src-strategy.md) | Content-Security-Policy posture. |
-| [`waf-request-RITM0792011.md`](./waf-request-RITM0792011.md) | The WAF / firewall request and posture (ServiceNow RITM0792011). |
-| [`ses-sender-verification.md`](./ses-sender-verification.md) | Out-of-band SES sender-verification steps for the "Request a change" mailer. |
+| [`ADR-007`](./ADR-007-csp-script-src-strategy.md) | Content-Security-Policy posture. || [`ses-sender-verification.md`](./ses-sender-verification.md) | Out-of-band SES sender-verification steps for the "Request a change" mailer. |
 
 ## 6. Data sources & ETL — where does the data come from?
 
@@ -133,11 +132,7 @@ in **§10**.
 | [`data-dictionary.md`](./data-dictionary.md) | The public data model: every table grouped by domain, with its source of record and what its fields mean. |
 | [`ADR-001`](./ADR-001-runtime-dal-vs-etl-transform.md) | The runtime/ETL relationship — the backbone of how data lands and is read. |
 | [`ADR-002`](./ADR-002-division-chiefs.md) | How `Division.chiefCwid` is populated. |
-| [`ADR-003`](./ADR-003-center-membership.md) | How `CenterMembership` was populated (historical record; methodology shipped under #12). |
-| [`etl/jenzabar-gs-faculty-probe.md`](./etl/jenzabar-gs-faculty-probe.md) | The Jenzabar Graduate-School faculty appointments source — what the view exposes (#193). |
-| [`data-population-runbook.md`](./data-population-runbook.md) | The operational procedure to load/refresh that data and the search index. |
-| [`spotlight-integration-plan.md`](./spotlight-integration-plan.md) | How ReciterAI spotlight data integrates into the home page. |
-| [`scholar-tools-taxonomy.md`](./scholar-tools-taxonomy.md) | Where the **Methods & tools** (method-family) taxonomy comes from — the ReciterAI A2 artifact on S3 (**not** DynamoDB; the legacy `reciterai` `TOOL#` rows are per-PMID activity, not the canonical registry), the published `tools[]`/`families[]` schema, the `etl:scholar-tool` loader + reversible `SCHOLAR_TOOL_SOURCE` (ddb→s3) switch (#794), the `scholar_tool` field mapping, and the offline consolidation-export script. |
+| [`ADR-003`](./ADR-003-center-membership.md) | How `CenterMembership` was populated (historical record; methodology shipped under #12). || [`data-population-runbook.md`](./data-population-runbook.md) | The operational procedure to load/refresh that data and the search index. || [`scholar-tools-taxonomy.md`](./scholar-tools-taxonomy.md) | Where the **Methods & tools** (method-family) taxonomy comes from — the ReciterAI A2 artifact on S3 (**not** DynamoDB; the legacy `reciterai` `TOOL#` rows are per-PMID activity, not the canonical registry), the published `tools[]`/`families[]` schema, the `etl:scholar-tool` loader + reversible `SCHOLAR_TOOL_SOURCE` (ddb→s3) switch (#794), the `scholar_tool` field mapping, and the offline consolidation-export script. |
 | [`coi-pubmed-suggestion-approach.md`](./coi-pubmed-suggestion-approach.md) | Where the "From your publications" COI suggestions come from — the nightly `etl:coi-gap` source, the extract→attribute→diff→tier pipeline, and **the 2026 hardening**: why the rendered surface is **`High` tier only** (#909; Medium is ~92% co-author leakage), the count chip (#910), junk-word suppression and why two-word person-name suppression was rejected as unsafe (#907), the production-scale distribution (585 scholars with ≥1 High, ~3.5k relationships), worked cases (Drilon vs Tamimi), governance, and the next lever (the `A.Ashworth`/`C Lehman` initial-surname co-author leak that still escapes #903). |
 
 ## 7. Architecture Decision Records — why it's built this way
@@ -165,9 +160,7 @@ ADRs capture decisions and their rationale; reach for these when a colleague ask
 | [`search-recall.md`](./search-recall.md) | **Why some obvious queries return too few people** (`covid19`→9 vs `covid-19`→1,425; `tylenol`→0). The *recall* counterpart to `search.md` (ranking): the two independent admission gaps — alphanumeric tokenization (#725/PR #727) and MeSH concept-resolution being ranking-only (#726) — with root causes, the fixes, validation, deploy sequencing, and limits. |
 | [`search-publications.md`](./search-publications.md) | Example-driven explainer for the Publications tab of `/search`. |
 | [`browse-vs-search.md`](./browse-vs-search.md) | The distinct jobs of the browse pages vs search. |
-| [`suggested-search-chips.md`](./suggested-search-chips.md) | Where the homepage "Try:" suggestion chips come from and **how to refresh them** — the curated lay-term master (`data/suggested-searches.json`), the runtime pool + sampler, and the repeatable method (mine the taxonomy → verify WCM depth → keep the lay-term↔MeSH gap). Reach for this when a chip looks stale or thin, or when it's time to regenerate the list. |
-| [`people-relevance-baseline.md`](./people-relevance-baseline.md) | The frozen baseline behind People-tab relevance (eval-owner signed off). |
-| [`taxonomy-aware-search.md`](./taxonomy-aware-search.md) | Taxonomy/MeSH-aware relevance re-weighting (v2.2). |
+| [`suggested-search-chips.md`](./suggested-search-chips.md) | Where the homepage "Try:" suggestion chips come from and **how to refresh them** — the curated lay-term master (`data/suggested-searches.json`), the runtime pool + sampler, and the repeatable method (mine the taxonomy → verify WCM depth → keep the lay-term↔MeSH gap). Reach for this when a chip looks stale or thin, or when it's time to regenerate the list. || [`taxonomy-aware-search.md`](./taxonomy-aware-search.md) | Taxonomy/MeSH-aware relevance re-weighting (v2.2). |
 | [`feedback-handling-matrix.md`](./feedback-handling-matrix.md) | How user feedback is routed (and the planned ServiceNow intake). |
 | [`retracted-publications.md`](./retracted-publications.md) | Why retracted papers don't display — the two-record problem (notice vs original), ReCiter's re-fetch lag, and the nightly PubMed-retraction stamp (#604) that closes the gap via the existing `NEVER_DISPLAY_TYPES` filter. |
 | [`what-can-be-hidden.md`](./what-can-be-hidden.md) | **The catalog of everything that can be removed from a public profile and search**, by section and by record — the four mechanisms (`suppression` rows, the `overview` `field_override`, the two Methods-lens overlays, and `deleted_at` soft-delete), the `EntityType` reach (scholar / publication / grant / education / appointment / mentee / org-unit), per-author hide vs whole-pub takedown vs derived-dark, the non-suppressible leadership guard, who can hide what, and the new **Methods & tools** case (no per-scholar control — families are hidden editorially/globally via `family_suppression_overlay`, or public-gated via `family_sensitivity_overlay` + `METHODS_LENS_SENSITIVE_GATE`). The deliberate-hiding counterpart to `retracted-publications.md`; operational view over `ADR-005`. |
@@ -184,21 +177,36 @@ post-launch operational question; consult them only when working on the feature 
 Listed here for completeness so §1–§8 stay focused.
 
 - Self-edit "Request a change" mailer (still dark — `SELF_EDIT_REQUEST_CHANGE_SEND` off in
-  both envs, falls back to `mailto:`): `self-edit-request-change-modal.md`,
-  `self-edit-request-change-server-mailer-plan.md` (paired with `ses-sender-verification.md`, §5),
-  `feedback-badge-spec.md`
-- Overview coverage: `overview-coverage-scope.md` (scope + strategy) and `overview-coverage/`
-  (audit + export SQL, target-list CSV, `gradschool-harvest-scope.md`)
+  both envs, falls back to `mailto:`): `self-edit-request-change-modal.md`
+  (mailer paired with `ses-sender-verification.md`, §5), `feedback-badge-spec.md`
 - Unit curation: `unit-curation-spec.md`, `org-unit-curation-spec.md`,
   `center-management-spec.md`
 - Outreach (launch-window, #506 D5): `outreach/_skeleton.md` (shared 5-part template) + per-audience
   drafts `outreach/wave1-center-admins.md`, `outreach/wave1-superusers-library.md`,
-  `outreach/wave1-pilot-dept-admins.md`, `outreach/wave2-scholars.md`,
+  `outreach/wave2-scholars.md`,
   `outreach/wave3-doctoral-students.md`, `outreach/wave4-public-launch.md`
 - ServiceNow KB (launch support, #506 D3): `kb/01-scholars.md`, `kb/03-superusers.md`,
   `kb/04-itsops.md` drafted; `kb/02-dept-admins.md` deferred (gated on #540); index in `kb/README.md`.
   Routing destinations are owned by `feedback-handling-matrix.md` (§8), not restated in the articles.
 - Snapshots/fixtures: `spec-snapshots/`
+
+---
+
+## 9a. Audits & snapshots (point-in-time)
+
+Dated, point-in-time artifacts under [`audits/`](./audits/) — audits, A/B tests, and validation
+runs. Each is **accurate as of the date in its filename and is not maintained**; kept for
+provenance and to show engineering rigor, not as a current-state reference. Don't cite one as the
+live state without re-checking the source.
+
+| Doc | What it captured |
+|---|---|
+| [`audits/a11y-audit-2026-05-29.md`](./audits/a11y-audit-2026-05-29.md) | Accessibility audit. |
+| [`audits/etl-reliability-audit-2026-07-02.md`](./audits/etl-reliability-audit-2026-07-02.md) | ETL reliability / failure-mode audit. |
+| [`audits/search-facet-perf-audit-2026-07-02.md`](./audits/search-facet-perf-audit-2026-07-02.md) | Search facet performance audit. |
+| [`audits/search-area-boost-ab-2026-07-02.md`](./audits/search-area-boost-ab-2026-07-02.md) | Search research-area boost A/B. |
+| [`audits/search-boost-tuning-ab-2026-07-03.md`](./audits/search-boost-tuning-ab-2026-07-03.md) | Search boost-tuning A/B. |
+| [`audits/overview-generator-validation-2026-06-08.md`](./audits/overview-generator-validation-2026-06-08.md) | Overview-generator output validation. |
 
 ---
 
@@ -215,8 +223,8 @@ an existing doc, mostly blocked on post-launch traffic or an external team.
 | Per-surface latency p50/p95/p99 + load-test numbers (cells marked `TBD (measure)`) | [`performance-baseline.md`](./performance-baseline.md) | Post-launch traffic or a 1000-scholar synthetic crawl; the 30-day-post-EdgeStack SLO review. |
 | **App-tier autoscaling thresholds are placeholders** — `AppStack` now ships a target-tracking policy (#596: avg CPU 60% + ALB request-count-per-target, min `appDesiredCount` / max `appMaxCount` = prod 2/6, staging 1/3), and the `PRODUCTION.md` + `performance-baseline.md` claims are reconciled to match. The max and the target values are conservative placeholders. | [`PRODUCTION.md`](./PRODUCTION.md), [`performance-baseline.md`](./performance-baseline.md), [`config.ts`](../cdk/lib/config.ts) | #554 load-test numbers (P0, Gate A) — tune the ceiling + thresholds once real RPS / CPU-per-task figures exist. |
 | Post-Edge/Etl cost baseline (current `$425/mo` predates CloudFront + ETL) and per-service `est.` → actuals from Cost Explorer | [`cost-model.md`](./cost-model.md) | **Trigger fired 2026-07-01** — EdgeStack + EtlStack now active in prod; re-audit due (add the #1430 WAF managed-rules line item). |
-| Production WAF topology — **decided 2026-06-03 (#502):** CloudFront + AWS-native WebACL (managed rules + rate rule, count mode via #1430) → NetScaler → ALB | [`network-security-topology.md`](./network-security-topology.md), [`waf-request-RITM0792011.md`](./waf-request-RITM0792011.md) | Residual: count→block promotion after false-positive review (#1434). |
-| WCM-internal ETL routing — **superseded by the shared-VPC consolidation (#1419); prod Tier-1 population executed 2026-07-01** ([`prod-etl-tier1-runbook.md`](./prod-etl-tier1-runbook.md)) | [`cutover-item3-execution-runbook.md`](./cutover-item3-execution-runbook.md), [`network-security-topology.md`](./network-security-topology.md) | Residual (SPS-owned): prod's own shared-VPC cutover + Tier-2 nightly sources. |
+| Production WAF topology — **decided 2026-06-03 (#502):** CloudFront + AWS-native WebACL (managed rules + rate rule, count mode via #1430) → NetScaler → ALB | [`network-security-topology.md`](./network-security-topology.md) | Residual: count→block promotion after false-positive review (#1434). |
+| WCM-internal ETL routing — **superseded by the shared-VPC consolidation (#1419); prod Tier-1 population executed 2026-07-01** ([`prod-etl-tier1-runbook.md`](./prod-etl-tier1-runbook.md)) | [`network-security-topology.md`](./network-security-topology.md) | Residual (SPS-owned): prod's own shared-VPC cutover + Tier-2 nightly sources. |
 | Access recertification cadence (review who holds `unit_admin` / superuser-group membership) and standing emergency-access posture | [`access-control-rbac.md`](./access-control-rbac.md) | A governance decision — candidate follow-on. |
 | Browser/client RUM tracing; ETL task tracing (X-Ray) | [`logging-reference.md`](./logging-reference.md), [`tracing.md`](./tracing.md) | Out of B24 scope; future workstreams. |
 
@@ -242,7 +250,7 @@ while writing the §1–§8 docs. Tracked in **[issue #560](https://github.com/w
 | 5 | **DR posture sign-off** — is PITR-only (restore Variant A) acceptable for go-live, or must the us-west-2 DR restore (Variant B) be exercised first? | Confirms the RTO/RPO claim in [`PRODUCTION.md`](./PRODUCTION.md) is signed off, not just asserted. | Operator + business owner |
 | 6 | **Access recertification cadence** — who reviews superuser-group + `unit_admin` grant membership, and how often? Is a recert required for launch? | Closes the governance gap noted in [`access-control-rbac.md`](./access-control-rbac.md). | Faculty Affairs + ITS |
 | 7 | **Break-glass policy** — is directory-dependent emergency superuser elevation acceptable, or is a standing break-glass account required? | Confirms the emergency-access posture in [`access-control-rbac.md`](./access-control-rbac.md). | Security |
-| 8 | **ETL→WCM connectivity** — ✅ **superseded:** the TGW-attach ask was mooted by consolidating the estate into the already-attached shared `its-reciter-vpc01` (#1419), and prod Tier-1 data population was executed 2026-07-01 ([`prod-etl-tier1-runbook.md`](./prod-etl-tier1-runbook.md)). | Residual: prod's own shared-VPC cutover + Tier-2 nightly/WCM-path sources ([`cutover-item3-execution-runbook.md`](./cutover-item3-execution-runbook.md)). | SPS-owned |
+| 8 | **ETL→WCM connectivity** — ✅ **superseded:** the TGW-attach ask was mooted by consolidating the estate into the already-attached shared `its-reciter-vpc01` (#1419), and prod Tier-1 data population was executed 2026-07-01 ([`prod-etl-tier1-runbook.md`](./prod-etl-tier1-runbook.md)). | Residual: prod's own shared-VPC cutover + Tier-2 nightly/WCM-path sources. | SPS-owned |
 | 9 | **SAML cert rollover** — CWID-as-attribute is confirmed ([`saml-sp.md`](./saml-sp.md) §1, against a live WCM assertion); remaining: verify the **deployed** `SAML_IDP_CERT` secret carries both the 2016 and 2036 IdP certs before the **2026-08-19** expiry. | A dated operational deadline ([`saml-sp.md`](./saml-sp.md) §2). | SAML / IdP contact |
 | 10 | **Post-launch operations ownership** — who is the named operator / on-call after launch (today: `paa2013@med.cornell.edu` / `paulalbert1`)? Is there a team handoff? | Determines who [`oncall.md`](./oncall.md) and the alarm fan-out actually page. | ITS management |
 

@@ -59,7 +59,9 @@ import {
   findUnit,
   isEditableField,
   isEditableUnitField,
+  isSectionVisibilityField,
   sanitizeOverview,
+  validateSectionVisibilityValue,
   validateSelectedHighlightPmids,
   validateSlugFormat,
   validateUnitFieldValue,
@@ -187,7 +189,13 @@ async function handleScholarFieldEdit(params: {
   // superuser-only).
   let viaUnitAdminUnit: EditableUnit | null = null;
   let authz: AuthzResult;
-  if (fieldName === "overview") {
+  if (fieldName === "overview" || isSectionVisibilityField(fieldName)) {
+    // Section-visibility toggles ride the SAME "may edit this scholar's profile"
+    // authz as the bio (self / superuser / comms_steward / granted proxy /
+    // org-unit owner-or-curator) — `authorizeOverviewWrite` is keyed on the
+    // scholar (entityId), not the field name, so reusing it is correct. A
+    // unit-admin allow carries the resolved unit into the B03 audit for
+    // attribution, exactly as an overview edit does.
     const ov = await authorizeOverviewWrite({
       session,
       realCwid,
@@ -230,6 +238,12 @@ async function handleScholarFieldEdit(params: {
     const result = validateSelectedHighlightPmids(value);
     if (!result.ok) return editError(400, result.error, "value");
     storedValue = JSON.stringify(result.value);
+  } else if (isSectionVisibilityField(fieldName)) {
+    // Section-visibility boolean — exactly "true" (hidden) or "false" (shown).
+    // `value` is already confirmed a string above (the non-highlights branch).
+    const result = validateSectionVisibilityValue(value as string);
+    if (!result.ok) return editError(400, result.error, "value");
+    storedValue = result.value;
   } else {
     const format = validateSlugFormat(value as string);
     if (!format.ok) return editError(400, format.error, "value");
@@ -371,10 +385,15 @@ async function handleScholarFieldEdit(params: {
     );
   }
 
-  // A changed `overview` or `selectedHighlightPmids` (#836) both alter the public
-  // profile page, so revalidate its canonical path. `slug` changes don't flip the
-  // URL until the next etl/ed run, so they need no revalidation here.
-  if (fieldName === "overview" || fieldName === "selectedHighlightPmids") {
+  // A changed `overview`, `selectedHighlightPmids` (#836), or a section-visibility
+  // toggle all alter the public profile page, so revalidate its canonical path.
+  // `slug` changes don't flip the URL until the next etl/ed run, so they need no
+  // revalidation here.
+  if (
+    fieldName === "overview" ||
+    fieldName === "selectedHighlightPmids" ||
+    isSectionVisibilityField(fieldName)
+  ) {
     const [profile] = await resolveAffectedProfiles("scholar", entityId, null);
     if (profile) await reflectOverviewEdit(profile.slug);
   }

@@ -4,6 +4,7 @@ import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
 import { EdgeStack } from "../lib/edge-stack";
 import { NetworkStack } from "../lib/network-stack";
+import { type SpsEnvConfig } from "../lib/config";
 import { makeFixture } from "./test-utils";
 
 interface BuildResult {
@@ -14,8 +15,10 @@ interface BuildResult {
 function buildEdgeStack(
   envName: "staging" | "prod",
   options?: { customDomain?: string; certArn?: string; allowedCidrs?: string },
+  envConfigOverride: Partial<SpsEnvConfig> = {},
 ): BuildResult {
   const fixture = makeFixture(envName);
+  const envConfig = { ...fixture.envConfig, ...envConfigOverride };
   if (options?.customDomain) {
     fixture.app.node.setContext("edgeCustomDomain", options.customDomain);
   }
@@ -27,16 +30,16 @@ function buildEdgeStack(
   }
   const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
   });
   const app = new AppStack(fixture.app, `Sps-App-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     vpc: network.vpc,
   });
   const stack = new EdgeStack(fixture.app, `Sps-Edge-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     deployRoleArn: app.deployRole.roleArn,
   });
   return { template: Template.fromStack(stack), stack };
@@ -496,6 +499,33 @@ describe("EdgeStack", () => {
         const s3Origin = ods.find((o) => o.CustomOriginConfig === undefined);
         expect(s3Origin?.OriginAccessControlId).toBeDefined();
         expect(s3Origin?.S3OriginConfig).toBeDefined();
+      });
+
+      it("with edgeOriginCertArn seeded, the ALB origin runs HTTPS_ONLY on the custom hostname over TLSv1.2, keeping X-Origin-Verify (#1507)", () => {
+        const { template: httpsTemplate } = buildEdgeStack("prod", undefined, {
+          edgeOriginCertArn:
+            "arn:aws:acm:us-east-1:123456789012:certificate/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          edgeOriginHostname: "scholars-origin.weill.cornell.edu",
+        });
+        const dc = (
+          Object.values(
+            httpsTemplate.findResources("AWS::CloudFront::Distribution"),
+          )[0].Properties as Record<string, unknown>
+        ).DistributionConfig as Record<string, unknown>;
+        const ods = dc.Origins as Array<Record<string, unknown>>;
+        const albOrigin = ods.find(
+          (o) => o.DomainName === "scholars-origin.weill.cornell.edu",
+        );
+        expect(albOrigin).toBeDefined();
+        const config = albOrigin?.CustomOriginConfig as Record<string, unknown>;
+        expect(config.OriginProtocolPolicy).toBe("https-only");
+        expect(config.HTTPSPort).toBe(443);
+        expect(config.OriginSSLProtocols).toEqual(["TLSv1.2"]);
+        // The origin-protection contract (X-Origin-Verify) survives the flip.
+        const headers =
+          (albOrigin?.OriginCustomHeaders as Array<{ HeaderName?: string }>) ??
+          [];
+        expect(headers.map((h) => h.HeaderName)).toContain("X-Origin-Verify");
       });
 
       it("origin sends an X-Origin-Verify custom header (acceptance #7)", () => {
@@ -1023,21 +1053,19 @@ describe("EdgeStack", () => {
       });
     });
 
-    describe("Custom domain bootstrap two-step (acceptance #13)", () => {
-      it("with neither context flag set, the distribution has no alias and no custom ACM cert (acceptance #13)", () => {
+    describe("Alias + cert from committed config (#1506)", () => {
+      it("with no -c flags, the alias and ACM cert come from config (a bare deploy no longer strips them)", () => {
         const props = Object.values(
           template.findResources("AWS::CloudFront::Distribution"),
         )[0]?.Properties as Record<string, unknown> | undefined;
         const dc = props?.DistributionConfig as Record<string, unknown>;
-        expect(dc.Aliases).toBeUndefined();
-        // CDK omits ViewerCertificate entirely (CloudFront defaults to its
-        // own cert) when no certificate is attached. Either undefined or an
-        // object lacking AcmCertificateArn is acceptable; what must NOT
-        // appear is a reference to a custom certificate.
-        const cert = dc.ViewerCertificate as Record<string, unknown> | undefined;
-        if (cert !== undefined) {
-          expect(cert.AcmCertificateArn).toBeUndefined();
-        }
+        // No context flags passed -- these resolve from config.prod.
+        expect(dc.Aliases).toEqual(["scholars.weill.cornell.edu"]);
+        const cert = dc.ViewerCertificate as Record<string, unknown>;
+        expect(cert.AcmCertificateArn).toBe(
+          "arn:aws:acm:us-east-1:665083158573:certificate/95f77e69-4abc-4d2c-b081-b8b5b8572fd6",
+        );
+        expect(cert.SslSupportMethod).toBe("sni-only");
       });
     });
   });
@@ -1102,15 +1130,29 @@ describe("EdgeStack", () => {
   });
 
   describe("temporary front-end IP allowlist (#461)", () => {
-    it("with no -c edgeAllowedCidrs: no WebACL, distribution unrestricted", () => {
+    it("with no -c edgeAllowedCidrs: WebACL built, IPSet addresses sourced from the SSM StringList (#1506)", () => {
       const { template } = buildEdgeStack("staging");
-      template.resourceCountIs("AWS::WAFv2::WebACL", 0);
-      template.resourceCountIs("AWS::WAFv2::IPSet", 0);
+      // Always built now -- a bare deploy no longer strips the WAF.
+      template.resourceCountIs("AWS::WAFv2::WebACL", 1);
+      template.resourceCountIs("AWS::WAFv2::IPSet", 1);
+      // The internal CIDRs are read at deploy time from an SSM StringList (not
+      // committed). Synth renders a typed SSM parameter defaulting to the
+      // per-env name, and the IPSet Addresses Ref it.
+      const params = template.findParameters("*", {
+        Type: "AWS::SSM::Parameter::Value<List<String>>",
+      });
+      const paramId = Object.keys(params)[0];
+      expect(paramId).toBeDefined();
+      expect(params[paramId].Default).toBe("/sps/staging/edge/allowed-cidrs");
+      const ipset = Object.values(
+        template.findResources("AWS::WAFv2::IPSet"),
+      )[0]?.Properties as Record<string, unknown>;
+      expect(ipset.Addresses).toEqual({ Ref: paramId });
       const dist = Object.values(
         template.findResources("AWS::CloudFront::Distribution"),
       )[0]?.Properties as Record<string, unknown> | undefined;
       const dc = dist?.DistributionConfig as Record<string, unknown>;
-      expect(dc.WebACLId).toBeUndefined();
+      expect(dc.WebACLId).toBeDefined();
     });
 
     describe("with -c edgeAllowedCidrs set", () => {

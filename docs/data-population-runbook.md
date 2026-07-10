@@ -239,8 +239,8 @@ aws ecs run-task --cluster sps-cluster-$ENV \
 
 (`ETL_SUBNETS` = the env's two `private` subnets, `ETL_SG` = its `EtlSecurityGroup`,
 resolved live from the deployed nightly state machine so this never rots. As of
-2026-07-04: staging = shared VPC `vpc-08a1873fc8eebae28` (`10.46.160.0/25`); prod =
-`vpc-0d0209cbfd298c892` (`10.10.0.0/16`) until its cutover.)
+2026-07-04: staging = shared VPC `vpc-08a1873fc8eebae28` (`10.x.x.x/25` internal); prod =
+`vpc-0d0209cbfd298c892` (`10.x.0.0/16` internal) until its cutover.)
 
 Watch the task's `/aws/ecs/sps-etl-$ENV` log stream to completion (the indexer
 logs people/publication/funding counts and the alias swap).
@@ -314,8 +314,8 @@ rows everything else hangs off: `Scholar`, `Department`, `Division`,
 `Appointment`, `Education`, `Grant`, `Publication`, `PublicationAuthor`,
 `PublicationScore`. From the SPS VPC these **time out** (DNS resolves — the three
 resolver rules are associated — but there is no TGW return route and no WCM
-firewall allowance for the SPS VPC CIDR: staging `10.46.160.0/25` on the shared
-`its-reciter-vpc01` since the 2026-07-02 cutover; prod `10.10.0.0/16` until its
+firewall allowance for the SPS VPC CIDR: staging `10.x.x.x/25` (internal) on the shared
+`its-reciter-vpc01` since the 2026-07-02 cutover; prod `10.x.0.0/16` (internal) until its
 own cutover).
 
 The remaining ETLs (**DynamoDB** topics, **Hierarchy**/**Spotlight** from S3,

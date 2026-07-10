@@ -1,6 +1,6 @@
 # Production deployment & operations — addendum
 
-Companion to [`PRODUCTION.md`](./PRODUCTION.md). Three sections that close the largest gaps in the parent document: how the writer endpoints authenticate and where their secrets come from, how the ETL pipeline is orchestrated and recovers from failure, and how schema changes ship without taking the site down. Each subsection here corresponds to one or more issues in [`PRODUCTION_BACKLOG.md`](./PRODUCTION_BACKLOG.md); resolved subsections will be merged inline into `PRODUCTION.md` and removed from here once the work ships.
+Companion to [`PRODUCTION.md`](./PRODUCTION.md). Three sections that close the largest gaps in the parent document: how the writer endpoints authenticate and where their secrets come from, how the ETL pipeline is orchestrated and recovers from failure, and how schema changes ship without taking the site down. Each subsection here corresponds to one or more production-readiness issues; resolved subsections will be merged inline into `PRODUCTION.md` and removed from here once the work ships.
 
 ## Auth, secrets, and the writer endpoints
 

@@ -69,6 +69,7 @@ const DETAIL = {
       primaryTitle: "Professor",
       identityImageEndpoint: "/img",
       isInterim: false,
+      role: "leader" as const,
     },
   ],
   members: [
@@ -148,5 +149,26 @@ describe("CenterProgramPage (#1105)", () => {
     const ui = await CenterProgramPage({ centerSlug: "meyer-cancer-center", code: "CB" });
     render(ui);
     expect(screen.queryByTestId("leader-card")).toBeNull();
+  });
+
+  it("labels a coe_liaison row 'COE Liaison', rendered AFTER the Leaders (#1570)", async () => {
+    mockGetCenterProgram.mockResolvedValueOnce({
+      ...DETAIL,
+      // loader already orders leaders before liaisons; the page renders in order.
+      leaders: [
+        { ...DETAIL.leaders[0], cwid: "lead001", role: "leader" as const },
+        {
+          ...DETAIL.leaders[0],
+          cwid: "liaison01",
+          preferredName: "Irina Liaison",
+          role: "coe_liaison" as const,
+        },
+      ],
+    });
+    const ui = await CenterProgramPage({ centerSlug: "meyer-cancer-center", code: "CB" });
+    render(ui);
+    const cards = screen.getAllByTestId("leader-card");
+    // "Leader" first, "COE Liaison" last — distinct from the LEADER label.
+    expect(cards.map((c) => c.textContent)).toEqual(["Leader", "COE Liaison"]);
   });
 });

@@ -1214,6 +1214,13 @@ export async function searchPeople(opts: {
   /** Phase 3 D-10 — filter results to scholars who have publications in this topic (parent topic slug). */
   topic?: string;
   /**
+   * Issue #1513 — single last-name initial for the A–Z directory overflow link.
+   * When a single [A-Za-z] letter, hard-scopes the (empty-query) browse result
+   * set to surnames beginning with it via a `prefix` on the shared `lastNameSort`
+   * keyword. Non-single-letter values are ignored.
+   */
+  letter?: string;
+  /**
    * Issue #309 / SPEC §6.1 — the `SEARCH_PEOPLE_RELEVANCE_MODE` value at
    * request time. The route reads the env and classifies the query; both are
    * passed down so this function stays env-free and re-uses the route's
@@ -1399,6 +1406,11 @@ export async function searchPeople(opts: {
   const sort = opts.sort ?? "relevance";
   const filters = opts.filters ?? {};
   const trimmed = q.trim();
+  // Issue #1513 — A–Z last-name-initial scope. Validated to one letter and
+  // lowercased to match the (suffix-stripped, lowercased) `lastNameSort` keyword
+  // that `getAZBuckets` and the index share; ignored otherwise.
+  const letterPrefix =
+    opts.letter && /^[A-Za-z]$/.test(opts.letter) ? opts.letter.toLowerCase() : undefined;
 
   // Issue #692 — generic-term demotion. Only active when the route asked for it
   // AND there is a real content/full split; otherwise `contentQuery === trimmed`
@@ -1913,6 +1925,8 @@ export async function searchPeople(opts: {
   const queryFilter: Record<string, unknown>[] = [];
   if (sparseClause) queryFilter.push(sparseClause);
   if (topicClause) queryFilter.push(topicClause);
+  // #1513 — always-on so the list AND facet/badge counts all scope to the letter.
+  if (letterPrefix) queryFilter.push({ prefix: { lastNameSort: letterPrefix } });
 
   // PLAN R5 / handoff item 3 — concept-only result-SET gate. Under `concept`
   // scope (and only when the query resolved to a descriptor, so

@@ -23,7 +23,8 @@ export const dynamic = "force-dynamic";
  * ECS health-check grace period (cdk/lib/app-stack.ts) and the deployment
  * circuit breaker's tolerance, so it can never wedge a deploy.
  *
- * The deeper ETL-freshness endpoint is at /api/health/refresh-status.
+ * ETL freshness is monitored in-VPC by the #595 `etl:freshness` Step Functions
+ * step, which reads `etl_run` directly. There is no HTTP freshness endpoint.
  */
 export async function GET(): Promise<NextResponse> {
   const warmed = isWarmed();

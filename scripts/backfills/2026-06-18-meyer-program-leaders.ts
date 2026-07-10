@@ -12,6 +12,14 @@
  *   CPC Cancer Prevention and Control  — Rulla Tamimi (rmt4001), Shoshana Rosenberg (shr4009)
  *   CT  Cancer Therapeutics            — Nasser Altorki (nkaltork), Rohit Chandwani (roc9045)
  *
+ * COE Liaisons (#1570) — one per program, `role='coe_liaison'`. Rendered as a
+ * separate "COE Liaison" card AFTER the leaders on the program page. cwids
+ * verified against the directory:
+ *   CB  — Irina Matei (irm2224)
+ *   CGE — Andrea Sboner (ans2077)
+ *   CPC — Steven Chao (syc2005)
+ *   CT  — Mehraneh Dorna Jafari (mdj9003)
+ *
  * Safety (data-integrity rule — never write a guessed/typo'd cwid):
  *   - VERIFY-ALL-BEFORE-WRITE. Every program code must exist for the center, and
  *     every cwid must resolve to exactly one `scholar` row. If any check fails the
@@ -29,22 +37,35 @@ import { pathToFileURL } from "node:url";
 
 const CENTER_CODE = "meyer_cancer_center";
 
-/** One leader assignment. `sortOrder` is the display order within the program. */
-type Assignment = { programCode: string; cwid: string; sortOrder: number };
+/** One leader assignment. `sortOrder` is the display order within the program;
+ *  `role` is "leader" (a program lead) or "coe_liaison" (#1570). */
+type Assignment = {
+  programCode: string;
+  cwid: string;
+  sortOrder: number;
+  role: "leader" | "coe_liaison";
+};
 
 /**
  * The initial assignments. Resolved cwids: six from local data exports, two
- * (rmt4001 Tamimi, nkaltork Altorki) provided by comms. All are verified against
- * the live `scholar` table at run time — these literals are not trusted blindly.
+ * (rmt4001 Tamimi, nkaltork Altorki) provided by comms. The four `coe_liaison`
+ * rows (#1570) are the per-program Community Outreach & Engagement liaisons. All
+ * are verified against the live `scholar` table at run time — these literals are
+ * not trusted blindly.
  */
 export const MEYER_PROGRAM_LEADERS: ReadonlyArray<Assignment> = [
-  { programCode: "CB", cwid: "jur2016", sortOrder: 0 },
-  { programCode: "CB", cwid: "temcgraw", sortOrder: 1 },
-  { programCode: "CGE", cwid: "ekk2003", sortOrder: 0 },
-  { programCode: "CPC", cwid: "rmt4001", sortOrder: 0 },
-  { programCode: "CPC", cwid: "shr4009", sortOrder: 1 },
-  { programCode: "CT", cwid: "nkaltork", sortOrder: 0 },
-  { programCode: "CT", cwid: "roc9045", sortOrder: 1 },
+  { programCode: "CB", cwid: "jur2016", sortOrder: 0, role: "leader" },
+  { programCode: "CB", cwid: "temcgraw", sortOrder: 1, role: "leader" },
+  { programCode: "CGE", cwid: "ekk2003", sortOrder: 0, role: "leader" },
+  { programCode: "CPC", cwid: "rmt4001", sortOrder: 0, role: "leader" },
+  { programCode: "CPC", cwid: "shr4009", sortOrder: 1, role: "leader" },
+  { programCode: "CT", cwid: "nkaltork", sortOrder: 0, role: "leader" },
+  { programCode: "CT", cwid: "roc9045", sortOrder: 1, role: "leader" },
+  // #1570 — COE liaisons, one per program (role="coe_liaison", sorted after leaders).
+  { programCode: "CB", cwid: "irm2224", sortOrder: 0, role: "coe_liaison" },
+  { programCode: "CGE", cwid: "ans2077", sortOrder: 0, role: "coe_liaison" },
+  { programCode: "CPC", cwid: "syc2005", sortOrder: 0, role: "coe_liaison" },
+  { programCode: "CT", cwid: "mdj9003", sortOrder: 0, role: "coe_liaison" },
 ];
 
 /** The narrow Prisma slice this backfill touches — structural so the unit test
@@ -73,8 +94,9 @@ export type ProgramLeaderBackfillDb = {
         cwid: string;
         interim: boolean;
         sortOrder: number;
+        role: string;
       };
-      update: { interim: boolean; sortOrder: number };
+      update: { interim: boolean; sortOrder: number; role: string };
     }): Promise<unknown>;
   };
 };
@@ -131,7 +153,7 @@ export async function runBackfill(
 
   log(`Verified ${programCodes.length} program(s) and ${resolvedNames.size} scholar(s):`);
   for (const a of MEYER_PROGRAM_LEADERS) {
-    log(`  ${a.programCode.padEnd(4)} ${a.cwid.padEnd(12)} (${resolvedNames.get(a.cwid)}) sort=${a.sortOrder}`);
+    log(`  ${a.programCode.padEnd(4)} ${a.cwid.padEnd(12)} (${resolvedNames.get(a.cwid)}) sort=${a.sortOrder} role=${a.role}`);
   }
 
   if (opts.dryRun) {
@@ -156,8 +178,9 @@ export async function runBackfill(
         cwid: a.cwid,
         interim: false,
         sortOrder: a.sortOrder,
+        role: a.role,
       },
-      update: { interim: false, sortOrder: a.sortOrder },
+      update: { interim: false, sortOrder: a.sortOrder, role: a.role },
     });
     upserted += 1;
   }

@@ -521,6 +521,16 @@ export class DataStack extends Stack {
       capacity: {
         dataNodes: envConfig.opensearchDataNodes,
         dataNodeInstanceType: envConfig.opensearchDataNodeInstanceType,
+        // #1509 — dedicated master nodes (prod: 3) move cluster coordination off
+        // the data path so query/index load can't trigger master election churn,
+        // and a 2-of-3 master quorum survives one node/AZ loss. Spread only when
+        // configured (>0) so the single-node staging domain synth is byte-identical.
+        ...(envConfig.opensearchMasterNodes > 0
+          ? {
+              masterNodes: envConfig.opensearchMasterNodes,
+              masterNodeInstanceType: envConfig.opensearchMasterNodeInstanceType,
+            }
+          : {}),
         multiAzWithStandbyEnabled: false,
       },
       zoneAwareness: opensearchMultiAz

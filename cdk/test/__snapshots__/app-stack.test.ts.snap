@@ -301,6 +301,12 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "prod",
               },
               {
+                "Name": "NEXT_ISR_CACHE_BUCKET",
+                "Value": {
+                  "Ref": "IsrCacheBucket311880A1",
+                },
+              },
+              {
                 "Name": "GRANT_MATCHER_SUBTOPIC_GRAIN",
                 "Value": "off",
               },
@@ -402,6 +408,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "CLINICAL_TRIALS_SECTION",
+                "Value": "on",
+              },
+              {
+                "Name": "AVAILABLE_TECHNOLOGIES_SECTION",
+                "Value": "off",
+              },
+              {
+                "Name": "SPONSOR_MATCH",
                 "Value": "off",
               },
               {
@@ -478,7 +492,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SPS_USAGE_WORKGROUP",
-                "Value": "sps-usage-prod",
+                "Value": "sps-usage-app-prod",
               },
               {
                 "Name": "SPS_USAGE_DATABASE",
@@ -522,7 +536,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PUB_MESH_ONLY_FILTER",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PUB_FACET_SPLIT",
@@ -566,11 +580,11 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_AREA_BOOST",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PEOPLE_PHRASE_BOOST",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PEOPLE_DIVISION_SHAPE",
@@ -598,7 +612,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_SHELL_STREAMING",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_SUGGEST_MESH_CONCEPT",
@@ -618,15 +632,15 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_MESH_QUERY_NORMALIZATION",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_ACRONYM_SENSE_GUARD",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "COAUTHOR_HIDDEN_STUDENT_CHIPS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "IMPERSONATION_ENABLED",
@@ -706,11 +720,11 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "OPPORTUNITY_URL_INTAKE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "PROFILE_FACET_REDESIGN",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLAR_LIST_EXPORT",
@@ -718,15 +732,15 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "INTERNAL_VIEWER_NETWORK_SIGNAL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLAR_LIST_EXPORT_EMAIL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "INTERNAL_VIEWER_CIDRS",
-                "Value": "",
+                "Value": "140.251.0.0/16,157.139.0.0/16",
               },
               {
                 "Name": "PROFILE_EMAIL_RELEASE_GATE",
@@ -1957,6 +1971,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -2032,6 +2047,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -2079,6 +2095,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -2105,6 +2122,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -2292,6 +2310,85 @@ service:
         },
       },
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+    },
+    "IsrCacheBucket311880A1": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "ExpirationInDays": 7,
+              "Id": "expire-isr-cache",
+              "Prefix": "next-isr-cache/",
+              "Status": "Enabled",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "IsrCacheBucketPolicyF908ED16": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "IsrCacheBucket311880A1",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "IsrCacheBucket311880A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "IsrCacheBucket311880A1",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
     },
     "MigrationLogGroupFD140541": {
       "DeletionPolicy": "Retain",
@@ -3126,6 +3223,59 @@ service:
       },
       "Type": "AWS::IAM::Policy",
     },
+    "TaskRoleDefaultPolicy07FC53DE": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "IsrCacheBucket311880A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "IsrCacheBucket311880A1",
+                          "Arn",
+                        ],
+                      },
+                      "/next-isr-cache/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "TaskRoleDefaultPolicy07FC53DE",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "TaskRoleOpportunitySubmissionPolicy51C9A514": {
       "Properties": {
         "PolicyDocument": {
@@ -3134,6 +3284,8 @@ service:
               "Action": [
                 "dynamodb:PutItem",
                 "dynamodb:Query",
+                "dynamodb:DeleteItem",
+                "dynamodb:UpdateItem",
               ],
               "Condition": {
                 "ForAllValues:StringEquals": {
@@ -3766,6 +3918,12 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "staging",
               },
               {
+                "Name": "NEXT_ISR_CACHE_BUCKET",
+                "Value": {
+                  "Ref": "IsrCacheBucket311880A1",
+                },
+              },
+              {
                 "Name": "GRANT_MATCHER_SUBTOPIC_GRAIN",
                 "Value": "on",
               },
@@ -3870,6 +4028,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "AVAILABLE_TECHNOLOGIES_SECTION",
+                "Value": "on",
+              },
+              {
+                "Name": "SPONSOR_MATCH",
+                "Value": "on",
+              },
+              {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
                 "Value": "on",
               },
@@ -3943,7 +4109,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SPS_USAGE_WORKGROUP",
-                "Value": "sps-usage-staging",
+                "Value": "sps-usage-app-staging",
               },
               {
                 "Name": "SPS_USAGE_DATABASE",
@@ -5489,6 +5655,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -5558,6 +5725,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -5605,6 +5773,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -5631,6 +5800,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -5827,6 +5997,85 @@ service:
         "VpcId": "vpc-08a1873fc8eebae28",
       },
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+    },
+    "IsrCacheBucket311880A1": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "ExpirationInDays": 7,
+              "Id": "expire-isr-cache",
+              "Prefix": "next-isr-cache/",
+              "Status": "Enabled",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "IsrCacheBucketPolicyF908ED16": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "IsrCacheBucket311880A1",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "IsrCacheBucket311880A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "IsrCacheBucket311880A1",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
     },
     "MigrationLogGroupFD140541": {
       "DeletionPolicy": "Retain",
@@ -6593,6 +6842,59 @@ service:
       },
       "Type": "AWS::IAM::Policy",
     },
+    "TaskRoleDefaultPolicy07FC53DE": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "IsrCacheBucket311880A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "IsrCacheBucket311880A1",
+                          "Arn",
+                        ],
+                      },
+                      "/next-isr-cache/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "TaskRoleDefaultPolicy07FC53DE",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "TaskRoleOpportunitySubmissionPolicy51C9A514": {
       "Properties": {
         "PolicyDocument": {
@@ -6601,6 +6903,8 @@ service:
               "Action": [
                 "dynamodb:PutItem",
                 "dynamodb:Query",
+                "dynamodb:DeleteItem",
+                "dynamodb:UpdateItem",
               ],
               "Condition": {
                 "ForAllValues:StringEquals": {

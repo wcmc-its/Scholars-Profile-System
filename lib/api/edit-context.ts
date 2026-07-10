@@ -31,7 +31,7 @@
 import { getEffectiveOverview, getSelectedHighlightPmids } from "@/lib/api/manual-layer";
 import { getMenteesForMentor } from "@/lib/api/mentoring";
 import { rankForSelectedHighlights } from "@/lib/ranking";
-import { MAX_SELECTED_HIGHLIGHTS } from "@/lib/edit/validators";
+import { MAX_SELECTED_HIGHLIGHTS, SECTION_VISIBILITY_FIELDS } from "@/lib/edit/validators";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { isFundingActive } from "@/lib/funding-active";
 import { isChairTitleFor } from "@/lib/leadership";
@@ -94,6 +94,13 @@ export type EditContextScholar = {
    * the slug card has a server-fetched baseline (no client round-trip).
    */
   slugOverride: string | null;
+  /**
+   * section-visibility-spec — the profile section keys currently HIDDEN
+   * (`field_override(scholar, <key>)` = "true"), a subset of
+   * `SECTION_VISIBILITY_FIELDS`. Drives the Visibility card's Sections panel
+   * switches; absent key = shown. Read suppression-OFF like every other field.
+   */
+  hiddenSections: string[];
   suppression: {
     /** A self-applied, un-revoked whole-scholar suppression — drives the "Make my profile visible" control. */
     ownRow: { id: string; reason: string } | null;
@@ -458,10 +465,27 @@ export type EditContextReporterProfileConfirmed = {
   autolocked: boolean;
 };
 
+/**
+ * #1323 — a historical (source "ED-HISTORICAL") appointment, hidden from the
+ * public profile until a curator / comms_steward reveals it. Distinct from
+ * `EditContextAppointment` (active rows, hide-to-suppress): these are
+ * reveal-to-show, so they carry `showOnProfile` instead of a suppression state.
+ */
+export type EditContextHistoricalAppointment = {
+  externalId: string;
+  title: string;
+  organization: string;
+  startDate: string | null;
+  endDate: string | null;
+  showOnProfile: boolean;
+};
+
 export type EditContext = {
   scholar: EditContextScholar;
   publications: ReadonlyArray<EditContextPublication>;
   appointments: ReadonlyArray<EditContextAppointment>;
+  /** #1323 — historical appointments, reveal-to-show (curator / comms_steward). */
+  historicalAppointments: ReadonlyArray<EditContextHistoricalAppointment>;
   educations: ReadonlyArray<EditContextEducation>;
   grants: ReadonlyArray<EditContextGrant>;
   /** Read-only COI disclosures (the Weill Research Gateway is the SOR). */
@@ -658,12 +682,14 @@ export async function loadEditContext(
     slugOverrideRow,
     scholarSuppressions,
     appointmentRows,
+    historicalAppointmentRows,
     educationRows,
     grantRows,
     coiRows,
     chairedDept,
     authorships,
     menteeRows,
+    sectionOverrideRows,
   ] = await Promise.all([
     // Phase 7 — the slug-card baseline. `null` = no override; superuser slug card
     // shows the "no override" state. The self surface does not surface this field
@@ -706,6 +732,22 @@ export async function loadEditContext(
         isPrimary: true,
       },
       orderBy: [{ isPrimary: "desc" }, { startDate: "desc" }],
+    }),
+    // #1323 — historical (expired) appointments imported from the WOOFA SOR
+    // under source "ED-HISTORICAL". Hidden on the public profile until a
+    // curator / comms_steward reveals one; the reveal panel lists ALL of them
+    // (revealed and not) with their current `showOnProfile` state.
+    client.appointment.findMany({
+      where: { cwid, source: "ED-HISTORICAL" },
+      select: {
+        externalId: true,
+        title: true,
+        organization: true,
+        startDate: true,
+        endDate: true,
+        showOnProfile: true,
+      },
+      orderBy: [{ endDate: "desc" }],
     }),
     client.education.findMany({
       where: { cwid },
@@ -788,9 +830,22 @@ export async function loadEditContext(
       );
       return [] as EditContextMenteeSource[];
     }),
+    // section-visibility-spec — the per-scholar section-hide overrides currently
+    // set to "true" (hidden). Drives the Visibility card's Sections panel; a
+    // "false" row (or none) is "shown", so only "true" is read.
+    client.fieldOverride.findMany({
+      where: {
+        entityType: "scholar",
+        entityId: cwid,
+        fieldName: { in: [...SECTION_VISIBILITY_FIELDS] },
+        value: "true",
+      },
+      select: { fieldName: true },
+    }),
   ]);
 
   const slugOverride = slugOverrideRow?.value ?? null;
+  const hiddenSections = sectionOverrideRows.map((r) => r.fieldName);
 
   // Defensive: multiple un-revoked rows of either kind shouldn't occur (the
   // suppress endpoint is idempotent — edge case 19), but a superuser row +
@@ -1268,6 +1323,18 @@ export async function loadEditContext(
     };
   });
 
+  // #1323 — historical appointments are reveal-to-show, not hide-to-suppress, so
+  // they carry their `showOnProfile` state rather than a suppression row state.
+  const historicalAppointments: EditContextHistoricalAppointment[] =
+    historicalAppointmentRows.map((a) => ({
+      externalId: a.externalId,
+      title: a.title,
+      organization: a.organization,
+      startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
+      endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
+      showOnProfile: a.showOnProfile,
+    }));
+
   const educations: EditContextEducation[] = educationRows.map((e) => {
     const hide = entityHide.get(`education:${e.externalId}`);
     return {
@@ -1323,6 +1390,7 @@ export async function loadEditContext(
         roleCategory: scholar.roleCategory,
         overview: effectiveOverview ?? "",
         slugOverride,
+        hiddenSections,
         suppression: {
           ownRow: ownRow ? { id: ownRow.id, reason: ownRow.reason } : null,
           adminRow: adminRow
@@ -1332,6 +1400,7 @@ export async function loadEditContext(
       },
       publications,
       appointments,
+      historicalAppointments,
       educations,
       grants,
       coiDisclosures,
@@ -1486,6 +1555,7 @@ export async function loadEditContext(
       roleCategory: scholar.roleCategory,
       overview: effectiveOverview ?? "",
       slugOverride,
+      hiddenSections,
       suppression: {
         ownRow: ownRow ? { id: ownRow.id, reason: ownRow.reason } : null,
         adminRow: adminRow
@@ -1495,6 +1565,7 @@ export async function loadEditContext(
     },
     publications,
     appointments,
+    historicalAppointments,
     educations,
     grants,
     coiDisclosures,

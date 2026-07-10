@@ -19,11 +19,11 @@ function runScript(file: string): Promise<{ ok: boolean; durationMs: number; err
   return new Promise((resolve) => {
     const start = Date.now();
     const repo = path.resolve(fileURLToPath(import.meta.url), "../..");
-    const child = spawn(
-      "node",
-      ["--import", "tsx/esm", path.join(repo, file)],
-      { stdio: "inherit", env: process.env, cwd: repo },
-    );
+    const child = spawn("node", ["--import", "tsx/esm", path.join(repo, file)], {
+      stdio: "inherit",
+      env: process.env,
+      cwd: repo,
+    });
     child.on("close", (code) => {
       resolve({
         ok: code === 0,
@@ -98,6 +98,17 @@ async function main() {
     // no-op-safe (0 rows when reciterdb is unreachable) like the other
     // reciterdb sources, so it is safe in the chain on the same footing.
     ["Clinical-Trials", "etl/clinical-trials/index.ts"],
+    // CTL available technologies. Scrapes innovation.weill.cornell.edu (public
+    // internet, not the WCM network) and joins on the cwid CTL embeds in each
+    // PI's VIVO link. Its cwid FK targets `scholar`, so it must run after the ED
+    // chain head. Volume-guarded, and a no-op write when the scrape matches the
+    // table. A CTL outage must not fail the chain; runScript isolates it.
+    //
+    // NOTE: this file is the in-process prototype runner (`npm run etl:daily`).
+    // The DEPLOYED cadence is the WEEKLY Step Function (`TechnologyWeekly` in
+    // cdk/lib/etl-stack.ts) — adding a step here does not schedule it in
+    // staging/prod.
+    ["Technology", "etl/technologies/index.ts"],
     // POPS clinical enrichment — depends on hasClinicalProfile set by the ED
     // chain head above; must run before the search reindex below so the new
     // clinicalSpecialties / clinicalExpertise fields land in the people doc.
@@ -134,10 +145,7 @@ async function main() {
   try {
     const completeness = await step("Completeness", "etl/completeness/index.ts");
     if (!completeness.ok) {
-      console.warn(
-        "[Completeness] snapshot step failed (non-fatal):",
-        completeness.error,
-      );
+      console.warn("[Completeness] snapshot step failed (non-fatal):", completeness.error);
     }
   } catch (err) {
     console.warn("[Completeness] snapshot step threw (non-fatal):", err);

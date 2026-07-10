@@ -46,51 +46,77 @@ const EXPECTED_CRONS: Readonly<Record<string, string>> = {
 
 // #442 -- the task container injects each credentialed source's granular
 // SCHOLARS_* keys (plus the three shared secrets), NOT a blob ETL_*_SECRET.
-const EXPECTED_SECRET_ENV_VARS = [
-  // shared
+// #1508 -- grouped by the task def that injects them. The three base secrets
+// ride EVERY def; each per-source group rides ONLY its own def so no step gets
+// a credential it doesn't use.
+const BASE_SECRET_ENV_VARS = [
   "DATABASE_URL",
   "OPENSEARCH_USER",
   "OPENSEARCH_PASS",
   // #447 -- renamed from REVALIDATE_TOKEN; etl/orchestrate.ts reads
   // SCHOLARS_REVALIDATE_TOKEN.
   "SCHOLARS_REVALIDATE_TOKEN",
-  // ed (LDAP simple bind)
-  "SCHOLARS_LDAP_URL",
-  "SCHOLARS_LDAP_BIND_DN",
-  "SCHOLARS_LDAP_BIND_PASSWORD",
-  // asms
+] as const;
+// sources def -- the five WCM-DB sources (asms/infoed/coi/reciter/jenzabar).
+const SOURCES_SECRET_ENV_VARS = [
   "SCHOLARS_ASMS_HOST",
   "SCHOLARS_ASMS_PORT",
   "SCHOLARS_ASMS_DATABASE",
   "SCHOLARS_ASMS_USERNAME",
   "SCHOLARS_ASMS_PASSWORD",
-  // infoed
   "SCHOLARS_INFOED_DB_URL",
   "SCHOLARS_INFOED_USERNAME",
   "SCHOLARS_INFOED_PASSWORD",
-  // coi
   "SCHOLARS_COI_URL",
   "SCHOLARS_COI_PORT",
   "SCHOLARS_COI_DATABASE",
   "SCHOLARS_COI_USERNAME",
   "SCHOLARS_COI_PASSWORD",
-  // reciter (ReciterDB MySQL)
   "SCHOLARS_RECITERDB_HOST",
   "SCHOLARS_RECITERDB_PORT",
   "SCHOLARS_RECITERDB_DATABASE",
   "SCHOLARS_RECITERDB_USERNAME",
   "SCHOLARS_RECITERDB_PASSWORD",
-  // jenzabar (PhD-mentor MSSQL -- #608)
   "SCHOLARS_JENZABAR_SERVER",
   "SCHOLARS_JENZABAR_PORT",
   "SCHOLARS_JENZABAR_DATABASE",
   "SCHOLARS_JENZABAR_USERNAME",
   "SCHOLARS_JENZABAR_PASSWORD",
-  // reciter REST API (#746 -- the "Not mine" reject scanner; ADMIN api-key kept
-  // out of the public web app, injected ONLY into this ETL task)
+] as const;
+// ldap def -- the LDAP simple bind (only etl:ed + the ed-export bridge).
+const LDAP_SECRET_ENV_VARS = [
+  "SCHOLARS_LDAP_URL",
+  "SCHOLARS_LDAP_BIND_DN",
+  "SCHOLARS_LDAP_BIND_PASSWORD",
+] as const;
+// reciter-api def -- the #746 ADMIN api-key, used ONLY by the operator-run
+// etl:reciter-refresh (no cadence step), kept off every other def.
+const RECITER_API_SECRET_ENV_VARS = [
   "RECITER_API_BASE_URL",
   "RECITER_API_KEY",
 ] as const;
+// Which prod task-def family carries which secret group (#1508).
+const SECRETS_BY_TASK_DEF: ReadonlyArray<{
+  label: string;
+  family: string;
+  vars: readonly string[];
+}> = [
+  { label: "base", family: "sps-etl-prod", vars: BASE_SECRET_ENV_VARS },
+  { label: "sources", family: "sps-etl-sources-prod", vars: SOURCES_SECRET_ENV_VARS },
+  { label: "ldap", family: "sps-etl-ldap-prod", vars: LDAP_SECRET_ENV_VARS },
+  {
+    label: "reciter-api",
+    family: "sps-etl-reciter-api-prod",
+    vars: RECITER_API_SECRET_ENV_VARS,
+  },
+];
+// Every per-source var (the three non-base defs' secrets) -- none of these may
+// appear on the base def's container.
+const NON_BASE_SECRET_ENV_VARS = [
+  ...SOURCES_SECRET_ENV_VARS,
+  ...LDAP_SECRET_ENV_VARS,
+  ...RECITER_API_SECRET_ENV_VARS,
+];
 
 // IAM-based sources read these as plaintext config from the environment
 // block (values mirror the source-script defaults).
@@ -206,10 +232,11 @@ describe("EtlStack", () => {
         template.resourceCountIs("AWS::CloudWatch::Alarm", 11);
       });
 
-      it("creates three ECS task definitions (ETL + lean reconciler + lean cdn reconciler) and one SG-to-SG ingress rule on the internal ALB SG", () => {
-        // The fat ETL task def + the lean #393 reconcile task def + the lean
-        // #353 cdn reconcile task def.
-        template.resourceCountIs("AWS::ECS::TaskDefinition", 3);
+      it("creates six ECS task definitions (4 ETL credential-split defs + lean reconciler + lean cdn reconciler) and one SG-to-SG ingress rule on the internal ALB SG", () => {
+        // #1508 split the single ETL task def into four by credential need:
+        // base / sources / ldap / reciter-api. Plus the lean #393 reconcile
+        // task def + the lean #353 cdn reconcile task def.
+        template.resourceCountIs("AWS::ECS::TaskDefinition", 6);
         template.resourceCountIs("AWS::EC2::SecurityGroupIngress", 1);
       });
 
@@ -940,16 +967,16 @@ describe("EtlStack", () => {
     });
 
     describe("IAM least-privilege guards", () => {
-      it("the task-execution role's secretsmanager:GetSecretValue lists exactly the 10 consumer ARNs (no *)", () => {
+      // #1508 -- return the GetSecretValue Resource list on the exec role whose
+      // logical id contains `refSubstring` (its inline default policy).
+      function execRoleSecretArns(refSubstring: string): unknown[] {
         const policies = template.findResources("AWS::IAM::Policy");
         const execPolicy = Object.values(policies).find((p) => {
           const roles = p.Properties?.Roles as
             | Array<{ Ref?: string }>
             | undefined;
           return roles?.some(
-            (r) =>
-              typeof r.Ref === "string" &&
-              r.Ref.includes("EtlTaskExecutionRole"),
+            (r) => typeof r.Ref === "string" && r.Ref.includes(refSubstring),
           );
         });
         expect(execPolicy).toBeDefined();
@@ -962,18 +989,44 @@ describe("EtlStack", () => {
             : action === "secretsmanager:GetSecretValue";
         });
         expect(secretsStmt).toBeDefined();
-        const resourceList = Array.isArray(secretsStmt?.Resource)
+        return Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        // 7 credentialed sources (incl. reciter-api, #746) + db/etl +
-        // opensearch/etl + revalidate-token = 10. The dynamodb/spotlight/
-        // hierarchy sources are IAM-based (task role) and read no injected
-        // secret, so they are absent (#442).
-        expect(resourceList).toHaveLength(10);
-        for (const r of resourceList) {
+      }
+
+      it("the BASE ETL exec role lists the 3 base secret ARNs + the app-ro probe DSN -- never a per-source cred, never * (#1508)", () => {
+        // The dynamodb/spotlight/hierarchy sources are IAM-based (task role) and
+        // read no injected secret. After the #1508 split the base role no longer
+        // reads ANY of the 7 per-source secrets -- that is the whole point. The
+        // one addition is the SELECT-only app-ro DSN (DATABASE_URL_RO) injected
+        // into the main sps-etl def for run-staging-probe.sh -- a DB DSN, not a
+        // per-source WCM credential.
+        const arns = execRoleSecretArns("EtlTaskExecutionRole");
+        expect(arns).toHaveLength(4);
+        for (const r of arns) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
         }
+        const joined = JSON.stringify(arns);
+        expect(joined).toMatch(/db\/app-ro/);
+        // Still no per-source WCM-DB credential on the base role.
+        expect(joined).not.toMatch(/asms|infoed|coi|jenzabar/i);
       });
+
+      it.each([
+        // base(3) + group; sources = 5 WCM-DB secrets, ldap/reciter-api = 1 each.
+        ["EtlSourcesTaskExecutionRole", 8],
+        ["EtlLdapTaskExecutionRole", 4],
+        ["EtlReciterApiTaskExecutionRole", 4],
+      ] as const)(
+        "the %s scopes GetSecretValue to base + its group (%i ARNs, no *)",
+        (refSubstring, expectedCount) => {
+          const arns = execRoleSecretArns(refSubstring);
+          expect(arns).toHaveLength(expectedCount);
+          for (const r of arns) {
+            expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
+          }
+        },
+      );
 
       it("the ETL task role has zero secretsmanager:* actions", () => {
         const policies = template.findResources("AWS::IAM::Policy");
@@ -1189,46 +1242,60 @@ describe("EtlStack", () => {
     });
 
     describe("ETL var injection (#442 -- granular SCHOLARS_*, not blob ETL_*_SECRET)", () => {
-      function etlContainerDef(): Record<string, unknown> {
-        // Two task defs now (fat ETL + lean #393 reconcile); select the ETL one
-        // by its family, then its `etl` container.
+      // #1508 -- select the `etl` container of a given task-def family.
+      function containerDefForFamily(family: string): Record<string, unknown> {
         const tds = template.findResources("AWS::ECS::TaskDefinition");
-        const etlTd = Object.values(tds).find(
-          (td) => td.Properties?.Family === "sps-etl-prod",
+        const td = Object.values(tds).find(
+          (t) => t.Properties?.Family === family,
         );
-        expect(etlTd).toBeDefined();
+        expect(td).toBeDefined();
         const container = (
-          etlTd?.Properties?.ContainerDefinitions as
+          td?.Properties?.ContainerDefinitions as
             | Array<Record<string, unknown>>
             | undefined
         )?.find((c) => c.Name === "etl");
         expect(container).toBeDefined();
         return container as Record<string, unknown>;
       }
+      // The base def carries the shared secrets + the shared env block.
+      function etlContainerDef(): Record<string, unknown> {
+        return containerDefForFamily("sps-etl-prod");
+      }
+      const secretNamesOf = (family: string): string[] =>
+        (
+          (containerDefForFamily(family).Secrets as
+            | Array<{ Name?: string }>
+            | undefined) ?? []
+        ).map((s) => s.Name ?? "");
 
-      it.each(EXPECTED_SECRET_ENV_VARS)(
-        "injects %s as a secret env var",
-        (envVar) => {
-          const secretNames = (
-            etlContainerDef().Secrets as Array<{ Name?: string }> | undefined
-          )?.map((s) => s.Name);
-          expect(secretNames).toContain(envVar);
+      // Each secret group is injected into ITS def -- and only its def (#1508).
+      it.each(SECRETS_BY_TASK_DEF)(
+        "the $label task def ($family) injects its secret group",
+        ({ family, vars }) => {
+          const names = secretNamesOf(family);
+          for (const v of vars) expect(names).toContain(v);
         },
       );
 
-      it("injects no blob ETL_*_SECRET env var", () => {
-        const secretNames = (
-          etlContainerDef().Secrets as Array<{ Name?: string }> | undefined
-        )?.map((s) => s.Name ?? "");
-        const blobs = (secretNames ?? []).filter((n) =>
-          /^ETL_.*_SECRET$/.test(n),
-        );
-        expect(blobs).toEqual([]);
+      it("the base def carries NONE of the per-source creds (LDAP bind pw, DB creds, ReCiter admin key) -- #1508", () => {
+        const baseNames = secretNamesOf("sps-etl-prod");
+        for (const v of NON_BASE_SECRET_ENV_VARS) {
+          expect(baseNames).not.toContain(v);
+        }
       });
 
-      it("binds SCHOLARS_LDAP_URL to that JSON key of the ed secret (ValueFrom carries the key)", () => {
+      it("no ETL task def injects a blob ETL_*_SECRET env var", () => {
+        for (const { family } of SECRETS_BY_TASK_DEF) {
+          const blobs = secretNamesOf(family).filter((n) =>
+            /^ETL_.*_SECRET$/.test(n),
+          );
+          expect(blobs).toEqual([]);
+        }
+      });
+
+      it("binds SCHOLARS_LDAP_URL to that JSON key of the ed secret on the ldap def (ValueFrom carries the key)", () => {
         const ldapUrl = (
-          etlContainerDef().Secrets as
+          containerDefForFamily("sps-etl-ldap-prod").Secrets as
             | Array<{ Name?: string; ValueFrom?: unknown }>
             | undefined
         )?.find((s) => s.Name === "SCHOLARS_LDAP_URL");

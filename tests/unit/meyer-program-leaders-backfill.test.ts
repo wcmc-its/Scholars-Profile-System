@@ -47,12 +47,47 @@ describe("Meyer program-leaders backfill (#1117)", () => {
   });
 
   it("has the expected co-led assignments (CB + CT + CPC are two-leader)", () => {
-    const byProgram = (code: string) =>
-      MEYER_PROGRAM_LEADERS.filter((a) => a.programCode === code).map((a) => a.cwid);
-    expect(byProgram("CB")).toEqual(["jur2016", "temcgraw"]);
-    expect(byProgram("CGE")).toEqual(["ekk2003"]);
-    expect(byProgram("CPC")).toEqual(["rmt4001", "shr4009"]);
-    expect(byProgram("CT")).toEqual(["nkaltork", "roc9045"]);
+    const leadersOf = (code: string) =>
+      MEYER_PROGRAM_LEADERS.filter((a) => a.programCode === code && a.role === "leader").map(
+        (a) => a.cwid,
+      );
+    expect(leadersOf("CB")).toEqual(["jur2016", "temcgraw"]);
+    expect(leadersOf("CGE")).toEqual(["ekk2003"]);
+    expect(leadersOf("CPC")).toEqual(["rmt4001", "shr4009"]);
+    expect(leadersOf("CT")).toEqual(["nkaltork", "roc9045"]);
+  });
+
+  it("has one COE liaison per program (#1570), role='coe_liaison'", () => {
+    const liaisonOf = (code: string) =>
+      MEYER_PROGRAM_LEADERS.filter(
+        (a) => a.programCode === code && a.role === "coe_liaison",
+      ).map((a) => a.cwid);
+    expect(liaisonOf("CB")).toEqual(["irm2224"]);
+    expect(liaisonOf("CGE")).toEqual(["ans2077"]);
+    expect(liaisonOf("CPC")).toEqual(["syc2005"]);
+    expect(liaisonOf("CT")).toEqual(["mdj9003"]);
+    // exactly four liaison rows, all with role="coe_liaison"
+    const liaisons = MEYER_PROGRAM_LEADERS.filter((a) => a.role === "coe_liaison");
+    expect(liaisons).toHaveLength(4);
+    expect(liaisons.every((a) => a.role === "coe_liaison")).toBe(true);
+  });
+
+  it("upserts each liaison with role='coe_liaison'", async () => {
+    const { db, upsert } = fakeDb();
+    await runBackfill(db, { dryRun: false });
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          centerCode_programCode_cwid: {
+            centerCode: "meyer_cancer_center",
+            programCode: "CB",
+            cwid: "irm2224",
+          },
+        },
+        create: expect.objectContaining({ role: "coe_liaison" }),
+        update: expect.objectContaining({ role: "coe_liaison" }),
+      }),
+    );
   });
 
   it("dry-run verifies everything but writes nothing", async () => {

@@ -252,6 +252,11 @@ describe("authorizeCommsStewardAction", () => {
   });
 });
 
+// authorizeAppointmentVisibility (#1323) was RETIRED with self-serve reveal
+// (#1557): POST /api/edit/appointment-visibility now rides `authorizeOverviewWrite`
+// (self OR superuser OR comms_steward OR proxy OR unit-admin), covered end-to-end
+// in `appointment-visibility-route.test.ts` and `overview-authz.test.ts`.
+
 // ---------------------------------------------------------------------------
 // page-access predicates  (the GET-time re-check, edge case 15)
 // ---------------------------------------------------------------------------

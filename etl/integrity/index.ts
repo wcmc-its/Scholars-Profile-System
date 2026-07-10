@@ -93,11 +93,16 @@ async function loadVolumeHistory(): Promise<VolumeHistory[]> {
   });
   const out: VolumeHistory[] = [];
   for (const { source } of distinct) {
-    // rowsProcessed is non-nullable with @default(0); sources that never set
-    // it (void withEtlRun results) sit at 0 and fall under the
-    // minPreviousRows exemption in findVolumeRegressions.
+    // Only sample runs that actually processed data (rowsProcessed > 0). A
+    // manifest-gated step that no-ops when its s3 input is unchanged (Hierarchy
+    // when the taxonomy hasn't moved, Tools in s3 mode) records a *success* row
+    // with rowsProcessed = 0 while leaving its table fully populated — that is
+    // not a volume observation, and comparing it against the prior real load
+    // reads as a bogus 100% drop. Sources that only ever sit at 0 yield < 2
+    // samples here and are skipped, same as the old minPreviousRows exemption.
+    // True emptiness is still caught by the spine-table floors below.
     const last2 = await db.read.etlRun.findMany({
-      where: { source, status: "success" },
+      where: { source, status: "success", rowsProcessed: { gt: 0 } },
       orderBy: { completedAt: "desc" },
       take: 2,
       select: { rowsProcessed: true },

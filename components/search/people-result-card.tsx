@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
@@ -149,11 +149,6 @@ export function PeopleResultCard({
     );
   }
 
-  // #1366 — shared across this card's stacked evidence lines for exemplar de-dup
-  // (representative papers stay globally disjoint though counts may overlap). A
-  // single-evidence card gets a fresh empty set ⇒ behaves exactly as before.
-  const claimedPmids = useRef(new Set<string>());
-
   // #1366 follow-up Part D collapse — the "Also matched" group is collapsed to a
   // category summary line by default (expandable). Only used when ≥2 secondaries.
   const [alsoExpanded, setAlsoExpanded] = useState(false);
@@ -176,6 +171,37 @@ export function PeopleResultCard({
   const fundingPanelId = useId();
 
   const qParam = (q ?? "").trim();
+
+  // #1366 evidence-line-stale-cache — shared across this card's stacked evidence
+  // lines for exemplar de-dup (representative papers stay globally disjoint
+  // though counts may overlap). Result cards are keyed by cwid (see the search
+  // page's `<li key={h.cwid}>`) and PERSIST across client-side query
+  // navigations, so this must be a FRESH empty set per query: `useMemo` on
+  // `qParam` mints a new Set during render (pure — unlike clearing a ref's
+  // contents, which persists across React's discarded/StrictMode renders),
+  // ready before the qParam-keyed EvidenceLine children re-claim into it. A
+  // single-evidence card still gets an empty set ⇒ behaves exactly as before.
+  // qParam is the intended "recreate on query change" key even though the
+  // factory doesn't read it — this is useMemo-as-reset, not a computed value.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const claimedPmids = useMemo(() => new Set<string>(), [qParam]);
+
+  // #1366 evidence-line-stale-cache — each EvidenceLine's reset key. Baking
+  // qParam into the key remounts the line on a query change, dropping its
+  // one-shot exemplar/key-paper fetch guards + expand/exemplar state (which
+  // would otherwise render the PREVIOUS query's papers). kind + its identity
+  // field keep a card's sibling lines distinct within one query
+  // (selectEvidenceLines emits at most one line per kind/discriminant).
+  const lineKey = (ev: ResultEvidence, idx: number) =>
+    `${qParam}:${ev.kind}:${
+      ev.kind === "topic"
+        ? ev.id
+        : ev.kind === "method"
+          ? ev.family
+          : ev.kind === "publications"
+            ? ev.strength
+            : idx
+    }`;
 
   // #1359 — the page-resolved concept (same source the key-paper fetch uses), threaded
   // so grants can match by concept tag. Empty for a free-text query ⇒ route stays
@@ -457,7 +483,7 @@ export function PeopleResultCard({
     <>
       {lesserLines.map((ev, i) => (
         <EvidenceLine
-          key={i + 1}
+          key={lineKey(ev, i + 1)}
           evidence={ev}
           cwid={hit.cwid}
           slug={hit.slug}
@@ -519,6 +545,7 @@ export function PeopleResultCard({
           <>
             {lines ? (
               <EvidenceLine
+                key={lineKey(lines[0], 0)}
                 evidence={lines[0]}
                 cwid={hit.cwid}
                 slug={hit.slug}

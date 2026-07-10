@@ -49,6 +49,7 @@ export function PublicationMeta({
   pmid,
   pmcid,
   doi,
+  ecommonsLink,
   abstract,
   defaultAbstractOpen = false,
   className,
@@ -61,6 +62,7 @@ export function PublicationMeta({
   pmid?: string | null;
   pmcid?: string | null;
   doi?: string | null;
+  ecommonsLink?: string | null;
   abstract?: string | null;
   defaultAbstractOpen?: boolean;
   className?: string;
@@ -117,6 +119,21 @@ export function PublicationMeta({
         className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
       >
         DOI
+      </a>,
+    );
+  }
+
+  if (ecommonsLink) {
+    blocks.push(
+      <a
+        key="ecommons"
+        href={ecommonsLink}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="eCommons institutional repository record"
+        className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
+      >
+        eCommons
       </a>,
     );
   }

@@ -1081,7 +1081,9 @@ exports[`DataStack prod matches the snapshot 1`] = `
           },
         },
         "ClusterConfig": {
-          "DedicatedMasterEnabled": false,
+          "DedicatedMasterCount": 3,
+          "DedicatedMasterEnabled": true,
+          "DedicatedMasterType": "m6g.large.search",
           "InstanceCount": 2,
           "InstanceType": "m6g.large.search",
           "MultiAZWithStandbyEnabled": false,

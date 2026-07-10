@@ -658,7 +658,7 @@ describe("<EvidenceLine> — #1366 follow-up Part A derives the panel header fro
     return fn;
   }
   function renderLine(evidence: Evidence) {
-    const claimedPmids = { current: new Set<string>() };
+    const claimedPmids = new Set<string>();
     return render(
       <EvidenceLine
         evidence={evidence}
@@ -700,7 +700,7 @@ describe("<EvidenceLine> — #1366 follow-up Part A derives the panel header fro
   });
 
   it("single-evidence (stacked=false) keeps the legacy 'Key papers' header, not the relabel", () => {
-    const claimedPmids = { current: new Set<string>() };
+    const claimedPmids = new Set<string>();
     render(
       <EvidenceLine
         evidence={{

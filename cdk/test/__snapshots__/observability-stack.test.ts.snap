@@ -204,7 +204,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
                   },
                 ],
                 "MetricName": "DesiredTaskCount",
-                "Namespace": "AWS/ECS",
+                "Namespace": "ECS/ContainerInsights",
               },
               "Period": 60,
               "Stat": "Maximum",
@@ -230,7 +230,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
                   },
                 ],
                 "MetricName": "RunningTaskCount",
-                "Namespace": "AWS/ECS",
+                "Namespace": "ECS/ContainerInsights",
               },
               "Period": 60,
               "Stat": "Minimum",
@@ -925,7 +925,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/ECS","RunningTaskCount","ClusterName","",
+              "","metrics":[["ECS/ContainerInsights","RunningTaskCount","ClusterName","",
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefEcsCluster97242B84553A5D8F",
               },
@@ -933,7 +933,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsService81FC6EF6Name1D81E5BE",
               },
-              "",{"label":"Running (min)","period":60,"stat":"Minimum"}],["AWS/ECS","DesiredTaskCount","ClusterName","",
+              "",{"label":"Running (min)","period":60,"stat":"Minimum"}],["ECS/ContainerInsights","DesiredTaskCount","ClusterName","",
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefEcsCluster97242B84553A5D8F",
               },
@@ -1173,7 +1173,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
                   },
                 ],
                 "MetricName": "DesiredTaskCount",
-                "Namespace": "AWS/ECS",
+                "Namespace": "ECS/ContainerInsights",
               },
               "Period": 60,
               "Stat": "Maximum",
@@ -1199,7 +1199,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
                   },
                 ],
                 "MetricName": "RunningTaskCount",
-                "Namespace": "AWS/ECS",
+                "Namespace": "ECS/ContainerInsights",
               },
               "Period": 60,
               "Stat": "Minimum",
@@ -1793,7 +1793,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
               {
                 "Ref": "AWS::Region",
               },
-              "","metrics":[["AWS/ECS","RunningTaskCount","ClusterName","",
+              "","metrics":[["ECS/ContainerInsights","RunningTaskCount","ClusterName","",
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefEcsCluster97242B84553A5D8F",
               },
@@ -1801,7 +1801,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsService81FC6EF6Name1D81E5BE",
               },
-              "",{"label":"Running (min)","period":60,"stat":"Minimum"}],["AWS/ECS","DesiredTaskCount","ClusterName","",
+              "",{"label":"Running (min)","period":60,"stat":"Minimum"}],["ECS/ContainerInsights","DesiredTaskCount","ClusterName","",
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefEcsCluster97242B84553A5D8F",
               },

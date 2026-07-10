@@ -31,6 +31,13 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # `next build`) -> skew protection inert, build byte-for-byte unchanged.
 ARG NEXT_DEPLOYMENT_ID=""
 ENV NEXT_DEPLOYMENT_ID=$NEXT_DEPLOYMENT_ID
+# #1503 — shared S3 ISR cacheHandler switch. next.config.ts reads this during
+# `next build` (standalone bakes the resolved config), so it MUST arrive as a
+# build-arg, not a runtime task-def env. Empty/"off" (default, incl. local/CI
+# builds) → Next's built-in handler, byte-identical. The Deploy workflow passes
+# "on" per env once the env's IsrCacheBucket is provisioned.
+ARG NEXT_ISR_CACHE_S3="off"
+ENV NEXT_ISR_CACHE_S3=$NEXT_ISR_CACHE_S3
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # lib/generated/ is excluded from the build context (.dockerignore); regenerate

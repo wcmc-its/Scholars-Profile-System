@@ -47,8 +47,10 @@ import {
   type EdPostdocEmploymentRecord,
   fetchActiveEmployeeRecords,
   fetchActiveFaculty,
+  fetchActiveMembersByCwid,
   fetchActiveFacultyAppointments,
   fetchActiveNypAffiliates,
+  fetchHistoricalFacultyAppointments,
   fetchAllPostdocEmploymentRecords,
   fetchDoctoralStudents,
   fetchPersonNamesByCwid,
@@ -85,6 +87,30 @@ import {
  * a PHD student pulled from ou=students with a residual personTypeCode does
  * not get re-classified.
  */
+/**
+ * Active-member guard for an ED-detected unit leader (dept chair / division
+ * chief). ED does NOT drop a chair/chief appointment title when a person
+ * expires, so a title-matched candidate can be someone whose person entry is
+ * `weillCornellEduActiveMember=FALSE`. Returns the CWID to write, or `null`
+ * when the candidate is not an active member — so the direct upsert self-clears
+ * the stale assignment.
+ *
+ * `guardApplied` is false when the active-member lookup could NOT run (e.g. the
+ * LDAP query threw). In that case the candidate is retained unchanged, so a
+ * transient directory error never mass-clears every chair/chief.
+ *
+ * Exported for unit tests (tests/unit/etl-ed-active-leader-guard.test.ts).
+ */
+export function guardActiveLeaderCwid(
+  candidateCwid: string | null,
+  activeByCwid: Map<string, boolean>,
+  guardApplied: boolean,
+): string | null {
+  if (!candidateCwid) return null;
+  if (!guardApplied) return candidateCwid;
+  return activeByCwid.get(candidateCwid.toLowerCase()) === true ? candidateCwid : null;
+}
+
 // Exported for unit tests (tests/unit/etl-ed-role-category.test.ts).
 export function deriveRoleCategory(f: EdFacultyEntry): RoleCategory {
   if (f.ou === "students" && f.degreeCode === "PHD") return "doctoral_student";
@@ -286,6 +312,77 @@ async function refreshEdAppointments(
   }
 }
 
+/** Source tag for historical (faculty:expired) appointments. Distinct from
+ *  "ED" so the active-faculty refresh (refreshEdAppointments) never touches
+ *  these rows, and so the read layer can hide them from the public profile
+ *  unless a curator reveals one (Appointment.showOnProfile). */
+const HISTORICAL_APPOINTMENT_SOURCE = "ED-HISTORICAL";
+
+/**
+ * Reconcile this scholar's historical (faculty:expired) appointments from the
+ * WOOFA SOR. Mirrors refreshEdAppointments but scoped to {cwid,
+ * source:"ED-HISTORICAL"} so the two populations never clobber each other.
+ *
+ * Curator-reveal invariant: `showOnProfile` is written ONLY on INSERT
+ * (defaulted false), and is NEVER part of an UPDATE — so a row a curator
+ * revealed (showOnProfile=true) stays revealed across ETL reruns. The content
+ * key (appointmentContentKey) does not hash showOnProfile, so toggling reveal
+ * causes no reconcile churn.
+ */
+async function refreshHistoricalAppointments(
+  cwid: string,
+  appts: EdFacultyAppointment[],
+): Promise<void> {
+  // Built WITHOUT showOnProfile so the field is set only when mapping
+  // plan.toCreate to createMany data below — never on update.
+  const incoming = appts.map((a) => ({
+    cwid: a.cwid,
+    title: a.title,
+    organization: a.organization ?? "Weill Cornell Medicine",
+    startDate: a.startDate,
+    endDate: a.endDate,
+    isPrimary: a.isPrimary,
+    isInterim: false,
+    externalId: a.externalId,
+    source: HISTORICAL_APPOINTMENT_SOURCE,
+  }));
+  const existing = await db.write.appointment.findMany({
+    where: { cwid, source: HISTORICAL_APPOINTMENT_SOURCE },
+    select: {
+      externalId: true, cwid: true, title: true, organization: true,
+      startDate: true, endDate: true, isPrimary: true, isInterim: true,
+      source: true,
+    },
+  });
+  const plan = classifyByExternalId({
+    incoming,
+    existing,
+    contentKey: appointmentContentKey,
+  });
+  if (plan.toCreate.length > 0) {
+    // showOnProfile defaults to false on INSERT only — see invariant above.
+    await db.write.appointment.createMany({
+      data: plan.toCreate.map((a) => ({ ...a, showOnProfile: false })),
+    });
+  }
+  for (const a of plan.toUpdate) {
+    // No showOnProfile key here — a curator's reveal must survive the update.
+    await db.write.appointment.update({
+      where: { externalId: a.externalId },
+      data: { ...a, lastRefreshedAt: new Date() },
+    });
+  }
+  if (plan.staleExternalIds.length > 0) {
+    await db.write.appointment.deleteMany({
+      where: {
+        cwid,
+        source: HISTORICAL_APPOINTMENT_SOURCE,
+        externalId: { in: plan.staleExternalIds },
+      },
+    });
+  }
+}
+
 /** NYP affiliate organization label shown on the profile sidebar. The title
  *  on these rows is the normalized role only ("Associate Physician"); the
  *  hospital name is carried on the Appointment.organization column so the
@@ -447,6 +544,31 @@ async function main() {
       appointmentsByCwid.set(a.cwid, arr);
     }
 
+    // Issue #1323 — historical (faculty:expired) appointments. Best-effort:
+    // a fetch failure must NOT abort the ETL, and an empty result from a failed
+    // fetch is NOT the same as "no historical rows exist", so we only reconcile
+    // when the fetch actually succeeded (a wipe-on-failure would delete every
+    // curator-revealed historical row). Deliberately NOT merged into
+    // appointmentsByCwid: historical rows must not feed active-faculty rollups
+    // (division/dept membership, primary-appointment dept/div resolution).
+    console.log("Fetching historical (faculty:expired) faculty appointments from ou=faculty SOR...");
+    let historicalAppointments: EdFacultyAppointment[] = [];
+    let historicalFetchSucceeded = false;
+    try {
+      historicalAppointments = await fetchHistoricalFacultyAppointments(client);
+      historicalFetchSucceeded = true;
+      console.log(`ED returned ${historicalAppointments.length} historical faculty appointment rows.`);
+    } catch (err) {
+      console.warn(
+        `Historical faculty appointment fetch skipped (ou=faculty,ou=sors unavailable): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    const historicalByCwid = new Map<string, EdFacultyAppointment[]>();
+    for (const a of historicalAppointments) {
+      const arr = historicalByCwid.get(a.cwid) ?? [];
+      arr.push(a);
+      historicalByCwid.set(a.cwid, arr);
+    }
 
     // Phase 4 — employee SOR for the manager graph. Used by:
     //   - postdoc mentor lookup (issue #5)
@@ -885,6 +1007,9 @@ async function main() {
           pinnedSlugCwids,
         );
         await refreshEdAppointments(f.cwid, appointmentsByCwid.get(f.cwid) ?? []);
+        if (historicalFetchSucceeded) {
+          await refreshHistoricalAppointments(f.cwid, historicalByCwid.get(f.cwid) ?? []);
+        }
         if (wasDeleted) reactivated += 1;
         updated += 1;
       } else {
@@ -921,6 +1046,9 @@ async function main() {
           },
         });
         await refreshEdAppointments(f.cwid, appointmentsByCwid.get(f.cwid) ?? []);
+        if (historicalFetchSucceeded) {
+          await refreshHistoricalAppointments(f.cwid, historicalByCwid.get(f.cwid) ?? []);
+        }
         created += 1;
       }
 
@@ -1033,6 +1161,12 @@ async function main() {
     const chairTitleVariants = new Set<string>();
     let chairAssignments = 0;
     let deptLeaderOverridesApplied = 0;
+    // Two-pass so the active-member guard is ONE batched LDAP lookup: pass 1
+    // resolves overrides (written immediately — a curator pin is authoritative,
+    // not ED-sourced) and collects the title-matched candidates; pass 2 guards
+    // the candidates against `weillCornellEduActiveMember` and writes.
+    const chairCandidates: Array<{ deptCode: string; cwid: string; title: string }> = [];
+    const chairDeptsToClear: string[] = [];
     for (const dept of seenDepts.values()) {
       // #540 — a `field_override(department, code, 'leaderCwid')` row wins
       // outright. Non-empty value writes the curated CWID; `""` writes null
@@ -1096,21 +1230,64 @@ async function main() {
         orderBy: [{ isPrimary: "desc" }, { startDate: "desc" }],
         select: { cwid: true, title: true },
       });
-      // Ensure we always clear stale assignments first — if no candidate
-      // matches this run, the dept gets chair_cwid=null instead of keeping
-      // the wrong scholar from a prior run.
-      await db.write.department.update({
-        where: { code: dept.code },
-        data: { chairCwid: candidate?.cwid ?? null },
-      });
       if (candidate) {
-        chairTitleVariants.add(candidate.title);
-        chairAssignments += 1;
+        chairCandidates.push({ deptCode: dept.code, cwid: candidate.cwid, title: candidate.title });
+      } else {
+        // Always clear stale assignments — if no candidate matches this run the
+        // dept gets chair_cwid=null instead of keeping a prior run's scholar.
+        chairDeptsToClear.push(dept.code);
       }
+    }
+
+    // Active-member guard (pass 2). ED keeps a "Chair of X" title on an expired
+    // person, so a title-matched candidate whose person is
+    // `weillCornellEduActiveMember != TRUE` is stale — drop it so the upsert
+    // self-clears. Fail-open on an LDAP error of the guard lookup: retain the
+    // candidate unchanged rather than mass-clear every chair on a transient blip.
+    let chairActive = new Map<string, boolean>();
+    let chairGuardApplied = false;
+    let chairGuardDropped = 0;
+    if (chairCandidates.length > 0) {
+      try {
+        const guardClient = await openLdap();
+        try {
+          chairActive = await fetchActiveMembersByCwid(
+            guardClient,
+            chairCandidates.map((c) => c.cwid),
+          );
+          chairGuardApplied = true;
+        } finally {
+          await guardClient.unbind().catch(() => {});
+        }
+      } catch (err) {
+        console.warn(
+          `[ED] chair active-member guard skipped (LDAP unavailable) — chairs retained unguarded this run: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    for (const c of chairCandidates) {
+      const cwidToWrite = guardActiveLeaderCwid(c.cwid, chairActive, chairGuardApplied);
+      await db.write.department.update({
+        where: { code: c.deptCode },
+        data: { chairCwid: cwidToWrite },
+      });
+      if (cwidToWrite) {
+        chairTitleVariants.add(c.title);
+        chairAssignments += 1;
+      } else {
+        chairGuardDropped += 1;
+      }
+    }
+    for (const deptCode of chairDeptsToClear) {
+      await db.write.department.update({
+        where: { code: deptCode },
+        data: { chairCwid: null },
+      });
     }
     console.log(
       `[ED] assigned leaders to ${chairAssignments}/${seenDepts.size} departments ` +
-        `(field_override consult: ${deptLeaderOverridesApplied} dept rows wrote from override)`,
+        `(field_override consult: ${deptLeaderOverridesApplied} dept rows wrote from override; ` +
+        `active-member guard dropped ${chairGuardDropped} inactive chair candidate(s))`,
     );
     console.log(`[ED] distinct leader-title variants observed:`, [...chairTitleVariants]);
 
@@ -1451,7 +1628,13 @@ async function main() {
     };
     let chiefAssignments = 0;
     let divLeaderOverridesApplied = 0;
+    let chiefGuardDropped = 0;
     if (!chiefDetectionDisabled && employeeRecords.length > 0) {
+      // Two-pass (see the chair loop): overrides write immediately, Path-B
+      // detections are collected then guarded against `weillCornellEduActiveMember`
+      // in ONE batched LDAP lookup.
+      const chiefCandidates: Array<{ divCode: string; cwid: string }> = [];
+      const chiefDivsToClear: string[] = [];
       for (const div of divisionsForChief) {
         // #540 — a `field_override(division, code, 'leaderCwid')` row wins
         // over Path B and Path C both. Non-empty -> that CWID; "" ->
@@ -1482,17 +1665,58 @@ async function main() {
         // Threshold gate: only HIGH and MEDIUM auto-write the pick.
         // LOW/NONE/GAP all clear to null — the override file (Path C) is
         // the escape hatch for divisions Path B can't decide on.
+        if (result.valueToWrite) {
+          chiefCandidates.push({ divCode: div.code, cwid: result.valueToWrite });
+        } else {
+          chiefDivsToClear.push(div.code);
+        }
+      }
+
+      // Active-member guard. ED keeps a chief's appointment/manager graph on an
+      // expired person; a detected chief who is not `weillCornellEduActiveMember`
+      // TRUE is stale — drop it so the upsert self-clears. Fail-open on an LDAP
+      // error: retain the detection unchanged rather than mass-clear.
+      let chiefActive = new Map<string, boolean>();
+      let chiefGuardApplied = false;
+      if (chiefCandidates.length > 0) {
+        try {
+          const guardClient = await openLdap();
+          try {
+            chiefActive = await fetchActiveMembersByCwid(
+              guardClient,
+              chiefCandidates.map((c) => c.cwid),
+            );
+            chiefGuardApplied = true;
+          } finally {
+            await guardClient.unbind().catch(() => {});
+          }
+        } catch (err) {
+          console.warn(
+            `[ED] chief active-member guard skipped (LDAP unavailable) — chiefs retained unguarded this run: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      for (const c of chiefCandidates) {
+        const cwidToWrite = guardActiveLeaderCwid(c.cwid, chiefActive, chiefGuardApplied);
         await db.write.division.update({
-          where: { code: div.code },
-          data: { chiefCwid: result.valueToWrite },
+          where: { code: c.divCode },
+          data: { chiefCwid: cwidToWrite },
         });
-        if (result.valueToWrite) chiefAssignments += 1;
+        if (cwidToWrite) chiefAssignments += 1;
+        else chiefGuardDropped += 1;
+      }
+      for (const divCode of chiefDivsToClear) {
+        await db.write.division.update({
+          where: { code: divCode },
+          data: { chiefCwid: null },
+        });
       }
       console.log(
         `[ED] Path B: assigned chiefs to ${chiefAssignments}/${divisionsForChief.length} divisions ` +
           `(verdicts — HIGH=${chiefVerdictTally.HIGH} MEDIUM=${chiefVerdictTally.MEDIUM} ` +
           `LOW=${chiefVerdictTally.LOW} NONE=${chiefVerdictTally.NONE} GAP=${chiefVerdictTally.GAP}; ` +
-          `field_override consult: ${divLeaderOverridesApplied} divisions wrote from override)`,
+          `field_override consult: ${divLeaderOverridesApplied} divisions wrote from override; ` +
+          `active-member guard dropped ${chiefGuardDropped} inactive chief candidate(s))`,
       );
     } else {
       console.log(
@@ -1510,7 +1734,14 @@ async function main() {
       // a swallowed fetch failure lands in this branch as "no employee SOR
       // data", and blanket-nulling every division chief on a transient LDAP
       // error is a mass-clear, not consistency (audit PR-3).
-      if (!chiefDetectionDisabled && employeeFetchSucceeded && employeeRecords.length > 0) {
+      //
+      // #1511: this else-branch is reached only when chief detection was
+      // DISABLED or there were no employee records — so the guard must key on
+      // `chiefDetectionDisabled`, not `!chiefDetectionDisabled`. With the
+      // negation the condition was unsatisfiable (detection-enabled + records
+      // present would have taken the Path B `if`), so disabling chief detection
+      // silently stopped clearing stale chiefs and applying leader overrides.
+      if (chiefDetectionDisabled && employeeFetchSucceeded && employeeRecords.length > 0) {
         await db.write.division.updateMany({ data: { chiefCwid: null } });
         for (const div of divisionsForChief) {
           const leaderOverride = resolveUnitLeaderForETL(

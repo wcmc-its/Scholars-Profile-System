@@ -83,10 +83,11 @@ API routes or the TypeScript types consumed by the frontend.
 
 The application operates on data that is as stale as the last successful ETL run. The
 staleness window is bounded by cadence: daily for ED, ASMS, InfoEd, ReCiter, and COI;
-weekly for the ReCiterAI projection. The `/api/health/refresh-status` endpoint exposes the
-`lastSuccessAt` timestamp for each source and raises `allFresh: false` (HTTP 503) when any
-source has not run successfully within 26 hours. Mohammad's team can wire this to a
-CloudWatch alarm for operational monitoring.
+weekly for the ReCiterAI projection. Freshness is monitored by the `etl:freshness` Step
+Functions step (#595), which reads each source's `lastSuccessAt` from the `etl_run` table
+in-VPC and exits non-zero when a source is past its cadence SLA; that failure rides the
+per-machine status alarm to the on-call topic. (An `/api/health/refresh-status` HTTP
+endpoint previously exposed the same data; it was retired in #1514 as it had no consumer.)
 
 Schema drift in upstream DynamoDB or LDAP requires ETL code changes to remain current. This
 is mitigated by the 30-day-advance schema-change protocol specified in design spec v1.7.1

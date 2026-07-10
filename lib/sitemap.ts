@@ -23,6 +23,7 @@ import {
   getSupercategoryHubEntries,
   getFamiliesForSupercategory,
 } from "@/lib/api/methods";
+import { siteBaseUrl } from "@/lib/site-url";
 
 /**
  * Maximum URLs per child sitemap. Half the 50,000-URL protocol cap, which also
@@ -48,10 +49,10 @@ export interface SitemapEntry {
   priority: number;
 }
 
-/** Canonical site origin; overridable per environment. */
-export function siteBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_SITE_URL ?? "https://scholars.weill.cornell.edu";
-}
+// Canonical site origin now lives in the zero-dep leaf `@/lib/site-url` (#1514,
+// runtime `SITE_URL`-aware). Re-exported so existing `@/lib/sitemap` importers
+// (app/sitemap.xml/route.ts, tests) keep resolving it here.
+export { siteBaseUrl };
 
 /**
  * Build the full, ordered list of sitemap entries (static + scholars + topics +

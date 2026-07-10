@@ -30,7 +30,7 @@ const {
 vi.mock("@/lib/db", () => ({
   prisma: {
     scholar: { findFirst: mockScholarFindFirst, findUnique: vi.fn() },
-    fieldOverride: { findUnique: mockFieldOverrideFindUnique },
+    fieldOverride: { findUnique: mockFieldOverrideFindUnique, findMany: vi.fn(async () => []) },
     publicationAuthor: { findMany: mockPublicationAuthorFindMany },
     suppression: { findMany: mockSuppressionFindMany },
     personNihProfile: { findFirst: mockPersonNihProfileFindFirst },
@@ -66,6 +66,7 @@ function scholarRow(emailVisibility: string | null, email: string | null = EMAIL
     deletedAt: null,
     status: "active",
     appointments: [],
+    profileAppointments: [],
     educations: [],
     grants: [],
     coiActivities: [],

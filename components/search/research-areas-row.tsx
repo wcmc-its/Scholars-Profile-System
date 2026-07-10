@@ -58,6 +58,12 @@ export function ResearchAreasRow({ result }: { result: TaxonomyMatchResult }) {
           chips as fit, the rest folded into "+N more" (expands inline). */}
       {areas.length > 0 ? (
         <MeasuredChipRow
+          // Key on the item SET so a soft-nav query refinement ("cancer" →
+          // "breast cancer") remounts the row with a fresh measurement pass.
+          // Without it the same instance keeps a `fit` sized for the old set
+          // (the measure effect re-arms only on element resize), clipping "+N
+          // more". Keying is simpler + more robust than re-arming in an effect.
+          key={areas.map((m) => `${m.entityType}:${m.id}`).join("|")}
           icon={<Shapes aria-hidden className="h-[15px] w-[15px] shrink-0" strokeWidth={2} />}
           label="Research Areas"
           items={areas}
@@ -75,6 +81,7 @@ export function ResearchAreasRow({ result }: { result: TaxonomyMatchResult }) {
           (methodMatches has no separate total, so "+N more" = the loaded set). */}
       {methodMatches.length > 0 ? (
         <MeasuredChipRow
+          key={methodMatches.map((m) => `${m.entityType}:${m.id}`).join("|")}
           icon={<Wrench aria-hidden className="h-[15px] w-[15px] shrink-0" strokeWidth={2} />}
           label="Methods and Tools"
           items={methodMatches}

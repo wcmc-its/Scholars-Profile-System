@@ -379,17 +379,36 @@ export class SpsObservabilityStack extends Stack {
     // alarm fires when running < desired regardless of the desired-count
     // value (handles bootstrap appDesiredCount=0 case correctly: 0 < 0 is
     // false, no false-fire).
+    // DesiredTaskCount / RunningTaskCount are published only to the
+    // ECS/ContainerInsights namespace (Container Insights is enabled on the
+    // cluster, app-stack.ts), NOT the AWS/ECS namespace that
+    // BaseService.metric() targets -- there they carry no data, so anything
+    // built on them (this alarm and the dashboard widget below) silently
+    // never receives datapoints. Build them explicitly against the right
+    // namespace; dimensions come from the same service construct the CPU/mem
+    // metrics already reference, so no new cross-stack export.
+    const ecsTaskCountMetric = (
+      metricName: "DesiredTaskCount" | "RunningTaskCount",
+      statistic: string,
+      label?: string,
+    ) =>
+      new cloudwatch.Metric({
+        namespace: "ECS/ContainerInsights",
+        metricName,
+        dimensionsMap: {
+          ClusterName: appStack.ecsService.cluster.clusterName,
+          ServiceName: appStack.ecsService.serviceName,
+        },
+        statistic,
+        period: Duration.minutes(1),
+        ...(label ? { label } : {}),
+      });
+
     const taskCountShortfall = new cloudwatch.MathExpression({
       expression: "desired - running",
       usingMetrics: {
-        desired: appStack.ecsService.metric("DesiredTaskCount", {
-          statistic: "Maximum",
-          period: Duration.minutes(1),
-        }),
-        running: appStack.ecsService.metric("RunningTaskCount", {
-          statistic: "Minimum",
-          period: Duration.minutes(1),
-        }),
+        desired: ecsTaskCountMetric("DesiredTaskCount", "Maximum"),
+        running: ecsTaskCountMetric("RunningTaskCount", "Minimum"),
       },
       label: "Desired - Running tasks (5m)",
       period: Duration.minutes(1),
@@ -1089,16 +1108,8 @@ export class SpsObservabilityStack extends Stack {
       width: 12,
       height: 6,
       left: [
-        appStack.ecsService.metric("RunningTaskCount", {
-          statistic: "Minimum",
-          period: Duration.minutes(1),
-          label: "Running (min)",
-        }),
-        appStack.ecsService.metric("DesiredTaskCount", {
-          statistic: "Maximum",
-          period: Duration.minutes(1),
-          label: "Desired (max)",
-        }),
+        ecsTaskCountMetric("RunningTaskCount", "Minimum", "Running (min)"),
+        ecsTaskCountMetric("DesiredTaskCount", "Maximum", "Desired (max)"),
       ],
       leftYAxis: { min: 0, label: "tasks" },
     });

@@ -25,7 +25,7 @@
  * DB pagination, bulk writes, smoke assertions — and consults the builders
  * for the actual `_source` shape.
  */
-import { prisma } from "../../lib/db";
+import { disconnect, prisma } from "../../lib/db";
 import { assertSourceVolume } from "../../lib/etl-guard";
 import { withEtlRun } from "../../lib/etl-run";
 import {
@@ -817,7 +817,5 @@ if (!process.env.VITEST) {
       console.error(err);
       process.exit(1);
     })
-    .finally(async () => {
-      await prisma.$disconnect();
-    });
+    .finally(disconnect);
 }

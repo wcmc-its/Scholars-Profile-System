@@ -106,6 +106,41 @@ describe("OverviewCard — Save disabled states", () => {
     expect(counter.textContent).toBe("2,100/2,500");
     expect(counter.className).toContain("text-apollo-amber");
   });
+
+  it("counter counts VISIBLE text, not the HTML markup", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="" />);
+    // 11 visible characters ("hello world"), but 18 characters of HTML.
+    fireEvent.change(screen.getByTestId("mock-editor"), {
+      target: { value: "<p>hello world</p>" },
+    });
+    const counter = screen.getByTestId("overview-counter");
+    expect(counter.textContent).toBe("11");
+    expect(counter.className).not.toContain("text-destructive");
+    expect(counter.className).not.toContain("text-apollo-amber");
+  });
+
+  it("editorial cap does NOT trip when HTML length is over 2,500 but visible text is under", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="" />);
+    // 400 visible characters, but 3,200 characters of HTML (well over 2,500).
+    const html = "<b>x</b>".repeat(400);
+    fireEvent.change(screen.getByTestId("mock-editor"), { target: { value: html } });
+    const counter = screen.getByTestId("overview-counter");
+    expect(counter.textContent).toBe("400");
+    expect(counter.className).not.toContain("text-destructive");
+    // Under the visible cap → Save stays enabled even though the HTML is > 2,500.
+    expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("editorial cap trips + Save disables on VISIBLE length over 2,500", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="" />);
+    // 2,501 visible characters (each wrapped in tags → far more HTML).
+    const html = "<b>x</b>".repeat(2_501);
+    fireEvent.change(screen.getByTestId("mock-editor"), { target: { value: html } });
+    const counter = screen.getByTestId("overview-counter");
+    expect(counter.textContent).toBe("2,501/2,500");
+    expect(counter.className).toContain("text-destructive");
+    expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
+  });
 });
 
 describe("OverviewCard — successful save", () => {

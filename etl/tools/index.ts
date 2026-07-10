@@ -62,6 +62,7 @@ import {
   type FamilyEntityArtifact,
 } from "./family-entity-mapper-s3";
 import { manifestContentSignature } from "./manifest-signature";
+import { publicationSuppressionChangedSince } from "./suppression-freshness";
 
 // ---------------------------------------------------------------------------
 // Module-level env constants — AWS SDK default credential chain; never hardcode
@@ -285,14 +286,29 @@ async function main(): Promise<void> {
       orderBy: { completedAt: "desc" },
     });
     if (lastRun?.manifestSha256 === signature) {
-      log("short_circuit", {
-        sha256: manifest.sha256,
-        signature_prefix: signature.slice(0, 12),
+      // #1502: the artifact sha is blind to Aurora-side ADR-005 suppression
+      // state. An unchanged artifact still forces a full rebuild when a
+      // publication takedown / per-author hide was created or revoked since the
+      // last successful run — otherwise the baked exemplar/usage sentences stay
+      // stale until ReciterAI happens to republish the artifact.
+      const suppressionChanged = await publicationSuppressionChangedSince(
+        db.write,
+        lastRun.completedAt,
+      );
+      if (!suppressionChanged) {
+        log("short_circuit", {
+          sha256: manifest.sha256,
+          signature_prefix: signature.slice(0, 12),
+          version: manifest.version,
+          rows: 0,
+        });
+        await recordRun({ status: "success", rowsProcessed: 0, manifest });
+        return;
+      }
+      log("suppression_changed_rebuild", {
+        since: lastRun.completedAt?.toISOString() ?? null,
         version: manifest.version,
-        rows: 0,
       });
-      await recordRun({ status: "success", rowsProcessed: 0, manifest });
-      return;
     }
   }
   if (forceReplace) {

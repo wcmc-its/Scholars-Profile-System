@@ -837,7 +837,11 @@ describe("assembleOverviewFacts — leadership-FK titles (#742 §2.5)", () => {
     expect(mockDepartmentFindMany.mock.calls[0][0].where).toEqual({ chairCwid: "self01" });
     expect(mockDivisionFindMany.mock.calls[0][0].where).toEqual({ chiefCwid: "self01" });
     expect(mockCenterFindMany.mock.calls[0][0].where).toEqual({ directorCwid: "self01" });
-    expect(mockCenterProgramLeaderFindMany.mock.calls[0][0].where).toEqual({ cwid: "self01" });
+    // #1570 — scoped to program LEADS only; a coe_liaison row is not a title.
+    expect(mockCenterProgramLeaderFindMany.mock.calls[0][0].where).toEqual({
+      cwid: "self01",
+      role: "leader",
+    });
   });
 
   it("a scholar's FK roles can be vetoed and surface in the drawer candidates", async () => {

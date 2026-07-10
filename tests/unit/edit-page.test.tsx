@@ -35,6 +35,7 @@ const ctx: EditContext = {
     roleCategory: "full_time_faculty",
     overview: "<p>Hi.</p>",
     slugOverride: null,
+    hiddenSections: [],
     suppression: { ownRow: null, adminRow: null },
   },
   publications: [
@@ -60,6 +61,7 @@ const ctx: EditContext = {
       suppressionId: null,
     },
   ],
+  historicalAppointments: [],
   educations: [
     {
       externalId: "edu-1",
@@ -271,6 +273,29 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(document.querySelector('[data-slot="appointments-panel"]')).not.toBeNull();
     expect(screen.getByTestId("appointment-row-appt-1")).toBeTruthy();
     expect(screen.getByText("Professor of Medicine")).toBeTruthy();
+  });
+
+  // #1557 — self-serve reveal. The scholar themselves (mode="self") sees the
+  // Historical Appointments reveal panel, not just curators/stewards.
+  it("?attr=appointments surfaces the Historical Appointments panel to the SELF scholar (#1557)", () => {
+    const withHistorical: EditContext = {
+      ...ctx,
+      historicalAppointments: [
+        {
+          externalId: "hist-1",
+          title: "Assistant Professor",
+          organization: "Prior University",
+          startDate: "2008-01-01",
+          endDate: "2014-12-31",
+          showOnProfile: false,
+        },
+      ],
+    };
+    render(<EditPage ctx={withHistorical} mode="self" attr="appointments" />);
+    expect(
+      document.querySelector('[data-slot="historical-appointments-panel"]'),
+    ).not.toBeNull();
+    expect(screen.getByTestId("historical-appointment-row-hist-1")).toBeTruthy();
   });
 
   it("?attr=funding renders the Funding panel with a filter + a grant row", () => {

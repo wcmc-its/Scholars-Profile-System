@@ -9,6 +9,8 @@
  * by actor; the data contract and write calls are layout-independent.
  */
 import { AppointmentsCard } from "@/components/edit/appointments-card";
+import { HistoricalAppointmentsCard } from "@/components/edit/historical-appointments-card";
+import { ProfileAppointmentsCard } from "@/components/edit/profile-appointments-card";
 import { CoiCard } from "@/components/edit/coi-card";
 import { CoiGapCard } from "@/components/edit/coi-gap-card";
 import { ReporterProfileCard } from "@/components/edit/reporter-profile-card";
@@ -965,6 +967,19 @@ function renderPanel(
           // purely to reframe its copy for a proxy / unit-admin (#955 #10).
           mode={childMode}
           thirdPerson={thirdPerson}
+          // section-visibility-spec — the Sections panel. Hidden keys come from
+          // the loader; the per-section hidden-RECORD counts are derived from the
+          // already-loaded edit-context suppression state (no new query). The
+          // "N records hidden →" links deep-link into each record card.
+          sections={{
+            hidden: ctx.scholar.hiddenSections,
+            hiddenRecordCounts: {
+              hideMentoring: ctx.mentees.filter((m) => m.state !== "shown").length,
+              hideEducation: ctx.educations.filter((e) => e.state !== "shown").length,
+              hideFunding: ctx.grants.filter((g) => g.state !== "shown").length,
+            },
+            basePath: detailBase,
+          }}
         />
       );
     case "publications":
@@ -992,12 +1007,44 @@ function renderPanel(
       );
     case "appointments":
       return (
-        <AppointmentsCard
-          cwid={cwid}
-          mode={voiceMode}
-          scholarName={scholarName}
-          appointments={ctx.appointments}
-        />
+        <div className="flex flex-col gap-8">
+          <AppointmentsCard
+            cwid={cwid}
+            mode={voiceMode}
+            scholarName={scholarName}
+            appointments={ctx.appointments}
+          />
+          {/* #1323 — reveal-to-show historical appointments. Every reveal-capable
+              editor sees the control: the scholar themselves (self, self-serve),
+              a superuser / comms_steward, a granted proxy, or a unit-admin curator
+              — the SAME set `authorizeOverviewWrite` authorizes at the route, so
+              the surface never drifts from the write gate. A self-actor only ever
+              sees + toggles their OWN history (the loader is per-scholar and the
+              route keys authz on the appointment's owner). */}
+          {(mode === "self" ||
+            isSuperuserLike(mode) ||
+            mode === "unit-admin" ||
+            mode === "proxy") &&
+            ctx.historicalAppointments.length > 0 && (
+              <HistoricalAppointmentsCard
+                scholarName={scholarName}
+                appointments={ctx.historicalAppointments}
+              />
+            )}
+          {/* #1568 — self-service editor for self-asserted appointments (internal
+              WCM roles the ED feed omits + prior/other-institution positions).
+              Shown to every actor the write route authorizes (self, superuser /
+              comms_steward, unit-admin, proxy — the SAME set as the historical
+              reveal above); the card fetches its own rows and each write is
+              re-authorized server-side. These render ONLY on the owner's profile,
+              never on a center / department / division / search surface. */}
+          {(mode === "self" ||
+            isSuperuserLike(mode) ||
+            mode === "unit-admin" ||
+            mode === "proxy") && (
+            <ProfileAppointmentsCard cwid={cwid} mode={voiceMode} scholarName={scholarName} />
+          )}
+        </div>
       );
     case "education":
       return (

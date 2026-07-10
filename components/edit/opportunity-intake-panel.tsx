@@ -10,6 +10,12 @@
  * render below the form (newest-first) with their pending/processed/rejected
  * outcomes, so nobody re-submits a URL a colleague already queued — the API
  * also 409s on a duplicate and the handler surfaces which row it collided with.
+ *
+ * Accidental submissions get per-row cleanup (confirm step included): Delete
+ * (pending/rejected — the item is simply removed) and Suppress (processed —
+ * status flips to `suppressed`; ReciterAI's drain companion honors that by
+ * removing the produced GRANT# items — separate ReciterAI PR in flight — and
+ * the rows fall out of the matcher on the next nightly projection).
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -39,7 +45,7 @@ const ERROR_MESSAGES: Record<string, string> = {
 
 function errorMessage(error: string | undefined, existing?: { opportunityId?: string }): string {
   if (error === "duplicate_url") {
-    return `Already in the corpus${existing?.opportunityId ? ` (${existing.opportunityId})` : ""} — search for it in the list above.`;
+    return `Already in the corpus${existing?.opportunityId ? ` (${existing.opportunityId})` : ""} — search for it on the Browse tab.`;
   }
   if (error === "duplicate_submission") {
     return "That URL has already been submitted — see the list below.";
@@ -51,7 +57,29 @@ const STATUS_STYLES: Record<SubmissionStatus, string> = {
   pending: "bg-amber-50 text-amber-800 border-amber-200",
   processed: "bg-emerald-50 text-emerald-800 border-emerald-200",
   rejected: "bg-red-50 text-red-800 border-red-200",
+  // Retracted-after-processing — deliberately muted, not alarming.
+  suppressed: "bg-zinc-100 text-zinc-600 border-zinc-300",
 };
+
+type RowActionKind = "delete" | "suppress";
+
+/** The one in-flight (or confirm-pending) row action — at most one at a time. */
+type RowAction = { submissionId: string; kind: RowActionKind; phase: "confirm" | "busy" };
+
+const ROW_ACTION_ERRORS: Record<string, string> = {
+  submission_processed:
+    "The pipeline already processed this one — use Suppress to retract it instead.",
+  not_processed: "Only a processed submission can be suppressed — delete it instead.",
+  already_suppressed: "Already suppressed.",
+  not_found: "That submission no longer exists — refreshing the list.",
+  queue_unavailable: "The submission queue isn't reachable right now. Please try again.",
+  queue_write_failed: "The submission queue isn't reachable right now. Please try again.",
+  write_failed: "The change couldn't be recorded. Please try again.",
+};
+
+function rowActionErrorMessage(error: string | undefined): string {
+  return ROW_ACTION_ERRORS[error ?? ""] ?? "Something went wrong. Please try again.";
+}
 
 function formatSubmitted(iso: string): string {
   const d = new Date(iso);
@@ -64,6 +92,8 @@ export function OpportunityIntakePanel() {
   const [note, setNote] = useState("");
   const [submit, setSubmit] = useState<SubmitState>({ kind: "idle" });
   const [list, setList] = useState<ListState>({ kind: "loading" });
+  const [rowAction, setRowAction] = useState<RowAction | null>(null);
+  const [rowActionError, setRowActionError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     fetch("/api/edit/opportunity-intake", { cache: "no-store", credentials: "same-origin" })
@@ -107,11 +137,42 @@ export function OpportunityIntakePanel() {
     }
   }
 
+  /** The confirmed row action — DELETE removes the item, PATCH suppresses it. */
+  async function performRowAction(action: RowAction) {
+    setRowAction({ ...action, phase: "busy" });
+    setRowActionError(null);
+    try {
+      const r = await fetch("/api/edit/opportunity-intake", {
+        method: action.kind === "delete" ? "DELETE" : "PATCH",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          action.kind === "delete"
+            ? { submissionId: action.submissionId }
+            : { submissionId: action.submissionId, action: "suppress" },
+        ),
+      });
+      if (!r.ok) {
+        const data = (await r.json().catch(() => ({}))) as { error?: string };
+        setRowActionError(rowActionErrorMessage(data.error));
+        // A stale row (already processed / already gone) means the list is
+        // out of date — refresh alongside the message either way.
+        refresh();
+      } else {
+        refresh();
+      }
+    } catch {
+      setRowActionError(rowActionErrorMessage(undefined));
+    } finally {
+      setRowAction(null);
+    }
+  }
+
   return (
     <section className="border-border mt-10 rounded-lg border p-5" data-slot="opportunity-intake">
       <h2 className="text-lg font-semibold tracking-tight">Submit a funding opportunity URL</h2>
       <p className="text-muted-foreground mt-1 text-sm">
-        Not in the list above? Paste the opportunity&rsquo;s web page. It goes through the same
+        Not in the Browse list? Paste the opportunity&rsquo;s web page. It goes through the same
         pipeline as the rest of the corpus — scraped, checked for duplicates, classified, and
         scored — and shows up in the matcher once processed, typically the next business day.
       </p>
@@ -159,6 +220,11 @@ export function OpportunityIntakePanel() {
       )}
 
       <div className="mt-5">
+        {rowActionError && (
+          <p className="mb-2 text-sm text-red-700" role="alert" data-testid="intake-row-action-error">
+            {rowActionError}
+          </p>
+        )}
         {list.kind === "loading" && <p className="text-muted-foreground text-sm">Loading submissions…</p>}
         {list.kind === "error" && (
           <p className="text-muted-foreground text-sm">Couldn&rsquo;t load submissions.</p>
@@ -200,11 +266,100 @@ export function OpportunityIntakePanel() {
                   <span className="text-red-700">{s.rejectReason}</span>
                 )}
                 {s.note && <span className="text-muted-foreground italic">“{s.note}”</span>}
+                <RowActions
+                  submission={s}
+                  rowAction={rowAction}
+                  onArm={(kind) =>
+                    setRowAction({ submissionId: s.submissionId, kind, phase: "confirm" })
+                  }
+                  onCancel={() => setRowAction(null)}
+                  onConfirm={(action) => void performRowAction(action)}
+                />
               </li>
             ))}
           </ul>
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * Per-row cleanup: Delete on a pending/rejected row (the pipeline never
+ * consumed it), Suppress on a processed one (retracts its produced
+ * opportunities via the drain — see the module doc). A `suppressed` row gets
+ * neither: it IS the retraction record. Destructive either way, so a click
+ * arms an inline confirm ("sure?" → Confirm/Cancel) instead of firing.
+ */
+function RowActions({
+  submission,
+  rowAction,
+  onArm,
+  onCancel,
+  onConfirm,
+}: {
+  submission: OpportunitySubmission;
+  rowAction: RowAction | null;
+  onArm: (kind: RowActionKind) => void;
+  onCancel: () => void;
+  onConfirm: (action: RowAction) => void;
+}) {
+  const kind: RowActionKind | null =
+    submission.status === "pending" || submission.status === "rejected"
+      ? "delete"
+      : submission.status === "processed"
+        ? "suppress"
+        : null;
+  if (!kind) return null;
+
+  const mine = rowAction?.submissionId === submission.submissionId ? rowAction : null;
+  const label = kind === "delete" ? "Delete" : "Suppress";
+
+  if (mine?.phase === "busy") {
+    return (
+      <span className="text-muted-foreground ml-auto text-xs" data-testid="intake-action-busy">
+        {kind === "delete" ? "Deleting…" : "Suppressing…"}
+      </span>
+    );
+  }
+  if (mine?.phase === "confirm") {
+    return (
+      <span className="ml-auto inline-flex items-center gap-2 text-xs">
+        <span className="text-muted-foreground">
+          {kind === "delete"
+            ? "Remove this submission?"
+            : "Retract it from the matcher (next pipeline run)?"}
+        </span>
+        <button
+          type="button"
+          onClick={() => onConfirm(mine)}
+          className="rounded-md border border-red-300 px-2 py-0.5 font-medium text-red-700 hover:bg-red-50"
+          data-testid="intake-action-confirm"
+        >
+          {label}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="text-muted-foreground hover:text-foreground px-1 py-0.5"
+          data-testid="intake-action-cancel"
+        >
+          Cancel
+        </button>
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onArm(kind)}
+      // Any authorized viewer may clean up any row (shared team queue) — the
+      // API enforces the same superuser-OR-developer gate as the submit.
+      disabled={rowAction !== null}
+      className="text-muted-foreground hover:text-foreground ml-auto text-xs underline decoration-dotted underline-offset-2 disabled:opacity-50"
+      data-testid={`intake-action-${kind}`}
+    >
+      {label}
+    </button>
   );
 }

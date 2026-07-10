@@ -19,6 +19,7 @@ import { EditMyProfileButton } from "@/components/scholar/edit-my-profile-button
 import { Suspense } from "react";
 import { GrantsSection } from "@/components/profile/grants-section";
 import { ClinicalTrialsSection } from "@/components/profile/clinical-trials-section";
+import { TechnologiesSection } from "@/components/profile/technologies-section";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { ProfilePubsCluster } from "@/components/profile/profile-pubs-cluster";
 import { PublicationRow } from "@/components/profile/publication-row";
@@ -31,6 +32,10 @@ import {
   type ProfilePublication,
 } from "@/lib/api/profile";
 import { serializeJsonLd } from "@/lib/seo/jsonld";
+import {
+  groupProfileAppointments,
+  type ProfileAppointmentEntry,
+} from "@/lib/profile/profile-appointments";
 import { groupPublicationsByYear } from "@/lib/profile-pub-grouping";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import {
@@ -90,8 +95,22 @@ export async function ProfileView({ slug }: { slug: string }) {
 
   const jsonLd = buildProfileJsonLd(profile);
 
+  // section-visibility-spec — per-scholar whole-section hides. The six
+  // payload-carried sections (education / funding / centers / postdoc mentor /
+  // clinical trials / methods) are already emptied in the loader, so their
+  // existing `length > 0` guards below no-op automatically. Two need a render-
+  // body gate: `hideMentoring` (the mentee list is fetched here, not in the
+  // payload) and `hideMethods` (also disable the sensitive-family reveal so an
+  // internal viewer can't re-surface the hidden lens). `?? []` guards a
+  // loosely-typed / older cached payload that predates this field.
+  const hiddenSectionSet = new Set(profile.hiddenSections ?? []);
+
   const sparse = isSparseProfile(profile);
   const activeAppointments = profile.appointments.filter((a) => a.isActive);
+  // #1568 — self-asserted appointments render ONLY here, on the owner's own
+  // profile (no aggregate/third-party serializer reads them). Split into the two
+  // headings; hidden rows (`showOnProfile === false`) are dropped by the helper.
+  const selfAppointments = groupProfileAppointments(profile.profileAppointments ?? []);
 
   // v2b — Mentoring section. Fetches AOC mentees from reciterdb. Returns []
   // for scholars with no recorded mentor relationships, in which case the
@@ -105,8 +124,15 @@ export async function ProfileView({ slug }: { slug: string }) {
   // fallback zero, NOT a real count, so we suppress the co-pub affordances
   // (rollup link + per-chip badges) and show a muted "temporarily unavailable"
   // note instead of presenting an outage as "no co-publications".
-  const { mentees: menteesAll, copubSourceAvailable } =
-    await getMenteesForMentor(profile.cwid, { sort: "copubs" });
+  // section-visibility — when Mentoring is hidden, skip the live ReciterDB
+  // mentee fetch entirely (the data never even loads, let alone ships).
+  const emptyMentoring: Awaited<ReturnType<typeof getMenteesForMentor>> = {
+    mentees: [],
+    copubSourceAvailable: true,
+  };
+  const { mentees: menteesAll, copubSourceAvailable } = hiddenSectionSet.has("hideMentoring")
+    ? emptyMentoring
+    : await getMenteesForMentor(profile.cwid, { sort: "copubs" });
 
   // #160 follow-up — a mentor may HIDE a mentee from their public profile. The
   // suppression layer is the SOR for that choice (ADR-005 immediacy: per-
@@ -329,6 +355,56 @@ export async function ProfileView({ slug }: { slug: string }) {
               </SidebarCard>
             ) : null}
 
+            {/* #1323 — Past Appointments: REVEALED historical (`ED-HISTORICAL`)
+                roles the scholar opted to show. Hidden ones never reach the
+                payload, so this card simply renders whatever survived. Each
+                row shows a start–end year range. `?? []` tolerates a stale
+                CloudFront/ISR payload built before this field existed during a
+                rolling deploy. */}
+            {(profile.pastAppointments ?? []).length > 0 ? (
+              <SidebarCard title="Past Appointments">
+                <ul className="flex flex-col gap-3">
+                  {(profile.pastAppointments ?? []).map((a, i) => {
+                    const startYear = a.startDate ? a.startDate.slice(0, 4) : null;
+                    const endYear = a.endDate ? a.endDate.slice(0, 4) : null;
+                    const yearRange =
+                      startYear && endYear
+                        ? `${startYear}–${endYear}`
+                        : startYear
+                          ? `${startYear}–`
+                          : endYear
+                            ? `–${endYear}`
+                            : "";
+                    return (
+                      <li key={i} className="leading-snug">
+                        <div className="font-semibold">{a.title}</div>
+                        <div className="text-muted-foreground mt-0.5 text-xs">
+                          {a.organization}
+                          {yearRange ? ` · ${yearRange}` : ""}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </SidebarCard>
+            ) : null}
+
+            {/* #1568 — self-asserted roles/leadership the ED feed doesn't carry
+                (WCM_LEADERSHIP). Owner-entered on /edit, profile-only. */}
+            {selfAppointments.leadership.length > 0 ? (
+              <SidebarCard title="Roles & Leadership">
+                <SelfAppointmentList entries={selfAppointments.leadership} />
+              </SidebarCard>
+            ) : null}
+
+            {/* #1568 — self-asserted appointments at other institutions
+                (EXTERNAL), prior or current — dates say which. */}
+            {selfAppointments.external.length > 0 ? (
+              <SidebarCard title="Previous / Other Appointments">
+                <SelfAppointmentList entries={selfAppointments.external} />
+              </SidebarCard>
+            ) : null}
+
             {/* #1103 — Centers card: the scholar's ACTIVE center memberships
                 (reverse of the center roster). Omitted entirely when there are
                 none (flag off ⇒ payload carries []). Each entry links to
@@ -404,7 +480,7 @@ export async function ProfileView({ slug }: { slug: string }) {
           {profile.overview ? (
             <Section title="Overview">
               <div
-                className="text-base leading-relaxed text-zinc-800 dark:text-zinc-200 [&_a]:text-[var(--color-accent-slate)] [&_a]:underline-offset-4 [&_a:hover]:underline [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:mb-1"
+                className="text-base leading-relaxed text-zinc-800 dark:text-zinc-200 [&_a]:text-[var(--color-accent-slate)] [&_a]:underline [&_a]:underline-offset-4 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:mb-1"
                 dangerouslySetInnerHTML={{ __html: profile.overview }}
               />
             </Section>
@@ -468,7 +544,9 @@ export async function ProfileView({ slug }: { slug: string }) {
                   publications={profile.publications}
                   keywords={profile.keywords.keywords}
                   families={profile.families}
-                  sensitiveGateActive={isMethodsLensSensitiveGateOn()}
+                  sensitiveGateActive={
+                    isMethodsLensSensitiveGateOn() && !hiddenSectionSet.has("hideMethods")
+                  }
                   familyFilterEnabled={isMethodsLensFamilyFilterOn()}
                   methodPagesEnabled={isMethodPagesEnabled()}
                   facetRedesignEnabled={isProfileFacetRedesignEnabled()}
@@ -519,6 +597,32 @@ export async function ProfileView({ slug }: { slug: string }) {
               }
             >
               <ClinicalTrialsSection trials={profile.clinicalTrials} />
+            </Section>
+          ) : null}
+
+          {profile.technologies.length > 0 ? (
+            <Section
+              title="Available technologies"
+              headingLg
+              count={
+                <>
+                  {profile.technologies.length}{" "}
+                  {profile.technologies.length === 1 ? "technology" : "technologies"}
+                </>
+              }
+              headerAction={
+                <a
+                  href="https://innovation.weill.cornell.edu/technology-portfolio"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Opens the WCM Center for Technology Licensing portfolio"
+                  className="text-sm whitespace-nowrap text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                >
+                  View full portfolio ↗
+                </a>
+              }
+            >
+              <TechnologiesSection technologies={profile.technologies} />
             </Section>
           ) : null}
 
@@ -679,6 +783,43 @@ function Section({
       )}
       {children}
     </section>
+  );
+}
+
+/** #1568 — a `start–end` year range for a self-asserted appointment. A missing
+ *  end reads as ongoing ("2019–"); a missing start with an end reads "–2019".
+ *  Mirrors the Past Appointments range logic above. */
+function selfAppointmentYearRange(startDate: string | null, endDate: string | null): string {
+  const start = startDate ? startDate.slice(0, 4) : null;
+  const end = endDate ? endDate.slice(0, 4) : null;
+  if (start && end) return `${start}–${end}`;
+  if (start) return `${start}–`;
+  if (end) return `–${end}`;
+  return "";
+}
+
+/** #1568 — the sidebar list for one self-asserted appointment group. Title is
+ *  the bold line; the muted meta joins organization / unit / location and the
+ *  year range with the sidebar's "·" separator (each part omitted when absent).
+ *  Presentational only — the owner-only trust boundary is upstream (this data is
+ *  read by no aggregate serializer). */
+function SelfAppointmentList({ entries }: { entries: ReadonlyArray<ProfileAppointmentEntry> }) {
+  return (
+    <ul className="flex flex-col gap-3">
+      {entries.map((a, i) => {
+        const meta = [a.organization, a.unit, a.location].filter(Boolean);
+        const range = selfAppointmentYearRange(a.startDate, a.endDate);
+        if (range) meta.push(range);
+        return (
+          <li key={i} className="leading-snug">
+            <div className="font-semibold">{a.title}</div>
+            {meta.length > 0 ? (
+              <div className="text-muted-foreground mt-0.5 text-xs">{meta.join(" · ")}</div>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

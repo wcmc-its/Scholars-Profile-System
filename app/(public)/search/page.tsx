@@ -180,6 +180,11 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
   const q = (Array.isArray(sp.q) ? sp.q[0] : sp.q) ?? "";
   const type = (Array.isArray(sp.type) ? sp.type[0] : sp.type) ?? "people";
+  // Issue #1513 — the A–Z directory overflow link ("View all N scholars with
+  // last name starting with X") passes a single last-name initial. Validated to
+  // one A–Z letter; anything else is ignored (falls back to normal browse).
+  const rawLetter = (Array.isArray(sp.letter) ? sp.letter[0] : sp.letter) ?? "";
+  const letter = /^[A-Za-z]$/.test(rawLetter) ? rawLetter : "";
   const rawPage = parseInt((Array.isArray(sp.page) ? sp.page[0] : sp.page) ?? "0", 10);
   const page = Number.isFinite(rawPage) ? Math.max(0, rawPage) : 0;
   const rawSort = Array.isArray(sp.sort) ? sp.sort[0] : sp.sort;
@@ -205,7 +210,9 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
         : emptyPeopleDefault
       : "relevance");
 
-  const showAZ = q === "" && type === "people";
+  // A single-letter `letter` browse shows the filtered people list, not the A–Z
+  // grid (which is the entry point the overflow link drills down from).
+  const showAZ = q === "" && type === "people" && letter === "";
   // Issue #294 PR-5 — time the taxonomy resolver. `taxonomyMatchMs` is null
   // when q is under 3 chars: the resolver call is skipped entirely, so the
   // log records "skipped" rather than a misleading ~0ms measurement.
@@ -469,6 +476,8 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           q,
           page,
           sort: sort as PeopleSort,
+          // #1513 — last-name-initial browse (A–Z overflow link).
+          letter: letter || undefined,
           filters: {
             deptDiv: effectiveDeptDiv.length > 0 ? effectiveDeptDiv : undefined,
             personType: personType.length > 0 ? personType : undefined,
@@ -846,6 +855,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             ) : (
               <PeopleResults
                 q={q}
+                letter={letter}
                 page={page}
                 sort={sort as PeopleSort}
                 deptDiv={deptDiv}
@@ -1117,6 +1127,7 @@ function deptDivLabel(key: string, map: Map<string, string>): string {
 
 async function PeopleResults({
   q,
+  letter,
   page,
   sort,
   deptDiv,
@@ -1133,6 +1144,8 @@ async function PeopleResults({
   evidenceRows,
 }: {
   q: string;
+  /** #1513 — A–Z last-name-initial browse; preserved across facet/sort/page links. */
+  letter: string;
   page: number;
   sort: PeopleSort;
   deptDiv: string[];
@@ -1181,6 +1194,10 @@ async function PeopleResults({
     const sp = new URLSearchParams();
     sp.set("q", q);
     sp.set("type", "people");
+    // #1513 — preserve the A–Z last-name-initial scope across every facet/sort/
+    // pagination link, so navigating the filtered browse doesn't silently revert
+    // to the full people list (mirrors the #396 searchMode preservation).
+    if (letter) sp.set("letter", letter);
     if (sort !== "relevance") sp.set("sort", sort);
     for (const v of deptDiv) sp.append("deptDiv", v);
     for (const v of personType) sp.append("personType", v);
@@ -1231,12 +1248,26 @@ async function PeopleResults({
       if (clamped !== PI_MIN_FLOOR) sp.set("pi_min", String(clamped));
     });
 
+  // #1513 — "Clear all" drops the letter too (it renders as a chip below, so
+  // clearing all must remove every chip). Individual facet ✕ and pagination keep
+  // the letter (that's the buildUrl preservation); only the letter chip's own ✕
+  // and "Clear all" exit the letter browse.
   const clearAllParams = new URLSearchParams({ q, type: "people" });
   if (scope !== "expanded") clearAllParams.set("match", scope);
   const clearAllHref = `/search?${clearAllParams.toString()}`;
 
   // One chip per selected value.
   const chips: Array<{ label: React.ReactNode; ariaLabel?: string; removeHref: string }> = [];
+  // #1513 — the A–Z last-name-initial scope renders as the first chip so the
+  // filtered browse is visible and clearable; its ✕ exits to the full people list.
+  if (letter) {
+    const initial = letter.toUpperCase();
+    chips.push({
+      label: `Last name: ${initial}`,
+      ariaLabel: `Remove last-name filter (${initial})`,
+      removeHref: buildUrl((sp) => sp.delete("letter")),
+    });
+  }
   for (const v of personType) {
     chips.push({
       label: formatRoleCategory(v) ?? v,

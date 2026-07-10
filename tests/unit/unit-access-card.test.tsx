@@ -112,6 +112,21 @@ describe("UnitAccessCard", () => {
     await waitFor(() => expect(screen.queryByTestId("unit-access-row-cur001")).toBeNull());
   });
 
+  it("shows the ED sentinel grantedBy 'ED-ETL' as 'Web Directory'", () => {
+    const edRow = {
+      cwid: "kjadams",
+      name: "kjadams",
+      title: null,
+      role: "curator" as const,
+      grantedBy: "ED-ETL",
+      grantedAt: new Date("2026-07-08"),
+      source: "ED:DivA",
+    };
+    render(<UnitAccessCard {...base} access={[edRow]} />);
+    expect(screen.getByText("Web Directory")).toBeTruthy();
+    expect(screen.queryByText("ED-ETL")).toBeNull();
+  });
+
   it("returns null when access is null (defensive — rail shouldn't mount it)", () => {
     const { container } = render(<UnitAccessCard {...base} access={null} />);
     expect(container.querySelector('[data-slot="unit-access-card"]')).toBeNull();

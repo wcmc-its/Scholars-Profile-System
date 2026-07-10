@@ -13,6 +13,10 @@ decisions), this doc is correct and the divergences are called out in
 > Sources of truth this doc consolidates: [`ADR-008`](./ADR-008-infrastructure-as-code.md)
 > (nine-stack CDK), [`cdk/lib/config.ts`](../cdk/lib/config.ts) (sizing), [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md)
 > (auth, ETL, secrets), [`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md) (edge).
+>
+> **Visual diagrams:** [`architecture/`](./architecture/index.html) — system context, app & AWS
+> topology, app internals, network topology, and the **edge-topology decision** (#502). Open the
+> gallery for the pictures this prose describes.
 
 ---
 
@@ -20,7 +24,8 @@ decisions), this doc is correct and the divergences are called out in
 
 SPS is a **read-mostly Next.js application** that renders ~9,000 public WCM scholar
 profiles plus topic, department, center, and search pages. It runs as a container on
-**ECS Fargate** behind an **Application Load Balancer**, fronted by **CloudFront + WAF**.
+**ECS Fargate** behind an **Application Load Balancer**, fronted by **CloudFront + WAF** (with a
+WCM-managed **NetScaler** edge layer resolved but not yet inserted — #502).
 Its primary store is **Aurora MySQL (Serverless v2)**; search and autocomplete are served
 by **Amazon OpenSearch Service**. All displayed data is *derived* — a nightly/weekly
 **Step Functions ETL** pulls from WCM source systems (Enterprise Directory, InfoEd, COI,
@@ -29,29 +34,11 @@ through staff-authenticated `/edit` endpoints (SAML SSO). The whole thing is def
 code in **AWS CDK** across nine stacks, deployed to a **single AWS account**
 (`665083158573`) with **env-prefix isolation** (staging and prod) via **GitHub Actions + OIDC**.
 
+[![System context — SPS, its users, and the WCM source systems it derives from](./architecture/system-context.svg)](./architecture/system-context.svg)
+
+*System context. Full interactive gallery: [`architecture/`](./architecture/index.html).*
+
 ## Request path (what a visitor hits)
-
-```mermaid
-flowchart TD
-  user([Browser / crawler]):::ext
-  cf["CloudFront CDN + AWS WAF<br/>(EdgeStack)<br/>caches HTML per-route s-maxage"]:::edge
-  albp["Public ALB<br/>sps-public-{env}<br/>(X-Origin-Verify gate)"]:::net
-  ecs["ECS Fargate task: sps-app-{env}<br/>Next.js (Node 22, next start)<br/>+ OTel collector sidecar"]:::app
-  aur[("Aurora MySQL Serverless v2<br/>writer + reader endpoints")]:::data
-  os[("OpenSearch Service<br/>alias: scholars")]:::data
-
-  user -->|"HTTPS"| cf
-  cf -->|"cache miss only<br/>+ shared-secret header"| albp
-  albp --> ecs
-  ecs -->|"db.read (profiles)<br/>db.write (/api/edit)"| aur
-  ecs -->|"/search, /api/search/suggest"| os
-
-  classDef ext fill:#eee,stroke:#999,color:#222;
-  classDef edge fill:#fde7e7,stroke:#7d1c1c,color:#222;
-  classDef net fill:#eef2ff,stroke:#3b5bdb,color:#222;
-  classDef app fill:#e6fcf5,stroke:#0ca678,color:#222;
-  classDef data fill:#fff3bf,stroke:#f08c00,color:#222;
-```
 
 - **Cacheable routes** (`/`, `/scholars/*`, `/topics/*`, `/departments/*`, `/centers/*`,
   `/sitemap.xml`) are served from the CloudFront edge for the route's TTL (24 h for
@@ -61,6 +48,17 @@ flowchart TD
 - `/search` is `force-dynamic` — every request hits the app and OpenSearch (search-as-you-type, by design).
 - **Origin protection:** CloudFront injects an `X-Origin-Verify` shared-secret header; the
   public ALB rejects (403) any request that lacks it, so the ALB DNS can't be used to bypass the CDN/WAF.
+- **Edge topology (resolved 2026-07-02, #502):** the settled production edge is **CloudFront + WAF
+  → NetScaler → ALB → Fargate** — a WCM-managed **NetScaler** (AWS VPX) inserted between the WAF and
+  the public ALB. It is **not yet in the request path**: both CloudFront distributions still point
+  straight at their ALB, and NetScaler provisioning is requested (RITM0801140, prod + staging,
+  staging-first). Insertion is a decoupled WCM edge change (no CDK change); the #461 WCM-only WAF
+  gate and the `:80` default-403 origin guard stay until NetScaler enforces equivalent filtering.
+  Full detail: [`network-security-topology.md`](./network-security-topology.md).
+
+[![Edge topology, resolved (#502) — CloudFront + WAF then NetScaler then ALB then Fargate; NetScaler not yet in the path](./architecture/edge-topology-fork.svg)](./architecture/edge-topology-fork.svg)
+
+*Edge topology — resolved (#502): a WCM-managed NetScaler (AWS VPX) sits between the WAF and the ALB. It is **not yet in the request path** — both CloudFront distributions still point straight at their ALB.*
 
 ## Write path (staff editing)
 
@@ -104,41 +102,11 @@ The request path serves data; this pipeline *produces* it. It runs on a schedule
 off the request path, orchestrated by **Step Functions** (one state machine per cadence)
 running **ECS Fargate tasks** (not Lambda — see corrections below).
 
-```mermaid
-flowchart LR
-  subgraph src["WCM source systems"]
-    ed2["Enterprise Directory (LDAPS)"]:::ext
-    infoed["InfoEd (MS SQL)"]:::ext
-    coi["COI Portal (MySQL)"]:::ext
-    asms["ASMS (MS SQL)"]:::ext
-    jenz["Jenzabar (MS SQL)"]:::ext
-    rdb["ReciterDB (MariaDB)"]:::ext
-    rai["ReciterAI (DynamoDB + S3)"]:::ext
-    nih["NIH RePORTER / NSF / NLM MeSH (HTTPS)"]:::ext
-  end
-  sfn["Step Functions<br/>nightly / weekly / annual<br/>(EventBridge cron)"]:::app
-  etltask["sps-etl-{env} Fargate task<br/>npm run etl:&lt;source&gt;"]:::app
-  aur2[("Aurora MySQL")]:::data
-  os2[("OpenSearch (alias swap)")]:::data
-  rev["POST /api/revalidate<br/>(internal ALB) — busts CDN"]:::net
-
-  src --> etltask
-  sfn --> etltask
-  etltask --> aur2
-  etltask --> os2
-  etltask --> rev
-
-  classDef ext fill:#eee,stroke:#999,color:#222;
-  classDef app fill:#e6fcf5,stroke:#0ca678,color:#222;
-  classDef data fill:#fff3bf,stroke:#f08c00,color:#222;
-  classDef net fill:#eef2ff,stroke:#3b5bdb,color:#222;
-```
-
 - **Cadences** (`PRODUCTION_ADDENDUM.md § EtlStack`; authoritative step lists in
   `cdk/lib/etl-stack.ts`): nightly (`ed → reciter → reciter-coi-statements → asms →
   infoed → coi → coi-gap → jenzabar → dynamodb → identity → scholar-tool → mesh-coverage →
   pubmed-retractions → search-index → revalidate → integrity`; staging drops `infoed` — its
-  `10.20.91.8` host overlaps the VPC CIDR — and inserts `mesh-anchors` before
+  internal host overlaps the VPC CIDR — and inserts `mesh-anchors` before
   `pubmed-retractions`), weekly (`completeness → headshot → spotlight → reporter → nsf →
   gates → nih-profile → pops → reporter-grants → clinical-trials → search-index → revalidate
   → integrity`), annual (`hierarchy` + manual approval gate). Step Functions enforces
@@ -167,7 +135,7 @@ change cadence ([`ADR-008`](./ADR-008-infrastructure-as-code.md)):
 | `SecretsStack` | Secrets Manager definitions, RDS rotation | rare | [`access-control-rbac.md`](./access-control-rbac.md) |
 | `AppStack` | ECR, ECS cluster/service/tasks, public + internal ALB, migration task, IAM role split | every deploy | [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md) |
 | `EtlStack` | Step Functions, EventBridge schedules, ETL SG, `etl-failures` SNS | per ETL change | [`PRODUCTION_ADDENDUM.md § EtlStack`](./PRODUCTION_ADDENDUM.md) |
-| `EdgeStack` | CloudFront, WAF, security-headers policy, legacy-VIVO redirects | occasional | [`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md) |
+| `EdgeStack` | CloudFront, WAF, security-headers policy, legacy-VIVO redirects. **NetScaler edge layer decided (#502) but not yet inserted** — CloudFront points straight at the ALB today | occasional | [`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md), [`network-security-topology.md`](./network-security-topology.md) |
 | `ObservabilityStack` | CloudWatch alarms, SNS page/notify topics, cost guardrails, on-call relay Lambda, reliability dashboard | occasional | [`SLOs.md`](./SLOs.md), [`oncall.md`](./oncall.md) |
 | `AnalyticsStack` | Glue + Athena over CloudFront access logs, nightly usage-rollup Lambda, durable (no-expiry) analytics bucket | occasional | — |
 
@@ -181,7 +149,7 @@ protection, so a bad `AppStack` deploy — which happens often — cannot tear d
 |---|---|---|
 | AWS account | `665083158573` (shared; env-prefix isolation) | `665083158573` (shared) |
 | Region / DR region | us-east-1 / us-west-2 | us-east-1 / us-west-2 |
-| VPC | shared `its-reciter-vpc01`[^shared-vpc] | own, `10.10.0.0/16` |
+| VPC | shared `its-reciter-vpc01`[^shared-vpc] | own, `10.x.0.0/16` (internal) |
 | App tasks | 1 × (1024 CPU / 2048 MiB) | 2 × (2048 CPU / 4096 MiB) |
 | Aurora Serverless v2 | 0.5–2 ACU, writer-only | 1–8 ACU, writer + 1 reader |
 | OpenSearch | 1 × `t3.medium.search` (fresh shared-VPC domain) | 2 × `m6g.large.search` (multi-AZ) |
@@ -193,10 +161,20 @@ Deploy mechanics, the staging-gates-prod rule, and the prod approval gate are in
 [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md). Sizing source: [`cdk/lib/config.ts`](../cdk/lib/config.ts).
 
 [^shared-vpc]: Staging cut over to the shared, TGW-attached `its-reciter-vpc01`
-    (`vpc-08a1873fc8eebae28`) via #1419 (2026-07-02); its old standalone `10.20.0.0/16`
+    (`vpc-08a1873fc8eebae28`) via #1419 (2026-07-02); its old standalone `10.x.0.0/16`
     VPC, Aurora cluster, and OpenSearch domain are `RETAIN`'d until the Phase G
-    decommission (tracker #1458). Prod still runs its own `10.10.0.0/16` VPC pending its
+    decommission (tracker #1458). Prod still runs its own `10.x.0.0/16` VPC pending its
     per-env cutover.
+
+### Topology & internals
+
+[![Application & AWS topology — ECS Fargate, ALBs, Aurora, OpenSearch, and the nine CDK stacks per environment](./architecture/app-aws-topology.svg)](./architecture/app-aws-topology.svg)
+
+[![Network topology — the shared its-reciter-vpc01, public/private subnets, security groups, and NAT egress](./architecture/network-topology.svg)](./architecture/network-topology.svg)
+
+[![Application internals — inside the Next.js container: public pages, staff /edit UI, API route groups, and shared libraries](./architecture/app-internals.svg)](./architecture/app-internals.svg)
+
+*These are the generated views under [`architecture/`](./architecture/index.html) — regenerate with `npm run diagrams` after editing `scripts/diagrams/definitions/*.mjs`.*
 
 ## Cross-cutting concerns → where to read
 

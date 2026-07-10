@@ -21,6 +21,7 @@ vi.mock("@/lib/db", () => ({
         deletedAt: null,
         status: "active",
         appointments: [],
+        profileAppointments: [],
         educations: [],
         grants: [],
         topicAssignments: [],
@@ -40,6 +41,7 @@ vi.mock("@/lib/db", () => ({
         deletedAt: null,
         status: "active",
         appointments: [],
+        profileAppointments: [],
         educations: [],
         grants: [],
         topicAssignments: [],
@@ -49,6 +51,8 @@ vi.mock("@/lib/db", () => ({
     fieldOverride: {
       // #356 — getScholarFullProfileBySlug now merges an overview override.
       findUnique: vi.fn(async () => null),
+      // section-visibility — no section-hide overrides for this fixture.
+      findMany: vi.fn(async () => []),
     },
     publicationAuthor: {
       findMany: vi.fn(async () => []),
