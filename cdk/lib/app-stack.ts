@@ -1062,13 +1062,6 @@ export class AppStack extends Stack {
         // corpus carries match_dsl); lib/api/match-researchers.ts also self-gates
         // on the opportunity's compiled match_dsl, so "on" is safe pre-reproject.
         GRANT_MATCHER_SUBTOPIC_GRAIN: envConfig.grantMatcherSubtopicGrain ? "on" : "off",
-        // Translational-IP re-rank: boost researchers holding CTL licensable IP,
-        // but ONLY on translational mechanisms (R41-44/U01/UH2/UH3). Dark
-        // everywhere until the scholar_technology load has soaked and the
-        // ★ column has been eyeballed on /edit/find-researchers — the row count
-        // it depends on is attached regardless of this flag, so the signal is
-        // observable before it is trusted.
-        GRANT_MATCHER_IP_SIGNAL: "off",
         // OpenSearch domain endpoint (https://...). Default: a plaintext env
         // baked from the DataStack cross-stack export. When
         // openSearchNodeFromSecret is on (consolidation cutover de-coupling,
