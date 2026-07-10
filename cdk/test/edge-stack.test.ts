@@ -4,6 +4,7 @@ import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
 import { EdgeStack } from "../lib/edge-stack";
 import { NetworkStack } from "../lib/network-stack";
+import { type SpsEnvConfig } from "../lib/config";
 import { makeFixture } from "./test-utils";
 
 interface BuildResult {
@@ -14,8 +15,10 @@ interface BuildResult {
 function buildEdgeStack(
   envName: "staging" | "prod",
   options?: { customDomain?: string; certArn?: string; allowedCidrs?: string },
+  envConfigOverride: Partial<SpsEnvConfig> = {},
 ): BuildResult {
   const fixture = makeFixture(envName);
+  const envConfig = { ...fixture.envConfig, ...envConfigOverride };
   if (options?.customDomain) {
     fixture.app.node.setContext("edgeCustomDomain", options.customDomain);
   }
@@ -27,20 +30,16 @@ function buildEdgeStack(
   }
   const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
   });
   const app = new AppStack(fixture.app, `Sps-App-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     vpc: network.vpc,
-    appSecurityGroup: network.appSecurityGroup,
-    etlSecurityGroup: network.etlSecurityGroup,
-    albSecurityGroup: network.albSecurityGroup,
   });
   const stack = new EdgeStack(fixture.app, `Sps-Edge-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
-    publicAlb: app.publicAlb,
+    envConfig,
     deployRoleArn: app.deployRole.roleArn,
   });
   return { template: Template.fromStack(stack), stack };
@@ -270,7 +269,7 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus thirty-two additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus thirty-three additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
@@ -283,8 +282,9 @@ describe("EdgeStack", () => {
         // + the #967 `/api/scholar/*/method-exemplar` representative-paper hover
         // + the two GrantRecs Phase 2 matcher routes
         // (/api/scholars/*/opportunities, /api/opportunities/*/researchers)
-        // + the GrantRecs slice-3 browse list (/api/opportunities).
-        expect(cacheBehaviors).toHaveLength(33);
+        // + the GrantRecs slice-3 browse list (/api/opportunities)
+        // + the SEARCH_EVIDENCE_ROWS `/api/scholar/*/grants` funding-row fetcher.
+        expect(cacheBehaviors).toHaveLength(34);
       });
 
       it("evaluates additional behaviors in the spec-defined order (static first, then uncacheable, then #634 query-keyed)", () => {
@@ -323,6 +323,8 @@ describe("EdgeStack", () => {
           "/api/scholars/*/popover-context",
           // #967 method-badge representative-paper hover -- reads `?family=`.
           "/api/scholar/*/method-exemplar",
+          // Funding-row representative grants (SEARCH_EVIDENCE_ROWS) -- reads `?q=`.
+          "/api/scholar/*/grants",
           "/api/topics/*/publications",
           "/api/methods/*/*/publications",
           // #974 Phase 2 dept/division method-facet roster -- reads `?method=`;
@@ -383,9 +385,9 @@ describe("EdgeStack", () => {
         const dc = props.DistributionConfig as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         // The custom cache policy is a stack-local resource; CDK references it
-        // by logical id (a `Ref`), not the managed-policy UUID. Two custom
-        // policies now exist (default RSC-aware + query-keyed); resolve the
-        // query-keyed one by name.
+        // by logical id (a `Ref`), not the managed-policy UUID. Three custom
+        // policies now exist (default RSC-aware + query-keyed + search-API
+        // compressible); resolve each by name.
         const customPolicyLogicalId = Object.entries(
           template.findResources("AWS::CloudFront::CachePolicy"),
         ).find(
@@ -395,6 +397,16 @@ describe("EdgeStack", () => {
                 .CachePolicyConfig as Record<string, unknown>
             ).Name === "sps-query-keyed-prod",
         )?.[0];
+        const searchPolicyLogicalId = Object.entries(
+          template.findResources("AWS::CloudFront::CachePolicy"),
+        ).find(
+          ([, r]) =>
+            (
+              (r.Properties as Record<string, unknown>)
+                .CachePolicyConfig as Record<string, unknown>
+            ).Name === "sps-search-nostore-compress-prod",
+        )?.[0];
+        expect(searchPolicyLogicalId).toBeDefined();
         for (const behavior of cacheBehaviors) {
           const path = behavior.PathPattern as string;
           if (path === "/_next/static/*") {
@@ -406,6 +418,14 @@ describe("EdgeStack", () => {
           } else if (QUERY_KEYED_PATTERNS.has(path)) {
             // #634 Group B -- custom `sps-query-keyed-*` policy (a Ref).
             expect(behavior.CachePolicyId).toEqual({ Ref: customPolicyLogicalId });
+          } else if (path === "/api/search*") {
+            // Custom no-store-but-compressible policy: CachingDisabled TTLs
+            // (0/0/1s) plus gzip/brotli support so `compress: true` fires on
+            // the large search JSON -- Managed-CachingDisabled hard-codes the
+            // Accept-Encoding flags off.
+            expect(behavior.CachePolicyId).toEqual({
+              Ref: searchPolicyLogicalId,
+            });
           } else {
             // Managed-CachingDisabled id.
             expect(behavior.CachePolicyId).toBe(
@@ -479,6 +499,33 @@ describe("EdgeStack", () => {
         const s3Origin = ods.find((o) => o.CustomOriginConfig === undefined);
         expect(s3Origin?.OriginAccessControlId).toBeDefined();
         expect(s3Origin?.S3OriginConfig).toBeDefined();
+      });
+
+      it("with edgeOriginCertArn seeded, the ALB origin runs HTTPS_ONLY on the custom hostname over TLSv1.2, keeping X-Origin-Verify (#1507)", () => {
+        const { template: httpsTemplate } = buildEdgeStack("prod", undefined, {
+          edgeOriginCertArn:
+            "arn:aws:acm:us-east-1:123456789012:certificate/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          edgeOriginHostname: "scholars-origin.weill.cornell.edu",
+        });
+        const dc = (
+          Object.values(
+            httpsTemplate.findResources("AWS::CloudFront::Distribution"),
+          )[0].Properties as Record<string, unknown>
+        ).DistributionConfig as Record<string, unknown>;
+        const ods = dc.Origins as Array<Record<string, unknown>>;
+        const albOrigin = ods.find(
+          (o) => o.DomainName === "scholars-origin.weill.cornell.edu",
+        );
+        expect(albOrigin).toBeDefined();
+        const config = albOrigin?.CustomOriginConfig as Record<string, unknown>;
+        expect(config.OriginProtocolPolicy).toBe("https-only");
+        expect(config.HTTPSPort).toBe(443);
+        expect(config.OriginSSLProtocols).toEqual(["TLSv1.2"]);
+        // The origin-protection contract (X-Origin-Verify) survives the flip.
+        const headers =
+          (albOrigin?.OriginCustomHeaders as Array<{ HeaderName?: string }>) ??
+          [];
+        expect(headers.map((h) => h.HeaderName)).toContain("X-Origin-Verify");
       });
 
       it("origin sends an X-Origin-Verify custom header (acceptance #7)", () => {
@@ -562,6 +609,8 @@ describe("EdgeStack", () => {
           "/api/scholars/*/popover-context",
           // #967 method-badge representative-paper hover -- GET-only read.
           "/api/scholar/*/method-exemplar",
+          // Funding-row representative grants (SEARCH_EVIDENCE_ROWS) -- GET-only read.
+          "/api/scholar/*/grants",
           "/api/topics/*/publications",
           "/api/methods/*/*/publications",
           // #866 internal-viewer reveal -- GET-only read.
@@ -628,8 +677,8 @@ describe("EdgeStack", () => {
         const policies = template.findResources(
           "AWS::CloudFront::CachePolicy",
         );
-        // Two custom policies now: the default RSC-aware policy and this
-        // query-keyed one. Select the query-keyed policy by name.
+        // Multiple custom policies exist (default RSC-aware, search-API
+        // compressible, this one). Select the query-keyed policy by name.
         const cfgs = Object.values(policies).map(
           (e) =>
             (e.Properties as Record<string, unknown>)
@@ -685,6 +734,58 @@ describe("EdgeStack", () => {
       });
     });
 
+    describe("search-API no-store-but-compressible cache policy", () => {
+      const policyConfig = (): Record<string, unknown> => {
+        const cfgs = Object.values(
+          template.findResources("AWS::CloudFront::CachePolicy"),
+        ).map(
+          (e) =>
+            (e.Properties as Record<string, unknown>)
+              .CachePolicyConfig as Record<string, unknown>,
+        );
+        const cfg = cfgs.find(
+          (c) => c.Name === "sps-search-nostore-compress-prod",
+        );
+        expect(cfg).toBeDefined();
+        return cfg as Record<string, unknown>;
+      };
+
+      it("caches for at most 1s: the minimum that lets CloudFront compress a header-less response", () => {
+        // CloudFront only compresses responses it can store. The search
+        // routes send no Cache-Control, so DefaultTTL must be >= 1s or the
+        // response is uncacheable and ships raw (verified on staging
+        // 2026-07-02 with DefaultTTL 0: policy live, still no
+        // content-encoding). 1s, keyed on the full query string, is the
+        // deliberate ceiling.
+        const cfg = policyConfig();
+        expect(cfg.MinTTL).toBe(0);
+        expect(cfg.DefaultTTL).toBe(1);
+        expect(cfg.MaxTTL).toBe(1);
+      });
+
+      it("enables gzip + brotli (the point -- Managed-CachingDisabled hard-codes them off)", () => {
+        const params = policyConfig()
+          .ParametersInCacheKeyAndForwardedToOrigin as Record<string, unknown>;
+        expect(params.EnableAcceptEncodingGzip).toBe(true);
+        expect(params.EnableAcceptEncodingBrotli).toBe(true);
+      });
+
+      it("keys on the full query string, never cookies or headers", () => {
+        const params = policyConfig()
+          .ParametersInCacheKeyAndForwardedToOrigin as Record<string, unknown>;
+        expect(
+          (params.QueryStringsConfig as Record<string, unknown>)
+            .QueryStringBehavior,
+        ).toBe("all");
+        expect(
+          (params.CookiesConfig as Record<string, unknown>).CookieBehavior,
+        ).toBe("none");
+        expect(
+          (params.HeadersConfig as Record<string, unknown>).HeaderBehavior,
+        ).toBe("none");
+      });
+    });
+
     describe("default RSC-aware cache policy (App Router soft navigation)", () => {
       const defaultCacheConfig = (): Record<string, unknown> => {
         const policies = template.findResources(
@@ -700,8 +801,10 @@ describe("EdgeStack", () => {
         return def as Record<string, unknown>;
       };
 
-      it("synthesizes the env-named default policy alongside the query-keyed one", () => {
-        template.resourceCountIs("AWS::CloudFront::CachePolicy", 2);
+      it("synthesizes the env-named default policy alongside the query-keyed + search ones", () => {
+        // Three custom policies: default RSC-aware, #634 query-keyed, and the
+        // search-API no-store-but-compressible policy.
+        template.resourceCountIs("AWS::CloudFront::CachePolicy", 3);
         expect(defaultCacheConfig().Name).toBe("sps-default-rsc-prod");
       });
 
@@ -950,21 +1053,19 @@ describe("EdgeStack", () => {
       });
     });
 
-    describe("Custom domain bootstrap two-step (acceptance #13)", () => {
-      it("with neither context flag set, the distribution has no alias and no custom ACM cert (acceptance #13)", () => {
+    describe("Alias + cert from committed config (#1506)", () => {
+      it("with no -c flags, the alias and ACM cert come from config (a bare deploy no longer strips them)", () => {
         const props = Object.values(
           template.findResources("AWS::CloudFront::Distribution"),
         )[0]?.Properties as Record<string, unknown> | undefined;
         const dc = props?.DistributionConfig as Record<string, unknown>;
-        expect(dc.Aliases).toBeUndefined();
-        // CDK omits ViewerCertificate entirely (CloudFront defaults to its
-        // own cert) when no certificate is attached. Either undefined or an
-        // object lacking AcmCertificateArn is acceptable; what must NOT
-        // appear is a reference to a custom certificate.
-        const cert = dc.ViewerCertificate as Record<string, unknown> | undefined;
-        if (cert !== undefined) {
-          expect(cert.AcmCertificateArn).toBeUndefined();
-        }
+        // No context flags passed -- these resolve from config.prod.
+        expect(dc.Aliases).toEqual(["scholars.weill.cornell.edu"]);
+        const cert = dc.ViewerCertificate as Record<string, unknown>;
+        expect(cert.AcmCertificateArn).toBe(
+          "arn:aws:acm:us-east-1:665083158573:certificate/95f77e69-4abc-4d2c-b081-b8b5b8572fd6",
+        );
+        expect(cert.SslSupportMethod).toBe("sni-only");
       });
     });
   });
@@ -1029,15 +1130,29 @@ describe("EdgeStack", () => {
   });
 
   describe("temporary front-end IP allowlist (#461)", () => {
-    it("with no -c edgeAllowedCidrs: no WebACL, distribution unrestricted", () => {
+    it("with no -c edgeAllowedCidrs: WebACL built, IPSet addresses sourced from the SSM StringList (#1506)", () => {
       const { template } = buildEdgeStack("staging");
-      template.resourceCountIs("AWS::WAFv2::WebACL", 0);
-      template.resourceCountIs("AWS::WAFv2::IPSet", 0);
+      // Always built now -- a bare deploy no longer strips the WAF.
+      template.resourceCountIs("AWS::WAFv2::WebACL", 1);
+      template.resourceCountIs("AWS::WAFv2::IPSet", 1);
+      // The internal CIDRs are read at deploy time from an SSM StringList (not
+      // committed). Synth renders a typed SSM parameter defaulting to the
+      // per-env name, and the IPSet Addresses Ref it.
+      const params = template.findParameters("*", {
+        Type: "AWS::SSM::Parameter::Value<List<String>>",
+      });
+      const paramId = Object.keys(params)[0];
+      expect(paramId).toBeDefined();
+      expect(params[paramId].Default).toBe("/sps/staging/edge/allowed-cidrs");
+      const ipset = Object.values(
+        template.findResources("AWS::WAFv2::IPSet"),
+      )[0]?.Properties as Record<string, unknown>;
+      expect(ipset.Addresses).toEqual({ Ref: paramId });
       const dist = Object.values(
         template.findResources("AWS::CloudFront::Distribution"),
       )[0]?.Properties as Record<string, unknown> | undefined;
       const dc = dist?.DistributionConfig as Record<string, unknown>;
-      expect(dc.WebACLId).toBeUndefined();
+      expect(dc.WebACLId).toBeDefined();
     });
 
     describe("with -c edgeAllowedCidrs set", () => {
@@ -1057,19 +1172,58 @@ describe("EdgeStack", () => {
         ]);
       });
 
-      it("creates a WebACL that defaults to BLOCK and ALLOWs the IP set", () => {
+      it("defaults to ALLOW and drops non-WCM at priority 0 (so managed rules can inspect WCM traffic)", () => {
         template.resourceCountIs("AWS::WAFv2::WebACL", 1);
         const acl = Object.values(
           template.findResources("AWS::WAFv2::WebACL"),
         )[0]?.Properties as Record<string, unknown>;
         expect(acl.Scope).toBe("CLOUDFRONT");
-        expect(acl.DefaultAction).toHaveProperty("Block");
+        // Inverted from default-BLOCK: a terminating allow-wcm short-circuited
+        // evaluation, so managed rules never saw WCM requests. Now default
+        // ALLOW + a priority-0 block-non-wcm rule, and WCM traffic falls
+        // through to the inspection rules.
+        expect(acl.DefaultAction).toHaveProperty("Allow");
         const rules = acl.Rules as Array<Record<string, unknown>>;
-        expect(rules).toHaveLength(1);
-        expect(rules[0].Action).toHaveProperty("Allow");
-        expect(JSON.stringify(rules[0].Statement)).toContain(
-          "IPSetReferenceStatement",
+        const block = rules.find((r) => r.Name === "block-non-wcm");
+        expect(block?.Priority).toBe(0);
+        expect(block?.Action).toHaveProperty("Block");
+        const stmt = JSON.stringify(block?.Statement);
+        expect(stmt).toContain("NotStatement");
+        expect(stmt).toContain("IPSetReferenceStatement");
+      });
+
+      it("layers AWS managed rule groups (SQLi/known-bad/common) in COUNT mode", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        const rules = acl.Rules as Array<Record<string, unknown>>;
+        const managed = rules.filter((r) =>
+          JSON.stringify(r.Statement ?? {}).includes("ManagedRuleGroupStatement"),
         );
+        const names = managed
+          .map((r) => JSON.stringify(r.Statement))
+          .join(",");
+        expect(names).toContain("AWSManagedRulesCommonRuleSet");
+        expect(names).toContain("AWSManagedRulesKnownBadInputsRuleSet");
+        expect(names).toContain("AWSManagedRulesSQLiRuleSet");
+        // Observe-only: every managed group overrides to Count (no enforcement
+        // until the metrics prove no false positives on real WCM traffic).
+        for (const r of managed) {
+          expect(r.OverrideAction).toHaveProperty("Count");
+          expect(r.Action).toBeUndefined();
+        }
+      });
+
+      it("adds a per-IP rate-based rule in COUNT mode", () => {
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        const rules = acl.Rules as Array<Record<string, unknown>>;
+        const rate = rules.find((r) =>
+          JSON.stringify(r.Statement ?? {}).includes("RateBasedStatement"),
+        );
+        expect(rate).toBeDefined();
+        expect(rate?.Action).toHaveProperty("Count");
       });
 
       it("attaches the WebACL to the distribution (WebACLId set)", () => {

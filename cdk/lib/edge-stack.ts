@@ -9,9 +9,9 @@ import {
 import * as acm from "aws-cdk-lib/aws-certificatemanager";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
-import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as wafv2 from "aws-cdk-lib/aws-wafv2";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
@@ -20,8 +20,6 @@ import { type SpsEnvConfig } from "./config";
 export interface EdgeStackProps extends StackProps {
   /** Resolved per-environment configuration. */
   readonly envConfig: SpsEnvConfig;
-  /** The public ALB from AppStack — the primary (fallback) origin. */
-  readonly publicAlb: elbv2.IApplicationLoadBalancer;
   /**
    * ARN of the AppStack GitHub Actions deploy role (`sps-deploy-<env>`). The
    * static-asset bucket grants this principal `s3:PutObject` (prefix-scoped) so
@@ -52,6 +50,10 @@ export interface EdgeStackProps extends StackProps {
  *      for writer routes, SSO endpoints, mutating internal endpoints, the
  *      health probe, telemetry, on-demand exports, and every query-string
  *      DYNAMIC route (search + the #634 Group A API/feedback/export routes).
+ *      One carve-out: `/api/search*` keeps the uncacheable semantics but on
+ *      the custom `sps-search-nostore-compress-*` policy (1s query-keyed
+ *      TTL + gzip/brotli flags) so compression can fire — see the policy
+ *      definition below and docs/cloudfront-cache-spec.md §Compression.
  *   4. Query-keyed CACHEABLE behaviors (#634 Group B) for the high-traffic
  *      ISR pages (profile, dept/center/division, topic-scholars) that read
  *      `searchParams`: a custom cache policy that keeps them edge-cacheable
@@ -89,7 +91,7 @@ export class EdgeStack extends Stack {
   constructor(scope: Construct, id: string, props: EdgeStackProps) {
     super(scope, id, props);
 
-    const { envConfig, publicAlb } = props;
+    const { envConfig } = props;
     const env = envConfig.envName;
 
     // ------------------------------------------------------------------
@@ -236,13 +238,43 @@ export class EdgeStack extends Stack {
     // customHeaders carries the X-Origin-Verify shared secret; the
     // listener-rule edit in AppStack admits only requests matching it.
     // ------------------------------------------------------------------
-    const origin = new origins.LoadBalancerV2Origin(publicAlb, {
-      protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
-      httpPort: 80,
-      customHeaders: {
-        "X-Origin-Verify": originVerifyToken,
-      },
-    });
+    // Item-3 pass 2b: point the origin at the public-ALB DNS name AppStack
+    // publishes to SSM (pass 1) instead of the cross-stack ALB handle — severs the
+    // App→Edge FnGetAtt DNSName import (edge 8) that would lock the flip (the
+    // public ALB replaces onto the shared VPC). `HttpOrigin` defaults to
+    // HTTPS_ONLY, so HTTP_ONLY + httpPort:80 stay explicit; every other origin
+    // prop is left default (byte-identical to the LoadBalancerV2Origin, which
+    // injected none). The X-Origin-Verify header is the whole origin-protection
+    // contract — the ALB listener default-denies 403 and forwards only the
+    // matching secret — and is unchanged.
+    // #1507 -- when edgeOriginCertArn is seeded, CloudFront talks HTTPS to a
+    // custom origin hostname the public ALB's :443 listener presents a cert for
+    // (the ALB DNS name can't carry a public cert). Otherwise it stays HTTP_ONLY
+    // on the ALB DNS name (today's behavior). The X-Origin-Verify shared-secret
+    // origin-protection contract is unchanged on both paths.
+    const originHttps = envConfig.edgeOriginCertArn.length > 0;
+    const origin = originHttps
+      ? new origins.HttpOrigin(envConfig.edgeOriginHostname, {
+          protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
+          httpsPort: 443,
+          originSslProtocols: [cloudfront.OriginSslPolicy.TLS_V1_2],
+          customHeaders: {
+            "X-Origin-Verify": originVerifyToken,
+          },
+        })
+      : new origins.HttpOrigin(
+          ssm.StringParameter.valueForStringParameter(
+            this,
+            `/sps/${env}/app/public-alb-dns`,
+          ),
+          {
+            protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+            httpPort: 80,
+            customHeaders: {
+              "X-Origin-Verify": originVerifyToken,
+            },
+          },
+        );
 
     // ------------------------------------------------------------------
     // Static-asset S3 origin (Layer 2 of the /about chunk-404 fix).
@@ -318,17 +350,19 @@ export class EdgeStack extends Stack {
     // ------------------------------------------------------------------
     // Custom domain + ACM certificate (plan D2, bootstrap two-step).
     //
-    // Both context flags must be present for the alias + cert to attach;
+    // Alias + cert now come from committed config (#1506) so a bare
+    // `cdk deploy` no longer strips them; a `-c edgeCustomDomain/edgeCertArn`
+    // flag still overrides. Both must resolve for the alias to attach;
     // otherwise the distribution ships on `*.cloudfront.net`. ACM certs
     // for CloudFront must live in us-east-1, which is also the primary
     // region -- no `crossRegionReferences` needed.
     // ------------------------------------------------------------------
-    const customDomain = this.node.tryGetContext("edgeCustomDomain") as
-      | string
-      | undefined;
-    const certArn = this.node.tryGetContext("edgeCertArn") as
-      | string
-      | undefined;
+    const customDomain =
+      (this.node.tryGetContext("edgeCustomDomain") as string | undefined) ??
+      envConfig.edgeCustomDomain;
+    const certArn =
+      (this.node.tryGetContext("edgeCertArn") as string | undefined) ??
+      envConfig.edgeCertArn;
     const viewerCert =
       customDomain && certArn
         ? acm.Certificate.fromCertificateArn(this, "ViewerCert", certArn)
@@ -382,6 +416,42 @@ export class EdgeStack extends Stack {
         ["/api/profile/*", internalViewerOrp],
         ["/api/export/*", internalViewerOrp],
       ]);
+
+    // Compression-enabling policy for `/api/search*`. Managed-CachingDisabled
+    // hard-codes gzip/brotli support OFF, so the behavior's `compress: true`
+    // never fires and the search API ships raw (measured 177.7 KB for a
+    // publications-tab response that gzips to ~20-30 KB). CloudFront only
+    // compresses responses it can store: the search routes send NO
+    // Cache-Control header, so with defaultTtl 0 the response is uncacheable
+    // and CloudFront skips compression too (verified empirically on staging
+    // 2026-07-02 -- policy live, compress on, still identity encoding).
+    // defaultTtl/maxTtl 1s makes the header-less response cacheable for <=1s,
+    // which is what lets compression fire; a 1-second, full-query-keyed cache
+    // on a public read-only API is deliberate and harmless. Query strings ALL
+    // go in the cache key -- they are forwarded by AllViewer regardless --
+    // and cookies / headers stay out of the key, same as the managed policy.
+    // Key shape mirrors `queryKeyedCache` below where applicable.
+    const searchApiNoStoreCompressible = new cloudfront.CachePolicy(
+      this,
+      "SearchApiNoStoreCompressible",
+      {
+        cachePolicyName: `sps-search-nostore-compress-${env}`,
+        comment: `SPS search API (${env}) -- 1s query-keyed TTL plus gzip/brotli support so compress fires.`,
+        queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
+        cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+        headerBehavior: cloudfront.CacheHeaderBehavior.none(),
+        enableAcceptEncodingGzip: true,
+        enableAcceptEncodingBrotli: true,
+        minTtl: Duration.seconds(0),
+        defaultTtl: Duration.seconds(1),
+        maxTtl: Duration.seconds(1),
+      },
+    );
+    // Per-path cache-policy override (mirrors `orpOverrides`): ONLY
+    // `/api/search*` swaps off Managed-CachingDisabled; every other
+    // uncacheable behavior keeps it.
+    const cachePolicyOverrides: ReadonlyMap<string, cloudfront.ICachePolicy> =
+      new Map([["/api/search*", searchApiNoStoreCompressible]]);
 
     // Next.js App Router serves two representations at the SAME URL: the
     // full HTML document (a hard navigation / refresh) and the React
@@ -483,8 +553,10 @@ export class EdgeStack extends Stack {
       // the query string from the cache key -- so CloudFront BOTH strips `?q=`
       // before the origin sees it (every request degrades to a match_all over
       // the whole corpus) AND caches the first response for every subsequent
-      // query. CachingDisabled + AllViewer forwards the full query string and
-      // never caches, matching the other dynamic GET routes above.
+      // query. AllViewer forwards the full query string; the cache policy is
+      // the custom `searchApiNoStoreCompressible` above (same never-cache
+      // TTLs, but with gzip/brotli support ON so the large JSON compresses),
+      // via `cachePolicyOverrides` -- not Managed-CachingDisabled.
       ["/api/search*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // `/search*` -- the user-facing search PAGE (SSR, `force-dynamic`). Same
       // failure mode as `/api/search*` but it was never given an explicit
@@ -523,6 +595,13 @@ export class EdgeStack extends Stack {
       // `family`, so the param would be stripped before the origin and the hover
       // would always come back empty. AllViewer forwards it. GET-only (a read).
       ["/api/scholar/*/method-exemplar", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // Funding-row representative grants (SEARCH_EVIDENCE_ROWS) -- `force-dynamic`,
+      // `no-store`, reads `?q=` to resolve the scholar's topic-matching grants for the
+      // "Key funding" disclosure. Same shape as `/api/scholar/*/method-exemplar`: unlisted
+      // it falls to the cacheable default whose per-route query allow-list omits `q`, so
+      // the param is stripped before the origin and the row never shows. AllViewer
+      // forwards it. GET-only (a read).
+      ["/api/scholar/*/grants", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Topic publication feed -- reads `sort`/`filter`/`subtopic`/`tier`/`page`.
       ["/api/topics/*/publications", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Method (cross-scholar family) publication feed -- reads `sort`/`filter`/
@@ -675,7 +754,7 @@ export class EdgeStack extends Stack {
     for (const [pathPattern, allowedMethods] of uncacheableBehaviors) {
       additionalBehaviors[pathPattern] = {
         origin,
-        cachePolicy: cachingDisabled,
+        cachePolicy: cachePolicyOverrides.get(pathPattern) ?? cachingDisabled,
         originRequestPolicy: orpOverrides.get(pathPattern) ?? allViewer,
         allowedMethods,
         responseHeadersPolicy: securityHeaders,
@@ -704,22 +783,50 @@ export class EdgeStack extends Stack {
     // CloudFront layer via an AWS WAFv2 WebACL -- the ALB SG can't do it
     // because CloudFront is the only client the ALB ever sees.
     //
-    // Toggle: `-c edgeAllowedCidrs=140.251.0.0/16,157.139.0.0/16` builds the
-    // WebACL (IP-set ALLOW, default BLOCK) and attaches it. Omit the flag and
-    // redeploy to remove the restriction -- no code change. WAFv2 WebACLs with
-    // CLOUDFRONT scope must live in us-east-1, which is EdgeStack's region.
+    // Source: the seeded SSM StringList by default, or `-c edgeAllowedCidrs=
+    // 140.251.0.0/16,157.139.0.0/16` to override (see the block below). The
+    // WebACL is always built now (#1506) -- to open to the public, delete the
+    // block, not the flag. WAFv2 WebACLs with CLOUDFRONT scope must live in
+    // us-east-1, which is EdgeStack's region.
+    //
+    // Layering (priority order): the WebACL defaults to ALLOW; a priority-0
+    // `block-non-wcm` rule drops anything outside the WCM IP set (so only WCM
+    // traffic reaches the rest), then AWS managed rule groups + a rate-based
+    // rule inspect that traffic in COUNT mode (observe-only until the metrics
+    // prove no false positives). That is the application-layer inspection the
+    // IP allowlist alone never did -- the reason we do not need to sit behind
+    // the enterprise NetScaler for edge security.
+    //
+    // ponytail: managed rules live inside this allowlist gate because we only
+    // ever run WCM-only. If the front end is opened to the public, move them
+    // OUT of the block so payload inspection survives without the allowlist.
     // ------------------------------------------------------------------
+    // The internal WCM/WCM-Qatar/NYP ranges are NOT committed to this public
+    // repo (#876/#502/#1506). Default source is the operator-seeded SSM
+    // StringList `/sps/<env>/edge/allowed-cidrs` (a deploy-time token -- fine
+    // for a WAF IPSet); a `-c edgeAllowedCidrs=1.2.0.0/16,...` flag overrides
+    // (the escape hatch before the param is seeded). The WebACL is now ALWAYS
+    // built, so a bare deploy no longer strips it. To open the front end to the
+    // public, delete this block (per the #461 note above) -- omitting the flag
+    // no longer removes it.
     const allowedCidrsCtx = this.node.tryGetContext("edgeAllowedCidrs") as
       | string
       | undefined;
-    const allowedCidrs = allowedCidrsCtx
+    const overrideCidrs = allowedCidrsCtx
       ? allowedCidrsCtx
           .split(",")
           .map((c) => c.trim())
           .filter((c) => c.length > 0)
-      : [];
-    let webAclArn: string | undefined;
-    if (allowedCidrs.length > 0) {
+      : undefined;
+    const allowedCidrs =
+      overrideCidrs && overrideCidrs.length > 0
+        ? overrideCidrs
+        : ssm.StringListParameter.valueForTypedListParameter(
+            this,
+            `/sps/${env}/edge/allowed-cidrs`,
+          );
+    let webAclArn: string;
+    {
       const ipAllowSet = new wafv2.CfnIPSet(this, "WcmIpAllowSet", {
         name: `sps-edge-${env}-wcm-allow`,
         scope: "CLOUDFRONT",
@@ -729,21 +836,68 @@ export class EdgeStack extends Stack {
         // and space) -- a deploy-only constraint cdk synth does not catch.
         description: `Temporary #461 SPS front-end allowlist ${env} - remove after testing`,
       });
+      // AWS managed rule groups -- application-layer inspection (SQLi/XSS/
+      // known-bad-inputs) the IP allowlist never did. COUNT-mode first so we
+      // see what they would block on real WCM traffic before enforcing.
+      const managedGroups = [
+        "AWSManagedRulesCommonRuleSet",
+        "AWSManagedRulesKnownBadInputsRuleSet",
+        "AWSManagedRulesSQLiRuleSet",
+      ];
       const webAcl = new wafv2.CfnWebACL(this, "EdgeWebAcl", {
         name: `sps-edge-${env}-wcm-only`,
         scope: "CLOUDFRONT",
-        defaultAction: { block: {} },
+        // Default ALLOW: only WCM traffic ever reaches the default action --
+        // the priority-0 block-non-wcm rule drops everything else. (Was
+        // default-BLOCK + a terminating allow-wcm rule, which short-circuited
+        // evaluation so no later rule could inspect WCM requests.)
+        defaultAction: { allow: {} },
         rules: [
           {
-            name: "allow-wcm-networks",
+            name: "block-non-wcm",
             priority: 0,
-            action: { allow: {} },
+            action: { block: {} },
             statement: {
-              ipSetReferenceStatement: { arn: ipAllowSet.attrArn },
+              notStatement: {
+                statement: {
+                  ipSetReferenceStatement: { arn: ipAllowSet.attrArn },
+                },
+              },
             },
             visibilityConfig: {
               cloudWatchMetricsEnabled: true,
-              metricName: `sps-edge-${env}-allow-wcm`,
+              metricName: `sps-edge-${env}-block-non-wcm`,
+              sampledRequestsEnabled: true,
+            },
+          },
+          ...managedGroups.map((groupName, i) => ({
+            name: groupName,
+            priority: i + 1,
+            // ponytail: COUNT-mode -- flip a group to `overrideAction:
+            // { none: {} }` once its *-count metric shows no false positives.
+            overrideAction: { count: {} },
+            statement: {
+              managedRuleGroupStatement: { vendorName: "AWS", name: groupName },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-${groupName}`,
+              sampledRequestsEnabled: true,
+            },
+          })),
+          {
+            name: "rate-limit",
+            priority: managedGroups.length + 1,
+            // ponytail: COUNT-mode. WCM egresses via shared NAT IPs, so a
+            // per-IP limit can pool a whole office onto one counter -- watch
+            // the *-rate-limit metric before flipping to `{ block: {} }`.
+            action: { count: {} },
+            statement: {
+              rateBasedStatement: { limit: 5000, aggregateKeyType: "IP" },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-rate-limit`,
               sampledRequestsEnabled: true,
             },
           },
@@ -753,7 +907,7 @@ export class EdgeStack extends Stack {
           metricName: `sps-edge-${env}-wcm-only`,
           sampledRequestsEnabled: true,
         },
-        description: `Temporary #461 SPS front end restricted to WCM networks ${env}`,
+        description: `SPS front end ${env} - WCM-only IP allow plus AWS managed rule groups in count mode`,
       });
       webAclArn = webAcl.attrArn;
     }
@@ -776,7 +930,7 @@ export class EdgeStack extends Stack {
       comment: `SPS edge -- ${env}`,
       domainNames: customDomain ? [customDomain] : undefined,
       certificate: viewerCert,
-      // Temporary WCM-only allowlist (#461); undefined => unrestricted.
+      // WCM-only allowlist (#461/#1506); always attached now (see WAF block).
       webAclId: webAclArn,
       defaultBehavior: {
         origin,

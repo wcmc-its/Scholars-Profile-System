@@ -96,7 +96,10 @@ vi.mock("@/lib/methods/supercategory-labels", () => ({
   supercategoryLabel: (...a: unknown[]) => mockSupercategoryLabel(...a),
 }));
 
-vi.mock("@/lib/seo/jsonld", () => ({ buildDefinedTermJsonLd: () => ({}) }));
+vi.mock("@/lib/seo/jsonld", () => ({
+  buildDefinedTermJsonLd: () => ({}),
+  serializeJsonLd: (o: unknown) => JSON.stringify(o),
+}));
 
 // Leaf components — replaced with inert stubs so the loaders' control flow (not
 // the rendered tree) is what's under test. Element creation does not invoke them.

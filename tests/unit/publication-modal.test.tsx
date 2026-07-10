@@ -48,6 +48,7 @@ function makePayload(
       citationCount: 2,
       pmcid: "PMC123",
       doi: "10.1234/widgets",
+      ecommonsLink: "https://hdl.handle.net/1813/124348",
       pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/12345/",
       meshTerms: [
         { ui: "D001", label: "Widgets" },
@@ -386,6 +387,42 @@ describe("PublicationModal — content sections", { retry: 2 }, () => {
     expect(idLine?.querySelector('a[href*="doi.org/"]')).not.toBeNull();
   });
 
+  it("renders an eCommons linkout after DOI when the handle is present, and nothing when it is null (#1567)", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const idLine = screen
+      .getByRole("dialog")
+      .querySelector('header [aria-label="Identifiers"]') as HTMLElement | null;
+    const ecommons = idLine?.querySelector(
+      'a[href="https://hdl.handle.net/1813/124348"]',
+    ) as HTMLAnchorElement | null;
+    expect(ecommons).not.toBeNull();
+    expect(ecommons?.textContent).toBe("eCommons");
+    expect(ecommons?.getAttribute("target")).toBe("_blank");
+    expect(ecommons?.getAttribute("rel")).toContain("noopener");
+    // Placed AFTER the DOI link in the row.
+    const doi = idLine?.querySelector('a[href*="doi.org/"]');
+    expect(
+      doi && ecommons
+        ? doi.compareDocumentPosition(ecommons) & Node.DOCUMENT_POSITION_FOLLOWING
+        : 0,
+    ).toBeTruthy();
+  });
+
+  it("omits the eCommons linkout when the handle is null (#1567)", async () => {
+    mockFetch(makePayload({ pub: { ...makePayload().pub, ecommonsLink: null } }));
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const idLine = screen
+      .getByRole("dialog")
+      .querySelector('header [aria-label="Identifiers"]') as HTMLElement | null;
+    expect(idLine?.querySelector('a[href*="hdl.handle.net"]')).toBeNull();
+    expect(idLine?.textContent).not.toContain("eCommons");
+  });
+
   it("carries copy buttons next to PMID and PMCID in the header", async () => {
     mockFetch(makePayload());
     renderModalHarness();
@@ -532,14 +569,16 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     // The snippet is only in the DOM while the HoverTooltip is visible, so hover.
     const trigger = screen.getByText("STORK-A");
-    fireEvent.mouseEnter(trigger.parentElement as HTMLElement);
+    fireEvent.focus(trigger.parentElement as HTMLElement);
     // Honest framing (the tool name does not appear verbatim here → no mark).
     await waitFor(() =>
-      expect(screen.getByText(/Verbatim, from the author's papers/i)).toBeDefined(),
+      expect(
+        screen.getAllByText(/Verbatim, from the author's papers/i).length,
+      ).toBeGreaterThan(0),
     );
     expect(
-      screen.getByText(/a non-invasive and automated method of embryo evaluation/),
-    ).toBeDefined();
+      screen.getAllByText(/a non-invasive and automated method of embryo evaluation/).length,
+    ).toBeGreaterThan(0);
   });
 
   it("frames the snippet as 'from this paper' when its source pmid is the viewed paper (#1158)", async () => {
@@ -566,9 +605,9 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     const trigger = screen.getByText("STORK-A");
-    fireEvent.mouseEnter(trigger.parentElement as HTMLElement);
+    fireEvent.focus(trigger.parentElement as HTMLElement);
     await waitFor(() =>
-      expect(screen.getByText(/Verbatim, from this paper/i)).toBeDefined(),
+      expect(screen.getAllByText(/Verbatim, from this paper/i).length).toBeGreaterThan(0),
     );
     // Must NOT use the representative framing when it is this paper.
     expect(screen.queryByText(/from the author's papers/i)).toBeNull();
@@ -598,7 +637,7 @@ describe("PublicationModal — Methods section (#917)", { retry: 2 }, () => {
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     const trigger = screen.getByText("corneal confocal microscope");
-    fireEvent.mouseEnter(trigger.parentElement as HTMLElement);
+    fireEvent.focus(trigger.parentElement as HTMLElement);
     // The occurrence inside the sentence is wrapped in a <mark>, preserving the
     // snippet's own casing ("A corneal confocal microscope was used…").
     await waitFor(() => {

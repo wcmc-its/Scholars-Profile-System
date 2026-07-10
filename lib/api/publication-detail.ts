@@ -139,6 +139,9 @@ export type PublicationDetailPayload = {
     pmcid: string | null;
     doi: string | null;
     pubmedUrl: string | null;
+    /** #1567 — eCommons institutional-repository handle URL, or null when this
+     *  pmid is not deposited there. Rendered as an "eCommons" linkout after DOI. */
+    ecommonsLink: string | null;
     meshTerms: Array<{ ui: string | null; label: string }>;
     /** One-line plain-language synopsis per pmid (#329). Read from
      *  `Publication.synopsis`. Null when no synopsis exists. */
@@ -488,6 +491,7 @@ export async function getPublicationDetail(
       pmcid: true,
       doi: true,
       pubmedUrl: true,
+      ecommonsLink: true,
       meshTerms: true,
       synopsis: true,
       publicationTopics: {
@@ -681,6 +685,7 @@ export async function getPublicationDetail(
       pmcid: pub.pmcid,
       doi: pub.doi,
       pubmedUrl: pub.pubmedUrl,
+      ecommonsLink: pub.ecommonsLink,
       meshTerms: normalizeMeshTerms(pub.meshTerms),
       synopsis: pub.synopsis && pub.synopsis.length > 0 ? pub.synopsis : null,
     },

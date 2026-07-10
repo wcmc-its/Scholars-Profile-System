@@ -1,12 +1,13 @@
 /**
  * #552 facet-sidebar follow-on — `CenterMembersClient` grouped layout: the left
- * facet sidebar (Program / Membership type / Organizational unit) over
+ * facet sidebar (Program / Membership type / Department / Professorial rank) over
  * program-grouped sections, plus the existing Appointment (role) chip row.
  * Covered:
  *  - all three facets + Appointment render; a section per group; all members.
  *  - Program facet narrows to the selected program section(s).
- *  - Membership-type facet narrows to research/clinical.
- *  - Organizational-unit facet narrows to a department.
+ *  - Membership-type facet narrows to research/clinical (and hides when single-type, #1570).
+ *  - Department facet narrows to a department.
+ *  - Professorial-rank facet narrows to a rank (#1570).
  *  - Appointment chip composes with the facets and drops emptied sections.
  *  - "Clear" resets the sidebar facets.
  *  - Program facet hides when the center has a single program.
@@ -58,6 +59,7 @@ function hit(
   membershipType: CenterMembershipType,
   departmentName: string,
   methodFamilies?: CenterMemberFamily[],
+  professorialRank: string | null = null,
 ) {
   return {
     cwid,
@@ -69,6 +71,7 @@ function hit(
     identityImageEndpoint: "",
     roleCategory,
     overview: null,
+    professorialRank,
     pubCount: 0,
     grantCount: 0,
     membershipType,
@@ -108,7 +111,7 @@ describe("CenterMembersClient — grouped facet sidebar (#552)", () => {
 
     expect(screen.getByRole("heading", { name: "Program" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Membership type" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Organizational unit" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Department" })).toBeTruthy();
     expect(screen.getByText("Appointment")).toBeTruthy();
 
     // Anchored section headings + all five members on one page.
@@ -134,7 +137,7 @@ describe("CenterMembersClient — grouped facet sidebar (#552)", () => {
     expect(personCwids().sort()).toEqual(["b", "d"]);
   });
 
-  it("Organizational-unit facet narrows to a department", () => {
+  it("Department facet narrows to a department", () => {
     render(<CenterMembersClient result={grouped} centerSlug="x" />);
     fireEvent.click(screen.getByRole("button", { name: /Pathology/ }));
     expect(personCwids().sort()).toEqual(["c", "d"]);
@@ -195,8 +198,67 @@ describe("CenterMembersClient — grouped facet sidebar (#552)", () => {
     // title, so it's suppressed; the facets + members still render.
     expect(screen.queryByRole("heading", { name: "Cancer Biology" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Membership type" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Organizational unit" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Department" })).toBeTruthy();
     expect(personCwids().sort()).toEqual(["a", "b"]);
+  });
+
+  it("hides the Membership-type facet when every member shares one type (#1570)", () => {
+    const allResearch: CenterMembersResult = {
+      mode: "grouped",
+      total: 3,
+      groups: [
+        {
+          code: "CB",
+          label: "Cancer Biology",
+          members: [hit("a", FT, "research", "Medicine"), hit("b", FT, "research", "Pathology")],
+        },
+        {
+          code: "CT",
+          label: "Cancer Therapeutics",
+          members: [hit("c", AFF, "research", "Surgery")],
+        },
+      ],
+    };
+    render(<CenterMembersClient result={allResearch} centerSlug="x" />);
+
+    // One-option facet can't filter anything → suppressed; the rest still render.
+    expect(screen.queryByRole("heading", { name: "Membership type" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Program" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Department" })).toBeTruthy();
+  });
+
+  it("Professorial-rank facet renders last and narrows to the selected rank (#1570)", () => {
+    const withRanks: CenterMembersResult = {
+      mode: "grouped",
+      total: 3,
+      groups: [
+        {
+          code: "CB",
+          label: "Cancer Biology",
+          members: [
+            hit("a", FT, "research", "Medicine", undefined, "Professor"),
+            hit("b", FT, "research", "Medicine", undefined, "Assistant Professor"),
+          ],
+        },
+        {
+          code: "CT",
+          label: "Cancer Therapeutics",
+          members: [hit("c", FT, "research", "Pathology", undefined, "Professor")],
+        },
+      ],
+    };
+    render(<CenterMembersClient result={withRanks} centerSlug="x" />);
+
+    // Renders, and after the (previously last) Department facet.
+    expect(screen.getByRole("heading", { name: "Professorial rank" })).toBeTruthy();
+    const headings = screen.getAllByRole("heading").map((h) => h.textContent);
+    expect(headings.indexOf("Professorial rank")).toBeGreaterThan(
+      headings.indexOf("Department"),
+    );
+
+    // Selecting "Professor" keeps the two Professors, drops the Assistant Professor.
+    fireEvent.click(screen.getByRole("button", { name: /^Professor/ }));
+    expect(personCwids().sort()).toEqual(["a", "c"]);
   });
 });
 
@@ -234,10 +296,10 @@ describe("CenterMembersClient — Methods & tools facet (#962)", () => {
     render(<CenterMembersClient result={withMethods} centerSlug="x" />);
 
     expect(screen.getByRole("heading", { name: "Methods & tools" })).toBeTruthy();
-    // #962 follow-up — Methods & tools ranks ABOVE Organizational unit in the sidebar.
+    // #962 follow-up — Methods & tools ranks ABOVE Department in the sidebar.
     const facetHeadings = screen.getAllByRole("heading").map((h) => h.textContent);
     expect(facetHeadings.indexOf("Methods & tools")).toBeLessThan(
-      facetHeadings.indexOf("Organizational unit"),
+      facetHeadings.indexOf("Department"),
     );
     // Chips piped to PersonRow (top-N familyLabels) for the equipped members only.
     const chips = Object.fromEntries(

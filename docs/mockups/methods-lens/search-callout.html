@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Method / Tool surfaced in Search — mockup</title>
+<style>
+  /* ============================================================
+   * CSS custom properties — reused verbatim from the SPS bundle
+   * (app/globals.css :root + entity-badge conventions).
+   * ============================================================ */
+  :root {
+    /* design tokens (locked by design spec v1.7.1) */
+    --color-primary-cornell-red: #B31B1B;
+    --color-accent-slate: #2c4f6e;
+
+    /* shadcn-style theme vars (oklch, from globals.css) */
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.51 0 0);
+    --border: oklch(0.922 0 0);
+
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-border: var(--border);
+
+    /* typography (Inter is the platform sans; falls back per --font-sans) */
+    --font-inter: 'Inter';
+    --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+    /* spacing — 8-point grid */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-6: 24px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    color: var(--foreground);
+    background: #f5f3ee;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  .page {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  .mock-note {
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #9a8f7e;
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+  .mock-h {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 4px;
+    color: #2b2f36;
+  }
+  .mock-sub {
+    font-size: 13.5px;
+    color: #6b6f76;
+    margin: 0 0 28px;
+    max-width: 760px;
+    line-height: 1.5;
+  }
+  .section-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--color-primary-cornell-red);
+    margin: 44px 0 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-label::before {
+    content: "";
+    width: 22px;
+    height: 2px;
+    background: var(--color-primary-cornell-red);
+    display: inline-block;
+  }
+
+  /* ============================================================
+   * (1) Taxonomy-match callout card — mirrors the existing topic
+   * taxonomy callout (Sparkles eyebrow, entity name, descriptor,
+   * scholar/pub counts, accent "View the … page →" link).
+   * Fires when the query matches a method-family / supercategory.
+   * ============================================================ */
+
+  .search-canvas {
+    background: var(--card);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    overflow: hidden;
+  }
+
+  .results-head {
+    padding: 20px 24px 14px;
+  }
+  .results-head h1 {
+    font-size: 28px;
+    line-height: 1.15;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 2px;
+    color: var(--foreground);
+  }
+  .results-head h1 .lede { font-weight: 400; }
+  .results-head h1 .q { font-weight: 700; }
+
+  /* Taxonomy-match callout — same visual language as the topic callout:
+     a soft-tinted card, Sparkles eyebrow, name, one-line descriptor, a
+     stat line, and an accent link. Tinted toward the new Method hue so it
+     reads as the method-family affordance, not a topic. */
+  .taxo-callout {
+    margin: 16px 0 4px;
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 14px 16px;
+    border: 0.5px solid #ecdcc8;
+    background: #fbf4ea;
+    border-radius: 10px;
+  }
+  .taxo-callout .glyph {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: #f3e3cf;
+    color: #8a5a1e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 1px;
+  }
+  .taxo-callout .glyph svg { width: 18px; height: 18px; }
+  .taxo-body { min-width: 0; flex: 1; }
+
+  .taxo-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    color: #8a7a63;
+    margin-bottom: 3px;
+  }
+  .taxo-eyebrow svg { width: 14px; height: 14px; }
+
+  .taxo-name-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex-wrap: wrap;
+  }
+  .taxo-name {
+    font-size: 17px;
+    font-weight: 700;
+    color: #2b2f36;
+    letter-spacing: -0.005em;
+  }
+  .taxo-desc {
+    margin: 5px 0 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #5e636b;
+    max-width: 640px;
+  }
+  .taxo-stats {
+    margin-top: 9px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12.5px;
+    color: #6f7077;
+  }
+  .taxo-stats .stat { display: inline-flex; align-items: center; gap: 5px; }
+  .taxo-stats .stat svg { width: 13px; height: 13px; }
+  .taxo-stats .stat strong { color: #2b2f36; font-weight: 600; }
+  .taxo-stats .dot { color: #c7bca8; }
+
+  .taxo-cta {
+    margin-top: 11px;
+  }
+  .taxo-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #1f51a8;
+    text-decoration: none;
+  }
+  .taxo-link:hover { text-decoration: underline; }
+  .taxo-link svg { width: 14px; height: 14px; }
+
+  /* result-type tabs below the callout (context, non-interactive) */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    padding: 4px 24px 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 14px 12px;
+    font-size: 13.5px;
+    color: #6b6f76;
+    border-bottom: 2px solid transparent;
+    cursor: default;
+  }
+  .tab.active {
+    color: var(--color-accent-slate);
+    font-weight: 600;
+    border-bottom-color: var(--color-accent-slate);
+  }
+  .tab .pill {
+    font-size: 11px;
+    font-weight: 600;
+    color: #6b6f76;
+    background: #f0eee8;
+    border-radius: 999px;
+    padding: 1px 7px;
+  }
+  .tab.active .pill { background: #e6edf3; color: var(--color-accent-slate); }
+
+  /* placeholder result rows (context only) */
+  .results-body { padding: 8px 24px 22px; }
+  .res-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 4px;
+    border-top: 1px solid #f0efe9;
+  }
+  .res-row:first-child { border-top: 0; }
+  .res-avatar {
+    width: 42px; height: 42px; border-radius: 999px; flex-shrink: 0;
+    background: linear-gradient(135deg,#e9e6dd,#dcd8cd);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 600; color: #8a8475;
+  }
+  .res-main { min-width: 0; }
+  .res-name { font-size: 15px; font-weight: 600; color: #2b2f36; }
+  .res-meta { font-size: 12.5px; color: #7a7e85; margin-top: 2px; }
+
+  /* ============================================================
+   * Entity badges — EXACT .entity-badge conventions from globals.css
+   * (#71): 10px, uppercase, 600, 0.08em tracking, 4px radius, no border,
+   * background carries the weight. New `--method` family added.
+   * ============================================================ */
+  .entity-badge {
+    display: inline-block;
+    flex-shrink: 0;
+    padding: 4px 9px;
+    border-radius: 4px;
+    font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .entity-badge--person     { background: #e8eef3; color: #3a4a5c; }  /* blue */
+  .entity-badge--topic      { background: #f5edd8; color: #6b5024; }  /* yellow */
+  .entity-badge--subtopic   { background: #faf2e0; color: #8a6a30; }
+  .entity-badge--department { background: #e6efe6; color: #3a553e; }  /* green */
+  .entity-badge--division   { background: #eef4ee; color: #52755a; }
+  .entity-badge--center     { background: #ede8f1; color: #4d3d6b; }  /* purple */
+  .entity-badge--institute  { background: #e0eded; color: #2c5862; }  /* teal */
+  /* NEW — Method/Tool family. Warm rust/orange: distinct from the five
+     existing color families, AA-contrast at 10px, and harmonises with the
+     warm parchment palette. */
+  .entity-badge--method     { background: #f6e3d4; color: #8a4a1f; }  /* rust */
+
+  /* ============================================================
+   * (2) Autocomplete dropdown — markup + classes mirror
+   * components/search/autocomplete.tsx (listbox shadow, row layout,
+   * truncating title/subtitle, right-aligned EntityBadge).
+   * ============================================================ */
+  .ac-wrap {
+    position: relative;
+    width: 100%;
+    max-width: 600px;
+  }
+  /* hero input box (focus-within slate ring, per the bundle) */
+  .ac-input-box {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid #d4d4d8;
+    background: #fff;
+    border-radius: 6px;
+    padding: 4px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .ac-input-box:focus-within {
+    border-color: var(--color-accent-slate);
+    box-shadow: 0 0 0 3px rgba(44,79,110,0.18);
+  }
+  .ac-input-box .lead-icon { margin-left: 12px; color: #a1a1aa; width: 16px; height: 16px; flex-shrink: 0; }
+  .ac-input {
+    flex: 1;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    padding: 10px 12px;
+    font: inherit;
+    font-size: 16px;
+    color: #18181b;
+  }
+  .ac-input::placeholder { color: #a1a1aa; }
+  .ac-btn {
+    flex-shrink: 0;
+    border: 0;
+    border-radius: 4px;
+    background: var(--color-primary-cornell-red);
+    color: #fff;
+    padding: 8px 20px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: default;
+  }
+
+  .ac-listbox {
+    position: absolute;
+    left: 0; right: 0; top: 100%;
+    z-index: 30;
+    margin-top: 8px;
+    max-height: 60vh;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    background: var(--background);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.08);
+    list-style: none;
+    margin-bottom: 0;
+    padding: 0;
+  }
+  .ac-opt { border-top: 1px solid #f4f4f5; }
+  .ac-opt:first-child { border-top: 0; }
+  .ac-link {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 14px;
+    text-decoration: none;
+    color: inherit;
+  }
+  .ac-opt:hover .ac-link,
+  .ac-opt.active .ac-link { background: #f5f3ee; }
+  .ac-opt.active .ac-link { background: #f0ede5; }
+  .ac-text { min-width: 0; flex: 1; }
+  .ac-title {
+    display: block;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 14px; font-weight: 600; color: #18181b;
+  }
+  .ac-subtitle {
+    display: block;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 12px; color: #71717a; margin-top: 1px;
+  }
+  /* role chip (person rows) — copied from autocomplete.tsx person branch */
+  .role-chip {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    border: 1px solid var(--color-border);
+    background: var(--muted);
+    border-radius: 3px;
+    padding: 0 6px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    line-height: 1.4;
+    color: var(--color-muted-foreground);
+  }
+
+  .ac-mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 11.5px; color: #8a6a47; }
+
+  .legend {
+    margin-top: 18px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+  .legend .lbl { font-size: 12px; color: #8a8475; margin-right: 2px; }
+</style>
+</head>
+<body>
+  <div class="page">
+
+    <p class="mock-note">Display-only mockup · Scholars Profile System</p>
+    <h1 class="mock-h">A Method / Tool surfaced in Search</h1>
+    <p class="mock-sub">
+      Mirrors how Topics surface today. Two affordances on one page:
+      (1) a taxonomy-match callout above the results when the query matches a
+      method-family / supercategory, and (2) an autocomplete dropdown carrying a
+      new <strong>Method</strong> category badge alongside Person, Topic, and
+      Department.
+    </p>
+
+    <!-- ============================================================ -->
+    <!-- (1) Taxonomy-match callout above search results              -->
+    <!-- ============================================================ -->
+    <div class="section-label">1 · Taxonomy-match callout — query “flow cytometry”</div>
+
+    <div class="search-canvas">
+      <div class="results-head">
+        <h1><span class="lede">Results for </span><span class="q">“flow cytometry”</span></h1>
+
+        <!-- Method-family callout. Same shape as the topic taxonomy callout:
+             Sparkles eyebrow → entity name → one-line descriptor → scholar /
+             publication stat line → "View the … page →" accent link. -->
+        <div class="taxo-callout" role="region" aria-label="Matched method family">
+          <div class="glyph" aria-hidden="true">
+            <!-- tool / wrench glyph (lucide wrench) -->
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+          </div>
+          <div class="taxo-body">
+            <span class="taxo-eyebrow">
+              <!-- sparkles (lucide) — same eyebrow icon as the topic callout -->
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>
+              Method &amp; tool family
+            </span>
+
+            <div class="taxo-name-row">
+              <span class="taxo-name">Flow Cytometry</span>
+              <span class="entity-badge entity-badge--method" aria-label="Result type: Method">Method</span>
+            </div>
+
+            <p class="taxo-desc">
+              A laser-based technique for measuring physical and chemical
+              characteristics of cells or particles in suspension — used for
+              immunophenotyping, cell sorting, and single-cell analysis across
+              immunology, hematology, and oncology.
+            </p>
+
+            <div class="taxo-stats">
+              <span class="stat">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <strong>248</strong>&nbsp;scholars
+              </span>
+              <span class="dot">·</span>
+              <span class="stat">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/></svg>
+                <strong>3,914</strong>&nbsp;publications
+              </span>
+            </div>
+
+            <div class="taxo-cta">
+              <a class="taxo-link" href="#">
+                View the Flow Cytometry page
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- result-type tabs (context) -->
+      <div class="tabs" role="tablist" aria-hidden="true">
+        <span class="tab active">Scholars <span class="pill">248</span></span>
+        <span class="tab">Publications <span class="pill">3,914</span></span>
+        <span class="tab">Funding <span class="pill">61</span></span>
+      </div>
+
+      <!-- placeholder scholar rows (context) -->
+      <div class="results-body">
+        <div class="res-row">
+          <div class="res-avatar">JL</div>
+          <div class="res-main">
+            <div class="res-name">Jennifer Lin, PhD</div>
+            <div class="res-meta">Associate Professor of Immunology · Microbiology &amp; Immunology</div>
+          </div>
+        </div>
+        <div class="res-row">
+          <div class="res-avatar">RA</div>
+          <div class="res-main">
+            <div class="res-name">Raj Anand, MD, PhD</div>
+            <div class="res-meta">Professor of Medicine · Hematology &amp; Medical Oncology</div>
+          </div>
+        </div>
+        <div class="res-row">
+          <div class="res-avatar">SO</div>
+          <div class="res-main">
+            <div class="res-name">Sofia Okafor, PhD</div>
+            <div class="res-meta">Assistant Professor of Pathology · Pathology &amp; Laboratory Medicine</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- (2) Autocomplete dropdown with a Method row                  -->
+    <!-- ============================================================ -->
+    <div class="section-label">2 · Autocomplete — a Method row beside Person / Topic / Department</div>
+
+    <div class="ac-wrap">
+      <div class="ac-input-box">
+        <svg class="lead-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input class="ac-input" type="search" value="flow cyto" placeholder="Search by name, topic, department, or publication…" aria-label="Search scholars" autocomplete="off" />
+        <button class="ac-btn" type="button">Search</button>
+      </div>
+
+      <ul class="ac-listbox" role="listbox" aria-label="Suggestions">
+        <!-- Method row — NEW category. Mono exemplar-tool subtitle, rust badge. -->
+        <li class="ac-opt active" role="option" aria-selected="true">
+          <a class="ac-link" href="#">
+            <span class="ac-text">
+              <span class="ac-title">Flow Cytometry</span>
+              <span class="ac-subtitle"><span class="ac-mono">FACS · CyTOF · FlowJo</span> — 248 scholars</span>
+            </span>
+            <span class="entity-badge entity-badge--method" aria-label="Result type: Method">Method</span>
+          </a>
+        </li>
+
+        <!-- Person row — role chip (existing behaviour) -->
+        <li class="ac-opt" role="option" aria-selected="false">
+          <a class="ac-link" href="#">
+            <span class="ac-text">
+              <span class="ac-title">Flora Cytron, MD</span>
+              <span class="ac-subtitle">Professor of Pediatrics · Pediatrics</span>
+            </span>
+            <span class="role-chip" aria-label="Role: Faculty">Faculty</span>
+          </a>
+        </li>
+
+        <!-- Topic row — existing yellow badge -->
+        <li class="ac-opt" role="option" aria-selected="false">
+          <a class="ac-link" href="#">
+            <span class="ac-text">
+              <span class="ac-title">Cellular Immunology</span>
+              <span class="ac-subtitle">412 scholars · 14 subtopics</span>
+            </span>
+            <span class="entity-badge entity-badge--topic" aria-label="Result type: Topic">Topic</span>
+          </a>
+        </li>
+
+        <!-- Method row #2 — sibling family, shows the badge isn't a one-off -->
+        <li class="ac-opt" role="option" aria-selected="false">
+          <a class="ac-link" href="#">
+            <span class="ac-text">
+              <span class="ac-title">Fluorescence Microscopy</span>
+              <span class="ac-subtitle"><span class="ac-mono">Confocal · STORM · ImageJ</span> — 176 scholars</span>
+            </span>
+            <span class="entity-badge entity-badge--method" aria-label="Result type: Method">Method</span>
+          </a>
+        </li>
+
+        <!-- Department row — existing green badge -->
+        <li class="ac-opt" role="option" aria-selected="false">
+          <a class="ac-link" href="#">
+            <span class="ac-text">
+              <span class="ac-title">Microbiology &amp; Immunology</span>
+              <span class="ac-subtitle">Department · 89 scholars</span>
+            </span>
+            <span class="entity-badge entity-badge--department" aria-label="Result type: Department">Department</span>
+          </a>
+        </li>
+      </ul>
+    </div>
+
+    <!-- badge legend -->
+    <div class="legend" style="margin-top:84px;">
+      <span class="lbl">Category badges:</span>
+      <span class="entity-badge entity-badge--person">Scholar</span>
+      <span class="entity-badge entity-badge--topic">Topic</span>
+      <span class="entity-badge entity-badge--subtopic">Subtopic</span>
+      <span class="entity-badge entity-badge--department">Department</span>
+      <span class="entity-badge entity-badge--division">Division</span>
+      <span class="entity-badge entity-badge--center">Center</span>
+      <span class="entity-badge entity-badge--institute">Institute</span>
+      <span class="entity-badge entity-badge--method">Method</span>
+      <span class="lbl" style="margin-left:6px;">← new</span>
+    </div>
+
+  </div>
+</body>
+</html>

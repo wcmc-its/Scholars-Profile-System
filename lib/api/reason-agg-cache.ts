@@ -15,10 +15,11 @@
  * OpenSearch round-trip; the rest await it.
  *
  * ponytail (full): deliberately a single-file Map cache, NOT unstable_cache or
- * an LRU dependency. Ceiling — unbounded entry count (no eviction). Acceptable
- * because the key space is bounded by (distinct concept × query × page-cwid set)
- * within a 30-min window and each entry is a few KB of bucket data; if memory
- * ever matters, add a size cap. No new dependency, mirrors the home.ts pattern.
+ * an LRU dependency. The "key space is naturally bounded" assumption held for
+ * server-derived keys but not for /api/search/key-paper, whose key parts are
+ * attacker-controlled query params on an unauthenticated route — so entries now
+ * expire on write (anything past the staleness ceiling) with a FIFO size cap as
+ * the backstop. Still no dependency; mirrors the home.ts pattern.
  */
 
 // 5 min fresh — shorter than home's 15 min because reason counts are live
@@ -27,12 +28,35 @@ const REASON_AGG_TTL_MS = 5 * 60 * 1000;
 // 30 min serve-stale ceiling — past this, block on a fresh load rather than
 // serve very stale counts. Proportional to the shorter TTL.
 const REASON_AGG_MAX_STALE_MS = 30 * 60 * 1000;
+// Size backstop: sweeping expired entries bounds honest traffic, but a burst of
+// distinct adversarial keys inside one staleness window could still grow the
+// map — cap it and drop oldest-inserted first. 5k entries × a few KB ≈ tens of
+// MB worst case, well within a 1-vCPU task's headroom.
+const REASON_AGG_MAX_ENTRIES = 5000;
 const REASON_AGG_BYPASS =
   Boolean(process.env.VITEST) || process.env.NODE_ENV === "test";
 
 type ReasonAggEntry<T> = { data: T; ts: number };
 const reasonAggCache = new Map<string, ReasonAggEntry<unknown>>();
 const reasonAggInflight = new Map<string, Promise<unknown>>();
+
+/** Drop entries past the staleness ceiling (they can never be served again),
+ *  then FIFO-trim to the size cap. Runs on every cache write — O(n) over a
+ *  few thousand entries every few minutes is noise next to the OS round-trip
+ *  each write represents. */
+function evictReasonAgg(now: number): void {
+  for (const [key, entry] of reasonAggCache) {
+    if (now - entry.ts >= REASON_AGG_MAX_STALE_MS) reasonAggCache.delete(key);
+  }
+  if (reasonAggCache.size > REASON_AGG_MAX_ENTRIES) {
+    const excess = reasonAggCache.size - REASON_AGG_MAX_ENTRIES;
+    let dropped = 0;
+    for (const key of reasonAggCache.keys()) {
+      if (dropped++ >= excess) break;
+      reasonAggCache.delete(key);
+    }
+  }
+}
 
 /**
  * Build a stable cache key for a reason-agg run. Sorts the cwid/UI arrays so a
@@ -54,12 +78,20 @@ export function reasonAggKey(parts: {
   ]);
 }
 
+/** Test-only probe: the current entry count, so eviction is assertable without
+ *  exporting the map itself. */
+export function reasonAggCacheSize(): number {
+  return reasonAggCache.size;
+}
+
 function refreshReasonAgg<T>(key: string, load: () => Promise<T>): Promise<T> {
   const existing = reasonAggInflight.get(key) as Promise<T> | undefined;
   if (existing) return existing;
   const p = load()
     .then((data) => {
-      reasonAggCache.set(key, { data, ts: Date.now() });
+      const now = Date.now();
+      reasonAggCache.set(key, { data, ts: now });
+      evictReasonAgg(now);
       return data;
     })
     .finally(() => {

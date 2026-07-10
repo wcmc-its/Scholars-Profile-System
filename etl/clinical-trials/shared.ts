@@ -299,18 +299,28 @@ export async function replaceAll(
   trials: TrialBuild[],
   links: LinkBuild[],
 ): Promise<{ insTrials: number; insLinks: number; delLinks: number; delTrials: number }> {
-  const delLinks = await db.write.personClinicalTrial.deleteMany({});
-  const delTrials = await db.write.clinicalTrial.deleteMany({});
-
+  // Delete + insert both tables in ONE transaction so a mid-write kill can't
+  // leave a half-rebuilt set (children-first delete, parents-first insert
+  // preserves FK order inside the tx). Interactive-tx timeout raised above the
+  // 5 s default for the batched createMany.
   let insTrials = 0;
-  for (const batch of chunks(trials, INSERT_BATCH)) {
-    await db.write.clinicalTrial.createMany({ data: batch });
-    insTrials += batch.length;
-  }
   let insLinks = 0;
-  for (const batch of chunks(links, INSERT_BATCH)) {
-    await db.write.personClinicalTrial.createMany({ data: batch });
-    insLinks += batch.length;
-  }
-  return { insTrials, insLinks, delLinks: delLinks.count, delTrials: delTrials.count };
+  let delLinks = 0;
+  let delTrials = 0;
+  await db.write.$transaction(
+    async (tx) => {
+      delLinks = (await tx.personClinicalTrial.deleteMany({})).count;
+      delTrials = (await tx.clinicalTrial.deleteMany({})).count;
+      for (const batch of chunks(trials, INSERT_BATCH)) {
+        await tx.clinicalTrial.createMany({ data: batch });
+        insTrials += batch.length;
+      }
+      for (const batch of chunks(links, INSERT_BATCH)) {
+        await tx.personClinicalTrial.createMany({ data: batch });
+        insLinks += batch.length;
+      }
+    },
+    { timeout: 120_000, maxWait: 10_000 },
+  );
+  return { insTrials, insLinks, delLinks, delTrials };
 }

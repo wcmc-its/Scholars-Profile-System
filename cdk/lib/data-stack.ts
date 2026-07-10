@@ -22,6 +22,7 @@ import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as cr from "aws-cdk-lib/custom-resources";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
+import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
 
 /** Props for {@link DataStack}. */
 export interface DataStackProps extends StackProps {
@@ -29,10 +30,6 @@ export interface DataStackProps extends StackProps {
   readonly envConfig: SpsEnvConfig;
   /** VPC the cluster and domain attach to (from NetworkStack). */
   readonly vpc: ec2.IVpc;
-  /** ECS application security group — granted Aurora + OpenSearch ingress. */
-  readonly appSecurityGroup: ec2.ISecurityGroup;
-  /** ETL Lambda security group — granted Aurora + OpenSearch ingress. */
-  readonly etlSecurityGroup: ec2.ISecurityGroup;
   /**
    * DR-region {@link backup.IBackupVault} from {@link DrBackupVaultStack}.
    * The AWS Backup plan's `copyAction` writes recovery points here, closing
@@ -55,8 +52,13 @@ export interface DataStackProps extends StackProps {
  * `RemovalPolicy.RETAIN` (ADR-008's blast-radius rule).
  */
 export class DataStack extends Stack {
-  /** Aurora MySQL Serverless v2 cluster. */
-  public readonly auroraCluster: rds.DatabaseCluster;
+  /**
+   * Aurora MySQL Serverless v2 cluster. Typed as {@link rds.IDatabaseCluster}
+   * (not the concrete `DatabaseCluster`) so the field can hold either the
+   * standalone cluster or the cutover `DatabaseClusterFromSnapshot` — both
+   * satisfy every consumer (Observability metrics, AWS Backup, the CfnOutputs).
+   */
+  public readonly auroraCluster: rds.IDatabaseCluster;
   /**
    * Auto-generated master-user secret bound to the cluster. SecretsStack
    * attaches the Secrets Manager RDS rotation Lambda to this (B06).
@@ -68,8 +70,26 @@ export class DataStack extends Stack {
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
 
-    const { envConfig, vpc, appSecurityGroup, etlSecurityGroup, drBackupVault } =
-      props;
+    const { envConfig, vpc, drBackupVault } = props;
+    // Item-3 pass 2a: import the app/etl SGs by id from the SSM params NetworkStack
+    // publishes (pass 1) instead of the cross-stack handle — severs the SG `Ref`
+    // exports that would lock the useSharedVpc flip (the SGs replace onto the
+    // imported VPC). Flag-agnostic; the Aurora/OpenSearch ingress rules below
+    // reference these by `.securityGroupId` (L1, id-keyed), so nothing drops.
+    const appSecurityGroup = resolveSharedSg(this, envConfig, "app", "AppSg");
+    const etlSecurityGroup = resolveSharedSg(this, envConfig, "etl", "EtlSg");
+
+    // Estate-consolidation subnet placement (plan §4.4): Aurora + OpenSearch in
+    // the db tier; the bootstrap/rotation Lambdas (compute) in the app2 tier —
+    // but only when useSharedVpc is on. Otherwise both resolve to the standalone
+    // Sps VPC's PRIVATE_WITH_EGRESS tier, byte-identical to pre-consolidation.
+    const dataSubnets = resolveTierSubnets(this, envConfig, "data", "DataSubnet");
+    const computeSubnets = resolveTierSubnets(
+      this,
+      envConfig,
+      "app",
+      "ComputeSubnet",
+    );
 
     // ------------------------------------------------------------------
     // Security groups for the data plane. Each is created in this stack
@@ -93,17 +113,6 @@ export class DataStack extends Stack {
       ec2.Port.tcp(3306),
       "ETL Lambdas to Aurora writer/reader endpoints",
     );
-    // ETL cadence VPC relocation (docs/etl-vpc-migration-handoff.md): once the
-    // cadence runs in scholars-dev/prod and peers back, those tasks reach
-    // Aurora from the peer CIDR, not the Sps ETL SG. Additive — the Sps-SG rule
-    // above stays for the reconcilers + curated backup that don't move.
-    if (envConfig.etlCadenceVpcRelocated) {
-      auroraSecurityGroup.addIngressRule(
-        ec2.Peer.ipv4(envConfig.etlPeerCidr),
-        ec2.Port.tcp(3306),
-        "Relocated ETL cadence (scholars-dev/prod) to Aurora over the VPC peer",
-      );
-    }
     // The Secrets Manager RDS rotation Lambda's SG ingress is added by
     // `cluster.addRotationSingleUser()` below — CDK creates the Lambda + a
     // dedicated SG + the Aurora-SG ingress rule together, so we do not
@@ -128,14 +137,18 @@ export class DataStack extends Stack {
       ec2.Port.tcp(443),
       "ETL Lambdas to OpenSearch HTTPS (index writes + suggest)",
     );
-    // ETL cadence VPC relocation (see Aurora rule above): the relocated cadence
-    // writes the OpenSearch index from the peer CIDR.
-    if (envConfig.etlCadenceVpcRelocated) {
-      opensearchSecurityGroup.addIngressRule(
-        ec2.Peer.ipv4(envConfig.etlPeerCidr),
-        ec2.Port.tcp(443),
-        "Relocated ETL cadence (scholars-dev/prod) to OpenSearch over the VPC peer",
-      );
+
+    // item-3 cutover: under useSharedVpc the data-tier SGs move to the shared
+    // VPC, which forces a replace (a SecurityGroup's VpcId is immutable). RETAIN
+    // the OLD physical SGs so CloudFormation ORPHANS them — exactly like the
+    // RETAIN'd old cluster/domain that are still attached to them — instead of
+    // trying to DELETE them during cleanup, which raises DependencyViolation
+    // (the orphaned datastore still holds the SG). The orphaned old SGs are torn
+    // down with the old VPC at Phase G. Gated on useSharedVpc so the flag-off
+    // synth stays byte-identical (no DeletionPolicy on the SGs pre-cutover).
+    if (envConfig.useSharedVpc) {
+      auroraSecurityGroup.applyRemovalPolicy(RemovalPolicy.RETAIN);
+      opensearchSecurityGroup.applyRemovalPolicy(RemovalPolicy.RETAIN);
     }
 
     // ------------------------------------------------------------------
@@ -161,59 +174,120 @@ export class DataStack extends Stack {
         }),
     );
 
-    this.auroraCluster = new rds.DatabaseCluster(this, "AuroraCluster", {
-      engine: rds.DatabaseClusterEngine.auroraMysql({
-        version: rds.AuroraMysqlEngineVersion.VER_3_08_0,
-      }),
-      credentials: rds.Credentials.fromGeneratedSecret("scholars_admin", {
-        // Env-prefixed because account `665083158573` hosts both staging and
-        // prod (one-account deviation from ADR-008's separate-accounts
-        // alternative). Without the env in the path, the two stacks collide
-        // on Secrets Manager's per-region-per-account name uniqueness.
-        secretName: `scholars/${envConfig.envName}/db/master`,
-      }),
-      defaultDatabaseName: "scholars",
-      vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-      securityGroups: [auroraSecurityGroup],
-      writer: rds.ClusterInstance.serverlessV2("Writer", {
-        publiclyAccessible: false,
-      }),
-      readers,
-      serverlessV2MinCapacity: envConfig.auroraMinCapacity,
-      serverlessV2MaxCapacity: envConfig.auroraMaxCapacity,
-      storageEncrypted: true,
-      deletionProtection: true,
-      backup: {
-        retention: Duration.days(envConfig.auroraBackupRetentionDays),
-        preferredWindow: "03:00-04:00",
-      },
-      iamAuthentication: false,
-      removalPolicy: RemovalPolicy.RETAIN,
-    });
-    // The auto-generated master secret. Retain on cluster delete so the
-    // recovery procedure can read the credentials from Secrets Manager even
-    // if the cluster has been replaced from a snapshot. RETAIN on
-    // UpdateReplacePolicy is equally critical: a Name change triggers a
-    // CFN replace (Name is replace-required for AWS::SecretsManager::Secret),
-    // and without RETAIN the OLD secret holding the cluster's live password
-    // is deleted. `cluster.secret` resolves through a SecretTargetAttachment
-    // whose `node.defaultChild` is that attachment, not the underlying
-    // Secret — so calling `applyRemovalPolicy` on it (the original shape of
-    // this code) only set the policy on the attachment. Walk into the
-    // construct tree directly so the policy lands on the real CfnSecret.
-    if (!this.auroraCluster.secret) {
-      throw new Error(
-        "Aurora cluster did not produce a master secret — Credentials.fromGeneratedSecret should always create one.",
+    // Estate-consolidation data-bearing cutover (plan §8.5/§8.6): when
+    // envConfig.auroraSnapshotIdentifier is set, restore the cluster via
+    // rds.DatabaseClusterFromSnapshot stood up ALONGSIDE the live one
+    // (reversible — "abandon new, keep old"). Undefined (shipped) → the
+    // standalone DatabaseCluster below, byte-identical to pre-cutover. The
+    // snapshot branch omits credentials/defaultDatabaseName/storageEncrypted —
+    // the master username, database, and KMS key are inherited from the snapshot.
+    const snapshotId = envConfig.auroraSnapshotIdentifier;
+    let cluster: rds.DatabaseCluster | rds.DatabaseClusterFromSnapshot;
+    if (snapshotId) {
+      // Transitional master credential for the restored cluster, GENERATED here
+      // (not SecretsStack) — SnapshotCredentials.fromSecret needs a real
+      // `password` field and the credential lifecycle lives with the cluster. A
+      // distinct name (db/master-its) so the live + restored clusters coexist
+      // during the reversible cutover. RETAIN so a Name-change replace never
+      // deletes the live password. Username is immutable on a snapshot restore,
+      // so it must match the live master (scholars_admin).
+      const itsMaster = new secretsmanager.Secret(
+        this,
+        "AuroraItsMasterSecret",
+        {
+          secretName: `scholars/${envConfig.envName}/db/master-its`,
+          generateSecretString: {
+            secretStringTemplate: JSON.stringify({ username: "scholars_admin" }),
+            generateStringKey: "password",
+            excludeCharacters: '"@/\\',
+          },
+          removalPolicy: RemovalPolicy.RETAIN,
+        },
       );
+      cluster = new rds.DatabaseClusterFromSnapshot(
+        this,
+        "AuroraClusterFromSnapshot",
+        {
+          snapshotIdentifier: snapshotId,
+          snapshotCredentials: rds.SnapshotCredentials.fromSecret(itsMaster),
+          engine: rds.DatabaseClusterEngine.auroraMysql({
+            version: rds.AuroraMysqlEngineVersion.VER_3_08_0,
+          }),
+          vpc,
+          vpcSubnets: dataSubnets,
+          securityGroups: [auroraSecurityGroup],
+          writer: rds.ClusterInstance.serverlessV2("Writer", {
+            publiclyAccessible: false,
+          }),
+          readers,
+          serverlessV2MinCapacity: envConfig.auroraMinCapacity,
+          serverlessV2MaxCapacity: envConfig.auroraMaxCapacity,
+          deletionProtection: true,
+          backup: {
+            retention: Duration.days(envConfig.auroraBackupRetentionDays),
+            preferredWindow: "03:00-04:00",
+          },
+          iamAuthentication: false,
+          removalPolicy: RemovalPolicy.RETAIN,
+        },
+      );
+      this.auroraMasterSecret = itsMaster;
+    } else {
+      cluster = new rds.DatabaseCluster(this, "AuroraCluster", {
+        engine: rds.DatabaseClusterEngine.auroraMysql({
+          version: rds.AuroraMysqlEngineVersion.VER_3_08_0,
+        }),
+        credentials: rds.Credentials.fromGeneratedSecret("scholars_admin", {
+          // Env-prefixed because account `665083158573` hosts both staging and
+          // prod (one-account deviation from ADR-008's separate-accounts
+          // alternative). Without the env in the path, the two stacks collide
+          // on Secrets Manager's per-region-per-account name uniqueness.
+          secretName: `scholars/${envConfig.envName}/db/master`,
+        }),
+        defaultDatabaseName: "scholars",
+        vpc,
+        vpcSubnets: dataSubnets,
+        securityGroups: [auroraSecurityGroup],
+        writer: rds.ClusterInstance.serverlessV2("Writer", {
+          publiclyAccessible: false,
+        }),
+        readers,
+        serverlessV2MinCapacity: envConfig.auroraMinCapacity,
+        serverlessV2MaxCapacity: envConfig.auroraMaxCapacity,
+        storageEncrypted: true,
+        deletionProtection: true,
+        backup: {
+          retention: Duration.days(envConfig.auroraBackupRetentionDays),
+          preferredWindow: "03:00-04:00",
+        },
+        iamAuthentication: false,
+        removalPolicy: RemovalPolicy.RETAIN,
+      });
+      // The auto-generated master secret. Retain on cluster delete so the
+      // recovery procedure can read the credentials from Secrets Manager even
+      // if the cluster has been replaced from a snapshot. RETAIN on
+      // UpdateReplacePolicy is equally critical: a Name change triggers a
+      // CFN replace (Name is replace-required for AWS::SecretsManager::Secret),
+      // and without RETAIN the OLD secret holding the cluster's live password
+      // is deleted. `cluster.secret` resolves through a SecretTargetAttachment
+      // whose `node.defaultChild` is that attachment, not the underlying
+      // Secret — so calling `applyRemovalPolicy` on it (the original shape of
+      // this code) only set the policy on the attachment. Walk into the
+      // construct tree directly so the policy lands on the real CfnSecret.
+      if (!cluster.secret) {
+        throw new Error(
+          "Aurora cluster did not produce a master secret — Credentials.fromGeneratedSecret should always create one.",
+        );
+      }
+      this.auroraMasterSecret = cluster.secret;
+      const masterSecretConstruct = cluster.node.findChild(
+        "Secret",
+      ) as secretsmanager.Secret;
+      (
+        masterSecretConstruct.node.defaultChild as secretsmanager.CfnSecret
+      ).applyRemovalPolicy(RemovalPolicy.RETAIN);
     }
-    this.auroraMasterSecret = this.auroraCluster.secret;
-    const masterSecretConstruct = this.auroraCluster.node.findChild(
-      "Secret",
-    ) as secretsmanager.Secret;
-    (
-      masterSecretConstruct.node.defaultChild as secretsmanager.CfnSecret
-    ).applyRemovalPolicy(RemovalPolicy.RETAIN);
+    this.auroraCluster = cluster;
 
     // RDS rotation for the Aurora master credentials (B06 secrets half).
     //
@@ -232,9 +306,15 @@ export class DataStack extends Stack {
     // Single-user rotation is the right primitive: the master user is
     // administrative and never serves an application connection, so the brief
     // reconnect window at rotation time is invisible.
-    this.auroraCluster.addRotationSingleUser({
+    cluster.addRotationSingleUser({
       automaticallyAfter: Duration.days(30),
       excludeCharacters: '"@/\\',
+      // Place the rotation Lambda in the compute (app2) tier, not the cluster's
+      // db tier it would otherwise inherit (plan §4.4/G2 budgets seeder +
+      // rotation ENIs against app2). Matters when useSharedVpc is on: the tight
+      // db /27 is reserved for Aurora/OpenSearch, and the Lambda needs NAT
+      // egress to reach Secrets Manager (no SPS-owned SM endpoint when shared).
+      vpcSubnets: computeSubnets,
     });
 
     // ------------------------------------------------------------------
@@ -271,6 +351,12 @@ export class DataStack extends Stack {
     // a dedicated seeder SG hung ~49s on the master-secret read — never reaching
     // Aurora — because the endpoint dropped its 443 SYN.) Reusing the ETL SG,
     // already blessed on both the endpoint and Aurora, sidesteps the layering.
+    //
+    // When useSharedVpc is on there is no SPS-owned Secrets Manager interface
+    // endpoint (AppStack skips it; SM is reached over its-reciter's NAT — plan
+    // §4.4/G5), so the endpoint-private-DNS reasoning above is moot there; the
+    // seeder + rotation Lambdas sit in the app2 tier (computeSubnets) and the
+    // IAM role — not the SG — remains the security boundary.
     // ------------------------------------------------------------------
     const bootstrapSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
@@ -308,7 +394,7 @@ export class DataStack extends Stack {
         memorySize: 256,
         timeout: Duration.minutes(2),
         vpc,
-        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        vpcSubnets: computeSubnets,
         // ETL SG: already admitted on the Secrets Manager interface endpoint
         // (443, AppStack) and on Aurora (3306, this stack) — see the block
         // comment above for why a dedicated seeder SG can't reach the endpoint.
@@ -407,14 +493,27 @@ export class DataStack extends Stack {
     // domain ("You must specify exactly one subnet"). Pick the exact subnet
     // count the topology calls for: 1 for single-AZ staging, N for the
     // multi-AZ envs.
-    const allPrivateSubnets = vpc.selectSubnets({
-      subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-    }).subnets;
-    const opensearchSubnets = allPrivateSubnets.slice(
+    // When shared, the explicit db-tier subnets (already AZ-paired); otherwise
+    // the created VPC's private subnets. Sliced to the node count because
+    // OpenSearch requires len(SubnetIds) == zone-awareness AZ count.
+    const allDataSubnets =
+      dataSubnets.subnets ??
+      vpc.selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS })
+        .subnets;
+    const opensearchSubnets = allDataSubnets.slice(
       0,
       envConfig.opensearchDataNodes,
     );
-    this.opensearchDomain = new opensearchservice.Domain(this, "OpenSearch", {
+    // item-3 cutover: an OpenSearch domain CANNOT move to a different VPC in
+    // place (AWS: "after you place a domain within a VPC, you can't move it to a
+    // different VPC") — an in-place VPCOptions change onto a shared-VPC subnet
+    // would FAIL the UpdateDomainConfig and roll back the Data deploy. So under
+    // useSharedVpc use a NEW construct id: CloudFormation stands up a FRESH (empty)
+    // domain in the shared VPC and ORPHANS the RETAIN'd old one; data is rebuilt
+    // via search:index (runbook Phase B4, app reads OLD until the new one verifies).
+    // Flag-off keeps the "OpenSearch" id → byte-identical pre-cutover synth.
+    const openSearchId = envConfig.useSharedVpc ? "OpenSearchShared" : "OpenSearch";
+    this.opensearchDomain = new opensearchservice.Domain(this, openSearchId, {
       version: opensearchservice.EngineVersion.OPENSEARCH_2_19,
       vpc,
       vpcSubnets: [{ subnets: opensearchSubnets }],
@@ -422,6 +521,16 @@ export class DataStack extends Stack {
       capacity: {
         dataNodes: envConfig.opensearchDataNodes,
         dataNodeInstanceType: envConfig.opensearchDataNodeInstanceType,
+        // #1509 — dedicated master nodes (prod: 3) move cluster coordination off
+        // the data path so query/index load can't trigger master election churn,
+        // and a 2-of-3 master quorum survives one node/AZ loss. Spread only when
+        // configured (>0) so the single-node staging domain synth is byte-identical.
+        ...(envConfig.opensearchMasterNodes > 0
+          ? {
+              masterNodes: envConfig.opensearchMasterNodes,
+              masterNodeInstanceType: envConfig.opensearchMasterNodeInstanceType,
+            }
+          : {}),
         multiAzWithStandbyEnabled: false,
       },
       zoneAwareness: opensearchMultiAz

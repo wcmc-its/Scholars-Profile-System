@@ -68,6 +68,13 @@ export function DepartmentFacultyClient({
     total: number;
   } | null>(null);
   const [loading, setLoading] = useState(false);
+  // Distinct from an empty result: a failed method-filter fetch (network / 5xx)
+  // must not read as "no scholars match" — the API returning [] and the request
+  // dying are different facts. Drives a retryable error state in the body.
+  const [error, setError] = useState(false);
+  // Bumped by the Retry affordance to re-run the fetch effect after a failure
+  // (same selection + page, so nothing else in the dep list changes).
+  const [retryNonce, setRetryNonce] = useState(0);
 
   const hasFacet = Boolean(methodFacet && methodFacet.length > 0 && unitKind && unitCode);
 
@@ -99,10 +106,20 @@ export function DepartmentFacultyClient({
     params.delete("method");
     params.delete("page");
     for (const v of selMethods) params.append("method", v);
-    if (selMethods.size > 0 && fetchPage > 1) params.set("page", String(fetchPage));
+    if (selMethods.size > 0) {
+      // Filtered view paginates client-side via `fetchPage`.
+      if (fetchPage > 1) params.set("page", String(fetchPage));
+    } else if (page > 1) {
+      // No method filter: reflect the SSR `page` prop, NOT whatever `?page=` is
+      // already in the URL. This preserves a genuine unfiltered arrival at
+      // `?page=3` while dropping a stale filtered `?page=N` when the user
+      // deselects the last method (the unfiltered roster then renders SSR
+      // `page`, so the address bar must agree with it).
+      params.set("page", String(page));
+    }
     const qs = params.toString();
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-  }, [selMethods, fetchPage, hasFacet]);
+  }, [selMethods, fetchPage, hasFacet, page]);
 
   // Fetch the filtered roster whenever the selection or page changes. No selection
   // → clear the filtered state so the SSR roster renders.
@@ -110,11 +127,13 @@ export function DepartmentFacultyClient({
     if (!hasFacet) return;
     if (selMethods.size === 0) {
       setFiltered(null);
+      setError(false);
       setLoading(false);
       return;
     }
     const controller = new AbortController();
     setLoading(true);
+    setError(false);
     const params = new URLSearchParams();
     for (const v of selMethods) params.append("method", v);
     params.set("page", String(Math.max(0, fetchPage - 1)));
@@ -128,11 +147,14 @@ export function DepartmentFacultyClient({
       })
       .catch((err) => {
         if (err?.name === "AbortError") return;
-        setFiltered({ hits: [], total: 0 });
+        // Keep the previous `filtered` (don't overwrite with an empty result —
+        // that would render as "No scholars match these filters."). Surface a
+        // retryable error instead.
+        setError(true);
         setLoading(false);
       });
     return () => controller.abort();
-  }, [selMethods, fetchPage, hasFacet, unitKind, unitCode]);
+  }, [selMethods, fetchPage, hasFacet, unitKind, unitCode, retryNonce]);
 
   const isFiltered = hasFacet && selMethods.size > 0;
   const baseHits = isFiltered ? (filtered?.hits ?? []) : faculty;
@@ -298,7 +320,23 @@ export function DepartmentFacultyClient({
           onChange={setActiveCategory}
         />
       </div>
-      {visible.length === 0 ? (
+      {isFiltered && error ? (
+        <p className="py-8 text-center text-sm text-muted-foreground">
+          Couldn’t load matching scholars.{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setError(false);
+              setRetryNonce((n) => n + 1);
+            }}
+            className="underline underline-offset-2 hover:no-underline"
+          >
+            Retry
+          </button>
+        </p>
+      ) : isFiltered && loading && filtered === null ? (
+        <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+      ) : visible.length === 0 ? (
         <p className="py-8 text-center text-sm text-muted-foreground">
           No scholars match these filters.
         </p>

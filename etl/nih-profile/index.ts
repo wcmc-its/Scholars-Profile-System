@@ -34,6 +34,7 @@
  */
 import { db } from "../../lib/db";
 import { coreProjectNum } from "@/lib/award-number";
+import { withEtlRun } from "@/lib/etl-run";
 import {
   iterateWcmProjects,
   searchProjectsByPiName,
@@ -280,7 +281,7 @@ async function main() {
   console.log("\nNIH Profile ETL complete.\n");
 }
 
-main()
+withEtlRun("NihProfile", main)
   .then(() => db.write.$disconnect())
   .catch(async (err) => {
     console.error(err);

@@ -5,6 +5,7 @@ import {
   applyProductMapping,
   productPmids,
   selectBiosketchProducts,
+  suggestPubsFromStatement,
   type BiosketchProducts,
 } from "@/lib/edit/biosketch-products";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
@@ -145,5 +146,61 @@ describe("applyProductMapping (#917 v6)", () => {
 
   it("productPmids returns the unique pmids across both buckets", () => {
     expect(productPmids(base)).toEqual(["p1", "p2", "p3"]);
+  });
+});
+
+describe("suggestPubsFromStatement (#1569)", () => {
+  it("returns [] for an empty / token-less statement", () => {
+    const pubs = [pub({ pmid: "a", title: "Pancreatic cancer immunotherapy" })];
+    expect(suggestPubsFromStatement(pubs, "")).toEqual([]);
+    // "the a to of" are all stopwords / too short → no tokens → no suggestions.
+    expect(suggestPubsFromStatement(pubs, "the a to of")).toEqual([]);
+  });
+
+  it("ranks by overlap desc and drops pubs that overlap nothing", () => {
+    const pubs = [
+      pub({ pmid: "hit3", title: "Pancreatic cancer immunotherapy resistance" }),
+      pub({ pmid: "hit1", title: "Cancer screening cohort" }),
+      pub({ pmid: "miss", title: "Unrelated cardiology imaging" }),
+    ];
+    const out = suggestPubsFromStatement(pubs, "pancreatic cancer immunotherapy resistance");
+    // hit3 overlaps 4 tokens, hit1 overlaps 1, miss overlaps 0 (excluded).
+    expect(out.map((p) => p.pmid)).toEqual(["hit3", "hit1"]);
+    expect(out[0].overlap).toBe(4);
+    expect(out[1].overlap).toBe(1);
+  });
+
+  it("breaks overlap ties by blended impact (higher first)", () => {
+    const pubs = [
+      pub({ pmid: "low", title: "Cancer genomics", impact: 20 }),
+      pub({ pmid: "high", title: "Cancer biology", impact: 90 }),
+    ];
+    // Both overlap only "cancer" (overlap 1); the higher-impact pub ranks first.
+    const out = suggestPubsFromStatement(pubs, "cancer therapy");
+    expect(out.map((p) => p.pmid)).toEqual(["high", "low"]);
+  });
+
+  it("reports matched terms deduped + sorted, and strips HTML from the returned title", () => {
+    const pubs = [
+      pub({
+        pmid: "m",
+        title: "<i>Cancer</i> cancer immunotherapy",
+        synopsis: "immunotherapy resistance study",
+      }),
+    ];
+    const out = suggestPubsFromStatement(pubs, "cancer immunotherapy resistance");
+    expect(out).toHaveLength(1);
+    // "cancer" appears twice in the source but the overlap/terms are deduped.
+    expect(out[0].overlap).toBe(3);
+    expect(out[0].matchedTerms).toEqual(["cancer", "immunotherapy", "resistance"]);
+    expect(out[0].title).toBe("Cancer cancer immunotherapy");
+  });
+
+  it("caps the output at the limit (default 10)", () => {
+    const pubs = Array.from({ length: 15 }, (_, i) =>
+      pub({ pmid: `p${i}`, title: "cancer immunotherapy", impact: 100 - i }),
+    );
+    expect(suggestPubsFromStatement(pubs, "cancer immunotherapy")).toHaveLength(10);
+    expect(suggestPubsFromStatement(pubs, "cancer immunotherapy", 3)).toHaveLength(3);
   });
 });

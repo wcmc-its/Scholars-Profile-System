@@ -45,11 +45,14 @@ import {
   normalizeForMatch,
   normalizeWithTokenStarts,
   normalizedWindows,
+  singularizeForMatch,
 } from "@/lib/api/normalize";
 import { dedupeFirstByKey } from "@/lib/api/search-ranking";
 import {
   resolveSearchSuggestMeshConcept,
   resolveMeshResolutionFallbackEnabled,
+  resolveMeshQueryNormalizationEnabled,
+  resolveAcronymSenseGuardEnabled,
 } from "@/lib/api/search-flags";
 import {
   isMethodPagesEnabled,
@@ -68,6 +71,7 @@ import {
 } from "@/lib/methods/supercategory-labels";
 import { methodFamilyPath, methodSupercategoryPath } from "@/lib/method-url";
 import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-layer";
+import { cachedRead } from "@/lib/api/swr-cache";
 
 const MIN_QUERY_LEN = 3;
 const SECONDARY_CAP = 4;
@@ -77,6 +81,11 @@ const ROW_AREA_CAP = 12;
 /** Cap candidates considered before enrichment. Anything beyond this rolls
  *  into the overflow count without being individually counted/ranked. */
 const MATCH_HARD_CAP = 1 + SECONDARY_CAP + 20;
+/** perf #1405 — cap matched method families/supercategories enriched (2-3 count
+ *  queries each, multi-thousand-pmid IN-lists) before the display slice. 10, not
+ *  the SECONDARY_CAP+1=5 ultimately shown, leaves headroom for the post-enrichment
+ *  scholarCount re-sort + same-label dedupe (see the enrichment site below). */
+const METHOD_ENRICH_CAP = 10;
 
 /**
  * Entity types the taxonomy-match callout can surface. `parentTopic` / `subtopic`
@@ -324,6 +333,17 @@ const loadEntityCandidates = cache(async (): Promise<EntityCandidate[]> => {
 });
 
 /**
+ * #824 PR-2 (perf #1405) — request-scoped memo for the Method overlay gate. It is
+ * needed twice on a method-matching request: inside {@link loadMethodCandidates}
+ * (to drop #800-suppressed / #801-sensitive families) and again in
+ * {@link matchQueryToTaxonomy} (the supercategory rollup count needs it). React
+ * cache() collapses the two reads to ONE Prisma round-trip per request while keeping
+ * the gate live per request — deliberately NOT a cross-request TTL, which would
+ * freeze #800/#801 visibility. Mirrors loadEntityCandidates.
+ */
+const loadMethodOverlayGate = cache(() => loadFamilyOverlayGate());
+
+/**
  * #824 PR-2 — Method-taxonomy candidates from `scholar_family`, overlay-gated.
  *
  * Two candidate kinds:
@@ -350,7 +370,7 @@ async function loadMethodCandidates(): Promise<EntityCandidate[]> {
       by: ["supercategory", "familyLabel"],
       _min: { familyId: true },
     }),
-    loadFamilyOverlayGate(),
+    loadMethodOverlayGate(),
   ]);
 
   const out: EntityCandidate[] = [];
@@ -672,11 +692,13 @@ export async function matchQueryToTaxonomy(
   const matched = matchedAll.filter((c) => !isMethodKind(c.entityType));
   const matchedMethods = matchedAll.filter((c) => isMethodKind(c.entityType));
 
-  // The overlay gate is loaded ONCE per request inside loadEntityCandidates; load
-  // it again here only when there are method matches to enrich (the supercategory
-  // rollup count needs it). Off-flag / no-method-match ⇒ never loaded.
+  // The overlay gate is read through the request-scoped loadMethodOverlayGate memo,
+  // so this reuses the read loadMethodCandidates already performed (one Prisma
+  // round-trip per request, not two). Only fetched when there are method matches to
+  // enrich (the supercategory rollup count needs it). Off-flag / no-method-match ⇒
+  // never loaded.
   const methodGate: FamilyOverlayGate | null =
-    matchedMethods.length > 0 ? await loadFamilyOverlayGate() : null;
+    matchedMethods.length > 0 ? await loadMethodOverlayGate() : null;
 
   // Pre-rank by [type priority, similarity desc] before the hard cap so the
   // best candidates make it through to count enrichment regardless of how
@@ -693,7 +715,16 @@ export async function matchQueryToTaxonomy(
   const cappedExtra = matched.length - considered.length;
 
   const enrich = async (c: (typeof matchedAll)[number]): Promise<TaxonomyMatch> => {
-    const counts = await getCounts(c, methodGate);
+    // perf #1405 — SWR-cache the per-candidate count read. Both branches of
+    // getCounts run 2 groupBys (topics) or 1-2 findMany rollups (methods) that
+    // queue on the tiny Fargate Prisma pool ahead of the OS query, yet the numbers
+    // change only at nightly ETL (topic pub rollups) or overlay-curation time.
+    // 15-min fresh / 1-h stale (swr-cache defaults), keyed by the candidate's stable
+    // identity. Bypassed under test (swr-cache), so per-candidate query assertions
+    // still hold. Return shape is exactly what getCounts returns.
+    const counts = await cachedRead(`taxonomy-counts:${c.entityType}:${c.id}`, () =>
+      getCounts(c, methodGate),
+    );
     return {
       entityType: c.entityType,
       id: c.id,
@@ -720,8 +751,27 @@ export async function matchQueryToTaxonomy(
   // family (typePriorityFor), then scholarCount desc, then similarity, then name —
   // so the broadest, densest method lands first in the callout. Capped at
   // SECONDARY_CAP+1 so an over-broad family-label substring never floods the card.
+  //
+  // perf #1405 — pre-rank by the same pre-enrichment keys the topic side caps on
+  // ([type priority, similarity desc]) and CAP BEFORE enrichment, mirroring the
+  // topic `matched.slice(0, MATCH_HARD_CAP)` above — so an over-broad label
+  // substring can't fan out into dozens of multi-thousand-pmid count queries
+  // (topics already capped; methods did not). The cap is METHOD_ENRICH_CAP (10),
+  // not the SECONDARY_CAP+1=5 ultimately displayed, because the FINAL sort below
+  // re-orders by scholarCount — only known post-enrichment — and dedupeFirstByKey
+  // can collapse same-label families; 10 keeps enough headroom that a
+  // high-scholarCount family ranked slightly lower by the similarity proxy still
+  // survives into the displayed 5.
+  const consideredMethods = matchedMethods
+    .slice()
+    .sort(
+      (a, b) =>
+        typePriorityFor(a.entityType) - typePriorityFor(b.entityType) ||
+        b.similarity - a.similarity,
+    )
+    .slice(0, METHOD_ENRICH_CAP);
   const enrichedMethods = (
-    await Promise.all(matchedMethods.map(enrich))
+    await Promise.all(consideredMethods.map(enrich))
   ).sort(
     (a, b) =>
       typePriorityFor(a.entityType) - typePriorityFor(b.entityType) ||
@@ -1313,6 +1363,23 @@ export async function resolveMeshDescriptor(
   }
   const candidates = rankedDescriptorCandidates(map, normalized);
   if (candidates.length === 0) {
+    // #1342 — before falling through, retry the SINGULARIZED query against the same
+    // index (flag-gated). Fires only on an exact-lookup miss, so every currently
+    // resolving query is byte-identical; a hit is stamped `partial` (attributes
+    // beneath every verbatim match, same tier as the window fallback).
+    if (resolveMeshQueryNormalizationEnabled()) {
+      const singular = singularizeForMatch(normalized);
+      if (singular !== normalized) {
+        const sCands = rankedDescriptorCandidates(map, singular);
+        if (sCands.length > 0) {
+          return buildMeshResolution(map, sCands[0], {
+            matchedForm: sCands[0].matchedForm,
+            confidence: "partial",
+            ambiguous: sCands.length > 1,
+          });
+        }
+      }
+    }
     // The whole query matched nothing. When the fallback flag is on, retry against
     // the query's contiguous word-windows (decompose-and-resolve). Off ⇒ null, exactly
     // as before.
@@ -1322,6 +1389,21 @@ export async function resolveMeshDescriptor(
   }
 
   const winner = candidates[0];
+  // #1346 — drop a short all-caps acronym (CAR/PET) that resolved ONLY via a
+  // common-word entry-term synonym whose matched form is a plain Title-case word
+  // (no uppercase past char 0): that is the wrong (non-medical) sense on a
+  // medical-center search. Returning null degrades to BM25, like 2-char acronyms.
+  // Internal-caps acronym entry terms (COPD/EHR) and exact NAME matches (DNA/RNA,
+  // confidence `exact`) are kept. Flag-off ⇒ byte-identical.
+  const rawQuery = query.trim();
+  if (
+    resolveAcronymSenseGuardEnabled() &&
+    winner.confidence === "entry-term" &&
+    /^[A-Z]{3,5}$/.test(rawQuery) &&
+    !/[A-Z]/.test(winner.matchedForm.trim().slice(1))
+  ) {
+    return null;
+  }
   return buildMeshResolution(map, winner, {
     matchedForm: winner.matchedForm,
     confidence: winner.confidence,
@@ -1362,9 +1444,23 @@ function buildMeshResolution(
  *     chars — so a short/common word can't latch onto a homonym or generic
  *     descriptor (the measured "Seahorse → Smegmamorpha", "Patient → Patients",
  *     "Calcium → Calcium" traps). Multi-token windows accept name OR entry-term.
+ *   - #1348: a single-token window is additionally blocked from resolving to a
+ *     GENERIC descriptor name (`GENERIC_DESCRIPTOR_NAMES`: Medicine/Blood/…), so
+ *     "AI in medicine" declines rather than mislabeling as Medicine.
  *   - `ambiguous` is set when ≥2 windows of the winning length resolve to DIFFERENT
  *     descriptors (the #726 floor then treats the admission conservatively).
  */
+/**
+ * #1348 — NORMALIZED (≡ `normalizeForMatch`) generic single-word descriptor names a
+ * one-token window must NOT latch onto: each is an exact MeSH descriptor name but
+ * too generic to be the salient concept of a multi-word query ("AI in medicine" →
+ * Medicine, "blood disorders" → Blood, "gut bacteria" → Bacteria). Kept tight —
+ * membership is a judgment call; this set fixes the four measured evidence rows.
+ */
+const GENERIC_DESCRIPTOR_NAMES = new Set([
+  "medicine", "disease", "diseases", "blood", "bacteria", "patients",
+]);
+
 function resolveByWindowFallback(map: MeshMap, query: string): MeshResolution | null {
   const tokens = query
     .toLowerCase()
@@ -1385,6 +1481,9 @@ function resolveByWindowFallback(map: MeshMap, query: string): MeshResolution | 
       const top = cands[0];
       // Single-token windows: exact descriptor-NAME match only.
       if (size === 1 && top.confidence !== "exact") continue;
+      // #1348 — and never to a generic single-word descriptor (Medicine/Blood/…);
+      // skip so a shorter/other window resolves, else the fallback declines to null.
+      if (size === 1 && GENERIC_DESCRIPTOR_NAMES.has(key)) continue;
       hits.push({ row: top.row, matchedForm: surface });
     }
     if (hits.length === 0) continue;

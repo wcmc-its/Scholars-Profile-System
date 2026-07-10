@@ -107,6 +107,14 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
+    "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/net/app-sg-id",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "SsmParameterValuespsprodnetetlsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/net/etl-sg-id",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
   },
   "Resources": {
     "AWS679f53fac002430cb0da5b7982bd22872D164C4C": {
@@ -410,6 +418,24 @@ exports[`DataStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::EC2::SecurityGroup",
     },
+    "AuroraSecurityGroupfromSpsDataprodAppSg12AABE3033067D84A62A": {
+      "Properties": {
+        "Description": "ECS app tasks to Aurora writer/reader endpoints",
+        "FromPort": 3306,
+        "GroupId": {
+          "Fn::GetAtt": [
+            "AuroraSecurityGroup75F699F6",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "tcp",
+        "SourceSecurityGroupId": {
+          "Ref": "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
+        },
+        "ToPort": 3306,
+      },
+      "Type": "AWS::EC2::SecurityGroupIngress",
+    },
     "AuroraSecurityGroupfromSpsDataprodAuroraClusterRotationSingleUserSecurityGroup628F0F23IndirectPort40AAF812": {
       "Properties": {
         "Description": "from SpsDataprodAuroraClusterRotationSingleUserSecurityGroup628F0F23:{IndirectPort}",
@@ -441,25 +467,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::EC2::SecurityGroupIngress",
     },
-    "AuroraSecurityGroupfromSpsNetworkprodAppSecurityGroupCFA0D3063306972DA0A5": {
-      "Properties": {
-        "Description": "ECS app tasks to Aurora writer/reader endpoints",
-        "FromPort": 3306,
-        "GroupId": {
-          "Fn::GetAtt": [
-            "AuroraSecurityGroup75F699F6",
-            "GroupId",
-          ],
-        },
-        "IpProtocol": "tcp",
-        "SourceSecurityGroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
-        },
-        "ToPort": 3306,
-      },
-      "Type": "AWS::EC2::SecurityGroupIngress",
-    },
-    "AuroraSecurityGroupfromSpsNetworkprodEtlSecurityGroupF1A0971D330656C705F4": {
+    "AuroraSecurityGroupfromSpsDataprodEtlSg5B5192373306492EDB4D": {
       "Properties": {
         "Description": "ETL Lambdas to Aurora writer/reader endpoints",
         "FromPort": 3306,
@@ -471,7 +479,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
         },
         "IpProtocol": "tcp",
         "SourceSecurityGroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
+          "Ref": "SsmParameterValuespsprodnetetlsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "ToPort": 3306,
       },
@@ -736,7 +744,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
         "VpcConfig": {
           "SecurityGroupIds": [
             {
-              "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
+              "Ref": "SsmParameterValuespsprodnetetlsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
             },
           ],
           "SubnetIds": [
@@ -1073,7 +1081,9 @@ exports[`DataStack prod matches the snapshot 1`] = `
           },
         },
         "ClusterConfig": {
-          "DedicatedMasterEnabled": false,
+          "DedicatedMasterCount": 3,
+          "DedicatedMasterEnabled": true,
+          "DedicatedMasterType": "m6g.large.search",
           "InstanceCount": 2,
           "InstanceType": "m6g.large.search",
           "MultiAZWithStandbyEnabled": false,
@@ -1231,7 +1241,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::EC2::SecurityGroup",
     },
-    "OpenSearchSecurityGroupfromSpsNetworkprodAppSecurityGroupCFA0D3064430924CAB2": {
+    "OpenSearchSecurityGroupfromSpsDataprodAppSg12AABE304431AE3704A": {
       "Properties": {
         "Description": "ECS app tasks to OpenSearch HTTPS",
         "FromPort": 443,
@@ -1243,13 +1253,13 @@ exports[`DataStack prod matches the snapshot 1`] = `
         },
         "IpProtocol": "tcp",
         "SourceSecurityGroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+          "Ref": "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "ToPort": 443,
       },
       "Type": "AWS::EC2::SecurityGroupIngress",
     },
-    "OpenSearchSecurityGroupfromSpsNetworkprodEtlSecurityGroupF1A0971D443B9C259F7": {
+    "OpenSearchSecurityGroupfromSpsDataprodEtlSg5B51923744392B17ED8": {
       "Properties": {
         "Description": "ETL Lambdas to OpenSearch HTTPS (index writes + suggest)",
         "FromPort": 443,
@@ -1261,7 +1271,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
         },
         "IpProtocol": "tcp",
         "SourceSecurityGroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
+          "Ref": "SsmParameterValuespsprodnetetlsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "ToPort": 443,
       },

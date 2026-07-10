@@ -53,6 +53,7 @@ vi.mock("@/lib/api/profile", () => ({
     publications: [],
     grants: [],
     clinicalTrials: [],
+    technologies: [],
     disclosures: [],
     centers: [],
   })),
@@ -64,6 +65,7 @@ vi.mock("@/lib/api/profile", () => ({
 // Mock @/lib/seo/jsonld to avoid JSON-LD side-effects.
 vi.mock("@/lib/seo/jsonld", () => ({
   buildPersonJsonLd: vi.fn(() => ({})),
+  serializeJsonLd: (o: unknown) => JSON.stringify(o),
 }));
 
 // Mock @/lib/api/mentoring — pulled in by MentoringSection on the profile

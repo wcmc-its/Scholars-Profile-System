@@ -30,6 +30,95 @@ exports[`NetworkStack prod matches the snapshot 1`] = `
         ],
       },
     },
+    "ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7": {
+      "Export": {
+        "Name": "Sps-Network-prod:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "AlbSecurityGroup86A59E99",
+          "GroupId",
+        ],
+      },
+    },
+    "ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6": {
+      "Export": {
+        "Name": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "AppSecurityGroupC396D536",
+          "GroupId",
+        ],
+      },
+    },
+    "ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072": {
+      "Export": {
+        "Name": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "EtlSecurityGroup5D059AE5",
+          "GroupId",
+        ],
+      },
+    },
+    "ExportsOutputRefVpc8378EB38272D6E3A": {
+      "Export": {
+        "Name": "Sps-Network-prod:ExportsOutputRefVpc8378EB38272D6E3A",
+      },
+      "Value": {
+        "Ref": "Vpc8378EB38",
+      },
+    },
+    "ExportsOutputRefVpcprivateSubnet1RouteTable1979EACBE1BD1DD4": {
+      "Export": {
+        "Name": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet1RouteTable1979EACBE1BD1DD4",
+      },
+      "Value": {
+        "Ref": "VpcprivateSubnet1RouteTable1979EACB",
+      },
+    },
+    "ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373": {
+      "Export": {
+        "Name": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
+      },
+      "Value": {
+        "Ref": "VpcprivateSubnet1SubnetCEAD3716",
+      },
+    },
+    "ExportsOutputRefVpcprivateSubnet2RouteTable4D0FFC8C36E62A4A": {
+      "Export": {
+        "Name": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet2RouteTable4D0FFC8C36E62A4A",
+      },
+      "Value": {
+        "Ref": "VpcprivateSubnet2RouteTable4D0FFC8C",
+      },
+    },
+    "ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D": {
+      "Export": {
+        "Name": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
+      },
+      "Value": {
+        "Ref": "VpcprivateSubnet2Subnet2DE7549C",
+      },
+    },
+    "ExportsOutputRefVpcpublicSubnet1Subnet2BB74ED74EB42ADC": {
+      "Export": {
+        "Name": "Sps-Network-prod:ExportsOutputRefVpcpublicSubnet1Subnet2BB74ED74EB42ADC",
+      },
+      "Value": {
+        "Ref": "VpcpublicSubnet1Subnet2BB74ED7",
+      },
+    },
+    "ExportsOutputRefVpcpublicSubnet2SubnetE34B022AC8BB6627": {
+      "Export": {
+        "Name": "Sps-Network-prod:ExportsOutputRefVpcpublicSubnet2SubnetE34B022AC8BB6627",
+      },
+      "Value": {
+        "Ref": "VpcpublicSubnet2SubnetE34B022A",
+      },
+    },
     "VpcId": {
       "Description": "SPS VPC id",
       "Value": {
@@ -92,6 +181,115 @@ exports[`NetworkStack prod matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::EC2::SecurityGroup",
+    },
+    "NetalbsgidECB9ADC0": {
+      "Properties": {
+        "Name": "/sps/prod/net/alb-sg-id",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "AlbSecurityGroup86A59E99",
+            "GroupId",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "Netalbsubnet05FBA8A01": {
+      "Properties": {
+        "Name": "/sps/prod/net/alb-subnet-0",
+        "Type": "String",
+        "Value": {
+          "Ref": "VpcpublicSubnet1Subnet2BB74ED7",
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "Netalbsubnet14302E442": {
+      "Properties": {
+        "Name": "/sps/prod/net/alb-subnet-1",
+        "Type": "String",
+        "Value": {
+          "Ref": "VpcpublicSubnet2SubnetE34B022A",
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "Netappsgid183261BE": {
+      "Properties": {
+        "Name": "/sps/prod/net/app-sg-id",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "AppSecurityGroupC396D536",
+            "GroupId",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "Netappsubnet05FF4E17C": {
+      "Properties": {
+        "Name": "/sps/prod/net/app-subnet-0",
+        "Type": "String",
+        "Value": {
+          "Ref": "VpcprivateSubnet1SubnetCEAD3716",
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "Netappsubnet1EF7EF516": {
+      "Properties": {
+        "Name": "/sps/prod/net/app-subnet-1",
+        "Type": "String",
+        "Value": {
+          "Ref": "VpcprivateSubnet2Subnet2DE7549C",
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "Netdatasubnet039C8FAC9": {
+      "Properties": {
+        "Name": "/sps/prod/net/data-subnet-0",
+        "Type": "String",
+        "Value": {
+          "Ref": "VpcprivateSubnet1SubnetCEAD3716",
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "Netdatasubnet1BEEE32DD": {
+      "Properties": {
+        "Name": "/sps/prod/net/data-subnet-1",
+        "Type": "String",
+        "Value": {
+          "Ref": "VpcprivateSubnet2Subnet2DE7549C",
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "NetetlsgidBC9109E1": {
+      "Properties": {
+        "Name": "/sps/prod/net/etl-sg-id",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "EtlSecurityGroup5D059AE5",
+            "GroupId",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "NetvpcidF33A2AB4": {
+      "Properties": {
+        "Name": "/sps/prod/net/vpc-id",
+        "Type": "String",
+        "Value": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
     },
     "Vpc8378EB38": {
       "Properties": {

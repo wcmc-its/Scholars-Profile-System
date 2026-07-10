@@ -742,13 +742,15 @@ export async function generateOverviewDraft(
     ...(modelAcceptsTemperature(modelId) ? { temperature } : {}),
   });
 
-  // #742 post-generation faithfulness pass (off by default — `OVERVIEW_FAITHFULNESS_PASS`).
-  // The validation gate showed the prompt already grounds drafts on the FACTS (incl. the
-  // ReciterAI distilled signals); this is defense-in-depth for the bulk rollout — it strips
-  // any specific a draft adds beyond ALL fact fields. `removed` is surfaced for transparency.
+  // #742 post-generation faithfulness pass — explicit opt-in only (validation
+  // harness / tests). The `OVERVIEW_FAITHFULNESS_PASS` env flag was retired
+  // (#1440): the validation gate showed the prompt already grounds drafts on the
+  // FACTS (incl. the ReciterAI distilled signals), so the pass never ran in any
+  // deployed env. It strips any specific a draft adds beyond ALL fact fields;
+  // `removed` is surfaced for transparency.
   let prose = result.text;
   let removed: UngroundedSpan[] = [];
-  if (opts?.faithfulnessPass ?? isOverviewFaithfulnessPassEnabled()) {
+  if (opts?.faithfulnessPass) {
     emit({ phase: "faithfulness" });
     // Pass the version's synopsis-finding permission so the faithfulness pass stays in
     // step with the prompt floor (v3 permits a synopsis-stated number; the pass must
@@ -1303,12 +1305,3 @@ export function isOverviewGenerateStreamEnabled(): boolean {
   return process.env.SELF_EDIT_OVERVIEW_GENERATE_STREAM === "on";
 }
 
-/**
- * Whether the post-generation faithfulness pass runs (#742). OFF by default — the
- * generator already grounds drafts on FACTS, so this is defense-in-depth for the
- * bulk rollout, at the cost of one or two extra Bedrock calls per generate. Flip
- * via `OVERVIEW_FAITHFULNESS_PASS=on` (wired per-env in cdk app-stack).
- */
-export function isOverviewFaithfulnessPassEnabled(): boolean {
-  return process.env.OVERVIEW_FAITHFULNESS_PASS === "on";
-}

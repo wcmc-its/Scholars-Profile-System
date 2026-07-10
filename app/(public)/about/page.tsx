@@ -124,41 +124,40 @@ export default function DocsPage() {
           change.
         </p>
 
-        <Callout variant="key" heading="The one thing to understand first">
+        <Callout variant="key" heading="Start here">
           <p>
-            Scholars does not store a profile you fill out. It assembles your profile from systems
-            that already hold your information, and shows a copy. That single fact answers most
-            questions:
+            Scholars does not store a profile you fill out. It builds your profile from systems that
+            already hold your information and shows a copy. That one fact answers most questions.
           </p>
           <ul>
             <li>
-              <em>Where your data comes from</em>: authoritative source systems (PubMed, the WCM Web
+              <em>Where your data comes from.</em> Authoritative source systems: PubMed, the WCM Web
               Directory, the Enterprise Directory, ASMS, InfoEd, NIH RePORTER, NYP, the Graduate
-              School, and the COI system) plus two in-house layers: ReCiter, which decides which publications are yours, and
-              ReciterAI, which derives research areas, the Impact score, and synopses.
+              School, and the COI system. On top of those sit two in-house layers. ReCiter decides
+              which publications are yours. ReciterAI derives your research areas, the Impact score,
+              and your synopses.
             </li>
             <li>
-              <em>How you correct it</em>: almost always at the source, not in Scholars.
-              Fixing the copy would not hold; the next refresh overwrites it. Your self-edit
-              interface is where you submit those corrections, and it routes each one to the office
-              that owns the field.
+              <em>How you correct it.</em> Almost always at the source, not in Scholars. If you edit
+              the copy, the next refresh overwrites it. You submit corrections through Edit my
+              profile, which routes each one to the office that owns the field.
             </li>
             <li>
-              <em>What you control here</em> is a small, deliberate set: your overview text and
-              which of your publications are shown.
+              <em>What you control here.</em> A short list: your overview text and which of your
+              publications are shown.
             </li>
           </ul>
         </Callout>
 
         <p>
           Scholars replaces VIVO, WCM&apos;s previous research-profile site. Like VIVO, it is mostly
-          read-only: it assembles your profile from systems that already hold your information rather
-          than asking you to fill one out, and it is not a submission system. You do not enter
-          publications, and there is no &ldquo;claim your profile&rdquo; step; profiles are built
-          automatically. Two names recur and are easy to confuse: <em>ReCiter</em> decides which
-          publications are yours (author disambiguation), while <em>ReciterAI</em> derives what a
-          publication is about and how notable it is (research areas, the Impact score, the one-line
-          synopsis). Different systems, different jobs.
+          read-only. It assembles your profile from systems that already hold your information instead
+          of asking you to fill one out. You do not enter publications, and there is no
+          &ldquo;claim your profile&rdquo; step. Profiles are built automatically. Two names recur and
+          are easy to confuse. <em>ReCiter</em> decides which publications are yours, which is author
+          disambiguation. <em>ReciterAI</em> works out what a publication is about and how notable it
+          is: your research areas, the Impact score, and the one-line synopsis. They do different
+          jobs.
         </p>
 
         <p>
@@ -167,14 +166,14 @@ export default function DocsPage() {
           <a href={PM} className={LINK}>
             ReCiter Publication Manager
           </a>{" "}
-          &mdash; confirming the papers that are yours and rejecting the ones that aren&apos;t
-          &mdash; carried over from the VIVO era and works as it did before; what&apos;s new with
-          Scholars is profile-level self-service: you write your own overview, hide or restore
-          individual papers, choose which of your papers appear as Selected highlights, and can
-          request a name-based custom web address. Second, there are more ways for your work and
-          expertise to surface: representative papers in the home Spotlight, the research areas you
-          publish in, the specific methods and tools your published work draws on, and expert
-          listings that place you among the most active faculty in an area.
+          (confirming the papers that are yours and rejecting the ones that aren&apos;t) carried over
+          from the VIVO era and works as it did before. What&apos;s new with Scholars is
+          profile-level self-service: you write your own overview, hide or restore individual papers,
+          choose which of your papers appear as Selected highlights, and can request a name-based
+          custom web address. Second, there are more ways for your work and expertise to surface:
+          representative papers in the home Spotlight, the research areas you publish in, the specific
+          methods and tools your published work draws on, and expert listings that place you among the
+          most active faculty in an area.
         </p>
 
         {/* Top-level section directly under the page h1, semantically an h2
@@ -190,32 +189,32 @@ export default function DocsPage() {
             {
               href: "#scholar",
               q: "Why is this paper on (or missing from) my profile?",
-              a: "ReCiter matched it, or has not yet. You can hide a wrong match as a near-term fix; the proper fix is to reject it in Publication Manager.",
+              a: "ReCiter matched it, or it hasn’t yet. You can hide a wrong match for now. The real fix is to reject it in Publication Manager.",
             },
             {
               href: "#provenance",
               q: "Where does the information on my profile come from?",
-              a: "From authoritative source systems plus the ReCiter and ReciterAI computed layers. Most fields are corrected at the source.",
+              a: "From authoritative source systems, plus the ReCiter and ReciterAI computed layers. Most fields are corrected at the source.",
             },
             {
               href: "#showcase",
               q: "Why isn’t my best paper a “Selected highlight”?",
-              a: "Those surfaces are chosen by a model, not by you, and filtered by author position, recency, and publication type.",
+              a: "A model chooses those, not you, and it filters by author position, recency, and publication type.",
             },
             {
               href: "#search",
               q: "Why isn’t my publication showing up in search?",
-              a: "Usually the index has not rebuilt yet, your terms do not match, or the paper is hidden. Search is separate from your profile.",
+              a: "Usually the index hasn’t rebuilt yet, your search terms don’t match, or the paper is hidden. Search is separate from your profile.",
             },
             {
               href: "#center-admin",
               q: "How do I add or remove a member of my center?",
-              a: "A center Owner or Curator edits the roster in-app; center membership is the only shared institutional field Scholars itself owns.",
+              a: "A center Owner or Curator edits the roster in the app. Center membership is the only shared institutional field Scholars itself owns.",
             },
             {
               href: "#profile-url",
               q: "Can I change my profile’s web address?",
-              a: "A custom address can be arranged through the Scholars team; your existing address keeps working and redirects to the new one.",
+              a: "The Scholars team can arrange a custom address. Your existing address keeps working and redirects to the new one.",
             },
           ].map((item) => (
             <Link
@@ -243,7 +242,7 @@ export default function DocsPage() {
             { href: "#scholar", t: "A scholar (faculty)", d: "You have a profile and want it to be right." },
             { href: "#postdoc", t: "A postdoc or fellow", d: "An academic appointee who can appear as a scholar." },
             { href: "#dept-admin", t: "A department / division administrator", d: "You report on a unit’s output and field its faculty’s questions." },
-            { href: "#center-admin", t: "A center administrator", d: "You manage a center — the only shared institutional data Scholars itself owns." },
+            { href: "#center-admin", t: "A center administrator", d: "You manage a center, the only shared institutional data Scholars itself owns." },
           ].map((c) => (
             <Link
               key={c.href}
@@ -271,29 +270,40 @@ export default function DocsPage() {
           ReciterAI.
         </p>
         <p>
-          <strong>What you can change yourself</strong>, in your self-edit interface at{" "}
-          <code>/edit/scholar/[your CWID]</code>: your overview text; which publications appear
-          (hide one that isn&apos;t yours, or restore one you hid, reversible and recorded);
-          and a data correction for anything else (Request a change, routed to the office that owns
-          the field). Your profile also has a stable web address you don&apos;t normally need to
-          touch; a custom one can be arranged through the Scholars team (see{" "}
+          <strong>What you can change yourself.</strong> Three things, on your Edit my profile page
+          at <code>/edit/scholar/[your CWID]</code>:
+        </p>
+        <ul>
+          <li>Your overview text.</li>
+          <li>
+            Which publications appear. Hide one that isn&apos;t yours, or restore one you hid. Both
+            are reversible and recorded.
+          </li>
+          <li>
+            A data correction for anything else. Use Request a change, and it routes to the office
+            that owns the field.
+          </li>
+        </ul>
+        <p>
+          Your profile also has a stable web address you don&apos;t normally need to touch. A custom
+          one can be arranged through the Scholars team (see{" "}
           <Link href="#profile-url" className={LINK}>
             Your profile URL
           </Link>
           ).
         </p>
         <p>
-          <strong>What you cannot change directly</strong>: source-of-record fields. For a{" "}
-          <em>misattributed publication</em>, hide it as a quick near-term fix, then reject it in{" "}
+          <strong>What you cannot change directly</strong> are the source-of-record fields. For a
+          publication that isn&apos;t yours, hide it as a quick fix, then reject it in{" "}
           <a href={PM} className={LINK}>
             ReCiter Publication Manager
-          </a>{" "}
-          to correct the attribution at the source so it does not come back; a <em>missing</em>{" "}
-          publication is added there too, by you or the library curation team, whoever gets
-          to it first. Your name, department, title, funding, disclosures, and
-          appointments are corrected at their source. Use Request a change in your self-edit
-          interface, and it routes to the right office. Research areas, Impact, and synopsis are computed by
-          ReciterAI and cannot be hand-edited. The full map is in{" "}
+          </a>
+          . That corrects the attribution at the source so it does not come back. A missing
+          publication is added there too, by you or the library curation team, whoever gets to it
+          first. Your name, department, title, funding, disclosures, and appointments are all
+          corrected at their source: use Request a change and it routes to the right office. Research
+          areas, Impact, and synopsis are computed by ReciterAI and cannot be hand-edited. The full
+          map is in{" "}
           <Link href="#provenance" className={LINK}>
             Where your data comes from
           </Link>{" "}
@@ -318,26 +328,26 @@ export default function DocsPage() {
             the Impact score
           </Link>
           ). A paper you co-authored with a full-time WCM faculty member is scored and appears with
-          its Impact; a paper with no full-time WCM faculty author is outside the scope and is not
-          scored. That is scope, a deliberate cost-and-scale choice, not a quality judgment (see{" "}
+          its Impact. A paper with no full-time WCM faculty author is outside the scope and is not
+          scored. That is a matter of scope, a cost-and-scale choice, not a judgment on quality (see{" "}
           <Link href="#impact" className={LINK}>
             why the scope stops there
           </Link>
           ).
         </p>
         <p>
-          To correct your academic appointment, use Request a change in your self-edit interface.
-          Academic appointments are owned by the Office of Faculty Affairs (not HR); the request is
-          routed to ITS support, who fix a data-sync (ETL) issue in the pipeline or escalate a
-          genuine source-record correction to Faculty Affairs. Either way it flows back through
-          Enterprise Directory on the next refresh. Your self-serve controls (overview,
-          hide/restore, submit a correction) are the same as a faculty member&apos;s.
+          To correct your academic appointment, use Request a change on your Edit my profile page.
+          Academic appointments are owned by the Office of Faculty Affairs, not HR. The request is
+          routed to ITS support, who either fix a data-sync (ETL) issue in the pipeline or escalate a
+          genuine source-record correction to Faculty Affairs. Either way, the fix flows back through
+          the Enterprise Directory on the next refresh. Your self-serve controls (overview, hide and
+          restore, submit a correction) are the same as a faculty member&apos;s.
         </p>
 
         <h2 id="dept-admin">Department or division administrator</h2>
         <p>
-          You mostly read and report, but if you hold a curation role on a unit, you also
-          have a real in-app editor (see{" "}
+          You mostly read and report. But if you hold a curation role on a unit, you also have a
+          real in-app editor (see{" "}
           <Link href="#roles" className={LINK}>
             Roles
           </Link>
@@ -345,8 +355,8 @@ export default function DocsPage() {
         </p>
         <p>
           Anyone can browse a unit&apos;s output (its faculty, research areas, and publications) on the
-          department and division surfaces. An Owner or Curator of a unit can edit
-          unit-level data in-app at <code>/edit/department/[code]</code> or{" "}
+          department and division pages. An Owner or Curator of a unit can edit
+          unit-level data at <code>/edit/department/[code]</code> or{" "}
           <code>/edit/division/[code]</code>: unit metadata (leadership, slug, browse category) and
           the roster of a manually-created division. LDAP-sourced division membership stays with ED
           and is not editable here. A Superuser can do all of this across every unit and grant
@@ -355,26 +365,26 @@ export default function DocsPage() {
         <p>
           No role lets you move someone between departments or edit a faculty member&apos;s personal
           profile. Primary department is derived from a person&apos;s primary appointment (Faculty
-          Affairs, by way of ASMS and Enterprise Directory) and isn&apos;t directly editable; it
-          changes only when the appointment does. The two personal controls (overview, publication
-          visibility) belong to the scholar.
-          For recurring reports by research area, date, or funding, ask the Scholars team through{" "}
+          Affairs, by way of ASMS and the Enterprise Directory). It isn&apos;t directly editable, and
+          it changes only when the appointment does. The two personal controls, overview and
+          publication visibility, belong to the scholar. For recurring reports by research area,
+          date, or funding, ask the Scholars team through{" "}
           <Link href="#requests" className={LINK}>
             Request a change
           </Link>
           .
         </p>
         <p>
-          Set expectations with your faculty: Impact is publication-level, not a ranking of your
+          Set expectations with your faculty. Impact is publication-level, not a ranking of your
           people (
           <Link href="#impact" className={LINK}>
             the Impact score
           </Link>
-          ); research areas are model-derived (
+          ). Research areas are model-derived (
           <Link href="#research-areas" className={LINK}>
             Research areas
           </Link>
-          ); and the showcase surfaces are algorithmic (
+          ). And the showcase surfaces are algorithmic (
           <Link href="#showcase" className={LINK}>
             Spotlight
           </Link>
@@ -383,22 +393,22 @@ export default function DocsPage() {
 
         <h2 id="center-admin">Center administrator</h2>
         <p>
-          You are the one stakeholder with a Scholars-native data responsibility.{" "}
+          You are the one stakeholder with a data responsibility native to Scholars.{" "}
           <strong>
             Center membership is the only <em>institutional</em> field whose system of record is
             Scholars itself
-          </strong>{" "}
-          &mdash; your overview, publication-visibility choices, and Selected highlights are stored
-          here too, but those are an individual&apos;s own profile rather than shared data about the
-          institution. Center rosters are not held anywhere upstream, so they are maintained in this application,
-          and they are self-serve for the right roles.
+          </strong>
+          . Your overview, publication-visibility choices, and Selected highlights are stored here
+          too, but those are an individual&apos;s own profile rather than shared data about the
+          institution. Center rosters are not held anywhere upstream, so they are maintained in this
+          application, and they are self-serve for the right roles.
         </p>
         <p>
           A center Owner or Curator manages the roster at <code>/edit/center/[code]</code>: add,
-          remove, or update a member, with membership type, program, and start/end dates. Every
+          remove, or update a member, with membership type, program, and start and end dates. Every
           change is one transaction and is audit-logged. If you do not have a role yet, a Superuser
-          grants you one (an Owner can also grant Curators on their own center), or request access
-          through{" "}
+          grants you one (an Owner can also grant Curators on their own center), or you can request
+          access through{" "}
           <Link href="#requests" className={LINK}>
             Request a change
           </Link>
@@ -407,7 +417,7 @@ export default function DocsPage() {
         <p>
           Everything else about your center&apos;s people (names, titles, departments, publications,
           funding, research areas, scores) comes from the same sources and follows the same correction paths
-          as any scholar. You route those; you do not own them.
+          as any scholar. You route those. You do not own them.
         </p>
 
         <hr className="mt-12 border-border" />
@@ -556,7 +566,7 @@ export default function DocsPage() {
               </tr>
               <tr className="[&>td]:bg-[#f7f1f1]">
                 <td>Center membership</td>
-                <td>Scholars (this app) &mdash; the only institutional field Scholars owns</td>
+                <td>Scholars (this app), the only institutional field Scholars owns</td>
                 <td>On edit</td>
                 <td>Edited in-app by a center Owner/Curator</td>
               </tr>
@@ -566,18 +576,26 @@ export default function DocsPage() {
         <Callout variant="warn" heading="Citation source">
           <p>Scholars uses iCite as its only citation source. It does not use Scopus.</p>
         </Callout>
-        <p>
-          A few non-obvious behaviors this map explains. MeSH &ldquo;check tags&rdquo; (Humans, Male,
-          Female, Adult, and so on) are filtered out upstream by ReciterDB before Scholars sees
-          them, so they correctly never appear as topics, which is intended, not a gap. A copy can lag
-          the source: a correction you make today appears only after the next refresh. And a
-          correction to directory or appointment data (department, title, affiliation, person type,
-          or an appointment) is submitted through Request a change and routed to ITS
-          support, because a wrong value can be either a source-record error (which they escalate to
-          the owning office, such as Faculty Affairs) or a data-sync (ETL) problem in the pipeline
-          (which they fix directly). That trade-off is the cost of showing an authoritative copy
-          rather than a hand-kept duplicate.
-        </p>
+        <p>A few less obvious behaviors the map explains:</p>
+        <ul>
+          <li>
+            MeSH &ldquo;check tags&rdquo; (Humans, Male, Female, Adult, and so on) are filtered out by
+            ReciterDB before Scholars sees them, so they never appear as topics. That is intended,
+            not a gap.
+          </li>
+          <li>
+            A copy can lag its source. A correction you make today appears only after the next
+            refresh.
+          </li>
+          <li>
+            A correction to directory or appointment data (department, title, affiliation, person
+            type, or an appointment) goes through Request a change and is routed to ITS support. A
+            wrong value can be one of two things: a source-record error, which they escalate to the
+            owning office such as Faculty Affairs, or a data-sync (ETL) problem in the pipeline, which
+            they fix directly. That routing is the trade-off for showing an authoritative copy rather
+            than a hand-kept duplicate.
+          </li>
+        </ul>
 
         <h3 id="disclosures" className="scroll-mt-28 lg:scroll-mt-20">
           Disclosures
@@ -587,17 +605,17 @@ export default function DocsPage() {
           system of record is the WCM Conflicts-of-Interest (COI) system, they refresh nightly, and
           on a profile they are shown grouped by category. As with every sourced field, Scholars
           shows a copy and cannot edit it. To correct or update a disclosure, use Request a change
-          in your self-edit interface and it routes to the COI office, where the fix is
-          applied and flows back on the next refresh.
+          on your Edit my profile page. It routes to the COI office, where the fix is applied and
+          flows back on the next refresh.
         </p>
 
         <h2 id="correct">How to correct something</h2>
         <p>
-          Your self-edit interface is the front door: it lets you edit your overview, hide or
-          restore publications, and submit a data correction via Request a change, which routes to
-          the office that owns the field (you never have to figure out where to send it). The rule
-          of thumb: if Scholars owns it, it is fixed here; otherwise the fix happens at
-          the source and appears after the next refresh.
+          Your Edit my profile page is the front door. It lets you edit your overview, hide or
+          restore publications, and submit a data correction through Request a change, which routes
+          to the office that owns the field. You never have to figure out where to send it. The rule
+          of thumb: if Scholars owns the field, it is fixed here; otherwise the fix happens at the
+          source and appears after the next refresh.
         </p>
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-[640px]">
@@ -677,7 +695,7 @@ export default function DocsPage() {
                 <td>InfoEd; NIH RePORTER backfills historical federal grants from a prior institution</td>
                 <td>
                   Request a change (InfoEd grants route to Sponsored Research; a RePORTER-sourced
-                  grant is matched from your publications — hide or remove it in your profile editor)
+                  grant is matched from your publications, so hide or remove it in your profile editor)
                 </td>
               </tr>
               <tr>
@@ -706,17 +724,17 @@ export default function DocsPage() {
         </div>
 
         <h2 id="control">What you control</h2>
-        <p>Four things are yours to do directly, in your self-edit interface:</p>
+        <p>Four things are yours to do directly, on your Edit my profile page:</p>
         <ul>
           <li>
-            <strong>Your overview text</strong>: the free-text statement about your work. You
-            write it; it is not derived from anything.
+            <strong>Your overview text.</strong> The free-text statement about your work. You write
+            it, and it is not derived from anything.
           </li>
           <li>
-            <strong>Hide or restore a publication</strong>: if ReCiter attributed a paper that
-            isn&apos;t yours, you can hide it as a quick near-term fix. Hiding is reversible and
-            recorded, and is about your profile rather than search: it removes a paper from your
-            profile, separate from whether it appears in search (
+            <strong>Hide or restore a publication.</strong> If ReCiter attributed a paper that
+            isn&apos;t yours, you can hide it as a quick fix. Hiding is reversible and recorded. It
+            affects your profile, not search: it removes a paper from your profile, which is separate
+            from whether the paper appears in search (
             <Link href="#search" className={LINK}>
               more on that below
             </Link>
@@ -727,11 +745,11 @@ export default function DocsPage() {
             , which corrects the attribution at the source so it does not return on the next refresh.
           </li>
           <li>
-            <strong>Submit a data correction</strong>: for a field you cannot edit directly,
-            Request a change and it is routed to the office that owns the field.
+            <strong>Submit a data correction.</strong> For a field you cannot edit directly, use
+            Request a change and it routes to the office that owns the field.
           </li>
           <li>
-            <strong>Choose your Selected highlights</strong>: the small set of papers featured on
+            <strong>Choose your Selected highlights.</strong> The small set of papers featured on
             your profile. By default these are chosen by Impact and recency; you can instead pick
             them yourself.
           </li>
@@ -781,9 +799,9 @@ export default function DocsPage() {
           </table>
         </div>
         <p>
-          Roles are unit-scoped (a role on one center does not grant access to another), and every
-          edit is audit-logged. Curatable: center rosters and metadata, manually-created
-          division rosters, and unit metadata (leadership, slug, browse category). Not curatable: a
+          Roles are unit-scoped: a role on one center does not grant access to another, and every
+          edit is audit-logged. What&apos;s curatable: center rosters and metadata, manually-created
+          division rosters, and unit metadata (leadership, slug, browse category). What&apos;s not: a
           scholar&apos;s source-of-record fields, or a scholar&apos;s personal overview and
           publication controls.
         </p>
@@ -795,10 +813,10 @@ export default function DocsPage() {
         <h2 id="research-areas">Research areas</h2>
         <Callout variant="key" heading="Two axes: what, and how">
           <p>
-            A scholar&apos;s work is described along two complementary axes. <em>Research areas</em>{" "}
-            capture <strong>what</strong> you study; <em>methods and tools</em> capture{" "}
-            <strong>how</strong> you study it. They are derived independently, shown as separate
-            sections, and together give a fuller picture than either alone.
+            A scholar&apos;s work is described along two axes. <em>Research areas</em> capture{" "}
+            <strong>what</strong> you study. <em>Methods and tools</em> capture <strong>how</strong>{" "}
+            you study it. They are derived independently and shown as separate sections, and together
+            they give a fuller picture than either alone.
           </p>
         </Callout>
         <p>
@@ -814,9 +832,9 @@ export default function DocsPage() {
         <p>
           As an independent check, that map was benchmarked against authoritative institutional
           reference points: Weill Cornell&apos;s divisions and departments, its strategic research
-          roadmap, and NIH research designations. It aligned cleanly with all three, confirming that
-          what the model surfaced from the literature mirrors how the institution and the wider field
-          already organize science.
+          roadmap, and NIH research designations. It aligned cleanly with all three. What the model
+          surfaced from the literature mirrors how the institution and the wider field already
+          organize science.
         </p>
         <p>
           Each publication is then placed on that map. ReciterAI scores each paper against every
@@ -838,11 +856,11 @@ export default function DocsPage() {
           </Link>{" "}
           below as well. It is read against every research area at once and clears the bar for three:{" "}
           <em>Aging &amp; Geroscience</em> most strongly, then <em>Immunology</em>, and{" "}
-          <em>Cancer Biology</em> more loosely. All three are kept; there is no single
+          <em>Cancer Biology</em> more loosely. All three are kept. There is no single
           &ldquo;primary&rdquo; area, because the work genuinely sits across them. Within Aging &amp;
           Geroscience it is then placed into finer subareas (here <em>Immune Aging</em> as the
-          best fit, with <em>Cellular Senescence</em> secondary), and a paper that fits no
-          subarea cleanly is left unassigned rather than forced into one.
+          best fit, with <em>Cellular Senescence</em> secondary). A paper that fits no subarea cleanly
+          is left unassigned rather than forced into one.
         </p>
         <Callout variant="warn" heading="A second score, a click deeper">
           <p>
@@ -864,11 +882,11 @@ export default function DocsPage() {
           enough to warrant it, not on a fixed clock. Your publications, though, are classified into
           the current taxonomy on a weekly run as new work is ingested, so an individual paper does
           not wait for a taxonomy rebuild to receive its areas, and your profile keeps up as you
-          publish. An area can shift when the taxonomy is next rebuilt; that is expected.
+          publish. An area can shift when the taxonomy is next rebuilt, and that is expected.
           Research-area scoring reads the paper&apos;s plain-language synopsis together with its
           abstract; a paper without an abstract is still scored from its synopsis. Subarea assignment
           instead reads the title together with the synopsis, not the abstract. A genuinely wrong area
-          is a ReciterAI matter; report a systematic error.
+          is a ReciterAI matter, so report a systematic error.
         </p>
 
         <h2 id="methods">Methods &amp; tools</h2>
@@ -877,8 +895,8 @@ export default function DocsPage() {
           instruments, datasets, models, and software behind the work. They are read directly from
           the publications themselves. ReciterAI scans the abstracts of each Weill Cornell
           scholar&apos;s papers and grants and identifies the specific methods and resources actually
-          used, deliberately skipping the commodity lab staples that don&apos;t distinguish one group
-          from another.
+          used, skipping the commodity lab staples that don&apos;t distinguish one group from
+          another.
         </p>
         <p>
           Closely related mentions are merged, so that &ldquo;MRI,&rdquo; &ldquo;magnetic resonance
@@ -893,19 +911,19 @@ export default function DocsPage() {
         </p>
         <ul>
           <li>
-            <strong>Raw mention</strong>: the exact phrase as it appeared in a paper, such as
+            <strong>Raw mention.</strong> The exact phrase as it appeared in a paper, such as
             &ldquo;scRNA-seq&rdquo; or &ldquo;single-cell RNA sequencing.&rdquo;
           </li>
           <li>
-            <strong>Canonical method</strong>: the single standard name those mentions resolve to
+            <strong>Canonical method.</strong> The single standard name those mentions resolve to
             (&ldquo;single-cell RNA sequencing&rdquo;).
           </li>
           <li>
-            <strong>Family</strong>: the capability group of related techniques it belongs to
+            <strong>Family.</strong> The capability group of related techniques it belongs to
             (&ldquo;single-cell genomics&rdquo;).
           </li>
           <li>
-            <strong>Supercategory</strong>: the broad domain above the family.
+            <strong>Supercategory.</strong> The broad domain above the family.
           </li>
         </ul>
         <p>
@@ -913,9 +931,9 @@ export default function DocsPage() {
           and the methods pages use the same structure.
         </p>
         <p>
-          <strong>The same paper, once more.</strong> From our example&apos;s abstract, ReciterAI
+          <strong>The same paper, on methods.</strong> From our example&apos;s abstract, ReciterAI
           picks out <em>single-cell RNA sequencing</em>, the <em>10x Genomics</em> platform, and{" "}
-          <em>CITE-seq</em>, and ignores the routine qPCR validation step, a commodity staple
+          <em>CITE-seq</em>, and it ignores the routine qPCR validation step, a commodity staple
           that doesn&apos;t distinguish one lab from another. &ldquo;scRNA-seq&rdquo; and
           &ldquo;single-cell RNA sequencing&rdquo; collapse into one entry, filed under a broader{" "}
           <em>single-cell genomics</em> capability family. Each method then carries a distinctiveness
@@ -932,32 +950,31 @@ export default function DocsPage() {
         <p>
           From a scholar&apos;s publications, a method is attributed to them only when they were
           first or senior (last) author on the paper it was drawn from (grants are a separate
-          source). That is a deliberate choice to err toward under-attribution: it keeps the list to
-          methods the scholar themselves led, at the cost of occasionally omitting one they used as a
-          middle author on a large collaboration. We would rather show fewer, surer methods than
-          over-claim.
+          source). This errs toward under-attribution on purpose: it keeps the list to methods the
+          scholar themselves led, at the cost of occasionally omitting one they used as a middle
+          author on a large collaboration. Better to show fewer, surer methods than to over-claim.
         </p>
 
         <h2 id="impact">The Impact score</h2>
         <p>
-          The Impact score is a 0&ndash;100 number ReciterAI assigns to a publication, shown as
-          &ldquo;Impact: NN&rdquo;. It weighs three things about the paper: its citation
+          The Impact score is a number from 0 to 100 that ReciterAI assigns to a publication, shown
+          as &ldquo;Impact: NN&rdquo;. It weighs three things about the paper: its citation
           signal (the iCite citation count, plus the paper&apos;s NIH percentile and Relative
           Citation Ratio once those exist), the standing of the journal it appeared in, and how
           recent it is. A calibrated model combines them into a single number by comparing
           the paper against a fixed ladder of reference points (described below). It is not a
-          hand-tuned arithmetic formula but a judgment the model makes against that ladder, which is
-          why two papers with comparable evidence land at comparable scores.
+          hand-tuned formula. It is a judgment the model makes against that ladder, which is why two
+          papers with comparable evidence land at comparable scores.
         </p>
         <h3>What the score is for, and what it isn&apos;t</h3>
         <p>
-          The Impact score has a deliberately limited job. Inside Scholars it is used mainly to help
-          the application decide <em>which of your own publications to surface</em>: on the
-          home-page showcase, in your profile&apos;s highlights, on a research-area page. It is an
-          input to that choice, not a verdict on you, and the aim of surfacing is egalitarian: to
-          make sure every researcher&apos;s strongest work gets its day in the sun, rather than
-          letting a few famous papers crowd everyone else out. It is <strong>not</strong> a ranking
-          of scholars, and it is not used to evaluate people for promotion, funding, or effort.
+          The Impact score has a narrow job. Inside Scholars it is used mainly to help the
+          application decide <em>which of your own publications to surface</em>: on the home-page
+          showcase, in your profile&apos;s highlights, on a research-area page. It is an input to that
+          choice, not a verdict on you, and the aim of surfacing is to give every researcher&apos;s
+          strongest work its due rather than letting a few famous papers crowd everyone else out. It
+          is <strong>not</strong> a ranking of scholars, and it is not used to evaluate people for
+          promotion, funding, or effort.
         </p>
         <p>
           It is also a <em>leading</em> indicator. Field-normalized citation metrics like the NIH
@@ -980,20 +997,20 @@ export default function DocsPage() {
         <p>
           The model scores against a fixed ladder of about two hundred reference points spanning all
           of biomedicine, so the same number means the same thing in any field. The bands are
-          demanding: preliminary or underpowered work sits in the low tier (a letter to the editor
-          anchors at 8, a single-patient case report near 12); solid but incremental studies fall in
-          the 30s and 40s; the 50s and 60s already denote strong contributions with clear influence;
-          and the 70s and 80s are major, practice- or field-shaping work. So a score that looks modest
-          is not a poor grade: a paper in the 60s is, by this rubric, a strong and influential
+          demanding. Preliminary or underpowered work sits in the low tier (a letter to the editor
+          anchors at 8, a single-patient case report near 12). Solid but incremental studies fall in
+          the 30s and 40s. The 50s and 60s already denote strong contributions with clear influence,
+          and the 70s and 80s are major, practice-shaping or field-shaping work. So a score that looks
+          modest is not a poor grade: a paper in the 60s is, by this rubric, a strong and influential
           one.
         </p>
-        <Callout variant="note" heading="High scores are rare by design">
+        <Callout variant="note" heading="High scores are rare">
           <p>
             The top of the ladder is held for paradigm-shifting, field-defining work (the
-            discovery of the DNA double helix anchors at 99, penicillin at 97, CRISPR&ndash;Cas9
+            discovery of the DNA double helix anchors at 99, penicillin at 97, CRISPR-Cas9
             genome editing at 93), so the scale is demanding and the model is sparing with high
-            numbers. There is no fixed ceiling for a real paper, but very high scores are uncommon by
-            design. The practical effect is that a number which looks middling can still mark one of a
+            numbers. There is no fixed ceiling for a real paper, but very high scores are uncommon.
+            The practical effect is that a number which looks middling can still mark one of a
             researcher&apos;s strongest papers, so read it against a scholar&apos;s own body of work
             rather than against a notional 100.
           </p>
@@ -1008,11 +1025,11 @@ export default function DocsPage() {
         </p>
         <p>
           <strong>It does not favor basic over clinical research, or the reverse.</strong> The model
-          is explicitly calibrated for parity: the ladder rates clinical trials, health-services
-          research, and implementation work on the same terms as bench science, and the scorer runs a
-          counterfactual check (would this same evidence score higher attached to a
-          basic-science paper?) and corrects itself when the answer is yes. Clinical,
-          implementation, and health-services work can reach the same heights as bench discovery.
+          is calibrated for parity. The ladder rates clinical trials, health-services research, and
+          implementation work on the same terms as bench science, and the scorer runs a
+          counterfactual check (would this same evidence score higher attached to a basic-science
+          paper?) and corrects itself when the answer is yes. Clinical, implementation, and
+          health-services work can reach the same heights as bench discovery.
         </p>
         <p>
           <strong>Which publications are scored.</strong> The scoring scope is full-time WCM faculty
@@ -1063,9 +1080,9 @@ export default function DocsPage() {
           about a day.
         </p>
         <p>
-          <strong>Why a publication can show no Impact (a dash).</strong> Not a quality judgment.
-          Usually the paper is very recent and not yet scored in a batch, is a preprint or in-press,
-          or is in a venue the citation source does not index.
+          <strong>Why a publication can show no Impact (a dash).</strong> This is not a quality
+          judgment. Usually the paper is very recent and not yet scored in a batch, is a preprint or
+          in-press, or is in a venue the citation source does not index.
         </p>
         <h3>The three scores in the system</h3>
         <p>Three scores run in Scholars, and they differ in how visible they are to you:</p>
@@ -1201,19 +1218,18 @@ export default function DocsPage() {
         <Callout variant="note" heading="A representative selection, not a complete list">
           <p>
             Read these surfaces as a <em>representative selection</em> of a scholar&apos;s work, a
-            curated highlight, not a complete or proportional inventory. Most feature only
+            curated highlight rather than a complete or proportional inventory. Most feature only
             research articles from 2020 onward on which the scholar is <em>first or senior (last)
             author</em>; co-first and co-senior authors count too, since equal-contribution
-            authorship is tracked upstream. That is a deliberate signal-to-noise choice: a faculty
-            member&apos;s first-
-            and senior-author papers are the ones they led or supervised, so restricting to them
-            gives a truer picture of what a scholar drives than a feed that also pulled in every
-            large-consortium paper they were a middle author on. The cost is real: it leaves
-            out some work that genuinely reflects expertise, such as key collaborations where the
-            scholar contributed without leading, but it keeps the highlighted set focused
-            rather than crowded. The selection is curated by design and is not meant to be
-            exhaustive: every paper attributed to a scholar, in any author position, still appears in
-            full on their profile and in search.
+            authorship is tracked upstream. This is a signal-to-noise choice: a faculty
+            member&apos;s first- and senior-author papers are the ones they led or supervised, so
+            restricting to them gives a truer picture of what a scholar drives than a feed that also
+            pulled in every large-consortium paper they were a middle author on. The cost is real. It
+            leaves out some work that genuinely reflects expertise, such as key collaborations where
+            the scholar contributed without leading, but it keeps the highlighted set focused rather
+            than crowded. The selection is curated and not meant to be exhaustive: every paper
+            attributed to a scholar, in any author position, still appears in full on their profile
+            and in search.
           </p>
         </Callout>
         <h3>Who appears on these surfaces</h3>
@@ -1224,7 +1240,7 @@ export default function DocsPage() {
           in full on their own profiles, in search, and on the Browse directory. <strong>Top
           scholars</strong> narrows further to full-time faculty only, because it is a
           principal-investigator surface. Doctoral students are not shown on any public surface at
-          all (a deliberate privacy choice), and appear only as plain-text names where a mentor or
+          all, which is a privacy choice, and they appear only as plain-text names where a mentor or
           co-author relationship refers to them.
         </p>
 
@@ -1246,25 +1262,24 @@ export default function DocsPage() {
         </p>
         <p>
           <strong>Your address is stable.</strong> If your preferred name later changes, or an
-          administrator sets a custom address for you, the old address keeps working; it
-          permanently redirects to the new one, so existing links, citations, and bookmarks
-          don&apos;t break.
+          administrator sets a custom address for you, the old address keeps working. It permanently
+          redirects to the new one, so existing links, citations, and bookmarks don&apos;t break.
         </p>
         <p>
-          <strong>Want a different address?</strong> Custom addresses aren&apos;t self-serve;
-          email the Scholars team (or open a Service Desk ticket) and say what you&apos;d like.
-          Addresses stay name-based, so ask for a variation of your first and last name; you
-          can add a middle initial or a fuller form (for example <code>jane-q-smith</code>) when a
-          namesake already has the plain form. They aren&apos;t free-choice handles; you can&apos;t claim a word
-          like a research area or a department. An administrator reviews the request, sets your new
-          address, and replies to your ticket when it&apos;s done, usually within a few business days;
-          your old address keeps working and permanently redirects.
+          <strong>Want a different address?</strong> Custom addresses aren&apos;t self-serve. Email
+          the Scholars team (or open a Service Desk ticket) and say what you&apos;d like. Addresses
+          stay name-based, so ask for a variation of your first and last name. You can add a middle
+          initial or a fuller form (for example <code>jane-q-smith</code>) when a namesake already has
+          the plain form. They aren&apos;t free-choice handles, and you can&apos;t claim a word like a
+          research area or a department. An administrator reviews the request, sets your new address,
+          and replies to your ticket when it&apos;s done, usually within a few business days. Your old
+          address keeps working and permanently redirects.
         </p>
         <Callout variant="note" heading="A number in your address isn’t a ranking">
           <p>
             If your address ends in a number (<code>jane-smith-2</code>), it only means someone
             already had the name-based address when yours was created. The first profile keeps the
-            plain <code>jane-smith</code>; each later namesake gets the next number, in the order
+            plain <code>jane-smith</code>, and each later namesake gets the next number, in the order
             profiles were created. It says nothing about you.
           </p>
         </Callout>
@@ -1276,12 +1291,12 @@ export default function DocsPage() {
           <Link href="#correct" className={LINK}>
             How to correct something
           </Link>
-          , starting in your self-edit interface, which routes the request to the owning office for
-          you. A <em>bug</em> means something is broken; report it through{" "}
+          , starting on your Edit my profile page, which routes the request to the owning office for
+          you. A <em>bug</em> means something is broken. Report it through{" "}
           <Link href="#correct" className={LINK}>
             Request a change
           </Link>
-          , and a systematic model error, such as wrong scores or research areas across many items, routes to
+          , and a systematic model error (wrong scores or research areas across many items) routes to
           a ReciterAI review. An <em>enhancement</em> is a feature request: include your stakeholder
           role, the surface or behavior, what you want, and the underlying need, and submit it the
           same way. Every request is logged as a support ticket and routed for you.
@@ -1292,13 +1307,13 @@ export default function DocsPage() {
         <h2 id="glossary">Glossary</h2>
         <dl className="mt-4 space-y-5">
           {[
-            { term: "Impact score", def: "A 0–100 score ReciterAI assigns to a publication: a calibrated model weighs its citation signal (iCite count, plus NIH percentile and RCR once they exist), journal standing, and recency against a fixed ladder of ~200 reference points. Publication-level and not author-relative: the same number for every co-author. Field-aware but not a literal cross-field ranking. Used mainly to help decide which of a scholar’s papers to surface; not a ranking of people. High scores are rare by design (the scale is demanding and the 90–100 band is reserved for historic landmarks), so a mid-range score can still mark a top paper. Shown as “Impact: NN”." },
+            { term: "Impact score", def: "A score from 0 to 100 that ReciterAI assigns to a publication: a calibrated model weighs its citation signal (iCite count, plus NIH percentile and RCR once they exist), journal standing, and recency against a fixed ladder of about 200 reference points. Publication-level and not author-relative: the same number for every co-author. Field-aware but not a literal cross-field ranking. Used mainly to help decide which of a scholar’s papers to surface; not a ranking of people. High scores are rare (the scale is demanding and the 90 to 100 band is reserved for historic landmarks), so a mid-range score can still mark a top paper. Shown as “Impact: NN”." },
             { term: "Author Position", def: "Your place in a publication’s author list (first / middle / senior). This, not Impact, conveys your role on a paper." },
             { term: "ReCiter", def: "WCM’s author-disambiguation engine. Decides which publications are yours, from PubMed. Runs nightly." },
             { term: "ReCiter Publication Manager", def: "The curation interface at reciter.weill.cornell.edu where a publication’s attribution is corrected. A misattributed paper is rejected here; a missing one is added here." },
             { term: "ReciterAI", def: "WCM’s pipeline that derives a publication’s research areas, Impact score, and one-line synopsis. Impact and synopsis refresh nightly; research areas and subareas are assigned weekly; the research-area taxonomy is rebuilt periodically." },
             { term: "Research areas (and subareas)", def: "WCM’s AI-derived map of what scholars work on: broad research areas such as Cancer Biology, each with finer subareas. ReciterAI derives them from publications, not from MeSH or a fixed list, and scores how strongly each paper relates to each area. Distinct from the MeSH keywords that power search." },
-            { term: "Self-edit interface", def: "Where a scholar edits their overview, hides or restores publications, and submits data corrections (Request a change), which route to the owning office." },
+            { term: "Edit my profile", def: "The page where a scholar edits their overview, hides or restores publications, and submits data corrections (Request a change), which route to the owning office." },
             { term: "Profile URL (slug)", def: "A profile’s web address: the short scholars.weill.cornell.edu/<slug> and the longer /scholars/<slug> both work and lead to the same page. The slug is derived automatically from the scholar’s preferred name (e.g. jane-smith); a later namesake gets a number (jane-smith-2) and the earlier profile keeps the plain form; it is not a ranking. The address is stable: if it changes, the old one permanently redirects, so existing links keep working. A custom address (still based on the scholar’s name) can be set by a Scholars administrator." },
             { term: "iCite", def: "The NIH tool Scholars uses as its only citation source. Scholars does not use Scopus." },
             { term: "InfoEd", def: "WCM’s grants system of record, for all sponsors. NIH RePORTER supplies federal abstract text and the portfolio link." },

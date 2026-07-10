@@ -16,49 +16,59 @@ The audit trail every action writes is in [`b03-audit-log.md`](./b03-audit-log.m
 
 ## TL;DR
 
-- **There is no "hide this whole section" toggle.** A section disappears from a profile
-  only when *every record in it* is hidden, or when the underlying data is empty. The one
-  thing you can hide wholesale is the **entire profile** (and the **bio**, by clearing it).
-- **Hiding is record-level.** You hide a publication, a grant, an education entry, an
-  appointment, a mentee — one record at a time.
-- **Three mechanisms** do all the hiding: **suppression** (revocable, per-record),
-  **field override** (the bio, where an empty value = "show nothing"), and the two
-  **Methods-lens overlays** (editorial, not per-scholar). Plus a fourth, distinct path:
-  **soft-delete** (departure, not a hiding choice).
-- **Methods & tools are new and hide differently** — see [§ Methods & tools](#methods--tools-new).
-  A scholar *cannot* hide an individual method in `/edit`; method families are hidden
-  **globally/editorially** through curated overlays, not per person.
+- **Three hide granularities.** *Record-level* (hide one publication / grant / education
+  entry / appointment / mentee), *whole-section* (hide an entire profile section — the
+  seven section-visibility toggles below), and *whole-profile* (suppress the entire
+  profile, or clear the **bio**).
+- **Hiding is mostly record-level.** You hide a publication, a grant, an education entry,
+  an appointment, a mentee — one record at a time. A section can also disappear when
+  *every record in it* is hidden, or the data is empty.
+- **Whole-section toggles (new).** A scholar (or a superuser / proxy / unit admin) can hide
+  seven whole sections per profile — Mentoring, Education, Funding, Centers, Postdoctoral
+  Mentor, Clinical trials, Methods & Tools — see
+  [§ Section visibility](#section-visibility-new). Display-only: a hidden section stays
+  fully searchable.
+- **Four mechanisms** do all the hiding: **suppression** (revocable, per-record),
+  **field override** (the bio, where an empty value = "show nothing"; **and** the seven
+  section-visibility booleans), and the two **Methods-lens overlays** (editorial, not
+  per-scholar). Plus a distinct path: **soft-delete** (departure, not a hiding choice).
 
 ---
 
-## The two granularities
+## The three granularities
 
 | | Can the **whole section** be hidden? | Can **individual records** be hidden? |
 |---|---|---|
 | **Overview / bio** | Yes — clear it (empty `field_override`) | n/a (single field) |
 | **Publications** | Only by hiding every authorship | Yes — per author, or whole-pub takedown |
-| **Funding / grants** | Only by hiding every investigator role | Yes — per grant row |
-| **Education** | Only by hiding every entry | Yes |
+| **Funding / grants** | **Yes — `hideFunding` toggle** (or hide every investigator role) | Yes — per grant row |
+| **Education** | **Yes — `hideEducation` toggle** (or hide every entry) | Yes |
+| **Centers** | **Yes — `hideCenters` toggle** | No — reverse of the center roster |
+| **Postdoctoral Mentor** | **Yes — `hidePostdocMentor` toggle** | n/a (single card) |
+| **Mentoring (mentees)** | **Yes — `hideMentoring` toggle** (or hide every relationship) | Yes — per relationship |
+| **Clinical trials** | **Yes — `hideClinicalTrials` toggle** | No |
 | **Appointments** | Only by hiding every entry (except leadership) | Yes (leadership appointments are **not** hideable) |
-| **Mentees** | Only by hiding every relationship | Yes — per relationship |
-| **Methods & tools** | n/a (no per-scholar control) | **Editorial only** — a family is hidden for everyone, or public-gated |
+| **Methods & tools** | **Yes — `hideMethods` toggle** (display-only) | **Editorial only** — a family is hidden for everyone, or public-gated |
 | **Topics / concepts** | No direct control | No — *inherited* from publication visibility |
 | **Co-authors** | No direct control | No — *derived* from non-hidden publications |
-| **Disclosures (COI)** | No | No — read-only mirror of Weill Research Gateway |
+| **Disclosures (COI)** | **No** — compliance-mandated public | No — read-only mirror of Weill Research Gateway |
 | **Whole profile** | **Yes** — suppress it, or it soft-deletes on departure | — |
 
-The recurring pattern: **sections empty out, they don't toggle.** Topics, co-authors, and
-the methods lens are all *derived* — hide the publications behind them and they shrink or
-vanish on their own.
+Seven sections carry a **whole-section toggle** (the bold cells above) — see
+[§ Section visibility](#section-visibility-new). The rest still follow the older pattern:
+**sections empty out, they don't toggle** — Topics, co-authors, and the appointments list
+are *derived* or record-only, so you hide the records behind them and they shrink or vanish
+on their own.
 
 ---
 
-## The four mechanisms
+## The mechanisms
 
 | Mechanism | Table / column | What it hides | Revocable? | Who triggers it |
 |---|---|---|---|---|
 | **Suppression** | `suppression` (row with `revoked_at IS NULL`) | One record, or one contributor on a record, or the whole scholar | Yes (set `revoked_at`) | Self / superuser / unit admin / proxy via `/edit` |
 | **Field override (bio)** | `field_override`, `field_name='overview'`, empty `value` | The Overview/bio text | Yes (delete/replace the override) | Self / superuser via `/edit` |
+| **Section visibility** | `field_override`, `field_name IN (hideMentoring, hideEducation, hideFunding, hideCenters, hidePostdocMentor, hideClinicalTrials, hideMethods)`, `value='true'` | One **whole profile section** (display-only — stays searchable) | Yes (set `value='false'`, or delete the row) | Self / superuser / unit admin / proxy via `/edit` |
 | **Methods-lens overlays** | `family_suppression_overlay`, `family_sensitivity_overlay` | A method **family**, by `(supercategory, family_label)` | Yes (remove the overlay row) | Editorial — loaded by ETL, no `/edit` control |
 | **Soft-delete** | `scholar.deleted_at` (not null) | The whole scholar (departure) | Within the 60-day window, before purge | ETL / departure process — *not a hiding choice* |
 
@@ -133,6 +143,51 @@ read. (`getEffectiveOverview`, `lib/api/manual-layer.ts`.)
 
 ---
 
+## Section visibility (new)
+
+The missing middle tier between *record-level* suppression and *whole-profile* suppression:
+**hide an entire profile section, per scholar.** Seven sections carry a toggle, each a
+boolean `field_override` on the scholar:
+
+| Toggle | Section | Where it renders |
+|---|---|---|
+| `hideMentoring` | Mentoring (mentees) | main column |
+| `hideEducation` | Education | sidebar |
+| `hideFunding` | Funding / Grants | main column |
+| `hideCenters` | Centers | sidebar |
+| `hidePostdocMentor` | Postdoctoral Mentor | sidebar |
+| `hideClinicalTrials` | Clinical trials | main column |
+| `hideMethods` | Methods & Tools | publications cluster |
+
+**How it works.** A `field_override(scholar, <toggle>)` row with `value='true'` hides the
+section; `value='false'` (or no row, or a deleted row) shows it — the same revocable
+semantics the bio override uses, so nothing is destroyed. The hide is applied **server-side
+in the profile read** (`lib/api/profile.ts`): a hidden section's data is dropped from the
+public payload entirely, so it never reaches the browser (the render component then sees an
+empty section and its `length > 0` guard no-ops it). Every toggle writes a B03 audit row.
+Managed from the **Sections** panel on the *Visibility* card in `/edit`
+(`components/edit/visibility-card.tsx`), which also shows a read-only count of any *records*
+hidden inside each section.
+
+**Two carve-outs to remember:**
+
+- **Display-only — stays searchable.** Unlike whole-profile suppression (which deletes the
+  people doc), a section hide is a *profile-display* choice only. It does **not** touch the
+  search index, so a scholar who hides their Funding section is still found in search, and
+  their grants still power funding search. No people-doc reflection.
+- **`hideMethods` hides the section, not the facts.** It removes the Methods & Tools lens
+  from the profile only. It does **not** alter the Overview generator's methods facts (those
+  stay driven by the global `family_suppression_overlay`) and it is **not** a per-family
+  control — the editorial overlays below still own family-level curation.
+
+**What is *not* section-toggleable:** COI/Disclosures (compliance-mandated public — the route
+rejects `hideDisclosures` with a `400`), whole Publications (record-level hide covers the
+legitimate cases), and Overview/Highlights/Contact (already user-controlled by other means).
+Appointments are out of scope here (the "show historical / hidden-by-default" behavior is a
+per-record reveal, tracked separately).
+
+---
+
 ## Methods & tools (new)
 
 The **Methods lens** surfaces, on a profile, the method families a scholar's publications
@@ -140,12 +195,14 @@ draw on (e.g. *CRISPR gene editing*, *live animal models*), grouped under superc
 The taxonomy itself is a ReciterAI S3 artifact — see
 [`scholar-tools-taxonomy.md`](./scholar-tools-taxonomy.md).
 
-**Hiding here works differently from every other section.** A scholar **cannot** hide an
-individual method or family from `/edit` — there is no `tool`/`family` entity type in
-`suppression`. Method families are hidden **editorially and globally**, through two curated
-overlays keyed on the stable `(supercategory, family_label)` pair (A2 re-mints `family_id`
-on every rebuild, so the label pair is the identity). Both are loaded by ETL, gaps-only,
-mirroring the `mesh_curated_alias` pattern:
+**Two levers, at two grains.** A scholar can hide the **whole Methods & Tools section** with
+the `hideMethods` section-visibility toggle (display-only — see
+[§ Section visibility](#section-visibility-new)), but **cannot** hide an *individual* method
+or family from `/edit` — there is no `tool`/`family` entity type in `suppression`. Individual
+method families are hidden **editorially and globally**, through two curated overlays keyed on
+the stable `(supercategory, family_label)` pair (A2 re-mints `family_id` on every rebuild, so
+the label pair is the identity). Both are loaded by ETL, gaps-only, mirroring the
+`mesh_curated_alias` pattern:
 
 | Overlay | Table | Effect | Audience | Gate |
 |---|---|---|---|---|
@@ -179,6 +236,7 @@ Full matrix in [`access-control-rbac.md`](./access-control-rbac.md). Summary:
 | Target | Self | Superuser | Unit admin | Proxy (#779) |
 |---|---|---|---|---|
 | Whole profile (`scholar`) | ✅ | ✅ | ✗ | ✗ |
+| Whole **section** (the 7 `hide*` toggles) | ✅ | ✅ | ✅ | ✅ |
 | Publication — per-author hide | ✅ (own authorship) | ✅ | ✅ (author in their unit) | ✅ (granted scholar's authorship) |
 | Publication — whole-pub takedown | ✗ | ✅ | ✗ | ✗ |
 | Grant / education / appointment | ✅ (own) | ✅ | ✗ | ✗ |
@@ -240,15 +298,16 @@ The four legitimate motives, and how each is served:
 
 What that principle rules **out** — these omissions are deliberate, not gaps:
 
-- **A per-scholar control to hide an individual method/tool/family.** Method data is
-  *derived* — the lever already exists (hide the underlying publications and the family
-  shrinks on its own), so a direct control would be redundant and could contradict pubs
-  that are still shown. More importantly, the Methods lens is only worth showing if it is an
-  *honest* read of what a scholar actually does; per-scholar pruning would hollow it out
-  on both profiles and the cross-scholar `/methods` pages. The legitimate cases are handled
-  **editorially and globally** — `family_suppression_overlay` for "too generic to inform,"
-  `family_sensitivity_overlay` for the safety case — and the whole feature has a global
-  kill-switch (`METHODS_LENS_ENABLED`). That is the right granularity; an individual one is not.
+- **A per-scholar control to hide an individual method/tool/*family*.** The scholar CAN now
+  hide the **whole Methods & Tools section** (`hideMethods`, see
+  [§ Section visibility](#section-visibility-new)) — a display-only, all-or-nothing choice for
+  a scholar who finds the lens unhelpful. What is still deliberately withheld is a control to
+  cherry-pick *individual* families: per-family pruning would let a profile show a curated,
+  dishonest read of what a scholar actually does, and would contradict pubs that are still
+  shown. Family-level curation stays **editorial and global** — `family_suppression_overlay`
+  for "too generic to inform," `family_sensitivity_overlay` for the safety case — with a
+  global kill-switch (`METHODS_LENS_ENABLED`). Whole-section (scholar) or whole-family
+  (editorial) are the right grains; a per-scholar per-family control is not.
 - **Topics / concepts and co-authors.** Derived from publications; the correct lever is
   hiding the source pubs. Direct suppression would let a profile misrepresent its own corpus.
 - **Profile header (name / title / department).** These are owned by upstream systems of
@@ -275,7 +334,8 @@ Two open policy decisions sit inside the *supported* set:
 - **Topics / concepts** and **co-authors** — derived; they follow publication visibility,
   with no independent control.
 - **Leadership appointments** — chair/chief/director roles are explicitly non-suppressible.
-- **An individual method/tool/family by a scholar** — only the editorial overlays hide
+- **An individual method/tool/*family* by a scholar** — a scholar can hide the whole Methods
+  & Tools section (`hideMethods`), but not a single family; only the editorial overlays hide
   families, and only globally or public-gated.
 
 ---

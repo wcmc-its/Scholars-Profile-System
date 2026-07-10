@@ -78,11 +78,6 @@ export default async function MethodFamiliesPage() {
   const pendingSlugRequests =
     superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
   const administratorsTab = superuserSurfaces && isAdministratorsTabEnabled() ? 0 : null;
-  const self = await db.read.scholar.findUnique({
-    where: { cwid: session.cwid },
-    select: { deletedAt: true },
-  });
-  const selfEditHref = self && self.deletedAt === null ? "/edit" : null;
 
   return (
     <div className="min-h-screen bg-[var(--background)]" data-slot="method-families-page">
@@ -104,7 +99,6 @@ export default async function MethodFamiliesPage() {
         administratorsTab={administratorsTab}
         methodsTab={isMethodsTabVisible(session) ? 0 : null}
         dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
-        selfEditHref={selfEditHref}
         superuserSurfaces={superuserSurfaces}
         // A comms_steward is a global profile + unit-content editor (comms-
         // steward-profile-editing-spec.md §3b/§4d), so surface the Profiles +

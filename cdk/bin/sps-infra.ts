@@ -2,7 +2,7 @@
 import { App, type Environment, Tags } from "aws-cdk-lib";
 import { AnalyticsStack } from "../lib/analytics-stack";
 import { AppStack } from "../lib/app-stack";
-import { resolveEnvConfig } from "../lib/config";
+import { assertCutoverGate, resolveEnvConfig } from "../lib/config";
 import { DataStack } from "../lib/data-stack";
 import { DrBackupVaultStack } from "../lib/dr-backup-vault-stack";
 import { EdgeStack } from "../lib/edge-stack";
@@ -16,6 +16,13 @@ const app = new App();
 // `-c env=staging|prod` selects the environment; defaults to staging.
 const envConfig = resolveEnvConfig(app.node.tryGetContext("env"));
 
+// Estate-consolidation cutover gate (docs/sps-vpc-consolidation-plan.md
+// §6.2/§8.5/§8.6; #1370): useSharedVpc is not yet deployable — flipping it would
+// CFN-replace Aurora/OpenSearch in place into empty datastores. Hard-throws while
+// the flag is on (shipped config is false → inert today; also fails CI on any
+// premature useSharedVpc:true commit). Lifted by the snapshot-restore cutover task.
+assertCutoverGate(envConfig);
+
 // ADR-008: staging and production are separate AWS accounts. The account id is
 // supplied at deploy time via `-c <envName>Account=<id>` and is never
 // committed. When it is absent — as in CI — the stack synthesizes
@@ -23,6 +30,7 @@ const envConfig = resolveEnvConfig(app.node.tryGetContext("env"));
 const account = app.node.tryGetContext(`${envConfig.envName}Account`) as
   | string
   | undefined;
+
 const env: Environment = { account, region: envConfig.region };
 const drEnv: Environment = { account, region: envConfig.drRegion };
 
@@ -51,8 +59,6 @@ const dataStack = new DataStack(app, `Sps-Data-${envConfig.envName}`, {
   envConfig,
   crossRegionReferences: true,
   vpc: networkStack.vpc,
-  appSecurityGroup: networkStack.appSecurityGroup,
-  etlSecurityGroup: networkStack.etlSecurityGroup,
   drBackupVault: drBackupVaultStack.vault,
   description: `SPS data — Aurora MySQL, OpenSearch, AWS Backup, ${envConfig.envName} (ADR-008).`,
 });
@@ -73,9 +79,6 @@ const appStack = new AppStack(app, `Sps-App-${envConfig.envName}`, {
   env,
   envConfig,
   vpc: networkStack.vpc,
-  appSecurityGroup: networkStack.appSecurityGroup,
-  etlSecurityGroup: networkStack.etlSecurityGroup,
-  albSecurityGroup: networkStack.albSecurityGroup,
   description: `SPS application plane — ECR, ECS Fargate, ALBs, VPC endpoints, ${envConfig.envName} (ADR-008).`,
 });
 
@@ -90,7 +93,6 @@ const etlStack = new EtlStack(app, `Sps-Etl-${envConfig.envName}`, {
   env,
   envConfig,
   vpc: networkStack.vpc,
-  etlSecurityGroup: networkStack.etlSecurityGroup,
   ecsCluster: appStack.ecsCluster,
   etlEcrRepository: appStack.etlEcrRepository,
   description: `SPS ETL orchestration — Step Functions state machines + alarms, ${envConfig.envName} (ADR-008 B08+B20).`,
@@ -127,7 +129,6 @@ new SpsObservabilityStack(
 new EdgeStack(app, `Sps-Edge-${envConfig.envName}`, {
   env,
   envConfig,
-  publicAlb: appStack.publicAlb,
   // The static-asset bucket (#700) grants this role PutObject so the deploy
   // workflow can sync `.next/static` to S3. Passed as the ARN string; CDK
   // resolves the cross-stack reference.
@@ -145,6 +146,9 @@ new EdgeStack(app, `Sps-Edge-${envConfig.envName}`, {
 new AnalyticsStack(app, `Sps-Analytics-${envConfig.envName}`, {
   env,
   envConfig,
+  // Grant target for the in-app Usage dashboard's Athena/Glue/S3 query policy —
+  // creates an Analytics->App dependency (Analytics deploys after App).
+  appTaskRole: appStack.appTaskRole,
   description: `SPS usage analytics — Glue + Athena over CloudFront logs + nightly rollup, ${envConfig.envName} (ADR-008 9th stack).`,
 });
 

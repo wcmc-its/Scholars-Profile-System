@@ -1,24 +1,26 @@
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
+import { resolveEnvConfig, type SpsEnvConfig } from "../lib/config";
 import { NetworkStack } from "../lib/network-stack";
 import { makeFixture, TEST_ACCOUNT } from "./test-utils";
 
-function buildAppStack(envName: "staging" | "prod"): {
+function buildAppStack(
+  envName: "staging" | "prod",
+  envConfigOverride: Partial<SpsEnvConfig> = {},
+): {
   template: Template;
   stack: AppStack;
 } {
   const fixture = makeFixture(envName);
+  const envConfig = { ...fixture.envConfig, ...envConfigOverride };
   const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
   });
   const stack = new AppStack(fixture.app, `Sps-App-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     vpc: network.vpc,
-    appSecurityGroup: network.appSecurityGroup,
-    etlSecurityGroup: network.etlSecurityGroup,
-    albSecurityGroup: network.albSecurityGroup,
   });
   return { template: Template.fromStack(stack), stack };
 }
@@ -30,8 +32,176 @@ function buildAppStack(envName: "staging" | "prod"): {
 const EC2_DESCRIPTION_ALLOWED = /^[a-zA-Z0-9. _\-:/()#,@[\]+=&;{}!$*]+$/;
 
 describe("AppStack", () => {
+  // Cutover de-coupling (§8.4): OPENSEARCH_NODE moves off the Data→App
+  // cross-stack export onto the opensearch secret's `node` key, so the
+  // OpenSearch-domain replace at cutover isn't blocked by the export-lock.
+  describe("OPENSEARCH_NODE de-coupling (openSearchNodeFromSecret)", () => {
+    it("off (explicit): node is a plaintext env baked from the DataStack export, not a secret", () => {
+      const json = JSON.stringify(
+        buildAppStack("staging", { openSearchNodeFromSecret: false }).template.toJSON(),
+      );
+      expect(json).toContain("Sps-Data-staging-OpenSearchDomainEndpoint");
+      expect(json).not.toContain(":node::");
+    });
+
+    it("on: node is injected from the opensearch secret `node` key and the export is no longer imported", () => {
+      const json = JSON.stringify(
+        buildAppStack("staging", { openSearchNodeFromSecret: true }).template.toJSON(),
+      );
+      expect(json).not.toContain("Sps-Data-staging-OpenSearchDomainEndpoint");
+      expect(json).toContain(":node::");
+    });
+  });
+
+  // #1507 -- HTTPS origin leg. Off by default (edgeOriginCertArn ""); the
+  // default prod/staging builds still show HTTP-only :80 (asserted elsewhere).
+  // These assert the flag-on shape: a :443 listener + ingress + forward rule,
+  // added WITHOUT removing :80 (its removal is a follow-up).
+  describe("#1507 -- HTTPS origin leg (edgeOriginCertArn seeded)", () => {
+    const CERT =
+      "arn:aws:acm:us-east-1:123456789012:certificate/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    const { template } = buildAppStack("prod", {
+      edgeOriginCertArn: CERT,
+      edgeOriginHostname: "scholars-origin.weill.cornell.edu",
+    });
+
+    it("adds an HTTPS :443 listener (ALB cert) alongside the kept :80 listeners", () => {
+      const ports = Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::Listener"),
+      ).map((l) => l.Properties?.Port as number);
+      expect(ports).toContain(443);
+      // public :80 + internal :80 are both kept.
+      expect(ports.filter((p) => p === 80).length).toBeGreaterThanOrEqual(2);
+      template.hasResourceProperties(
+        "AWS::ElasticLoadBalancingV2::Listener",
+        {
+          Port: 443,
+          Protocol: "HTTPS",
+          Certificates: [{ CertificateArn: CERT }],
+        },
+      );
+    });
+
+    it("the :443 listener forwards X-Origin-Verify-matching requests to the app TG (a second origin-verify rule)", () => {
+      const originVerifyForwards = Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::ListenerRule"),
+      ).filter((r) => {
+        const conds =
+          (r.Properties?.Conditions as Array<Record<string, unknown>>) ?? [];
+        return conds.some(
+          (c) =>
+            (c.HttpHeaderConfig as { HttpHeaderName?: string } | undefined)
+              ?.HttpHeaderName === "X-Origin-Verify",
+        );
+      });
+      // one for :80 (existing), one for :443 (added).
+      expect(originVerifyForwards).toHaveLength(2);
+    });
+
+    it("opens a :443 internet ingress on the public ALB SG", () => {
+      template.hasResourceProperties("AWS::EC2::SecurityGroupIngress", {
+        FromPort: 443,
+        ToPort: 443,
+        CidrIp: "0.0.0.0/0",
+      });
+    });
+  });
+
+  // Estate consolidation (plan §4.4/§5.5): with useSharedVpc on, compute lands
+  // in app2, the public ALB in dmz, and SPS owns no VPC interface/gateway
+  // endpoints (it rides its-reciter's; a privateDNS SM endpoint would hijack
+  // co-tenant DNS).
+  describe("shared VPC placement (useSharedVpc on)", () => {
+    // Out-of-band shared SG ids (item-3 G8) — resolveSharedSg reads these config
+    // literals when shared, so the template must carry them, not an SSM ref.
+    const SHARED_SG = {
+      appSgId: "sg-0app0000000000",
+      etlSgId: "sg-0etl0000000000",
+      albSgId: "sg-0alb0000000000",
+    };
+    const staging = resolveEnvConfig("staging");
+    const { template } = buildAppStack("staging", {
+      useSharedVpc: true,
+      sharedVpc: { ...staging.sharedVpc, ...SHARED_SG },
+    });
+    const APP2 = ["subnet-0c6593fb9c9a165c3", "subnet-070cbc242efbddc3c"];
+    const DMZ = ["subnet-09a6fab648280ca19", "subnet-0485fefe267b06736"];
+
+    it("places the internal ALB in the app2 subnets", () => {
+      const albs = Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::LoadBalancer"),
+      );
+      const internal = albs.find((a) => a.Properties?.Scheme === "internal");
+      expect(internal?.Properties?.Subnets).toEqual(
+        expect.arrayContaining(APP2),
+      );
+    });
+
+    it("places the public ALB in the dmz subnets", () => {
+      const albs = Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::LoadBalancer"),
+      );
+      const pub = albs.find((a) => a.Properties?.Scheme === "internet-facing");
+      expect(pub?.Properties?.Subnets).toEqual(expect.arrayContaining(DMZ));
+    });
+
+    it("runs the ECS service in the app2 subnets", () => {
+      template.hasResourceProperties("AWS::ECS::Service", {
+        NetworkConfiguration: {
+          AwsvpcConfiguration: { Subnets: Match.arrayWith(APP2) },
+        },
+      });
+    });
+
+    it("creates no VPC interface/gateway endpoints (rides its-reciter's)", () => {
+      template.resourceCountIs("AWS::EC2::VPCEndpoint", 0);
+    });
+
+    // The flag-on SG id must come from the cfg.sharedVpc.<tier>SgId literal, not
+    // Network's /sps/<env>/net/<tier>-sg-id SSM echo (item-3 §4): a consumer that
+    // read the param would depend on Network deploying first, forcing
+    // producer-first ordering and re-locking the consumers-first flip.
+    it("imports SGs from the sharedVpc config literal, not Network's SSM param", () => {
+      const sv = resolveEnvConfig("staging").sharedVpc;
+      const json = JSON.stringify(
+        buildAppStack("staging", {
+          useSharedVpc: true,
+          sharedVpc: {
+            ...sv,
+            appSgId: "sg-0app",
+            etlSgId: "sg-0etl",
+            albSgId: "sg-0alb",
+          },
+        }).template.toJSON(),
+      );
+      expect(json).toContain("sg-0app");
+      expect(json).not.toContain("/sps/staging/net/app-sg-id");
+      expect(json).not.toContain("/sps/staging/net/etl-sg-id");
+      expect(json).not.toContain("/sps/staging/net/alb-sg-id");
+    });
+
+    // G15-a: the ALBs + TGs are VPC-coupled, so the flip REPLACES them; a fixed
+    // physical name blocks CFN create-before-delete. Under shared they auto-name.
+    it("auto-generates ALB + target-group names under shared VPC (G15-a)", () => {
+      for (const alb of Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::LoadBalancer"),
+      )) {
+        expect(alb.Properties?.Name).toBeUndefined();
+      }
+      for (const tg of Object.values(
+        template.findResources("AWS::ElasticLoadBalancingV2::TargetGroup"),
+      )) {
+        expect(tg.Properties?.Name).toBeUndefined();
+      }
+    });
+  });
+
   describe("prod", () => {
-    const { template } = buildAppStack("prod");
+    // Pin flag-off so this block keeps covering the STANDALONE-VPC app topology
+    // (env-prefixed ALB names, own VPC endpoints). Prod's cutover shared-VPC
+    // synth (auto-named ALBs, no endpoints) is covered by the staging (flag-on)
+    // block + the regenerated snapshot + the pre-deploy cdk diff.
+    const { template } = buildAppStack("prod", { useSharedVpc: false });
 
     /** Inline IAM policies attached to the app TASK role (not the exec role). */
     function findTaskRolePolicies() {
@@ -457,9 +627,6 @@ describe("AppStack", () => {
               Environment: Match.arrayWith([
                 Match.objectLike({ Name: "NODE_ENV", Value: "production" }),
                 Match.objectLike({ Name: "PORT", Value: "3000" }),
-                // #447 -- OpenSearch endpoint imported from DataStack (value
-                // is an Fn::ImportValue token, so assert on Name only).
-                Match.objectLike({ Name: "OPENSEARCH_NODE" }),
               ]),
               Secrets: Match.arrayWith([
                 Match.objectLike({ Name: "DATABASE_URL" }),
@@ -1596,33 +1763,41 @@ describe("AppStack", () => {
         expect(env.get("SCHOLARS_MAIL_FROM")).toBe("no-reply-scholars@weill.cornell.edu");
       });
 
-      it("keeps the ReCiter pending-suggestions nudge OFF in prod (SELF_EDIT_RECITER_PENDING_HINT — armed; staging flips first)", () => {
-        // Prod is armed but off: the live DynamoDB read is staging-on for the soak,
-        // and prod flips only on the next approval-gated Sps-App-prod deploy.
-        expect(appContainerEnv().get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("off");
+      it("activates the ReCiter pending-suggestions nudge in prod (SELF_EDIT_RECITER_PENDING_HINT — launch batch 1, #506)", () => {
+        // Prod flipped 2026-07-05: staging soak complete (read-only DynamoDB hint,
+        // offline-safe). Render-only; reversible via flag flip.
+        expect(appContainerEnv().get("SELF_EDIT_RECITER_PENDING_HINT")).toBe("on");
       });
 
-      it("keeps the ReCiter 'Not mine' reject OFF in prod during the staging-first rollout (#746)", () => {
-        // Env-gated: ON in staging, OFF in prod until the staging soak
-        // completes. In prod the route 503s and "Not mine?" keeps the
-        // Publication-Manager off-ramp.
-        expect(appContainerEnv().get("RECITER_REJECT_SEND")).toBe("off");
+      it("activates the ReCiter 'Not mine' reject in prod (RECITER_REJECT_SEND, launch batch 2, #746/#506)", () => {
+        // Prod flipped 2026-07-05: staging soak complete + the item-3 VPC
+        // consolidation gave prod ReCiter connectivity. Best-effort writeback;
+        // failures record locally and are retried by etl:reciter-refresh.
+        expect(appContainerEnv().get("RECITER_REJECT_SEND")).toBe("on");
       });
 
-      it("keeps the Methods lens dark in prod (METHODS_LENS_ENABLED + METHODS_LENS_SENSITIVE_GATE both OFF, #799/#801 staging-first)", () => {
-        // Env-gated: both ON in staging, OFF in prod until the staging soak
-        // completes and the prod data steps (#794 cutover + #801 overlay seed)
-        // are done. Off in prod = loadScholarFamilies returns [] so nothing
-        // renders and no sensitive family leaks.
-        expect(appContainerEnv().get("METHODS_LENS_ENABLED")).toBe("off");
-        expect(appContainerEnv().get("METHODS_LENS_SENSITIVE_GATE")).toBe("off");
+      it("activates the Methods lens in prod (METHODS_LENS_ENABLED + METHODS_LENS_SENSITIVE_GATE both ON, #962/#1481 go-live)", () => {
+        // Prod go-live 2026-07-05: the staging soak is done and the prod data
+        // steps are complete -- scholar_family/family_entity loaded (#1481) and
+        // the #801 sensitivity overlay seeded on prod (38 rows mirrored from
+        // staging). SENSITIVE_GATE MUST be on with ENABLED so the curated
+        // live-animal families stay hidden on the public payload.
+        expect(appContainerEnv().get("METHODS_LENS_ENABLED")).toBe("on");
+        expect(appContainerEnv().get("METHODS_LENS_SENSITIVE_GATE")).toBe("on");
       });
 
-      it("keeps the family click-to-filter off in prod (METHODS_LENS_FAMILY_FILTER, #819)", () => {
-        // Staging-first like the sibling Methods-lens flags; off in prod until the
-        // pmids-bearing scholar_family rollup is loaded and the staging soak is done.
-        expect(appContainerEnv().get("METHODS_LENS_FAMILY_FILTER")).toBe("off");
-        expect(appContainerEnv().get("METHODS_LENS_PAGES")).toBe("on"); // #824 armed both envs (armed-not-live; ENABLED still gates prod)
+      it("keeps the subtopic-grain grant matcher off in prod (GRANT_MATCHER_SUBTOPIC_GRAIN, staging-first)", () => {
+        // Env-gated: on in staging, off in prod until the prod opportunity corpus
+        // carries match_dsl/match_query and the staging soak completes. Off in
+        // prod = the matcher runs the proven topic-vector path.
+        expect(appContainerEnv().get("GRANT_MATCHER_SUBTOPIC_GRAIN")).toBe("off");
+      });
+
+      it("activates the family click-to-filter in prod (METHODS_LENS_FAMILY_FILTER, #819/#962 go-live)", () => {
+        // Prod go-live 2026-07-05 with the sibling Methods-lens flags: the
+        // pmids-bearing scholar_family rollup is loaded (#1481) and the staging soak is done.
+        expect(appContainerEnv().get("METHODS_LENS_FAMILY_FILTER")).toBe("on");
+        expect(appContainerEnv().get("METHODS_LENS_PAGES")).toBe("on"); // #824 armed both envs (now live in prod with ENABLED on)
       });
 
       it("serves the root /{slug} canonical profile URL in prod (PROFILE_CANONICAL=root, #671 cutover)", () => {
@@ -1644,21 +1819,21 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("SELF_EDIT_OVERVIEW_GENERATE")).toBe("on");
       });
 
-      it("keeps overview streaming OFF in prod but defaults the audience (SELF_EDIT_OVERVIEW_GENERATE_STREAM=off, OVERVIEW_AUDIENCE_DEFAULT=informed)", () => {
-        // The base generator is already live in prod; the streamed response SHAPE is a
-        // separate staging-first sub-flag, off in prod until an approval-gated deploy.
+      it("activates overview streaming in prod and defaults the audience (SELF_EDIT_OVERVIEW_GENERATE_STREAM=on, OVERVIEW_AUDIENCE_DEFAULT=informed)", () => {
+        // Prod flipped 2026-07-05 (launch batch 1, #506): the base generator is already
+        // live in prod; the streamed response SHAPE sub-flag flips on after its staging soak.
         // The audience default ("informed") ships in both envs as the no-image-roll lever.
         const env = appContainerEnv();
-        expect(env.get("SELF_EDIT_OVERVIEW_GENERATE_STREAM")).toBe("off");
+        expect(env.get("SELF_EDIT_OVERVIEW_GENERATE_STREAM")).toBe("on");
         expect(env.get("OVERVIEW_AUDIENCE_DEFAULT")).toBe("informed");
       });
 
-      it("keeps the #917 v6 biosketch generator OFF in prod (EDIT_BIOSKETCH_GENERATE=off, staging-first; faithfulness pass ON; default version v6)", () => {
-        // New surface: default-off in prod, on in staging while it bakes. The #917 v6
-        // faithfulness pass is ON in both envs (grant document); the default prompt
-        // version is v7 in both envs (the generator stays dark in prod until the flag flips).
+      it("activates the #917 biosketch generator in prod (EDIT_BIOSKETCH_GENERATE=on, launch batch 2; faithfulness pass ON; default version v7)", () => {
+        // Prod flipped 2026-07-05 (#506): staging soak complete. The #917
+        // faithfulness pass stays ON in both envs (grant document); the default
+        // prompt version is v7 in both envs.
         const env = appContainerEnv();
-        expect(env.get("EDIT_BIOSKETCH_GENERATE")).toBe("off");
+        expect(env.get("EDIT_BIOSKETCH_GENERATE")).toBe("on");
         expect(env.get("BIOSKETCH_FAITHFULNESS_PASS")).toBe("on");
         expect(env.get("BIOSKETCH_PROMPT_VERSION_DEFAULT")).toBe("v7");
       });
@@ -2040,6 +2215,25 @@ describe("AppStack", () => {
       expect(envByName.get("CLINICAL_TRIALS_SECTION")).toBe("on");
     });
 
+    it("activates the subtopic-grain grant matcher in staging first (GRANT_MATCHER_SUBTOPIC_GRAIN=on)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appTaskDef = Object.values(taskDefs).find(
+        (r) => r.Properties?.Family === "sps-app-staging",
+      );
+      const appContainer = (
+        appTaskDef?.Properties?.ContainerDefinitions as
+          | Array<{
+              Name?: string;
+              Environment?: Array<{ Name?: string; Value?: string }>;
+            }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("GRANT_MATCHER_SUBTOPIC_GRAIN")).toBe("on");
+    });
+
     it("enables the center collaboration network in staging first (CENTER_COLLABORATION_NETWORK=on, #1137)", () => {
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const appTaskDef = Object.values(taskDefs).find(
@@ -2241,10 +2435,10 @@ describe("AppStack", () => {
       expect(appTaskDef?.Properties?.Memory).toBe("2048");
     });
 
-    it("grants the audit INSERT to `'app_rw'@'10.20.%'` on staging (#493 staging fix)", () => {
-      // Staging's app user is host-pattern `10.20.%` (VPC-CIDR-scoped), not the
-      // `%` the bootstrap defaulted to -- the cause of the MySQL 1410 at GRANT.
-      // Guards the per-env appRwGranteeHost wiring on the bootstrap task def.
+    it("grants the audit INSERT to `'app_rw'@'10.46.160.%'` on staging (item-3 cutover)", () => {
+      // Post-item-3-cutover staging's app user connects from the shared VPC's
+      // app2 tier, so the host pattern is `10.46.160.%` (was `10.20.%` on the
+      // standalone VPC). Guards the per-env appRwGranteeHost wiring.
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const bootstrap = Object.values(taskDefs).find(
         (r) => r.Properties?.Family === "sps-db-bootstrap-staging",
@@ -2261,7 +2455,7 @@ describe("AppStack", () => {
       const envByName = new Map(
         (container?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
-      expect(envByName.get("GRANTEE_HOST")).toBe("10.20.%");
+      expect(envByName.get("GRANTEE_HOST")).toBe("10.46.160.%");
     });
 
     it("provisions the verify-grants task on staging with all four role DSNs (ADR-009 Phase 2)", () => {
@@ -2320,9 +2514,6 @@ describe("AppStack", () => {
         env: fixture.env,
         envConfig: fixture.envConfig,
         vpc: network.vpc,
-        appSecurityGroup: network.appSecurityGroup,
-        etlSecurityGroup: network.etlSecurityGroup,
-        albSecurityGroup: network.albSecurityGroup,
       });
       const t = Template.fromStack(stack);
       t.hasResourceProperties("AWS::ECS::Service", { DesiredCount: 0 });

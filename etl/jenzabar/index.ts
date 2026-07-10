@@ -19,6 +19,7 @@
  * Usage: `npm run etl:jenzabar`
  */
 import { db } from "../../lib/db";
+import { assertSourceVolume } from "../../lib/etl-guard";
 import { closeJenzabarPool, getJenzabarPool } from "@/lib/sources/mssql-jenzabar";
 
 const VIEW = "[TmsEPly].[dbo].[WCN_IDM_GS_ADVISOR_ADVISEE_View]";
@@ -123,18 +124,30 @@ async function main() {
       };
     });
 
-    console.log("Truncating phd_mentor_relationship...");
-    await db.write.phdMentorRelationship.deleteMany();
+    // Mentoring history only grows (conferrals accrue); an empty/truncated
+    // MAJSP result would silently wipe the table via the truncate below.
+    assertSourceVolume("jenzabar:mentor-relationships", {
+      incoming: inserts.length,
+      existing: await db.write.phdMentorRelationship.count(),
+      maxDropPct: 20,
+    });
 
-    console.log(`Inserting ${inserts.length} rows...`);
-    let inserted = 0;
-    for (const batch of chunks(inserts, INSERT_BATCH)) {
-      await db.write.phdMentorRelationship.createMany({
-        data: batch,
-        skipDuplicates: true,
-      });
-      inserted += batch.length;
-    }
+    // Truncate + repopulate in one transaction so a mid-write kill can't leave
+    // phd_mentor_relationship half-empty. Interactive-tx timeout raised above
+    // the 5 s default for the batched createMany.
+    console.log(`Truncating + inserting ${inserts.length} rows in one transaction...`);
+    await db.write.$transaction(
+      async (tx) => {
+        await tx.phdMentorRelationship.deleteMany();
+        for (const batch of chunks(inserts, INSERT_BATCH)) {
+          await tx.phdMentorRelationship.createMany({
+            data: batch,
+            skipDuplicates: true,
+          });
+        }
+      },
+      { timeout: 120_000, maxWait: 10_000 },
+    );
 
     await db.write.etlRun.update({
       where: { id: run.id },

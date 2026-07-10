@@ -25,3 +25,18 @@ Backfills are not migrations. Keep backfill scripts in [`scripts/backfills/`](./
 ### PR checklist
 
 Every PR that touches `prisma/schema.prisma` must complete the migration checklist in the [pull request template](./.github/PULL_REQUEST_TEMPLATE.md).
+
+## Documentation — what belongs in this public repo
+
+This is a **public** repository. A doc belongs here only if it is one of:
+
+- **How the live system works** — architecture, ADRs, ops/security runbooks, cost/performance, and specs for **shipped** features.
+- **A dated audit or snapshot** — goes under [`docs/audits/`](./docs/audits/) with an `as-of YYYY-MM-DD — not maintained` header; never cited as current state.
+
+Everything else stays **out** of this repo and lives in the private working area (`~/Dropbox/Projects/Scholars-Profile-System/`):
+
+- transient working notes — handoffs, debriefs, `NEXT-STEPS`, session notes;
+- build-time R&D — plans, analyses, findings, eval/pilot runs, prompt-version dumps;
+- specs for features that have **not shipped yet** — promote the spec into this repo when the feature goes live.
+
+Keep host IPs, campus CIDRs (#461), internal hostnames, and DB / service-account names out of committed docs. Secrets Manager holds the values; docs reference names/ARNs only. The curated index is [`docs/DOCUMENTATION-REGISTRY.md`](./docs/DOCUMENTATION-REGISTRY.md).

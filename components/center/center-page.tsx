@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { buildOrganizationJsonLd } from "@/lib/seo/jsonld";
+import { buildOrganizationJsonLd, serializeJsonLd } from "@/lib/seo/jsonld";
 import {
   centerHasPrograms,
   getCenter,
@@ -107,7 +107,7 @@ export async function CenterPage({
     <main className="mx-auto max-w-[1100px] px-6 py-12">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
       />
       <Breadcrumb className="mb-4">
         <BreadcrumbList>

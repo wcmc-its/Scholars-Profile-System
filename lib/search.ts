@@ -11,9 +11,19 @@
  * Local dev: docker container at OPENSEARCH_NODE.
  */
 import { Client, type ClientOptions } from "@opensearch-project/opensearch";
-import { recordOsRoundTrip } from "@/lib/api/os-round-trips";
+import { isInOsRequestScope, recordOsRoundTrip } from "@/lib/api/os-round-trips";
 
 let _client: Client | null = null;
+
+// Interactive-path request timeout. Without an override the client waits its
+// 30s default on a wedged node/shard — an eternity for a user-facing search.
+// Applied per-call (only inside a request scope), NOT on the client options,
+// because ETL index builds share this singleton and legitimately run long.
+// Env-tunable; 5s is ~10× the healthy p99 of the heaviest people query.
+const OS_REQUEST_PATH_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.SEARCH_OS_REQUEST_TIMEOUT_MS);
+  return Number.isInteger(raw) && raw > 0 ? raw : 5_000;
+})();
 
 /**
  * Build the OpenSearch client options from the environment.
@@ -47,11 +57,23 @@ export function searchClient(): Client {
   // OpenSearch round-trip increments the active per-request counter
   // (lib/api/os-round-trips.ts). `recordOsRoundTrip` is inert outside a
   // `runWithOsRoundTripCounter` scope, so ETL / index-build calls through the
-  // same singleton are unaffected. Behavior-neutral: we delegate to the
-  // original `.search` and return its result untouched.
+  // same singleton are unaffected.
+  //
+  // Inside a request scope the wrapper also injects a fail-fast transport
+  // timeout (+ a single retry) so a wedged node degrades a user search in
+  // seconds, not the client's 30s default. Explicit per-call options win over
+  // the injected defaults; out-of-scope (ETL) calls pass through untouched.
   const originalSearch = client.search.bind(client);
   client.search = function (...args: Parameters<typeof originalSearch>) {
     recordOsRoundTrip();
+    if (isInOsRequestScope()) {
+      const [params, options] = args as unknown as [unknown, Record<string, unknown> | undefined];
+      return originalSearch(params as Parameters<typeof originalSearch>[0], {
+        requestTimeout: OS_REQUEST_PATH_TIMEOUT_MS,
+        maxRetries: 1,
+        ...options,
+      });
+    }
     return originalSearch(...args);
   } as typeof client.search;
   _client = client;
@@ -195,6 +217,13 @@ export const peopleIndexMapping = {
       // `object` + `enabled: false`. OMITTED on scholars with no MeSH-tagged pub.
       // Served only when SEARCH_PEOPLE_REASON_FROM_DOC is on.
       meshSubtreeCounts: { type: "object", enabled: false },
+      // #1366 — per-method-family distinct-pub counts for the reason-line "N of M".
+      // Dynamic family-label keys ⇒ store in `_source` but DON'T index (object +
+      // enabled:false), same as `meshSubtreeCounts`, to avoid a mapping explosion.
+      methodFamilyCounts: { type: "object", enabled: false },
+      // #1366 — per-parent-topic distinct-pub counts (dynamic topic-slug keys);
+      // store in `_source`, don't index — same rationale as `methodFamilyCounts`.
+      areaCounts: { type: "object", enabled: false },
       overview: { type: "text", analyzer: "scholar_text" },
       // Issue #310 / SPEC §6.1.5 — materialized inputs to the topic-shape
       // sparse-profile soft decay. The decay's "non-trivial" thresholds
@@ -857,6 +886,41 @@ export const PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE = "full_time_faculty";
  */
 export const PEOPLE_DEPT_LEADERSHIP_CHAIR_WEIGHT = 3.0;
 export const PEOPLE_DEPT_LEADERSHIP_CHIEF_WEIGHT = 1.5;
+
+/**
+ * Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
+ * When a topic query resolves to a Research Area, scholars are lifted by their
+ * relevance×coverage ranking in that area — the topic page's own per-scholar `total`
+ * (Σ scorePublication over first/last-authored, recent, in-area pubs). The continuous
+ * `total` is bucketed into 3 tiers (by fraction of the area's max `total`) and each
+ * tier rides as an additive weight in the OUTER prominence `function_score` (same slot
+ * as the #513 prominence factors), so concentration can overcome the
+ * `ln1p(publicationCount)` lift that floats prolific generalists. Reorder-only: a
+ * `filter` clause scores only docs already matched, so the result set/facets are
+ * unchanged. Weights are INITIAL — tuned by the spec §6 dense-page eval.
+ * ponytail: 3 static tiers; a reindexed per-scholar `total` field + script_score is
+ * the smoother upgrade (spec OQ-7) once the signal is proven.
+ */
+// Prominence is `score_mode: sum` × relevance, where the non-boost terms sum to
+// ~6 (mostly ln1p(publicationCount)). The original 8/4/1.5 made a top-tier boost
+// DOUBLE the multiplier — concentration dominated relevance instead of informing it
+// (the "huge FT boost" / method-tagged-ethics-prof-over-Rice distortion). Softened
+// to a peer signal: a top tier now adds ~50% (6→9), reordering within a relevance
+// band without overriding it. Still INITIAL — the staging A/B picks the final values.
+export const AREA_BOOST_W_HI = 3;
+export const AREA_BOOST_W_MID = 1.5;
+export const AREA_BOOST_W_LO = 0.75;
+/** Tier cutoffs as a fraction of the area's top `total` (the #1 scholar). */
+export const AREA_BOOST_HI_FRAC = 0.5;
+export const AREA_BOOST_MID_FRAC = 0.2;
+/** Cap on how many of the area's ranked scholars are pulled for the boost. */
+export const AREA_BOOST_TOP_N = 200;
+/**
+ * #1343 — minimum on-topic pubs for a WCM author to be eligible for the
+ * concept-axis concentration boost. Floors out 1–2-pub authors whose on-topic
+ * fraction would otherwise spike them above genuine specialists.
+ */
+export const CONCEPT_CONCENTRATION_MIN_PUBS = 3;
 
 /**
  * Boost weights used by the publications-index query builder.

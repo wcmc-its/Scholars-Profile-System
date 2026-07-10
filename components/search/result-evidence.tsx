@@ -1,7 +1,31 @@
 import type { ResultEvidence } from "@/lib/api/result-evidence";
-import { MatchReason, MatchAwareReason } from "@/components/search/match-reason";
+import { MatchAwareReason, LesserReason, CountFirst } from "@/components/search/match-reason";
 import { HighlightedSnippet } from "@/components/search/highlight-snippet";
 import { ConceptChipRow } from "@/components/search/concept-chip-row";
+
+/**
+ * #1366 follow-up Part B — a PRIMARY lead whose matched-pub share of the scholar's
+ * output (`count / pubCount`) falls below this gets a "· X% of output" coverage cue
+ * and is fainted. Tunable. 2% structurally only fires for high-output scholars (a
+ * 1-pub match needs >50 pubs to dip under it), so it self-guards against tiny
+ * denominators: it separates a 1-of-538 lead (0.2%, fires) from a 4-of-98 (4.1%) or
+ * 3-of-44 (6.8%) lead (don't).
+ */
+const COVERAGE_CUE_THRESHOLD = 0.02;
+
+/** #1381 follow-up — the subtle dotted underline that marks a matched entity for every
+ *  kind EXCEPT a literal keyword/mention (method family, research area, concept term,
+ *  clinical specialty, funding-tagged concept). */
+const ENTITY_UNDERLINE =
+  "underline decoration-[rgba(52,64,138,0.55)] decoration-dotted decoration-1 underline-offset-[3px]";
+
+/** #1366 follow-up Part B — the "X.X% of output" coverage figure, rounded to one
+ *  decimal; a share that rounds below 0.1% reads "<0.1%" rather than a misleading
+ *  "0.0%". */
+function coveragePct(count: number, total: number): string {
+  const rounded = Math.round((1000 * count) / total) / 10;
+  return rounded === 0 ? "<0.1%" : `${rounded}%`;
+}
 
 /**
  * #824 follow-up Phase 1 — the ONE renderer for the coherent search-result
@@ -57,6 +81,9 @@ export function ResultEvidence({
   panelId,
   hasQuery = true,
   slug,
+  pubCount,
+  stacked = false,
+  tier = "primary",
 }: {
   evidence: ResultEvidence;
   /** Rep-papers disclosure — when true and the evidence is a method/topic/
@@ -67,6 +94,10 @@ export function ResultEvidence({
   expanded?: boolean;
   onToggle?: () => void;
   panelId?: string;
+  /** #1381 — DEPRECATED / ignored. The publications reason row is now the count-first
+   *  dot layout for all callers (the §4.7 flavor pill was removed), so this no longer
+   *  gates anything; kept only so existing callers keep type-checking. */
+  badged?: boolean;
   /** True when there is an active query. The honest-empty match line ("— no
    *  specific match for this query —") only makes sense when something was being
    *  matched; on the no-query Browse page it is suppressed for the identity
@@ -76,60 +107,258 @@ export function ResultEvidence({
    *  (`/{slug}?mesh=<ui>#publications`). Required wherever a concepts evidence
    *  can render (the People card always passes it). */
   slug?: string;
+  /** #1366 — the scholar's total pub count (M), paired with `evidence.count` (N)
+   *  to render the "· N of M publications" suffix on method/area lines. Absent ⇒
+   *  no suffix (the single-evidence path passes no count, so this stays label-only). */
+  pubCount?: number;
+  /** #1366 follow-up — true only in the tiered (`evidenceLines`) context. The Part B
+   *  relevance cues are scoped to it so the single-evidence path stays visually frozen,
+   *  matching the `stacked`-gated C/D tiering and Part A's panel relabel. */
+  stacked?: boolean;
+  /** #1366 follow-up — "primary" = the prominent lead signal (today's full badge);
+   *  "lesser" = a compact "Also matched" dot row. Identity-fallback kinds are always
+   *  solo, so they only ever render as "primary". */
+  tier?: "primary" | "lesser";
 }) {
+
+  // #1366 follow-up — compact "Also matched" dot rows: the dot is always FILLED in
+  // the category color (Part C); a literal keyword mention's weakness is carried by
+  // muted/italic text (`weak`) + the MentionNote, not the dot. Count is abbreviated
+  // ("· N of M", no "publications" word). The disclosure panel is the SAME (rep
+  // papers); only this summary row restyles.
+  if (tier === "lesser") {
+    const lesserCount = (count: number | undefined): string | undefined =>
+      count != null && pubCount != null ? ` · ${count} of ${pubCount} publications` : undefined;
+    switch (evidence.kind) {
+      case "method":
+        return (
+          <LesserReason
+            dotClassName="bg-[#8B4A2F]"
+            suffix={lesserCount(evidence.count)}
+            canExpand={canExpand}
+            expanded={expanded}
+            onToggle={onToggle}
+            panelId={panelId}
+          >
+            <span className="font-medium text-[#8B4A2F]">Method</span> ·{" "}
+            <span className={`font-[450] text-[#3a3a3a] ${ENTITY_UNDERLINE}`}>{evidence.family}</span>
+          </LesserReason>
+        );
+      case "topic":
+        return (
+          <LesserReason
+            dotClassName="bg-[#2563eb]"
+            suffix={lesserCount(evidence.count)}
+            canExpand={canExpand}
+            expanded={expanded}
+            onToggle={onToggle}
+            panelId={panelId}
+          >
+            <span className="font-medium text-[#1d4ed8]">Research area</span> ·{" "}
+            <span className={`font-[450] text-[#3a3a3a] ${ENTITY_UNDERLINE}`}>{evidence.label}</span>
+          </LesserReason>
+        );
+      case "clinical":
+        return (
+          <LesserReason
+            dotClassName="bg-[#0891b2]"
+            canExpand={canExpand}
+            expanded={expanded}
+            onToggle={onToggle}
+            panelId={panelId}
+          >
+            <span className="font-medium text-[#0e7490]">Clinical</span> ·{" "}
+            {evidence.boardCertified ? (
+              <>
+                Board certified in{" "}
+                <span className={`font-[450] text-[#3a3a3a] ${ENTITY_UNDERLINE}`}>{evidence.specialty}</span>
+              </>
+            ) : (
+              <span className={`font-[450] text-[#3a3a3a] ${ENTITY_UNDERLINE}`}>{evidence.specialty}</span>
+            )}
+          </LesserReason>
+        );
+      case "publications": {
+        const mention = evidence.strength === "mention";
+        return (
+          <LesserReason
+            // #1366 follow-up Part C — dots are always FILLED in the category color; a
+            // mention's weakness is carried by `weak` (muted/italic text) + the
+            // MentionNote, not a hollow dot.
+            dotClassName={mention ? "bg-[#64748b]" : "bg-[#7c3aed]"}
+            weak={mention}
+            suffix={lesserCount(evidence.count)}
+            canExpand={canExpand}
+            expanded={expanded}
+            onToggle={onToggle}
+            panelId={panelId}
+          >
+            <span className={`font-medium ${mention ? "text-[#475569]" : "text-[#6d28d9]"}`}>
+              {mention ? "Keyword" : "Concept"}
+            </span>
+            {evidence.term ? (
+              <>
+                {" · "}
+                <span
+                  className={
+                    mention
+                      ? "font-[450] text-[#3a3a3a]"
+                      : `font-[450] text-[#3a3a3a] ${ENTITY_UNDERLINE}`
+                  }
+                >
+                  {evidence.term}
+                </span>
+              </>
+            ) : null}
+          </LesserReason>
+        );
+      }
+      default:
+        // Identity fallbacks (concepts/areas/none) are always solo ⇒ never lesser.
+        return null;
+    }
+  }
+
+  // #1366 follow-up Part B — relevance cues on the PRIMARY lead. Two independent
+  // caveats, both also FAINT the lead (`dim`): a low-coverage cue when the matched
+  // pubs are a tiny share of the scholar's output, and a "keyword-only" type cue when
+  // the lead is a literal mention. PRECEDENCE: keyword-only wins (the stronger
+  // weakness signal); never stack both. Funding-promoted + identity-fallback primaries
+  // are handled elsewhere / have no pub coverage, so they carry no cue. Scoped to the
+  // tiered (`stacked`) context — the single-evidence path stays frozen (matches C/D).
+  const primaryCount =
+    evidence.kind === "method" ||
+    evidence.kind === "topic" ||
+    evidence.kind === "publications"
+      ? evidence.count
+      : undefined;
+  const lowCoverage =
+    primaryCount != null &&
+    pubCount != null &&
+    pubCount > 0 &&
+    primaryCount / pubCount < COVERAGE_CUE_THRESHOLD;
+  const keywordOnly = evidence.kind === "publications" && evidence.strength === "mention";
+  const cue = !stacked
+    ? undefined
+    : keywordOnly
+      ? " · term match only"
+      : lowCoverage
+        ? ` · ${coveragePct(primaryCount!, pubCount!)} of output`
+        : undefined;
+  const dim = cue != null;
+
   switch (evidence.kind) {
     case "method":
       return (
         <MatchAwareReason
           kind="method"
-          label={evidence.family}
-          canExpand={canExpand}
-          expanded={expanded}
-          onToggle={onToggle}
-          panelId={panelId}
-        />
-      );
-    case "topic":
-      return (
-        <MatchAwareReason
-          kind="topic"
-          label={evidence.label}
-          canExpand={canExpand}
-          expanded={expanded}
-          onToggle={onToggle}
-          panelId={panelId}
-        />
-      );
-    case "clinical":
-      return (
-        <MatchAwareReason
-          kind="clinical"
-          label={
-            evidence.boardCertified
-              ? `Board certified in ${evidence.specialty}`
-              : `Clinical specialty: ${evidence.specialty}`
-          }
-          canExpand={canExpand}
-          expanded={expanded}
-          onToggle={onToggle}
-          panelId={panelId}
-        />
-      );
-    case "publications":
-      // The count line IS the evidence; the representative papers ride the
-      // disclosure (canExpand = pubs present). Concept is the sparkle variant
-      // (Case F, folded in) and carries no pubs.
-      return (
-        <MatchReason
-          kind={evidence.strength === "concept" ? "concept" : "publications"}
+          cue={cue}
+          dim={dim}
           canExpand={canExpand}
           expanded={expanded}
           onToggle={onToggle}
           panelId={panelId}
         >
-          {evidence.text}
-        </MatchReason>
+          <CountFirst
+            n={evidence.count}
+            m={pubCount}
+            thing="publications"
+            relation="used"
+            entity={evidence.family}
+            underline
+            dim={dim}
+          />
+        </MatchAwareReason>
       );
+    case "topic":
+      return (
+        <MatchAwareReason
+          kind="topic"
+          cue={cue}
+          dim={dim}
+          canExpand={canExpand}
+          expanded={expanded}
+          onToggle={onToggle}
+          panelId={panelId}
+        >
+          <CountFirst
+            n={evidence.count}
+            m={pubCount}
+            thing="publications"
+            relation="in"
+            entity={evidence.label}
+            underline
+            dim={dim}
+          />
+        </MatchAwareReason>
+      );
+    case "clinical":
+      // No count — the dotted underline (every kind but keyword) marks the specialty.
+      return (
+        <MatchAwareReason
+          kind="clinical"
+          canExpand={canExpand}
+          expanded={expanded}
+          onToggle={onToggle}
+          panelId={panelId}
+        >
+          {evidence.boardCertified ? <span className="text-[#8c8c8c]">Board certified in </span> : null}
+          <CountFirst entity={evidence.specialty} underline />
+        </MatchAwareReason>
+      );
+    case "publications": {
+      // §4.5 flavor: a MeSH-descriptor hit IS a concept (tagged/concept → "Concept"); a
+      // literal mention → "Keyword". Count-first emphasis: bold the leading matched count
+      // in the server phrase ("N of M publications tagged/mention"), keep the rest muted,
+      // then the term. The dotted underline marks a system-resolved concept — a literal
+      // keyword/mention term stays plain (semibold, no underline).
+      const mention = evidence.strength === "mention";
+      const anchor = dim ? "text-[#9a958a]" : "text-[#1a1a1a]";
+      const muted = dim ? "text-[#9a958a]" : "text-[#8c8c8c]";
+      const lead = evidence.text.match(/^(\d[\d,]*)(\s[\s\S]*)$/);
+      return (
+        <MatchAwareReason
+          kind={mention ? "keyword" : "concept"}
+          cue={cue}
+          dim={dim}
+          canExpand={canExpand}
+          expanded={expanded}
+          onToggle={onToggle}
+          panelId={panelId}
+        >
+          {lead ? (
+            <>
+              <span className={`font-semibold ${anchor}`}>{lead[1]}</span>
+              <span className={muted}>{lead[2]}</span>
+            </>
+          ) : (
+            <span className={muted}>{evidence.text}</span>
+          )}
+          {evidence.term ? (
+            <>
+              {" "}
+              {/* #1361 — the matched term is semibold; the dotted underline (§4.5) is
+                  added ONLY for a system-resolved concept (tagged/concept), never a
+                  literal `mention`. */}
+              <span className={mention ? `font-semibold ${anchor}` : `font-semibold ${anchor} ${ENTITY_UNDERLINE}`}>
+                {evidence.term}
+              </span>
+              {/* #1355 — the narrower descendant term(s) the scholar actually carries. */}
+              {evidence.descendantTerms && evidence.descendantTerms.length > 0 ? (
+                <span className="text-[#6b7280]">
+                  {" "}
+                  (matched {evidence.descendantTerms.slice(0, 2).join(", ")}
+                  {evidence.descendantTerms.length > 2
+                    ? `, +${evidence.descendantTerms.length - 2} more`
+                    : ""}
+                  )
+                </span>
+              ) : null}
+            </>
+          ) : null}
+        </MatchAwareReason>
+      );
+    }
     case "name":
       // Strongest signal — render the matched name fragment, term bold.
       return (

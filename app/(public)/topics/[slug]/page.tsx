@@ -1,6 +1,7 @@
+import { cache } from "react";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { buildDefinedTermJsonLd } from "@/lib/seo/jsonld";
+import { buildDefinedTermJsonLd, serializeJsonLd } from "@/lib/seo/jsonld";
 import {
   getTopic,
   getTopScholarsForTopic,
@@ -20,9 +21,24 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 
-// 6h fallback TTL; on-demand revalidation triggered by ETL writes (Plan 09).
-export const revalidate = 21600;
+// 2h fallback TTL; on-demand revalidation triggered by ETL writes (Plan 09).
+// #1503 interim — cut from 6h: `revalidatePath` busts only one of 2–6 app tasks'
+// ISR store (no shared cacheHandler), so the edge can refill from a stale task;
+// a shorter TTL bounds the cross-task staleness until the S3 cacheHandler lands
+// (docs/1503-shared-cachehandler-spec.md). Kept at 2h (not lower) because the
+// topic page runs the getDistinctScholarCountForTopic groupBy (#1514 E6) on
+// regeneration, so a deeper cut would amplify that known-heavy query.
+export const revalidate = 7200;
 export const dynamicParams = true;
+
+// #1514 — dedupe the loaders shared by generateMetadata + the page body within
+// a single request/regeneration. Without React `cache()` each ran twice per
+// render; `getDistinctScholarCountForTopic` is the known-heavy groupBy called
+// out above, so halving it on regeneration matters.
+const loadTopic = cache((slug: string) => getTopic(slug));
+const loadScholarCount = cache((slug: string) =>
+  getDistinctScholarCountForTopic(slug),
+);
 
 export async function generateMetadata({
   params,
@@ -30,9 +46,9 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const topic = await getTopic(slug).catch(() => null);
+  const topic = await loadTopic(slug).catch(() => null);
   if (!topic) return { title: "Topic not found" };
-  const scholarCount = await getDistinctScholarCountForTopic(slug).catch(() => 0);
+  const scholarCount = await loadScholarCount(slug).catch(() => 0);
   return {
     title: `${topic.label} Research`,
     description: `Explore WCM researchers and publications in ${topic.label} — ${scholarCount} scholars.`,
@@ -46,14 +62,14 @@ export default async function TopicPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const topic = await getTopic(slug);
+  const topic = await loadTopic(slug);
   if (!topic) notFound();
 
   const [topScholars, spotlightCards, subtopics, scholarCount] = await Promise.all([
     getTopScholarsForTopic(slug).catch(() => null),
     getSpotlightCardsForTopic(slug).catch(() => null),
     getSubtopicsForTopic(slug).catch(() => null),
-    getDistinctScholarCountForTopic(slug).catch(() => 0),
+    loadScholarCount(slug).catch(() => 0),
   ]);
 
   const subtopicList = subtopics ?? [];
@@ -77,7 +93,7 @@ export default async function TopicPage({
     <main className="mx-auto max-w-[1100px] px-6 py-12">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
       />
       {/* Breadcrumbs — UI-SPEC §7 */}
       <Breadcrumb className="mb-4">

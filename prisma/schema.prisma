@@ -110,6 +110,7 @@ model Scholar {
 
   appointments         Appointment[]
   educations           Education[]
+  profileAppointments  ProfileAppointment[]
   grants               Grant[]
   authorships          PublicationAuthor[]
   topicAssignments     TopicAssignment[]
@@ -128,6 +129,7 @@ model Scholar {
   overviewSelection    OverviewSourceSelection?
   scholarTools         ScholarTool[]
   scholarFamilies      ScholarFamily[]
+  technologies         ScholarTechnology[]
   department           Department?              @relation(fields: [deptCode], references: [code], onDelete: SetNull)
   division             Division?                @relation(fields: [divCode], references: [code], onDelete: SetNull)
   postdoctoralMentor   Scholar?                 @relation("PostdocMentor", fields: [postdoctoralMentorCwid], references: [cwid], onDelete: SetNull)
@@ -157,11 +159,52 @@ model Appointment {
   isInterim       Boolean   @default(false) @map("is_interim")
   externalId      String    @unique @map("external_id") @db.VarChar(128) // ED appointment ID; #352 reconcile key
   source          String    @default("ED") @db.VarChar(32)
+  // #1323 — historical (source "ED-HISTORICAL") appointments are hidden from the
+  // public profile until a curator or comms_steward reveals one. False for every
+  // imported historical row; irrelevant for active sources (always shown). The CV
+  // export ignores this flag (historical always exported).
+  showOnProfile   Boolean   @default(false) @map("show_on_profile")
   lastRefreshedAt DateTime  @default(now()) @map("last_refreshed_at")
 
   @@index([cwid])
   @@index([cwid, isPrimary, endDate])
   @@map("appointment")
+}
+
+/// Self-asserted appointments a scholar (or a curator on their behalf) enters on
+/// `/edit` (#1568) — internal WCM roles the ED feed omits (Program Director,
+/// Head of Section) and current/historical positions at OTHER institutions. A
+/// SEPARATE store from `appointment` by design: the ED/Jenzabar ETL never
+/// touches this table (structurally wipe-safe), and it is PROFILE-ONLY by
+/// construction — the center/department/division/search serializers never read
+/// it, so a self-asserted row can never surface on a third-party or aggregate
+/// page (no per-row `source` guard to forget). `category` alone is controlled;
+/// `title`/`organization` are free text. `source` = SELF | CURATOR (who entered).
+model ProfileAppointment {
+  id            String                     @id @default(uuid()) @db.VarChar(64)
+  cwid          String                     @db.VarChar(32)
+  scholar       Scholar                    @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  category      ProfileAppointmentCategory
+  title         String                     @db.VarChar(255) // free text: "Program Director", "Assistant Professor"
+  organization  String                     @db.VarChar(255) // "Weill Cornell Medicine" or an external institution
+  unit          String?                    @db.VarChar(255) // optional scope: WCM section/division/program, or external dept
+  location      String?                    @db.VarChar(255) // optional city/country (mainly EXTERNAL)
+  startDate     DateTime?                  @map("start_date") @db.Date
+  endDate       DateTime?                  @map("end_date") @db.Date // NULL = current
+  sortOrder     Int                        @default(0) @map("sort_order")
+  showOnProfile Boolean                    @default(true) @map("show_on_profile")
+  source        String                     @default("SELF") @db.VarChar(16) // SELF | CURATOR (who entered it)
+  enteredByCwid String                     @map("entered_by_cwid") @db.VarChar(32)
+  createdAt     DateTime                   @default(now()) @map("created_at")
+  updatedAt     DateTime                   @updatedAt @map("updated_at")
+
+  @@index([cwid, showOnProfile, sortOrder])
+  @@map("profile_appointment")
+}
+
+enum ProfileAppointmentCategory {
+  WCM_LEADERSHIP // internal WCM role not carried by ED (Program Director, Head of Section, ...)
+  EXTERNAL // appointment at another institution (prior or current — dates say which)
 }
 
 /// Education and training entries from ASMS.
@@ -418,6 +461,15 @@ model Opportunity {
   /// Prestige signal from ReciterAI (GRANT# contract v2):
   /// `{ score, mechanism_tier, size_bucket, sponsor_tier, selectivity, label, rationale }`.
   prestige         Json?     @map("prestige")
+  /// LLM-compiled grant→researcher match DSL `{ require, penalize, pediatric_* }`
+  /// (SUBTOPIC slugs) — consumed by the flag-gated subtopic-grain reverse matcher.
+  matchDsl         Json?     @map("match_dsl")
+  /// LLM-compiled weighted BM25 query `[{ q, w }]` for the relevance boost.
+  matchQuery       Json?     @map("match_query")
+  /// Precomputed DENSE relevance map `{ pmid: cosine∈[0,1] }` (Titan v2) — a strictly
+  /// better alternative to the live BM25 boost for the same `{pmid: rel}` seam. The
+  /// matcher prefers it when present and falls back to `matchQuery` (BM25) when absent.
+  matchRel         Json?     @map("match_rel")
   /// True for nomination-based honorific recognition (prize/medal/lectureship, or a
   /// recognition "Award" with no NIH activity code) — excluded from recommendations.
   isHonorific      Boolean?  @map("is_honorific")
@@ -763,6 +815,13 @@ model Publication {
   /// bibliography export; falls back to `journal` (full title) when null.
   journalAbbrev       String?   @map("journal_abbrev") @db.VarChar(200)
   pubmedUrl           String?   @map("pubmed_url") @db.VarChar(512)
+  /// #1567 — canonical handle URL in Cornell's eCommons institutional
+  /// repository (e.g. "https://hdl.handle.net/1813/124348") when this PMID is
+  /// deposited there. Sourced from `reciterdb.ecommons_pmid_link.ecommonslink`,
+  /// joined by the weekly reciter ETL. NULL for the vast majority of pubs (not
+  /// in the repository). Surfaced as an "eCommons" linkout on publication cards
+  /// and the detail modal; never indexed.
+  ecommonsLink        String?   @map("ecommons_link") @db.VarChar(255)
   /// MeSH keywords from accepted publications, used by the profile Topics
   /// section (issue #73). Format: `[{ ui: "D015316", label: "Genetic Therapy" }, ...]`.
   /// `ui` is null for the rare label that doesn't resolve to a `mesh.DescriptorUI`
@@ -1244,6 +1303,11 @@ model CenterProgramLeader {
   programCode String  @map("program_code") @db.VarChar(16)
   cwid        String  @db.VarChar(32)
   interim     Boolean @default(false)
+  /// #1570 — role within the program: "leader" (a program lead, the default) or
+  /// "coe_liaison" (the Community Outreach & Engagement liaison, rendered as a
+  /// separate "COE Liaison" card AFTER the leaders). Kept as a String (not a
+  /// Prisma enum) so the additive column is a plain default-backfilled VARCHAR.
+  role        String  @default("leader") @map("role") @db.VarChar(32)
   sortOrder   Int     @default(0) @map("sort_order")
 
   program CenterProgram @relation(fields: [centerCode, programCode], references: [centerCode, code], onDelete: Cascade)
@@ -1407,6 +1471,7 @@ model PublicationTopic {
   @@index([parentTopicId, year(sort: Desc), score(sort: Desc)]) // /topics/{slug} Recent highlights
   @@index([cwid, year(sort: Desc)]) // profile most-recent feed (with D-16 dedup)
   @@index([parentTopicId, cwid]) // Top scholars chip row group-by
+  @@index([primarySubtopicId]) // subtopic-grain reverse matcher pool (grant→researcher)
   @@map("publication_topic")
 }
 
@@ -1684,8 +1749,9 @@ model EtlState {
 /// Phase 6 ANALYTICS-03 — weekly profile completeness snapshot.
 /// One row per weekly cron run (D-03). Historical rows kept for trending.
 /// `belowThreshold` = true when completenessPercent < COMPLETENESS_THRESHOLD (70).
-/// Read by /api/health/refresh-status (latest row only) per D-09; the
-/// production CloudWatch alarm wires the boolean to PagerDuty.
+/// Written weekly by `lib/analytics/completeness.ts`. Currently write-only: the
+/// only reader was /api/health/refresh-status, retired in #1514. Rows are kept
+/// for trending; retire the writer too if no reader materializes.
 model CompletenessSnapshot {
   id                  String   @id @default(uuid()) @db.VarChar(64)
   snapshotAt          DateTime @default(now()) @map("snapshot_at")
@@ -2101,6 +2167,47 @@ model ScholarTool {
   @@map("scholar_tool")
 }
 
+/// One licensable invention from the WCM Center for Technology Licensing's
+/// public technology portfolio (innovation.weill.cornell.edu), attributed to a
+/// scholar. Loaded by `npm run etl:technologies` from the checked-in
+/// `etl/technologies/technologies.json` seed; full-replacement each run.
+///
+/// Attribution comes from the VIVO link CTL already prints beside each
+/// "Principal Investigator" (`vivo.weill.cornell.edu/display/cwid-<cwid>`), so
+/// the join is an identifier join, never a name match. 60 of 279 portfolio
+/// pages carry no such link — those inventors are overwhelmingly departed
+/// faculty (Cantley, Silverstein, Vahdat) with no `scholar` row, so they are
+/// dropped rather than fuzzy-matched.
+///
+/// Denormalized on purpose: one row per (scholar, technology). A technology
+/// with several PIs repeats its title across rows. At 235 rows a join table
+/// would cost a file and buy nothing.
+model ScholarTechnology {
+  id   String @id @default(uuid()) @db.VarChar(64)
+  cwid String @db.VarChar(32)
+  /// CTL's "Cornell Reference" docket number (e.g. "11166"). Null on ~35% of
+  /// portfolio pages, which simply omit it.
+  reference   String?  @map("reference") @db.VarChar(32)
+  title       String   @db.Text
+  /// Absolute URL of the public technology detail page.
+  url         String   @db.VarChar(512)
+  /// CTL's patent status for the invention ("US Application Filed", "PCT
+  /// Application Filed", "Issued"). Null on ~61% of portfolio pages.
+  patentStatus String? @map("patent_status") @db.VarChar(64)
+  /// PMIDs of the papers CTL lists under the technology's "Publications" pane,
+  /// as a JSON array of digit strings. `[]` when the page lists none (~25%).
+  /// Rendered as PubMed links: 95% of these papers are authored by the very PI
+  /// CTL names on the page, which independently corroborates the cwid join.
+  pmids       Json
+  refreshedAt DateTime @default(now()) @map("refreshed_at")
+
+  scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+
+  @@unique([cwid, url])
+  @@index([cwid])
+  @@map("scholar_technology")
+}
+
 /// Per-(scholar, method-family) rollup from the A2 canonical taxonomy (#799).
 /// The family-primary "Methods & tools" lens shows these families as the entity,
 /// expandable to member tools. Written by etl/tools (the S3 loader, alongside
@@ -2508,4 +2615,28 @@ enum FeedbackRole {
   patient_or_public
   prefer_not_say
   other
+}
+
+/// Single-use ledger for consumed SAML assertions (issue #1439). One row per
+/// SAML assertion the ACS has already accepted, keyed by the assertion's own
+/// signature-covered ID (falling back to the response ID or a hash of the raw
+/// SAMLResponse). The insert uses the PK as a uniqueness guard: a duplicate PK
+/// means the same assertion is being presented a second time, so the callback
+/// rejects it instead of minting another session. This is the shared,
+/// instance-independent single-use guard — an in-memory cache would not catch a
+/// second presentation routed to a different Fargate task. `expiresAt` is the assertion's
+/// validity horizon (NotOnOrAfter + clock skew); rows past it can never gate a
+/// fresh login (node-saml already rejects a time-expired assertion) and are
+/// pruned opportunistically on each successful sign-in.
+model SamlAssertionSeen {
+  /// Stable unique id for the consumed assertion (assertion ID / response ID /
+  /// hash of the raw SAMLResponse). Primary key => the single-use guard.
+  id        String   @id @db.VarChar(255)
+  /// Validity horizon after which the row is safe to prune.
+  expiresAt DateTime @map("expires_at")
+  /// When the assertion was first consumed (audit / debugging).
+  seenAt    DateTime @default(now()) @map("seen_at")
+
+  @@index([expiresAt], map: "idx_saml_assertion_seen_expires_at")
+  @@map("saml_assertion_seen")
 }

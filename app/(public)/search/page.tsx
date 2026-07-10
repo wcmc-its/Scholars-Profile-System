@@ -38,16 +38,19 @@ import {
   resolveDeptLeadershipBoost,
   resolvePeopleRelevanceMode,
   resolveGenericTermMode,
-  resolvePeopleMatchProvenance,
+  resolveSearchPeopleDivisionShape,
   resolvePeopleMatchExplain,
   resolvePeopleSnippetRepresentativePub,
   resolvePeopleReasonFromDoc,
+  resolveSearchPeopleAreaBoost,
+  resolveSearchPeopleFacultyProminence,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
   resolvePublicationMeshOnlyFilter,
   resolveConceptFallbackSparseEnabled,
   resolveSearchShellStreaming,
+  resolveSearchEvidenceRows,
   computeConceptFallback,
   CONCEPT_FALLBACK_CAP,
   CONCEPT_FALLBACK_SPARSE_THRESHOLD,
@@ -58,6 +61,7 @@ import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
 import {
   searchPeople,
   searchPublications,
+  getConceptScholarConcentration,
   PI_MIN_CEILING,
   PI_MIN_FLOOR,
   type ActivityFilter,
@@ -67,7 +71,8 @@ import {
   type PublicationsSort,
   type SearchFacetBucket,
 } from "@/lib/api/search";
-import { meshMatchTier } from "@/lib/search";
+import { meshMatchTier, AREA_BOOST_TOP_N } from "@/lib/search";
+import { getAreaScholarConcentration } from "@/lib/api/topics";
 import {
   searchFunding,
   type FundingFilters,
@@ -175,6 +180,11 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
   const q = (Array.isArray(sp.q) ? sp.q[0] : sp.q) ?? "";
   const type = (Array.isArray(sp.type) ? sp.type[0] : sp.type) ?? "people";
+  // Issue #1513 — the A–Z directory overflow link ("View all N scholars with
+  // last name starting with X") passes a single last-name initial. Validated to
+  // one A–Z letter; anything else is ignored (falls back to normal browse).
+  const rawLetter = (Array.isArray(sp.letter) ? sp.letter[0] : sp.letter) ?? "";
+  const letter = /^[A-Za-z]$/.test(rawLetter) ? rawLetter : "";
   const rawPage = parseInt((Array.isArray(sp.page) ? sp.page[0] : sp.page) ?? "0", 10);
   const page = Number.isFinite(rawPage) ? Math.max(0, rawPage) : 0;
   const rawSort = Array.isArray(sp.sort) ? sp.sort[0] : sp.sort;
@@ -200,7 +210,9 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
         : emptyPeopleDefault
       : "relevance");
 
-  const showAZ = q === "" && type === "people";
+  // A single-letter `letter` browse shows the filtered people list, not the A–Z
+  // grid (which is the entry point the overflow link drills down from).
+  const showAZ = q === "" && type === "people" && letter === "";
   // Issue #294 PR-5 — time the taxonomy resolver. `taxonomyMatchMs` is null
   // when q is under 3 chars: the resolver call is skipped entirely, so the
   // log records "skipped" rather than a misleading ~0ms measurement.
@@ -377,12 +389,25 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // while client-side requests went v3. Classifier sets are boot-cached.
   const peopleRelevanceMode = resolvePeopleRelevanceMode();
   // `peopleClassifierSets` is resolved in the parallel block above (Perf).
+  // #1347 — division-shape routing (dark by default; mirrors the route). Adds division
+  // names to the classifier vocabulary and resolves a bare division query to its roster
+  // (deptDivKey) filter; the filter changes the result SET, so the count query below uses
+  // `effectiveDeptDiv` too, keeping the badge count aligned with the list.
+  const divisionShapeOn = resolveSearchPeopleDivisionShape();
+  const knownDivisions = divisionShapeOn
+    ? new Set(peopleClassifierSets.divisions.keys())
+    : undefined;
+  const divisionRosterKeys = divisionShapeOn
+    ? (peopleClassifierSets.divisions.get(q.trim().toLowerCase()) ?? [])
+    : [];
+  const effectiveDeptDiv = [...deptDiv, ...divisionRosterKeys];
   const peopleQueryShape = classifyPeopleQuery({
     query: q,
     meshResolved: taxonomyMatch.meshResolution != null,
     knownCwids: peopleClassifierSets.cwids,
     knownSurnames: peopleClassifierSets.surnames,
     knownDepartments: peopleClassifierSets.departments,
+    knownDivisions,
   });
 
   // Perf — start the active tab's FULL faceted search NOW, concurrently with the
@@ -405,14 +430,56 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   // the card). The split only matters when `matchExplain` is on (otherwise no
   // reason agg runs and `skipReasonAgg` is a no-op).
   const peopleMatchExplain = resolvePeopleMatchExplain();
+  // Track B — Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
+  // Same resolution as the JSON route: when the flag is on, the query resolved to a
+  // Research Area, and not under Exact word, pull the area's relevance×coverage ranking
+  // ({cwid,total}) so area-concentrated scholars are lifted (topic/hybrid only,
+  // reorder-only). `areas[0]` is the area drawn as the "Research Areas" chip. Cached
+  // read; flag-off ⇒ skipped, the people search is byte-identical to today.
+  let areaConcentration: { cwid: string; total: number }[] | undefined;
+  if (
+    type === "people" &&
+    resolveSearchPeopleAreaBoost() &&
+    !meshOff &&
+    taxonomyMatch.state === "matches" &&
+    taxonomyMatch.areas.length > 0
+  ) {
+    const top = taxonomyMatch.areas[0];
+    const parentTopicId = top.entityType === "subtopic" ? top.parentTopicId : top.id;
+    const subtopicId = top.entityType === "subtopic" ? top.id : null;
+    if (parentTopicId) {
+      areaConcentration = await getAreaScholarConcentration(
+        parentTopicId,
+        subtopicId,
+        AREA_BOOST_TOP_N,
+      );
+    }
+  }
+  // #1343 — concept-axis fallback (mirrors the route). No curated area but a MeSH
+  // descriptor resolved ⇒ source concentration from the publications index so the boost
+  // reaches concept queries (obesity/hypertension). Reuses the area-boost source toggle.
+  if (
+    type === "people" &&
+    resolveSearchPeopleAreaBoost() &&
+    !meshOff &&
+    (!areaConcentration || areaConcentration.length === 0) &&
+    taxonomyMatch.meshResolution?.descendantUis?.length
+  ) {
+    areaConcentration = await getConceptScholarConcentration(
+      taxonomyMatch.meshResolution.descendantUis,
+      AREA_BOOST_TOP_N,
+    );
+  }
   const peopleSearchOpts =
     type === "people"
       ? {
           q,
           page,
           sort: sort as PeopleSort,
+          // #1513 — last-name-initial browse (A–Z overflow link).
+          letter: letter || undefined,
           filters: {
-            deptDiv: deptDiv.length > 0 ? deptDiv : undefined,
+            deptDiv: effectiveDeptDiv.length > 0 ? effectiveDeptDiv : undefined,
             personType: personType.length > 0 ? personType : undefined,
             activity: activity.length > 0 ? activity : undefined,
             pi,
@@ -426,9 +493,11 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           meshMatchedFormLength: effectiveMeshResolution?.matchedForm.length,
           scope,
           deptLeadershipBoost: resolveDeptLeadershipBoost(),
+          // #1345 — full-time-faculty prominence lever (default ON). Resolved here so the
+          // SSR list ranks identically to the /api/search route.
+          facultyProminence: resolveSearchPeopleFacultyProminence(),
           genericDemote,
           contentQuery,
-          matchProvenance: resolvePeopleMatchProvenance(),
           meshDescriptorName: taxonomyMatch.meshResolution?.name,
           // Search reason-from-doc — the resolved ROOT concept UI (the O(1)
           // lookup key into the people doc's `meshSubtreeCounts`) + the flag.
@@ -443,6 +512,8 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
           // matched topics) derived from the already-resolved taxonomyMatch. Inert
           // unless SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on (searchPeople gates it).
           matchAwareContext: buildMatchAwareContext(taxonomyMatch),
+          // Track B — Research-Area concentration boost (inert unless resolved above).
+          areaConcentration,
         }
       : null;
   // Under reason-from-doc (D) the reason is a cheap O(1) lookup on the list
@@ -473,7 +544,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
               new Map(
                 r.hits.map((h) => [
                   h.cwid,
-                  { matchReason: h.matchReason, evidence: h.evidence },
+                  { matchReason: h.matchReason, evidence: h.evidence, evidenceLines: h.evidenceLines },
                 ]),
               ),
           )
@@ -493,8 +564,15 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             ? []
             : (taxonomyMatch.meshResolution?.descendantUis ?? []),
           contentQuery,
+          // #1351 — resolved concept name, so the key-paper title highlight can mark
+          // the concept term (not just the literal query) on a tagged match.
+          conceptLabel: meshOff ? "" : (taxonomyMatch.meshResolution?.name ?? ""),
         }
       : null;
+  // SEARCH_EVIDENCE_ROWS — server-resolved once, threaded to each Scholars card to
+  // gate the lazy Funding row + the publications flavor badge (off ⇒ no fetch, row,
+  // or badge).
+  const evidenceRows = resolveSearchEvidenceRows();
   const activePubsPromise =
     type === "publications"
       ? searchPublications({
@@ -546,10 +624,13 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
   const [peopleResult, pubsResult, fundingResult] = await Promise.all([
     searchPeople({
       q,
+      // Track B — Research-Area concentration boost (count query; reorder-only, so the
+      // badge total is unchanged — passed for parity with the list query).
+      areaConcentration,
       page: type === "people" ? page : 0,
       sort: type === "people" ? (sort as PeopleSort) : "relevance",
       filters: {
-        deptDiv: deptDiv.length > 0 ? deptDiv : undefined,
+        deptDiv: effectiveDeptDiv.length > 0 ? effectiveDeptDiv : undefined,
         personType: personType.length > 0 ? personType : undefined,
         activity: activity.length > 0 ? activity : undefined,
         pi,
@@ -774,6 +855,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
             ) : (
               <PeopleResults
                 q={q}
+                letter={letter}
                 page={page}
                 sort={sort as PeopleSort}
                 deptDiv={deptDiv}
@@ -787,6 +869,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 resultPromise={activePeoplePromise!}
                 reasonPromise={activePeopleReasonPromise}
                 keyPaperConfig={keyPaperConfig}
+                evidenceRows={evidenceRows}
               />
             )}
           </React.Suspense>
@@ -962,6 +1045,9 @@ type PubsResultData = Awaited<ReturnType<typeof searchPublications>>;
 type PeopleReasonPatch = {
   matchReason: PeopleResultData["hits"][number]["matchReason"];
   evidence: PeopleResultData["hits"][number]["evidence"];
+  // #1366 — the stacked, counted lines (present instead of `evidence` under the
+  // reason-counts flag); streamed and overlaid the same way.
+  evidenceLines: PeopleResultData["hits"][number]["evidenceLines"];
 };
 type PeopleReasonMap = Map<string, PeopleReasonPatch>;
 
@@ -1041,6 +1127,7 @@ function deptDivLabel(key: string, map: Map<string, string>): string {
 
 async function PeopleResults({
   q,
+  letter,
   page,
   sort,
   deptDiv,
@@ -1054,8 +1141,11 @@ async function PeopleResults({
   resultPromise,
   reasonPromise,
   keyPaperConfig,
+  evidenceRows,
 }: {
   q: string;
+  /** #1513 — A–Z last-name-initial browse; preserved across facet/sort/page links. */
+  letter: string;
   page: number;
   sort: PeopleSort;
   deptDiv: string[];
@@ -1078,6 +1168,8 @@ async function PeopleResults({
   /** Search reason-from-doc (lazy key papers) — the per-card lazy key-paper
    *  config, or null when the doc-sourced reason path is off. */
   keyPaperConfig: KeyPaperConfig | null;
+  /** SEARCH_EVIDENCE_ROWS — gates the per-card lazy Funding row + pub flavor badge. */
+  evidenceRows: boolean;
 }) {
   // Overlap the search round-trip with the dept/div label lookup.
   const [result, deptDivLabelMap] = await Promise.all([
@@ -1102,6 +1194,10 @@ async function PeopleResults({
     const sp = new URLSearchParams();
     sp.set("q", q);
     sp.set("type", "people");
+    // #1513 — preserve the A–Z last-name-initial scope across every facet/sort/
+    // pagination link, so navigating the filtered browse doesn't silently revert
+    // to the full people list (mirrors the #396 searchMode preservation).
+    if (letter) sp.set("letter", letter);
     if (sort !== "relevance") sp.set("sort", sort);
     for (const v of deptDiv) sp.append("deptDiv", v);
     for (const v of personType) sp.append("personType", v);
@@ -1152,12 +1248,26 @@ async function PeopleResults({
       if (clamped !== PI_MIN_FLOOR) sp.set("pi_min", String(clamped));
     });
 
+  // #1513 — "Clear all" drops the letter too (it renders as a chip below, so
+  // clearing all must remove every chip). Individual facet ✕ and pagination keep
+  // the letter (that's the buildUrl preservation); only the letter chip's own ✕
+  // and "Clear all" exit the letter browse.
   const clearAllParams = new URLSearchParams({ q, type: "people" });
   if (scope !== "expanded") clearAllParams.set("match", scope);
   const clearAllHref = `/search?${clearAllParams.toString()}`;
 
   // One chip per selected value.
   const chips: Array<{ label: React.ReactNode; ariaLabel?: string; removeHref: string }> = [];
+  // #1513 — the A–Z last-name-initial scope renders as the first chip so the
+  // filtered browse is visible and clearable; its ✕ exits to the full people list.
+  if (letter) {
+    const initial = letter.toUpperCase();
+    chips.push({
+      label: `Last name: ${initial}`,
+      ariaLabel: `Remove last-name filter (${initial})`,
+      removeHref: buildUrl((sp) => sp.delete("letter")),
+    });
+  }
   for (const v of personType) {
     chips.push({
       label: formatRoleCategory(v) ?? v,
@@ -1253,6 +1363,7 @@ async function PeopleResults({
                   filters={{ deptDiv, personType, activity }}
                   reasonPromise={reasonPromise}
                   keyPaperConfig={keyPaperConfig}
+                  evidenceRows={evidenceRows}
                 />
               </li>
             ))}

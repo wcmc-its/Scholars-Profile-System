@@ -86,6 +86,7 @@ type RowWithProgram = CenterMemberHit & { programLabel: string };
 
 const TYPE_ORDER: CenterMembershipType[] = ["research", "clinical"];
 const NO_DEPT = "—";
+const NO_RANK = "—";
 
 /**
  * Programmed center: a left facet sidebar (Program / Membership type /
@@ -114,6 +115,8 @@ function GroupedRoster({
   const [selDepts, setSelDepts] = useState<ReadonlySet<string>>(new Set());
   // #962 — "Methods & tools" facet selection (family overlay-key values).
   const [selMethods, setSelMethods] = useState<ReadonlySet<string>>(new Set());
+  // #1570 — "Professorial rank" facet selection (ASMS rank values).
+  const [selRanks, setSelRanks] = useState<ReadonlySet<string>>(new Set());
 
   // Flatten to rows tagged with the program section they belong to; keep the
   // (sorted) program order for both the facet and the section layout.
@@ -130,6 +133,7 @@ function GroupedRoster({
   );
 
   const deptKey = (m: RowWithProgram) => m.departmentName || NO_DEPT;
+  const rankKey = (m: RowWithProgram) => m.professorialRank || NO_RANK;
   const typeKey = (m: RowWithProgram): string => m.membershipType ?? "";
   // #962 — the family overlay-key values a member belongs to (facet membership).
   const methodValues = (m: RowWithProgram): string[] =>
@@ -145,11 +149,12 @@ function GroupedRoster({
   // counts don't collapse when you select within it).
   const passes = (
     m: RowWithProgram,
-    except: "program" | "type" | "dept" | "method" | null,
+    except: "program" | "type" | "dept" | "method" | "rank" | null,
   ): boolean =>
     (except === "program" || selPrograms.size === 0 || selPrograms.has(m.programLabel)) &&
     (except === "type" || selTypes.size === 0 || selTypes.has(typeKey(m))) &&
     (except === "dept" || selDepts.size === 0 || selDepts.has(deptKey(m))) &&
+    (except === "rank" || selRanks.size === 0 || selRanks.has(rankKey(m))) &&
     // #962 — OR within the Methods facet: a member with families {A,B} matches a
     // {A} selection. AND across facets, like the other three.
     (except === "method" ||
@@ -159,7 +164,7 @@ function GroupedRoster({
   const finalRows = useMemo(
     () => base.filter((m) => passes(m, null)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, selPrograms, selTypes, selDepts, selMethods],
+    [base, selPrograms, selTypes, selDepts, selMethods, selRanks],
   );
 
   const programOptions = useMemo<FacetOption[]>(
@@ -170,7 +175,7 @@ function GroupedRoster({
         count: base.filter((m) => m.programLabel === label && passes(m, "program")).length,
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, programOrder, selTypes, selDepts, selMethods],
+    [base, programOrder, selTypes, selDepts, selMethods, selRanks],
   );
 
   const typeOptions = useMemo<FacetOption[]>(
@@ -181,7 +186,7 @@ function GroupedRoster({
         count: base.filter((m) => typeKey(m) === t && passes(m, "type")).length,
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, allRows, selPrograms, selDepts, selMethods],
+    [base, allRows, selPrograms, selDepts, selMethods, selRanks],
   );
 
   const deptOptions = useMemo<FacetOption[]>(
@@ -194,7 +199,23 @@ function GroupedRoster({
         }))
         .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, allRows, selPrograms, selTypes, selMethods],
+    [base, allRows, selPrograms, selTypes, selMethods, selRanks],
+  );
+
+  // #1570 — "Professorial rank" facet, derived exactly like deptOptions: a
+  // sentinel bucket for members without an ASMS rank, sorted count-desc.
+  // `passes(m,"rank")` excludes this facet from its own counts (smart-count).
+  const rankOptions = useMemo<FacetOption[]>(
+    () =>
+      Array.from(new Set(allRows.map(rankKey)))
+        .map((rank) => ({
+          value: rank,
+          label: rank === NO_RANK ? "No rank" : rank,
+          count: base.filter((m) => rankKey(m) === rank && passes(m, "rank")).length,
+        }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [base, allRows, selPrograms, selTypes, selDepts, selMethods],
   );
 
   // #962 — "Methods & tools" facet: family-level options (value = stable overlay
@@ -215,7 +236,7 @@ function GroupedRoster({
       }))
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, allRows, selPrograms, selTypes, selDepts]);
+  }, [base, allRows, selPrograms, selTypes, selDepts, selRanks]);
 
   // Re-group the surviving rows under their program headers (original order).
   const sections = useMemo(
@@ -244,12 +265,13 @@ function GroupedRoster({
   // redundant with the page title, so it's always hidden.
   const hideHeaders = singleProgram || selPrograms.size === 1;
   const anySelected =
-    selPrograms.size + selTypes.size + selDepts.size + selMethods.size > 0;
+    selPrograms.size + selTypes.size + selDepts.size + selMethods.size + selRanks.size > 0;
   const clearAll = () => {
     setSelPrograms(new Set());
     setSelTypes(new Set());
     setSelDepts(new Set());
     setSelMethods(new Set());
+    setSelRanks(new Set());
   };
 
   return (
@@ -278,13 +300,18 @@ function GroupedRoster({
               onToggle={makeToggle(selPrograms, setSelPrograms)}
             />
           )}
-          <RosterFacet
-            title="Membership type"
-            options={typeOptions}
-            selected={selTypes}
-            onToggle={makeToggle(selTypes, setSelTypes)}
-          />
-          {/* #962 — Methods & tools ranks above Organizational unit. Vanishes when
+          {/* #1570 — hide the Membership-type facet when every shown member shares
+              a single type (Meyer is all-Research): a one-option facet can't filter
+              anything. Mirrors the Program facet's ≥2 guard. */}
+          {typeOptions.length >= 2 && (
+            <RosterFacet
+              title="Membership type"
+              options={typeOptions}
+              selected={selTypes}
+              onToggle={makeToggle(selTypes, setSelTypes)}
+            />
+          )}
+          {/* #962 — Methods & tools ranks above Department. Vanishes when
               no member carries a public family (flag off or no data), since
               `methodOptions` is then empty. */}
           {methodOptions.length > 0 && (
@@ -299,13 +326,27 @@ function GroupedRoster({
               noMatchLabel="No methods match"
             />
           )}
+          {/* #1570 — "Organizational unit" relabeled to "Department" per Cancer
+              Center feedback. */}
           <RosterFacet
-            title="Organizational unit"
+            title="Department"
             options={deptOptions}
             selected={selDepts}
             onToggle={makeToggle(selDepts, setSelDepts)}
             collapseAfter={8}
           />
+          {/* #1570 — "Professorial rank" renders LAST. Hidden unless ≥2 distinct
+              ranks are present: rankKey always buckets a missing rank under the
+              NO_RANK sentinel, so rankOptions is never empty when rows exist, and
+              a one-option facet can't filter anything. Mirrors the ≥2 guards above. */}
+          {rankOptions.length >= 2 && (
+            <RosterFacet
+              title="Professorial rank"
+              options={rankOptions}
+              selected={selRanks}
+              onToggle={makeToggle(selRanks, setSelRanks)}
+            />
+          )}
         </div>
       </aside>
 

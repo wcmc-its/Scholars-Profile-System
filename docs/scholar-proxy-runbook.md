@@ -49,7 +49,7 @@ are confirmed applied there. **Prod** has not yet had #779 deployed (prod CD is 
 > `ldaps://` directory search** (`searchDirectoryPeopleByName`); when WCM LDAP is unreachable
 > from the SPS VPC the API returns `503 directory_unavailable` and the UI shows **"search
 > failed."** This is the same WCM-network routing gap that blocks #443 / #746
-> (`project_sps_vpc_wcm_connectivity` — needs TGW + WCM firewall for `10.20.0.0/16`). Until ED
+> (`project_sps_vpc_wcm_connectivity` — needs TGW + WCM firewall for the SPS VPC CIDR). Until ED
 > is routable, you cannot pick a person, so **Step 1 (and the name display in the panel) cannot
 > run via the UI**. Workaround for a functional smoke test: POST the grant directly with a known
 > cwid — `POST /api/edit/proxy {scholarCwid:"ras2022", proxyCwid:"bec4010", action:"grant"}` —
@@ -173,9 +173,21 @@ const mariadb = require('mariadb');
 JS
 node -e 'const fs=require("fs");fs.writeFileSync("/tmp/ov.json",JSON.stringify({containerOverrides:[{name:"etl",command:["node","-e",fs.readFileSync("/tmp/q.js","utf8")]}]}))'
 
+# Resolve staging's live ETL network config (rot-proof -- the 2026-07-02 shared-VPC
+# cutover changed the subnet/SG ids; the old hardcoded ones now launch the task into
+# the dead VPC where it times out with no reachable Aurora):
+read ETL_SUBNETS ETL_SG < <(aws stepfunctions describe-state-machine \
+  --state-machine-arn "$(aws stepfunctions list-state-machines \
+     --query "stateMachines[?contains(name,'scholars-nightly-staging')].stateMachineArn|[0]" --output text)" \
+  --query definition --output text \
+  | python3 -c 'import sys,re
+t=sys.stdin.read()
+m=re.search(r"\"Subnets\"\s*:\s*\[([^\]]*)\].*?\"SecurityGroups\"\s*:\s*\[([^\]]*)\]", t, re.S)
+print(",".join(s.strip().strip("\"") for s in m.group(1).split(",")), m.group(2).strip().strip("\""))')
+
 aws ecs run-task --cluster sps-cluster-staging --task-definition sps-etl-staging \
   --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[subnet-03de6e3dfe190288b,subnet-019afebef588ee4b3],securityGroups=[sg-0e9f5358a40c016a5],assignPublicIp=DISABLED}" \
+  --network-configuration "awsvpcConfiguration={subnets=[$ETL_SUBNETS],securityGroups=[$ETL_SG],assignPublicIp=DISABLED}" \
   --overrides file:///tmp/ov.json --started-by "proxy-audit" --query 'tasks[0].taskArn' --output text
 
 # then: aws ecs wait tasks-stopped --cluster sps-cluster-staging --tasks <arn>

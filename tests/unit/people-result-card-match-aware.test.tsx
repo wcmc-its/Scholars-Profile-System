@@ -57,8 +57,10 @@ describe("PeopleResultCard — #824 match-aware snippet", () => {
       />,
     );
     expect(screen.getByText("Method")).toBeTruthy();
+    // #1381 — the entity is a subtly-underlined span (all kinds but keyword), not <strong>.
     const family = screen.getByText("Single-cell RNA sequencing");
-    expect(family.tagName).toBe("STRONG");
+    expect(family.tagName).toBe("SPAN");
+    expect(family.className).toMatch(/underline/);
     // The muted dot-separated tool trail was dropped from the method row.
     expect(screen.queryByText("scRNA-seq")).toBeNull();
     expect(screen.queryByText("single-nuclei")).toBeNull();
@@ -75,7 +77,7 @@ describe("PeopleResultCard — #824 match-aware snippet", () => {
       />,
     );
     expect(screen.getByText("Method")).toBeTruthy();
-    expect(screen.getByText("Mass spectrometry").tagName).toBe("STRONG");
+    expect(screen.getByText("Mass spectrometry").tagName).toBe("SPAN");
   });
 
   it("renders the topic badge + bold label", () => {
@@ -88,7 +90,7 @@ describe("PeopleResultCard — #824 match-aware snippet", () => {
       />,
     );
     expect(screen.getByText("Research area")).toBeTruthy();
-    expect(screen.getByText("Single-cell & spatial biology").tagName).toBe("STRONG");
+    expect(screen.getByText("Single-cell & spatial biology").tagName).toBe("SPAN");
   });
 
   it("renders humanized areas without underscores, bolding the matched area", () => {
@@ -125,7 +127,7 @@ describe("PeopleResultCard — #824 match-aware snippet", () => {
       />,
     );
     expect(screen.getByText("Method")).toBeTruthy();
-    expect(screen.getByText("Flow cytometry").tagName).toBe("STRONG");
+    expect(screen.getByText("Flow cytometry").tagName).toBe("SPAN");
     // The lower-priority surfaces do not render.
     expect(screen.queryByText(/A bio sentence about/)).toBeNull();
     expect(screen.queryByText("Immunology")).toBeNull();

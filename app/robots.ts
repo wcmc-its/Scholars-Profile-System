@@ -1,8 +1,14 @@
 import type { MetadataRoute } from "next";
+import { siteBaseUrl } from "@/lib/site-url";
+
+// Render at request time so `siteBaseUrl()` reads the per-env runtime `SITE_URL`
+// (#1514). Without this, Next statically generates robots.txt at BUILD — where
+// `SITE_URL` is unset — baking the prod-origin fallback into every environment
+// (staging's robots.txt advertised the prod sitemap). Trivial render, no DB.
+export const dynamic = "force-dynamic";
 
 export default function robots(): MetadataRoute.Robots {
-  const base =
-    process.env.NEXT_PUBLIC_SITE_URL ?? "https://scholars.weill.cornell.edu";
+  const base = siteBaseUrl();
   return {
     rules: {
       userAgent: "*",

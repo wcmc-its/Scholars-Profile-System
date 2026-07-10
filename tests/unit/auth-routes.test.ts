@@ -8,8 +8,16 @@ vi.mock("@/lib/auth/saml", () => ({
   validateSamlResponse: vi.fn(),
 }));
 
+// The DB-backed single-use guard (#1439) is exercised on its own in
+// saml-assertion-store.test.ts; here it is mocked to drive the callback's
+// duplicate-assertion / store-unavailable branches without a database.
+vi.mock("@/lib/auth/saml-assertion-store", () => ({
+  markAssertionConsumed: vi.fn(),
+}));
+
 import { NextRequest } from "next/server";
 import { getLoginRedirectUrl, validateSamlResponse } from "@/lib/auth/saml";
+import { markAssertionConsumed } from "@/lib/auth/saml-assertion-store";
 import { GET as loginGET } from "@/app/api/auth/saml/login/route";
 import { POST as callbackPOST } from "@/app/api/auth/saml/callback/route";
 import { POST as logoutPOST } from "@/app/api/auth/logout/route";
@@ -23,14 +31,18 @@ afterAll(() => vi.unstubAllEnvs());
 
 const mockedLoginUrl = vi.mocked(getLoginRedirectUrl);
 const mockedValidate = vi.mocked(validateSamlResponse);
+const mockedConsume = vi.mocked(markAssertionConsumed);
 
 beforeEach(() => {
   vi.resetAllMocks();
   vi.spyOn(console, "warn").mockImplementation(() => {});
+  // Default: a first-use assertion records cleanly.
+  mockedConsume.mockResolvedValue({ duplicate: false });
 });
 
 const LOGIN = "https://scholars.weill.cornell.edu/api/auth/saml/login";
 const CALLBACK = "https://scholars.weill.cornell.edu/api/auth/saml/callback";
+const ASSERTION = { id: "assn:_test-assertion", expiresAt: new Date(Date.now() + 60_000) };
 
 describe("GET /api/auth/saml/login", () => {
   it("302-redirects to the IdP URL returned by getLoginRedirectUrl", async () => {
@@ -81,7 +93,7 @@ describe("POST /api/auth/saml/callback", () => {
   });
 
   it("mints a session cookie and 302s to the RelayState path on success", async () => {
-    mockedValidate.mockResolvedValue({ ok: true, cwid: "abc1234" });
+    mockedValidate.mockResolvedValue({ ok: true, cwid: "abc1234", assertion: ASSERTION });
     const res = await callbackPOST(
       callbackRequest({ SAMLResponse: "valid", RelayState: "/edit/scholar/abc1234" }),
     );
@@ -91,10 +103,35 @@ describe("POST /api/auth/saml/callback", () => {
     // (ip-...:3000 behind CloudFront -> ALB -> Fargate).
     expect(res.headers.get("location")).toBe("/edit/scholar/abc1234");
     expect(res.cookies.get("__Secure-sps_session")?.value).toBeTruthy();
+    // The assertion is recorded single-use before the session is minted (#1439).
+    expect(mockedConsume).toHaveBeenCalledWith(ASSERTION);
+  });
+
+  it("401s and writes no cookie when the assertion is presented a second time (#1439)", async () => {
+    mockedValidate.mockResolvedValue({ ok: true, cwid: "abc1234", assertion: ASSERTION });
+    // A second presentation of the same still-valid assertion: the shared store
+    // reports it already consumed. Without the single-use guard this same input
+    // would 302 + Set-Cookie — so this case fails if the guard is removed.
+    mockedConsume.mockResolvedValue({ duplicate: true });
+    const res = await callbackPOST(
+      callbackRequest({ SAMLResponse: "valid", RelayState: "/edit/scholar/abc1234" }),
+    );
+    expect(res.status).toBe(401);
+    expect(res.cookies.get("__Secure-sps_session")).toBeUndefined();
+  });
+
+  it("503s and writes no cookie when the single-use store is unavailable (fail closed)", async () => {
+    mockedValidate.mockResolvedValue({ ok: true, cwid: "abc1234", assertion: ASSERTION });
+    mockedConsume.mockRejectedValue(new Error("db unreachable"));
+    const res = await callbackPOST(
+      callbackRequest({ SAMLResponse: "valid", RelayState: "/edit" }),
+    );
+    expect(res.status).toBe(503);
+    expect(res.cookies.get("__Secure-sps_session")).toBeUndefined();
   });
 
   it("falls back to the default path when RelayState is unsafe", async () => {
-    mockedValidate.mockResolvedValue({ ok: true, cwid: "abc1234" });
+    mockedValidate.mockResolvedValue({ ok: true, cwid: "abc1234", assertion: ASSERTION });
     const res = await callbackPOST(
       callbackRequest({ SAMLResponse: "valid", RelayState: "https://evil.com" }),
     );

@@ -65,6 +65,12 @@ import {
   PEOPLE_PROMINENCE_FACULTY_WEIGHT,
   PEOPLE_PROMINENCE_GRANT_WEIGHT,
   PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
+  AREA_BOOST_W_HI,
+  AREA_BOOST_W_MID,
+  AREA_BOOST_W_LO,
+  AREA_BOOST_HI_FRAC,
+  AREA_BOOST_MID_FRAC,
+  CONCEPT_CONCENTRATION_MIN_PUBS,
   FUNDING_INDEX,
   PEOPLE_RESTRUCTURED_MSM,
   PEOPLE_TOPIC_ABSTRACTS_BOOST,
@@ -90,22 +96,30 @@ import {
   resolvePeopleMethodFamilyBoost,
   resolvePeopleMethodFamilyTier,
   resolvePeopleMethodContextBoost,
+  resolvePubFacetSplit,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
+  resolvePeopleTopicPhraseBoost,
+  resolveAreaBoostWeights,
   resolveSearchPeopleClinical,
   resolveSearchPeopleClinicalBoost,
+  resolveSearchPeopleClinicalFn,
+  resolveSearchPeopleClinicalFnWeight,
   resolveSearchPeopleClinicalReasonThresholds,
   resolveSearchPeopleConceptHint,
   resolveSearchResultEvidence,
+  resolveSearchEvidenceReasonCounts,
   type PubRecencyMode,
   type Scope,
 } from "@/lib/api/search-flags";
 import {
   selectEvidence,
+  selectEvidenceLines,
   refineExemplarTools,
   clinicalExactMatch,
   AREAS_CAP,
   type ResultEvidence,
+  type SelectEvidenceInput,
 } from "@/lib/api/result-evidence";
 // Issue #309 / SPEC §6.1.2 — the classifier's shape enum (cwid / name / …),
 // distinct from the OS-body `PeopleQueryShape` telemetry label below. Aliased
@@ -283,6 +297,14 @@ export type PeopleHit = {
    * card falls back to that legacy chain (today's behavior). Serializable.
    */
   evidence?: ResultEvidence;
+  /**
+   * #1366 — the STACKED evidence lines (method / concept / research-area as
+   * first-class peers, each "N of M publications"; keyword fallback; clinical an
+   * independent label-only line). Present INSTEAD of `evidence` only when
+   * `SEARCH_EVIDENCE_REASON_COUNTS` is on; the card renders the list. Absent ⇒
+   * the single `evidence` (or the legacy chain) drives the card. Serializable.
+   */
+  evidenceLines?: ResultEvidence[];
 };
 
 /**
@@ -528,10 +550,20 @@ export async function fetchKeyPaper(args: {
   descriptorUis: string[];
   /** The literal query, for the `<mark>` highlight and the free-text fallback filter. */
   contentQuery: string;
+  /** #1351 — the resolved concept's display name (e.g. "Pharmacogenetics"). When
+   *  set, titles that carry the concept term get `<mark>`-highlighted even if the
+   *  literal query isn't in the title (the common tagged-match case). */
+  conceptLabel?: string;
+  /** #1366 follow-up — pmids already claimed by a sibling stacked line. Dropped at
+   *  the QUERY level (`must_not`) so this line pulls its top-N from the NON-claimed
+   *  pool, instead of fetching then post-filtering (which could empty the panel). */
+  exclude?: string[];
 }): Promise<RepresentativePub[]> {
   const cwid = args.cwid?.trim();
   const contentQuery = args.contentQuery?.trim() ?? "";
+  const conceptLabel = args.conceptLabel?.trim() ?? "";
   const descriptorUis = args.descriptorUis ?? [];
+  const exclude = args.exclude ?? [];
   if (!cwid) return [];
   // Need at least one way to identify a relevant pub: a resolved concept subtree
   // OR a literal query to scan. Neither ⇒ nothing to fetch.
@@ -555,6 +587,9 @@ export async function fetchKeyPaper(args: {
     "key-paper",
     cwid,
     descriptorUis.length > 0 ? [...descriptorUis].sort() : `q:${contentQuery}`,
+    // #1366 — the exclude set changes the result, so it MUST bucket the cache (two
+    // lines with different claimed-pmid sets must not collide on the same key).
+    exclude.length > 0 ? [...exclude].sort() : null,
   ]);
 
   // The admitted SET is the bool `filter` (author + concept/free-text) — UNCHANGED
@@ -564,6 +599,9 @@ export async function fetchKeyPaper(args: {
   const boolQuery = {
     bool: {
       filter: [{ term: { wcmAuthorCwids: cwid } }, matchFilter],
+      // #1366 — exclude the sibling-claimed pmids from the candidate pool itself, so
+      // the panel under-fills from the remaining pool rather than resolving empty.
+      ...(exclude.length > 0 ? { must_not: [{ terms: { pmid: exclude } }] } : {}),
       ...(contentQuery.length > 0
         ? {
             should: [
@@ -596,15 +634,26 @@ export async function fetchKeyPaper(args: {
           { _score: { order: "desc" } },
           { year: { order: "desc", missing: "_last" } },
         ],
-        // Highlight is keyed to the LITERAL query (not the concept filter), so a
-        // descriptor-tagged title with no literal term highlights nothing and the
-        // card renders plain text — identical to the inline rep-pub behavior.
-        ...(contentQuery.length > 0
+        // #1351 — highlight the LITERAL query AND (when one resolved) the concept
+        // term. So a descriptor-tagged title that carries the concept term verbatim
+        // (e.g. "Pharmacogenetics …") now marks it, instead of rendering plain
+        // because the literal typed query ("Pharmacogenomics") isn't present.
+        // Highlight-only — admission/rank unchanged.
+        ...(contentQuery.length > 0 || conceptLabel.length > 0
           ? {
               highlight: {
                 fields: { title: { number_of_fragments: 0 } },
                 highlight_query: {
-                  multi_match: { query: contentQuery, fields: ["title"], operator: "or" },
+                  bool: {
+                    should: [
+                      ...(contentQuery.length > 0
+                        ? [{ multi_match: { query: contentQuery, fields: ["title"], operator: "or" } }]
+                        : []),
+                      ...(conceptLabel.length > 0
+                        ? [{ match_phrase: { title: conceptLabel } }]
+                        : []),
+                    ],
+                  },
                 },
                 pre_tags: ["<mark>"],
                 post_tags: ["</mark>"],
@@ -991,6 +1040,174 @@ async function collectGrantMatchedCwids(descendantUis: string[]): Promise<string
   return buckets.map((b) => b.key);
 }
 
+/**
+ * Per-pmid BM25 relevance for a compiled grant query (`[{ q, w }]` weighted terms),
+ * normalized to [0,1] by ÷ this query's own max — OS `_score` is NOT cross-query
+ * comparable, so the normalization is encapsulated here and callers only ever see the
+ * scaled value. ONE OpenSearch round-trip (no aggs, `_source:["pmid"]`); an
+ * empty/absent query yields an empty map so the relevance boost simply no-ops.
+ * Used by the subtopic-grain reverse matcher (grant→researcher).
+ */
+export async function relevanceScoresForQuery(
+  matchQuery: unknown,
+  size = 1000,
+): Promise<Map<string, number>> {
+  const terms = (Array.isArray(matchQuery) ? matchQuery : []).filter(
+    (t): t is { q: string; w?: number } =>
+      !!t &&
+      typeof t === "object" &&
+      typeof (t as { q?: unknown }).q === "string" &&
+      (t as { q: string }).q.trim() !== "",
+  );
+  if (terms.length === 0) return new Map();
+
+  const should = terms.map((t) => ({
+    multi_match: {
+      query: t.q,
+      fields: ["title^2", "abstract"],
+      boost: typeof t.w === "number" && t.w > 0 ? t.w : 1,
+    },
+  }));
+  const resp = await searchClient().search({
+    index: PUBLICATIONS_INDEX,
+    body: { size, _source: ["pmid"], track_total_hits: false, query: { bool: { should } } } as object,
+  });
+  const hits =
+    (resp.body as unknown as { hits?: { hits?: Array<{ _score?: number; _source?: { pmid?: string } }> } })
+      .hits?.hits ?? [];
+
+  let max = 0;
+  const raw: Array<[string, number]> = [];
+  for (const h of hits) {
+    const pmid = h._source?.pmid;
+    const s = h._score ?? 0;
+    if (typeof pmid === "string" && s > 0) {
+      raw.push([pmid, s]);
+      if (s > max) max = s;
+    }
+  }
+  if (max <= 0) return new Map();
+  return new Map(raw.map(([pmid, s]) => [pmid, s / max]));
+}
+
+/**
+ * Research-Area concentration boost clauses (spec §3.2). Buckets the area's ranked
+ * scholars (`{cwid, total}`, sorted desc) into 3 tiers by fraction of the top `total`,
+ * emitting one `filter`/`weight` clause per non-empty tier for the OUTER prominence
+ * `function_score` (additive). Pure — unit-tested directly. Reorder-only: a `filter`
+ * clause scores only docs already in the result set.
+ */
+export function buildAreaBoostFunctions(
+  concentration: { cwid: string; total: number }[],
+): Record<string, unknown>[] {
+  const maxTotal = concentration[0]?.total ?? 0;
+  if (maxTotal <= 0) return [];
+  const hi: string[] = [];
+  const mid: string[] = [];
+  const lo: string[] = [];
+  for (const { cwid, total } of concentration) {
+    if (total <= 0) continue;
+    const frac = total / maxTotal;
+    if (frac >= AREA_BOOST_HI_FRAC) hi.push(cwid);
+    else if (frac >= AREA_BOOST_MID_FRAC) mid.push(cwid);
+    else lo.push(cwid);
+  }
+  const fns: Record<string, unknown>[] = [];
+  const w = resolveAreaBoostWeights({
+    hi: AREA_BOOST_W_HI,
+    mid: AREA_BOOST_W_MID,
+    lo: AREA_BOOST_W_LO,
+  });
+  if (hi.length && w.hi > 0) fns.push({ filter: { terms: { cwid: hi } }, weight: w.hi });
+  if (mid.length && w.mid > 0) fns.push({ filter: { terms: { cwid: mid } }, weight: w.mid });
+  if (lo.length && w.lo > 0) fns.push({ filter: { terms: { cwid: lo } }, weight: w.lo });
+  return fns;
+}
+
+/**
+ * #1343 — concept-axis on-topic CONCENTRATION. Ranks WCM authors of the resolved
+ * concept (descendant descriptor set) by how *concentrated* their work is on it,
+ * not by raw on-topic volume, then returns `{ cwid, total }` — the SAME shape
+ * `getAreaScholarConcentration` returns, so it feeds `buildAreaBoostFunctions`
+ * and the prominence slot UNCHANGED (`total` is a tiering score, never surfaced).
+ * Reaches MeSH-concept queries with no curated Research Area (the area rollup
+ * only covers curated areas).
+ *
+ * Why concentration, not count: ranking by raw on-topic `doc_count` rewarded
+ * high-VOLUME authors who merely had many on-topic pubs (a ~900-pub cardiologist
+ * with 20 obesity pubs out-tiered a 30-pub obesity specialist) — the exact volume
+ * dominance the boost was meant to fix (staging A/B 2026-06-29). Score is
+ * `n²/total` = on-topic count × on-topic fraction: rewards BOTH real output and
+ * focus, so a niche specialist out-tiers an incidental generalist while a genuine
+ * high-output expert (high n AND high fraction) still leads. Pure fraction would
+ * over-reward 1–2-pub authors; the n² numerator + the `CONCEPT_CONCENTRATION_MIN_PUBS`
+ * floor prevent that.
+ *
+ * Sources the publications index (`meshDescriptorUi` ∩ `wcmAuthorCwids`, both
+ * already indexed — NO reindex): one agg for on-topic counts, a second for each
+ * author's total pub count (the fraction denominator). Both cached together under
+ * one key, capped at `limit`, so a broad concept can't saturate the search pool.
+ * `doc_count` IS the distinct pmid count (one doc per pmid).
+ * ponytail: n²/total over two aggs; a reindexed per-scholar on-topic-fraction
+ *   field would drop the 2nd round-trip if this proves out (spec OQ-7).
+ */
+export async function getConceptScholarConcentration(
+  descendantUis: string[],
+  limit: number,
+): Promise<{ cwid: string; total: number }[]> {
+  if (descendantUis.length === 0 || limit <= 0) return [];
+  return cachedReasonAgg<{ cwid: string; total: number }[]>(
+    `concept-concentration:${[...descendantUis].sort().join(",")}:${limit}`,
+    async () => {
+      const authorBuckets = (resp: unknown): { key: string; doc_count: number }[] =>
+        (
+          resp as {
+            body?: {
+              aggregations?: { byAuthor?: { buckets?: { key: string; doc_count: number }[] } };
+            };
+          }
+        ).body?.aggregations?.byAuthor?.buckets ?? [];
+      // 1. On-topic pub count per WCM author.
+      const onTopicResp = await searchClient().search({
+        index: PUBLICATIONS_INDEX,
+        body: {
+          size: 0,
+          query: { bool: { filter: [{ terms: { meshDescriptorUi: descendantUis } }] } },
+          aggs: { byAuthor: { terms: { field: "wcmAuthorCwids", size: limit } } },
+        } as object,
+      });
+      const onTopic = authorBuckets(onTopicResp)
+        .map((b) => ({ cwid: b.key, n: b.doc_count }))
+        .filter((a) => a.n >= CONCEPT_CONCENTRATION_MIN_PUBS);
+      if (onTopic.length === 0) return [];
+      // 2. Each author's TOTAL WCM-authored pub count (the fraction denominator).
+      //    `include` pins the buckets to exactly our authors so co-authors can't
+      //    crowd them out; each doc_count is then that author's whole-index total
+      //    (every doc an author is on matches the cwid filter, so it's counted).
+      const cwids = onTopic.map((a) => a.cwid);
+      const totalResp = await searchClient().search({
+        index: PUBLICATIONS_INDEX,
+        body: {
+          size: 0,
+          query: { bool: { filter: [{ terms: { wcmAuthorCwids: cwids } }] } },
+          aggs: {
+            byAuthor: { terms: { field: "wcmAuthorCwids", size: cwids.length, include: cwids } },
+          },
+        } as object,
+      });
+      const totalByCwid = new Map(
+        authorBuckets(totalResp).map((b) => [b.key, b.doc_count] as [string, number]),
+      );
+      // 3. Concentration score n²/total (count × on-topic fraction). Tiered by
+      //    buildAreaBoostFunctions' frac-of-max — that logic is UNCHANGED.
+      return onTopic
+        .map(({ cwid, n }) => ({ cwid, total: (n * n) / Math.max(totalByCwid.get(cwid) ?? n, 1) }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, limit);
+    },
+  );
+}
+
 export async function searchPeople(opts: {
   q: string;
   page?: number;
@@ -998,6 +1215,13 @@ export async function searchPeople(opts: {
   filters?: PeopleFilters;
   /** Phase 3 D-10 — filter results to scholars who have publications in this topic (parent topic slug). */
   topic?: string;
+  /**
+   * Issue #1513 — single last-name initial for the A–Z directory overflow link.
+   * When a single [A-Za-z] letter, hard-scopes the (empty-query) browse result
+   * set to surnames beginning with it via a `prefix` on the shared `lastNameSort`
+   * keyword. Non-single-letter values are ignored.
+   */
+  letter?: string;
   /**
    * Issue #309 / SPEC §6.1 — the `SEARCH_PEOPLE_RELEVANCE_MODE` value at
    * request time. The route reads the env and classifies the query; both are
@@ -1049,14 +1273,6 @@ export async function searchPeople(opts: {
    * pre-gate body — it pushes nothing. Absent ⇒ `expanded`.
    */
   scope?: Scope;
-  /**
-   * Issue #688 — `SEARCH_PEOPLE_MATCH_PROVENANCE` resolved at request time by
-   * the route. When true (and the topic template ran against a resolved
-   * descriptor), each hit that matched via a narrower descendant term carries
-   * `matchProvenance` so the UI can explain the subsumption match. Pure
-   * additive metadata: no effect on the query, scoring, or result set.
-   */
-  matchProvenance?: boolean;
   /**
    * Issue #702 / PLAN R4 — `SEARCH_PEOPLE_MATCH_EXPLAIN` resolved at request time
    * by the route. When true (and a concept resolved against the topic template),
@@ -1113,6 +1329,14 @@ export async function searchPeople(opts: {
    * `false` so the rollout is opt-in.
    */
   deptLeadershipBoost?: boolean;
+  /**
+   * #1345 — full-time-faculty prominence lever. When `false`, the outer prominence
+   * function_score OMITS the flat `+PEOPLE_PROMINENCE_FACULTY_WEIGHT` full_time_faculty
+   * term (the expertise-independent employment prior). Resolved route/page-side from
+   * `SEARCH_PEOPLE_FACULTY_PROMINENCE` (default ON) so the API and SSR rank identically;
+   * headless callers default to today's behavior (`true` — term present).
+   */
+  facultyProminence?: boolean;
   /**
    * Issue #692 — generic-term demotion (mode `on`). When true and `contentQuery`
    * differs from the raw query, the topic + hybrid bodies score on the content
@@ -1171,11 +1395,24 @@ export async function searchPeople(opts: {
    * callers default to a full search (`false`).
    */
   skipReasonAgg?: boolean;
+  /**
+   * Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
+   * The resolved area's scholars as `{cwid, total}` (relevance×coverage, sorted desc),
+   * from `getAreaScholarConcentration`. Applied ONLY on topic/hybrid shapes, as additive
+   * tier weights in the prominence `function_score` (reorder-only). Absent/empty ⇒ no
+   * boost (today's ranking). Resolved + gated route-side behind `SEARCH_PEOPLE_AREA_BOOST`.
+   */
+  areaConcentration?: { cwid: string; total: number }[];
 }): Promise<PeopleSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
   const filters = opts.filters ?? {};
   const trimmed = q.trim();
+  // Issue #1513 — A–Z last-name-initial scope. Validated to one letter and
+  // lowercased to match the (suffix-stripped, lowercased) `lastNameSort` keyword
+  // that `getAZBuckets` and the index share; ignored otherwise.
+  const letterPrefix =
+    opts.letter && /^[A-Za-z]$/.test(opts.letter) ? opts.letter.toLowerCase() : undefined;
 
   // Issue #692 — generic-term demotion. Only active when the route asked for it
   // AND there is a real content/full split; otherwise `contentQuery === trimmed`
@@ -1209,6 +1446,10 @@ export async function searchPeople(opts: {
   // emits the single typed `evidence` object per hit and bumps the overview
   // highlight fragment_size for the Case-D sentence trim.
   const resultEvidence = resolveSearchResultEvidence();
+  // #1366 — counted, STACKED evidence reason lines. Only meaningful under
+  // `resultEvidence` (the evidence object is only built then); when on, the hit
+  // carries `evidenceLines` (a list) instead of the single `evidence`.
+  const reasonCountsStacked = resultEvidence && resolveSearchEvidenceReasonCounts();
   // People-tab "concepts" hint — when on, the evidence TAIL surfaces the
   // scholar's top MeSH descriptors (`topMeshTerms`) instead of the sparse
   // self-reported areas. Only relevant under `resultEvidence` (the evidence
@@ -1418,6 +1659,20 @@ export async function searchPeople(opts: {
   const methodContextShould = (query: string, boost: number): Record<string, unknown>[] =>
     methodContextBoostOn ? [{ match: { methodContext: { query, boost } } }] : [];
 
+  // #1344 — topic/hybrid proximity boost. Scoring-only `match_phrase` clauses that
+  // reward within-a-single-publication co-occurrence of the query terms (slop kept
+  // well below the default position_increment_gap of 100 so a phrase can't bridge two
+  // unrelated titles in the concatenated `publicationTitles` rollup). Dark by default
+  // (flag-OFF ⇒ empty spread ⇒ body byte-identical); never admits (no msm on the bool).
+  const topicPhraseBoostOn = resolvePeopleTopicPhraseBoost();
+  const phraseBoostShould = (query: string): Record<string, unknown>[] =>
+    topicPhraseBoostOn && query.trim().length > 0
+      ? [
+          { match_phrase: { publicationTitles: { query, slop: 8, boost: 6 } } },
+          { match_phrase: { areasOfInterest: { query, slop: 4, boost: 4 } } },
+        ]
+      : [];
+
   // Issue #311 / SPEC §6.1.4 — name-template should-clauses, reused by the name
   // template (#309) and as the name half of the hybrid template. The cwid^100
   // term stays in the outer `should` (the existing short-circuit), so it is NOT
@@ -1498,6 +1753,8 @@ export async function searchPeople(opts: {
                 },
               },
             },
+            // #1344 — scoring-only proximity boost (dark by default).
+            ...phraseBoostShould(contentQuery),
           ],
           minimum_should_match: 1,
         },
@@ -1543,6 +1800,8 @@ export async function searchPeople(opts: {
             },
             // #1119 — methodContext is scoring-only here too (topic-raised boost).
             ...methodContextShould(contentQuery, PEOPLE_TOPIC_METHOD_CONTEXT_BOOST),
+            // #1344 — scoring-only proximity boost (dark by default).
+            ...phraseBoostShould(contentQuery),
           ],
         },
       }
@@ -1676,6 +1935,8 @@ export async function searchPeople(opts: {
   const queryFilter: Record<string, unknown>[] = [];
   if (sparseClause) queryFilter.push(sparseClause);
   if (topicClause) queryFilter.push(topicClause);
+  // #1513 — always-on so the list AND facet/badge counts all scope to the letter.
+  if (letterPrefix) queryFilter.push({ prefix: { lastNameSort: letterPrefix } });
 
   // PLAN R5 / handoff item 3 — concept-only result-SET gate. Under `concept`
   // scope (and only when the query resolved to a descriptor, so
@@ -2070,6 +2331,32 @@ export async function searchPeople(opts: {
     applyDeptTemplate ||
     applyHybridTemplate ||
     applyTopicTemplate;
+  // Research-Area concentration boost (spec §3.2). Topic/hybrid shapes only — never
+  // name/dept (a name query that incidentally matched an area must not be reordered by
+  // it). Additive tier weights in the outer prominence function_score; reorder-only.
+  const areaBoostFunctions: Record<string, unknown>[] =
+    (applyTopicTemplate || applyHybridTemplate) &&
+    opts.areaConcentration &&
+    opts.areaConcentration.length > 0
+      ? buildAreaBoostFunctions(opts.areaConcentration)
+      : [];
+  // Track B / B2 — clinical-specialty function_score boost (spec: docs/search-trackA-clinical-
+  // inert-finding.md). Topic/hybrid only, like the area boost. An additive weight on docs whose
+  // board-derived `clinicalSpecialties` match the query — bypasses the cross_fields blend that
+  // makes the `SEARCH_PEOPLE_CLINICAL` text-field variant inert. `match` (analyzed) handles case
+  // ("obesity" → "Obesity"); `clinicalSpecialties` ONLY (board-derived, high precision) — NOT the
+  // noisy `clinicalExpertise` free-text. No-ops when no specialty matches (e.g. "hypertension").
+  const clinicalFnFunctions: Record<string, unknown>[] =
+    (applyTopicTemplate || applyHybridTemplate) &&
+    resolveSearchPeopleClinicalFn() &&
+    trimmed.length > 0
+      ? [
+          {
+            filter: { match: { clinicalSpecialties: trimmed } },
+            weight: resolveSearchPeopleClinicalFnWeight(),
+          },
+        ]
+      : [];
   const prominenceFunctions: Record<string, unknown>[] = applyProminence
     ? [
         { weight: PEOPLE_PROMINENCE_BASE_WEIGHT },
@@ -2081,14 +2368,22 @@ export async function searchPeople(opts: {
             missing: 0,
           },
         },
-        {
-          filter: { term: { personType: PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE } },
-          weight: PEOPLE_PROMINENCE_FACULTY_WEIGHT,
-        },
+        // #1345 — the flat full_time_faculty prominence term, dropped when the
+        // faculty-prominence lever is off (expertise-independent employment prior).
+        ...(opts.facultyProminence !== false
+          ? [
+              {
+                filter: { term: { personType: PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE } },
+                weight: PEOPLE_PROMINENCE_FACULTY_WEIGHT,
+              },
+            ]
+          : []),
         {
           filter: { term: { hasActiveGrants: true } },
           weight: PEOPLE_PROMINENCE_GRANT_WEIGHT,
         },
+        ...areaBoostFunctions,
+        ...clinicalFnFunctions,
       ]
     : [];
 
@@ -2193,6 +2488,12 @@ export async function searchPeople(opts: {
       // path keeps today's `_source` shape. The count is then an O(1) `_source`
       // lookup instead of a publications-index agg.
       ...(reasonFromDoc && opts.skipReasonAgg !== true ? ["meshSubtreeCounts"] : []),
+      // #1366 — the precomputed reason-line counts (method family + research
+      // area), requested ONLY when the stacked-lines flag is on so the off path
+      // keeps today's `_source` shape. Both are O(1) `_source` lookups (no agg).
+      ...(reasonCountsStacked && opts.skipReasonAgg !== true
+        ? ["methodFamilyCounts", "areaCounts"]
+        : []),
       // POPS clinical fields — the matchable specialty set + the board-cert-only
       // subset (for the `boardCertified` label), requested ONLY when
       // SEARCH_PEOPLE_CLINICAL is on so the off path keeps today's `_source`
@@ -2322,6 +2623,12 @@ export async function searchPeople(opts: {
       // count is `meshSubtreeCounts[resolvedConceptUi] ?? 0`; a not-yet-reindexed
       // doc lacks the field and degrades to 0 (concept fallback), never a 500.
       meshSubtreeCounts?: Record<string, number>;
+      // #1366 — precomputed reason-line counts. `methodFamilyCounts[familyLabel]`
+      // + `areaCounts[parentTopicSlug]` = distinct on-topic pub counts, read O(1).
+      // Present only when SEARCH_EVIDENCE_REASON_COUNTS is on (added to `_source`
+      // above); a not-yet-reindexed doc lacks them → no count, never a 500.
+      methodFamilyCounts?: Record<string, number>;
+      areaCounts?: Record<string, number>;
       // POPS clinical specialty set + board-cert-only subset (omit-on-empty in
       // the ETL). Present only when SEARCH_PEOPLE_CLINICAL is on (added to
       // `_source` above); feed `clinicalExactMatch` for the `clinical:exact`
@@ -2355,13 +2662,13 @@ export async function searchPeople(opts: {
       ? (r.aggregations?.attributionMatch?.doc_count ?? 0) > 0
       : null;
 
-  // Issue #688 — narrower-term match provenance. Only when the flag is on, the
-  // topic template ran against a resolved descriptor with at least one
-  // descendant, and we have the descriptor's display name to frame the "…
-  // narrower term of {name}" string. Labels for the whole descendant set are
-  // resolved once, then intersected per hit by `computeMatchProvenance`.
+  // Issue #688 — narrower-term match provenance (always on; #1440 retired the
+  // `SEARCH_PEOPLE_MATCH_PROVENANCE` lever). Attaches when the topic template
+  // ran against a resolved descriptor with at least one descendant, and we have
+  // the descriptor's display name to frame the "… narrower term of {name}"
+  // string. Labels for the whole descendant set are resolved once, then
+  // intersected per hit by `computeMatchProvenance`.
   const provenanceOn =
-    opts.matchProvenance === true &&
     applyTopicTemplate &&
     meshDescendantUis.length > 1 &&
     (opts.meshDescriptorName?.length ?? 0) > 0;
@@ -2721,25 +3028,41 @@ export async function searchPeople(opts: {
   // called when `resultEvidence` is on (and then `matchAwareContext` is set, so
   // method/topic/areas are derived). Keyed `hl` (NOT the flattened `highlight`)
   // is required so name vs affiliation can be told apart (handoff Edge G).
-  const resolveHitEvidence = (
+  const buildHitEvidenceInput = (
     cwid: string,
     areasOfInterest: string | undefined,
     pubCount: number,
-    hasProvenance: boolean,
+    prov: MatchProvenance | undefined,
     hl: Record<string, string[]> | undefined,
     topMeshTerms: Array<{ ui: string | null; label: string }> | string[] | undefined,
     clinicalSpecialties: string[] | undefined,
     clinicalBoardSet: string[] | undefined,
-  ): ResultEvidence => {
+    // #1366 — doc-precomputed reason-line counts (O(1) lookups, no agg). Keyed by
+    // `familyLabel` / parent-topic slug. Only read by the stacked-lines path.
+    methodFamilyCounts: Record<string, number> | undefined,
+    areaCounts: Record<string, number> | undefined,
+  ): SelectEvidenceInput => {
+    const hasProvenance = prov != null;
+    // #1366 — clamp a doc-precomputed count to the scholar total; drop 0/absent
+    // (a not-yet-reindexed doc has no map → no count → no prefix, gracefully).
+    const countOf = (n: number | undefined): number | undefined =>
+      n && n > 0 ? Math.min(n, pubCount) : undefined;
     const m = methodReasonByCwid.get(cwid);
-    let topic: { label: string; id: string } | undefined;
+    let topic: { label: string; id: string; count?: number } | undefined;
     if (matchedTopicSlugs.size > 0 && areasOfInterest) {
       const areaSlugs = areasOfInterest.trim().split(/\s+/).filter(Boolean);
       const hitSlug = areaSlugs.find((s) => matchedTopicSlugs.has(s));
       // `hitSlug` IS the parent-topic slug (= Topic.id = PublicationTopic
       // .parentTopicId) — carry it as `id` so the hover can resolve the
-      // scholar's representative paper in this topic.
-      if (hitSlug) topic = { label: topicLabelByMatchedSlug.get(hitSlug) ?? hitSlug, id: hitSlug };
+      // scholar's representative paper in this topic, and as the `areaCounts` key.
+      if (hitSlug) {
+        const areaCount = countOf(areaCounts?.[hitSlug]);
+        topic = {
+          label: topicLabelByMatchedSlug.get(hitSlug) ?? hitSlug,
+          id: hitSlug,
+          ...(areaCount != null ? { count: areaCount } : {}),
+        };
+      }
     }
 
     // Publication-evidence parts — tagged and mention split out so the
@@ -2752,19 +3075,37 @@ export async function searchPeople(opts: {
     // `tagged` is only meaningful with a resolved descriptor NAME to show — guard
     // against an empty `provenanceParent` rendering "publications tagged " with a
     // trailing blank (the content-shape relaxation dropped the old name gate).
+    // #1350 — the resolved concept term (`provenanceParent`) is split out of `text`
+    // into `term` so the renderer can give it a subtle underline; `text` keeps only
+    // the prefix. #1355 — a narrower match also carries the descendant term(s) the
+    // scholar actually has. `mention` keeps its whole text (the literal is already
+    // quoted, not a resolved term).
+    const narrowerTerms =
+      prov?.kind === "narrower" ? prov.descendantTerms : undefined;
     if (counts && counts.tagged > 0 && provenanceParent.length > 0)
       pub.tagged = {
-        text: `${Math.min(counts.tagged, pubCount)} of ${pubCount} publications tagged ${provenanceParent}`,
+        text: `${Math.min(counts.tagged, pubCount)} of ${pubCount} publications tagged`,
+        term: provenanceParent,
+        ...(narrowerTerms && narrowerTerms.length > 0 ? { descendantTerms: narrowerTerms } : {}),
         count: Math.min(counts.tagged, pubCount),
         ...(reps?.tagged && reps.tagged.length > 0 ? { pubs: reps.tagged } : {}),
       };
     if (counts && counts.mention > 0)
       pub.mention = {
-        text: `${Math.min(counts.mention, pubCount)} of ${pubCount} publications mention “${contentQuery}”`,
+        // #1361 — the literal query term is split out (curly-quoted) as `term` so it
+        // renders semibold; the prefix stays normal weight. No underline (that marks
+        // a system-expanded concept, which the literal mention is not).
+        text: `${Math.min(counts.mention, pubCount)} of ${pubCount} publications mention`,
+        term: `“${contentQuery}”`,
         count: Math.min(counts.mention, pubCount),
         ...(reps?.mention && reps.mention.length > 0 ? { pubs: reps.mention } : {}),
       };
-    if (hasProvenance) pub.concept = { text: `via related concept ${provenanceParent}` };
+    if (hasProvenance)
+      pub.concept = {
+        text: `via related concept`,
+        term: provenanceParent,
+        ...(narrowerTerms && narrowerTerms.length > 0 ? { descendantTerms: narrowerTerms } : {}),
+      };
 
     // Bounded research-areas hint — score-desc (areasOfInterest is already
     // score-ordered), capped to AREAS_CAP, no `matchedIndex` (always -1 here by
@@ -2803,10 +3144,17 @@ export async function searchPeople(opts: {
       ? clinicalExactMatch(contentQuery, clinicalSpecialties ?? [], clinicalBoardSet ?? [])
       : null;
 
-    return selectEvidence({
+    const methodCount = m ? countOf(methodFamilyCounts?.[m.family]) : undefined;
+    return {
       nameHighlight: hl?.preferredName?.[0],
       bioHighlight: hl?.overview?.[0],
-      method: m ? { family: m.family, tools: refineExemplarTools(m.family, m.rawTools) } : undefined,
+      method: m
+        ? {
+            family: m.family,
+            tools: refineExemplarTools(m.family, m.rawTools),
+            ...(methodCount != null ? { count: methodCount } : {}),
+          }
+        : undefined,
       topic,
       pub: Object.keys(pub).length > 0 ? pub : undefined,
       clinical: clinical ?? undefined,
@@ -2816,7 +3164,7 @@ export async function searchPeople(opts: {
       query: contentQuery,
       areas,
       concepts,
-    });
+    };
   };
 
   return {
@@ -2880,18 +3228,25 @@ export async function searchPeople(opts: {
         // only under `SEARCH_RESULT_EVIDENCE`; when present the card renders it
         // via `<ResultEvidence>` and ignores the legacy fields above.
         ...(resultEvidence
-          ? {
-              evidence: resolveHitEvidence(
+          ? (() => {
+              const evInput = buildHitEvidenceInput(
                 h._source.cwid,
                 h._source.areasOfInterest,
                 h._source.publicationCount,
-                prov != null,
+                prov,
                 hl,
                 h._source.topMeshTerms,
                 h._source.clinicalSpecialties,
                 h._source.clinicalBoardSet,
-              ),
-            }
+                h._source.methodFamilyCounts,
+                h._source.areaCounts,
+              );
+              // #1366 — flag on ⇒ the stacked list; off ⇒ today's single object
+              // (byte-identical, `selectEvidenceLines` is never called).
+              return reasonCountsStacked
+                ? { evidenceLines: selectEvidenceLines(evInput) }
+                : { evidence: selectEvidence(evInput) };
+            })()
           : {}),
       };
     }),
@@ -2934,6 +3289,26 @@ export async function searchPeople(opts: {
       },
     },
   };
+}
+
+// Pub-tab facet split — bound the facet (Request B) load so a wedged broad-
+// concept agg can't tail past the #1017 7s nav watchdog and hard-reload the
+// page. Same idiom as people-classifier-sets.ts `refreshWithTimeout` (#610): the
+// underlying OpenSearch call can't be cancelled, so a timed-out one keeps running
+// in the background — we just stop awaiting it and reject so the caller degrades
+// to empty facets (and `cachedReasonAgg` does not cache the rejection, so the
+// next request retries). Timer is unref'd and always cleared.
+const PUB_FACET_TIMEOUT_MS = 5000;
+function racePubFacetTimeout<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`pub facet agg exceeded ${PUB_FACET_TIMEOUT_MS}ms`)),
+      PUB_FACET_TIMEOUT_MS,
+    );
+    timer.unref?.();
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
 }
 
 export async function searchPublications(opts: {
@@ -3092,6 +3467,10 @@ export async function searchPublications(opts: {
   // follow-up /api/search call rank identically. Only applied on the relevance
   // path (empty sortClause) below.
   const recencyMode = resolvePubRecencyMode();
+
+  // Pub-tab perf — split the facet aggregation off the hit-list request (see
+  // resolvePubFacetSplit). Off → the single combined body below, byte-identical.
+  const facetSplit = resolvePubFacetSplit();
 
   let queryShape: PublicationsQueryShape;
   const must: Record<string, unknown>[] = [];
@@ -3577,6 +3956,33 @@ export async function searchPublications(opts: {
   const body = {
     from: page * PAGE_SIZE,
     size: PAGE_SIZE,
+    // Perf (#1407) — return only the fields the pub `Hit` mapper reads
+    // (verified against the `Hit._source` type + the mapper below; mirrors the
+    // people-search include list). Without this, OpenSearch ships the entire
+    // `_source` per hit — the concatenated `meshTerms` labels, `authorNames`,
+    // the nested `wcmAuthors` rows (author chips are re-hydrated from Prisma
+    // via `fetchWcmAuthorsForPmids` anyway), `wcmAuthorCwids` /
+    // `wcmAuthorPositions` / `wcmAuthorDepartments` / `reciterParentTopicId` /
+    // `dateAddedToEntrez` — only to be discarded. Sorts, filters, and aggs run
+    // on indexed doc values, not `_source`, so they are unaffected; highlight
+    // fragments arrive on `hit.highlight`, independent of `_source`. The
+    // `countOnly` fast path above is `size: 0` (no hits), so it needs no list.
+    _source: [
+      "pmid",
+      "title",
+      "journal",
+      "year",
+      "publicationType",
+      "citationCount",
+      "doi",
+      "pmcid",
+      "pubmedUrl",
+      "impactScore",
+      "topicImpacts",
+      "impactJustification",
+      "abstract",
+      "meshDescriptorUi",
+    ],
     // OpenSearch's default cap of 10000 short-circuits the total counter
     // and would make the subhead read "10,000 publications" even when
     // there are 90k+. Larger publications index (~90k docs) so this
@@ -3619,6 +4025,11 @@ export async function searchPublications(opts: {
                 should: [
                   { match_phrase: { title: trimmed } },
                   { match: { title: highlightSignificantQuery } },
+                  // #1351 — also mark the RESOLVED concept term, so a title that
+                  // matched via concept expansion (no literal term) still shows the
+                  // term it actually matched on. Highlight-only; admission/rank
+                  // unchanged. Omitted when no concept resolved.
+                  ...(resolution?.name ? [{ match_phrase: { title: resolution.name } }] : []),
                 ],
               },
             },
@@ -3668,7 +4079,16 @@ export async function searchPublications(opts: {
         filter: aggBoolFor(filtersExcept("wcmAuthor")),
         aggs: {
           keys: { terms: { field: "wcmAuthorCwids", size: 500 } },
-          total: { cardinality: { field: "wcmAuthorCwids", precision_threshold: 4000 } },
+          // §4.5 — near-exact 4000 is the priciest single sub-agg; the rail
+          // header ("Author 1,619") tolerates ~1–2% error, so the facet-split
+          // path drops to 1000. Flag-off keeps 4000 so the combined body is
+          // byte-identical to today.
+          total: {
+            cardinality: {
+              field: "wcmAuthorCwids",
+              precision_threshold: facetSplit ? 1000 : 4000,
+            },
+          },
         },
       },
       // Issue #837 — Department facet. Top 200 mirrors the People-tab dept
@@ -3717,11 +4137,7 @@ export async function searchPublications(opts: {
   // Mirrors the `countOnly` short-circuit above, but keeps `size` and hit
   // emission. The facet `scholar.findMany` is skipped separately below.
   const skipAggs = opts.hitsOnly === true;
-  const { aggs: _aggs, ...bodyNoAggs } = body;
-  const resp = await searchClient().search({
-    index: PUBLICATIONS_INDEX,
-    body: (skipAggs ? bodyNoAggs : body) as object,
-  });
+  const { aggs: aggsBlock, ...bodyNoAggs } = body;
 
   type Hit = {
     _score?: number; // #1329 — surfaced raw onto PublicationHit.relevanceScore.
@@ -3747,7 +4163,7 @@ export async function searchPublications(opts: {
       abstract?: string;
       // Issue #707 — descriptor UIs this publication is tagged with (#259 uses
       // them for the concept-mode `terms { meshDescriptorUi }` clause). Read for
-      // the match-provenance path; already in `_source` (no include-list trims it).
+      // the match-provenance path; kept in the `_source` include list above.
       meshDescriptorUi?: string[];
     };
     // SEARCH_PUB_HIGHLIGHT — `title` highlight fragment (whole field, marked),
@@ -3755,25 +4171,91 @@ export async function searchPublications(opts: {
     highlight?: { title?: string[] };
   };
   type Bucket = { key: string; doc_count: number };
-  const r = resp.body as unknown as {
-    hits: { hits: Hit[]; total: { value: number } };
-    aggregations?: {
-      publicationTypes?: { keys: { buckets: Bucket[] } };
-      journals?: { keys: { buckets: Bucket[] } };
-      wcmRoleFirst?: { doc_count: number };
-      wcmRoleSenior?: { doc_count: number };
-      wcmRoleMiddle?: { doc_count: number };
-      wcmAuthors?: {
-        keys: { buckets: Bucket[] };
-        total: { value: number };
-      };
-      // Issue #837 — present only when SEARCH_PUB_DEPARTMENT_FILTER is on.
-      departments?: { keys: { buckets: Bucket[] } };
-      mentoringPrograms?: {
-        buckets: Record<MentoringProgramKey, { doc_count: number }>;
-      };
+  type PubAggregations = {
+    publicationTypes?: { keys: { buckets: Bucket[] } };
+    journals?: { keys: { buckets: Bucket[] } };
+    wcmRoleFirst?: { doc_count: number };
+    wcmRoleSenior?: { doc_count: number };
+    wcmRoleMiddle?: { doc_count: number };
+    wcmAuthors?: {
+      keys: { buckets: Bucket[] };
+      total: { value: number };
+    };
+    // Issue #837 — present only when SEARCH_PUB_DEPARTMENT_FILTER is on.
+    departments?: { keys: { buckets: Bucket[] } };
+    mentoringPrograms?: {
+      buckets: Record<MentoringProgramKey, { doc_count: number }>;
     };
   };
+  type PubSearchResponse = {
+    hits: { hits: Hit[]; total: { value: number } };
+    aggregations?: PubAggregations;
+  };
+
+  let r: PubSearchResponse;
+  if (facetSplit && !skipAggs) {
+    // §4.1 — decouple the facet aggregation from the hit list. Request A (hits)
+    // and Request B (facets) run in parallel; B is cached on the facet-
+    // determining inputs only (counts are page- AND sort-invariant) and time-
+    // capped, so paginating/re-sorting the same query pays only A's cost and a
+    // wedged agg degrades to empty facets rather than hanging the nav.
+    //
+    // Request B uses the UNSCORED `query` (not `scoredQuery`): the recency
+    // function_score never reaches the filter-context aggs, and `query` still
+    // carries the #396 meshOnly hard filter (`query.bool.filter`) that a
+    // match_all would drop. post_filter is omitted — each agg already scopes
+    // itself via `filtersExcept(axis)`, so post_filter was never part of agg
+    // scope. `total` stays on Request A (it keeps track_total_hits+post_filter).
+    const facetKey =
+      "pub-facets:" +
+      JSON.stringify([
+        query,
+        userAxisFilters,
+        useDepartmentFilter,
+        // The mentoring agg embeds per-program pmid lists that aren't otherwise
+        // in the key; fingerprint their size so a ReciterDB recovery
+        // (empty→full buckets) busts the cache instead of serving zero
+        // mentoring counts for the TTL. ponytail: a count-equal-but-content-
+        // changed bucket set collides — bounded by the 5-min TTL, harmless.
+        Object.values(mentoringBuckets.byProgram).reduce((n, a) => n + a.length, 0),
+      ]);
+    const [hitsResp, facetAggs] = await Promise.all([
+      searchClient().search({
+        index: PUBLICATIONS_INDEX,
+        body: bodyNoAggs as object,
+      }),
+      // A timed-out/rejected load is not cached (cachedReasonAgg only stores
+      // resolved values), so the catch degrades to empty facets and the next
+      // request retries — same contract as the People reason-agg.
+      cachedReasonAgg<PubAggregations | null>(facetKey, () =>
+        racePubFacetTimeout(
+          searchClient()
+            .search({
+              index: PUBLICATIONS_INDEX,
+              body: { size: 0, query, aggs: aggsBlock } as object,
+            })
+            .then(
+              (resp) =>
+                (resp.body as unknown as { aggregations?: PubAggregations })
+                  .aggregations ?? null,
+            ),
+        ),
+      ).catch(() => null),
+    ]);
+    const hitsBody = hitsResp.body as unknown as {
+      hits: { hits: Hit[]; total: { value: number } };
+    };
+    r = { hits: hitsBody.hits, aggregations: facetAggs ?? undefined };
+  } else {
+    // Combined single request — byte-identical to the pre-split body when the
+    // flag is off. `hitsOnly` (sparse-concept preview) also lands here and drops
+    // the aggs block via `bodyNoAggs`.
+    const resp = await searchClient().search({
+      index: PUBLICATIONS_INDEX,
+      body: (skipAggs ? bodyNoAggs : body) as object,
+    });
+    r = resp.body as unknown as PubSearchResponse;
+  }
 
   // Issue #88 — hydrate Author facet buckets with display name + slug +
   // avatar in a single Prisma round trip. Active selections may not

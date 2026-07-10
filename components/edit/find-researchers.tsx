@@ -14,15 +14,27 @@
  * Display calibration (topic fit 0–100, stage-fit badge, the fact-only row blurb)
  * lives in `lib/match-display.ts`. Dept/career/funding filters + CSV export are a
  * follow-on slice.
+ *
+ * The selected opportunity lives in the URL (`?opp=<id>`), not component state,
+ * so browser Back returns to the list and a colleague can be linked straight to
+ * an opportunity's matches.
+ *
+ * Browse cards and the detail layout are modeled on Duke Research Funding
+ * (researchfunding.duke.edu): deadline-led card meta, award amount on the card,
+ * and a right-rail fact column with a "More information" button on the detail.
  */
 import { useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { ArrowLeft, Check, ChevronRight, Download, ExternalLink } from "lucide-react";
 
 import { PrestigeBadge } from "@/components/edit/prestige-badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { CareerStage } from "@/lib/career-stage";
 import type { Prestige } from "@/lib/funding/prestige";
 import {
   buildResearcherCsv,
   careerStageLabel,
+  dueUrgency,
   fundingStatusLabel,
   researcherBlurb,
   stageFit,
@@ -96,6 +108,8 @@ type OpportunityListItem = {
   status: string | null;
   prestige?: Prestige | null;
   isHonorific?: boolean | null;
+  awardCeiling?: number | null;
+  awardFloor?: number | null;
 };
 
 type MatchingTopic = { topicId: string; label: string; score: number };
@@ -122,6 +136,7 @@ const SOURCE_LABELS: Record<string, string> = {
   grants_gov: "Grants.gov",
   nih_guide: "NIH Guide",
   wcm_curated: "WCM curated",
+  manual_url: "Submitted URL",
 };
 
 function sourceLabel(source: string | null): string | null {
@@ -133,7 +148,14 @@ function formatDue(iso: string | null): string | null {
   if (!iso) return null;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  // Date-only DB columns arrive as midnight UTC; format in UTC so the day
+  // doesn't shift back one in US-Eastern.
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 function formatMoney(n: number | null): string | null {
@@ -151,14 +173,88 @@ function awardRange(floor: number | null, ceiling: number | null): string | null
   return null;
 }
 
-export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }) {
-  const toolName = unifiedNav ? "Funding matcher" : "Find researchers";
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+/**
+ * "Due Jun 12, 2026" toned by urgency: amber inside the 30-day window, a
+ * "(passed)" suffix once behind us — so staff can triage actionable vs dead
+ * opportunities at a glance. Null when there is no parseable due date.
+ */
+function DueDate({ iso }: { iso: string | null }) {
+  const due = formatDue(iso);
+  if (!due) return null;
+  const urgency = dueUrgency(iso, Date.now());
+  return (
+    <span className={urgency === "soon" ? "font-medium text-amber-700 dark:text-amber-400" : undefined}>
+      Due {due}
+      {urgency === "past" ? " (passed)" : ""}
+    </span>
+  );
+}
+
+/**
+ * Long NOFO prose (synopsis, eligibility) collapsed behind a Show-more toggle,
+ * mirroring the abstract clamp in `components/funding/expanded-grant.tsx`, so
+ * the ranked researcher list stays near the fold.
+ */
+// ponytail: char-count heuristic for "long", not measured lines.
+const CLAMP_THRESHOLD = 400;
+
+function ClampedText({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const long = text.length > CLAMP_THRESHOLD;
+  return (
+    <div>
+      <p
+        className={`whitespace-pre-line text-sm leading-relaxed text-foreground/90 ${
+          long && !expanded ? "line-clamp-4" : ""
+        }`}
+      >
+        {text}
+      </p>
+      {long ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          className="mt-1 text-xs text-[var(--color-accent-slate)] hover:underline"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** Shimmer cards while a list loads; the label stays visible so staff know what's happening. */
+function ListSkeleton({ label, rows = 6 }: { label: string; rows?: number }) {
+  return (
+    <div aria-busy="true">
+      <p className="text-muted-foreground py-3 text-sm">{label}</p>
+      <div className="space-y-3">
+        {Array.from({ length: rows }, (_, i) => (
+          <div key={i} className="border-border rounded-lg border p-4">
+            <Skeleton className="h-3 w-1/4" />
+            <Skeleton className="mt-2 h-4 w-2/3" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function FindResearchers() {
+  // Selection lives in the URL (`?opp=`) — deep-linkable, and browser Back
+  // returns to the list instead of leaving the console. The page is
+  // force-dynamic, so `useSearchParams` needs no Suspense boundary.
+  const router = useRouter();
+  const pathname = usePathname();
+  const selectedId = useSearchParams().get("opp");
+  const setSelectedId = (id: string | null) => {
+    router.push(id ? `${pathname}?opp=${encodeURIComponent(id)}` : pathname);
+  };
 
   return (
     <div>
       <div className="mb-5">
-        <h1 className="text-2xl font-bold tracking-tight">{toolName}</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Funding matcher</h1>
         <p className="text-muted-foreground mt-1 text-sm">
           Browse funding opportunities — the hand-curated WCM awards first — and open one
           to rank Weill Cornell researchers by topic fit and career-stage appeal.
@@ -169,7 +265,7 @@ export function FindResearchers({ unifiedNav = false }: { unifiedNav?: boolean }
       {selectedId === null ? (
         <BrowseList onSelect={setSelectedId} />
       ) : (
-        <MatchedView opportunityId={selectedId} onBack={() => setSelectedId(null)} />
+        <MatchedView key={selectedId} opportunityId={selectedId} onBack={() => setSelectedId(null)} />
       )}
     </div>
   );
@@ -180,9 +276,83 @@ type BrowseStatus =
   | { kind: "ok"; opportunities: OpportunityListItem[] }
   | { kind: "error"; message: string };
 
+type BrowseSort = "curated" | "deadline";
+
+/** Client-side browse filters (search box + Duke-style sidebar). */
+export type BrowseFilters = {
+  q: string;
+  /** Hide opportunities whose due day is fully behind us (undated stay visible). */
+  openOnly: boolean;
+  /** Due-date range, `yyyy-mm-dd` or "" — a set range only matches dated opportunities. */
+  dueFrom: string;
+  dueTo: string;
+  sponsors: ReadonlySet<string>;
+  mechanisms: ReadonlySet<string>;
+};
+
+export const EMPTY_BROWSE_FILTERS: BrowseFilters = {
+  q: "",
+  openOnly: false,
+  dueFrom: "",
+  dueTo: "",
+  sponsors: new Set(),
+  mechanisms: new Set(),
+};
+
+/**
+ * Does one opportunity pass the browse filters? OR within a checkbox group,
+ * AND across groups. `skip` omits one group's own selections — used for that
+ * group's facet counts, so unchecked options stay discoverable.
+ */
+export function matchesBrowseFilters(
+  o: OpportunityListItem,
+  f: BrowseFilters,
+  now: number,
+  skip?: "sponsors" | "mechanisms",
+): boolean {
+  const q = f.q.trim().toLowerCase();
+  if (
+    q &&
+    !(o.title ?? "").toLowerCase().includes(q) &&
+    !(o.sponsor ?? "").toLowerCase().includes(q)
+  ) {
+    return false;
+  }
+  if (f.openOnly && dueUrgency(o.dueDate, now) === "past") return false;
+  if (f.dueFrom || f.dueTo) {
+    const t = o.dueDate ? new Date(o.dueDate).getTime() : NaN;
+    if (Number.isNaN(t)) return false;
+    // Date-only strings parse as midnight UTC on both sides, so bounds are inclusive.
+    if (f.dueFrom && t < Date.parse(f.dueFrom)) return false;
+    if (f.dueTo && t > Date.parse(f.dueTo)) return false;
+  }
+  if (skip !== "sponsors" && f.sponsors.size > 0 && !f.sponsors.has(o.sponsor ?? "")) return false;
+  if (skip !== "mechanisms" && f.mechanisms.size > 0 && !f.mechanisms.has(o.mechanism ?? "")) {
+    return false;
+  }
+  return true;
+}
+
+/** `[value, count]` facet options for one group, most-frequent first. */
+function facetOptions(
+  all: readonly OpportunityListItem[],
+  f: BrowseFilters,
+  now: number,
+  group: "sponsors" | "mechanisms",
+  key: (o: OpportunityListItem) => string | null,
+): Array<[string, number]> {
+  const counts = new Map<string, number>();
+  for (const o of all) {
+    const k = key(o);
+    if (k && matchesBrowseFilters(o, f, now, group)) counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
 function BrowseList({ onSelect }: { onSelect: (id: string) => void }) {
-  const [query, setQuery] = useState("");
   const [includeGrantsGov, setIncludeGrantsGov] = useState(false);
+  const [sort, setSort] = useState<BrowseSort>("curated");
+  const [filters, setFilters] = useState<BrowseFilters>(EMPTY_BROWSE_FILTERS);
   const [status, setStatus] = useState<BrowseStatus>({ kind: "loading" });
 
   useEffect(() => {
@@ -216,27 +386,194 @@ function BrowseList({ onSelect }: { onSelect: (id: string) => void }) {
   }, [includeGrantsGov]);
 
   const all = status.kind === "ok" ? status.opportunities : [];
-  const q = query.trim().toLowerCase();
-  const shown = q
-    ? all.filter(
-        (o) =>
-          (o.title ?? "").toLowerCase().includes(q) || (o.sponsor ?? "").toLowerCase().includes(q),
-      )
-    : all;
+  const now = Date.now();
+  let shown = all.filter((o) => matchesBrowseFilters(o, filters, now));
+  if (sort === "deadline") {
+    // Soonest first; undated (rolling) opportunities trail.
+    shown = [...shown].sort((a, b) => {
+      const ta = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+      const tb = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+      return ta - tb;
+    });
+  }
+
+  const sponsorOptions = facetOptions(all, filters, now, "sponsors", (o) => o.sponsor);
+  const mechanismOptions = facetOptions(all, filters, now, "mechanisms", (o) => o.mechanism);
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
         <input
           type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          value={filters.q}
+          onChange={(e) => setFilters((f) => ({ ...f, q: e.target.value }))}
           placeholder="Search funding opportunities"
           aria-label="Search funding opportunities"
           className="border-border h-9 w-80 rounded-md border bg-background px-3 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]"
           autoComplete="off"
           spellCheck={false}
         />
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground text-xs font-medium">Sort</span>
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as BrowseSort)}
+            className="border-border h-9 rounded-md border bg-background px-2 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]"
+          >
+            <option value="curated">Curated first</option>
+            <option value="deadline">Deadline (soonest)</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="flex flex-col gap-x-10 gap-y-6 lg:flex-row">
+        <div className="min-w-0 flex-1">
+          {status.kind === "loading" ? (
+            <ListSkeleton label="Loading opportunities…" />
+          ) : status.kind === "error" ? (
+            <div className="text-muted-foreground py-8 text-sm">{status.message}</div>
+          ) : shown.length === 0 ? (
+            <div className="text-muted-foreground py-8 text-sm">
+              No opportunities match the current filters.
+            </div>
+          ) : (
+            <>
+              <p className="text-muted-foreground mb-2 text-xs">
+                {shown.length} opportunit{shown.length === 1 ? "y" : "ies"}
+              </p>
+              <ul className="space-y-3">
+                {shown.map((o) => (
+                  <li key={o.opportunityId}>
+                    <OpportunityRow o={o} onSelect={onSelect} />
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+
+        <FilterRail
+          filters={filters}
+          setFilters={setFilters}
+          sponsorOptions={sponsorOptions}
+          mechanismOptions={mechanismOptions}
+          includeGrantsGov={includeGrantsGov}
+          setIncludeGrantsGov={setIncludeGrantsGov}
+        />
+      </div>
+    </div>
+  );
+}
+
+const dateInputClass =
+  "border-border h-9 w-full rounded-md border bg-background px-2 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]";
+
+// Duke-style right-rail filters: availability, deadline range, then checkbox
+// facet groups with counts. All client-side over the fetched corpus.
+function FilterRail({
+  filters,
+  setFilters,
+  sponsorOptions,
+  mechanismOptions,
+  includeGrantsGov,
+  setIncludeGrantsGov,
+}: {
+  filters: BrowseFilters;
+  setFilters: React.Dispatch<React.SetStateAction<BrowseFilters>>;
+  sponsorOptions: Array<[string, number]>;
+  mechanismOptions: Array<[string, number]>;
+  includeGrantsGov: boolean;
+  setIncludeGrantsGov: (v: boolean) => void;
+}) {
+  const active =
+    filters.openOnly ||
+    filters.dueFrom !== "" ||
+    filters.dueTo !== "" ||
+    filters.sponsors.size > 0 ||
+    filters.mechanisms.size > 0;
+
+  function toggleIn(group: "sponsors" | "mechanisms", value: string) {
+    setFilters((f) => {
+      const next = new Set(f[group]);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return { ...f, [group]: next };
+    });
+  }
+
+  return (
+    <aside className="w-full shrink-0 space-y-5 lg:w-64" aria-label="Filter opportunities">
+      <div className="flex items-baseline justify-between">
+        <h3 className="text-sm font-semibold">Filters</h3>
+        {active ? (
+          <button
+            type="button"
+            onClick={() => setFilters((f) => ({ ...EMPTY_BROWSE_FILTERS, q: f.q }))}
+            className="text-xs text-[var(--color-accent-slate)] hover:underline"
+          >
+            reset all
+          </button>
+        ) : null}
+      </div>
+
+      <fieldset className="space-y-1.5">
+        <legend className="mb-1.5 text-sm font-medium">Availability</legend>
+        {(
+          [
+            [false, "Open and past"],
+            [true, "Only open"],
+          ] as const
+        ).map(([value, label]) => (
+          <label key={label} className="flex items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name="availability"
+              checked={filters.openOnly === value}
+              onChange={() => setFilters((f) => ({ ...f, openOnly: value }))}
+              className="size-4 accent-[var(--color-accent-slate)]"
+            />
+            {label}
+          </label>
+        ))}
+      </fieldset>
+
+      <fieldset className="space-y-1.5">
+        <legend className="mb-1.5 text-sm font-medium">Deadline</legend>
+        <label className="block text-xs">
+          <span className="text-muted-foreground">From</span>
+          <input
+            type="date"
+            value={filters.dueFrom}
+            onChange={(e) => setFilters((f) => ({ ...f, dueFrom: e.target.value }))}
+            className={dateInputClass}
+          />
+        </label>
+        <label className="block text-xs">
+          <span className="text-muted-foreground">To</span>
+          <input
+            type="date"
+            value={filters.dueTo}
+            onChange={(e) => setFilters((f) => ({ ...f, dueTo: e.target.value }))}
+            className={dateInputClass}
+          />
+        </label>
+      </fieldset>
+
+      <FacetGroup
+        title="Sponsor"
+        options={sponsorOptions}
+        selected={filters.sponsors}
+        onToggle={(v) => toggleIn("sponsors", v)}
+      />
+      <FacetGroup
+        title="Mechanism"
+        options={mechanismOptions}
+        selected={filters.mechanisms}
+        onToggle={(v) => toggleIn("mechanisms", v)}
+      />
+
+      <fieldset>
+        <legend className="mb-1.5 text-sm font-medium">Sources</legend>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -248,34 +585,68 @@ function BrowseList({ onSelect }: { onSelect: (id: string) => void }) {
             Include Grants.gov
           </span>
         </label>
-      </div>
-
-      {status.kind === "loading" ? (
-        <div className="text-muted-foreground py-8 text-sm">Loading opportunities…</div>
-      ) : status.kind === "error" ? (
-        <div className="text-muted-foreground py-8 text-sm">{status.message}</div>
-      ) : shown.length === 0 ? (
-        <div className="text-muted-foreground py-8 text-sm">
-          No opportunities match{q ? ` “${query.trim()}”` : ""}.
-        </div>
-      ) : (
-        <>
-          <p className="text-muted-foreground mb-2 text-xs">
-            {shown.length} opportunit{shown.length === 1 ? "y" : "ies"}
-          </p>
-          <ul>
-            {shown.map((o) => (
-              <li key={o.opportunityId}>
-                <OpportunityRow o={o} onSelect={onSelect} />
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-    </div>
+      </fieldset>
+    </aside>
   );
 }
 
+// ponytail: fixed collapse threshold; a per-group search box only if a real
+// corpus ever makes "show all" unwieldy.
+const FACET_COLLAPSED = 8;
+
+function FacetGroup({
+  title,
+  options,
+  selected,
+  onToggle,
+}: {
+  title: string;
+  options: Array<[string, number]>;
+  selected: ReadonlySet<string>;
+  onToggle: (value: string) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  if (options.length === 0) return null;
+  // Keep checked options visible even when collapsed.
+  const shown = showAll
+    ? options
+    : options.filter(([v], i) => i < FACET_COLLAPSED || selected.has(v));
+  return (
+    <fieldset>
+      <legend className="mb-1.5 text-sm font-medium">{title}</legend>
+      <div className="space-y-1">
+        {shown.map(([value, count]) => (
+          <label key={value} className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={selected.has(value)}
+              onChange={() => onToggle(value)}
+              className="size-4 shrink-0 accent-[var(--color-accent-slate)]"
+            />
+            <span className="min-w-0 flex-1 truncate" title={value}>
+              {value}
+            </span>
+            <span className="text-muted-foreground rounded-full bg-muted px-1.5 py-0.5 text-xs tabular-nums">
+              {count}
+            </span>
+          </label>
+        ))}
+      </div>
+      {options.length > FACET_COLLAPSED ? (
+        <button
+          type="button"
+          onClick={() => setShowAll((s) => !s)}
+          className="mt-1 text-xs text-[var(--color-accent-slate)] hover:underline"
+        >
+          {showAll ? "show fewer" : `show all (${options.length})`}
+        </button>
+      ) : null}
+    </fieldset>
+  );
+}
+
+// Card layout modeled on Duke Research Funding's results list: deadline-led
+// meta row, link-blue title, award amount + chevron affordance on the right.
 function OpportunityRow({
   o,
   onSelect,
@@ -284,23 +655,37 @@ function OpportunityRow({
   onSelect: (id: string) => void;
 }) {
   const due = formatDue(o.dueDate);
-  const meta = [o.mechanism, due ? `Due ${due}` : null, o.sponsor].filter(Boolean) as string[];
+  const award = awardRange(o.awardFloor ?? null, o.awardCeiling ?? null);
   return (
     <button
       type="button"
       onClick={() => onSelect(o.opportunityId)}
-      className="block w-full border-t border-border py-3 text-left first:border-t-0 hover:bg-[var(--muted)]/40"
+      className="border-border block w-full rounded-lg border bg-background p-4 text-left shadow-sm transition-shadow hover:border-[var(--color-accent-slate)]/50 hover:shadow"
     >
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="flex flex-wrap items-baseline gap-2">
-          <span className="font-medium leading-snug text-foreground">{o.title ?? o.opportunityId}</span>
+      {due || o.sponsor || o.source ? (
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
+            <DueDate iso={o.dueDate} />
+            {o.sponsor ? <span className="truncate">{o.sponsor}</span> : null}
+          </div>
+          <SourceBadge source={o.source} />
+        </div>
+      ) : null}
+      <div className="mt-1.5 flex items-center justify-between gap-4">
+        <span className="flex min-w-0 flex-wrap items-baseline gap-2">
+          <span className="font-semibold leading-snug text-[var(--color-accent-slate)]">
+            {o.title ?? o.opportunityId}
+          </span>
           <PrestigeBadge prestige={o.prestige} />
         </span>
-        <SourceBadge source={o.source} />
+        <span className="flex shrink-0 items-center gap-2">
+          {award ? (
+            <span className="text-sm font-medium tabular-nums text-foreground">{award}</span>
+          ) : null}
+          <ChevronRight className="text-muted-foreground size-4" aria-hidden />
+        </span>
       </div>
-      {meta.length > 0 ? (
-        <div className="text-muted-foreground mt-0.5 text-sm">{meta.join(" · ")}</div>
-      ) : null}
+      {o.mechanism ? <div className="text-muted-foreground mt-1 text-sm">{o.mechanism}</div> : null}
     </button>
   );
 }
@@ -336,6 +721,7 @@ function MatchedView({
 }) {
   const [sort, setSort] = useState<Sort>("fit");
   const [stageLens, setStageLens] = useState(false);
+  const [esiOnly, setEsiOnly] = useState(false);
   const [limit, setLimit] = useState<number>(25);
   const [status, setStatus] = useState<Status>({ kind: "loading" });
 
@@ -345,6 +731,7 @@ function MatchedView({
     const qs = new URLSearchParams({
       sort,
       stageLens: stageLens ? "1" : "0",
+      esiOnly: esiOnly ? "1" : "0",
       limit: String(limit),
     });
     fetch(`/api/opportunities/${encodeURIComponent(opportunityId)}/researchers?${qs}`, {
@@ -377,7 +764,7 @@ function MatchedView({
     return () => {
       active = false;
     };
-  }, [opportunityId, sort, stageLens, limit]);
+  }, [opportunityId, sort, stageLens, esiOnly, limit]);
 
   return (
     <div>
@@ -386,7 +773,7 @@ function MatchedView({
         onClick={onBack}
         className="mb-4 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)] hover:underline"
       >
-        <span aria-hidden>←</span> Back to opportunities
+        <ArrowLeft className="size-4" aria-hidden /> Back to opportunities
       </button>
 
       <div className="mb-4 flex flex-wrap items-end gap-x-4 gap-y-3">
@@ -399,6 +786,17 @@ function MatchedView({
           />
           <span title="Blend career-stage appeal into the default score (who would this suit). Researchers with an unknown career stage score 0 under the lens.">
             Weight by career-stage fit
+          </span>
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={esiOnly}
+            onChange={(e) => setEsiOnly(e.target.checked)}
+            className="size-4 accent-[var(--color-accent-slate)]"
+          />
+          <span title="Soft ESI gate: rank early-stage-investigator-eligible faculty above ineligible ones (no one is dropped). Useful for early-career-targeted grants.">
+            Prioritize ESI-eligible
           </span>
         </label>
         <div className="flex flex-col gap-1">
@@ -442,87 +840,105 @@ function OpportunityCard({
   const estimated = formatMoney(o?.estimatedFunding ?? null);
   const cfda = o?.cfdaList?.length ? o.cfdaList.join(", ") : null;
 
-  // Compact subtitle under the title; the rest of the metadata lives in the grid.
+  // Compact subtitle under the title; the rest of the metadata lives in the rail.
   const subtitle = [o?.sponsor, o?.mechanism, o?.status].filter(Boolean) as string[];
 
-  // Fact grid — only the cells we actually have a value for.
-  const facts: Array<{ label: string; value: string }> = [];
-  if (open) facts.push({ label: "Opens", value: open });
-  if (due) facts.push({ label: "Due", value: due });
+  // Fact rail (Duke-style right column) — only entries we actually have a value
+  // for, amount first, deadline toned by urgency.
+  const facts: Array<{ label: string; value: string; className?: string }> = [];
   if (award) facts.push({ label: "Award", value: award });
   if (estimated) facts.push({ label: "Est. total funding", value: estimated });
   if (o?.numberOfAwards != null) facts.push({ label: "Awards", value: `~${o.numberOfAwards}` });
+  if (open) facts.push({ label: "Opens", value: open });
+  if (due) {
+    const urgency = dueUrgency(o?.dueDate ?? null, Date.now());
+    facts.push({
+      label: "Due",
+      value: urgency === "past" ? `${due} (passed)` : due,
+      className:
+        urgency === "soon" ? "font-medium text-amber-700 dark:text-amber-400" : undefined,
+    });
+  }
   if (cfda) facts.push({ label: "CFDA", value: cfda });
 
   return (
-    <div className="border-border mb-6 rounded-lg border bg-[var(--muted)]/40 p-4">
+    <div className="border-border mb-6 rounded-lg border bg-[var(--muted)]/40 p-4 sm:p-5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="border-border-strong rounded-md border px-2 py-0.5 font-mono text-xs text-foreground">
           {opportunityId}
         </span>
-        {src ? (
-          o?.sourceUrl ? (
-            <a
-              href={o.sourceUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="text-muted-foreground inline-flex items-center gap-1 text-xs hover:text-[var(--color-accent-slate)] hover:underline"
-            >
-              Parsed from {src} <span aria-hidden>↗</span>
-            </a>
-          ) : (
-            <span className="text-muted-foreground text-xs">Parsed from {src}</span>
-          )
-        ) : null}
+        {src ? <span className="text-muted-foreground text-xs">Parsed from {src}</span> : null}
       </div>
 
-      {o?.title ? (
-        <h2 className="mt-2 text-lg font-semibold leading-snug">{o.title}</h2>
-      ) : null}
+      <div className="mt-2 flex flex-col gap-x-8 gap-y-4 sm:flex-row">
+        <div className="min-w-0 flex-1">
+          {o?.title ? <h2 className="text-lg font-semibold leading-snug">{o.title}</h2> : null}
 
-      {subtitle.length > 0 ? (
-        <div className="text-muted-foreground mt-1 text-sm">{subtitle.join(" · ")}</div>
-      ) : null}
+          {subtitle.length > 0 ? (
+            <div className="text-muted-foreground mt-1 text-sm">{subtitle.join(" · ")}</div>
+          ) : null}
 
-      {o?.synopsis ? (
-        <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-foreground/90">
-          {o.synopsis}
-        </p>
-      ) : null}
-
-      {facts.length > 0 ? (
-        <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
-          {facts.map((f) => (
-            <div key={f.label}>
-              <dt className="text-muted-foreground text-xs uppercase tracking-wide">{f.label}</dt>
-              <dd className="text-sm text-foreground">{f.value}</dd>
+          {o?.synopsis ? (
+            <div className="mt-3">
+              <ClampedText text={o.synopsis} />
             </div>
-          ))}
-        </dl>
-      ) : null}
+          ) : null}
 
-      {o?.eligibilityRaw ? (
-        <div className="mt-3">
-          <span className="text-muted-foreground text-xs uppercase tracking-wide">Eligibility</span>
-          <p className="mt-0.5 whitespace-pre-line text-sm leading-relaxed text-foreground/90">
-            {o.eligibilityRaw}
-          </p>
-        </div>
-      ) : null}
+          {o?.eligibilityRaw ? (
+            <div className="mt-3">
+              <span className="text-muted-foreground text-xs uppercase tracking-wide">
+                Eligibility
+              </span>
+              <div className="mt-0.5">
+                <ClampedText text={o.eligibilityRaw} />
+              </div>
+            </div>
+          ) : null}
 
-      {matchingOn.length > 0 ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="text-muted-foreground text-xs uppercase tracking-wide">Matching on</span>
-          {matchingOn.map((t) => (
-            <span
-              key={t.topicId}
-              className="border-border-strong rounded-full border bg-background px-2.5 py-0.5 text-xs text-foreground"
-            >
-              {t.label}
-            </span>
-          ))}
+          {matchingOn.length > 0 ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-muted-foreground text-xs uppercase tracking-wide">
+                Matching on
+              </span>
+              {matchingOn.map((t) => (
+                <span
+                  key={t.topicId}
+                  className="border-border-strong rounded-full border bg-background px-2.5 py-0.5 text-xs text-foreground"
+                >
+                  {t.label}
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
-      ) : null}
+
+        {o?.sourceUrl || facts.length > 0 ? (
+          <div className="w-full shrink-0 space-y-4 sm:w-56">
+            {o?.sourceUrl ? (
+              <a
+                href={o.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-[var(--color-accent-slate)] px-3 text-sm font-medium text-white hover:opacity-90"
+              >
+                <ExternalLink className="size-3.5" aria-hidden /> More information
+              </a>
+            ) : null}
+            {facts.length > 0 ? (
+              <dl className="space-y-3">
+                {facts.map((f) => (
+                  <div key={f.label}>
+                    <dt className="text-muted-foreground text-xs uppercase tracking-wide">
+                      {f.label}
+                    </dt>
+                    <dd className={`text-sm ${f.className ?? "text-foreground"}`}>{f.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -545,7 +961,7 @@ function Results({
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
 
   if (status.kind === "loading") {
-    return <div className="text-muted-foreground py-8 text-sm">Ranking researchers…</div>;
+    return <ListSkeleton label="Ranking researchers…" />;
   }
   if (status.kind === "error") {
     return <div className="text-muted-foreground py-8 text-sm">{status.message}</div>;
@@ -645,7 +1061,7 @@ function Results({
                 disabled={selectedCount === 0}
                 className="border-border-strong inline-flex h-7 items-center gap-1 rounded-md border bg-background px-3 text-sm text-foreground hover:border-[var(--color-accent-slate)] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <span aria-hidden>↓</span> Export ({selectedCount})
+                <Download className="size-3.5" aria-hidden /> Export ({selectedCount})
               </button>
               <span className="text-muted-foreground ml-1 text-xs">Sort</span>
               {SORT_TABS.map(({ key, label }) => {
@@ -841,11 +1257,10 @@ function ResearcherRow({
                 aria-expanded={open}
                 className="group mt-2 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)]"
               >
-                <span
-                  className={`text-muted-foreground inline-block w-3 text-[10px] transition-transform ${open ? "rotate-90" : ""}`}
-                >
-                  ▶
-                </span>
+                <ChevronRight
+                  aria-hidden
+                  className={`text-muted-foreground size-3.5 transition-transform ${open ? "rotate-90" : ""}`}
+                />
                 <span className="group-hover:underline">
                   {contributions.length} topic{contributions.length === 1 ? "" : "s"}
                 </span>
@@ -905,7 +1320,7 @@ function StageBadge({ fit }: { fit: ReturnType<typeof stageFit> }) {
     <span
       className={`mt-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-sm font-medium ${tone[fit.tone]}`}
     >
-      {fit.tone === "strong" ? <span aria-hidden>✓</span> : null}
+      {fit.tone === "strong" ? <Check className="size-3.5" aria-hidden /> : null}
       {fit.label}
     </span>
   );

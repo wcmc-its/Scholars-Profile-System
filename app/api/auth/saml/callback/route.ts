@@ -3,6 +3,7 @@ import { getDefaultReturnPath } from "@/lib/auth/config";
 import { safeReturnPath } from "@/lib/auth/return-path";
 import { createSessionCookie } from "@/lib/auth/session";
 import { validateSamlResponse, type SamlValidationResult } from "@/lib/auth/saml";
+import { markAssertionConsumed } from "@/lib/auth/saml-assertion-store";
 
 /**
  * POST /api/auth/saml/callback — the SAML Assertion Consumer Service (B01 #100).
@@ -59,6 +60,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!result.ok) {
     console.warn(
       JSON.stringify({ event: "saml_callback_failed", reason: result.reason }),
+    );
+    return errorPage(401, "Your sign-in could not be verified. Please try again.");
+  }
+
+  // Enforce single-use of the assertion before minting a session (#1439). The
+  // ledger is shared across Fargate tasks, so a duplicate SAMLResponse — even
+  // one routed to a different task than the original — is caught here. Fail
+  // closed: if the assertion cannot be durably recorded, do not sign in.
+  let consumed: { duplicate: boolean };
+  try {
+    consumed = await markAssertionConsumed(result.assertion);
+  } catch {
+    console.warn(
+      JSON.stringify({
+        event: "saml_callback_failed",
+        reason: "assertion_store_unavailable",
+      }),
+    );
+    return errorPage(503, "Sign-in is temporarily unavailable.");
+  }
+  if (consumed.duplicate) {
+    console.warn(
+      JSON.stringify({ event: "saml_callback_failed", reason: "assertion_reused" }),
     );
     return errorPage(401, "Your sign-in could not be verified. Please try again.");
   }

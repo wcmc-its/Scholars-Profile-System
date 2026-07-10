@@ -27,8 +27,8 @@
 import { db } from "../../lib/db";
 import { nsfAwardId } from "@/lib/award-number";
 import { fetchNsfAward, sleepBetweenRequests } from "./fetcher";
-
-const REFRESH_TTL_DAYS = 90;
+import { hasFreshNsfResult } from "./candidate";
+import { withEtlRun } from "@/lib/etl-run";
 
 function isNsfFunder(g: {
   primeSponsor: string | null;
@@ -40,12 +40,6 @@ function isNsfFunder(g: {
   // for "NSF" / "National Science Foundation" in raw or eyebrow `funder`.
   const hay = `${g.primeSponsorRaw ?? ""} ${g.funder ?? ""}`.toLowerCase();
   return /\bnsf\b/.test(hay) || /national science foundation/.test(hay);
-}
-
-function isStale(fetchedAt: Date | null): boolean {
-  if (!fetchedAt) return true;
-  const ageMs = Date.now() - fetchedAt.getTime();
-  return ageMs > REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000;
 }
 
 async function main() {
@@ -100,7 +94,7 @@ async function main() {
       skippedOtherSource++;
       continue;
     }
-    if (g.abstract && !isStale(g.abstractFetchedAt)) {
+    if (hasFreshNsfResult(g)) {
       skippedFresh++;
       continue;
     }
@@ -146,9 +140,15 @@ async function main() {
       unmatched++;
     } else if (!award.abstractText) {
       // NSF has the award but no abstract published (rare; happens for
-      // some legacy program announcements). Still mark it as touched so
-      // we don't refetch every run.
+      // some legacy program announcements). Stamp abstractFetchedAt +
+      // source so hasFreshNsfResult() skips it until the TTL lapses,
+      // instead of re-fetching every run. Leaves any existing abstract
+      // untouched (we only write the marker fields).
       unmatched++;
+      await db.write.grant.update({
+        where: { id: c.id },
+        data: { abstractFetchedAt: fetchedAt, abstractSource: "nsf" },
+      });
     } else {
       matched++;
       if (award.abstractText === c.currentAbstract && c.currentSource === "nsf") {
@@ -180,7 +180,7 @@ async function main() {
   console.log(`Done in ${((Date.now() - start) / 1000).toFixed(1)}s.`);
 }
 
-main()
+withEtlRun("NSF", main)
   .catch((e) => {
     console.error(e);
     process.exit(1);

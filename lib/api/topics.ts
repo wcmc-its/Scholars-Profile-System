@@ -32,9 +32,14 @@
  *   - lib/ranking.ts (Variant B math, surface-keyed recency curves)
  */
 import { prisma } from "@/lib/db";
+import { Prisma } from "@/lib/generated/prisma/client";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { scorePublication, type RankablePublication } from "@/lib/ranking";
-import { TOP_SCHOLARS_ELIGIBLE_ROLES, type RoleCategory } from "@/lib/eligibility";
+import {
+  SEARCH_BOOST_ELIGIBLE_ROLES,
+  TOP_SCHOLARS_ELIGIBLE_ROLES,
+  type RoleCategory,
+} from "@/lib/eligibility";
 import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 import {
   isAuthorHidden,
@@ -43,6 +48,7 @@ import {
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
 import { resolveHiddenStudentCoauthorChips } from "@/lib/api/search-flags";
+import { cachedRead } from "@/lib/api/swr-cache";
 
 // Sparse-state floors and target counts (sourced from 02-UI-SPEC.md §States table
 // + plan acceptance criteria). Top scholars: 7 chips, hide if <3.
@@ -220,6 +226,163 @@ export async function getTopScholarsForTopic(
     identityImageEndpoint: identityImageEndpoint(e.scholar.cwid),
     rank: i + 1,
   }));
+}
+
+export type AreaScholarConcentration = { cwid: string; total: number };
+
+// #1363 — a scholar needs this many on-topic first/last pubs before a pure-fraction
+// concentration score can lift them, so a 1–2-pub incidental author can't top the tier
+// on focus alone. Mirrors CONCEPT_CONCENTRATION_MIN_PUBS on the concept axis.
+const AREA_CONCENTRATION_MIN_PUBS = 3;
+
+// publication_topic row → RankablePublication. Local to the concentration path; the
+// other D-13/D-14 carves in this file still inline their own build (see the file-level
+// ponytail note — consolidate all of them if that shared ranker ever gets written).
+function topicRowToRankable(r: {
+  pmid: string;
+  score: unknown;
+  authorPosition: string | null;
+  publication: { publicationType: string | null; dateAddedToEntrez: Date | null };
+}): RankablePublication {
+  return {
+    pmid: r.pmid,
+    publicationType: r.publication.publicationType,
+    reciteraiImpact: Number(r.score),
+    dateAddedToEntrez: r.publication.dateAddedToEntrez,
+    authorship: {
+      isFirst: r.authorPosition === "first",
+      isLast: r.authorPosition === "last",
+      isPenultimate: r.authorPosition === "penultimate",
+    },
+    isConfirmed: true,
+  };
+}
+
+/**
+ * Lean variant of getTopScholarsForTopic for the People-search Research-Area boost
+ * (spec: docs/search-research-area-relevance-spec.md). Returns the area's scholars as
+ * `{ cwid, total }` where `total` is an on-topic CONCENTRATION score (#1363):
+ * `topicImpact² / totalImpact`, NOT raw on-topic volume — so a niche specialist
+ * out-tiers an incidental high-volume generalist while a genuine high-output expert
+ * (high impact AND high fraction) still leads. Top `limit`, no chip floors and no
+ * hydration. `subtopicId` narrows to that subtopic (more term-specific) when the query
+ * resolved to one; null ⇒ whole parent area. Cached (SWR) so an area-resolved search
+ * doesn't re-run the aggregation per request. `total` is a tiering score for
+ * buildAreaBoostFunctions (frac-of-max) — never surfaced.
+ *
+ * Role carve is SEARCH_BOOST_ELIGIBLE_ROLES (research roles), NOT the FT-only
+ * TOP_SCHOLARS_ELIGIBLE_ROLES that getTopScholarsForTopic uses — search must be able to
+ * lift concentrated affiliated experts, not just FT faculty (#1363). This function is
+ * search-only, so the wider carve does not touch the topic-page chip row.
+ * ponytail: third+fourth copy of the D-13 carve in this file (alongside
+ * getTopScholarsForTopic / getSubtopicScholars, which keep the FT-only carve) —
+ * consolidate into one parameterized ranker if it grows.
+ */
+export function getAreaScholarConcentration(
+  parentTopicId: string,
+  subtopicId: string | null,
+  limit: number,
+  now: Date = new Date(),
+): Promise<AreaScholarConcentration[]> {
+  return cachedRead(
+    `search:area-concentration:${parentTopicId}:${subtopicId ?? ""}:${limit}`,
+    () => loadAreaScholarConcentration(parentTopicId, subtopicId, limit, now),
+  );
+}
+
+async function loadAreaScholarConcentration(
+  parentTopicId: string,
+  subtopicId: string | null,
+  limit: number,
+  now: Date,
+): Promise<AreaScholarConcentration[]> {
+  // 1. On-topic impact + distinct on-topic pub count per scholar (numerator + floor).
+  //    The denominator query (below) repeats this exact D-13/D-14/D-15 carve minus the
+  //    topic filter, so on-topic impact and total impact are scored over the same
+  //    population. where/select are inlined per query (Prisma needs the literal select
+  //    for result-type inference — extracting it widens the row type).
+  const topicRows = await prisma.publicationTopic.findMany({
+    where: {
+      parentTopicId,
+      ...(subtopicId ? { primarySubtopicId: subtopicId } : {}),
+      authorPosition: { in: ["first", "last"] }, // D-13
+      year: { gte: RECITERAI_YEAR_FLOOR }, // D-15
+      scholar: {
+        deletedAt: null,
+        status: "active",
+        // #1363 — research roles, NOT the FT-only D-14 chip-row carve: search must
+        // be able to lift concentrated affiliated experts, not just FT faculty.
+        roleCategory: { in: [...SEARCH_BOOST_ELIGIBLE_ROLES] },
+      },
+      publication: { publicationType: { notIn: [...FEED_EXCLUDED_TYPES] } },
+    },
+    select: {
+      cwid: true,
+      pmid: true,
+      score: true,
+      authorPosition: true,
+      publication: { select: { publicationType: true, dateAddedToEntrez: true } },
+    },
+  });
+  const topicImpact = new Map<string, number>();
+  const topicPubs = new Map<string, Set<string>>();
+  for (const r of topicRows) {
+    const score = scorePublication(topicRowToRankable(r), "top_scholars", true, now);
+    if (score === 0) continue;
+    topicImpact.set(r.cwid, (topicImpact.get(r.cwid) ?? 0) + score);
+    let pmids = topicPubs.get(r.cwid);
+    if (!pmids) topicPubs.set(r.cwid, (pmids = new Set()));
+    pmids.add(r.pmid);
+  }
+
+  const cwids = [...topicPubs]
+    .filter(([, pmids]) => pmids.size >= AREA_CONCENTRATION_MIN_PUBS)
+    .map(([cwid]) => cwid);
+  if (cwids.length === 0) return [];
+
+  // 2. Each floored scholar's TOTAL impact across ALL topics (the fraction denominator),
+  //    same carve, no topic filter, pinned to those cwids. topicImpact ⊆ totalImpact
+  //    (the on-topic rows are a subset), so the fraction lands in [0,1]. publication_topic
+  //    already holds the per-scholar per-topic rows — one extra grouped read, no reindex.
+  //    ponytail: O(scholar's whole first/last corpus) rows, cached SWR; a reindexed
+  //      per-scholar total-impact field would drop this query (cf. the concept axis's
+  //      2nd OS agg).
+  const totalRows = await prisma.publicationTopic.findMany({
+    where: {
+      cwid: { in: cwids },
+      authorPosition: { in: ["first", "last"] }, // D-13
+      year: { gte: RECITERAI_YEAR_FLOOR }, // D-15
+      scholar: {
+        deletedAt: null,
+        status: "active",
+        roleCategory: { in: [...SEARCH_BOOST_ELIGIBLE_ROLES] }, // #1363 — research roles, not FT-only
+      },
+      publication: { publicationType: { notIn: [...FEED_EXCLUDED_TYPES] } },
+    },
+    select: {
+      cwid: true,
+      pmid: true,
+      score: true,
+      authorPosition: true,
+      publication: { select: { publicationType: true, dateAddedToEntrez: true } },
+    },
+  });
+  const totalImpact = new Map<string, number>();
+  for (const r of totalRows) {
+    const score = scorePublication(topicRowToRankable(r), "top_scholars", true, now);
+    if (score === 0) continue;
+    totalImpact.set(r.cwid, (totalImpact.get(r.cwid) ?? 0) + score);
+  }
+
+  // 3. Concentration = topicImpact² / totalImpact (impact × on-topic fraction). Tiered
+  //    downstream by buildAreaBoostFunctions' frac-of-max — that logic is unchanged.
+  return cwids
+    .map((cwid) => {
+      const ti = topicImpact.get(cwid) ?? 0;
+      return { cwid, total: (ti * ti) / Math.max(totalImpact.get(cwid) ?? ti, ti) };
+    })
+    .sort((a, b) => b.total - a.total)
+    .slice(0, limit);
 }
 
 // Inline middot-separated list threshold per issue #172 spec — up to 10
@@ -654,50 +817,44 @@ export async function getTopicPublications(
     baseWhere.score = { lt: displayThreshold };
   }
 
-  // Same scope as `baseWhere` but with publicationType filters fixed to
-  // each side — used to populate the totals for the toggle-visibility
-  // decision (#30) regardless of which filter is currently active.
-  const baseWhereAllTypes: Record<string, unknown> = { parentTopicId: topicSlug };
-  if (subtopicFilter) baseWhereAllTypes.primarySubtopicId = subtopicFilter;
-  const baseWhereResearchOnly: Record<string, unknown> = {
-    ...baseWhereAllTypes,
-    publication: { publicationType: { notIn: HARD_EXCLUDE_TYPES } },
-  };
+  // #1504 — the per-scope totals below are COUNT(DISTINCT pmid) raw queries
+  // instead of `groupBy(["pmid"]).length`, which materialized up to N distinct
+  // pmid rows per predicate (7×N rows shipped to Node just to compute 7
+  // integers, inside the transaction). The SQL predicates are composed from the
+  // SAME source values as `baseWhere` (topicSlug / subtopicFilter / filter /
+  // opts.tier / displayThreshold), so they stay in lockstep with the Prisma
+  // page query:
+  //   - the research-only publication-type filter is a `pt.pmid IN (SELECT …)`
+  //     subquery mirroring Prisma's to-one relation filter (a NULL
+  //     publication_type is excluded by NOT IN, exactly as Prisma's `notIn`);
+  //   - every count is DISTINCT pmid because publication_topic is keyed
+  //     (pmid, cwid, parent_topic_id) — a plain COUNT over-reports co-authored
+  //     papers (the #651 contract).
+  const parentCond = Prisma.sql`pt.parent_topic_id = ${topicSlug}`;
+  const subCond = subtopicFilter
+    ? Prisma.sql`pt.primary_subtopic_id = ${subtopicFilter}`
+    : null;
+  const researchCond = Prisma.sql`pt.pmid IN (SELECT p.pmid FROM publication p WHERE p.publication_type NOT IN (${Prisma.join(HARD_EXCLUDE_TYPES)}))`;
+  // Present only when the active filter is research-only (mirrors baseWhere*).
+  const researchIfFiltered = filter === "research_articles_only" ? researchCond : null;
+  const scoreStrongly = Prisma.sql`pt.score >= ${displayThreshold}`;
+  const scoreAlso = Prisma.sql`pt.score < ${displayThreshold}`;
+  // The tier condition applied to the visible `baseWhere` set (page + `total`).
+  const baseTierCond =
+    opts.tier === "strongly"
+      ? scoreStrongly
+      : opts.tier === "also"
+        ? scoreAlso
+        : null;
 
-  // Issue #326 — tier totals are scoped to the active filter (publication
-  // type + subtopic) but ignore opts.tier so the response always tells
-  // the client whether the "Also relevant" toggle should render. Sharing
-  // `baseWhereFiltered` with the page query keeps the count consistent
-  // with what the user can paginate through.
-  const baseWhereFiltered: Record<string, unknown> = { parentTopicId: topicSlug };
-  if (subtopicFilter) baseWhereFiltered.primarySubtopicId = subtopicFilter;
-  if (filter === "research_articles_only") {
-    baseWhereFiltered.publication = { publicationType: { notIn: HARD_EXCLUDE_TYPES } };
-  }
-  const tierStronglyWhere = {
-    ...baseWhereFiltered,
-    score: { gte: displayThreshold },
-  };
-  const tierAlsoWhere = {
-    ...baseWhereFiltered,
-    score: { lt: displayThreshold },
-  };
-
-  // Parent-scope tier totals — ignores subtopic filter so the client can
-  // keep the scope select visible on subtopic views whose own also-count
-  // is zero (#326 refinement). Pub-type filter is respected so the
-  // visibility decision tracks what the user could actually see.
-  const parentScopeWhere: Record<string, unknown> = { parentTopicId: topicSlug };
-  if (filter === "research_articles_only") {
-    parentScopeWhere.publication = { publicationType: { notIn: HARD_EXCLUDE_TYPES } };
-  }
-  const parentTierStronglyWhere = {
-    ...parentScopeWhere,
-    score: { gte: displayThreshold },
-  };
-  const parentTierAlsoWhere = {
-    ...parentScopeWhere,
-    score: { lt: displayThreshold },
+  // COUNT(DISTINCT pt.pmid) over an AND of the active (non-null) conditions.
+  const countDistinctPmids = (conds: Array<Prisma.Sql | null>) => {
+    const active = conds.filter((c): c is Prisma.Sql => c !== null);
+    return prisma.$queryRaw<Array<{ c: bigint }>>`
+      SELECT COUNT(DISTINCT pt.pmid) AS c
+      FROM publication_topic pt
+      WHERE ${Prisma.join(active, " AND ")}
+    `;
   };
 
   // All three sorts are SQL-direct — by_impact previously routed through the
@@ -757,17 +914,15 @@ export async function getTopicPublications(
   // + `.length` is the distinct-count idiom already used in this file
   // (getDistinctScholarCountForTopic). `orderBy` is required by the groupBy
   // type inside $transaction; the pmid sort is irrelevant to `.length`.
-  const distinctPmids = (where: Record<string, unknown>) =>
-    prisma.publicationTopic.groupBy({ by: ["pmid"], where, orderBy: { pmid: "asc" } });
   const [
     rows,
-    totalGroups,
-    totalAllTypesGroups,
-    totalResearchOnlyGroups,
-    tierStronglyGroups,
-    tierAlsoGroups,
-    parentTierStronglyGroups,
-    parentTierAlsoGroups,
+    baseCount,
+    allTypesCount,
+    researchOnlyCount,
+    tierStronglyRows,
+    tierAlsoRows,
+    parentTierStronglyRows,
+    parentTierAlsoRows,
   ] = await prisma.$transaction([
     prisma.publicationTopic.findMany({
       where: baseWhere,
@@ -778,21 +933,28 @@ export async function getTopicPublications(
       distinct: ["pmid"],
       include: { publication: { select: pubSelectFields } },
     }),
-    distinctPmids(baseWhere),
-    distinctPmids(baseWhereAllTypes),
-    distinctPmids(baseWhereResearchOnly),
-    distinctPmids(tierStronglyWhere),
-    distinctPmids(tierAlsoWhere),
-    distinctPmids(parentTierStronglyWhere),
-    distinctPmids(parentTierAlsoWhere),
+    // `total` — matches baseWhere exactly (incl. the active tier + type filter).
+    countDistinctPmids([parentCond, subCond, researchIfFiltered, baseTierCond]),
+    // baseWhereAllTypes — parent (+ subtopic), no type/tier filter.
+    countDistinctPmids([parentCond, subCond]),
+    // baseWhereResearchOnly — parent (+ subtopic) + research type filter.
+    countDistinctPmids([parentCond, subCond, researchCond]),
+    // tierStronglyWhere / tierAlsoWhere — filtered scope, ignoring opts.tier.
+    countDistinctPmids([parentCond, subCond, researchIfFiltered, scoreStrongly]),
+    countDistinctPmids([parentCond, subCond, researchIfFiltered, scoreAlso]),
+    // parent-scope tiers — ignore the subtopic filter (#326 refinement).
+    countDistinctPmids([parentCond, researchIfFiltered, scoreStrongly]),
+    countDistinctPmids([parentCond, researchIfFiltered, scoreAlso]),
   ]);
-  const total = totalGroups.length;
-  const totalAllTypes = totalAllTypesGroups.length;
-  const totalResearchOnly = totalResearchOnlyGroups.length;
-  const tierStronglyCount = tierStronglyGroups.length;
-  const tierAlsoCount = tierAlsoGroups.length;
-  const parentTierStronglyCount = parentTierStronglyGroups.length;
-  const parentTierAlsoCount = parentTierAlsoGroups.length;
+  // MySQL COUNT() comes back as BIGINT → coerce each bigint to a number.
+  const toCount = (r: Array<{ c: bigint }>): number => Number(r[0]?.c ?? 0);
+  const total = toCount(baseCount);
+  const totalAllTypes = toCount(allTypesCount);
+  const totalResearchOnly = toCount(researchOnlyCount);
+  const tierStronglyCount = toCount(tierStronglyRows);
+  const tierAlsoCount = toCount(tierAlsoRows);
+  const parentTierStronglyCount = toCount(parentTierStronglyRows);
+  const parentTierAlsoCount = toCount(parentTierAlsoRows);
   // #356 — drop publications taken down or derived-dark from the feed. The
   // publication_topic-keyed `total` / tier counts are left as-is: a per-author
   // hide never changes them, and a whole-pub takedown is a rare superuser
@@ -1086,15 +1248,20 @@ export async function fetchAuthorBylineForPmids(
  * algorithmic. Returns 0 when the topic has no attributed scholars.
  */
 export async function getDistinctScholarCountForTopic(topicSlug: string): Promise<number> {
-  const distinctRows = await prisma.publicationTopic.groupBy({
-    by: ["cwid"],
-    where: {
-      parentTopicId: topicSlug,
-      scholar: { deletedAt: null, status: "active" },
-    },
-    _count: { _all: true },
-  });
-  return distinctRows.length;
+  // #1504 — COUNT(DISTINCT cwid) instead of groupBy(["cwid"]).length, which
+  // shipped one row per distinct scholar just to read its length (this runs
+  // twice per topic-page render). Mirrors the Prisma relation filter
+  // `scholar: { deletedAt: null, status: "active" }` via an inner join
+  // (publication_topic.cwid -> scholar.cwid is a required FK).
+  const rows = await prisma.$queryRaw<Array<{ c: bigint }>>`
+    SELECT COUNT(DISTINCT pt.cwid) AS c
+    FROM publication_topic pt
+    JOIN scholar s ON s.cwid = pt.cwid
+    WHERE pt.parent_topic_id = ${topicSlug}
+      AND s.deleted_at IS NULL
+      AND s.status = 'active'
+  `;
+  return Number(rows[0]?.c ?? 0);
 }
 
 /**

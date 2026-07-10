@@ -45,6 +45,12 @@ export async function GET(request: NextRequest) {
       maxAge: TELEMETRY_COOKIE_MAX_AGE_S,
       path: "/",
     });
+    // This path matches the CloudFront `/api/search*` behavior, which caches
+    // for ~1s keyed on the query string only (cookies excluded from the key)
+    // and does not strip Set-Cookie. Mark the minting response no-store so it
+    // is never edge-cached, otherwise cookieless viewers issuing the same `?q=`
+    // within the window would be served one viewer's minted telemetry id. Refs #1439.
+    response.headers.set("Cache-Control", "no-store");
   }
   return response;
 }

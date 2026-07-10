@@ -34,6 +34,32 @@ layer you measure:
 A healthy CloudFront cache hit rate is **>85%**; below **50%** is an incident signal
 ([`PRODUCTION.md § Incident: pages are slow`](./PRODUCTION.md)).
 
+### Multi-task ISR cache consistency — the shared S3 cacheHandler (#1503)
+
+Prod runs 2–6 app tasks ([§ Scaling characteristics](#scaling-characteristics)), and Next's
+default ISR cache is **in-process, per-task**. So an on-demand `revalidatePath` (an ETL
+`/api/revalidate` call or a curator edit) busted **one** task's store; the CloudFront
+invalidation then refilled the edge from a **random** task — often one whose store was never
+busted — which re-cached the stale copy for up to the route TTL. The visible symptom was
+edits not reliably appearing, **not** slowness.
+
+The fix routes every task through **one shared S3 store** (`lib/cache/s3-cache-handler.js`),
+with revalidation propagated via a shared tag→last-revalidated-timestamp map. The handler
+runs only on an origin miss/regeneration (CloudFront still fronts the app), behind a 250 ms
+timeout + fail-open so a slow/unavailable S3 never blocks a render or 500s an edit.
+
+**This is primarily a correctness win, not a user-latency one.** Edge cache hits are
+unchanged, and the origin ISR *read* is a hair slower (an S3 round-trip vs in-memory,
+mitigated by an in-process LRU front). The secondary performance benefit is **fewer redundant
+origin regenerations across the fleet**: once any task regenerates a heavy ISR page (e.g. a
+`/topics/[slug]` `groupBy`), the others read it from S3 instead of re-running the work — most
+valuable right after a deploy or an autoscale-up, when per-task caches are cold.
+
+**Status (2026-07-07):** active on staging (verified — an uncached ISR route wrote a
+well-formed S3 entry, re-hit returned a get-hit); prod bucket + wiring deployed (`cdk deploy
+Sps-App-prod`), **dark** until a prod image built with `NEXT_ISR_CACHE_S3=on` ships (#1558
+flipped the prod build arm on).
+
 ## Targets and alarm thresholds (the brackets of "normal")
 
 These are real and enforced today (`cdk/lib/observability-stack.ts`, [`SLOs.md`](./SLOs.md)):
@@ -95,22 +121,26 @@ changes cut it on the hot concept-People path (fix plan: `.planning/perf-audit.m
   only on the rare sparse case, removing **2 round-trips per cold concept-People SSR render**
   on the common non-sparse path. Gated by `SEARCH_PEOPLE_CONCEPT_PRECOUNT` (default-on = old
   pre-count path; `off` = reorder). **Staging flipped to the reorder 2026-06-12** (task def
-  `sps-app-staging:45`); prod still on the old path.
+  `sps-app-staging:45`); **prod flipped to the reorder in cdk** (#929, `c9fbf28d`, ~2026-06-12)
+  and went live with the 2026-07-01 prod App deploy (task def `sps-app-prod:21`).
 
 > ⚠️ **Not yet a measured win.** A staging curl probe (`/search?q=…&type=people`, HTTP 200)
 > confirmed the B2 reorder is live with no hot-path regression, but staging's small
 > OpenSearch + single-sample curl noise (±1 s run-to-run) **cannot isolate** the per-RTT
-> delta — do not cite the staging numbers as a baseline. The real before/after is the
-> `search_query` `duration_ms` **p50/p95** (Logs Insights, see [§ How to (re)measure](#how-to-remeasure))
-> under **prod** traffic; capture that before flipping `SEARCH_PEOPLE_CONCEPT_PRECOUNT=off`
-> in prod. Until then the `/search` origin cell above stays `TBD (measure)`.
+> delta — do not cite the staging numbers as a baseline. The `search_query` `duration_ms`
+> **p50/p95** (Logs Insights, see [§ How to (re)measure](#how-to-remeasure)) under **prod**
+> traffic is the only usable signal, but the before-flip prod capture never happened, so the
+> `/search` origin baseline must now come from **post-flip** numbers only. Until then the
+> `/search` origin cell above stays `TBD (measure)`.
 
 > ⚠️ **Profile edge-cache reality vs. the table.** The Scholar-profile row lists ISR TTL
 > 24 h, but that is the *intended* state — the canonical root profile URL is currently
 > served `force-dynamic` and lands on no cacheable CloudFront behavior, so today it is an
 > origin miss every view (audit F1 / C1). The fix (force-static + edge-behavior carve) is
 > **#914, held** pending its prod prerequisites (`PROFILE_EMAIL_RELEASE_GATE` on in prod
-> first + a shared multi-task ISR cacheHandler). This is the single biggest site-wide win.
+> first + a shared multi-task ISR cacheHandler — the latter is now **built and deployed**,
+> #1503, staging-active/prod-dark, see [§ Multi-task ISR cache consistency](#multi-task-isr-cache-consistency--the-shared-s3-cachehandler-1503)).
+> This is the single biggest site-wide win.
 
 ### Search performance findings (2026-06-26)
 
@@ -153,13 +183,13 @@ Publications paths.
   (`config.ts`, deployed task def rev 83) left C=3 p50 unchanged (4.8 → 5.0 s) and only
   tightened the tail (C=3 p90 6.9 → 5.4 s). A null result on a CPU bump is itself the proof
   the bottleneck is DB I/O, not CPU. Prod was **not** deployed (same reason).
-- **The Publications facet-split was investigated and parked.** A handoff
-  (`pub-tab-performance-handoff.md`) proposed splitting/caching the OpenSearch facet aggs
-  off the hit list; measurement shows the aggs are ~0.2 s, so the split optimizes the wrong
-  component. Code preserved at `origin/perf/pub-tab-facet-split` (`SEARCH_PUB_FACET_SPLIT`,
-  default-off, byte-identical), pinned by the immutable tag `parked/pub-tab-facet-split`
-  (commit `927c35dd`); tracked with its revisit trigger in **#1301** — revisit only if
-  OpenSearch aggs ever become binding.
+- **The Publications facet-split was investigated and parked** *(since revived — see the
+  2026-07-02 update below)*. A handoff (`pub-tab-performance-handoff.md`) proposed
+  splitting/caching the OpenSearch facet aggs off the hit list; measurement shows the aggs
+  are ~0.2 s, so the split optimizes the wrong component. Code preserved at
+  `origin/perf/pub-tab-facet-split` (`SEARCH_PUB_FACET_SPLIT`, default-off, byte-identical),
+  pinned by the immutable tag `parked/pub-tab-facet-split` (commit `927c35dd`); tracked in
+  **#1301**.
 
 **The real lever (documented, not built):** a cross-request cache of the taxonomy resolve.
 The per-candidate counts are ETL-cadence (safe to cache for minutes/hours) and the candidate
@@ -167,11 +197,41 @@ load is query-independent, but the `#800/#801` method-family overlay gate must s
 so the cache needs ETL-versioning or a short TTL, not a blunt freeze. Worth doing only if
 go-live concurrency makes it bind.
 
+**4. 2026-07-02 update — the lever above was (partly) built, and the numbers moved.** A
+full search/faceting audit ([`search-facet-perf-audit-2026-07-02.md`](./audits/search-facet-perf-audit-2026-07-02.md),
+tracker **#1415**) landed nine PRs the same day, deployed to staging:
+
+- **`getCounts` is now SWR-cached** cross-request (15-min fresh / 1-h stale) and
+  method-family enrichment is pre-capped (#1420) — the "dozens of groupBys per broad
+  query" above no longer recur per request. The candidate-set snapshot and whole-result
+  memo remain open as **#1409**.
+- **The publications/funding API branches skip the resolver's Prisma enrichment entirely**
+  (#1421) — they only ever consumed the in-memory MeSH resolution. Staging `Server-Timing`
+  for the C-ramp query class now reads `taxonomy;dur=0` (was ~0.5 s warm / 1.7 s cold in
+  the table above).
+- **The facet-split was revived** (#1423, cherry-pick of `927c35dd`, applied clean) and
+  the flag is **ON in staging**: repeat publications searches serve the agg request from
+  its 5-min cache — measured `search;dur=69–84 ms` vs 269–635 ms combined.
+- **Responses are ~80 % smaller on the wire**: pub `_source` trim (#1418) plus
+  gzip (#1416/#1428/#1433 — see
+  [`cloudfront-cache-spec.md` §Compression](./cloudfront-cache-spec.md)); measured
+  196,315 → 39,275 bytes through CloudFront.
+
+Prod: the image shipped 2026-07-02 (GH Actions run 28624978997), so the flags on task-def
+`:21` are now **live** in prod — gzip verified on `/api/search` and
+`SEARCH_PEOPLE_REASON_FROM_DOC` on — and the reorder / doc-reason paths run in prod, no
+longer inert behind an older image. `meshSubtreeCounts` is **present** on the prod people
+index (verified 2026-07-03 by a direct `_source` read — 118 of a 200-doc sample carry a
+non-empty map; the field is mapped `enabled: false`, so it is readable from `_source` but
+**not** via an `exists` query — the reason the doc-reason path reads it from `_source`), so
+the flag-on reason counts are served correctly (#1404 resolved). The C-ramp can be re-run
+against prod to quantify the win.
+
 ## Scaling characteristics
 
 - **App tier:** ECS Fargate. Per-task sizing: **staging 1024 CPU / 2048 MiB** (bumped from
-  512/1024 and deployed 2026-06-26); **prod 2048 / 4096 in `config.ts` but the deployed task
-  def is still 1024 / 2048** pending a prod `cdk deploy` (sizing rides a task-def deploy, not
+  512/1024 and deployed 2026-06-26); **prod task def rev 21 (deployed 2026-07-01) runs the
+  `config.ts` sizing 2048 / 4096** (sizing rides a task-def deploy, not
   the CD image roll). The 2026-06-26 bump is a marginal-only mitigation for the Aurora-bound
   taxonomy cost above — not a fix. Target-tracking
   autoscaling (#596) between min 2 (= `appDesiredCount`, AZ-spread) and max 6
@@ -208,6 +268,13 @@ alongside each number you write back.
    that single test fills most of the per-surface table.
 5. **Trace attribution.** For "where did the time go in one slow render," open the X-Ray
    trace and find the longest Prisma span ([`tracing.md`](./tracing.md)).
+6. **Search concurrency / `/search` origin latency.** [`scripts/perf/sps-loadtest.sh`](../scripts/perf/sps-loadtest.sh)
+   runs a concurrency C-ramp against `GET /api/search?type=people` (ttfb + total p50/p90/max
+   and non-200 count per level); [`scripts/perf/sps-satcheck.sh`](../scripts/perf/sps-satcheck.sh)
+   isolates whether a slow concurrent number is the OpenSearch node saturating or the app.
+   These fill the `/search` / autocomplete origin cells above — but a staging number
+   under-reports prod (single `t3.medium` node); see the cluster-sizing caveat in
+   [`search-people-concurrency-performance.md`](./search-people-concurrency-performance.md).
 
 ## Review cadence
 
@@ -218,7 +285,10 @@ moves the render path (a new heavy query, an ISR TTL change, an instance-size ch
 
 ---
 
-*Baseline last updated: 2026-06-26 — added § Search performance findings (taxonomy-resolver
+*Baseline last updated: 2026-07-02 — added item 4 (search/faceting audit #1415: taxonomy
+counts cached #1420, pubs/funding mesh-only #1421 → `taxonomy;dur=0` on staging,
+facet-split revived + staging-on #1423, wire size −80 % via #1416/#1428/#1433; prod
+pending image release). 2026-06-26: § Search performance findings (taxonomy-resolver
 Aurora bottleneck under concurrency; cold-start warm-up gap → #1297; vCPU bump null result;
 facet-split parked) and app-tier sizing change. 2026-06-12: search origin-path optimizations
 (Section A/B, #913 / #922 / #924). Per-surface latency cells still pending a

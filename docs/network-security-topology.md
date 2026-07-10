@@ -27,7 +27,7 @@ ingress and endpoints added by AppStack/EtlStack/DataStack
 
 | | Staging | Production |
 |---|---|---|
-| VPC CIDR | `10.20.0.0/16` | `10.10.0.0/16` |
+| VPC CIDR | `10.x.0.0/16` (internal) | `10.x.0.0/16` (internal) |
 | AZs | `us-east-1a`, `us-east-1b` | same |
 | Public subnets | /24 per AZ — ALB + NAT only | same |
 | Private-with-egress subnets | /22 per AZ — ECS tasks, Aurora, OpenSearch, ETL | same |
@@ -127,10 +127,11 @@ two halves:
   `scholars/${env}/edge/origin-shared-secret`; rotation runbook in
   [`PRODUCTION_ADDENDUM.md § Origin protection`](./PRODUCTION_ADDENDUM.md).
 - **AWS WAF** attaches to the distribution: a rate-based rule (1000 req / 5 min / IP) plus
-  AWS Managed Rules. A WCM-only access gate (#461) is currently in place pending the
-  production WAF topology decision (NetScaler vs AWS-native WAFv2 — RITM0792011, see
-  [`waf-request-RITM0792011.md`](./waf-request-RITM0792011.md)). **Do not lift the WCM-only
-  gate until the WAF topology is confirmed.**
+  AWS Managed Rules. The production WAF topology is decided (#502): CloudFront + AWS WAF →
+  NetScaler → ALB → Fargate, with the NetScaler (AWS VPX, WCM network team) being provisioned
+  via RITM0801140 (prod+staging, staging-first). A WCM-only access gate (#461)
+  stays in place meanwhile. **Do not lift the WCM-only gate until the NetScaler enforces
+  equivalent filtering.**
 - **TLS:** ACM certs for `scholars[-staging].weill.cornell.edu` are provisioned and rotated
   by WCM ITS (not CDK). HSTS ships on the security-headers policy; CSP and the other headers
   are filled in by B21 ([`ADR-007`](./ADR-007-csp-script-src-strategy.md)).
@@ -162,7 +163,9 @@ is SAML + RBAC, see [`access-control-rbac.md`](./access-control-rbac.md)), secre
   (accepted; raise EIP quota and bump to 2 post-launch).
 - **TGW + WCM firewall are not SPS-owned** — the ETL connectivity path depends on another
   team; resolver associations are codified but routing is external.
-- **Production WAF topology is unresolved** (#502) — the AWS-native WebACL may be fronted or
-  replaced by an on-prem NetScaler; don't change the WAF track until confirmed.
+- **NetScaler not yet in the request path** (#502, RITM0801140) — the WAF topology is resolved
+  (CloudFront + AWS WAF → NetScaler → ALB → Fargate) but the NetScaler (AWS VPX, WCM network
+  team) is still being provisioned; both distributions point straight at their ALB today, and
+  the #461 WCM-only gate stays until it enforces equivalent filtering.
 - **`cdk diff` is the only drift detector** — there is no continuous config-drift scanner;
   console changes are caught at the next diff, not in real time.

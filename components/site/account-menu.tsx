@@ -21,13 +21,13 @@ import { profilePath } from "@/lib/profile-url";
 
 /**
  * Signed-in account menu rendered in the site header (UI-SPEC § Signing in
- * and reaching `/edit`) and — when the unified account-dropdown flag is on
- * (account-dropdown-nav handoff, Workstream A) — in the `/edit` `AdminSubnav`
- * strip via `context="console"`. A `Popover` opened by a context-styled trigger:
+ * and reaching `/edit`) and — the unified account-dropdown (account-dropdown-nav
+ * handoff, Workstream A; its `ACCOUNT_CONSOLE_NAV_RESTRUCTURE` flag was retired
+ * in #1440) — in the `/edit` `AdminSubnav` strip via `context="console"`. A
+ * `Popover` opened by a context-styled trigger:
  *
  *   - With a scholar row (the common case): View my profile · Edit my profile ·
- *     Separator · console rows · Separator · Sign out. (Classic order — Edit
- *     before View — when the flag is off.)
+ *     Separator · console rows · Separator · Sign out.
  *   - In the console: the same, but the superuser roster row is replaced by a
  *     "Back to Scholars" link (→ `/`); the other destinations stay.
  *   - Without a scholar row (a staff superuser without their own scholar
@@ -82,10 +82,10 @@ export type AccountMenuProps = {
    * Where the menu is mounted (account-dropdown-nav handoff, Workstream A):
    *   - `"public"` (default) — the site header. The context row is the
    *     superuser "Admin console" roster link (rendered as a normal console row).
-   *   - `"console"` — the `/edit` `AdminSubnav` strip (only when the unified-nav
-   *     flag is on). The context row becomes "Back to Scholars" (→ `/`), the
-   *     roster row is dropped (the Profiles tab already covers it), and the
-   *     trigger is styled for the light strip rather than the maroon header.
+   *   - `"console"` — the `/edit` `AdminSubnav` strip. The context row becomes
+   *     "Back to Scholars" (→ `/`), the roster row is dropped (the Profiles tab
+   *     already covers it), and the trigger is styled for the light strip
+   *     rather than the maroon header.
    */
   context?: "public" | "console";
 };
@@ -115,9 +115,6 @@ export function AccountMenu({
   // The signed-in scholar: the prop (public header) or the probe (console mount).
   const effectiveScholar = scholar ?? probe?.scholar ?? null;
   const label = effectiveScholar?.preferredName ?? "Account";
-  // The unified menu (View → Edit order). Always on in the console (it only
-  // mounts when the flag is on); driven by the probe on the public header.
-  const unified = isConsole || (probe?.accountNavRestructure ?? false);
   // In the console the per-role roster link is replaced by "Back to Scholars",
   // so drop the manage-profiles row; any remaining role destinations (Method
   // Families / Units) stay reachable.
@@ -183,17 +180,8 @@ export function AccountMenu({
           <>
             {effectiveScholar ? (
               <>
-                {unified ? (
-                  <>
-                    {viewRow}
-                    {editRow}
-                  </>
-                ) : (
-                  <>
-                    {editRow}
-                    {viewRow}
-                  </>
-                )}
+                {viewRow}
+                {editRow}
                 <Separator className="my-1" />
               </>
             ) : null}

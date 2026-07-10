@@ -18,8 +18,9 @@ import { asPrestige } from "@/lib/funding/prestige";
 export const dynamic = "force-dynamic";
 
 const MAX_LIMIT = 500;
-// Lower rank sorts first. Curated leads; everything else (grants.gov, …) trails.
-const SOURCE_RANK: Record<string, number> = { wcm_curated: 0 };
+// Lower rank sorts first. Curated leads — hand-vetted WCM awards and staff-submitted
+// URLs (`manual_url`, the opportunity-intake queue) — everything else trails.
+const SOURCE_RANK: Record<string, number> = { wcm_curated: 0, manual_url: 0 };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const session = await getEffectiveEditSession();
@@ -59,6 +60,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       status: true,
       prestige: true,
       isHonorific: true,
+      awardCeiling: true,
+      awardFloor: true,
     },
   });
 
@@ -75,7 +78,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (pa !== pb) return pb - pa;
     return (a.title ?? "").localeCompare(b.title ?? "");
   });
-  const opportunities = rows.slice(0, limit);
+  // BigInt award fields → number for JSON (mirrors the detail route).
+  const opportunities = rows.slice(0, limit).map((r) => ({
+    ...r,
+    awardCeiling: r.awardCeiling == null ? null : Number(r.awardCeiling),
+    awardFloor: r.awardFloor == null ? null : Number(r.awardFloor),
+  }));
 
   return NextResponse.json({ count: opportunities.length, opportunities });
 }

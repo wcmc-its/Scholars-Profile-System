@@ -1,0 +1,96 @@
+<style>
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+.dtool{display:flex;gap:10px;align-items:center;margin:0 0 12px}
+.dsearch{position:relative;flex:1}
+.dsearch i{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--color-text-tertiary);font-size:16px;pointer-events:none}
+.dsearch input{width:100%;padding-left:34px;box-sizing:border-box}
+.seg{display:inline-flex;border:0.5px solid var(--color-border-secondary);border-radius:999px;overflow:hidden;flex:none}
+.seg button{background:none;border:0;padding:7px 12px;font-size:12.5px;color:var(--color-text-secondary);cursor:pointer}
+.seg button.on{background:var(--color-background-info);color:var(--color-text-info)}
+.dgrouphdr{display:flex;align-items:center;gap:8px;padding:8px 4px 2px}
+.dline{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:0;border-radius:8px;padding:9px;cursor:pointer}
+.dline:hover{background:var(--color-background-secondary)}
+.dname{flex:1;min-width:0;font-size:13.5px;font-weight:500;color:var(--color-text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dcount{font-size:12.5px;font-family:var(--font-mono);color:var(--color-text-secondary);flex:none}
+.dline .ti-arrow-up-right{color:var(--color-text-tertiary);font-size:15px;flex:none}
+</style>
+
+<h2 class="sr-only">Expanded "all cell lines" directory for the immortalized cell lines method: a searchable, sortable index of every named cell line the method resolves to, with the two 3T3-L1 forms nested under a shared parent and each row linking to its filtered article list.</h2>
+
+<div style="background:var(--color-background-secondary);border-radius:var(--border-radius-lg);padding:1.1rem 1.2rem 1.3rem;">
+
+  <div style="margin-bottom:12px;">
+    <div style="font-size:18px;font-weight:500;color:var(--color-text-primary);">All cell lines used</div>
+    <div style="font-size:13px;color:var(--color-text-secondary);margin-top:2px;">Immortalized cell lines · <span id="dcount-total">7</span> cell lines across 33 papers</div>
+  </div>
+
+  <div class="dtool">
+    <span class="dsearch"><i class="ti ti-search" aria-hidden="true"></i><input id="dq" type="text" placeholder="Filter cell lines…" aria-label="Filter cell lines"></span>
+    <span class="seg" role="group" aria-label="Sort">
+      <button id="s-use" class="on">Most used</button>
+      <button id="s-az">A–Z</button>
+    </span>
+  </div>
+
+  <div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:5px 12px;">
+
+    <div id="grp-wrap" class="dgroup">
+      <div class="dgrouphdr"><span style="font-size:13.5px;font-weight:500;color:var(--color-text-primary);">3T3-L1</span><span style="font-size:12px;color:var(--color-text-tertiary);">· mouse fibroblast line · 2 forms</span></div>
+      <div id="grp" style="padding-left:14px;border-left:2px solid var(--color-border-tertiary);margin-left:6px;">
+        <button class="dline" data-name="3t3-l1 adipocytes" data-count="11"><span class="dname">3T3-L1 adipocytes</span><span class="dcount">11</span><i class="ti ti-arrow-up-right" aria-hidden="true"></i></button>
+        <button class="dline" data-name="3t3-l1 preadipocytes" data-count="8"><span class="dname">3T3-L1 preadipocytes</span><span class="dcount">8</span><i class="ti ti-arrow-up-right" aria-hidden="true"></i></button>
+      </div>
+    </div>
+
+    <div style="border-top:0.5px solid var(--color-border-tertiary);margin:6px 4px;"></div>
+
+    <div id="flat">
+      <button class="dline" data-name="hek293t cells" data-count="5"><span class="dname">HEK293T cells</span><span class="dcount">5</span><i class="ti ti-arrow-up-right" aria-hidden="true"></i></button>
+      <button class="dline" data-name="human hepatocyte cell line" data-count="3"><span class="dname">human hepatocyte cell line</span><span class="dcount">3</span><i class="ti ti-arrow-up-right" aria-hidden="true"></i></button>
+      <button class="dline" data-name="ms1 vegf angiosarcoma cells" data-count="3"><span class="dname">MS1 VEGF angiosarcoma cells</span><span class="dcount">3</span><i class="ti ti-arrow-up-right" aria-hidden="true"></i></button>
+      <button class="dline" data-name="n9 microglial cells" data-count="2"><span class="dname">N9 microglial cells</span><span class="dcount">2</span><i class="ti ti-arrow-up-right" aria-hidden="true"></i></button>
+      <button class="dline" data-name="human thyroid cell line" data-count="2"><span class="dname">human thyroid cell line</span><span class="dcount">2</span><i class="ti ti-arrow-up-right" aria-hidden="true"></i></button>
+    </div>
+
+    <div id="dempty" style="display:none;padding:18px 9px;font-size:13px;color:var(--color-text-tertiary);">No cell lines match that filter.</div>
+  </div>
+
+  <div style="display:flex;align-items:flex-start;gap:6px;padding:8px 2px 0;font-size:11.5px;color:var(--color-text-tertiary);line-height:1.5;">
+    <i class="ti ti-info-circle" style="margin-top:1px;" aria-hidden="true"></i><span>Selecting a row would collapse this view and filter the article list to that cell line. Counts are illustrative — your extraction pipeline supplies the real set.</span>
+  </div>
+</div>
+
+<script>
+(function(){
+  var flat=document.getElementById('flat'),grp=document.getElementById('grp');
+  var allLines=[].slice.call(document.querySelectorAll('.dline'));
+
+  allLines.forEach(function(b){
+    b.addEventListener('click',function(){sendPrompt('Filter the immortalized cell lines article list to '+b.querySelector('.dname').textContent);});
+  });
+
+  var q=document.getElementById('dq');
+  function runSearch(){
+    var t=q.value.trim().toLowerCase(),vis=0;
+    allLines.forEach(function(b){var m=b.dataset.name.indexOf(t)>=0;b.style.display=m?'':'none';if(m)vis++;});
+    var grpVis=[].slice.call(grp.querySelectorAll('.dline')).some(function(b){return b.style.display!=='none';});
+    document.getElementById('grp-wrap').style.display=grpVis?'':'none';
+    document.getElementById('dempty').style.display=vis?'none':'block';
+  }
+  q.addEventListener('input',runSearch);
+
+  function sortBy(mode){
+    [flat,grp].forEach(function(c){
+      var rows=[].slice.call(c.querySelectorAll('.dline'));
+      rows.sort(function(a,b){
+        if(mode==='az')return a.dataset.name.localeCompare(b.dataset.name);
+        return (+b.dataset.count)-(+a.dataset.count);
+      });
+      rows.forEach(function(r){c.appendChild(r);});
+    });
+  }
+  var sUse=document.getElementById('s-use'),sAz=document.getElementById('s-az');
+  sUse.addEventListener('click',function(){sUse.classList.add('on');sAz.classList.remove('on');sortBy('use');});
+  sAz.addEventListener('click',function(){sAz.classList.add('on');sUse.classList.remove('on');sortBy('az');});
+})();
+</script>

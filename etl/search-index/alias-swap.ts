@@ -244,6 +244,10 @@ export async function cleanStaleNextVersion(
  *   colliding with an orphan. (Skipping this cleanup would break every
  *   subsequent rebuild: `indices.create` on the same v{N+1} would
  *   resource-already-exists.)
+ * - `preSwapCheck` throws -> same handling as fillFn: the fully-written
+ *   new index is deleted and the alias never moves, so a rebuild that
+ *   fails validation leaves the previous (stale but intact) version
+ *   serving reads -- strictly better than swapping in a bad index.
  * - `swapAlias` throws -> same handling. The new index is fully written
  *   but unreferenced; we delete it and re-throw so the next attempt
  *   starts clean.
@@ -258,9 +262,22 @@ export async function rebuildAliasedIndex<T extends number = number>(args: {
   alias: string;
   mapping: object;
   fillFn: (concreteIndex: string) => Promise<T>;
+  /**
+   * Validation gate run after `fillFn` completes but BEFORE the alias swap
+   * (doc-count shrink checks, smoke queries against the new concrete index).
+   * A throw aborts the rebuild without touching the alias.
+   */
+  preSwapCheck?: (concreteIndex: string, docsIndexed: T) => Promise<void>;
   retain?: number;
 }): Promise<{ docsIndexed: T; newIndex: string; deleted: string[] }> {
-  const { client, alias, mapping, fillFn, retain = DEFAULT_RETENTION } = args;
+  const {
+    client,
+    alias,
+    mapping,
+    fillFn,
+    preSwapCheck,
+    retain = DEFAULT_RETENTION,
+  } = args;
   const state = await resolveAliasState(client, alias);
   const newIndex = nextVersionName(alias, state);
   // Clear a stale next-version orphan left by a killed prior run before
@@ -277,6 +294,9 @@ export async function rebuildAliasedIndex<T extends number = number>(args: {
   let docsIndexed: T;
   try {
     docsIndexed = await fillFn(newIndex);
+    if (preSwapCheck !== undefined) {
+      await preSwapCheck(newIndex, docsIndexed);
+    }
     await swapAlias(client, alias, newIndex, state);
   } catch (err) {
     try {

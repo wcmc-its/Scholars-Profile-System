@@ -29,13 +29,29 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ pubs: [] });
   }
   const params = request.nextUrl.searchParams;
-  const cwid = params.get("cwid") ?? "";
-  const contentQuery = params.get("q") ?? "";
+  // Unauthenticated route whose params feed a module-level cache key — cap every
+  // list/string so an adversarial caller can't mint unbounded distinct keys (or
+  // oversized OpenSearch clauses). Legitimate callers send one cwid, a handful of
+  // descriptor UIs, and at most a card's worth of exclude pmids.
+  const cwid = (params.get("cwid") ?? "").slice(0, 32);
+  const contentQuery = (params.get("q") ?? "").slice(0, 300);
   const descriptorUis = (params.get("descriptorUis") ?? "")
     .split(",")
     .map((s) => s.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .slice(0, 50);
+  // #1351 — the resolved concept display name, so the title highlight can mark the
+  // concept term (not just the literal query) on a descriptor-tagged key paper.
+  const conceptLabel = (params.get("label") ?? "").slice(0, 300);
+  // #1366 — pmids already shown on a sibling stacked line; dropped at the QUERY
+  // level (must_not) so the panel pulls its top-N from the non-claimed pool, never
+  // fetched-then-emptied (the bug the follow-up fixes).
+  const exclude = (params.get("exclude") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 50);
 
-  const pubs = await fetchKeyPaper({ cwid, descriptorUis, contentQuery });
+  const pubs = await fetchKeyPaper({ cwid, descriptorUis, contentQuery, conceptLabel, exclude });
   return NextResponse.json({ pubs });
 }

@@ -1,7 +1,7 @@
 # `/search` People concept-search — performance findings
 
 **Scope:** why broad-concept People searches saturated under concurrency, what we changed, what the numbers say, and where the remaining ceiling is.
-**Last updated:** 2026-06-26 (added §7 note on the shared Aurora-side taxonomy bottleneck).
+**Last updated:** 2026-07-03 (§7 addendum: taxonomy cache built #1420, pubs/funding mesh-only #1421, `SEARCH_PEOPLE_REASON_FROM_DOC` on both envs #1417). 2026-06-26: added §7 note on the shared Aurora-side taxonomy bottleneck.
 
 > TL;DR — The app-side query load is now minimal (one people-index query per concept search; the per-request publications aggregation is gone). On staging the optimization improved latency but did **not** clear the ~10-concurrent target — because staging OpenSearch is a single burstable `t3.medium` node and hits a **node-capacity wall at ~5 concurrent**, not because of the code. Production is a far larger cluster (`m6g.large.search ×2`, Multi-AZ). The remaining lever is cluster scale, not more app code.
 
@@ -65,7 +65,16 @@ Single-query latency improved markedly (C=1: 2.27 → 1.32 s). But C=10 stayed ~
 - **A second, Aurora-side bottleneck (found 2026-06-26).** A Publications-tab C-ramp isolated `matchQueryToTaxonomy` — the query→taxonomy resolver shared by **both** tabs — as the dominant cost under concurrency: ~8.6 s at C=5 vs ~1.3 s for the OpenSearch search+aggs, because it runs two `publicationTopic.groupBy` queries **per matched candidate** (`getCounts`), uncached across requests. That is an **Aurora** ceiling independent of the OpenSearch one above, and the People path pays it too. An app-CPU bump did **not** move it (proof it's DB I/O, not CPU); the lever is a cross-request taxonomy cache. Full detail: [`performance-baseline.md` § Search performance findings (2026-06-26)](./performance-baseline.md).
 - **What's unverified:** the C=10 number on the representative (prod-sized) cluster. Cheapest ways to get it without a production release: (a) re-run the staging load test now to quantify #1285 on the `t3.medium`; (b) temporarily resize staging to `m6g.large` and load-test the optimized path; (c) fold into the next planned prod release (prod is ~350 commits behind; deploying it is a large multi-feature release, and exercising the *fixed* path on prod additionally needs a prod people-reindex for `meshSubtreeCounts` + flipping `SEARCH_PEOPLE_REASON_FROM_DOC` on for prod).
 
+**Update 2026-07-03 — the taxonomy lever above was built and the prod flag flipped** (full search/faceting audit, tracker **#1415**; see [`performance-baseline.md` § Search performance findings, item 4](./performance-baseline.md)):
+
+- **The cross-request taxonomy cache is built.** `getCounts` is now SWR-cached cross-request (`lib/api/search-taxonomy.ts`, #1420), so the per-candidate `groupBy` load called out above no longer recurs per request.
+- **The publications/funding branches skip the resolver's Prisma enrichment entirely** (#1421) — the People path still runs the full resolver, but the pub/funding tabs never pay it, and staging `Server-Timing` for this query class now reads `taxonomy;dur=0`.
+- **`SEARCH_PEOPLE_REASON_FROM_DOC` is now ON in both envs** (#1417; verified in the live prod task-def `:21`), so the fixed doc-reason path runs in prod, not just staging.
+- **The prod image roll is done** (GH Actions run 28624978997, deployed 2026-07-02 — `/api/search` now serves gzip on the wire and `SEARCH_PEOPLE_REASON_FROM_DOC` is on in prod, rev 21) and **`meshSubtreeCounts` is populated on the prod people index** (verified 2026-07-03 by a direct `_source` read — 118 of a 200-doc sample carry a non-empty map). Note the field is mapped `enabled: false`, so it lives in `_source` (where the doc-reason path reads it O(1)) but is **not** matchable by an `exists` query. The reason-from-doc path therefore serves real counts in prod — **#1404 resolved**.
+
 ## 8. Reusable load-test tooling
 
-- `/tmp/sps-loadtest.sh ‹label›` — C-ramp (1→10), reports ttfb + total p50/p90/max and non-200 count per level. Rotates broad concepts to defeat the response cache so OpenSearch is actually loaded. macOS-safe (percentile via `sort -n` + index, not gawk `asort`; `gunzip -c` not `zcat`). Base: `https://scholars-staging.weill.cornell.edu/search`.
-- `/tmp/sps-satcheck.sh` — sequential-vs-concurrent saturation isolator (the probe that proved the node-capacity wall).
+Committed under [`scripts/perf/`](../scripts/perf/) (read-only GETs; run from the WCM network; `--selftest` for a no-network sanity check):
+
+- [`scripts/perf/sps-loadtest.sh`](../scripts/perf/sps-loadtest.sh) `‹label›` — C-ramp (default `1 5 8 10`), reports ttfb + total p50/p90/max and non-200 count per level. Rotates broad concepts to defeat the response cache so OpenSearch is actually loaded. macOS-safe (percentile via `sort -n` + index, not gawk `asort`). Hits `GET $HOST/api/search?type=people&q=…` (default `HOST=https://scholars-staging.weill.cornell.edu`; set `HOST=…scholars.weill.cornell.edu` for prod, or `PATH_TMPL` for the streamed `/search` page).
+- [`scripts/perf/sps-satcheck.sh`](../scripts/perf/sps-satcheck.sh) — sequential-vs-concurrent saturation isolator (the probe that proved the node-capacity wall): a large sequential→concurrent per-query gap means the OpenSearch node is the wall, not the app.

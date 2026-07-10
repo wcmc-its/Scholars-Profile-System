@@ -42,7 +42,8 @@ import {
 import { loadOverviewSelectionDeltas } from "@/lib/edit/overview-selection-store";
 import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import { type UnitScholarLookup } from "@/lib/edit/unit-scholar-authz";
-import { editError, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import { editError, editRateLimited, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import { recordCvExportAttempt } from "@/lib/edit/rate-limit";
 import { getScholarFullProfileBySlug, type ProfilePayload } from "@/lib/api/profile";
 import { getMenteesForMentor, type MenteeChip } from "@/lib/api/mentoring";
 import { filterHiddenMentees, hiddenMenteeCwids } from "@/lib/mentee-suppression";
@@ -51,6 +52,7 @@ import {
   buildWcmCvBuffer,
   isCvEnabled,
   type CvInput,
+  type HistoricalAppointment,
   type PopsEnrichment,
   type PubForCitation,
 } from "@/lib/edit/cv-export";
@@ -123,6 +125,26 @@ export async function POST(request: NextRequest): Promise<Response> {
     return editError(403, authz.reason);
   }
 
+  // --- rate limit (mirrors the overview/biosketch generators): every export is
+  //     a fresh Bedrock generation, so count the attempt BEFORE any assembly or
+  //     gateway cost. Keyed on the TARGET scholar under the distinct `cv:`
+  //     namespace, so the cap holds regardless of which authorized actor
+  //     exports and never collides with the sibling generator caps. ---
+  const rate = await recordCvExportAttempt(entityId);
+  if (!rate.allowed) {
+    console.warn(
+      JSON.stringify({
+        event: "cv_export_rate_limited",
+        path: PATH,
+        actor_cwid: session.cwid,
+        target_cwid: entityId,
+        count: rate.count,
+        limit: rate.limit,
+      }),
+    );
+    return editRateLimited(rate.retryAfterSeconds);
+  }
+
   // --- assemble (DB reads). The CV's content sections all come from the
   //     suppression-honoring `ProfilePayload`; `OverviewFacts` is the M1 feedstock
   //     ONLY. Mentees re-apply the mentor's FERPA hide choices (the loader does
@@ -133,6 +155,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   let pops: PopsEnrichment | null = null;
   let mentees: MenteeChip[] = [];
   let bibliography: PubForCitation[] = [];
+  let historicalAppointments: HistoricalAppointment[] = [];
   try {
     const scholar = await db.read.scholar.findUnique({
       where: { cwid: entityId },
@@ -201,6 +224,22 @@ export async function POST(request: NextRequest): Promise<Response> {
     bibliography = profile.publications
       .map((pub) => byPmid.get(pub.pmid))
       .filter((row): row is PubForCitation => row != null);
+
+    // Historical appointments (#1323) — the CV exports ALL `ED-HISTORICAL` rows
+    // regardless of `showOnProfile`, and they are NOT in the (active-only,
+    // hidden-excluding) `ProfilePayload`, so load them directly here.
+    const historicalRows = await db.read.appointment.findMany({
+      where: { cwid: entityId, source: "ED-HISTORICAL" },
+      select: { title: true, organization: true, startDate: true, endDate: true },
+      orderBy: { endDate: "desc" },
+    });
+    historicalAppointments = historicalRows.map((a) => ({
+      title: a.title,
+      organization: a.organization,
+      startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
+      endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
+      isActive: false,
+    }));
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
@@ -221,7 +260,14 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // --- build the WCM CV `.docx` and stream it as an attachment. ---
   try {
-    const input: CvInput = { profile, mentees, researchSummary, pops, bibliography };
+    const input: CvInput = {
+      profile,
+      mentees,
+      researchSummary,
+      pops,
+      bibliography,
+      historicalAppointments,
+    };
     const buffer = await buildWcmCvBuffer(input);
     const filename = `${profile.slug}-wcm-cv.docx`;
     return new NextResponse(new Uint8Array(buffer), {

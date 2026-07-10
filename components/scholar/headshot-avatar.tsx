@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { cn, initials } from "@/lib/utils";
 
@@ -55,6 +55,13 @@ export function HeadshotAvatar({
   );
   const noImage = !identityImageEndpoint || !cwid;
 
+  // #1387 — Radix AvatarImage only mounts its <img> on the client, so rendering
+  // it during the initial (hydration) render diverges from the server's
+  // fallback-only markup → React #418 hydration mismatch. Defer it past mount so
+  // the first client render matches SSR (fallback only), then swap the image in.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   const dataState: HeadshotState = noImage
     ? "fallback"
     : imgStatus === "loaded"
@@ -68,7 +75,7 @@ export function HeadshotAvatar({
       data-headshot-state={dataState}
       className={cn(SIZE_CLASS[size], "shrink-0", className)}
     >
-      {!noImage && (
+      {mounted && !noImage && (
         <AvatarImage
           src={identityImageEndpoint}
           // Decorative: every headshot is rendered next to the scholar's name as

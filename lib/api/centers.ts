@@ -33,9 +33,9 @@ import type {
 import {
   isAuthorHidden,
   isUnitSuppressed,
-  loadPublicationSuppressions,
+  loadAllPublicationSuppressions,
   resolveActiveGrantSuppression,
-  resolveDarkPmids,
+  resolveUnitDarkPmids,
 } from "@/lib/api/manual-layer";
 import {
   loadPublicFamiliesForMembers,
@@ -242,6 +242,10 @@ export type CenterMemberFamily = MemberMethodFamily;
  *  classification (#552) the facet sidebar + per-row badge consume. */
 export type CenterMemberHit = DepartmentFacultyHit & {
   membershipType: CenterMembershipType | null;
+  /** #1570 — ASMS professorial rank ("Professor" / "Associate Professor" /
+   *  "Assistant Professor"), or null for members without one. Powers the
+   *  "Professorial rank" facet in the roster sidebar. */
+  professorialRank: string | null;
   /** #962 — ALL public method families for this member, pmidCount desc. Facet
    *  membership reads this set. Present only when CENTER_METHODS_FACET is on AND
    *  the member has ≥1 public family; undefined otherwise (so the OFF-path payload
@@ -393,14 +397,16 @@ type CenterScholarRow = {
   primaryDepartment: string | null;
   roleCategory: string | null;
   overview: string | null;
+  professorialRank: string | null;
   department: { name: string } | null;
   division: { name: string } | null;
 };
 
-/** Hydrate scholar rows into `DepartmentFacultyHit`s with pub/grant counts. */
+/** Hydrate scholar rows into `DepartmentFacultyHit`s (plus the #1570 professorial
+ *  rank the center facet reads) with pub/grant counts. */
 async function buildCenterMemberHits(
   rows: CenterScholarRow[],
-): Promise<DepartmentFacultyHit[]> {
+): Promise<Array<DepartmentFacultyHit & { professorialRank: string | null }>> {
   const cwids = rows.map((s) => s.cwid);
   const now = new Date();
   const [pubCounts, grantRows] = cwids.length > 0
@@ -445,6 +451,7 @@ async function buildCenterMemberHits(
     identityImageEndpoint: identityImageEndpoint(s.cwid),
     roleCategory: formatRoleCategory(s.roleCategory),
     overview: s.overview,
+    professorialRank: s.professorialRank,
     pubCount: pubMap.get(s.cwid) ?? 0,
     grantCount: grantMap.get(s.cwid) ?? 0,
   }));
@@ -503,7 +510,9 @@ async function getCenterMembersUncached(
   for (const m of activeMemberships) {
     membershipTypeByCwid.set(m.cwid, m.membershipType);
   }
-  const attachType = (hs: DepartmentFacultyHit[]): CenterMemberHit[] =>
+  const attachType = (
+    hs: Array<DepartmentFacultyHit & { professorialRank: string | null }>,
+  ): CenterMemberHit[] =>
     hs.map((h) => ({
       ...h,
       membershipType: membershipTypeByCwid.get(h.cwid) ?? null,
@@ -541,6 +550,7 @@ async function getCenterMembersUncached(
       primaryDepartment: true,
       roleCategory: true,
       overview: true,
+      professorialRank: true,
       department: { select: { name: true } },
       division: { select: { name: true } },
     },
@@ -633,6 +643,9 @@ export type ProgramLeader = {
   identityImageEndpoint: string;
   /** Interim/acting qualifier — renders "Interim Leader". */
   isInterim: boolean;
+  /** #1570 — "leader" (a program lead) or "coe_liaison" (rendered as a separate
+   *  "COE Liaison" card AFTER the leaders). */
+  role: "leader" | "coe_liaison";
 };
 
 /** #1105 — a dedicated per-program page detail. */
@@ -681,16 +694,20 @@ export async function getCenterProgram(
       description: true,
       leaders: {
         orderBy: [{ sortOrder: "asc" }, { cwid: "asc" }],
-        select: { cwid: true, interim: true },
+        select: { cwid: true, interim: true, role: true },
       },
     },
   });
   if (!program) return null;
 
-  // Leaders (#1117) — 0..N rows in display order. Each `cwid` resolves to a WCM
-  // scholar (profile-linked) or the external-leader fallback keyed
-  // `<centerCode>:<programCode>` (used only when that entry names THIS cwid).
-  // A cwid that resolves to neither is dropped — never fabricate a name.
+  // Leaders (#1117) + COE liaisons (#1570) — 0..N rows in display order. Each
+  // `cwid` resolves to a WCM scholar (profile-linked) or the external-leader
+  // fallback keyed `<centerCode>:<programCode>` (used only when that entry names
+  // THIS cwid). A cwid that resolves to neither is dropped — never fabricate a
+  // name. Leaders render first, then COE liaisons; within each group the join's
+  // `sortOrder` (then cwid) order is preserved. We order by an explicit
+  // role RANK (leader=0, coe_liaison=1), NOT alphabetically by the role string
+  // ("coe_liaison" sorts BEFORE "leader" lexically — the wrong order).
   let leaders: ProgramLeader[] = [];
   if (program.leaders.length > 0) {
     const scholars = await prisma.scholar.findMany({
@@ -699,7 +716,14 @@ export async function getCenterProgram(
     });
     const scholarByCwid = new Map(scholars.map((s) => [s.cwid, s]));
     const ext = EXTERNAL_LEADERS[`${center.code}:${code}`];
-    leaders = program.leaders.flatMap((row): ProgramLeader[] => {
+    const roleRank = (role: string): number => (role === "coe_liaison" ? 1 : 0);
+    // Stable sort: leaders (rank 0) before liaisons (rank 1); the join already
+    // ordered by sortOrder,cwid so the within-group order is preserved.
+    const orderedRows = [...program.leaders].sort(
+      (a, b) => roleRank(a.role) - roleRank(b.role),
+    );
+    leaders = orderedRows.flatMap((row): ProgramLeader[] => {
+      const role: "leader" | "coe_liaison" = row.role === "coe_liaison" ? "coe_liaison" : "leader";
       const scholar = scholarByCwid.get(row.cwid);
       if (scholar) {
         return [
@@ -710,6 +734,7 @@ export async function getCenterProgram(
             primaryTitle: scholar.primaryTitle,
             identityImageEndpoint: identityImageEndpoint(scholar.cwid),
             isInterim: row.interim,
+            role,
           },
         ];
       }
@@ -722,6 +747,7 @@ export async function getCenterProgram(
             primaryTitle: ext.primaryTitle,
             identityImageEndpoint: identityImageEndpoint(ext.cwid),
             isInterim: row.interim,
+            role,
           },
         ];
       }
@@ -769,17 +795,18 @@ async function getCenterPublicationsListUncached(
     return { hits: [], total: 0, page, pageSize: PUB_PAGE_SIZE };
   }
 
-  const pmidRows = (await prisma.publicationAuthor.findMany({
-    where: { isConfirmed: true, cwid: { in: memberCwids } },
-    select: { pmid: true },
-    distinct: ["pmid"],
-  })) as Array<{ pmid: string }>;
-  const poolPmids = pmidRows.map((r) => r.pmid);
-  // #356 — drop taken-down / derived-dark publications before paginating.
-  const suppressions = await loadPublicationSuppressions(poolPmids, prisma);
-  const darkPmids = await resolveDarkPmids(poolPmids, suppressions, prisma);
-  const allPmids = poolPmids.filter((p) => !darkPmids.has(p));
-  const total = allPmids.length;
+  // #1505 — push center membership into the page query/count via an
+  // `authors: { some }` relation filter instead of materializing every distinct
+  // member pmid; invert suppression (see resolveUnitDarkPmids). #356 — total and
+  // the page window are both computed over this visible set.
+  const membership = { cwid: { in: memberCwids } };
+  const suppressions = await loadAllPublicationSuppressions(prisma);
+  const unitDarkPmids = await resolveUnitDarkPmids(suppressions, membership, prisma);
+  const visibleWhere = {
+    authors: { some: { isConfirmed: true, ...membership } },
+    ...(unitDarkPmids.length > 0 ? { pmid: { notIn: unitDarkPmids } } : {}),
+  };
+  const total = await prisma.publication.count({ where: visibleWhere });
   if (total === 0) {
     return { hits: [], total: 0, page, pageSize: PUB_PAGE_SIZE };
   }
@@ -790,7 +817,7 @@ async function getCenterPublicationsListUncached(
       : [{ dateAddedToEntrez: "desc" as const }, { pmid: "asc" as const }];
 
   const pubs = await prisma.publication.findMany({
-    where: { pmid: { in: allPmids } },
+    where: visibleWhere,
     orderBy,
     skip: page * PUB_PAGE_SIZE,
     take: PUB_PAGE_SIZE,
@@ -936,20 +963,17 @@ export async function getCenterHighlights(
   }
 
   // Top 3 publications by citation × recency among member-authored work.
-  const poolPmids = await prisma.publicationAuthor
-    .findMany({
-      where: { isConfirmed: true, cwid: { in: memberCwids } },
-      select: { pmid: true },
-      distinct: ["pmid"],
-    })
-    .then((r) => r.map((x) => x.pmid));
-  // #356 — exclude publications taken down or derived-dark from the pool.
-  const suppressions = await loadPublicationSuppressions(poolPmids, prisma);
-  const darkPmids = await resolveDarkPmids(poolPmids, suppressions, prisma);
-  const memberPmids = poolPmids.filter((p) => !darkPmids.has(p));
+  // #1505 — push membership into the query; invert suppression (see
+  // resolveUnitDarkPmids). No pagination/total here — just the top 3 visible.
+  const membership = { cwid: { in: memberCwids } };
+  const suppressions = await loadAllPublicationSuppressions(prisma);
+  const unitDarkPmids = await resolveUnitDarkPmids(suppressions, membership, prisma);
 
   const pubs = await prisma.publication.findMany({
-    where: { pmid: { in: memberPmids } },
+    where: {
+      authors: { some: { isConfirmed: true, ...membership } },
+      ...(unitDarkPmids.length > 0 ? { pmid: { notIn: unitDarkPmids } } : {}),
+    },
     orderBy: [{ citationCount: "desc" }, { dateAddedToEntrez: "desc" }],
     take: 3,
     select: {

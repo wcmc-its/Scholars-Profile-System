@@ -1,11 +1,4 @@
-import {
-  CfnOutput,
-  Duration,
-  Fn,
-  RemovalPolicy,
-  Stack,
-  type StackProps,
-} from "aws-cdk-lib";
+import { CfnOutput, Duration, Fn, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
 import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
 import * as cloudwatchActions from "aws-cdk-lib/aws-cloudwatch-actions";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
@@ -18,10 +11,12 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as sns from "aws-cdk-lib/aws-sns";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as sfn from "aws-cdk-lib/aws-stepfunctions";
 import * as tasks from "aws-cdk-lib/aws-stepfunctions-tasks";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
+import { resolveSharedSg, resolveTierSubnets } from "./shared-vpc-subnets";
 
 /** Props for {@link EtlStack}. */
 export interface EtlStackProps extends StackProps {
@@ -29,8 +24,6 @@ export interface EtlStackProps extends StackProps {
   readonly envConfig: SpsEnvConfig;
   /** VPC every workload runs in (from NetworkStack). */
   readonly vpc: ec2.IVpc;
-  /** SG attached to ETL Fargate tasks (from NetworkStack). */
-  readonly etlSecurityGroup: ec2.ISecurityGroup;
   /** ECS cluster the ETL task family runs in (from AppStack). */
   readonly ecsCluster: ecs.ICluster;
   /**
@@ -46,11 +39,25 @@ export interface EtlStackProps extends StackProps {
  * `$.startFrom` token operators pass to skip ahead); `npmScript` is the
  * `npm run` script the container executes; `external` marks sources that
  * need a per-source secret from SecretsStack.
+ *
+ * `tier` classifies how a failure of this step is handled (reliability-audit
+ * PR-7). Only the nightly/weekly cadence steps set it:
+ *   - `"abort"`   — failure PAGES (publishes to `etl-page-<env>`) and STOPS the
+ *                   chain (`.next(Fail)`). For the spine (Ed/Reciter/Dynamodb/
+ *                   search:index) + the terminal Integrity validator: a
+ *                   stale-but-coherent site beats a broken one.
+ *   - `"continue"`— failure WARNS (publishes to the existing `etl-failures-<env>`)
+ *                   and PROCEEDS to the next step (`.next(successor)`). For the
+ *                   enrichers, whose absence degrades gracefully.
+ *   - omitted     — legacy: failure warns (`etl-failures-<env>`) and stops the
+ *                   chain. Kept for the single-step / non-cadence machines
+ *                   (annual, heartbeat) whose one failure mode should not page.
  */
 interface StepSpec {
   readonly id: string;
   readonly npmScript: string;
   readonly external: boolean;
+  readonly tier?: "abort" | "continue";
 }
 
 /**
@@ -82,7 +89,7 @@ interface StepSpec {
  *   Lambda variant is not introduced here; the metric-based alarms cover
  *   the same failure modes with fewer moving parts.
  * - **D7.** Cadences: nightly `cron(0 7 * * ? *)`, weekly
- *   `cron(0 8 ? * SUN *)`, annual `cron(0 9 1 7 ? *)` — all UTC.
+ *   `cron(0 12 ? * SUN *)`, annual `cron(0 9 1 7 ? *)` — all UTC.
  *
  * Cross-stack handoff: this stack consumes the AppStack ECS cluster and
  * the dedicated ETL ECR repo via constructor props (CDK auto-wires the
@@ -95,6 +102,14 @@ interface StepSpec {
 export class EtlStack extends Stack {
   /** SNS topic every failure / cadence alarm publishes to (B23 wires PagerDuty). */
   public readonly failureTopic: sns.Topic;
+  /**
+   * P1 page topic for abort-tier step failures (reliability-audit PR-7). The
+   * on-call relay routes any topic that is neither `sps-warn-*` nor
+   * `etl-failures-*` to the page channel, so this needs no relay change; the
+   * subscription is wired in ObservabilityStack (same cycle-avoidance pattern
+   * as `failureTopic`).
+   */
+  public readonly pageTopic: sns.Topic;
   /** Fargate task family every state-machine step launches. */
   public readonly etlTaskDefinition: ecs.FargateTaskDefinition;
   /** Three cadence state machines: nightly, weekly, annual. */
@@ -111,7 +126,12 @@ export class EtlStack extends Stack {
   constructor(scope: Construct, id: string, props: EtlStackProps) {
     super(scope, id, props);
 
-    const { envConfig, etlSecurityGroup, ecsCluster, etlEcrRepository } = props;
+    const { envConfig, ecsCluster, etlEcrRepository } = props;
+    // Item-3 pass 2a: import the ETL SG by id from the SSM param NetworkStack
+    // publishes (pass 1) instead of the cross-stack handle — severs the SG `Ref`
+    // export that would lock the useSharedVpc flip. Used only as `.securityGroupId`
+    // and as a `securityGroups` array member, both valid on an imported SG.
+    const etlSecurityGroup = resolveSharedSg(this, envConfig, "etl", "EtlSg");
     const env = envConfig.envName;
     // `vpc` is in props for future SG lookups + API consistency with the
     // other stacks. ECS RunTask resolves the VPC from `ecsCluster`, so
@@ -129,8 +149,13 @@ export class EtlStack extends Stack {
     // regardless of which SG it modifies (mirrors AppStack's pattern that
     // breaks the App <-> Network cycle).
     // ------------------------------------------------------------------
-    const internalAlbSgId = Fn.importValue(
-      `Sps-App-${env}-InternalAlbSecurityGroupId`,
+    // Item-3 pass 2b: read the internal-ALB SG id from the SSM param AppStack
+    // publishes (pass 1) instead of the cross-stack named export — severs the
+    // App→Etl import (edge 6) that would lock the flip (the internal ALB replaces
+    // onto the shared VPC). The standalone ingress below is otherwise unchanged.
+    const internalAlbSgId = ssm.StringParameter.valueForStringParameter(
+      this,
+      `/sps/${env}/app/internal-alb-sg-id`,
     );
     new ec2.CfnSecurityGroupIngress(this, "InternalAlbIngressFromEtl", {
       groupId: internalAlbSgId,
@@ -141,68 +166,14 @@ export class EtlStack extends Stack {
       description: `ETL SG to SPS internal ALB HTTP (${env}) -- /api/revalidate`,
     });
 
-    // ------------------------------------------------------------------
-    // ETL cadence VPC relocation (docs/etl-vpc-migration-handoff.md).
-    //
-    // The cadence task family reads on-prem LDAP + the 10.46.x source DBs
-    // (reachable only via the TGW) and writes Aurora / OpenSearch / the
-    // internal ALB (in the Sps VPC). The Sps VPC can't be TGW-attached
-    // (10.20/10.10 overlap), so when `etlCadenceVpcRelocated` is set the
-    // cadence steps run in the TGW-attached scholars-dev/prod VPC
-    // (envConfig.edExportVpc — the same import the ED bridge uses) and reach
-    // the datastores back in the Sps VPC over an intra-account VPC peering
-    // connection. OFF by default: the peering + datastore CIDR ingress must
-    // exist first, or the move regresses the (working) write side. The subnet
-    // selection + SG are built ONCE here and shared by every cadence step (the
-    // reconcilers + curated backup don't move — they only touch the Sps VPC's
-    // own datastores and stay on `etlSecurityGroup`).
-    // ------------------------------------------------------------------
-    const relocateCadence = envConfig.etlCadenceVpcRelocated;
-    let cadenceSubnets: ec2.SubnetSelection = {
-      subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-    };
-    let cadenceSecurityGroups: ec2.ISecurityGroup[] = [etlSecurityGroup];
-    if (relocateCadence) {
-      const cadVpcCfg = envConfig.edExportVpc;
-      // Import by attributes (no context lookup → synth stays deterministic
-      // without account creds). Distinct construct ids from the ED bridge's
-      // EdExportVpc/EdExportSubnet* so the two imports of the same real VPC
-      // don't collide.
-      const cadenceVpc = ec2.Vpc.fromVpcAttributes(this, "EtlCadenceVpc", {
-        vpcId: cadVpcCfg.vpcId,
-        availabilityZones: [...cadVpcCfg.availabilityZones],
-        privateSubnetIds: [...cadVpcCfg.appSubnetIds],
-      });
-      cadenceSubnets = {
-        subnets: cadVpcCfg.appSubnetIds.map((id, i) =>
-          ec2.Subnet.fromSubnetId(this, `EtlCadenceSubnet${i}`, id),
-        ),
-      };
-      // One egress-only SG for the whole cadence family. allowAllOutbound
-      // covers the TGW (on-prem + 10.46.x reads), the peer (Aurora/OpenSearch/
-      // ALB writes), and NAT (S3 / Secrets Manager / DynamoDB / public APIs).
-      // No ingress — a batch task accepts no inbound connections.
-      const cadenceSg = new ec2.SecurityGroup(this, "EtlCadenceSg", {
-        vpc: cadenceVpc,
-        description: `SPS ETL cadence task egress (${env}).`,
-        allowAllOutbound: true,
-      });
-      cadenceSecurityGroups = [cadenceSg];
-
-      // The relocated cadence reaches the internal ALB (etl:revalidate POST to
-      // /api/revalidate) from the scholars-dev CIDR over the peer, not the Sps
-      // ETL SG. Aurora (:3306) + OpenSearch (:443) CIDR ingress are added in
-      // DataStack (it owns those SGs); the ALB SG lives in AppStack, so we
-      // attach a standalone ingress here (same pattern as the rule above).
-      new ec2.CfnSecurityGroupIngress(this, "InternalAlbIngressFromEtlCadenceVpc", {
-        groupId: internalAlbSgId,
-        ipProtocol: "tcp",
-        fromPort: 80,
-        toPort: 80,
-        cidrIp: envConfig.etlPeerCidr,
-        description: `ETL cadence VPC ${envConfig.etlPeerCidr} to SPS internal ALB HTTP (${env}) -- /api/revalidate`,
-      });
-    }
+    // Estate-consolidation subnet placement (plan §4.4): every ETL Fargate task
+    // (cadence + reconcilers + curated backup + opportunity projection + the ED
+    // import side) lands in the app2 tier when useSharedVpc is on, else the
+    // standalone Sps VPC's PRIVATE_WITH_EGRESS — byte-identical otherwise. Built
+    // ONCE and reused by every task placement below. (#1310's cross-VPC
+    // relocation branch was removed in the supersede — plan §8.8.)
+    const etlTaskSubnets = resolveTierSubnets(this, envConfig, "app", "EtlTaskSubnet");
+    const etlTaskSecurityGroups: ec2.ISecurityGroup[] = [etlSecurityGroup];
 
     // ------------------------------------------------------------------
     // ETL secrets, looked up by name (SecretsStack owns the stubs; values
@@ -227,6 +198,17 @@ export class EtlStack extends Stack {
       this,
       "EtlDbSecret",
       `scholars/${env}/db/etl`,
+    );
+    // Read-only app DSN — injected ONLY into the main `sps-etl-${env}` task def
+    // (below) as DATABASE_URL_RO, so `scripts/run-staging-probe.sh` runs its
+    // "READ-ONLY probe" against the SELECT-only Aurora user instead of the
+    // read-write ETL DSN. Not fanned into baseSecrets (the fan-out defs never
+    // run probes and must not carry it) and its exec-role grant is scoped to
+    // this def's execution role only.
+    const appRoSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "AppRoSecret",
+      `scholars/${env}/db/app-ro`,
     );
     const opensearchEtlSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
@@ -256,11 +238,7 @@ export class EtlStack extends Stack {
       {
         constructId: "EtlSecretEd",
         secretName: `scholars/${env}/etl/ed`,
-        keys: [
-          "SCHOLARS_LDAP_URL",
-          "SCHOLARS_LDAP_BIND_DN",
-          "SCHOLARS_LDAP_BIND_PASSWORD",
-        ],
+        keys: ["SCHOLARS_LDAP_URL", "SCHOLARS_LDAP_BIND_DN", "SCHOLARS_LDAP_BIND_PASSWORD"],
       },
       {
         constructId: "EtlSecretAsms",
@@ -276,11 +254,7 @@ export class EtlStack extends Stack {
       {
         constructId: "EtlSecretInfoed",
         secretName: `scholars/${env}/etl/infoed`,
-        keys: [
-          "SCHOLARS_INFOED_DB_URL",
-          "SCHOLARS_INFOED_USERNAME",
-          "SCHOLARS_INFOED_PASSWORD",
-        ],
+        keys: ["SCHOLARS_INFOED_DB_URL", "SCHOLARS_INFOED_USERNAME", "SCHOLARS_INFOED_PASSWORD"],
       },
       {
         constructId: "EtlSecretCoi",
@@ -333,18 +307,53 @@ export class EtlStack extends Stack {
       },
     ];
     const perSourceSecrets = credentialedSources.map((src) =>
-      secretsmanager.Secret.fromSecretNameV2(
-        this,
-        src.constructId,
-        src.secretName,
-      ),
+      secretsmanager.Secret.fromSecretNameV2(this, src.constructId, src.secretName),
     );
-    const allConsumerSecretArns: string[] = [
+    // #1508 -- secrets grouped by the task def that injects them, so no ETL
+    // step carries a credential it doesn't use. Base secrets ride every def;
+    // each per-source secret rides only its group's def (and that def's
+    // execution role reads only those ARNs). The group membership below is the
+    // authoritative source→step mapping: verified against which lib/sources/*
+    // loader each cadence step's npm script imports.
+    const baseSecretArns = [
       dbEtlSecret.secretArn,
       opensearchEtlSecret.secretArn,
       revalidateTokenSecret.secretArn,
-      ...perSourceSecrets.map((s) => s.secretArn),
     ];
+    const perSourceByConstructId = new Map(
+      credentialedSources.map((src, i) => [src.constructId, { src, secret: perSourceSecrets[i] }]),
+    );
+    // Which per-source secrets each non-base task def carries (by construct id).
+    const SOURCES_SECRET_IDS = [
+      "EtlSecretAsms",
+      "EtlSecretInfoed",
+      "EtlSecretCoi",
+      "EtlSecretReciter",
+      "EtlSecretJenzabar",
+    ];
+    const LDAP_SECRET_IDS = ["EtlSecretEd"];
+    const RECITER_API_SECRET_IDS = ["EtlSecretReciterApi"];
+    const secretArnsFor = (ids: string[]): string[] =>
+      ids.map((id) => {
+        const e = perSourceByConstructId.get(id);
+        if (!e) throw new Error(`unknown ETL secret construct id: ${id}`);
+        return e.secret.secretArn;
+      });
+    // Fan a group's per-source secrets into the granular `SCHOLARS_*` env vars
+    // its config loaders read (#442). The injected env-var name equals the
+    // secret's JSON key; a key absent from the seeded secret fails task-start,
+    // so `keys` must match the seeded shape exactly.
+    const fanSecrets = (ids: string[]): { [k: string]: ecs.Secret } => {
+      const out: { [k: string]: ecs.Secret } = {};
+      for (const id of ids) {
+        const e = perSourceByConstructId.get(id);
+        if (!e) throw new Error(`unknown ETL secret construct id: ${id}`);
+        for (const key of e.src.keys) {
+          out[key] = ecs.Secret.fromSecretsManager(e.secret, key);
+        }
+      }
+      return out;
+    };
 
     // ------------------------------------------------------------------
     // CloudWatch log group for the ETL task family.
@@ -361,8 +370,10 @@ export class EtlStack extends Stack {
     // IAM role split — same execution/task pattern AppStack uses (B06).
     //
     // - Execution role: ECR pull, secret injection at task-start, log
-    //   stream write. `secretsmanager:GetSecretValue` resource list is the
-    //   eight concrete ARNs above -- never `*`. Asserted in the tests.
+    //   stream write. This BASE role's `secretsmanager:GetSecretValue` lists
+    //   ONLY the three base ARNs -- never `*`, never a per-source secret
+    //   (#1508). The sources/ldap/reciter-api defs get their own scoped roles
+    //   below. Asserted in the tests.
     // - Task role: identity the running ETL Node process assumes. Today
     //   the scripts read secrets via env vars (injected by ECS), so the
     //   task role itself has zero AWS-API permissions.
@@ -394,7 +405,9 @@ export class EtlStack extends Stack {
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: ["secretsmanager:GetSecretValue"],
-        resources: allConsumerSecretArns,
+        // appRoSecret rides the base execution role (main `sps-etl-${env}` def)
+        // only — NOT baseSecretArns, which the fan-out defs' roles also read.
+        resources: [...baseSecretArns, appRoSecret.secretArn],
       }),
     );
     taskExecutionRole.addToPolicy(
@@ -532,50 +545,128 @@ export class EtlStack extends Stack {
     // (#442). The IAM-based sources (dynamodb/spotlight/hierarchy) take
     // their non-secret config from the `environment:` block.
     // ------------------------------------------------------------------
-    const containerImage = ecs.ContainerImage.fromEcrRepository(
-      etlEcrRepository,
-      "latest",
-    );
-    this.etlTaskDefinition = new ecs.FargateTaskDefinition(
-      this,
-      "EtlTaskDefinition",
-      {
-        family: `sps-etl-${env}`,
-        cpu: envConfig.etlTaskCpu,
-        memoryLimitMiB: envConfig.etlTaskMemoryMiB,
-        executionRole: taskExecutionRole,
-        taskRole,
-      },
-    );
-    const containerSecrets: { [k: string]: ecs.Secret } = {
+    const containerImage = ecs.ContainerImage.fromEcrRepository(etlEcrRepository, "latest");
+    this.etlTaskDefinition = new ecs.FargateTaskDefinition(this, "EtlTaskDefinition", {
+      family: `sps-etl-${env}`,
+      cpu: envConfig.etlTaskCpu,
+      memoryLimitMiB: envConfig.etlTaskMemoryMiB,
+      executionRole: taskExecutionRole,
+      taskRole,
+    });
+    // Base secrets every ETL task def carries (#1508). Per-source secrets are
+    // NOT fanned in here -- they go only on the task def whose steps read them
+    // (see the task-def units below), so a public-API/IAM step never receives
+    // the LDAP bind password or the ReCiter admin key.
+    const baseSecrets: { [k: string]: ecs.Secret } = {
       DATABASE_URL: ecs.Secret.fromSecretsManager(dbEtlSecret),
-      OPENSEARCH_USER: ecs.Secret.fromSecretsManager(
-        opensearchEtlSecret,
-        "username",
-      ),
-      OPENSEARCH_PASS: ecs.Secret.fromSecretsManager(
-        opensearchEtlSecret,
-        "password",
-      ),
+      // Cutover de-coupling (§8.4): when on, OPENSEARCH_NODE comes from the
+      // secret's `node` key instead of the dropped cross-stack export.
+      ...(envConfig.openSearchNodeFromSecret
+        ? {
+            OPENSEARCH_NODE: ecs.Secret.fromSecretsManager(opensearchEtlSecret, "node"),
+          }
+        : {}),
+      OPENSEARCH_USER: ecs.Secret.fromSecretsManager(opensearchEtlSecret, "username"),
+      OPENSEARCH_PASS: ecs.Secret.fromSecretsManager(opensearchEtlSecret, "password"),
       // Read by etl/orchestrate.ts as SCHOLARS_REVALIDATE_TOKEN -- the
       // env-var name is the contract. #447
-      SCHOLARS_REVALIDATE_TOKEN:
-        ecs.Secret.fromSecretsManager(revalidateTokenSecret),
+      SCHOLARS_REVALIDATE_TOKEN: ecs.Secret.fromSecretsManager(revalidateTokenSecret),
     };
-    // Fan each per-source secret out into the granular `SCHOLARS_*` env
-    // vars its config loader reads (#442). The injected env-var name equals
-    // the secret's JSON key; ECS only injects keys whose secret the
-    // execution role can read (resource list above), and a key absent from
-    // the secret JSON fails task-start -- so `keys` must match the seeded
-    // shape exactly.
-    for (const [i, src] of credentialedSources.entries()) {
-      for (const key of src.keys) {
-        containerSecrets[key] = ecs.Secret.fromSecretsManager(
-          perSourceSecrets[i],
-          key,
-        );
-      }
-    }
+    // Non-secret config the IAM-based sources read, shared by every ETL task
+    // def (#442/#1508). Values match the source-script defaults; pinned here so
+    // the deployed config is explicit rather than implicit in code. These
+    // resources are reached via the task role (IAM), not an injected credential
+    // -- the EtlTaskRoleReciterAiPolicy above is the matching read grant:
+    //   dynamodb  -> ReciterAI publication table (task-role scan)
+    //   spotlight -> ReciterAI artifacts bucket + key prefix
+    //   hierarchy -> ReciterAI hierarchy bucket
+    const baseEnvironment: { [k: string]: string } = {
+      NODE_ENV: "production",
+      // Deployment env name for steps whose behavior is env-scoped —
+      // etl:freshness skips SLA entries for sources a given env's cadence
+      // deliberately omits (InfoEd on staging, MeshAnchor on prod).
+      SCHOLARS_ENV: env,
+      // #485 — the search:index build holds the full corpus graph in memory
+      // (178k+ publications). Node's default old-space cap (~2 GB) OOM-kills
+      // the task well under the container limit; pin the heap to ~85% of the
+      // 8 GB task memory (etlTaskMemoryMiB) so it can use what's allocated.
+      NODE_OPTIONS: "--max-old-space-size=7168",
+      SCHOLARS_DYNAMODB_TABLE: "reciterai",
+      // #918 — etl:identity scans this table for ORCID iDs → Scholar.orcid.
+      SCHOLARS_IDENTITY_TABLE: "Identity",
+      ARTIFACTS_BUCKET: "wcmc-reciterai-artifacts",
+      ARTIFACT_PREFIX: "spotlight",
+      HIERARCHY_BUCKET: "wcmc-reciterai-hierarchy",
+      // #794 — A2 canonical tools taxonomy (etl:scholar-tool). Same shared
+      // artifacts bucket as spotlight, under the tools/ prefix.
+      TOOLS_BUCKET: "wcmc-reciterai-artifacts",
+      TOOLS_PREFIX: "tools",
+      // scholar_tool producer switch (#794). "ddb" (legacy DynamoDB Block 5)
+      // was the reversible default; "s3" makes etl:scholar-tool the sole
+      // scholar_tool writer over the A2 canonical taxonomy and also populates
+      // scholar_family (the #799 Methods lens). Cutover complete for BOTH envs:
+      // staging soaked on "s3", prod signed off 2026-07-06 (reverses a team
+      // deferral + unblocks ReciterAI's legacy TOOL# deletion). Rollback = set
+      // back to "ddb". Applied via cdk deploy --exclusively Sps-Etl-<env>; run
+      // etl:scholar-tool after the deploy.
+      SCHOLAR_TOOL_SOURCE: "s3",
+      // RePORTER grants v2 PMID-overlap matcher — step 0 of etl:reporter-grants.
+      // Resolves lateral recruits with no person_nih_profile row (name →
+      // candidate profile_ids → PMID overlap → auto-lock K≥3 / propose K=2). A
+      // per-run scholar cap (REPORTER_MATCH_V2_MAX_PER_RUN, code default 500)
+      // bounds the nightly RePORTER call volume; tune it once the staging cohort
+      // is sized. STAGING-FIRST: "on" in staging now, prod stays "off" until the
+      // staging soak signs off. Applied via cdk deploy --exclusively
+      // Sps-Etl-<env> (CD only rolls the image, never deploys infra).
+      REPORTER_MATCH_V2: env === "staging" ? "on" : "off",
+      // OpenSearch domain endpoint (https://...). Default: plaintext env from
+      // the DataStack export. When openSearchNodeFromSecret is on (cutover
+      // de-coupling §8.4), the export is dropped and OPENSEARCH_NODE is
+      // injected from the opensearch secret's `node` key (baseSecrets).
+      // lib/search.ts reads OPENSEARCH_NODE; USER/PASS come from secrets. #447
+      ...(envConfig.openSearchNodeFromSecret
+        ? {}
+        : {
+            OPENSEARCH_NODE: `https://${Fn.importValue(
+              `Sps-Data-${env}-OpenSearchDomainEndpoint`,
+            )}`,
+          }),
+      // #479 — cadence revalidate step POSTs to /api/revalidate on the
+      // VPC-private internal ALB (HTTP :80; no TLS on the internal listener).
+      // The ETL SG -> internal-ALB-SG :80 ingress is already opened at the
+      // top of this stack. `etl/revalidate/index.ts` validates this origin
+      // against its allowlist before sending the bearer token.
+      SCHOLARS_BASE_URL: `http://${ssm.StringParameter.valueForStringParameter(
+        this,
+        `/sps/${env}/app/internal-alb-dns`,
+      )}`,
+      // #746 — the etl:reciter-refresh scanner (operator-run for now) reads
+      // this to deliver any deferred ReCiter rejects and fire the delayed,
+      // per-uid feature-generator re-score. STAGING-FIRST: ON in staging, OFF
+      // in prod until the staging soak completes; the EventBridge → Step
+      // Function schedule is a follow-up.
+      RECITER_REJECT_SEND: env === "staging" ? "on" : "off",
+      // #1258 — gate for the MeSH derived-anchor producer (etl:mesh-anchors).
+      // "0.9" mines descriptor→topic anchors from publication_topic.score ≥ 0.9
+      // papers; a value > 1 is the kill-switch (zero derived rows, curated-only).
+      // STAGING-FIRST: on in staging now, prod held at "2" until the staging
+      // soak signs off — then drop this override to enable prod.
+      MESH_ANCHOR_SCORE_MIN: env === "staging" ? "0.9" : "2",
+      // Destination bucket for the `backup:curated` logical-dump step. The
+      // task role is granted PutObject on exactly this bucket above; the
+      // script defaults the key prefix to "sps-curation-backups".
+      CURATION_BACKUP_BUCKET: curationBackupBucket.bucketName,
+      // #728 — write gate for the ED delegated-admin importer (etl:ed:admins,
+      // the EdAdmins nightly step). "on" enables per-unit UnitAdmin `curator`
+      // upserts + reconcile; anything else keeps the job in dry-run (no writes,
+      // no deletes). Read only by etl/ed-admins/index.ts, which runs on the
+      // LDAP task def — every task def shares baseEnvironment, but only that
+      // step consumes it. Enabled unconditionally in BOTH envs (a live dry-run
+      // resolved ~618 grants with the #1576 active-member guard working). The
+      // app-stack copy (app-stack.ts, "off") is documentation-only — no app
+      // runtime code reads it — and is deliberately left untouched here.
+      SELF_EDIT_ED_ADMINS_IMPORT: "on",
+    };
     const etlContainer = this.etlTaskDefinition.addContainer("etl", {
       image: containerImage,
       containerName: "etl",
@@ -584,82 +675,129 @@ export class EtlStack extends Stack {
         logGroup: etlLogGroup,
         streamPrefix: "etl",
       }),
-      // Non-secret config the IAM-based sources read. Values match the
-      // source-script defaults; pinned here so the deployed config is
-      // explicit rather than implicit in code (#442). These resources are
-      // reached via the task role (IAM), not an injected credential -- the
-      // EtlTaskRoleReciterAiPolicy above is the matching read grant:
-      //   dynamodb  -> ReciterAI publication table (task-role scan)
-      //   spotlight -> ReciterAI artifacts bucket + key prefix
-      //   hierarchy -> ReciterAI hierarchy bucket
-      environment: {
-        NODE_ENV: "production",
-        // #485 — the search:index build holds the full corpus graph in memory
-        // (178k+ publications). Node's default old-space cap (~2 GB) OOM-kills
-        // the task well under the container limit; pin the heap to ~85% of the
-        // 8 GB task memory (etlTaskMemoryMiB) so it can use what's allocated.
-        NODE_OPTIONS: "--max-old-space-size=7168",
-        SCHOLARS_DYNAMODB_TABLE: "reciterai",
-        // #918 — etl:identity scans this table for ORCID iDs → Scholar.orcid.
-        SCHOLARS_IDENTITY_TABLE: "Identity",
-        ARTIFACTS_BUCKET: "wcmc-reciterai-artifacts",
-        ARTIFACT_PREFIX: "spotlight",
-        HIERARCHY_BUCKET: "wcmc-reciterai-hierarchy",
-        // #794 — A2 canonical tools taxonomy (etl:scholar-tool). Same shared
-        // artifacts bucket as spotlight, under the tools/ prefix.
-        TOOLS_BUCKET: "wcmc-reciterai-artifacts",
-        TOOLS_PREFIX: "tools",
-        // scholar_tool producer switch (#794). "ddb" (legacy DynamoDB Block 5)
-        // is the reversible default; "s3" makes etl:scholar-tool the sole
-        // scholar_tool writer over the A2 canonical taxonomy and also populates
-        // scholar_family (the #799 Methods lens). STAGING-FIRST cutover: "s3" in
-        // staging now, prod stays "ddb" until the staging soak completes and the
-        // prod cutover is signed off (it reverses a team deferral + unblocks
-        // ReciterAI's legacy TOOL# deletion). Applied via cdk deploy
-        // --exclusively Sps-Etl-<env>; run etl:scholar-tool after the deploy.
-        SCHOLAR_TOOL_SOURCE: env === "staging" ? "s3" : "ddb",
-        // RePORTER grants v2 PMID-overlap matcher — step 0 of etl:reporter-grants.
-        // Resolves lateral recruits with no person_nih_profile row (name →
-        // candidate profile_ids → PMID overlap → auto-lock K≥3 / propose K=2). A
-        // per-run scholar cap (REPORTER_MATCH_V2_MAX_PER_RUN, code default 500)
-        // bounds the nightly RePORTER call volume; tune it once the staging cohort
-        // is sized. STAGING-FIRST: "on" in staging now, prod stays "off" until the
-        // staging soak signs off. Applied via cdk deploy --exclusively
-        // Sps-Etl-<env> (CD only rolls the image, never deploys infra).
-        REPORTER_MATCH_V2: env === "staging" ? "on" : "off",
-        // OpenSearch domain endpoint (https://...) imported from DataStack;
-        // the search-index step's lib/search.ts reads OPENSEARCH_NODE and
-        // authenticates with the OPENSEARCH_USER/PASS secrets above. #447
-        OPENSEARCH_NODE: `https://${Fn.importValue(
-          `Sps-Data-${env}-OpenSearchDomainEndpoint`,
-        )}`,
-        // #479 — cadence revalidate step POSTs to /api/revalidate on the
-        // VPC-private internal ALB (HTTP :80; no TLS on the internal listener).
-        // The ETL SG -> internal-ALB-SG :80 ingress is already opened at the
-        // top of this stack. `etl/revalidate/index.ts` validates this origin
-        // against its allowlist before sending the bearer token.
-        SCHOLARS_BASE_URL: `http://${Fn.importValue(
-          `Sps-App-${env}-InternalAlbDns`,
-        )}`,
-        // #746 — the etl:reciter-refresh scanner (operator-run for now) reads
-        // this to deliver any deferred ReCiter rejects and fire the delayed,
-        // per-uid feature-generator re-score. STAGING-FIRST: ON in staging, OFF
-        // in prod until the staging soak completes; the EventBridge → Step
-        // Function schedule is a follow-up.
-        RECITER_REJECT_SEND: env === "staging" ? "on" : "off",
-        // #1258 — gate for the MeSH derived-anchor producer (etl:mesh-anchors).
-        // "0.9" mines descriptor→topic anchors from publication_topic.score ≥ 0.9
-        // papers; a value > 1 is the kill-switch (zero derived rows, curated-only).
-        // STAGING-FIRST: on in staging now, prod held at "2" until the staging
-        // soak signs off — then drop this override to enable prod.
-        MESH_ANCHOR_SCORE_MIN: env === "staging" ? "0.9" : "2",
-        // Destination bucket for the `backup:curated` logical-dump step. The
-        // task role is granted PutObject on exactly this bucket above; the
-        // script defaults the key prefix to "sps-curation-backups".
-        CURATION_BACKUP_BUCKET: curationBackupBucket.bucketName,
-      },
-      secrets: containerSecrets,
+      environment: baseEnvironment,
+      // DATABASE_URL_RO is on THIS def only (the probe target); the fan-out
+      // defs below get baseSecrets without it.
+      secrets: { ...baseSecrets, DATABASE_URL_RO: ecs.Secret.fromSecretsManager(appRoSecret) },
     });
+
+    // ------------------------------------------------------------------
+    // #1508 — the other three task defs, one per credential group, so no ETL
+    // step carries a credential it doesn't use. Each has its OWN execution role
+    // scoped to only the secret ARNs its def injects (base + group); the task
+    // role (runtime identity) is shared -- it holds no secrets. `taskUnitFor`
+    // (below) routes each step to the right def by npm script.
+    // ------------------------------------------------------------------
+    const makeEtlExecRole = (
+      idSuffix: string,
+      familySuffix: string,
+      perSourceArns: string[],
+    ): iam.Role => {
+      const role = new iam.Role(this, `Etl${idSuffix}TaskExecutionRole`, {
+        roleName: `sps-etl-${familySuffix}-task-exec-${env}`,
+        assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+        description: `SPS ETL ${familySuffix} ECS task-execution role (${env}). Pulls images, injects only the ${familySuffix}-group secrets, writes logs.`,
+      });
+      role.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["ecr:GetAuthorizationToken"],
+          resources: ["*"],
+        }),
+      );
+      role.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            "ecr:BatchCheckLayerAvailability",
+            "ecr:GetDownloadUrlForLayer",
+            "ecr:BatchGetImage",
+          ],
+          resources: [etlEcrRepository.repositoryArn],
+        }),
+      );
+      role.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["secretsmanager:GetSecretValue"],
+          resources: [...baseSecretArns, ...perSourceArns],
+        }),
+      );
+      role.addToPolicy(
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["logs:CreateLogStream", "logs:PutLogEvents"],
+          resources: [etlLogGroup.logGroupArn, `${etlLogGroup.logGroupArn}:*`],
+        }),
+      );
+      return role;
+    };
+    const makeEtlTaskUnit = (
+      idSuffix: string,
+      familySuffix: string,
+      secretIds: string[],
+    ): { taskDefinition: ecs.FargateTaskDefinition; container: ecs.ContainerDefinition } => {
+      const td = new ecs.FargateTaskDefinition(this, `Etl${idSuffix}TaskDefinition`, {
+        family: `sps-etl-${familySuffix}-${env}`,
+        cpu: envConfig.etlTaskCpu,
+        memoryLimitMiB: envConfig.etlTaskMemoryMiB,
+        executionRole: makeEtlExecRole(idSuffix, familySuffix, secretArnsFor(secretIds)),
+        taskRole,
+      });
+      const container = td.addContainer("etl", {
+        image: containerImage,
+        containerName: "etl",
+        essential: true,
+        logging: ecs.LogDriver.awsLogs({
+          logGroup: etlLogGroup,
+          streamPrefix: "etl",
+        }),
+        environment: baseEnvironment,
+        secrets: { ...baseSecrets, ...fanSecrets(secretIds) },
+      });
+      return { taskDefinition: td, container };
+    };
+    const baseUnit = {
+      taskDefinition: this.etlTaskDefinition,
+      container: etlContainer,
+    };
+    const sourcesUnit = makeEtlTaskUnit("Sources", "sources", SOURCES_SECRET_IDS);
+    const ldapUnit = makeEtlTaskUnit("Ldap", "ldap", LDAP_SECRET_IDS);
+    // reciter-api def: no cadence step runs on it -- the ReCiter admin key
+    // (#746) is used only by the operator-run `etl:reciter-refresh`, which the
+    // operator launches via `run-task --task-definition sps-etl-reciter-api-<env>`
+    // (see OPERATIONS-RUNBOOK). Isolating it here keeps the admin key off every
+    // cadence step. Created for its side effect (the task def + role).
+    makeEtlTaskUnit("ReciterApi", "reciter-api", RECITER_API_SECRET_IDS);
+    // Route each step's npm script to the task def whose secrets it needs;
+    // everything not listed runs on the base def (base secrets only).
+    const LDAP_SCRIPTS = new Set([
+      "etl:ed",
+      // #728 — the ED delegated-admin importer reads the same Web Directory
+      // over LDAP as etl:ed (the #443 in-VPC bind), so it must route to the
+      // LDAP task def to carry SCHOLARS_LDAP_*. Runs in the nightly right
+      // after Ed (needs the Department/Division/Center rows etl:ed creates).
+      "etl:ed:admins",
+      "etl:ed:export-email-visibility",
+    ]);
+    const SOURCES_SCRIPTS = new Set([
+      "etl:reciter",
+      "etl:reciter:coi-statements",
+      "etl:asms",
+      "etl:infoed",
+      "etl:coi",
+      "etl:jenzabar",
+      "etl:reporter",
+      "etl:clinical-trials",
+    ]);
+    const taskUnitFor = (
+      npmScript: string,
+    ): { taskDefinition: ecs.FargateTaskDefinition; container: ecs.ContainerDefinition } =>
+      LDAP_SCRIPTS.has(npmScript)
+        ? ldapUnit
+        : SOURCES_SCRIPTS.has(npmScript)
+          ? sourcesUnit
+          : baseUnit;
 
     // ------------------------------------------------------------------
     // SNS topic. No subscriptions in this PR; B23 wires PagerDuty.
@@ -672,46 +810,25 @@ export class EtlStack extends Stack {
     });
 
     // Allow Step Functions and EventBridge to publish failure notifications.
-    this.failureTopic.grantPublish(
-      new iam.ServicePrincipal("states.amazonaws.com"),
-    );
+    this.failureTopic.grantPublish(new iam.ServicePrincipal("states.amazonaws.com"));
+
+    // PR-7 — P1 page topic. Abort-tier step failures publish here (vs the
+    // warn-tier etl-failures topic); the relay's severityForRecord defaults any
+    // non-warn topic to the page channel, so no lambda change is needed.
+    this.pageTopic = new sns.Topic(this, "EtlPageTopic", {
+      topicName: `etl-page-${env}`,
+      displayName: `SPS ETL page (${env})`,
+    });
+    this.pageTopic.grantPublish(new iam.ServicePrincipal("states.amazonaws.com"));
 
     // ------------------------------------------------------------------
-    // Helper -- build one step (an EcsRunTask) plus its retry/catch.
-    // Returns a Chain so the caller can wire it inline.
+    // Helper -- build a step's SNS-notify state. The topic depends on the
+    // tier (page vs failures); buildStateMachine chains .next(Fail|successor)
+    // after it. Construct id `Notify${id}` is stable across the refactor.
     // ------------------------------------------------------------------
-    const buildStep = (spec: StepSpec): sfn.IChainable => {
-      const task = new tasks.EcsRunTask(this, `Task${spec.id}`, {
-        integrationPattern: sfn.IntegrationPattern.RUN_JOB,
-        cluster: ecsCluster,
-        taskDefinition: this.etlTaskDefinition,
-        launchTarget: new tasks.EcsFargateLaunchTarget({
-          platformVersion: ecs.FargatePlatformVersion.LATEST,
-        }),
-        assignPublicIp: false,
-        // Sps VPC by default; the scholars-dev/prod app subnets + cadence SG
-        // when relocated (docs/etl-vpc-migration-handoff.md).
-        subnets: cadenceSubnets,
-        securityGroups: cadenceSecurityGroups,
-        containerOverrides: [
-          {
-            containerDefinition: etlContainer,
-            command: ["npm", "run", spec.npmScript],
-          },
-        ],
-        // .sync polls every 5 s; 24 h cap is well past the longest
-        // observed ETL (reciter ~12 min). Failure of the underlying ECS
-        // task surfaces as States.TaskFailed for the Retry/Catch block.
-        taskTimeout: sfn.Timeout.duration(Duration.hours(24)),
-      });
-      task.addRetry({
-        errors: ["States.TaskFailed", "States.Timeout"],
-        maxAttempts: 2,
-        backoffRate: 2,
-        interval: Duration.seconds(30),
-      });
-      const onFailure = new tasks.SnsPublish(this, `Notify${spec.id}`, {
-        topic: this.failureTopic,
+    const buildNotify = (spec: StepSpec, topic: sns.Topic): tasks.SnsPublish =>
+      new tasks.SnsPublish(this, `Notify${spec.id}`, {
+        topic,
         subject: `SPS ETL ${env} -- ${spec.id} failed`,
         message: sfn.TaskInput.fromObject({
           env,
@@ -720,10 +837,45 @@ export class EtlStack extends Stack {
           execution: sfn.JsonPath.executionName,
           error: sfn.JsonPath.stringAt("$.error"),
         }),
-      }).next(new sfn.Fail(this, `Fail${spec.id}`, { cause: `${spec.id} failed` }));
-      task.addCatch(onFailure, {
-        errors: ["States.ALL"],
-        resultPath: "$.error",
+      });
+
+    // ------------------------------------------------------------------
+    // Helper -- build one step's EcsRunTask + retry. The Catch is wired in
+    // buildStateMachine (a continue-tier step routes failure to its successor,
+    // which only the chaining loop knows -- PR-7).
+    // ------------------------------------------------------------------
+    const buildStep = (spec: StepSpec): sfn.TaskStateBase => {
+      // #1508 — run on the task def whose secrets this step's script needs.
+      const unit = taskUnitFor(spec.npmScript);
+      const task = new tasks.EcsRunTask(this, `Task${spec.id}`, {
+        integrationPattern: sfn.IntegrationPattern.RUN_JOB,
+        cluster: ecsCluster,
+        taskDefinition: unit.taskDefinition,
+        launchTarget: new tasks.EcsFargateLaunchTarget({
+          platformVersion: ecs.FargatePlatformVersion.LATEST,
+        }),
+        assignPublicIp: false,
+        // app2 tier when useSharedVpc is on, else the local Sps VPC (plan §4.4).
+        subnets: etlTaskSubnets,
+        securityGroups: etlTaskSecurityGroups,
+        containerOverrides: [
+          {
+            containerDefinition: unit.container,
+            command: ["npm", "run", spec.npmScript],
+          },
+        ],
+        // .sync polls every 5 s. Per-attempt cap cut 24h -> 4h (PR-7): the
+        // longest observed step is ~12 min and search:index worst case is well
+        // under 1h, so 4h bounds a pathological hang while keeping a wedged
+        // nightly from colliding with the (now noon) Sunday weekly. The
+        // machine-level 24h timeout (buildStateMachine) is the outer backstop.
+        taskTimeout: sfn.Timeout.duration(Duration.hours(4)),
+      });
+      task.addRetry({
+        errors: ["States.TaskFailed", "States.Timeout"],
+        maxAttempts: 2,
+        backoffRate: 2,
+        interval: Duration.seconds(30),
       });
       return task;
     };
@@ -744,21 +896,50 @@ export class EtlStack extends Stack {
       if (steps.length === 0) {
         throw new Error("state machine requires at least one step");
       }
-      // Build each step task once; the Choice fans into the same task
-      // graph by chaining task[i] -> task[i+1] -> ... -> tail. Wiring the
-      // success transitions mutates the underlying State -- the Chain
-      // value itself is discarded.
+      // Build each step task once, then wire BOTH transitions per step: the
+      // success edge to its successor (task[i] -> task[i+1] -> ... -> tail) and
+      // the tiered failure edge (PR-7). The Choice below fans into this same
+      // graph, so entering mid-chain still walks the rest of the sequence.
       const stepTasks = steps.map((s) => buildStep(s));
       const startStates = stepTasks as sfn.TaskStateBase[];
-      for (let i = 0; i < startStates.length - 1; i++) {
-        startStates[i].next(startStates[i + 1]);
+      for (let i = 0; i < steps.length; i++) {
+        const spec = steps[i];
+        const task = startStates[i];
+        // Successor: the next step, else the tail (annual's approval gate),
+        // else nothing (last step of a tail-less machine).
+        const successor: sfn.IChainable | undefined =
+          i < startStates.length - 1 ? startStates[i + 1] : tail;
+        if (successor !== undefined) {
+          task.next(successor);
+        }
+        // Failure wiring by tier (StepSpec.tier):
+        //   continue -> warn (etl-failures) then CONTINUE to the successor;
+        //   abort    -> page (etl-page) then STOP (Fail);
+        //   omitted  -> warn (etl-failures) then STOP (Fail)  [legacy].
+        // resultPath keeps the error payload out of `$` so it can flow into a
+        // continue-successor harmlessly (steps use static container overrides,
+        // never state input; the startFrom Choice runs once at the top).
+        if (spec.tier === "continue") {
+          if (successor === undefined) {
+            throw new Error(`continue-tier step ${spec.id} has no successor to continue to`);
+          }
+          task.addCatch(buildNotify(spec, this.failureTopic).next(successor), {
+            errors: ["States.ALL"],
+            resultPath: "$.error",
+          });
+        } else {
+          const topic = spec.tier === "abort" ? this.pageTopic : this.failureTopic;
+          task.addCatch(
+            buildNotify(spec, topic).next(
+              new sfn.Fail(this, `Fail${spec.id}`, { cause: `${spec.id} failed` }),
+            ),
+            { errors: ["States.ALL"], resultPath: "$.error" },
+          );
+        }
       }
-      if (tail !== undefined) {
-        startStates[startStates.length - 1].next(tail);
-      }
-      // Top-level Choice. Each branch enters at a different stepTask;
-      // because each stepTask was already chained to its successor above,
-      // entering mid-chain still walks the rest of the sequence.
+      // Top-level Choice. Each branch enters at a different stepTask; because
+      // each stepTask was already chained to its successor above, entering
+      // mid-chain still walks the rest of the sequence.
       const choice = new sfn.Choice(this, `${smId}StartFromChoice`);
       for (let i = 0; i < steps.length; i++) {
         choice.when(
@@ -767,7 +948,7 @@ export class EtlStack extends Stack {
           // `States.Runtime: Invalid path '$.startFrom'` when a Choice tests
           // a path that is absent from the input. isPresent makes the And
           // short-circuit to false for the missing-key case, so it falls
-          // through to .otherwise(step[0]) instead of failing the execution.
+          // through to the strict-fail / otherwise branches below.
           sfn.Condition.and(
             sfn.Condition.isPresent("$.startFrom"),
             sfn.Condition.stringEquals("$.startFrom", steps[i].id),
@@ -775,6 +956,18 @@ export class EtlStack extends Stack {
           stepTasks[i],
         );
       }
+      // Strict startFrom (PR-7): a PRESENT but unmatched startFrom is an
+      // operator typo. Fail loudly instead of silently running the whole chain
+      // via otherwise. Ordered AFTER the per-step matches (Choice conditions
+      // evaluate in insertion order) and BEFORE otherwise, which now handles
+      // only the absent-key (scheduled `{}`) case.
+      choice.when(
+        sfn.Condition.isPresent("$.startFrom"),
+        new sfn.Fail(this, `${smId}UnknownStartFrom`, {
+          error: "UnknownStartFrom",
+          cause: "unknown startFrom step id",
+        }),
+      );
       choice.otherwise(stepTasks[0] as sfn.State);
       const logGroup = new logs.LogGroup(this, `${smId}LogGroup`, {
         logGroupName: `/aws/states/${cadenceName}-${env}`,
@@ -817,13 +1010,27 @@ export class EtlStack extends Stack {
     // (vivo-redirect is a manual cutover-prep tool, never a cadence step.)
     // ------------------------------------------------------------------
     const nightlySteps: ReadonlyArray<StepSpec> = [
-      { id: "Ed", npmScript: "etl:ed", external: true },
-      { id: "Reciter", npmScript: "etl:reciter", external: true },
+      { id: "Ed", npmScript: "etl:ed", external: true, tier: "abort" },
+      // #728 — ED delegated-admin importer. Reads Web Directory delegated-admin
+      // tags over LDAP → per-unit `curator` UnitAdmin grants (fail-closed,
+      // best-effort). external:true (needs the LDAP secret; routed to the LDAP
+      // task def via LDAP_SCRIPTS above). MUST follow Ed: it needs the
+      // Department/Division/Center rows etl:ed creates; unresolvable N-codes
+      // are skipped-and-logged. tier:"continue" — a failure warns and proceeds;
+      // it must NOT abort the nightly. Writes are enabled by
+      // SELF_EDIT_ED_ADMINS_IMPORT="on" in baseEnvironment (else dry-run).
+      { id: "EdAdmins", npmScript: "etl:ed:admins", external: true, tier: "continue" },
+      { id: "Reciter", npmScript: "etl:reciter", external: true, tier: "abort" },
       // PubMed competing-interest statements — same WCM-ReciterDB path as Reciter
       // (reads reporting_conflicts), so external:true and placed right after it.
       // Seeds publication_conflict_statement for the COI-gap source below.
-      { id: "ReciterCoiStatements", npmScript: "etl:reciter:coi-statements", external: true },
-      { id: "Asms", npmScript: "etl:asms", external: true },
+      {
+        id: "ReciterCoiStatements",
+        npmScript: "etl:reciter:coi-statements",
+        external: true,
+        tier: "continue",
+      },
+      { id: "Asms", npmScript: "etl:asms", external: true, tier: "continue" },
       // etl:infoed is EXCLUDED from the STAGING cadence (Paul, 2026-06-22).
       // InfoEd is at 10.20.91.8, which overlaps the Sps VPC's own 10.20/16
       // CIDR, so once the cadence relocates + peers, scholars-dev routes
@@ -834,34 +1041,41 @@ export class EtlStack extends Stack {
       // once WCM re-IPs / NATs InfoEd off 10.20 (docs/etl-vpc-migration-handoff.md).
       ...(env === "staging"
         ? []
-        : [{ id: "Infoed", npmScript: "etl:infoed", external: true } as StepSpec]),
-      { id: "Coi", npmScript: "etl:coi", external: true },
+        : [
+            { id: "Infoed", npmScript: "etl:infoed", external: true, tier: "continue" } as StepSpec,
+          ]),
+      { id: "Coi", npmScript: "etl:coi", external: true, tier: "continue" },
       // COI-gap recommendations — reads SPS-DB only (disclosed COI from the Coi
       // step + the PubMed statements above), so external:false. Computes whatever
       // its inputs hold; zero candidates until the WCM statement path is flowing.
-      { id: "CoiGap", npmScript: "etl:coi-gap", external: false },
+      { id: "CoiGap", npmScript: "etl:coi-gap", external: false, tier: "continue" },
       // #608 mentoring source — moved from the weekly machine to nightly (operator
       // request) so grad-school mentoring chips refresh within a day. Reads its own
       // MSSQL credential (etl/jenzabar), external:true. Chips are ISR-only (not
       // indexed), so it only needs to precede the closing revalidate.
-      { id: "JenzabarNightly", npmScript: "etl:jenzabar", external: true },
+      { id: "JenzabarNightly", npmScript: "etl:jenzabar", external: true, tier: "continue" },
       // After the source ETLs (so a freshly matched publication is enriched the
       // same night) and before search:index (so the rebuilt index carries the
       // day's scores).
-      { id: "Dynamodb", npmScript: "etl:dynamodb", external: true },
+      { id: "Dynamodb", npmScript: "etl:dynamodb", external: true, tier: "abort" },
       // #918 — populate Scholar.orcid from the WCM Identity table (DynamoDB
       // Scan, external:true). After Dynamodb (scholars exist; both are DynamoDB
       // scans); ORCID feeds the profile JSON-LD `sameAs`, not the search index,
       // so there's no SearchIndex ordering dependency. Never NULLs an existing
       // orcid — Identity may lag ED — so re-running nightly only self-heals.
-      { id: "Identity", npmScript: "etl:identity", external: true },
+      { id: "Identity", npmScript: "etl:identity", external: true, tier: "continue" },
       // #794 — A2 canonical tools taxonomy → scholar_tool. Runs after Dynamodb
       // (whose scholar projection the cwid FK targets) and before SearchIndex.
       // external:true — reads s3://wcmc-reciterai-artifacts/tools/ via the task
       // role (no per-source secret). A no-op while SCHOLAR_TOOL_SOURCE=ddb;
       // the sole scholar_tool writer once flipped to s3.
-      { id: "Tools", npmScript: "etl:scholar-tool", external: true },
-      { id: "MeshCoverageNightly", npmScript: "etl:mesh-coverage", external: false },
+      { id: "Tools", npmScript: "etl:scholar-tool", external: true, tier: "continue" },
+      {
+        id: "MeshCoverageNightly",
+        npmScript: "etl:mesh-coverage",
+        external: false,
+        tier: "continue",
+      },
       // #1258 — curated + derived descriptor→topic anchors. SPS-DB only (reads
       // publication.mesh_terms × publication_topic), so external:false. Runs after
       // MeshCoverage (mesh_terms fresh) and Dynamodb (publication_topic fresh).
@@ -870,7 +1084,14 @@ export class EtlStack extends Stack {
       // suppresses *derived* rows, not curated), bypassing the soak. Add to prod
       // once staging is verified — mirror of the infoed exclusion above.
       ...(env === "staging"
-        ? [{ id: "MeshAnchorNightly", npmScript: "etl:mesh-anchors", external: false } as StepSpec]
+        ? [
+            {
+              id: "MeshAnchorNightly",
+              npmScript: "etl:mesh-anchors",
+              external: false,
+              tier: "continue",
+            } as StepSpec,
+          ]
         : []),
       // #604 -- stamp publication_type='Retraction' on PubMed-retracted originals
       // ReCiter hasn't re-fetched yet. MUST run after Reciter (whose upsert
@@ -879,12 +1100,24 @@ export class EtlStack extends Stack {
       // un-retraction self-heals: Reciter restores the real type, then this step
       // simply no longer re-stamps the PMID. external:false -- it reads public
       // PubMed E-utilities (NAT egress), no per-source WCM secret.
-      { id: "PubMedRetractions", npmScript: "etl:pubmed-retractions", external: false },
-      { id: "SearchIndexNightly", npmScript: "search:index", external: false },
-      { id: "RevalidateNightly", npmScript: "etl:revalidate", external: false },
+      {
+        id: "PubMedRetractions",
+        npmScript: "etl:pubmed-retractions",
+        external: false,
+        tier: "continue",
+      },
+      { id: "SearchIndexNightly", npmScript: "search:index", external: false, tier: "abort" },
+      { id: "RevalidateNightly", npmScript: "etl:revalidate", external: false, tier: "continue" },
+      // Reliability-audit PR-5 — terminal volume gate. Reads etl_run
+      // rowsProcessed history, spine-table floors, and live OpenSearch alias
+      // doc-counts; a violation exits 1 -> Catch -> SNS so an implausible end
+      // state pages instead of silently serving. Runs LAST so it validates
+      // what the night actually published. external:false — SPS DB + in-VPC
+      // OpenSearch only.
+      { id: "IntegrityNightly", npmScript: "etl:integrity", external: false, tier: "abort" },
     ];
     const weeklySteps: ReadonlyArray<StepSpec> = [
-      { id: "Completeness", npmScript: "etl:completeness", external: false },
+      { id: "Completeness", npmScript: "etl:completeness", external: false, tier: "continue" },
       // Data Quality dashboard headshot signal (docs/data-quality-dashboard-spec.md).
       // Probes the PUBLIC WCM directory (`identityImageEndpoint`, which 404s when no
       // photo exists) per active scholar and persists has_headshot — the app can't
@@ -892,8 +1125,8 @@ export class EtlStack extends Stack {
       // Reads the directory over NAT egress with no credential (like etl:nsf), so
       // external:false; mutates SPS-DB only. Weekly cadence is plenty for a slow-
       // changing signal; incremental by default (re-probes never-checked + >30d-stale).
-      { id: "HeadshotPresence", npmScript: "etl:headshot", external: false },
-      { id: "Spotlight", npmScript: "etl:spotlight", external: true },
+      { id: "HeadshotPresence", npmScript: "etl:headshot", external: false, tier: "continue" },
+      { id: "Spotlight", npmScript: "etl:spotlight", external: true, tier: "continue" },
       // Grant-enrichment sources (#608). They key off the `grant` table that
       // etl:infoed refreshes nightly; neither needs 24h freshness, so they batch
       // here weekly instead of weighting the nightly critical path. RePORTER +
@@ -904,17 +1137,44 @@ export class EtlStack extends Stack {
       // ReciterDB (etl/reciter secret) and NSF hits the public NSF Awards API
       // (no credential -- NAT egress only, so external: false). (Jenzabar moved to
       // the nightly machine so mentoring chips refresh daily.)
-      { id: "ReporterWeekly", npmScript: "etl:reporter", external: true },
-      { id: "NsfWeekly", npmScript: "etl:nsf", external: false },
+      { id: "ReporterWeekly", npmScript: "etl:reporter", external: true, tier: "continue" },
+      { id: "NsfWeekly", npmScript: "etl:nsf", external: false, tier: "continue" },
       // #658 -- the remaining grant/PI enrichers, completing the set. Both read
       // PUBLIC sources (Gates BMGF CSV; NIH RePORTER API) over NAT egress with no
       // credential -> external: false, no SecretsStack wiring. Gates (an NSF twin:
       // 90-day TTL + source-precedence guard) precedes search:index so its abstracts
       // are indexed; nih-profile feeds profile/grant deep-links, not the index.
-      { id: "GatesWeekly", npmScript: "etl:gates", external: false },
-      { id: "NihProfileWeekly", npmScript: "etl:nih-profile", external: false },
-      { id: "SearchIndexWeekly", npmScript: "search:index", external: false },
-      { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false },
+      { id: "GatesWeekly", npmScript: "etl:gates", external: false, tier: "continue" },
+      { id: "NihProfileWeekly", npmScript: "etl:nih-profile", external: false, tier: "continue" },
+      // PR-7 — three ready-but-uncadenced sources, now scheduled weekly ahead of
+      // search:index so their fresh rows are indexed. POPS reads the public
+      // directory (no secret); reporter-grants + clinical-trials read ReciterDB
+      // (external). Their entrypoints record etl_run via withEtlRun (freshness).
+      { id: "PopsWeekly", npmScript: "etl:pops", external: false, tier: "continue" },
+      {
+        id: "ReporterGrantsWeekly",
+        npmScript: "etl:reporter-grants",
+        external: true,
+        tier: "continue",
+      },
+      {
+        id: "ClinicalTrialsWeekly",
+        npmScript: "etl:clinical-trials",
+        external: true,
+        tier: "continue",
+      },
+      // CTL available technologies. Reads innovation.weill.cornell.edu — a PUBLIC
+      // site over NAT egress with no credential, so `external: false` (an NSF/Gates
+      // twin, not a ReciterDB/WCM-network source). Weekly, not nightly: CTL's
+      // portfolio changes a few times a year, and the entrypoint short-circuits to
+      // a no-op write when the scrape matches the table. `continue` — a CTL outage
+      // or markup change must never abort the chain; its volume guard aborts the
+      // step itself rather than blanking the section.
+      { id: "TechnologyWeekly", npmScript: "etl:technologies", external: false, tier: "continue" },
+      { id: "SearchIndexWeekly", npmScript: "search:index", external: false, tier: "abort" },
+      { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false, tier: "continue" },
+      // Terminal volume gate — see IntegrityNightly above.
+      { id: "IntegrityWeekly", npmScript: "etl:integrity", external: false, tier: "abort" },
     ];
     const annualSteps: ReadonlyArray<StepSpec> = [
       { id: "Hierarchy", npmScript: "etl:hierarchy", external: true },
@@ -944,22 +1204,12 @@ export class EtlStack extends Stack {
         topic: this.failureTopic,
         subject: `SPS annual ETL ${env} -- approval gate failed/timed out`,
         message: sfn.TaskInput.fromObject({ env, step: "AnnualApprovalGate" }),
-      }).next(
-        new sfn.Fail(this, "FailAnnualApprovalGate", { cause: "approval gate failed" }),
-      ),
+      }).next(new sfn.Fail(this, "FailAnnualApprovalGate", { cause: "approval gate failed" })),
       { errors: ["States.ALL"], resultPath: "$.error" },
     );
 
-    this.nightlyStateMachine = buildStateMachine(
-      "NightlyStateMachine",
-      "nightly",
-      nightlySteps,
-    );
-    this.weeklyStateMachine = buildStateMachine(
-      "WeeklyStateMachine",
-      "weekly",
-      weeklySteps,
-    );
+    this.nightlyStateMachine = buildStateMachine("NightlyStateMachine", "nightly", nightlySteps);
+    this.weeklyStateMachine = buildStateMachine("WeeklyStateMachine", "weekly", weeklySteps);
     this.annualStateMachine = buildStateMachine(
       "AnnualStateMachine",
       "annual",
@@ -1025,7 +1275,10 @@ export class EtlStack extends Stack {
     buildSchedule(
       "WeeklyScheduleRule",
       "weekly",
-      events.Schedule.expression("cron(0 8 ? * SUN *)"),
+      // PR-7 — moved 08:00 -> 12:00 UTC. With the per-attempt task timeout cut
+      // to 4h, this 5h gap after the 07:00 nightly makes a nightly/weekly
+      // collision (both rebuild the same tables) impossible without a wait-loop.
+      events.Schedule.expression("cron(0 12 ? * SUN *)"),
       this.weeklyStateMachine,
     );
     buildSchedule(
@@ -1035,7 +1288,7 @@ export class EtlStack extends Stack {
       this.annualStateMachine,
     );
     // #595 — heartbeat runs daily at 13:00 UTC, ~6h after the nightly window
-    // (07:00) and after the Sunday weekly (08:00), so a failed or missed
+    // (07:00) and after the Sunday weekly (12:00), so a failed or missed
     // overnight cadence shows up as staleness the same day. Gated on the same
     // `etlSchedulesEnabled` flag as the cadences: where cadences are disabled
     // (prod pre-launch) there is no fresh data to expect, so the heartbeat
@@ -1138,8 +1391,7 @@ export class EtlStack extends Stack {
         metric: failedMetric,
         evaluationPeriods: 1,
         threshold: 0,
-        comparisonOperator:
-          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       });
       statusAlarm.addAlarmAction(alarmAction);
@@ -1206,15 +1458,11 @@ export class EtlStack extends Stack {
       removalPolicy: RemovalPolicy.RETAIN,
     });
 
-    const reconcileExecutionRole = new iam.Role(
-      this,
-      "ReconcileTaskExecutionRole",
-      {
-        roleName: `sps-reconcile-task-exec-${env}`,
-        assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
-        description: `SPS reconciler ECS task-execution role (${env}). Pulls the ETL image, injects the db/etl + opensearch/etl secrets, writes logs.`,
-      },
-    );
+    const reconcileExecutionRole = new iam.Role(this, "ReconcileTaskExecutionRole", {
+      roleName: `sps-reconcile-task-exec-${env}`,
+      assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+      description: `SPS reconciler ECS task-execution role (${env}). Pulls the ETL image, injects the db/etl + opensearch/etl secrets, writes logs.`,
+    });
     reconcileExecutionRole.addToPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
@@ -1246,10 +1494,7 @@ export class EtlStack extends Stack {
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: ["logs:CreateLogStream", "logs:PutLogEvents"],
-        resources: [
-          reconcileLogGroup.logGroupArn,
-          `${reconcileLogGroup.logGroupArn}:*`,
-        ],
+        resources: [reconcileLogGroup.logGroupArn, `${reconcileLogGroup.logGroupArn}:*`],
       }),
     );
 
@@ -1259,56 +1504,53 @@ export class EtlStack extends Stack {
       description: `SPS reconciler ECS task role (${env}). Runtime identity; zero AWS API permissions (reads everything via injected env).`,
     });
 
-    const reconcileTaskDefinition = new ecs.FargateTaskDefinition(
-      this,
-      "ReconcileTaskDefinition",
-      {
-        family: `sps-reconcile-${env}`,
-        // Lean: the worker processes <=200 rows, not the corpus. 256/512 with
-        // wide headroom; ~16x cheaper than reusing the 8 GB ETL task def at a
-        // 5 min cadence.
-        cpu: 256,
-        memoryLimitMiB: 512,
-        executionRole: reconcileExecutionRole,
-        taskRole: reconcileTaskRole,
+    const reconcileTaskDefinition = new ecs.FargateTaskDefinition(this, "ReconcileTaskDefinition", {
+      family: `sps-reconcile-${env}`,
+      // Lean: the worker processes <=200 rows, not the corpus. 256/512 with
+      // wide headroom; ~16x cheaper than reusing the 8 GB ETL task def at a
+      // 5 min cadence.
+      cpu: 256,
+      memoryLimitMiB: 512,
+      executionRole: reconcileExecutionRole,
+      taskRole: reconcileTaskRole,
+    });
+    const reconcileContainer = reconcileTaskDefinition.addContainer("reconcile", {
+      image: ecs.ContainerImage.fromEcrRepository(etlEcrRepository, "latest"),
+      // Container name `reconcile` (not `etl`) keeps the two task defs'
+      // containers unambiguous for the tests.
+      containerName: "reconcile",
+      essential: true,
+      logging: ecs.LogDriver.awsLogs({
+        logGroup: reconcileLogGroup,
+        streamPrefix: "reconcile",
+      }),
+      environment: {
+        NODE_ENV: "production",
+        // searchClient() reads OPENSEARCH_NODE; OPENSEARCH_USER/PASS arrive
+        // as secrets below. Same de-coupling as the ETL container (§8.4):
+        // export-baked env by default, secret `node` key when flag on.
+        ...(envConfig.openSearchNodeFromSecret
+          ? {}
+          : {
+              OPENSEARCH_NODE: `https://${Fn.importValue(
+                `Sps-Data-${env}-OpenSearchDomainEndpoint`,
+              )}`,
+            }),
       },
-    );
-    const reconcileContainer = reconcileTaskDefinition.addContainer(
-      "reconcile",
-      {
-        image: ecs.ContainerImage.fromEcrRepository(etlEcrRepository, "latest"),
-        // Container name `reconcile` (not `etl`) keeps the two task defs'
-        // containers unambiguous for the tests.
-        containerName: "reconcile",
-        essential: true,
-        logging: ecs.LogDriver.awsLogs({
-          logGroup: reconcileLogGroup,
-          streamPrefix: "reconcile",
-        }),
-        environment: {
-          NODE_ENV: "production",
-          // searchClient() reads OPENSEARCH_NODE; OPENSEARCH_USER/PASS arrive
-          // as secrets below. Same cross-stack import the ETL container uses.
-          OPENSEARCH_NODE: `https://${Fn.importValue(
-            `Sps-Data-${env}-OpenSearchDomainEndpoint`,
-          )}`,
-        },
-        secrets: {
-          // db.read + db.write collapse onto this single DSN (no
-          // DATABASE_URL_RO in-container), exactly as the search:index step
-          // runs.
-          DATABASE_URL: ecs.Secret.fromSecretsManager(dbEtlSecret),
-          OPENSEARCH_USER: ecs.Secret.fromSecretsManager(
-            opensearchEtlSecret,
-            "username",
-          ),
-          OPENSEARCH_PASS: ecs.Secret.fromSecretsManager(
-            opensearchEtlSecret,
-            "password",
-          ),
-        },
+      secrets: {
+        // db.read + db.write collapse onto this single DSN (no
+        // DATABASE_URL_RO in-container), exactly as the search:index step
+        // runs.
+        DATABASE_URL: ecs.Secret.fromSecretsManager(dbEtlSecret),
+        ...(envConfig.openSearchNodeFromSecret
+          ? {
+              OPENSEARCH_NODE: ecs.Secret.fromSecretsManager(opensearchEtlSecret, "node"),
+            }
+          : {}),
+        OPENSEARCH_USER: ecs.Secret.fromSecretsManager(opensearchEtlSecret, "username"),
+        OPENSEARCH_PASS: ecs.Secret.fromSecretsManager(opensearchEtlSecret, "password"),
       },
-    );
+    });
 
     const reconcileTask = new tasks.EcsRunTask(this, "TaskReconcile", {
       integrationPattern: sfn.IntegrationPattern.RUN_JOB,
@@ -1318,7 +1560,7 @@ export class EtlStack extends Stack {
         platformVersion: ecs.FargatePlatformVersion.LATEST,
       }),
       assignPublicIp: false,
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      subnets: etlTaskSubnets,
       securityGroups: [etlSecurityGroup],
       containerOverrides: [
         {
@@ -1347,9 +1589,7 @@ export class EtlStack extends Stack {
           execution: sfn.JsonPath.executionName,
           error: sfn.JsonPath.stringAt("$.error"),
         }),
-      }).next(
-        new sfn.Fail(this, "FailReconcile", { cause: "reconcile run failed" }),
-      ),
+      }).next(new sfn.Fail(this, "FailReconcile", { cause: "reconcile run failed" })),
       { errors: ["States.ALL"], resultPath: "$.error" },
     );
 
@@ -1358,25 +1598,21 @@ export class EtlStack extends Stack {
       retention: logRetention,
       removalPolicy: RemovalPolicy.RETAIN,
     });
-    this.reconcileStateMachine = new sfn.StateMachine(
-      this,
-      "ReconcileStateMachine",
-      {
-        stateMachineName: `scholars-reconcile-${env}`,
-        stateMachineType: sfn.StateMachineType.STANDARD,
-        definitionBody: sfn.DefinitionBody.fromChainable(reconcileTask),
-        // 15 min hard cap (vs the cadences' 24h): the worker is bounded to
-        // <=200 rows, so a longer-running execution is wedged and must not
-        // pile up at the 5 min cadence.
-        timeout: Duration.minutes(15),
-        logs: {
-          destination: reconcileSmLogGroup,
-          level: sfn.LogLevel.ERROR,
-          includeExecutionData: false,
-        },
-        tracingEnabled: true,
+    this.reconcileStateMachine = new sfn.StateMachine(this, "ReconcileStateMachine", {
+      stateMachineName: `scholars-reconcile-${env}`,
+      stateMachineType: sfn.StateMachineType.STANDARD,
+      definitionBody: sfn.DefinitionBody.fromChainable(reconcileTask),
+      // 15 min hard cap (vs the cadences' 24h): the worker is bounded to
+      // <=200 rows, so a longer-running execution is wedged and must not
+      // pile up at the 5 min cadence.
+      timeout: Duration.minutes(15),
+      logs: {
+        destination: reconcileSmLogGroup,
+        level: sfn.LogLevel.ERROR,
+        includeExecutionData: false,
       },
-    );
+      tracingEnabled: true,
+    });
 
     // EventBridge rate(5 min) schedule. `reconcileScheduleEnabled` is true in
     // both envs (continuous backstop -- see config flag JSDoc). retryAttempts: 0
@@ -1403,57 +1639,48 @@ export class EtlStack extends Stack {
     const reconcileDimensions = {
       StateMachineArn: this.reconcileStateMachine.stateMachineArn,
     };
-    const reconcileStatusAlarm = new cloudwatch.Alarm(
-      this,
-      "ReconcileStatusAlarm",
-      {
-        alarmName: `sps-reconcile-status-${env}`,
-        alarmDescription: `SPS reconciler (${env}) -- run failed (>=1 suppression row could not be reflected into the index). Next: check the Step Functions execution for the failing row; it self-heals once the underlying write succeeds.`,
-        metric: new cloudwatch.Metric({
-          namespace: "AWS/States",
-          metricName: "ExecutionsFailed",
-          statistic: cloudwatch.Stats.SUM,
-          period: Duration.minutes(15),
-          dimensionsMap: reconcileDimensions,
-        }),
-        // Require ~30 min of sustained failure (2 consecutive 15 min windows)
-        // before alerting. The reconciler runs every 5 min and is idempotent,
-        // so a single failed run self-heals on the next fire and is not worth a
-        // notification; two windows = a persistent failure (e.g. a row that
-        // keeps failing to reflect), which is. The cadence alarm below still
-        // alerts immediately on schedule death.
-        evaluationPeriods: 2,
-        datapointsToAlarm: 2,
-        threshold: 0,
-        comparisonOperator:
-          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-        // An idle 15 min window (no executions) is not a failure -- the cadence
-        // alarm below owns absence.
-        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      },
-    );
+    const reconcileStatusAlarm = new cloudwatch.Alarm(this, "ReconcileStatusAlarm", {
+      alarmName: `sps-reconcile-status-${env}`,
+      alarmDescription: `SPS reconciler (${env}) -- run failed (>=1 suppression row could not be reflected into the index). Next: check the Step Functions execution for the failing row; it self-heals once the underlying write succeeds.`,
+      metric: new cloudwatch.Metric({
+        namespace: "AWS/States",
+        metricName: "ExecutionsFailed",
+        statistic: cloudwatch.Stats.SUM,
+        period: Duration.minutes(15),
+        dimensionsMap: reconcileDimensions,
+      }),
+      // Require ~30 min of sustained failure (2 consecutive 15 min windows)
+      // before alerting. The reconciler runs every 5 min and is idempotent,
+      // so a single failed run self-heals on the next fire and is not worth a
+      // notification; two windows = a persistent failure (e.g. a row that
+      // keeps failing to reflect), which is. The cadence alarm below still
+      // alerts immediately on schedule death.
+      evaluationPeriods: 2,
+      datapointsToAlarm: 2,
+      threshold: 0,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      // An idle 15 min window (no executions) is not a failure -- the cadence
+      // alarm below owns absence.
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
     reconcileStatusAlarm.addAlarmAction(alarmAction);
 
-    const reconcileCadenceAlarm = new cloudwatch.Alarm(
-      this,
-      "ReconcileCadenceAlarm",
-      {
-        alarmName: `sps-reconcile-cadence-${env}`,
-        alarmDescription: `SPS reconciler (${env}) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.`,
-        metric: new cloudwatch.Metric({
-          namespace: "AWS/States",
-          metricName: "ExecutionsStarted",
-          statistic: cloudwatch.Stats.SUM,
-          period: Duration.minutes(15),
-          dimensionsMap: reconcileDimensions,
-        }),
-        evaluationPeriods: 1,
-        threshold: 1,
-        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
-        // Total metric absence => the schedule is dead => breach.
-        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
-      },
-    );
+    const reconcileCadenceAlarm = new cloudwatch.Alarm(this, "ReconcileCadenceAlarm", {
+      alarmName: `sps-reconcile-cadence-${env}`,
+      alarmDescription: `SPS reconciler (${env}) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.`,
+      metric: new cloudwatch.Metric({
+        namespace: "AWS/States",
+        metricName: "ExecutionsStarted",
+        statistic: cloudwatch.Stats.SUM,
+        period: Duration.minutes(15),
+        dimensionsMap: reconcileDimensions,
+      }),
+      evaluationPeriods: 1,
+      threshold: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+      // Total metric absence => the schedule is dead => breach.
+      treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+    });
     reconcileCadenceAlarm.addAlarmAction(alarmAction);
 
     // ------------------------------------------------------------------
@@ -1494,25 +1721,17 @@ export class EtlStack extends Stack {
     // synchronous invalidation path is dormant pre-launch. This keeps the
     // reconciler decoupled from the #502-frozen EdgeStack distribution.
     // ------------------------------------------------------------------
-    const cdnReconcileLogGroup = new logs.LogGroup(
-      this,
-      "CdnReconcileLogGroup",
-      {
-        logGroupName: `/aws/ecs/sps-cdn-reconcile-${env}`,
-        retention: logRetention,
-        removalPolicy: RemovalPolicy.RETAIN,
-      },
-    );
+    const cdnReconcileLogGroup = new logs.LogGroup(this, "CdnReconcileLogGroup", {
+      logGroupName: `/aws/ecs/sps-cdn-reconcile-${env}`,
+      retention: logRetention,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
 
-    const cdnReconcileExecutionRole = new iam.Role(
-      this,
-      "CdnReconcileTaskExecutionRole",
-      {
-        roleName: `sps-cdn-reconcile-task-exec-${env}`,
-        assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
-        description: `SPS CloudFront-invalidation reconciler ECS task-execution role (${env}). Pulls the ETL image, injects the db/etl secret, writes logs.`,
-      },
-    );
+    const cdnReconcileExecutionRole = new iam.Role(this, "CdnReconcileTaskExecutionRole", {
+      roleName: `sps-cdn-reconcile-task-exec-${env}`,
+      assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+      description: `SPS CloudFront-invalidation reconciler ECS task-execution role (${env}). Pulls the ETL image, injects the db/etl secret, writes logs.`,
+    });
     cdnReconcileExecutionRole.addToPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
@@ -1545,10 +1764,7 @@ export class EtlStack extends Stack {
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: ["logs:CreateLogStream", "logs:PutLogEvents"],
-        resources: [
-          cdnReconcileLogGroup.logGroupArn,
-          `${cdnReconcileLogGroup.logGroupArn}:*`,
-        ],
+        resources: [cdnReconcileLogGroup.logGroupArn, `${cdnReconcileLogGroup.logGroupArn}:*`],
       }),
     );
 
@@ -1581,31 +1797,28 @@ export class EtlStack extends Stack {
         taskRole: cdnReconcileTaskRole,
       },
     );
-    const cdnReconcileContainer = cdnReconcileTaskDefinition.addContainer(
-      "cdn-reconcile",
-      {
-        image: ecs.ContainerImage.fromEcrRepository(etlEcrRepository, "latest"),
-        // Container name `cdn-reconcile` (not `etl` / `reconcile`) keeps the
-        // three task defs' containers unambiguous for the tests.
-        containerName: "cdn-reconcile",
-        essential: true,
-        logging: ecs.LogDriver.awsLogs({
-          logGroup: cdnReconcileLogGroup,
-          streamPrefix: "cdn-reconcile",
-        }),
-        environment: {
-          NODE_ENV: "production",
-          // NO SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID: dormant-safe -- the worker
-          // no-ops without touching the DB until the operator supplies it at
-          // enable time. No OPENSEARCH_* either (this worker never reads it).
-        },
-        secrets: {
-          // db.read + db.write collapse onto this single DSN (no
-          // DATABASE_URL_RO in-container), exactly as the #393 reconciler runs.
-          DATABASE_URL: ecs.Secret.fromSecretsManager(dbEtlSecret),
-        },
+    const cdnReconcileContainer = cdnReconcileTaskDefinition.addContainer("cdn-reconcile", {
+      image: ecs.ContainerImage.fromEcrRepository(etlEcrRepository, "latest"),
+      // Container name `cdn-reconcile` (not `etl` / `reconcile`) keeps the
+      // three task defs' containers unambiguous for the tests.
+      containerName: "cdn-reconcile",
+      essential: true,
+      logging: ecs.LogDriver.awsLogs({
+        logGroup: cdnReconcileLogGroup,
+        streamPrefix: "cdn-reconcile",
+      }),
+      environment: {
+        NODE_ENV: "production",
+        // NO SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID: dormant-safe -- the worker
+        // no-ops without touching the DB until the operator supplies it at
+        // enable time. No OPENSEARCH_* either (this worker never reads it).
       },
-    );
+      secrets: {
+        // db.read + db.write collapse onto this single DSN (no
+        // DATABASE_URL_RO in-container), exactly as the #393 reconciler runs.
+        DATABASE_URL: ecs.Secret.fromSecretsManager(dbEtlSecret),
+      },
+    });
 
     const cdnReconcileTask = new tasks.EcsRunTask(this, "TaskCdnReconcile", {
       integrationPattern: sfn.IntegrationPattern.RUN_JOB,
@@ -1615,7 +1828,7 @@ export class EtlStack extends Stack {
         platformVersion: ecs.FargatePlatformVersion.LATEST,
       }),
       assignPublicIp: false,
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      subnets: etlTaskSubnets,
       securityGroups: [etlSecurityGroup],
       containerOverrides: [
         {
@@ -1652,34 +1865,26 @@ export class EtlStack extends Stack {
       { errors: ["States.ALL"], resultPath: "$.error" },
     );
 
-    const cdnReconcileSmLogGroup = new logs.LogGroup(
-      this,
-      "CdnReconcileSmLogGroup",
-      {
-        logGroupName: `/aws/states/cdn-reconcile-${env}`,
-        retention: logRetention,
-        removalPolicy: RemovalPolicy.RETAIN,
+    const cdnReconcileSmLogGroup = new logs.LogGroup(this, "CdnReconcileSmLogGroup", {
+      logGroupName: `/aws/states/cdn-reconcile-${env}`,
+      retention: logRetention,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    this.cdnReconcileStateMachine = new sfn.StateMachine(this, "CdnReconcileStateMachine", {
+      stateMachineName: `scholars-cdn-reconcile-${env}`,
+      stateMachineType: sfn.StateMachineType.STANDARD,
+      definitionBody: sfn.DefinitionBody.fromChainable(cdnReconcileTask),
+      // 15 min hard cap (vs the cadences' 24h): the worker is bounded to
+      // <=200 rows, so a longer-running execution is wedged and must not
+      // pile up at the 5 min cadence.
+      timeout: Duration.minutes(15),
+      logs: {
+        destination: cdnReconcileSmLogGroup,
+        level: sfn.LogLevel.ERROR,
+        includeExecutionData: false,
       },
-    );
-    this.cdnReconcileStateMachine = new sfn.StateMachine(
-      this,
-      "CdnReconcileStateMachine",
-      {
-        stateMachineName: `scholars-cdn-reconcile-${env}`,
-        stateMachineType: sfn.StateMachineType.STANDARD,
-        definitionBody: sfn.DefinitionBody.fromChainable(cdnReconcileTask),
-        // 15 min hard cap (vs the cadences' 24h): the worker is bounded to
-        // <=200 rows, so a longer-running execution is wedged and must not
-        // pile up at the 5 min cadence.
-        timeout: Duration.minutes(15),
-        logs: {
-          destination: cdnReconcileSmLogGroup,
-          level: sfn.LogLevel.ERROR,
-          includeExecutionData: false,
-        },
-        tracingEnabled: true,
-      },
-    );
+      tracingEnabled: true,
+    });
 
     // EventBridge rate(5 min) schedule. `cdnReconcileScheduleEnabled` is true in
     // both envs (continuous backstop -- see config flag JSDoc). retryAttempts: 0
@@ -1705,56 +1910,47 @@ export class EtlStack extends Stack {
     const cdnReconcileDimensions = {
       StateMachineArn: this.cdnReconcileStateMachine.stateMachineArn,
     };
-    const cdnReconcileStatusAlarm = new cloudwatch.Alarm(
-      this,
-      "CdnReconcileStatusAlarm",
-      {
-        alarmName: `sps-cdn-reconcile-status-${env}`,
-        alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- run failed (>=1 pending edge purge could not be replayed). Next: check the Step Functions execution for the failing purge; it replays on the next run once CloudFront accepts it.`,
-        metric: new cloudwatch.Metric({
-          namespace: "AWS/States",
-          metricName: "ExecutionsFailed",
-          statistic: cloudwatch.Stats.SUM,
-          period: Duration.minutes(15),
-          dimensionsMap: cdnReconcileDimensions,
-        }),
-        // Require ~30 min of sustained failure (2 consecutive 15 min windows)
-        // before alerting. The reconciler runs every 5 min and is idempotent,
-        // so a single failed run self-heals on the next fire and is not worth a
-        // notification; two windows = a persistent failure, which is. The
-        // cadence alarm below still alerts immediately on schedule death.
-        evaluationPeriods: 2,
-        datapointsToAlarm: 2,
-        threshold: 0,
-        comparisonOperator:
-          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-        // An idle 15 min window (no executions) is not a failure -- the cadence
-        // alarm below owns absence.
-        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      },
-    );
+    const cdnReconcileStatusAlarm = new cloudwatch.Alarm(this, "CdnReconcileStatusAlarm", {
+      alarmName: `sps-cdn-reconcile-status-${env}`,
+      alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- run failed (>=1 pending edge purge could not be replayed). Next: check the Step Functions execution for the failing purge; it replays on the next run once CloudFront accepts it.`,
+      metric: new cloudwatch.Metric({
+        namespace: "AWS/States",
+        metricName: "ExecutionsFailed",
+        statistic: cloudwatch.Stats.SUM,
+        period: Duration.minutes(15),
+        dimensionsMap: cdnReconcileDimensions,
+      }),
+      // Require ~30 min of sustained failure (2 consecutive 15 min windows)
+      // before alerting. The reconciler runs every 5 min and is idempotent,
+      // so a single failed run self-heals on the next fire and is not worth a
+      // notification; two windows = a persistent failure, which is. The
+      // cadence alarm below still alerts immediately on schedule death.
+      evaluationPeriods: 2,
+      datapointsToAlarm: 2,
+      threshold: 0,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      // An idle 15 min window (no executions) is not a failure -- the cadence
+      // alarm below owns absence.
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
     cdnReconcileStatusAlarm.addAlarmAction(alarmAction);
 
-    const cdnReconcileCadenceAlarm = new cloudwatch.Alarm(
-      this,
-      "CdnReconcileCadenceAlarm",
-      {
-        alarmName: `sps-cdn-reconcile-cadence-${env}`,
-        alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.`,
-        metric: new cloudwatch.Metric({
-          namespace: "AWS/States",
-          metricName: "ExecutionsStarted",
-          statistic: cloudwatch.Stats.SUM,
-          period: Duration.minutes(15),
-          dimensionsMap: cdnReconcileDimensions,
-        }),
-        evaluationPeriods: 1,
-        threshold: 1,
-        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
-        // Total metric absence => the schedule is dead => breach.
-        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
-      },
-    );
+    const cdnReconcileCadenceAlarm = new cloudwatch.Alarm(this, "CdnReconcileCadenceAlarm", {
+      alarmName: `sps-cdn-reconcile-cadence-${env}`,
+      alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires). Next: confirm the rate(5 min) rule is enabled and the state-machine IAM is intact.`,
+      metric: new cloudwatch.Metric({
+        namespace: "AWS/States",
+        metricName: "ExecutionsStarted",
+        statistic: cloudwatch.Stats.SUM,
+        period: Duration.minutes(15),
+        dimensionsMap: cdnReconcileDimensions,
+      }),
+      evaluationPeriods: 1,
+      threshold: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+      // Total metric absence => the schedule is dead => breach.
+      treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+    });
     cdnReconcileCadenceAlarm.addAlarmAction(alarmAction);
 
     // ------------------------------------------------------------------
@@ -1778,19 +1974,20 @@ export class EtlStack extends Stack {
     // flag flips. See docs/curation-backup-runbook.md § Prod.
     // ------------------------------------------------------------------
     if (envConfig.curationBackupScheduleEnabled) {
+      const backupUnit = taskUnitFor("backup:curated"); // base (no source creds)
       const backupTask = new tasks.EcsRunTask(this, "TaskCurationBackup", {
         integrationPattern: sfn.IntegrationPattern.RUN_JOB,
         cluster: ecsCluster,
-        taskDefinition: this.etlTaskDefinition,
+        taskDefinition: backupUnit.taskDefinition,
         launchTarget: new tasks.EcsFargateLaunchTarget({
           platformVersion: ecs.FargatePlatformVersion.LATEST,
         }),
         assignPublicIp: false,
-        subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        subnets: etlTaskSubnets,
         securityGroups: [etlSecurityGroup],
         containerOverrides: [
           {
-            containerDefinition: etlContainer,
+            containerDefinition: backupUnit.container,
             command: ["npm", "run", "backup:curated"],
           },
         ],
@@ -1824,31 +2021,23 @@ export class EtlStack extends Stack {
         { errors: ["States.ALL"], resultPath: "$.error" },
       );
 
-      const backupSmLogGroup = new logs.LogGroup(
-        this,
-        "CurationBackupSmLogGroup",
-        {
-          logGroupName: `/aws/states/curation-backup-${env}`,
-          retention: logRetention,
-          removalPolicy: RemovalPolicy.RETAIN,
+      const backupSmLogGroup = new logs.LogGroup(this, "CurationBackupSmLogGroup", {
+        logGroupName: `/aws/states/curation-backup-${env}`,
+        retention: logRetention,
+        removalPolicy: RemovalPolicy.RETAIN,
+      });
+      const curationBackupStateMachine = new sfn.StateMachine(this, "CurationBackupStateMachine", {
+        stateMachineName: `scholars-curation-backup-${env}`,
+        stateMachineType: sfn.StateMachineType.STANDARD,
+        definitionBody: sfn.DefinitionBody.fromChainable(backupTask),
+        timeout: Duration.minutes(35),
+        logs: {
+          destination: backupSmLogGroup,
+          level: sfn.LogLevel.ERROR,
+          includeExecutionData: false,
         },
-      );
-      const curationBackupStateMachine = new sfn.StateMachine(
-        this,
-        "CurationBackupStateMachine",
-        {
-          stateMachineName: `scholars-curation-backup-${env}`,
-          stateMachineType: sfn.StateMachineType.STANDARD,
-          definitionBody: sfn.DefinitionBody.fromChainable(backupTask),
-          timeout: Duration.minutes(35),
-          logs: {
-            destination: backupSmLogGroup,
-            level: sfn.LogLevel.ERROR,
-            includeExecutionData: false,
-          },
-          tracingEnabled: true,
-        },
-      );
+        tracingEnabled: true,
+      });
 
       // Daily at 06:00 UTC -- ahead of the 07:00 nightly ETL, so the snapshot
       // reflects the curated state as last hand-edited, before any nightly churn.
@@ -1870,28 +2059,24 @@ export class EtlStack extends Stack {
       // Alarm if no execution started across two consecutive 1-day windows (~2
       // missed daily fires). The Catch above already notifies on a failed run;
       // this owns absence.
-      const curationBackupCadenceAlarm = new cloudwatch.Alarm(
-        this,
-        "CurationBackupCadenceAlarm",
-        {
-          alarmName: `sps-curation-backup-cadence-${env}`,
-          alarmDescription: `SPS curated-tables backup (${env}) -- cadence missed (no execution started in ~2 days). Next: confirm the daily rule is enabled and the state-machine IAM is intact; run 'npm run backup:curated' via run-task to bridge the gap.`,
-          metric: new cloudwatch.Metric({
-            namespace: "AWS/States",
-            metricName: "ExecutionsStarted",
-            statistic: cloudwatch.Stats.SUM,
-            period: Duration.days(1),
-            dimensionsMap: {
-              StateMachineArn: curationBackupStateMachine.stateMachineArn,
-            },
-          }),
-          evaluationPeriods: 2,
-          datapointsToAlarm: 2,
-          threshold: 1,
-          comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
-          treatMissingData: cloudwatch.TreatMissingData.BREACHING,
-        },
-      );
+      const curationBackupCadenceAlarm = new cloudwatch.Alarm(this, "CurationBackupCadenceAlarm", {
+        alarmName: `sps-curation-backup-cadence-${env}`,
+        alarmDescription: `SPS curated-tables backup (${env}) -- cadence missed (no execution started in ~2 days). Next: confirm the daily rule is enabled and the state-machine IAM is intact; run 'npm run backup:curated' via run-task to bridge the gap.`,
+        metric: new cloudwatch.Metric({
+          namespace: "AWS/States",
+          metricName: "ExecutionsStarted",
+          statistic: cloudwatch.Stats.SUM,
+          period: Duration.days(1),
+          dimensionsMap: {
+            StateMachineArn: curationBackupStateMachine.stateMachineArn,
+          },
+        }),
+        evaluationPeriods: 2,
+        datapointsToAlarm: 2,
+        threshold: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+      });
       curationBackupCadenceAlarm.addAlarmAction(alarmAction);
     }
 
@@ -1913,19 +2098,20 @@ export class EtlStack extends Stack {
     // task def + SG + private-egress subnets (same placement as the nightly step).
     // ------------------------------------------------------------------
     if (envConfig.opportunityProjectionScheduleEnabled) {
+      const projectionUnit = taskUnitFor("etl:dynamodb"); // base (IAM scan, no creds)
       const projectionTask = new tasks.EcsRunTask(this, "TaskOpportunityProjection", {
         integrationPattern: sfn.IntegrationPattern.RUN_JOB,
         cluster: ecsCluster,
-        taskDefinition: this.etlTaskDefinition,
+        taskDefinition: projectionUnit.taskDefinition,
         launchTarget: new tasks.EcsFargateLaunchTarget({
           platformVersion: ecs.FargatePlatformVersion.LATEST,
         }),
         assignPublicIp: false,
-        subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        subnets: etlTaskSubnets,
         securityGroups: [etlSecurityGroup],
         containerOverrides: [
           {
-            containerDefinition: etlContainer,
+            containerDefinition: projectionUnit.container,
             command: ["npm", "run", "etl:dynamodb"],
           },
         ],
@@ -2000,24 +2186,28 @@ export class EtlStack extends Stack {
       // the corpus go stale unnoticed. Alarm if no execution started across two
       // consecutive 1-day windows (~2 missed daily fires); the Catch above owns
       // failed runs, this owns absence.
-      const projectionCadenceAlarm = new cloudwatch.Alarm(this, "OpportunityProjectionCadenceAlarm", {
-        alarmName: `sps-opportunity-projection-cadence-${env}`,
-        alarmDescription: `SPS opportunity projection (${env}) -- cadence missed (no execution started in ~2 days). Next: confirm the daily rule is enabled and the state-machine IAM is intact; run 'npm run etl:dynamodb' via run-task to bridge the gap.`,
-        metric: new cloudwatch.Metric({
-          namespace: "AWS/States",
-          metricName: "ExecutionsStarted",
-          statistic: cloudwatch.Stats.SUM,
-          period: Duration.days(1),
-          dimensionsMap: {
-            StateMachineArn: opportunityProjectionStateMachine.stateMachineArn,
-          },
-        }),
-        evaluationPeriods: 2,
-        datapointsToAlarm: 2,
-        threshold: 1,
-        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
-        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
-      });
+      const projectionCadenceAlarm = new cloudwatch.Alarm(
+        this,
+        "OpportunityProjectionCadenceAlarm",
+        {
+          alarmName: `sps-opportunity-projection-cadence-${env}`,
+          alarmDescription: `SPS opportunity projection (${env}) -- cadence missed (no execution started in ~2 days). Next: confirm the daily rule is enabled and the state-machine IAM is intact; run 'npm run etl:dynamodb' via run-task to bridge the gap.`,
+          metric: new cloudwatch.Metric({
+            namespace: "AWS/States",
+            metricName: "ExecutionsStarted",
+            statistic: cloudwatch.Stats.SUM,
+            period: Duration.days(1),
+            dimensionsMap: {
+              StateMachineArn: opportunityProjectionStateMachine.stateMachineArn,
+            },
+          }),
+          evaluationPeriods: 2,
+          datapointsToAlarm: 2,
+          threshold: 1,
+          comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+          treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+        },
+      );
       projectionCadenceAlarm.addAlarmAction(alarmAction);
     }
 
@@ -2097,10 +2287,13 @@ export class EtlStack extends Stack {
         subnets: ec2.SubnetSelection,
         securityGroups: ec2.ISecurityGroup[],
       ): tasks.EcsRunTask => {
+        // #1508 — the export leg reads LDAP (ldap def); the import leg is
+        // base (S3 + Aurora). taskUnitFor routes by script.
+        const unit = taskUnitFor(npmScript);
         const task = new tasks.EcsRunTask(this, `Task${idSuffix}`, {
           integrationPattern: sfn.IntegrationPattern.RUN_JOB,
           cluster: ecsCluster,
-          taskDefinition: this.etlTaskDefinition,
+          taskDefinition: unit.taskDefinition,
           launchTarget: new tasks.EcsFargateLaunchTarget({
             platformVersion: ecs.FargatePlatformVersion.LATEST,
           }),
@@ -2109,7 +2302,7 @@ export class EtlStack extends Stack {
           securityGroups,
           containerOverrides: [
             {
-              containerDefinition: etlContainer,
+              containerDefinition: unit.container,
               command: ["npm", "run", npmScript],
             },
           ],
@@ -2135,9 +2328,7 @@ export class EtlStack extends Stack {
               execution: sfn.JsonPath.executionName,
               error: sfn.JsonPath.stringAt("$.error"),
             }),
-          }).next(
-            new sfn.Fail(this, `Fail${idSuffix}`, { cause: `${idSuffix} failed` }),
-          ),
+          }).next(new sfn.Fail(this, `Fail${idSuffix}`, { cause: `${idSuffix} failed` })),
           { errors: ["States.ALL"], resultPath: "$.error" },
         );
         return task;
@@ -2155,20 +2346,16 @@ export class EtlStack extends Stack {
       const edImportTask = buildBridgeStep(
         "EdEmailVisibilityImport",
         "etl:ed:import-email-visibility",
-        { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        etlTaskSubnets,
         [etlSecurityGroup],
       );
       edExportTask.next(edImportTask);
 
-      const edBridgeLogGroup = new logs.LogGroup(
-        this,
-        "EdEmailVisibilityBridgeSmLogGroup",
-        {
-          logGroupName: `/aws/states/ed-email-visibility-${env}`,
-          retention: logRetention,
-          removalPolicy: RemovalPolicy.RETAIN,
-        },
-      );
+      const edBridgeLogGroup = new logs.LogGroup(this, "EdEmailVisibilityBridgeSmLogGroup", {
+        logGroupName: `/aws/states/ed-email-visibility-${env}`,
+        retention: logRetention,
+        removalPolicy: RemovalPolicy.RETAIN,
+      });
       const edBridgeStateMachine = new sfn.StateMachine(
         this,
         "EdEmailVisibilityBridgeStateMachine",
@@ -2187,24 +2374,20 @@ export class EtlStack extends Stack {
       );
 
       // Weekly, Sunday 05:00 UTC — a quiet slot ahead of the 06:00 curated
-      // backup / 07:00 nightly / 08:00 weekly cadences. Email-visibility release
+      // backup / 07:00 nightly / 12:00 weekly cadences. Email-visibility release
       // codes change slowly, so weekly is ample. enabled:true — the whole block
       // is already creation-gated on the flag, so reaching here means this env
       // should run it.
-      const edBridgeRule = new events.Rule(
-        this,
-        "EdEmailVisibilityBridgeScheduleRule",
-        {
-          ruleName: `sps-ed-email-visibility-${env}`,
-          description: `SPS ED email-visibility bridge -- weekly Sun 05:00 UTC (${env}). #443.`,
-          schedule: events.Schedule.cron({
-            minute: "0",
-            hour: "5",
-            weekDay: "SUN",
-          }),
-          enabled: true,
-        },
-      );
+      const edBridgeRule = new events.Rule(this, "EdEmailVisibilityBridgeScheduleRule", {
+        ruleName: `sps-ed-email-visibility-${env}`,
+        description: `SPS ED email-visibility bridge -- weekly Sun 05:00 UTC (${env}). #443.`,
+        schedule: events.Schedule.cron({
+          minute: "0",
+          hour: "5",
+          weekDay: "SUN",
+        }),
+        enabled: true,
+      });
       edBridgeRule.addTarget(
         new eventsTargets.SfnStateMachine(edBridgeStateMachine, {
           input: events.RuleTargetInput.fromObject({}),
@@ -2257,14 +2440,17 @@ export class EtlStack extends Stack {
       value: this.failureTopic.topicArn,
       description: "SPS ETL failure SNS topic ARN (B23 subscribes PagerDuty).",
     });
+    new CfnOutput(this, "EtlPageTopicArn", {
+      value: this.pageTopic.topicArn,
+      description: "SPS ETL P1 page SNS topic ARN (abort-tier step failures; PR-7).",
+    });
     new CfnOutput(this, "EtlTaskFamily", {
       value: this.etlTaskDefinition.family,
       description: "SPS ETL Fargate task family.",
     });
     new CfnOutput(this, "CurationBackupBucketName", {
       value: curationBackupBucket.bucketName,
-      description:
-        "SPS curated-tables logical-backup bucket (backup:curated uploads here).",
+      description: "SPS curated-tables logical-backup bucket (backup:curated uploads here).",
     });
     new CfnOutput(this, "NightlyStateMachineArn", {
       value: this.nightlyStateMachine.stateMachineArn,
@@ -2284,13 +2470,11 @@ export class EtlStack extends Stack {
     });
     new CfnOutput(this, "ReconcileStateMachineArn", {
       value: this.reconcileStateMachine.stateMachineArn,
-      description:
-        "SPS suppression search-index reconciler state machine ARN (#393).",
+      description: "SPS suppression search-index reconciler state machine ARN (#393).",
     });
     new CfnOutput(this, "CdnReconcileStateMachineArn", {
       value: this.cdnReconcileStateMachine.stateMachineArn,
-      description:
-        "SPS CloudFront-invalidation reconciler state machine ARN (#353).",
+      description: "SPS CloudFront-invalidation reconciler state machine ARN (#353).",
     });
   }
 }

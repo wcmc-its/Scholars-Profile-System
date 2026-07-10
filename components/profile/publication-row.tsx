@@ -76,6 +76,7 @@ export function PublicationRow({
         pmid={pub.pmid}
         pmcid={pub.pmcid}
         doi={pub.doi}
+        ecommonsLink={pub.ecommonsLink}
         abstract={pub.abstract}
       />
     </div>

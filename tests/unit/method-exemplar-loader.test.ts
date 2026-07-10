@@ -147,6 +147,19 @@ describe("loadMethodExemplar — gating", () => {
     expect(await loadMethodExemplar("", "F")).toEqual(EMPTY);
     expect(scholarFamilyFindMany).not.toHaveBeenCalled();
   });
+
+  it("#1366 — drops sibling-claimed (exclude) pmids from the candidate pool before ranking", async () => {
+    scholarFamilyFindMany.mockResolvedValue([
+      { supercategory: "x", familyLabel: "F", pmids: ["1", "2", "3"] },
+    ]);
+    publicationFindMany.mockResolvedValue([
+      pub({ pmid: "2", title: "P2" }),
+      pub({ pmid: "3", title: "P3" }),
+    ]);
+    await loadMethodExemplar("abc", "F", undefined, ["1"]);
+    // pmid "1" is excluded at the candidate stage ⇒ only "2","3" reach the metadata query.
+    expect(publicationFindMany.mock.calls[0][0].where.pmid.in).toEqual(["2", "3"]);
+  });
 });
 
 describe("loadMethodExemplar — methodContext + #1158 sourcePmid", () => {
@@ -197,6 +210,48 @@ describe("loadMethodExemplar — methodContext + #1158 sourcePmid", () => {
     expect(r.methodContext).toEqual({
       tool: "CheXpert",
       context: "labels chest radiographs across 14 observations",
+      sourcePmid: "33144353",
+    });
+  });
+
+  // #1502 — the snippet is a verbatim sentence baked from `sourcePmid` by the
+  // tools ETL, whose sha256 short-circuit can skip a rebuild after a takedown.
+  // The loader must re-check the source publication's suppression at read time.
+  const familyWithSnippet = {
+    supercategory: "x",
+    familyLabel: "F",
+    pmids: ["1"],
+    exemplarTools: ["CheXpert"],
+    exemplarContexts: { CheXpert: "labels chest radiographs" },
+    exemplarContextPmids: { CheXpert: "33144353" },
+  };
+
+  it("#1502 — drops methodContext when the sourcePmid is dark (post-publish takedown)", async () => {
+    scholarFamilyFindMany.mockResolvedValue([familyWithSnippet]);
+    publicationFindMany.mockResolvedValue([pub({ pmid: "1", title: "P1" })]);
+    // sourcePmid 33144353 is dark; the list pmid "1" is not, so the list survives.
+    resolveDarkPmids.mockResolvedValue(new Set(["33144353"]));
+    const r = await loadMethodExemplar("abc", "F");
+    expect(r.methodContext).toBeNull();
+    expect(r.pubs.map((p) => p.pmid)).toEqual(["1"]); // only the snippet dropped
+  });
+
+  it("#1502 — drops methodContext when this scholar per-author-hid the sourcePmid", async () => {
+    scholarFamilyFindMany.mockResolvedValue([familyWithSnippet]);
+    publicationFindMany.mockResolvedValue([pub({ pmid: "1", title: "P1" })]);
+    isAuthorHidden.mockImplementation((_s: unknown, pmid: string) => pmid === "33144353");
+    const r = await loadMethodExemplar("abc", "F");
+    expect(r.methodContext).toBeNull();
+    expect(r.pubs.map((p) => p.pmid)).toEqual(["1"]);
+  });
+
+  it("#1502 — keeps methodContext when the sourcePmid is not suppressed", async () => {
+    scholarFamilyFindMany.mockResolvedValue([familyWithSnippet]);
+    publicationFindMany.mockResolvedValue([pub({ pmid: "1", title: "P1" })]);
+    const r = await loadMethodExemplar("abc", "F");
+    expect(r.methodContext).toEqual({
+      tool: "CheXpert",
+      context: "labels chest radiographs",
       sourcePmid: "33144353",
     });
   });
@@ -298,5 +353,13 @@ describe("loadTopicExemplar — gating", () => {
     expect(await loadTopicExemplar("abc", "  ")).toEqual(EMPTY);
     expect(await loadTopicExemplar("", "t1")).toEqual(EMPTY);
     expect(publicationTopicFindMany).not.toHaveBeenCalled();
+  });
+
+  it("#1366 — threads exclude as a `notIn` on the publication_topic query (query-level de-dup)", async () => {
+    publicationTopicFindMany.mockResolvedValue([{ pmid: "2" }]);
+    publicationFindMany.mockResolvedValue([pub({ pmid: "2", title: "P2" })]);
+    await loadTopicExemplar("abc", "t1", undefined, ["1"]);
+    const where = publicationTopicFindMany.mock.calls[0][0].where;
+    expect(where.pmid).toEqual({ notIn: ["1"] });
   });
 });

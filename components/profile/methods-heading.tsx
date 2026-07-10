@@ -45,7 +45,7 @@ export function MethodsHeading({ pagesEnabled = false }: { pagesEnabled?: boolea
           href="/methods"
           className="text-muted-foreground shrink-0 text-xs underline-offset-4 hover:text-[var(--color-accent-slate)] hover:underline"
         >
-          Browse all methods →
+          Browse all methods &amp; tools →
         </Link>
       ) : null}
     </div>

@@ -25,6 +25,8 @@
  * Usage: `npm run etl:reporter-grants`
  */
 import { db } from "../../lib/db";
+import { assertPruneVolume } from "../../lib/etl-guard";
+import { withEtlRun } from "@/lib/etl-run";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import {
   dedupeAgainstInfoEd,
@@ -393,6 +395,11 @@ async function main() {
 
   // 3. Per scholar: fetch → group → dedup → upsert (+ recency suppression).
   const keptIds = new Set<string>();
+  // Scholars whose RePORTER fetch errored — their existing rows must be
+  // EXCLUDED from the stale reconcile below, or a transient per-scholar API
+  // failure deletes that scholar's entire RePORTER grant set (the swallowed
+  // error keeps the run exiting 0).
+  const erroredCwids = new Set<string>();
   let processed = 0;
   let grantsUpserted = 0;
   let newlySuppressed = 0;
@@ -406,6 +413,7 @@ async function main() {
       fetched = await fetchGrantProjectsByProfileIds(profileIds);
     } catch (err) {
       errored++;
+      erroredCwids.add(cwid);
       console.warn(`  [${cwid}] RePORTER fetch failed: ${(err as Error).message}`);
       await sleepBetweenRequests();
       continue;
@@ -498,9 +506,24 @@ async function main() {
   //    The `source: "RePORTER"` guard means InfoEd rows are never touched.
   const existingReporter = await db.write.grant.findMany({
     where: { source: "RePORTER" },
-    select: { id: true },
+    select: { id: true, cwid: true },
   });
-  const staleIds = existingReporter.map((g) => g.id).filter((id) => !keptIds.has(id));
+  const staleIds = existingReporter
+    .filter((g) => !erroredCwids.has(g.cwid))
+    .map((g) => g.id)
+    .filter((id) => !keptIds.has(id));
+  if (erroredCwids.size > 0) {
+    console.warn(
+      `Reconcile: ${erroredCwids.size} scholar(s) with fetch errors excluded from the stale prune.`,
+    );
+  }
+  // Belt-and-braces: even with errored scholars excluded, an implausibly
+  // large stale set means a systemic fetch problem, not real churn.
+  assertPruneVolume("reporter-grants:stale-reconcile", {
+    pruning: staleIds.length,
+    of: existingReporter.length,
+    maxPct: 25,
+  });
   let deleted = 0;
   for (const batch of chunks(staleIds, DELETE_BATCH)) {
     const res = await db.write.grant.deleteMany({
@@ -512,7 +535,10 @@ async function main() {
   console.log("\nRePORTER Grants ETL complete.\n");
 }
 
-main()
+// Records an etl_run row (source "ReporterGrants") so the freshness heartbeat
+// tracks this weekly step (PR-7). main() does not disconnect internally, so the
+// success/failure etl_run update runs before the outer disconnect below.
+withEtlRun("ReporterGrants", main)
   .then(() => db.write.$disconnect())
   .catch(async (err) => {
     console.error(err);

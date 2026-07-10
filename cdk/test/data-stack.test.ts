@@ -1,42 +1,135 @@
 import { Match, Template } from "aws-cdk-lib/assertions";
+import { type SpsEnvConfig } from "../lib/config";
 import { DataStack } from "../lib/data-stack";
 import { DrBackupVaultStack } from "../lib/dr-backup-vault-stack";
 import { NetworkStack } from "../lib/network-stack";
 import { makeFixture } from "./test-utils";
 
-function buildDataStack(envName: "staging" | "prod"): {
+function buildDataStack(
+  envName: "staging" | "prod",
+  envConfigOverride: Partial<SpsEnvConfig> = {},
+): {
   template: Template;
   stack: DataStack;
 } {
   const fixture = makeFixture(envName);
+  const envConfig = { ...fixture.envConfig, ...envConfigOverride };
   const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
   });
   const dr = new DrBackupVaultStack(
     fixture.app,
     `Sps-DrBackupVault-${envName}`,
     {
       env: fixture.drEnv,
-      envConfig: fixture.envConfig,
+      envConfig,
       crossRegionReferences: true,
     },
   );
   const stack = new DataStack(fixture.app, `Sps-Data-${envName}`, {
     env: fixture.env,
-    envConfig: fixture.envConfig,
+    envConfig,
     crossRegionReferences: true,
     vpc: network.vpc,
-    appSecurityGroup: network.appSecurityGroup,
-    etlSecurityGroup: network.etlSecurityGroup,
     drBackupVault: dr.vault,
   });
   return { template: Template.fromStack(stack), stack };
 }
 
 describe("DataStack", () => {
+  // Estate consolidation (plan §4.4): with useSharedVpc on, Aurora + OpenSearch
+  // land in the explicit, AZ-paired db-tier subnets and the stack owns no VPC.
+  describe("shared VPC placement (useSharedVpc on)", () => {
+    const { template } = buildDataStack("prod", { useSharedVpc: true });
+    const DB = ["subnet-0d35923e345653d0d", "subnet-099a9ebefc36ee888"];
+
+    it("Aurora's subnet group uses the db-tier subnet ids", () => {
+      template.hasResourceProperties("AWS::RDS::DBSubnetGroup", {
+        SubnetIds: Match.arrayWith(DB),
+      });
+    });
+
+    it("OpenSearch lands only in db-tier subnets", () => {
+      const domain = Object.values(
+        template.findResources("AWS::OpenSearchService::Domain"),
+      )[0];
+      const ids: string[] = domain?.Properties?.VPCOptions?.SubnetIds ?? [];
+      expect(ids.length).toBeGreaterThan(0);
+      for (const id of ids) expect(DB).toContain(id);
+    });
+
+    it("creates no VPC of its own", () => {
+      template.resourceCountIs("AWS::EC2::VPC", 0);
+    });
+  });
+
+  // Increment 4 (cutover, plan §8.5/§8.6): with auroraSnapshotIdentifier set,
+  // DataStack RESTORES the cluster from the snapshot (data-bearing, alongside the
+  // live one) instead of creating a fresh empty cluster. Asserted with Template
+  // matchers, NOT a snapshot, so no cutover output is baked into the committed
+  // snapshots — the shipped config (no snapshot id) stays byte-identical.
+  describe("Aurora snapshot-restore path (auroraSnapshotIdentifier set)", () => {
+    const { template } = buildDataStack("prod", {
+      auroraSnapshotIdentifier: "sps-prod-cutover-snap",
+    });
+
+    it("restores the single DBCluster from the configured snapshot id", () => {
+      template.resourceCountIs("AWS::RDS::DBCluster", 1);
+      template.hasResourceProperties("AWS::RDS::DBCluster", {
+        Engine: "aurora-mysql",
+        SnapshotIdentifier: "sps-prod-cutover-snap",
+        DeletionProtection: true,
+      });
+      template.hasResource("AWS::RDS::DBCluster", {
+        DeletionPolicy: "Retain",
+        UpdateReplacePolicy: "Retain",
+      });
+    });
+
+    it("omits DatabaseName / MasterUsername on the restore (inherited from the snapshot)", () => {
+      const cluster = Object.values(
+        template.findResources("AWS::RDS::DBCluster"),
+      )[0];
+      expect(cluster?.Properties?.DatabaseName).toBeUndefined();
+      expect(cluster?.Properties?.MasterUsername).toBeUndefined();
+    });
+
+    it("creates ONLY the transitional db/master-its master secret (retained, no plaintext)", () => {
+      template.hasResourceProperties("AWS::SecretsManager::Secret", {
+        Name: "scholars/prod/db/master-its",
+        GenerateSecretString: Match.objectLike({
+          GenerateStringKey: "password",
+          SecretStringTemplate: Match.stringLikeRegexp(
+            "\\{\\s*\"username\"\\s*:\\s*\"scholars_admin\"",
+          ),
+        }),
+      });
+      const names = Object.values(
+        template.findResources("AWS::SecretsManager::Secret"),
+      ).map((s) => s.Properties?.Name);
+      expect(names).toContain("scholars/prod/db/master-its");
+      // The standalone master secret is NOT created on the restore path.
+      expect(names).not.toContain("scholars/prod/db/master");
+      expect(JSON.stringify(template.toJSON())).not.toMatch(
+        /scholars_admin_password/,
+      );
+    });
+
+    it("still schedules single-user rotation on the restored cluster", () => {
+      template.resourceCountIs("AWS::SecretsManager::RotationSchedule", 1);
+    });
+  });
+
   describe("prod", () => {
-    const { template } = buildDataStack("prod");
+    // Pin flag-off + no snapshot so this block keeps covering the STANDALONE
+    // Aurora (regular DatabaseCluster + canonical master secret). Prod's cutover
+    // DatabaseClusterFromSnapshot + shared-VPC synth is covered by the staging
+    // (flag-on) block + the regenerated snapshot + the pre-deploy cdk diff.
+    const { template } = buildDataStack("prod", {
+      useSharedVpc: false,
+      auroraSnapshotIdentifier: undefined,
+    });
 
     it("matches the snapshot", () => {
       expect(template.toJSON()).toMatchSnapshot();
@@ -505,4 +598,5 @@ describe("DataStack", () => {
       });
     });
   });
+
 });

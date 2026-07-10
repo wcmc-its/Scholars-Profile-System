@@ -30,12 +30,14 @@
  *
  * Usage: `npm run etl:reporter`
  */
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 import { coreProjectNum } from "@/lib/award-number";
 import { parseReporterTerms } from "@/lib/reporter-terms";
 import { resolveGrantKeywords } from "./mesh";
+import { withEtlRun } from "@/lib/etl-run";
+import { assertSourceVolume } from "../../lib/etl-guard";
 
 type ReporterRow = {
   core_project_num: string;
@@ -138,15 +140,20 @@ async function step1_GrantAbstracts() {
     // array; compare by canonical JSON since parseReporterTerms is deterministic.
     const keywordsChanged =
       JSON.stringify(g.keywords ?? null) !== JSON.stringify(keywords);
+    // A partially-populated grant_reporter_project mirror carries NULL
+    // abstract_text on rows RePORTER has already published abstracts for —
+    // never replace a real abstract with upstream NULL (applId/keywords
+    // still update normally).
+    const abstract = r.abstract_text ?? g.abstract;
     if (
       g.applId !== r.appl_id ||
-      g.abstract !== r.abstract_text ||
+      g.abstract !== abstract ||
       keywordsChanged
     ) {
       toUpdate.push({
         id: g.id,
         applId: r.appl_id,
-        abstract: r.abstract_text,
+        abstract,
         keywords,
       });
     }
@@ -292,35 +299,49 @@ async function step2_GrantPublications() {
     `${provNoGrant} skipped — (cwid, core) not in our grants).`
   );
 
-  // Truncate-reload pattern, scoped to the grants we actually loaded.
-  // deleteMany WHERE grantId IN (...) is safer than full TRUNCATE — leaves
-  // other rows alone if our grant scope changes.
-  console.log("Clearing existing grant_publication rows for these grants...");
+  // An empty/truncated grant_provenance read reaches here with toInsert=[] and
+  // would wipe the whole bridge below, then hit the "Nothing to insert" early
+  // return — the delete must not run on an implausibly shrunken rebuild set.
+  assertSourceVolume("reporter:grant-publication-bridge", {
+    incoming: toInsert.length,
+    existing: await db.write.grantPublication.count({
+      where: { grantId: { in: grants.map((g) => g.id) } },
+    }),
+    maxDropPct: 50,
+  });
+
+  // Truncate-reload in ONE interactive transaction so a mid-write crash — or a
+  // reader landing between the delete and the insert — can never observe an
+  // empty or half-rebuilt bridge (every grant's pub count would otherwise read
+  // 0 for the duration of the ~100k-row reload). deleteMany WHERE grantId
+  // IN (...) stays scoped to the grants we loaded (safer than a full TRUNCATE).
+  // Timeout raised above the 5 s interactive default for the batched reload —
+  // clinical-trials' replaceAll is the in-repo model.
+  console.log("Rebuilding grant_publication rows for these grants (transactional)...");
   const allGrantIds = grants.map((g) => g.id);
   let deleted = 0;
-  for (const batch of chunks(allGrantIds, 1000)) {
-    const r = await db.write.grantPublication.deleteMany({
-      where: { grantId: { in: batch } },
-    });
-    deleted += r.count;
-  }
-  console.log(`Deleted ${deleted} existing rows.`);
-
-  if (toInsert.length === 0) {
-    console.log("Nothing to insert.");
-    return;
-  }
-
-  console.log(`Inserting ${toInsert.length} grant_publication rows...`);
   let inserted = 0;
-  for (const batch of chunks(toInsert, 1000)) {
-    await db.write.grantPublication.createMany({ data: batch });
-    inserted += batch.length;
-    if (inserted % 5000 === 0) {
-      console.log(`  ...${inserted}/${toInsert.length}`);
-    }
-  }
-  console.log(`Inserted ${inserted} rows.`);
+  await db.write.$transaction(
+    async (tx) => {
+      for (const batch of chunks(allGrantIds, 1000)) {
+        const r = await tx.grantPublication.deleteMany({
+          where: { grantId: { in: batch } },
+        });
+        deleted += r.count;
+      }
+      // toInsert=[] (guarded above by assertSourceVolume) ⇒ the loop is a no-op
+      // and the bridge is simply cleared — atomically — for these grants.
+      for (const batch of chunks(toInsert, 1000)) {
+        await tx.grantPublication.createMany({ data: batch });
+        inserted += batch.length;
+        if (inserted % 5000 === 0) {
+          console.log(`  ...${inserted}/${toInsert.length}`);
+        }
+      }
+    },
+    { timeout: 120_000, maxWait: 10_000 },
+  );
+  console.log(`Rebuilt grant_publication bridge: -${deleted} +${inserted}.`);
 }
 
 async function step3_ResolveMeshDescriptors() {
@@ -409,16 +430,22 @@ async function main() {
     await step2_GrantPublications();
     await step3_ResolveMeshDescriptors();
   } finally {
-    // Close both connection pools so the process exits cleanly. Without the
-    // Prisma disconnect the adapter's pool keeps the event loop alive and the
-    // script hangs after "Done in …s." rather than exiting.
+    // Close the ReciterDB pool here (withEtlRun never touches it). The Prisma
+    // db.write disconnect is deferred to the entrypoint below: withEtlRun writes
+    // the etl_run success/failure row AFTER main() returns, so disconnecting here
+    // would make that write auto-reopen the Prisma pool with nothing left to
+    // close it — the script would hang after "Done in …s." rather than exiting.
     await closeReciterPool();
-    await db.write.$disconnect();
   }
   console.log(`\nDone in ${((Date.now() - start) / 1000).toFixed(1)}s.`);
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// Disconnect only AFTER withEtlRun has written its etl_run row (on both the
+// success and failure paths), then let the empty event loop exit the process.
+// `process.exitCode` (not `process.exit`) so the `.finally` cleanup still runs.
+withEtlRun("Reporter", main)
+  .catch((e) => {
+    console.error(e);
+    process.exitCode = 1;
+  })
+  .finally(disconnect);

@@ -20,10 +20,37 @@ const NODE_BUILTIN_EXTERNALS: Record<string, string> = {
   "node:path": "commonjs path",
 };
 
+// #1503 — shared S3-backed ISR cacheHandler. Prod runs 2–6 app tasks and
+// Next's default incremental cache is per-process, so `revalidatePath` busts
+// only one task and the edge can refill a stale copy from another. When "on",
+// route all tasks through the shared S3 store (`lib/cache/s3-cache-handler.js`)
+// with in-process memory disabled so S3 is the single source of truth. Off
+// (default) → Next's built-in FS/in-memory handler, byte-identical to today.
+//
+// IMPORTANT — this is read at `next build`, NOT at runtime. `output: standalone`
+// bakes the resolved config into the image (the runtime server uses the baked
+// `__NEXT_PRIVATE_STANDALONE_CONFIG`; it never re-evaluates next.config.ts), so
+// whether `cacheHandler` is wired is fixed at build. Enabling it is therefore a
+// BUILD-ARG: the Deploy workflow passes `--build-arg NEXT_ISR_CACHE_S3=on` per
+// env (Dockerfile ENV → this read). It is deliberately NOT gated on the bucket
+// env — the bucket name is a CloudFormation ref only known at deploy time, so it
+// can never be present at build; the handler reads NEXT_ISR_CACHE_BUCKET at
+// runtime and safely no-ops if it is absent. See docs/1503-shared-cachehandler-spec.md §4e.
+const isrCacheS3 = process.env.NEXT_ISR_CACHE_S3 === "on";
+
 const nextConfig: NextConfig = {
   // ADR-008: emit a standalone server bundle for the production container
   // image (see Dockerfile) — only traced dependencies are included.
   output: "standalone",
+  ...(isrCacheS3
+    ? {
+        cacheHandler: require.resolve("./lib/cache/s3-cache-handler.js"),
+        // S3 is the shared source of truth; disable the default in-memory LRU
+        // so a task can't serve its own stale copy past a shared revalidation.
+        // (The handler keeps its own small in-process front — §4c.)
+        cacheMaxMemorySize: 0,
+      }
+    : {}),
   // Pin the file-tracing root so the standalone bundle lands at a stable
   // path (.next/standalone/server.js). Without this, Next infers the root
   // from the nearest lockfile, which is ambiguous when the build runs from

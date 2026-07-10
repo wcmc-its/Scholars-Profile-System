@@ -108,7 +108,43 @@ export type AuditAction =
   /** a scholar (or a genuine superuser) revoked a confirmed RePORTER match —
    *  deletes the `person_nih_profile` row (grants reconcile out next run);
    *  before/after carry the status transition. */
-  | "reporter_profile_revoke";
+  | "reporter_profile_revoke"
+  /** a development-role member (or superuser) queued a funding-opportunity URL
+   *  for the ReciterAI pipeline (`docs/opportunity-url-intake-spec.md`);
+   *  `targetEntityType='opportunity_submission'`, `targetEntityId` the queue
+   *  item's sort key, `afterValues` carries `{ url, note }`. */
+  | "opportunity_submission"
+  /** a curator / comms_steward (or a superuser) set a historical
+   *  (`source = "ED-HISTORICAL"`) appointment's public visibility via /edit
+   *  (#1323); `targetEntityType='appointment'`, `targetEntityId` is the
+   *  appointment `externalId`, `afterValues` carries `show_on_profile` (+ the
+   *  conferring unit on a unit-admin reveal). Requires the `scholars_audit`
+   *  action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "appointment_visibility_set"
+  /** a scholar (or a curator on their behalf) added / edited / removed a
+   *  self-asserted `profile_appointment` row on /edit (#1568) — an internal WCM
+   *  role the ED feed omits, or a current/historical external appointment.
+   *  `targetEntityType='profile_appointment'`, `targetEntityId` is the row `id`;
+   *  before/after carry the row snapshot. Its own store → its own audit action,
+   *  never `field_override`. Requires the `scholars_audit` action ENUM be
+   *  extended — see `scripts/sql/audit-log.sql`. */
+  | "profile_appointment_create"
+  | "profile_appointment_update"
+  | "profile_appointment_delete"
+  /** a development-role member (or superuser) DELETED an accidental
+   *  funding-opportunity submission the pipeline had not consumed (status
+   *  pending/rejected — Submissions sub-tab cleanup); DynamoDB DeleteItem on
+   *  the SUBMISSION item. `targetEntityType='opportunity_submission'`,
+   *  `targetEntityId` the queue item's sort key, `beforeValues` the deleted
+   *  row's `{ url, status, note, submitted_by }`. Requires the `scholars_audit`
+   *  action ENUM be extended — see `scripts/sql/audit-log.sql`. */
+  | "opportunity_submission_delete"
+  /** a development-role member (or superuser) SUPPRESSED a processed
+   *  submission — `status='suppressed'` on the SUBMISSION item; ReciterAI's
+   *  drain companion then removes the produced `GRANT#` items. before/after
+   *  carry the status transition (+ `produced_opportunity_ids`). Same ENUM
+   *  note as `opportunity_submission_delete`. */
+  | "opportunity_submission_suppress";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -137,7 +173,14 @@ export type AuditEntityType =
   /** a RePORTER PMID-overlap match candidate confirmed/rejected/revoked in /edit
    *  (`REPORTER_MATCH_V2`); `targetEntityId` is the
    *  `reporter_profile_candidate.id`. */
-  | "reporter_profile_candidate";
+  | "reporter_profile_candidate"
+  /** a funding-opportunity URL submission queue item in the shared `reciterai`
+   *  DynamoDB table (`OPPORTUNITY_URL_INTAKE`); `targetEntityId` is the item's
+   *  time-ordered sort key (`<ISO ts>#<uuid8>`). */
+  | "opportunity_submission"
+  /** a self-asserted `profile_appointment` row edited on /edit (#1568);
+   *  `targetEntityId` is the `profile_appointment.id`. */
+  | "profile_appointment";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

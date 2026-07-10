@@ -23,9 +23,9 @@ import type {
 } from "@/lib/api/dept-highlights";
 import {
   isAuthorHidden,
-  loadPublicationSuppressions,
+  loadAllPublicationSuppressions,
   resolveActiveGrantSuppression,
-  resolveDarkPmids,
+  resolveUnitDarkPmids,
 } from "@/lib/api/manual-layer";
 
 const PAGE_SIZE = 20;
@@ -53,22 +53,20 @@ async function getDeptPublicationsListUncached(
   const page = Math.max(0, opts.page ?? 0);
   const sort: PubSort = opts.sort ?? "newest";
 
-  // Distinct PMIDs with at least one confirmed dept author.
-  const pmidRows = (await prisma.publicationAuthor.findMany({
-    where: {
-      isConfirmed: true,
-      scholar: { deptCode, deletedAt: null, status: "active" },
-    },
-    select: { pmid: true },
-    distinct: ["pmid"],
-  })) as Array<{ pmid: string }>;
-  const poolPmids = pmidRows.map((r) => r.pmid);
-  // #356 — drop taken-down / derived-dark publications before paginating, so
-  // `total` and the page window are computed over the visible set.
-  const suppressions = await loadPublicationSuppressions(poolPmids, prisma);
-  const darkPmids = await resolveDarkPmids(poolPmids, suppressions, prisma);
-  const allPmids = poolPmids.filter((p) => !darkPmids.has(p));
-  const total = allPmids.length;
+  // #1505 — push dept membership into the page query and count via an
+  // `authors: { some }` relation filter instead of materializing every distinct
+  // dept pmid (50k-100k for a large dept). Suppression is inverted: load the
+  // SMALL sitewide active-suppression set, resolve the unit's dark pmids from it
+  // (tens of rows), and exclude them via `pmid: { notIn }`. #356 — total and the
+  // page window are both computed over this visible set.
+  const membership = { scholar: { deptCode, deletedAt: null, status: "active" } };
+  const suppressions = await loadAllPublicationSuppressions(prisma);
+  const unitDarkPmids = await resolveUnitDarkPmids(suppressions, membership, prisma);
+  const visibleWhere = {
+    authors: { some: { isConfirmed: true, ...membership } },
+    ...(unitDarkPmids.length > 0 ? { pmid: { notIn: unitDarkPmids } } : {}),
+  };
+  const total = await prisma.publication.count({ where: visibleWhere });
   if (total === 0) {
     return { hits: [], total: 0, page, pageSize: PAGE_SIZE };
   }
@@ -79,7 +77,7 @@ async function getDeptPublicationsListUncached(
       : [{ dateAddedToEntrez: "desc" as const }, { pmid: "asc" as const }];
 
   const pubs = await prisma.publication.findMany({
-    where: { pmid: { in: allPmids } },
+    where: visibleWhere,
     orderBy,
     skip: page * PAGE_SIZE,
     take: PAGE_SIZE,

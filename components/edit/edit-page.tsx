@@ -9,6 +9,8 @@
  * by actor; the data contract and write calls are layout-independent.
  */
 import { AppointmentsCard } from "@/components/edit/appointments-card";
+import { HistoricalAppointmentsCard } from "@/components/edit/historical-appointments-card";
+import { ProfileAppointmentsCard } from "@/components/edit/profile-appointments-card";
 import { CoiCard } from "@/components/edit/coi-card";
 import { CoiGapCard } from "@/components/edit/coi-gap-card";
 import { ReporterProfileCard } from "@/components/edit/reporter-profile-card";
@@ -146,7 +148,7 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // superuser (operator decision — trusted, with a UI nag before any action), but
   // NOT to a proxy / unit-admin (excluded in `attrsForMode`). The rail item
   // appears only when there are candidates AND the flag is on.
-  { key: "coi-gap", label: "From your publications", readonly: true, modes: ["self", "superuser"] },
+  { key: "coi-gap", label: "Disclosed in publications", readonly: true, modes: ["self", "superuser"] },
   // RePORTER "Is this you?" (REPORTER_MATCH_V2) — K=2 PMID-overlap matches the
   // scholar confirms/rejects, plus a revocable confirmed-match history. Self OR a
   // genuine superuser (on their behalf); never a proxy / unit-admin (excluded in
@@ -630,11 +632,10 @@ export function EditPage({
           placement.group === "Yours to edit" && mode !== "self"
             ? "Profile content"
             : placement.group;
-        // The advisory's first-person label reframes for anyone editing on the
-        // scholar's behalf (superuser / comms_steward), mirroring the classic
-        // superuser rail.
-        const label =
-          a.key === "coi-gap" && mode !== "self" ? "From the scholar’s publications" : a.label;
+        // §7.4 — the advisory's nav label describes the thing, not the source or
+        // viewer ("Disclosed in publications"), so it reads the same for the
+        // scholar and a superuser editing on their behalf.
+        const label = a.label;
         return [
           {
             key: a.key,
@@ -683,9 +684,9 @@ export function EditPage({
       : SUPERUSER_RAIL_ORDER.flatMap((k) => {
           const a = visible.find((v) => v.key === k);
           if (!a) return [];
-          // The COI-gap label is first-person ("From your publications"); reframe
-          // it for a superuser viewing another scholar's advisory.
-          const label = a.key === "coi-gap" ? "From the scholar’s publications" : a.label;
+          // §7.4 — viewer-neutral nav label ("Disclosed in publications"), same
+          // for self and superuser.
+          const label = a.label;
           // Like the self rail, the advisory nests under Conflicts of Interest
           // (it immediately follows "coi" in SUPERUSER_RAIL_ORDER) rather than
           // reading as a flat sibling — it is a sub-view of COI, not its own SOR.
@@ -966,6 +967,19 @@ function renderPanel(
           // purely to reframe its copy for a proxy / unit-admin (#955 #10).
           mode={childMode}
           thirdPerson={thirdPerson}
+          // section-visibility-spec — the Sections panel. Hidden keys come from
+          // the loader; the per-section hidden-RECORD counts are derived from the
+          // already-loaded edit-context suppression state (no new query). The
+          // "N records hidden →" links deep-link into each record card.
+          sections={{
+            hidden: ctx.scholar.hiddenSections,
+            hiddenRecordCounts: {
+              hideMentoring: ctx.mentees.filter((m) => m.state !== "shown").length,
+              hideEducation: ctx.educations.filter((e) => e.state !== "shown").length,
+              hideFunding: ctx.grants.filter((g) => g.state !== "shown").length,
+            },
+            basePath: detailBase,
+          }}
         />
       );
     case "publications":
@@ -993,12 +1007,44 @@ function renderPanel(
       );
     case "appointments":
       return (
-        <AppointmentsCard
-          cwid={cwid}
-          mode={voiceMode}
-          scholarName={scholarName}
-          appointments={ctx.appointments}
-        />
+        <div className="flex flex-col gap-8">
+          <AppointmentsCard
+            cwid={cwid}
+            mode={voiceMode}
+            scholarName={scholarName}
+            appointments={ctx.appointments}
+          />
+          {/* #1323 — reveal-to-show historical appointments. Every reveal-capable
+              editor sees the control: the scholar themselves (self, self-serve),
+              a superuser / comms_steward, a granted proxy, or a unit-admin curator
+              — the SAME set `authorizeOverviewWrite` authorizes at the route, so
+              the surface never drifts from the write gate. A self-actor only ever
+              sees + toggles their OWN history (the loader is per-scholar and the
+              route keys authz on the appointment's owner). */}
+          {(mode === "self" ||
+            isSuperuserLike(mode) ||
+            mode === "unit-admin" ||
+            mode === "proxy") &&
+            ctx.historicalAppointments.length > 0 && (
+              <HistoricalAppointmentsCard
+                scholarName={scholarName}
+                appointments={ctx.historicalAppointments}
+              />
+            )}
+          {/* #1568 — self-service editor for self-asserted appointments (internal
+              WCM roles the ED feed omits + prior/other-institution positions).
+              Shown to every actor the write route authorizes (self, superuser /
+              comms_steward, unit-admin, proxy — the SAME set as the historical
+              reveal above); the card fetches its own rows and each write is
+              re-authorized server-side. These render ONLY on the owner's profile,
+              never on a center / department / division / search surface. */}
+          {(mode === "self" ||
+            isSuperuserLike(mode) ||
+            mode === "unit-admin" ||
+            mode === "proxy") && (
+            <ProfileAppointmentsCard cwid={cwid} mode={voiceMode} scholarName={scholarName} />
+          )}
+        </div>
       );
     case "education":
       return (

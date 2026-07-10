@@ -40,8 +40,14 @@
  * Usage: `npm run etl:reciter`
  */
 import { Prisma } from "@/lib/generated/prisma/client";
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
+import { assertPruneVolume, assertSourceVolume } from "../../lib/etl-guard";
 import { markTopicRebuildStarted } from "../../lib/etl-state";
+import {
+  publicationSignature,
+  planAuthorshipReconcile,
+  type IncomingAuthorship,
+} from "./change-detection";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
 type AuthorRow = {
@@ -80,6 +86,12 @@ type JournalAbbrevRow = {
 };
 
 type AbstractRow = { pmid: number; abstractVarchar: string | null };
+
+/** #1567 — eCommons institutional-repository crosswalk from
+ *  `reciterdb.ecommons_pmid_link` (columns `pmid`, `ecommonslink`). `pmid` is a
+ *  varchar in the source; the mariadb driver returns it as a string, coerced to
+ *  a number for the map key like every other pmid keyed read here. */
+type EcommonsRow = { pmid: number; ecommonslink: string | null };
 
 /** #917 v6 — NIH iCite bibliometrics from `reciterdb.analysis_nih` (keyed by pmid).
  *  `relative_citation_ratio` is the field- and time-normalized influence figure used by
@@ -312,6 +324,17 @@ async function main() {
     }
     console.log(`Got ${articleByPmid.size} article rows.`);
 
+    // ReciterDB's analysis_summary_* tables are themselves rebuilt nightly; a
+    // read overlapping that rebuild (or an auth-scope change) succeeds with a
+    // truncated set. The corpus only grows in normal operation, so a >20%
+    // shrink vs what we already hold means a bad read — abort before the
+    // publication_score wipe / authorship rewrite / orphan prune below.
+    assertSourceVolume("reciter:publications", {
+      incoming: articleByPmid.size,
+      existing: await db.write.publication.count(),
+      maxDropPct: 20,
+    });
+
     // Issue #21 — pull abstracts for the same pmid set so the search-index
     // ETL can emit a `publicationAbstracts` field on each people document.
     // We use `abstractVarchar` (already capped at 15000 chars at the
@@ -331,6 +354,16 @@ async function main() {
       });
     }
     console.log(`Got ${abstractByPmid.size} abstracts.`);
+
+    // Empty-but-reachable secondary tables would mass-null their enrichment
+    // column via the unconditional upsert below (same truncated-read fragility
+    // as the primary guard above). Compare each map against the rows whose
+    // value it is about to overwrite; bootstrap (0 existing) passes.
+    assertSourceVolume("reciter:abstracts", {
+      incoming: abstractByPmid.size,
+      existing: await db.write.publication.count({ where: { abstract: { not: null } } }),
+      maxDropPct: 30,
+    });
 
     // #917 v6 — NIH iCite bibliometrics (RCR / NIH percentile / iCite citation count) for the
     // same pmid set, from `reciterdb.analysis_nih`. Rides this weekly refresh so the biosketch
@@ -358,6 +391,54 @@ async function main() {
       }
     }
     console.log(`Got ${nihByPmid.size} NIH iCite rows.`);
+
+    // The best-effort per-batch catch above means a dead or emptied
+    // analysis_nih arrives here as a near-empty map — which would null
+    // RCR / nihPercentile / citedByCount corpus-wide. Guard on volume.
+    assertSourceVolume("reciter:nih-bibliometrics", {
+      incoming: nihByPmid.size,
+      existing: await db.write.publication.count({
+        where: { relativeCitationRatio: { not: null } },
+      }),
+      maxDropPct: 30,
+    });
+
+    // #1567 — eCommons institutional-repository handle URLs for the same pmid
+    // set, from `reciterdb.ecommons_pmid_link` (pmid → ecommonslink). Rides this
+    // weekly refresh so a publication deposited in Cornell's eCommons gets an
+    // "eCommons" linkout on its card/modal. Best-effort per batch (mirrors the
+    // analysis_nih fallback above): a missing or unreadable crosswalk simply
+    // leaves `ecommonsLink` null — the linkout just doesn't render — so it never
+    // fails the run (issue #1567 AC). Deliberately NO assertSourceVolume guard:
+    // this is a pure linkout enrichment, and the AC requires a failed/empty read
+    // to degrade to null rather than abort. One handle per pmid in practice;
+    // keep the first non-empty sighting defensively.
+    const ecommonsLinkByPmid = new Map<number, string>();
+    for (const batch of chunks(distinctPmids, IN_BATCH)) {
+      try {
+        await withReciterConnection(async (conn) => {
+          const rows = (await conn.query(
+            `SELECT pmid, ecommonslink
+             FROM ecommons_pmid_link
+             WHERE pmid IN (?) AND ecommonslink IS NOT NULL AND ecommonslink <> ''`,
+            [batch],
+          )) as EcommonsRow[];
+          for (const r of rows) {
+            const key = Number(r.pmid);
+            if (!ecommonsLinkByPmid.has(key) && r.ecommonslink) {
+              ecommonsLinkByPmid.set(key, r.ecommonslink);
+            }
+          }
+        });
+      } catch (err) {
+        console.warn(
+          `ecommons_pmid_link fetch failed for a batch (continuing without eCommons links for it): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    console.log(`Got ${ecommonsLinkByPmid.size} eCommons links.`);
 
     // Issue #89 — full author list for the Word bibliography. We pull
     // structured per-rank rows from analysis_summary_author_list (which
@@ -409,6 +490,15 @@ async function main() {
     }
     console.log(`Got ${fullAuthorsByPmid.size} full-author strings.`);
 
+    // An empty analysis_summary_author_list would null fullAuthorsString everywhere.
+    assertSourceVolume("reciter:full-author-lists", {
+      incoming: fullAuthorsByPmid.size,
+      existing: await db.write.publication.count({
+        where: { fullAuthorsString: { not: null } },
+      }),
+      maxDropPct: 30,
+    });
+
     // Issue #89 — NLM journal abbreviation. person_article carries the
     // ISO abbreviation per pmid (despite the name, it's the NLM-style
     // form: "Proc Natl Acad Sci U S A"). Distinct per pmid; pick first
@@ -433,6 +523,13 @@ async function main() {
       });
     }
     console.log(`Got ${journalAbbrevByPmid.size} journal abbreviations.`);
+
+    // An empty person_article would null journalAbbrev everywhere.
+    assertSourceVolume("reciter:journal-abbrevs", {
+      incoming: journalAbbrevByPmid.size,
+      existing: await db.write.publication.count({ where: { journalAbbrev: { not: null } } }),
+      maxDropPct: 30,
+    });
 
     // Issue #73 — pull MeSH keywords for the same pmid set so the profile
     // loader can derive the Topics section without a runtime join. Keywords
@@ -460,6 +557,15 @@ async function main() {
       });
     }
     console.log(`Got keywords for ${keywordsByPmid.size} pmids.`);
+
+    // An empty person_article_keyword would wipe meshTerms (→ DbNull) everywhere.
+    assertSourceVolume("reciter:mesh-keywords", {
+      incoming: keywordsByPmid.size,
+      existing: await db.write.publication.count({
+        where: { meshTerms: { not: Prisma.AnyNull } },
+      }),
+      maxDropPct: 30,
+    });
 
     // First-seen authors string per pmid (denormalized, same per row).
     const authorsStringByPmid = new Map<number, string>();
@@ -502,6 +608,9 @@ async function main() {
         pages: a.pages,
         journalAbbrev: journalAbbrevByPmid.get(Number(a.pmid)) ?? null,
         pubmedUrl: `https://pubmed.ncbi.nlm.nih.gov/${a.pmid}/`,
+        // #1567 — eCommons handle URL (null when this pmid is not in the repo,
+        // or when the crosswalk read failed for its batch above).
+        ecommonsLink: ecommonsLinkByPmid.get(Number(a.pmid)) ?? null,
         abstract: abstractByPmid.get(Number(a.pmid)) ?? null,
         meshTerms: keywordsByPmid.get(Number(a.pmid)) ?? Prisma.DbNull,
         source: "ReciterDB",
@@ -512,11 +621,65 @@ async function main() {
 
     // 5. Upsert publications keyed on pmid. Parallel-chunk pattern mirrors
     //    etl/dynamodb/index.ts:300-336.
-    console.log(`Upserting ${pubRows.length} publications...`);
-    let upserted = 0;
+    console.log(`Upserting ${pubRows.length} publications (change-detection)...`);
+    // The reciter-written fields only — the same set publicationSignature reads.
+    // `synopsis` / `impact*` / `topTopicId` are owned by other ETLs; excluding
+    // them keeps this comparison from ever thinking another ETL's write is a
+    // reciter change (and vice versa).
+    const PUB_SELECT = {
+      pmid: true,
+      title: true,
+      authorsString: true,
+      fullAuthorsString: true,
+      journal: true,
+      year: true,
+      publicationType: true,
+      citationCount: true,
+      relativeCitationRatio: true,
+      nihPercentile: true,
+      citedByCount: true,
+      dateAddedToEntrez: true,
+      doi: true,
+      pmcid: true,
+      volume: true,
+      issue: true,
+      pages: true,
+      journalAbbrev: true,
+      pubmedUrl: true,
+      ecommonsLink: true,
+      abstract: true,
+      meshTerms: true,
+      source: true,
+    } as const;
+    let pubCreated = 0;
+    let pubUpdated = 0;
+    let pubUnchanged = 0;
     for (const batch of chunks(pubRows, INSERT_BATCH)) {
+      const existingRows = await db.write.publication.findMany({
+        where: { pmid: { in: batch.map((p) => p.pmid) } },
+        select: PUB_SELECT,
+      });
+      const existingSig = new Map(
+        existingRows.map((r) => [r.pmid, publicationSignature(r)]),
+      );
+      // Only new / content-changed rows are written (and their lastRefreshedAt
+      // bumped); an unchanged row is skipped so the corpus isn't rewritten
+      // wholesale every night (100k+ full-row upserts incl. 15KB abstracts).
+      const changed = batch.filter((p) => {
+        const prev = existingSig.get(p.pmid);
+        if (prev === undefined) {
+          pubCreated += 1;
+          return true;
+        }
+        if (prev !== publicationSignature(p)) {
+          pubUpdated += 1;
+          return true;
+        }
+        pubUnchanged += 1;
+        return false;
+      });
       await Promise.all(
-        batch.map((p) => {
+        changed.map((p) => {
           const { pmid, ...rest } = p;
           return db.write.publication.upsert({
             where: { pmid },
@@ -525,37 +688,114 @@ async function main() {
           });
         }),
       );
-      upserted += batch.length;
-      if (upserted % (INSERT_BATCH * 10) === 0) {
-        console.log(`  ...${upserted}/${pubRows.length}`);
-      }
     }
+    console.log(
+      `publications: ${pubCreated} created, ${pubUpdated} updated, ` +
+        `${pubUnchanged} unchanged (skipped).`,
+    );
 
-    // 6. Scoped refresh of PublicationAuthor rows. Delete WCM authorships only
-    //    for the source PMID set, then bulk insert the freshly-computed rows.
-    //    PublicationAuthor has no inbound FK references, so the scoped delete
-    //    doesn't cascade anywhere.
+    // 6. Reconcile PublicationAuthor rows by (pmid, cwid) instead of wiping and
+    //    reinserting the whole corpus every night. The old wipe re-stamped
+    //    lastRefreshedAt (@default(now())) on EVERY row, which defeated
+    //    etl/coi-gap's incremental watermark (it selects
+    //    publicationAuthor.lastRefreshedAt > watermark, so every run became a
+    //    full-cohort recompute). Keyed reconcile touches only real deltas —
+    //    create new authorships, update changed ones (+bump lastRefreshedAt),
+    //    delete stale ones — and LEAVES unchanged rows untouched so their
+    //    timestamp is preserved. Per-pmid-batch transactions keep each
+    //    publication's author set atomically consistent (no author-less window)
+    //    without holding one multi-minute corpus-wide transaction. (Supersedes
+    //    #1511c's single-transaction wipe+reinsert, which fixed atomicity but
+    //    still re-stamped every row.)
     const authorshipRows = buildAuthorshipRows(
       authorRows,
       ourCwidSet,
       rankByPmidCwid,
       totalAuthorsByPmidFromList,
     );
-
-    console.log(`Clearing prior WCM authorship rows for ${sourcePmids.length} source PMIDs...`);
+    const incomingByPmid = new Map<string, IncomingAuthorship[]>();
+    for (const r of authorshipRows) {
+      const arr = incomingByPmid.get(r.pmid) ?? [];
+      arr.push(r);
+      incomingByPmid.set(r.pmid, arr);
+    }
+    console.log(
+      `Reconciling WCM authorships for ${sourcePmids.length} source PMIDs ` +
+        `(${authorshipRows.length} incoming)...`,
+    );
+    let authCreated = 0;
+    let authUpdated = 0;
+    let authDeleted = 0;
+    let authUnchanged = 0;
     for (const batch of chunks(sourcePmids, IN_BATCH)) {
-      await db.write.publicationAuthor.deleteMany({ where: { pmid: { in: batch } } });
-    }
-
-    console.log(`Inserting ${authorshipRows.length} WCM authorship rows...`);
-    let authInserted = 0;
-    for (const batch of chunks(authorshipRows, INSERT_BATCH)) {
-      await db.write.publicationAuthor.createMany({ data: batch, skipDuplicates: true });
-      authInserted += batch.length;
-      if (authInserted % (INSERT_BATCH * 20) === 0) {
-        console.log(`  ...${authInserted}/${authorshipRows.length}`);
+      const existing = await db.write.publicationAuthor.findMany({
+        where: { pmid: { in: batch } },
+        select: {
+          id: true,
+          pmid: true,
+          cwid: true,
+          position: true,
+          totalAuthors: true,
+          isFirst: true,
+          isLast: true,
+          isPenultimate: true,
+          isConfirmed: true,
+        },
+      });
+      const incoming = batch.flatMap((pmid) => incomingByPmid.get(pmid) ?? []);
+      const plan = planAuthorshipReconcile(existing, incoming);
+      authUnchanged += plan.unchanged;
+      if (
+        plan.toCreate.length === 0 &&
+        plan.toUpdate.length === 0 &&
+        plan.toDeleteIds.length === 0
+      ) {
+        continue; // steady-state batch — no writes, timestamps preserved
       }
+      await db.write.$transaction(
+        async (tx) => {
+          for (const idBatch of chunks(plan.toDeleteIds, IN_BATCH)) {
+            await tx.publicationAuthor.deleteMany({ where: { id: { in: idBatch } } });
+          }
+          if (plan.toCreate.length > 0) {
+            await tx.publicationAuthor.createMany({
+              data: plan.toCreate.map((r) => ({
+                pmid: r.pmid,
+                cwid: r.cwid,
+                position: r.position,
+                totalAuthors: r.totalAuthors,
+                isFirst: r.isFirst,
+                isLast: r.isLast,
+                isPenultimate: r.isPenultimate,
+                isConfirmed: r.isConfirmed,
+              })),
+            });
+          }
+          for (const u of plan.toUpdate) {
+            await tx.publicationAuthor.update({
+              where: { id: u.id },
+              data: {
+                position: u.row.position,
+                totalAuthors: u.row.totalAuthors,
+                isFirst: u.row.isFirst,
+                isLast: u.row.isLast,
+                isPenultimate: u.row.isPenultimate,
+                isConfirmed: u.row.isConfirmed,
+                lastRefreshedAt: new Date(),
+              },
+            });
+          }
+        },
+        { timeout: 120_000, maxWait: 10_000 },
+      );
+      authCreated += plan.toCreate.length;
+      authUpdated += plan.toUpdate.length;
+      authDeleted += plan.toDeleteIds.length;
     }
+    console.log(
+      `WCM authorships: ${authCreated} created, ${authUpdated} updated, ` +
+        `${authDeleted} deleted, ${authUnchanged} unchanged.`,
+    );
 
     // 7. Orphan cleanup — delete publications whose pmid is no longer in the
     //    ReCiter source. Cascade to publication_topic / publication_author /
@@ -566,6 +806,14 @@ async function main() {
       await db.write.publication.findMany({ select: { pmid: true } })
     ).map((p) => p.pmid);
     const orphanPmids = existingPmids.filter((pmid) => !sourcePmidsSet.has(pmid));
+    // Orphan churn is normally a trickle (retractions, disambiguation fixes).
+    // A large orphan set means the source read was truncated — deleting would
+    // cascade into publication_topic / publication_author / grant_publication.
+    assertPruneVolume("reciter:orphan-prune", {
+      pruning: orphanPmids.length,
+      of: existingPmids.length,
+      maxPct: 5,
+    });
     if (orphanPmids.length > 0) {
       console.log(
         `Deleting ${orphanPmids.length} orphan publication(s) ` +
@@ -618,7 +866,7 @@ if (!process.env.VITEST) {
       process.exit(1);
     })
     .finally(async () => {
-      await db.write.$disconnect();
+      await disconnect();
       await closeReciterPool();
     });
 }

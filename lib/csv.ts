@@ -17,9 +17,26 @@ export type CsvCell = string | number | null | undefined;
 
 const NEEDS_QUOTING = /[",\r\n]/;
 
+// CSV formula / DDE injection (OWASP "CSV Injection"): a spreadsheet may
+// evaluate a cell that starts with one of these as a formula (`=cmd`, `+1-2`,
+// `@SUM`, a leading TAB/CR). Prefix such a cell with a single quote so Excel /
+// Sheets render it as literal text. Applied to STRING cells only — a value that
+// is itself a plain number (e.g. "-5", "+3.2") is a number, not a formula, so
+// it is left untouched (as are `number`-typed cells), which keeps legitimate
+// negative numbers / signed values in existing exports intact.
+const FORMULA_LEAD = /^[=+\-@\t\r]/;
+
+function guardFormula(s: string): string {
+  if (!FORMULA_LEAD.test(s)) return s;
+  if (s.trim() !== "" && !Number.isNaN(Number(s))) return s; // a numeric string
+  return `'${s}`;
+}
+
 function csvEscape(value: CsvCell): string {
   if (value === null || value === undefined) return "";
-  const s = typeof value === "number" ? String(value) : value;
+  // Numbers are never a formula-injection vector (a leading sign is not a
+  // formula); string cells run through the formula guard first.
+  const s = typeof value === "number" ? String(value) : guardFormula(value);
   if (!NEEDS_QUOTING.test(s)) return s;
   return `"${s.replace(/"/g, '""')}"`;
 }

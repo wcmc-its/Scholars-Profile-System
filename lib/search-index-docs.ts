@@ -430,6 +430,11 @@ export const PEOPLE_INDEX_SELECT = {
   department: { select: { name: true } },
   division: { select: { name: true } },
   topicAssignments: { orderBy: { score: "desc" } },
+  // #1366 — this scholar's per-publication parent-topic rows, for the precomputed
+  // `areaCounts` (distinct on-topic pub count per parent topic) the People reason
+  // line reads O(1) — same doc-precompute pattern as `meshSubtreeCounts`. Suppressed
+  // / hidden pmids are filtered in `buildPeopleDoc` against the kept-authorship set.
+  publicationTopics: { select: { pmid: true, parentTopicId: true } },
   // Exclude source='RePORTER' — the person-doc grantCount + active-grant signals
   // count WCM-administered awards only, not individual prior-institution history.
   grants: { where: { source: { not: "RePORTER" } } },
@@ -774,6 +779,10 @@ export async function buildPeopleDoc(
   // listing, so dedupe).
   const abstractParts: string[] = [];
   const seenAbstractPmids = new Set<string>();
+  // #1366 — the suppression-filtered pmid set, so `areaCounts` (built after the
+  // loop from `s.publicationTopics`) counts only pubs that survive the SAME
+  // hidden/dark filter as every other rollup here.
+  const keptPmids = new Set<string>();
 
   let kept = 0;
   for (const a of s.authorships) {
@@ -786,6 +795,7 @@ export async function buildPeopleDoc(
     // the 4a plan §4 profile.ts own-list.
     if (isAuthorHidden(sup, a.pmid, s.cwid) || sup.darkPmids.has(a.pmid)) continue;
     kept += 1;
+    keptPmids.add(a.pmid);
 
     const kind = classifyAuthorship(a);
     const weight = AUTHORSHIP_WEIGHTS[kind];
@@ -886,6 +896,27 @@ export async function buildPeopleDoc(
   // OMIT-on-empty (and absent entirely when `meshAncestors` wasn't passed).
   const meshSubtreeCounts: Record<string, number> | null =
     subtreeAgg && subtreeAgg.size > 0 ? Object.fromEntries(subtreeAgg) : null;
+
+  // #1366 — per-parent-topic distinct-pub map for the research-area reason line.
+  // `areaCounts[parentTopicId]` = the scholar's distinct VISIBLE pubs in that
+  // parent topic (= `Topic.id` = the matched area slug), read O(1) at query time
+  // (no publications-index agg — mirrors `meshSubtreeCounts`). Filtered to the
+  // kept-authorship pmid set so a hidden/dark pub never inflates the count.
+  // OMIT-on-empty.
+  const areaPmidSets = new Map<string, Set<string>>();
+  for (const pt of s.publicationTopics ?? []) {
+    if (!keptPmids.has(pt.pmid)) continue;
+    let set = areaPmidSets.get(pt.parentTopicId);
+    if (!set) {
+      set = new Set<string>();
+      areaPmidSets.set(pt.parentTopicId, set);
+    }
+    set.add(pt.pmid);
+  }
+  const areaCounts: Record<string, number> | null =
+    areaPmidSets.size > 0
+      ? Object.fromEntries(Array.from(areaPmidSets, ([k, v]) => [k, v.size]))
+      : null;
 
   // Issue #233 — `hasActiveGrants` realigned onto NCE 12-month grace
   // semantics so the People-tab Activity facet, the PI facet, and the
@@ -1102,6 +1133,13 @@ export async function buildPeopleDoc(
   // its own `methodContext` field so usage language is matchable (gated query-side
   // by SEARCH_PEOPLE_METHOD_CONTEXT). Built from the SAME gate + sidecar query.
   let methodContextField: { methodContext: string } | Record<string, never> = {};
+  // #1366 — per-family distinct-publication count, keyed by the SAME trimmed
+  // `familyLabel` the search reason carries (`evidence.family`), so the People
+  // reason line can show "N of M publications" via an O(1) `_source` lookup (no
+  // query-time round-trip — mirrors `meshSubtreeCounts`). `pmidCount` is the
+  // C-reconciled distinct-pub count already on the row; read directly, never
+  // re-aggregated. Gated-visible families only (same gate as `methodFamily`).
+  const methodFamilyCounts: Record<string, number> = {};
   if (gate) {
     const famRows = await client.scholarFamily.findMany({
       where: { cwid: s.cwid },
@@ -1110,6 +1148,7 @@ export async function buildPeopleDoc(
         familyLabel: true,
         exemplarTools: true,
         exemplarContexts: true,
+        pmidCount: true,
       },
     });
     const methodTerms = new Set<string>();
@@ -1117,7 +1156,13 @@ export async function buildPeopleDoc(
     for (const r of famRows) {
       if (!isFamilyPubliclyVisible(r.supercategory, r.familyLabel, gate)) continue;
       const label = r.familyLabel.trim();
-      if (label) methodTerms.add(label);
+      if (label) {
+        methodTerms.add(label);
+        // Largest count wins if two gated rows share a label (defensive; the
+        // (cwid, family_id) key makes collisions unlikely).
+        if (r.pmidCount > 0 && r.pmidCount > (methodFamilyCounts[label] ?? 0))
+          methodFamilyCounts[label] = r.pmidCount;
+      }
       if (Array.isArray(r.exemplarTools)) {
         for (const t of r.exemplarTools) {
           const name = String(t).trim();
@@ -1252,6 +1297,12 @@ export async function buildPeopleDoc(
     // Issue #824 §4c — public method-family rollup (OMIT-on-empty, gate-only).
     // Empty `{}` unless a gate was passed AND ≥1 overlay-visible family exists.
     ...methodFamilyField,
+    // #1366 — per-family distinct-pub counts for the reason-line "N of M"
+    // (OMIT-on-empty, gate-only). Keyed by the trimmed `familyLabel`.
+    ...(Object.keys(methodFamilyCounts).length > 0 ? { methodFamilyCounts } : {}),
+    // #1366 — per-parent-topic distinct-pub counts for the research-area
+    // reason-line "N of M" (OMIT-on-empty). Keyed by parent-topic slug.
+    ...(areaCounts ? { areaCounts } : {}),
     // #1119 — public method-family tool-USAGE snippets (OMIT-on-empty, gate-only).
     ...methodContextField,
     // POPS clinical fields (OMIT-on-empty: scholars with no POPS data write

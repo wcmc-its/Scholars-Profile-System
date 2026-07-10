@@ -156,6 +156,17 @@ exports[`AppStack prod matches the snapshot 1`] = `
         ],
       },
     },
+    "ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9": {
+      "Export": {
+        "Name": "Sps-App-prod:ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "PublicAlb84330974",
+          "DNSName",
+        ],
+      },
+    },
     "ExportsOutputRefEcrRepository4D7B3EE140E01346": {
       "Export": {
         "Name": "Sps-App-prod:ExportsOutputRefEcrRepository4D7B3EE140E01346",
@@ -204,6 +215,18 @@ exports[`AppStack prod matches the snapshot 1`] = `
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
+    "SsmParameterValuespsprodnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/net/alb-sg-id",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/net/app-sg-id",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "SsmParameterValuespsprodnetetlsgidC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/net/etl-sg-id",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
   },
   "Resources": {
     "AppIngressFromInternalAlb": {
@@ -211,7 +234,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
         "Description": "Internal ALB to SPS app tasks on container port (prod)",
         "FromPort": 3000,
         "GroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+          "Ref": "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "IpProtocol": "tcp",
         "SourceSecurityGroupId": {
@@ -229,11 +252,11 @@ exports[`AppStack prod matches the snapshot 1`] = `
         "Description": "Public ALB to SPS app tasks on container port (prod)",
         "FromPort": 3000,
         "GroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+          "Ref": "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "IpProtocol": "tcp",
         "SourceSecurityGroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
+          "Ref": "SsmParameterValuespsprodnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "ToPort": 3000,
       },
@@ -278,18 +301,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "prod",
               },
               {
-                "Name": "OPENSEARCH_NODE",
+                "Name": "NEXT_ISR_CACHE_BUCKET",
                 "Value": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "https://",
-                      {
-                        "Fn::ImportValue": "Sps-Data-prod-OpenSearchDomainEndpoint",
-                      },
-                    ],
-                  ],
+                  "Ref": "IsrCacheBucket311880A1",
                 },
+              },
+              {
+                "Name": "GRANT_MATCHER_SUBTOPIC_GRAIN",
+                "Value": "off",
               },
               {
                 "Name": "SAML_IDP_ENTITY_ID",
@@ -341,11 +360,11 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "EDIT_DATA_QUALITY_DASHBOARD",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "RECITER_REJECT_SEND",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SELF_EDIT_MANUAL_HIGHLIGHTS",
@@ -365,23 +384,23 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "EDIT_UNIT_ROSTER_EXPORT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "PROFILE_CENTER_AFFILIATION",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "UNIT_ADMIN_CENTER_PROXY",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "CENTER_PROGRAM_PAGES",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "CENTER_COLLABORATION_NETWORK",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "CENTER_COLLABORATION_GRANT_AXIS",
@@ -389,11 +408,19 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "CLINICAL_TRIALS_SECTION",
+                "Value": "on",
+              },
+              {
+                "Name": "AVAILABLE_TECHNOLOGIES_SECTION",
+                "Value": "off",
+              },
+              {
+                "Name": "SPONSOR_MATCH",
                 "Value": "off",
               },
               {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "MENTORING_COPUB_BRIDGE",
@@ -413,19 +440,15 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_OVERVIEW_GENERATE_STREAM",
-                "Value": "off",
-              },
-              {
-                "Name": "OVERVIEW_FAITHFULNESS_PASS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "EDIT_BIOSKETCH_GENERATE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "EDIT_CV_EXPORT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "REPORTER_MATCH_V2",
@@ -437,10 +460,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_RAIL_RESTRUCTURE",
-                "Value": "off",
-              },
-              {
-                "Name": "ACCOUNT_CONSOLE_NAV_RESTRUCTURE",
                 "Value": "on",
               },
               {
@@ -472,15 +491,23 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "https://scholars.weill.cornell.edu",
               },
               {
+                "Name": "SPS_USAGE_WORKGROUP",
+                "Value": "sps-usage-app-prod",
+              },
+              {
+                "Name": "SPS_USAGE_DATABASE",
+                "Value": "sps_usage_prod",
+              },
+              {
+                "Name": "SPS_USAGE_REGION",
+                "Value": "us-east-1",
+              },
+              {
                 "Name": "SHOW_BETA_BADGE",
                 "Value": "on",
               },
               {
                 "Name": "SEARCH_GENERIC_TERM_DEMOTE",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_PEOPLE_MATCH_PROVENANCE",
                 "Value": "on",
               },
               {
@@ -493,7 +520,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_REASON_FROM_DOC",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PUB_HIGHLIGHT",
@@ -509,19 +536,23 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PUB_MESH_ONLY_FILTER",
-                "Value": "off",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PUB_FACET_SPLIT",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PEOPLE_METHOD_FAMILY",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PEOPLE_METHOD_FAMILY_TIER",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PEOPLE_METHOD_CONTEXT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PEOPLE_CLINICAL",
@@ -540,16 +571,44 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "4",
               },
               {
+                "Name": "SEARCH_PEOPLE_CLINICAL_FN",
+                "Value": "on",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_RESULT_EVIDENCE",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_EVIDENCE_ROWS",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_EVIDENCE_REASON_COUNTS",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_AREA_BOOST",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_PHRASE_BOOST",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_DIVISION_SHAPE",
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_PEOPLE_FACULTY_PROMINENCE",
+                "Value": "on",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_CONCEPT_HINT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_FUNDING_TAB_CONCEPT",
@@ -560,8 +619,12 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "fundedPubMeshUi",
               },
               {
-                "Name": "SEARCH_SHELL_STREAMING",
+                "Name": "SEARCH_FUNDING_CONCEPT_GRANTS",
                 "Value": "off",
+              },
+              {
+                "Name": "SEARCH_SHELL_STREAMING",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_SUGGEST_MESH_CONCEPT",
@@ -573,15 +636,23 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_CONCEPT_GRANT_AXIS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_MESH_RESOLUTION_FALLBACK",
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_MESH_QUERY_NORMALIZATION",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_ACRONYM_SENSE_GUARD",
+                "Value": "on",
+              },
+              {
                 "Name": "COAUTHOR_HIDDEN_STUDENT_CHIPS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "IMPERSONATION_ENABLED",
@@ -593,19 +664,19 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "METHODS_LENS_ENABLED",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "METHODS_LENS_SENSITIVE_GATE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "METHODS_LENS_FAMILY_FILTER",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "METHODS_LENS_FAMILY_ROSTER_FALLBACK",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "METHODS_LENS_PAGES",
@@ -613,39 +684,39 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "METHODS_LENS_FAMILY_DEFINITIONS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "METHODS_LENS_TOOL_CONTEXT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "METHODS_LENS_PUB_MODAL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "METHODS_LENS_FAMILY_SYNONYMS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "METHODS_LENS_CELL_LINE_ENTITIES",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "METHODS_LENS_ENTITY_USAGE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "CENTER_METHODS_FACET",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ORG_UNIT_METHODS_CHIPS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "ORG_UNIT_METHODS_FACET",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "CORE_PUB_MODAL",
@@ -660,24 +731,28 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "OPPORTUNITY_URL_INTAKE",
+                "Value": "on",
+              },
+              {
                 "Name": "PROFILE_FACET_REDESIGN",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLAR_LIST_EXPORT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "INTERNAL_VIEWER_NETWORK_SIGNAL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLAR_LIST_EXPORT_EMAIL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "INTERNAL_VIEWER_CIDRS",
-                "Value": "",
+                "Value": "140.251.0.0/16,157.139.0.0/16",
               },
               {
                 "Name": "PROFILE_EMAIL_RELEASE_GATE",
@@ -810,6 +885,21 @@ exports[`AppStack prod matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/app-ro",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/opensearch/app:node::",
                     ],
                   ],
                 },
@@ -1141,6 +1231,45 @@ service:
         },
       },
       "Type": "AWS::ECS::TaskDefinition",
+    },
+    "AppinternalalbdnsEDBEA85B": {
+      "Properties": {
+        "Name": "/sps/prod/app/internal-alb-dns",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "InternalAlb58CEEAE8",
+            "DNSName",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "Appinternalalbsgid03BC738C": {
+      "Properties": {
+        "Name": "/sps/prod/app/internal-alb-sg-id",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "InternalAlbSecurityGroup32D71C5A",
+            "GroupId",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ApppublicalbdnsB3FF6E1F": {
+      "Properties": {
+        "Name": "/sps/prod/app/public-alb-dns",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "PublicAlb84330974",
+            "DNSName",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
     },
     "DbBootstrapLogGroupAF64F8C3": {
       "DeletionPolicy": "Retain",
@@ -1854,6 +1983,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -1902,7 +2032,7 @@ service:
             "AssignPublicIp": "DISABLED",
             "SecurityGroups": [
               {
-                "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+                "Ref": "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
             ],
             "Subnets": [
@@ -1929,6 +2059,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -1976,6 +2107,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -2002,6 +2134,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -2190,6 +2323,85 @@ service:
       },
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
     },
+    "IsrCacheBucket311880A1": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "ExpirationInDays": 7,
+              "Id": "expire-isr-cache",
+              "Prefix": "next-isr-cache/",
+              "Status": "Enabled",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "IsrCacheBucketPolicyF908ED16": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "IsrCacheBucket311880A1",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "IsrCacheBucket311880A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "IsrCacheBucket311880A1",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
+    },
     "MigrationLogGroupFD140541": {
       "DeletionPolicy": "Retain",
       "Properties": {
@@ -2360,7 +2572,7 @@ service:
         "Scheme": "internet-facing",
         "SecurityGroups": [
           {
-            "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
+            "Ref": "SsmParameterValuespsprodnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
           },
         ],
         "Subnets": [
@@ -2381,7 +2593,7 @@ service:
         "Description": "Internet to SPS public ALB HTTP (prod) -- HTTPS lands with EdgeStack",
         "FromPort": 80,
         "GroupId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
+          "Ref": "SsmParameterValuespsprodnetalbsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
         },
         "IpProtocol": "tcp",
         "ToPort": 80,
@@ -3023,6 +3235,92 @@ service:
       },
       "Type": "AWS::IAM::Policy",
     },
+    "TaskRoleDefaultPolicy07FC53DE": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "IsrCacheBucket311880A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "IsrCacheBucket311880A1",
+                          "Arn",
+                        ],
+                      },
+                      "/next-isr-cache/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "TaskRoleDefaultPolicy07FC53DE",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "TaskRoleOpportunitySubmissionPolicy51C9A514": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "dynamodb:PutItem",
+                "dynamodb:Query",
+                "dynamodb:DeleteItem",
+                "dynamodb:UpdateItem",
+              ],
+              "Condition": {
+                "ForAllValues:StringEquals": {
+                  "dynamodb:LeadingKeys": [
+                    "SUBMISSION",
+                  ],
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "arn:aws:dynamodb:us-east-1:123456789012:table/reciterai",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-prod-opportunity-submission",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "TaskRoleReciterReadPolicyE018B6D7": {
       "Properties": {
         "PolicyDocument": {
@@ -3298,7 +3596,7 @@ service:
             "FromPort": 443,
             "IpProtocol": "tcp",
             "SourceSecurityGroupId": {
-              "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+              "Ref": "SsmParameterValuespsprodnetappsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
             },
             "ToPort": 443,
           },
@@ -3307,7 +3605,7 @@ service:
             "FromPort": 443,
             "IpProtocol": "tcp",
             "SourceSecurityGroupId": {
-              "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
+              "Ref": "SsmParameterValuespsprodnetetlsgidC96584B6F00A464EAD1953AFF4B05118Parameter",
             },
             "ToPort": 443,
           },
@@ -3505,6 +3803,17 @@ exports[`AppStack staging matches the snapshot 1`] = `
         ],
       },
     },
+    "ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9": {
+      "Export": {
+        "Name": "Sps-App-staging:ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "PublicAlb84330974",
+          "DNSName",
+        ],
+      },
+    },
     "ExportsOutputRefEcrRepository4D7B3EE140E01346": {
       "Export": {
         "Name": "Sps-App-staging:ExportsOutputRefEcrRepository4D7B3EE140E01346",
@@ -3559,9 +3868,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
       "Properties": {
         "Description": "Internal ALB to SPS app tasks on container port (staging)",
         "FromPort": 3000,
-        "GroupId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
-        },
+        "GroupId": "sg-010c270a395b4854b",
         "IpProtocol": "tcp",
         "SourceSecurityGroupId": {
           "Fn::GetAtt": [
@@ -3577,13 +3884,9 @@ exports[`AppStack staging matches the snapshot 1`] = `
       "Properties": {
         "Description": "Public ALB to SPS app tasks on container port (staging)",
         "FromPort": 3000,
-        "GroupId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
-        },
+        "GroupId": "sg-010c270a395b4854b",
         "IpProtocol": "tcp",
-        "SourceSecurityGroupId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
-        },
+        "SourceSecurityGroupId": "sg-0ab492e161a9e9976",
         "ToPort": 3000,
       },
       "Type": "AWS::EC2::SecurityGroupIngress",
@@ -3627,18 +3930,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "staging",
               },
               {
-                "Name": "OPENSEARCH_NODE",
+                "Name": "NEXT_ISR_CACHE_BUCKET",
                 "Value": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "https://",
-                      {
-                        "Fn::ImportValue": "Sps-Data-staging-OpenSearchDomainEndpoint",
-                      },
-                    ],
-                  ],
+                  "Ref": "IsrCacheBucket311880A1",
                 },
+              },
+              {
+                "Name": "GRANT_MATCHER_SUBTOPIC_GRAIN",
+                "Value": "on",
               },
               {
                 "Name": "SAML_IDP_ENTITY_ID",
@@ -3741,6 +4040,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "AVAILABLE_TECHNOLOGIES_SECTION",
+                "Value": "on",
+              },
+              {
+                "Name": "SPONSOR_MATCH",
+                "Value": "on",
+              },
+              {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
                 "Value": "on",
               },
@@ -3765,10 +4072,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
-                "Name": "OVERVIEW_FAITHFULNESS_PASS",
-                "Value": "off",
-              },
-              {
                 "Name": "EDIT_BIOSKETCH_GENERATE",
                 "Value": "on",
               },
@@ -3786,10 +4089,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_RAIL_RESTRUCTURE",
-                "Value": "on",
-              },
-              {
-                "Name": "ACCOUNT_CONSOLE_NAV_RESTRUCTURE",
                 "Value": "on",
               },
               {
@@ -3821,15 +4120,23 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "https://scholars-staging.weill.cornell.edu",
               },
               {
+                "Name": "SPS_USAGE_WORKGROUP",
+                "Value": "sps-usage-app-staging",
+              },
+              {
+                "Name": "SPS_USAGE_DATABASE",
+                "Value": "sps_usage_staging",
+              },
+              {
+                "Name": "SPS_USAGE_REGION",
+                "Value": "us-east-1",
+              },
+              {
                 "Name": "SHOW_BETA_BADGE",
                 "Value": "on",
               },
               {
                 "Name": "SEARCH_GENERIC_TERM_DEMOTE",
-                "Value": "on",
-              },
-              {
-                "Name": "SEARCH_PEOPLE_MATCH_PROVENANCE",
                 "Value": "on",
               },
               {
@@ -3861,6 +4168,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SEARCH_PUB_FACET_SPLIT",
+                "Value": "on",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_METHOD_FAMILY",
                 "Value": "on",
               },
@@ -3874,7 +4185,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_CLINICAL",
-                "Value": "on",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_PEOPLE_CLINICAL_BOOST",
@@ -3889,12 +4200,40 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "4",
               },
               {
+                "Name": "SEARCH_PEOPLE_CLINICAL_FN",
+                "Value": "on",
+              },
+              {
                 "Name": "SEARCH_PEOPLE_MATCH_AWARE_SNIPPET",
                 "Value": "on",
               },
               {
                 "Name": "SEARCH_RESULT_EVIDENCE",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_EVIDENCE_ROWS",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_EVIDENCE_REASON_COUNTS",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_AREA_BOOST",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_PHRASE_BOOST",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_DIVISION_SHAPE",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_FACULTY_PROMINENCE",
+                "Value": "off",
               },
               {
                 "Name": "SEARCH_PEOPLE_CONCEPT_HINT",
@@ -3907,6 +4246,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_FUNDING_MESH_GATE",
                 "Value": "fundedPubMeshUi",
+              },
+              {
+                "Name": "SEARCH_FUNDING_CONCEPT_GRANTS",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_SHELL_STREAMING",
@@ -3926,6 +4269,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_MESH_RESOLUTION_FALLBACK",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_MESH_QUERY_NORMALIZATION",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_ACRONYM_SENSE_GUARD",
                 "Value": "on",
               },
               {
@@ -4006,6 +4357,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "CORE_CLAIM_WRITEBACK",
+                "Value": "on",
+              },
+              {
+                "Name": "OPPORTUNITY_URL_INTAKE",
                 "Value": "on",
               },
               {
@@ -4159,6 +4514,21 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/app-ro",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/opensearch/app:node::",
                     ],
                   ],
                 },
@@ -4491,6 +4861,45 @@ service:
       },
       "Type": "AWS::ECS::TaskDefinition",
     },
+    "AppinternalalbdnsEDBEA85B": {
+      "Properties": {
+        "Name": "/sps/staging/app/internal-alb-dns",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "InternalAlb58CEEAE8",
+            "DNSName",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "Appinternalalbsgid03BC738C": {
+      "Properties": {
+        "Name": "/sps/staging/app/internal-alb-sg-id",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "InternalAlbSecurityGroup32D71C5A",
+            "GroupId",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ApppublicalbdnsB3FF6E1F": {
+      "Properties": {
+        "Name": "/sps/staging/app/public-alb-dns",
+        "Type": "String",
+        "Value": {
+          "Fn::GetAtt": [
+            "PublicAlb84330974",
+            "DNSName",
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
     "CustomAWSCDKOpenIdConnectProviderCustomResourceProviderHandlerF2C543E0": {
       "DependsOn": [
         "CustomAWSCDKOpenIdConnectProviderCustomResourceProviderRole517FED65",
@@ -4577,7 +4986,7 @@ service:
             "Environment": [
               {
                 "Name": "GRANTEE_HOST",
-                "Value": "10.20.%",
+                "Value": "10.46.160.%",
               },
             ],
             "Essential": true,
@@ -5270,6 +5679,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -5317,17 +5727,11 @@ service:
           "AwsvpcConfiguration": {
             "AssignPublicIp": "DISABLED",
             "SecurityGroups": [
-              {
-                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
-              },
+              "sg-010c270a395b4854b",
             ],
             "Subnets": [
-              {
-                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
-              },
-              {
-                "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
-              },
+              "subnet-0c6593fb9c9a165c3",
+              "subnet-070cbc242efbddc3c",
             ],
           },
         },
@@ -5345,6 +5749,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -5392,6 +5797,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -5418,6 +5824,7 @@ service:
         "OriginVerifiedForwardC0422D52",
         "PublicAlbPublicHttpListener8CAA0E91",
         "PublicAppTargetGroup68798009",
+        "TaskRoleDefaultPolicy07FC53DE",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -5533,7 +5940,6 @@ service:
             "Value": "false",
           },
         ],
-        "Name": "sps-internal-staging",
         "Scheme": "internal",
         "SecurityGroups": [
           {
@@ -5544,12 +5950,8 @@ service:
           },
         ],
         "Subnets": [
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
-          },
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
-          },
+          "subnet-0c6593fb9c9a165c3",
+          "subnet-070cbc242efbddc3c",
         ],
         "Type": "application",
       },
@@ -5592,9 +5994,7 @@ service:
             "ToPort": 80,
           },
         ],
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
+        "VpcId": "vpc-08a1873fc8eebae28",
       },
       "Type": "AWS::EC2::SecurityGroup",
     },
@@ -5604,7 +6004,6 @@ service:
         "HealthCheckPath": "/api/health",
         "HealthCheckTimeoutSeconds": 5,
         "HealthyThresholdCount": 2,
-        "Name": "sps-tg-int-staging",
         "Port": 3000,
         "Protocol": "HTTP",
         "TargetGroupAttributes": [
@@ -5619,11 +6018,88 @@ service:
         ],
         "TargetType": "ip",
         "UnhealthyThresholdCount": 3,
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
+        "VpcId": "vpc-08a1873fc8eebae28",
       },
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+    },
+    "IsrCacheBucket311880A1": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "ExpirationInDays": 7,
+              "Id": "expire-isr-cache",
+              "Prefix": "next-isr-cache/",
+              "Status": "Enabled",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "IsrCacheBucketPolicyF908ED16": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "IsrCacheBucket311880A1",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "IsrCacheBucket311880A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "IsrCacheBucket311880A1",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
     },
     "MigrationLogGroupFD140541": {
       "DeletionPolicy": "Retain",
@@ -5791,20 +6267,13 @@ service:
             "Value": "false",
           },
         ],
-        "Name": "sps-public-staging",
         "Scheme": "internet-facing",
         "SecurityGroups": [
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
-          },
+          "sg-0ab492e161a9e9976",
         ],
         "Subnets": [
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcpublicSubnet1Subnet2BB74ED74EB42ADC",
-          },
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcpublicSubnet2SubnetE34B022AC8BB6627",
-          },
+          "subnet-09a6fab648280ca19",
+          "subnet-0485fefe267b06736",
         ],
         "Type": "application",
       },
@@ -5815,9 +6284,7 @@ service:
         "CidrIp": "0.0.0.0/0",
         "Description": "Internet to SPS public ALB HTTP (staging) -- HTTPS lands with EdgeStack",
         "FromPort": 80,
-        "GroupId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAlbSecurityGroup86A59E99GroupIdE3A37BC7",
-        },
+        "GroupId": "sg-0ab492e161a9e9976",
         "IpProtocol": "tcp",
         "ToPort": 80,
       },
@@ -5849,7 +6316,6 @@ service:
         "HealthCheckPath": "/api/health",
         "HealthCheckTimeoutSeconds": 5,
         "HealthyThresholdCount": 2,
-        "Name": "sps-tg-pub-staging",
         "Port": 3000,
         "Protocol": "HTTP",
         "TargetGroupAttributes": [
@@ -5864,67 +6330,9 @@ service:
         ],
         "TargetType": "ip",
         "UnhealthyThresholdCount": 3,
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
+        "VpcId": "vpc-08a1873fc8eebae28",
       },
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
-    },
-    "S3GatewayEndpointE8BAF1BC": {
-      "Properties": {
-        "RouteTableIds": [
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1RouteTable1979EACBE1BD1DD4",
-          },
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2RouteTable4D0FFC8C36E62A4A",
-          },
-        ],
-        "ServiceName": {
-          "Fn::Join": [
-            "",
-            [
-              "com.amazonaws.",
-              {
-                "Ref": "AWS::Region",
-              },
-              ".s3",
-            ],
-          ],
-        },
-        "VpcEndpointType": "Gateway",
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
-      },
-      "Type": "AWS::EC2::VPCEndpoint",
-    },
-    "SecretsManagerEndpoint5E83C66B": {
-      "Properties": {
-        "PrivateDnsEnabled": true,
-        "SecurityGroupIds": [
-          {
-            "Fn::GetAtt": [
-              "VpcEndpointSecurityGroup02EA44AC",
-              "GroupId",
-            ],
-          },
-        ],
-        "ServiceName": "com.amazonaws.us-east-1.secretsmanager",
-        "SubnetIds": [
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
-          },
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
-          },
-        ],
-        "VpcEndpointType": "Interface",
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
-      },
-      "Type": "AWS::EC2::VPCEndpoint",
     },
     "TaskExecutionRole250D2532": {
       "Properties": {
@@ -6458,6 +6866,92 @@ service:
       },
       "Type": "AWS::IAM::Policy",
     },
+    "TaskRoleDefaultPolicy07FC53DE": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "IsrCacheBucket311880A1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "IsrCacheBucket311880A1",
+                          "Arn",
+                        ],
+                      },
+                      "/next-isr-cache/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "TaskRoleDefaultPolicy07FC53DE",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "TaskRoleOpportunitySubmissionPolicy51C9A514": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "dynamodb:PutItem",
+                "dynamodb:Query",
+                "dynamodb:DeleteItem",
+                "dynamodb:UpdateItem",
+              ],
+              "Condition": {
+                "ForAllValues:StringEquals": {
+                  "dynamodb:LeadingKeys": [
+                    "SUBMISSION",
+                  ],
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "arn:aws:dynamodb:us-east-1:123456789012:table/reciterai",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-staging-opportunity-submission",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "TaskRoleReciterReadPolicyE018B6D7": {
       "Properties": {
         "PolicyDocument": {
@@ -6714,44 +7208,6 @@ service:
         },
       },
       "Type": "AWS::ECS::TaskDefinition",
-    },
-    "VpcEndpointSecurityGroup02EA44AC": {
-      "Properties": {
-        "GroupDescription": "SPS VPC interface endpoints (staging) -- HTTPS from app + ETL SGs.",
-        "SecurityGroupEgress": [
-          {
-            "CidrIp": "255.255.255.255/32",
-            "Description": "Disallow all traffic",
-            "FromPort": 252,
-            "IpProtocol": "icmp",
-            "ToPort": 86,
-          },
-        ],
-        "SecurityGroupIngress": [
-          {
-            "Description": "App SG to interface endpoints HTTPS (staging)",
-            "FromPort": 443,
-            "IpProtocol": "tcp",
-            "SourceSecurityGroupId": {
-              "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
-            },
-            "ToPort": 443,
-          },
-          {
-            "Description": "ETL SG to interface endpoints HTTPS (staging)",
-            "FromPort": 443,
-            "IpProtocol": "tcp",
-            "SourceSecurityGroupId": {
-              "Fn::ImportValue": "Sps-Network-staging:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
-            },
-            "ToPort": 443,
-          },
-        ],
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
-      },
-      "Type": "AWS::EC2::SecurityGroup",
     },
   },
   "Rules": {

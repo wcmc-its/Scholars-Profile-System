@@ -66,6 +66,8 @@ vi.mock("@/lib/db", () => ({
     scholar: { findMany: scholarFindMany, findUnique: scholarFindUnique },
     menteeCopublication: { findMany: menteeCopubFindMany, findFirst: menteeCopubFindFirst },
     aocMentee: { findMany: aocMenteeFindMany, findFirst: aocMenteeFindFirst },
+    // #160 follow-up — getMentorMenteePair now reads the mentee-hide set.
+    suppression: { findMany: async () => [] },
   },
 }));
 

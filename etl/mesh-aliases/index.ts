@@ -52,8 +52,9 @@ function readCurated(): AliasRow[] {
     text = readFileSync(abs, "utf-8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      console.warn(`[MeshAlias] ${JSON.stringify({ event: "curated_csv_missing", path: abs })}`);
-      return [];
+      // curated.csv is checked into the repo — absence is a packaging bug.
+      // Returning [] used to wipe mesh_curated_alias to empty under a SUCCESS run.
+      throw new Error(`[MeshAlias] curated CSV missing at ${abs} — refusing to treat as empty`);
     }
     throw err;
   }

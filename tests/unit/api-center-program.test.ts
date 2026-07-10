@@ -165,8 +165,8 @@ describe("getCenterProgram (#1105)", () => {
       label: "Cancer Biology",
       description: null,
       leaders: [
-        { cwid: "lead001", interim: true },
-        { cwid: "lead002", interim: false },
+        { cwid: "lead001", interim: true, role: "leader" },
+        { cwid: "lead002", interim: false, role: "leader" },
       ],
     });
     const detail = await getCenterProgram("meyer-cancer-center", "CB");
@@ -179,6 +179,7 @@ describe("getCenterProgram (#1105)", () => {
         primaryTitle: null,
         identityImageEndpoint: expect.any(String),
         isInterim: true,
+        role: "leader",
       },
       {
         cwid: "lead002",
@@ -187,8 +188,40 @@ describe("getCenterProgram (#1105)", () => {
         primaryTitle: null,
         identityImageEndpoint: expect.any(String),
         isInterim: false,
+        role: "leader",
       },
     ]);
+  });
+
+  it("orders Leaders before COE liaisons and surfaces the role (#1570)", async () => {
+    // The join returns them interleaved (both sortOrder 0); the loader must place
+    // the coe_liaison AFTER the leader regardless of the row order it receives,
+    // and NOT rely on alphabetical role ordering (coe_liaison < leader lexically).
+    mockCenterProgramFindUnique.mockResolvedValueOnce({
+      code: "CB",
+      label: "Cancer Biology",
+      description: null,
+      leaders: [
+        { cwid: "liaison01", interim: false, role: "coe_liaison" },
+        { cwid: "lead001", interim: false, role: "leader" },
+      ],
+    });
+    const detail = await getCenterProgram("meyer-cancer-center", "CB");
+    expect(detail!.leaders.map((l) => [l.cwid, l.role])).toEqual([
+      ["lead001", "leader"],
+      ["liaison01", "coe_liaison"],
+    ]);
+  });
+
+  it("defaults a role-less join row to 'leader' (pre-#1570 rows)", async () => {
+    mockCenterProgramFindUnique.mockResolvedValueOnce({
+      code: "CB",
+      label: "Cancer Biology",
+      description: null,
+      leaders: [{ cwid: "lead001", interim: false }],
+    });
+    const detail = await getCenterProgram("meyer-cancer-center", "CB");
+    expect(detail!.leaders[0].role).toBe("leader");
   });
 
   it("falls back to the external leader (slug null) for a cwid with no scholar row", async () => {

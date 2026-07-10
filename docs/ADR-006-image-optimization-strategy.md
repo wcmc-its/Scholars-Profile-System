@@ -83,7 +83,7 @@ This decision is scoped to the current image surface — small, externally-hoste
 
 ## References
 
-- `B15` (#114) — the backlog item this ADR closes; [`PRODUCTION_BACKLOG.md`](./PRODUCTION_BACKLOG.md).
+- `B15` (#114) — the backlog item this ADR closes.
 - `B13` (#112) — staging environment; option (b) removes `B15`'s dependency on it (see *Operational implications*).
 - [`PRODUCTION.md` § Database connection pooling](./PRODUCTION.md#database-connection-pooling) — the 1-vCPU Fargate / `connection_limit=15` constraint that motivates `B15`.
 - `ADR-001` — runtime data access layer = ETL transform; the precedent on keeping the request path lean.

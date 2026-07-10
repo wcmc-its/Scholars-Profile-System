@@ -15,8 +15,14 @@ import { Client } from "ldapts";
 
 export const DEFAULT_BIND_DN = "cn=reciter,ou=binds,dc=weill,dc=cornell,dc=edu";
 export const DEFAULT_SEARCH_BASE = "ou=people,dc=weill,dc=cornell,dc=edu";
+/** Doctoral-student person records. ED removed the former top-level
+ *  `ou=students` subtree (2026-07-03 probe: the directory root now exposes only
+ *  ou=People + ou=Groups); PhD students now live under the students SOR, next to
+ *  the faculty/employee/nyp SORs — one `weillCornellEduSORRecord` person entry per
+ *  student, with nested `weillCornellEduSORRoleRecord` program rows read separately
+ *  by fetchPhdStudentProgramRecords (#195). */
 export const DEFAULT_STUDENT_SEARCH_BASE =
-  "ou=students,dc=weill,dc=cornell,dc=edu";
+  "ou=students,ou=sors,dc=weill,dc=cornell,dc=edu";
 /** WOOFA-sourced System-of-Record for faculty academic appointments. One LDAP
  *  entry per appointment row with per-appointment dept, dates, status, etc.
  *  We pull from here instead of the multi-valued `title` attribute on the
@@ -26,13 +32,20 @@ export const DEFAULT_FACULTY_SOR_BASE =
   "ou=faculty,ou=sors,dc=weill,dc=cornell,dc=edu";
 export const DEFAULT_ACTIVE_FILTER =
   "(&(objectClass=eduPerson)(weillCornellEduPersonTypeCode=academic))";
-/** Phase 2 — only doctoral students (PHD degree code) feed the eligibility carve. */
+/** Phase 2 — only doctoral students (PHD degree code) feed the eligibility carve.
+ *  Pin `weillCornellEduSORRecord` so a subtree search under the students SOR
+ *  returns the person entries and NOT the nested SORRoleRecord program rows,
+ *  which carry a CWID + PHD degreeCode but no name/personType and would otherwise
+ *  project to junk scholar rows. */
 export const DEFAULT_DOCTORAL_STUDENT_FILTER =
-  "(weillCornellEduDegreeCode=PHD)";
+  "(&(objectClass=weillCornellEduSORRecord)(weillCornellEduDegreeCode=PHD))";
 /** Faculty SOR search: only currently-active appointments. Excludes
  *  faculty:expired rows so the profile sidebar shows live titles only. */
 export const DEFAULT_FACULTY_SOR_FILTER =
   "(&(objectClass=weillCornellEduSORRoleRecord)(weillCornellEduStatus=faculty:active))";
+// ponytail: faculty:expired is the documented historical token (see active-filter comment); confirm against a live LDAP probe before staging rollout — upgrade path: widen to (!(...faculty:active)) if other historical statuses exist.
+export const DEFAULT_FACULTY_SOR_HISTORICAL_FILTER =
+  "(&(objectClass=weillCornellEduSORRoleRecord)(weillCornellEduStatus=faculty:expired))";
 
 /** WOOFA-sourced System-of-Record for employee records. Carries the
  *  `manager` attribute (full DN of the reporting manager) used for the
@@ -286,10 +299,38 @@ const FACULTY_SOR_ATTRS = [
 export async function fetchActiveFacultyAppointments(
   client: Client,
 ): Promise<EdFacultyAppointment[]> {
-  const searchBase =
-    process.env.SCHOLARS_LDAP_FACULTY_SOR_BASE ?? DEFAULT_FACULTY_SOR_BASE;
   const filter =
     process.env.SCHOLARS_LDAP_FACULTY_SOR_FILTER ?? DEFAULT_FACULTY_SOR_FILTER;
+  return fetchFacultyAppointmentsByFilter(client, filter, "ED-FACULTY-");
+}
+
+/** Fetch every faculty appointment record with status `faculty:expired` from
+ *  the WOOFA SOR. Historical (alumni/prior) appointments — hidden from the
+ *  public profile unless a curator reveals them (see Appointment.showOnProfile),
+ *  but always included in the CV export. The distinct externalId prefix
+ *  ("ED-FACULTY-HIST-") keeps a role that transitions active→expired from
+ *  colliding with its old active row on the externalId unique constraint
+ *  (same SORID, different status/source). */
+export async function fetchHistoricalFacultyAppointments(
+  client: Client,
+): Promise<EdFacultyAppointment[]> {
+  const filter =
+    process.env.SCHOLARS_LDAP_FACULTY_SOR_HISTORICAL_FILTER ??
+    DEFAULT_FACULTY_SOR_HISTORICAL_FILTER;
+  return fetchFacultyAppointmentsByFilter(client, filter, "ED-FACULTY-HIST-");
+}
+
+/** Shared search + projection body for the faculty SOR. `filter` selects the
+ *  status slice (active vs expired) and `externalIdPrefix` stamps the stable
+ *  per-appointment ID so active and historical rows for the same SORID don't
+ *  collide on the externalId unique constraint. */
+async function fetchFacultyAppointmentsByFilter(
+  client: Client,
+  filter: string,
+  externalIdPrefix: string,
+): Promise<EdFacultyAppointment[]> {
+  const searchBase =
+    process.env.SCHOLARS_LDAP_FACULTY_SOR_BASE ?? DEFAULT_FACULTY_SOR_BASE;
   const { searchEntries } = await client.search(searchBase, {
     scope: "sub",
     filter,
@@ -321,7 +362,7 @@ export async function fetchActiveFacultyAppointments(
       startDate: parseLdapGeneralizedTime(firstString(e.weillCornellEduStartDate)),
       endDate: parseLdapGeneralizedTime(firstString(e.weillCornellEduEndDate)),
       isPrimary: firstString(e.weillCornellEduPrimaryEntry) === "TRUE",
-      externalId: `ED-FACULTY-${sorId}`,
+      externalId: `${externalIdPrefix}${sorId}`,
       isJoint: firstString(e.weillCornellEduType) === "Joint",
       deptCode,
       divCode,
@@ -1166,6 +1207,74 @@ export async function fetchDirectoryPeopleByCwid(
 }
 
 // ---------------------------------------------------------------------------
+// active-member guard  (ED-sourced org-unit role imports)
+//
+// ED does NOT remove a person's org-unit admin tag / chair / chief appointment
+// when their person entry expires — `weillCornellEduActiveMember` flips to FALSE
+// on the `ou=people` entry, but the role tag stays. Every ED-sourced role import
+// (unit admins, dept chair, division chief) must therefore consult this flag
+// before granting, or a stale/expired person keeps unit-edit access forever.
+//
+// Minimal attribute list: CWID + the active flag, nothing else.
+// ---------------------------------------------------------------------------
+
+const ACTIVE_MEMBER_ATTRS = [
+  "weillCornellEduCWID",
+  "weillCornellEduActiveMember",
+] as const;
+
+/**
+ * Batch-resolve `weillCornellEduActiveMember` for a set of CWIDs against
+ * `ou=people`. Chunks the OR-of-CWIDs filter at 100 per query (mirrors
+ * `fetchDirectoryPeopleByCwid`) so a long list doesn't blow the LDAP
+ * filter-length limit. Takes an already-bound client — the caller owns its
+ * lifecycle.
+ *
+ * Returns a `Map<lowercased cwid, boolean>` with an entry for EVERY input CWID.
+ * The value is `true` iff the person entry exists in `ou=people` AND carries
+ * `weillCornellEduActiveMember === "TRUE"`. A CWID not found in `ou=people`, or
+ * with a missing / non-"TRUE" value, is `false` — fail-closed: treat as NOT an
+ * active member (so a stale role grant is dropped rather than retained).
+ */
+export async function fetchActiveMembersByCwid(
+  client: Client,
+  cwids: string[],
+): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>();
+  const unique = Array.from(
+    new Set(cwids.map((c) => c.trim().toLowerCase()).filter((c) => c.length > 0)),
+  );
+  if (unique.length === 0) return out;
+
+  // Default every requested CWID to `false` (fail-closed). A search hit that
+  // carries `weillCornellEduActiveMember=TRUE` upgrades it; anything not found
+  // or not TRUE stays false.
+  for (const c of unique) out.set(c, false);
+
+  const searchBase = process.env.SCHOLARS_LDAP_SEARCH_BASE ?? DEFAULT_SEARCH_BASE;
+  const batchSize = 100;
+  for (let i = 0; i < unique.length; i += batchSize) {
+    const batch = unique.slice(i, i + batchSize);
+    const filter =
+      "(&(objectClass=eduPerson)(|" +
+      batch.map((c) => `(weillCornellEduCWID=${escapeLdapFilter(c)})`).join("") +
+      "))";
+    const { searchEntries } = await client.search(searchBase, {
+      scope: "sub",
+      filter,
+      attributes: [...ACTIVE_MEMBER_ATTRS],
+      paged: { pageSize: 500 },
+    });
+    for (const e of searchEntries) {
+      const cwid = firstString(e.weillCornellEduCWID);
+      if (!cwid) continue;
+      out.set(cwid.toLowerCase(), firstString(e.weillCornellEduActiveMember) === "TRUE");
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // org-unit admin populations  (#728 — ED admin-role org-unit managers)
 //
 // WCM ED carries each org unit's administrators as OPTION-TAGGED subtypes of
@@ -1191,6 +1300,16 @@ export const ED_ADMIN_SOURCE: Record<EdAdminTag, string> = {
   diva: "ED:DivA",
   iamdela: "ED:IAMDELA",
   "diva-iamdela": "ED:DivA-IAMDELA",
+};
+
+/** `UnitAdmin.role` granted per population. DA and DivA-IAMDELA administer their
+ *  unit as `owner` (may grant/delegate WITHIN their one locked unit); DivA and
+ *  IAMDELA are `curator` (edit/proxy only, cannot grant). */
+export const ED_ADMIN_ROLE: Record<EdAdminTag, "owner" | "curator"> = {
+  da: "owner",
+  diva: "curator",
+  iamdela: "curator",
+  "diva-iamdela": "owner",
 };
 
 const DEFAULT_ORGUNITS_BASE = "ou=orgunits,ou=Groups,dc=weill,dc=cornell,dc=edu";

@@ -35,6 +35,7 @@ const ctx: EditContext = {
     roleCategory: "full_time_faculty",
     overview: "<p>Hi.</p>",
     slugOverride: null,
+    hiddenSections: [],
     suppression: { ownRow: null, adminRow: null },
   },
   publications: [
@@ -60,6 +61,7 @@ const ctx: EditContext = {
       suppressionId: null,
     },
   ],
+  historicalAppointments: [],
   educations: [
     {
       externalId: "edu-1",
@@ -273,6 +275,29 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.getByText("Professor of Medicine")).toBeTruthy();
   });
 
+  // #1557 — self-serve reveal. The scholar themselves (mode="self") sees the
+  // Historical Appointments reveal panel, not just curators/stewards.
+  it("?attr=appointments surfaces the Historical Appointments panel to the SELF scholar (#1557)", () => {
+    const withHistorical: EditContext = {
+      ...ctx,
+      historicalAppointments: [
+        {
+          externalId: "hist-1",
+          title: "Assistant Professor",
+          organization: "Prior University",
+          startDate: "2008-01-01",
+          endDate: "2014-12-31",
+          showOnProfile: false,
+        },
+      ],
+    };
+    render(<EditPage ctx={withHistorical} mode="self" attr="appointments" />);
+    expect(
+      document.querySelector('[data-slot="historical-appointments-panel"]'),
+    ).not.toBeNull();
+    expect(screen.getByTestId("historical-appointment-row-hist-1")).toBeTruthy();
+  });
+
   it("?attr=funding renders the Funding panel with a filter + a grant row", () => {
     render(<EditPage ctx={ctx} mode="self" attr="funding" />);
     expect(document.querySelector('[data-slot="funding-panel"]')).not.toBeNull();
@@ -471,13 +496,13 @@ describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)",
     );
   });
 
-  it("surfaces coi-gap in superuser mode when candidates are present (operator decision), with reframed rail label", () => {
+  it("surfaces coi-gap in superuser mode when candidates are present (operator decision), with the viewer-neutral rail label", () => {
     const suCtx: EditContext = { ...superuserCtx, unmatchedPubmedCoi: gapCtx.unmatchedPubmedCoi };
     render(<EditPage ctx={suCtx} mode="superuser" />);
     const rail = screen.getByTestId("rail-coi-gap");
     expect(rail).toBeTruthy();
-    // Reframed for the superuser — not the first-person "From your publications".
-    expect(rail.textContent).toContain("From the scholar");
+    // §7.4 — describes the thing, not the source/viewer; same label for self + superuser.
+    expect(rail.textContent).toContain("Disclosed in publications");
     // Nested UNDER Conflicts of Interest (like the self rail) — a sub-view, not a
     // flat sibling. The child marker is the indentation class.
     expect(rail.className).toContain("pl-7");

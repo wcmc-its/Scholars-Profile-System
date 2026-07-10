@@ -173,8 +173,11 @@ export function editOkStream(
   });
 }
 
-/** Whether impersonated edits are blocked at write time (#637 §3, default off). */
-function impersonationReadonly(): boolean {
+/** Whether impersonated edits are blocked at write time (#637 §3, default off).
+ *  Exported for write routes that can't consume `readEditRequest` (e.g. the
+ *  overview-selection PUT, which normalizes its body instead) but still owe
+ *  the same refusal. */
+export function impersonationReadonly(): boolean {
   return process.env.IMPERSONATION_READONLY === "true";
 }
 

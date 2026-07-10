@@ -122,6 +122,22 @@ describe("lib/api/analytics.ts handleAnalyticsBeacon (pure function)", () => {
     expect(logged.q).toBe("cardiology");
   });
 
+  it("bounds unbounded user-controlled strings (T-06-02-01)", () => {
+    const huge = "a".repeat(5000);
+    handleAnalyticsBeacon({
+      event: "search_click",
+      q: huge,
+      cwid: huge,
+      filters: { department: huge },
+    });
+    const logged = JSON.parse(
+      (console.log as ReturnType<typeof vi.fn>).mock.calls[0][0] as string,
+    );
+    expect(logged.q.length).toBe(512);
+    expect(logged.cwid.length).toBe(512);
+    expect(logged.filters.department.length).toBe(512);
+  });
+
   it("does not log for non-object payload (null)", () => {
     handleAnalyticsBeacon(null);
     expect(console.log).not.toHaveBeenCalled();

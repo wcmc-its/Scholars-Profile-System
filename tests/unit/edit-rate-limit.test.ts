@@ -9,7 +9,12 @@ vi.mock("@/lib/db", () => ({
   db: { write: { $executeRaw: mockExecuteRaw, $queryRaw: mockQueryRaw } },
 }));
 
-import { recordRequestChangeAttempt, requestChangeRateLimit } from "@/lib/edit/rate-limit";
+import {
+  cvExportRateLimit,
+  recordCvExportAttempt,
+  recordRequestChangeAttempt,
+  requestChangeRateLimit,
+} from "@/lib/edit/rate-limit";
 
 const ENV = "SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT";
 const original = process.env[ENV];
@@ -95,5 +100,51 @@ describe("recordRequestChangeAttempt()", () => {
     mockQueryRaw.mockResolvedValue([]);
     const res = await recordRequestChangeAttempt("self01");
     expect(res).toMatchObject({ allowed: true, count: 1 });
+  });
+});
+
+// CV export cap — the M1 research summary is a Bedrock call per export, so the
+// route counts the attempt like its overview/biosketch siblings.
+describe("cvExportRateLimit() / recordCvExportAttempt()", () => {
+  const CV_ENV = "EDIT_CV_EXPORT_RATE_LIMIT";
+  const cvOriginal = process.env[CV_ENV];
+
+  afterEach(() => {
+    if (cvOriginal === undefined) delete process.env[CV_ENV];
+    else process.env[CV_ENV] = cvOriginal;
+  });
+
+  it("defaults to 10 when the env var is unset", () => {
+    delete process.env[CV_ENV];
+    expect(cvExportRateLimit()).toBe(10);
+  });
+
+  it("honors a positive integer env override", () => {
+    process.env[CV_ENV] = "3";
+    expect(cvExportRateLimit()).toBe(3);
+  });
+
+  it.each(["abc", "0", "-3", "2.5", ""])(
+    "falls back to the default for a non-positive-integer value %j",
+    (value) => {
+      process.env[CV_ENV] = value;
+      expect(cvExportRateLimit()).toBe(10);
+    },
+  );
+
+  it("counts in its own cv: namespaced bucket, disjoint from the other limiters", async () => {
+    mockQueryRaw.mockResolvedValue([{ count: 1 }]);
+    await recordCvExportAttempt("self01");
+    // Tagged-template call: interpolated values follow the SQL fragments.
+    expect(mockExecuteRaw.mock.calls[0][1]).toBe("cv:self01");
+  });
+
+  it("blocks over the limit with a Retry-After window", async () => {
+    process.env[CV_ENV] = "2";
+    mockQueryRaw.mockResolvedValue([{ count: 3 }]);
+    const res = await recordCvExportAttempt("self01", new Date("2026-05-26T10:20:00.000Z"));
+    expect(res.allowed).toBe(false);
+    if (res.allowed) throw new Error("expected blocked");
+    expect(res.retryAfterSeconds).toBe(40 * 60);
   });
 });

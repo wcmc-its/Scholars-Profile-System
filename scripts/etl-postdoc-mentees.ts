@@ -40,7 +40,12 @@ async function main(): Promise<void> {
     `ED returned ${records.length} postdoc role records ` +
       `(${fetchedActive} active, ${fetchedExpired} expired).`,
   );
-  if (fetchedActive > 0 && fetchedExpired === 0) {
+  // Set when the active+expired fetch returns active rows but ZERO expired
+  // rows — the silently-scoped-ACL signature. The tombstone pass must not then
+  // treat the missing alumni rows as "removed from the SOR" (audit PR-3 —
+  // mirrors the production ED ETL, etl/ed/index.ts).
+  const postdocFeedLikelyTruncated = fetchedActive > 0 && fetchedExpired === 0;
+  if (postdocFeedLikelyTruncated) {
     console.warn(
       "[ED] postdoc role-record fetch returned zero expired entries " +
         "despite an active+expired filter. The LDAP bind DN may be scoped " +
@@ -134,9 +139,24 @@ async function main(): Promise<void> {
     upserted += 1;
   }
 
-  const existing = await db.write.postdocMentorRelationship.findMany({
-    select: { externalId: true },
-  });
+  // Tombstone stale rows — but NOT when the feed is empty (a failed or empty
+  // fetch would tombstone the ENTIRE table) or when it shows the active-only
+  // scoped-ACL truncation signature (deleting alumni rows we know are missing).
+  // Ports the two guards from the production ED ETL (etl/ed/index.ts) that this
+  // standalone re-run script was missing.
+  const skipTombstone = records.length === 0 || postdocFeedLikelyTruncated;
+  if (skipTombstone) {
+    console.warn(
+      records.length === 0
+        ? "[ED] postdoc relationship tombstone skipped — empty feed; stale rows retained"
+        : "[ED] postdoc relationship tombstone skipped — truncated-feed signature detected; stale rows retained",
+    );
+  }
+  const existing = skipTombstone
+    ? []
+    : await db.write.postdocMentorRelationship.findMany({
+        select: { externalId: true },
+      });
   const stale = existing
     .map((row) => row.externalId)
     .filter((eid) => !seenExternalIds.has(eid));

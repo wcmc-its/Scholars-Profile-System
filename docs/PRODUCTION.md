@@ -4,7 +4,7 @@ This is the operational counterpart to the local-dev `README.md`. It describes t
 
 The headline reason this matters: during development we observed `/topics/{slug}` responses dropping from ~150 ms to 30+ seconds after the dev server had compiled dozens of routes interleaved with concurrent requests. That is a **`next dev` artifact**, not a code regression. Production builds (`next build` + `next start`) and the runbook below sidestep it entirely. This document explains the moving parts and the load-shedding model so the prod deploy never lives or dies on a single Node process the way a dev box does.
 
-> **Companion docs:** [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md) covers auth/secrets, ETL orchestration, and schema-migration policy — the three areas this document underspecifies. [`PRODUCTION_BACKLOG.md`](./PRODUCTION_BACKLOG.md) tracks the production-readiness work as P0/P1/P2 issues.
+> **Companion docs:** [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md) covers auth/secrets, ETL orchestration, and schema-migration policy — the three areas this document underspecifies.
 
 ## Why `next dev` is not production
 
@@ -74,9 +74,9 @@ The application has explicit ISR per route (search the codebase for `export cons
 | Route | TTL | Comment |
 |---|---:|---|
 | `/scholars/[slug]` | 86400 (24 h) | Heaviest page, most-crawled |
-| `/topics/[slug]` | 21600 (6 h) | |
+| `/topics/[slug]` | 7200 (2 h) | Cut from 6 h (#1542) to bound cross-task staleness pending the shared cacheHandler |
 | `/departments/[slug]`, `/centers/[slug]`, `/departments/[slug]/divisions/[div]` | 21600 (6 h) | |
-| `/` (home) | 21600 (6 h) | |
+| `/` (home) | 7200 (2 h) | Cut from 6 h (#1542) to bound cross-task staleness pending the shared cacheHandler |
 | `/sitemap.xml` | 86400 (24 h) | |
 | `/about`, `/about/methodology` | `force-static` | Pure-static; no DB calls at all |
 | `/search` | `force-dynamic` | Per-request OpenSearch query, intentional |
@@ -85,6 +85,7 @@ What this means in practice:
 
 - A bot crawling `/scholars/*` for the first time fills the CDN. After that, the same URL is served by CloudFront for 24 h with no app hit, no DB hit. The Fargate task only ever serves the *first* request per slug per 24 h.
 - ETL jobs invalidate stale entries via `POST /api/revalidate` after each successful run (see `app/api/revalidate/route.ts`). That writes targeted `path:` invalidations — slug pages that didn't change in the run still serve cached.
+- **Multi-task ISR consistency (#1503).** Next's default ISR cache is in-process, per-task, so with the 2–6 prod tasks a `revalidatePath` mutates only the *one* task that received it — the following CloudFront invalidation could then refill the edge from a still-stale task for up to the route TTL (why `/` and `/topics/[slug]` were cut to 2 h above as an interim). The real fix is a shared **S3 `cacheHandler`** (`lib/cache/s3-cache-handler.js`, gated by build-arg `NEXT_ISR_CACHE_S3`) that makes all tasks read/write one ISR store and propagates revalidation via a tag→timestamp map; it is fail-open (a slow/unavailable S3 degrades to a cache miss, never a 500). **Staging-active; prod bucket + wiring deployed, dark until a prod image built `on` ships.** Rationale and perf framing: [`performance-baseline.md § Multi-task ISR cache consistency`](./performance-baseline.md).
 - The `force-dynamic` search page is the only request path that hits the app on every request. We want it that way (search-as-you-type), and the work it does is bounded by OpenSearch, not the DB.
 
 CloudFront configuration to enforce this:
@@ -105,7 +106,7 @@ A typical crawl pattern for this site is `GET /sitemap.xml` (8,919 scholar URLs 
 
 If a bot somehow ignores caching headers, two layers protect us:
 
-1. **AWS WAF rate rule**: 1000 req / 5 min per IP (`RateBasedRule`). Borderline-aggressive crawlers see 429s; well-behaved Googlebot/Bingbot stay well under.
+1. **AWS WAF rate rule**: 5000 req / 5 min per IP (`RateBasedRule`), currently in **COUNT mode** (#1430) — it only tags matching requests, so nothing is 429'd today. Flip-to-block is pending the #1434 false-positive review: WCM egresses via shared NAT IPs that pool onto one counter, so a live limit could catch legitimate staff traffic before it slows a crawler.
 2. **Origin concurrency**: ALB target group caps in-flight requests per task (default 2x healthy task count). If the burst still gets through WAF, the queue absorbs and 503s start; the ECS service autoscaler (target-tracking on avg CPU 60% + ALB request-count-per-target) adds tasks toward the `appMaxCount` ceiling (prod 6) — scale-out cooldown is 60 s.
 
 Lighter mitigation appropriate for `robots.txt`:

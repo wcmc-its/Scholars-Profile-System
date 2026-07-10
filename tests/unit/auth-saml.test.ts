@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { extractCwid, extractCwidFromEppn } from "@/lib/auth/saml";
+import { extractCwid, extractCwidFromEppn, extractAssertionIdentity } from "@/lib/auth/saml";
 import { parseScopes } from "@/lib/auth/config";
 import type { Profile } from "@node-saml/node-saml";
 
@@ -85,6 +86,104 @@ describe("extractCwidFromEppn", () => {
 
   it("returns null when the eppn attribute is absent", () => {
     expect(extractCwidFromEppn(profile({}), EPPN, scopes)).toBeNull();
+  });
+});
+
+describe("extractAssertionIdentity", () => {
+  const NOW = new Date("2026-07-03T12:00:00.000Z");
+  const OPTS = { now: NOW, clockSkewMs: 5000 };
+
+  /**
+   * Build a Profile whose `getAssertion()` mirrors node-saml's xml2js shape
+   * (explicitRoot + explicitArray + explicitCharkey): the root `Assertion` is a
+   * single object with `$` attributes and arrayed children.
+   */
+  function assertionProfile(opts: {
+    assertionId?: string;
+    responseId?: string;
+    conditionsNotOnOrAfter?: string;
+    subjectNotOnOrAfter?: string;
+    omitAssertion?: boolean;
+  }): Profile {
+    const p = profile({}) as Profile & { getAssertion?: () => Record<string, unknown> };
+    if (opts.responseId) p.ID = opts.responseId;
+    if (!opts.omitAssertion) {
+      p.getAssertion = () => ({
+        Assertion: {
+          $: { ID: opts.assertionId, IssueInstant: "2026-07-03T11:59:00Z", Version: "2.0" },
+          Conditions: opts.conditionsNotOnOrAfter
+            ? [{ $: { NotOnOrAfter: opts.conditionsNotOnOrAfter } }]
+            : undefined,
+          Subject: [
+            {
+              SubjectConfirmation: [
+                {
+                  SubjectConfirmationData: opts.subjectNotOnOrAfter
+                    ? [{ $: { NotOnOrAfter: opts.subjectNotOnOrAfter } }]
+                    : undefined,
+                },
+              ],
+            },
+          ],
+        },
+      });
+    }
+    return p;
+  }
+
+  it("keys on the signature-covered assertion ID and is deterministic on re-presentation", () => {
+    const p = assertionProfile({
+      assertionId: "_9f8e7d6c",
+      conditionsNotOnOrAfter: "2026-07-03T12:04:00.000Z",
+    });
+    const first = extractAssertionIdentity(p, "raw-b64", OPTS);
+    const second = extractAssertionIdentity(p, "raw-b64", OPTS);
+    // Same message => same key: the single-use guard can recognise the second POST.
+    expect(first.id).toBe("assn:_9f8e7d6c");
+    expect(second.id).toBe(first.id);
+  });
+
+  it("derives the prune horizon from NotOnOrAfter plus the accepted clock skew", () => {
+    const p = assertionProfile({
+      assertionId: "_a",
+      conditionsNotOnOrAfter: "2026-07-03T12:04:00.000Z",
+    });
+    const { expiresAt } = extractAssertionIdentity(p, "raw", OPTS);
+    // 12:04:00 + 5000ms skew.
+    expect(expiresAt.toISOString()).toBe("2026-07-03T12:04:05.000Z");
+  });
+
+  it("uses the latest NotOnOrAfter across Conditions and SubjectConfirmationData", () => {
+    const p = assertionProfile({
+      assertionId: "_a",
+      conditionsNotOnOrAfter: "2026-07-03T12:04:00.000Z",
+      subjectNotOnOrAfter: "2026-07-03T12:06:00.000Z",
+    });
+    const { expiresAt } = extractAssertionIdentity(p, "raw", OPTS);
+    expect(expiresAt.toISOString()).toBe("2026-07-03T12:06:05.000Z");
+  });
+
+  it("falls back to the response ID when the assertion carries no ID", () => {
+    const p = assertionProfile({ responseId: "_resp-42" });
+    expect(extractAssertionIdentity(p, "raw", OPTS).id).toBe("resp:_resp-42");
+  });
+
+  it("falls back to a hash of the raw SAMLResponse when no id is available", () => {
+    const p = assertionProfile({ omitAssertion: true });
+    const expected = "hash:" + createHash("sha256").update("the-raw-response").digest("hex");
+    expect(extractAssertionIdentity(p, "the-raw-response", OPTS).id).toBe(expected);
+    // Distinct responses hash to distinct keys; identical responses collide (by design).
+    const other = extractAssertionIdentity(p, "different-response", OPTS).id;
+    expect(other).not.toBe(expected);
+  });
+
+  it("uses the fixed fallback window when no NotOnOrAfter is present", () => {
+    const p = assertionProfile({ assertionId: "_a" });
+    const { expiresAt } = extractAssertionIdentity(p, "raw", {
+      ...OPTS,
+      fallbackWindowMs: 60_000,
+    });
+    expect(expiresAt.toISOString()).toBe("2026-07-03T12:01:00.000Z");
   });
 });
 

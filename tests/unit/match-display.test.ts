@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildResearcherCsv,
   careerStageLabel,
+  dueUrgency,
   fundingStatusLabel,
   researcherBlurb,
   stageFit,
@@ -125,5 +126,24 @@ describe("buildResearcherCsv", () => {
     ]);
     // ...Unknown,,, ... → empty ESI + empty funding between Stage fit and Top topic.
     expect(csv.trim().split(/\r?\n/)[1]).toContain("Unknown,,,");
+  });
+});
+
+describe("dueUrgency", () => {
+  const now = Date.parse("2026-07-06T12:00:00Z");
+  it("is past once the due day is fully behind now", () => {
+    expect(dueUrgency("2026-07-05T00:00:00Z", now)).toBe("past");
+  });
+  it("is not past on the due day itself (date-only stamps)", () => {
+    expect(dueUrgency("2026-07-06T00:00:00Z", now)).toBe("soon");
+  });
+  it("is soon within the 30-day window (boundary inclusive)", () => {
+    expect(dueUrgency("2026-07-20T00:00:00Z", now)).toBe("soon");
+    expect(dueUrgency("2026-08-05T12:00:00Z", now)).toBe("soon");
+  });
+  it("is null beyond the window, and for absent or unparseable dates", () => {
+    expect(dueUrgency("2026-12-01T00:00:00Z", now)).toBeNull();
+    expect(dueUrgency(null, now)).toBeNull();
+    expect(dueUrgency("not-a-date", now)).toBeNull();
   });
 });

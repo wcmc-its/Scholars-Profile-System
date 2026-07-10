@@ -1,3 +1,5 @@
+import { Stack } from "aws-cdk-lib";
+import * as iam from "aws-cdk-lib/aws-iam";
 import { Template } from "aws-cdk-lib/assertions";
 import { AnalyticsStack } from "../lib/analytics-stack";
 import { makeFixture } from "./test-utils";
@@ -10,10 +12,19 @@ function buildAnalyticsStack(envName: "staging" | "prod"): {
   // AnalyticsStack references the raw CloudFront log bucket BY NAME
   // (envConfig.cloudFrontLogsBucketName) rather than via an EdgeStack handle,
   // so it stands alone with no prerequisite stacks (it deploys while EdgeStack
-  // is frozen behind #502).
+  // is frozen behind #502). Its only prop dependency is the AppStack task role
+  // (for the in-app Usage dashboard grant) — stubbed here by ARN so the stack
+  // still synthesizes standalone.
+  const roleScope = new Stack(fixture.app, `AppStub-${envName}`);
+  const appTaskRole = iam.Role.fromRoleArn(
+    roleScope,
+    "AppTaskRoleStub",
+    `arn:aws:iam::123456789012:role/sps-task-${envName}`,
+  );
   const stack = new AnalyticsStack(fixture.app, `Sps-Analytics-${envName}`, {
     env: fixture.env,
     envConfig: fixture.envConfig,
+    appTaskRole,
   });
   return { template: Template.fromStack(stack), stack };
 }
@@ -133,8 +144,8 @@ describe("AnalyticsStack", () => {
       });
 
       // ---- Athena ----------------------------------------------------
-      it("creates two workgroups: operator (1 GiB cap) + rollup (uncapped)", () => {
-        template.resourceCountIs("AWS::Athena::WorkGroup", 2);
+      it("creates three workgroups: operator (1 GiB cap) + rollup (uncapped) + app (isolated results)", () => {
+        template.resourceCountIs("AWS::Athena::WorkGroup", 3);
         // Operator workgroup: enforced config, SSE-S3, 1 GiB scan cap (guards
         // an interactive no-predicate scan of the unpartitioned raw table).
         template.hasResourceProperties("AWS::Athena::WorkGroup", {
@@ -148,6 +159,30 @@ describe("AnalyticsStack", () => {
             },
           },
         });
+        // App workgroup: same enforced config + cap, but results land under a
+        // DEDICATED athena-results/app/ prefix so the app role's scoped S3 read
+        // can never reach an operator's ad-hoc results over the raw PII table.
+        const appWg = Object.values(
+          template.findResources("AWS::Athena::WorkGroup"),
+        ).find(
+          (w) =>
+            (w.Properties as { Name?: string })?.Name === `sps-usage-app-${env}`,
+        );
+        expect(appWg).toBeDefined();
+        const appCfg = (
+          appWg!.Properties as {
+            WorkGroupConfiguration?: {
+              EnforceWorkGroupConfiguration?: boolean;
+              BytesScannedCutoffPerQuery?: number;
+              ResultConfiguration?: { OutputLocation?: unknown };
+            };
+          }
+        ).WorkGroupConfiguration;
+        expect(appCfg?.EnforceWorkGroupConfiguration).toBe(true);
+        expect(appCfg?.BytesScannedCutoffPerQuery).toBe(1073741824);
+        expect(JSON.stringify(appCfg?.ResultConfiguration?.OutputLocation)).toContain(
+          "athena-results/app",
+        );
         // Rollup workgroup: enforced config + SSE-S3 but NO scan cap -- the
         // nightly rollup must scan the full corpus, and a cap would silently
         // fail the job as traffic grows (finding #2).
@@ -176,8 +211,8 @@ describe("AnalyticsStack", () => {
         expect(cfg?.BytesScannedCutoffPerQuery).toBeUndefined();
       });
 
-      it("creates the six saved marketing named queries", () => {
-        template.resourceCountIs("AWS::Athena::NamedQuery", 6);
+      it("creates the six marketing + three perf saved named queries", () => {
+        template.resourceCountIs("AWS::Athena::NamedQuery", 9);
         const qs = template.findResources("AWS::Athena::NamedQuery");
         const names = Object.values(qs)
           .map((q) => (q.Properties as { Name?: string })?.Name)
@@ -191,8 +226,38 @@ describe("AnalyticsStack", () => {
             `sps-usage-referrers-${env}`,
             `sps-usage-search-terms-${env}`,
             `sps-usage-top-profiles-${env}`,
+            `sps-perf-slow-routes-${env}`,
+            `sps-perf-errors-by-route-${env}`,
+            `sps-perf-cache-hit-${env}`,
           ].sort(),
         );
+      });
+
+      // ---- In-app Usage dashboard grant (least privilege / PII boundary) ----
+      it("grants the app task role workgroup-scoped Athena but NO raw-log access", () => {
+        const policies = template.findResources("AWS::IAM::Policy", {
+          Properties: { PolicyName: `sps-usage-app-query-${env}` },
+        });
+        const docs = Object.values(policies).map(
+          (p) => (p.Properties as { PolicyDocument: unknown }).PolicyDocument,
+        );
+        expect(docs).toHaveLength(1);
+        const json = JSON.stringify(docs[0]);
+        // Query is on the app-only workgroup — NOT the operator workgroup (whose
+        // ad-hoc results over the raw PII table share athena-results/ root) and
+        // NOT the rollup workgroup.
+        expect(json).toContain(`workgroup/sps-usage-app-${env}`);
+        expect(json).not.toContain(`workgroup/sps-usage-${env}"`);
+        expect(json).not.toContain(`workgroup/sps-usage-rollup-${env}`);
+        // Glue read is scoped to daily_usage only — never the raw PII table.
+        expect(json).toContain("daily_usage");
+        expect(json).not.toContain("cf_access_logs");
+        // S3 read on results is scoped to the app's OWN prefix (athena-results/app/),
+        // never the shared athena-results/ root, and never the raw `cf/` log prefix.
+        expect(json).toContain("rollup/daily-usage/*");
+        expect(json).toContain("athena-results/app/*");
+        expect(json).not.toMatch(/"[^"]*athena-results\/\*"/);
+        expect(json).not.toMatch(/"[^"]*\/cf\/\*?"/);
       });
 
       // ---- Lambda ----------------------------------------------------

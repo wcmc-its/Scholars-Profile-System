@@ -141,6 +141,34 @@ describe("buildOpportunityWrites", () => {
     expect(bad.prestige).toBe(Prisma.JsonNull);
     expect(bad.isHonorific).toBeNull();
   });
+
+  it("parses match_dsl / match_query S-string JSON; JsonNull when absent/malformed (contract v3)", () => {
+    // ReciterAI writes these as compact-JSON DynamoDB `S` strings (DocumentClient yields strings).
+    const [w] = buildOpportunityWrites([
+      grantItem({
+        match_dsl: '{"require":["pediatric_cardiology"],"penalize":["health_informatics"]}',
+        match_query: '[{"q":"congenital heart","w":1}]',
+        match_rel: '{"39492837":0.91,"38112233":0.42}',
+      }),
+    ]).writes;
+    expect(w.matchDsl).toEqual({ require: ["pediatric_cardiology"], penalize: ["health_informatics"] });
+    expect(w.matchQuery).toEqual([{ q: "congenital heart", w: 1 }]);
+    expect(w.matchRel).toEqual({ "39492837": 0.91, "38112233": 0.42 }); // dense map (contract v4)
+
+    // Absent upstream → JSON-null (matcher stays fail-closed → BM25 fallback).
+    const [without] = buildOpportunityWrites([grantItem()]).writes;
+    expect(without.matchDsl).toBe(Prisma.JsonNull);
+    expect(without.matchQuery).toBe(Prisma.JsonNull);
+    expect(without.matchRel).toBe(Prisma.JsonNull);
+
+    // Malformed string → JsonNull (fail-open, never throws).
+    const [bad] = buildOpportunityWrites([grantItem({ match_dsl: "{not json" })]).writes;
+    expect(bad.matchDsl).toBe(Prisma.JsonNull);
+
+    // Already-parsed object (future native DDB map) passes through unchanged.
+    const [native] = buildOpportunityWrites([grantItem({ match_dsl: { require: ["x"], penalize: [] } })]).writes;
+    expect(native.matchDsl).toEqual({ require: ["x"], penalize: [] });
+  });
 });
 
 describe("deriveEligibilityFlags", () => {

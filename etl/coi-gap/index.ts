@@ -23,7 +23,7 @@
  *   npm run etl:coi-gap            # incremental since last successful run
  *   npm run etl:coi-gap -- --full  # recompute all scholars
  */
-import { db } from "../../lib/db";
+import { db, disconnect } from "../../lib/db";
 import { computeScholarGaps } from "@/lib/coi-gap/compute";
 import { reconcileCandidates, type CandidateStatus, type ExistingGap } from "@/lib/coi-gap/lifecycle";
 
@@ -224,6 +224,4 @@ main()
     console.error(err);
     process.exit(1);
   })
-  .finally(async () => {
-    await db.write.$disconnect();
-  });
+  .finally(disconnect);

@@ -1,12 +1,15 @@
+import { gzipSync } from "node:zlib";
 import { NextResponse, type NextRequest } from "next/server";
 import { apiError } from "@/lib/api/error-response";
 import {
   searchPeople,
   searchPublications,
+  getConceptScholarConcentration,
   type PeopleSort,
   type PublicationsSort,
 } from "@/lib/api/search";
-import { meshMatchTier } from "@/lib/search";
+import { meshMatchTier, AREA_BOOST_TOP_N } from "@/lib/search";
+import { getAreaScholarConcentration } from "@/lib/api/topics";
 import {
   searchFunding,
   type FundingFilters,
@@ -16,7 +19,9 @@ import {
 } from "@/lib/api/search-funding";
 import {
   matchQueryToTaxonomy,
+  resolveMeshDescriptor,
   buildMatchAwareContext,
+  type TaxonomyMatchResult,
 } from "@/lib/api/search-taxonomy";
 import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
 import {
@@ -27,10 +32,12 @@ import {
   resolveFundingConceptEnabled,
   resolveDeptLeadershipBoost,
   resolvePeopleRelevanceMode,
-  resolvePeopleMatchProvenance,
   resolvePeopleMatchExplain,
   resolvePeopleSnippetRepresentativePub,
   resolveGenericTermMode,
+  resolveSearchPeopleAreaBoost,
+  resolveSearchPeopleDivisionShape,
+  resolveSearchPeopleFacultyProminence,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
@@ -61,19 +68,32 @@ export async function GET(request: NextRequest) {
   return runWithOsRoundTripCounter(() => handleSearch(request));
 }
 
+// DoS/robustness via deep paging (mirrors the topics route's T-03-05-05 clamp):
+// `from = page * PAGE_SIZE` past `index.max_result_window` (100k) makes the
+// OpenSearch client throw — an uncaught 500 — and every deep `from` is a cheap
+// CPU amplifier for the caller. 500 pages × 20 rows = 10k results, far past any
+// legitimate pagination depth.
+const MAX_PAGE = 500;
+
 async function handleSearch(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const q = params.get("q") ?? "";
   const type = params.get("type") ?? "people";
   const rawPage = parseInt(params.get("page") ?? "0", 10);
-  const page = Number.isFinite(rawPage) ? Math.max(0, rawPage) : 0;
+  const page = Number.isFinite(rawPage) ? Math.min(Math.max(0, rawPage), MAX_PAGE) : 0;
 
   // Issue #259 §1.5 — taxonomy match (curated + MeSH resolution) computed
   // once at the top so all three branches can log resolution outcome.
-  // matchQueryToTaxonomy short-circuits on q < 3 normalized chars, so the
-  // cost here is one Map lookup + one indexed etl_run row when the cache
-  // is hot. Same call the server-rendered /search page makes; the duplication
-  // is acceptable until call sites consolidate.
+  //
+  // Perf #1406 — the publications and funding branches consume ONLY
+  // `taxonomyMatch.meshResolution` (the concept clause plus the
+  // interpretation/log fields derived from it). The curated-candidate matching
+  // and its per-candidate Prisma count enrichment (up to MATCH_HARD_CAP × 2
+  // group-bys) feed `primary`/`areas`/`methodMatches`, which only the people
+  // branch (and the SSR page) read — so those branches resolve just the MeSH
+  // side, O(1) warm off the module-cached MeSH map, and the full matcher runs
+  // only on the people path. Measured before the split (prod, warm): the
+  // funding tab paid ~460ms of taxonomy for a ~118ms search.
   //
   // Issue #259 SPEC §7.5 — split-scope timing. `taxonomyMatchMs` measures
   // the resolver in isolation so a resolver regression doesn't dilute the
@@ -88,23 +108,49 @@ async function handleSearch(request: NextRequest) {
   const genericStripped = genericTermMode !== "off" && genericRemoved.length > 0;
   const genericDemote = genericTermMode === "on" && genericRemoved.length > 0;
 
+  const meshOnlyResolution = type === "publications" || type === "funding";
   const taxonomyStart = Date.now();
-  let taxonomyMatch = await matchQueryToTaxonomy(q);
-  // Issue #692 §4.1 — full query first; only on a complete MISS (no curated
-  // match AND no MeSH descriptor) retry against the stripped content query.
-  // Full-first protects descriptors built from filler ("gene therapy",
-  // "clinical trial") — those resolve on the first call and never reach here.
-  if (
-    genericStripped &&
-    taxonomyMatch.state === "none" &&
-    taxonomyMatch.meshResolution === null
-  ) {
-    const retry = await matchQueryToTaxonomy(contentQuery);
-    if (retry.state === "matches" || retry.meshResolution !== null) {
-      taxonomyMatch = retry;
+  let taxonomyMatch: TaxonomyMatchResult;
+  if (meshOnlyResolution) {
+    // Perf #1406 — MeSH-only path (see block comment above). Same object the
+    // full matcher would embed as `meshResolution`; it has its own <3-char
+    // short-circuit and fails closed to null.
+    let mesh = await resolveMeshDescriptor(q);
+    // Issue #692 §4.1, mesh-only shape — retry the stripped content query on a
+    // resolution miss. The full path below additionally requires a curated-
+    // match miss before retrying; curated state isn't computed here, so in the
+    // rare case where the full query curated-matches a topic label WITHOUT
+    // MeSH-resolving, this retry can resolve a descriptor the people/SSR path
+    // would not. Strictly more-resolved for branches that only consume the
+    // descriptor; accepted to keep this path off the candidate/count queries.
+    if (genericStripped && mesh === null) {
+      mesh = await resolveMeshDescriptor(contentQuery);
+    }
+    taxonomyMatch = { state: "none", meshResolution: mesh };
+  } else {
+    taxonomyMatch = await matchQueryToTaxonomy(q);
+    // Issue #692 §4.1 — full query first; only on a complete MISS (no curated
+    // match AND no MeSH descriptor) retry against the stripped content query.
+    // Full-first protects descriptors built from filler ("gene therapy",
+    // "clinical trial") — those resolve on the first call and never reach here.
+    if (
+      genericStripped &&
+      taxonomyMatch.state === "none" &&
+      taxonomyMatch.meshResolution === null
+    ) {
+      const retry = await matchQueryToTaxonomy(contentQuery);
+      if (retry.state === "matches" || retry.meshResolution !== null) {
+        taxonomyMatch = retry;
+      }
     }
   }
   const taxonomyMatchMs = Date.now() - taxonomyStart;
+  // Server-Timing `taxonomy` span desc — names the resolver actually run
+  // (#1406: mesh-only on the publications/funding branches). The span name
+  // (`taxonomy;dur=`) is unchanged, so SLI parsing is unaffected.
+  const taxonomyLabel = meshOnlyResolution
+    ? "resolveMeshDescriptor"
+    : "matchQueryToTaxonomy";
   // PLAN R2/R6 — one user-facing `?match=exact|expanded|concept` scope (default
   // `expanded`) replaces the split `?mesh=` surface. `parseScopeParam` validates
   // the value (anything unrecognized → `expanded`) and folds the legacy
@@ -208,8 +254,10 @@ async function handleSearch(request: NextRequest) {
       result,
       searchInterpretation,
       taxonomyMatchMs,
+      taxonomyLabel,
       searchLatencyMs,
       "searchFunding",
+      request.headers.get("accept-encoding"),
     );
   }
 
@@ -402,8 +450,10 @@ async function handleSearch(request: NextRequest) {
       result,
       searchInterpretation,
       taxonomyMatchMs,
+      taxonomyLabel,
       searchLatencyMs,
       "searchPublications",
+      request.headers.get("accept-encoding"),
     );
   }
 
@@ -444,12 +494,24 @@ async function handleSearch(request: NextRequest) {
   // `resolvePeopleRelevanceMode` so both rank identically.
   const appliedRelevanceMode = resolvePeopleRelevanceMode();
   const classifierSets = await getPeopleClassifierSets();
+  // #1347 — division-shape routing (dark by default). Add clinical-division names to the
+  // classifier vocabulary so a bare division query hits the department template, and
+  // resolve that division to its roster (deptDivKey) filter. Flag-off ⇒ both are inert.
+  const divisionShapeOn = resolveSearchPeopleDivisionShape();
+  const knownDivisions = divisionShapeOn
+    ? new Set(classifierSets.divisions.keys())
+    : undefined;
+  const divisionRosterKeys = divisionShapeOn
+    ? (classifierSets.divisions.get(q.trim().toLowerCase()) ?? [])
+    : [];
+  const effectiveDeptDiv = [...deptDiv, ...divisionRosterKeys];
   const queryShape = classifyPeopleQuery({
     query: q,
     meshResolved: taxonomyMatch.meshResolution != null,
     knownCwids: classifierSets.cwids,
     knownSurnames: classifierSets.surnames,
     knownDepartments: classifierSets.departments,
+    knownDivisions,
   });
 
   const searchStart = Date.now();
@@ -460,12 +522,52 @@ async function handleSearch(request: NextRequest) {
   const meshTier = meshRes
     ? meshMatchTier(meshRes.confidence, meshRes.curatedTopicAnchors.length)
     : undefined;
+  // Track B — Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
+  // When the flag is on, the query resolved to a Research Area, and we're not under Exact
+  // word, pull that area's relevance×coverage ranking ({cwid,total}) so searchPeople can
+  // lift area-concentrated scholars (topic/hybrid only, reorder-only). `areas[0]` is the
+  // top matched area — the same one drawn as the "Research Areas" chip. Cached read.
+  let areaConcentration: { cwid: string; total: number }[] | undefined;
+  if (
+    resolveSearchPeopleAreaBoost() &&
+    !meshOff &&
+    taxonomyMatch.state === "matches" &&
+    taxonomyMatch.areas.length > 0
+  ) {
+    const top = taxonomyMatch.areas[0];
+    const parentTopicId = top.entityType === "subtopic" ? top.parentTopicId : top.id;
+    const subtopicId = top.entityType === "subtopic" ? top.id : null;
+    if (parentTopicId) {
+      areaConcentration = await getAreaScholarConcentration(
+        parentTopicId,
+        subtopicId,
+        AREA_BOOST_TOP_N,
+      );
+    }
+  }
+  // #1343 — concept-axis fallback. When no curated Research Area matched but the query
+  // resolved to a MeSH descriptor (obesity/hypertension), source the concentration from
+  // the publications index instead, so the same boost slot reaches concept queries.
+  // Reuses the SEARCH_PEOPLE_AREA_BOOST source toggle; reorder-only, no reindex.
+  if (
+    resolveSearchPeopleAreaBoost() &&
+    !meshOff &&
+    (!areaConcentration || areaConcentration.length === 0) &&
+    taxonomyMatch.meshResolution?.descendantUis?.length
+  ) {
+    areaConcentration = await getConceptScholarConcentration(
+      taxonomyMatch.meshResolution.descendantUis,
+      AREA_BOOST_TOP_N,
+    );
+  }
   const result = await searchPeople({
     q,
     page,
     sort,
     filters: {
-      deptDiv: deptDiv.length > 0 ? deptDiv : undefined,
+      // #1347 — `effectiveDeptDiv` unions the facet-selected deptDiv with the resolved
+      // division roster keys (empty unless the division-shape flag is on).
+      deptDiv: effectiveDeptDiv.length > 0 ? effectiveDeptDiv : undefined,
       personType: personType.length > 0 ? personType : undefined,
       activity: activity.length > 0 ? activity : undefined,
       includeIncomplete,
@@ -491,10 +593,10 @@ async function handleSearch(request: NextRequest) {
     // the API people count (ungated, 76) disagrees with the rendered Scholars
     // badge (gated, 5) for the identical request.
     scope,
-    // Issue #688 — env-gated narrower-term match provenance. searchPeople only
-    // attaches it on topic/unclassified hits that matched via a descendant; the
-    // descriptor name frames the "… narrower term of {name}" string.
-    matchProvenance: resolvePeopleMatchProvenance(),
+    // Issue #688 — narrower-term match provenance (always on; #1440 retired the
+    // env lever). searchPeople only attaches it on topic/unclassified hits that
+    // matched via a descendant; the descriptor name frames the "… narrower term
+    // of {name}" string.
     meshDescriptorName: taxonomyMatch.meshResolution?.name,
     // Issue #702 — env-gated pub-evidence highlighting + "Matched on" chip so a
     // publication-only match isn't left bare. Pure presentation metadata.
@@ -510,11 +612,17 @@ async function handleSearch(request: NextRequest) {
     // Issue #532 — env-gated dept-shape leadership boost. Ignored for
     // non-dept shapes inside `searchPeople`.
     deptLeadershipBoost: resolveDeptLeadershipBoost(),
+    // #1345 — full-time-faculty prominence lever (default ON). When off, the flat
+    // +1.0 full_time_faculty prominence term is dropped.
+    facultyProminence: resolveSearchPeopleFacultyProminence(),
     // #824 follow-up — match-aware snippet context so client tab-nav / pagination
     // (this route) keeps the method/topic reason the SSR page produced. Built off
     // the taxonomyMatch already resolved at the top of the handler; inert unless
     // SEARCH_PEOPLE_MATCH_AWARE_SNIPPET is on (searchPeople gates it).
     matchAwareContext: buildMatchAwareContext(taxonomyMatch),
+    // Track B — Research-Area concentration boost. Inert unless the flag resolved a
+    // non-empty area ranking above; searchPeople applies it only on topic/hybrid shapes.
+    areaConcentration,
   });
   const searchLatencyMs = Date.now() - searchStart;
   // ANALYTICS-02 (D-02): structured search-query log (people branch).
@@ -560,8 +668,10 @@ async function handleSearch(request: NextRequest) {
     result,
     searchInterpretation,
     taxonomyMatchMs,
+    taxonomyLabel,
     searchLatencyMs,
     "searchPeople",
+    request.headers.get("accept-encoding"),
   );
 }
 
@@ -577,24 +687,46 @@ function orUndefined<T>(arr: T[]): T[] | undefined {
 // PLAN R3 — the result object is spread alongside `searchInterpretation`
 // ({ scope, conceptLabel, meshMapped }) so all three branches return the same
 // shape uniformly without each search result type having to carry the field.
+// Origin floor mirrors CloudFront's own 1,000-byte compression floor.
+const GZIP_MIN_BYTES = 1000;
+
 function jsonWithTiming<T extends object>(
   body: T,
   searchInterpretation: SearchInterpretation,
   taxonomyMatchMs: number,
+  taxonomyLabel: string,
   searchLatencyMs: number,
   searchLabel: string,
+  acceptEncoding: string | null,
 ) {
-  return NextResponse.json(
-    { ...body, searchInterpretation },
-    {
-      headers: {
-        "Server-Timing": serverTimingHeader([
-          { name: "taxonomy", ms: taxonomyMatchMs, desc: "matchQueryToTaxonomy" },
-          { name: "search", ms: searchLatencyMs, desc: searchLabel },
-        ]),
-      },
-    },
-  );
+  // Compressed at the ORIGIN, not the edge. CloudFront only compresses
+  // responses whose size it can read from a Content-Length header (docs:
+  // "Serving compressed files" > conditions), and Next.js strips any
+  // app-set Content-Length from route-handler responses (bodies re-stream
+  // chunked) — verified live on staging 2026-07-02, where these payloads
+  // shipped identity at 196 KB with compression fully enabled at the edge.
+  // An origin response that already carries Content-Encoding passes through
+  // CloudFront untouched, so gzipping here is the deterministic fix.
+  // gzipSync on a ~200 KB JSON string costs low single-digit ms.
+  const payload = JSON.stringify({ ...body, searchInterpretation });
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Server-Timing": serverTimingHeader([
+      { name: "taxonomy", ms: taxonomyMatchMs, desc: taxonomyLabel },
+      { name: "search", ms: searchLatencyMs, desc: searchLabel },
+    ]),
+    Vary: "Accept-Encoding",
+  };
+  if (
+    acceptEncoding !== null &&
+    /\bgzip\b/i.test(acceptEncoding) &&
+    Buffer.byteLength(payload) >= GZIP_MIN_BYTES
+  ) {
+    return new NextResponse(new Uint8Array(gzipSync(payload)), {
+      headers: { ...headers, "Content-Encoding": "gzip" },
+    });
+  }
+  return new NextResponse(payload, { headers });
 }
 
 // PLAN R3 — the interpretation block returned on every branch.

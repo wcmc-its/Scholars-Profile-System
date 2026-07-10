@@ -51,6 +51,19 @@ export interface SpsEnvConfig {
   readonly opensearchDataNodes: number;
   /** OpenSearch data-node instance type. */
   readonly opensearchDataNodeInstanceType: string;
+  /**
+   * Number of dedicated OpenSearch master nodes; 0 = none (#1509). Prod runs 3
+   * so cluster coordination moves off the data path and survives losing one
+   * data node/AZ (quorum 2-of-3) instead of the current 2-data-node domain's
+   * 2-of-2 vote, where either node's loss takes search fully down. Other envs
+   * run 0 — a single/low-traffic domain gains nothing from dedicated masters.
+   * NB: the VPC has two AZs, so three masters distribute 2+1 across those two
+   * AZs; full 3-AZ master placement would need NetworkStack at three AZs (same
+   * out-of-scope caveat as the data-node count above).
+   */
+  readonly opensearchMasterNodes: number;
+  /** Dedicated master instance type; ignored when opensearchMasterNodes is 0. */
+  readonly opensearchMasterNodeInstanceType: string;
 
   // --- AWS Backup (B10) ---
 
@@ -119,6 +132,14 @@ export interface SpsEnvConfig {
    * auto-create the missing `@'host'` account -- so it is fail-closed, not
    * silent. NOT derivable from {@link vpcCidr}: prod uses `%` despite its
    * 10.10/16 CIDR.
+   *
+   * Cutover (docs/sps-vpc-consolidation-plan.md §6.2): once compute moves to the
+   * shared its-reciter app2 tier, the source IP changes to `10.46.160.x`, so
+   * staging must re-scope from `10.20.%` to `10.46.160.%` (the two app2 /25s =
+   * `10.46.160.0/24`) — or `%` — together with the live in-DB regrant, else
+   * app_rw auth fails closed (MySQL 1410). One of the prerequisites
+   * {@link assertCutoverGate} lists before {@link useSharedVpc} may be flipped.
+   * Prod stays `%`, unaffected by the source move.
    */
   readonly appRwGranteeHost: string;
   /**
@@ -162,8 +183,14 @@ export interface SpsEnvConfig {
    * annual state machines are enabled at deploy time. `true` in staging so
    * the cadence runs immediately after the first deploy; `false` in prod so
    * the first deploy never auto-starts a run before the runbook is reviewed.
-   * Flipped to `true` post-launch via `aws events enable-rule` (out of band)
-   * or by changing this flag and redeploying.
+   *
+   * To turn prod schedules on: flip THIS flag to `true` and
+   * `cdk deploy Sps-Etl-prod`. Do NOT enable the rules out of band with
+   * `aws events enable-rule` — the rules synthesize `enabled:
+   * envConfig.etlSchedulesEnabled` (etl-stack.ts), so an out-of-band enable
+   * drifts from the template and the next Sps-Etl-prod deploy that touches a
+   * rule silently reverts it to DISABLED. The config flag is the single source
+   * of truth (#1512).
    */
   readonly etlSchedulesEnabled: boolean;
   /**
@@ -225,6 +252,17 @@ export interface SpsEnvConfig {
    */
   readonly opportunityProjectionScheduleEnabled: boolean;
   /**
+   * Whether the reverse grant→researcher matcher runs the subtopic-grain path
+   * (require/penalize DSL + BM25 boost) instead of the proven topic-vector path.
+   * Surfaced to the app container as `GRANT_MATCHER_SUBTOPIC_GRAIN` ("on"/"off").
+   * The path ALSO self-gates on the opportunity carrying a compiled `match_dsl`,
+   * so with the flag on it still no-ops (→ topic-vector) on opportunities not yet
+   * reprojected. `true` in staging (corpus backfilled + reprojected); `false` in
+   * prod until the prod corpus carries match_dsl/match_query and staging soaks.
+   * See docs/grant-matching-productionization-handoff.md.
+   */
+  readonly grantMatcherSubtopicGrain: boolean;
+  /**
    * The externally-created, TGW-attached VPC that on-prem-reachable ETL tasks
    * run in — specifically the ED LDAP → S3 email-visibility export (#443).
    * Created out-of-band by WCM networking (NOT by our CDK): staging →
@@ -258,28 +296,83 @@ export interface SpsEnvConfig {
    */
   readonly edEmailVisibilityBridgeEnabled: boolean;
   /**
-   * Whether the regular ETL cadence task family (nightly / weekly / annual +
-   * heartbeat) runs in {@link edExportVpc} (scholars-dev / scholars-prod,
-   * TGW-attached) instead of the Sps VPC, reaching Aurora / OpenSearch / the
-   * internal ALB back in the Sps VPC over an intra-account VPC peering
-   * connection. The ETL is two-sided — it reads on-prem LDAP + the 10.46.x
-   * source DBs (TGW-only) and writes the Sps-VPC datastores — and the Sps VPC
-   * cannot be TGW-attached (10.20/10.10 overlap), so the compute moves and
-   * peers back. **OFF in both envs** until that peering + the datastore CIDR
-   * ingress ({@link etlPeerCidr}) are in place and the source-reach probe
-   * passes from scholars-dev: the placement move regresses the
-   * (currently-working) write side if it lands first. Gating it here keeps the
-   * scholars-dev cadence SG + the CIDR ingress rules out of the template until
-   * an operator flips it. See docs/etl-vpc-migration-handoff.md.
+   * Whether this environment's stacks place their resources in the shared,
+   * TGW-attached its-reciter-vpc01 ({@link sharedVpc}, imported by id) instead
+   * of creating their own Sps VPC. **Default `false` in both envs** — the
+   * estate-consolidation cutover (docs/sps-vpc-consolidation-plan.md) flips it
+   * per-env, staging first, and only after the data tier has been migrated by
+   * dump/restore + reindex (an operational step, NOT a flag flip). Governs CDK
+   * topology only: NetworkStack create→import plus every downstream subnet/SG
+   * selection. OFF means the stacks synthesize exactly as before this PR, so a
+   * dormant `false` is a no-op against the live envs. Supersedes the deleted
+   * #1310 peering flags (`etlVpcPeeringEnabled` / `etlCadenceVpcRelocated`):
+   * a single shared VPC has no peer, so the whole peering field-set collapses
+   * into this one topology switch + {@link sharedVpc} (plan §8.8).
    */
-  readonly etlCadenceVpcRelocated: boolean;
+  readonly useSharedVpc: boolean;
   /**
-   * CIDR of the TGW-attached ETL VPC ({@link edExportVpc}) that the Sps-side
-   * datastores (Aurora 3306, OpenSearch 443, internal ALB 80) admit once
-   * {@link etlCadenceVpcRelocated} is true: scholars-dev = `10.46.231.0/24`,
-   * scholars-prod = `10.46.230.0/24`. Referenced only when relocated.
+   * The shared its-reciter-vpc01 (`vpc-08a1873fc8eebae28`, acct 665083158573,
+   * us-east-1), imported by attributes — no `fromLookup`, so synth stays
+   * deterministic without account creds. Subnet ids were discovered 2026-06-30
+   * by read-only AWS describe (plan §4.4): compute (app service + internal ALB +
+   * every ETL task) lands in the **app2** /25 tier; Aurora + OpenSearch in the
+   * **db** /27 tier; an optional public ALB in the **dmz** tier (unused under
+   * the NetScaler front, §7). Both envs share ONE descriptor by design — env
+   * isolation is by per-env security group, never by network (plan §4.5). Read
+   * only when {@link useSharedVpc} is true.
    */
-  readonly etlPeerCidr: string;
+  readonly sharedVpc: {
+    readonly vpcId: string;
+    readonly availabilityZones: readonly string[];
+    /** app2 /25 — app service + internal ALB + ETL task ENIs. */
+    readonly appSubnetIds: readonly string[];
+    /** db /27 — Aurora + OpenSearch ENIs (prod needs ≥2 AZs). */
+    readonly dataSubnetIds: readonly string[];
+    /** dmz — optional public ALB only; unused under the NetScaler front (§7). */
+    readonly albSubnetIds: readonly string[];
+    /**
+     * Out-of-band pre-provisioned security-group ids in the shared VPC (option 2,
+     * item-3 pass 1; docs/cutover-item3-implementation-map-2026-06-30.md). The
+     * shared-VPC team (its-reciter-vpc01 owners) creates the app/etl/alb SGs —
+     * **with default allow-all egress** — and owns their base ingress; NetworkStack
+     * echoes the flag-appropriate id to SSM and every consumer imports by id
+     * (`fromSecurityGroupId`), so no SG replaces at the `useSharedVpc` flip. Empty
+     * in the shipped config (flag-off) — {@link assertSharedVpcConfig} fails closed
+     * if `useSharedVpc` is flipped before these are filled.
+     */
+    readonly appSgId: string;
+    readonly etlSgId: string;
+    readonly albSgId: string;
+  };
+  /**
+   * Cutover de-coupling flag (docs/sps-vpc-consolidation-plan.md §8.4; review
+   * w26gz881i). When `false` (shipped default both envs) the app + ETL tasks read
+   * `OPENSEARCH_NODE` as a plaintext env baked from
+   * `Fn.importValue("Sps-Data-<env>-OpenSearchDomainEndpoint")` — the current
+   * behavior, byte-identical. When `true`, that named CFN export is no longer
+   * imported; instead `OPENSEARCH_NODE` is injected from the `node` key of the
+   * `scholars/<env>/opensearch/{app,etl}` secret. This removes the Data→App/Etl
+   * export so the consolidation cutover (immutable-subnet-group replace of the
+   * OpenSearch domain) is not blocked by CFN's "cannot update an export in use".
+   *
+   * **Fail-closed ordering:** flip to `true` (and `cdk deploy Sps-App/Etl-<env>`)
+   * ONLY after backfilling the `node` key (holding the current `https://<endpoint>`)
+   * into BOTH `opensearch/app` and `opensearch/etl` in that env — an absent key
+   * fails ECS task-start (search 500s).
+   */
+  readonly openSearchNodeFromSecret: boolean;
+  /**
+   * Aurora cluster/instance SNAPSHOT identifier to restore the data tier FROM
+   * during the estate-consolidation cutover (plan §8.5/§8.6). When set, DataStack
+   * builds `rds.DatabaseClusterFromSnapshot` (data-bearing, restored ALONGSIDE the
+   * live cluster — reversible "abandon new, keep old") instead of a fresh, empty
+   * `rds.DatabaseCluster`. Required by {@link assertCutoverGate} once
+   * {@link useSharedVpc} is on — flipping the VPC topology without it would
+   * CFN-replace the live cluster into an empty datastore (§8.6 forbids this).
+   * Undefined in the shipped config → the standalone `DatabaseCluster` path,
+   * byte-identical to today.
+   */
+  readonly auroraSnapshotIdentifier?: string;
   /**
    * Fargate CPU units for the ETL task family. Tunable per-step via
    * `Overrides.ContainerOverrides[].Cpu`; this is the base allocation.
@@ -316,13 +409,134 @@ export interface SpsEnvConfig {
    */
   readonly cloudFrontDistributionId: string;
   /**
+   * CloudFront custom domain (alias) attached to the EdgeStack distribution.
+   * Committed here (non-secret -- it is the public URL) so a bare
+   * `cdk deploy Sps-Edge-<env>` no longer strips the alias off the live
+   * distribution (#1506). A `-c edgeCustomDomain=...` context flag still wins
+   * when supplied. Paired with {@link edgeCertArn}; both must be present for the
+   * alias to attach.
+   */
+  readonly edgeCustomDomain: string;
+  /**
+   * ACM certificate ARN for {@link edgeCustomDomain}. MUST be in us-east-1
+   * (CloudFront viewer-cert requirement). Committed for the same
+   * bare-deploy-no-strip reason as {@link edgeCustomDomain} (#1506); the ARN
+   * carries only the already-committed account id, no secret. `-c edgeCertArn=...`
+   * still overrides.
+   */
+  readonly edgeCertArn: string;
+  /**
    * CloudFront standard-access-log S3 bucket name (EdgeStack-owned; raw logs at
    * `cf/<env>/`). Referenced by NAME (s3.Bucket.fromBucketName) by AnalyticsStack
    * for the same Edge-decoupling reason as {@link cloudFrontDistributionId}.
    * CFN-generated name, stable (the bucket is RETAIN).
    */
   readonly cloudFrontLogsBucketName: string;
+
+  // --- Edge -> ALB origin TLS (#1507) ---
+
+  /**
+   * Custom origin hostname CloudFront uses when the origin leg runs over HTTPS
+   * (#1507). The public ALB's AWS-assigned `*.elb.amazonaws.com` DNS name cannot
+   * carry a public ACM cert, so an HTTPS origin needs a hostname we control that
+   * DNS-resolves to the ALB and whose cert the ALB's :443 listener presents.
+   * Committed (public URL) but INERT until {@link edgeOriginCertArn} is set.
+   */
+  readonly edgeOriginHostname: string;
+  /**
+   * ACM certificate ARN (ALB region, us-east-1) for {@link edgeOriginHostname},
+   * presented by the public ALB's :443 listener (#1507). This is the *regional*
+   * ALB cert -- distinct from the us-east-1 CloudFront *viewer* cert. Empty =
+   * feature OFF: the ALB stays HTTP-:80-only and CloudFront talks HTTP_ONLY to
+   * the origin (today's behavior). Set it (operator, after issuing the cert +
+   * pointing DNS at the ALB) to add the :443 listener and flip the CloudFront
+   * origin to HTTPS_ONLY. Ships dark. Deploy Sps-App-<env> (adds :443) and
+   * verify :443 serves BEFORE Sps-Edge-<env> (flips the origin).
+   */
+  readonly edgeOriginCertArn: string;
+
+  // --- Observability metric-by-name decouple (cutover) ---
+
+  /**
+   * Whether ObservabilityStack reads its Aurora + OpenSearch metrics by literal
+   * NAME (config) instead of via the DataStack `auroraCluster` / `opensearchDomain`
+   * L2 handles. OFF (shipped) keeps the handle path — byte-identical, and the two
+   * cross-stack `Ref` exports DataStack publishes for Observability stay intact.
+   * ON severs those two Data→Observability export edges so the estate-consolidation
+   * `useSharedVpc` flip can replace the cluster/domain without CloudFormation's
+   * "cannot update an export in use" (the decouple campaign,
+   * docs/cutover-decouple-increments-2026-06-30.md). A DEDICATED flag, NOT tied to
+   * {@link useSharedVpc}: {@link assertCutoverGate} hard-throws while useSharedVpc
+   * is on without the data path, so a useSharedVpc-gated branch could not be
+   * synthesized or snapshot-tested — this flag lets the edge-severance ship and
+   * deploy (Observability-stack-only, BEFORE the Data deploy) on its own.
+   *
+   * MUST flip only once {@link auroraClusterIdentifier} / {@link opensearchDomainName}
+   * point at live resources (the snapshot-restored cluster/domain assigned explicit
+   * identifiers at cutover) — else the by-name metrics resolve to empty AWS/RDS +
+   * AWS/ES dimensions and the alarms silently never fire (NOT_BREACHING).
+   */
+  readonly observabilityMetricsByName: boolean;
+  /**
+   * Aurora cluster identifier (`DBClusterIdentifier`) the by-name Observability
+   * metrics key on when {@link observabilityMetricsByName} is true. Empty in the
+   * shipped config (unused while the flag is off); assigned the snapshot-restored
+   * cluster's explicit identifier at cutover. Referenced by NAME for the same
+   * Data/Edge-decoupling reason as {@link cloudFrontDistributionId}.
+   */
+  readonly auroraClusterIdentifier: string;
+  /**
+   * OpenSearch domain name (`DomainName`) the by-name Observability metrics key on
+   * when {@link observabilityMetricsByName} is true. Empty in the shipped config
+   * (unused while the flag is off); assigned the fresh domain's explicit name at
+   * cutover.
+   */
+  readonly opensearchDomainName: string;
+  /**
+   * Public ALB "full name" (the `LoadBalancer` CloudWatch dimension value,
+   * `app/<name>/<id>`) the by-name Observability ALB metrics key on when
+   * {@link observabilityMetricsByName} is true. Empty in the shipped config
+   * (unused while the flag is off); assigned the replaced ALB's full name at
+   * cutover. Severs the App->Observability ALB `LoadBalancerFullName` export.
+   */
+  readonly publicAlbFullName: string;
+  /**
+   * Public target-group "full name" (`targetgroup/<name>/<id>`, the `TargetGroup`
+   * CloudWatch dimension) the by-name unhealthy-hosts metric keys on when
+   * {@link observabilityMetricsByName} is true. Empty in the shipped config;
+   * assigned at cutover. Severs the App->Observability `TargetGroupFullName` export.
+   */
+  readonly publicTargetGroupFullName: string;
 }
+
+/**
+ * its-reciter-vpc01 — the single shared, TGW-attached VPC both envs consolidate
+ * into (acct 665083158573, us-east-1). Imported by attributes (no context
+ * lookup → deterministic synth). Ids discovered 2026-06-30 by read-only AWS
+ * describe (plan §4.4). SHARED across envs on purpose — isolation is by per-env
+ * security group, never by network (plan §4.5). Consumed only when an env's
+ * {@link SpsEnvConfig.useSharedVpc} is true. Each per-tier id array is
+ * AZ-ordered: index i pairs with `availabilityZones[i]` (1a, then 1b), which
+ * resolveTierSubnets relies on for AZ-correct Aurora/OpenSearch placement.
+ */
+const SHARED_VPC = {
+  vpcId: "vpc-08a1873fc8eebae28",
+  availabilityZones: ["us-east-1a", "us-east-1b"],
+  // app2 /25 (162 free) — app service + internal ALB + ETL task ENIs.
+  appSubnetIds: ["subnet-0c6593fb9c9a165c3", "subnet-070cbc242efbddc3c"],
+  // db /27 (40 free across 2 AZ) — Aurora + OpenSearch ENIs.
+  dataSubnetIds: ["subnet-0d35923e345653d0d", "subnet-099a9ebefc36ee888"],
+  // dmz (public, IGW) — optional public ALB only; unused under NetScaler (§7).
+  albSubnetIds: ["subnet-09a6fab648280ca19", "subnet-0485fefe267b06736"],
+  // Out-of-band pre-provisioned SGs (item-3 pass 1). Left empty here = the
+  // per-env default; each env overrides with its OWN SGs via a spread (staging
+  // done, prod TODO at its cutover) because isolation is by per-env SG (plan
+  // §4.5). Empty is safe while useSharedVpc is off (assertSharedVpcConfig gates
+  // the flip on these being non-empty).
+  appSgId: "",
+  etlSgId: "",
+  albSgId: "",
+} as const;
 
 const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
   staging: {
@@ -343,6 +557,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // (4 GB, ~2 GB heap, more burst credits) gives the rebuild headroom, paired
     // with the paced bulk writer (#627). Still single-node — staging is low-traffic.
     opensearchDataNodeInstanceType: "t3.medium.search",
+    // Single-node staging domain — no dedicated masters (#1509 is a prod HA fix).
+    opensearchMasterNodes: 0,
+    opensearchMasterNodeInstanceType: "m6g.large.search",
     awsBackupRetentionDays: 14,
     appDesiredCount: 1,
     // #596 — staging is low-traffic (internal QA + VPN circulation); a small
@@ -358,10 +575,12 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     appMemoryMiB: 2048,
     migrationTaskCpu: 512,
     migrationTaskMemoryMiB: 1024,
-    // Staging's app user is `'app_rw'@'10.20.%'` (VPC-CIDR-scoped), confirmed
-    // 2026-05-30 via SELECT CURRENT_USER() from an in-VPC app_rw connection.
-    // The bootstrap default of `%` 1410'd here because that account is absent.
-    appRwGranteeHost: "10.20.%",
+    // Item-3 cutover (2026-07-02): the app now connects from the shared VPC's
+    // app2 tier (10.46.160.0/24), so app_rw/app_ro/etl were re-granted to
+    // `@'10.46.160.%'` on the restored cluster (the old `@'10.20.%'` grants remain,
+    // harmless). The seeder's app_rw tighten + db-bootstrap's audit grant target
+    // this host. Pre-cutover this was `'10.20.%'` (standalone-VPC CIDR).
+    appRwGranteeHost: "10.46.160.%",
     // Staging announces the PROD SP entityID, not its own host (#466). WCM
     // registered a single SP (the prod entityID, tied to the filed cert) and
     // confirmed it covers staging too -- the staging-host entityID is not
@@ -393,6 +612,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // stays fresh while the nightly is blocked at etl:ed (#443). On in staging
     // (matcher is live here); idempotent upsert, so safe from launch.
     opportunityProjectionScheduleEnabled: true,
+    // grant→researcher matcher: subtopic-grain path ON in staging (corpus
+    // backfilled + reprojected). Self-gates on per-opportunity match_dsl.
+    grantMatcherSubtopicGrain: true,
     // #443 — staging runs the ED email-visibility bridge in scholars-dev, whose
     // on-prem LDAP reach is proven (2026-06-18: in-VPC LDAPS bind + 2440-unit
     // search). Only the two private `app` subnets (TGW + NAT routes) are listed.
@@ -402,12 +624,33 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
       appSubnetIds: ["subnet-08cab06d3084fba41", "subnet-07ffed73356c01f6c"],
     },
     edEmailVisibilityBridgeEnabled: true,
-    // ETL cadence VPC relocation (docs/etl-vpc-migration-handoff.md) — OFF
-    // until the scholars-dev ↔ Sps-Network-staging peering + the datastore CIDR
-    // ingress exist and the source-reach probe passes from scholars-dev. Flip
-    // to true only after peering is up, or the cadence loses DB/index reach.
-    etlCadenceVpcRelocated: false,
-    etlPeerCidr: "10.46.231.0/24",
+    // Estate consolidation (docs/sps-vpc-consolidation-plan.md): ON — item-3
+    // staging cutover 2026-07-02. Every stack now imports the shared its-reciter-
+    // vpc01 substrate; DataStack restores the FINAL freeze-time snapshot into a
+    // NEW DatabaseClusterFromSnapshot + fresh OS domain alongside the RETAIN'd old
+    // ones. assertCutoverGate requires auroraSnapshotIdentifier below.
+    useSharedVpc: true,
+    // Final freeze-time staging snapshot (taken after ETL quiesce + write-freeze,
+    // 2026-07-02). Selects the DatabaseClusterFromSnapshot data-bearing path.
+    auroraSnapshotIdentifier: "sps-data-staging-cutover-final-20260702",
+    // Staging's own pre-provisioned SGs in the shared VPC (item-3 G8, created
+    // out-of-band 2026-07-02, allow-all egress / no ingress). Per-env override
+    // of SHARED_VPC's empty SG fields — isolation is by per-env SG (plan §4.5),
+    // so staging and prod cannot share SG ids even though they share the VPC +
+    // subnets. Inert while useSharedVpc is off (resolveSharedSg only reads these
+    // at flag-on); assertSharedVpcConfig gates the flip on them being non-empty.
+    sharedVpc: {
+      ...SHARED_VPC,
+      appSgId: "sg-010c270a395b4854b",
+      etlSgId: "sg-016b62e11314e7050",
+      albSgId: "sg-0ab492e161a9e9976",
+    },
+    // Cutover de-coupling (increment-1): ON — the opensearch/{app,etl} `node`
+    // key was backfilled 2026-07-02 with the CURRENT staging endpoint, so App/Etl
+    // read OPENSEARCH_NODE from the secret (same endpoint) instead of the Data
+    // cross-stack export. Byte-identical in effect; severs the App/Etl→Data
+    // OpenSearchDomainEndpoint export ahead of the useSharedVpc cutover. See flag JSDoc.
+    openSearchNodeFromSecret: true,
     // #485 — search:index OOM-killed at 2048 MiB building the full corpus
     // (178k+ pubs). 8 GB + the NODE_OPTIONS heap cap (EtlStack) clears it;
     // 2 vCPU also speeds the build, easing throttle pressure on the node.
@@ -418,7 +661,31 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // Live EdgeStack-owned resources, referenced by name to decouple the
     // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
     cloudFrontDistributionId: "E17NRWINXLP3B3",
+    // Committed edge alias + us-east-1 viewer cert so a bare Edge deploy stops
+    // stripping them (#1506). Live values read from the distribution config.
+    edgeCustomDomain: "scholars-staging.weill.cornell.edu",
+    edgeCertArn:
+      "arn:aws:acm:us-east-1:665083158573:certificate/f50f0b04-dc62-4d8e-97b8-2761d1efdd0f",
     cloudFrontLogsBucketName: "sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz",
+    // #1507 -- HTTPS origin leg. INERT until edgeOriginCertArn is seeded
+    // (operator issues the ALB-region cert for this hostname + points DNS at
+    // the public ALB). Confirm the exact hostname before issuing the cert.
+    edgeOriginHostname: "scholars-staging-origin.weill.cornell.edu",
+    edgeOriginCertArn: "",
+    // Observability metric-by-name decouple (cutover, item-3 Phase B2): ON.
+    // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-
+    // stack Ref exports so the useSharedVpc flip can replace those resources without
+    // "cannot update an export in use". Seeded with the CURRENT LIVE names so alarms
+    // stay functional through the freeze (the flag can't synth with empty ids —
+    // observability-stack.ts throws). Swapped to the new snapshot-restored cluster/
+    // fresh-domain/auto-named-ALB names once they exist (Phase C Observability redeploy).
+    observabilityMetricsByName: true,
+    // Post-cutover (Phase C): swapped from the transitional CURRENT-live names to
+    // the NEW snapshot-restored cluster / fresh domain / auto-named replaced ALB+TG.
+    auroraClusterIdentifier: "sps-data-staging-auroraclusterfromsnapshot7b6a45d8-8kp4eh79cfrn",
+    opensearchDomainName: "opensearchshare-mhshucea3jvk",
+    publicAlbFullName: "app/Sps-Ap-Publi-28Px8J5FO9hH/54dece3b8bad13da",
+    publicTargetGroupFullName: "targetgroup/Sps-Ap-Publi-VGHKKQ7XZH2E/7db931046bbc72ff",
   },
   prod: {
     envName: "prod",
@@ -439,6 +706,13 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     auroraBackupRetentionDays: 14,
     opensearchDataNodes: 2,
     opensearchDataNodeInstanceType: "m6g.large.search",
+    // #1509 — 3 dedicated masters so a single data-node/AZ loss degrades search
+    // to yellow (quorum holds) instead of red. Blocks the #731 RI purchase until
+    // the topology settles. Stateful blue/green: deploy in a low-traffic window,
+    // and verify every index has number_of_replicas >= 1 FIRST (else a data-node
+    // loss goes red anyway).
+    opensearchMasterNodes: 3,
+    opensearchMasterNodeInstanceType: "m6g.large.search",
     awsBackupRetentionDays: 35,
     appDesiredCount: 2,
     // #596 — 3x the 2-task floor gives room to absorb a Wave-4 (WCM-wide,
@@ -469,8 +743,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // flip back + cdk deploy.
     cspMode: "enforce",
     // Prod schedules ship disabled — first run is operator-driven after
-    // runbook review, then `aws events enable-rule` flips them on (see
-    // PRODUCTION_ADDENDUM § EtlStack).
+    // runbook review. To turn them on, flip this flag to true and
+    // `cdk deploy Sps-Etl-prod` (NOT `aws events enable-rule` — see the flag
+    // JSDoc: out-of-band enable drifts and gets reverted by the next deploy).
+    // Verified DISABLED in AWS 2026-07-07, so config == live state (no drift).
     etlSchedulesEnabled: false,
     // #393 — the reconciler backstop runs in prod from launch (empty-queue-safe
     // pre-launch), unlike the runbook-gated cadences above. See flag JSDoc.
@@ -489,6 +765,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // opportunity corpus isn't published yet and the matcher is dark there. Flip
     // when the prod corpus lands (or leave off once #443 unblocks the nightly).
     opportunityProjectionScheduleEnabled: false,
+    // grant→researcher matcher: subtopic-grain path OFF in prod until the prod
+    // corpus carries match_dsl/match_query and staging soaks clean.
+    grantMatcherSubtopicGrain: false,
     // #443 — prod's on-prem-reachable VPC is scholars-prod. Wired but NOT yet
     // activated: edEmailVisibilityBridgeEnabled stays false until the
     // scholars-prod path is verified end-to-end (the same in-VPC bind probe as
@@ -499,11 +778,31 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
       appSubnetIds: ["subnet-069dc77801ee2d8f3", "subnet-0ceec7bb2f059e162"],
     },
     edEmailVisibilityBridgeEnabled: false,
-    // ETL cadence VPC relocation — OFF; replicate the staging peer-and-move on
-    // scholars-prod ↔ Sps-Network-prod and verify before flipping (prod ETL
-    // schedules are off anyway). See docs/etl-vpc-migration-handoff.md.
-    etlCadenceVpcRelocated: false,
-    etlPeerCidr: "10.46.230.0/24",
+    // Estate consolidation (docs/sps-vpc-consolidation-plan.md): ON — item-3 prod
+    // cutover 2026-07-05 (staging soaked clean 07-04/07-05). Every stack imports
+    // the shared its-reciter-vpc01 substrate; DataStack restores the FINAL
+    // freeze-time snapshot into a NEW DatabaseClusterFromSnapshot + fresh OS domain
+    // alongside the RETAIN'd old ones. assertCutoverGate requires the snapshot id.
+    useSharedVpc: true,
+    // Final freeze-time prod snapshot (taken after ETL quiesce + write-freeze,
+    // 2026-07-06 UTC). Selects the DatabaseClusterFromSnapshot data-bearing path.
+    auroraSnapshotIdentifier: "sps-data-prod-cutover-final-20260706t024926z",
+    // Prod's own pre-provisioned SGs in the shared VPC (item-3 prod cutover,
+    // created out-of-band 2026-07-05, allow-all egress / no ingress). Per-env
+    // override of SHARED_VPC's empty SG fields — isolation is by per-env SG (plan
+    // §4.5), so prod and staging cannot share SG ids even though they share the
+    // VPC + subnets. Inert while useSharedVpc is off (resolveSharedSg only reads
+    // these at flag-on); assertSharedVpcConfig gates the flip on them being non-empty.
+    sharedVpc: {
+      ...SHARED_VPC,
+      appSgId: "sg-098a71afdd462d988",
+      etlSgId: "sg-03babbb300ddb3b95",
+      albSgId: "sg-06422c1b27dc4e17d",
+    },
+    // Cutover de-coupling: ON — prod `opensearch/{app,etl}` `node` seeded
+    // 2026-07-05 with the current prod endpoint, so App/Etl read OPENSEARCH_NODE
+    // from the secret (same endpoint → byte-identical) ahead of the topology flip.
+    openSearchNodeFromSecret: true,
     // #485 — match staging's 8 GB headroom for the search:index corpus build
     // (paired with the NODE_OPTIONS heap cap in EtlStack). Prod's 2-node
     // m6g.large.search domain already handles the bulk write rate.
@@ -514,7 +813,28 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // Live EdgeStack-owned resources, referenced by name to decouple the
     // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
     cloudFrontDistributionId: "E28NKDFXC7K2ZL",
+    // Committed edge alias + us-east-1 viewer cert so a bare Edge deploy stops
+    // stripping them (#1506). Live values read from the distribution config.
+    edgeCustomDomain: "scholars.weill.cornell.edu",
+    edgeCertArn:
+      "arn:aws:acm:us-east-1:665083158573:certificate/95f77e69-4abc-4d2c-b081-b8b5b8572fd6",
     cloudFrontLogsBucketName: "sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
+    // #1507 -- HTTPS origin leg. INERT until edgeOriginCertArn is seeded
+    // (operator issues the ALB-region cert for this hostname + points DNS at
+    // the public ALB). Confirm the exact hostname before issuing the cert.
+    edgeOriginHostname: "scholars-origin.weill.cornell.edu",
+    edgeOriginCertArn: "",
+    // Observability metric-by-name decouple (cutover, item-3 prod window): ON.
+    // Severs the Data->Observability (Aurora/OS) + App->Observability (ALB) cross-
+    // stack Ref exports so the useSharedVpc flip can replace those resources without
+    // "cannot update an export in use". Swapped from the old transitional names to
+    // the new snapshot-restored cluster / fresh domain / auto-named ALB+TG after the
+    // 2026-07-06 prod cutover (App-cut + edge repoint complete; old tier retained).
+    observabilityMetricsByName: true,
+    auroraClusterIdentifier: "sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm",
+    opensearchDomainName: "opensearchshare-hr8gdfznbeww",
+    publicAlbFullName: "app/Sps-Ap-Publi-dZ0soKIosV6j/a43ae4ad91d52643",
+    publicTargetGroupFullName: "targetgroup/Sps-Ap-Publi-TL07SCGAWNJM/4cc4b1d7b17c0f8c",
   },
 };
 
@@ -535,5 +855,131 @@ export function resolveEnvConfig(envContext: unknown): SpsEnvConfig {
       `Unknown CDK context env="${name}" — pass -c env=staging or -c env=prod.`,
     );
   }
-  return ENV_CONFIG[name];
+  const cfg = ENV_CONFIG[name];
+  assertSharedVpcConfig(cfg);
+  return cfg;
+}
+
+/**
+ * Footgun guard for the estate consolidation (docs/sps-vpc-consolidation-plan.md).
+ * When {@link SpsEnvConfig.useSharedVpc} is on, every stack imports
+ * its-reciter-vpc01 by id and places resources into explicit subnet ids — an
+ * empty vpcId yields an import with an empty id, and a missing subnet tier
+ * yields an empty subnet selection, both of which only fail at CloudFormation
+ * deploy. Fail at SYNTH instead. Also requires ≥2 AZs (prod Aurora writer+reader
+ * and zone-aware OpenSearch span two). Short-circuits when the flag is off, so
+ * the real ENV_CONFIG entries (both `useSharedVpc: false`) never trip it.
+ * Exported so it can be unit-tested with synthetic shared-VPC-on configs.
+ */
+export function assertSharedVpcConfig(cfg: SpsEnvConfig): void {
+  if (!cfg.useSharedVpc) {
+    return;
+  }
+  const v = cfg.sharedVpc;
+  if (!v.vpcId) {
+    throw new Error(
+      `Invalid config for env="${cfg.envName}": useSharedVpc requires ` +
+        `sharedVpc.vpcId (the its-reciter-vpc01 id imported by attributes; an ` +
+        `empty id yields an import that only fails at deploy). See ` +
+        `docs/sps-vpc-consolidation-plan.md.`,
+    );
+  }
+  const tiers: ReadonlyArray<readonly [string, readonly string[]]> = [
+    ["appSubnetIds", v.appSubnetIds],
+    ["dataSubnetIds", v.dataSubnetIds],
+    ["albSubnetIds", v.albSubnetIds],
+  ];
+  for (const [name, ids] of tiers) {
+    if (ids.length === 0) {
+      throw new Error(
+        `Invalid config for env="${cfg.envName}": useSharedVpc requires at least ` +
+          `one sharedVpc.${name} (subnetType filtering is unreliable on an imported ` +
+          `VPC, so each tier needs explicit its-reciter subnet ids; an empty list ` +
+          `yields an empty subnet selection that only fails at deploy). See ` +
+          `docs/sps-vpc-consolidation-plan.md.`,
+      );
+    }
+  }
+  if (v.availabilityZones.length < 2) {
+    throw new Error(
+      `Invalid config for env="${cfg.envName}": useSharedVpc requires ≥2 ` +
+        `sharedVpc.availabilityZones (prod Aurora writer+reader and zone-aware ` +
+        `OpenSearch span two AZs). See docs/sps-vpc-consolidation-plan.md.`,
+    );
+  }
+  const sgs: ReadonlyArray<readonly [string, string]> = [
+    ["appSgId", v.appSgId],
+    ["etlSgId", v.etlSgId],
+    ["albSgId", v.albSgId],
+  ];
+  for (const [name, id] of sgs) {
+    if (!id) {
+      throw new Error(
+        `Invalid config for env="${cfg.envName}": useSharedVpc requires ` +
+          `sharedVpc.${name} (the out-of-band pre-provisioned SG id in the shared ` +
+          `VPC; an empty id yields an import that only fails at deploy). Fill it ` +
+          `from the shared-VPC team's provisioned SG. See ` +
+          `docs/cutover-item3-implementation-map-2026-06-30.md.`,
+      );
+    }
+  }
+}
+
+/**
+ * Cutover gate for the estate consolidation
+ * (docs/sps-vpc-consolidation-plan.md §6.2/§8.5/§8.6; tracker #1370). Called from
+ * the `bin` entrypoint — NOT from {@link resolveEnvConfig} — so the flag-on
+ * placement unit tests (which synth stacks with `useSharedVpc:true` directly) are
+ * unaffected.
+ *
+ * `useSharedVpc` is NOT yet safe to flip. As built, DataStack holds a single
+ * in-place `rds.DatabaseCluster` + `opensearchservice.Domain`; flipping the flag
+ * changes their immutable subnet group, so CloudFormation REPLACES both in place
+ * — and a replace provisions a FRESH EMPTY cluster/domain UNLESS the snapshot-
+ * restore path ({@link SpsEnvConfig.auroraSnapshotIdentifier}) is selected. The
+ * plan forbids the empty in-place replace: §8.5/§8.6
+ * require the data tier to move as a NEW resource (`DatabaseClusterFromSnapshot` +
+ * a fresh OpenSearch domain) stood up ALONGSIDE the live one (reversible —
+ * "abandon new, keep old"), "NOT an in-place flip of the old VPC".
+ *
+ * So this is a conditional tripwire, not an acknowledgement: while `useSharedVpc`
+ * is on WITHOUT an {@link SpsEnvConfig.auroraSnapshotIdentifier}, synth throws —
+ * which also fails CI on a premature `useSharedVpc:true` flip before the
+ * snapshot-restore data path is wired (shipped config is `false`, so the gate is
+ * inert today). Setting a snapshot id selects the DataStack
+ * `DatabaseClusterFromSnapshot` branch and lifts the throw; the remaining §6
+ * operator prerequisites are named in the message but are out-of-band and not
+ * synth-enforceable, so the gate still gives no false "looks safe" signal.
+ */
+export function assertCutoverGate(cfg: SpsEnvConfig): void {
+  if (!cfg.useSharedVpc) {
+    return; // standalone topology — nothing replaces, nothing to gate
+  }
+  if (!cfg.auroraSnapshotIdentifier) {
+    throw new Error(
+      `Refusing to synth/deploy env="${cfg.envName}" with useSharedVpc=true and ` +
+        `no auroraSnapshotIdentifier: it is not yet deployable. Flipping ` +
+        `useSharedVpc without a snapshot id would CFN-REPLACE the in-place Aurora ` +
+        `cluster + OpenSearch domain into EMPTY datastores — the plan forbids ` +
+        `this (§8.6: the data tier must move as a NEW resource via ` +
+        `DatabaseClusterFromSnapshot, not an in-place flip). Set ` +
+        `auroraSnapshotIdentifier to the prod cluster snapshot id (DataStack then ` +
+        `restores it alongside the live cluster), and the operator must complete ` +
+        `the §6 prerequisites:\n` +
+        `  1. snapshot-restore data path: the NEW DatabaseClusterFromSnapshot ` +
+        `cluster + fresh OpenSearch domain stood up alongside the live ones ` +
+        `(§5.4/§8.5);\n` +
+        `  2. re-scope appRwGranteeHost off the decommissioned CIDR ` +
+        `("${cfg.appRwGranteeHost}") → "10.46.160.%" (or "%") AND re-issue the live ` +
+        `app_rw/app_ro/sps_migrate/sps_bootstrap GRANTs for the 10.46.x source ` +
+        `(§6.2) — else app_rw auth fails closed (MySQL 1410);\n` +
+        `  3. reseed every DSN + OpenSearch endpoint secret with the new endpoints ` +
+        `(§6.4/§6.8) — a stale DSN silently regresses every write.\n` +
+        `See docs/sps-vpc-consolidation-plan.md §6.2/§6.8/§8.5/§8.6.`,
+    );
+  }
+  // useSharedVpc on AND a snapshot id set → DataStack builds the data-bearing
+  // DatabaseClusterFromSnapshot path, so the synth tripwire lifts. The remaining
+  // §6 operator prerequisites (appRwGranteeHost regrant, DSN/endpoint reseed) are
+  // out-of-band and NOT synth-enforceable — they are named in the throw above.
 }

@@ -222,7 +222,7 @@ export function UnitAccessCard({ entityType, entityId, access, actorCwid }: Unit
                       {shown.title && <span className="text-muted-foreground"> · {shown.title}</span>}
                     </td>
                     <td className="py-2 capitalize">{row.role}</td>
-                    <td className="py-2">{row.grantedBy ?? "—"}</td>
+                    <td className="py-2">{formatGrantedBy(row.grantedBy)}</td>
                     <td className="py-2 tabular-nums">{formatGrantedAt(row.grantedAt)}</td>
                     <td className="py-2 text-right">
                       <Button
@@ -285,6 +285,13 @@ export function UnitAccessCard({ entityType, entityId, access, actorCwid }: Unit
       />
     </EditPanel>
   );
+}
+
+/** The ED import stamps a synthetic non-CWID actor (`GRANTED_BY = "ED-ETL"`,
+ *  etl/ed-admins/index.ts) — show its human name. Real CWIDs pass through. */
+function formatGrantedBy(grantedBy: string | null): string {
+  if (grantedBy === "ED-ETL") return "Web Directory";
+  return grantedBy ?? "—";
 }
 
 function formatGrantedAt(d: Date): string {

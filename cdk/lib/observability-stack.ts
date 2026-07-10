@@ -149,6 +149,84 @@ export class SpsObservabilityStack extends Stack {
     const { envConfig, appStack, dataStack } = props;
     const env = envConfig.envName;
 
+    // Estate-consolidation decouple (docs/cutover-decouple-increments-2026-06-30.md):
+    // when observabilityMetricsByName is on, the Aurora/OpenSearch alarms + dashboard
+    // widgets read their metrics by literal cluster/domain NAME (config) instead of
+    // via the dataStack.auroraCluster / .opensearchDomain L2 handles — which severs
+    // the two Data->Observability cross-stack Ref exports so the useSharedVpc flip can
+    // replace those resources without "cannot update an export in use". OFF (shipped)
+    // keeps the handle path, byte-identical. Deploy ordering (runbook): flip this and
+    // deploy Sps-Observability-<env> EXCLUSIVELY, BEFORE the Data deploy that removes
+    // the export, or CloudFormation re-trips "cannot delete export in use".
+    const metricsByName = envConfig.observabilityMetricsByName;
+    if (
+      metricsByName &&
+      (!envConfig.auroraClusterIdentifier ||
+        !envConfig.opensearchDomainName ||
+        !envConfig.publicAlbFullName ||
+        !envConfig.publicTargetGroupFullName)
+    ) {
+      throw new Error(
+        `observabilityMetricsByName is on for env="${env}" but one of ` +
+          `auroraClusterIdentifier/opensearchDomainName/publicAlbFullName/` +
+          `publicTargetGroupFullName is not set — the by-name metrics would synth ` +
+          `empty AWS/RDS + AWS/ES + AWS/ApplicationELB dimensions that never alarm ` +
+          `(treatMissingData NOT_BREACHING). Assign the snapshot-restored cluster/` +
+          `domain identifiers and the replaced ALB/target-group full names in config ` +
+          `before flipping the flag.`,
+      );
+    }
+    // Aurora (AWS/RDS) metric by literal DBClusterIdentifier — used when
+    // metricsByName is on. period/label are per call-site.
+    const dbMetric = (
+      metricName: string,
+      statistic: string,
+      opts: { period: Duration; label?: string },
+    ): cloudwatch.Metric =>
+      new cloudwatch.Metric({
+        namespace: "AWS/RDS",
+        metricName,
+        dimensionsMap: { DBClusterIdentifier: envConfig.auroraClusterIdentifier },
+        statistic,
+        period: opts.period,
+        label: opts.label,
+      });
+    // OpenSearch (AWS/ES) metric by literal DomainName. ClientId (the account) is
+    // REQUIRED — without it the AWS/ES series is empty even with a correct DomainName.
+    const osMetric = (
+      metricName: string,
+      statistic: string,
+      opts: { period: Duration; label?: string },
+    ): cloudwatch.Metric =>
+      new cloudwatch.Metric({
+        namespace: "AWS/ES",
+        metricName,
+        dimensionsMap: {
+          DomainName: envConfig.opensearchDomainName,
+          ClientId: this.account,
+        },
+        statistic,
+        period: opts.period,
+        label: opts.label,
+      });
+    // Public ALB (AWS/ApplicationELB) metric by literal LoadBalancer full name —
+    // used when metricsByName is on, severing the App->Observability ALB
+    // LoadBalancerFullName export (edge 9). Target-group (edge 10) metrics also
+    // carry the LoadBalancer dim and are built inline where used.
+    const albMetric = (
+      metricName: string,
+      statistic: string,
+      opts: { period: Duration; label?: string },
+    ): cloudwatch.Metric =>
+      new cloudwatch.Metric({
+        namespace: "AWS/ApplicationELB",
+        metricName,
+        dimensionsMap: { LoadBalancer: envConfig.publicAlbFullName },
+        statistic,
+        period: opts.period,
+        label: opts.label,
+      });
+
     // ------------------------------------------------------------------
     // SNS topics — page (alarms -> Teams channel) and notify (cost -> email)
     // ------------------------------------------------------------------
@@ -203,14 +281,20 @@ export class SpsObservabilityStack extends Stack {
     const alb5xxRate = new cloudwatch.MathExpression({
       expression: `IF(m5xx >= ${MIN_5XX_FOR_RATE_ALARM}, (m5xx / IF(reqs > 0, reqs, 1)) * 100, 0)`,
       usingMetrics: {
-        m5xx: appStack.publicAlb.metrics.httpCodeTarget(
-          elbv2.HttpCodeTarget.TARGET_5XX_COUNT,
-          { statistic: "Sum", period: Duration.minutes(5) },
-        ),
-        reqs: appStack.publicAlb.metricRequestCount({
-          statistic: "Sum",
-          period: Duration.minutes(5),
-        }),
+        m5xx: metricsByName
+          ? albMetric("HTTPCode_Target_5XX_Count", "Sum", {
+              period: Duration.minutes(5),
+            })
+          : appStack.publicAlb.metrics.httpCodeTarget(
+              elbv2.HttpCodeTarget.TARGET_5XX_COUNT,
+              { statistic: "Sum", period: Duration.minutes(5) },
+            ),
+        reqs: metricsByName
+          ? albMetric("RequestCount", "Sum", { period: Duration.minutes(5) })
+          : appStack.publicAlb.metrics.requestCount({
+              statistic: "Sum",
+              period: Duration.minutes(5),
+            }),
       },
       label: "5xx rate (%) over 5m",
       period: Duration.minutes(5),
@@ -238,10 +322,21 @@ export class SpsObservabilityStack extends Stack {
       {
         alarmName: `sps-alb-unhealthy-hosts-${env}`,
         alarmDescription: `Public ALB has zero healthy targets for 5 consecutive minutes (${env}). Circuit-breaker did not catch it -- real outage. Next: check ECS task health, the in-flight deploy, and the target-group health-check path.`,
-        metric: appStack.publicTargetGroup.metrics.unhealthyHostCount({
-          statistic: "Maximum",
-          period: Duration.minutes(1),
-        }),
+        metric: metricsByName
+          ? new cloudwatch.Metric({
+              namespace: "AWS/ApplicationELB",
+              metricName: "UnHealthyHostCount",
+              dimensionsMap: {
+                LoadBalancer: envConfig.publicAlbFullName,
+                TargetGroup: envConfig.publicTargetGroupFullName,
+              },
+              statistic: "Maximum",
+              period: Duration.minutes(1),
+            })
+          : appStack.publicTargetGroup.metrics.unhealthyHostCount({
+              statistic: "Maximum",
+              period: Duration.minutes(1),
+            }),
         threshold: 0,
         evaluationPeriods: 5,
         datapointsToAlarm: 5,
@@ -259,10 +354,14 @@ export class SpsObservabilityStack extends Stack {
       {
         alarmName: `sps-alb-latency-p99-${env}`,
         alarmDescription: `Public ALB target response time p99 > ${LATENCY_P99_THRESHOLD_MS}ms over 5m (${env}). Burns the latency SLO budget. See docs/SLOs.md. Next: open the reliability dashboard latency and Aurora SelectLatency panels; look for a slow query, a cold cache, or an undersized task.`,
-        metric: appStack.publicAlb.metrics.targetResponseTime({
-          statistic: "p99",
-          period: Duration.minutes(5),
-        }),
+        metric: metricsByName
+          ? albMetric("TargetResponseTime", "p99", {
+              period: Duration.minutes(5),
+            })
+          : appStack.publicAlb.metrics.targetResponseTime({
+              statistic: "p99",
+              period: Duration.minutes(5),
+            }),
         threshold: LATENCY_P99_THRESHOLD_MS / 1000, // ALB metric is seconds
         evaluationPeriods: 3,
         datapointsToAlarm: 3,
@@ -280,17 +379,36 @@ export class SpsObservabilityStack extends Stack {
     // alarm fires when running < desired regardless of the desired-count
     // value (handles bootstrap appDesiredCount=0 case correctly: 0 < 0 is
     // false, no false-fire).
+    // DesiredTaskCount / RunningTaskCount are published only to the
+    // ECS/ContainerInsights namespace (Container Insights is enabled on the
+    // cluster, app-stack.ts), NOT the AWS/ECS namespace that
+    // BaseService.metric() targets -- there they carry no data, so anything
+    // built on them (this alarm and the dashboard widget below) silently
+    // never receives datapoints. Build them explicitly against the right
+    // namespace; dimensions come from the same service construct the CPU/mem
+    // metrics already reference, so no new cross-stack export.
+    const ecsTaskCountMetric = (
+      metricName: "DesiredTaskCount" | "RunningTaskCount",
+      statistic: string,
+      label?: string,
+    ) =>
+      new cloudwatch.Metric({
+        namespace: "ECS/ContainerInsights",
+        metricName,
+        dimensionsMap: {
+          ClusterName: appStack.ecsService.cluster.clusterName,
+          ServiceName: appStack.ecsService.serviceName,
+        },
+        statistic,
+        period: Duration.minutes(1),
+        ...(label ? { label } : {}),
+      });
+
     const taskCountShortfall = new cloudwatch.MathExpression({
       expression: "desired - running",
       usingMetrics: {
-        desired: appStack.ecsService.metric("DesiredTaskCount", {
-          statistic: "Maximum",
-          period: Duration.minutes(1),
-        }),
-        running: appStack.ecsService.metric("RunningTaskCount", {
-          statistic: "Minimum",
-          period: Duration.minutes(1),
-        }),
+        desired: ecsTaskCountMetric("DesiredTaskCount", "Maximum"),
+        running: ecsTaskCountMetric("RunningTaskCount", "Minimum"),
       },
       label: "Desired - Running tasks (5m)",
       period: Duration.minutes(1),
@@ -354,10 +472,12 @@ export class SpsObservabilityStack extends Stack {
     const auroraCpuAlarm = new cloudwatch.Alarm(this, "AuroraCpuAlarm", {
       alarmName: `sps-aurora-cpu-${env}`,
       alarmDescription: `Aurora cluster CPU > 80% sustained for 10m (${env}). Likely a hot query loop or runaway analytic. Next: check Performance Insights or the slow-query log; scale ACUs only if the load is legitimate.`,
-      metric: dataStack.auroraCluster.metricCPUUtilization({
-        statistic: "Average",
-        period: Duration.minutes(5),
-      }),
+      metric: metricsByName
+        ? dbMetric("CPUUtilization", "Average", { period: Duration.minutes(5) })
+        : dataStack.auroraCluster.metricCPUUtilization({
+            statistic: "Average",
+            period: Duration.minutes(5),
+          }),
       threshold: 80,
       evaluationPeriods: 3,
       datapointsToAlarm: 3,
@@ -378,10 +498,14 @@ export class SpsObservabilityStack extends Stack {
       {
         alarmName: `sps-aurora-connections-${env}`,
         alarmDescription: `Aurora active connection count > 80 sustained over 5m (${env}). Symptom of connection-pool exhaustion or unintended app fan-out. Next: look for leaked or idle connections; recycle the app tasks if the count will not drain.`,
-        metric: dataStack.auroraCluster.metricDatabaseConnections({
-          statistic: "Maximum",
-          period: Duration.minutes(5),
-        }),
+        metric: metricsByName
+          ? dbMetric("DatabaseConnections", "Maximum", {
+              period: Duration.minutes(5),
+            })
+          : dataStack.auroraCluster.metricDatabaseConnections({
+              statistic: "Maximum",
+              period: Duration.minutes(5),
+            }),
         threshold: 80,
         evaluationPeriods: 3,
         datapointsToAlarm: 3,
@@ -402,10 +526,14 @@ export class SpsObservabilityStack extends Stack {
       {
         alarmName: `sps-opensearch-jvm-pressure-${env}`,
         alarmDescription: `OpenSearch JVM memory pressure > 85% for 15m (${env}). GC pressure will cascade into query latency. Next: check shard count and query load on the dashboard; throttle heavy queries or scale the domain.`,
-        metric: dataStack.opensearchDomain.metric("JVMMemoryPressure", {
-          statistic: "Maximum",
-          period: Duration.minutes(5),
-        }),
+        metric: metricsByName
+          ? osMetric("JVMMemoryPressure", "Maximum", {
+              period: Duration.minutes(5),
+            })
+          : dataStack.opensearchDomain.metric("JVMMemoryPressure", {
+              statistic: "Maximum",
+              period: Duration.minutes(5),
+            }),
         threshold: 85,
         evaluationPeriods: 3,
         datapointsToAlarm: 3,
@@ -423,10 +551,14 @@ export class SpsObservabilityStack extends Stack {
       {
         alarmName: `sps-opensearch-cluster-red-${env}`,
         alarmDescription: `OpenSearch cluster status is RED (${env}). Shards unassigned -- searches affected. Next: check OpenSearch _cluster/health; reallocate or restore the affected index from snapshot.`,
-        metric: dataStack.opensearchDomain.metric("ClusterStatus.red", {
-          statistic: "Maximum",
-          period: Duration.minutes(1),
-        }),
+        metric: metricsByName
+          ? osMetric("ClusterStatus.red", "Maximum", {
+              period: Duration.minutes(1),
+            })
+          : dataStack.opensearchDomain.metric("ClusterStatus.red", {
+              statistic: "Maximum",
+              period: Duration.minutes(1),
+            }),
         threshold: 0,
         evaluationPeriods: 1,
         datapointsToAlarm: 1,
@@ -589,6 +721,21 @@ export class SpsObservabilityStack extends Stack {
     relay.addPermission("AllowEtlFailuresTopicInvoke", {
       principal: new iam.ServicePrincipal("sns.amazonaws.com"),
       sourceArn: props.etlStack.failureTopic.topicArn,
+      action: "lambda:InvokeFunction",
+    });
+
+    // PR-7 — subscribe the same relay to the P1 page topic (abort-tier step
+    // failures). Same in-this-stack wiring as EtlFailures above to avoid the
+    // EtlStack->ObservabilityStack cycle. severityForRecord routes any non-warn
+    // topic (etl-page-* included) to the page channel, so no relay change.
+    new sns.Subscription(this, "EtlPageRelaySubscription", {
+      topic: props.etlStack.pageTopic,
+      protocol: sns.SubscriptionProtocol.LAMBDA,
+      endpoint: relay.functionArn,
+    });
+    relay.addPermission("AllowEtlPageTopicInvoke", {
+      principal: new iam.ServicePrincipal("sns.amazonaws.com"),
+      sourceArn: props.etlStack.pageTopic.topicArn,
       action: "lambda:InvokeFunction",
     });
 
@@ -803,21 +950,36 @@ export class SpsObservabilityStack extends Stack {
       width: 12,
       height: 6,
       left: [
-        appStack.publicAlb.metrics.targetResponseTime({
-          statistic: "p50",
-          period: Duration.minutes(5),
-          label: "p50",
-        }),
-        appStack.publicAlb.metrics.targetResponseTime({
-          statistic: "p90",
-          period: Duration.minutes(5),
-          label: "p90",
-        }),
-        appStack.publicAlb.metrics.targetResponseTime({
-          statistic: "p99",
-          period: Duration.minutes(5),
-          label: "p99",
-        }),
+        metricsByName
+          ? albMetric("TargetResponseTime", "p50", {
+              period: Duration.minutes(5),
+              label: "p50",
+            })
+          : appStack.publicAlb.metrics.targetResponseTime({
+              statistic: "p50",
+              period: Duration.minutes(5),
+              label: "p50",
+            }),
+        metricsByName
+          ? albMetric("TargetResponseTime", "p90", {
+              period: Duration.minutes(5),
+              label: "p90",
+            })
+          : appStack.publicAlb.metrics.targetResponseTime({
+              statistic: "p90",
+              period: Duration.minutes(5),
+              label: "p90",
+            }),
+        metricsByName
+          ? albMetric("TargetResponseTime", "p99", {
+              period: Duration.minutes(5),
+              label: "p99",
+            })
+          : appStack.publicAlb.metrics.targetResponseTime({
+              statistic: "p99",
+              period: Duration.minutes(5),
+              label: "p99",
+            }),
       ],
       leftYAxis: { min: 0, label: "seconds" },
     });
@@ -827,27 +989,58 @@ export class SpsObservabilityStack extends Stack {
       width: 12,
       height: 6,
       left: [
-        appStack.publicAlb.metricRequestCount({
-          statistic: "Sum",
-          period: Duration.minutes(5),
-          label: "Requests",
-        }),
+        metricsByName
+          ? albMetric("RequestCount", "Sum", {
+              period: Duration.minutes(5),
+              label: "Requests",
+            })
+          : appStack.publicAlb.metrics.requestCount({
+              statistic: "Sum",
+              period: Duration.minutes(5),
+              label: "Requests",
+            }),
       ],
       leftYAxis: { min: 0, label: "requests" },
       right: [
-        appStack.publicAlb.metrics.httpCodeTarget(
-          elbv2.HttpCodeTarget.TARGET_5XX_COUNT,
-          { statistic: "Sum", period: Duration.minutes(5), label: "Target 5xx" },
-        ),
-        appStack.publicAlb.metrics.httpCodeTarget(
-          elbv2.HttpCodeTarget.TARGET_4XX_COUNT,
-          { statistic: "Sum", period: Duration.minutes(5), label: "Target 4xx" },
-        ),
-        appStack.publicAlb.metrics.httpCodeElb(elbv2.HttpCodeElb.ELB_5XX_COUNT, {
-          statistic: "Sum",
-          period: Duration.minutes(5),
-          label: "ELB 5xx",
-        }),
+        metricsByName
+          ? albMetric("HTTPCode_Target_5XX_Count", "Sum", {
+              period: Duration.minutes(5),
+              label: "Target 5xx",
+            })
+          : appStack.publicAlb.metrics.httpCodeTarget(
+              elbv2.HttpCodeTarget.TARGET_5XX_COUNT,
+              {
+                statistic: "Sum",
+                period: Duration.minutes(5),
+                label: "Target 5xx",
+              },
+            ),
+        metricsByName
+          ? albMetric("HTTPCode_Target_4XX_Count", "Sum", {
+              period: Duration.minutes(5),
+              label: "Target 4xx",
+            })
+          : appStack.publicAlb.metrics.httpCodeTarget(
+              elbv2.HttpCodeTarget.TARGET_4XX_COUNT,
+              {
+                statistic: "Sum",
+                period: Duration.minutes(5),
+                label: "Target 4xx",
+              },
+            ),
+        metricsByName
+          ? albMetric("HTTPCode_ELB_5XX_Count", "Sum", {
+              period: Duration.minutes(5),
+              label: "ELB 5xx",
+            })
+          : appStack.publicAlb.metrics.httpCodeElb(
+              elbv2.HttpCodeElb.ELB_5XX_COUNT,
+              {
+                statistic: "Sum",
+                period: Duration.minutes(5),
+                label: "ELB 5xx",
+              },
+            ),
       ],
       rightYAxis: { min: 0, label: "errors" },
     });
@@ -915,16 +1108,8 @@ export class SpsObservabilityStack extends Stack {
       width: 12,
       height: 6,
       left: [
-        appStack.ecsService.metric("RunningTaskCount", {
-          statistic: "Minimum",
-          period: Duration.minutes(1),
-          label: "Running (min)",
-        }),
-        appStack.ecsService.metric("DesiredTaskCount", {
-          statistic: "Maximum",
-          period: Duration.minutes(1),
-          label: "Desired (max)",
-        }),
+        ecsTaskCountMetric("RunningTaskCount", "Minimum", "Running (min)"),
+        ecsTaskCountMetric("DesiredTaskCount", "Maximum", "Desired (max)"),
       ],
       leftYAxis: { min: 0, label: "tasks" },
     });
@@ -935,11 +1120,16 @@ export class SpsObservabilityStack extends Stack {
       width: 8,
       height: 6,
       left: [
-        dataStack.auroraCluster.metricCPUUtilization({
-          statistic: "Average",
-          period: Duration.minutes(5),
-          label: "CPU %",
-        }),
+        metricsByName
+          ? dbMetric("CPUUtilization", "Average", {
+              period: Duration.minutes(5),
+              label: "CPU %",
+            })
+          : dataStack.auroraCluster.metricCPUUtilization({
+              statistic: "Average",
+              period: Duration.minutes(5),
+              label: "CPU %",
+            }),
       ],
       leftYAxis: { min: 0, max: 100, label: "percent" },
     });
@@ -949,11 +1139,16 @@ export class SpsObservabilityStack extends Stack {
       width: 8,
       height: 6,
       left: [
-        dataStack.auroraCluster.metricDatabaseConnections({
-          statistic: "Maximum",
-          period: Duration.minutes(5),
-          label: "Connections (max)",
-        }),
+        metricsByName
+          ? dbMetric("DatabaseConnections", "Maximum", {
+              period: Duration.minutes(5),
+              label: "Connections (max)",
+            })
+          : dataStack.auroraCluster.metricDatabaseConnections({
+              statistic: "Maximum",
+              period: Duration.minutes(5),
+              label: "Connections (max)",
+            }),
       ],
       leftYAxis: { min: 0, label: "connections" },
     });
@@ -965,11 +1160,16 @@ export class SpsObservabilityStack extends Stack {
       width: 8,
       height: 6,
       left: [
-        dataStack.auroraCluster.metric("SelectLatency", {
-          statistic: "Average",
-          period: Duration.minutes(5),
-          label: "Select latency",
-        }),
+        metricsByName
+          ? dbMetric("SelectLatency", "Average", {
+              period: Duration.minutes(5),
+              label: "Select latency",
+            })
+          : dataStack.auroraCluster.metric("SelectLatency", {
+              statistic: "Average",
+              period: Duration.minutes(5),
+              label: "Select latency",
+            }),
       ],
       leftYAxis: { min: 0, label: "ms" },
     });

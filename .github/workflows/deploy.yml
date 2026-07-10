@@ -66,7 +66,7 @@ jobs:
           echo "stack=Sps-App-$target" >> "$GITHUB_OUTPUT"
           echo "role=arn:aws:iam::${AWS_ACCOUNT_ID}:role/sps-deploy-$target" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v6
@@ -123,8 +123,24 @@ jobs:
           # from an older build that navigates onto a newer task hard-reloads
           # instead of silently dropping the click. The ETL image below is not a
           # Next app, so it does not get the arg.
+          #
+          # NEXT_ISR_CACHE_S3 (#1503) = whether the shared S3 ISR cacheHandler is
+          # compiled into the image. next.config reads it at `next build` (the
+          # standalone config is baked), so it is a build-arg, not a task-def env.
+          # Per-env activation policy lives here. Both envs now build "on" (staging
+          # soaked; prod activated 2026-07-07). The if/else is kept so either env
+          # can be flipped back to "off" independently as a no-rebuild-needed
+          # rollback lever. Provisioning order still holds: the env's IsrCacheBucket
+          # must exist (cdk deploy Sps-App-<env>) before an "on" image runs there,
+          # else the handler runs cold (no bucket → per-task in-memory only).
+          if [ "${{ steps.target.outputs.env }}" = "prod" ]; then
+            ISR_CACHE_S3="on"
+          else
+            ISR_CACHE_S3="on"
+          fi
           docker build \
             --build-arg NEXT_DEPLOYMENT_ID="${{ github.sha }}" \
+            --build-arg NEXT_ISR_CACHE_S3="$ISR_CACHE_S3" \
             --tag "${{ steps.outputs.outputs.ecr_uri }}:${{ github.sha }}" \
             --tag "${{ steps.outputs.outputs.ecr_uri }}:latest" \
             .

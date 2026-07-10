@@ -20,26 +20,25 @@ import { Eye } from "lucide-react";
 
 import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { FindResearchers } from "@/components/edit/find-researchers";
+import { FindResearchersTabs } from "@/components/edit/find-researchers-tabs";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { isAccountConsoleNavRestructureEnabled } from "@/lib/auth/account-console-nav";
 import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { logEditDenial } from "@/lib/edit/authz";
 import { isDataQualityTabVisible } from "@/lib/edit/data-quality";
+import { isOpportunityIntakeEnabled } from "@/lib/edit/opportunity-submission";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 // The tab title tracks the account-menu label (account-dropdown-nav handoff,
-// Workstream B): "Funding matcher" when the unified-nav flag is on, the legacy
-// "Find researchers" when off — so the dropdown and this page never disagree.
+// Workstream B) — so the dropdown and this page never disagree.
 export function generateMetadata() {
-  const toolName = isAccountConsoleNavRestructureEnabled() ? "Funding matcher" : "Find researchers";
   return {
-    title: `${toolName} — Scholars Profile Console`,
+    title: "Funding matcher — Scholars Profile Console",
     robots: { index: false, follow: false },
   };
 }
@@ -68,11 +67,6 @@ export default async function FindResearchersPage() {
   const pendingSlugRequests =
     superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
   const administratorsTab = superuserSurfaces && isAdministratorsTabEnabled() ? 0 : null;
-  const self = await db.read.scholar.findUnique({
-    where: { cwid: session.cwid },
-    select: { deletedAt: true },
-  });
-  const selfEditHref = self && self.deletedAt === null ? "/edit" : null;
 
   return (
     <div className="min-h-screen bg-[var(--background)]" data-slot="find-researchers-page">
@@ -95,7 +89,6 @@ export default async function FindResearchersPage() {
         methodsTab={isMethodsTabVisible(session) ? 0 : null}
         dataQualityTab={isDataQualityTabVisible(session) ? 0 : null}
         viewerIsDeveloper={session.isDeveloper}
-        selfEditHref={selfEditHref}
         superuserSurfaces={superuserSurfaces}
         profilesTab={session.isCommsSteward || session.isSuperuser}
         unitsTab={session.isCommsSteward || session.isSuperuser}
@@ -111,7 +104,11 @@ export default async function FindResearchersPage() {
             </p>
           </AlertDescription>
         </Alert>
-        <FindResearchers unifiedNav={isAccountConsoleNavRestructureEnabled()} />
+        {/* With the intake flag on, the page splits into Browse / Submissions
+            sub-tabs (the URL intake + team queue history get their own surface,
+            `?tab=submissions`). Flag off → the bare matcher, no tab strip — the
+            dark-ship posture unchanged. */}
+        {isOpportunityIntakeEnabled() ? <FindResearchersTabs /> : <FindResearchers />}
       </main>
     </div>
   );

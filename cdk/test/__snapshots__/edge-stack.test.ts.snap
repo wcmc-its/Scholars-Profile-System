@@ -37,6 +37,14 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
+    "SsmParameterValuespsprodapppublicalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/app/public-alb-dns",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "SsmParameterValuespsprodedgeallowedcidrsC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/prod/edge/allowed-cidrs",
+      "Type": "AWS::SSM::Parameter::Value<List<String>>",
+    },
   },
   "Resources": {
     "DefaultRscCacheCFC4DDE6": {
@@ -71,6 +79,9 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
     "Distribution830FAC52": {
       "Properties": {
         "DistributionConfig": {
+          "Aliases": [
+            "scholars.weill.cornell.edu",
+          ],
           "CacheBehaviors": [
             {
               "AllowedMethods": [
@@ -307,7 +318,9 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 "HEAD",
                 "OPTIONS",
               ],
-              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "CachePolicyId": {
+                "Ref": "SearchApiNoStoreCompressible179C8AE1",
+              },
               "Compress": true,
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/search*",
@@ -391,6 +404,22 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               "Compress": true,
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/scholar/*/method-exemplar",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/scholar/*/grants",
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeadersE66B69D3",
               },
@@ -734,7 +763,7 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 ],
               },
               "DomainName": {
-                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9",
+                "Ref": "SsmParameterValuespsprodapppublicalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
               "Id": "SpsEdgeprodDistributionOrigin13FA7C7AF",
               "OriginCustomHeaders": [
@@ -764,6 +793,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
             },
           ],
           "PriceClass": "PriceClass_100",
+          "ViewerCertificate": {
+            "AcmCertificateArn": "arn:aws:acm:us-east-1:665083158573:certificate/95f77e69-4abc-4d2c-b081-b8b5b8572fd6",
+            "MinimumProtocolVersion": "TLSv1.2_2021",
+            "SslSupportMethod": "sni-only",
+          },
+          "WebACLId": {
+            "Fn::GetAtt": [
+              "EdgeWebAcl",
+              "Arn",
+            ],
+          },
         },
       },
       "Type": "AWS::CloudFront::Distribution",
@@ -791,6 +831,122 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::CloudFront::OriginAccessControl",
+    },
+    "EdgeWebAcl": {
+      "Properties": {
+        "DefaultAction": {
+          "Allow": {},
+        },
+        "Description": "SPS front end prod - WCM-only IP allow plus AWS managed rule groups in count mode",
+        "Name": "sps-edge-prod-wcm-only",
+        "Rules": [
+          {
+            "Action": {
+              "Block": {},
+            },
+            "Name": "block-non-wcm",
+            "Priority": 0,
+            "Statement": {
+              "NotStatement": {
+                "Statement": {
+                  "IPSetReferenceStatement": {
+                    "Arn": {
+                      "Fn::GetAtt": [
+                        "WcmIpAllowSet",
+                        "Arn",
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-block-non-wcm",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Name": "AWSManagedRulesCommonRuleSet",
+            "OverrideAction": {
+              "Count": {},
+            },
+            "Priority": 1,
+            "Statement": {
+              "ManagedRuleGroupStatement": {
+                "Name": "AWSManagedRulesCommonRuleSet",
+                "VendorName": "AWS",
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-AWSManagedRulesCommonRuleSet",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Name": "AWSManagedRulesKnownBadInputsRuleSet",
+            "OverrideAction": {
+              "Count": {},
+            },
+            "Priority": 2,
+            "Statement": {
+              "ManagedRuleGroupStatement": {
+                "Name": "AWSManagedRulesKnownBadInputsRuleSet",
+                "VendorName": "AWS",
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-AWSManagedRulesKnownBadInputsRuleSet",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Name": "AWSManagedRulesSQLiRuleSet",
+            "OverrideAction": {
+              "Count": {},
+            },
+            "Priority": 3,
+            "Statement": {
+              "ManagedRuleGroupStatement": {
+                "Name": "AWSManagedRulesSQLiRuleSet",
+                "VendorName": "AWS",
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-AWSManagedRulesSQLiRuleSet",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Count": {},
+            },
+            "Name": "rate-limit",
+            "Priority": 4,
+            "Statement": {
+              "RateBasedStatement": {
+                "AggregateKeyType": "IP",
+                "Limit": 5000,
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-prod-rate-limit",
+              "SampledRequestsEnabled": true,
+            },
+          },
+        ],
+        "Scope": "CLOUDFRONT",
+        "VisibilityConfig": {
+          "CloudWatchMetricsEnabled": true,
+          "MetricName": "sps-edge-prod-wcm-only",
+          "SampledRequestsEnabled": true,
+        },
+      },
+      "Type": "AWS::WAFv2::WebACL",
     },
     "HtmlHeadersD748949D": {
       "Properties": {
@@ -954,6 +1110,31 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 "q",
                 "role",
               ],
+            },
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::CachePolicy",
+    },
+    "SearchApiNoStoreCompressible179C8AE1": {
+      "Properties": {
+        "CachePolicyConfig": {
+          "Comment": "SPS search API (prod) -- 1s query-keyed TTL plus gzip/brotli support so compress fires.",
+          "DefaultTTL": 1,
+          "MaxTTL": 1,
+          "MinTTL": 0,
+          "Name": "sps-search-nostore-compress-prod",
+          "ParametersInCacheKeyAndForwardedToOrigin": {
+            "CookiesConfig": {
+              "CookieBehavior": "none",
+            },
+            "EnableAcceptEncodingBrotli": true,
+            "EnableAcceptEncodingGzip": true,
+            "HeadersConfig": {
+              "HeaderBehavior": "none",
+            },
+            "QueryStringsConfig": {
+              "QueryStringBehavior": "all",
             },
           },
         },
@@ -1140,6 +1321,18 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::S3::BucketPolicy",
     },
+    "WcmIpAllowSet": {
+      "Properties": {
+        "Addresses": {
+          "Ref": "SsmParameterValuespsprodedgeallowedcidrsC96584B6F00A464EAD1953AFF4B05118Parameter",
+        },
+        "Description": "Temporary #461 SPS front-end allowlist prod - remove after testing",
+        "IPAddressVersion": "IPV4",
+        "Name": "sps-edge-prod-wcm-allow",
+        "Scope": "CLOUDFRONT",
+      },
+      "Type": "AWS::WAFv2::IPSet",
+    },
   },
   "Rules": {
     "CheckBootstrapVersion": {
@@ -1208,6 +1401,14 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
       "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
       "Type": "AWS::SSM::Parameter::Value<String>",
     },
+    "SsmParameterValuespsstagingapppublicalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/staging/app/public-alb-dns",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "SsmParameterValuespsstagingedgeallowedcidrsC96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/sps/staging/edge/allowed-cidrs",
+      "Type": "AWS::SSM::Parameter::Value<List<String>>",
+    },
   },
   "Resources": {
     "DefaultRscCacheCFC4DDE6": {
@@ -1242,6 +1443,9 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
     "Distribution830FAC52": {
       "Properties": {
         "DistributionConfig": {
+          "Aliases": [
+            "scholars-staging.weill.cornell.edu",
+          ],
           "CacheBehaviors": [
             {
               "AllowedMethods": [
@@ -1478,7 +1682,9 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
                 "HEAD",
                 "OPTIONS",
               ],
-              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "CachePolicyId": {
+                "Ref": "SearchApiNoStoreCompressible179C8AE1",
+              },
               "Compress": true,
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/search*",
@@ -1562,6 +1768,22 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
               "Compress": true,
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/scholar/*/method-exemplar",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/scholar/*/grants",
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeadersE66B69D3",
               },
@@ -1905,7 +2127,7 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
                 ],
               },
               "DomainName": {
-                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttPublicAlb84330974DNSNameFA3FF7E9",
+                "Ref": "SsmParameterValuespsstagingapppublicalbdnsC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
               "Id": "SpsEdgestagingDistributionOrigin145B7DDC3",
               "OriginCustomHeaders": [
@@ -1935,6 +2157,17 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
             },
           ],
           "PriceClass": "PriceClass_100",
+          "ViewerCertificate": {
+            "AcmCertificateArn": "arn:aws:acm:us-east-1:665083158573:certificate/f50f0b04-dc62-4d8e-97b8-2761d1efdd0f",
+            "MinimumProtocolVersion": "TLSv1.2_2021",
+            "SslSupportMethod": "sni-only",
+          },
+          "WebACLId": {
+            "Fn::GetAtt": [
+              "EdgeWebAcl",
+              "Arn",
+            ],
+          },
         },
       },
       "Type": "AWS::CloudFront::Distribution",
@@ -1962,6 +2195,122 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::CloudFront::OriginAccessControl",
+    },
+    "EdgeWebAcl": {
+      "Properties": {
+        "DefaultAction": {
+          "Allow": {},
+        },
+        "Description": "SPS front end staging - WCM-only IP allow plus AWS managed rule groups in count mode",
+        "Name": "sps-edge-staging-wcm-only",
+        "Rules": [
+          {
+            "Action": {
+              "Block": {},
+            },
+            "Name": "block-non-wcm",
+            "Priority": 0,
+            "Statement": {
+              "NotStatement": {
+                "Statement": {
+                  "IPSetReferenceStatement": {
+                    "Arn": {
+                      "Fn::GetAtt": [
+                        "WcmIpAllowSet",
+                        "Arn",
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-block-non-wcm",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Name": "AWSManagedRulesCommonRuleSet",
+            "OverrideAction": {
+              "Count": {},
+            },
+            "Priority": 1,
+            "Statement": {
+              "ManagedRuleGroupStatement": {
+                "Name": "AWSManagedRulesCommonRuleSet",
+                "VendorName": "AWS",
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-AWSManagedRulesCommonRuleSet",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Name": "AWSManagedRulesKnownBadInputsRuleSet",
+            "OverrideAction": {
+              "Count": {},
+            },
+            "Priority": 2,
+            "Statement": {
+              "ManagedRuleGroupStatement": {
+                "Name": "AWSManagedRulesKnownBadInputsRuleSet",
+                "VendorName": "AWS",
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-AWSManagedRulesKnownBadInputsRuleSet",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Name": "AWSManagedRulesSQLiRuleSet",
+            "OverrideAction": {
+              "Count": {},
+            },
+            "Priority": 3,
+            "Statement": {
+              "ManagedRuleGroupStatement": {
+                "Name": "AWSManagedRulesSQLiRuleSet",
+                "VendorName": "AWS",
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-AWSManagedRulesSQLiRuleSet",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Count": {},
+            },
+            "Name": "rate-limit",
+            "Priority": 4,
+            "Statement": {
+              "RateBasedStatement": {
+                "AggregateKeyType": "IP",
+                "Limit": 5000,
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "sps-edge-staging-rate-limit",
+              "SampledRequestsEnabled": true,
+            },
+          },
+        ],
+        "Scope": "CLOUDFRONT",
+        "VisibilityConfig": {
+          "CloudWatchMetricsEnabled": true,
+          "MetricName": "sps-edge-staging-wcm-only",
+          "SampledRequestsEnabled": true,
+        },
+      },
+      "Type": "AWS::WAFv2::WebACL",
     },
     "HtmlHeadersD748949D": {
       "Properties": {
@@ -2125,6 +2474,31 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
                 "q",
                 "role",
               ],
+            },
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::CachePolicy",
+    },
+    "SearchApiNoStoreCompressible179C8AE1": {
+      "Properties": {
+        "CachePolicyConfig": {
+          "Comment": "SPS search API (staging) -- 1s query-keyed TTL plus gzip/brotli support so compress fires.",
+          "DefaultTTL": 1,
+          "MaxTTL": 1,
+          "MinTTL": 0,
+          "Name": "sps-search-nostore-compress-staging",
+          "ParametersInCacheKeyAndForwardedToOrigin": {
+            "CookiesConfig": {
+              "CookieBehavior": "none",
+            },
+            "EnableAcceptEncodingBrotli": true,
+            "EnableAcceptEncodingGzip": true,
+            "HeadersConfig": {
+              "HeaderBehavior": "none",
+            },
+            "QueryStringsConfig": {
+              "QueryStringBehavior": "all",
             },
           },
         },
@@ -2310,6 +2684,18 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::S3::BucketPolicy",
+    },
+    "WcmIpAllowSet": {
+      "Properties": {
+        "Addresses": {
+          "Ref": "SsmParameterValuespsstagingedgeallowedcidrsC96584B6F00A464EAD1953AFF4B05118Parameter",
+        },
+        "Description": "Temporary #461 SPS front-end allowlist staging - remove after testing",
+        "IPAddressVersion": "IPV4",
+        "Name": "sps-edge-staging-wcm-allow",
+        "Scope": "CLOUDFRONT",
+      },
+      "Type": "AWS::WAFv2::IPSet",
     },
   },
   "Rules": {

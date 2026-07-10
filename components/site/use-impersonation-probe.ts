@@ -53,11 +53,6 @@ export type ImpersonationProbe = {
    *  `canBrowseProfiles` flag, so a non-superuser steward / unit admin gets an
    *  entry point too. */
   consoleLinks: ConsoleLink[];
-  /** Whether the unified account-dropdown + console-nav restructure flag
-   *  (`ACCOUNT_CONSOLE_NAV_RESTRUCTURE`) is on. The account menu reads it to
-   *  reorder View → Edit and render the relabeled console rows. `false` (the
-   *  default) keeps the classic dropdown. */
-  accountNavRestructure: boolean;
 };
 
 /**
@@ -93,7 +88,6 @@ export function useImpersonationProbe(enabled = true): ImpersonationProbe | null
           impersonating: data.impersonating ?? null,
           canImpersonate: data.canImpersonate ?? false,
           consoleLinks: data.consoleLinks ?? [],
-          accountNavRestructure: data.accountNavRestructure ?? false,
         });
       })
       .catch(() => {

@@ -25,7 +25,9 @@
  * Usage: `npm run etl:clinical-trials`
  */
 import { db } from "../../lib/db";
+import { assertSourceVolume } from "../../lib/etl-guard";
 import { closeReciterPool } from "@/lib/sources/reciterdb";
+import { withEtlRun } from "@/lib/etl-run";
 import { buildTrialsAndLinks, loadScholars, readReciterdbTables, replaceAll } from "./shared";
 
 async function main() {
@@ -59,6 +61,15 @@ async function main() {
       );
     }
 
+    // The guard above misses the EMPTY-source case (institutional.length === 0
+    // → trials=[] sails through and replaceAll wipes both tables). Volume-check
+    // the built set against what we currently hold before the full-replace.
+    assertSourceVolume("clinical-trials:full-replace", {
+      incoming: trials.length,
+      existing: await db.write.clinicalTrial.count(),
+      maxDropPct: 50,
+    });
+
     console.log("Replacing person_clinical_trial + clinical_trial...");
     const r = await replaceAll(trials, links);
     console.log(
@@ -67,13 +78,22 @@ async function main() {
     );
   } finally {
     await closeReciterPool();
-    await db.write.$disconnect();
   }
 
   console.log(`\nDone in ${((Date.now() - start) / 1000).toFixed(1)}s.`);
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// Records an etl_run row (source "ClinicalTrials", distinct from the bridge
+// import's "ClinicalTrials-Import") so the freshness heartbeat tracks this
+// weekly step (PR-7). withEtlRun writes the etl_run success/failure row AFTER
+// main() returns, so db.write.$disconnect() is deferred to the .finally below —
+// disconnecting inside main() made that trailing update auto-reopen the Prisma
+// pool with nothing left to close it, hanging the process after "Done in …s."
+// (same exit-hang as etl/reporter #1497). process.exitCode (not process.exit)
+// so the .finally cleanup still runs on the failure path.
+withEtlRun("ClinicalTrials", main)
+  .catch((e) => {
+    console.error(e);
+    process.exitCode = 1;
+  })
+  .finally(() => db.write.$disconnect());

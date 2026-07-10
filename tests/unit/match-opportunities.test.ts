@@ -11,8 +11,10 @@ import {
   DEFAULT_WEIGHTS,
   combineScore,
   deadlineProximity,
+  isHonorificAward,
   meshOverlap,
   rankCandidates,
+  scholarTopicRowWeight,
   topicAffinity,
   type OpportunityCandidate,
 } from "@/lib/api/match-opportunities";
@@ -180,5 +182,57 @@ describe("rankCandidates — distinct axes + sortable", () => {
     expect(ranked).toHaveLength(1);
     expect(ranked[0].axes.prestige).toBe(0);
     expect(ranked[0].prestige).toBeNull();
+  });
+});
+
+describe("scholarTopicRowWeight (vector weighting §2.1/§2.4)", () => {
+  it("full weight for a current first/last-author paper", () => {
+    expect(scholarTopicRowWeight(2, 2026, "first", 2026)).toBeCloseTo(2);
+    expect(scholarTopicRowWeight(2, 2026, "last", 2026)).toBeCloseTo(2);
+  });
+  it("halves at one recency half-life (5y) and quarters at two", () => {
+    expect(scholarTopicRowWeight(1, 2021, "first", 2026)).toBeCloseTo(0.5);
+    expect(scholarTopicRowWeight(1, 2016, "first", 2026)).toBeCloseTo(0.25);
+  });
+  it("down-weights penultimate / middle vs first / last", () => {
+    expect(scholarTopicRowWeight(1, 2026, "penultimate", 2026)).toBeCloseTo(0.5);
+    expect(scholarTopicRowWeight(1, 2026, "middle", 2026)).toBeCloseTo(0.25); // unknown → middle
+    expect(scholarTopicRowWeight(1, 2026, null, 2026)).toBeCloseTo(0.25);
+  });
+  it("future-dated papers cap at full weight; non-positive base is zero", () => {
+    expect(scholarTopicRowWeight(1, 2030, "first", 2026)).toBeCloseTo(1); // age floored at 0
+    expect(scholarTopicRowWeight(0, 2026, "first", 2026)).toBe(0);
+    expect(scholarTopicRowWeight(-3, 2026, "first", 2026)).toBe(0);
+  });
+});
+
+describe("isHonorificAward — prize filter (§2.9)", () => {
+  it("flags prizes / medals / lectureships / awards from a curated source", () => {
+    for (const t of [
+      "The Shaw Prize in Life Science & Medicine",
+      "The Jessie Stevenson Kovalenko Medal",
+      "AACR Distinguished Lectureship in Breast Cancer Research",
+      "The Passano Award",
+      "Fondation ARC Léopold Griffuel Award",
+      "Szent-Györgyi Prize for Progress in Cancer Research",
+    ]) {
+      expect(isHonorificAward(t, "wcm_curated")).toBe(true);
+    }
+  });
+  it("keeps real grants — an NIH activity code overrides award wording", () => {
+    expect(isHonorificAward("Metastasis Research Network (U54 Clinical Trial Not Allowed)", "wcm_curated")).toBe(false);
+    expect(isHonorificAward("NIH Director's New Innovator Award (DP2)", "wcm_curated")).toBe(false);
+    expect(isHonorificAward("Mentored Career Development Award (K08)", "nih_foundation")).toBe(false);
+  });
+  it("never filters the trusted grants_gov NOFO feed", () => {
+    expect(isHonorificAward("Anything-shaped Award", "grants_gov")).toBe(false);
+  });
+  it("keeps fundable non-prize curated items (fellowships, plain programs)", () => {
+    expect(isHonorificAward("Damon Runyon Fellowship", "wcm_curated")).toBe(false);
+    expect(isHonorificAward("Pew Biomedical Scholars Program", "wcm_curated")).toBe(false);
+  });
+  it("KNOWN CEILING: a fundable curated grant titled '…Award' with no code is dropped", () => {
+    // Documented over-exclusion (no upstream opportunityType); acceptable for now.
+    expect(isHonorificAward("Foundation Research Award", "wcm_curated")).toBe(true);
   });
 });

@@ -5,6 +5,7 @@ import {
   buildProgramEdges,
   computeCoPubCounts,
   countOmittedHyperauthored,
+  findSearchTarget,
   nodeRadius,
   paperInYear,
   programKey,
@@ -159,5 +160,37 @@ describe("programKey", () => {
   it("maps null to the unclassified key", () => {
     expect(programKey(null)).toBe(UNCLASSIFIED_KEY);
     expect(programKey("CB")).toBe("CB");
+  });
+});
+
+describe("findSearchTarget (#review-0707 crash guard)", () => {
+  const nodes = [
+    { i: 0, name: "Alice Chen" },
+    { i: 1, name: "Bob Alvarez" },
+    { i: 2, name: "Carol Kim" },
+  ];
+
+  it("returns null for an empty / whitespace query", () => {
+    const rendered = new Set([0, 1, 2]);
+    expect(findSearchTarget("", nodes, rendered)).toBeNull();
+    expect(findSearchTarget("   ", nodes, rendered)).toBeNull();
+  });
+
+  it("matches a rendered node by case-insensitive name substring", () => {
+    const rendered = new Set([0, 1, 2]);
+    expect(findSearchTarget("chen", nodes, rendered)?.i).toBe(0);
+    expect(findSearchTarget("KIM", nodes, rendered)?.i).toBe(2);
+  });
+
+  it("returns null when the only name match is NOT in the rendered set (the crash case)", () => {
+    // "Carol Kim" matches, but node 2 is filtered out of the graph → focusing it
+    // would throw in vis-network. The guard must skip it.
+    const rendered = new Set([0, 1]);
+    expect(findSearchTarget("kim", nodes, rendered)).toBeNull();
+  });
+
+  it("matches 'alv' (unique to Alvarez) only when he is in the rendered set", () => {
+    expect(findSearchTarget("alv", nodes, new Set([1]))?.i).toBe(1);
+    expect(findSearchTarget("alv", nodes, new Set([0, 2]))).toBeNull();
   });
 });
