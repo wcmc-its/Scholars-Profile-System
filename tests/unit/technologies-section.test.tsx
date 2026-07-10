@@ -69,6 +69,40 @@ describe("TechnologiesSection — Overview disclosure", () => {
   });
 });
 
+describe("TechnologiesSection — Overview bullet form", () => {
+  // Bullet-form overview: one bullet per newline (the ETL join), as CTL's
+  // bullet pages store it. Rendered as a real <ul>, not a run-on paragraph.
+  const bullets = ["The Technology: alpha", "PoC Data: beta", "gamma", "delta"];
+  const overview = bullets.join("\n");
+
+  it("renders a bulleted <ul>, previewing the first three then revealing the rest", () => {
+    const { container } = render(<TechnologiesSection technologies={[tech({ overview })]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+
+    const list = container.querySelector("ul.list-disc");
+    expect(list).not.toBeNull();
+    // Collapsed: first three bullets only, no run-on <p>.
+    expect(within(list as HTMLElement).getAllByRole("listitem")).toHaveLength(3);
+    expect(within(list as HTMLElement).getByText("The Technology: alpha")).toBeTruthy();
+    expect(within(list as HTMLElement).queryByText("delta")).toBeNull();
+
+    const showMore = screen.getByRole("button", { name: "Show more" });
+    fireEvent.click(showMore);
+    expect(within(list as HTMLElement).getAllByRole("listitem")).toHaveLength(4);
+    expect(within(list as HTMLElement).getByText("delta")).toBeTruthy();
+    expect(showMore.textContent).toBe("Show less");
+  });
+
+  it("shows no toggle when the list fits the preview (<= 3 bullets)", () => {
+    const { container } = render(
+      <TechnologiesSection technologies={[tech({ overview: "one\ntwo\nthree" })]} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+    expect(container.querySelectorAll("ul.list-disc li")).toHaveLength(3);
+    expect(screen.queryByRole("button", { name: /Show more|Show less/ })).toBeNull();
+  });
+});
+
 describe("TechnologiesSection — POC DATA chip", () => {
   it("renders the PoC Data chip only when hasPocData is true", () => {
     const { rerender } = render(
