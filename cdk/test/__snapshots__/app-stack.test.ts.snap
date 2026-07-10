@@ -311,10 +311,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
-                "Name": "GRANT_MATCHER_IP_SIGNAL",
-                "Value": "off",
-              },
-              {
                 "Name": "SAML_IDP_ENTITY_ID",
                 "Value": "https://login-proxy.weill.cornell.edu/idp",
               },
@@ -4002,10 +3998,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "GRANT_MATCHER_SUBTOPIC_GRAIN",
                 "Value": "on",
-              },
-              {
-                "Name": "GRANT_MATCHER_IP_SIGNAL",
-                "Value": "off",
               },
               {
                 "Name": "SAML_IDP_ENTITY_ID",

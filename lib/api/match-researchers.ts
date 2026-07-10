@@ -62,47 +62,6 @@ function parseMatchDsl(raw: unknown): MatchDsl | null {
 // knob reverts to BM25 without a reproject (set "off"), the rollback lever for the ranking change.
 const grantMatcherDenseRel = () => process.env.GRANT_MATCHER_DENSE_REL !== "off";
 
-/**
- * NIH activity codes on which holding licensable IP is allowed to move the rank:
- * SBIR/STTR (R41-R44) and the phased exploratory/development awards (UH2/UH3).
- *
- * MEASURED: on the local corpus, IP holders are ~2.7x over-represented in the
- * top-10 for bench/translational TOPICS (gene therapy 5/10, immunology 6/10,
- * genomics 6/10) and 0/10 for health-services, implementation-science, and
- * workforce topics. That is evidence the signal must NOT be applied corpus-wide,
- * where it would inject noise exactly where it has none to give.
- *
- * JUDGED, not measured: which mechanisms belong in this set. The corpus used for
- * the measurement above carries no `mechanism`, so nothing here is validated by
- * it. U01 is deliberately EXCLUDED — it is a general cooperative agreement
- * spanning trials and epidemiology consortia, not a tech-development vehicle.
- * Revisit against a real grants.gov corpus before widening.
- */
-const TRANSLATIONAL_MECHANISMS: ReadonlySet<string> = new Set([
-  "R41",
-  "R42",
-  "R43",
-  "R44",
-  "UH2",
-  "UH3",
-]);
-
-/** Translational-IP re-rank (flag-gated, ships dark). Off ⇒ ipBoost = 0 everywhere. */
-const grantMatcherIpSignal = () => process.env.GRANT_MATCHER_IP_SIGNAL === "on";
-
-/** Boost strength: defaultScore × (1 + IP_BOOST) for IP holders. ponytail: one env knob. */
-const grantMatcherIpBoost = () => {
-  const n = Number(process.env.GRANT_MATCHER_IP_BOOST);
-  return Number.isFinite(n) && n >= 0 ? n : 0.15;
-};
-
-/** The boost applies only on translational mechanisms, and only when flagged on. */
-export function ipBoostFor(mechanism: string | null): number {
-  if (!grantMatcherIpSignal()) return 0;
-  if (!mechanism || !TRANSLATIONAL_MECHANISMS.has(mechanism.toUpperCase())) return 0;
-  return grantMatcherIpBoost();
-}
-
 /** Parse the stored match_rel JSON → `{pmid: cosine∈[0,1]}` as a Map (same shape as the BM25
  *  `relevanceScoresForQuery`, a drop-in rel source); null when absent/empty so the matcher falls
  *  back to the BM25 query boost. Values are already pool-max-normalized + floored by the producer. */
@@ -164,8 +123,6 @@ export type RankedScholar = {
   inMyTopMatches?: boolean;
   /** Count of CTL licensable technologies this scholar holds. 0 when none. */
   technologyCount?: number;
-  /** True when the translational-IP boost actually moved this row's defaultScore. */
-  ipBoosted?: boolean;
 };
 
 export type FundingStatus = "funded" | "unfunded";
@@ -256,19 +213,8 @@ export type RankResearchersOptions = {
   /** ESI eligibility per candidate cwid; read only by the esiOnly demote. */
   esiEligibleByCwid?: Map<string, boolean>;
   /** CTL licensable-IP count per candidate cwid. Attached to every row for display;
-   *  read by the `ipBoost` re-rank only when that is > 0. */
+   *  never a scoring input. */
   technologyCountByCwid?: Map<string, number>;
-  /**
-   * Translational-IP boost: multiply `defaultScore` by (1 + ipBoost) for scholars
-   * holding CTL IP, applied BEFORE `limit` so a boosted scholar can enter the
-   * top-N rather than merely reshuffle it. 0 (default) disables it.
-   *
-   * ponytail: binary has-IP, not count-scaled. A 12-invention portfolio reflects
-   * career length and CTL bookkeeping, not relevance to THIS opportunity; scaling
-   * by count would just re-rank by seniority. Scale by topic-matched IP if the
-   * binary signal proves too coarse.
-   */
-  ipBoost?: number;
   sort?: ResearcherSort;
   limit?: number;
 };
@@ -316,16 +262,10 @@ export function rankResearchers(
   const appeal = opts.appealByStage ?? {};
   const stageByCwid = opts.stageByCwid;
   const ranked: RankedScholar[] = [];
-  const ipBoost = opts.ipBoost ?? 0;
   for (const acc of byCwid.values()) {
     const stage = stageByCwid?.get(acc.cwid);
     const stageAppeal = stage ? (appeal[stage] ?? 0) : 0;
     const technologyCount = opts.technologyCountByCwid?.get(acc.cwid) ?? 0;
-    // The boost moves `defaultScore` (the ordering) only. `axes.topicFit` stays the
-    // untouched topical evidence, so the row's rationale never claims the scholar
-    // is a better topical match than the corpus says.
-    const ipBoosted = ipBoost > 0 && technologyCount > 0;
-    const base = opts.stageLens ? acc.topicFit * stageAppeal : acc.topicFit;
     ranked.push({
       cwid: acc.cwid,
       slug: acc.slug,
@@ -333,9 +273,8 @@ export function rankResearchers(
       careerStage: stage ?? null,
       axes: { topicFit: acc.topicFit, stageAppeal },
       topicContributions: acc.contributions,
-      defaultScore: ipBoosted ? base * (1 + ipBoost) : base,
+      defaultScore: opts.stageLens ? acc.topicFit * stageAppeal : acc.topicFit,
       technologyCount,
-      ipBoosted,
     });
   }
 
@@ -592,7 +531,6 @@ export async function rankResearchersForOpportunity(
       matchDsl: true,
       matchQuery: true,
       matchRel: true,
-      mechanism: true,
     },
   });
   if (!opp) return [];
@@ -653,9 +591,8 @@ export async function rankResearchersForOpportunity(
     }
   }
 
-  // CTL licensable-IP counts. Attached to every row for the ★ column regardless of
-  // the flag; they only move the ordering when `ipBoost` > 0 (translational
-  // mechanisms, flag on), so the signal can be observed before it is trusted.
+  // CTL licensable-IP counts. Attached to every row for the ★ column; display
+  // only, never a ranking input.
   const technologyCountByCwid = new Map<string, number>();
   if (cwids.length > 0) {
     const grouped = await db.read.scholarTechnology.groupBy({
@@ -673,7 +610,6 @@ export async function rankResearchersForOpportunity(
     esiOnly: opts.esiOnly,
     esiEligibleByCwid: new Map([...signalsByCwid].map(([c, s]) => [c, s.esiEligible])),
     technologyCountByCwid,
-    ipBoost: ipBoostFor(opp.mechanism),
     sort: opts.sort,
     limit: opts.limit,
   });

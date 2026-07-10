@@ -127,33 +127,17 @@ technologies, so repeating it per row is noise, and caching a named person's
 email would rot the moment CTL reassigns a docket. One shared inbox in the
 footer; the named officer lives on CTL's own page, one click away.
 
-## Funding-matcher signal
+## Funding-matcher signal (removed 2026-07-09)
 
-Scholars holding CTL IP are **~2.7x over-represented** in the top-10 of the
-reverse matcher (`rankResearchersForOpportunity`), measured across the local
-corpus: 8.3% of the rankable pool holds IP, versus 22.5% of top-10 slots.
-
-The concentration is entirely in bench/translational topics — gene therapy 5/10,
-immunology 6/10, genomics 6/10 — and **0/10** for health-services,
-implementation-science, and workforce topics. Applying the signal corpus-wide
-would inject noise exactly where it has none to give.
-
-So `GRANT_MATCHER_IP_SIGNAL` (default off) boosts `defaultScore` by
-`GRANT_MATCHER_IP_BOOST` (default 0.15) **only** on SBIR/STTR (R41–R44) and the
-phased UH2/UH3 mechanisms. `U01` is deliberately excluded: a general cooperative
-agreement, not a tech-development vehicle. The mechanism set is a judgment call —
-the corpus used for the enrichment measurement carries no `mechanism`, so nothing
-in that set is validated by it. Revisit against a real grants.gov corpus.
-
-Two invariants, both unit-tested:
-
-- The boost is applied **before** `limit`, so an IP holder can _enter_ the top-N
-  rather than merely reshuffle within it.
-- The boost moves `defaultScore` only. `axes.topicFit` stays the untouched topical
-  evidence, so a row's rationale never overclaims topical fit.
-
-`technologyCount` is attached to every ranked row regardless of the flag, so the
-★ column is observable on `/edit/find-researchers` before the boost is trusted.
+A translational-IP boost (`GRANT_MATCHER_IP_SIGNAL`, shipped dark) once
+multiplied the reverse matcher's `defaultScore` for scholars holding CTL IP on
+SBIR/STTR and UH2/UH3 opportunities. It was removed 2026-07-09: nobody asked for
+it, the ~2.7x enrichment behind it was measured on twelve synthetic DEMO
+opportunities rather than a real corpus, and that corpus carried no `mechanism`,
+so the mechanism list was judged, not measured. Re-measure against the real
+grants.gov corpus before rebuilding anything like it. What survives is the
+display data: `technologyCount` is attached to every ranked row and feeds the
+★ column on `/edit/find-researchers` — it is never a ranking input.
 
 ## Granting CTL access to /edit/find-researchers
 

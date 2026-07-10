@@ -98,6 +98,9 @@ opportunities**, and the corpus carries no `mechanism`, so the mechanism list
 Either delete it, or re-measure against staging's real grants.gov corpus before
 anyone flips the flag. Do not flip it on the current evidence.
 
+**Resolved 2026-07-09: deleted.** The `technologyCount` display data (the ★
+column feed) was kept — see `docs/ctl-technologies.md`.
+
 ### 4. Asks (2) and (3) for CTL
 
 - Ask (2) costs nothing: send her the URL. `scholars-staging.weill.cornell.edu`
@@ -118,7 +121,7 @@ anyone flips the flag. Do not flip it on the current evidence.
 4. **`cdk deploy Sps-Analytics-prod` BEFORE `Sps-App-prod`** — see below.
 5. Flip `AVAILABLE_TECHNOLOGIES_SECTION` to `"on"` for prod in `app-stack.ts`,
    then `cdk deploy Sps-App-prod`.
-6. Leave `GRANT_MATCHER_IP_SIGNAL` off.
+6. ~~Leave `GRANT_MATCHER_IP_SIGNAL` off.~~ The flag was removed 2026-07-09 (§3).
 
 ## Traps, paid for the hard way
 
