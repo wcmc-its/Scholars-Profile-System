@@ -75,6 +75,13 @@ Isolated leftovers of already-deleted DBs. No live/shared resource touched. Each
 ```bash
 R=us-east-1
 
+# ACCOUNT GUARD — REQUIRED. AWS creds are live in the shell and this is a
+# multi-account environment; every delete below is irreversible. Abort unless
+# the shell is actually pointed at the SPS/ReCiter account. (Optionally pin
+# AWS_PROFILE to the 665083158573 profile instead of relying on the default chain.)
+[ "$(aws sts get-caller-identity --query Account --output text)" = "665083158573" ] \
+  || { echo "WRONG AWS ACCOUNT — aborting"; exit 1; }
+
 # Pre-flight: confirm the archives we KEEP exist & are usable BEFORE deleting anything.
 aws rds describe-db-snapshots --region $R \
   --query "DBSnapshots[?DBSnapshotIdentifier=='vivo-qa-snapshot-encrypted' || DBSnapshotIdentifier=='vivo-dev-final-snapshot-encrypted'].{Id:DBSnapshotIdentifier,Status:Status,GB:AllocatedStorage}" \
@@ -93,9 +100,21 @@ aws ec2 delete-snapshot --region $R --snapshot-id snap-0d240df861009feb8   # viv
 # 1c. Unused RDS parameter groups (both vivo DBs deleted; delete fails safe / no-ops if in use).
 aws rds delete-db-parameter-group --region $R --db-parameter-group-name vivo-parameter-group
 aws rds delete-db-parameter-group --region $R --db-parameter-group-name vivo-aurora-parameter-group
+
+# POST-DELETE VERIFICATION — run before closing the loop:
+#   (a) exactly the two KEPT encrypted snapshots remain, both 'available';
+aws rds describe-db-snapshots --region $R \
+  --query "DBSnapshots[?contains(DBSnapshotIdentifier,'vivo')].{Id:DBSnapshotIdentifier,Status:Status}" \
+  --output table   # expect ONLY vivo-qa-snapshot-encrypted + vivo-dev-final-snapshot-encrypted
+#   (b) the Fuseki EBS archive is still intact;
+aws ec2 describe-snapshots --region $R --snapshot-ids snap-095289426be03158f \
+  --query 'Snapshots[].{Id:SnapshotId,State:State}' --output table   # expect 'completed'
+#   (c) next day: confirm the EBS-Daily-Backup-Plan job still completes cleanly.
 ```
 
 **Why this is safe:** leftovers of **already-deleted** DBs, referenced by nothing live; you retain one encrypted snapshot of each VIVO MySQL DB (preserves the #945 Phase-0 archive); param-group deletes fail safe if somehow in use. To keep a different `vivo-qa` copy than `-encrypted`, swap which two IDs you delete.
+
+**Restore paths (if ever needed):** RDS — `aws rds restore-db-instance-from-db-snapshot --db-instance-identifier <new-id> --db-snapshot-identifier vivo-qa-snapshot-encrypted`; EBS — `aws ec2 create-volume --availability-zone <az> --snapshot-id snap-095289426be03158f`.
 
 
 
@@ -104,6 +123,11 @@ aws rds delete-db-parameter-group --region $R --db-parameter-group-name vivo-aur
 Deleting the dormant EKS `vivo`/`vivo-fuseki` workloads requires editing the live `reciter-main-ing` ingress. Reversible (back it up first), but should be done by the ReCiter EKS operator, ideally in a quiet window. There is **zero cutover urgency** to this.
 
 ```bash
+# ACCOUNT + CLUSTER GUARD — REQUIRED (this tier edits a PROD ingress).
+[ "$(aws sts get-caller-identity --query Account --output text)" = "665083158573" ] \
+  || { echo "WRONG AWS ACCOUNT — aborting"; exit 1; }
+kubectl config current-context   # ASSERT: the ReCiter prod EKS cluster — stop if anything else
+
 # Pre-flight: confirm still dormant.
 kubectl get deploy vivo vivo-fuseki -n reciter           # expect 0/0
 aws ec2 describe-volumes --region us-east-1 --volume-ids vol-0ef870455f11748a5 \
@@ -143,6 +167,6 @@ Everything in inventory section **C**. Per #945, the EC2 box and its `vivo-dev` 
 
 
 
-## Open question (verify before touching the EC2 stack)
+## Phase-3 BLOCKER — resolve with WCM ITS/networking BEFORE any EC2/ALB/CloudFront teardown
 
-Prod `vivo.weill.cornell.edu` resolves to CloudFront `d3t1ivz9l0ys5g`, which is **not in this account** — prod VIVO's edge is external/on-prem. The `vivo-dev`-named EC2 stack is likely its **origin** (the EC2 box is a healthy target on the internet-facing `vivo-dev-public-alb`). Confirm with WCM ITS / networking before assuming anything in section C is non-prod. (This is moot for Tier 1/Tier 2, which don't touch section C — but it matters for the eventual Phase 3 teardown.)
+**This is a blocking prerequisite for Phase 3 (tracked on #945), not a footnote.** Prod `vivo.weill.cornell.edu` resolves to CloudFront `d3t1ivz9l0ys5g`, which is **not in this account** — prod VIVO's edge is external/on-prem. The `vivo-dev`-named EC2 stack is likely its **origin** (the EC2 box is a healthy target on the internet-facing `vivo-dev-public-alb`), i.e. the "dev"-named stack may be serving prod. Confirm the actual origin mapping with WCM ITS / networking before assuming anything in section C is non-prod. Moot for Tier 1/Tier 2 (they don't touch section C) — but no Phase-3 EC2/ALB/CloudFront delete may run until this is answered in writing on #945.
