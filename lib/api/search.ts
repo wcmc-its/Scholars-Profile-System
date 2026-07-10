@@ -101,9 +101,9 @@ import {
   resolvePublicationDepartmentFilter,
   resolvePeopleTopicPhraseBoost,
   resolveAreaBoostWeights,
-  resolveSearchPeopleClinical,
   resolveSearchPeopleClinicalFn,
   resolveSearchPeopleClinicalFnWeight,
+  resolveSearchPeopleClinicalReasonThresholds,
   resolveSearchPeopleConceptHint,
   resolveSearchResultEvidence,
   resolveSearchEvidenceReasonCounts,
@@ -1615,25 +1615,25 @@ export async function searchPeople(opts: {
     resolvePeopleMethodFamilyTier() && applyTopicTemplate
       ? opts.matchAwareContext?.methodFamily?.familyLabel?.trim() || null
       : null;
-  // POPS clinical specialty boost (`SEARCH_PEOPLE_CLINICAL`). When on, append the
-  // index-time `clinicalSpecialties` / `clinicalExpertise` fields to the topic +
-  // default boost ladders so a specialty query ("cardiology") ranks the matching
-  // clinician. Conservative weights (below `publicationTitles`/`publicationMesh`)
-  // so clinical evidence never overpowers publication evidence; both use the same
-  // `scholar_text` analyzer, so they join the `cross_fields` blended group cleanly
-  // without perturbing the `minimum_should_match` token accounting. Default OFF
-  // (reindex-then-flip): off ⇒ an empty spread, so the ladders are byte-identical.
-  const clinicalBoostOn = resolveSearchPeopleClinical();
-  const clinicalFields = clinicalBoostOn ? ["clinicalSpecialties^3", "clinicalExpertise^2"] : [];
+  // POPS clinical evidence (`SEARCH_PEOPLE_CLINICAL_FN`). The clinical signal reaches
+  // ranking through the function_score path below, NOT through the boost ladders: the
+  // cross_fields text-field variant was measured inert in-VPC and has been removed.
+  // The same flag gates the clinical:exact ranking REASON — the `_source` fetch of the
+  // reason fields and the `clinicalExactMatch` call — so the label appears exactly where
+  // the boost that earned it is live.
+  const clinicalReasonOn = resolveSearchPeopleClinicalFn();
+  // Count thresholds for the clinical:exact-vs-tagged-pubs reason precedence
+  // (env-tunable). Resolved once per request; passed into selectEvidence per hit.
+  const clinicalReasonThresholds = clinicalReasonOn
+    ? resolveSearchPeopleClinicalReasonThresholds()
+    : undefined;
   const peopleTopicFields = (): string[] => [
     ...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS,
     ...(methodBoostOn ? ["methodFamily^4"] : []),
-    ...clinicalFields,
   ];
   const peopleDefaultFields = (): string[] => [
     ...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS,
     ...(methodBoostOn ? ["methodFamily^3"] : []),
-    ...clinicalFields,
   ];
 
   // #1119 — the sibling method-CONTEXT boost (`SEARCH_PEOPLE_METHOD_CONTEXT`). The
@@ -2333,13 +2333,11 @@ export async function searchPeople(opts: {
   // Track B / B2 — clinical-specialty function_score boost (spec: docs/search-trackA-clinical-
   // inert-finding.md). Topic/hybrid only, like the area boost. An additive weight on docs whose
   // board-derived `clinicalSpecialties` match the query — bypasses the cross_fields blend that
-  // makes the `SEARCH_PEOPLE_CLINICAL` text-field variant inert. `match` (analyzed) handles case
+  // made the removed text-field variant inert. `match` (analyzed) handles case
   // ("obesity" → "Obesity"); `clinicalSpecialties` ONLY (board-derived, high precision) — NOT the
   // noisy `clinicalExpertise` free-text. No-ops when no specialty matches (e.g. "hypertension").
   const clinicalFnFunctions: Record<string, unknown>[] =
-    (applyTopicTemplate || applyHybridTemplate) &&
-    resolveSearchPeopleClinicalFn() &&
-    trimmed.length > 0
+    (applyTopicTemplate || applyHybridTemplate) && clinicalReasonOn && trimmed.length > 0
       ? [
           {
             filter: { match: { clinicalSpecialties: trimmed } },
@@ -2486,10 +2484,10 @@ export async function searchPeople(opts: {
         : []),
       // POPS clinical fields — the matchable specialty set + the board-cert-only
       // subset (for the `boardCertified` label), requested ONLY when
-      // SEARCH_PEOPLE_CLINICAL is on so the off path keeps today's `_source`
-      // shape. `clinicalExpertise` is a loose-only ranking signal (never a
-      // reason), so it is not returned. Drives the `clinical:exact` evidence below.
-      ...(clinicalBoostOn ? ["clinicalSpecialties", "clinicalBoardSet"] : []),
+      // SEARCH_PEOPLE_CLINICAL_FN is on so the off path keeps today's `_source`
+      // shape. `clinicalExpertise` is not indexed into any live query path, so it
+      // is not returned. Drives the `clinical:exact` evidence below.
+      ...(clinicalReasonOn ? ["clinicalSpecialties", "clinicalBoardSet"] : []),
     ],
     // OpenSearch's default cap of 10000 short-circuits the total counter
     // and would make the subhead read "10,000 publications" even when
@@ -2620,7 +2618,7 @@ export async function searchPeople(opts: {
       methodFamilyCounts?: Record<string, number>;
       areaCounts?: Record<string, number>;
       // POPS clinical specialty set + board-cert-only subset (omit-on-empty in
-      // the ETL). Present only when SEARCH_PEOPLE_CLINICAL is on (added to
+      // the ETL). Present only when SEARCH_PEOPLE_CLINICAL_FN is on (added to
       // `_source` above); feed `clinicalExactMatch` for the `clinical:exact`
       // reason. A not-yet-reindexed doc lacks them → no clinical reason, never a 500.
       clinicalSpecialties?: string[];
@@ -3125,12 +3123,12 @@ export async function searchPeople(opts: {
     }
 
     // POPS clinical:exact reason (selectEvidence rank 4). Gated on
-    // SEARCH_PEOPLE_CLINICAL; off ⇒ the `_source` clinical fields aren't
+    // SEARCH_PEOPLE_CLINICAL_FN; off ⇒ the `_source` clinical fields aren't
     // requested and `clinical` stays null, so the evidence is byte-identical.
     // `clinicalExactMatch` returns null for a loose / no-overlap query — those
-    // still boost ranking (the §3 multi_match) but emit no reason (under-claim
+    // still boost ranking (the function_score) but emit no reason (under-claim
     // rather than mislabel).
-    const clinical = clinicalBoostOn
+    const clinical = clinicalReasonOn
       ? clinicalExactMatch(contentQuery, clinicalSpecialties ?? [], clinicalBoardSet ?? [])
       : null;
 
@@ -3148,6 +3146,7 @@ export async function searchPeople(opts: {
       topic,
       pub: Object.keys(pub).length > 0 ? pub : undefined,
       clinical: clinical ?? undefined,
+      clinicalReasonThresholds,
       // The content query drives the partial-bio-vs-pub.mention precedence split
       // (a subset-only bio highlight loses to publication-mention evidence).
       query: contentQuery,

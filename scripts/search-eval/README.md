@@ -98,7 +98,7 @@ Each `expected` entry is either a bare regex (legacy) or an object
 the scorecard down per archetype (the lever that lifts one archetype often can't move
 another, so a mixed average hides it):
 
-- **clinician-expert** — expertise lives in clinical/POPS signal; non-anchor-heavy. Lever: clinical fields (`SEARCH_PEOPLE_CLINICAL`).
+- **clinician-expert** — expertise lives in clinical/POPS signal; non-anchor-heavy. Lever: clinical function_score boost (`SEARCH_PEOPLE_CLINICAL_FN`).
 - **research-pi** — anchor-heavy (first/last) senior author; pub signal carries them.
 - **methods-scientist** — high-N middle author, no clinical signal; prone to BM25 term-dilution + length-norm suppression (e.g. C. Mason, a 468-pub genomics PI, is `#MISS` on CRISPR). Lever: authorship-expertise restructure — **with** a `1/√N` double-suppression guardrail.
 
