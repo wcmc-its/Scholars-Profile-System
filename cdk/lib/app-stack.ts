@@ -1213,10 +1213,12 @@ export class AppStack extends Stack {
         // (superuser), surfacing the Phase-2 forward matcher
         // (/api/scholars/[cwid]/opportunities). Read via isGrantRecsEnabled()
         // (=== "on"); when off the grant-recs attribute is dropped from the rail
-        // and the valid-attr set, so the feature ships fully dark. OFF in both
-        // envs for now: the matcher only returns data once GRANT# opportunities
-        // are ingested + indexed in that env, so it stays dark until that lands.
-        SELF_EDIT_GRANT_RECS: "off",
+        // and the valid-attr set, so the feature ships fully dark.
+        // STAGING-FIRST (#1613): on in staging to soak, off in prod. The matcher
+        // only returns data once GRANT# opportunities are ingested + indexed in
+        // that env — staging has the corpus; prod stays dark until the prod
+        // mirror lands (ReciterAI#269) and #506/#1203 sign off.
+        SELF_EDIT_GRANT_RECS: env === "staging" ? "on" : "off",
         // PRESTIGE_AXIS_WEIGHT — funding-opportunity prestige axis weight, read by
         // prestigeAxisWeight() in lib/api/match-opportunities.ts (parsed as a number,
         // default "0"). The prestige badge + "Prestige" sort ship unconditionally;

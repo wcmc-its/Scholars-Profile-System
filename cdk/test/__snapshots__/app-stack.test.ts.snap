@@ -4069,7 +4069,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_GRANT_RECS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "PRESTIGE_AXIS_WEIGHT",
