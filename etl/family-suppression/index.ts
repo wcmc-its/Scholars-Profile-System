@@ -5,7 +5,9 @@
  * CSV at etl/family-suppression/curated.csv — the data-steward-owned list of
  * non-distinctive method families (e.g. generic statistical tests, generic study
  * designs) that should never surface in the methods lens. One run:
- *   1. Read + validate the curated CSV (supercategory, family_label, source_note).
+ *   1. Read + validate the curated CSV (supercategory, family_label, source_note),
+ *      then check every label against `scholar_family` — the overlay joins on the
+ *      exact string, so an unmatched label would seed a row that hides nothing.
  *   2. SEED-SAFE reseed (DB-as-source-of-truth): only insert/replace rows whose
  *      `source='seed'`; NEVER delete or overwrite a `source='steward'` row (a tier
  *      set from the /edit/methods surface). Steward-owned keys are skipped entirely,
@@ -96,6 +98,50 @@ function rowKey(supercategory: string, familyLabel: string): string {
 }
 
 /**
+ * Curated rows whose (supercategory, family_label) names no real family. The overlay is
+ * exact-string-joined against `scholar_family` at read time, so an unmatched label inserts
+ * a row that hides nothing — a silent typo. Exported for unit test.
+ */
+export function findUnknownFamilies(
+  rows: SuppressedRow[],
+  knownKeys: Set<string>,
+): SuppressedRow[] {
+  return rows.filter((r) => !knownKeys.has(rowKey(r.supercategory, r.familyLabel)));
+}
+
+/**
+ * Fail closed when a curated label matches no family. Queries via `db.write` so the single
+ * `db.write.$disconnect()` in the finally block covers it — a `db.read` query under a set
+ * DATABASE_URL_RO opens a second pool nothing ever closes, which hangs the run.
+ */
+async function assertLabelsMatchFamilies(rows: SuppressedRow[]): Promise<void> {
+  const families = await db.write.scholarFamily.findMany({
+    select: { supercategory: true, familyLabel: true },
+    distinct: ["supercategory", "familyLabel"],
+  });
+  if (families.length === 0) {
+    // Nothing to validate against: scholar_family is dormant until the A2 load runs. Every
+    // overlay row is inert in that state anyway, so seeding is harmless — but say so loudly.
+    console.warn(
+      `[FamilySuppression] ${JSON.stringify({
+        event: "family_table_empty_validation_skipped",
+        rows: rows.length,
+      })}`,
+    );
+    return;
+  }
+  const known = new Set(families.map((f) => rowKey(f.supercategory, f.familyLabel)));
+  const unknown = findUnknownFamilies(rows, known);
+  if (unknown.length > 0) {
+    const offenders = unknown.map((r) => `(${r.supercategory}, "${r.familyLabel}")`).join("; ");
+    throw new Error(
+      `[FamilySuppression] ${unknown.length} curated label(s) match no family in scholar_family — ` +
+        `refusing to seed inert rows: ${offenders}`,
+    );
+  }
+}
+
+/**
  * Seed-safe reseed. The DB is the source of truth: a comms-steward tier set writes
  * `source='steward'` rows that this seed ETL must never clobber.
  *
@@ -175,6 +221,7 @@ async function replaceRows(rows: SuppressedRow[]): Promise<void> {
 async function main(): Promise<void> {
   const startedAt = Date.now();
   const rows = readCurated();
+  await assertLabelsMatchFamilies(rows);
   await replaceRows(rows);
   await recordRun({ status: "success", rowsProcessed: rows.length });
   console.log(
@@ -186,13 +233,19 @@ async function main(): Promise<void> {
   );
 }
 
-main()
-  .catch(async (err) => {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[FamilySuppression] ${JSON.stringify({ event: "fatal", error: message })}`);
-    await recordRun({ status: "failed", rowsProcessed: 0, errorMessage: message }).catch(() => {});
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await db.write.$disconnect();
-  });
+const isDirectInvocation =
+  typeof process !== "undefined" &&
+  process.argv[1] !== undefined &&
+  import.meta.url === `file://${process.argv[1]}`;
+if (isDirectInvocation) {
+  main()
+    .catch(async (err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[FamilySuppression] ${JSON.stringify({ event: "fatal", error: message })}`);
+      await recordRun({ status: "failed", rowsProcessed: 0, errorMessage: message }).catch(() => {});
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await db.write.$disconnect();
+    });
+}
