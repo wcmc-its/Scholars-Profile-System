@@ -840,7 +840,7 @@ export class EdgeStack extends Stack {
       // known-bad-inputs) the IP allowlist never did. ENFORCED since #1434:
       // the 06-27..07-04 count-mode window showed zero matches for
       // KnownBadInputs/SQLi/rate-limit; the only CommonRuleSet sub-rule firing
-      // was SizeRestrictions_Body, and only on legitimate large /edit saves
+      // was SizeRestrictions_BODY, and only on legitimate large /edit saves
       // (overview/biosketch POSTs > 8 KB), so that one sub-rule stays in count
       // while its group enforces.
       const managedGroups = [
@@ -877,7 +877,7 @@ export class EdgeStack extends Stack {
           ...managedGroups.map((groupName, i) => ({
             name: groupName,
             priority: i + 1,
-            // Enforced (#1434, after the count-mode soak). SizeRestrictions_Body
+            // Enforced (#1434, after the count-mode soak). SizeRestrictions_BODY
             // alone stays in count: it fires on legitimate >8 KB /edit saves.
             overrideAction: { none: {} },
             statement: {
@@ -888,7 +888,7 @@ export class EdgeStack extends Stack {
                   ? {
                       ruleActionOverrides: [
                         {
-                          name: "SizeRestrictions_Body",
+                          name: "SizeRestrictions_BODY",
                           actionToUse: { count: {} },
                         },
                       ],

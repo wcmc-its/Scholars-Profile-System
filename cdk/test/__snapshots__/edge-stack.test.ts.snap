@@ -880,7 +880,7 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                     "ActionToUse": {
                       "Count": {},
                     },
-                    "Name": "SizeRestrictions_Body",
+                    "Name": "SizeRestrictions_BODY",
                   },
                 ],
                 "VendorName": "AWS",
@@ -2287,7 +2287,7 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
                     "ActionToUse": {
                       "Count": {},
                     },
-                    "Name": "SizeRestrictions_Body",
+                    "Name": "SizeRestrictions_BODY",
                   },
                 ],
                 "VendorName": "AWS",
