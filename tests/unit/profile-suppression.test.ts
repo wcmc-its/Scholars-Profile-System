@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   mockScholarFindFirst,
@@ -348,6 +348,63 @@ describe("getScholarFullProfileBySlug — section visibility", () => {
     expect((payload?.educations ?? []).length).toBe(1);
     expect((payload?.grants ?? []).length).toBe(1);
     expect(payload?.hiddenSections).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// section-visibility: CTL "Available technologies" whole-section hide (#1639)
+// ---------------------------------------------------------------------------
+
+/** A CTL technology row in the shape `scholar.technologies` carries (the profile
+ *  mapper reads reference/title/url/patentStatus/pmids/overview/hasPocData). */
+function technology(reference: string, title: string) {
+  return {
+    reference,
+    title,
+    url: "https://innovation.weill.cornell.edu/technology-portfolio/widget",
+    patentStatus: "US Application Filed",
+    pmids: ["31508198"],
+    overview: "The Technology: a widget.",
+    hasPocData: true,
+  };
+}
+
+describe("getScholarFullProfileBySlug — Available technologies section hide", () => {
+  // The technologies payload is dark unless AVAILABLE_TECHNOLOGIES_SECTION is on;
+  // set/restore it per test (the read path reads it at call time).
+  let prevFlag: string | undefined;
+  beforeEach(() => {
+    prevFlag = process.env.AVAILABLE_TECHNOLOGIES_SECTION;
+    process.env.AVAILABLE_TECHNOLOGIES_SECTION = "on";
+  });
+  afterEach(() => {
+    if (prevFlag === undefined) delete process.env.AVAILABLE_TECHNOLOGIES_SECTION;
+    else process.env.AVAILABLE_TECHNOLOGIES_SECTION = prevFlag;
+  });
+
+  it("empties the technologies payload when hideTechnologies is set (flag on)", async () => {
+    mockScholarFindFirst.mockResolvedValue({
+      ...scholarRow(),
+      technologies: [technology("11166", "A Licensable Widget")],
+    });
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    mockFieldOverrideFindMany.mockResolvedValue([{ fieldName: "hideTechnologies" }]);
+    const payload = await getScholarFullProfileBySlug("owner-one");
+    // Hidden → profile-view drops the section (it renders only when length > 0).
+    expect(payload?.technologies).toEqual([]);
+    expect(payload?.hiddenSections).toContain("hideTechnologies");
+  });
+
+  it("populates the technologies payload when hideTechnologies is NOT set (flag on)", async () => {
+    mockScholarFindFirst.mockResolvedValue({
+      ...scholarRow(),
+      technologies: [technology("11166", "A Licensable Widget")],
+    });
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    // default beforeEach: mockFieldOverrideFindMany resolves []
+    const payload = await getScholarFullProfileBySlug("owner-one");
+    expect((payload?.technologies ?? []).map((t) => t.title)).toEqual(["A Licensable Widget"]);
+    expect(payload?.hiddenSections ?? []).not.toContain("hideTechnologies");
   });
 });
 

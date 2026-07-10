@@ -1419,8 +1419,13 @@ export const getScholarFullProfileBySlug = cache(
       // on: an unflagged env returns [] regardless of the table contents, so the
       // ETL seed can land before the flag flip without exposing the section.
       // Ordering comes from the query (title asc).
+      // section-visibility — `hideTechnologies` drops the whole section (in
+      // addition to the AVAILABLE_TECHNOLOGIES_SECTION dark-launch gate), the
+      // same precedent as `hideClinicalTrials`. The /edit read-only mirror is
+      // NOT hide-gated, so the scholar can still un-hide.
       technologies:
-        process.env.AVAILABLE_TECHNOLOGIES_SECTION === "on"
+        process.env.AVAILABLE_TECHNOLOGIES_SECTION === "on" &&
+        !hiddenSections.has("hideTechnologies")
           ? scholar.technologies.map((t) => ({
               reference: t.reference,
               title: t.title,

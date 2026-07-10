@@ -410,3 +410,55 @@ describe("VisibilityCard — Sections panel", () => {
     expect(screen.queryByRole("button", { name: "Hide section" })).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// #1639 — "Available technologies" is an applicability-gated 8th toggle: it
+// renders ONLY when `availableTechnologies` is true (flag on + ≥1 CTL invention),
+// unlike the other seven which every scholar sees.
+// ---------------------------------------------------------------------------
+
+describe("VisibilityCard — Available technologies toggle (applicability-gated)", () => {
+  it("is ABSENT when availableTechnologies is false/undefined; the other 7 still render", () => {
+    render(<VisibilityCard cwid={CWID} suppression={NEITHER} sections={SECTIONS} />);
+    expect(screen.queryByTestId("section-toggle-hideTechnologies")).toBeNull();
+    // The seven always-on toggles are unaffected.
+    for (const key of SECTION_KEYS) {
+      expect(screen.getByTestId(`section-toggle-${key}`)).toBeTruthy();
+    }
+  });
+
+  it("RENDERS when availableTechnologies is true", () => {
+    render(
+      <VisibilityCard
+        cwid={CWID}
+        suppression={NEITHER}
+        sections={{ ...SECTIONS, availableTechnologies: true }}
+      />,
+    );
+    expect(screen.getByTestId("section-toggle-hideTechnologies")).toBeTruthy();
+    expect(screen.getByText("Available technologies")).toBeTruthy();
+  });
+
+  it("Hide → confirm → POSTs fieldName 'hideTechnologies' value 'true' to /api/edit/field", async () => {
+    const f = stubFetch({ body: { ok: true } });
+    render(
+      <VisibilityCard
+        cwid={CWID}
+        suppression={NEITHER}
+        sections={{ ...SECTIONS, availableTechnologies: true }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("section-toggle-hideTechnologies"));
+    fireEvent.click(await screen.findByRole("button", { name: "Hide section" }));
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    const [url, opts] = f.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/edit/field");
+    expect(JSON.parse(opts.body as string)).toEqual({
+      entityType: "scholar",
+      entityId: CWID,
+      fieldName: "hideTechnologies",
+      value: "true",
+    });
+    expect(mockRefresh).toHaveBeenCalled();
+  });
+});

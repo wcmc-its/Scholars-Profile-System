@@ -582,6 +582,19 @@ describe("EditPage router — Available technologies rail (AVAILABLE_TECHNOLOGIE
     const item = screen.getByTestId("rail-technologies") as HTMLAnchorElement;
     expect(item.getAttribute("href")).toBe("/edit/scholar/other7?attr=technologies");
   });
+
+  it("#1639 — threads availableTechnologies into the Visibility Sections panel (populated → toggle shows)", () => {
+    render(<EditPage ctx={withTech} mode="self" attr="visibility" />);
+    // ctx.technologies non-empty ⇒ the 8th (applicability-gated) hide toggle renders.
+    expect(screen.getByTestId("section-toggle-hideTechnologies")).toBeTruthy();
+  });
+
+  it("#1639 — no technologies ⇒ the Visibility Sections panel omits the toggle", () => {
+    render(<EditPage ctx={ctx} mode="self" attr="visibility" />);
+    // The other section toggles still render; the technologies one is gated off.
+    expect(screen.getByTestId("section-toggle-hideMethods")).toBeTruthy();
+    expect(screen.queryByTestId("section-toggle-hideTechnologies")).toBeNull();
+  });
 });
 
 describe("EditPage router — self Profile URL request card (#497 PR-3, flag-gated)", () => {
