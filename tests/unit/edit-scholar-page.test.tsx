@@ -117,6 +117,7 @@ const fakeCtx = (cwid: string) => ({
   reporterProfileCandidates: [],
   reporterProfileConfirmed: [],
   highlights: null,
+  technologies: [],
 });
 
 function params(cwid: string): Promise<{ cwid: string }> {
