@@ -29,7 +29,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronDown, ChevronUp, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, HelpCircle, X } from "lucide-react";
 
 import {
   DirectoryPeopleTypeahead,
@@ -39,7 +39,9 @@ import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { Textarea } from "@/components/ui/textarea";
+import { COE_HELP } from "@/lib/center-program-roles";
 import { cn } from "@/lib/utils";
 
 /** Mirrors `PROGRAM_PAGE_EXCLUDED_CODES` in `lib/api/centers.ts` (server-only,
@@ -265,7 +267,21 @@ function ProgramEditor({
 
       {/* Leaders */}
       <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">Leadership</span>
+        <span className="flex items-center gap-1 text-sm font-medium">
+          Leadership
+          {/* #1570 — "COE" isn't self-evident, and a native <option> can't host a
+              tooltip, so the definition lives beside the dropdowns. */}
+          <HoverTooltip text={COE_HELP} wide>
+            <button
+              type="button"
+              aria-label="What is a COE Liaison?"
+              className="text-muted-foreground hover:text-foreground inline-flex size-5 items-center justify-center rounded-full"
+              data-testid={`leadership-help-${program.code}`}
+            >
+              <HelpCircle className="size-4" />
+            </button>
+          </HoverTooltip>
+        </span>
         {leaders.length === 0 ? (
           <p className="text-muted-foreground text-sm">No leaders set.</p>
         ) : (
