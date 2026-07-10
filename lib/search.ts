@@ -323,7 +323,8 @@ export const peopleIndexMapping = {
       // certifications, primary specialties, and clinical expertise (problem_procedure)
       // by the etl/pops step. All three are OMIT-on-empty (scholars with no POPS data
       // carry none of these fields). The query-time boost and clinical:exact evidence
-      // kind are gated behind SEARCH_PEOPLE_CLINICAL (default OFF, reindex-then-flip).
+      // kind are gated behind SEARCH_PEOPLE_CLINICAL_FN. `clinicalExpertise` is indexed
+      // but no live query path reads it (the removed text-field variant was its only one).
       //
       // `clinicalSpecialties` — board-cert ∪ primary specialties, deduped
       // case-insensitively; queried via the cross_fields multi_match at a conservative

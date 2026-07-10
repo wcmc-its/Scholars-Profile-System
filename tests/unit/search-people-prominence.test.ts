@@ -337,6 +337,44 @@ describe("clinical-specialty function_score boost — Track B / B2", () => {
     expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length);
   });
 
+  // #1333 — the clinical:exact REASON was re-pointed off the removed text-field flag
+  // (SEARCH_PEOPLE_CLINICAL) onto this one. The reason fields have to be fetched for
+  // `clinicalExactMatch` to run at all, so `_source` is the observable proxy: no
+  // request for them ⇒ no reason can ever be emitted.
+  it("requests the clinical reason fields in _source when the flag is on", async () => {
+    await searchPeople({
+      q: "obesity",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: ["D012345"],
+    });
+    expect(capturedBodies[0]._source).toEqual(
+      expect.arrayContaining(["clinicalSpecialties", "clinicalBoardSet"]),
+    );
+  });
+
+  it("requests them on the name shape too — the reason is shape-agnostic", async () => {
+    // The function_score boost is topic/hybrid only, but a board-cert match is a valid
+    // reason on any shape, so the reason gate is the plain flag read.
+    await searchPeople({ q: "cantley", relevanceMode: "v3", shape: "name" });
+    expect(capturedBodies[0]._source).toEqual(
+      expect.arrayContaining(["clinicalSpecialties", "clinicalBoardSet"]),
+    );
+  });
+
+  it("flag off → clinical reason fields are not fetched (no reason emitted)", async () => {
+    delete process.env.SEARCH_PEOPLE_CLINICAL_FN;
+    await searchPeople({
+      q: "obesity",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: ["D012345"],
+    });
+    expect(capturedBodies[0]._source).not.toEqual(
+      expect.arrayContaining(["clinicalSpecialties"]),
+    );
+  });
+
   it("flag off → no clinical boost (byte-identical to today)", async () => {
     delete process.env.SEARCH_PEOPLE_CLINICAL_FN;
     await searchPeople({

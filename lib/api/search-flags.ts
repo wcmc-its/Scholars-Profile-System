@@ -1050,46 +1050,14 @@ export function resolveAcronymSenseGuardEnabled(): boolean {
   return process.env.SEARCH_ACRONYM_SENSE_GUARD === "on";
 }
 
-/**
- * POPS clinical specialty search — People-tab ranking boost + clinical:exact
- * evidence kind. When on, the people query adds `clinicalSpecialties` and
- * `clinicalExpertise` to the multi_match boost ladder so a specialty query
- * ("cardiology") ranks the matching clinician, and `resolveHitEvidence` emits
- * a `clinical:exact` reason when every query content token is covered by a
- * specialty string in the hit's `clinicalSpecialties` set.
- *
- * Default OFF (`SEARCH_PEOPLE_CLINICAL=on` enables). This is a
- * reindex-then-flip rollout: the three clinical fields
- * (`clinicalSpecialties`, `clinicalExpertise`, `clinicalBoardSet`) must be
- * in the people index docs BEFORE flipping — the etl/pops step populates
- * the Scholar rows and a full people reindex writes the doc fields.
- * Flipping first boosts absent fields (wasted no-op clauses). Reversible
- * by clearing the flag. Flag-parity note: when enabling later, wire the env
- * var in BOTH `.env.local` AND `cdk/lib/app-stack.ts` per environment — a
- * local-on / deployed-off split silently ships nothing.
- */
-export function resolveSearchPeopleClinical(): boolean {
-  return process.env.SEARCH_PEOPLE_CLINICAL === "on";
-}
-
-/** Ranking boost applied to the `clinicalSpecialties` field in the people
- *  multi_match when SEARCH_PEOPLE_CLINICAL is on (`SEARCH_PEOPLE_CLINICAL_BOOST`).
- *  Default 5 — below `publicationTitles^6`/`publicationMesh^4` so clinical evidence
- *  surfaces clinicians without overpowering publication evidence. Env-tunable.
- *  NOTE: this rides `SEARCH_PEOPLE_CLINICAL`, the cross_fields text-field variant
- *  a later in-VPC A/B found INERT (see `resolveSearchPeopleClinicalFn` below — the
- *  function_score path is what actually shipped). Dead lever while that flag is off. */
-export function resolveSearchPeopleClinicalBoost(): number {
-  const n = Number(process.env.SEARCH_PEOPLE_CLINICAL_BOOST);
-  return Number.isFinite(n) && n > 0 ? n : 5;
-}
-
 /** Count thresholds for the clinical:exact-vs-publications:tagged reason precedence
  *  (`SEARCH_PEOPLE_CLINICAL_BOARD_OVER_TAGGED` / `_SPECIALTY_OVER_TAGGED`).
  *  clinical:exact outranks a `tagged` reason only when the tagged pub count is
  *  below the threshold — higher for a board certification than a bare specialty.
  *  Defaults: board 6, specialty 4 ("5 pubs > 1 specialty, 3 maybe not; board cert >
- *  specialty"). Env-tunable so the inclination can be dialed without a code change. */
+ *  specialty"). Env-tunable so the inclination can be dialed without a code change.
+ *  Rides `SEARCH_PEOPLE_CLINICAL_FN` (the function_score path that actually shipped),
+ *  NOT the removed cross_fields text-field variant. */
 export function resolveSearchPeopleClinicalReasonThresholds(): {
   boardOverTagged: number;
   specialtyOverTagged: number;
@@ -1103,8 +1071,8 @@ export function resolveSearchPeopleClinicalReasonThresholds(): {
 }
 
 /**
- * Track B / B2 — clinical-as-function_score. SEPARATE from `SEARCH_PEOPLE_CLINICAL` (the
- * inert cross_fields text-field variant): an in-VPC A/B proved the text field is swallowed by
+ * Track B / B2 — clinical-as-function_score. Replaced the cross_fields text-field variant
+ * (`SEARCH_PEOPLE_CLINICAL`, since removed): an in-VPC A/B proved the text field is swallowed by
  * the cross_fields blend (a clinician who also publishes on the topic gets no lift). Instead,
  * boost scholars whose BOARD-DERIVED `clinicalSpecialties` match the query via an additive
  * function_score weight (the same outer prominence layer the area boost rides). Measured: on

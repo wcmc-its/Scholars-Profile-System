@@ -55,7 +55,6 @@ owning issues; dates from the cdk flip annotations.
 
 | Flag | Owner | Exit criterion / decision |
 |---|---|---|
-| SEARCH_PEOPLE_CLINICAL | #1372 Track A | INERT (text field empty in index) — kill or backfill decision rides clinical-fn outcome (CLINICAL_FN itself converged prod-on 07-05, table above) |
 | SEARCH_PEOPLE_DIVISION_SHAPE | #1347 | Dark pending A/B of division-shape routing |
 | SEARCH_PEOPLE_CONCEPT_PRECOUNT | #1414 | Inverted polarity ("off" = new fast path); #1414 wants code-default flip |
 | SEARCH_SUGGEST_MESH_CONCEPT | #878 | Flip staging first for a soak → prod; no data prereq |

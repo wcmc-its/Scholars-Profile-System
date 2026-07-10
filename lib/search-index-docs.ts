@@ -1309,8 +1309,8 @@ export async function buildPeopleDoc(
     // nothing for any of these fields, so `_source` consumers distinguish
     // "no clinical data" from "[]"). All three are populated by the etl/pops
     // step; the query-time boost and clinical:exact evidence are gated behind
-    // SEARCH_PEOPLE_CLINICAL (default OFF) so indexing these fields is inert
-    // until the flag is flipped after a successful people reindex.
+    // SEARCH_PEOPLE_CLINICAL_FN, so indexing these fields is inert until that
+    // flag is on and a people reindex has landed.
     ...(clinicalSpecialties.length > 0 ? { clinicalSpecialties } : {}),
     ...(clinicalExpertise.length > 0 ? { clinicalExpertise } : {}),
     ...(clinicalBoardSet.length > 0 ? { clinicalBoardSet } : {}),

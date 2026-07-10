@@ -66,8 +66,8 @@ Pattern: clone `methodFamily` (cheap, indexed, query-time `multi_match` boost). 
   - `clinicalExpertise` — `expertise` / `problem_procedure`.
   - ponytail: two `text` fields, not keyword facets — no faceting was requested. Add keyword sub-fields only if a specialty filter UI lands later.
 - **Mapping** (`lib/search.ts` `peopleIndexMapping`): both as `type: text, analyzer: scholar_text` (same as `areasOfInterest`). Adds ~0.5–2 KB/doc — within the ~53 KB/doc budget but **verify against the byte-aware 8 MB chunker** (#485/#626); keep expertise a single short blob, don't repeat it.
-- **Query** (`lib/api/search.ts`): add the two fields to the people `cross_fields multi_match` field set (`peopleTopicFields`/`peopleDefaultFields`). `clinicalSpecialties` boost is **env-tunable** via `SEARCH_PEOPLE_CLINICAL_BOOST` (default **^5**, below `publicationTitles^6`/`publicationMesh^4`); `clinicalExpertise` stays `^2` (loose). Raised from the initial `^3` to surface clinicians higher for specialty queries.
-- **Flag:** gate behind `SEARCH_PEOPLE_CLINICAL` (default **OFF**), cloning the `SEARCH_PEOPLE_METHOD_FAMILY` lifecycle. **Reindex must land before the flag flips** (field has to be in the doc first).
+- **Query** — ~~add the two fields to the people `cross_fields multi_match` field set~~. **Superseded.** An in-VPC A/B proved the text-field path inert: `cross_fields` blends the clinical field into the same blob as publication text, so a clinician who also publishes on the topic gets no lift. The shipped mechanism is an additive **`function_score`** weight on docs whose board-derived `clinicalSpecialties` match the query (Track B / B2). The `SEARCH_PEOPLE_CLINICAL` flag, its `^N` field boost, and the `clinicalFields` spread have all been removed.
+- **Flag:** `SEARCH_PEOPLE_CLINICAL_FN` (function_score weight, prod-on since 2026-07-05). **Reindex must land before the flag flips** (field has to be in the doc first). `clinicalExpertise` remains indexed but is read by no live query path.
 
 ## 4. Deliverable 3 — search explanation (match reason only)
 
@@ -78,7 +78,7 @@ Add a `"clinical"` evidence kind, mirroring `"method"`. Data reads from the hit 
 `selectEvidence()` is a first-match-wins precedence list; today it already ranks by *match precision* (tagged > concept > mention). Clinical is **two signals, not one**, and obeys the same law:
 
 - **`clinical:exact`** — the searcher asked for exactly this specialty. **The only clinical case that earns a reason line.** It sits at **rank 3/4 against `publications:tagged`, COUNT-GATED** (below): it beats a *weak* tagged-pub signal but loses to a *strong* one. Above `publications:concept` / `selfDescription` / `publications:mention` / `topic` regardless.
-- **`clinical:loose`** — query tokens fuzzily overlap a specialty/expertise string. **Contributes to ranking only** (the field stays in the §3 `multi_match`); generates **no** clinical reason. Conservative: under-claim rather than mislabel.
+- **`clinical:loose`** — query tokens fuzzily overlap a specialty/expertise string. **Contributes to ranking only** (via the §3 `function_score` weight); generates **no** clinical reason. Conservative: under-claim rather than mislabel.
 
 **Count-gated `clinical:exact` vs `publications:tagged`** (env-tunable). `clinical:exact` outranks a `tagged` reason only when the tagged pub **count is below a threshold** — higher for a board certification than a bare specialty (`SEARCH_PEOPLE_CLINICAL_BOARD_OVER_TAGGED` default **6**, `…_SPECIALTY_OVER_TAGGED` default **4**):
 - board-cert match beats ≤5 tagged pubs, loses to ≥6;
@@ -114,8 +114,8 @@ Known v1 gap (accepted): synonym/abbreviation specialty queries ("heart" → car
 
 | File | Change |
 |------|--------|
-| `lib/api/result-evidence.ts` | Add union variant `{ kind: "clinical"; specialty: string; boardCertified: boolean }`; add `clinical?: { specialty; boardCertified }` to `SelectEvidenceInput`; insert the rank-4 precedence clause in `selectEvidence()`. |
-| `lib/api/search.ts` | In `resolveHitEvidence()`, run the §4.1 exact-tier check against the hit's `_source` clinical specialties + the content query; pass `clinical` (or nothing for loose) to `selectEvidence`. Gate on `SEARCH_PEOPLE_CLINICAL`. |
+| `lib/api/result-evidence.ts` | Add union variant `{ kind: "clinical"; specialty: string; boardCertified: boolean }`; add `clinical?: { specialty; boardCertified }` to `SelectEvidenceInput`; insert the count-gated rank-3/4 precedence clause in `selectEvidence()`. |
+| `lib/api/search.ts` | In `resolveHitEvidence()`, run the §4.1 exact-tier check against the hit's `_source` clinical specialties + the content query; pass `clinical` (or nothing for loose) to `selectEvidence`. Gate on `SEARCH_PEOPLE_CLINICAL_FN`. |
 | `components/search/result-evidence.tsx` | Add `case "clinical": return <MatchAwareReason kind="clinical" label={evidence.boardCertified ? \`Board certified in ${evidence.specialty}\` : \`Clinical specialty: ${evidence.specialty}\`} … />`. |
 | `components/search/match-reason.tsx` | Extend `MatchAwareReason` kind union with `"clinical"`; add `Stethoscope` icon + teal badge branch; import the icon. |
 
@@ -126,8 +126,8 @@ Known v1 gap (accepted): synonym/abbreviation specialty queries ("heart" → car
 1. Schema migration + `etl/pops/index.ts` + orchestrate wiring → land, run on staging.
 2. **Coverage probe (G1)** → go/no-go on the rest.
 3. Index mapping + `buildPeopleDoc` fields → full reindex (field in doc, nothing queries it yet).
-4. Query boost + `"clinical"` reason kind, all behind `SEARCH_PEOPLE_CLINICAL=OFF`.
-5. Flag parity: wire `SEARCH_PEOPLE_CLINICAL` in `cdk/lib/app-stack.ts` per-env (not just `.env.local`) + regenerate the app-stack snapshot (`cd cdk && npm test -- -u`).
+4. Query boost + `"clinical"` reason kind, behind `SEARCH_PEOPLE_CLINICAL_FN` (the text-field variant and its flag are removed).
+5. Flag parity: wire `SEARCH_PEOPLE_CLINICAL_FN` and the two `…_OVER_TAGGED` thresholds in `cdk/lib/app-stack.ts` per-env (not just `.env.local`) + regenerate the app-stack snapshot (`cd cdk && npm test -- -u`).
 6. Flip flag **on staging** → verify a specialty query surfaces the right clinician with the clinical reason → soak → prod.
 
 ## 6. Edge cases / tests
@@ -142,7 +142,7 @@ Known v1 gap (accepted): synonym/abbreviation specialty queries ("heart" → car
 | Loose/synonym specialty query ("heart" → Cardiology) | no clinical reason; still contributes to ranking; falls through to other evidence. |
 | Specialty present but not board-certified | label "Clinical specialty: X", never "Board certified". |
 | POPS specialty changed since last run | refreshed nightly; `popsRefreshedAt` tracks staleness. |
-| `SEARCH_PEOPLE_CLINICAL` OFF | identical to today (field indexed but unqueried, no reason emitted). |
+| `SEARCH_PEOPLE_CLINICAL_FN` OFF | identical to today (fields indexed but unqueried, no reason emitted). |
 
 ## 7. Decisions
 

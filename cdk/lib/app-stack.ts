@@ -1559,29 +1559,16 @@ export class AppStack extends Stack {
         // reindex + flip). resolvePeopleMethodContextBoost reads === "on"; a
         // not-yet-reindexed cluster matches an absent field (never a 500).
         SEARCH_PEOPLE_METHOD_CONTEXT: "on", // Prod flipped 2026-07-05 (#962/#1481 methods-lens go-live).
-        // POPS clinical specialty search -- indexes board-cert specialties, primary
-        // specialties, and clinical expertise (problem_procedure) from POPS into the
-        // people doc and adds a clinical:exact evidence kind when the query matches
-        // a specialty exactly. Reindex-then-flip: the etl/pops step must run AND the
-        // people index must be rebuilt with the three clinical fields before flipping
-        // on. resolveSearchPeopleClinical reads === "on"; off => fields indexed but
-        // not queried, no clinical reason emitted, body byte-identical to today.
-        // Default OFF both envs. A later in-VPC A/B proved this cross_fields
-        // text-field path INERT, so #1333's staging-on flip is deliberately NOT
-        // restored on this merge; the function_score path below is what ships.
-        SEARCH_PEOPLE_CLINICAL: "off",
-        // #1333 clinical relevance tuning — levers for the text-field path above.
-        // Read ONLY when SEARCH_PEOPLE_CLINICAL is "on", so they are inert today;
-        // wired anyway because the flag-parity CI gate requires every env key a
-        // code path consumes to exist in cdk. BOOST = clinicalSpecialties field
-        // boost in the people multi_match. *_OVER_TAGGED = the tagged-pub COUNT
-        // below which a clinical:exact reason outranks a tagged-pub reason (board
-        // cert beats more pubs than a bare specialty: "5 pubs > 1 specialty").
-        SEARCH_PEOPLE_CLINICAL_BOOST: "5",
+        // #1333 clinical-reason precedence — the tagged-pub COUNT below which a
+        // clinical:exact reason outranks a tagged-pub reason (a board cert beats more
+        // pubs than a bare specialty: "5 pubs > 1 specialty"). Read whenever
+        // SEARCH_PEOPLE_CLINICAL_FN is on, so these are live wherever that flag is.
+        // The flag-parity CI gate requires every env key a code path consumes.
         SEARCH_PEOPLE_CLINICAL_BOARD_OVER_TAGGED: "6",
         SEARCH_PEOPLE_CLINICAL_SPECIALTY_OVER_TAGGED: "4",
-        // Track B / B2 — clinical-specialty function_score boost (separate from the inert
-        // text-field SEARCH_PEOPLE_CLINICAL above). Additive boost on docs whose board-derived
+        // Track B / B2 — clinical-specialty function_score boost. (The cross_fields
+        // text-field variant SEARCH_PEOPLE_CLINICAL was measured inert in-VPC and has
+        // been removed.) Additive boost on docs whose board-derived
         // clinicalSpecialties match the query; lifts thin-publication clinician-experts
         // (measured: obesity Igel #183->#12). No reindex (query-time boost). Query-tunable
         // weight via SEARCH_PEOPLE_CLINICAL_FN_WEIGHT (code default 3). Staging-on after the
