@@ -1105,6 +1105,9 @@ export class AppStack extends Stack {
         // corpus carries match_dsl); lib/api/match-researchers.ts also self-gates
         // on the opportunity's compiled match_dsl, so "on" is safe pre-reproject.
         GRANT_MATCHER_SUBTOPIC_GRAIN: envConfig.grantMatcherSubtopicGrain ? "on" : "off",
+        // Abstention floor for the reverse matcher (0 = off). Staging-first; must
+        // stay 0 wherever subtopic-grain is off. See config.ts grantMatcherAbstainFloor.
+        GRANT_MATCHER_ABSTAIN_FLOOR: String(envConfig.grantMatcherAbstainFloor),
         // OpenSearch domain endpoint (https://...). Default: a plaintext env
         // baked from the DataStack cross-stack export. When
         // openSearchNodeFromSecret is on (consolidation cutover de-coupling,
