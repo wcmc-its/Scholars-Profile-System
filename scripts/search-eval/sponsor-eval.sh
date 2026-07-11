@@ -72,6 +72,7 @@ echo "(higher nDCG@$K = better order; Spearman ρ∈[-1,1]; coverage = judged pe
 echo
 
 acc="[]"
+fetched="{}"   # id → full ranked cwid array (captured when FETCH_OUT is set); a reusable run.json
 while read -r prompt; do
   id="$(jq -r '.id' <<<"$prompt")"
   ideal="$(jq -c '.ideal' <<<"$prompt")"
@@ -81,6 +82,7 @@ while read -r prompt; do
     actual="$(jq -c --arg id "$id" '.[$id] // []' "$ACTUAL")"
   fi
   [[ -z "$actual" ]] && actual='[]'
+  [[ -n "${FETCH_OUT:-}" ]] && fetched="$(jq -n --argjson f "$fetched" --arg id "$id" --argjson a "$actual" '$f + {($id): $a}')"
   s="$(jq -f "$DIR/sponsor-score.jq" --argjson ideal "$ideal" --argjson k "$K" --arg id "$id" <<<"$actual")"
   jq -r '"── \(.id)   nDCG@\(.k)=\(if .ndcg_at_k == null then "n/a" else (.ndcg_at_k*1000|floor)/1000 end)   ρ=\(if .spearman == null then "n/a" else (.spearman*1000|floor)/1000 end)   coverage=\(.found)/\(.n_ideal)\(if (.missing|length)>0 then "   missing=\(.missing|join(","))" else "" end)"' <<<"$s"
   acc="$(jq -n --argjson a "$acc" --argjson s "$s" '$a + [$s]')"
@@ -94,3 +96,4 @@ jq -r '
   | "OVERALL   meanNDCG=\(if ($nd|length)==0 then "n/a" else (([ $nd[].ndcg_at_k ]|add/($nd|length))*1000|floor)/1000 end)   meanρ=\(if ($sp|length)==0 then "n/a" else (([ $sp[].spearman ]|add/($sp|length))*1000|floor)/1000 end)   coverage=\([.[].found]|add)/\([.[].n_ideal]|add)"
 ' <<<"$acc"
 if [[ -n "${JSON_OUT:-}" ]]; then echo "$acc" > "$JSON_OUT"; echo "wrote $JSON_OUT"; fi
+if [[ -n "${FETCH_OUT:-}" ]]; then echo "$fetched" > "$FETCH_OUT"; echo "wrote $FETCH_OUT (full ranker output — reusable run.json; carries cwids, keep local)"; fi

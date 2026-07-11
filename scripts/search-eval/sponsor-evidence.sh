@@ -32,11 +32,14 @@ clean() { jq -rn --arg s "$1" '$s | gsub("<[^>]+>";" ") | gsub("\\s+";" ") | .[0
 bundles="[]"
 while read -r row; do
   cwid="$(jq -r '.cwid' <<<"$row")"
+  [[ -z "$cwid" || "$cwid" == "null" ]] && continue
   name="$(jq -r '.preferredName // .name // ""' <<<"$row")"
-  [[ -z "$name" ]] && continue
 
   # --- Scholars profile: role + human bio overview ---
   prof="$(curl -4 -s --max-time 20 "$HOST/api/scholars/$cwid" || echo '{}')"
+  # name may come from the pool row OR (for ranker-return pseudo-pools) the profile itself
+  [[ -z "$name" ]] && name="$(jq -r '.preferredName // .fullName // ""' <<<"$prof")"
+  [[ -z "$name" ]] && continue
   title="$(jq -r '.primaryTitle // "?"' <<<"$prof")"
   dept="$(jq -r '.primaryDepartment // "?"' <<<"$prof")"
   overview="$(clean "$(jq -r '.overview // ""' <<<"$prof")")"
