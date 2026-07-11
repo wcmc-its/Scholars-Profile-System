@@ -116,7 +116,11 @@ export function UnitDescriptionCard({
       throw new Error("clear_failed"); // keeps the dialog open
     }
     // The upstream (ETL) value now shows through; we don't know it client-side,
-    // so blank the editor and let the next page load re-seed it.
+    // so blank the editor and let the next page load re-seed it. Reset both
+    // `value` and `saved` or the textarea keeps showing the just-cleared
+    // override text (and `dirty` stays false, hiding that anything changed).
+    setValue("");
+    setSaved("");
     setOverrideExists(false);
     setConfirmOpen(false);
     setJustSaved(true);

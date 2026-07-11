@@ -69,9 +69,17 @@ export function AuthorFacet({
   }, [unselected, query, sort]);
 
   const hasQuery = query.trim().length > 0;
-  // Show-all unconditionally expands; with a query, the search itself
-  // narrows so we hide the Show-all toggle (per spec §"Search/typeahead").
-  const visibleCap = hasQuery ? EXPANDED_VISIBLE : showAll ? EXPANDED_VISIBLE : TOP_VISIBLE;
+  // Show-all reveals every author the server sent (not a second 50-cap): the
+  // button promises "Show all N", so capping the reveal at EXPANDED_VISIBLE
+  // stranded rows 51+ AND removed the button, leaving them unreachable. With a
+  // query, the search itself narrows so we hide the toggle and keep the 50-cap.
+  // (The server still sends at most ~500 buckets, so a very large N can exceed
+  // what's revealable client-side — that bucket cap is a separate concern.)
+  const visibleCap = hasQuery
+    ? EXPANDED_VISIBLE
+    : showAll
+      ? filtered.length
+      : TOP_VISIBLE;
   const visible = filtered.slice(0, visibleCap);
   const hiddenCount = Math.max(0, filtered.length - visible.length);
 
