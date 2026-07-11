@@ -29,7 +29,6 @@ SERPAPI_KEY
 BIOSKETCH_GENERATE_MODEL
 EDIT_BIOSKETCH_GENERATE_RATE_LIMIT
 EDIT_CV_EXPORT_RATE_LIMIT           # CV-export Bedrock cap (code default 10/hr)
-GRANT_MATCHER_ABSTAIN_FLOOR         # abstain gate; code default 0=off, re-validate floor on staging before enabling
 GRANT_MATCHER_DENSE_REL
 GRANT_MATCHER_REL_BOOST
 IMPERSONATION_READONLY

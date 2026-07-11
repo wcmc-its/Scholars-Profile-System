@@ -1795,6 +1795,12 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("GRANT_MATCHER_SUBTOPIC_GRAIN")).toBe("off");
       });
 
+      it("keeps the abstention floor off in prod (GRANT_MATCHER_ABSTAIN_FLOOR=0, #287)", () => {
+        // Must stay 0 while subtopic-grain is off: meanTopRel is 0 on the
+        // topic-vector path, so any positive floor would abstain every grant.
+        expect(appContainerEnv().get("GRANT_MATCHER_ABSTAIN_FLOOR")).toBe("0");
+      });
+
       it("activates the family click-to-filter in prod (METHODS_LENS_FAMILY_FILTER, #819/#962 go-live)", () => {
         // Prod go-live 2026-07-05 with the sibling Methods-lens flags: the
         // pmids-bearing scholar_family rollup is loaded (#1481) and the staging soak is done.
@@ -2235,6 +2241,9 @@ describe("AppStack", () => {
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("GRANT_MATCHER_SUBTOPIC_GRAIN")).toBe("on");
+      // #287 abstention floor: staging-first at the match_v9b offline prior (0.1),
+      // safe here because subtopic-grain is on.
+      expect(envByName.get("GRANT_MATCHER_ABSTAIN_FLOOR")).toBe("0.1");
     });
 
     it("enables the center collaboration network in staging first (CENTER_COLLABORATION_NETWORK=on, #1137)", () => {
