@@ -751,8 +751,12 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SCHOLARS_SUPERUSER_GROUP_CN",
+                "Value": "ITS:Library:Scholars/superuser-role",
+              },
+              {
                 "Name": "SCHOLARS_SUPERUSER_CWIDS",
-                "Value": "paa2013,drw2004,mrj4001,ved4006,mom2021",
+                "Value": "",
               },
               {
                 "Name": "COMMS_STEWARD_ENABLED",
@@ -760,7 +764,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_COMMS_STEWARD_GROUP_CN",
-                "Value": "",
+                "Value": "ITS:Library:Scholars/comms-steward-role",
               },
               {
                 "Name": "SCHOLARS_COMMS_STEWARD_ALLOWLIST",
@@ -772,11 +776,11 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_DEVELOPMENT_GROUP_CN",
-                "Value": "",
+                "Value": "ITS:Library:Scholars/development-role",
               },
               {
                 "Name": "SCHOLARS_DEVELOPMENT_ALLOWLIST",
-                "Value": "lmp2006",
+                "Value": "",
               },
               {
                 "Name": "SECURITY_CSP_MODE",
@@ -4448,8 +4452,12 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SCHOLARS_SUPERUSER_GROUP_CN",
+                "Value": "ITS:Library:Scholars/superuser-role",
+              },
+              {
                 "Name": "SCHOLARS_SUPERUSER_CWIDS",
-                "Value": "paa2013,drw2004,mrj4001,ved4006,mom2021",
+                "Value": "",
               },
               {
                 "Name": "COMMS_STEWARD_ENABLED",
@@ -4457,11 +4465,11 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_COMMS_STEWARD_GROUP_CN",
-                "Value": "",
+                "Value": "ITS:Library:Scholars/comms-steward-role",
               },
               {
                 "Name": "SCHOLARS_COMMS_STEWARD_ALLOWLIST",
-                "Value": "dwd2001",
+                "Value": "",
               },
               {
                 "Name": "DEVELOPMENT_ENABLED",
@@ -4469,11 +4477,11 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_DEVELOPMENT_GROUP_CN",
-                "Value": "",
+                "Value": "ITS:Library:Scholars/development-role",
               },
               {
                 "Name": "SCHOLARS_DEVELOPMENT_ALLOWLIST",
-                "Value": "flm4001,lmp2006",
+                "Value": "",
               },
               {
                 "Name": "SECURITY_CSP_MODE",

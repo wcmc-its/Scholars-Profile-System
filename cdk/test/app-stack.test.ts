@@ -1840,15 +1840,16 @@ describe("AppStack", () => {
         expect(env.get("BIOSKETCH_PROMPT_VERSION_DEFAULT")).toBe("v7");
       });
 
-      it("ships the #443 interim superuser allowlist with the group CN left unset", () => {
-        // The live LDAP superuser check can't reach the WCM directory yet, so
-        // the allowlist confers the tier without LDAP and the group CN stays
-        // unset (else every session probe hangs on the LDAPS connect timeout).
+      it("sources the superuser tier from the ED group with the allowlist emptied", () => {
+        // Membership now flows from ITS:Library:Scholars/superuser-role (all
+        // former allowlist CWIDs verified members, both envs); the allowlist is
+        // an empty break-glass override. #1592 gave the app the LDAP route,
+        // #1626 made the dynamic-group query correct+fast.
         const env = appContainerEnv();
-        expect(env.get("SCHOLARS_SUPERUSER_CWIDS")).toBe(
-          "paa2013,drw2004,mrj4001,ved4006,mom2021",
+        expect(env.get("SCHOLARS_SUPERUSER_GROUP_CN")).toBe(
+          "ITS:Library:Scholars/superuser-role",
         );
-        expect(env.has("SCHOLARS_SUPERUSER_GROUP_CN")).toBe(false);
+        expect(env.get("SCHOLARS_SUPERUSER_CWIDS")).toBe("");
       });
 
       it("the task role has zero AWS managed policies attached", () => {
