@@ -41,6 +41,7 @@ import {
   type ScholarTopicScore,
 } from "@/lib/api/match-researchers";
 import { relevanceScoresForQuery } from "@/lib/api/search";
+import { applyDenseRerank, denseWeight } from "@/lib/api/sponsor-match-dense";
 
 const RECITERAI_YEAR_FLOOR = 2020; // D-15; mirrors lib/api/match-researchers.ts (module-local there).
 
@@ -301,5 +302,8 @@ export async function rankResearchersForDescription(
       }));
     }
   }
-  return out;
+  // Stage-2 dense re-rank (design §2/§8): reorder the term-retrieved pool by
+  // fused (1-w)·terms + w·denseAffinity. wDense=0 (default) is a no-op — no extra
+  // queries, order byte-identical to the terms-only path.
+  return applyDenseRerank(out, (r) => r.defaultScore, rel, denseWeight(), now);
 }

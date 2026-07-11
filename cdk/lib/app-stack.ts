@@ -1274,6 +1274,12 @@ export class AppStack extends Stack {
         // SPONSOR_MATCH — the /edit/sponsor-match CTL surface (paste a sponsor's
         // description → researchers ranked on topical fit alone). Staging-on for soak; prod-off.
         SPONSOR_MATCH: env === "staging" ? "on" : "off",
+        // SPONSOR_MATCH_DENSE_WEIGHT — Stage-2 dense-affinity re-rank weight w∈[0,1]
+        // for sponsor-match (design docs/2026-07-10-sponsor-match-phase2-3-design.md
+        // §2/§8/§16-Q0). "0" = dense axis OFF, ranking byte-identical to terms-only.
+        // Ships at "0" both envs; the Phase-0 bake-off sets it per experiment
+        // (1 = dense-only, 0.5 = fused) before any default is committed.
+        SPONSOR_MATCH_DENSE_WEIGHT: "0",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
