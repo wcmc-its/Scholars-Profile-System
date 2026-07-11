@@ -100,10 +100,13 @@ export const isSuperuser = cache(async (cwid: string): Promise<boolean> => {
 export async function getEditSession(): Promise<EditSession | null> {
   const session = await getSession();
   if (!session) return null;
-  return {
-    cwid: session.cwid,
-    isSuperuser: await isSuperuser(session.cwid),
-    isCommsSteward: await isCommsSteward(session.cwid),
-    isDeveloper: await isDeveloper(session.cwid),
-  };
+  // #1514 — three independent LDAPS group checks; resolve concurrently so the
+  // wall-clock cost is one directory round-trip, not three. All three are
+  // fail-closed and never throw, so Promise.all cannot reject.
+  const [su, cs, dev] = await Promise.all([
+    isSuperuser(session.cwid),
+    isCommsSteward(session.cwid),
+    isDeveloper(session.cwid),
+  ]);
+  return { cwid: session.cwid, isSuperuser: su, isCommsSteward: cs, isDeveloper: dev };
 }
