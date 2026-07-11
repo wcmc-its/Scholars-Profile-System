@@ -1192,7 +1192,7 @@ describe("EdgeStack", () => {
         expect(stmt).toContain("IPSetReferenceStatement");
       });
 
-      it("ENFORCES the SQLi/known-bad/common managed groups, keeping only SizeRestrictions_Body in count (#1434)", () => {
+      it("ENFORCES the SQLi/known-bad/common managed groups, keeping only SizeRestrictions_BODY in count (#1434)", () => {
         const acl = Object.values(
           template.findResources("AWS::WAFv2::WebACL"),
         )[0]?.Properties as Record<string, unknown>;
@@ -1215,7 +1215,7 @@ describe("EdgeStack", () => {
           (x) => x.Name === "AWSManagedRulesCommonRuleSet",
         );
         const overrides = JSON.stringify(common?.Statement);
-        expect(overrides).toContain("SizeRestrictions_Body");
+        expect(overrides).toContain("SizeRestrictions_BODY");
         expect(overrides).toContain('"Count"');
       });
 
