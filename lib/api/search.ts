@@ -1045,10 +1045,15 @@ async function collectGrantMatchedCwids(descendantUis: string[]): Promise<string
  * scaled value. ONE OpenSearch round-trip (no aggs, `_source:["pmid"]`); an
  * empty/absent query yields an empty map so the relevance boost simply no-ops.
  * Used by the subtopic-grain reverse matcher (grant→researcher).
+ *
+ * `fields` defaults to title/abstract (unchanged for existing callers); sponsor
+ * concept-rank opts in `meshTerms` to reach domain vocabulary the surface
+ * lexicon misses (spec §4.1).
  */
 export async function relevanceScoresForQuery(
   matchQuery: unknown,
   size = 1000,
+  fields: string[] = ["title^2", "abstract"],
 ): Promise<Map<string, number>> {
   const terms = (Array.isArray(matchQuery) ? matchQuery : []).filter(
     (t): t is { q: string; w?: number } =>
@@ -1062,7 +1067,7 @@ export async function relevanceScoresForQuery(
   const should = terms.map((t) => ({
     multi_match: {
       query: t.q,
-      fields: ["title^2", "abstract"],
+      fields,
       boost: typeof t.w === "number" && t.w > 0 ? t.w : 1,
     },
   }));

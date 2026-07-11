@@ -1271,6 +1271,13 @@ export class AppStack extends Stack {
         // SPONSOR_MATCH — the /edit/sponsor-match CTL surface (paste a sponsor's
         // description → researchers ranked on topical fit alone). Staging-on for soak; prod-off.
         SPONSOR_MATCH: env === "staging" ? "on" : "off",
+        // SPONSOR_MATCH_CONCEPT_RANK — Phase-1 count-saturation + MeSH-axis
+        // refinement of the sponsor-match ranker (spec
+        // docs/2026-07-10-sponsor-match-concept-ranking-spec.md §4.1/§4.3).
+        // Ships DARK (off both envs) — the combiner is unvalidated until the
+        // Phase-0 eval fixture exists; flip to `env === "staging" ? "on" : "off"`
+        // for soak once that lands, prod stays off pending an explicit go.
+        SPONSOR_MATCH_CONCEPT_RANK: "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim

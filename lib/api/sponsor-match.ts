@@ -67,6 +67,31 @@ export function isSponsorMatchEnabled(): boolean {
   return process.env.SPONSOR_MATCH === "on";
 }
 
+/** Phase-1 concept-rank flag (default off, ships dark — spec
+ *  `docs/2026-07-10-sponsor-match-concept-ranking-spec.md` §11). Gates BOTH the
+ *  count-saturation combiner (§4.3) and the MeSH relevance field (§4.1). Off ⇒
+ *  byte-identical legacy behavior (raw Σ inc, title/abstract-only rel). */
+export function isConceptRankEnabled(): boolean {
+  return process.env.SPONSOR_MATCH_CONCEPT_RANK === "on";
+}
+
+/**
+ * Count-saturating topical-fit combiner (spec §4.3). Replaces the raw
+ * `Σ (impact × rel)` — which ranks by paper COUNT (§1a) — with
+ * quality-of-best-work × a saturating count term, borrowing the main
+ * people-ranker's `× ln1p(count)` shape (`search.ts` publicationCount modifier).
+ * Count enters ONLY through `ln1p`, so one strong paper beats three weak ones;
+ * K reuses TOP_EVIDENCE_ROWS. Pure — unit-tested directly.
+ * ponytail: swappable knob — Phase-0 eval (spec §6) arbitrates this ln1p-mean
+ *   form vs the n²/total concentration form before the flag flips staging-on.
+ */
+export function saturatedTopicFit(incs: number[]): number {
+  if (incs.length === 0) return 0;
+  const topK = [...incs].sort((a, b) => b - a).slice(0, TOP_EVIDENCE_ROWS);
+  const meanTop = topK.reduce((sum, x) => sum + x, 0) / topK.length;
+  return meanTop * (1 + Math.log1p(incs.length));
+}
+
 /** One evidence paper on a ranked row: PubMed-linkable, with the normalized
  *  BM25 relevance ((0–1], query-max-normalized) that weighted its contribution. */
 export type SponsorMatchPaper = {
@@ -113,10 +138,18 @@ export async function rankResearchersForDescription(
   opts: { limit?: number; now?: Date } = {},
 ): Promise<SponsorRankedScholar[]> {
   const now = opts.now ?? new Date();
+  const conceptRank = isConceptRankEnabled();
   const text = normalizeDescription(description);
   if (text.length === 0) return [];
 
-  const rel = await relevanceScoresForQuery([{ q: text }], 1000);
+  // MeSH axis (§4.1): concept-rank widens the BM25 rel query with `meshTerms`
+  // (indexed text field) so a paper's MeSH descriptors bridge domain vocabulary
+  // the surface title/abstract lexicon misses (§1b). Off ⇒ default fields.
+  const rel = await relevanceScoresForQuery(
+    [{ q: text }],
+    1000,
+    conceptRank ? ["title^2", "abstract", "meshTerms"] : undefined,
+  );
   if (rel.size === 0) return [];
 
   const rows = await db.read.publicationTopic.findMany({
@@ -212,6 +245,11 @@ export async function rankResearchersForDescription(
         topicWeight: 1,
         scholars: [...byScholar.values()].map((s) => ({
           ...s.entry,
+          // Count-saturation (§4.3): override the raw Σ inc with the saturating
+          // combiner when concept-rank is on; off ⇒ `...s.entry`'s raw sum stands.
+          variantBScore: conceptRank
+            ? saturatedTopicFit(s.papers.map((p) => p.inc))
+            : s.entry.variantBScore,
           pubCount: s.pmids.size,
           minYear: s.minYear,
         })),

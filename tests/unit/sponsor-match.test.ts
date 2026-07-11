@@ -62,7 +62,7 @@ vi.mock("@/lib/api/sponsor-match", async (importOriginal) => ({
 
 import { POST } from "@/app/api/edit/sponsor-match/route";
 
-const { rankResearchersForDescription } =
+const { rankResearchersForDescription, saturatedTopicFit } =
   await vi.importActual<typeof import("@/lib/api/sponsor-match")>("@/lib/api/sponsor-match");
 
 const NOW = new Date("2026-07-01T00:00:00Z");
@@ -259,5 +259,33 @@ describe("POST /api/edit/sponsor-match (route)", () => {
       researchers: [{ cwid: "a", slug: "slug-a", defaultScore: 4.2, technologyCount: 1 }],
     });
     expect(mockRankForDescription).toHaveBeenCalledWith("gene therapy");
+  });
+});
+
+// Phase-1 count-saturation combiner (spec §4.3). Pure — the piece §7 calls out
+// for direct coverage; the flag-gated wiring stays exercised by the engine tests.
+describe("saturatedTopicFit (§4.3 count-saturation)", () => {
+  it("lets one strong paper beat three weak ones (the §1a count-inflation fix)", () => {
+    expect(saturatedTopicFit([10])).toBeGreaterThan(saturatedTopicFit([1, 1, 1]));
+  });
+
+  it("returns 0 for an empty pool", () => {
+    expect(saturatedTopicFit([])).toBe(0);
+  });
+
+  it("is monotonic in a single paper's strength", () => {
+    expect(saturatedTopicFit([5])).toBeGreaterThan(saturatedTopicFit([2]));
+  });
+
+  it("rewards more strong papers, but only via the saturating ln1p term (not linearly)", () => {
+    const one = saturatedTopicFit([10]);
+    const four = saturatedTopicFit([10, 10, 10, 10]);
+    expect(four).toBeGreaterThan(one); // more strong work ranks higher
+    expect(four).toBeLessThan(one * 4); // …but count saturates — no linear count inflation
+  });
+
+  it("keys quality off the top-K papers, so a weak tail can't dilute a strong lead", () => {
+    // Same best-3 (9,8,7); the second scholar's extra weak papers only add via ln1p(count).
+    expect(saturatedTopicFit([9, 8, 7, 1, 1])).toBeGreaterThan(saturatedTopicFit([9, 8, 7]));
   });
 });
