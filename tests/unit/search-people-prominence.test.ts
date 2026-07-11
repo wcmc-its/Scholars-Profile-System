@@ -416,6 +416,45 @@ describe("faculty-prominence lever — #1345", () => {
   });
 });
 
+describe("grant-prominence lever — topical-only (companion to #1345)", () => {
+  beforeEach(() => {
+    capturedBodies.length = 0;
+    groupByMock.mockResolvedValue([]);
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  it("grantProminence:false drops the hasActiveGrants term (faculty intact)", async () => {
+    await searchPeople({ q: "cantley", relevanceMode: "v3", shape: "name", grantProminence: false });
+    const fns = functionScore(capturedBodies[0])!.functions;
+    expect(fns).not.toContainEqual({ filter: { term: { hasActiveGrants: true } }, weight: 0.5 });
+    expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length - 1);
+    // Faculty term survives when only the grant lever is off.
+    expect(fns).toContainEqual({ filter: { term: { personType: "full_time_faculty" } }, weight: 1.0 });
+  });
+
+  it("both levers off ⇒ purely topical prominence (no faculty, no grant)", async () => {
+    await searchPeople({
+      q: "cantley",
+      relevanceMode: "v3",
+      shape: "name",
+      facultyProminence: false,
+      grantProminence: false,
+    });
+    const fns = functionScore(capturedBodies[0])!.functions;
+    expect(fns).not.toContainEqual({ filter: { term: { personType: "full_time_faculty" } }, weight: 1.0 });
+    expect(fns).not.toContainEqual({ filter: { term: { hasActiveGrants: true } }, weight: 0.5 });
+    expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length - 2);
+    expect(fns).toContainEqual({ weight: 1.0 }); // BASE survives
+  });
+
+  it("default (omitted) keeps the grant term (byte-identical)", async () => {
+    await searchPeople({ q: "cantley", relevanceMode: "v3", shape: "name" });
+    const fns = functionScore(capturedBodies[0])!.functions;
+    expect(fns).toContainEqual({ filter: { term: { hasActiveGrants: true } }, weight: 0.5 });
+    expect(fns).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length);
+  });
+});
+
 describe("getConceptScholarConcentration — #1343 concept-axis source", () => {
   beforeEach(() => {
     capturedBodies.length = 0;
