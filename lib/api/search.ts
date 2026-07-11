@@ -107,9 +107,12 @@ import {
   resolveSearchPeopleConceptHint,
   resolveSearchResultEvidence,
   resolveSearchEvidenceReasonCounts,
+  resolveSearchEvidenceRows,
+  resolveFundingConceptGrants,
   type PubRecencyMode,
   type Scope,
 } from "@/lib/api/search-flags";
+import { investigatorGrantMatchCounts } from "@/lib/api/search-funding";
 import {
   selectEvidence,
   selectEvidenceLines,
@@ -247,6 +250,15 @@ export type PeopleHit = {
   pubCount: number;
   grantCount: number;
   hasActiveGrants: boolean;
+  /** #1412 — this scholar's count of grants matching the query, from ONE page-level
+   *  funding agg (replaces the per-card `/api/scholar/[cwid]/grants` fan-out). Present
+   *  only under `SEARCH_EVIDENCE_ROWS` with a non-empty query and a matching grant;
+   *  gates the card's Funding evidence row + supplies its `N of M` summary. The top-N
+   *  records stay lazy (fetched from `/grants` on expand). Absent ⇒ no Funding row. */
+  grantMatchCount?: number;
+  /** #1412 — the matched grants were admitted by the concept axis (drives the
+   *  "tagged <Concept>" vs "mention" label). Only meaningful with `grantMatchCount`. */
+  grantMatchTagged?: boolean;
   identityImageEndpoint: string;
   /** Highlight fragments from the scholar's self-reported fields
    *  (`preferredName` / `areasOfInterest` / `overview`). The card renders the
@@ -3170,6 +3182,34 @@ export async function searchPeople(opts: {
     };
   };
 
+  // #1412 perf — ONE page-level funding agg replaces the per-card
+  // `/api/scholar/[cwid]/grants` fan-out (worst exactly on a multi-grant-PI result
+  // set — every card is grant-heavy). Only under SEARCH_EVIDENCE_ROWS with a non-empty
+  // query. `evidenceGrantQuery` mirrors the /grants route's `stripDeprioritized` input,
+  // and the minimal MeshResolution mirrors what the card passed to /grants — so the
+  // eager count matches the records the card later fetches on expand.
+  const evidenceGrantQuery = opts.contentQuery?.trim() || trimmed;
+  const grantMatchByCwid =
+    resolveSearchEvidenceRows() && evidenceGrantQuery.length > 0 && r.hits.hits.length > 0
+      ? await investigatorGrantMatchCounts({
+          q: evidenceGrantQuery,
+          cwids: r.hits.hits.map((h) => h._source.cwid),
+          meshResolution:
+            resolveFundingConceptGrants() && meshDescendantUis.length > 0
+              ? {
+                  descriptorUi: opts.meshDescriptorUi ?? meshDescendantUis[0],
+                  name: opts.meshDescriptorName ?? "",
+                  matchedForm: opts.meshDescriptorName ?? "",
+                  confidence: "exact",
+                  scopeNote: null,
+                  entryTerms: [],
+                  curatedTopicAnchors: [],
+                  descendantUis: meshDescendantUis,
+                }
+              : null,
+        })
+      : new Map<string, { count: number; tagged: boolean }>();
+
   return {
     hits: r.hits.hits.map((h) => {
       const hl = h.highlight;
@@ -3204,6 +3244,15 @@ export async function searchPeople(opts: {
         pubCount: h._source.publicationCount,
         grantCount: h._source.grantCount,
         hasActiveGrants: h._source.hasActiveGrants,
+        // #1412 — eager Funding-row count/strength from the page-level agg above.
+        // Emitted only for a scholar with ≥1 matching grant, so the flag-off /
+        // no-match response stays byte-identical to today.
+        ...(() => {
+          const gm = grantMatchByCwid.get(h._source.cwid);
+          return gm && gm.count > 0
+            ? { grantMatchCount: gm.count, grantMatchTagged: gm.tagged }
+            : {};
+        })(),
         identityImageEndpoint: identityImageEndpoint(h._source.cwid),
         highlight,
         matchReason: resolveHitMatchReason(

@@ -300,6 +300,101 @@ function pickTextEvidence(
   return null;
 }
 
+/**
+ * #1412 perf — page-level replacement for the per-card `/api/scholar/[cwid]/grants`
+ * fan-out. Given the people-search page's cwids and the (already generic-stripped)
+ * query, runs ONE funding search that buckets matched-grant counts by investigator, so
+ * each people card renders its Funding evidence SUMMARY (`N of M grants mention "q"`,
+ * tagged/mention) without its own `searchFunding` round-trip. The `/grants` route
+ * survives only for the on-expand top-N record list.
+ *
+ * The admission `must` here MUST stay identical to `searchFunding`'s `expanded`-scope
+ * admission (text OR — under the concept flag — descriptor-tagged), because that is the
+ * set the `/grants` records reflect: a summary count that disagreed with the records the
+ * user then expands would be a bug. It deliberately re-derives that `must` (textClause +
+ * #295 concept union) rather than sharing `searchFunding` internals, to avoid touching
+ * that hot body / its query-shape snapshots — keep the two in sync (the count-agg
+ * query-shape test guards it). Score-only bits (`boost`, `_name`) are omitted: they don't
+ * change the admission SET, which is all a count agg reads.
+ *
+ * Returns a Map cwid → { count, tagged }. `count` is that investigator's matching-grant
+ * count (== what `/grants` lists post-filter for them); `tagged` marks a concept-axis
+ * admission (drives the "tagged <Concept>" vs "mention" label). Empty query / no cwids ⇒
+ * empty Map (caller renders no Funding rows).
+ */
+export async function investigatorGrantMatchCounts(opts: {
+  q: string;
+  cwids: string[];
+  meshResolution?: MeshResolution | null;
+}): Promise<Map<string, { count: number; tagged: boolean }>> {
+  const cwids = Array.from(new Set(opts.cwids.filter(Boolean)));
+  const trimmed = opts.q.trim();
+  if (cwids.length === 0 || trimmed.length === 0) return new Map();
+
+  // Text admission — identical to searchFunding's `textClause` (Tier-1 MSM flag).
+  const useFundingMsm = resolveFundingTabMsm();
+  const fundingFields = useFundingMsm
+    ? FUNDING_FIELD_BOOSTS.map((f) => (f === "abstract^1" ? "abstract^0.5" : f))
+    : [...FUNDING_FIELD_BOOSTS];
+  const textClause: Record<string, unknown> = {
+    multi_match: {
+      query: trimmed,
+      fields: fundingFields,
+      type: "best_fields",
+      ...(useFundingMsm
+        ? { operator: "or", minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM }
+        : {}),
+    },
+  };
+
+  // #295 concept union (expanded scope) — admit grants tagged with the resolved
+  // descriptor's descendants even without a literal text hit. Gated exactly as
+  // searchFunding: flag on AND a resolved descendant set.
+  const descendantUis = opts.meshResolution?.descendantUis ?? [];
+  const conceptApplies = resolveFundingConceptEnabled() && descendantUis.length > 0;
+  const meshGateField = resolveFundingMeshGateField();
+  const conceptTermsClause = conceptApplies
+    ? { terms: { [meshGateField]: descendantUis } }
+    : null;
+  const must: Record<string, unknown>[] = conceptTermsClause
+    ? [{ bool: { should: [textClause, conceptTermsClause], minimum_should_match: 1 } }]
+    : [textClause];
+
+  const resp = await searchClient().search({
+    index: FUNDING_INDEX,
+    body: {
+      size: 0,
+      track_total_hits: false,
+      query: {
+        bool: { must, filter: [{ terms: { wcmInvestigatorCwids: cwids } }] },
+      },
+      aggs: {
+        byInvestigator: {
+          terms: { field: "wcmInvestigatorCwids", include: cwids, size: cwids.length },
+          // Concept-tagged sub-count → per-investigator "tagged" vs "mention".
+          ...(conceptTermsClause ? { aggs: { tagged: { filter: conceptTermsClause } } } : {}),
+        },
+      },
+    } as object,
+  });
+
+  const buckets =
+    (
+      resp.body as unknown as {
+        aggregations?: {
+          byInvestigator?: {
+            buckets: Array<{ key: string; doc_count: number; tagged?: { doc_count: number } }>;
+          };
+        };
+      }
+    ).aggregations?.byInvestigator?.buckets ?? [];
+  const out = new Map<string, { count: number; tagged: boolean }>();
+  for (const b of buckets) {
+    out.set(b.key, { count: b.doc_count, tagged: (b.tagged?.doc_count ?? 0) > 0 });
+  }
+  return out;
+}
+
 export async function searchFunding(opts: {
   q: string;
   page?: number;
