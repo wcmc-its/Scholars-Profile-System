@@ -2040,24 +2040,25 @@ export class AppStack extends Stack {
         // BOTH .env.local AND here per the flag-parity rule -- a manual
         // `cdk deploy Sps-App-<env>` is required (CD re-rolls the image only).
         PROFILE_EMAIL_RELEASE_GATE: env === "staging" ? "on" : "off",
-        // Superuser allowlist. SCHOLARS_SUPERUSER_GROUP_CN is intentionally left
-        // UNSET, so isSuperuser() (lib/auth/superuser.ts, R1) short-circuits on
-        // the empty cn and never calls openLdap(). This comma-separated CWID
-        // allowlist is the operative superuser tier, letting a tightly-scoped
-        // operator set use the admin features (incl. #637 "View as").
+        // Superuser tier, sourced from the ED group
+        // `ITS:Library:Scholars/superuser-role`. isSuperuser()
+        // (lib/auth/superuser.ts, R1) checks the CWID allowlist first, then the
+        // group via isGroupMember() (lib/auth/ldap-group.ts resolve+compare).
         //
-        // The original reason was a routing gap (#443: no SPS VPC -> WCM LDAPS
-        // route, so the live check could not succeed). That gap is CLOSED -- the
-        // app and the ED ETL now share its-reciter-vpc01 and the same subnets,
-        // and a Fargate task launched into the app's subnets + the app's SG
-        // bound edprovider/ed.weill.cornell.edu successfully in both envs
-        // (probe, 2026-07-09; the app service itself carries the credential only
-        // as of #1592). Leaving the cn UNSET is therefore now a DELIBERATE
-        // choice, not a limitation: a live group search here would put an LDAPS
-        // bind on every authenticated session probe. Setting it is a separate,
-        // reviewable decision -- do not treat it as merely "unblocked".
-        // CWIDs are directory usernames, not secrets.
-        SCHOLARS_SUPERUSER_CWIDS: "paa2013,drw2004,mrj4001,ved4006,mom2021",
+        // The group is now the source of truth: #1592 gave the app the LDAP
+        // credential and #1626 made the dynamic-group query correct+fast
+        // (resolve the group DN, then LDAP `compare` — the `groupOfURLs` role
+        // groups have no readable `member`, and a `(member=..)` filter times
+        // out). All five former allowlist CWIDs are verified members of the ED
+        // group in BOTH envs (probe 2026-07-10), so emptying the allowlist locks
+        // nobody out. The allowlist is kept as an empty break-glass override.
+        //
+        // Cost of enabling: isSuperuser() is on the session/edit hot path, so
+        // each such request now does one LDAPS bind+compare (~230ms), deduped
+        // per request by React cache(). Promote staging-first via a manual
+        // reviewer-gated `cdk deploy Sps-App-<env>` and watch latency.
+        SCHOLARS_SUPERUSER_GROUP_CN: "ITS:Library:Scholars/superuser-role",
+        SCHOLARS_SUPERUSER_CWIDS: "",
         // comms_steward Method-Family visibility role + surface
         // (docs/comms-steward-methods-visibility-spec.md §3/§9). Three vars,
         // OFF in BOTH envs at launch -- the surface ships dark until External
@@ -2069,32 +2070,23 @@ export class AppStack extends Stack {
         //     group membership or the allowlist below. Flip to "on" per-env only
         //     after the group exists (or the interim allowlist is set) AND the
         //     surfacing pass has run once (npm run etl:family-review).
-        //   SCHOLARS_COMMS_STEWARD_GROUP_CN -- the ED group whose `member` list
-        //     confers the role: ITS:Library:Scholars/comms-steward-role (the
-        //     durable source of truth). Left UNSET like SCHOLARS_SUPERUSER_GROUP_CN
-        //     above: the SPS VPC has no route to the WCM directory yet, so the live
-        //     group search fails closed; setting a cn now would only add an LDAPS
-        //     connect-timeout to each session probe. Set this to the group above
-        //     (and clear the allowlist) once VPC->WCM LDAPS routing lands (#443).
-        //   SCHOLARS_COMMS_STEWARD_ALLOWLIST -- interim comma-separated CWID
-        //     allowlist that confers the role WITHOUT LDAP (mirrors
-        //     SCHOLARS_SUPERUSER_CWIDS), so a tightly-scoped steward set can use
-        //     the Method-Family + profile/unit surfaces before the group/routing
-        //     lands. The live LDAPS group search fails closed in-VPC (#443), so
-        //     this allowlist is the ONLY thing that confers the role to a
-        //     non-superuser in a deployed env today.
-        // PROD ARM (this PR): COMMS_STEWARD_ENABLED flipped on for prod so the
-        // role machinery is live, BUT the prod allowlist is left EMPTY on
-        // purpose -- with it empty, the surfaces are reachable ONLY by prod
-        // superusers (the steward superset), and NO External-Affairs comms
-        // person has the role yet. >>> ACTION REQUIRED before this confers
-        // anything to comms: set the prod allowlist to the EA steward CWIDs
-        // (e.g. "dwd2001,..."), or wire SCHOLARS_COMMS_STEWARD_GROUP_CN once
-        // #443 LDAPS routing lands. Promotion is a manual `cdk deploy
-        // Sps-App-prod` (reviewer-gated); CD re-rolls the image only.
+        //   SCHOLARS_COMMS_STEWARD_GROUP_CN -- the ED group whose membership
+        //     confers the role: ITS:Library:Scholars/comms-steward-role, now the
+        //     source of truth. Resolved via isGroupMember() (resolve+compare,
+        //     #1626). dwd2001 is a verified member in both envs (probe
+        //     2026-07-10). NOTE: prod previously conferred this to NO ONE (empty
+        //     prod allowlist), so setting the cn NEWLY grants dwd2001 comms-
+        //     steward in prod — the intended go-live, not a mechanism no-op.
+        //   SCHOLARS_COMMS_STEWARD_ALLOWLIST -- kept as an empty break-glass
+        //     override (mirrors SCHOLARS_SUPERUSER_CWIDS); the group is the
+        //     operative source now that the LDAP route (#1592) + query (#1626)
+        //     are in place.
+        // COMMS_STEWARD_ENABLED stays on both envs; membership now flows from the
+        // ED group. Promotion is a manual reviewer-gated `cdk deploy
+        // Sps-App-<env>` (staging first); CD re-rolls the image only.
         COMMS_STEWARD_ENABLED: env === "staging" || env === "prod" ? "on" : "off",
-        SCHOLARS_COMMS_STEWARD_GROUP_CN: "",
-        SCHOLARS_COMMS_STEWARD_ALLOWLIST: env === "staging" ? "dwd2001" : "",
+        SCHOLARS_COMMS_STEWARD_GROUP_CN: "ITS:Library:Scholars/comms-steward-role",
+        SCHOLARS_COMMS_STEWARD_ALLOWLIST: "",
         // `development` role (GrantRecs Phase 4 — the /edit/find-researchers
         // reverse-matcher admin surface). The page + its data route admit
         // `isSuperuser || isDeveloper`, so superusers always retain access; the
@@ -2105,37 +2097,22 @@ export class AppStack extends Stack {
         //     and promoted via a reviewer-gated `cdk deploy Sps-App-prod`; note
         //     the flag is inert until the prod image carries the find-researchers
         //     feature (#1185), so it ships with the next full prod release.
-        //   SCHOLARS_DEVELOPMENT_GROUP_CN -- the ED group whose `member` list
-        //     would confer the role: ITS:Library:Scholars/development-role
-        //     (created under ou=application security,ou=Groups; a subtree search
-        //     from ou=Groups reaches it). Pinned "" -- the live group search is
-        //     deliberately OFF, and isDeveloper() short-circuits on the empty cn
-        //     (lib/auth/development.ts) before it ever calls openLdap().
-        //
-        //     This used to be self-enforcing: the app task def carried no LDAP
-        //     credential, so openLdap() threw and the search failed closed no
-        //     matter what this held. #1592 injects SCHOLARS_LDAP_* (the
-        //     `secrets:` block below) for the directory route, which removes
-        //     that accident. Were this left set to the group cn, isDeveloper()
-        //     -- called unconditionally by getEffectiveEditSession() -- would
-        //     run a real LDAPS bind + ou=Groups search on EVERY /edit GET and
-        //     guarded API call (React cache() dedupes within one request only),
-        //     and prod dev-role membership would silently shift from
-        //     "superusers only" to live ED group membership. Both are real
-        //     changes that belong in their own PR, gated on an audit of that
-        //     group's members. So the cn is pinned "" here, mirroring
-        //     SCHOLARS_COMMS_STEWARD_GROUP_CN above. To activate later: set the
-        //     cn, audit the group first, and expect the per-request bind.
-        //   SCHOLARS_DEVELOPMENT_ALLOWLIST -- the operative membership mechanism
-        //     while the group search is off. STAGING carries flm4001 (a real
-        //     development-role group member) so the surface is reachable to a
-        //     non-superuser operator for testing. lmp2006 (CTL senior managing
-        //     director) gets the matcher surfaces per the 2026-07-09 CTL asks
-        //     (docs/2026-07-09-ctl-technologies-handoff.md §1) — staging now,
-        //     prod when the gated App deploy ships this.
+        //   SCHOLARS_DEVELOPMENT_GROUP_CN -- the ED group whose membership
+        //     confers the role: ITS:Library:Scholars/development-role, now the
+        //     source of truth. isDeveloper() (lib/auth/development.ts) is called
+        //     unconditionally by getEffectiveEditSession(), so this puts an LDAPS
+        //     bind+compare on the /edit path per request (deduped by React
+        //     cache()); #1626 made that query correct+fast (resolve+compare,
+        //     ~230ms) so it is no longer the latency trap that kept it pinned "".
+        //     Both former allowlist members are verified in the group: flm4001
+        //     (employee) and lmp2006 (affiliate — the group carries a per-uid
+        //     memberURL for each, so the affiliate is matched by an affiliate-
+        //     filtered line). Probe 2026-07-10, both envs.
+        //   SCHOLARS_DEVELOPMENT_ALLOWLIST -- kept as an empty break-glass
+        //     override; the ED group is the operative source now.
         DEVELOPMENT_ENABLED: env === "staging" || env === "prod" ? "on" : "off",
-        SCHOLARS_DEVELOPMENT_GROUP_CN: "",
-        SCHOLARS_DEVELOPMENT_ALLOWLIST: env === "staging" ? "flm4001,lmp2006" : "lmp2006",
+        SCHOLARS_DEVELOPMENT_GROUP_CN: "ITS:Library:Scholars/development-role",
+        SCHOLARS_DEVELOPMENT_ALLOWLIST: "",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
         // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
         // ships the policy as `Content-Security-Policy-Report-Only` (the
