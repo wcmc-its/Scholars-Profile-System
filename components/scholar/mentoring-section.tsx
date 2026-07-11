@@ -464,6 +464,7 @@ function MenteeChipCard({
             cwid={mentee.cwid}
             surface="mentee"
             contextScholarCwid={mentorCwid}
+            contextScholarSlug={mentorSlug}
           >
             <a
               href={profilePath(mentee.scholar!.slug)}
@@ -478,6 +479,7 @@ function MenteeChipCard({
             cwid={mentee.cwid}
             surface="mentee"
             contextScholarCwid={mentorCwid}
+            contextScholarSlug={mentorSlug}
           >
             <div data-mentee-body className="flex min-w-0 flex-1">
               {body}

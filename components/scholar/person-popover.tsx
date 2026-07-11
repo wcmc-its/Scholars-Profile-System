@@ -113,6 +113,12 @@ export type PersonPopoverProps = {
   /** Display name for the contextual scholar (used in "co-pubs with {name}"
    *  line and the "Filter by {LastName}" primary action). */
   contextScholarName?: string;
+  /** Slug of the contextual scholar (the mentor, on the `mentee` surface).
+   *  Drives the "See N co-pubs →" jump to the bookmarkable pairwise page
+   *  `/scholars/{mentorSlug}/co-pubs/{menteeCwid}` (#184). Only the mentee
+   *  surface has such a page — `getMentorMenteePair` 404s for a non-mentee
+   *  pair — so co-author popovers never get this action. */
+  contextScholarSlug?: string;
   /** Label for the context topic, used in the bottom row ("Recent in
    *  {topicLabel}"). Optional — falls back to the slug. */
   contextTopicLabel?: string;
@@ -166,6 +172,7 @@ export function PersonPopover({
   contextTopicSlug,
   currentProfileCwid,
   contextScholarName,
+  contextScholarSlug,
   contextTopicLabel,
   contextTopicRank,
   filterMatchCount,
@@ -281,6 +288,7 @@ export function PersonPopover({
             isSelf={isSelf}
             contextGrant={contextGrant}
             contextScholarName={contextScholarName}
+            contextScholarSlug={contextScholarSlug}
             contextTopicLabel={contextTopicLabel}
             contextTopicRank={contextTopicRank}
             filterMatchCount={filterMatchCount}
@@ -300,6 +308,7 @@ function PersonPopoverBody({
   isSelf,
   contextGrant,
   contextScholarName,
+  contextScholarSlug,
   contextTopicLabel,
   contextTopicRank,
   filterMatchCount,
@@ -312,6 +321,7 @@ function PersonPopoverBody({
   isSelf: boolean;
   contextGrant?: PersonPopoverProps["contextGrant"];
   contextScholarName?: string;
+  contextScholarSlug?: string;
   contextTopicLabel?: string;
   contextTopicRank?: number;
   filterMatchCount?: number;
@@ -390,7 +400,7 @@ function PersonPopoverBody({
     ? derivePrimaryAction({
         surface,
         data,
-        contextScholarName,
+        contextScholarSlug,
         primaryActionHref,
         primaryActionLabel,
         profileHref,
@@ -766,14 +776,14 @@ function lastNameFromDisplay(displayName: string): string {
 function derivePrimaryAction({
   surface,
   data,
-  contextScholarName,
+  contextScholarSlug,
   primaryActionHref,
   primaryActionLabel,
   profileHref,
 }: {
   surface: PersonPopoverSurface;
   data: ApiResponse;
-  contextScholarName?: string;
+  contextScholarSlug?: string;
   primaryActionHref?: string;
   primaryActionLabel?: string;
   profileHref: string | null;
@@ -787,15 +797,18 @@ function derivePrimaryAction({
     };
   }
 
-  if (surface === "co-author" || surface === "mentee") {
+  // Co-pubs jump — ONLY the mentee surface. The pairwise page
+  // `/scholars/{mentorSlug}/co-pubs/{menteeCwid}` (#184) is keyed on the
+  // MENTOR's slug (`contextScholarSlug`) + the hovered mentee's cwid, and
+  // `getMentorMenteePair` 404s for a pair with no mentoring relationship — so
+  // co-author popovers deliberately get no co-pubs action. The mentee needs no
+  // slug of its own (the page resolves it by cwid), so this fires for unlinked
+  // mentees too.
+  if (surface === "mentee" && contextScholarSlug) {
     const cp = data.coPubs;
-    if (cp && cp.count > 0 && contextScholarName && profileHref) {
-      // Co-pubs jump action — defaults to the co-pubs page if the popover
-      // target has a profile slug. Falls back to View profile when missing.
-      // #671 — co-pubs sub-pages stay under `/scholars/{slug}` (not the root
-      // profile form), so build this from the slug, not `profileHref`.
+    if (cp && cp.count > 0) {
       return {
-        href: `/scholars/${data.header.slug}/co-pubs?with=${data.header.cwid}`,
+        href: `/scholars/${contextScholarSlug}/co-pubs/${data.header.cwid}`,
         label: `See ${cp.count} co-pub${cp.count === 1 ? "" : "s"} →`,
         eventKey: "copubs",
       };
