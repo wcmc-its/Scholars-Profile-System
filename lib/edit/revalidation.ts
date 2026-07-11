@@ -45,6 +45,7 @@ import { randomUUID } from "node:crypto";
 import { CloudFrontClient, CreateInvalidationCommand } from "@aws-sdk/client-cloudfront";
 import { revalidatePath } from "next/cache";
 
+import { bust } from "@/lib/api/swr-cache";
 import { db } from "@/lib/db";
 import { runAfterResponse } from "@/lib/edit/after-response";
 import { isAllowedRevalidatePath } from "@/lib/revalidate-allowlist";
@@ -253,6 +254,16 @@ export async function reflectUnitChange(params: {
     }
   }
   revalidatePaths(paths);
+  // #1537 — the ISR/CDN busts above don't touch the in-process swr-cache Map
+  // that getCenter/getDepartment/getDivision (+ their members/pubs/spotlight
+  // reads) serve through, so the origin task would re-serve the pre-edit rollup
+  // for up to MAX_STALE_MS. A division edit also mutates the parent department
+  // page (it lists the chief), so bust that prefix too.
+  const bustPrefixes =
+    params.unitKind === "division"
+      ? ["division:", "department:"]
+      : [`${params.unitKind}:`];
+  for (const prefix of bustPrefixes) bust(prefix);
   await invalidateCloudFront(paths);
 }
 

@@ -50,6 +50,25 @@ function refresh<T>(key: string, load: () => Promise<T>): Promise<T> {
   return p;
 }
 
+/**
+ * Drop every cached + inflight entry whose key starts with `prefix`. The edit
+ * reflection path (`lib/edit/revalidation.ts`) calls this so a curator edit
+ * doesn't keep serving a stale Map entry for up to MAX_STALE_MS after the
+ * ISR/CDN busts — the origin task reads through this Map, which `revalidatePath`
+ * and the CloudFront invalidation never touch (#1537).
+ *
+ * ponytail (full): coarse per-prefix bust — a single center edit evicts every
+ * `center:*` entry, not just the edited one. Edits are rare superuser actions
+ * and cachedRead's inflight dedup collapses the reload, so the blunt sweep is
+ * cheaper than threading entity codes/pages/sorts through the reflection path.
+ * Upgrade path: pass exact (entity, page, sort) keys if edit frequency ever
+ * makes the reload storm measurable.
+ */
+export function bust(prefix: string): void {
+  for (const key of store.keys()) if (key.startsWith(prefix)) store.delete(key);
+  for (const key of inflight.keys()) if (key.startsWith(prefix)) inflight.delete(key);
+}
+
 export function cachedRead<T>(key: string, load: () => Promise<T>): Promise<T> {
   if (BYPASS) return load();
   const hit = store.get(key) as Entry<T> | undefined;
