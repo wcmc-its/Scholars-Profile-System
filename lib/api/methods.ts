@@ -70,6 +70,7 @@ import {
   methodFamilyPath,
 } from "@/lib/method-url";
 import { deriveSlug } from "@/lib/slug";
+import { cachedRead } from "@/lib/api/swr-cache";
 
 // Re-export the chip/row data shapes so Method page components import them from
 // here (one module surface) rather than reaching into `topics.ts`.
@@ -891,12 +892,28 @@ export type SupercategoryRollup = {
  * deduped exemplar UNION (cap 3), and resolves the representative recent
  * publications across the supercategory-wide pmid union. Lens-off / empty ⇒ both
  * empty. `allWorkLimit` caps the representative list (default 12).
+ *
+ * #1537 — the supercategory page is force-dynamic for #800/#801 gate
+ * correctness, which rebuilt this full pmid-union rollup on every request.
+ * Served through the shared swr-cache instead; the writes that change its
+ * output (family tier route, suppress/revoke via `reflectVisibilityChange`)
+ * bust the `methods:` prefix, so gate edits still reflect immediately.
  */
 export async function getSupercategoryRollup(
   supercategory: string,
   opts?: { allWorkLimit?: number },
 ): Promise<SupercategoryRollup> {
   if (!isMethodsLensEnabled()) return { families: [], allWorkPubs: [] };
+  const allWorkLimit = opts?.allWorkLimit ?? 12;
+  return cachedRead(`methods:rollup:${supercategory}:${allWorkLimit}`, () =>
+    loadSupercategoryRollup(supercategory, allWorkLimit),
+  );
+}
+
+async function loadSupercategoryRollup(
+  supercategory: string,
+  allWorkLimit: number,
+): Promise<SupercategoryRollup> {
   const gate = await loadFamilyOverlayGate();
 
   // Base roster (skip the single-row exemplar read; we supply the union below).
@@ -932,7 +949,7 @@ export async function getSupercategoryRollup(
       where: { pmid: { in: unionPmids }, publicationType: { notIn: HARD_EXCLUDE_TYPES } },
       select: PUB_SELECT,
       orderBy: [{ year: "desc" }, { dateAddedToEntrez: "desc" }],
-      take: opts?.allWorkLimit ?? 12,
+      take: allWorkLimit,
     });
     const authorsByPmid = await fetchWcmAuthorsForPmids(pubs.map((p) => p.pmid));
     allWorkPubs = pubs.map((p) => mapPublicationHit(p, authorsByPmid.get(p.pmid)));

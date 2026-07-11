@@ -31,6 +31,7 @@ import { apiError } from "@/lib/api/error-response";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import { FAMILY_TIERS, type FamilyTier } from "@/lib/api/methods-families";
+import { bust } from "@/lib/api/swr-cache";
 
 const PATH = "/api/edit/methods/families/tier";
 
@@ -142,6 +143,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
   }
+
+  // #1537 — the /methods rollup is served through the swr-cache; a tier change
+  // must evict it so a newly suppressed family disappears immediately.
+  bust("methods:");
 
   return editOk({ supercategory, familyLabel, tier: nextTier });
 }
