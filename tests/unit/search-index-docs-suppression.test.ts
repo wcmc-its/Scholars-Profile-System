@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { PublicationSuppressions } from "@/lib/api/manual-layer";
+import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import {
   buildPeopleDoc,
   buildPublicationDoc,
@@ -379,6 +380,28 @@ describe("buildPeopleDoc — suppression integration (C4)", () => {
     );
     const date = (doc as { mostRecentPubDate: Date | null }).mostRecentPubDate;
     expect(date?.toISOString()).toBe("2023-01-01T00:00:00.000Z");
+  });
+
+  it("excludes Retraction/Erratum from the mostRecentPubDate query (#1514)", async () => {
+    // The retraction exclusion lives in the Prisma `where` (like the
+    // authorships select), so the DB never returns those rows — assert the
+    // query shape rather than an outcome the dumb mock can't reproduce.
+    const s = scholarWithAuthorships([{ pmid: "1", title: "Paper" }]);
+    const sup: PublicationSuppressions = {
+      darkPmids: new Set(),
+      hiddenAuthorsByPmid: new Map(),
+    };
+    const client = mockClient([{ pmid: "1", date: new Date("2024-01-01T00:00:00.000Z") }]);
+    await buildPeopleDoc(s, client, sup);
+    const findMany = (
+      client as unknown as {
+        publicationAuthor: { findMany: ReturnType<typeof vi.fn> };
+      }
+    ).publicationAuthor.findMany;
+    const where = (findMany.mock.calls[0]?.[0] as {
+      where?: { publication?: { publicationType?: { notIn?: readonly string[] } } };
+    }).where;
+    expect(where?.publication?.publicationType?.notIn).toEqual([...NEVER_DISPLAY_TYPES]);
   });
 
   it("isComplete uses the filtered count, not s.authorships.length", async () => {
