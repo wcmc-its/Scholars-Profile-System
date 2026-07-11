@@ -7,6 +7,7 @@ const {
   mockCdnCreate,
   mockCdnUpdate,
   mockCfSend,
+  mockBust,
   deferredTasks,
 } = vi.hoisted(() => ({
   mockScholarFindUnique: vi.fn(),
@@ -15,6 +16,7 @@ const {
   mockCdnCreate: vi.fn(),
   mockCdnUpdate: vi.fn(),
   mockCfSend: vi.fn(),
+  mockBust: vi.fn(),
   // #955 #6 — `runAfterResponse` defers the CloudFront send off the request
   // path. Capture each scheduled task so a test can assert it was NOT run
   // in-request, then `flushDeferred()` to drive the deferred send + bookkeeping.
@@ -33,6 +35,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("next/cache", () => ({ revalidatePath: mockRevalidatePath }));
+vi.mock("@/lib/api/swr-cache", () => ({ bust: mockBust }));
 // Capture deferred tasks instead of scheduling them on Next's `after()`, which
 // is unavailable outside a request scope in a unit test.
 vi.mock("@/lib/edit/after-response", () => ({
@@ -164,6 +167,28 @@ describe("reflectUnitChange", () => {
     await reflectUnitChange({ unitKind: "department", unitSlug: "medicine" });
     expect(mockCdnCreate).not.toHaveBeenCalled();
     expect(mockCfSend).not.toHaveBeenCalled();
+  });
+
+  // #1537 — the ISR/CDN busts don't reach the in-process swr-cache Map, so
+  // reflectUnitChange must also evict the affected unit prefix or the origin
+  // task re-serves the pre-edit rollup for up to MAX_STALE_MS.
+  it("busts the department: swr-cache prefix on a department edit", async () => {
+    await reflectUnitChange({ unitKind: "department", unitSlug: "medicine" });
+    expect(mockBust.mock.calls).toEqual([["department:"]]);
+  });
+
+  it("busts the center: swr-cache prefix on a center edit", async () => {
+    await reflectUnitChange({ unitKind: "center", unitSlug: "cancer" });
+    expect(mockBust.mock.calls).toEqual([["center:"]]);
+  });
+
+  it("busts both division: and the parent department: prefix on a division edit", async () => {
+    await reflectUnitChange({
+      unitKind: "division",
+      unitSlug: "cardiology",
+      parentDeptSlug: "medicine",
+    });
+    expect(mockBust.mock.calls).toEqual([["division:"], ["department:"]]);
   });
 });
 
