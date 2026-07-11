@@ -474,8 +474,12 @@ describe("pub-tab query shape — SEARCH_PUB_TAB_CONCEPT_MODE (§5)", () => {
     const body = capturedBodies[0];
     const aggs = body.aggs as Record<string, Record<string, unknown>>;
     // the admission still lives in the MAIN query's top-level should + msm:1 ...
-    expect(topLevelBool(body).should).toBeDefined();
-    expect(topLevelBool(body).minimum_should_match).toBe(1);
+    const mainBool = topLevelBool(body) as {
+      should?: unknown[];
+      minimum_should_match?: number;
+    };
+    expect(mainBool.should).toBeDefined();
+    expect(mainBool.minimum_should_match).toBe(1);
     // ... and each excluding-self agg carries ONLY its filter — a top-level filter-agg
     // already runs inside that admission, so re-embedding should/msm per agg is redundant.
     for (const aggName of ["publicationTypes", "journals", "wcmRoleFirst"]) {
