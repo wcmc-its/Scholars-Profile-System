@@ -39,11 +39,23 @@ if [[ "$MODE" == "fetch" ]]; then
   # shellcheck source=lib.sh
   source "$DIR/lib.sh"   # HOST
   # The sponsor route is auth-gated (/edit). Export SPONSOR_COOKIE='<your dev session cookie>'.
-  fetch_actual() {  # $1 = paste  → JSON array of ranked cwids
-    curl -4 -s -X POST "$HOST/api/edit/sponsor-match" -H 'content-type: application/json' \
+  fetch_actual() {  # $1 = paste → JSON array of ranked cwids; ALWAYS valid JSON ([] on any failure)
+    local resp code body
+    resp="$(curl -4 -s -w $'\n%{http_code}' -X POST "$HOST/api/edit/sponsor-match" \
+      -H 'content-type: application/json' \
       ${SPONSOR_COOKIE:+-H "cookie: $SPONSOR_COOKIE"} \
-      --data "$(jq -n --arg d "$1" '{description:$d}')" \
-    | jq -c '[.researchers[]?.cwid] // []'
+      --data "$(jq -n --arg d "$1" '{description:$d}')")"
+    code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
+    if [[ "$code" != "200" ]]; then
+      echo "  ⚠ HTTP $code from /api/edit/sponsor-match — 401=cookie missing/stale, 403=forbidden/CSRF" >&2
+      echo '[]'; return
+    fi
+    if ! jq -e . >/dev/null 2>&1 <<<"$body"; then
+      echo "  ⚠ non-JSON response (first 100 chars: ${body:0:100})" >&2
+      echo '[]'; return
+    fi
+    # tolerate {researchers:[{cwid}]} or {results:[{cwid}]}; [] if neither present
+    jq -c '[(.researchers // .results // [])[]? | (.cwid // .id)] | map(select(. != null))' <<<"$body"
   }
   echo "sponsor-eval @ ${HOST}  (live fetch)  fixtures=$(basename "$FIX")  k=$K"
 else
@@ -63,6 +75,7 @@ while read -r prompt; do
   else
     actual="$(jq -c --arg id "$id" '.[$id] // []' "$ACTUAL")"
   fi
+  [[ -z "$actual" ]] && actual='[]'
   s="$(jq -f "$DIR/sponsor-score.jq" --argjson ideal "$ideal" --argjson k "$K" --arg id "$id" <<<"$actual")"
   jq -r '"── \(.id)   nDCG@\(.k)=\(if .ndcg_at_k == null then "n/a" else (.ndcg_at_k*1000|floor)/1000 end)   ρ=\(if .spearman == null then "n/a" else (.spearman*1000|floor)/1000 end)   coverage=\(.found)/\(.n_ideal)\(if (.missing|length)>0 then "   missing=\(.missing|join(","))" else "" end)"' <<<"$s"
   acc="$(jq -n --argjson a "$acc" --argjson s "$s" '$a + [$s]')"
