@@ -68,6 +68,11 @@ import {
 import { isRetryableBulkStatus, resolveBulkConfig } from "@/lib/search-index-bulk";
 import { rebuildAliasedIndex } from "./alias-swap";
 
+// #1413 — people-doc builds per batch. Each buildPeopleDoc issues ~6 serial
+// sidecar queries on the shared Prisma client, so 8 concurrent builds keeps
+// peak in-flight queries at 8 — inside the ETL task's connection pool.
+const PEOPLE_BUILD_CONCURRENCY = 8;
+
 // Rebuilds happen via the alias-swap pattern (B18, #117) -- see
 // `./alias-swap.ts`. The three exported names in `lib/search.ts`
 // (`scholars-people`, `scholars-publications`, `scholars-funding`) are
@@ -210,16 +215,29 @@ async function indexPeople(concreteIndex: string) {
   // scholar) in exchange for the fast-path getting the one-cwid variant
   // naturally and for `buildPeopleDoc`'s extra-data surface being fully
   // closed-over by `(s, client, sup)`.
+  // #536 — hidden identity classes (doctoral students) never enter the people
+  // index, so they don't surface on the people tab or in autocomplete. Filtered
+  // before buildPeopleDoc to avoid the per-scholar centerMembership query.
+  const eligible = scholars.filter((s) => isPubliclyDisplayed(s.roleCategory));
+  // #1413 — buildPeopleDoc's ~6 sidecar queries ran one scholar at a time:
+  // ~50k+ serial Prisma round trips per rebuild. Batch them with bounded
+  // concurrency (the etl/reciter-rcr idiom: Promise.all within a batch,
+  // batches sequential) so rebuild wall-time stops gating reindex-then-flip
+  // deploy windows. In-batch order is positional, so doc order — and the
+  // golden output — is identical to the serial loop.
+  // ponytail: batches convoy on their slowest member; a worker pool
+  // (etl/headshot) is the upgrade if the batch tail ever matters.
   const docs: Array<{ cwid: string; doc: Record<string, unknown> }> = [];
-  for (const s of scholars) {
-    // #536 — hidden identity classes (doctoral students) never enter the people
-    // index, so they don't surface on the people tab or in autocomplete. Skipped
-    // before buildPeopleDoc to avoid the per-scholar centerMembership query.
-    if (!isPubliclyDisplayed(s.roleCategory)) continue;
+  for (let i = 0; i < eligible.length; i += PEOPLE_BUILD_CONCURRENCY) {
+    const batch = eligible.slice(i, i + PEOPLE_BUILD_CONCURRENCY);
     // #824 §4c — pass the public overlay gate so `buildPeopleDoc` emits the
     // `methodFamily` rollup (suppressed + sensitive families always excluded).
-    const doc = await buildPeopleDoc(s, prisma, sup, gate, meshAncestors);
-    if (doc !== null) docs.push({ cwid: s.cwid, doc });
+    const built = await Promise.all(
+      batch.map((s) => buildPeopleDoc(s, prisma, sup, gate, meshAncestors)),
+    );
+    built.forEach((doc, j) => {
+      if (doc !== null) docs.push({ cwid: batch[j].cwid, doc });
+    });
   }
 
   if (docs.length === 0) return 0;
