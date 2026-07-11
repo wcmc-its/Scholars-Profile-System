@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
@@ -155,18 +155,20 @@ export function PeopleResultCard({
   const alsoPanelId = useId();
 
   // Funding evidence row (SEARCH_EVIDENCE_ROWS) — a scholar's TOPIC-matching grants.
-  // Eager per-card fetch, gated on flag + active query + the scholar having ANY grant
-  // (`grantCount`, already on the hit). The row is presence-gated (hide-when-empty,
-  // §4.1/§5), so the match count must be known before render — not on expand. Records
-  // are loaded here too, so expanding is instant. Flag-off / no-query / no-grants ⇒
-  // no fetch. ponytail: per-card fetch reuses searchFunding; if the fan-out bites,
-  // hoist presence to one funding terms-agg on the people path (see the /grants route).
+  // #1412 — count + strength are EAGER, precomputed once per page by a single funding
+  // agg (`grantMatchCount`/`grantMatchTagged` on the hit) that replaced the old per-card
+  // /grants fan-out. The row is presence-gated (hide-when-empty, §4.1/§5) on the eager
+  // count, so it renders immediately with no mount fetch. The strength is "tagged"
+  // (concept axis) vs "mention" (literal text); absent ⇒ "mention", so the flag-off /
+  // text-only payload reads exactly as before.
+  const grantsTotal = hit.grantMatchCount ?? 0;
+  const grantsStrength: "tagged" | "mention" = hit.grantMatchTagged ? "tagged" : "mention";
+  const hasFunding = grantsTotal > 0;
+  // The top-N record LIST stays lazy — fetched from /grants only when the disclosure
+  // opens (see the records effect below), so a page of grant-heavy PIs fires 0 grant
+  // calls on nav instead of one per card.
   const [grants, setGrants] = useState<EvidenceGrant[]>([]);
-  const [grantsTotal, setGrantsTotal] = useState(0);
-  // #1359 — row reason strength from the route: "tagged" (concept axis) vs "mention"
-  // (literal text). Server-derived (only it knows which grants are concept-tagged);
-  // defaults "mention" so the flag-off / text-only payload reads exactly as before.
-  const [grantsStrength, setGrantsStrength] = useState<"tagged" | "mention">("mention");
+  const grantsFetchedRef = useRef(false);
   const [fundingExpanded, setFundingExpanded] = useState(false);
   const fundingPanelId = useId();
 
@@ -210,41 +212,14 @@ export function PeopleResultCard({
   const grantDescriptorUis = keyPaperConfig?.descriptorUis.join(",") ?? "";
   const grantConceptLabel = keyPaperConfig?.conceptLabel ?? "";
 
+  // #1412 — cards are keyed by cwid and persist across query navigations, so drop a
+  // prior query's lazily-loaded records (and re-arm the one-shot fetch guard) whenever
+  // the query changes. The eager count/strength come off the hit, so they refresh with
+  // the server response automatically — only the on-expand record list needs resetting.
   useEffect(() => {
-    if (!evidenceRows || !qParam || hit.grantCount <= 0) {
-      // Card instances are keyed by cwid and persist across navigations, so a
-      // query→browse transition (qParam → "") on a card that previously loaded
-      // grants must DROP the now-stale row, not leave it rendering an old query's
-      // grants. Functional reset avoids re-render churn when already empty.
-      setGrants((prev) => (prev.length ? [] : prev));
-      setGrantsTotal(0);
-      setGrantsStrength("mention");
-      return;
-    }
-    let alive = true;
-    const params = new URLSearchParams({ q: qParam });
-    if (grantDescriptorUis) {
-      params.set("descriptorUis", grantDescriptorUis);
-      params.set("label", grantConceptLabel);
-    }
-    fetch(`/api/scholar/${encodeURIComponent(hit.cwid)}/grants?${params.toString()}`)
-      .then((r) => (r.ok ? r.json() : { grants: [], total: 0 }))
-      .then((d: { grants?: EvidenceGrant[]; total?: number; strength?: "tagged" | "mention" }) => {
-        if (!alive) return;
-        setGrants(d?.grants ?? []);
-        setGrantsTotal(d?.total ?? 0);
-        setGrantsStrength(d?.strength ?? "mention");
-      })
-      .catch(() => {
-        if (!alive) return;
-        setGrants([]);
-        setGrantsTotal(0);
-        setGrantsStrength("mention");
-      });
-    return () => {
-      alive = false;
-    };
-  }, [evidenceRows, qParam, hit.cwid, hit.grantCount, grantDescriptorUis, grantConceptLabel]);
+    grantsFetchedRef.current = false;
+    setGrants((prev) => (prev.length ? [] : prev));
+  }, [qParam]);
 
   const deptLine = hit.divisionName
     ? `${hit.divisionName} · Department of ${hit.deptName ?? hit.primaryDepartment ?? ""}`.trim()
@@ -283,7 +258,7 @@ export function PeopleResultCard({
   // (exactly one) still collapses under "Also matched" (#1381 follow-up), but the
   // umbrella toggle then expands straight to that secondary's records — one click.
   const lesserLines = lines ? lines.slice(1) : [];
-  const secondaryCount = lesserLines.length + (grants.length > 0 ? 1 : 0);
+  const secondaryCount = lesserLines.length + (hasFunding ? 1 : 0);
   const singleSecondary = secondaryCount === 1;
 
   // LEGACY priority chain — rendered ONLY when there are no stacked/single `lines`
@@ -375,7 +350,7 @@ export function PeopleResultCard({
   // does NOT preempt a real pub line (which would also jank, since grant strength
   // loads async). ponytail: structural promotion, known synchronously on first paint;
   // swap in a normalized relevance weight if/when one exists across pub + funding.
-  const promoteFunding = grants.length > 0 && primaryIsIdentityFallback;
+  const promoteFunding = hasFunding && primaryIsIdentityFallback;
 
   // Stretched-link card (rep-papers disclosure): the row is a `<div>` and the
   // NAME is the profile `<Link>` whose `after:absolute inset-0` overlay makes the
@@ -400,8 +375,42 @@ export function PeopleResultCard({
   // the umbrella toggle is its only control (no inner chevron) and the grant records
   // render as soon as the group expands, so one click reveals funding.
   const fundingLoneDemoted = !fundingFull && singleSecondary;
+
+  // #1412 — lazy records: fetch this scholar's top-N matching grants from /grants ONLY
+  // when the Funding disclosure is actually OPEN. The control differs by tier: the full
+  // badge has its own chevron (`fundingExpanded`); a demoted row lives behind the "Also
+  // matched" umbrella (`alsoExpanded`), and when it's the lone secondary the umbrella IS
+  // its only control. Gating on the structural `fundingLoneDemoted` alone would fetch on
+  // mount — the whole point was to STOP the per-card fan-out — so the umbrella state is
+  // required. Fires once per query (reset on qParam change above); the summary already
+  // rendered from the eager count, so this only fills the record list.
+  const fundingRecordsOpen =
+    hasFunding &&
+    (fundingFull ? fundingExpanded : alsoExpanded && (fundingLoneDemoted || fundingExpanded));
+  useEffect(() => {
+    if (!fundingRecordsOpen || grantsFetchedRef.current || !qParam) return;
+    grantsFetchedRef.current = true;
+    let alive = true;
+    const params = new URLSearchParams({ q: qParam });
+    if (grantDescriptorUis) {
+      params.set("descriptorUis", grantDescriptorUis);
+      params.set("label", grantConceptLabel);
+    }
+    fetch(`/api/scholar/${encodeURIComponent(hit.cwid)}/grants?${params.toString()}`)
+      .then((r) => (r.ok ? r.json() : { grants: [] }))
+      .then((d: { grants?: EvidenceGrant[] }) => {
+        if (alive) setGrants(d?.grants ?? []);
+      })
+      .catch(() => {
+        if (alive) setGrants([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [fundingRecordsOpen, qParam, hit.cwid, grantDescriptorUis, grantConceptLabel]);
+
   const fundingNode =
-    grants.length > 0 ? (
+    hasFunding ? (
       <>
         {fundingFull ? (
           <MatchAwareReason
@@ -448,7 +457,7 @@ export function PeopleResultCard({
             )}
           </LesserReason>
         )}
-        {fundingLoneDemoted || fundingExpanded ? (
+        {(fundingLoneDemoted || fundingExpanded) && grants.length > 0 ? (
           <KeyFunding
             grants={grants}
             total={grantsTotal}
@@ -471,7 +480,7 @@ export function PeopleResultCard({
         : SECONDARY_META[ev.kind],
     )
     .filter((c): c is SecondaryMeta => Boolean(c));
-  if (grants.length > 0) secondaryChips.push(SECONDARY_META.funding);
+  if (hasFunding) secondaryChips.push(SECONDARY_META.funding);
   // ponytail: 4 chips fit one line at typical widths; more collapse to "+N". Bump the
   // cap if cards routinely carry more secondaries.
   const shownChips = secondaryChips.slice(0, 4);
@@ -500,7 +509,7 @@ export function PeopleResultCard({
           defaultExpanded={singleSecondary}
         />
       ))}
-      {grants.length > 0 ? fundingNode : null}
+      {hasFunding ? fundingNode : null}
     </>
   );
 
@@ -621,7 +630,7 @@ export function PeopleResultCard({
             ) : null}
             {/* Non-stacked (single-evidence + legacy) keeps the full Funding row below
                 the block, unchanged from before the tiered redesign. */}
-            {!stacked && grants.length > 0 ? fundingNode : null}
+            {!stacked && hasFunding ? fundingNode : null}
           </>
         )}
       </div>

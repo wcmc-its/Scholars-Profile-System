@@ -1,11 +1,17 @@
 /**
- * Generalized evidence rows — the Scholars card's lazy "Funding" evidence row and
- * the opt-in publications flavor badge, both gated by `evidenceRows` (the
- * server-resolved SEARCH_EVIDENCE_ROWS):
- *   - a scholar with grantCount > 0 + an active query eager-fetches /grants and shows
- *     `[Funding] N grant(s) ⌄` ONLY when ≥1 matched (hide-when-empty, §4.1/§5);
- *   - expanding reveals the "Key funding" records (title · sponsor · years);
- *   - no fetch when the flag is off, the query is empty, or grantCount is 0;
+ * Scholars card "Funding" evidence row + the opt-in publications flavor badge, both
+ * gated by `evidenceRows` (server-resolved SEARCH_EVIDENCE_ROWS).
+ *
+ * #1412 — the row's presence + `N of M` count + tagged/mention strength are EAGER, read
+ * off the hit (`grantMatchCount` / `grantMatchTagged`) which a single page-level funding
+ * agg precomputes; there is NO per-card mount fetch. The top-N grant RECORDS stay lazy —
+ * `/grants` is called only when the disclosure opens (chevron for the full badge, the
+ * "Also matched" umbrella for a demoted row). So:
+ *   - a scholar with `grantMatchCount > 0` shows `[Funding] N of M grants … ⌄`
+ *     immediately (hide-when-empty, §4.1/§5), with no fetch;
+ *   - expanding fetches + reveals the "Key funding" records (title · sponsor · years);
+ *   - no `grantMatchCount` (flag off / no match / no grants / no query) ⇒ no row,
+ *     and no fetch ever fires;
  *   - with the flag on the publications reason row is a flavor pill
  *     (mention→Keyword, tagged→Concept, concept→Concept); off ⇒ muted, no pill.
  */
@@ -44,6 +50,8 @@ const base = {
   filters: { deptDiv: [], personType: [], activity: [] },
 };
 
+// The /grants records payload (the ONLY thing the route now supplies to the card — count
+// and strength come off the hit). Fired on expand.
 function mockFetch(payload: unknown) {
   const fn = vi.fn().mockResolvedValue({ ok: true, json: async () => payload });
   vi.stubGlobal("fetch", fn);
@@ -65,8 +73,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("PeopleResultCard — lazy Funding evidence row", () => {
-  it("eager-fetches /grants and shows the Funding row when ≥1 grant matched", async () => {
+describe("PeopleResultCard — Funding evidence row (eager count, lazy records)", () => {
+  it("shows the Funding row + count eagerly from the hit; fetches records only on expand", async () => {
     const fetchFn = mockFetch({
       grants: [
         {
@@ -78,22 +86,27 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
           isActive: true,
         },
       ],
-      total: 1,
     });
-    render(<PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />);
+    render(
+      <PeopleResultCard
+        {...base}
+        evidenceRows
+        hit={makeHit({ grantMatchCount: 1, evidence: pubEvidence() })}
+      />,
+    );
 
-    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
-    // #1381 — the full Funding lead is now the count-first dot layout: emphasized count,
-    // muted "of 3 grants mention", quoted query as the entity span.
+    // Eager: the row + count-first line render immediately, NO fetch on mount.
+    expect(screen.getByText("Funding")).toBeTruthy();
     expect(document.body.textContent).toMatch(/1 of 3 grants mention/);
     expect(screen.getByText("“diabetes”").tagName).toBe("SPAN");
+    expect(fetchFn).not.toHaveBeenCalled();
+
+    // Expand → records fetched from /grants and shown.
+    fireEvent.click(screen.getByRole("button", { name: /key funding/i }));
     expect(
       fetchFn.mock.calls.some((c) => c[0] === "/api/scholar/abc1234/grants?q=diabetes"),
     ).toBe(true);
-
-    // expand → "Key funding" records
-    fireEvent.click(screen.getByRole("button", { name: /key funding/i }));
-    expect(screen.getByText(/Beta-cell regeneration in T2D/)).toBeTruthy();
+    expect(await screen.findByText(/Beta-cell regeneration in T2D/)).toBeTruthy();
     expect(screen.getByText(/NIH \/ NIDDK/)).toBeTruthy();
   });
 
@@ -110,18 +123,18 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
           isActive: true,
         },
       ],
-      total: 1,
     });
     const { container } = render(
-      <PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />,
-    );
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /key funding/i })).toBeTruthy(),
+      <PeopleResultCard
+        {...base}
+        evidenceRows
+        hit={makeHit({ grantMatchCount: 1, evidence: pubEvidence() })}
+      />,
     );
     fireEvent.click(screen.getByRole("button", { name: /key funding/i }));
     // highlightedTitleHtml keeps a real <mark> (styled as the light-red pill).
-    const mark = container.querySelector("mark");
-    expect(mark?.textContent).toBe("diabetes");
+    await waitFor(() => expect(container.querySelector("mark")).toBeTruthy());
+    expect(container.querySelector("mark")?.textContent).toBe("diabetes");
   });
 
   it("the KEY FUNDING disclosure header carries no inline count (total via '+N more')", async () => {
@@ -129,11 +142,17 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
       grants: [
         { projectId: "p1", title: "Grant one", sponsor: "NIH", startYear: 2021, endYear: 2025, isActive: true },
       ],
-      total: 8,
     });
-    render(<PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />);
-    await waitFor(() => expect(screen.getByRole("button", { name: /key funding/i })).toBeTruthy());
+    // grantMatchCount 8, one record returned ⇒ "+7 more in profile".
+    render(
+      <PeopleResultCard
+        {...base}
+        evidenceRows
+        hit={makeHit({ grantMatchCount: 8, grantCount: 8, evidence: pubEvidence() })}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /key funding/i }));
+    await screen.findByText(/Grant one/);
     // Sentence-case subhead, no "1 of 8" count (approved); the rest live in "+7 more".
     expect(screen.queryByText("1 of 8")).toBeNull();
     expect(screen.getByText(/\+7 more in profile/)).toBeTruthy();
@@ -151,8 +170,6 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
           isActive: true,
         },
       ],
-      total: 2,
-      strength: "tagged",
     });
     render(
       <PeopleResultCard
@@ -164,17 +181,19 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
           contentQuery: "cardiac arrest",
           conceptLabel: "Heart Arrest",
         }}
-        hit={makeHit({ evidence: pubEvidence() })}
+        hit={makeHit({ grantMatchCount: 2, grantMatchTagged: true, evidence: pubEvidence() })}
       />,
     );
-    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
     // #1381 count-first: emphasized count + muted "of 3 grants tagged" + the underlined
-    // CONCEPT term (a span now, not <strong>).
+    // CONCEPT term (a span now, not <strong>) — all eager from the hit.
     expect(document.body.textContent).toMatch(/2 of 3 grants tagged/);
     const term = screen.getByText("Heart Arrest");
     expect(term.tagName).toBe("SPAN");
     expect(term.className).toMatch(/underline/);
-    // the page-resolved concept is threaded into the /grants fetch
+
+    // On expand the page-resolved concept is threaded into the /grants records fetch.
+    fireEvent.click(screen.getByRole("button", { name: /key funding/i }));
+    await screen.findByText(/Cardiac arrest survival/);
     expect(
       fetchFn.mock.calls.some(
         (c) => String(c[0]).includes("descriptorUis=D006323") && String(c[0]).includes("label=Heart"),
@@ -182,26 +201,25 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
     ).toBe(true);
   });
 
-  it("hides the Funding row entirely when no grant matched (never 0 of N)", async () => {
-    const fetchFn = mockFetch({ grants: [], total: 0 });
+  it("hides the Funding row entirely when no grant matched (no grantMatchCount, no fetch)", async () => {
+    const fetchFn = mockFetch({ grants: [] });
     render(<PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />);
-    await waitFor(() =>
-      expect(fetchFn.mock.calls.some((c) => String(c[0]).includes("/grants?q="))).toBe(true),
-    );
+    await Promise.resolve();
     expect(screen.queryByText("Funding")).toBeNull();
     expect(screen.queryByRole("button", { name: /key funding/i })).toBeNull();
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 
-  it("never fetches /grants when the flag is off", async () => {
-    const fetchFn = mockFetch({ grants: [], total: 0 });
+  it("never fetches /grants when the flag is off (no eager count is emitted)", async () => {
+    const fetchFn = mockFetch({ grants: [] });
     render(<PeopleResultCard {...base} hit={makeHit({ evidence: pubEvidence() })} />);
     await Promise.resolve();
     expect(fetchFn).not.toHaveBeenCalled();
     expect(screen.queryByText("Funding")).toBeNull();
   });
 
-  it("never fetches /grants for a scholar with no grants", async () => {
-    const fetchFn = mockFetch({ grants: [], total: 0 });
+  it("never fetches /grants for a scholar with no matching grants", async () => {
+    const fetchFn = mockFetch({ grants: [] });
     render(
       <PeopleResultCard {...base} evidenceRows hit={makeHit({ grantCount: 0, evidence: pubEvidence() })} />,
     );
@@ -210,7 +228,7 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
   });
 
   it("never fetches /grants on the no-query Browse page", async () => {
-    const fetchFn = mockFetch({ grants: [], total: 0 });
+    const fetchFn = mockFetch({ grants: [] });
     render(<PeopleResultCard {...base} q="" evidenceRows hit={makeHit({ evidence: pubEvidence() })} />);
     await Promise.resolve();
     expect(fetchFn).not.toHaveBeenCalled();
@@ -219,7 +237,7 @@ describe("PeopleResultCard — lazy Funding evidence row", () => {
 
 describe("PeopleResultCard — publications flavor badge (§4.7, Scholars card only)", () => {
   it("badges a literal mention as Keyword when the flag is on", () => {
-    mockFetch({ grants: [], total: 0 });
+    mockFetch({ grants: [] });
     render(
       <PeopleResultCard {...base} evidenceRows hit={makeHit({ grantCount: 0, evidence: pubEvidence() })} />,
     );
@@ -227,7 +245,7 @@ describe("PeopleResultCard — publications flavor badge (§4.7, Scholars card o
   });
 
   it("badges a tagged match as Concept (a MeSH descriptor is a concept, not a research area)", () => {
-    mockFetch({ grants: [], total: 0 });
+    mockFetch({ grants: [] });
     render(
       <PeopleResultCard
         {...base}
@@ -242,7 +260,7 @@ describe("PeopleResultCard — publications flavor badge (§4.7, Scholars card o
   });
 
   it("badges a concept match as Concept", () => {
-    mockFetch({ grants: [], total: 0 });
+    mockFetch({ grants: [] });
     render(
       <PeopleResultCard
         {...base}
@@ -257,7 +275,7 @@ describe("PeopleResultCard — publications flavor badge (§4.7, Scholars card o
   });
 
   it("renders the pub row as a dot + type word — the dot layout is not flag-gated", () => {
-    mockFetch({ grants: [], total: 0 });
+    mockFetch({ grants: [] });
     render(<PeopleResultCard {...base} hit={makeHit({ grantCount: 0, evidence: pubEvidence() })} />);
     // #1381 — the primary is the count-first dot layout regardless of SEARCH_EVIDENCE_ROWS;
     // the old muted MatchReason row and the bordered flavor pill are both gone.
@@ -270,33 +288,31 @@ describe("PeopleResultCard — publications flavor badge (§4.7, Scholars card o
 describe("PeopleResultCard — Funding supersedes the generic no-match fallback", () => {
   const oneGrant = {
     grants: [{ projectId: "p1", title: "Pediatric trial", sponsor: "NIH", startYear: 2022, endYear: 2025 }],
-    total: 1,
   };
 
-  it("drops the '— no specific match —' fallback when a grant matched", async () => {
+  it("drops the '— no specific match —' fallback when a grant matched", () => {
     mockFetch(oneGrant);
     render(
       <PeopleResultCard
         {...base}
         evidenceRows
-        hit={makeHit({ evidence: { kind: "none" } as PeopleHit["evidence"] })}
+        hit={makeHit({ grantMatchCount: 1, evidence: { kind: "none" } as PeopleHit["evidence"] })}
       />,
     );
-    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
+    expect(screen.getByText("Funding")).toBeTruthy();
     // the honest-empty identity fallback is gone — the Funding row IS the match
     expect(screen.queryByText(/no specific match for this query/i)).toBeNull();
   });
 
-  it("#1366 — PROMOTES Funding to the full primary badge when it is the only signal", async () => {
+  it("#1366 — PROMOTES Funding to the full primary badge when it is the only signal", () => {
     mockFetch(oneGrant);
     const { container } = render(
       <PeopleResultCard
         {...base}
         evidenceRows
-        hit={makeHit({ evidence: { kind: "none" } as PeopleHit["evidence"] })}
+        hit={makeHit({ grantMatchCount: 1, evidence: { kind: "none" } as PeopleHit["evidence"] })}
       />,
     );
-    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
     // No first-class pub line ⇒ Funding LEADS with the count-first dot layout ("N of M
     // grants mention 'query'" + quoted query span), NOT a demoted dot, and there is no
     // "Also matched" group to subordinate it under.
@@ -305,8 +321,8 @@ describe("PeopleResultCard — Funding supersedes the generic no-match fallback"
     expect(container.textContent).not.toContain("Also matched");
   });
 
-  it("keeps the '— no specific match —' fallback when NO grant matched", async () => {
-    const fetchFn = mockFetch({ grants: [], total: 0 });
+  it("keeps the '— no specific match —' fallback when NO grant matched (no fetch)", async () => {
+    const fetchFn = mockFetch({ grants: [] });
     render(
       <PeopleResultCard
         {...base}
@@ -314,17 +330,22 @@ describe("PeopleResultCard — Funding supersedes the generic no-match fallback"
         hit={makeHit({ evidence: { kind: "none" } as PeopleHit["evidence"] })}
       />,
     );
-    await waitFor(() =>
-      expect(fetchFn.mock.calls.some((c) => String(c[0]).includes("/grants?q="))).toBe(true),
-    );
+    await Promise.resolve();
     expect(screen.getByText(/no specific match for this query/i)).toBeTruthy();
     expect(screen.queryByText("Funding")).toBeNull();
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 
-  it("does NOT suppress a real publications match — both rows coexist", async () => {
+  it("does NOT suppress a real publications match — both rows coexist", () => {
     mockFetch(oneGrant);
-    render(<PeopleResultCard {...base} evidenceRows hit={makeHit({ evidence: pubEvidence() })} />);
-    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
+    render(
+      <PeopleResultCard
+        {...base}
+        evidenceRows
+        hit={makeHit({ grantMatchCount: 1, evidence: pubEvidence() })}
+      />,
+    );
+    expect(screen.getByText("Funding")).toBeTruthy();
     // the real match reason still renders alongside the Funding row
     expect(screen.getByText(/publications mention/)).toBeTruthy();
   });
@@ -333,10 +354,10 @@ describe("PeopleResultCard — Funding supersedes the generic no-match fallback"
 describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked evidenceLines)", () => {
   const oneGrant = {
     grants: [{ projectId: "p1", title: "Pediatric trial", sponsor: "NIH", startYear: 2022, endYear: 2025 }],
-    total: 1,
   };
   const stackedHit = (over: Record<string, unknown> = {}) =>
     makeHit({
+      grantMatchCount: 1,
       evidenceLines: [
         { kind: "method", family: "CRISPR genome editing", tools: [], count: 3 },
         { kind: "topic", label: "Stem Cell & Regenerative Medicine", id: "stem", count: 2 },
@@ -349,7 +370,6 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     const { container } = render(
       <PeopleResultCard {...base} evidenceRows hit={stackedHit()} />,
     );
-    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
     // the primary keeps the full Method badge...
     expect(screen.getByText("Method")).toBeTruthy();
     // ...and the demoted signals sit under "Also matched", collapsed by default.
@@ -358,15 +378,14 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     fireEvent.click(screen.getByRole("button", { name: /also matched/i }));
     expect(container.textContent).toMatch(/mentions\s*“diabetes”/);
     expect(container.textContent).toMatch(/1 of 3 grants/);
-    // the demoted dot still expands to the KEY FUNDING records.
+    // the demoted dot still expands to the KEY FUNDING records (fetched on this click).
     fireEvent.click(screen.getByRole("button", { name: /key funding/i }));
-    expect(screen.getByText(/Pediatric trial/)).toBeTruthy();
+    expect(await screen.findByText(/Pediatric trial/)).toBeTruthy();
   });
 
-  it("Part D collapse — the 'Also matched' group is a category summary line by default (counts/entities hidden)", async () => {
+  it("Part D collapse — the 'Also matched' group is a category summary line by default (counts/entities hidden)", () => {
     mockFetch(oneGrant);
     const { container } = render(<PeopleResultCard {...base} evidenceRows hit={stackedHit()} />);
-    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
     // the summary shows colored category labels for each secondary...
     expect(screen.getByRole("button", { name: /also matched/i })).toBeTruthy();
     expect(screen.getByText("Research area")).toBeTruthy();
@@ -377,10 +396,9 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     expect(screen.queryByRole("button", { name: /key funding/i })).toBeNull();
   });
 
-  it("Part D collapse — expanding the summary reveals the full lesser rows", async () => {
+  it("Part D collapse — expanding the summary reveals the full lesser rows", () => {
     mockFetch(oneGrant);
     render(<PeopleResultCard {...base} evidenceRows hit={stackedHit()} />);
-    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /also matched/i }));
     // the topic entity + funding count + disclosure now render.
     expect(screen.getByText(/Stem Cell & Regenerative Medicine/)).toBeTruthy();
@@ -394,28 +412,28 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
         {...base}
         evidenceRows
         hit={makeHit({
+          grantMatchCount: 1,
           evidenceLines: [
             { kind: "method", family: "CRISPR genome editing", tools: [], count: 3 },
           ] as PeopleHit["evidenceLines"],
         })}
       />,
     );
-    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
     // ONE secondary (the funding dot; the method badge is the primary) still collapses
     // under the "Also matched" umbrella — the summary shows, the detail is hidden.
     expect(screen.getByRole("button", { name: /also matched/i })).toBeTruthy();
     expect(screen.queryByText(/mentions\s*“diabetes”/)).toBeNull();
     expect(screen.queryByText(/Pediatric trial/)).toBeNull();
     // and there is NO separate inner "key funding" chevron — the umbrella is the sole
-    // control, so ONE click on it reveals the grant records directly.
+    // control, so ONE click on it reveals the grant records directly (fetched now).
     expect(screen.queryByRole("button", { name: /key funding/i })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /also matched/i }));
     expect(screen.getByText(/mentions\s*“diabetes”/)).toBeTruthy();
-    expect(screen.getByText(/Pediatric trial/)).toBeTruthy();
+    expect(await screen.findByText(/Pediatric trial/)).toBeTruthy();
   });
 
   it("#1381 follow-up — a lone LESSER LINE secondary also reveals its records in one click", async () => {
-    mockFetch({ grants: [], total: 0 });
+    mockFetch({ grants: [] });
     render(
       <PeopleResultCard
         {...base}
@@ -443,10 +461,11 @@ describe("PeopleResultCard — #1366 follow-up tiered 'Also matched' (stacked ev
     expect(screen.getByText(/Inline lesser paper/)).toBeTruthy();
   });
 
-  it("#1366 follow-up Part C — the demoted funding MENTION dot is FILLED green (bg-[#16a34a]), not bordered", async () => {
+  it("#1366 follow-up Part C — the demoted funding MENTION dot is FILLED green (bg-[#16a34a]), not bordered", () => {
     mockFetch(oneGrant);
     const { container } = render(<PeopleResultCard {...base} evidenceRows hit={stackedHit()} />);
-    await waitFor(() => expect(screen.getByText("Funding")).toBeTruthy());
+    // expand the umbrella so the demoted funding dot renders.
+    fireEvent.click(screen.getByRole("button", { name: /also matched/i }));
     const dots = Array.from(container.querySelectorAll("span.rounded-full")).map((d) => d.className);
     // the funding dot is filled green; no dot uses the old hollow bordered-green style.
     expect(dots.some((c) => c.includes("bg-[#16a34a]"))).toBe(true);
