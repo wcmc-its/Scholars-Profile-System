@@ -947,7 +947,15 @@ export async function buildPeopleDoc(
   // predicate as the loop above — `pmid` is added to the `select` to make
   // the filter possible.
   const pubDates = await client.publicationAuthor.findMany({
-    where: { cwid: s.cwid, isConfirmed: true },
+    // Issue #63 / #1514 — exclude Retraction / Erratum here too, matching the
+    // `authorships` select above. Without it a retracted paper can become a
+    // scholar's `mostRecentPubDate` sort key even though its title/MeSH are
+    // dropped from the doc and it renders nowhere else.
+    where: {
+      cwid: s.cwid,
+      isConfirmed: true,
+      publication: { publicationType: { notIn: [...NEVER_DISPLAY_TYPES] } },
+    },
     select: { pmid: true, publication: { select: { dateAddedToEntrez: true } } },
   });
   const mostRecentPubDate =
