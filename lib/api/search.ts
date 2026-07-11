@@ -1336,6 +1336,15 @@ export async function searchPeople(opts: {
    */
   facultyProminence?: boolean;
   /**
+   * The active-grants prominence lever — companion to `facultyProminence`. When
+   * `false`, the outer prominence function_score OMITS the flat
+   * `+PEOPLE_PROMINENCE_GRANT_WEIGHT` `hasActiveGrants` term (also an
+   * expertise-independent employment prior). Defaults to today's behavior
+   * (`true` — term present); a purely topical caller (e.g. sponsor-match's
+   * per-term retrieval) passes `false` so ranking reflects only topical fit.
+   */
+  grantProminence?: boolean;
+  /**
    * Issue #692 — generic-term demotion (mode `on`). When true and `contentQuery`
    * differs from the raw query, the topic + hybrid bodies score on the content
    * query (full query discounted) and highlighting is restricted to the content
@@ -2366,10 +2375,16 @@ export async function searchPeople(opts: {
               },
             ]
           : []),
-        {
-          filter: { term: { hasActiveGrants: true } },
-          weight: PEOPLE_PROMINENCE_GRANT_WEIGHT,
-        },
+        // The flat active-grants prominence term, dropped when the grant-prominence
+        // lever is off (expertise-independent employment prior), mirroring faculty above.
+        ...(opts.grantProminence !== false
+          ? [
+              {
+                filter: { term: { hasActiveGrants: true } },
+                weight: PEOPLE_PROMINENCE_GRANT_WEIGHT,
+              },
+            ]
+          : []),
         ...areaBoostFunctions,
         ...clinicalFnFunctions,
       ]
