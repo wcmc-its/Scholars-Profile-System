@@ -1,0 +1,22 @@
+{
+  "_note": "Topic spec for the sponsor-match gold grader (evidence-grounded judge). Per fixture: id, the sponsor TOPIC the judge grades against, `pool` (MeSH people-search query to surface candidates — recall only, NOT the grade), `oa` (OpenAlex topical-work search term for the evidence bundle). `paste` in the fixtures file is the realistic sponsor description; the judge grades against `topic`.",
+  "_probes": "rarity → rarity-scleroderma + rarity2-cystic-fibrosis + als (rare, few experts must out-rank common-area). redundant-phrasing → heme-malignancy (paste repeats leukemia/lymphoma/myeloma). method-not-disease → ml-in-medicine, single-cell-genomics. over-broad → cardiovascular-broad. acronym/ambiguous → multiple-sclerosis (MS), als (ALS).",
+  "topics": [
+    { "id": "cancer-metabolism",     "topic": "metabolic reprogramming and cellular metabolism in cancer", "pool": "cancer metabolism", "oa": "cancer metabolism" },
+    { "id": "immuno-onc",            "topic": "cancer immunotherapy: checkpoint blockade, T-cell exhaustion, tumor immune microenvironment", "pool": "cancer immunotherapy checkpoint inhibitor T cell", "oa": "cancer immunotherapy" },
+    { "id": "rarity-scleroderma",    "topic": "systemic sclerosis (scleroderma), a rare autoimmune connective-tissue disease", "pool": "systemic sclerosis scleroderma", "oa": "scleroderma" },
+    { "id": "heme-malignancy",       "topic": "hematologic malignancies (blood cancers): leukemia, lymphoma, and multiple myeloma", "pool": "leukemia lymphoma hematologic malignancy", "oa": "leukemia lymphoma myeloma" },
+    { "id": "heart-failure",         "topic": "heart failure and cardiomyopathy (HFrEF/HFpEF), cardiac remodeling", "pool": "heart failure cardiomyopathy", "oa": "heart failure" },
+    { "id": "alzheimers",            "topic": "Alzheimer's disease and related dementias: amyloid/tau, neurodegeneration", "pool": "Alzheimer's disease dementia neurodegeneration", "oa": "Alzheimer disease" },
+    { "id": "hiv-aids",              "topic": "HIV/AIDS: antiretroviral therapy, cure/reservoir, prevention", "pool": "HIV AIDS antiretroviral", "oa": "HIV" },
+    { "id": "health-disparities",    "topic": "health equity and disparities: social determinants of health, structural inequities in care", "pool": "health disparities social determinants of health equity", "oa": "health disparities" },
+    { "id": "gene-therapy",          "topic": "gene and cell therapy: viral-vector gene delivery, CRISPR gene editing, engineered cell therapy", "pool": "gene therapy CRISPR gene editing", "oa": "gene therapy" },
+
+    { "id": "ml-in-medicine",        "topic": "machine learning / artificial intelligence applied to medicine and clinical prediction (a METHOD, not a disease)", "pool": "machine learning artificial intelligence clinical prediction", "oa": "machine learning healthcare" },
+    { "id": "single-cell-genomics",  "topic": "single-cell and spatial genomics: scRNA-seq, spatial transcriptomics (a PLATFORM/method)", "pool": "single cell RNA sequencing spatial transcriptomics", "oa": "single-cell RNA sequencing" },
+    { "id": "cardiovascular-broad",  "topic": "cardiovascular disease, broadly (an intentionally OVER-BROAD sponsor scope)", "pool": "cardiovascular disease", "oa": "cardiovascular disease" },
+    { "id": "multiple-sclerosis",    "topic": "multiple sclerosis (MS), the demyelinating CNS disease (NOT mass spectrometry / mitral stenosis)", "pool": "multiple sclerosis demyelinating", "oa": "multiple sclerosis" },
+    { "id": "rarity2-cystic-fibrosis","topic": "cystic fibrosis (CF), a rare inherited disease of the CFTR channel", "pool": "cystic fibrosis", "oa": "cystic fibrosis" },
+    { "id": "als",                   "topic": "amyotrophic lateral sclerosis (ALS), a rare fatal motor-neuron disease", "pool": "amyotrophic lateral sclerosis motor neuron", "oa": "amyotrophic lateral sclerosis" }
+  ]
+}
