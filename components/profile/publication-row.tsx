@@ -77,7 +77,7 @@ export function PublicationRow({
         pmcid={pub.pmcid}
         doi={pub.doi}
         ecommonsLink={pub.ecommonsLink}
-        abstract={pub.abstract}
+        lazyAbstract={pub.hasAbstract}
       />
     </div>
   );

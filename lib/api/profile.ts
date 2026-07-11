@@ -359,10 +359,12 @@ export type ProfilePublication = ScoredPublication<{
    *  the row had no keywords in reciterdb. `ui` is null for the rare
    *  unresolved label. */
   meshTerms: Array<{ ui: string | null; label: string }>;
-  /** Plain-text article abstract from `Publication.abstract` (#288 PR-A).
-   *  Null when the publication has no abstract — common for older papers
-   *  and non-research types. Rendered inline via `<AbstractDisclosure>`. */
-  abstract: string | null;
+  /** Whether `Publication.abstract` is populated (#288 PR-A) — common false
+   *  for older papers and non-research types. #1537: a boolean, not the text;
+   *  hundreds of full abstracts were serialized into the RSC/client payload
+   *  despite rendering collapsed. The meta row fetches the gated text from
+   *  `/api/publications/[pmid]` on first open (`lazyAbstract`). */
+  hasAbstract: boolean;
   /** Active WCM scholars (incl. the profile owner) who are confirmed authors
    *  on this publication. Chip-row shape matching the topic/search surfaces. */
   wcmAuthors: Array<{
@@ -1083,7 +1085,7 @@ export const getScholarFullProfileBySlug = cache(
         },
         isConfirmed: a.isConfirmed,
         meshTerms: normalizeMeshTerms(a.publication.meshTerms),
-        abstract: a.publication.abstract ?? null,
+        hasAbstract: Boolean(a.publication.abstract),
         // All confirmed WCM authors on this publication, including the profile
         // owner. Same chip-row shape as topic/search; the page renders chips and
         // omits the plain authorsString to avoid duplicating WCM author names.
