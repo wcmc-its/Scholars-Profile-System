@@ -207,6 +207,13 @@ describe("reflectVisibilityChange", () => {
     expect(mockRevalidatePath).toHaveBeenCalledWith("/browse");
     warn.mockRestore();
   });
+
+  // #1537 — the cached methods rollup filters through the suppression layer,
+  // so a suppression/revoke must evict the methods: swr-cache prefix.
+  it("busts the methods: swr-cache prefix", async () => {
+    await reflectVisibilityChange(["jane-smith"]);
+    expect(mockBust.mock.calls).toEqual([["methods:"]]);
+  });
 });
 
 describe("invalidateCloudFront enqueue/mark (#353 outbox)", () => {

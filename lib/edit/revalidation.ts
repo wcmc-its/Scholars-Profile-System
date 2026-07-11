@@ -280,6 +280,10 @@ export async function reflectVisibilityChange(
   // #671 — the current canonical profile form per slug (PROFILE_CANONICAL).
   const paths = ["/browse", ...profileSlugs.map((slug) => canonicalProfilePath(slug))];
   revalidatePaths(paths);
+  // #1537 — the cached methods rollup filters its pmid union through the
+  // suppression layer, so a publication/scholar suppression must evict it or
+  // the /methods pages re-serve the suppressed work for up to MAX_STALE_MS.
+  bust("methods:");
   await invalidateCloudFront(paths);
 }
 
