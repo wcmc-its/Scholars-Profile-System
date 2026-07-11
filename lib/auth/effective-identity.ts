@@ -82,12 +82,14 @@ export async function getEffectiveEditSession(): Promise<EditSession | null> {
   const session = await getSession();
   if (!session) return null;
   const cwid = getEffectiveCwid(session);
-  return {
-    cwid,
-    isSuperuser: await isSuperuser(cwid),
-    isCommsSteward: await isCommsSteward(cwid),
-    isDeveloper: await isDeveloper(cwid),
-  };
+  // #1514 — same concurrent resolve as getEditSession: independent fail-closed
+  // checks, one directory round-trip of wall-clock instead of three.
+  const [su, cs, dev] = await Promise.all([
+    isSuperuser(cwid),
+    isCommsSteward(cwid),
+    isDeveloper(cwid),
+  ]);
+  return { cwid, isSuperuser: su, isCommsSteward: cs, isDeveloper: dev };
 }
 
 /**
