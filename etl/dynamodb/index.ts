@@ -169,9 +169,9 @@ async function main() {
     console.log(`Topic upserts complete: ${topicRowsUpserted} rows.`);
 
     const topicCount = await db.write.topic.count();
-    console.log(`topic table count: ${topicCount} (expected 68 for taxonomy_v2)`);
-    if (topicCount !== 68) {
-      console.warn(`WARN: topic count ${topicCount} != 68 — investigate TAXONOMY# probe output.`);
+    console.log(`topic table count: ${topicCount} (expected 67 for taxonomy_v2)`);
+    if (topicCount !== 67) {
+      console.warn(`WARN: topic count ${topicCount} != 67 — investigate TAXONOMY# probe output.`);
     }
 
     // ===================================================================
