@@ -2156,9 +2156,17 @@ export async function searchPeople(opts: {
   // selection. Ticking another row in the same group OR's within that
   // group; ticking a row in another group AND's. Implementation lives
   // entirely in the request body — no separate round-trip per facet.
+  // #1411 — every agg below is a top-level filter-context aggregation, so it already
+  // operates on the main-query matched set (`{ bool: { must, filter: queryFilter } }`,
+  // before post_filter). Re-embedding the lexical `must` inside each agg's own bool is
+  // therefore redundant: it re-evaluates the ~9-clause `multi_match` once per agg without
+  // changing a single bucket count. Dropped here — the aggs now carry ONLY their
+  // excluding-self `filter` reconstruction and inherit `must` from query scope. Counts
+  // are bucket-for-bucket identical; the request just stops re-matching the query text
+  // N times. (No `_score`-consuming aggs exist here, so filter-context is exact.)
   const aggs: Record<string, unknown> = {
     deptDivs: {
-      filter: { bool: { must, filter: filtersExcept("deptDiv") } },
+      filter: { bool: { filter: filtersExcept("deptDiv") } },
       // 200 covers the long tail comfortably — ~30 departments × handful
       // of divisions + ~20 centers + free-text fallbacks. Labels are
       // resolved server-side in the page (see PeopleResults) so the
@@ -2166,13 +2174,12 @@ export async function searchPeople(opts: {
       aggs: { keys: { terms: { field: "deptDivKey", size: 200 } } },
     },
     personTypes: {
-      filter: { bool: { must, filter: filtersExcept("personType") } },
+      filter: { bool: { filter: filtersExcept("personType") } },
       aggs: { keys: { terms: { field: "personType", size: 10 } } },
     },
     activityHasGrants: {
       filter: {
         bool: {
-          must,
           filter: [
             ...filtersExcept("activity"),
             { term: { hasActiveGrants: true } },
@@ -2183,7 +2190,6 @@ export async function searchPeople(opts: {
     activityRecentPub: {
       filter: {
         bool: {
-          must,
           filter: [
             ...filtersExcept("activity"),
             { range: { mostRecentPubDate: { gte: recentPubCutoff.toISOString() } } },
@@ -2199,12 +2205,11 @@ export async function searchPeople(opts: {
     // total-without-pi-filter so the "No filter" radio shows a baseline
     // count next to it. `piMulti` uses the current `piMin`.
     piNone: {
-      filter: { bool: { must, filter: filtersExcept("pi") } },
+      filter: { bool: { filter: filtersExcept("pi") } },
     },
     piAny: {
       filter: {
         bool: {
-          must,
           filter: [...filtersExcept("pi"), piClauseFor("any", piMin)],
         },
       },
@@ -2212,7 +2217,6 @@ export async function searchPeople(opts: {
     piActive: {
       filter: {
         bool: {
-          must,
           filter: [...filtersExcept("pi"), piClauseFor("active", piMin)],
         },
       },
@@ -2220,7 +2224,6 @@ export async function searchPeople(opts: {
     piMulti: {
       filter: {
         bool: {
-          must,
           filter: [...filtersExcept("pi"), piClauseFor("multi", piMin)],
         },
       },
@@ -2235,7 +2238,10 @@ export async function searchPeople(opts: {
           attributionMatch: {
             filter: {
               bool: {
-                must,
+                // #1411 — `must` (and the re-listed `queryFilter`) are inherited from the
+                // main-query scope this filter-agg runs in; only the descendant-UI
+                // predicate narrows the count. `queryFilter` is left in place (cheap,
+                // redundant) to keep this a pure `must`-removal.
                 filter: [
                   ...queryFilter,
                   { terms: { publicationMeshUi: meshDescendantUis } },
@@ -3803,42 +3809,22 @@ export async function searchPublications(opts: {
     sortClause.push({ dateAddedToEntrez: "desc" });
   }
 
-  // Issue #259 §5.2 — facet aggs must mirror the admission shape:
-  //   - strict / §1.2: must carries the admission clause; filter adds the
-  //     other axes (today's `must`-only contract).
-  //   - concept_expanded: should + msm=1 carries the admission; filter adds
-  //     the other axes (`must` is empty so it would short-circuit to
-  //     match-all, producing a wrong denominator).
+  // Issue #259 §5.2 / #1411 — facet aggs used to re-embed the admission clause so it
+  // "mirrored" the main query (strict: `must`; concept_expanded: `should`+`msm:1`). But
+  // every agg here is a top-level FILTER-CONTEXT aggregation, so it already runs inside
+  // the main query's matched set — the admission is applied there. Re-embedding it in the
+  // agg only re-evaluates the multi-clause admission per agg without moving a single
+  // bucket count. So both modes now emit just `{ bool: { filter } }`, carrying only the
+  // excluding-self `filter`; admission is inherited from query scope. Counts are
+  // bucket-for-bucket identical (same theorem as the people/funding tabs).
   //
-  // Scope caveat — filter-context aggregations only. Every current agg is a
-  // filter-context `terms` / `filter` / `filters` aggregation: admission
-  // count is what matters, scoring contribution is irrelevant. Filter
-  // clauses don't score, so the `should`-with-msm shape admits the same
-  // docs as `must` would while contributing zero to `_score`. Aggs that
-  // consume `_score` (e.g. `top_hits` with `_score` sort, `significant_terms`)
-  // would behave differently between modes and silently break the cross-mode
-  // equivalence — none exist today; a future addition needs a
-  // `must: { match_all }` + `should` + `msm: 1` + `filter` shape that
-  // promotes admission into a scoring path.
-  //
-  // Closure captures: `queryShape`, `topLevelShould`, `must`. The msm
-  // value is the literal `1` (the only value SPEC §5.2 specifies); not
-  // threaded through a variable so a future rename can't accidentally
-  // serialize `minimum_should_match: undefined`.
-  const aggBoolFor = (
-    filter: Record<string, unknown>[],
-  ): Record<string, unknown> => {
-    if (queryShape === "concept_expanded") {
-      return {
-        bool: {
-          should: topLevelShould,
-          minimum_should_match: 1,
-          filter,
-        },
-      };
-    }
-    return { bool: { must, filter } };
-  };
+  // Scope caveat — filter-context only. Aggs that consume `_score` (`top_hits` sorted by
+  // `_score`, `significant_terms`) WOULD depend on the admission clause's scoring and must
+  // NOT use this helper — none exist today; a future one needs the explicit
+  // `must: { match_all }` + `should` + `msm: 1` + `filter` scoring shape.
+  const aggBoolFor = (filter: Record<string, unknown>[]): Record<string, unknown> => ({
+    bool: { filter },
+  });
 
   const query = {
     bool: {
