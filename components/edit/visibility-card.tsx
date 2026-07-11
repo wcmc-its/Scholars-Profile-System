@@ -155,6 +155,14 @@ export function VisibilityCard({
   async function suppressTarget(reason: string | null) {
     setError(null);
     setPending(true);
+    // Same message for a bad response and a network/parse failure — hoisted so
+    // the catch below can surface it too (a bare `fetch` rejection or a non-JSON
+    // gateway page never reaches the `!res.ok` branch, so without the catch the
+    // user got zero feedback).
+    const failMessage =
+      mode === "superuser"
+        ? "We couldn't hide this scholar's profile. Please try again."
+        : "We couldn't hide your profile. Please try again.";
     try {
       const res = await fetch("/api/edit/suppress", {
         method: "POST",
@@ -171,11 +179,6 @@ export function VisibilityCard({
         | { ok: true; suppressionId: string }
         | { ok: false; error: string };
       if (!res.ok || data.ok !== true) {
-        setError(
-          mode === "superuser"
-            ? "We couldn't hide this scholar's profile. Please try again."
-            : "We couldn't hide your profile. Please try again.",
-        );
         // Re-throw so the dialog's "Working…" state resets and the dialog
         // stays open for the user to retry / cancel.
         throw new Error("suppress_failed");
@@ -194,6 +197,11 @@ export function VisibilityCard({
       }
       setConfirmOpen(false);
       router.refresh();
+    } catch (err) {
+      // Covers both the thrown `suppress_failed` (bad response) and a raw
+      // network/parse rejection; re-throw so the dialog stays open to retry.
+      setError(failMessage);
+      throw err;
     } finally {
       setPending(false);
     }

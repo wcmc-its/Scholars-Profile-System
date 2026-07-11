@@ -74,6 +74,18 @@ describe("UnitDescriptionCard", () => {
     });
   });
 
+  it("blanks the editor after a successful Clear override (#1514)", async () => {
+    stubOk("");
+    render(<UnitDescriptionCard {...base} description="seed override" canClear hasOverride />);
+    const textarea = screen.getByTestId("unit-description-textarea") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("seed override");
+    fireEvent.click(screen.getByTestId("unit-description-clear"));
+    const confirmButtons = screen.getAllByRole("button", { name: "Clear override" });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+    // Previously the override text lingered in the textarea after clearing.
+    await waitFor(() => expect(textarea.value).toBe(""));
+  });
+
   it("hides the Clear button for a center (canClear=false)", () => {
     render(
       <UnitDescriptionCard entityType="center" entityId="man-x" description="seed" canClear={false} hasOverride />,

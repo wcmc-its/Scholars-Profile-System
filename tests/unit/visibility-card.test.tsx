@@ -82,6 +82,21 @@ describe("VisibilityCard — visible state", () => {
     // Did not flip into hidden-self — the visible-state copy is still here.
     expect(screen.getByText("Your profile is visible to the public.")).toBeTruthy();
   });
+
+  it("hide network failure: still shows the destructive Alert (#1514)", async () => {
+    // A raw fetch rejection (offline / gateway) never reaches the !res.ok
+    // branch, so without a catch the user got zero feedback.
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
+    render(<VisibilityCard cwid={CWID} suppression={NEITHER} />);
+    fireEvent.click(screen.getByTestId("visibility-hide"));
+    fireEvent.click(await screen.findByRole("button", { name: "Hide my profile" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("We couldn't hide your profile. Please try again."),
+      ).toBeTruthy(),
+    );
+    expect(screen.getByText("Your profile is visible to the public.")).toBeTruthy();
+  });
 });
 
 describe("VisibilityCard — hidden-self state", () => {
