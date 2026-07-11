@@ -461,7 +461,7 @@ describe("pub-tab query shape — SEARCH_PUB_TAB_CONCEPT_MODE (§5)", () => {
     }
   });
 
-  it("case 8 — expanded shape: facet aggs reference top-level should + msm:1, not must", async () => {
+  it("case 8 — #1411 expanded shape: facet aggs carry only filter; admission (should+msm:1) inherited from the main query", async () => {
     process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "expanded";
     const mod = (await import("@/lib/api/search")) as {
       searchPublications: (opts: unknown) => Promise<{ queryShape: string }>;
@@ -473,17 +473,25 @@ describe("pub-tab query shape — SEARCH_PUB_TAB_CONCEPT_MODE (§5)", () => {
     });
     const body = capturedBodies[0];
     const aggs = body.aggs as Record<string, Record<string, unknown>>;
-    const expectedShould = (topLevelBool(body).should as Record<string, unknown>[]);
-
+    // the admission still lives in the MAIN query's top-level should + msm:1 ...
+    const mainBool = topLevelBool(body) as {
+      should?: unknown[];
+      minimum_should_match?: number;
+    };
+    expect(mainBool.should).toBeDefined();
+    expect(mainBool.minimum_should_match).toBe(1);
+    // ... and each excluding-self agg carries ONLY its filter — a top-level filter-agg
+    // already runs inside that admission, so re-embedding should/msm per agg is redundant.
     for (const aggName of ["publicationTypes", "journals", "wcmRoleFirst"]) {
       const filter = aggs[aggName].filter as { bool: Record<string, unknown> };
       expect(filter.bool).not.toHaveProperty("must");
-      expect(filter.bool.should).toEqual(expectedShould);
-      expect(filter.bool.minimum_should_match).toBe(1);
+      expect(filter.bool).not.toHaveProperty("should");
+      expect(filter.bool).not.toHaveProperty("minimum_should_match");
+      expect(filter.bool).toHaveProperty("filter");
     }
   });
 
-  it("case 9 — strict mode aggs still carry `must` (byte-identical to legacy)", async () => {
+  it("case 9 — #1411 strict mode aggs carry only filter; the `must` admission is inherited from the main query", async () => {
     process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "strict";
     const mod = (await import("@/lib/api/search")) as {
       searchPublications: (opts: unknown) => Promise<{ queryShape: string }>;
@@ -495,10 +503,13 @@ describe("pub-tab query shape — SEARCH_PUB_TAB_CONCEPT_MODE (§5)", () => {
     });
     const body = capturedBodies[0];
     const aggs = body.aggs as Record<string, Record<string, unknown>>;
-    const expectedMust = (topLevelBool(body).must as Record<string, unknown>[]);
+    // the admission still lives in the MAIN query must ...
+    expect((topLevelBool(body).must as unknown[]).length).toBeGreaterThan(0);
+    // ... and the excluding-self aggs carry ONLY their filter (no re-embedded must/should).
     const pubTypesFilter = aggs.publicationTypes.filter as { bool: Record<string, unknown> };
-    expect(pubTypesFilter.bool.must).toEqual(expectedMust);
+    expect(pubTypesFilter.bool).not.toHaveProperty("must");
     expect(pubTypesFilter.bool).not.toHaveProperty("should");
+    expect(pubTypesFilter.bool).toHaveProperty("filter");
   });
 
   it("case 10 — telemetry fields populated unconditionally on the result", async () => {

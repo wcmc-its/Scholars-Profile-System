@@ -590,29 +590,35 @@ export async function searchFunding(opts: {
     },
   };
 
+  // #1411 — these are all top-level filter-context aggregations, so they already run
+  // inside the main query's matched set (`{ bool: { must, should? } }`, user axes in
+  // post_filter). Re-embedding the admission `must` in each agg's bool is redundant — it
+  // re-evaluates the multi-clause text/concept admission per agg without changing a bucket
+  // count. Dropped; each agg carries only its excluding-self `filter` and inherits `must`
+  // from query scope. Bucket-for-bucket identical (same theorem as the people/pubs tabs).
   const aggs: Record<string, unknown> = {
     funders: {
-      filter: { bool: { must, filter: filtersExcept("funder") } },
+      filter: { bool: { filter: filtersExcept("funder") } },
       aggs: { keys: { terms: { field: "primeSponsor", size: 50 } } },
     },
     directFunders: {
-      filter: { bool: { must, filter: filtersExcept("directFunder") } },
+      filter: { bool: { filter: filtersExcept("directFunder") } },
       aggs: { keys: { terms: { field: "directSponsor", size: 50 } } },
     },
     programTypes: {
-      filter: { bool: { must, filter: filtersExcept("programType") } },
+      filter: { bool: { filter: filtersExcept("programType") } },
       aggs: { keys: { terms: { field: "programType", size: 20 } } },
     },
     mechanisms: {
-      filter: { bool: { must, filter: filtersExcept("mechanism") } },
+      filter: { bool: { filter: filtersExcept("mechanism") } },
       aggs: { keys: { terms: { field: "mechanism", size: 30 } } },
     },
     departments: {
-      filter: { bool: { must, filter: filtersExcept("department") } },
+      filter: { bool: { filter: filtersExcept("department") } },
       aggs: { keys: { terms: { field: "department", size: 30 } } },
     },
     roleBuckets: {
-      filter: { bool: { must, filter: filtersExcept("role") } },
+      filter: { bool: { filter: filtersExcept("role") } },
       aggs: { keys: { terms: { field: "roles", size: 5 } } },
     },
     // Issue #94 — Investigator facet. Top 500 mirrors the Author facet
@@ -620,7 +626,7 @@ export async function searchFunding(opts: {
     // Cardinality sub-agg surfaces the true distinct count for the rail
     // header so the user sees the full scope of the facet.
     investigators: {
-      filter: { bool: { must, filter: filtersExcept("investigator") } },
+      filter: { bool: { filter: filtersExcept("investigator") } },
       aggs: {
         keys: { terms: { field: "wcmInvestigatorCwids", size: 500 } },
         total: {
@@ -629,13 +635,13 @@ export async function searchFunding(opts: {
       },
     },
     statusActive: {
-      filter: { bool: { must, filter: [...statusBaseFilters, activeRange] } },
+      filter: { bool: { filter: [...statusBaseFilters, activeRange] } },
     },
     statusEndingSoon: {
-      filter: { bool: { must, filter: [...statusBaseFilters, endingSoonRange] } },
+      filter: { bool: { filter: [...statusBaseFilters, endingSoonRange] } },
     },
     statusRecentlyEnded: {
-      filter: { bool: { must, filter: [...statusBaseFilters, recentlyEndedRange] } },
+      filter: { bool: { filter: [...statusBaseFilters, recentlyEndedRange] } },
     },
   };
 

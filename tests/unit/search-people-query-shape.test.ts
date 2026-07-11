@@ -184,4 +184,22 @@ describe("people-index restructured body — SPEC §12 PR-5 (#312)", () => {
     // Empty trimmed query → match_all branch, no restructured bool to inspect.
     expect(must[0]).toEqual({ match_all: {} });
   });
+
+  it("#1411 — excluding-self facet aggs carry only their filter; `must` is inherited from query scope", async () => {
+    await searchPeople({ q: "electronic health records", page: 0 });
+    const body = capturedBodies[capturedBodies.length - 1];
+    // the lexical admission still lives in the MAIN query must ...
+    const mainMust = (body.query as { bool: { must: unknown[] } }).bool.must;
+    expect(mainMust.length).toBeGreaterThan(0);
+    // ... and each top-level filter-context agg carries ONLY its excluding-self filter —
+    // re-embedding the multi-clause `must` per agg was redundant (same doc scope) and
+    // just re-matched the query text N times. Guards against a re-introduction.
+    const aggs = body.aggs as Record<string, { filter?: { bool: Record<string, unknown> } }>;
+    for (const name of ["deptDivs", "personTypes", "activityHasGrants", "activityRecentPub", "piNone", "piMulti"]) {
+      const bool = aggs[name]?.filter?.bool;
+      expect(bool, `agg ${name}`).toBeDefined();
+      expect(bool, `agg ${name}`).not.toHaveProperty("must");
+      expect(bool, `agg ${name}`).toHaveProperty("filter");
+    }
+  });
 });

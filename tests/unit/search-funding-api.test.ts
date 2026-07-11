@@ -429,22 +429,26 @@ describe("searchFunding — issue #295 MeSH concept clause", () => {
     expect(mustOf()).toEqual([textClause]);
   });
 
-  it("propagates the concept clause into the excluding-self facet aggregations", async () => {
+  it("#1411 — keeps the concept clause in the main query must; excluding-self aggs inherit it (no re-embed)", async () => {
     process.env.SEARCH_FUNDING_TAB_CONCEPT = "on";
     await runSearch({
       q: "cancer",
       meshResolution: NEOPLASMS,
       filters: { funder: ["NCI"] },
     });
-    // The funder agg re-applies the main `must` (now concept-wrapped) so its
-    // admission count matches the main query — the reason the clause stays
-    // inside `must` rather than a top-level should.
+    // The concept-wrapped admission lives in the MAIN query must (the reason the clause
+    // stays inside `must` rather than a top-level should) ...
+    const mainMust = mustOf();
+    expect(mainMust).toHaveLength(1);
+    expect(mainMust[0]).toHaveProperty("bool");
+    // ... and the excluding-self aggs carry ONLY their filter — a top-level filter-agg
+    // already runs inside that admission, so re-embedding it per agg is redundant.
     const aggs = lastRequest!.body.aggs as Record<
       string,
-      { filter: { bool: { must: unknown[] } } }
+      { filter: { bool: Record<string, unknown> } }
     >;
-    expect(aggs.funders.filter.bool.must).toHaveLength(1);
-    expect(aggs.funders.filter.bool.must[0]).toHaveProperty("bool");
+    expect(aggs.funders.filter.bool).not.toHaveProperty("must");
+    expect(aggs.funders.filter.bool).toHaveProperty("filter");
   });
 });
 
@@ -790,7 +794,7 @@ describe("searchFunding — TIER 2 phrase boost (SEARCH_FUNDING_PHRASE_BOOST)", 
     expect(bool).not.toHaveProperty("minimum_should_match");
   });
 
-  it("keeps every excluding-self facet aggregation must-only (no should) when the flag is on — ranking-only contract", async () => {
+  it("keeps the phrase should out of every excluding-self facet aggregation (#1411 filter-only) when the flag is on — ranking-only contract", async () => {
     process.env.SEARCH_FUNDING_PHRASE_BOOST = "on";
     await runSearch({ q: "natural language processing", filters: { funder: ["NCI"] } });
     const aggs = lastRequest!.body.aggs as Record<string, { filter: { bool: Record<string, unknown> } }>;
@@ -803,8 +807,12 @@ describe("searchFunding — TIER 2 phrase boost (SEARCH_FUNDING_PHRASE_BOOST)", 
       "roleBuckets",
       "investigators",
     ]) {
+      // #1411 — the agg carries ONLY its excluding-self `filter`; the admission `must`
+      // (and therefore never the ranking-only phrase `should`) is inherited from the
+      // main-query scope this filter-agg runs in.
       expect(aggs[key].filter.bool).not.toHaveProperty("should");
-      expect(aggs[key].filter.bool).toHaveProperty("must");
+      expect(aggs[key].filter.bool).not.toHaveProperty("must");
+      expect(aggs[key].filter.bool).toHaveProperty("filter");
     }
   });
 
