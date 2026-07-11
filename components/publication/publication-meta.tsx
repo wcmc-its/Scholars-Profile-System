@@ -39,6 +39,12 @@ import { sanitizePubmedHtml } from "@/lib/utils";
  * matching the disappear-when-missing pattern of DOI / PMC. Pass
  * `defaultAbstractOpen` to ship a surface with the abstract expanded by
  * default (reserved for future per-surface tuning; default is false).
+ *
+ * `lazyAbstract` (#1537) — payload-trim alternative to `abstract` for surfaces
+ * that ship many rows (the profile publications list). The server sends only a
+ * boolean; the text is fetched from `/api/publications/[pmid]` (the modal's
+ * already-gated detail route) on first open. Requires `pmid`; ignored when an
+ * eager `abstract` is provided.
  */
 export function PublicationMeta({
   citationCount,
@@ -51,6 +57,7 @@ export function PublicationMeta({
   doi,
   ecommonsLink,
   abstract,
+  lazyAbstract = false,
   defaultAbstractOpen = false,
   className,
 }: {
@@ -64,11 +71,31 @@ export function PublicationMeta({
   doi?: string | null;
   ecommonsLink?: string | null;
   abstract?: string | null;
+  lazyAbstract?: boolean;
   defaultAbstractOpen?: boolean;
   className?: string;
 }) {
   const [abstractOpen, setAbstractOpen] = useState(defaultAbstractOpen);
   const [abstractExpanded, setAbstractExpanded] = useState(false);
+  const [fetchedAbstract, setFetchedAbstract] = useState<string | null>(null);
+  const [fetchFailed, setFetchFailed] = useState(false);
+
+  const hasEagerAbstract = typeof abstract === "string" && abstract.length > 0;
+  const isLazy = !hasEagerAbstract && lazyAbstract && Boolean(pmid);
+
+  const toggleAbstract = () => {
+    const next = !abstractOpen;
+    setAbstractOpen(next);
+    if (next && isLazy && fetchedAbstract === null) {
+      setFetchFailed(false);
+      fetch(`/api/publications/${encodeURIComponent(pmid as string)}`)
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
+        .then((d) =>
+          setFetchedAbstract(typeof d.abstract === "string" ? d.abstract : ""),
+        )
+        .catch(() => setFetchFailed(true));
+    }
+  };
 
   const blocks: ReactNode[] = [];
 
@@ -180,13 +207,13 @@ export function PublicationMeta({
     );
   }
 
-  const hasAbstract = typeof abstract === "string" && abstract.length > 0;
+  const hasAbstract = hasEagerAbstract || isLazy;
   if (hasAbstract) {
     blocks.push(
       <button
         key="abstract"
         type="button"
-        onClick={() => setAbstractOpen((s) => !s)}
+        onClick={toggleAbstract}
         aria-expanded={abstractOpen}
         className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
       >
@@ -226,6 +253,24 @@ export function PublicationMeta({
 
   if (!hasAbstract || !abstractOpen) return row;
 
+  const abstractText = hasEagerAbstract ? (abstract as string) : fetchedAbstract;
+  if (!abstractText) {
+    // Lazy fetch in flight, failed, or the gated route returned no abstract.
+    // Reopening after a failure refetches (fetchedAbstract stays null).
+    return (
+      <>
+        {row}
+        <p className="text-muted-foreground mt-2 text-sm" role="status">
+          {fetchFailed
+            ? "Couldn't load the abstract."
+            : abstractText === ""
+              ? "Abstract unavailable."
+              : "Loading abstract…"}
+        </p>
+      </>
+    );
+  }
+
   return (
     <>
       {row}
@@ -234,7 +279,7 @@ export function PublicationMeta({
           className={`text-sm leading-relaxed text-foreground/90 ${
             abstractExpanded ? "" : "line-clamp-3"
           }`}
-          dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(abstract as string) }}
+          dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(abstractText) }}
         />
         <button
           type="button"
