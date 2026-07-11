@@ -971,41 +971,6 @@ export function normalizeClinicalProfileUrl(raw: string | null): string | null {
   return null;
 }
 
-/**
- * Slugify an org-unit name to UPPER_SNAKE for use as a stable code.
- * Used as a deptCode fallback when LDAP returns no numeric code.
- */
-function slugifyOrgName(name: string | null): string | null {
-  if (!name) return null;
-  const t = name.trim();
-  if (!t) return null;
-  return t
-    .toUpperCase()
-    .replace(/&/g, "AND")
-    .replace(/[^A-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 64);
-}
-
-/**
- * Derive a stable division code from the LDAP `weillCornellEduOrgUnit` value
- * when it differs from the dept name. Same UPPER_SNAKE shape as deptCode so
- * dept and division share a slugify convention. Returns null when the
- * scholar has no division (orgUnit absent or equal to the dept name) — the
- * Division upsert path in etl/ed/index.ts skips null divCodes.
- */
-function deriveDivCode(
-  orgUnit: string | null,
-  deptName: string | null,
-): string | null {
-  if (!orgUnit) return null;
-  const trimmedOrg = orgUnit.trim();
-  const trimmedDept = deptName?.trim() ?? "";
-  if (trimmedOrg.length === 0) return null;
-  if (trimmedDept && trimmedOrg === trimmedDept) return null;
-  return slugifyOrgName(trimmedOrg);
-}
-
 function firstString(v: unknown): string | null {
   if (Array.isArray(v)) {
     const first = v.find((x) => typeof x === "string");
