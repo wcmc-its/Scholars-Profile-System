@@ -41,8 +41,13 @@ if [[ "$MODE" == "fetch" ]]; then
   # The sponsor route is auth-gated (/edit). Export SPONSOR_COOKIE='<your dev session cookie>'.
   fetch_actual() {  # $1 = paste → JSON array of ranked cwids; ALWAYS valid JSON ([] on any failure)
     local resp code body
+    # /api/edit/* enforces a same-origin guard (lib/edit/authz.ts verifyRequestOrigin):
+    # Sec-Fetch-Site=same-origin (primary) or Origin-host==Host (fallback). A browser
+    # fetch sets these; curl must send them explicitly or the route 403s (cross_origin).
     resp="$(curl -4 -s -w $'\n%{http_code}' -X POST "$HOST/api/edit/sponsor-match" \
       -H 'content-type: application/json' \
+      -H 'sec-fetch-site: same-origin' \
+      -H "origin: $HOST" \
       ${SPONSOR_COOKIE:+-H "cookie: $SPONSOR_COOKIE"} \
       --data "$(jq -n --arg d "$1" '{description:$d}')")"
     code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
