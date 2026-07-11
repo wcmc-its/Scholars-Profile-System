@@ -1,0 +1,26 @@
+{
+  "_note": "GOLD fixtures for sponsor-match ranking eval (Phase 0). Copy this to sponsor-fixtures.json and FILL IN. For each prompt: paste the real sponsor description, then hand-rank the scholars you believe should surface, each with a relevance GRADE. The harness scores the ranker's actual output against this (nDCG + rank-correlation). Nothing in Phase 1/2/3 is 'verified' without a filled fixture.",
+  "_grades": "3 = world-class / the person you'd name first. 2 = strong, genuinely on-topic. 1 = marginal / tangential but not wrong. 0 = FALSE POSITIVE — matches lexically but is the wrong domain (the failure class the ranker must push down). List 0s too; they anchor the bottom.",
+  "_rarity_case": "Per the Phase-2/3 design §14, include at least one rarity probe: a scholar who is one of very few WCM experts on a RARE area should out-rank an expert on a COMMON area, all else equal. Encode that expectation with grades (rare expert = 3, common-area expert = 2) and note it.",
+  "_how_to_run": "See sponsor-README.md. Score a captured ranking: ACTUAL=run.json ./sponsor-eval.sh sponsor-fixtures.json  (run.json = {\"<prompt id>\": [\"cwid\", ...ranked...]}). Self-check the math: ./sponsor-eval.sh --selftest.",
+  "prompts": [
+    {
+      "id": "cancer-metabolism",
+      "paste": "<<< REPLACE: paste the real sponsor description for the cancer-metabolism prompt >>>",
+      "notes": "Discriminator is oncology CONTEXT — reward metabolism ∧ cancer. A world leader in cancer lipid metabolism with one indexed paper should top a microbiome/T2D/cardiometabolic researcher with several 'metabolism' papers (concept-ranking spec §1a/§1b).",
+      "ideal": [
+        { "cwid": "REPLACE_cwid_1", "grade": 3, "note": "why this person is a perfect match" },
+        { "cwid": "REPLACE_cwid_2", "grade": 2, "note": "strong, on-topic" },
+        { "cwid": "REPLACE_cwid_3", "grade": 0, "note": "false positive — e.g. microbiome 'metabolism', wrong domain" }
+      ]
+    },
+    {
+      "id": "immuno-onc",
+      "paste": "<<< REPLACE: paste the real sponsor description for the immuno-oncology prompt >>>",
+      "notes": "Mechanistic domain terms (T-cell exhaustion, checkpoint, tumor microenvironment) should bridge to people whose work IS immuno-onc even when their abstracts don't echo the sponsor's surface vocabulary.",
+      "ideal": [
+        { "cwid": "REPLACE_cwid_1", "grade": 3, "note": "why" }
+      ]
+    }
+  ]
+}
