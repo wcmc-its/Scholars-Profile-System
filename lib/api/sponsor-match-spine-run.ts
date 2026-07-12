@@ -54,10 +54,17 @@ const UNIFORM_CENTRALITY = 1;
  *  scale the axes tests exercise. */
 const IDF_CAP = 10;
 
-/** Fallback idf FACTOR when a cluster resolves to no `mesh_descriptor` coverage row
- *  (NULL = coverage not yet computed): treat the idf as neutral (1) so the cluster
- *  neither up- nor down-weights relative to known concepts — NOT the `cap` branch
- *  `dampedIdf` would take for a zero/absent coverage number. */
+/** Fallback idf FACTOR when a cluster's coverage signal is absent OR known-zero.
+ *  Absent = no `mesh_descriptor` row / NULL (coverage not yet computed). Known-zero =
+ *  the coverage ETL writes `COALESCE(n_pubs, 0) / total` for EVERY descriptor, so a
+ *  root descriptor with no directly-tagged local pubs carries 0 — common for broad
+ *  descriptors (MEDLINE indexes the most-specific term; the fraction counts only
+ *  direct root-UI tags, not the descendant subtree the retrieval spans). Neither
+ *  state is evidence the concept is rare, so treat the idf as neutral (1): the
+ *  cluster neither up- nor down-weights relative to known concepts — NEVER the `cap`
+ *  branch `dampedIdf` takes for a non-positive coverage number (unknown-or-zero ≠
+ *  maximally rare; the cap would hand a zero-evidence concept the MAXIMUM fusion
+ *  weight and let its lexical-only hits dominate the RRF). */
 const NEUTRAL_IDF = 1;
 
 /** Jaccard merge threshold for `mergeTermClusters`. Subsumption always merges; this
@@ -65,18 +72,34 @@ const NEUTRAL_IDF = 1;
  *  descendant sets collapse but distinct concepts stay separate. */
 const CLUSTER_TAU = 0.5;
 
-/** Per-term retrieval depth. `searchPeople` pages 20 at a time (PAGE_SIZE, not
- *  overridable), so ~100 candidates = up to 5 sequential pages. Capped defensively. */
+/** Hard cap on extracted terms. `mergeTermClusters` documents a small-list (≤ ~12
+ *  terms) assumption, and every term costs one taxonomy resolution + (per cluster)
+ *  up to MAX_PAGES sequential `searchPeople` round-trips — a taxonomy-dense 3,000-char
+ *  paste could otherwise extract 100+ labels and stall the worker for minutes.
+ *  Truncation keeps the FIRST vocab-order terms (deterministic; see
+ *  `loadTaxonomyVocab`) — acceptable for the dark bake-off tool; the LLM extractor
+ *  owns real term selection later (§7-Q1). */
+const MAX_TERMS = 12;
+
+/** Per-term retrieval depth. `searchPeople` pages at its own module-private page
+ *  size (20 today, not overridable) and reports it as `pageSize` on every result —
+ *  the paging loop keys its short-page stop to THAT, never to a copied constant
+ *  that could silently drift. ~100 candidates = up to 5 sequential pages today;
+ *  MAX_PAGES is only a defensive absolute cap on per-cluster round-trips (it covers
+ *  full depth for any page size ≥ 10). */
 const TERM_DEPTH = 100;
-const PEOPLE_PAGE_SIZE = 20;
-const MAX_PAGES = Math.ceil(TERM_DEPTH / PEOPLE_PAGE_SIZE);
+const MAX_PAGES = 10;
 
 /** Load the v1 vocab: every curated taxonomy label (topics + subtopics). Two bounded
- *  reads; the union is the dictionary `extractTerms` scans the paste against. */
+ *  reads; the union is the dictionary `extractTerms` scans the paste against.
+ *  Ordered (label asc) so the vocab — and everything downstream of it: extraction
+ *  order, cluster member order, the cluster's joined query string, the
+ *  representative resolution, RRF tie-breaks — is DETERMINISTIC across runs/envs
+ *  instead of riding unspecified DB row order (the bake-off compares runs). */
 async function loadTaxonomyVocab(): Promise<string[]> {
   const [topics, subs] = await Promise.all([
-    db.read.topic.findMany({ select: { label: true } }),
-    db.read.subtopic.findMany({ select: { label: true } }),
+    db.read.topic.findMany({ select: { label: true }, orderBy: { label: "asc" } }),
+    db.read.subtopic.findMany({ select: { label: true }, orderBy: { label: "asc" } }),
   ]);
   return [...topics.map((t) => t.label), ...subs.map((s) => s.label)];
 }
@@ -128,7 +151,7 @@ async function retrieveCluster(
     }
     if (
       ranked.length >= TERM_DEPTH ||
-      result.hits.length < PEOPLE_PAGE_SIZE ||
+      result.hits.length < result.pageSize || // authoritative page size, short page = last
       ranked.length >= result.total
     ) {
       break;
@@ -152,7 +175,7 @@ export async function rankResearchersForDescriptionSpine(
   if (text.length === 0) return [];
 
   const vocab = await loadTaxonomyVocab();
-  const terms = extractTerms(text, vocab);
+  const terms = extractTerms(text, vocab).slice(0, MAX_TERMS);
   if (terms.length === 0) return [];
 
   // Resolve each extracted term to its MeSH descendant-UI set + representative
@@ -202,13 +225,15 @@ export async function rankResearchersForDescriptionSpine(
   for (const cluster of clusters) {
     // MAX member coverage ≈ the broadest merged synonym = a lower bound on the
     // cluster's true union corpus coverage (the exact union-coverage is an ETL
-    // upgrade). No coverage row ⇒ neutral idf.
+    // upgrade). No coverage row OR known-zero coverage ⇒ neutral idf (see
+    // NEUTRAL_IDF — a non-positive number must not take dampedIdf's cap branch).
     const coverages = cluster.members
       .map((m) => rootUiByTerm.get(m))
       .filter((ui): ui is string => ui != null)
       .map((ui) => coverageByUi.get(ui))
       .filter((c): c is number => typeof c === "number");
-    const idf = coverages.length > 0 ? dampedIdf(Math.max(...coverages), IDF_CAP) : NEUTRAL_IDF;
+    const maxCoverage = coverages.length > 0 ? Math.max(...coverages) : 0;
+    const idf = maxCoverage > 0 ? dampedIdf(maxCoverage, IDF_CAP) : NEUTRAL_IDF;
     const weight = cluster.centrality * idf;
 
     // Representative resolution = the first member's (drives name/tier only).

@@ -4,7 +4,12 @@
  *    cluster dedup → per-cluster `searchPeople` → weighted RRF → top-N map;
  *  - the fusion weight is centrality × dampedIdf(coverage) — the idf actually
  *    reorders (a rare concept up-weights its cluster);
+ *  - a KNOWN-ZERO coverage row gets the NEUTRAL idf, never dampedIdf's cap branch
+ *    (zero root-tag coverage ≠ maximally rare);
  *  - redundant phrasing collapses into ONE `searchPeople` call;
+ *  - the vocab loads with a deterministic order (bake-off run-to-run comparability);
+ *  - extracted terms are capped at MAX_TERMS (bounded per-request fan-out);
+ *  - paging keys off the reported `result.pageSize`, not a copied constant;
  *  - empty/whitespace/control-char paste short-circuits with no vocab load or search;
  *  - a `searchPeople` failure propagates (no silent partial results).
  * Mocks db + searchPeople + matchQueryToTaxonomy; the pure spine/axes helpers and
@@ -79,9 +84,10 @@ function hit(cwid: string) {
   };
 }
 
-/** A `searchPeople` result page — hits < page size so the caller stops after page 0. */
+/** A `searchPeople` result page. Carries the authoritative `pageSize` the real
+ *  `PeopleSearchResult` reports; hits < pageSize so the caller stops after page 0. */
 function people(cwids: string[]) {
-  return { hits: cwids.map(hit), total: cwids.length };
+  return { hits: cwids.map(hit), total: cwids.length, pageSize: 20 };
 }
 
 beforeEach(() => {
@@ -148,6 +154,84 @@ describe("rankResearchersForDescriptionSpine", () => {
       grantProminence: false,
       meshDescendantUis: ["D_CANCER"],
     });
+  });
+
+  it("treats KNOWN-ZERO coverage as neutral idf — never dampedIdf's cap branch", async () => {
+    mockTopicFindMany.mockResolvedValue([{ label: "rare" }, { label: "zerocov" }]);
+    // Disjoint descendant sets ⇒ two separate clusters.
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) =>
+      q === "rare" ? meshRes("D_RARE", ["D_RARE"]) : meshRes("D_ZERO", ["D_ZERO"]),
+    );
+    // `rare` is genuinely rare (0.001 ⇒ idf 6.908, near the cap). `zerocov` has a
+    // KNOWN-ZERO coverage row (the ETL writes COALESCE(n_pubs,0)/total for every
+    // descriptor) — zero root-tag coverage is NOT evidence of rarity, so it must get
+    // the neutral idf (1), not the cap (10) that would let it dominate the fusion.
+    mockMeshDescriptorFindMany.mockResolvedValue([
+      { descriptorUi: "D_RARE", localPubCoverage: 0.001 },
+      { descriptorUi: "D_ZERO", localPubCoverage: 0 },
+    ]);
+    mockSearchPeople.mockImplementation(async ({ q }: { q: string }) =>
+      q === "rare" ? people(["x"]) : people(["z"]),
+    );
+
+    const out = await rankResearchersForDescriptionSpine("rare and zerocov studies");
+
+    // Neutral idf: x = 6.908/61 = .113 beats z = 1/61 = .016. Under the cap-branch
+    // bug the zero-evidence cluster would weigh 10 and z (10/61 = .164) would win.
+    expect(out.map((r) => r.cwid)).toEqual(["x", "z"]);
+    expect(out[0].defaultScore).toBeGreaterThan(out[1].defaultScore * 5);
+  });
+
+  it("loads the vocab with a deterministic order (label asc)", async () => {
+    mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+    await rankResearchersForDescriptionSpine("cancer research");
+    expect(mockTopicFindMany).toHaveBeenCalledWith({
+      select: { label: true },
+      orderBy: { label: "asc" },
+    });
+    expect(mockSubtopicFindMany).toHaveBeenCalledWith({
+      select: { label: true },
+      orderBy: { label: "asc" },
+    });
+  });
+
+  it("caps extraction at MAX_TERMS (12) — bounded resolution + retrieval fan-out", async () => {
+    const labels = Array.from({ length: 15 }, (_, i) => `term${String(i + 1).padStart(2, "0")}`);
+    mockTopicFindMany.mockResolvedValue(labels.map((label) => ({ label })));
+    // Disjoint singleton descendant sets ⇒ every surviving term is its own cluster.
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) => meshRes(`D_${q}`, [`D_${q}`]));
+
+    await rankResearchersForDescriptionSpine(labels.join(" "));
+
+    // 15 vocab labels occur in the paste; only the first 12 resolve and retrieve.
+    expect(mockMatchQueryToTaxonomy).toHaveBeenCalledTimes(12);
+    expect(mockSearchPeople).toHaveBeenCalledTimes(12);
+  });
+
+  it("pages by the reported result.pageSize, not a copied constant", async () => {
+    mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+    mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
+    mockMeshDescriptorFindMany.mockResolvedValue([
+      { descriptorUi: "D_CANCER", localPubCoverage: 0.5 },
+    ]);
+    // Three FULL pages of 2 (total 6). A break keyed to a hard-coded 20 would stop
+    // after page 0 (2 < 20); keying to the reported pageSize pages to the total.
+    const pages = [
+      ["a", "b"],
+      ["c", "d"],
+      ["e", "f"],
+    ];
+    mockSearchPeople.mockImplementation(async ({ page }: { page: number }) => ({
+      hits: pages[page].map(hit),
+      total: 6,
+      pageSize: 2,
+    }));
+
+    const out = await rankResearchersForDescriptionSpine("cancer research");
+
+    expect(mockSearchPeople).toHaveBeenCalledTimes(3);
+    expect(mockSearchPeople.mock.calls.map((c) => c[0].page)).toEqual([0, 1, 2]);
+    expect(out.map((r) => r.cwid)).toEqual(["a", "b", "c", "d", "e", "f"]);
   });
 
   it("merges redundant phrasing into ONE searchPeople call (union descendant set)", async () => {
