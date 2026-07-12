@@ -67,6 +67,14 @@ export function isSponsorMatchEnabled(): boolean {
   return process.env.SPONSOR_MATCH === "on";
 }
 
+/** Sub-flag (default off, dark in BOTH envs) — swaps the route's engine from the
+ *  bespoke BM25×Variant-B path to the compose-`searchPeople` per-term spine
+ *  (`sponsor-match-spine-run.ts`), for the same-deploy A/B bake-off. Inert unless
+ *  `SPONSOR_MATCH` is also on (that master flag still gates the surface). */
+export function isSponsorMatchSpineEnabled(): boolean {
+  return process.env.SPONSOR_MATCH_SPINE === "on";
+}
+
 /** One evidence paper on a ranked row: PubMed-linkable, with the normalized
  *  BM25 relevance ((0–1], query-max-normalized) that weighted its contribution. */
 export type SponsorMatchPaper = {
@@ -89,8 +97,10 @@ export type SponsorRankedScholar = RankedScholar & {
 };
 
 /** Trust-boundary normalization: strip control chars (tab/newline survive as
- *  whitespace), collapse to a trimmed string, cap the length. "" ⇒ no query. */
-function normalizeDescription(raw: string): string {
+ *  whitespace), collapse to a trimmed string, cap the length. "" ⇒ no query.
+ *  Exported so the searchPeople spine engine (`sponsor-match-spine-run.ts`)
+ *  normalizes the paste identically — same trust boundary, same cap. */
+export function normalizeDescription(raw: string): string {
   if (typeof raw !== "string") return "";
   return raw
     // Escaped ranges, never literal control bytes in source (the #1602 binary-diff trap).

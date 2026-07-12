@@ -22,6 +22,7 @@ const {
   mockReadEditRequest,
   mockLogEditDenial,
   mockRankForDescription,
+  mockRankSpine,
 } = vi.hoisted(() => ({
   mockRelevanceScoresForQuery: vi.fn(),
   mockPublicationTopicFindMany: vi.fn(),
@@ -32,6 +33,7 @@ const {
   mockReadEditRequest: vi.fn(),
   mockLogEditDenial: vi.fn(),
   mockRankForDescription: vi.fn(),
+  mockRankSpine: vi.fn(),
 }));
 
 vi.mock("@/lib/api/search", () => ({
@@ -58,6 +60,11 @@ vi.mock("@/lib/edit/authz", () => ({ logEditDenial: mockLogEditDenial }));
 vi.mock("@/lib/api/sponsor-match", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/sponsor-match")>()),
   rankResearchersForDescription: mockRankForDescription,
+}));
+// The spine engine is mocked whole for the route tests (engine SELECTION is what
+// they cover); its composition is tested in `sponsor-match-spine-run.test.ts`.
+vi.mock("@/lib/api/sponsor-match-spine-run", () => ({
+  rankResearchersForDescriptionSpine: mockRankSpine,
 }));
 
 import { POST } from "@/app/api/edit/sponsor-match/route";
@@ -88,10 +95,13 @@ function row(cwid: string, pmid: string, parentTopicId: string, score: number) {
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.SPONSOR_MATCH = "on";
+  process.env.SPONSOR_MATCH_SPINE = "off";
   mockScholarFindMany.mockResolvedValue([]);
   mockTechnologyGroupBy.mockResolvedValue([]);
   mockPublicationFindMany.mockResolvedValue([]);
   mockTopicFindMany.mockResolvedValue([]);
+  mockRankForDescription.mockResolvedValue([]);
+  mockRankSpine.mockResolvedValue([]);
 });
 
 describe("rankResearchersForDescription (engine)", () => {
@@ -259,5 +269,48 @@ describe("POST /api/edit/sponsor-match (route)", () => {
       researchers: [{ cwid: "a", slug: "slug-a", defaultScore: 4.2, technologyCount: 1 }],
     });
     expect(mockRankForDescription).toHaveBeenCalledWith("gene therapy");
+  });
+
+  describe("engine selection (SPONSOR_MATCH_SPINE)", () => {
+    it("spine flag OFF: always bespoke, and any `engine` field is ignored", async () => {
+      process.env.SPONSOR_MATCH_SPINE = "off";
+      const resp = await POST(postRequest(developerCtx, { description: "x", engine: "spine" }));
+      expect(resp.status).toBe(200);
+      expect(mockRankForDescription).toHaveBeenCalledWith("x");
+      expect(mockRankSpine).not.toHaveBeenCalled();
+    });
+
+    it("spine flag ON: defaults to the spine engine (no engine field)", async () => {
+      process.env.SPONSOR_MATCH_SPINE = "on";
+      const resp = await POST(postRequest(developerCtx, { description: "x" }));
+      expect(resp.status).toBe(200);
+      expect(mockRankSpine).toHaveBeenCalledWith("x");
+      expect(mockRankForDescription).not.toHaveBeenCalled();
+    });
+
+    it("spine flag ON: `engine: \"bespoke\"` forces the bespoke engine", async () => {
+      process.env.SPONSOR_MATCH_SPINE = "on";
+      const resp = await POST(postRequest(developerCtx, { description: "x", engine: "bespoke" }));
+      expect(resp.status).toBe(200);
+      expect(mockRankForDescription).toHaveBeenCalledWith("x");
+      expect(mockRankSpine).not.toHaveBeenCalled();
+    });
+
+    it("spine flag ON: `engine: \"spine\"` forces the spine engine", async () => {
+      process.env.SPONSOR_MATCH_SPINE = "on";
+      const resp = await POST(postRequest(developerCtx, { description: "x", engine: "spine" }));
+      expect(resp.status).toBe(200);
+      expect(mockRankSpine).toHaveBeenCalledWith("x");
+      expect(mockRankForDescription).not.toHaveBeenCalled();
+    });
+
+    it("spine flag ON: an unrecognized `engine` value → 400, neither engine called", async () => {
+      process.env.SPONSOR_MATCH_SPINE = "on";
+      const resp = await POST(postRequest(developerCtx, { description: "x", engine: "turbo" }));
+      expect(resp.status).toBe(400);
+      expect(await resp.json()).toMatchObject({ ok: false, error: "invalid_engine", field: "engine" });
+      expect(mockRankForDescription).not.toHaveBeenCalled();
+      expect(mockRankSpine).not.toHaveBeenCalled();
+    });
   });
 });
