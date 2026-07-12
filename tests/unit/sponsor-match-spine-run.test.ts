@@ -1,5 +1,9 @@
 /**
  * Sponsor-match searchPeople SPINE engine (`sponsor-match-spine-run.ts`):
+ *  - returns `{ researchers, concepts }` — the concept set actually used rides back so
+ *    the editable-centrality console can render + reweight it;
+ *  - a non-empty `conceptsOverride` BYPASSES extraction and drives the ranking directly
+ *    (the console re-rank path — no Bedrock/dictionary round-trip);
  *  - LLM `extractSponsorConcepts` is the primary term source; its per-term centrality
  *    reaches the fusion weight (a higher-centrality cluster outranks a lower one), and
  *    an empty LLM result falls back to the dictionary `extractTerms` (both empty ⇒ []);
@@ -132,7 +136,7 @@ describe("rankResearchersForDescriptionSpine", () => {
     );
     mockTechnologyGroupBy.mockResolvedValue([{ cwid: "y", _count: { _all: 2 } }]);
 
-    const out = await rankResearchersForDescriptionSpine("cancer and munchausen syndrome work");
+    const { researchers: out } = await rankResearchersForDescriptionSpine("cancer and munchausen syndrome work");
 
     // Weights: cancer -ln(0.5)=0.693, munchausen -ln(0.001)=6.908. Fused:
     //   y = .693/62 + 6.908/61 = .124 (both terms), z = 6.908/62 = .111, x = .693/61 = .011.
@@ -188,7 +192,7 @@ describe("rankResearchersForDescriptionSpine", () => {
       q === "rare" ? people(["x"]) : people(["z"]),
     );
 
-    const out = await rankResearchersForDescriptionSpine("rare and zerocov studies");
+    const { researchers: out } = await rankResearchersForDescriptionSpine("rare and zerocov studies");
 
     // Neutral idf: x = 6.908/61 = .113 beats z = 1/61 = .016. Under the cap-branch
     // bug the zero-evidence cluster would weigh 10 and z (10/61 = .164) would win.
@@ -263,7 +267,7 @@ describe("rankResearchersForDescriptionSpine", () => {
       pageSize: 2,
     }));
 
-    const out = await rankResearchersForDescriptionSpine("cancer research");
+    const { researchers: out } = await rankResearchersForDescriptionSpine("cancer research");
 
     expect(mockSearchPeople).toHaveBeenCalledTimes(3);
     expect(mockSearchPeople.mock.calls.map((c) => c[0].page)).toEqual([0, 1, 2]);
@@ -283,7 +287,7 @@ describe("rankResearchersForDescriptionSpine", () => {
     ]);
     mockSearchPeople.mockResolvedValue(people(["a"]));
 
-    const out = await rankResearchersForDescriptionSpine("cancer oncology");
+    const { researchers: out } = await rankResearchersForDescriptionSpine("cancer oncology");
 
     expect(mockSearchPeople).toHaveBeenCalledTimes(1);
     expect(mockSearchPeople.mock.calls[0][0]).toMatchObject({
@@ -294,16 +298,19 @@ describe("rankResearchersForDescriptionSpine", () => {
   });
 
   it("returns [] for empty/whitespace/control-char input WITHOUT loading vocab or searching", async () => {
-    expect(await rankResearchersForDescriptionSpine("")).toEqual([]);
-    expect(await rankResearchersForDescriptionSpine("   \n\t  ")).toEqual([]);
-    expect(await rankResearchersForDescriptionSpine(String.fromCharCode(0, 7, 27, 127))).toEqual([]);
+    const empty = { researchers: [], concepts: [] };
+    expect(await rankResearchersForDescriptionSpine("")).toEqual(empty);
+    expect(await rankResearchersForDescriptionSpine("   \n\t  ")).toEqual(empty);
+    expect(await rankResearchersForDescriptionSpine(String.fromCharCode(0, 7, 27, 127))).toEqual(
+      empty,
+    );
     expect(mockTopicFindMany).not.toHaveBeenCalled();
     expect(mockSearchPeople).not.toHaveBeenCalled();
   });
 
   it("returns [] when no vocab term occurs in the paste, without searching", async () => {
     mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
-    const out = await rankResearchersForDescriptionSpine("totally unrelated prose about weather");
+    const { researchers: out } = await rankResearchersForDescriptionSpine("totally unrelated prose about weather");
     expect(out).toEqual([]);
     expect(mockTopicFindMany).toHaveBeenCalled();
     expect(mockSearchPeople).not.toHaveBeenCalled();
@@ -339,7 +346,7 @@ describe("rankResearchersForDescriptionSpine", () => {
       q === "minor" ? people(["m"]) : people(["p"]),
     );
 
-    const out = await rankResearchersForDescriptionSpine("some sponsor prose");
+    const { researchers: out } = await rankResearchersForDescriptionSpine("some sponsor prose");
 
     expect(mockExtractSponsorConcepts).toHaveBeenCalledWith("some sponsor prose");
     expect(out.map((r) => r.cwid)).toEqual(["p", "m"]);
@@ -359,7 +366,7 @@ describe("rankResearchersForDescriptionSpine", () => {
     ]);
     mockSearchPeople.mockResolvedValue(people(["a"]));
 
-    const out = await rankResearchersForDescriptionSpine("cancer research program");
+    const { researchers: out } = await rankResearchersForDescriptionSpine("cancer research program");
 
     expect(mockExtractSponsorConcepts).toHaveBeenCalledTimes(1);
     // Dictionary fallback engaged: the vocab loaded and its label match drove retrieval.
@@ -373,11 +380,82 @@ describe("rankResearchersForDescriptionSpine", () => {
     // Vocab present, but no label occurs in the paste ⇒ dictionary also yields [].
     mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
 
-    const out = await rankResearchersForDescriptionSpine("prose with no taxonomy label at all");
+    const { researchers: out } = await rankResearchersForDescriptionSpine("prose with no taxonomy label at all");
 
     expect(out).toEqual([]);
     expect(mockExtractSponsorConcepts).toHaveBeenCalledTimes(1);
     expect(mockTopicFindMany).toHaveBeenCalled(); // fallback attempted
     expect(mockSearchPeople).not.toHaveBeenCalled();
+  });
+
+  it("returns the concept set actually used alongside the ranked researchers", async () => {
+    // The LLM concepts (post-sanitize/cap) ride back so the console can render + edit
+    // them; here two disjoint concepts both retrieve, so both survive to the result.
+    mockExtractSponsorConcepts.mockResolvedValue([
+      { term: "cancer metabolism", centrality: 0.9 },
+      { term: "t-cell exhaustion", centrality: 0.7 },
+    ]);
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) =>
+      q === "cancer metabolism" ? meshRes("D_CM", ["D_CM"]) : meshRes("D_TC", ["D_TC"]),
+    );
+    mockSearchPeople.mockImplementation(async ({ q }: { q: string }) =>
+      q === "cancer metabolism" ? people(["a"]) : people(["b"]),
+    );
+
+    const { researchers, concepts } = await rankResearchersForDescriptionSpine("sponsor prose");
+
+    expect(concepts).toEqual([
+      { term: "cancer metabolism", centrality: 0.9 },
+      { term: "t-cell exhaustion", centrality: 0.7 },
+    ]);
+    expect(researchers.map((r) => r.cwid).sort()).toEqual(["a", "b"]);
+  });
+
+  it("conceptsOverride BYPASSES extraction and drives the ranking directly", async () => {
+    // The console re-rank path: a client-edited concept set replaces extraction. Low
+    // centrality FIRST, high SECOND, EQUAL coverage ⇒ only centrality differentiates the
+    // weight, flipping first-seen [m, p] → [p, m]. Proves the override reaches fusion.
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) =>
+      q === "minor" ? meshRes("D_MIN", ["D_MIN"]) : meshRes("D_PRI", ["D_PRI"]),
+    );
+    mockMeshDescriptorFindMany.mockResolvedValue([
+      { descriptorUi: "D_MIN", localPubCoverage: 0.5 },
+      { descriptorUi: "D_PRI", localPubCoverage: 0.5 },
+    ]);
+    mockSearchPeople.mockImplementation(async ({ q }: { q: string }) =>
+      q === "minor" ? people(["m"]) : people(["p"]),
+    );
+
+    const override = [
+      { term: "minor", centrality: 0.3 },
+      { term: "primary", centrality: 1.0 },
+    ];
+    const { researchers, concepts } = await rankResearchersForDescriptionSpine("ignored prose", {
+      conceptsOverride: override,
+    });
+
+    // Extraction (LLM) and the dictionary fallback (vocab load) are BOTH skipped.
+    expect(mockExtractSponsorConcepts).not.toHaveBeenCalled();
+    expect(mockTopicFindMany).not.toHaveBeenCalled();
+    // The override centralities reached fusion — high-centrality "primary" outranks "minor".
+    expect(researchers.map((r) => r.cwid)).toEqual(["p", "m"]);
+    expect(researchers[0].defaultScore).toBeGreaterThan(researchers[1].defaultScore);
+    // The concepts used (= the override) ride back.
+    expect(concepts).toEqual(override);
+  });
+
+  it("falls through to extraction when conceptsOverride is empty (not a re-rank)", async () => {
+    // An empty override is NOT a re-rank signal — extraction still runs (here the LLM
+    // supplies the concepts). Guards against `[]` being treated as "use nothing".
+    mockExtractSponsorConcepts.mockResolvedValue([{ term: "cancer", centrality: 0.8 }]);
+    mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
+    mockSearchPeople.mockResolvedValue(people(["a"]));
+
+    const { researchers } = await rankResearchersForDescriptionSpine("cancer prose", {
+      conceptsOverride: [],
+    });
+
+    expect(mockExtractSponsorConcepts).toHaveBeenCalledTimes(1);
+    expect(researchers.map((r) => r.cwid)).toEqual(["a"]);
   });
 });

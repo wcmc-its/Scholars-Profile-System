@@ -44,6 +44,11 @@ type MatchedPaper = {
 
 type MatchedTopic = { topicId: string; label: string; pubCount: number };
 
+/** One editable concept the spine engine extracted from the paste: a canonical term
+ *  and its funder-centrality in [0,1]. Mirrors the server `SponsorConcept`; the
+ *  console reweights `centrality` and posts the edited set back to re-rank. */
+type SponsorConcept = { term: string; centrality: number };
+
 type RankedResearcher = {
   cwid: string;
   slug: string;
@@ -85,6 +90,12 @@ export function SponsorMatchPanel() {
   const [deptSel, setDeptSel] = useState<ReadonlySet<string>>(new Set());
   const [topicSel, setTopicSel] = useState<ReadonlySet<string>>(new Set());
   const [ctlOnly, setCtlOnly] = useState(false);
+  // The editable concept set the spine returned + the description it was ranked
+  // against. Editing a centrality and re-ranking re-POSTs THAT description with the
+  // edited concepts (the server re-scores the same candidate universe, no new search).
+  // Empty for the bespoke engine (no concept decomposition) ⇒ the editor stays hidden.
+  const [concepts, setConcepts] = useState<SponsorConcept[]>([]);
+  const [rankedDescription, setRankedDescription] = useState("");
   const pending = status.kind === "loading";
 
   // SSR-safe history load: start empty, read localStorage in an effect (no
@@ -135,20 +146,34 @@ export function SponsorMatchPanel() {
     setCtlOnly(false);
   }
 
-  async function runSearch(text: string) {
+  // `conceptsOverride` present ⇒ a re-rank of the SAME description with edited
+  // centralities (no new extraction); absent ⇒ a fresh search that extracts concepts.
+  async function runSearch(text: string, conceptsOverride?: SponsorConcept[]) {
     if (pending || text.trim().length === 0) return;
     setStatus({ kind: "loading" });
+    // A fresh search re-extracts concepts, so drop any stale editor immediately; a
+    // re-rank (conceptsOverride present) keeps its edited concepts visible and busy.
+    if (!conceptsOverride) setConcepts([]);
     try {
       const r = await fetch("/api/edit/sponsor-match", {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ description: text }),
+        body: JSON.stringify(
+          conceptsOverride ? { description: text, concepts: conceptsOverride } : { description: text },
+        ),
       });
       if (r.ok) {
-        const data = (await r.json()) as { researchers?: RankedResearcher[] };
+        const data = (await r.json()) as {
+          researchers?: RankedResearcher[];
+          concepts?: SponsorConcept[];
+        };
         clearFilters(); // stale facet selections must not silently hide fresh results
         saveHistory(text.trim());
+        // Reflect the concepts the server actually used (sanitized), so the sliders
+        // stay in sync with what drove the ranking.
+        setConcepts(data.concepts ?? []);
+        setRankedDescription(text.trim());
         setStatus({ kind: "ok", researchers: data.researchers ?? [] });
         return;
       }
@@ -162,6 +187,10 @@ export function SponsorMatchPanel() {
     } catch {
       setStatus({ kind: "error", message: "Couldn't rank researchers. Please try again." });
     }
+  }
+
+  function updateCentrality(index: number, centrality: number) {
+    setConcepts((prev) => prev.map((c, i) => (i === index ? { ...c, centrality } : c)));
   }
 
   const researchers = useMemo(
@@ -278,6 +307,19 @@ export function SponsorMatchPanel() {
         </details>
       ) : null}
 
+      {/* Concept editor lives OUTSIDE the status switch so a re-rank keeps the just-
+          edited sliders on screen (with a live busy state) instead of flashing them away
+          to the results skeleton — which also makes the button's pending affordance
+          reachable. Hidden on error, matching the results area below. */}
+      {concepts.length > 0 && status.kind !== "error" ? (
+        <ConceptEditor
+          concepts={concepts}
+          onCentralityChange={updateCentrality}
+          onRerank={() => void runSearch(rankedDescription, concepts)}
+          pending={pending}
+        />
+      ) : null}
+
       {status.kind === "loading" ? (
         <div aria-busy="true">
           <p className="text-muted-foreground py-3 text-sm">Ranking researchers…</p>
@@ -295,12 +337,13 @@ export function SponsorMatchPanel() {
           {status.message}
         </p>
       ) : status.kind === "ok" ? (
-        researchers.length === 0 ? (
-          <p className="text-muted-foreground py-4 text-sm">
-            No researchers matched this description.
-          </p>
-        ) : (
-          <>
+        <>
+          {researchers.length === 0 ? (
+            <p className="text-muted-foreground py-4 text-sm">
+              No researchers matched this description.
+            </p>
+          ) : (
+            <>
             <div data-slot="sponsor-match-facets" className="border-border mb-4 rounded-lg border p-3">
               {deptFacet.length > 0 ? (
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -369,9 +412,75 @@ export function SponsorMatchPanel() {
                 ))}
               </ul>
             )}
-          </>
-        )
+            </>
+          )}
+        </>
       ) : null}
+    </div>
+  );
+}
+
+/** The editable-centrality control: one range slider per extracted concept (0.05–1, step
+ *  0.05 — the floor is 0.05, NOT 0, because the server's `sanitizeConcepts` rewrites any
+ *  non-positive centrality to 0.3, so a 0 stop would silently snap back to 0.3 on
+ *  re-rank; 0.05 is the smallest value that round-trips through the contract), a live mono
+ *  value readout, and a Re-rank button. Editing a slider only mutates
+ *  local state; Re-rank re-POSTs the same description with the edited centralities so the
+ *  server re-scores the same candidate universe (no new extraction). Concept rows are NOT
+ *  removable and keep their server order (most-central first) — the console reweights, it
+ *  never drops a concept. Native `<input type=range>` with the panel's accent color keeps
+ *  it accessible (labeled) and on-idiom (no custom slider). */
+function ConceptEditor({
+  concepts,
+  onCentralityChange,
+  onRerank,
+  pending,
+}: {
+  concepts: SponsorConcept[];
+  onCentralityChange: (index: number, centrality: number) => void;
+  onRerank: () => void;
+  pending: boolean;
+}) {
+  return (
+    <div data-slot="sponsor-match-concepts" className="border-border mb-4 rounded-lg border p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="text-base font-semibold">Concepts</h2>
+        <span className="text-muted-foreground text-xs">drag to reweight</span>
+      </div>
+      <p className="text-muted-foreground mt-1 mb-3 text-xs">
+        How central each concept is to the sponsor&rsquo;s ask. Adjust the weights and
+        re-rank — the same candidates are re-scored, no new search.
+      </p>
+      <ul className="space-y-3">
+        {concepts.map((c, i) => (
+          <li key={c.term} className="flex flex-col gap-1">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-sm font-medium">{c.term}</span>
+              <span className="text-muted-foreground font-mono text-xs tabular-nums">
+                {c.centrality.toFixed(2)}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0.05}
+              max={1}
+              step={0.05}
+              value={c.centrality}
+              onChange={(e) => onCentralityChange(i, Number(e.target.value))}
+              aria-label={`${c.term} centrality`}
+              className="w-full accent-[var(--color-accent-slate)]"
+            />
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        onClick={onRerank}
+        disabled={pending}
+        className="mt-3 inline-flex h-9 items-center rounded-md bg-[var(--color-accent-slate)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {pending ? "Re-ranking…" : "Re-rank"}
+      </button>
     </div>
   );
 }

@@ -128,6 +128,16 @@ async function loadTaxonomyVocab(): Promise<string[]> {
  *  descriptor identity + coverage lookup key). */
 type ResolvedTerm = { term: string; centrality: number; resolution: MeshResolution | null };
 
+/** The spine's result: the ranked scholars PLUS the `{term, centrality}` concept set
+ *  actually used to produce them (post-sanitize/cap, in the order used). The editable-
+ *  centrality console renders `concepts` as reweightable rows and posts an edited copy
+ *  back as `conceptsOverride` to re-rank — so the surfaced concepts and the ranking
+ *  signal are always the same list. `concepts` is [] only when nothing was extracted. */
+export type SpineRankResult = {
+  researchers: SponsorRankedScholar[];
+  concepts: SponsorConcept[];
+};
+
 /** Retrieve up to `TERM_DEPTH` scholar cwids for one cluster, in `searchPeople` rank
  *  order, paging as needed. Topical-only: the expertise-independent employment priors
  *  (faculty + active-grant prominence) are OFF so ranking reflects fit alone. A
@@ -189,30 +199,49 @@ async function retrieveCluster(
 
 /**
  * SPINE engine: rank researchers against a pasted sponsor description by
- * composing per-concept `searchPeople` rankings (see module doc). Short-circuits
- * to `[]` on an empty paste, no extracted terms, or all-empty retrieval — the
+ * composing per-concept `searchPeople` rankings (see module doc). Returns
+ * `{ researchers, concepts }` — `concepts` is the `{term, centrality}` set
+ * actually used (LLM, dictionary-fallback, or client override), so the editable-
+ * centrality console can render and reweight it. Short-circuits to empty
+ * researchers on an empty paste, no extracted terms, or all-empty retrieval — the
  * same posture as the bespoke engine. Any per-cluster `searchPeople` failure
  * throws out of here (the route's catch → 502); there are no silent partial results.
+ *
+ * `opts.conceptsOverride` (non-empty) is the console's re-rank path: it REPLACES
+ * extraction with the client's edited concept set (already sanitized at the route
+ * trust boundary), so a slider edit re-ranks the SAME candidate universe with no
+ * new Bedrock call.
  */
 export async function rankResearchersForDescriptionSpine(
   description: string,
-  opts: { limit?: number } = {},
-): Promise<SponsorRankedScholar[]> {
+  opts: { limit?: number; conceptsOverride?: SponsorConcept[] } = {},
+): Promise<SpineRankResult> {
   const text = normalizeDescription(description);
-  if (text.length === 0) return [];
+  if (text.length === 0) return { researchers: [], concepts: [] };
 
   // Extraction seam (§7-Q1): the Bedrock LLM names the funder's concepts + real
   // per-term centrality. On [] (Bedrock outage/empty) fall back to the v1 dictionary
   // extractor at uniform centrality — degrade to v1 recall, not to nothing. Both
   // empty ⇒ the same [] short-circuit as before. MAX_TERMS caps either source.
-  let concepts: SponsorConcept[] = (await extractSponsorConcepts(text)).slice(0, MAX_TERMS);
-  if (concepts.length === 0) {
-    const vocab = await loadTaxonomyVocab();
-    concepts = extractTerms(text, vocab)
-      .slice(0, MAX_TERMS)
-      .map((term) => ({ term, centrality: UNIFORM_CENTRALITY }));
+  //
+  // OVERRIDE: a non-empty `conceptsOverride` (the editable-centrality console re-rank)
+  // BYPASSES extraction entirely — the client's edited `{term, centrality}` set drives
+  // resolution → clustering → fusion directly, re-ranking the same candidate universe
+  // with no Bedrock/dictionary round-trip. The route sanitizes it (`sanitizeConcepts`)
+  // before it reaches here; MAX_TERMS still caps it.
+  let concepts: SponsorConcept[];
+  if (opts.conceptsOverride && opts.conceptsOverride.length > 0) {
+    concepts = opts.conceptsOverride.slice(0, MAX_TERMS);
+  } else {
+    concepts = (await extractSponsorConcepts(text)).slice(0, MAX_TERMS);
+    if (concepts.length === 0) {
+      const vocab = await loadTaxonomyVocab();
+      concepts = extractTerms(text, vocab)
+        .slice(0, MAX_TERMS)
+        .map((term) => ({ term, centrality: UNIFORM_CENTRALITY }));
+    }
   }
-  if (concepts.length === 0) return [];
+  if (concepts.length === 0) return { researchers: [], concepts: [] };
 
   // Resolve each concept to its MeSH descendant-UI set + representative descriptor
   // (one taxonomy round-trip per concept; the list is short by construction). The
@@ -233,7 +262,7 @@ export async function rankResearchersForDescriptionSpine(
     centrality: r.centrality,
   }));
   const clusters = mergeTermClusters(clusterTerms, CLUSTER_TAU);
-  if (clusters.length === 0) return [];
+  if (clusters.length === 0) return { researchers: [], concepts };
 
   // Coverage lookup: the fusion idf uses `mesh_descriptor.local_pub_coverage`
   // (a fraction, not a count). One bounded read over the resolved root descriptor UIs.
@@ -287,7 +316,7 @@ export async function rankResearchersForDescriptionSpine(
   }
 
   const fused = rrfFuse(rankings).slice(0, opts.limit ?? SPINE_DEFAULT_LIMIT);
-  if (fused.length === 0) return [];
+  if (fused.length === 0) return { researchers: [], concepts };
 
   // technologyCount — CTL officers care whether the researcher already holds CTL IP.
   // Same inline groupBy the bespoke engine and `rankResearchersForOpportunity` use
@@ -307,7 +336,7 @@ export async function rankResearchersForDescriptionSpine(
   // `searchPeople` shape carries no per-topic pub count or evidence pubs without the
   // match-explain aggregation, and fabricating counts is forbidden. The bake-off
   // scores ORDER; the evidence upgrade lands with the LLM front-end.
-  return fused.map((f) => {
+  const researchers = fused.map((f) => {
     const hit = hitByCwid.get(f.cwid);
     return {
       cwid: f.cwid,
@@ -324,4 +353,5 @@ export async function rankResearchersForDescriptionSpine(
       matchedTopics: [],
     };
   });
+  return { researchers, concepts };
 }

@@ -135,8 +135,15 @@ function buildExtractPrompt(paste: string): string {
  *  centrality zeroes a concept's weight — its cluster still costs a full taxonomy
  *  resolution + `searchPeople` fan-out but contributes 0 to the RRF (its people sink to
  *  the bottom), and an all-≤0 batch would collapse the ranking to first-seen order.
- *  Cap to `MAX_CONCEPTS`. */
-function sanitizeConcepts(raw: readonly { term: string; centrality: number }[]): SponsorConcept[] {
+ *  Cap to `MAX_CONCEPTS`.
+ *
+ *  Exported because the sponsor-match route reuses THESE rules verbatim to clean the
+ *  editable-centrality console's `conceptsOverride` (the same trust boundary: a
+ *  client-edited concept set is untrusted input that must clamp/dedupe/cap identically
+ *  to the LLM output before it drives the ranking). */
+export function sanitizeConcepts(
+  raw: readonly { term: string; centrality: number }[],
+): SponsorConcept[] {
   const seen = new Set<string>();
   const out: SponsorConcept[] = [];
   for (const c of raw) {
