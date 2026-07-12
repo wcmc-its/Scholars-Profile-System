@@ -41,7 +41,13 @@ export type SponsorConcept = { term: string; centrality: number };
  *  temperature 0 for near-deterministic extraction (Opus would 400 on it). The exact
  *  `-20250929-v1:0` minor is the same profile id the overview generator's
  *  `humanizeModelId` recognizes as active; the IAM glob permits an intra-family bump
- *  (4.5 → 4.6) with no policy change if a newer minor is preferred later. */
+ *  (4.5 → 4.6) with no policy change if a newer minor is preferred later. This const is
+ *  the DEFAULT; `extractSponsorConcepts` resolves `SPONSOR_MATCH_EXTRACT_MODEL` ahead of
+ *  it — a code-default runtime rollback lever mirroring the overview generator's
+ *  `OVERVIEW_GENERATE_MODEL`/`BIOSKETCH_GENERATE_MODEL` (registered in the flag-parity
+ *  allowlist, deliberately NOT wired per-env; unset ⇒ this default in every env, so
+ *  behavior is unchanged until an operator sets it). Repointing the model in a deployed
+ *  env is then a task-def env change + restart, not a code edit and full app deploy. */
 const EXTRACT_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
 
 /** Hard cap on returned concepts — mirrors the spine's `MAX_TERMS` (every concept
@@ -118,10 +124,16 @@ function buildExtractPrompt(paste: string): string {
 }
 
 /** Output hygiene: trim + drop empty/whitespace terms, dedupe case-insensitively
- *  (first occurrence wins, preserving the model's most-central-first order), clamp
- *  centrality to [0,1] (a non-finite value defaults to 0.3 — treat an unusable score
- *  as an incidental mention rather than letting it dominate or crash), cap to
- *  `MAX_CONCEPTS`. */
+ *  (first occurrence wins, preserving the model's most-central-first order), map
+ *  centrality into (0,1] — a value >1 clamps to 1, and any non-finite OR non-positive
+ *  score defaults to the incidental floor 0.3. Both are out of the prompted [0,1]
+ *  contract (the prompt asks for 1.0 / ~0.5 / ~0.3 and never ≤0), so treat an unusable
+ *  score as an incidental mention. Flooring ≤0 to 0.3 rather than 0 matters downstream:
+ *  the fusion weight is `centrality × idf` (see `sponsor-match-spine-run.ts`), so a 0
+ *  centrality zeroes a concept's weight — its cluster still costs a full taxonomy
+ *  resolution + `searchPeople` fan-out but contributes 0 to the RRF (its people sink to
+ *  the bottom), and an all-≤0 batch would collapse the ranking to first-seen order.
+ *  Cap to `MAX_CONCEPTS`. */
 function sanitizeConcepts(raw: readonly { term: string; centrality: number }[]): SponsorConcept[] {
   const seen = new Set<string>();
   const out: SponsorConcept[] = [];
@@ -131,7 +143,9 @@ function sanitizeConcepts(raw: readonly { term: string; centrality: number }[]):
     const key = term.toLowerCase();
     if (seen.has(key)) continue;
     const n = Number(c.centrality);
-    const centrality = Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0.3;
+    // Finite & >0 ⇒ clamp high to 1; a non-finite (NaN/±Infinity) OR non-positive
+    // score floors to the incidental 0.3 (never 0 — see the fusion-weight note above).
+    const centrality = Number.isFinite(n) && n > 0 ? Math.min(1, n) : 0.3;
     seen.add(key);
     out.push({ term, centrality });
     if (out.length >= MAX_CONCEPTS) break;
@@ -149,7 +163,11 @@ export async function extractSponsorConcepts(paste: string): Promise<SponsorConc
   const text = paste.trim();
   if (text.length === 0) return [];
 
-  const modelId = EXTRACT_MODEL;
+  // Operator override first, else the pinned default (parity with the overview
+  // generator's `OVERVIEW_GENERATE_MODEL` lever; the IAM policy scopes the whole
+  // `us.anthropic.claude-sonnet-4-*` family so an intra-family repoint needs no
+  // cdk/IAM change). `modelAcceptsTemperature` still gates temperature by id.
+  const modelId = process.env.SPONSOR_MATCH_EXTRACT_MODEL ?? EXTRACT_MODEL;
   try {
     const { object } = await generateObject({
       model: sponsorBedrock()(modelId),
