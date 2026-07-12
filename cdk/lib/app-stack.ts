@@ -1274,11 +1274,12 @@ export class AppStack extends Stack {
         // SPONSOR_MATCH — the /edit/sponsor-match CTL surface (paste a sponsor's
         // description → researchers ranked on topical fit alone). Staging-on for soak; prod-off.
         SPONSOR_MATCH: env === "staging" ? "on" : "off",
-        // SPONSOR_MATCH_SPINE — dark sub-flag of SPONSOR_MATCH: swaps the route's
+        // SPONSOR_MATCH_SPINE — sub-flag of SPONSOR_MATCH: swaps the route's
         // engine from the bespoke BM25×Variant-B path to the compose-searchPeople
         // per-term spine, for the same-deploy A/B bake-off. Inert unless SPONSOR_MATCH
-        // is also on. Dark in BOTH envs until the offline eval picks a winner.
-        SPONSOR_MATCH_SPINE: "off",
+        // is also on. Staging-on so the bake-off can capture both engines (the body
+        // `engine` override works only while on); prod-off until the eval picks a winner.
+        SPONSOR_MATCH_SPINE: env === "staging" ? "on" : "off",
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
