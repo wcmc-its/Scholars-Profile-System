@@ -1,7 +1,10 @@
 /**
  * Sponsor-match searchPeople SPINE engine (`sponsor-match-spine-run.ts`):
- *  - term extraction over the taxonomy-label vocab → per-term MeSH resolution →
- *    cluster dedup → per-cluster `searchPeople` → weighted RRF → top-N map;
+ *  - LLM `extractSponsorConcepts` is the primary term source; its per-term centrality
+ *    reaches the fusion weight (a higher-centrality cluster outranks a lower one), and
+ *    an empty LLM result falls back to the dictionary `extractTerms` (both empty ⇒ []);
+ *  - term source → per-term MeSH resolution → cluster dedup → per-cluster
+ *    `searchPeople` → weighted RRF → top-N map;
  *  - the fusion weight is centrality × dampedIdf(coverage) — the idf actually
  *    reorders (a rare concept up-weights its cluster);
  *  - a KNOWN-ZERO coverage row gets the NEUTRAL idf, never dampedIdf's cap branch
@@ -12,8 +15,9 @@
  *  - paging keys off the reported `result.pageSize`, not a copied constant;
  *  - empty/whitespace/control-char paste short-circuits with no vocab load or search;
  *  - a `searchPeople` failure propagates (no silent partial results).
- * Mocks db + searchPeople + matchQueryToTaxonomy; the pure spine/axes helpers and
- * `normalizeDescription` run for real.
+ * Mocks db + searchPeople + matchQueryToTaxonomy + extractSponsorConcepts (never
+ * invokes Bedrock); the pure spine/axes helpers and `normalizeDescription` run for
+ * real.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,6 +28,7 @@ const {
   mockTechnologyGroupBy,
   mockSearchPeople,
   mockMatchQueryToTaxonomy,
+  mockExtractSponsorConcepts,
 } = vi.hoisted(() => ({
   mockTopicFindMany: vi.fn(),
   mockSubtopicFindMany: vi.fn(),
@@ -31,6 +36,7 @@ const {
   mockTechnologyGroupBy: vi.fn(),
   mockSearchPeople: vi.fn(),
   mockMatchQueryToTaxonomy: vi.fn(),
+  mockExtractSponsorConcepts: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -51,6 +57,11 @@ vi.mock("@/lib/api/search-taxonomy", () => ({
   matchQueryToTaxonomy: mockMatchQueryToTaxonomy,
 }));
 vi.mock("@/lib/search", () => ({ meshMatchTier: vi.fn(() => "exact") }));
+// LLM extractor mocked at the module seam — NEVER invokes Bedrock. The default below
+// returns [] so the existing dictionary-path assertions exercise the fallback.
+vi.mock("@/lib/api/sponsor-match-extract", () => ({
+  extractSponsorConcepts: mockExtractSponsorConcepts,
+}));
 
 import { rankResearchersForDescriptionSpine } from "@/lib/api/sponsor-match-spine-run";
 
@@ -98,6 +109,9 @@ beforeEach(() => {
   mockTechnologyGroupBy.mockResolvedValue([]);
   mockMatchQueryToTaxonomy.mockResolvedValue({ state: "none", meshResolution: null });
   mockSearchPeople.mockResolvedValue(people([]));
+  // Default: LLM extractor yields nothing → the spine falls back to the dictionary
+  // extractor, so the pre-existing tests below exercise the v1 path unchanged.
+  mockExtractSponsorConcepts.mockResolvedValue([]);
 });
 
 describe("rankResearchersForDescriptionSpine", () => {
@@ -280,5 +294,68 @@ describe("rankResearchersForDescriptionSpine", () => {
     await expect(rankResearchersForDescriptionSpine("cancer research")).rejects.toThrow(
       "opensearch down",
     );
+  });
+
+  it("flows differentiated LLM centrality into the fusion weight — higher centrality outranks lower", async () => {
+    // Low-centrality concept FIRST, high-centrality SECOND. Disjoint MeSH sets ⇒ two
+    // clusters; EQUAL coverage ⇒ identical idf, so ONLY centrality differentiates the
+    // weight. Under uniform (v1) centrality the two weights tie and first-seen order
+    // wins → [m, p]; the real centralities flip it to [p, m] — proving centrality is a
+    // live fusion multiplicand, not an inert 1.0.
+    mockExtractSponsorConcepts.mockResolvedValue([
+      { term: "minor", centrality: 0.3 },
+      { term: "primary", centrality: 1.0 },
+    ]);
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) =>
+      q === "minor" ? meshRes("D_MIN", ["D_MIN"]) : meshRes("D_PRI", ["D_PRI"]),
+    );
+    mockMeshDescriptorFindMany.mockResolvedValue([
+      { descriptorUi: "D_MIN", localPubCoverage: 0.5 },
+      { descriptorUi: "D_PRI", localPubCoverage: 0.5 },
+    ]);
+    mockSearchPeople.mockImplementation(async ({ q }: { q: string }) =>
+      q === "minor" ? people(["m"]) : people(["p"]),
+    );
+
+    const out = await rankResearchersForDescriptionSpine("some sponsor prose");
+
+    expect(mockExtractSponsorConcepts).toHaveBeenCalledWith("some sponsor prose");
+    expect(out.map((r) => r.cwid)).toEqual(["p", "m"]);
+    expect(out[0].defaultScore).toBeGreaterThan(out[1].defaultScore);
+    // Primary path: the LLM terms are resolved directly; the taxonomy-label vocab is
+    // never loaded.
+    expect(mockMatchQueryToTaxonomy).toHaveBeenCalledWith("primary");
+    expect(mockTopicFindMany).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the dictionary extractor when the LLM returns [] (Bedrock outage/empty)", async () => {
+    mockExtractSponsorConcepts.mockResolvedValue([]); // Bedrock failed / no concepts
+    mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+    mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
+    mockMeshDescriptorFindMany.mockResolvedValue([
+      { descriptorUi: "D_CANCER", localPubCoverage: 0.5 },
+    ]);
+    mockSearchPeople.mockResolvedValue(people(["a"]));
+
+    const out = await rankResearchersForDescriptionSpine("cancer research program");
+
+    expect(mockExtractSponsorConcepts).toHaveBeenCalledTimes(1);
+    // Dictionary fallback engaged: the vocab loaded and its label match drove retrieval.
+    expect(mockTopicFindMany).toHaveBeenCalled();
+    expect(mockSearchPeople).toHaveBeenCalledTimes(1);
+    expect(out.map((r) => r.cwid)).toEqual(["a"]);
+  });
+
+  it("returns [] when BOTH the LLM and the dictionary fallback yield nothing", async () => {
+    mockExtractSponsorConcepts.mockResolvedValue([]);
+    // Vocab present, but no label occurs in the paste ⇒ dictionary also yields [].
+    mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+
+    const out = await rankResearchersForDescriptionSpine("prose with no taxonomy label at all");
+
+    expect(out).toEqual([]);
+    expect(mockExtractSponsorConcepts).toHaveBeenCalledTimes(1);
+    expect(mockTopicFindMany).toHaveBeenCalled(); // fallback attempted
+    expect(mockSearchPeople).not.toHaveBeenCalled();
   });
 });
