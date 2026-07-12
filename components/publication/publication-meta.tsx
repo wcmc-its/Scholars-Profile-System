@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { CopyButton } from "@/components/publication/copy-button";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { sanitizePubmedHtml } from "@/lib/utils";
+import { pubSource } from "@/lib/publication-source";
 
 /**
  * Unified publication-card metadata row (#87). Renders, in order:
@@ -98,8 +99,11 @@ export function PublicationMeta({
   };
 
   const blocks: ReactNode[] = [];
+  // External-source pubs (#101) are keyed on a source-prefixed id, not a PubMed
+  // pmid — show a source label instead of a dead PMID link.
+  const { isPubmed, sourceLabel } = pubSource(pmid);
 
-  if (pmid) {
+  if (pmid && isPubmed) {
     blocks.push(
       <span key="pmid" className="inline-flex items-center">
         PMID:{" "}
@@ -113,6 +117,12 @@ export function PublicationMeta({
           {pmid}
         </a>
         <CopyButton value={pmid} label={`Copy PMID ${pmid}`} />
+      </span>,
+    );
+  } else if (sourceLabel) {
+    blocks.push(
+      <span key="source" className="inline-flex items-center">
+        Source: {sourceLabel}
       </span>,
     );
   }

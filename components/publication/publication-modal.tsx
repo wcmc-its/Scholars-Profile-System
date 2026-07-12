@@ -26,6 +26,7 @@ import type {
   PublicationDetailTopic,
 } from "@/lib/api/publication-detail";
 import { sanitizePubmedHtml, sanitizePubTitle } from "@/lib/utils";
+import { pubSource } from "@/lib/publication-source";
 
 /**
  * Publication detail modal (#288 PR-B). One modal shared across profile,
@@ -803,20 +804,31 @@ function IdentifiersLine({
   // per-row meta band on the publication-feed cards so the modal reads
   // as the source-of-truth detail view for the same row.
   const blocks: ReactNode[] = [];
-  blocks.push(
-    <span key="pmid" className="inline-flex items-center">
-      PMID:{" "}
-      <a
-        href={pubmedUrl ?? `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="ml-0.5 underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
-      >
-        {pmid}
-      </a>
-      <CopyButton value={pmid} label={`Copy PMID ${pmid}`} />
-    </span>,
-  );
+  // External-source pubs (#101) have no PubMed record — show a source label
+  // instead of a dead pubmed.ncbi link for their source-prefixed pmid.
+  const { isPubmed, sourceLabel } = pubSource(pmid);
+  if (isPubmed) {
+    blocks.push(
+      <span key="pmid" className="inline-flex items-center">
+        PMID:{" "}
+        <a
+          href={pubmedUrl ?? `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-0.5 underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
+        >
+          {pmid}
+        </a>
+        <CopyButton value={pmid} label={`Copy PMID ${pmid}`} />
+      </span>,
+    );
+  } else if (sourceLabel) {
+    blocks.push(
+      <span key="source" className="inline-flex items-center">
+        Source: {sourceLabel}
+      </span>,
+    );
+  }
   if (pmcid) {
     blocks.push(
       <span key="pmcid" className="inline-flex items-center">
