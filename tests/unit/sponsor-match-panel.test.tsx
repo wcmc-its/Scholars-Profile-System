@@ -5,7 +5,9 @@
  *  - a successful search lands in localStorage history — browser-only by
  *    design, since the server never persists descriptions (route contract);
  *  - per-row evidence renders: PubMed-linked top papers with the relevance
- *    percentage, and matched-topic chips.
+ *    percentage, and matched-topic chips;
+ *  - the editable-centrality console: response `concepts` render as labeled 0–1
+ *    sliders, and Re-rank re-POSTs the SAME description with the edited centralities.
  * fetch is stubbed — no route/engine involvement.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -126,5 +128,66 @@ describe("SponsorMatchPanel", () => {
     const link = screen.getByRole("link", { name: "CAR T persistence" });
     expect(link.getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/111/");
     expect(screen.getByText(/90% match/)).toBeTruthy();
+  });
+
+  it("shows NO concept editor on the bespoke shape (empty concepts)", async () => {
+    // Default beforeEach stub returns no `concepts` (bespoke shape) ⇒ no editor.
+    await renderAndSearch();
+    expect(screen.queryByLabelText(/centrality/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Re-rank/ })).toBeNull();
+  });
+
+  it("renders response concepts as labeled 0–1 centrality sliders, seeded to their weight", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          researchers: THREE,
+          concepts: [
+            { term: "cancer metabolism", centrality: 0.9 },
+            { term: "t-cell exhaustion", centrality: 0.7 },
+          ],
+        }),
+      })),
+    );
+    await renderAndSearch();
+    const slider = screen.getByLabelText("cancer metabolism centrality") as HTMLInputElement;
+    expect(slider.value).toBe("0.9");
+    expect(slider.min).toBe("0");
+    expect(slider.max).toBe("1");
+    expect(screen.getByLabelText("t-cell exhaustion centrality")).toBeTruthy();
+    expect(screen.getByText("0.90")).toBeTruthy();
+  });
+
+  it("re-ranks by re-POSTing the SAME description with the edited concepts", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        researchers: THREE,
+        concepts: [{ term: "cancer metabolism", centrality: 0.9 }],
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    await renderAndSearch();
+
+    // Edit the slider down, then Re-rank.
+    const slider = screen.getByLabelText("cancer metabolism centrality");
+    fireEvent.change(slider, { target: { value: "0.35" } });
+    expect(screen.getByText("0.35")).toBeTruthy(); // live readout updated
+    fireEvent.click(screen.getByRole("button", { name: /Re-rank/ }));
+    await screen.findByText("Alice Alpha"); // re-rendered from the second response
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const secondCall = fetchMock.mock.calls[1] as unknown as [string, { body: string }];
+    const secondBody = JSON.parse(secondCall[1].body) as {
+      description: string;
+      concepts: Array<{ term: string; centrality: number }>;
+    };
+    // Same description (not the possibly-edited textarea), with the edited centrality.
+    expect(secondBody.description).toBe("CAR T collaborators");
+    expect(secondBody.concepts).toEqual([{ term: "cancer metabolism", centrality: 0.35 }]);
   });
 });
