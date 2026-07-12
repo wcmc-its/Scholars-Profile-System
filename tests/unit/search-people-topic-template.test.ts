@@ -334,6 +334,36 @@ describe("people-index topic-shape template — SPEC §6.1.3 (#310)", () => {
     expect(inner.score_mode).toBe("multiply");
     expect(inner.boost_mode).toBe("multiply");
   });
+
+  it("skipFacetAggs omits the facet aggregations from the request body (spine fan-out breaker)", async () => {
+    // Default: the facet aggs are attached — today's /search body.
+    await searchPeople({
+      q: "ras signaling pancreatic cancer",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: DESCENDANTS,
+    });
+    expect(capturedBodies[0]).toHaveProperty("aggs");
+    const aggs = capturedBodies[0].aggs as Record<string, unknown>;
+    expect(aggs.deptDivs).toBeDefined();
+    expect(aggs.personTypes).toBeDefined();
+    expect(aggs.attributionMatch).toBeDefined();
+
+    // skipFacetAggs: the `aggs` object is NOT sent, so OpenSearch runs none of the
+    // nine facet aggregations (the per-request heap the spine's fan-out piled up).
+    // The scoring query + hit fetch are untouched — only aggs are gated off.
+    capturedBodies.length = 0;
+    await searchPeople({
+      q: "ras signaling pancreatic cancer",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: DESCENDANTS,
+      skipFacetAggs: true,
+    });
+    expect(capturedBodies[0]).not.toHaveProperty("aggs");
+    expect(capturedBodies[0].query).toHaveProperty("function_score");
+    expect(capturedBodies[0].size).toBeDefined();
+  });
 });
 
 // Issue #692 — generic-term demotion on the topic body.
