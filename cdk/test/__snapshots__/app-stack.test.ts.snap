@@ -4133,7 +4133,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SPONSOR_MATCH_SPINE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",
