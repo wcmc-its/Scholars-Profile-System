@@ -5,7 +5,8 @@
  * and `sponsor-match-axes.ts` (dampedIdf, clustering); THIS module owns the
  * side-effecting glue the bake-off runs behind `SPONSOR_MATCH_SPINE`:
  *
- *   paste ─▶ extractTerms(vocab) ─▶ per-term matchQueryToTaxonomy (MeSH set)
+ *   paste ─▶ extractSponsorConcepts (Bedrock LLM: concepts + centrality; dictionary
+ *            `extractTerms` fallback on outage) ─▶ per-term matchQueryToTaxonomy (MeSH)
  *         ─▶ mergeTermClusters (dedup redundant phrasing)
  *         ─▶ per-cluster searchPeople (topical-only: faculty/grant prominence OFF)
  *         ─▶ weight = centrality × dampedIdf(coverage) ─▶ rrfFuse(rank) ─▶ top-N
@@ -17,20 +18,27 @@
  * engines run side-by-side on the same deploy so the offline eval can score
  * ORDER; nothing here is wired live until the sub-flag flips.
  *
- * VOCAB (v1): the curated taxonomy term labels — `Topic.label` + `Subtopic.label`.
- * These are the surface forms `matchQueryToTaxonomy` is built to resolve (they ARE
- * the taxonomy), so extraction and MeSH resolution stay consistent with zero extra
- * infrastructure and no method-pages flag dependency. CEILING: dozens of parent
- * topics + hundreds of subtopics; a sponsor phrase that isn't a taxonomy label
- * (paraphrase, brand name, un-catalogued method) is missed. Paraphrase recall +
- * rubric centrality are the Bedrock front-end upgrade (§7-Q1); `extractTerms`'
- * dictionary match is a drop-in seam for it.
+ * EXTRACTION: the Bedrock LLM front-end `extractSponsorConcepts` (§7-Q1) is the
+ * primary term source — it reads the prose and names canonical research concepts
+ * `matchQueryToTaxonomy` can resolve, each with a real per-term CENTRALITY. It
+ * replaced the v1 dictionary `extractTerms` after a staging bake-off measured the
+ * dictionary at ~0 recall on real pastes (it only literal-matches `Topic`/`Subtopic`
+ * labels, so paraphrase / brand-name / un-catalogued prose is missed). The dictionary
+ * is KEPT as a fallback: when the LLM returns [] (Bedrock outage/empty), the spine
+ * extracts with `extractTerms` over the taxonomy-label vocab at UNIFORM_CENTRALITY —
+ * degrading to v1 recall rather than to nothing. Both empty ⇒ [] (unchanged).
  *
- * CENTRALITY (v1): uniform 1.0 for every term. The LLM extractor owns real
- * per-term centrality later; until then the fusion weight is idf-only.
+ * CENTRALITY: real 0-1 values from the LLM (uniform 1.0 only on the dictionary
+ * fallback). It is the LIVE left factor of the fusion weight (`centrality × idf`), so
+ * differentiated centrality reorders results and gives the editable-centrality UI a
+ * signal to edit.
  */
 import { db } from "@/lib/db";
 import { extractTerms, rrfFuse, type TermRanking } from "@/lib/api/sponsor-match-spine";
+import {
+  extractSponsorConcepts,
+  type SponsorConcept,
+} from "@/lib/api/sponsor-match-extract";
 import {
   dampedIdf,
   mergeTermClusters,
@@ -47,7 +55,9 @@ import {
 /** Mirrors `sponsor-match.ts` DEFAULT_LIMIT — the client facets narrow browser-side. */
 const SPINE_DEFAULT_LIMIT = 100;
 
-/** Uniform per-term centrality until the LLM extractor supplies real values (§5a). */
+/** Per-term centrality for the DICTIONARY FALLBACK only — the LLM extractor supplies
+ *  real 0-1 values on the primary path (§7-Q1). Uniform 1 makes the fallback weight
+ *  idf-only, matching v1 behaviour. */
 const UNIFORM_CENTRALITY = 1;
 
 /** dampedIdf ceiling — a 1-in-corpus concept can't dominate the fusion. Matches the
@@ -104,9 +114,10 @@ async function loadTaxonomyVocab(): Promise<string[]> {
   return [...topics.map((t) => t.label), ...subs.map((s) => s.label)];
 }
 
-/** One term's MeSH resolution, kept alongside the term so the cluster can carry the
- *  representative descriptor identity (name/tier) and the coverage lookup key. */
-type ResolvedTerm = { term: string; resolution: MeshResolution | null };
+/** One extracted concept resolved to MeSH: the term, its centrality (carried through
+ *  to the ClusterTerm as the fusion multiplicand), and the resolution (representative
+ *  descriptor identity + coverage lookup key). */
+type ResolvedTerm = { term: string; centrality: number; resolution: MeshResolution | null };
 
 /** Retrieve up to `TERM_DEPTH` scholar cwids for one cluster, in `searchPeople` rank
  *  order, paging as needed. Topical-only: the expertise-independent employment priors
@@ -174,24 +185,36 @@ export async function rankResearchersForDescriptionSpine(
   const text = normalizeDescription(description);
   if (text.length === 0) return [];
 
-  const vocab = await loadTaxonomyVocab();
-  const terms = extractTerms(text, vocab).slice(0, MAX_TERMS);
-  if (terms.length === 0) return [];
+  // Extraction seam (§7-Q1): the Bedrock LLM names the funder's concepts + real
+  // per-term centrality. On [] (Bedrock outage/empty) fall back to the v1 dictionary
+  // extractor at uniform centrality — degrade to v1 recall, not to nothing. Both
+  // empty ⇒ the same [] short-circuit as before. MAX_TERMS caps either source.
+  let concepts: SponsorConcept[] = (await extractSponsorConcepts(text)).slice(0, MAX_TERMS);
+  if (concepts.length === 0) {
+    const vocab = await loadTaxonomyVocab();
+    concepts = extractTerms(text, vocab)
+      .slice(0, MAX_TERMS)
+      .map((term) => ({ term, centrality: UNIFORM_CENTRALITY }));
+  }
+  if (concepts.length === 0) return [];
 
-  // Resolve each extracted term to its MeSH descendant-UI set + representative
-  // descriptor (one taxonomy round-trip per term; the list is short by construction).
+  // Resolve each concept to its MeSH descendant-UI set + representative descriptor
+  // (one taxonomy round-trip per concept; the list is short by construction). The
+  // centrality rides through so the ClusterTerm carries a real fusion multiplicand.
   const resolved: ResolvedTerm[] = await Promise.all(
-    terms.map(async (term) => ({
-      term,
-      resolution: (await matchQueryToTaxonomy(term)).meshResolution,
+    concepts.map(async (c) => ({
+      term: c.term,
+      centrality: c.centrality,
+      resolution: (await matchQueryToTaxonomy(c.term)).meshResolution,
     })),
   );
 
-  // Cluster redundant phrasing by MeSH-set equivalence (uniform centrality in v1).
+  // Cluster redundant phrasing by MeSH-set equivalence; each ClusterTerm carries its
+  // concept's centrality (mergeTermClusters takes the MAX across merged members).
   const clusterTerms: ClusterTerm[] = resolved.map((r) => ({
     term: r.term,
     descendantUis: r.resolution?.descendantUis ?? [],
-    centrality: UNIFORM_CENTRALITY,
+    centrality: r.centrality,
   }));
   const clusters = mergeTermClusters(clusterTerms, CLUSTER_TAU);
   if (clusters.length === 0) return [];
