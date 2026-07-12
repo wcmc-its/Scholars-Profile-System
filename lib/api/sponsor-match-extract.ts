@@ -50,9 +50,11 @@ export type SponsorConcept = { term: string; centrality: number };
  *  env is then a task-def env change + restart, not a code edit and full app deploy. */
 const EXTRACT_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
 
-/** Hard cap on returned concepts — mirrors the spine's `MAX_TERMS` (every concept
- *  costs one taxonomy resolution + a per-cluster `searchPeople` fan-out). The prompt
- *  also asks for ≤12; this is the belt-and-suspenders enforcement in `sanitize`. */
+/** Hard cap on returned concepts — an UPPER bound on the LLM output. The spine then
+ *  re-caps to its own (tighter) `MAX_TERMS` before the per-concept `searchPeople`
+ *  fan-out, so THAT is the operative fan-out bound (every concept costs one taxonomy
+ *  resolution + a per-cluster fan-out). The prompt also asks for ≤12; this is the
+ *  belt-and-suspenders enforcement in `sanitize`. */
 const MAX_CONCEPTS = 12;
 
 /** Near-deterministic extraction (bake-off run-to-run comparability). Passed only when

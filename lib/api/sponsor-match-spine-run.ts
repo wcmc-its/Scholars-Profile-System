@@ -82,14 +82,23 @@ const NEUTRAL_IDF = 1;
  *  descendant sets collapse but distinct concepts stay separate. */
 const CLUSTER_TAU = 0.5;
 
-/** Hard cap on extracted terms. `mergeTermClusters` documents a small-list (≤ ~12
- *  terms) assumption, and every term costs one taxonomy resolution + (per cluster)
- *  up to MAX_PAGES sequential `searchPeople` round-trips — a taxonomy-dense 3,000-char
- *  paste could otherwise extract 100+ labels and stall the worker for minutes.
- *  Truncation keeps the FIRST vocab-order terms (deterministic; see
- *  `loadTaxonomyVocab`) — acceptable for the dark bake-off tool; the LLM extractor
- *  owns real term selection later (§7-Q1). */
-const MAX_TERMS = 12;
+/** Hard cap on extracted terms — also the fan-out breaker's concept multiplicand.
+ *  Worst-case sequential `searchPeople` round-trips = MAX_TERMS × pages-per-cluster,
+ *  and the broadest multi-concept pastes (max concepts × max pages) are exactly the
+ *  ones that tripped the OpenSearch parent circuit breaker; `mergeTermClusters` already
+ *  documents a small-list (≤ ~12) assumption. Lowered 12→8 to trim that worst-case
+ *  burst ~33% (paired with `skipFacetAggs`, which removes the per-request agg heap that
+ *  was the actual breaker driver). Every term still costs one taxonomy resolution +
+ *  (per cluster) up to MAX_PAGES round-trips, so a taxonomy-dense 3,000-char paste can't
+ *  stall the worker.
+ *  ponytail: the cut is recall-cheap here BY DESIGN — truncation keeps the FIRST
+ *  concepts (LLM: most-central-first per the extraction prompt; dictionary fallback: vocab order,
+ *  deterministic — see `loadTaxonomyVocab`), so only the least-central 9th-12th concepts
+ *  of a >8-concept paste are dropped. Single/few-concept pastes (e.g. the scleroderma
+ *  0→100 win) carry < 8 concepts and are UNTOUCHED — this only trims the broad pastes
+ *  that fail. TERM_DEPTH is deliberately left at 100 so per-concept pool depth (and that
+ *  0→100 recall) is preserved. Acceptable for the dark bake-off tool. */
+const MAX_TERMS = 8;
 
 /** Per-term retrieval depth. `searchPeople` pages at its own module-private page
  *  size (20 today, not overridable) and reports it as `pageSize` on every result —
@@ -155,6 +164,13 @@ async function retrieveCluster(
       // Full active-scholar pool (directory baseline), fast headless shape (no
       // match-explain / representative-pub aggregations).
       filters: { includeIncomplete: undefined },
+      // Fan-out breaker: this loop reads only hits/total/pageSize (facets are
+      // discarded), so skip the nine People-index facet aggregations. Sending them on
+      // every one of the per-concept × per-page sequential calls piled up the
+      // per-request heap (incl. a size-200 `deptDivKey` terms agg) that tripped the
+      // OpenSearch parent circuit breaker on the broadest sponsor pastes. Recall-neutral
+      // — aggs never touch hits, scoring, or ordering.
+      skipFacetAggs: true,
     });
     for (const h of result.hits) {
       ranked.push(h.cwid);

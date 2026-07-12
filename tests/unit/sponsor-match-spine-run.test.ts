@@ -209,7 +209,7 @@ describe("rankResearchersForDescriptionSpine", () => {
     });
   });
 
-  it("caps extraction at MAX_TERMS (12) — bounded resolution + retrieval fan-out", async () => {
+  it("caps extraction at MAX_TERMS (8) — bounded resolution + retrieval fan-out", async () => {
     const labels = Array.from({ length: 15 }, (_, i) => `term${String(i + 1).padStart(2, "0")}`);
     mockTopicFindMany.mockResolvedValue(labels.map((label) => ({ label })));
     // Disjoint singleton descendant sets ⇒ every surviving term is its own cluster.
@@ -217,9 +217,31 @@ describe("rankResearchersForDescriptionSpine", () => {
 
     await rankResearchersForDescriptionSpine(labels.join(" "));
 
-    // 15 vocab labels occur in the paste; only the first 12 resolve and retrieve.
-    expect(mockMatchQueryToTaxonomy).toHaveBeenCalledTimes(12);
-    expect(mockSearchPeople).toHaveBeenCalledTimes(12);
+    // 15 vocab labels occur in the paste; only the first 8 (fan-out breaker) resolve
+    // and retrieve — bounding the per-request `searchPeople` burst on broad pastes.
+    expect(mockMatchQueryToTaxonomy).toHaveBeenCalledTimes(8);
+    expect(mockSearchPeople).toHaveBeenCalledTimes(8);
+  });
+
+  it("skips the discarded facet aggregations on every per-cluster searchPeople call", async () => {
+    // Fan-out breaker (prime lever): the spine reads only hits/total/pageSize, so it
+    // must pass `skipFacetAggs: true` so OpenSearch never runs the nine People-index
+    // facet aggs that piled up the per-request heap and tripped the parent breaker.
+    mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+    mockSubtopicFindMany.mockResolvedValue([{ label: "munchausen syndrome" }]);
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) =>
+      q === "cancer" ? meshRes("D_CANCER", ["D_CANCER"]) : meshRes("D_MUNCH", ["D_MUNCH"]),
+    );
+    mockSearchPeople.mockImplementation(async ({ q }: { q: string }) =>
+      q === "cancer" ? people(["x"]) : people(["y"]),
+    );
+
+    await rankResearchersForDescriptionSpine("cancer and munchausen syndrome work");
+
+    expect(mockSearchPeople.mock.calls.length).toBeGreaterThan(0);
+    for (const [args] of mockSearchPeople.mock.calls) {
+      expect(args.skipFacetAggs).toBe(true);
+    }
   });
 
   it("pages by the reported result.pageSize, not a copied constant", async () => {

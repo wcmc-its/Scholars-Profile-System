@@ -1415,6 +1415,21 @@ export async function searchPeople(opts: {
    */
   skipReasonAgg?: boolean;
   /**
+   * Perf — sponsor-match SPINE fan-out breaker. When true, the People-index facet
+   * aggregations (deptDivs, personTypes, the two activity + four PI counts, and the
+   * attributionMatch telemetry agg) are NOT attached to the search body, so OpenSearch
+   * executes none of them. The response's `facets` then read empty (the `?.`
+   * aggregation reads below already fall back to []/0) and `attributionBoostFired`
+   * reads false (telemetry only). Callers that DISCARD facets — the spine's
+   * `retrieveCluster` reads only hits/total/pageSize — pay nothing for them: dropping
+   * the nine aggs (chief among them the size-200 `deptDivKey` terms agg that loads
+   * global ordinals) removes the per-request heap that accumulated across the spine's
+   * long sequential per-concept/per-page burst and tripped the OpenSearch parent
+   * circuit breaker on broad pastes. Default false ⇒ the /search body is byte-identical
+   * (only the `aggs` attachment is gated); the main search keeps every facet.
+   */
+  skipFacetAggs?: boolean;
+  /**
    * Research-Area concentration boost (spec: docs/search-research-area-relevance-spec.md).
    * The resolved area's scholars as `{cwid, total}` (relevance×coverage, sorted desc),
    * from `getAreaScholarConcentration`. Applied ONLY on topic/hybrid shapes, as additive
@@ -2539,7 +2554,13 @@ export async function searchPeople(opts: {
       ? { post_filter: { bool: { filter: userAxisFilters } } }
       : {}),
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
-    aggs,
+    // Spine fan-out breaker — `skipFacetAggs` (default off) gates the facet aggs OFF
+    // for callers that discard them (the sponsor-match spine). When off, `{ aggs }`
+    // spreads the SAME `aggs` key at this exact position, so the serialized /search
+    // body is byte-identical to today; when on, `aggs` is absent and OpenSearch runs
+    // none of the nine People-index facet aggregations (the accumulated per-request
+    // heap the spine's burst tripped the parent breaker on).
+    ...(opts.skipFacetAggs ? {} : { aggs }),
     highlight: {
       // The card's only highlight surface is the self-reported snippet fallback,
       // so only the three self-reported fields are highlighted. (The #702
