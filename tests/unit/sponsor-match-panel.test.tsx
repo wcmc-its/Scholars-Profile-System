@@ -155,7 +155,9 @@ describe("SponsorMatchPanel", () => {
     await renderAndSearch();
     const slider = screen.getByLabelText("cancer metabolism centrality") as HTMLInputElement;
     expect(slider.value).toBe("0.9");
-    expect(slider.min).toBe("0");
+    // Floor is 0.05, not 0: the server's sanitizeConcepts rewrites any non-positive
+    // centrality to 0.3, so a 0 stop would snap back on re-rank. 0.05 round-trips.
+    expect(slider.min).toBe("0.05");
     expect(slider.max).toBe("1");
     expect(screen.getByLabelText("t-cell exhaustion centrality")).toBeTruthy();
     expect(screen.getByText("0.90")).toBeTruthy();
@@ -189,5 +191,43 @@ describe("SponsorMatchPanel", () => {
     // Same description (not the possibly-edited textarea), with the edited centrality.
     expect(secondBody.description).toBe("CAR T collaborators");
     expect(secondBody.concepts).toEqual([{ term: "cancer metabolism", centrality: 0.35 }]);
+  });
+
+  it("keeps the concept editor mounted and shows a busy Re-rank during the round-trip", async () => {
+    const okResponse = () => ({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        researchers: THREE,
+        concepts: [{ term: "cancer metabolism", centrality: 0.9 }],
+      }),
+    });
+    let releaseSecond!: () => void;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse())
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseSecond = () => resolve(okResponse());
+          }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    await renderAndSearch();
+
+    fireEvent.click(screen.getByRole("button", { name: /Re-rank/ }));
+
+    // During the in-flight re-rank the editor stays mounted (the just-edited sliders do
+    // NOT flash away to the skeleton) and the button reflects the busy state — the state
+    // that was previously unreachable because the whole editor unmounted while loading.
+    const busy = await screen.findByRole("button", { name: /Re-ranking/ });
+    expect((busy as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByLabelText("cancer metabolism centrality")).toBeTruthy();
+
+    releaseSecond();
+    await screen.findByText("Alice Alpha");
+    expect((screen.getByRole("button", { name: /Re-rank/ }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 });

@@ -151,6 +151,9 @@ export function SponsorMatchPanel() {
   async function runSearch(text: string, conceptsOverride?: SponsorConcept[]) {
     if (pending || text.trim().length === 0) return;
     setStatus({ kind: "loading" });
+    // A fresh search re-extracts concepts, so drop any stale editor immediately; a
+    // re-rank (conceptsOverride present) keeps its edited concepts visible and busy.
+    if (!conceptsOverride) setConcepts([]);
     try {
       const r = await fetch("/api/edit/sponsor-match", {
         method: "POST",
@@ -304,6 +307,19 @@ export function SponsorMatchPanel() {
         </details>
       ) : null}
 
+      {/* Concept editor lives OUTSIDE the status switch so a re-rank keeps the just-
+          edited sliders on screen (with a live busy state) instead of flashing them away
+          to the results skeleton — which also makes the button's pending affordance
+          reachable. Hidden on error, matching the results area below. */}
+      {concepts.length > 0 && status.kind !== "error" ? (
+        <ConceptEditor
+          concepts={concepts}
+          onCentralityChange={updateCentrality}
+          onRerank={() => void runSearch(rankedDescription, concepts)}
+          pending={pending}
+        />
+      ) : null}
+
       {status.kind === "loading" ? (
         <div aria-busy="true">
           <p className="text-muted-foreground py-3 text-sm">Ranking researchers…</p>
@@ -322,14 +338,6 @@ export function SponsorMatchPanel() {
         </p>
       ) : status.kind === "ok" ? (
         <>
-          {concepts.length > 0 ? (
-            <ConceptEditor
-              concepts={concepts}
-              onCentralityChange={updateCentrality}
-              onRerank={() => void runSearch(rankedDescription, concepts)}
-              pending={pending}
-            />
-          ) : null}
           {researchers.length === 0 ? (
             <p className="text-muted-foreground py-4 text-sm">
               No researchers matched this description.
@@ -412,8 +420,11 @@ export function SponsorMatchPanel() {
   );
 }
 
-/** The editable-centrality control: one range slider per extracted concept (0–1, step
- *  0.05), a live mono value readout, and a Re-rank button. Editing a slider only mutates
+/** The editable-centrality control: one range slider per extracted concept (0.05–1, step
+ *  0.05 — the floor is 0.05, NOT 0, because the server's `sanitizeConcepts` rewrites any
+ *  non-positive centrality to 0.3, so a 0 stop would silently snap back to 0.3 on
+ *  re-rank; 0.05 is the smallest value that round-trips through the contract), a live mono
+ *  value readout, and a Re-rank button. Editing a slider only mutates
  *  local state; Re-rank re-POSTs the same description with the edited centralities so the
  *  server re-scores the same candidate universe (no new extraction). Concept rows are NOT
  *  removable and keep their server order (most-central first) — the console reweights, it
@@ -451,7 +462,7 @@ function ConceptEditor({
             </div>
             <input
               type="range"
-              min={0}
+              min={0.05}
               max={1}
               step={0.05}
               value={c.centrality}
