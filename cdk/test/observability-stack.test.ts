@@ -90,8 +90,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 10 CloudWatch alarms (9 platform + 1 B27 relay-errors)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 10);
+    it("creates exactly 11 CloudWatch alarms (10 platform + 1 B27 relay-errors)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 11);
     });
 
     it("every alarm name contains the prod env literal (Footgun #4)", () => {
@@ -99,13 +99,13 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(10);
+      expect(names).toHaveLength(11);
       for (const name of names) {
         expect(name).toMatch(/-prod$/);
       }
     });
 
-    it("alarm names cover the nine platform surfaces plus the B27 relay-errors alarm", () => {
+    it("alarm names cover the ten platform surfaces plus the B27 relay-errors alarm", () => {
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
@@ -120,6 +120,7 @@ describe("SpsObservabilityStack", () => {
           "sps-aurora-cpu-prod",
           "sps-ecs-task-shortfall-prod",
           "sps-edit-authz-denied-prod",
+          "sps-opensearch-breaker-prod",
           "sps-opensearch-cluster-red-prod",
           "sps-opensearch-jvm-pressure-prod",
           "sps-oncall-relay-errors-prod",
@@ -277,6 +278,7 @@ describe("SpsObservabilityStack", () => {
       // (the composite-child indicators).
       const expected: Record<string, string | undefined> = {
         "sps-alb-latency-p99-prod": pageId,
+        "sps-opensearch-breaker-prod": warnId,
         "sps-opensearch-cluster-red-prod": pageId,
         "sps-aurora-cpu-prod": warnId,
         "sps-aurora-connections-prod": warnId,
@@ -306,7 +308,7 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      expect(seen).toBe(10);
+      expect(seen).toBe(11);
     });
 
     it("creates the app-unavailable composite that pages on the serving cascade", () => {
@@ -513,8 +515,10 @@ describe("SpsObservabilityStack", () => {
     });
 
     it("creates the B02 edit_authz_denied metric filter on the app log group", () => {
-      template.resourceCountIs("AWS::Logs::MetricFilter", 1);
-      const filters = template.findResources("AWS::Logs::MetricFilter");
+      template.resourceCountIs("AWS::Logs::MetricFilter", 2);
+      const filters = template.findResources("AWS::Logs::MetricFilter", {
+        Properties: { FilterName: "sps-edit-authz-denied-prod" },
+      });
       const props = Object.values(filters)[0]?.Properties;
       expect(props?.FilterPattern).toBe('{ $.event = "edit_authz_denied" }');
       const transforms = props?.MetricTransformations as
@@ -532,6 +536,23 @@ describe("SpsObservabilityStack", () => {
       // shape matches the AppStack-owned env-prefixed group.
       const logGroupName = props?.LogGroupName;
       expect(logGroupName).toBeDefined();
+    });
+
+    it("alarms on the first circuit_breaking_exception in the app log", () => {
+      const filters = template.findResources("AWS::Logs::MetricFilter", {
+        Properties: { FilterName: "sps-opensearch-breaker-prod" },
+      });
+      expect(Object.keys(filters)).toHaveLength(1);
+      expect(Object.values(filters)[0]?.Properties?.FilterPattern).toBe(
+        '"circuit_breaking_exception"',
+      );
+      const alarms = template.findResources("AWS::CloudWatch::Alarm", {
+        Properties: { AlarmName: "sps-opensearch-breaker-prod" },
+      });
+      const props = Object.values(alarms)[0]?.Properties;
+      expect(props?.Threshold).toBe(0);
+      expect(props?.DatapointsToAlarm).toBe(1);
+      expect(props?.Namespace).toBe("SPS/Search");
     });
 
     it("the edit_authz_denied alarm has the right threshold and SNS action", () => {
@@ -809,8 +830,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 10 CloudWatch alarms (9 platform + 1 B27 relay-errors)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 10);
+    it("creates exactly 11 CloudWatch alarms (10 platform + 1 B27 relay-errors)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 11);
     });
 
     it("every alarm name contains the staging env literal", () => {
@@ -818,7 +839,7 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(10);
+      expect(names).toHaveLength(11);
       for (const name of names) {
         expect(name).toMatch(/-staging$/);
       }
@@ -894,6 +915,7 @@ describe("SpsObservabilityStack", () => {
       const notifyId = topicId("sps-notify-staging");
       const expected: Record<string, string | undefined> = {
         "sps-alb-latency-p99-staging": pageId,
+        "sps-opensearch-breaker-staging": warnId,
         "sps-opensearch-cluster-red-staging": pageId,
         "sps-aurora-cpu-staging": warnId,
         "sps-aurora-connections-staging": warnId,
@@ -922,7 +944,7 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      expect(seen).toBe(10);
+      expect(seen).toBe(11);
     });
 
     it("creates the app-unavailable composite in staging too", () => {
@@ -996,7 +1018,7 @@ describe("SpsObservabilityStack", () => {
     // log-group-scoped (per-env) rather than account-wide. They must ship in
     // both envs so staging traffic exercises the binding before prod.
     it("creates the B02 edit_authz_denied metric filter in staging (not prod-only)", () => {
-      template.resourceCountIs("AWS::Logs::MetricFilter", 1);
+      template.resourceCountIs("AWS::Logs::MetricFilter", 2);
       template.hasResourceProperties("AWS::Logs::MetricFilter", {
         FilterPattern: '{ $.event = "edit_authz_denied" }',
       });

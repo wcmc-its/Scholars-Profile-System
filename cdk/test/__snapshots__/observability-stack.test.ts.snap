@@ -704,6 +704,45 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       "Type": "AWS::Logs::LogGroup",
       "UpdateReplacePolicy": "Retain",
     },
+    "OpenSearchBreakerAlarm0D13D3F1": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "OpenSearch refused a query with circuit_breaking_exception (prod) -- the parent breaker tripped at 95% of heap and the app returned 502. Next: check JVMMemoryPressure Maximum on the domain; the node is undersized or a query burst (e.g. the sponsor-match fan-out) is too heavy for the heap.",
+        "AlarmName": "sps-opensearch-breaker-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 1,
+        "EvaluationPeriods": 1,
+        "MetricName": "OpenSearchCircuitBreaker",
+        "Namespace": "SPS/Search",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "OpenSearchBreakerMetricFilter2EF567D5": {
+      "Properties": {
+        "FilterName": "sps-opensearch-breaker-prod",
+        "FilterPattern": ""circuit_breaking_exception"",
+        "LogGroupName": {
+          "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefAppLogGroup7D8CD9527CC48D3E",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "OpenSearchCircuitBreaker",
+            "MetricNamespace": "SPS/Search",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
+    },
     "OpenSearchClusterRedAlarm2725A3FB": {
       "Properties": {
         "AlarmActions": [
@@ -1571,6 +1610,45 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::Logs::LogGroup",
       "UpdateReplacePolicy": "Retain",
+    },
+    "OpenSearchBreakerAlarm0D13D3F1": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "WarnTopicFEEED862",
+          },
+        ],
+        "AlarmDescription": "OpenSearch refused a query with circuit_breaking_exception (staging) -- the parent breaker tripped at 95% of heap and the app returned 502. Next: check JVMMemoryPressure Maximum on the domain; the node is undersized or a query burst (e.g. the sponsor-match fan-out) is too heavy for the heap.",
+        "AlarmName": "sps-opensearch-breaker-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 1,
+        "EvaluationPeriods": 1,
+        "MetricName": "OpenSearchCircuitBreaker",
+        "Namespace": "SPS/Search",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "OpenSearchBreakerMetricFilter2EF567D5": {
+      "Properties": {
+        "FilterName": "sps-opensearch-breaker-staging",
+        "FilterPattern": ""circuit_breaking_exception"",
+        "LogGroupName": {
+          "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefAppLogGroup7D8CD9527CC48D3E",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "OpenSearchCircuitBreaker",
+            "MetricNamespace": "SPS/Search",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
     },
     "OpenSearchClusterRedAlarm2725A3FB": {
       "Properties": {
