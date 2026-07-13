@@ -71,8 +71,97 @@ These are real and enforced today (`cdk/lib/observability-stack.ts`, [`SLOs.md`]
 | RUM (real-user) | — | p95 > 2 s **or** 5xx > 1% | `PRODUCTION.md § Observability` (CloudWatch RUM/synthetics). |
 | CloudFront cache hit rate | > 85% healthy | (dashboard, not alarmed) | < 50% ⇒ investigate (bad deploy cache-key change, or hot invalidation cycle). |
 | Aurora CPU | — | > 80% for 3×5m | Hot query loop / runaway analytic. |
-| Aurora connections | — | > 80 for 3×5m | Pool exhaustion. Budget: `connectionLimit=15`/task. |
+| Aurora connections | **peak ≤ 60** | > 70 for 2×5m | Retuned 2026-07-13 — the old `> 80 for 3×5m` could not see the failure. See [The Aurora connection budget](#the-aurora-connection-budget-and-the-leak-that-keeps-eating-it) below. |
+| Aurora pool timeouts | **0** | ≥ 1 (P1, pages) | A request could not get a DB connection — users are getting 500s. Log-metric filter on `"pool timeout"` in the app log group. |
 | OpenSearch JVM memory pressure | — | > 85% for 3×5m | GC pressure cascading into query latency. |
+
+### The Aurora connection budget, and the leak that keeps eating it
+
+**The numbers, measured on staging (not inferred):**
+
+| | connections |
+|---|---|
+| One app task (Prisma `connectionLimit=15`) | **15** |
+| Normal daily peak (app + reconcile + deploy transients) | **60** |
+| Aurora Serverless v2 cap at low ACU (`max_connections` at 0.5 ACU) | **~90** |
+
+The headroom between a normal day and the cap is **one or two leaked pools**, because every pool is
+exactly 15 connections. That is a thin margin, and it has been breached three times in one week.
+
+**The leak, which has now recurred twice and caused a user-visible outage:** any one-off `run-task`
+probe or eval script that imports from `@/lib/db` (transitively: anything importing `@/lib/api/*`)
+opens a 15-connection Prisma pool. **If it does not call `await db.$disconnect()`, the Node event
+loop never ends** — the task prints its output in seconds and then sits in `RUNNING`, holding its 15
+connections until a human kills it. Serverless v2 scales on **CPU/memory, not connection count**, so
+idle leaked connections never trigger a scale-up that would raise `max_connections`; they just
+accumulate against a fixed ceiling.
+
+Observed on staging, 7 days to 2026-07-13:
+
+```
+07-06   91   saturation
+07-07   60   normal
+07-08   75   a leaked pool sat here ALL DAY, under the old 80 threshold -- invisible
+07-09   60   normal
+07-10   60   normal
+07-11   60   normal
+07-12   90   saturation -- nobody noticed
+07-13   90   saturation -- three leaked probes; a user hit the 500 and reported it
+```
+
+**Why the old alarm was structurally blind, and what the new one fixes.** `> 80 for 3×5m` demanded a
+value above 80 sustained for 15 minutes. The leak's steady state is **75** — *below* the threshold —
+so a leak could sit there indefinitely, one app-task roll away from the cap. When it did cross 80 it
+was a ~6-minute spike, *shorter* than the 15-minute sustain. Too low to trip on the plateau, too slow
+to trip on the spike. The threshold is now **70** (above the measured normal peak of 60, below the
+leak plateau of 75) over **2×5m**, so it fires on the *leak* rather than on the outage the leak
+eventually causes — and a separate P1 fires on the actual harm (`pool timeout`).
+
+**Symptom when the cap is hit.** Every Prisma-touching route degrades. The app log shows:
+
+```json
+{"event":"edit_write_failed","path":"/api/edit/sponsor-match",
+ "error":"pool timeout: failed to retrieve a connection from pool after 10001ms
+          (pool connections: active=0 idle=0 limit=15)"}
+```
+
+`active=0 idle=0` means the pool could not open a **single** connection — the ceiling is the
+**cluster**, not that task. **Recycling the app will not help.** Find what is holding the connections.
+
+**Runbook.**
+
+```bash
+# 1. Find the holders. One-off probes/evals run in the ETL task family.
+aws ecs list-tasks --cluster sps-cluster-<env> --family sps-etl-<env> --desired-status RUNNING
+
+# 2. Confirm before stopping -- a parallel session's eval may be legitimately running,
+#    and the nightly ETL uses this family too. The tell for a zombie probe is that it is
+#    still RUNNING long after it printed its results.
+aws ecs describe-tasks --cluster sps-cluster-<env> --tasks <id> \
+  --query 'tasks[0].{cmd:overrides.containerOverrides[0].command,started:startedAt}'
+
+# 3. Stop the zombies. Read-only probes hold no writes, so this is data-safe.
+aws ecs stop-task --cluster sps-cluster-<env> --task <id> --reason "leaked prisma pool"
+
+# 4. Watch the connections drain (90 -> baseline within ~3 min; the app self-heals,
+#    no restart needed). NOTE: staging has TWO Aurora clusters and one sits idle at 0 --
+#    query the `...auroraclusterfromsnapshot...` one or you will "prove" nothing is wrong.
+aws cloudwatch get-metric-statistics --namespace AWS/RDS --metric-name DatabaseConnections \
+  --dimensions Name=DBClusterIdentifier,Value=<the fromsnapshot cluster id> \
+  --period 60 --statistics Maximum --start-time <t-15m> --end-time <now>
+```
+
+**Prevention — do both, because the first one relies on remembering.**
+
+1. **End every probe with `await db.$disconnect()`.** This is the fix.
+2. **Wrap the container command in `timeout`.** This is the seatbelt for the day someone forgets,
+   and it needs no one to remember anything at runtime:
+   ```
+   "command": ["sh","-c","timeout 600 sh -c 'cd /app && npx tsx -e \"...\"'"]
+   ```
+
+Do **not** reach for a higher min-ACU to buy connection headroom: it costs money continuously to
+paper over a leak that costs nothing to fix.
 
 ## Per-surface baseline
 

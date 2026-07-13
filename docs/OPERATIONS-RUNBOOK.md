@@ -339,7 +339,7 @@ ETL (local, reads prod sources over VPN): `npm run etl:daily` (chain head `etl:e
 
 **Error-budget policy** (policy, *not* enforced): if > 50% of the 28-day budget burns in any rolling 7-day sub-window, prod deploys pause. Non-SLO "normal" brackets: CloudFront cache hit > 85% healthy / < 50% incident signal; Aurora connections alarm at 80.
 
-### Alarm catalog — 9 alarms/env (P1/P2 tiered) + 1 composite (`../cdk/lib/observability-stack.ts`)
+### Alarm catalog — 10 alarms/env (P1/P2 tiered) + 1 composite (`../cdk/lib/observability-stack.ts`)
 
 P1 → **page** topic `sps-alarms-${env}` (on-call Teams channel); P2 → **warn** topic `sps-warn-${env}` (separate "warn" channel, falls back to page until provisioned). Full detail: `SLOs.md § Alarm catalog` + `oncall.md § Severity tiers`.
 
@@ -350,14 +350,15 @@ P1 → **page** topic `sps-alarms-${env}` (on-call Teams channel); P2 → **warn
 | `sps-alb-latency-p99-${env}` | P1 | p99 > 1.5 s | 5m, 3/3 | Latency SLO burn |
 | `sps-ecs-task-shortfall-${env}` | P1† | desired − running > 0 | 1m, 5/5 | Tasks died, not replaced |
 | `sps-aurora-cpu-${env}` | P2 | > 80% | 5m, 3/3 | Hot query loop |
-| `sps-aurora-connections-${env}` | P2 | > 80 | 5m, 3/3 | Connection-pool exhaustion |
+| `sps-aurora-connections-${env}` | P2 | > 70 | 5m, 2/2 | Leaked connection pool (normal peak 60, each pool +15, cap ~90) |
+| `sps-db-pool-timeout-${env}` | P1 | `"pool timeout"` ≥ 1 | 5m, 1/1 | Cannot get a DB connection — users seeing 500s |
 | `sps-opensearch-jvm-pressure-${env}` | P2 | > 85% | 5m, 3/3 | GC pressure → query latency |
 | `sps-opensearch-cluster-red-${env}` | P1 | `ClusterStatus.red` > 0 | 1m, 1/1 | Shards unassigned |
 | `sps-edit-authz-denied-${env}` | P2 | `edit_authz_denied` > 10 | 5m, 2/2 | Edit-surface 403 burst / probing |
 | `sps-app-unavailable-${env}` | P1 | composite: `ALARM(5xx) OR ALARM(unhealthy) OR ALARM(task-shortfall)` | — | The serving cascade — one page for the three †-marked symptoms |
 
 > **† No direct action** — these three feed the `sps-app-unavailable` composite (the single P1 page for a serving cascade); they still evaluate, so the dashboard and the composite rule see them. All ETL/reconciler alarms (`etl-failures-${env}`) are P2.
-> **Count note:** `SLOs.md` says "eight"; the 9th (`sps-edit-authz-denied`, B02 #101) is real in code. **Code is authoritative — 9 alarms + 1 composite.**
+> **Count note: code is authoritative — 10 alarms + 1 composite** (`cdk/lib/observability-stack.ts`; the cdk test asserts the exact inventory, so it cannot silently drift). The 10th is `sps-db-pool-timeout` (2026-07-13). An older note here claimed `SLOs.md` undercounted at "eight"; `SLOs.md` now lists the full set.
 
 A separate **relay watchdog** `sps-oncall-relay-errors-${env}` (Lambda `Errors` ≥ 1/min, 1m 1/1) routes to the **notify** topic (email), not page — because the page topic flows through the relay Lambda itself.
 
@@ -462,6 +463,7 @@ Two operator surfaces beyond the live `sps-reliability-${env}` dashboard + alarm
 | 11 | DB data loss / corruption (not app code) | Outside app-rollback scope — Aurora PITR | Targets **RPO ≤ 24 h, RTO ≤ 4 h**. Variant A — PITR `aws rds restore-db-cluster-to-point-in-time … --use-latest-restorable-time` then add a `db.serverless` writer (~20–40 min). Variant B — snapshot restore from DR vault `sps-dr-backup-vault-${env}` (us-west-2). → [`./restore-drill-runbook.md`](./restore-drill-runbook.md) |
 | 12 | `POST /api/revalidate` returns 401 / 500 | 401 = no/wrong token or non-Bearer scheme; 500 `server misconfigured` = `SCHOLARS_REVALIDATE_TOKEN` unset; mid-rotation 401 = old process cached old token | During rotation stage **both** `SCHOLARS_REVALIDATE_TOKEN` (new) + `SCHOLARS_REVALIDATE_TOKEN_PREVIOUS` (old) in `scholars/revalidate-token`, redeploy app to re-read, roll ETL callers, verify both 200, drop previous after ≥24 h + redeploy. → [`./revalidate-token-rotation.md`](./revalidate-token-rotation.md) |
 | 13 | ETL step fails `[etl-guard:<name>] … refusing to proceed` (e.g. `ed:scholar-soft-delete` with a large departed count) | Fail-safe tripped: the source returned far fewer records than the DB holds. Either the upstream shrank/restructured (e.g. ED moved students to `ou=students,ou=sors`, 2026-06) **or** a genuine offboarding backlog accumulated while nightlies were failing | **Verify before bypassing.** Reproduce the departed set read-only and spot-check a sample upstream (ED case: all LDAP `faculty:expired`, none active ⇒ genuine). Genuine ⇒ one-time rerun with `ETL_GUARD_BYPASS="<guard-name>"` (comma-list or `"all"`; set via `containerOverrides.environment` on a one-off `run-task` — never permanently), then confirm the next nightly is clean. Not genuine ⇒ fix the fetch, don't bypass (see PR #1456 for the ED repoint pattern). |
+| 14 | `sps-db-pool-timeout-${env}` fired, or any route 500s with `pool timeout: failed to retrieve a connection from pool` | Aurora is at its connection cap (~90). Almost always a **leaked Prisma pool**: a one-off `run-task` probe/eval that imported `@/lib/db` (transitively, any `@/lib/api/*`), never called `await db.$disconnect()`, so Node never exited — it prints its output in seconds then sits in `RUNNING` holding **15** connections. Normal peak is 60; each leak is +15. | `active=0 idle=0` in the log line means the pool could not open a **single** connection — the ceiling is the **cluster**, so **recycling the app will not help**. `aws ecs list-tasks --cluster sps-cluster-$ENV --family sps-etl-$ENV --desired-status RUNNING` → confirm each is a finished probe (still RUNNING long after printing results) and not a live ETL/parallel-session eval → `aws ecs stop-task` (read-only probes are data-safe) → watch `DatabaseConnections` drain (90 → baseline in ~3 min; the app self-heals). ⚠ staging has **two** Aurora clusters and the idle one reads 0 — query the `...auroraclusterfromsnapshot...` id. Prevention = `$disconnect` **and** a `timeout 600` wrapper on the container command. → [`./performance-baseline.md`](./performance-baseline.md) |
 
 **ETL manual `run-task` — pick the family by credential group (#1508).** The single ETL task def was split four ways so no step carries a credential it does not need (LDAP bind pw / WCM-DB creds / ReCiter admin key). A one-off `run-task` (rows #2/#9/#13) MUST target the family whose secrets the step reads, or ECS fails it at task-start with a missing key. Rule: LDAP read → `-ldap`; a WCM DB → `-sources`; the ReCiter REST API → `-reciter-api`; everything else (public API / IAM / DB-only) → base. Authoritative mapping is `LDAP_SCRIPTS` / `SOURCES_SCRIPTS` in `cdk/lib/etl-stack.ts`:
 - `sps-etl-$ENV` (base) — `search:index`, `backup:curated`, `etl:dynamodb`, `etl:identity`, `etl:spotlight`, `etl:hierarchy`, `etl:scholar-tool`, `etl:mesh-*`, `etl:pubmed-retractions`, `etl:reporter-grants`, `etl:nsf/gates/nih-profile/pops`, `etl:revalidate/integrity/completeness/headshot/freshness`, `etl:coi-gap`, `etl:ed:import-email-visibility`.
@@ -469,7 +471,7 @@ Two operator surfaces beyond the live `sps-reliability-${env}` dashboard + alarm
 - `sps-etl-ldap-$ENV` — `etl:ed`, `etl:ed:export-email-visibility` (any `etl:ed:*` that binds LDAP).
 - `sps-etl-reciter-api-$ENV` — `etl:reciter-refresh` only (holds the #746 ReCiter admin key; was previously run on `sps-etl-$ENV`).
 
-**Quick alarm → entry index:** 5xx-rate / unhealthy-hosts / ecs-task-shortfall → #6; latency-p99 → #1/#6; aurora-cpu / aurora-connections → #2/#6; opensearch-red / jvm-pressure → #4/#9; etl-*-status/-cadence/-heartbeat → #3; oncall-relay-errors → #8; budget/anomaly (notify, email) = cost guardrail, not a service incident.
+**Quick alarm → entry index:** 5xx-rate / unhealthy-hosts / ecs-task-shortfall → #6; latency-p99 → #1/#6; aurora-cpu / aurora-connections → #2/#6/#14; db-pool-timeout → #14; opensearch-red / jvm-pressure → #4/#9; etl-*-status/-cadence/-heartbeat → #3; oncall-relay-errors → #8; budget/anomaly (notify, email) = cost guardrail, not a service incident.
 
 ## 5. Host, contacts & access
 

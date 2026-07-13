@@ -487,17 +487,39 @@ export class SpsObservabilityStack extends Stack {
     });
     auroraCpuAlarm.addAlarmAction(warnAction); // P2 -- leading indicator, not an outage
 
-    // (6) Connection count -- catches connection-pool exhaustion before
-    // the app starts surfacing connection errors. Threshold is absolute
-    // (80 connections) rather than percent-of-max since Aurora Serverless
-    // v2 max scales with capacity and the raw number is easier to reason
-    // about. 80 covers writer-pool defaults + headroom.
+    // (6) Connection count -- catches connection-pool exhaustion before the app
+    // starts surfacing connection errors. Threshold is absolute rather than
+    // percent-of-max since Aurora Serverless v2 max scales with capacity and the
+    // raw number is easier to reason about.
+    //
+    // RETUNED 2026-07-13 after this alarm slept through three saturation events.
+    // The old values (>80, 3x5m sustained) were reasoned from "writer-pool
+    // defaults + headroom" -- not measured -- and landed in the one dead zone
+    // that cannot see the actual failure. Measured on staging instead:
+    //
+    //   normal daily peak   60   (07-07, 07-09, 07-10, 07-11)
+    //   leaked-pool plateau 75   (07-08 sat here ALL DAY, under the threshold)
+    //   saturation / cap    90   (07-06, 07-12, 07-13 -- app cannot connect)
+    //
+    // Each leaked Prisma pool is exactly +15 connections, so a leak parks the
+    // cluster at 75 -- BELOW the old 80 threshold -- indefinitely and invisibly,
+    // one app-task roll away from the 90 cap. And when it did cross 80 it was a
+    // ~6-minute spike, shorter than the 15 minutes of sustain the alarm demanded.
+    // It was structurally blind on both axes: the plateau was too low and the
+    // spike was too short. On 2026-07-13 that cost a user-visible outage on
+    // /api/edit/sponsor-match (pool timeout, active=0 idle=0) which nothing
+    // caught -- a human reported it.
+    //
+    // 70 sits above the measured normal peak (60) with headroom, and below the
+    // leak plateau (75), so it fires on the LEAK rather than on the outage the
+    // leak eventually causes. 2x5m keeps a single deploy transient from paging.
+    // Leak source + cleanup runbook: docs/performance-baseline.md.
     const auroraConnectionsAlarm = new cloudwatch.Alarm(
       this,
       "AuroraConnectionsAlarm",
       {
         alarmName: `sps-aurora-connections-${env}`,
-        alarmDescription: `Aurora active connection count > 80 sustained over 5m (${env}). Symptom of connection-pool exhaustion or unintended app fan-out. Next: look for leaked or idle connections; recycle the app tasks if the count will not drain.`,
+        alarmDescription: `Aurora active connection count > 70 sustained over 10m (${env}). Normal peak is 60; each leaked Prisma pool adds exactly 15, and the cluster caps near 90. Most likely a one-off ECS probe/eval task that never called db.$disconnect() and is still RUNNING long after printing its output. Next: aws ecs list-tasks --cluster sps-cluster-${env} --family sps-etl-${env} --desired-status RUNNING, stop the zombies (read-only probes are data-safe), and watch DatabaseConnections drain. See docs/performance-baseline.md.`,
         metric: metricsByName
           ? dbMetric("DatabaseConnections", "Maximum", {
               period: Duration.minutes(5),
@@ -506,15 +528,58 @@ export class SpsObservabilityStack extends Stack {
               statistic: "Maximum",
               period: Duration.minutes(5),
             }),
-        threshold: 80,
-        evaluationPeriods: 3,
-        datapointsToAlarm: 3,
+        threshold: 70,
+        evaluationPeriods: 2,
+        datapointsToAlarm: 2,
         comparisonOperator:
           cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       },
     );
     auroraConnectionsAlarm.addAlarmAction(warnAction); // P2 -- leading indicator
+
+    // (6b) Prisma pool timeouts -- the HARM, not the leading indicator. (6) can
+    // still be evaded (a leak that plateaus under 70, a cap change, a fan-out we
+    // have not thought of); this fires whenever a request actually failed to get
+    // a DB connection, whatever the cause. The app logs one JSON line per
+    // occurrence: {"event":"edit_write_failed", ... "error":"pool timeout: failed
+    // to retrieve a connection from pool after 10001ms (pool connections:
+    // active=0 idle=0 limit=15)"}. `active=0 idle=0` means the pool could not
+    // open a SINGLE connection -- the ceiling is the CLUSTER, not this task, so
+    // recycling the app will not help; find what is holding the connections.
+    //
+    // One pool timeout is already a 500 in a user's face, so alarm on the first.
+    new logs.MetricFilter(this, "DbPoolTimeoutMetricFilter", {
+      logGroup: appStack.appLogGroup,
+      filterName: `sps-db-pool-timeout-${env}`,
+      filterPattern: logs.FilterPattern.literal('"pool timeout"'),
+      metricNamespace: "SPS/Data",
+      metricName: "DbPoolTimeout",
+      metricValue: "1",
+      defaultValue: 0,
+    });
+
+    const dbPoolTimeoutAlarm = new cloudwatch.Alarm(
+      this,
+      "DbPoolTimeoutAlarm",
+      {
+        alarmName: `sps-db-pool-timeout-${env}`,
+        alarmDescription: `A request could not get a DB connection from the pool (${env}) -- users are seeing 500s right now. If the log line says active=0 idle=0, the Aurora cluster is at its connection cap and recycling the app will NOT help. Next: check DatabaseConnections on the cluster, then stop any zombie one-off ECS tasks holding pools (see the sps-aurora-connections-${env} alarm and docs/performance-baseline.md).`,
+        metric: new cloudwatch.Metric({
+          namespace: "SPS/Data",
+          metricName: "DbPoolTimeout",
+          statistic: "Sum",
+          period: Duration.minutes(5),
+        }),
+        threshold: 0,
+        evaluationPeriods: 1,
+        datapointsToAlarm: 1,
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    dbPoolTimeoutAlarm.addAlarmAction(snsAction); // P1 -- users are getting 500s
 
     // ------------------------------------------------------------------
     // OpenSearch domain alarms (2)

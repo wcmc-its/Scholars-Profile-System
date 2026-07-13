@@ -160,6 +160,14 @@ Run it in-VPC (the ETL task def has **no** `SEARCH_*` flags, so they must be inj
 container-override env, or evidence is suppressed for a reason that has nothing to do with the
 code):
 
+**Wrap the command in `timeout`.** `$disconnect` is the fix; `timeout` is the seatbelt for the day
+someone forgets it (which has now happened twice). It bounds the blast radius to 10 minutes without
+depending on anyone remembering anything:
+
+```
+"command": ["sh","-c","timeout 600 sh -c 'cd /app && npx tsx -e \"...\"'"]
+```
+
 ```bash
 aws ecs run-task --cluster sps-cluster-staging \
   --task-definition sps-etl-staging:21 --launch-type FARGATE \
