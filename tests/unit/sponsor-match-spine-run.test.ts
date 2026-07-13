@@ -27,7 +27,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { rerankCandidates } from "@/lib/api/sponsor-match-contract";
+import { conceptWeight, rerankCandidates } from "@/lib/api/sponsor-match-contract";
 
 const {
   mockTopicFindMany,
@@ -183,6 +183,69 @@ describe("rankResearchersForDescriptionSpine", () => {
     });
   });
 
+  /**
+   * THE REGRESSION TEST FOR THE FINDING ITSELF (`docs/2026-07-12-FINDING-...`).
+   *
+   * Both halves are measured from the live extractor, not invented:
+   *
+   *  - multiple-sclerosis extracts `multiple sclerosis` alongside `remyelination` and
+   *    `neuroprotection` — its own MECHANISMS, which are corpus-RARER than the disease
+   *    (MS coverage 1.28e-3; the mechanisms are far rarer). Corpus IDF therefore weighted
+   *    the mechanisms ABOVE the disease and a mechanism generalist outranked the disease
+   *    specialist. The disease must now win.
+   *
+   *  - ml-in-medicine extracts `machine learning` as a METHOD at centrality 1.0 — here the
+   *    method IS the funder's target. This is §9's objection to a kind prior, and it is why
+   *    the prior is paste-RELATIVE rather than a blanket "disease beats method": a rule that
+   *    fixed MS by always demoting methods would break this paste. Both must hold at once,
+   *    which is the whole reason this is one test with two halves.
+   */
+  it("FINDING §8: the funder's target outranks its own mechanisms — in BOTH directions", async () => {
+    const setup = (concepts: { term: string; kind: "concept" | "method"; centrality: number }[],
+                   coverage: Record<string, number>) => {
+      mockExtractSponsorConcepts.mockResolvedValue(concepts);
+      mockMatchQueryToTaxonomy.mockImplementation(async (q: string) =>
+        meshRes(`D_${q}`, [`D_${q}`]),
+      );
+      mockMeshDescriptorFindMany.mockResolvedValue(
+        Object.entries(coverage).map(([t, c]) => ({ descriptorUi: `D_${t}`, localPubCoverage: c })),
+      );
+      mockSearchPeople.mockImplementation(async () => people(["p"]));
+    };
+    const weightOf = (cs: { term: string }[] & unknown[], term: string) =>
+      conceptWeight((cs as Parameters<typeof conceptWeight>[0][]).find((c) => c.term === term)!);
+
+    // (a) DISEASE paste. The disease is corpus-COMMON, its mechanisms corpus-RARE — the exact
+    //     anti-correlation the FINDING is about.
+    setup(
+      [
+        { term: "multiple sclerosis", kind: "concept", centrality: 1.0 },
+        { term: "remyelination", kind: "concept", centrality: 0.4 },
+        { term: "neuroprotection", kind: "concept", centrality: 0.4 },
+      ],
+      { "multiple sclerosis": 1.28e-3, remyelination: 2.0e-5, neuroprotection: 3.0e-5 },
+    );
+    const ms = (await rankResearchersForDescriptionSpine("ms paste")).concepts;
+    expect(weightOf(ms, "multiple sclerosis")).toBeGreaterThan(weightOf(ms, "remyelination"));
+    expect(weightOf(ms, "multiple sclerosis")).toBeGreaterThan(weightOf(ms, "neuroprotection"));
+    // …and it is not a hair's breadth: the target should DOMINATE its supporting detail.
+    expect(weightOf(ms, "multiple sclerosis")).toBeGreaterThan(
+      weightOf(ms, "remyelination") + weightOf(ms, "neuroprotection"),
+    );
+
+    // (b) METHOD paste (§9). Same rules, opposite target kind — the method must win here, so
+    //     the fix cannot be a blanket disease-over-method prior.
+    setup(
+      [
+        { term: "machine learning", kind: "method", centrality: 1.0 },
+        { term: "disease progression", kind: "concept", centrality: 0.4 },
+      ],
+      { "machine learning": 4.0e-3, "disease progression": 8.0e-4 },
+    );
+    const ml = (await rankResearchersForDescriptionSpine("ml paste")).concepts;
+    expect(weightOf(ml, "machine learning")).toBeGreaterThan(weightOf(ml, "disease progression"));
+  });
+
   it("treats KNOWN-ZERO coverage as neutral idf — never dampedIdf's cap branch", async () => {
     mockTopicFindMany.mockResolvedValue([{ label: "rare" }, { label: "zerocov" }]);
     // Disjoint descendant sets ⇒ two separate clusters.
@@ -204,19 +267,29 @@ describe("rankResearchersForDescriptionSpine", () => {
     const { concepts, candidates: out } =
       await rankResearchersForDescriptionSpine("rare and zerocov studies");
 
-    // Neutral idf: x = 6.908/61 = .113 beats z = 1/61 = .016. Under the cap-branch
-    // bug the zero-evidence cluster would weigh 10 and z (10/61 = .164) would win.
+    // The genuinely-rare concept still outranks the zero-evidence one, and the zero-evidence
+    // one still cannot take the cap branch and dominate — that invariant is unchanged.
     expect(out.map((r) => r.cwid)).toEqual(["x", "z"]);
-    expect(out[0].fusedScore).toBeGreaterThan(out[1].fusedScore * 5);
 
-    // …and the zero-coverage concept ships NO `corpusCoverage` at all. It gets a neutral
+    const zerocov = concepts.find((c) => c.term === "zerocov")!;
+    const rare = concepts.find((c) => c.term === "rare")!;
+    expect(rare.weightFactor).toBeGreaterThan(zerocov.weightFactor);
+
+    // …but the CLIFF is gone (FINDING §8.5), and that is the point of this fix. Zero coverage
+    // now lands on the rarity band's CENTRE rather than at a value 10x away from its
+    // nearest-neighbour descriptor. Both concepts sit inside a ±15% band, so the gap between
+    // "no coverage row" and "one tagged paper" is a few percent, not an order of magnitude —
+    // across a boundary that carries no topical meaning and that 40% of descriptors sit on.
+    // Both are kind-aligned here, so the shared 1.25 kind prior is the band's multiplier.
+    expect(zerocov.weightFactor).toBeCloseTo(1 * 1.25, 6); // band centre × aligned-kind prior
+    expect(rare.weightFactor / zerocov.weightFactor).toBeLessThan(1.2);
+
+    // …and the zero-coverage concept ships NO `corpusCoverage` at all. It gets a band-centre
     // weightFactor (a ranking decision), but the UI must not be handed a 0 it could render
     // as "vanishingly rare" — a zero root-tag coverage is missing evidence, not rarity, and
     // it is 40% of descriptors. Absent ≠ zero.
-    const zerocov = concepts.find((c) => c.term === "zerocov")!;
-    expect(zerocov.weightFactor).toBe(1); // NEUTRAL_IDF
     expect(zerocov.corpusCoverage).toBeUndefined();
-    expect(concepts.find((c) => c.term === "rare")!.corpusCoverage).toBe(0.001);
+    expect(rare.corpusCoverage).toBe(0.001);
   });
 
   it("loads the vocab with a deterministic order (label asc)", async () => {
@@ -423,14 +496,19 @@ describe("rankResearchersForDescriptionSpine", () => {
   it("ships the FULL fused pool, not a default-weight top-N (a truncated pool is a broken rail)", async () => {
     mockExtractSponsorConcepts.mockResolvedValue([
       { term: "dominant", kind: "concept", centrality: 1.0 },
-      { term: "secondary", kind: "concept", centrality: 0.4 },
+      // 0.15, not 0.4 — an incidental mention, so this concept's ONE expert genuinely falls
+      // below the 100-deep dominant pool and the "no truncation" claim is a REAL cut.
+      // At 0.4 it no longer does: K=8 (FINDING §8.3) deliberately promotes being #1 on a
+      // secondary concept over being #54-100 on the primary one, which is the head-sharpening
+      // the fix is FOR — so the old fixture stopped exercising truncation at all.
+      { term: "secondary", kind: "concept", centrality: 0.15 },
     ]);
     mockMatchQueryToTaxonomy.mockImplementation(async (q: string) =>
       q === "dominant" ? meshRes("D_DOM", ["D_DOM"]) : meshRes("D_SEC", ["D_SEC"]),
     );
     mockMeshDescriptorFindMany.mockResolvedValue([
-      { descriptorUi: "D_DOM", localPubCoverage: 7.5e-4 }, // idf ≈ 7.2 ⇒ weight ≈ 7.2
-      { descriptorUi: "D_SEC", localPubCoverage: 0.018 }, // idf ≈ 4.0 ⇒ weight ≈ 1.6
+      { descriptorUi: "D_DOM", localPubCoverage: 7.5e-4 }, // rare-ish ⇒ band ≈ 1.07
+      { descriptorUi: "D_SEC", localPubCoverage: 0.018 }, // common-ish ⇒ band ≈ 0.97
     ]);
     // "dominant" retrieves a full 100-deep pool; "secondary" retrieves one disjoint person.
     const dominantPool = Array.from({ length: 100 }, (_, i) => `dom${i + 1}`);
@@ -484,13 +562,17 @@ describe("rankResearchersForDescriptionSpine", () => {
 
     const { concepts, candidates } = await rankResearchersForDescriptionSpine("sponsor prose");
 
+    // The paste's top centrality is a `concept` (0.9) so the target kind is "concept":
+    // `cancer` takes the aligned 1.25 prior and the off-target `CAR-T` method takes 0.8.
+    //   cancer: rarityFactor(0.5)   = 0.85 + 0.3·(0.693/10) = 0.871 ; × 1.25 = 1.088
+    //   CAR-T : rarityFactor(0.001) = 0.85 + 0.3·(6.908/10) = 1.057 ; × 0.80 = 0.846
     expect(concepts).toEqual([
       {
         term: "cancer",
         kind: "concept",
         members: ["cancer", "oncology"],
         centrality: 0.9, // max across the merged members, not oncology's 0.4
-        weightFactor: expect.closeTo(0.693, 2), // dampedIdf(0.5) — today's engine choice
+        weightFactor: expect.closeTo(1.088, 2),
         corpusCoverage: 0.5, // the raw measured fraction, for the badge only
       },
       {
@@ -498,10 +580,19 @@ describe("rankResearchersForDescriptionSpine", () => {
         kind: "method",
         members: ["CAR-T"],
         centrality: 0.7,
-        weightFactor: expect.closeTo(6.908, 2), // dampedIdf(0.001)
+        weightFactor: expect.closeTo(0.846, 2),
         corpusCoverage: 0.001,
       },
     ]);
+
+    // THE INVERSION, FIXED — this fixture is the FINDING in miniature. `CAR-T` is rare
+    // (coverage 0.001) and `cancer` is ubiquitous (0.5), so the old corpus-IDF weightFactor
+    // handed the OFF-TARGET method 6.908 against the on-target concept's 0.693 — a 10x
+    // advantage bought with nothing but corpus rarity, which is how a mechanism generalist
+    // came to outrank the disease specialist. The funder's actual target must now win.
+    const w = (t: string) => conceptWeight(concepts.find((c) => c.term === t)!);
+    expect(w("cancer")).toBeGreaterThan(w("CAR-T"));
+
     // Contributions key on the cluster's REPRESENTATIVE term, so they join to
     // `concepts[].term`. "oncology" merged away and must never appear as a key — a
     // contribution the rail cannot resolve to a slider is a dead re-rank input.

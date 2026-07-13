@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { extractTerms, rrfFuse } from "@/lib/api/sponsor-match-spine";
+import { DEFAULT_K } from "@/lib/api/sponsor-match-contract";
 
 describe("extractTerms (v1 dictionary match)", () => {
   const vocab = ["CRISPR", "machine learning", "PCR", "cell", "t-test", "a.b"];
@@ -38,7 +39,9 @@ describe("rrfFuse (§4 weighted RRF)", () => {
   it("single term: preserves rank order, score decays with rank", () => {
     const out = rrfFuse([{ term: "t1", weight: 2, ranked: ["x", "y", "z"] }]);
     expect(out.map((r) => r.cwid)).toEqual(["x", "y", "z"]);
-    expect(out[0].score).toBeCloseTo(2 / 61);
+    // Derived from DEFAULT_K, not hardcoded — this assertion pinned 2/61 and went stale the
+    // moment K moved 60 → 8. The invariant is `weight / (K + rank)`, not the literal.
+    expect(out[0].score).toBeCloseTo(2 / (DEFAULT_K + 1));
     expect(out[0].score).toBeGreaterThan(out[1].score);
   });
 

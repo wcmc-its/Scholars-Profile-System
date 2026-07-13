@@ -17,8 +17,8 @@
  * That is only possible if the response carries the DECOMPOSED score inputs per
  * candidate rather than a final scalar:
  *
- *     score(s) = Σ_c  centrality(c)·weightFactor(c) / (K + rank_{s,c}) × (1 + λ·prefBoost(s))
- *                     └── editable ──┘└─── fixed ───┘   └─ per-candidate, per-concept ─┘
+ *     score(s) = Σ_c  centrality(c)^γ·weightFactor(c) / (K + rank_{s,c}) × (1 + λ·prefBoost(s))
+ *                     └──── editable ────┘└─── fixed ───┘   └─ per-candidate, per-concept ─┘
  *
  * `SponsorCandidate.contributions[]` carries `rank_{s,c}` for EVERY concept the
  * candidate appeared under — weak ones included, because they are re-rank inputs, not
@@ -26,12 +26,14 @@
  * drag", which the design rejects (each drag = up to 8 concepts × paged `searchPeople`
  * — seconds, not live).
  *
- * WHAT THIS FILE DOES NOT FREEZE: the ranker's WEIGHTING. `weightFactor` is named for its
- * role in the formula, not its implementation, and the engine's current choice for it
- * (corpus IDF) is known-broken — see `docs/2026-07-12-FINDING-idf-inverts-concept-weighting.md`
- * and the field's own doc below. Fixing the weighting is an engine change; this contract,
- * the route and the panel all stay put. The decomposition is what gets frozen here, and the
- * decomposition is right.
+ * THE WEIGHTING IS NOT FROZEN HERE, AND IT MOVED. `weightFactor` is named for its role in
+ * the formula, not its implementation — which is exactly what let the FINDING's fix land as
+ * an engine-only change. It is no longer corpus IDF (that axis anti-correlated with topical
+ * centrality and ranked a disease BELOW its own mechanisms; see
+ * `docs/2026-07-12-FINDING-idf-inverts-concept-weighting.md`). It is now a bounded rarity
+ * tiebreaker times a paste-relative kind prior, with centrality raised to γ and doing the
+ * actual work. The route and the panel did not move. The decomposition is what is frozen
+ * here, and the decomposition is right.
  *
  * DERIVED, NOT WIRED: the matched-concept chips and the fit tier are deliberately NOT
  * response fields. Both are computed client-side (`matchedConcepts`, `fitTier`) so they
@@ -54,8 +56,30 @@ import type { CareerStage } from "@/lib/career-stage";
  * definition. They MUST agree or `rerankCandidates` at default weights will not reproduce
  * the order the server sent (see `sponsor-match-contract.test.ts`, which asserts exactly
  * that round-trip).
+ *
+ * 8, not 60 (FINDING §8.3). At K=60 the RRF denominators for ranks 1 and 20 are 61 and 80
+ * — a 1.3x spread, so being the single BEST person on the funder's primary target was
+ * worth almost nothing over being twentieth on it, and a candidate could out-score the
+ * specialist by placing mid-pack on several peripheral concepts. At K=8 the same two ranks
+ * are 9 and 28 (3.1x), so depth on the central concept actually pays.
  */
-export const DEFAULT_K = 60;
+export const DEFAULT_K = 8;
+
+/**
+ * Exponent on centrality in the fusion weight (FINDING §8.4 — decomposition asymmetry).
+ *
+ * A sponsor's paste decomposes into ONE primary target and SIX-ish supporting mechanisms,
+ * and every cluster votes independently in the RRF. Linear centrality therefore lets the
+ * mechanisms out-vote the target by sheer count: a generalist mid-ranked on six mechanisms
+ * beats the specialist ranked #1 on the disease. Squaring the centrality makes the primary
+ * target dominate its own supporting detail BY CONSTRUCTION rather than by accident —
+ * at the post-FINDING rubric (target 1.0, mechanism ~0.5) it turns a 2x lead into 4x.
+ *
+ * Shared, like DEFAULT_K: `conceptWeight` is the ONE definition of the weight and both the
+ * server's fusion and the client's slider re-rank call it, so client and server cannot
+ * drift apart on it (`sponsor-match-contract.test.ts` pins the round-trip).
+ */
+export const CENTRALITY_GAMMA = 2;
 
 /**
  * Fit-tier bands, as a fraction of the TOP candidate's fused score. The ranker stays
@@ -90,23 +114,26 @@ export type SponsorConcept = {
   /** Funder-centrality in (0,1]. EDITABLE — this is what a slider moves. */
   centrality: number;
   /**
-   * The FIXED half of the fusion weight: `weight = centrality × weightFactor`. Not editable.
+   * The FIXED half of the fusion weight: `weight = centrality^γ × weightFactor`. Not editable.
    *
-   * Named for its ROLE in the formula, not for its current implementation, and that is
-   * deliberate. The RANKER owns what this number means; the contract only promises it is
-   * the non-editable multiplicand, so the client can recompute the score after a slider
-   * move. Today the spine sets it to `dampedIdf(corpus coverage)` — and that choice is
-   * KNOWN-BROKEN: corpus rarity anti-correlates with topical centrality in a hierarchical
-   * domain, so a disease's own mechanisms outweigh the disease (Myofibroblasts 8.44 >
-   * Fibrosis 8.00 > Scleroderma 7.24), and a mechanism generalist outranks the disease
-   * specialist. See `docs/2026-07-12-FINDING-idf-inverts-concept-weighting.md`.
+   * Named for its ROLE in the formula, not its implementation — and naming it that way is what
+   * let the FINDING's fix land without touching this type, the route or the panel. The RANKER
+   * owns what this number means; the contract only promises it is the non-editable
+   * multiplicand, so the client can recompute the score after a slider move.
    *
-   * Landing this file does NOT bless that formula. Every fix the finding proposes — a
-   * kind-based disease prior, a discriminating centrality rubric, per-kind weight
-   * normalisation, the coverage=0 cliff — changes only how the ENGINE computes this number,
-   * with no change to this type, the route, or the panel. (The K fix is the one exception,
-   * and `DEFAULT_K` above is the single shared constant it edits.) That is the point of
-   * naming it `weightFactor` rather than `rarity`.
+   * It USED to be `dampedIdf(corpus coverage)`, and that was the bug: corpus rarity
+   * anti-correlates with topical centrality in a hierarchical domain, so a disease's own
+   * mechanisms outweighed the disease (Myofibroblasts 8.44 > Fibrosis 8.00 > Scleroderma
+   * 7.24) and a mechanism generalist outranked the disease specialist.
+   *
+   * The spine now sets it to `rarityFactor(coverage) × kindPrior(kind, targetKind)` — rarity
+   * demoted to a bounded ±15% tiebreaker, times a prior that boosts whichever kind THIS paste
+   * is targeting. Topicality is carried by `centrality^γ` instead. See
+   * `docs/2026-07-12-FINDING-idf-inverts-concept-weighting.md` §8.
+   *
+   * INVARIANT: whatever the engine puts here must NOT depend on `centrality` — the client
+   * re-derives the weight on every slider drag, so a centrality-contaminated `weightFactor`
+   * would freeze the original value into the "fixed" half and desync the sliders.
    */
   weightFactor: number;
   /**
@@ -224,15 +251,22 @@ export type RerankOptions = {
   lambda?: number;
 };
 
-/** Fusion weight for one concept: `centrality × weightFactor`. Centrality is the slider;
+/** Fusion weight for one concept: `centrality^γ × weightFactor`. Centrality is the slider;
  *  weightFactor is the ranker's fixed multiplicand. Zeroing a slider zeroes the concept's
- *  contribution without dropping it.
+ *  contribution without dropping it, and γ (CENTRALITY_GAMMA) leaves that property intact —
+ *  0^γ is still 0, 1^γ is still 1 — while widening the gap between a primary target and its
+ *  supporting mechanisms everywhere in between.
+ *
+ *  γ belongs HERE and not baked into the server's `weightFactor` for a specific reason: the
+ *  slider moves `centrality`, so the exponent has to be re-applied on every drag. Folding it
+ *  into `weightFactor` server-side would bake in the ORIGINAL centrality and make a dragged
+ *  slider compute a different weight than the server would for that same value.
  *
  *  Note what is NOT here: `corpusCoverage`. It is display-only, and keeping it out of the
  *  one function that defines the weight is what makes that guarantee checkable rather than
  *  a comment. */
 export function conceptWeight(concept: SponsorConcept): number {
-  return concept.centrality * concept.weightFactor;
+  return concept.centrality ** CENTRALITY_GAMMA * concept.weightFactor;
 }
 
 /** Term → fusion weight, for a whole concept set. */

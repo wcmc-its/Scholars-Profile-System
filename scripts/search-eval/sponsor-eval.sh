@@ -39,20 +39,41 @@ if [[ "$MODE" == "fetch" ]]; then
   # shellcheck source=lib.sh
   source "$DIR/lib.sh"   # HOST
   # The sponsor route is auth-gated (/edit). Export SPONSOR_COOKIE='<your dev session cookie>'.
+  # Retry budget for the OpenSearch parent circuit breaker. The sponsor fan-out issues ~40-60
+  # sequential `searchPeople` calls per paste, which walks a heap-constrained node past its 95%
+  # parent-breaker limit; the node then refuses even a 2KB request and the route returns 502
+  # `match_unavailable`. It is TRANSIENT — the heap drops back once GC runs — so a fixture that
+  # 502s is a MEASUREMENT FAILURE, not a ranking of zero.
+  #
+  # This matters more than it looks. Without the retry the failure is silent: a 502 became `[]`,
+  # `[]` scores nDCG 0.000, and a run where the box was merely busy reads as a catastrophic
+  # ranking regression. A first local baseline scored 0.161 that way — 11 of 15 fixtures had
+  # simply 502'd. Never let infrastructure noise enter the scorecard as a ranking number.
+  RETRIES="${RETRIES:-4}"
   fetch_actual() {  # $1 = paste → JSON array of ranked cwids; ALWAYS valid JSON ([] on any failure)
-    local resp code body
-    # /api/edit/* enforces a same-origin guard (lib/edit/authz.ts verifyRequestOrigin):
-    # Sec-Fetch-Site=same-origin (primary) or Origin-host==Host (fallback). A browser
-    # fetch sets these; curl must send them explicitly or the route 403s (cross_origin).
-    resp="$(curl -4 -s -w $'\n%{http_code}' -X POST "$HOST/api/edit/sponsor-match" \
-      -H 'content-type: application/json' \
-      -H 'sec-fetch-site: same-origin' \
-      -H "origin: $HOST" \
-      ${SPONSOR_COOKIE:+-H "cookie: $SPONSOR_COOKIE"} \
-      --data "$(jq -n --arg d "$1" '{description:$d}')")"
-    code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
+    local resp code body attempt
+    for ((attempt = 1; attempt <= RETRIES; attempt++)); do
+      # /api/edit/* enforces a same-origin guard (lib/edit/authz.ts verifyRequestOrigin):
+      # Sec-Fetch-Site=same-origin (primary) or Origin-host==Host (fallback). A browser
+      # fetch sets these; curl must send them explicitly or the route 403s (cross_origin).
+      resp="$(curl -4 -s -w $'\n%{http_code}' --max-time 300 -X POST "$HOST/api/edit/sponsor-match" \
+        -H 'content-type: application/json' \
+        -H 'sec-fetch-site: same-origin' \
+        -H "origin: $HOST" \
+        ${SPONSOR_COOKIE:+-H "cookie: $SPONSOR_COOKIE"} \
+        --data "$(jq -n --arg d "$1" '{description:$d}')")"
+      code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
+      [[ "$code" == "200" ]] && break
+      # 401/403 are terminal (bad cookie / CSRF) — retrying cannot help. 5xx is the breaker.
+      if [[ "$code" == "401" || "$code" == "403" ]]; then
+        echo "  ⚠ HTTP $code — 401=cookie missing/stale, 403=forbidden/CSRF (terminal)" >&2
+        echo '[]'; return
+      fi
+      echo "  ⚠ HTTP $code (attempt $attempt/$RETRIES) — likely the OpenSearch parent breaker; backing off" >&2
+      sleep $((attempt * 8))
+    done
     if [[ "$code" != "200" ]]; then
-      echo "  ⚠ HTTP $code from /api/edit/sponsor-match — 401=cookie missing/stale, 403=forbidden/CSRF" >&2
+      echo "  ⚠ GAVE UP after $RETRIES attempts (HTTP $code). This fixture is UNMEASURED, not zero." >&2
       echo '[]'; return
     fi
     if ! jq -e . >/dev/null 2>&1 <<<"$body"; then
