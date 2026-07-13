@@ -59,8 +59,14 @@ if [[ "$MODE" == "fetch" ]]; then
       echo "  ⚠ non-JSON response (first 100 chars: ${body:0:100})" >&2
       echo '[]'; return
     fi
-    # tolerate {researchers:[{cwid}]} or {results:[{cwid}]}; [] if neither present
-    jq -c '[(.researchers // .results // [])[]? | (.cwid // .id)] | map(select(. != null))' <<<"$body"
+    # Tolerate every ranked-list shape this route has ever returned; [] if none present.
+    # `candidates` is the CURRENT one (the UI ⇄ ranker contract, `lib/api/sponsor-match-contract.ts`);
+    # `researchers` is what it returned before that landed. BOTH are kept on purpose — this harness
+    # probes a DEPLOYED environment, so it has to score a staging box running the old shape and a
+    # freshly-deployed one running the new shape, often on the same afternoon. Drop `researchers` and
+    # the eval silently scores 0.000 on every fixture against any not-yet-redeployed env, which reads
+    # exactly like a catastrophic ranking regression.
+    jq -c '[(.candidates // .researchers // .results // [])[]? | (.cwid // .id)] | map(select(. != null))' <<<"$body"
   }
   echo "sponsor-eval @ ${HOST}  (live fetch)  fixtures=$(basename "$FIX")  k=$K"
 else

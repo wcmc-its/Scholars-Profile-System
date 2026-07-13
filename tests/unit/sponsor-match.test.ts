@@ -7,9 +7,11 @@
  *  - empty/whitespace/control-char input short-circuits with NO OpenSearch call;
  *  - route wiring: 404 while SPONSOR_MATCH is off, 403 + denial log for a
  *    non-developer, 400 on a missing description, 200 happy-path shape;
- *  - the response carries `concepts` (spine: the set used; bespoke: []), and the
- *    spine accepts a sanitized `concepts` override (malformed shape → 400; ignored
- *    while the spine flag is off).
+ *  - BOTH engines answer in the UI contract's `{ concepts, candidates }` shape (bespoke
+ *    maps into it with no decomposition: empty concepts + empty contributions, but real
+ *    measures/evidence);
+ *  - there is NO `concepts` request field any more — #1673's server-side override is gone,
+ *    because the console re-ranks client-side over the already-fetched candidates.
  * Mocks db + relevanceScoresForQuery — never live OpenSearch/MySQL.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -104,7 +106,7 @@ beforeEach(() => {
   mockPublicationFindMany.mockResolvedValue([]);
   mockTopicFindMany.mockResolvedValue([]);
   mockRankForDescription.mockResolvedValue([]);
-  mockRankSpine.mockResolvedValue({ researchers: [], concepts: [] });
+  mockRankSpine.mockResolvedValue({ concepts: [], candidates: [] });
 });
 
 describe("rankResearchersForDescription (engine)", () => {
@@ -261,16 +263,50 @@ describe("POST /api/edit/sponsor-match (route)", () => {
     expect(mockRankForDescription).not.toHaveBeenCalled();
   });
 
-  it("200s with the ranked researchers from the engine (bespoke ⇒ empty concepts)", async () => {
+  it("maps the bespoke engine into the contract shape (no decomposition ⇒ empty concepts)", async () => {
+    // Both engines answer in ONE response shape, so the console has one type to consume.
+    // Bespoke does no concept decomposition, so `concepts` and every `contributions` are
+    // empty — the rail hides itself and the client re-rank is a no-op, which is the honest
+    // rendering of an engine with no per-concept signal to edit. It DOES carry the
+    // measures + evidence the spine's headless retrieval cannot produce.
     mockRankForDescription.mockResolvedValue([
-      { cwid: "a", slug: "slug-a", defaultScore: 4.2, technologyCount: 1 },
+      {
+        cwid: "a",
+        slug: "slug-a",
+        preferredName: "Ada L",
+        title: "Prof",
+        department: "Medicine",
+        careerStage: "senior",
+        defaultScore: 4.2,
+        technologyCount: 1,
+        matchedTopics: [{ topicId: "t1", label: "Oncology", pubCount: 7 }],
+        topPapers: [
+          { pmid: "1", title: "P", year: 2020, journal: "J", relevance: 0.8 },
+        ],
+      },
     ]);
     const resp = await POST(postRequest(developerCtx, { description: "gene therapy" }));
     expect(resp.status).toBe(200);
     expect(await resp.json()).toEqual({
       ok: true,
-      researchers: [{ cwid: "a", slug: "slug-a", defaultScore: 4.2, technologyCount: 1 }],
       concepts: [],
+      candidates: [
+        {
+          cwid: "a",
+          name: "Ada L",
+          profileSlug: "slug-a",
+          title: "Prof",
+          department: "Medicine",
+          fusedScore: 4.2,
+          contributions: [],
+          technologyCount: 1,
+          measures: { careerStage: "senior" },
+          evidence: {
+            topics: [{ label: "Oncology", pubCount: 7 }],
+            papers: [{ pmid: "1", title: "P", year: 2020, journal: "J", relevance: 0.8 }],
+          },
+        },
+      ],
     });
     expect(mockRankForDescription).toHaveBeenCalledWith("gene therapy");
   });
@@ -288,7 +324,7 @@ describe("POST /api/edit/sponsor-match (route)", () => {
       process.env.SPONSOR_MATCH_SPINE = "on";
       const resp = await POST(postRequest(developerCtx, { description: "x" }));
       expect(resp.status).toBe(200);
-      expect(mockRankSpine).toHaveBeenCalledWith("x", { conceptsOverride: undefined });
+      expect(mockRankSpine).toHaveBeenCalledWith("x");
       expect(mockRankForDescription).not.toHaveBeenCalled();
     });
 
@@ -304,7 +340,7 @@ describe("POST /api/edit/sponsor-match (route)", () => {
       process.env.SPONSOR_MATCH_SPINE = "on";
       const resp = await POST(postRequest(developerCtx, { description: "x", engine: "spine" }));
       expect(resp.status).toBe(200);
-      expect(mockRankSpine).toHaveBeenCalledWith("x", { conceptsOverride: undefined });
+      expect(mockRankSpine).toHaveBeenCalledWith("x");
       expect(mockRankForDescription).not.toHaveBeenCalled();
     });
 
@@ -317,77 +353,66 @@ describe("POST /api/edit/sponsor-match (route)", () => {
       expect(mockRankSpine).not.toHaveBeenCalled();
     });
 
-    it("spine flag ON: surfaces the concepts the engine used in the response", async () => {
+    it("spine flag ON: ships the spine's decomposed concepts + candidates verbatim", async () => {
       process.env.SPONSOR_MATCH_SPINE = "on";
-      mockRankSpine.mockResolvedValue({
-        researchers: [{ cwid: "a", slug: "slug-a", defaultScore: 1 }],
-        concepts: [{ term: "cancer metabolism", centrality: 0.9 }],
-      });
+      const concepts = [
+        {
+          term: "cancer metabolism",
+          kind: "concept",
+          members: ["cancer metabolism"],
+          centrality: 0.9,
+          weightFactor: 3.2,
+          corpusCoverage: 4.1e-4,
+        },
+      ];
+      const candidates = [
+        {
+          cwid: "a",
+          name: "Ada L",
+          profileSlug: "slug-a",
+          title: null,
+          department: null,
+          fusedScore: 1,
+          contributions: [{ term: "cancer metabolism", rank: 1 }],
+          technologyCount: 0,
+        },
+      ];
+      mockRankSpine.mockResolvedValue({ concepts, candidates });
       const resp = await POST(postRequest(developerCtx, { description: "x" }));
       expect(resp.status).toBe(200);
-      expect(await resp.json()).toEqual({
-        ok: true,
-        researchers: [{ cwid: "a", slug: "slug-a", defaultScore: 1 }],
-        concepts: [{ term: "cancer metabolism", centrality: 0.9 }],
-      });
+      // The decomposed inputs must reach the client INTACT — both weight factors and
+      // every per-concept rank. Anything the route drops here, the console cannot
+      // re-rank over, and the sliders fall back to re-querying.
+      expect(await resp.json()).toEqual({ ok: true, concepts, candidates });
     });
   });
 
-  describe("concept override (SPONSOR_MATCH_SPINE)", () => {
+  // #1673 accepted a client-supplied `concepts` override and re-retrieved + re-fused on
+  // every slider drag. That is the "re-query on every drag" degradation the UI contract
+  // rejects, and removing it also removed a client-controlled trust boundary. Re-ranking
+  // is now client-side (`rerankCandidates`) over the already-fetched candidates.
+  describe("no concept override (the contract's hinge)", () => {
     beforeEach(() => {
       process.env.SPONSOR_MATCH_SPINE = "on";
     });
 
-    it("sanitizes a valid `concepts` override and passes it to the spine", async () => {
+    it("ignores a `concepts` body field entirely — it is not an input any more", async () => {
       const resp = await POST(
         postRequest(developerCtx, {
           description: "x",
-          concepts: [
-            { term: "  Cancer metabolism  ", centrality: 1.4 }, // trim + clamp high → 1
-            { term: "cancer metabolism", centrality: 0.5 }, // case-insensitive dupe → dropped
-            { term: "t-cell exhaustion", centrality: 0 }, // non-positive → 0.3 floor
-          ],
+          concepts: [{ term: "injected", centrality: 1 }],
         }),
       );
       expect(resp.status).toBe(200);
-      expect(mockRankSpine).toHaveBeenCalledWith("x", {
-        conceptsOverride: [
-          { term: "Cancer metabolism", centrality: 1 },
-          { term: "t-cell exhaustion", centrality: 0.3 },
-        ],
-      });
+      // Not passed through, not validated, not 400 — simply not a parameter. The spine is
+      // called with the description alone.
+      expect(mockRankSpine).toHaveBeenCalledWith("x");
     });
 
-    it("400s on a malformed `concepts` override (non-array), no engine call", async () => {
+    it("does not 400 on a garbage `concepts` field (there is no such trust boundary now)", async () => {
       const resp = await POST(postRequest(developerCtx, { description: "x", concepts: "nope" }));
-      expect(resp.status).toBe(400);
-      expect(await resp.json()).toMatchObject({
-        ok: false,
-        error: "invalid_concepts",
-        field: "concepts",
-      });
-      expect(mockRankSpine).not.toHaveBeenCalled();
-    });
-
-    it("400s on an override element with an empty term or a non-finite centrality", async () => {
-      expect(
-        (await POST(postRequest(developerCtx, { description: "x", concepts: [{ term: "  ", centrality: 0.5 }] }))).status,
-      ).toBe(400);
-      expect(
-        (await POST(postRequest(developerCtx, { description: "x", concepts: [{ term: "cancer", centrality: "high" }] }))).status,
-      ).toBe(400);
-      expect(
-        (await POST(postRequest(developerCtx, { description: "x", concepts: [{ term: "cancer", centrality: Number.NaN }] }))).status,
-      ).toBe(400);
-      expect(mockRankSpine).not.toHaveBeenCalled();
-    });
-
-    it("flag OFF: a `concepts` field is ignored (bespoke, no validation, no 400)", async () => {
-      process.env.SPONSOR_MATCH_SPINE = "off";
-      const resp = await POST(postRequest(developerCtx, { description: "x", concepts: "garbage" }));
       expect(resp.status).toBe(200);
-      expect(mockRankForDescription).toHaveBeenCalledWith("x");
-      expect(mockRankSpine).not.toHaveBeenCalled();
+      expect(mockRankSpine).toHaveBeenCalledWith("x");
     });
   });
 });

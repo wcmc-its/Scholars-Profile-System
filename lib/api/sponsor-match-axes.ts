@@ -17,8 +17,20 @@ export function dampedIdf(coverage: number, cap: number): number {
   return Math.min(-Math.log(coverage), cap);
 }
 
-export type ClusterTerm = { term: string; descendantUis: string[]; centrality: number };
-export type TermCluster = { members: string[]; descendantUis: string[]; centrality: number };
+export type ConceptKind = "concept" | "method";
+
+export type ClusterTerm = {
+  term: string;
+  descendantUis: string[];
+  centrality: number;
+  kind: ConceptKind;
+};
+export type TermCluster = {
+  members: string[];
+  descendantUis: string[];
+  centrality: number;
+  kind: ConceptKind;
+};
 
 /** Jaccard of two id sets. 0 when either is empty. */
 function jaccard(a: Set<string>, b: Set<string>): number {
@@ -44,6 +56,13 @@ function related(a: Set<string>, b: Set<string>, tau: number): boolean {
  * wrong. Connected components over pairwise `related`; each cluster unions the
  * descendant sets and takes the max member centrality. Stable by earliest member.
  * Terms with no resolved descriptors pass through as singletons.
+ *
+ * The cluster's `kind` is its FIRST member's — the same member that supplies the
+ * representative term and the representative MeSH resolution, so the three stay
+ * consistent. A mixed-kind cluster (a method and a disease sharing a descriptor set)
+ * is possible in principle and follows the representative rather than a vote; a
+ * majority rule here would let the rail's Concept/Method panel disagree with the name
+ * the cluster is displayed under.
  */
 export function mergeTermClusters(terms: ClusterTerm[], tau: number): TermCluster[] {
   const sets = terms.map((t) => new Set(t.descendantUis));
@@ -72,6 +91,7 @@ export function mergeTermClusters(terms: ClusterTerm[], tau: number): TermCluste
         centrality = Math.max(centrality, terms[i].centrality);
         for (const u of terms[i].descendantUis) uni.add(u);
       }
-      return { members, descendantUis: [...uni], centrality };
+      // `idxs` is ascending, so idxs[0] is the earliest member — the representative.
+      return { members, descendantUis: [...uni], centrality, kind: terms[idxs[0]].kind };
     });
 }

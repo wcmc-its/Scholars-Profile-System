@@ -11,6 +11,8 @@
  *                  `searchPeople` rankings (§4: score(s) = Σ_c weight_c / (K + rank)).
  */
 
+import { DEFAULT_K } from "@/lib/api/sponsor-match-contract";
+
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
@@ -40,10 +42,23 @@ export function extractTerms(paste: string, vocab: string[]): string[] {
 }
 
 export type TermRanking = {
+  /** The cluster's representative term. Joins to `SponsorConcept.term` on the wire, so
+   *  the client can attribute each contribution back to the slider that drives it. */
+  term: string;
   /** fusion weight for this cluster/term = centrality × dampedIdf (≥ 0). */
   weight: number;
   /** scholar cwids in `searchPeople` rank order (rank = index + 1). */
   ranked: string[];
+};
+
+/** One fused scholar, WITH the decomposed inputs that produced its score. */
+export type FusedScholar = {
+  cwid: string;
+  score: number;
+  /** Every (term, rank) this scholar appeared under — the UI contract's hinge. The
+   *  client recomputes `score` from these as sliders move, so a re-rank needs no new
+   *  search. Ordered by the ranking order the caller passed in. */
+  contributions: { term: string; rank: number }[];
 };
 
 /**
@@ -53,19 +68,35 @@ export type TermRanking = {
  * K damps the head so one term's #1 can't dominate. A scholar absent from a term
  * contributes nothing for it. Returns cwids sorted by fused score desc, ties broken
  * by earliest first appearance (stable).
+ *
+ * Also returns each scholar's `contributions` — the per-term ranks the sum was built
+ * from. They are NOT extra work: this loop already visits every (term, scholar, rank)
+ * triple, and previously discarded the rank after folding it into the scalar. Keeping
+ * them is what lets the console re-rank live over the already-fetched candidates
+ * instead of re-querying on every slider drag (`sponsor-match-contract.ts`). Weak
+ * contributions are kept deliberately — a concept the user slides UP must be able to
+ * lift a scholar who only ranked #80 under it, and that is impossible if the response
+ * pruned the row.
+ *
+ * `K` defaults to the contract's `DEFAULT_K`; the client re-ranks with the same
+ * constant, and `sponsor-match-contract.test.ts` pins the two together.
  */
-export function rrfFuse(rankings: TermRanking[], K = 60): { cwid: string; score: number }[] {
+export function rrfFuse(rankings: TermRanking[], K = DEFAULT_K): FusedScholar[] {
   const score = new Map<string, number>();
+  const contributions = new Map<string, { term: string; rank: number }[]>();
   const firstSeen = new Map<string, number>();
   let order = 0;
-  for (const { weight, ranked } of rankings) {
+  for (const { term, weight, ranked } of rankings) {
     for (let rank = 1; rank <= ranked.length; rank++) {
       const cwid = ranked[rank - 1];
       score.set(cwid, (score.get(cwid) ?? 0) + weight / (K + rank));
+      const rows = contributions.get(cwid);
+      if (rows) rows.push({ term, rank });
+      else contributions.set(cwid, [{ term, rank }]);
       if (!firstSeen.has(cwid)) firstSeen.set(cwid, order++);
     }
   }
   return [...score.entries()]
-    .map(([cwid, s]) => ({ cwid, score: s }))
+    .map(([cwid, s]) => ({ cwid, score: s, contributions: contributions.get(cwid)! }))
     .sort((a, b) => b.score - a.score || firstSeen.get(a.cwid)! - firstSeen.get(b.cwid)!);
 }

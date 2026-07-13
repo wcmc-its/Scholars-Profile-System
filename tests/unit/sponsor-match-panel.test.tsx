@@ -1,63 +1,117 @@
 /**
- * Sponsor-match panel client behaviors (iteration pass):
- *  - facets (department / matched topic / CTL-IP) narrow the rendered rows
- *    client-side, and each row keeps its ORIGINAL rank number;
- *  - a successful search lands in localStorage history — browser-only by
- *    design, since the server never persists descriptions (route contract);
- *  - per-row evidence renders: PubMed-linked top papers with the relevance
- *    percentage, and matched-topic chips;
- *  - the editable-centrality console: response `concepts` render as labeled 0–1
- *    sliders, and Re-rank re-POSTs the SAME description with the edited centralities.
+ * Sponsor-match panel client behaviors.
+ *
+ * The load-bearing test here is "a slider re-ranks with NO fetch". PR #1673 re-POSTed the
+ * description with edited concepts on every re-rank, which is the "re-query on every drag"
+ * degradation the UI contract rejects (`lib/api/sponsor-match-contract.ts`). The response
+ * now carries the decomposed score inputs, so the panel re-ranks in the browser. If anyone
+ * re-adds a fetch to the slider path, `expect(fetchMock).toHaveBeenCalledTimes(1)` fails.
+ *
+ * Also covered:
+ *  - facets (department / matched concept / CTL-IP) narrow rows client-side, and each row
+ *    keeps its rank number from the FULL list;
+ *  - a successful search lands in localStorage history — browser-only by design, since the
+ *    server never persists descriptions (route contract);
+ *  - the rail splits Concepts from Methods by `kind`, shows merged members as chips, and
+ *    badges a rare concept;
+ *  - the bespoke shape (empty concepts) renders no rail at all.
  * fetch is stubbed — no route/engine involvement.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 import { SponsorMatchPanel } from "@/components/edit/sponsor-match-panel";
+import type { SponsorCandidate, SponsorConcept } from "@/lib/api/sponsor-match-contract";
 
-function researcher(over: Record<string, unknown>) {
+// K = 60. Scores below are the RRF sums the server would have sent; the panel recomputes
+// them from `contributions` × `concepts`, so they only have to be self-consistent.
+const CONCEPTS: SponsorConcept[] = [
+  {
+    term: "Immuno-oncology",
+    kind: "concept",
+    members: ["Immuno-oncology", "immunotherapy"],
+    centrality: 0.9,
+    weightFactor: 3.0,
+    // An order of magnitude scarcer than Cancer Metabolism below ⇒ the ONLY ·rare badge.
+    corpusCoverage: 5e-5,
+  },
+  {
+    term: "Cancer Metabolism",
+    kind: "concept",
+    members: ["Cancer Metabolism"],
+    centrality: 0.5,
+    weightFactor: 1.0,
+    corpusCoverage: 1e-3, // the most-covered concept in this ask ⇒ the baseline
+  },
+  {
+    term: "CRISPR screening",
+    kind: "method",
+    members: ["CRISPR screening"],
+    centrality: 0.4,
+    weightFactor: 1.0,
+    // No corpusCoverage at all — unknown. Must NOT be badged (absent ≠ common, and
+    // absent ≠ rare either).
+  },
+];
+
+function candidate(over: Partial<SponsorCandidate> & { cwid: string }): SponsorCandidate {
   return {
-    cwid: "x",
-    slug: "slug-x",
-    preferredName: "X",
+    name: "X",
+    profileSlug: `slug-${over.cwid}`,
     title: "Professor",
     department: "Medicine",
-    topicContributions: [
-      { topicId: "__sponsor_match__", contribution: 1, pubCount: 2, minYear: 2021 },
-    ],
-    defaultScore: 1,
+    fusedScore: 0,
+    contributions: [],
     technologyCount: 0,
-    topPapers: [],
-    matchedTopics: [],
     ...over,
   };
 }
 
-const THREE = [
-  researcher({
+// In fused order, as the server ships them.
+const THREE: SponsorCandidate[] = [
+  candidate({
     cwid: "a",
-    slug: "slug-a",
-    preferredName: "Alice Alpha",
-    topPapers: [
-      { pmid: "111", title: "CAR T persistence", year: 2024, journal: "Blood", relevance: 0.9 },
-    ],
-    matchedTopics: [{ topicId: "immuno", label: "Immuno-oncology", pubCount: 3 }],
+    name: "Alice Alpha",
+    fusedScore: 0.9 * 3.0 / 61, // 0.0443
+    contributions: [{ term: "Immuno-oncology", rank: 1 }],
+    evidence: {
+      papers: [
+        { pmid: "111", title: "CAR T persistence", year: 2024, journal: "Blood", relevance: 0.9 },
+      ],
+    },
   }),
-  researcher({
+  candidate({
     cwid: "b",
-    slug: "slug-b",
-    preferredName: "Bob Beta",
+    name: "Bob Beta",
     technologyCount: 2,
-    matchedTopics: [{ topicId: "immuno", label: "Immuno-oncology", pubCount: 1 }],
+    fusedScore: 0.9 * 3.0 / 62, // 0.0435
+    contributions: [{ term: "Immuno-oncology", rank: 2 }],
   }),
-  researcher({
+  candidate({
     cwid: "c",
-    slug: "slug-c",
-    preferredName: "Cara Gamma",
+    name: "Cara Gamma",
     department: "Surgery",
-    matchedTopics: [{ topicId: "metab", label: "Cancer Metabolism", pubCount: 2 }],
+    fusedScore: 0.5 * 1.0 / 61, // 0.0082
+    contributions: [{ term: "Cancer Metabolism", rank: 1 }],
   }),
 ];
+
+/** Exactly what the route's `bespokeToCandidate` emits: a real score, and NO contributions
+ *  (that engine does no concept decomposition, so there is nothing to re-rank by). */
+const BESPOKE: SponsorCandidate[] = [
+  candidate({ cwid: "a", name: "Alice Alpha", fusedScore: 0.91 }),
+  candidate({ cwid: "b", name: "Bob Beta", fusedScore: 0.44 }),
+  candidate({ cwid: "c", name: "Cara Gamma", department: "Surgery", fusedScore: 0.06 }),
+];
+
+function stubFetch(payload: { concepts: SponsorConcept[]; candidates: SponsorCandidate[] }) {
+  const fetchMock = vi.fn(async () => ({
+    ok: true,
+    json: async () => ({ ok: true, ...payload }),
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
 
 async function renderAndSearch() {
   render(<SponsorMatchPanel />);
@@ -68,12 +122,18 @@ async function renderAndSearch() {
   await screen.findByText("Alice Alpha");
 }
 
+/** Names of the result rows, in RENDERED (DOM) order — each row links to a profile, so the
+ *  profile links in document order are the ranking the user actually sees. */
+function rowOrder(): string[] {
+  return screen
+    .getAllByRole("link")
+    .filter((a) => a.getAttribute("href")?.startsWith("/slug-"))
+    .map((a) => a.textContent ?? "");
+}
+
 beforeEach(() => {
   window.localStorage.clear();
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => ({ ok: true, json: async () => ({ ok: true, researchers: THREE }) })),
-  );
+  stubFetch({ concepts: CONCEPTS, candidates: THREE });
 });
 
 afterEach(() => {
@@ -81,7 +141,120 @@ afterEach(() => {
 });
 
 describe("SponsorMatchPanel", () => {
-  it("department facet narrows rows and keeps the ORIGINAL rank number", async () => {
+  // ── The contract's hinge ────────────────────────────────────────────────────
+  it("re-ranks LIVE on a slider move — with NO new fetch", async () => {
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE });
+    await renderAndSearch();
+
+    // Server order: Alice (Immuno #1), Bob (Immuno #2), Cara (Metabolism #1).
+    expect(rowOrder()).toEqual(["Alice Alpha", "Bob Beta", "Cara Gamma"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Mute Immuno-oncology. Alice and Bob ranked ONLY under it, so both collapse to 0 and
+    // Cara — who ranked under Cancer Metabolism — takes the top. This is recomputed from
+    // `contributions` already in the browser.
+    fireEvent.change(screen.getByLabelText("Immuno-oncology centrality"), {
+      target: { value: "0" },
+    });
+
+    expect(rowOrder()).toEqual(["Cara Gamma", "Alice Alpha", "Bob Beta"]);
+    // THE ASSERTION THAT MATTERS: the re-rank cost zero round-trips.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("slides a muted concept back up and its candidates return", async () => {
+    const fetchMock = stubFetch({ concepts: CONCEPTS, candidates: THREE });
+    await renderAndSearch();
+    const slider = screen.getByLabelText("Immuno-oncology centrality");
+
+    fireEvent.change(slider, { target: { value: "0" } });
+    expect(rowOrder()[0]).toBe("Cara Gamma");
+
+    // A 0 is a mute, NOT a delete — the contributions survive, so the concept revives.
+    // (Under #1673 this was impossible: 0 round-tripped through the server's
+    // sanitizeConcepts, which rewrote any non-positive centrality to 0.3.)
+    fireEvent.change(slider, { target: { value: "0.9" } });
+    expect(rowOrder()).toEqual(["Alice Alpha", "Bob Beta", "Cara Gamma"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  // ── The rail ───────────────────────────────────────────────────────────────
+  it("splits Concepts and Methods by kind, and seeds each slider to its centrality", async () => {
+    await renderAndSearch();
+    expect(screen.getByRole("heading", { name: "Concepts" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Methods" })).toBeTruthy();
+
+    const immuno = screen.getByLabelText("Immuno-oncology centrality") as HTMLInputElement;
+    expect(immuno.value).toBe("0.9");
+    // Floor is 0, not 0.05: with the re-rank client-side there is no sanitize hop to snap
+    // a 0 back to 0.3, so "mute this concept" is finally expressible.
+    expect(immuno.min).toBe("0");
+    expect(immuno.max).toBe("1");
+    expect(screen.getByLabelText("CRISPR screening centrality")).toBeTruthy();
+  });
+
+  it("shows merged member forms as chips", async () => {
+    await renderAndSearch();
+    // "immunotherapy" merged into the Immuno-oncology cluster — one slider, not two.
+    expect(screen.getByText("immunotherapy")).toBeTruthy();
+  });
+
+  it("badges the scarce concept, and says what it actually measured", async () => {
+    await renderAndSearch();
+    // Exactly one: Immuno-oncology (5e-5) is an order of magnitude scarcer than the
+    // most-covered concept in the ask (Cancer Metabolism, 1e-3). CRISPR has NO coverage at
+    // all and must not be badged — unknown is neither rare nor common.
+    const badges = screen.getAllByText("·rare");
+    expect(badges).toHaveLength(1);
+    // The tooltip states the measured fact and makes no claim about the ranking. The old
+    // badge said "so a match on it counts for more", which is exactly the conflation the
+    // IDF finding called out.
+    const title = badges[0].getAttribute("title")!;
+    expect(title).toMatch(/about 1 in 20,000 Weill Cornell papers/);
+    expect(title).not.toMatch(/counts for more/);
+  });
+
+  it("badges nothing when no concept has a known coverage", async () => {
+    // The §6 cliff: 40% of descriptors have zero coverage, and the spine omits the field
+    // for those. A response with no coverage anywhere must render no badge at all.
+    stubFetch({
+      concepts: CONCEPTS.map((c) => ({ ...c, corpusCoverage: undefined })),
+      candidates: THREE,
+    });
+    await renderAndSearch();
+    expect(screen.queryByText("·rare")).toBeNull();
+  });
+
+  it("shows NO rail on the bespoke shape (empty concepts)", async () => {
+    stubFetch({ concepts: [], candidates: BESPOKE });
+    await renderAndSearch();
+    expect(screen.queryByLabelText(/centrality/i)).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Concepts" })).toBeNull();
+    // And no stale Re-rank button — re-ranking is a render now, never an action.
+    expect(screen.queryByRole("button", { name: /Re-rank/ })).toBeNull();
+  });
+
+  /**
+   * The bespoke engine (whenever SPONSOR_MATCH_SPINE is off) ships concepts: [] and
+   * contributions: [], carrying its real BM25 score in fusedScore. Re-ranking that by the
+   * formula would zero every score — leaving the ORDER correct, so the list looks fine, while
+   * every fit badge silently collapses to "Weak fit", top hit included.
+   *
+   * Note this fixture uses candidates with NO contributions, unlike THREE. The earlier version
+   * of the bespoke test reused the spine fixture, which is why it could not catch this.
+   */
+  it("keeps the bespoke engine's own scores — the re-rank must not flatten every tier to weak", async () => {
+    stubFetch({ concepts: [], candidates: BESPOKE });
+    await renderAndSearch();
+
+    expect(rowOrder()).toEqual(["Alice Alpha", "Bob Beta", "Cara Gamma"]);
+    // Alice (0.91) is the top hit; Cara (0.06) is not. They must not read the same.
+    expect(screen.getByText("Strong fit")).toBeTruthy();
+    expect(screen.getAllByText("Weak fit")).toHaveLength(1);
+  });
+
+  // ── Facets ─────────────────────────────────────────────────────────────────
+  it("department facet narrows rows and keeps the rank number from the full list", async () => {
     await renderAndSearch();
     fireEvent.click(screen.getByRole("button", { name: /Surgery · 1/ }));
 
@@ -103,12 +276,32 @@ describe("SponsorMatchPanel", () => {
     expect(screen.getByText("Cara Gamma")).toBeTruthy();
   });
 
-  it("topic facet matches rows carrying the selected topic", async () => {
+  it("concept facet matches rows that ranked under the selected concept", async () => {
     await renderAndSearch();
-    // Facet chips are buttons; per-row topic chips are plain spans — no clash.
+    // Facets count only concepts people actually MATCHED, so the CRISPR method — which no
+    // candidate ranked under — has no facet chip even though it IS in the rail.
+    expect(screen.queryByRole("button", { name: /CRISPR screening · / })).toBeNull();
+
     fireEvent.click(screen.getByRole("button", { name: /Cancer Metabolism · 1/ }));
     expect(screen.queryByText("Alice Alpha")).toBeNull();
     expect(screen.getByText("Cara Gamma")).toBeTruthy();
+  });
+
+  // ── Rows ───────────────────────────────────────────────────────────────────
+  it("renders a fit tier relative to the top candidate, never the raw score", async () => {
+    await renderAndSearch();
+    // Bob is ~98% of Alice's score ⇒ both strong; Cara is ~19% ⇒ weak.
+    expect(screen.getAllByText("Strong fit")).toHaveLength(2);
+    expect(screen.getByText("Weak fit")).toBeTruthy();
+    // The RRF sum is meaningless to a reader and must never be rendered.
+    expect(screen.queryByText(/0\.044/)).toBeNull();
+  });
+
+  it("renders per-row paper evidence: PubMed link + relevance percentage", async () => {
+    await renderAndSearch();
+    const link = screen.getByRole("link", { name: "CAR T persistence" });
+    expect(link.getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/111/");
+    expect(screen.getByText(/90% match/)).toBeTruthy();
   });
 
   it("saves the search to localStorage history and renders it", async () => {
@@ -121,113 +314,5 @@ describe("SponsorMatchPanel", () => {
     // Clearing wipes storage too.
     fireEvent.click(screen.getByRole("button", { name: "Clear history" }));
     expect(window.localStorage.getItem("sponsor-match-history")).toBeNull();
-  });
-
-  it("renders per-row paper evidence: PubMed link + relevance percentage", async () => {
-    await renderAndSearch();
-    const link = screen.getByRole("link", { name: "CAR T persistence" });
-    expect(link.getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/111/");
-    expect(screen.getByText(/90% match/)).toBeTruthy();
-  });
-
-  it("shows NO concept editor on the bespoke shape (empty concepts)", async () => {
-    // Default beforeEach stub returns no `concepts` (bespoke shape) ⇒ no editor.
-    await renderAndSearch();
-    expect(screen.queryByLabelText(/centrality/i)).toBeNull();
-    expect(screen.queryByRole("button", { name: /Re-rank/ })).toBeNull();
-  });
-
-  it("renders response concepts as labeled 0–1 centrality sliders, seeded to their weight", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        json: async () => ({
-          ok: true,
-          researchers: THREE,
-          concepts: [
-            { term: "cancer metabolism", centrality: 0.9 },
-            { term: "t-cell exhaustion", centrality: 0.7 },
-          ],
-        }),
-      })),
-    );
-    await renderAndSearch();
-    const slider = screen.getByLabelText("cancer metabolism centrality") as HTMLInputElement;
-    expect(slider.value).toBe("0.9");
-    // Floor is 0.05, not 0: the server's sanitizeConcepts rewrites any non-positive
-    // centrality to 0.3, so a 0 stop would snap back on re-rank. 0.05 round-trips.
-    expect(slider.min).toBe("0.05");
-    expect(slider.max).toBe("1");
-    expect(screen.getByLabelText("t-cell exhaustion centrality")).toBeTruthy();
-    expect(screen.getByText("0.90")).toBeTruthy();
-  });
-
-  it("re-ranks by re-POSTing the SAME description with the edited concepts", async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        ok: true,
-        researchers: THREE,
-        concepts: [{ term: "cancer metabolism", centrality: 0.9 }],
-      }),
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-    await renderAndSearch();
-
-    // Edit the slider down, then Re-rank.
-    const slider = screen.getByLabelText("cancer metabolism centrality");
-    fireEvent.change(slider, { target: { value: "0.35" } });
-    expect(screen.getByText("0.35")).toBeTruthy(); // live readout updated
-    fireEvent.click(screen.getByRole("button", { name: /Re-rank/ }));
-    await screen.findByText("Alice Alpha"); // re-rendered from the second response
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const secondCall = fetchMock.mock.calls[1] as unknown as [string, { body: string }];
-    const secondBody = JSON.parse(secondCall[1].body) as {
-      description: string;
-      concepts: Array<{ term: string; centrality: number }>;
-    };
-    // Same description (not the possibly-edited textarea), with the edited centrality.
-    expect(secondBody.description).toBe("CAR T collaborators");
-    expect(secondBody.concepts).toEqual([{ term: "cancer metabolism", centrality: 0.35 }]);
-  });
-
-  it("keeps the concept editor mounted and shows a busy Re-rank during the round-trip", async () => {
-    const okResponse = () => ({
-      ok: true,
-      json: async () => ({
-        ok: true,
-        researchers: THREE,
-        concepts: [{ term: "cancer metabolism", centrality: 0.9 }],
-      }),
-    });
-    let releaseSecond!: () => void;
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(okResponse())
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            releaseSecond = () => resolve(okResponse());
-          }),
-      );
-    vi.stubGlobal("fetch", fetchMock);
-    await renderAndSearch();
-
-    fireEvent.click(screen.getByRole("button", { name: /Re-rank/ }));
-
-    // During the in-flight re-rank the editor stays mounted (the just-edited sliders do
-    // NOT flash away to the skeleton) and the button reflects the busy state — the state
-    // that was previously unreachable because the whole editor unmounted while loading.
-    const busy = await screen.findByRole("button", { name: /Re-ranking/ });
-    expect((busy as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByLabelText("cancer metabolism centrality")).toBeTruthy();
-
-    releaseSecond();
-    await screen.findByText("Alice Alpha");
-    expect((screen.getByRole("button", { name: /Re-rank/ }) as HTMLButtonElement).disabled).toBe(
-      false,
-    );
   });
 });

@@ -2,26 +2,34 @@
  * `/api/edit/sponsor-match` — rank WCM researchers against a pasted sponsor
  * description (`docs/2026-07-09-ctl-technologies-handoff.md` §2).
  *
- * POST `{ description }` → `{ ok: true, researchers, concepts }` — one engine call.
- * `concepts` is the `{term, centrality}` set the spine used (always `[]` for the
- * bespoke engine, which does no concept decomposition), so the editable-centrality
- * console can render and reweight it. The default engine is the bespoke
- * `rankResearchersForDescription` (BM25 relevance × Variant-B, topical fit only). No
- * writes, no queue: the pasted text is a query, never persisted.
+ * POST `{ description }` → `SponsorMatchResponse` (`lib/api/sponsor-match-contract.ts`):
+ * `{ ok, concepts, candidates }`. One engine call. No writes, no queue: the pasted text
+ * is a query, never persisted.
+ *
+ * THE RESPONSE IS DECOMPOSED, NOT SCALAR. `concepts[]` carries each merged concept's
+ * editable `centrality` and fixed `weightFactor`; `candidates[].contributions[]` carries every
+ * (concept, rank) pair the fusion summed. The console re-ranks LIVE in the browser from
+ * those inputs (`rerankCandidates`), so moving a slider costs zero round-trips. See the
+ * contract module for the invariant and why it matters.
+ *
+ * NOTE there is deliberately no `concepts` request field. PR #1673 accepted a
+ * client-supplied concept override and re-retrieved + re-fused on every slider drag —
+ * seconds per drag, and exactly the "re-query on every drag" degradation the contract
+ * rejects. Removing it also removes a client-controlled trust boundary; nothing on the
+ * request side needs sanitizing now beyond `description` and `engine`.
  *
  * Engine selection (`SPONSOR_MATCH_SPINE`, a dark sub-flag of `SPONSOR_MATCH`):
- * while OFF the route is byte-identical to before — always bespoke, any `engine` /
- * `concepts` field ignored (bar the always-`[]` concepts in the response). While ON
- * the searchPeople per-term spine (`rankResearchersForDescriptionSpine`) becomes the
- * default, and an optional body `engine: "spine" | "bespoke"` forces either so both
- * can be captured on the SAME deploy for the offline bake-off. An unrecognized
- * `engine` value (flag on) → 400.
+ * flag OFF ⇒ always the bespoke `rankResearchersForDescription` (one BM25 round-trip over
+ * the whole paste), and any `engine` field is ignored. Flag ON ⇒ the searchPeople per-term
+ * spine is the default, and an optional body `engine: "spine" | "bespoke"` forces either so
+ * both can be captured on the SAME deploy for the offline bake-off. An unrecognized
+ * `engine` (flag on) → 400.
  *
- * Concept override (flag on, spine engine): an optional body `concepts:
- * {term, centrality}[]` REPLACES Bedrock extraction — the console's re-rank posts the
- * SAME description with edited centralities to re-score the same candidate universe
- * with no new extraction. It is a trust boundary: the shape is validated and the
- * values sanitized (`sanitizeConcepts`) before use; a malformed shape → 400.
+ * BOTH engines answer in the contract shape, so the console has one response type. The
+ * bespoke engine does no concept decomposition, so it returns `concepts: []` and
+ * `contributions: []` — the rail hides itself and the client re-rank is a no-op, which is
+ * the honest rendering of an engine that has no per-concept signal to edit. It does supply
+ * `measures` + `evidence`, which the spine cannot.
  *
  * Authorization mirrors the surface this lives on (`/edit/sponsor-match`) and
  * its sibling `/api/edit/opportunity-intake`: superuser OR development role,
@@ -29,12 +37,13 @@
  */
 import { NextResponse, type NextRequest } from "next/server";
 
+import type { SponsorCandidate } from "@/lib/api/sponsor-match-contract";
 import {
   isSponsorMatchEnabled,
   isSponsorMatchSpineEnabled,
   rankResearchersForDescription,
+  type SponsorRankedScholar,
 } from "@/lib/api/sponsor-match";
-import { sanitizeConcepts, type SponsorConcept } from "@/lib/api/sponsor-match-extract";
 import { rankResearchersForDescriptionSpine } from "@/lib/api/sponsor-match-spine-run";
 import { logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
@@ -43,21 +52,32 @@ const PATH = "/api/edit/sponsor-match";
 
 export const dynamic = "force-dynamic";
 
-/** Trust-boundary parse of the optional `concepts` override (the console re-rank).
- *  Returns the SANITIZED concept set on a well-formed array, or `null` to signal a
- *  malformed shape (→ 400). Shape rules: an array whose every element is an object with
- *  a non-empty string `term` and a finite-number `centrality`. Value hygiene (clamp to
- *  (0,1], floor non-positive to 0.3, dedupe, cap) is delegated to `sanitizeConcepts` so
- *  the override is cleaned by the EXACT rules the LLM output is. */
-function parseConceptsOverride(raw: unknown): SponsorConcept[] | null {
-  if (!Array.isArray(raw)) return null;
-  for (const c of raw) {
-    if (c == null || typeof c !== "object") return null;
-    const { term, centrality } = c as { term?: unknown; centrality?: unknown };
-    if (typeof term !== "string" || term.trim() === "") return null;
-    if (typeof centrality !== "number" || !Number.isFinite(centrality)) return null;
-  }
-  return sanitizeConcepts(raw as { term: string; centrality: number }[]);
+/** Bespoke engine → the wire contract. It has no concept decomposition, so
+ *  `contributions` is empty (nothing to re-rank over client-side — see the module doc).
+ *  It DOES carry the signals the spine's headless shape cannot: a career stage, the
+ *  matched topics with real pub counts, and the scored top papers. */
+function bespokeToCandidate(r: SponsorRankedScholar): SponsorCandidate {
+  return {
+    cwid: r.cwid,
+    name: r.preferredName ?? r.slug,
+    profileSlug: r.slug,
+    title: r.title ?? null,
+    department: r.department ?? null,
+    fusedScore: r.defaultScore,
+    contributions: [],
+    technologyCount: r.technologyCount ?? 0,
+    measures: { careerStage: r.careerStage },
+    evidence: {
+      topics: r.matchedTopics.map((t) => ({ label: t.label, pubCount: t.pubCount })),
+      papers: r.topPapers.map((p) => ({
+        pmid: p.pmid,
+        title: p.title,
+        year: p.year,
+        journal: p.journal,
+        relevance: p.relevance,
+      })),
+    },
+  };
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -81,38 +101,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(400, "invalid_description", "description");
   }
 
-  // Engine selection. Flag OFF ⇒ bespoke, `engine`/`concepts` ignored (byte-identical
-  // to before). Flag ON ⇒ spine by default; `engine` may force either for the same-
-  // deploy bake-off, and the spine engine accepts an optional `concepts` override.
+  // Engine selection. Flag OFF ⇒ bespoke, `engine` ignored. Flag ON ⇒ spine by default;
+  // `engine` may force either for the same-deploy bake-off.
   let useSpine = false;
-  let conceptsOverride: SponsorConcept[] | undefined;
   if (isSponsorMatchSpineEnabled()) {
     const { engine } = body;
     if (engine !== undefined && engine !== "spine" && engine !== "bespoke") {
       return editError(400, "invalid_engine", "engine");
     }
     useSpine = engine !== "bespoke";
-
-    // Concept override (the editable-centrality console re-rank) — only meaningful for
-    // the spine engine. Present-but-malformed ⇒ 400; absent ⇒ normal extraction.
-    if (useSpine && body.concepts !== undefined) {
-      const parsed = parseConceptsOverride(body.concepts);
-      if (parsed === null) return editError(400, "invalid_concepts", "concepts");
-      conceptsOverride = parsed;
-    }
   }
 
   try {
     if (useSpine) {
-      const { researchers, concepts } = await rankResearchersForDescriptionSpine(description, {
-        conceptsOverride,
-      });
-      return editOk({ researchers, concepts });
+      const { concepts, candidates } = await rankResearchersForDescriptionSpine(description);
+      return editOk({ concepts, candidates });
     }
-    // Bespoke has no concept decomposition — always an empty `concepts` for a uniform
-    // client contract (the console's concept editor stays hidden on the bespoke shape).
     const researchers = await rankResearchersForDescription(description);
-    return editOk({ researchers, concepts: [] });
+    return editOk({ concepts: [], candidates: researchers.map(bespokeToCandidate) });
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(502, "match_unavailable");
