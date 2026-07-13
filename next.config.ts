@@ -72,6 +72,14 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   devIndicators: false,
+  // #1412 item 5 — client router cache for dynamic segments. Next's default is 0, so a
+  // Back out of a profile, or a flip between the People/Publications tabs, re-fetches an
+  // RSC payload the browser had seconds ago. 30s buys the whole back/tab-flip loop
+  // without letting a result set visibly age: search results move on the ETL's nightly
+  // cadence, not a 30-second one, so nothing here is fresher than the window.
+  experimental: {
+    staleTimes: { dynamic: 30 },
+  },
   // ADR-006: headshots render as a native <img> via the Radix Avatar
   // primitive, not next/image. `unoptimized` is a forward-guard — if a
   // <Image> component is ever added it will not route through the
