@@ -21,7 +21,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 import { SponsorMatchPanel } from "@/components/edit/sponsor-match-panel";
-import type { SponsorCandidate, SponsorConcept } from "@/lib/api/sponsor-match-contract";
+import type {
+  SponsorCandidate,
+  SponsorConcept,
+  SponsorPreference,
+} from "@/lib/api/sponsor-match-contract";
 
 // K = 60. Scores below are the RRF sums the server would have sent; the panel recomputes
 // them from `contributions` × `concepts`, so they only have to be self-consistent.
@@ -104,7 +108,11 @@ const BESPOKE: SponsorCandidate[] = [
   candidate({ cwid: "c", name: "Cara Gamma", department: "Surgery", fusedScore: 0.06 }),
 ];
 
-function stubFetch(payload: { concepts: SponsorConcept[]; candidates: SponsorCandidate[] }) {
+function stubFetch(payload: {
+  concepts: SponsorConcept[];
+  candidates: SponsorCandidate[];
+  preferences?: SponsorPreference[];
+}) {
   const fetchMock = vi.fn(async () => ({
     ok: true,
     json: async () => ({ ok: true, ...payload }),
@@ -397,6 +405,59 @@ describe("SponsorMatchPanel", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /Practicing clinician/ }));
     expect(screen.getByText("Alice Alpha")).toBeTruthy();
     expect(screen.queryByText("Bob Beta")).toBeNull();
+  });
+
+  // ── Sponsor preferences (#1654) ────────────────────────────────────────────
+  it("applies a detected preference to the ranking, and unchecking it re-ranks live", async () => {
+    // Bob leads topically (rank 1 vs Alice's rank 2), but the sponsor asked for early-career
+    // and Alice is early-career. At λ the nudge is enough to flip a margin this thin.
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "b",
+          name: "Bob Beta",
+          contributions: [{ term: "Immuno-oncology", rank: 1 }],
+          measures: { careerStage: "senior", isClinician: false },
+        }),
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          contributions: [{ term: "Immuno-oncology", rank: 2 }],
+          measures: { careerStage: "early", isClinician: false },
+        }),
+      ],
+      preferences: [
+        {
+          measure: "careerStage",
+          stages: ["early"],
+          label: "Early-career",
+          evidence: "…support early-career investigators…",
+          importance: 1,
+        },
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    // The chip shows, checked, with its provenance — an unexplained nudge is not auditable.
+    const box = screen.getByRole("checkbox", { name: /Early-career/ });
+    expect((box as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByText(/support early-career investigators/)).toBeTruthy();
+
+    // Honoured by default: Alice (rank 2 + preference) leads Bob (rank 1, no preference).
+    expect(rowOrder()).toEqual(["Alice Alpha", "Bob Beta"]);
+
+    // Unchecking is the officer's override, and it re-ranks live — back to pure topical order.
+    fireEvent.click(box);
+    expect(rowOrder()).toEqual(["Bob Beta", "Alice Alpha"]);
+  });
+
+  it("renders no preference panel when the paste stated no non-topical ask", async () => {
+    await renderAndSearch(); // no `preferences` in the response
+    expect(screen.queryByText("Sponsor preferences")).toBeNull();
   });
 
   it("a candidate with NO measure is filtered OUT by a measure filter, never silently kept", async () => {

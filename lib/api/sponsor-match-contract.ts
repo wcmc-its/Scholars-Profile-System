@@ -242,17 +242,73 @@ export type SponsorCandidate = {
   caveat?: string;
 };
 
-/** A non-topical nudge extracted from the paste ("we prefer physician-scientists").
- *  No producer yet. `measure` names which `SponsorMeasures` field the nudge reads — the
- *  UI owns the match predicate, so the ranker never has to encode presentation logic. */
+/**
+ * A non-topical nudge extracted from the paste ("we prefer physician-scientists"). Produced
+ * by `extractSponsorPreferences` (#1654).
+ *
+ * A DISCRIMINATED UNION, because a preference is not scoreable without its TARGET. The old
+ * shape carried `measure: keyof SponsorMeasures` and nothing else, which named the field to
+ * read but never what value would satisfy it — "careerStage" alone cannot tell you whether
+ * the sponsor wanted juniors or seniors. Carrying the target in the type means the predicate
+ * below cannot be written wrong.
+ */
 export type SponsorPreference = {
   label: string;
   /** The "from paste: …" provenance line. */
   evidence: string;
-  /** Slider start, in [0,1]. Feeds `prefBoost` in the formula. */
+  /** Weight in `preferenceBoost`, in [0,1]. */
   importance: number;
-  measure: keyof SponsorMeasures;
-};
+} & (
+  | { measure: "careerStage"; stages: CareerStage[] }
+  | { measure: "isClinician" }
+);
+
+/**
+ * Preference strength λ in `score × (1 + λ·prefBoost)`.
+ *
+ * 0.25 — a NUDGE, deliberately not a re-sort. A candidate who satisfies every stated
+ * preference scores at most 25% above an identical candidate who satisfies none, so a
+ * preference can lift a near-miss past a marginally-better topical match but can never haul
+ * a weak match over a strong one. That ordering is the point: the sponsor's money follows
+ * the science, and the preference breaks ties within it.
+ *
+ * It is also the blast radius. The ranking eval grades TOPICAL relevance, so any non-topical
+ * boost can only cost nDCG — λ is the bound on how much. Retune it against a run of the eval,
+ * not against intuition.
+ */
+export const PREFERENCE_LAMBDA = 0.25;
+
+/**
+ * The reference preference predicate: what fraction of the ACTIVE preferences this candidate
+ * satisfies, weighted by importance. In [0,1] — the `prefBoost` the formula multiplies by λ.
+ *
+ * Lives in the contract, not in the panel, because two callers must agree on it: the console
+ * (which re-ranks live) and the ranking eval (which has to score exactly what a user sees, or
+ * it is measuring a system nobody runs). A predicate defined in the component could not be
+ * called by the eval without duplicating it, and a duplicated predicate is a drifted one.
+ *
+ * ABSENT IS NOT ZERO. A candidate whose `measures` are missing satisfies NOTHING — she is not
+ * scored as failing the preference, she is scored as not having been shown to meet it, which
+ * is the same arithmetic but a different claim, and it is the honest one.
+ */
+export function preferenceBoost(
+  candidate: SponsorCandidate,
+  preferences: readonly SponsorPreference[],
+): number {
+  let matched = 0;
+  let total = 0;
+  for (const p of preferences) {
+    total += p.importance;
+    const m = candidate.measures;
+    if (!m) continue;
+    const hit =
+      p.measure === "careerStage"
+        ? m.careerStage != null && p.stages.includes(m.careerStage)
+        : m.isClinician === true;
+    if (hit) matched += p.importance;
+  }
+  return total > 0 ? matched / total : 0;
+}
 
 /** A client-side filter facet, counted over the FULL candidate set (pre-filter). Filtering
  *  preserves each row's re-ranked position and never re-queries. No producer yet — the
@@ -352,7 +408,26 @@ export function rerankCandidates(
   concepts: readonly SponsorConcept[],
   opts: RerankOptions = {},
 ): SponsorCandidate[] {
-  if (concepts.length === 0) return [...candidates];
+  if (concepts.length === 0) {
+    // No concept decomposition (the bespoke engine): there is nothing to re-rank BY, and the
+    // real score already lives in `fusedScore` — see the note above on why re-deriving it
+    // here would flatten every tier to "weak".
+    //
+    // But a preference is not a concept, and #1654's nudge must not be silently inert on an
+    // engine just because that engine ships no concepts. Scale the score the server DID send,
+    // which is the same `× (1 + λ·prefBoost)` the decomposed path applies — and re-sort, since
+    // the boost can legitimately reorder.
+    if (!opts.prefBoost) return [...candidates];
+    const lambda = opts.lambda ?? 1;
+    return candidates
+      .map((candidate, index) => ({
+        candidate,
+        index,
+        score: candidate.fusedScore * (1 + lambda * opts.prefBoost!(candidate)),
+      }))
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .map(({ candidate, score }) => ({ ...candidate, fusedScore: score }));
+  }
   const weights = conceptWeights(concepts);
   return candidates
     .map((candidate, index) => ({

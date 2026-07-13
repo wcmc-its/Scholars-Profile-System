@@ -42,11 +42,18 @@
  *  - the rarity badge's NUMBER and the word "common" — `weightFactor` is a claim about the
  *    RANKING and must not be shown, and "common" is unsayable because absent ≠ zero for the 40%
  *    of descriptors with no coverage row.
- * Career stage and clinician status now HAVE a producer (#1654) and render as the mockup's two
+ * Career stage and clinician status HAVE a producer (#1654) and render as the mockup's two
  * remaining facet groups; each hides itself when no ranked row carries the measure, so an absent
- * signal still shows nothing rather than a lie. Preference hits remain absent — extracting the
- * sponsor's non-topical asks from the paste, and giving the formula's `prefBoost` term something
- * to read, is the next slice.
+ * signal still shows nothing rather than a lie.
+ *
+ * SPONSOR PREFERENCES (#1654) are the one thing here that touches the ranking rather than the
+ * view. The route ships the non-topical asks it read out of the paste ("early-career
+ * physician-scientists"); this panel feeds the active ones to the contract's `preferenceBoost`
+ * and re-ranks live, on the same code path as a slider. They are a NUDGE, bounded by
+ * `PREFERENCE_LAMBDA` — a preference can lift a near-miss over a marginally better topical
+ * match, never a weak match over a strong one. Every detected ask is checked by default and can
+ * be unchecked, because an extractor that reads an ask the sponsor never made must not be able
+ * to skew a ranking with no way for the officer to say so.
  */
 import { useEffect, useMemo, useState } from "react";
 import { Download } from "lucide-react";
@@ -57,12 +64,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   fitTier,
   matchedConcepts,
+  preferenceBoost,
+  PREFERENCE_LAMBDA,
   rareTerms,
   rerankCandidates,
   type SponsorCandidate,
   type SponsorConcept,
   type SponsorFitTier,
   type SponsorMatchResponse,
+  type SponsorPreference,
 } from "@/lib/api/sponsor-match-contract";
 import type { CareerStage } from "@/lib/career-stage";
 import { buildSponsorMatchCsv } from "@/lib/edit/sponsor-match-export";
@@ -165,6 +175,10 @@ export function SponsorMatchPanel() {
   // derived from them.
   const [candidates, setCandidates] = useState<SponsorCandidate[]>([]);
   const [concepts, setConcepts] = useState<SponsorConcept[]>([]);
+  // #1654 — the sponsor's non-topical asks, and which of them the officer is honouring.
+  // Keyed by label: an extractor that fires twice on the same ask would emit one entry.
+  const [preferences, setPreferences] = useState<SponsorPreference[]>([]);
+  const [activePrefs, setActivePrefs] = useState<ReadonlySet<string>>(new Set());
   const pending = status.kind === "loading";
 
   // SSR-safe history load: start empty, read localStorage in an effect (no
@@ -237,6 +251,11 @@ export function SponsorMatchPanel() {
         saveHistory(text.trim());
         setCandidates(data.candidates ?? []);
         setConcepts(data.concepts ?? []);
+        // #1654 — detected preferences arrive ACTIVE. The sponsor said it; the default is to
+        // honour it. Deselecting is the officer's override, not their opt-in.
+        const prefs = data.preferences ?? [];
+        setPreferences(prefs);
+        setActivePrefs(new Set(prefs.map((p) => p.label)));
         setStatus({ kind: "ok" });
         return;
       }
@@ -266,9 +285,28 @@ export function SponsorMatchPanel() {
   // they would have been truncated away at default weights before the response was written
   // (see `sponsor-match-spine-run.ts`). We re-rank the whole pool and show the head of it,
   // so the visible list is the true top-N under the CURRENT weights, recomputed live.
+  // #1654 — the preference nudge rides the SAME live re-rank. Only the preferences the
+  // officer left active count, so unchecking one re-ranks instantly, exactly like a slider.
+  // `preferenceBoost` is the contract's reference predicate, not a local copy: the ranking
+  // eval scores through the same function, so what we measure is what an officer sees.
+  const activePreferences = useMemo(
+    () => preferences.filter((p) => activePrefs.has(p.label)),
+    [preferences, activePrefs],
+  );
+
   const ranked = useMemo(
-    () => rerankCandidates(candidates, concepts).slice(0, RESULT_MAX),
-    [candidates, concepts],
+    () =>
+      rerankCandidates(
+        candidates,
+        concepts,
+        activePreferences.length > 0
+          ? {
+              prefBoost: (c) => preferenceBoost(c, activePreferences),
+              lambda: PREFERENCE_LAMBDA,
+            }
+          : {},
+      ).slice(0, RESULT_MAX),
+    [candidates, concepts, activePreferences],
   );
 
   const topScore = ranked[0]?.fusedScore ?? 0;
@@ -503,6 +541,43 @@ export function SponsorMatchPanel() {
                     rare={rare}
                     onCentralityChange={setCentrality}
                   />
+                ) : null}
+
+                {/* #1654 — the sponsor's non-topical asks. Sits ABOVE Filter, and apart from it,
+                    because it is not a filter: it reweights the ranking (nothing is hidden), and
+                    that is a different promise to the officer. Each is checked by default — the
+                    sponsor said it — and unchecking re-ranks live, which is the escape hatch when
+                    the extractor reads an ask that was never there. */}
+                {preferences.length > 0 ? (
+                  <div
+                    data-slot="sponsor-match-preferences"
+                    className="border-border mb-3 rounded-lg border p-3"
+                  >
+                    <h2 className="text-base font-semibold">Sponsor preferences</h2>
+                    <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
+                      Detected in the paste. These nudge the ranking; they never filter anyone out.
+                    </p>
+                    <ul className="mt-2 space-y-2">
+                      {preferences.map((p) => (
+                        <li key={p.label}>
+                          <label className="flex cursor-pointer items-start gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              className="mt-[3px] size-3.5 shrink-0 accent-[var(--color-accent-slate)]"
+                              checked={activePrefs.has(p.label)}
+                              onChange={() => setActivePrefs(toggled(activePrefs, p.label))}
+                            />
+                            <span className="min-w-0">
+                              <span className="font-medium">{p.label}</span>
+                              <span className="text-muted-foreground block text-xs italic leading-snug">
+                                from paste: &ldquo;{p.evidence}&rdquo;
+                              </span>
+                            </span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 ) : null}
 
                 {/* The mockup's five groups. `Career stage` and `Clinician` were held back until
