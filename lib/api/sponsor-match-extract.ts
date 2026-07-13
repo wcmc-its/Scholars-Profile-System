@@ -26,10 +26,22 @@ import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 import { z } from "zod";
 import { modelAcceptsTemperature } from "@/lib/edit/overview-generator";
 
-/** One extracted concept: a canonical noun phrase + its funder-centrality in [0,1]
- *  (1.0 = the primary target, ~0.3 = an incidental mention). The `term` is the join
- *  key the spine resolves via `matchQueryToTaxonomy` and clusters/fuses on. */
-export type SponsorConcept = { term: string; centrality: number };
+/** One extracted concept: a canonical noun phrase, its funder-centrality in [0,1]
+ *  (1.0 = the primary target, ~0.3 = an incidental mention), and its `kind`. The `term`
+ *  is the join key the spine resolves via `matchQueryToTaxonomy` and clusters/fuses on.
+ *
+ *  NOT the wire type — the rail's `SponsorConcept` (`sponsor-match-contract.ts`) is the
+ *  merged CLUSTER and additionally carries `members` + `weightFactor`, neither of which exists
+ *  until clustering and the idf lookup run downstream. This is only what the extractor
+ *  itself can know. */
+export type ExtractedConcept = {
+  term: string;
+  /** Splits the rail's Concept and Method panels. The LLM tags it (the extractor already
+   *  reads "diseases, methods, mechanisms, and populations" — it just was not asked to say
+   *  which); the dictionary fallback has no way to tell, so it defaults to "concept". */
+  kind: "concept" | "method";
+  centrality: number;
+};
 
 /** MODEL — the Claude Sonnet 4.5 cross-region inference profile on Amazon Bedrock.
  *  WITHIN the TaskRoleBedrockPolicy IAM scope (cdk `app-stack.ts`): the task role
@@ -82,13 +94,23 @@ function sponsorBedrock() {
   });
 }
 
-/** Structured-output contract. Kept minimal (`term`, `centrality`) — the cap and the
- *  [0,1] clamp are enforced in `sanitizeConcepts`, NOT the schema, so a model that
- *  returns 13 concepts or a centrality of 1.4 is cleaned rather than rejected (a
- *  schema-level `.max()`/range would throw → drop the whole extraction to the
- *  dictionary fallback). */
+/** Structured-output contract. Kept minimal — the cap and the [0,1] clamp are enforced in
+ *  `sanitizeConcepts`, NOT the schema, so a model that returns 13 concepts or a centrality
+ *  of 1.4 is cleaned rather than rejected (a schema-level `.max()`/range would throw → drop
+ *  the whole extraction to the dictionary fallback).
+ *
+ *  `kind` IS a schema enum, unlike the numeric range: it is a closed two-value set the
+ *  model can always satisfy, and an unrecognized string has no sensible clamp (silently
+ *  defaulting a garbage kind to "concept" would hide a broken prompt). `sanitizeConcepts`
+ *  still defaults a missing kind, for the dictionary-fallback path that has no LLM at all. */
 const ConceptsSchema = z.object({
-  concepts: z.array(z.object({ term: z.string(), centrality: z.number() })),
+  concepts: z.array(
+    z.object({
+      term: z.string(),
+      kind: z.enum(["concept", "method"]),
+      centrality: z.number(),
+    }),
+  ),
 });
 
 const EXTRACT_SYSTEM_PROMPT = [
@@ -107,6 +129,10 @@ const EXTRACT_SYSTEM_PROMPT = [
   "Assign each concept a CENTRALITY in [0,1]: 1.0 = the funder's primary target;",
   "~0.5 = a supporting or secondary interest; ~0.3 = an incidental or contextual",
   "mention. Deduplicate near-identical concepts (keep the most canonical phrasing).",
+  "",
+  'Tag each concept with a KIND: "method" for an assay, technique, platform, instrument',
+  'or therapeutic modality (how the work is done); "concept" for a disease, mechanism,',
+  'biological process or population (what is studied). When in doubt, use "concept".',
   "",
   "Return at most 12 concepts, most central first. If the description names no",
   "fundable research concept, return an empty list. Output only the structured list —",
@@ -135,17 +161,18 @@ function buildExtractPrompt(paste: string): string {
  *  centrality zeroes a concept's weight — its cluster still costs a full taxonomy
  *  resolution + `searchPeople` fan-out but contributes 0 to the RRF (its people sink to
  *  the bottom), and an all-≤0 batch would collapse the ranking to first-seen order.
- *  Cap to `MAX_CONCEPTS`.
+ *  An absent/unrecognized `kind` defaults to "concept" (the dictionary fallback supplies
+ *  none — it cannot tell a method from a disease). Cap to `MAX_CONCEPTS`.
  *
- *  Exported because the sponsor-match route reuses THESE rules verbatim to clean the
- *  editable-centrality console's `conceptsOverride` (the same trust boundary: a
- *  client-edited concept set is untrusted input that must clamp/dedupe/cap identically
- *  to the LLM output before it drives the ranking). */
+ *  NOTE this is no longer a trust boundary: it cleans LLM output only. The route's
+ *  client-supplied `conceptsOverride` — which reused these rules — is GONE, because the
+ *  console now re-ranks client-side over the already-fetched candidates (the contract's
+ *  hinge) instead of re-POSTing edited concepts for the server to re-score. */
 export function sanitizeConcepts(
-  raw: readonly { term: string; centrality: number }[],
-): SponsorConcept[] {
+  raw: readonly { term: string; kind?: string; centrality: number }[],
+): ExtractedConcept[] {
   const seen = new Set<string>();
-  const out: SponsorConcept[] = [];
+  const out: ExtractedConcept[] = [];
   for (const c of raw) {
     const term = (c.term ?? "").trim();
     if (term === "") continue;
@@ -156,7 +183,7 @@ export function sanitizeConcepts(
     // score floors to the incidental 0.3 (never 0 — see the fusion-weight note above).
     const centrality = Number.isFinite(n) && n > 0 ? Math.min(1, n) : 0.3;
     seen.add(key);
-    out.push({ term, centrality });
+    out.push({ term, kind: c.kind === "method" ? "method" : "concept", centrality });
     if (out.length >= MAX_CONCEPTS) break;
   }
   return out;
@@ -168,7 +195,7 @@ export function sanitizeConcepts(
  * malformed output) — the caller falls back to the v1 dictionary extractor on [], so
  * this must never throw.
  */
-export async function extractSponsorConcepts(paste: string): Promise<SponsorConcept[]> {
+export async function extractSponsorConcepts(paste: string): Promise<ExtractedConcept[]> {
   const text = paste.trim();
   if (text.length === 0) return [];
 

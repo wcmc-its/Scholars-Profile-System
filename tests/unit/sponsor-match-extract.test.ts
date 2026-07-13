@@ -44,7 +44,10 @@ vi.mock("@/lib/edit/overview-generator", () => ({
 import { extractSponsorConcepts } from "@/lib/api/sponsor-match-extract";
 
 /** Shape a mocked generateObject success — it returns `{ object }`. */
-function objectWith(concepts: { term: string; centrality: number }[]) {
+/** `kind` is optional here on purpose: the LLM's zod schema requires it, but
+ *  `sanitizeConcepts` also cleans the dictionary-fallback path, which supplies none — so
+ *  the tests must be able to hand it a concept with an absent or garbage kind. */
+function objectWith(concepts: { term: string; kind?: string; centrality: number }[]) {
   return { object: { concepts } };
 }
 
@@ -59,30 +62,49 @@ describe("extractSponsorConcepts", () => {
   it("applies hygiene: clamp-high, non-finite/non-positive → 0.3 floor, trim, drop-empty, case-insensitive dedupe", async () => {
     mockGenerateObject.mockResolvedValue(
       objectWith([
-        { term: "systemic sclerosis", centrality: 1.0 },
-        { term: "  Raynaud phenomenon ", centrality: 0.5 }, // trimmed
-        { term: "Systemic Sclerosis", centrality: 0.9 }, // case-insensitive dup → dropped
-        { term: "", centrality: 0.4 }, // empty → dropped
-        { term: "   ", centrality: 0.4 }, // whitespace → dropped
-        { term: "pulmonary fibrosis", centrality: 1.4 }, // clamp high → 1
-        { term: "vasculopathy", centrality: -0.2 }, // non-positive → incidental floor 0.3
-        { term: "background mention", centrality: 0 }, // zero → incidental floor 0.3 (never 0 weight)
-        { term: "infinite score", centrality: Number.POSITIVE_INFINITY }, // non-finite → 0.3, NOT 1
-        { term: "unscored concept", centrality: Number.NaN }, // non-finite → 0.3
+        { term: "systemic sclerosis", kind: "concept", centrality: 1.0 },
+        { term: "  Raynaud phenomenon ", kind: "concept", centrality: 0.5 }, // trimmed
+        { term: "Systemic Sclerosis", kind: "concept", centrality: 0.9 }, // case-insensitive dup → dropped
+        { term: "", kind: "concept", centrality: 0.4 }, // empty → dropped
+        { term: "   ", kind: "concept", centrality: 0.4 }, // whitespace → dropped
+        { term: "pulmonary fibrosis", kind: "concept", centrality: 1.4 }, // clamp high → 1
+        { term: "vasculopathy", kind: "concept", centrality: -0.2 }, // non-positive → incidental floor 0.3
+        { term: "background mention", kind: "concept", centrality: 0 }, // zero → incidental floor 0.3 (never 0 weight)
+        { term: "infinite score", kind: "concept", centrality: Number.POSITIVE_INFINITY }, // non-finite → 0.3, NOT 1
+        { term: "unscored concept", kind: "concept", centrality: Number.NaN }, // non-finite → 0.3
       ]),
     );
 
     const out = await extractSponsorConcepts("some sponsor prose");
 
     expect(out).toEqual([
-      { term: "systemic sclerosis", centrality: 1.0 },
-      { term: "Raynaud phenomenon", centrality: 0.5 },
-      { term: "pulmonary fibrosis", centrality: 1 },
-      { term: "vasculopathy", centrality: 0.3 },
-      { term: "background mention", centrality: 0.3 },
-      { term: "infinite score", centrality: 0.3 },
-      { term: "unscored concept", centrality: 0.3 },
+      { term: "systemic sclerosis", kind: "concept", centrality: 1.0 },
+      { term: "Raynaud phenomenon", kind: "concept", centrality: 0.5 },
+      { term: "pulmonary fibrosis", kind: "concept", centrality: 1 },
+      { term: "vasculopathy", kind: "concept", centrality: 0.3 },
+      { term: "background mention", kind: "concept", centrality: 0.3 },
+      { term: "infinite score", kind: "concept", centrality: 0.3 },
+      { term: "unscored concept", kind: "concept", centrality: 0.3 },
     ]);
+  });
+
+  it("carries the LLM's kind through, and defaults an absent/garbage one to concept", async () => {
+    // `kind` splits the rail's Concept and Method panels. The schema constrains the LLM to
+    // the two values, but `sanitizeConcepts` also serves the dictionary fallback (which has
+    // no LLM and supplies no kind) — so an absent kind must land on "concept", never
+    // undefined, or the rail would drop the row from both panels.
+    mockGenerateObject.mockResolvedValue(
+      objectWith([
+        { term: "CRISPR screening", kind: "method", centrality: 0.9 },
+        { term: "systemic sclerosis", kind: "concept", centrality: 0.8 },
+        { term: "no kind at all", centrality: 0.7 },
+        { term: "garbage kind", kind: "wibble", centrality: 0.6 },
+      ]),
+    );
+
+    const out = await extractSponsorConcepts("some sponsor prose");
+
+    expect(out.map((c) => c.kind)).toEqual(["method", "concept", "concept", "concept"]);
   });
 
   it("caps the returned concepts at 12", async () => {

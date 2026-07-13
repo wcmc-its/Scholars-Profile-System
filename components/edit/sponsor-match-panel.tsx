@@ -6,66 +6,50 @@
  * (`docs/2026-07-09-ctl-technologies-handoff.md` §2). One POST to
  * `/api/edit/sponsor-match`; no stage axis, no ESI, no intake queue.
  *
- * Rows are a deliberately minimal cut of the Funding-matcher row (that markup
- * is not exported and carries stage/ESI/CSV machinery this surface rejects):
- * linked name → public profile, title/department, the paper-count evidence,
- * and a CTL-IP count badge when the researcher already holds licensable IP.
- * On top of that, the console carries:
- *  - per-row EVIDENCE — matched parent-topic chips and the top matching papers
- *    (PubMed-linked, with the BM25 relevance that drove the rank), so an
- *    officer sees WHY someone ranked;
- *  - client-side FACETS (department / matched topic / CTL-IP) over the long
- *    server list — narrowing never re-queries, and each row keeps its original
- *    rank number so "#7 overall" stays legible under a filter;
- *  - a search HISTORY in localStorage ONLY. Descriptions are commercially
- *    sensitive; the server never persists them (route contract), so history
- *    lives in the officer's own browser and nowhere else.
+ * THE SLIDERS DO NOT TALK TO THE SERVER. The response carries the decomposed score
+ * inputs — each concept's editable `centrality` and fixed `weightFactor`, and each candidate's
+ * per-concept `rank` — so a slider move re-ranks the ALREADY-FETCHED candidates with
+ * `rerankCandidates`, in a `useMemo`, in the browser. That is the UI ⇄ ranker contract's
+ * central invariant (`lib/api/sponsor-match-contract.ts`), and it is why there is no
+ * "Re-rank" button here: re-ranking is not an action, it is a render.
+ *
+ * PR #1673 did the opposite — it re-POSTed the description with edited concepts on every
+ * drag, so each drag re-ran up to 8 concepts × paged `searchPeople` (seconds, not live).
+ * If you find yourself adding a fetch inside a slider handler, re-read the contract.
+ *
+ * Rows are a deliberately minimal cut of the Funding-matcher row (that markup is not
+ * exported and carries stage/ESI/CSV machinery this surface rejects): linked name →
+ * public profile, title/department, a fit tier, the concepts the person actually matched,
+ * and a CTL-IP badge when they already hold licensable IP. On top of that:
+ *  - client-side FACETS (department / matched concept / CTL-IP) over the long server list
+ *    — narrowing never re-queries, and each row keeps its live rank so "#7 overall" stays
+ *    legible under a filter;
+ *  - a search HISTORY in localStorage ONLY. Descriptions are commercially sensitive; the
+ *    server never persists them (route contract), so history lives in the officer's own
+ *    browser and nowhere else.
+ *
+ * VISUAL: this is the working console's idiom, wired to the contract. The Scholars-skinned
+ * reskin (`sponsor-match-scholars.html`) is a separate pass — the data seam is the fix here.
  */
 import { useEffect, useMemo, useState } from "react";
 
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  fitTier,
+  matchedConcepts,
+  rareTerms,
+  rerankCandidates,
+  type SponsorCandidate,
+  type SponsorConcept,
+  type SponsorFitTier,
+} from "@/lib/api/sponsor-match-contract";
 import { initials } from "@/lib/utils";
-
-type TopicContribution = {
-  topicId: string;
-  contribution: number;
-  pubCount: number;
-  minYear: number | null;
-};
-
-type MatchedPaper = {
-  pmid: string;
-  title: string;
-  year: number | null;
-  journal: string | null;
-  relevance: number;
-};
-
-type MatchedTopic = { topicId: string; label: string; pubCount: number };
-
-/** One editable concept the spine engine extracted from the paste: a canonical term
- *  and its funder-centrality in [0,1]. Mirrors the server `SponsorConcept`; the
- *  console reweights `centrality` and posts the edited set back to re-rank. */
-type SponsorConcept = { term: string; centrality: number };
-
-type RankedResearcher = {
-  cwid: string;
-  slug: string;
-  preferredName?: string;
-  title?: string | null;
-  department?: string | null;
-  topicContributions: TopicContribution[];
-  defaultScore: number;
-  technologyCount?: number;
-  topPapers?: MatchedPaper[];
-  matchedTopics?: MatchedTopic[];
-};
 
 type Status =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "ok"; researchers: RankedResearcher[] }
+  | { kind: "ok" }
   | { kind: "error"; message: string };
 
 type HistoryEntry = { d: string; at: string };
@@ -73,8 +57,30 @@ type HistoryEntry = { d: string; at: string };
 const HISTORY_KEY = "sponsor-match-history";
 const HISTORY_MAX = 20;
 
-/** Topic facet stays scannable: top-N topics by researcher coverage. */
-const TOPIC_FACET_MAX = 12;
+/** Concept facet stays scannable: top-N by researcher coverage. */
+const CONCEPT_FACET_MAX = 12;
+
+/** Rows rendered from the re-ranked pool. The RESPONSE carries the whole fused pool so the
+ *  sliders have something to re-rank over (see the `ranked` memo); this is only how much of
+ *  the current ranking we put on screen, and it matches what the console showed before. */
+const RESULT_MAX = 100;
+
+/** Coverage 7.17e-4 → "about 1 in 1,400 papers". Reads better than a fraction in a tooltip. */
+function oneInN(coverage: number): string {
+  return `about 1 in ${Math.round(1 / coverage).toLocaleString()} Weill Cornell papers`;
+}
+
+const TIER_LABEL: Record<SponsorFitTier, string> = {
+  strong: "Strong fit",
+  good: "Good fit",
+  weak: "Weak fit",
+};
+
+const TIER_CLASS: Record<SponsorFitTier, string> = {
+  strong: "bg-[var(--color-accent-slate)] text-white",
+  good: "bg-[var(--color-accent-slate)]/25 text-[var(--color-accent-slate)]",
+  weak: "border-border text-muted-foreground border",
+};
 
 function toggled(set: ReadonlySet<string>, value: string): Set<string> {
   const next = new Set(set);
@@ -88,14 +94,13 @@ export function SponsorMatchPanel() {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [deptSel, setDeptSel] = useState<ReadonlySet<string>>(new Set());
-  const [topicSel, setTopicSel] = useState<ReadonlySet<string>>(new Set());
+  const [conceptSel, setConceptSel] = useState<ReadonlySet<string>>(new Set());
   const [ctlOnly, setCtlOnly] = useState(false);
-  // The editable concept set the spine returned + the description it was ranked
-  // against. Editing a centrality and re-ranking re-POSTs THAT description with the
-  // edited concepts (the server re-scores the same candidate universe, no new search).
-  // Empty for the bespoke engine (no concept decomposition) ⇒ the editor stays hidden.
+  // The two halves of the contract payload. `candidates` is fetched ONCE per search and
+  // never refetched by a slider; `concepts` is the editable rail. Everything below is
+  // derived from them.
+  const [candidates, setCandidates] = useState<SponsorCandidate[]>([]);
   const [concepts, setConcepts] = useState<SponsorConcept[]>([]);
-  const [rankedDescription, setRankedDescription] = useState("");
   const pending = status.kind === "loading";
 
   // SSR-safe history load: start empty, read localStorage in an effect (no
@@ -142,39 +147,31 @@ export function SponsorMatchPanel() {
 
   function clearFilters() {
     setDeptSel(new Set());
-    setTopicSel(new Set());
+    setConceptSel(new Set());
     setCtlOnly(false);
   }
 
-  // `conceptsOverride` present ⇒ a re-rank of the SAME description with edited
-  // centralities (no new extraction); absent ⇒ a fresh search that extracts concepts.
-  async function runSearch(text: string, conceptsOverride?: SponsorConcept[]) {
+  /** The ONLY network call. A search — never a re-rank. */
+  async function runSearch(text: string) {
     if (pending || text.trim().length === 0) return;
     setStatus({ kind: "loading" });
-    // A fresh search re-extracts concepts, so drop any stale editor immediately; a
-    // re-rank (conceptsOverride present) keeps its edited concepts visible and busy.
-    if (!conceptsOverride) setConcepts([]);
     try {
       const r = await fetch("/api/edit/sponsor-match", {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify(
-          conceptsOverride ? { description: text, concepts: conceptsOverride } : { description: text },
-        ),
+        body: JSON.stringify({ description: text }),
       });
       if (r.ok) {
         const data = (await r.json()) as {
-          researchers?: RankedResearcher[];
+          candidates?: SponsorCandidate[];
           concepts?: SponsorConcept[];
         };
         clearFilters(); // stale facet selections must not silently hide fresh results
         saveHistory(text.trim());
-        // Reflect the concepts the server actually used (sanitized), so the sliders
-        // stay in sync with what drove the ranking.
+        setCandidates(data.candidates ?? []);
         setConcepts(data.concepts ?? []);
-        setRankedDescription(text.trim());
-        setStatus({ kind: "ok", researchers: data.researchers ?? [] });
+        setStatus({ kind: "ok" });
         return;
       }
       setStatus({
@@ -189,48 +186,74 @@ export function SponsorMatchPanel() {
     }
   }
 
-  function updateCentrality(index: number, centrality: number) {
-    setConcepts((prev) => prev.map((c, i) => (i === index ? { ...c, centrality } : c)));
+  /** THE HINGE. A slider writes `centrality` here; the `ranked` memo below recomputes the
+   *  whole ordering from data already in the browser. No fetch, no loading state. */
+  function setCentrality(term: string, centrality: number) {
+    setConcepts((prev) => prev.map((c) => (c.term === term ? { ...c, centrality } : c)));
   }
 
-  const researchers = useMemo(
-    () => (status.kind === "ok" ? status.researchers : []),
-    [status],
+  // Live re-rank. This is the contract's promise, and it is one line: the decomposed
+  // inputs are all here, so re-ranking is pure arithmetic over state.
+  //
+  // `candidates` is the ranker's FULL fused pool (up to ~800), not its top-100 — it has to
+  // be, or sliding a concept up could not surface that concept's own best people, because
+  // they would have been truncated away at default weights before the response was written
+  // (see `sponsor-match-spine-run.ts`). We re-rank the whole pool and show the head of it,
+  // so the visible list is the true top-N under the CURRENT weights, recomputed live.
+  const ranked = useMemo(
+    () => rerankCandidates(candidates, concepts).slice(0, RESULT_MAX),
+    [candidates, concepts],
   );
+
+  const topScore = ranked[0]?.fusedScore ?? 0;
+
+  const conceptPanels = useMemo(
+    () => ({
+      concept: concepts.filter((c) => c.kind === "concept"),
+      method: concepts.filter((c) => c.kind === "method"),
+    }),
+    [concepts],
+  );
+
+  // Rarity is judged across the WHOLE ask, not per panel — a method is scarce relative to
+  // the other concepts the sponsor named, not just to the other methods.
+  const rare = useMemo(() => rareTerms(concepts), [concepts]);
 
   const deptFacet = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const r of researchers)
-      if (r.department) counts.set(r.department, (counts.get(r.department) ?? 0) + 1);
+    for (const c of ranked)
+      if (c.department) counts.set(c.department, (counts.get(c.department) ?? 0) + 1);
     return [...counts].sort((a, b) => b[1] - a[1]);
-  }, [researchers]);
+  }, [ranked]);
 
-  const topicFacet = useMemo(() => {
-    const counts = new Map<string, { label: string; count: number }>();
-    for (const r of researchers)
-      for (const t of r.matchedTopics ?? []) {
-        const c = counts.get(t.topicId) ?? { label: t.label, count: 0 };
-        c.count += 1;
-        counts.set(t.topicId, c);
-      }
-    return [...counts].sort((a, b) => b[1].count - a[1].count).slice(0, TOPIC_FACET_MAX);
-  }, [researchers]);
+  // Facet over the concepts people actually MATCHED (their contributions), not the whole
+  // rail — a concept nobody ranked under is not a useful filter. Counts are over the full
+  // candidate set, pre-filter.
+  const conceptFacet = useMemo(() => {
+    const label = new Map(concepts.map((c) => [c.term, c]));
+    const counts = new Map<string, number>();
+    for (const c of ranked)
+      for (const term of new Set(c.contributions.map((x) => x.term)))
+        if (label.has(term)) counts.set(term, (counts.get(term) ?? 0) + 1);
+    return [...counts].sort((a, b) => b[1] - a[1]).slice(0, CONCEPT_FACET_MAX);
+  }, [ranked, concepts]);
 
   const ctlHolderCount = useMemo(
-    () => researchers.filter((r) => (r.technologyCount ?? 0) > 0).length,
-    [researchers],
+    () => ranked.filter((c) => c.technologyCount > 0).length,
+    [ranked],
   );
 
-  const hasFilters = deptSel.size > 0 || topicSel.size > 0 || ctlOnly;
-  // Original rank travels with the row so a filtered view still reads
-  // "this person is #7 overall", not "#1 of the filtered three".
-  const visible = researchers
-    .map((r, i) => ({ r, rank: i + 1 }))
+  const hasFilters = deptSel.size > 0 || conceptSel.size > 0 || ctlOnly;
+  // Live rank travels with the row, so a filtered view still reads "this person is #7
+  // overall", not "#1 of the filtered three". It re-derives as sliders move.
+  const visible = ranked
+    .map((c, i) => ({ c, rank: i + 1 }))
     .filter(
-      ({ r }) =>
-        (deptSel.size === 0 || (r.department != null && deptSel.has(r.department))) &&
-        (topicSel.size === 0 || (r.matchedTopics ?? []).some((t) => topicSel.has(t.topicId))) &&
-        (!ctlOnly || (r.technologyCount ?? 0) > 0),
+      ({ c }) =>
+        (deptSel.size === 0 || (c.department != null && deptSel.has(c.department))) &&
+        (conceptSel.size === 0 ||
+          c.contributions.some((x) => conceptSel.has(x.term))) &&
+        (!ctlOnly || c.technologyCount > 0),
     );
 
   return (
@@ -307,19 +330,6 @@ export function SponsorMatchPanel() {
         </details>
       ) : null}
 
-      {/* Concept editor lives OUTSIDE the status switch so a re-rank keeps the just-
-          edited sliders on screen (with a live busy state) instead of flashing them away
-          to the results skeleton — which also makes the button's pending affordance
-          reachable. Hidden on error, matching the results area below. */}
-      {concepts.length > 0 && status.kind !== "error" ? (
-        <ConceptEditor
-          concepts={concepts}
-          onCentralityChange={updateCentrality}
-          onRerank={() => void runSearch(rankedDescription, concepts)}
-          pending={pending}
-        />
-      ) : null}
-
       {status.kind === "loading" ? (
         <div aria-busy="true">
           <p className="text-muted-foreground py-3 text-sm">Ranking researchers…</p>
@@ -338,80 +348,107 @@ export function SponsorMatchPanel() {
         </p>
       ) : status.kind === "ok" ? (
         <>
-          {researchers.length === 0 ? (
+          {ranked.length === 0 ? (
             <p className="text-muted-foreground py-4 text-sm">
               No researchers matched this description.
             </p>
           ) : (
             <>
-            <div data-slot="sponsor-match-facets" className="border-border mb-4 rounded-lg border p-3">
-              {deptFacet.length > 0 ? (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-muted-foreground mr-1 text-xs font-medium">Department</span>
-                  {deptFacet.map(([dept, n]) => (
-                    <FacetChip
-                      key={dept}
-                      active={deptSel.has(dept)}
-                      onClick={() => setDeptSel(toggled(deptSel, dept))}
-                    >
-                      {dept} · {n}
-                    </FacetChip>
-                  ))}
-                </div>
+              {conceptPanels.concept.length > 0 ? (
+                <ConceptRail
+                  title="Concepts"
+                  concepts={conceptPanels.concept}
+                  rare={rare}
+                  onCentralityChange={setCentrality}
+                />
               ) : null}
-              {topicFacet.length > 0 ? (
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <span className="text-muted-foreground mr-1 text-xs font-medium">
-                    Matched topic
-                  </span>
-                  {topicFacet.map(([id, t]) => (
-                    <FacetChip
-                      key={id}
-                      active={topicSel.has(id)}
-                      onClick={() => setTopicSel(toggled(topicSel, id))}
-                    >
-                      {t.label} · {t.count}
-                    </FacetChip>
-                  ))}
-                </div>
+              {conceptPanels.method.length > 0 ? (
+                <ConceptRail
+                  title="Methods"
+                  concepts={conceptPanels.method}
+                  rare={rare}
+                  onCentralityChange={setCentrality}
+                />
               ) : null}
-              <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <FacetChip
-                  active={ctlOnly}
-                  onClick={() => setCtlOnly(!ctlOnly)}
-                  title="Only researchers who already hold licensable technology in the CTL portfolio."
-                >
-                  ★ Holds CTL technology · {ctlHolderCount}
-                </FacetChip>
-                {hasFilters ? (
-                  <button
-                    type="button"
-                    onClick={clearFilters}
-                    className="text-muted-foreground ml-1 text-xs underline-offset-4 hover:underline"
-                  >
-                    Clear filters
-                  </button>
-                ) : null}
-              </div>
-            </div>
 
-            <h2 className="text-base font-semibold">
-              Researchers for this description (
-              {hasFilters ? `${visible.length} of ${researchers.length}` : researchers.length})
-            </h2>
-            {visible.length === 0 ? (
-              <p className="text-muted-foreground py-4 text-sm">
-                No researchers match the selected filters.
-              </p>
-            ) : (
-              <ul className="mt-1">
-                {visible.map(({ r, rank }) => (
-                  <li key={r.cwid}>
-                    <ResearcherRow r={r} rank={rank} />
-                  </li>
-                ))}
-              </ul>
-            )}
+              <div
+                data-slot="sponsor-match-facets"
+                className="border-border mb-4 rounded-lg border p-3"
+              >
+                {deptFacet.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-muted-foreground mr-1 text-xs font-medium">
+                      Department
+                    </span>
+                    {deptFacet.map(([dept, n]) => (
+                      <FacetChip
+                        key={dept}
+                        active={deptSel.has(dept)}
+                        onClick={() => setDeptSel(toggled(deptSel, dept))}
+                      >
+                        {dept} · {n}
+                      </FacetChip>
+                    ))}
+                  </div>
+                ) : null}
+                {conceptFacet.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <span className="text-muted-foreground mr-1 text-xs font-medium">
+                      Matched concept
+                    </span>
+                    {conceptFacet.map(([term, n]) => (
+                      <FacetChip
+                        key={term}
+                        active={conceptSel.has(term)}
+                        onClick={() => setConceptSel(toggled(conceptSel, term))}
+                      >
+                        {term} · {n}
+                      </FacetChip>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <FacetChip
+                    active={ctlOnly}
+                    onClick={() => setCtlOnly(!ctlOnly)}
+                    title="Only researchers who already hold licensable technology in the CTL portfolio."
+                  >
+                    ★ Holds CTL technology · {ctlHolderCount}
+                  </FacetChip>
+                  {hasFilters ? (
+                    <button
+                      type="button"
+                      onClick={clearFilters}
+                      className="text-muted-foreground ml-1 text-xs underline-offset-4 hover:underline"
+                    >
+                      Clear filters
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              <h2 className="text-base font-semibold">
+                Researchers for this description (
+                {hasFilters ? `${visible.length} of ${ranked.length}` : ranked.length})
+              </h2>
+              {visible.length === 0 ? (
+                <p className="text-muted-foreground py-4 text-sm">
+                  No researchers match the selected filters.
+                </p>
+              ) : (
+                <ul className="mt-1">
+                  {visible.map(({ c, rank }) => (
+                    <li key={c.cwid}>
+                      <ResearcherRow
+                        candidate={c}
+                        rank={rank}
+                        concepts={concepts}
+                        topScore={topScore}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              )}
             </>
           )}
         </>
@@ -420,67 +457,90 @@ export function SponsorMatchPanel() {
   );
 }
 
-/** The editable-centrality control: one range slider per extracted concept (0.05–1, step
- *  0.05 — the floor is 0.05, NOT 0, because the server's `sanitizeConcepts` rewrites any
- *  non-positive centrality to 0.3, so a 0 stop would silently snap back to 0.3 on
- *  re-rank; 0.05 is the smallest value that round-trips through the contract), a live mono
- *  value readout, and a Re-rank button. Editing a slider only mutates
- *  local state; Re-rank re-POSTs the same description with the edited centralities so the
- *  server re-scores the same candidate universe (no new extraction). Concept rows are NOT
- *  removable and keep their server order (most-central first) — the console reweights, it
- *  never drops a concept. Native `<input type=range>` with the panel's accent color keeps
- *  it accessible (labeled) and on-idiom (no custom slider). */
-function ConceptEditor({
+/**
+ * The editable rail: one range slider per merged concept.
+ *
+ * The floor is 0, not 0.05. Under #1673 a 0 round-tripped through the server's
+ * `sanitizeConcepts`, which rewrote any non-positive centrality to 0.3 — so a 0 stop
+ * silently snapped back and "mute this concept" was impossible to express. Now that the
+ * re-rank is client-side there is no sanitize hop, and 0 means exactly what it looks like:
+ * the concept's fusion weight goes to zero and it stops contributing, without being
+ * dropped from the rail (slide it back up and its candidates return).
+ *
+ * Rows are NOT removable and keep their server order (most-central first) — the console
+ * reweights, it never drops a concept. Native `<input type=range>` keeps it accessible
+ * and on-idiom (no custom slider).
+ */
+function ConceptRail({
+  title,
   concepts,
+  rare,
   onCentralityChange,
-  onRerank,
-  pending,
 }: {
+  title: string;
   concepts: SponsorConcept[];
-  onCentralityChange: (index: number, centrality: number) => void;
-  onRerank: () => void;
-  pending: boolean;
+  /** Terms to badge, computed once across the whole ask by `rareTerms`. */
+  rare: ReadonlySet<string>;
+  onCentralityChange: (term: string, centrality: number) => void;
 }) {
   return (
     <div data-slot="sponsor-match-concepts" className="border-border mb-4 rounded-lg border p-3">
       <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-base font-semibold">Concepts</h2>
-        <span className="text-muted-foreground text-xs">drag to reweight</span>
+        <h2 className="text-base font-semibold">{title}</h2>
+        <span className="text-muted-foreground text-xs">drag to reweight — updates live</span>
       </div>
-      <p className="text-muted-foreground mt-1 mb-3 text-xs">
-        How central each concept is to the sponsor&rsquo;s ask. Adjust the weights and
-        re-rank — the same candidates are re-scored, no new search.
-      </p>
-      <ul className="space-y-3">
-        {concepts.map((c, i) => (
+      <ul className="mt-3 space-y-3">
+        {concepts.map((c) => (
           <li key={c.term} className="flex flex-col gap-1">
             <div className="flex items-baseline justify-between gap-2">
-              <span className="text-sm font-medium">{c.term}</span>
+              <span className="min-w-0">
+                <span className="text-sm font-medium">{c.term}</span>
+                {/* Reads `corpusCoverage`, never `weightFactor` — the badge is a claim about
+                    the LITERATURE, not about the ranking. The tooltip states the measured
+                    fact and stops there; it deliberately does NOT say "so it counts for
+                    more", which is what made the old badge misleading. */}
+                {rare.has(c.term) && c.corpusCoverage != null ? (
+                  <span
+                    title={`Scarce at Weill Cornell relative to the other concepts in this ask — ${oneInN(
+                      c.corpusCoverage,
+                    )}.`}
+                    className="text-muted-foreground ml-1.5 text-xs"
+                  >
+                    ·rare
+                  </span>
+                ) : null}
+              </span>
               <span className="text-muted-foreground font-mono text-xs tabular-nums">
                 {c.centrality.toFixed(2)}
               </span>
             </div>
+            {/* The merged forms that collapsed into this concept — so an officer can see
+                that "cancer" and "oncology" are one slider, not two. */}
+            {c.members.length > 1 ? (
+              <div className="flex flex-wrap gap-1">
+                {c.members.slice(1).map((m) => (
+                  <span
+                    key={m}
+                    className="border-border text-muted-foreground rounded-full border px-1.5 py-0.5 text-xs"
+                  >
+                    {m}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <input
               type="range"
-              min={0.05}
+              min={0}
               max={1}
               step={0.05}
               value={c.centrality}
-              onChange={(e) => onCentralityChange(i, Number(e.target.value))}
+              onChange={(e) => onCentralityChange(c.term, Number(e.target.value))}
               aria-label={`${c.term} centrality`}
               className="w-full accent-[var(--color-accent-slate)]"
             />
           </li>
         ))}
       </ul>
-      <button
-        type="button"
-        onClick={onRerank}
-        disabled={pending}
-        className="mt-3 inline-flex h-9 items-center rounded-md bg-[var(--color-accent-slate)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {pending ? "Re-ranking…" : "Re-rank"}
-      </button>
     </div>
   );
 }
@@ -513,13 +573,24 @@ function FacetChip({
   );
 }
 
-function ResearcherRow({ r, rank }: { r: RankedResearcher; rank: number }) {
-  const name = r.preferredName ?? r.slug ?? r.cwid;
-  // One synthetic topic, so the first contribution IS the whole evidence.
-  const evidence = r.topicContributions[0];
-  const techCount = r.technologyCount ?? 0;
-  const topPapers = r.topPapers ?? [];
-  const matchedTopics = r.matchedTopics ?? [];
+function ResearcherRow({
+  candidate,
+  rank,
+  concepts,
+  topScore,
+}: {
+  candidate: SponsorCandidate;
+  rank: number;
+  concepts: SponsorConcept[];
+  topScore: number;
+}) {
+  const name = candidate.name;
+  // Chips + tier are DERIVED, never wired — so both stay live under the sliders. The raw
+  // fused score is never rendered: it is an RRF sum and means nothing on its own.
+  const matched = matchedConcepts(candidate, concepts);
+  const tier = fitTier(candidate.fusedScore, topScore);
+  const papers = candidate.evidence?.papers ?? [];
+  const topics = candidate.evidence?.topics ?? [];
   return (
     <div className="border-t border-border flex gap-3 py-4 first:border-t-0">
       <div className="text-muted-foreground w-5 pt-1 text-right text-sm tabular-nums">{rank}</div>
@@ -532,25 +603,41 @@ function ResearcherRow({ r, rank }: { r: RankedResearcher; rank: number }) {
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <a
-            href={`/${encodeURIComponent(r.slug)}`}
+            href={`/${encodeURIComponent(candidate.profileSlug)}`}
             className="text-base font-semibold leading-snug text-foreground underline-offset-4 hover:underline"
           >
             {name}
           </a>
-          {r.title ? <span className="text-muted-foreground text-sm">{r.title}</span> : null}
+          {candidate.title ? (
+            <span className="text-muted-foreground text-sm">{candidate.title}</span>
+          ) : null}
+          <span
+            className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-xs ${TIER_CLASS[tier]}`}
+          >
+            {TIER_LABEL[tier]}
+          </span>
         </div>
-        {r.department ? <div className="text-muted-foreground text-sm">{r.department}</div> : null}
-        {evidence && evidence.pubCount > 0 ? (
-          <p className="mt-1.5 text-sm text-foreground/90">
-            {evidence.pubCount} matching paper{evidence.pubCount === 1 ? "" : "s"}
-            {evidence.minYear ? ` since ${evidence.minYear}` : ""}
-          </p>
+        {candidate.department ? (
+          <div className="text-muted-foreground text-sm">{candidate.department}</div>
         ) : null}
-        {matchedTopics.length > 0 ? (
+        {matched.length > 0 ? (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {matchedTopics.map((t) => (
+            {matched.map(({ concept }) => (
               <span
-                key={t.topicId}
+                key={concept.term}
+                title={`Ranked under "${concept.term}" for this description.`}
+                className="border-border text-muted-foreground rounded-full border px-2 py-0.5 text-xs"
+              >
+                {concept.term}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {topics.length > 0 ? (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {topics.map((t) => (
+              <span
+                key={t.label}
                 title={`${t.pubCount} matching paper${t.pubCount === 1 ? "" : "s"} in this topic`}
                 className="border-border text-muted-foreground rounded-full border px-2 py-0.5 text-xs"
               >
@@ -559,13 +646,13 @@ function ResearcherRow({ r, rank }: { r: RankedResearcher; rank: number }) {
             ))}
           </div>
         ) : null}
-        {topPapers.length > 0 ? (
+        {papers.length > 0 ? (
           <details className="mt-1.5">
             <summary className="text-muted-foreground cursor-pointer text-xs select-none">
-              Why this match — top paper{topPapers.length === 1 ? "" : "s"}
+              Why this match — top paper{papers.length === 1 ? "" : "s"}
             </summary>
             <ul className="mt-1 space-y-1">
-              {topPapers.map((p) => (
+              {papers.map((p) => (
                 <li key={p.pmid} className="text-xs">
                   <a
                     href={`https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(p.pmid)}/`}
@@ -582,20 +669,23 @@ function ResearcherRow({ r, rank }: { r: RankedResearcher; rank: number }) {
                         {" · "}
                       </>
                     ) : null}
-                    {(p.year ? `${p.year} · ` : "") +
-                      `${Math.round(p.relevance * 100)}% match`}
+                    {(p.year ? `${p.year}` : "") +
+                      (p.relevance != null
+                        ? `${p.year ? " · " : ""}${Math.round(p.relevance * 100)}% match`
+                        : "")}
                   </span>
                 </li>
               ))}
             </ul>
           </details>
         ) : null}
-        {techCount > 0 ? (
+        {candidate.technologyCount > 0 ? (
           <span
             title="Licensable technologies this researcher already holds in the CTL portfolio."
             className="mt-1.5 inline-flex rounded-full bg-[var(--color-accent-slate)]/15 px-2 py-0.5 text-xs text-[var(--color-accent-slate)]"
           >
-            {techCount} CTL technolog{techCount === 1 ? "y" : "ies"}
+            {candidate.technologyCount} CTL technolog
+            {candidate.technologyCount === 1 ? "y" : "ies"}
           </span>
         ) : null}
       </div>

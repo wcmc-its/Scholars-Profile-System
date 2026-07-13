@@ -37,23 +37,49 @@ import { db } from "@/lib/db";
 import { extractTerms, rrfFuse, type TermRanking } from "@/lib/api/sponsor-match-spine";
 import {
   extractSponsorConcepts,
-  type SponsorConcept,
+  type ExtractedConcept,
 } from "@/lib/api/sponsor-match-extract";
 import {
   dampedIdf,
   mergeTermClusters,
   type ClusterTerm,
 } from "@/lib/api/sponsor-match-axes";
+import type {
+  SponsorCandidate,
+  SponsorConcept,
+} from "@/lib/api/sponsor-match-contract";
 import { searchPeople, type PeopleHit } from "@/lib/api/search";
 import { meshMatchTier } from "@/lib/search";
 import { matchQueryToTaxonomy, type MeshResolution } from "@/lib/api/search-taxonomy";
-import {
-  normalizeDescription,
-  type SponsorRankedScholar,
-} from "@/lib/api/sponsor-match";
+import { normalizeDescription } from "@/lib/api/sponsor-match";
 
-/** Mirrors `sponsor-match.ts` DEFAULT_LIMIT — the client facets narrow browser-side. */
-const SPINE_DEFAULT_LIMIT = 100;
+/**
+ * NO DEFAULT TRUNCATION — the candidate universe shipped to the client is the FULL fused
+ * pool, not a top-N of it. This is load-bearing for the re-rank contract, and it is subtle.
+ *
+ * The client re-ranks over exactly the candidates it was sent. If the server truncated to the
+ * top-N *at default weights*, then sliding a concept UP could not surface that concept's own
+ * best people — they were cut before the response was written. Concretely: a paste yields a
+ * dominant concept A (weight 7.2) and a secondary concept B (weight 1.6). A's people fill the
+ * entire default top-100 — A's rank-100 scores 7.2/(60+100) = .045, which still beats B's
+ * rank-1 at 1.6/(60+1) = .026 — so B's single best researcher is not in the payload at all.
+ * The officer then drags A to zero precisely to isolate B, and the rail shows leftover
+ * A-people who happen to rank weakly under B, with B's actual expert missing. The one
+ * interaction the sliders exist for would be the one that silently breaks.
+ *
+ * (#1673 did not have this bug — it re-queried the server on every drag, which is the very
+ * thing the contract forbids. Dropping the re-query means the PAYLOAD must carry the pool
+ * that the re-query would have re-fused.)
+ *
+ * Shipping the whole pool makes the client re-rank EQUIVALENT to a server re-fusion at the
+ * edited weights, for ANY weights — the property the contract actually promises.
+ *
+ * The pool is bounded by construction: MAX_TERMS (8) × TERM_DEPTH (100) = 800 candidates
+ * worst-case, and far fewer in practice once clusters merge and their people overlap. The
+ * panel renders only the top slice of the current ranking, so the DOM does not grow with it.
+ * `opts.limit` still truncates for callers that genuinely want a top-N — but the route does
+ * NOT pass it, because a truncated pool is a broken rail.
+ */
 
 /** Per-term centrality for the DICTIONARY FALLBACK only — the LLM extractor supplies
  *  real 0-1 values on the primary path (§7-Q1). Uniform 1 makes the fallback weight
@@ -124,18 +150,28 @@ async function loadTaxonomyVocab(): Promise<string[]> {
 }
 
 /** One extracted concept resolved to MeSH: the term, its centrality (carried through
- *  to the ClusterTerm as the fusion multiplicand), and the resolution (representative
- *  descriptor identity + coverage lookup key). */
-type ResolvedTerm = { term: string; centrality: number; resolution: MeshResolution | null };
+ *  to the ClusterTerm as the fusion multiplicand), its kind, and the resolution
+ *  (representative descriptor identity + coverage lookup key). */
+type ResolvedTerm = {
+  term: string;
+  centrality: number;
+  kind: "concept" | "method";
+  resolution: MeshResolution | null;
+};
 
-/** The spine's result: the ranked scholars PLUS the `{term, centrality}` concept set
- *  actually used to produce them (post-sanitize/cap, in the order used). The editable-
- *  centrality console renders `concepts` as reweightable rows and posts an edited copy
- *  back as `conceptsOverride` to re-rank — so the surfaced concepts and the ranking
- *  signal are always the same list. `concepts` is [] only when nothing was extracted. */
+/**
+ * The spine's result — the UI ⇄ ranker contract's payload (`sponsor-match-contract.ts`).
+ *
+ * `concepts` are the MERGED CLUSTERS actually fused (not the raw extracted terms), each
+ * carrying BOTH halves of its fusion weight: the editable `centrality` and the fixed
+ * `weightFactor` (today: dampedIdf). `candidates` carry `contributions[]` — every (concept, rank) pair
+ * the fusion summed over. Together those are the complete, decomposed score inputs, which
+ * is what lets the console re-rank live in the browser as sliders move instead of
+ * re-querying the server on every drag. `concepts` is [] only when nothing was extracted.
+ */
 export type SpineRankResult = {
-  researchers: SponsorRankedScholar[];
   concepts: SponsorConcept[];
+  candidates: SponsorCandidate[];
 };
 
 /** Retrieve up to `TERM_DEPTH` scholar cwids for one cluster, in `searchPeople` rank
@@ -199,70 +235,67 @@ async function retrieveCluster(
 
 /**
  * SPINE engine: rank researchers against a pasted sponsor description by
- * composing per-concept `searchPeople` rankings (see module doc). Returns
- * `{ researchers, concepts }` — `concepts` is the `{term, centrality}` set
- * actually used (LLM, dictionary-fallback, or client override), so the editable-
- * centrality console can render and reweight it. Short-circuits to empty
- * researchers on an empty paste, no extracted terms, or all-empty retrieval — the
- * same posture as the bespoke engine. Any per-cluster `searchPeople` failure
- * throws out of here (the route's catch → 502); there are no silent partial results.
+ * composing per-concept `searchPeople` rankings (see module doc). Returns the UI
+ * contract's `{ concepts, candidates }` — the DECOMPOSED score inputs, not just a
+ * ranked list: every concept's `centrality` × `weightFactor`, and every candidate's per-
+ * concept `rank`. That is what the console re-ranks over in the browser.
  *
- * `opts.conceptsOverride` (non-empty) is the console's re-rank path: it REPLACES
- * extraction with the client's edited concept set (already sanitized at the route
- * trust boundary), so a slider edit re-ranks the SAME candidate universe with no
- * new Bedrock call.
+ * Short-circuits to empty candidates on an empty paste, no extracted terms, or
+ * all-empty retrieval — the same posture as the bespoke engine. Any per-cluster
+ * `searchPeople` failure throws out of here (the route's catch → 502); there are no
+ * silent partial results.
+ *
+ * There is deliberately NO concept-override parameter. The console re-ranks CLIENT-side
+ * (`rerankCandidates`), so a slider edit costs zero round-trips; #1673's server-side
+ * override — which re-retrieved and re-fused on every drag — was the contract violation
+ * this rework removes, and with it a client-controlled trust boundary.
  */
 export async function rankResearchersForDescriptionSpine(
   description: string,
-  opts: { limit?: number; conceptsOverride?: SponsorConcept[] } = {},
+  opts: { limit?: number } = {},
 ): Promise<SpineRankResult> {
+  const empty: SpineRankResult = { concepts: [], candidates: [] };
   const text = normalizeDescription(description);
-  if (text.length === 0) return { researchers: [], concepts: [] };
+  if (text.length === 0) return empty;
 
   // Extraction seam (§7-Q1): the Bedrock LLM names the funder's concepts + real
-  // per-term centrality. On [] (Bedrock outage/empty) fall back to the v1 dictionary
-  // extractor at uniform centrality — degrade to v1 recall, not to nothing. Both
-  // empty ⇒ the same [] short-circuit as before. MAX_TERMS caps either source.
-  //
-  // OVERRIDE: a non-empty `conceptsOverride` (the editable-centrality console re-rank)
-  // BYPASSES extraction entirely — the client's edited `{term, centrality}` set drives
-  // resolution → clustering → fusion directly, re-ranking the same candidate universe
-  // with no Bedrock/dictionary round-trip. The route sanitizes it (`sanitizeConcepts`)
-  // before it reaches here; MAX_TERMS still caps it.
-  let concepts: SponsorConcept[];
-  if (opts.conceptsOverride && opts.conceptsOverride.length > 0) {
-    concepts = opts.conceptsOverride.slice(0, MAX_TERMS);
-  } else {
-    concepts = (await extractSponsorConcepts(text)).slice(0, MAX_TERMS);
-    if (concepts.length === 0) {
-      const vocab = await loadTaxonomyVocab();
-      concepts = extractTerms(text, vocab)
-        .slice(0, MAX_TERMS)
-        .map((term) => ({ term, centrality: UNIFORM_CENTRALITY }));
-    }
+  // per-term centrality + kind. On [] (Bedrock outage/empty) fall back to the v1
+  // dictionary extractor at uniform centrality — degrade to v1 recall, not to nothing.
+  // The dictionary cannot tell a method from a disease, so it tags everything
+  // "concept" (the rail then shows one panel). Both empty ⇒ the same [] short-circuit
+  // as before. MAX_TERMS caps either source.
+  let extracted: ExtractedConcept[] = (await extractSponsorConcepts(text)).slice(0, MAX_TERMS);
+  if (extracted.length === 0) {
+    const vocab = await loadTaxonomyVocab();
+    extracted = extractTerms(text, vocab)
+      .slice(0, MAX_TERMS)
+      .map((term) => ({ term, kind: "concept" as const, centrality: UNIFORM_CENTRALITY }));
   }
-  if (concepts.length === 0) return { researchers: [], concepts: [] };
+  if (extracted.length === 0) return empty;
 
   // Resolve each concept to its MeSH descendant-UI set + representative descriptor
   // (one taxonomy round-trip per concept; the list is short by construction). The
   // centrality rides through so the ClusterTerm carries a real fusion multiplicand.
   const resolved: ResolvedTerm[] = await Promise.all(
-    concepts.map(async (c) => ({
+    extracted.map(async (c) => ({
       term: c.term,
       centrality: c.centrality,
+      kind: c.kind,
       resolution: (await matchQueryToTaxonomy(c.term)).meshResolution,
     })),
   );
 
   // Cluster redundant phrasing by MeSH-set equivalence; each ClusterTerm carries its
-  // concept's centrality (mergeTermClusters takes the MAX across merged members).
+  // concept's centrality (mergeTermClusters takes the MAX across merged members) and
+  // its kind (the cluster takes its FIRST member's — the representative).
   const clusterTerms: ClusterTerm[] = resolved.map((r) => ({
     term: r.term,
     descendantUis: r.resolution?.descendantUis ?? [],
     centrality: r.centrality,
+    kind: r.kind,
   }));
   const clusters = mergeTermClusters(clusterTerms, CLUSTER_TAU);
-  if (clusters.length === 0) return { researchers: [], concepts };
+  if (clusters.length === 0) return empty;
 
   // Coverage lookup: the fusion idf uses `mesh_descriptor.local_pub_coverage`
   // (a fraction, not a count). One bounded read over the resolved root descriptor UIs.
@@ -287,8 +320,13 @@ export async function rankResearchersForDescriptionSpine(
     }
   }
 
-  // Per cluster: retrieve people (topical-only) and compute the fusion weight.
+  // Per cluster: retrieve people (topical-only), compute the fusion weight, and record
+  // the cluster AS THE WIRE CONCEPT. The two factors of the weight are surfaced
+  // separately — `centrality` (what a slider moves) and `weightFactor` (fixed) — because
+  // the client must be able to recompute `weight = centrality × weightFactor` itself.
+  // Shipping only their product would make the sliders unusable.
   const rankings: TermRanking[] = [];
+  const concepts: SponsorConcept[] = [];
   const hitByCwid = new Map<string, PeopleHit>();
   for (const cluster of clusters) {
     // MAX member coverage ≈ the broadest merged synonym = a lower bound on the
@@ -301,22 +339,47 @@ export async function rankResearchersForDescriptionSpine(
       .map((ui) => coverageByUi.get(ui))
       .filter((c): c is number => typeof c === "number");
     const maxCoverage = coverages.length > 0 ? Math.max(...coverages) : 0;
-    const idf = maxCoverage > 0 ? dampedIdf(maxCoverage, IDF_CAP) : NEUTRAL_IDF;
-    const weight = cluster.centrality * idf;
+
+    // The fixed half of the fusion weight. Today it is the damped corpus IDF — UNCHANGED
+    // math, so this rework does not move the ranking. But the wire NAME is `weightFactor`,
+    // not `rarity`, because corpus IDF is the WRONG axis here and is on its way out: it
+    // anti-correlates with topical centrality in a hierarchical domain, so a disease's own
+    // mechanisms outweigh the disease (see
+    // `docs/2026-07-12-FINDING-idf-inverts-concept-weighting.md`). When that is fixed, the
+    // change is confined to this line and `DEFAULT_K` — the contract, route and panel do
+    // not move.
+    const weightFactor = maxCoverage > 0 ? dampedIdf(maxCoverage, IDF_CAP) : NEUTRAL_IDF;
+
+    // The cluster's representative term: its first member. It is the concept's identity
+    // on the wire and the join key `contributions[].term` points back to — so the SAME
+    // string must key the ranking, the concept, and every contribution.
+    const term = cluster.members[0];
+    concepts.push({
+      term,
+      kind: cluster.kind,
+      members: cluster.members,
+      centrality: cluster.centrality,
+      weightFactor,
+      // Display-only, and OMITTED when we do not know it. A zero coverage means "no
+      // locally-tagged pubs for this descriptor" — which is 40% of descriptors and is not
+      // evidence of rarity — so it must not reach the UI as a rarity claim. Absent ≠ zero.
+      ...(maxCoverage > 0 ? { corpusCoverage: maxCoverage } : {}),
+    });
 
     // Representative resolution = the first member's (drives name/tier only).
-    const rep = repByTerm.get(cluster.members[0]) ?? null;
+    const rep = repByTerm.get(term) ?? null;
     const { ranked, hits } = await retrieveCluster(
       cluster.members.join(" "),
       cluster.descendantUis,
       rep,
     );
     for (const h of hits) if (!hitByCwid.has(h.cwid)) hitByCwid.set(h.cwid, h);
-    rankings.push({ weight, ranked });
+    rankings.push({ term, weight: cluster.centrality * weightFactor, ranked });
   }
 
-  const fused = rrfFuse(rankings).slice(0, opts.limit ?? SPINE_DEFAULT_LIMIT);
-  if (fused.length === 0) return { researchers: [], concepts };
+  const allFused = rrfFuse(rankings);
+  const fused = opts.limit != null ? allFused.slice(0, opts.limit) : allFused;
+  if (fused.length === 0) return { concepts, candidates: [] };
 
   // technologyCount — CTL officers care whether the researcher already holds CTL IP.
   // Same inline groupBy the bespoke engine and `rankResearchersForOpportunity` use
@@ -329,29 +392,28 @@ export async function rankResearchersForDescriptionSpine(
   });
   const techByCwid = new Map(grouped.map((g) => [g.cwid, g._count._all]));
 
-  // Map to SponsorRankedScholar. Display fields (name/slug/title/department) ride in
-  // from the `searchPeople` hits — no extra profile read. The fused RRF score orders
-  // the rows (defaultScore/topicFit; never rendered, ordering only).
-  // ponytail: v1 leaves topPapers/matchedTopics EMPTY — the fast headless
-  // `searchPeople` shape carries no per-topic pub count or evidence pubs without the
-  // match-explain aggregation, and fabricating counts is forbidden. The bake-off
-  // scores ORDER; the evidence upgrade lands with the LLM front-end.
-  const researchers = fused.map((f) => {
+  // Map to the wire `SponsorCandidate`. Display fields (name/slug/title/department) ride
+  // in from the `searchPeople` hits — no extra profile read. `fusedScore` is the RRF sum
+  // at DEFAULT weights; the UI buckets it into a tier relative to the top hit and never
+  // renders the raw number. `contributions` is the hinge — it comes straight out of
+  // `rrfFuse`, which already had every (concept, rank) pair and used to discard them.
+  // ponytail: `measures` and `evidence` are OMITTED, not zeroed. The fast headless
+  // `searchPeople` shape carries no career stage, no per-topic pub count and no evidence
+  // pubs (it runs `skipFacetAggs`), and fabricating counts is forbidden — so the contract
+  // makes both optional and absent means "not computed", never "none". The evidence
+  // upgrade needs the match-explain aggregation, which is a separate change.
+  const candidates: SponsorCandidate[] = fused.map((f) => {
     const hit = hitByCwid.get(f.cwid);
     return {
       cwid: f.cwid,
-      slug: hit?.slug ?? f.cwid,
-      preferredName: hit?.preferredName ?? undefined,
-      careerStage: null,
+      name: hit?.preferredName ?? f.cwid,
+      profileSlug: hit?.slug ?? f.cwid,
       title: hit?.primaryTitle ?? null,
       department: hit?.primaryDepartment ?? null,
-      axes: { topicFit: f.score, stageAppeal: 0 },
-      topicContributions: [],
-      defaultScore: f.score,
+      fusedScore: f.score,
+      contributions: f.contributions,
       technologyCount: techByCwid.get(f.cwid) ?? 0,
-      topPapers: [],
-      matchedTopics: [],
     };
   });
-  return { researchers, concepts };
+  return { concepts, candidates };
 }
