@@ -24,9 +24,14 @@
  *  - client-side FACETS (department / matched concept / CTL-IP) over the long server list
  *    — narrowing never re-queries, and each row keeps its live rank so "#7 overall" stays
  *    legible under a filter;
- *  - a search HISTORY in localStorage ONLY. Descriptions are commercially sensitive; the
- *    server never persists them (route contract), so history lives in the officer's own
- *    browser and nowhere else.
+ *  - a search HISTORY that is now SERVER-SIDE and shared (#6d). It used to live in the
+ *    officer's own localStorage, on the stated grounds that descriptions are commercially
+ *    sensitive and the server never persisted them. That rule turned out to rest on nothing but
+ *    the comment asserting it, and the cost of keeping it was high: the λ preference weighting
+ *    cannot be tuned without REAL sponsor text, and a private per-browser list could not tell an
+ *    officer that a colleague had already run this sponsor. Searches are now retained, the panel
+ *    SAYS SO where they are listed, and any of them can be deleted — which erases the text for
+ *    good, because the result cache deliberately holds none of it.
  *
  * VISUAL: skinned to `sponsor-match-scholars.html`, but to that mockup's INFORMATION design and
  * token values only — not its chrome. The mockup is drawn as the PUBLIC Scholars site (Cornell-red
@@ -55,7 +60,7 @@
  * be unchecked, because an extractor that reads an ask the sponsor never made must not be able
  * to skew a ranking with no way for the officer to say so.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download } from "lucide-react";
 
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
@@ -88,10 +93,16 @@ type Status =
   | { kind: "ok" }
   | { kind: "error"; message: string };
 
-type HistoryEntry = { d: string; at: string };
-
-const HISTORY_KEY = "sponsor-match-history";
-const HISTORY_MAX = 20;
+/** A retained search, as `GET /api/edit/sponsor-match` ships it (#6d). */
+type Submission = {
+  id: string;
+  description: string;
+  title: string | null;
+  engine: string;
+  candidateCount: number;
+  submittedBy: string;
+  createdAt: string;
+};
 
 /** Facet groups stay scannable: top-N by researcher coverage. As a vertical checkbox panel
  *  (rather than the old wrapping chip row) an uncapped department list runs to ~20 rows on a
@@ -163,7 +174,7 @@ function downloadCsv(filename: string, csv: string) {
 export function SponsorMatchPanel() {
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState<Status>({ kind: "idle" });
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [history, setHistory] = useState<Submission[]>([]);
   const [deptSel, setDeptSel] = useState<ReadonlySet<string>>(new Set());
   const [conceptSel, setConceptSel] = useState<ReadonlySet<string>>(new Set());
   const [ctlOnly, setCtlOnly] = useState(false);
@@ -189,45 +200,37 @@ export function SponsorMatchPanel() {
   const [matchedText, setMatchedText] = useState("");
   const pending = status.kind === "loading";
 
-  // SSR-safe history load: start empty, read localStorage in an effect (no
-  // hydration mismatch — same pattern as the COI-gap card's sticky group-by).
-  useEffect(() => {
+  // #6d — the retained searches, from the SERVER. This REPLACES the old localStorage history
+  // outright rather than sitting beside it: the server list does everything the private one did
+  // (read back a past paste, re-run it) and adds the two things it could not — a colleague's
+  // searches, and a delete that actually erases the sponsor's words rather than clearing one
+  // browser. Two histories would have been two sources of truth for the same question.
+  const loadHistory = useCallback(async () => {
     try {
-      const raw = window.localStorage.getItem(HISTORY_KEY);
-      const parsed: unknown = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(parsed))
-        setHistory(
-          parsed.filter(
-            (h): h is HistoryEntry =>
-              !!h && typeof h === "object" && typeof (h as HistoryEntry).d === "string",
-          ),
-        );
+      const r = await fetch("/api/edit/sponsor-match", { credentials: "same-origin" });
+      if (!r.ok) return; // a failed history load must never disturb the matcher
+      const data = (await r.json()) as { submissions?: Submission[] };
+      setHistory(data.submissions ?? []);
     } catch {
-      /* private mode / disabled storage / corrupt entry — start empty. */
+      /* offline / transient — the list is a convenience, not the product. */
     }
   }, []);
 
-  function saveHistory(text: string) {
-    setHistory((prev) => {
-      const next = [
-        { d: text, at: new Date().toISOString() },
-        ...prev.filter((h) => h.d !== text),
-      ].slice(0, HISTORY_MAX);
-      try {
-        window.localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  }
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
 
-  function clearHistory() {
-    setHistory([]);
+  async function deleteSubmission(id: string) {
     try {
-      window.localStorage.removeItem(HISTORY_KEY);
+      const r = await fetch("/api/edit/sponsor-match", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ submissionId: id }),
+      });
+      if (r.ok) setHistory((prev) => prev.filter((h) => h.id !== id));
     } catch {
-      /* ignore */
+      /* ignore — the row stays listed, and the next load will show the truth. */
     }
   }
 
@@ -257,7 +260,7 @@ export function SponsorMatchPanel() {
         // `{candidates?; concepts?}` opted the envelope out of exactly that.
         const data = (await r.json()) as Partial<SponsorMatchResponse>;
         clearFilters(); // stale facet selections must not silently hide fresh results
-        saveHistory(text.trim());
+        void loadHistory(); // the row the server just retained
         setCandidates(data.candidates ?? []);
         setConcepts(data.concepts ?? []);
         setMatchedText(text);
@@ -508,33 +511,46 @@ export function SponsorMatchPanel() {
           <summary className="text-muted-foreground cursor-pointer text-sm select-none">
             Recent searches ({history.length})
           </summary>
-          <ul className="mt-2 space-y-1">
+          {/* Say it plainly, on the surface where it happens. Searches are kept, they are kept
+              for a stated reason, everyone here can see them, and anyone here can erase one.
+              A retention notice buried in a policy page nobody opens is not a notice. */}
+          <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
+            Searches are saved — including the description you pasted — so we can measure and
+            improve match quality against real sponsor text. Everyone with access to this console
+            can see them. Delete any search to remove its text for good.
+          </p>
+          <ul className="mt-3 space-y-1">
             {history.map((h) => (
-              <li key={h.d} className="flex items-baseline gap-2">
+              <li key={h.id} className="flex items-baseline gap-2">
                 <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                  {new Date(h.at).toLocaleDateString()}
+                  {new Date(h.createdAt).toLocaleDateString()}
+                </span>
+                <span className="text-muted-foreground shrink-0 text-xs">{h.submittedBy}</span>
+                <button
+                  type="button"
+                  title={h.description}
+                  onClick={() => {
+                    setDescription(h.description);
+                    void runSearch(h.description);
+                  }}
+                  className="min-w-0 flex-1 truncate text-left text-sm text-foreground/90 underline-offset-4 hover:underline"
+                >
+                  {h.title ?? h.description}
+                </button>
+                <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                  {h.candidateCount}
                 </span>
                 <button
                   type="button"
-                  title={h.d}
-                  onClick={() => {
-                    setDescription(h.d);
-                    void runSearch(h.d);
-                  }}
-                  className="min-w-0 truncate text-left text-sm text-foreground/90 underline-offset-4 hover:underline"
+                  aria-label={`Delete search: ${h.title ?? h.description.slice(0, 60)}`}
+                  onClick={() => void deleteSubmission(h.id)}
+                  className="text-muted-foreground shrink-0 text-xs underline-offset-4 hover:underline"
                 >
-                  {h.d}
+                  Delete
                 </button>
               </li>
             ))}
           </ul>
-          <button
-            type="button"
-            onClick={clearHistory}
-            className="text-muted-foreground mt-2 text-xs underline-offset-4 hover:underline"
-          >
-            Clear history
-          </button>
         </details>
       ) : null}
 

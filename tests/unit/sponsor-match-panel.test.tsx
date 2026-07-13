@@ -5,13 +5,18 @@
  * description with edited concepts on every re-rank, which is the "re-query on every drag"
  * degradation the UI contract rejects (`lib/api/sponsor-match-contract.ts`). The response
  * now carries the decomposed score inputs, so the panel re-ranks in the browser. If anyone
- * re-adds a fetch to the slider path, `expect(fetchMock).toHaveBeenCalledTimes(1)` fails.
+ * re-adds a fetch to the slider path, `expect(rankCalls(fetchMock)).toBe(1)` fails.
+ *
+ * That assertion counts RANKING POSTs, not all fetches, because the panel legitimately GETs its
+ * retained-search list on mount and after a search (#6d). Counting every call would have made
+ * the test fail for a harmless reason — and, worse, would have let a genuinely re-added
+ * re-query hide behind a history refresh.
  *
  * Also covered:
  *  - facets (department / matched concept / CTL-IP) narrow rows client-side, and each row
  *    keeps its rank number from the FULL list;
- *  - a successful search lands in localStorage history — browser-only by design, since the
- *    server never persists descriptions (route contract);
+ *  - retained searches are listed from the SERVER and are cross-officer (#6d), the officer is
+ *    told they are kept, and deleting one really deletes it;
  *  - the rail splits Concepts from Methods by `kind`, shows merged members as chips, and
  *    badges a rare concept;
  *  - the bespoke shape (empty concepts) renders no rail at all.
@@ -108,18 +113,49 @@ const BESPOKE: SponsorCandidate[] = [
   candidate({ cwid: "c", name: "Cara Gamma", department: "Surgery", fusedScore: 0.06 }),
 ];
 
+/**
+ * The panel now talks to the route with three verbs, so the stub answers by verb:
+ *   POST   — run the matcher (the ranking payload)
+ *   GET    — the retained searches (#6d)
+ *   DELETE — erase one
+ * A GET that returned the ranking payload would leave `submissions` undefined, which is a
+ * silently-empty history rather than an obviously-wrong one — worth not doing.
+ */
 function stubFetch(payload: {
   concepts: SponsorConcept[];
   candidates: SponsorCandidate[];
   preferences?: SponsorPreference[];
+  submissions?: Submission[];
 }) {
-  const fetchMock = vi.fn(async () => ({
-    ok: true,
-    json: async () => ({ ok: true, ...payload }),
-  }));
+  const fetchMock = vi.fn(async (_url: string, init?: { method?: string }) => {
+    const method = init?.method ?? "GET";
+    if (method === "GET") {
+      return { ok: true, json: async () => ({ ok: true, submissions: payload.submissions ?? [] }) };
+    }
+    return { ok: true, json: async () => ({ ok: true, ...payload }) };
+  });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
+
+/** Ranking requests only. The panel also GETs its retained-search list on mount and after a
+ *  search; those are not round-trips the SLIDER is allowed to cause, and conflating them with
+ *  the matcher POST would let a re-added re-query hide behind a history refresh. */
+function rankCalls(fetchMock: { mock: { calls: unknown[][] } }): number {
+  return fetchMock.mock.calls.filter(
+    (c) => ((c[1] as { method?: string } | undefined)?.method ?? "GET") === "POST",
+  ).length;
+}
+
+type Submission = {
+  id: string;
+  description: string;
+  title: string | null;
+  engine: string;
+  candidateCount: number;
+  submittedBy: string;
+  createdAt: string;
+};
 
 async function renderAndSearch() {
   render(<SponsorMatchPanel />);
@@ -156,7 +192,7 @@ describe("SponsorMatchPanel", () => {
 
     // Server order: Alice (Immuno #1), Bob (Immuno #2), Cara (Metabolism #1).
     expect(rowOrder()).toEqual(["Alice Alpha", "Bob Beta", "Cara Gamma"]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(rankCalls(fetchMock)).toBe(1);
 
     // Mute Immuno-oncology. Alice and Bob ranked ONLY under it, so both collapse to 0 and
     // Cara — who ranked under Cancer Metabolism — takes the top. This is recomputed from
@@ -166,8 +202,8 @@ describe("SponsorMatchPanel", () => {
     });
 
     expect(rowOrder()).toEqual(["Cara Gamma", "Alice Alpha", "Bob Beta"]);
-    // THE ASSERTION THAT MATTERS: the re-rank cost zero round-trips.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // THE ASSERTION THAT MATTERS: the re-rank cost zero round-trips to the RANKER.
+    expect(rankCalls(fetchMock)).toBe(1);
   });
 
   it("slides a muted concept back up and its candidates return", async () => {
@@ -183,7 +219,7 @@ describe("SponsorMatchPanel", () => {
     // sanitizeConcepts, which rewrote any non-positive centrality to 0.3.)
     fireEvent.change(slider, { target: { value: "0.9" } });
     expect(rowOrder()).toEqual(["Alice Alpha", "Bob Beta", "Cara Gamma"]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(rankCalls(fetchMock)).toBe(1);
   });
 
   // ── The rail ───────────────────────────────────────────────────────────────
@@ -611,15 +647,65 @@ describe("SponsorMatchPanel", () => {
     expect(screen.getByText(/90% match/)).toBeTruthy();
   });
 
-  it("saves the search to localStorage history and renders it", async () => {
-    await renderAndSearch();
-    const saved = JSON.parse(window.localStorage.getItem("sponsor-match-history")!) as Array<{
-      d: string;
-    }>;
-    expect(saved[0].d).toBe("CAR T collaborators");
-    expect(screen.getByText(/Recent searches \(1\)/)).toBeTruthy();
-    // Clearing wipes storage too.
-    fireEvent.click(screen.getByRole("button", { name: "Clear history" }));
-    expect(window.localStorage.getItem("sponsor-match-history")).toBeNull();
+  // ── Retained searches (#6d) ────────────────────────────────────────────────
+  it("lists retained searches from the SERVER, including a colleague's, and says they are kept", async () => {
+    // Cross-officer visibility is the whole reason this replaced the localStorage history: the
+    // private list could never tell you that someone else had already run this sponsor.
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: THREE,
+      submissions: [
+        {
+          id: "s1",
+          description: "We fund cardiac fibrosis work.",
+          title: "cardiac fibrosis",
+          engine: "spine",
+          candidateCount: 12,
+          submittedBy: "zzz9001", // NOT the current officer
+          createdAt: "2026-07-13T10:00:00.000Z",
+        },
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    expect(await screen.findByText(/Recent searches \(1\)/)).toBeTruthy();
+    expect(screen.getByText("zzz9001")).toBeTruthy();
+    expect(screen.getByText("cardiac fibrosis")).toBeTruthy();
+    // The officer is TOLD, on the surface where it happens — not in a policy page.
+    expect(screen.getByText(/Searches are saved/)).toBeTruthy();
+    expect(screen.getByText(/improve match quality/)).toBeTruthy();
+  });
+
+  it("deletes a retained search and drops it from the list", async () => {
+    const fetchMock = stubFetch({
+      concepts: CONCEPTS,
+      candidates: THREE,
+      submissions: [
+        {
+          id: "s1",
+          description: "We fund cardiac fibrosis work.",
+          title: "cardiac fibrosis",
+          engine: "spine",
+          candidateCount: 12,
+          submittedBy: "aaa1001",
+          createdAt: "2026-07-13T10:00:00.000Z",
+        },
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    await screen.findByText(/Recent searches \(1\)/);
+
+    fireEvent.click(screen.getByRole("button", { name: /Delete search: cardiac fibrosis/ }));
+    await screen.findByText(/Recent searches \(0\)/).catch(() => null);
+
+    // The row is gone from the list, and a DELETE actually went to the server — a client-only
+    // hide would leave the sponsor's text sitting in the database.
+    const deletes = fetchMock.mock.calls.filter(
+      (c) => (c[1] as { method?: string } | undefined)?.method === "DELETE",
+    );
+    expect(deletes).toHaveLength(1);
+    expect(JSON.parse(String((deletes[0][1] as { body: string }).body))).toEqual({
+      submissionId: "s1",
+    });
+    expect(screen.queryByText("cardiac fibrosis")).toBeNull();
   });
 });

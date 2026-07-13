@@ -26,6 +26,7 @@ checkable from the handoff. Both took one grep.
 | §6a paste read-back | `lib/sponsor-paste-highlight.ts` + `PasteReadback` | Honest LOWER BOUND, see §2 below |
 | §6b the ask | `sponsorAskFrom` — **derived, no Bedrock call** | See §3 — the specced design was rejected |
 | §6c submission dedup | sha256 key + `shouldCache` gate | See §4 — nearly shipped a stuck-failure bug |
+| §6d retained searches | `SponsorMatchSubmission` — **the paste in full**, cross-officer list, delete | See §5 — the "never persist" rule turned out to have no policy behind it |
 
 Also: deleted `SponsorFacet` (declared, no producer, no consumer); made `preferenceBoost`
 exhaustive with a `never` default, which the contract's header already claimed but did not
@@ -98,35 +99,51 @@ envs), which is the trade the "never persisted" promise refuses.
 The TTL question the plan left open is **moot**: the reused cache's 30-minute staleness ceiling
 means no entry can outlive a nightly ETL run.
 
-## 5. §6d — persist the submission: NEEDS A DECISION
+## 5. §6d — SHIPPED, and it stores the paste
 
-Buildable now (§6b no longer gates it). But it is a **design reversal** and there is a fork the
-plan did not name.
+The plan's constraint was *"persist the title + the submitter + the timestamp — **not the
+paste**."* We inherited that and were about to build it, until the obvious question got asked:
+**why wouldn't we store the paste?**
 
-`app/api/edit/sponsor-match/route.ts:6-7` states, as a deliberate property: *"the pasted text is
-a query, never persisted."* Persisting a submission record makes that route a writer. The
-"never the paste" constraint is right and sufficient — but the doc comment becomes false the
-moment a row is written, and in this repo doc comments are treated as contracts.
+There was no answer. **The "commercially sensitive, never persist" rule has no policy behind
+it.** The claim exists in exactly one place in the codebase — a comment at
+`sponsor-match-panel.tsx:27`, introduced by the same PR that built the surface — and nowhere
+else. No spec, no legal reference. Meanwhile this same app already stores funder prose
+(`Opportunity.synopsis`), and already ships every paste to Bedrock and OpenSearch. The line was
+never drawn; it was assumed, and then quoted back as though it were a constraint.
 
-**The fork — and they cost very differently:**
+**Storing the paste is what unblocks §4.** The iteration handoff's own §0 is unambiguous: *"A
+synthetic corpus cannot tell you what the world contains — only what we asked it to contain. Any
+conclusion about sponsor behavior needs real sponsor text."* The λ preference weighting is
+unmeasurable without a preference-bearing gold set, and a gold set we author ourselves can only
+contain what we thought to ask for. **Retained pastes ARE that corpus.** The plan proposed
+hashing away the one asset that would have solved its own §4.
 
-| Option | Cost | Catch |
-|---|---|---|
-| **New Prisma model** (copy `SlugRequest`, `schema.prisma:2462`) | Clean additive migration | Required anyway if officers must LIST past submissions |
-| **B03 audit row** (`lib/edit/audit.ts`) | No schema change — it already persists actor + timestamp + JSON | `manual_edit_audit.target_entity_type` is a **MySQL ENUM**; a new value is NOT a Prisma migration, it rides `scripts/sql/audit-log.sql` + a **db-bootstrap run per environment** |
+Shipped as `SponsorMatchSubmission` — the paste in full, plus the derived title, engine,
+candidate count, actor, timestamp, and the same SHA-256 the result cache keys on (so a row and
+its cached result are joinable).
 
-Note the sibling precedent is ambiguous: opportunity-intake persists to **DynamoDB**
-(`opportunity-intake/route.ts:128`), not Prisma. "Follow the intake pattern" does not resolve it.
+Three properties, all load-bearing:
 
-**The recommendation: a new Prisma model, and only if the submissions LIST is actually wanted.**
-A persisted row with no reader is the seventh instance of this repo's dominant defect — the one
-the prior handoff's §3 is entirely about. If the goal is only "the officer can refer back to a
-past search", the panel **already** has per-officer history in localStorage. The genuinely new
-capability is *cross-officer* visibility. That is a real thing to want, but it should be wanted
-out loud, because it is the whole justification for reversing the route's posture.
+- **The officer is told.** The notice sits in the panel, on the list itself: *"Searches are saved
+  — including the description you pasted — so we can measure and improve match quality against
+  real sponsor text. Everyone with access to this console can see them."* A notice in a policy
+  page nobody opens is not a notice.
+- **Deletion is real, and anyone on the surface can do it** — not only the officer who pasted it.
+  Scoping erasure to one person would mean their absence could block a takedown we have committed
+  to honouring.
+- **The result cache still holds no verbatim paste text**, and this is now the *sharper* reason
+  for that rather than a vaguer one: if the cache held the sponsor's words, deleting a row would
+  leave them resident in RAM on every task that had served it, and **the delete button would be a
+  lie**.
 
-**Decide:** cross-officer submissions list — yes or no? If yes, it ships as model + write + read
-API + a panel section, together, in one PR.
+It also **replaced** the localStorage history rather than sitting beside it. The server list does
+everything the private one did, and adds the two things it could not: a colleague's searches, and
+an erasure that survives a browser. Two histories would have been two sources of truth for one
+question.
+
+**Revisit if** CTL tells us a sponsor expects confidentiality. Nothing in the code says so today —
+that was the whole finding.
 
 ## 6. §6e — copy-emails is a POLICY NO-GO, not a deferral
 
@@ -186,7 +203,10 @@ working bespoke UI. Either way it is a real decision, and it should be an issue.
   is required. (`sponsorAskFrom` is display-only; the cache returns the same engine output; the
   facet filters client-side.)
 - §4's preference-bearing fixtures remain the only way to ever score λ, and remain the one item
-  here that needs a human judgment call rather than code. The eval also does not currently
+  here that needs a human judgment call rather than code — but §6d now supplies the missing
+  INPUT: real sponsor pastes accumulate from today, so the corpus §0 said we lacked is being
+  collected. The judgment call (*should a topically-weaker early-career researcher outrank a
+  stronger senior one, and by how much?*) is still a human's to make. The eval also does not currently
   exercise `preferenceBoost` at all — `sponsor-eval.sh:90` reads only `.candidates[].cwid`, and
   the route ships the un-nudged order by design. Measuring λ needs a nudge-aware scoring step
   in the harness first. Budget that before any weighting work, or it is unmeasurable.
