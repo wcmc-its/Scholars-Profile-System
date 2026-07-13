@@ -667,7 +667,21 @@ describe("rankResearchersForDescriptionSpine", () => {
 });
 
 // ── Evidence (#1689) ────────────────────────────────────────────────────────
-/** A hit carrying the search's own evidence, as `searchPeople` emits it once asked. */
+/**
+ * A hit in the shape `searchPeople` ACTUALLY emits in staging and prod: the TIERED
+ * `evidenceLines[]`, not the singular `evidence`.
+ *
+ * Which field is emitted is a FLAG DECISION (`SEARCH_EVIDENCE_REASON_COUNTS`), and it is ON in
+ * both deployed environments — so `evidence` is never populated there. The first cut of #1689
+ * read only `evidence`, passed every test, and returned 0 evidence for 160 real hits on
+ * staging. This factory exists so the suite tests the shape production actually sends.
+ */
+function hitWithEvidenceLines(cwid: string, term: string, count: number, pubCount: number) {
+  const { evidence, ...rest } = hitWithEvidence(cwid, term, count, pubCount);
+  return { ...rest, evidenceLines: [evidence] };
+}
+
+/** The LEGACY single-object shape (emitted only with the reason-counts flag off). */
 function hitWithEvidence(cwid: string, term: string, count: number, pubCount: number) {
   return {
     ...hit(cwid),
@@ -770,6 +784,47 @@ describe("rankResearchersForDescriptionSpine — evidence (#1689)", () => {
     expect(a.contributions.length).toBe(2); // ranked under both
     expect(a.searchEvidence?.evidence).toMatchObject({ term: "Munchausen" });
     expect(a.searchEvidence?.keyPaper.descriptorUis).toEqual(["D_MUNCH"]);
+  });
+
+
+  it("reads the TIERED `evidenceLines` shape production actually emits, not just `evidence`", async () => {
+    // THE REGRESSION THIS FILE EXISTS FOR. `searchPeople` emits `evidenceLines[]` whenever
+    // SEARCH_EVIDENCE_REASON_COUNTS is on — which it is, in staging AND prod — and then never
+    // populates `evidence`. Reading only `evidence` yields a candidate list with no evidence at
+    // all in every environment that matters, while every mocked test still passes.
+    mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+    mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
+    mockSearchPeople.mockResolvedValue({
+      hits: [hitWithEvidenceLines("a", "Cancer", 12, 40)],
+      total: 1,
+      pageSize: 20,
+    });
+
+    const { candidates } = await rankResearchersForDescriptionSpine("cancer work");
+
+    expect(candidates[0].searchEvidence?.evidence).toMatchObject({
+      kind: "publications",
+      term: "Cancer",
+      count: 12,
+    });
+    expect(candidates[0].searchEvidence?.pubCount).toBe(40);
+  });
+
+  it("takes the PRIMARY lead when several evidence lines are tiered", async () => {
+    // `evidenceLines[0]` is the strongest reason by the search's own precedence ladder — the
+    // one the People card renders large. A lesser "Also matched" row must not caption the card.
+    mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+    mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
+    const primary = hitWithEvidence("a", "Cancer", 30, 40).evidence;
+    const lesser = hitWithEvidence("a", "Something Weaker", 1, 40).evidence;
+    mockSearchPeople.mockResolvedValue({
+      hits: [{ ...hit("a"), pubCount: 40, evidenceLines: [primary, lesser] }],
+      total: 1,
+      pageSize: 20,
+    });
+
+    const { candidates } = await rankResearchersForDescriptionSpine("cancer work");
+    expect(candidates[0].searchEvidence?.evidence).toMatchObject({ term: "Cancer", count: 30 });
   });
 
   it("leaves evidence ABSENT when the hit carries none — never a zeroed count", async () => {
