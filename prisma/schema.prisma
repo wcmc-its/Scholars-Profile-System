@@ -2648,3 +2648,57 @@ model SamlAssertionSeen {
   @@index([expiresAt], map: "idx_saml_assertion_seen_expires_at")
   @@map("saml_assertion_seen")
 }
+
+/// A sponsor-match search, retained (#6d).
+///
+/// THIS REVERSES THE ROUTE'S ORIGINAL POSTURE, DELIBERATELY. `/api/edit/sponsor-match` was
+/// built to persist nothing — "the pasted text is a query, never persisted" — on the stated
+/// grounds that sponsor descriptions are commercially sensitive. That rule turned out to have
+/// no policy behind it: the claim lived in a single code comment and nowhere else, while the
+/// same app already stores funder prose (`Opportunity.synopsis`) and already sends every paste
+/// to Bedrock and OpenSearch. The line was never actually drawn; it was assumed.
+///
+/// It is now drawn the other way, on purpose, because retaining the text buys two things
+/// nothing else can:
+///  - REAL SPONSOR TEXT. The λ preference-weighting cannot be measured against a corpus we
+///    wrote ourselves — a synthetic corpus only contains what we thought to ask for. Genuine
+///    pastes are the only source of a preference-bearing gold set.
+///  - Dedup and audit that survive a task restart, which a per-task RAM cache cannot give.
+///
+/// The officer is TOLD their searches are kept and to what end, and can DELETE any of them.
+/// Deletion must be real, which is why the in-process result cache holds no verbatim paste
+/// text (see the route): a deleted row must not leave the sponsor's words resident in RAM.
+model SponsorMatchSubmission {
+  id String @id @default(uuid()) @db.VarChar(64)
+
+  /// The paste, in full. The reason this model exists.
+  description String @db.Text
+
+  /// SHA-256 of `normalizeDescription(description)` — the same key the result cache uses, so a
+  /// row and its cached result identify the same search. NOT unique: the same paste re-run
+  /// after a nightly reindex is a genuinely different search, and squashing the two would
+  /// destroy the record of when a result changed.
+  descriptionHash String @map("description_hash") @db.VarChar(64)
+
+  /// The derived handle (`sponsorAskFrom`) — "cardiac fibrosis, myofibroblast · Early-career".
+  /// Nullable: a paste that yielded no concepts has nothing to be named after, and an empty
+  /// string would read as a title rather than the absence of one.
+  title String? @db.VarChar(512)
+
+  /// Which engine answered — spine or bespoke. A submission's results are not interpretable
+  /// without it.
+  engine String @db.VarChar(16)
+
+  /// How many candidates came back. Zero is meaningful (it is what a weak-coverage paste, or a
+  /// degraded Bedrock call, looks like) and is exactly what we want to be able to go back and
+  /// examine.
+  candidateCount Int @map("candidate_count")
+
+  submittedBy String   @map("submitted_by") @db.VarChar(32) // actor cwid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt]) // the list view: newest first
+  @@index([submittedBy])
+  @@index([descriptionHash])
+  @@map("sponsor_match_submission")
+}

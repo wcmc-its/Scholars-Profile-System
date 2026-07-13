@@ -119,6 +119,44 @@ export function careerStageLabel(stage: CareerStage | null): string {
   return stage ? CAREER_STAGE_LABELS[stage] : "";
 }
 
+// ED's `role_category` codes, as the person-type facet renders them. The vocabulary is the
+// one `careerStageBucket` switches on (lib/career-stage.ts) — this is a display map for it,
+// not a second source of truth about what roles exist.
+//
+// `doctoral_student_*` is a PREFIX FAMILY, so it is matched, not looked up.
+const ROLE_CATEGORY_LABELS: Record<string, string> = {
+  full_time_faculty: "Full-time faculty",
+  affiliated_faculty: "Affiliated faculty",
+  non_faculty_academic: "Non-faculty academic",
+  instructor: "Instructor",
+  lecturer: "Lecturer",
+  postdoc: "Postdoc",
+  fellow: "Fellow",
+  emeritus: "Emeritus",
+  doctoral_student_md: "Doctoral student (MD)",
+  doctoral_student_phd: "Doctoral student (PhD)",
+  doctoral_student_mdphd: "Doctoral student (MD-PhD)",
+  affiliate_alumni: "Alumni",
+  non_academic: "Non-academic staff",
+};
+
+/**
+ * Human label for an ED person-type code. Empty string for absent — the caller decides what
+ * absence means, and it is never "unknown person type": a candidate with no Scholar row is
+ * left OUT of the facet rather than bucketed into a made-up one.
+ *
+ * An unrecognised code is HUMANISED (`some_new_role` → "Some new role"), not dropped. ED owns
+ * this vocabulary and can extend it without asking us; a hard-coded map that silently hid
+ * every scholar carrying a new code would be a worse failure than an imperfect label.
+ */
+export function roleCategoryLabel(role: string | null | undefined): string {
+  if (!role) return "";
+  const known = ROLE_CATEGORY_LABELS[role];
+  if (known) return known;
+  const humanized = role.replace(/_/g, " ").trim();
+  return humanized ? humanized.charAt(0).toUpperCase() + humanized.slice(1) : "";
+}
+
 // Funding status (mirrors FundingStatus in lib/api/match-researchers; redeclared
 // here so this client-safe module imports no server code).
 export type FundingStatus = "funded" | "unfunded";

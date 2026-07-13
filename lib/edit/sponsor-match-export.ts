@@ -45,6 +45,8 @@ export type SponsorMatchCsvRow = {
   careerStage: string;
   /** #1654 — "Yes" / "No" / "" (absent). Same rule: blank is unknown, not "not a clinician". */
   clinician: string;
+  /** ED person type as its display label ("Postdoc"), or "" when absent. Blank is unknown. */
+  personType: string;
   /** Absolute profile URL, so the cell is clickable when pasted anywhere. */
   profileUrl: string;
 };
@@ -57,6 +59,7 @@ const HEADERS = [
   "Department",
   "Fit",
   "Matched concepts",
+  "Person type",
   "Career stage",
   "Clinician",
   "CTL technologies",
@@ -74,6 +77,7 @@ export function buildSponsorMatchCsv(rows: readonly SponsorMatchCsvRow[]): strin
       r.department ?? "",
       r.fit,
       r.matchedConcepts.join("; "),
+      r.personType,
       r.careerStage,
       r.clinician,
       r.technologyCount,
