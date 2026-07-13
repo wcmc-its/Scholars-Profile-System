@@ -35,6 +35,18 @@ type Variant = "header" | "hero";
 const NAV_WATCHDOG_MS = 7000;
 
 /**
+ * #1412 item 4 — suggestion cache, keyed by the exact typed prefix. Debounce +
+ * AbortController stopped in-flight duplicates but nothing remembered a settled answer,
+ * so backspacing through a typed query re-fetched every prefix on the way back. Module
+ * scope, not component state: the header input remounts across navigations and the cache
+ * should survive that.
+ *
+ * ponytail: unbounded Map, cleared per session. A suggest key is a short prefix and a
+ * session types a bounded number of them — swap in an LRU if that ever stops being true.
+ */
+const suggestCache = new Map<string, Suggestion[]>();
+
+/**
  * Search input with entity-aware autocomplete (spec line 184: fires on 2 chars).
  * Submitting routes to /search?q=<query>; clicking a suggestion routes to the
  * entity's canonical page.
@@ -114,6 +126,15 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
       return;
     }
     abortRef.current?.abort();
+    // A prefix we have already resolved: serve it and issue no request at all. This is
+    // the backspace path — skipping the debounce too, since there is nothing to wait for.
+    const cached = suggestCache.get(value);
+    if (cached) {
+      setSuggestions(cached);
+      setActiveIndex(-1);
+      setOpen(true);
+      return;
+    }
     const controller = new AbortController();
     abortRef.current = controller;
     let ignore = false;
@@ -124,8 +145,12 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
         });
         if (!resp.ok) return;
         const data = (await resp.json()) as { suggestions: Suggestion[] };
+        const next = data.suggestions ?? [];
+        // Cache on arrival, not on render — an aborted/superseded response still taught us
+        // what that prefix resolves to, and the user may well backspace onto it.
+        suggestCache.set(value, next);
         if (ignore) return;
-        setSuggestions(data.suggestions ?? []);
+        setSuggestions(next);
         setActiveIndex(-1);
         setOpen(true);
       } catch (e) {
