@@ -90,8 +90,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 11 CloudWatch alarms (10 platform + 1 B27 relay-errors)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 11);
+    it("creates exactly 12 CloudWatch alarms (11 platform + 1 B27 relay-errors)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 12);
     });
 
     it("every alarm name contains the prod env literal (Footgun #4)", () => {
@@ -99,13 +99,13 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(11);
+      expect(names).toHaveLength(12);
       for (const name of names) {
         expect(name).toMatch(/-prod$/);
       }
     });
 
-    it("alarm names cover the ten platform surfaces plus the B27 relay-errors alarm", () => {
+    it("alarm names cover the eleven platform surfaces plus the B27 relay-errors alarm", () => {
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
@@ -118,6 +118,7 @@ describe("SpsObservabilityStack", () => {
           "sps-alb-unhealthy-hosts-prod",
           "sps-aurora-connections-prod",
           "sps-aurora-cpu-prod",
+          "sps-db-pool-timeout-prod",
           "sps-ecs-task-shortfall-prod",
           "sps-edit-authz-denied-prod",
           "sps-opensearch-breaker-prod",
@@ -282,6 +283,7 @@ describe("SpsObservabilityStack", () => {
         "sps-opensearch-cluster-red-prod": pageId,
         "sps-aurora-cpu-prod": warnId,
         "sps-aurora-connections-prod": warnId,
+        "sps-db-pool-timeout-prod": pageId,
         "sps-opensearch-jvm-pressure-prod": warnId,
         "sps-edit-authz-denied-prod": warnId,
         "sps-oncall-relay-errors-prod": notifyId,
@@ -308,7 +310,7 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      expect(seen).toBe(11);
+      expect(seen).toBe(12);
     });
 
     it("creates the app-unavailable composite that pages on the serving cascade", () => {
@@ -515,7 +517,7 @@ describe("SpsObservabilityStack", () => {
     });
 
     it("creates the B02 edit_authz_denied metric filter on the app log group", () => {
-      template.resourceCountIs("AWS::Logs::MetricFilter", 2);
+      template.resourceCountIs("AWS::Logs::MetricFilter", 3);
       const filters = template.findResources("AWS::Logs::MetricFilter", {
         Properties: { FilterName: "sps-edit-authz-denied-prod" },
       });
@@ -830,8 +832,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 11 CloudWatch alarms (10 platform + 1 B27 relay-errors)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 11);
+    it("creates exactly 12 CloudWatch alarms (11 platform + 1 B27 relay-errors)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 12);
     });
 
     it("every alarm name contains the staging env literal", () => {
@@ -839,7 +841,7 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(11);
+      expect(names).toHaveLength(12);
       for (const name of names) {
         expect(name).toMatch(/-staging$/);
       }
@@ -919,6 +921,7 @@ describe("SpsObservabilityStack", () => {
         "sps-opensearch-cluster-red-staging": pageId,
         "sps-aurora-cpu-staging": warnId,
         "sps-aurora-connections-staging": warnId,
+        "sps-db-pool-timeout-staging": pageId,
         "sps-opensearch-jvm-pressure-staging": warnId,
         "sps-edit-authz-denied-staging": warnId,
         "sps-oncall-relay-errors-staging": notifyId,
@@ -944,7 +947,7 @@ describe("SpsObservabilityStack", () => {
           expect(actions[0]?.Ref).toBe(dest);
         }
       }
-      expect(seen).toBe(11);
+      expect(seen).toBe(12);
     });
 
     it("creates the app-unavailable composite in staging too", () => {
@@ -1018,7 +1021,7 @@ describe("SpsObservabilityStack", () => {
     // log-group-scoped (per-env) rather than account-wide. They must ship in
     // both envs so staging traffic exercises the binding before prod.
     it("creates the B02 edit_authz_denied metric filter in staging (not prod-only)", () => {
-      template.resourceCountIs("AWS::Logs::MetricFilter", 2);
+      template.resourceCountIs("AWS::Logs::MetricFilter", 3);
       template.hasResourceProperties("AWS::Logs::MetricFilter", {
         FilterPattern: '{ $.event = "edit_authz_denied" }',
       });

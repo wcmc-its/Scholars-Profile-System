@@ -124,22 +124,22 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "Ref": "WarnTopicFEEED862",
           },
         ],
-        "AlarmDescription": "Aurora active connection count > 80 sustained over 5m (prod). Symptom of connection-pool exhaustion or unintended app fan-out. Next: look for leaked or idle connections; recycle the app tasks if the count will not drain.",
+        "AlarmDescription": "Aurora active connection count > 70 sustained over 10m (prod). Normal peak is 60; each leaked Prisma pool adds exactly 15, and the cluster caps near 90. Most likely a one-off ECS probe/eval task that never called db.$disconnect() and is still RUNNING long after printing its output. Next: aws ecs list-tasks --cluster sps-cluster-prod --family sps-etl-prod --desired-status RUNNING, stop the zombies (read-only probes are data-safe), and watch DatabaseConnections drain. See docs/performance-baseline.md.",
         "AlarmName": "sps-aurora-connections-prod",
         "ComparisonOperator": "GreaterThanThreshold",
-        "DatapointsToAlarm": 3,
+        "DatapointsToAlarm": 2,
         "Dimensions": [
           {
             "Name": "DBClusterIdentifier",
             "Value": "sps-data-prod-auroraclusterfromsnapshot7b6a45d8-ylbuldcja7bm",
           },
         ],
-        "EvaluationPeriods": 3,
+        "EvaluationPeriods": 2,
         "MetricName": "DatabaseConnections",
         "Namespace": "AWS/RDS",
         "Period": 300,
         "Statistic": "Maximum",
-        "Threshold": 80,
+        "Threshold": 70,
         "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
@@ -170,6 +170,45 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
+    },
+    "DbPoolTimeoutAlarm06C9E04F": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "A request could not get a DB connection from the pool (prod) -- users are seeing 500s right now. If the log line says active=0 idle=0, the Aurora cluster is at its connection cap and recycling the app will NOT help. Next: check DatabaseConnections on the cluster, then stop any zombie one-off ECS tasks holding pools (see the sps-aurora-connections-prod alarm and docs/performance-baseline.md).",
+        "AlarmName": "sps-db-pool-timeout-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 1,
+        "EvaluationPeriods": 1,
+        "MetricName": "DbPoolTimeout",
+        "Namespace": "SPS/Data",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "DbPoolTimeoutMetricFilterEC77C148": {
+      "Properties": {
+        "FilterName": "sps-db-pool-timeout-prod",
+        "FilterPattern": ""pool timeout"",
+        "LogGroupName": {
+          "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefAppLogGroup7D8CD9527CC48D3E",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "DbPoolTimeout",
+            "MetricNamespace": "SPS/Data",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
     },
     "EcsTaskShortfallAlarm951444EC": {
       "Properties": {
@@ -1132,22 +1171,22 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
             "Ref": "WarnTopicFEEED862",
           },
         ],
-        "AlarmDescription": "Aurora active connection count > 80 sustained over 5m (staging). Symptom of connection-pool exhaustion or unintended app fan-out. Next: look for leaked or idle connections; recycle the app tasks if the count will not drain.",
+        "AlarmDescription": "Aurora active connection count > 70 sustained over 10m (staging). Normal peak is 60; each leaked Prisma pool adds exactly 15, and the cluster caps near 90. Most likely a one-off ECS probe/eval task that never called db.$disconnect() and is still RUNNING long after printing its output. Next: aws ecs list-tasks --cluster sps-cluster-staging --family sps-etl-staging --desired-status RUNNING, stop the zombies (read-only probes are data-safe), and watch DatabaseConnections drain. See docs/performance-baseline.md.",
         "AlarmName": "sps-aurora-connections-staging",
         "ComparisonOperator": "GreaterThanThreshold",
-        "DatapointsToAlarm": 3,
+        "DatapointsToAlarm": 2,
         "Dimensions": [
           {
             "Name": "DBClusterIdentifier",
             "Value": "sps-data-staging-auroraclusterfromsnapshot7b6a45d8-8kp4eh79cfrn",
           },
         ],
-        "EvaluationPeriods": 3,
+        "EvaluationPeriods": 2,
         "MetricName": "DatabaseConnections",
         "Namespace": "AWS/RDS",
         "Period": 300,
         "Statistic": "Maximum",
-        "Threshold": 80,
+        "Threshold": 70,
         "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
@@ -1178,6 +1217,45 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
+    },
+    "DbPoolTimeoutAlarm06C9E04F": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "A request could not get a DB connection from the pool (staging) -- users are seeing 500s right now. If the log line says active=0 idle=0, the Aurora cluster is at its connection cap and recycling the app will NOT help. Next: check DatabaseConnections on the cluster, then stop any zombie one-off ECS tasks holding pools (see the sps-aurora-connections-staging alarm and docs/performance-baseline.md).",
+        "AlarmName": "sps-db-pool-timeout-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 1,
+        "EvaluationPeriods": 1,
+        "MetricName": "DbPoolTimeout",
+        "Namespace": "SPS/Data",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "DbPoolTimeoutMetricFilterEC77C148": {
+      "Properties": {
+        "FilterName": "sps-db-pool-timeout-staging",
+        "FilterPattern": ""pool timeout"",
+        "LogGroupName": {
+          "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefAppLogGroup7D8CD9527CC48D3E",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "DbPoolTimeout",
+            "MetricNamespace": "SPS/Data",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
     },
     "EcsTaskShortfallAlarm951444EC": {
       "Properties": {
