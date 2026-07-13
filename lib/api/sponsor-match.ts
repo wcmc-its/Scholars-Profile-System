@@ -97,6 +97,9 @@ export type SponsorRankedScholar = RankedScholar & {
   /** #1654 — the clinician half of `SponsorMeasures`; the career-stage half already rides
    *  in on `RankedScholar`. Undefined ⇒ no Scholar row, never "not a clinician". */
   isClinician?: boolean;
+  /** ED's person-type code, for the person-type facet. Undefined ⇒ no Scholar row; null ⇒
+   *  the row has no role. Neither is "unknown" — see `SponsorMeasures.roleCategory`. */
+  roleCategory?: string | null;
 };
 
 /** Trust-boundary normalization: strip control chars (tab/newline survive as
@@ -263,13 +266,14 @@ export async function rankResearchersForDescription(
       db.read.scholar.findMany({
         where: { cwid: { in: cwids } },
         // #1654 — `careerStage` already rides in on RankedScholar (the matcher computes it),
-        // so the only measure missing here is the clinician flag. One extra column on the
-        // read this engine already does for title/department.
+        // so the measures missing here are the clinician flag and the person-type code. Two
+        // extra columns on the read this engine already does for title/department.
         select: {
           cwid: true,
           primaryTitle: true,
           primaryDepartment: true,
           hasClinicalProfile: true,
+          roleCategory: true,
         },
       }),
       db.read.scholarTechnology.groupBy({
@@ -302,6 +306,7 @@ export async function rankResearchersForDescription(
       // #1654 — absent (not `false`) when the scholar row is missing: the contract's
       // "absent ≠ none" rule, so a facet can't silently bucket someone as non-clinician.
       r.isClinician = p?.hasClinicalProfile;
+      r.roleCategory = p?.roleCategory;
       r.topPapers = (topPapersByCwid.get(r.cwid) ?? []).flatMap((paper) => {
         const pub = pubByPmid.get(paper.pmid);
         return pub

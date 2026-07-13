@@ -345,7 +345,7 @@ describe("SponsorMatchPanel", () => {
       expect(parts).toHaveLength(1);
       const csv = parts[0];
       expect(csv.split("\r\n")[0]).toBe(
-        "Rank,CWID,Name,Title,Department,Fit,Matched concepts,Career stage,Clinician,CTL technologies,Profile URL",
+        "Rank,CWID,Name,Title,Department,Fit,Matched concepts,Person type,Career stage,Clinician,CTL technologies,Profile URL",
       );
       expect(csv).toContain("Alice Alpha");
       expect(csv).toContain("Strong fit");
@@ -405,6 +405,82 @@ describe("SponsorMatchPanel", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /Practicing clinician/ }));
     expect(screen.getByText("Alice Alpha")).toBeTruthy();
     expect(screen.queryByText("Bob Beta")).toBeNull();
+  });
+
+  // ── Person type facet (§2) ─────────────────────────────────────────────────
+  it("renders no Person type facet when no candidate carries a role", async () => {
+    await renderAndSearch(); // THREE — no `measures`
+    // Same rule as the two facets above: a candidate with no Scholar row is ABSENT from the
+    // facet, never bucketed into a made-up "unknown" person type.
+    expect(screen.queryByText("Person type")).toBeNull();
+  });
+
+  it("renders the Person type facet with ED's labels, and filters on it", async () => {
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          fusedScore: 0.9,
+          measures: { roleCategory: "full_time_faculty" },
+        }),
+        candidate({
+          cwid: "b",
+          name: "Bob Beta",
+          fusedScore: 0.5,
+          measures: { roleCategory: "postdoc" },
+        }),
+        // No role at all — must survive the unfiltered view but be excluded by any selection.
+        candidate({ cwid: "c", name: "Carol Gamma", fusedScore: 0.4, measures: {} }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    expect(screen.getByText("Person type")).toBeTruthy();
+    // The raw ED code is never shown — `full_time_faculty` is not a label.
+    expect(screen.queryByText(/full_time_faculty/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Full-time faculty/ }));
+    expect(screen.getByText("Alice Alpha")).toBeTruthy();
+    expect(screen.queryByText("Bob Beta")).toBeNull();
+    // The roleless candidate fails the filter — she cannot be SHOWN to satisfy it.
+    expect(screen.queryByText("Carol Gamma")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByText("Carol Gamma")).toBeTruthy();
+  });
+
+  // ── Paste read-back (§6a) ──────────────────────────────────────────────────
+  it("marks the extracted terms in the paste, and says how many it could not point at", async () => {
+    await renderAndSearch(); // searches for "CAR T"; CONCEPTS has 2 concepts
+    // The readback quotes the text that was SEARCHED. None of the three concept terms occurs
+    // in "CAR T collaborators", so nothing marks — and the panel must SAY so, rather than let
+    // an unmarked paste read as "the matcher ignored all of this".
+    expect(screen.getByText(/What we read from the description/)).toBeTruthy();
+    expect(screen.getByText(/0 of 3 concepts are highlighted/)).toBeTruthy();
+  });
+
+  it("highlights a member phrasing and ties it back to its concept", async () => {
+    stubFetch({
+      concepts: CONCEPTS, // "Immuno-oncology" carries the member "immunotherapy"
+      candidates: [candidate({ cwid: "a", name: "Alice Alpha", fusedScore: 0.9 })],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), {
+      target: { value: "We fund immunotherapy research." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    const mark = screen.getByText("immunotherapy", { selector: "mark" });
+    expect(mark).toBeTruthy();
+    // The mark points back at the CONCEPT, not at itself — that is the audit trail.
+    expect(mark.getAttribute("title")).toBe("Immuno-oncology");
+    expect(screen.getByText(/1 of 3 concepts are highlighted/)).toBeTruthy();
   });
 
   // ── Sponsor preferences (#1654) ────────────────────────────────────────────

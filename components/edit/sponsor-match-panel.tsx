@@ -76,8 +76,9 @@ import {
 } from "@/lib/api/sponsor-match-contract";
 import type { CareerStage } from "@/lib/career-stage";
 import { buildSponsorMatchCsv } from "@/lib/edit/sponsor-match-export";
-import { careerStageLabel } from "@/lib/match-display";
+import { careerStageLabel, roleCategoryLabel } from "@/lib/match-display";
 import { profilePath } from "@/lib/profile-url";
+import { markPaste, markedConceptCount } from "@/lib/sponsor-paste-highlight";
 import { initials } from "@/lib/utils";
 
 type Status =
@@ -169,6 +170,7 @@ export function SponsorMatchPanel() {
   // so the filter compares labels too. One vocabulary, no id↔label map to drift.
   const [stageSel, setStageSel] = useState<ReadonlySet<string>>(new Set());
   const [clinicianOnly, setClinicianOnly] = useState(false);
+  const [roleSel, setRoleSel] = useState<ReadonlySet<string>>(new Set());
   const [sort, setSort] = useState<SortKey>("fit");
   // The two halves of the contract payload. `candidates` is fetched ONCE per search and
   // never refetched by a slider; `concepts` is the editable rail. Everything below is
@@ -179,6 +181,13 @@ export function SponsorMatchPanel() {
   // Keyed by label: an extractor that fires twice on the same ask would emit one entry.
   const [preferences, setPreferences] = useState<SponsorPreference[]>([]);
   const [activePrefs, setActivePrefs] = useState<ReadonlySet<string>>(new Set());
+  // #6a — the text THAT WAS SEARCHED, snapshotted at submit. Not `description`: the textarea
+  // stays mounted and editable while results are on screen, so highlighting the live value
+  // would mark words that never produced these concepts (and, after a history replay, a
+  // different paste entirely).
+  const [matchedText, setMatchedText] = useState("");
+  // The search's handle, derived server-side from the concepts (`sponsorAskFrom`).
+  const [ask, setAsk] = useState<SponsorMatchResponse["ask"]>(undefined);
   const pending = status.kind === "loading";
 
   // SSR-safe history load: start empty, read localStorage in an effect (no
@@ -229,6 +238,7 @@ export function SponsorMatchPanel() {
     setCtlOnly(false);
     setStageSel(new Set());
     setClinicianOnly(false);
+    setRoleSel(new Set());
   }
 
   /** The ONLY network call. A search — never a re-rank. */
@@ -251,6 +261,8 @@ export function SponsorMatchPanel() {
         saveHistory(text.trim());
         setCandidates(data.candidates ?? []);
         setConcepts(data.concepts ?? []);
+        setMatchedText(text);
+        setAsk(data.ask);
         // #1654 — detected preferences arrive ACTIVE. The sponsor said it; the default is to
         // honour it. Deselecting is the officer's override, not their opt-in.
         const prefs = data.preferences ?? [];
@@ -366,8 +378,25 @@ export function SponsorMatchPanel() {
     [ranked],
   );
 
+  // Person type. Same discipline as the two above: only rows that CARRY a role are counted, so
+  // a candidate with no Scholar row is absent from the facet rather than invented into one.
+  // Ordered by count — unlike career stage there is no natural ladder to preserve.
+  const roleFacet = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of ranked) {
+      const label = roleCategoryLabel(c.measures?.roleCategory);
+      if (label) counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    return [...counts].sort((a, b) => b[1] - a[1]);
+  }, [ranked]);
+
   const hasFilters =
-    deptSel.size > 0 || conceptSel.size > 0 || ctlOnly || stageSel.size > 0 || clinicianOnly;
+    deptSel.size > 0 ||
+    conceptSel.size > 0 ||
+    ctlOnly ||
+    stageSel.size > 0 ||
+    clinicianOnly ||
+    roleSel.size > 0;
 
   // Live rank travels with the row, so a filtered view still reads "this person is #7 overall",
   // not "#1 of the filtered three". It re-derives as sliders move.
@@ -388,12 +417,13 @@ export function SponsorMatchPanel() {
           (stageSel.size === 0 ||
             (c.measures?.careerStage != null &&
               stageSel.has(careerStageLabel(c.measures.careerStage)))) &&
-          (!clinicianOnly || c.measures?.isClinician === true),
+          (!clinicianOnly || c.measures?.isClinician === true) &&
+          (roleSel.size === 0 || roleSel.has(roleCategoryLabel(c.measures?.roleCategory))),
       );
     return sort === "name"
       ? [...rows].sort((a, b) => a.c.name.localeCompare(b.c.name))
       : rows;
-  }, [ranked, deptSel, conceptSel, ctlOnly, stageSel, clinicianOnly, sort]);
+  }, [ranked, deptSel, conceptSel, ctlOnly, stageSel, clinicianOnly, roleSel, sort]);
 
   /** Exports exactly what is on screen — current sliders, current filters, current sort. A
    *  server route could not do this: it would re-run the match and emit the DEFAULT ranking,
@@ -412,6 +442,7 @@ export function SponsorMatchPanel() {
         careerStage: c.measures?.careerStage ? careerStageLabel(c.measures.careerStage) : "",
         clinician:
           c.measures?.isClinician === undefined ? "" : c.measures.isClinician ? "Yes" : "No",
+        personType: roleCategoryLabel(c.measures?.roleCategory),
         technologyCount: c.technologyCount,
         profileUrl: new URL(
           profilePath(c.profileSlug),
@@ -516,6 +547,14 @@ export function SponsorMatchPanel() {
         </p>
       ) : status.kind === "ok" ? (
         <>
+          {ask ? (
+            <h2 data-slot="sponsor-match-ask" className="pt-4 text-base font-semibold">
+              {ask.title}
+            </h2>
+          ) : null}
+          {concepts.length > 0 && matchedText.length > 0 ? (
+            <PasteReadback text={matchedText} concepts={concepts} />
+          ) : null}
           {ranked.length === 0 ? (
             <p className="text-muted-foreground py-4 text-sm">
               No researchers matched this description.
@@ -618,6 +657,15 @@ export function SponsorMatchPanel() {
                       selected={stageSel}
                       onToggle={(v) => setStageSel(toggled(stageSel, v))}
                       title="Years since terminal degree, bucketed — the same derivation the funding matcher ranks on."
+                    />
+                  ) : null}
+                  {roleFacet.length > 0 ? (
+                    <FacetGroup
+                      label="Person type"
+                      options={roleFacet}
+                      selected={roleSel}
+                      onToggle={(v) => setRoleSel(toggled(roleSel, v))}
+                      title="The Enterprise Directory's person type — faculty, postdoc, doctoral student, and so on."
                     />
                   ) : null}
                   {clinicianCount > 0 ? (
@@ -825,6 +873,57 @@ function ConceptRail({
  * will leave you with — not a number from a pool you cannot see. They move as sliders move,
  * which is correct: the ranking moved.
  */
+/**
+ * #6a — the paste, read back with each extracted concept marked where it literally occurs.
+ *
+ * This is the decomposition's audit trail: it lets an officer see that the matcher read
+ * "our CAR-T program" as *chimeric antigen receptor T-cell therapy* — and, more usefully,
+ * catch it when it read something as a concept that was never the point.
+ *
+ * IT IS A LOWER BOUND, AND IT SAYS SO. The extractor canonicalises ("CF" → "cystic fibrosis"),
+ * so a concept whose canonical form never appears in the paste cannot be anchored to any span
+ * (`lib/sponsor-paste-highlight.ts` documents why). Rather than let the officer read an unmarked
+ * paragraph as "the matcher ignored this", the count is stated plainly. Absent ≠ ignored — the
+ * same rule the rest of this contract keeps.
+ *
+ * Collapsed by default: it repeats text the officer just pasted, and the results are the point.
+ * It is a <details> over a <div>, not the <textarea> — a textarea cannot contain a <mark>.
+ */
+function PasteReadback({ text, concepts }: { text: string; concepts: SponsorConcept[] }) {
+  const segments = useMemo(() => markPaste(text, concepts), [text, concepts]);
+  const marked = useMemo(() => markedConceptCount(segments), [segments]);
+
+  return (
+    <details data-slot="sponsor-match-readback" className="mt-3">
+      <summary className="text-muted-foreground cursor-pointer text-xs underline-offset-4 hover:underline">
+        What we read from the description
+      </summary>
+      <div className="border-border mt-2 rounded-lg border p-3">
+        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+          {segments.map((s, i) =>
+            s.term ? (
+              <mark
+                key={i}
+                title={s.term}
+                className="rounded bg-[var(--color-accent-slate)]/15 px-0.5 text-inherit"
+              >
+                {s.text}
+              </mark>
+            ) : (
+              <span key={i}>{s.text}</span>
+            ),
+          )}
+        </p>
+        <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
+          {`${marked} of ${concepts.length} ${
+            concepts.length === 1 ? "concept is" : "concepts are"
+          } highlighted above. The rest were recognised but written in standard terms that do not appear verbatim in the description (an abbreviation expanded, a brand name resolved), so there is nothing here to point at — they were not ignored.`}
+        </p>
+      </div>
+    </details>
+  );
+}
+
 function FacetGroup({
   label,
   options,

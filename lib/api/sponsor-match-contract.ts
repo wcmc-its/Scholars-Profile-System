@@ -189,11 +189,16 @@ export type SponsorContribution = {
 };
 
 /** Non-topical candidate attributes the preference nudges and status tags read.
- *  Optional because a caller may omit the hydration read; when present, both fields are
+ *  Optional because a caller may omit the hydration read; when present, every field is
  *  real (#1654). */
 export type SponsorMeasures = {
   careerStage?: CareerStage | null;
   isClinician?: boolean;
+  /** ED's raw person-type code (`full_time_faculty`, `postdoc`, `doctoral_student_phd`, …).
+   *  The person-type facet filters on it. Sourced from the Scholar row, NOT from the
+   *  People-index hit: the index coerces a null role to the literal string `"unknown"`
+   *  (lib/search-index-docs.ts), and a fabricated value is worse than an absent one. */
+  roleCategory?: string | null;
 };
 
 /** The scholar columns `sponsorMeasuresFrom` needs. Both engines already read Scholar for
@@ -225,6 +230,7 @@ export function sponsorMeasuresFrom(row: SponsorMeasuresRow, now: Date = new Dat
       now,
     ),
     isClinician: row.hasClinicalProfile,
+    roleCategory: row.roleCategory,
   };
 }
 
@@ -325,33 +331,70 @@ export function preferenceBoost(
     total += p.importance;
     const m = candidate.measures;
     if (!m) continue;
-    const hit =
-      p.measure === "careerStage"
-        ? m.careerStage != null && p.stages.includes(m.careerStage)
-        : m.isClinician === true;
+    // A `switch` with a `never` default, not a ternary. The union has two arms today, so a
+    // ternary's false branch narrows to `isClinician` and reads correctly — but the moment a
+    // third arm is added, that false branch silently widens and scores the NEW preference as
+    // a clinician preference, with no compile error. This module's header promises drift is
+    // "a compile error rather than a live bug"; the ternary did not keep that promise.
+    let hit: boolean;
+    switch (p.measure) {
+      case "careerStage":
+        hit = m.careerStage != null && p.stages.includes(m.careerStage);
+        break;
+      case "isClinician":
+        hit = m.isClinician === true;
+        break;
+      default: {
+        const unhandled: never = p;
+        void unhandled;
+        hit = false;
+      }
+    }
     if (hit) matched += p.importance;
   }
   return total > 0 ? matched / total : 0;
 }
 
-/** A client-side filter facet, counted over the FULL candidate set (pre-filter). Filtering
- *  preserves each row's re-ranked position and never re-queries. No producer yet — the
- *  spine runs `skipFacetAggs: true`. */
-export type SponsorFacet = {
-  group: string;
-  label: string;
-  count: number;
-};
-
 export type SponsorMatchResponse = {
   ok: true;
   concepts: SponsorConcept[];
   candidates: SponsorCandidate[];
-  /** The funder's ask, for the results header. No producer yet. */
+  /** A short handle for this search — see `sponsorAskFrom`. Absent when the paste yielded
+   *  no concepts (⇒ nothing to name it after). */
   ask?: { title: string; quote: string };
   preferences?: SponsorPreference[];
-  facets?: SponsorFacet[];
 };
+
+/**
+ * The funder's ask, as a short handle for the results header ("Cardiac fibrosis,
+ * myofibroblast differentiation · early career").
+ *
+ * DETERMINISTIC, AND DELIBERATELY NOT AN LLM CALL. The obvious design is a second Bedrock
+ * call that reads the paste and writes a title, and it was specced that way — but the task
+ * role's IAM grant (cdk/lib/app-stack.ts, "TaskRoleBedrockPolicy") admits only Opus and
+ * Sonnet; Haiku is excluded on purpose. So the "cheap title call" is a SECOND SONNET CALL —
+ * roughly doubling per-request LLM spend, on a route with no rate limit, to name something
+ * we can already name for free: the extractor has ALREADY read the paste and told us what it
+ * is about. A title is the top concepts plus whatever non-topical ask was detected. Deriving
+ * it costs nothing, cannot fail, cannot time out, and cannot perturb the eval-tuned
+ * extraction prompt.
+ *
+ * `quote` is the preference's own paste provenance when there is one — it is already a
+ * verbatim snippet (`SponsorPreference.evidence`), so there is nothing to generate.
+ */
+export function sponsorAskFrom(
+  concepts: readonly SponsorConcept[],
+  preferences: readonly SponsorPreference[] = [],
+): { title: string; quote: string } | undefined {
+  const top = concepts.slice(0, ASK_TITLE_CONCEPTS).map((c) => c.term);
+  if (top.length === 0) return undefined;
+  const prefs = preferences.map((p) => p.label);
+  const title = [top.join(", "), ...prefs].join(" · ");
+  return { title, quote: preferences[0]?.evidence ?? "" };
+}
+
+/** Two concepts name a search; five are a list, not a handle. */
+const ASK_TITLE_CONCEPTS = 2;
 
 /** Options for the reference scorers. `prefBoost` is injected because the UI owns the
  *  preference match predicate (the ranker ships `measures`, not verdicts). Absent ⇒ the

@@ -387,7 +387,15 @@ describe("rankResearchersForDescriptionSpine", () => {
     const { candidates } = await rankResearchersForDescriptionSpine("cancer");
 
     const staffed = candidates.find((c) => c.cwid === "staffed");
-    expect(staffed?.measures).toEqual({ careerStage: "early", isClinician: true });
+    // `roleCategory` rides in on the SAME hydration read — the spine already selected the
+    // column to derive the career stage and was dropping it. It is the DB's value, not the
+    // People index's: the index coerces a null role to the literal string "unknown", and the
+    // person-type facet must not offer a bucket the directory never asserted.
+    expect(staffed?.measures).toEqual({
+      careerStage: "early",
+      isClinician: true,
+      roleCategory: "full_time_faculty",
+    });
 
     const ghost = candidates.find((c) => c.cwid === "ghost");
     expect(ghost).toBeDefined();
