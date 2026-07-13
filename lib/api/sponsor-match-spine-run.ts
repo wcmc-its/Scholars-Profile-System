@@ -459,9 +459,24 @@ export async function rankResearchersForDescriptionSpine(
     // any cluster) but WRONG for evidence: it would tell an officer that a candidate matched
     // on whichever concept happened to be retrieved first, not on the one that carried them.
     for (const h of hits) {
-      if (!h.evidence) continue;
+      // #1689 follow-up — READ BOTH SHAPES, and prefer `evidenceLines`.
+      //
+      // `searchPeople` emits ONE of two fields, and which one is a FLAG DECISION, not a
+      // property of the data: with `SEARCH_EVIDENCE_REASON_COUNTS` on it emits the tiered
+      // `evidenceLines[]` (primary lead first, then "Also matched" rows) and NEVER `evidence`;
+      // with it off it emits the single `evidence`. Both flags are ON in staging and prod, so
+      // reading only `evidence` — which is what the first cut of this did — found nothing in
+      // every deployed environment while passing every test, because the tests mock
+      // `searchPeople` and hand it whichever shape the test author had in mind. A green suite
+      // said yes; an in-VPC probe against real staging OpenSearch said 0 of 160 hits.
+      //
+      // `evidenceLines[0]` is the PRIMARY lead — the strongest reason, by the search's own
+      // precedence ladder. That is the one the People card renders large, and the one the
+      // officer should see here.
+      const hitEvidence = h.evidenceLines?.[0] ?? h.evidence;
+      if (!hitEvidence) continue;
       evidenceByTermCwid.set(evidenceKey(term, h.cwid), {
-        evidence: h.evidence,
+        evidence: hitEvidence,
         pubCount: h.pubCount,
         // What the lazy key-paper fetch needs to find this candidate's papers FOR THIS
         // CONCEPT — the same three inputs the public People card passes.
