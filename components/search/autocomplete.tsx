@@ -35,18 +35,6 @@ type Variant = "header" | "hero";
 const NAV_WATCHDOG_MS = 7000;
 
 /**
- * #1412 item 4 — suggestion cache, keyed by the exact typed prefix. Debounce +
- * AbortController stopped in-flight duplicates but nothing remembered a settled answer,
- * so backspacing through a typed query re-fetched every prefix on the way back. Module
- * scope, not component state: the header input remounts across navigations and the cache
- * should survive that.
- *
- * ponytail: unbounded Map, cleared per session. A suggest key is a short prefix and a
- * session types a bounded number of them — swap in an LRU if that ever stops being true.
- */
-const suggestCache = new Map<string, Suggestion[]>();
-
-/**
  * Search input with entity-aware autocomplete (spec line 184: fires on 2 chars).
  * Submitting routes to /search?q=<query>; clicking a suggestion routes to the
  * entity's canonical page.
@@ -71,6 +59,22 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
   const containerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const skipSuggestRef = useRef(false);
+  /**
+   * #1412 item 4 — resolved prefixes, keyed by the exact typed value. Debounce +
+   * AbortController stopped two requests being in flight at once, but nothing remembered a
+   * SETTLED answer, so backspacing through a typed query re-fetched every prefix on the
+   * way back.
+   *
+   * Component-scoped, deliberately NOT module-scoped: a module Map is a shared global that
+   * outlives every mount, so a prefix resolved once would be pinned for the life of the tab
+   * with no TTL — and it silently leaked between test cases, which is how this got caught.
+   * The header input stays mounted across soft-navs, so this scope keeps the hit rate that
+   * matters (the backspace loop) without the global.
+   *
+   * ponytail: unbounded within a mount. A session types a bounded number of prefixes —
+   * reach for an LRU only if that stops being true.
+   */
+  const suggestCacheRef = useRef(new Map<string, Suggestion[]>());
   const [isPending, startTransition] = useTransition();
 
   // #1017 watchdog plumbing. Read the latest isPending from a ref inside the
@@ -128,7 +132,7 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
     abortRef.current?.abort();
     // A prefix we have already resolved: serve it and issue no request at all. This is
     // the backspace path — skipping the debounce too, since there is nothing to wait for.
-    const cached = suggestCache.get(value);
+    const cached = suggestCacheRef.current.get(value);
     if (cached) {
       setSuggestions(cached);
       setActiveIndex(-1);
@@ -148,7 +152,7 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
         const next = data.suggestions ?? [];
         // Cache on arrival, not on render — an aborted/superseded response still taught us
         // what that prefix resolves to, and the user may well backspace onto it.
-        suggestCache.set(value, next);
+        suggestCacheRef.current.set(value, next);
         if (ignore) return;
         setSuggestions(next);
         setActiveIndex(-1);
