@@ -484,6 +484,38 @@ describe("SponsorMatchPanel", () => {
   });
 
   // ── Sponsor preferences (#1654) ────────────────────────────────────────────
+  it("drops a deselected preference from the ask header, so it cannot contradict the ranking", async () => {
+    // The header is DERIVED from the ACTIVE preferences, not frozen at submit. An officer who
+    // unchecks an ask the extractor invented has said the sponsor never wanted it — a header
+    // still announcing "· Early-career" over a ranking that no longer honours it is the panel
+    // contradicting itself.
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [candidate({ cwid: "a", name: "Alice Alpha", fusedScore: 0.9 })],
+      preferences: [
+        {
+          measure: "careerStage",
+          stages: ["early"],
+          label: "Early-career",
+          evidence: "…support early-career investigators…",
+          importance: 1,
+        },
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    const header = () => document.querySelector('[data-slot="sponsor-match-ask"]')?.textContent;
+    expect(header()).toContain("Early-career");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Early-career/ }));
+    expect(header()).not.toContain("Early-career");
+    // The topical half of the handle survives — only the honoured ask is gone.
+    expect(header()).toContain("Immuno-oncology");
+  });
+
   it("applies a detected preference to the ranking, and unchecking it re-ranks live", async () => {
     // Bob leads topically (rank 1 vs Alice's rank 2), but the sponsor asked for early-career
     // and Alice is early-career. At λ the nudge is enough to flip a margin this thin.

@@ -36,6 +36,13 @@ function isWordChar(ch: string | undefined): boolean {
   return ch !== undefined && /[A-Za-z0-9]/.test(ch);
 }
 
+/** Concept terms are LLM output and reach us as data, not as patterns. "IL-6 (p<0.05)" or a
+ *  term containing `+`, `*` or `(` would otherwise be compiled as a regex — at best matching
+ *  the wrong thing, at worst throwing on an unbalanced bracket and taking the panel down. */
+function escapeRegExp(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
  * Split `paste` into segments, marking every literal occurrence of any concept member.
  *
@@ -51,11 +58,14 @@ export function markPaste(paste: string, concepts: readonly SponsorConcept[]): P
 
   // Every phrasing that merged into a cluster is a candidate needle, plus the representative
   // term itself. Deduped case-insensitively; a member that duplicates another is not two hits.
-  const needles = new Map<string, string>(); // lowercased needle → concept term
+  const needles = new Map<string, string>(); // needle → concept term
   for (const concept of concepts) {
     for (const member of [concept.term, ...concept.members]) {
-      const key = member.trim().toLowerCase();
-      if (key.length > 0) needles.set(key, concept.term);
+      const key = member.trim();
+      // Must contain a letter or digit. A member that is empty, or is pure punctuation, would
+      // otherwise match every hyphen or bracket in the email and scatter meaningless marks
+      // through the officer's text. These are LLM output; they are not guaranteed sane.
+      if (/[A-Za-z0-9]/.test(key)) needles.set(key.toLowerCase(), concept.term);
     }
   }
   if (needles.size === 0) return [{ text: paste }];
@@ -63,16 +73,24 @@ export function markPaste(paste: string, concepts: readonly SponsorConcept[]): P
   // Longest first, so a specific concept claims its span before a generic one nested inside it.
   const ordered = [...needles.entries()].sort((a, b) => b[0].length - a[0].length);
 
-  const hay = paste.toLowerCase();
   const claimed: { start: number; end: number; term: string }[] = [];
 
   for (const [needle, term] of ordered) {
-    let from = 0;
+    // Case-insensitive search over the PASTE ITSELF, via a regex, rather than `indexOf` over a
+    // lowercased copy. `toLowerCase()` is NOT length-preserving in Unicode — "İ" (U+0130) maps
+    // to two code units — so an index taken in the lowercased copy can address a different
+    // character in the original, and every span after it would slice the wrong text. Matching
+    // the original keeps the index domain and the slice domain the same string, by
+    // construction. (`i` handles the case-folding; `escapeRegExp` keeps the term a literal.)
+    const re = new RegExp(escapeRegExp(needle), "gi");
     for (;;) {
-      const at = hay.indexOf(needle, from);
-      if (at === -1) break;
-      const end = at + needle.length;
-      from = at + 1;
+      const m = re.exec(paste);
+      if (m === null) break;
+      const at = m.index;
+      const end = at + m[0].length;
+      // Advance by one so overlapping occurrences of the same needle are still considered;
+      // a zero-length match cannot happen (empty needles are filtered above) but guard anyway.
+      re.lastIndex = at + 1;
 
       // Whole-word only: "CF" must not light up inside "CFTR".
       if (isWordChar(paste[at - 1]) || isWordChar(paste[end])) continue;

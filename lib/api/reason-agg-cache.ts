@@ -84,11 +84,16 @@ export function reasonAggCacheSize(): number {
   return reasonAggCache.size;
 }
 
-function refreshReasonAgg<T>(key: string, load: () => Promise<T>): Promise<T> {
+function refreshReasonAgg<T>(
+  key: string,
+  load: () => Promise<T>,
+  shouldCache?: (data: T) => boolean,
+): Promise<T> {
   const existing = reasonAggInflight.get(key) as Promise<T> | undefined;
   if (existing) return existing;
   const p = load()
     .then((data) => {
+      if (shouldCache && !shouldCache(data)) return data;
       const now = Date.now();
       reasonAggCache.set(key, { data, ts: now });
       evictReasonAgg(now);
@@ -105,8 +110,19 @@ function refreshReasonAgg<T>(key: string, load: () => Promise<T>): Promise<T> {
  * Serve the reason-agg result for `key` from the cache when fresh, serve stale +
  * refresh in the background within the ceiling, else block on a fresh load.
  * Inflight-deduped, so concurrent misses share one load. Bypassed under test.
+ *
+ * `shouldCache` — optional gate on the RESULT. A rejected load is already never cached, but
+ * some loaders DEGRADE INSTEAD OF THROWING: they swallow an upstream failure and resolve with
+ * an empty value. Caching that turns a transient outage into a sticky one, because the retry
+ * that would have healed it is served from the cache instead of re-running. A caller whose
+ * loader can degrade must say so here. Omitted ⇒ cache every resolved value (the original
+ * behaviour; the aggregation callers below genuinely cannot degrade-and-resolve).
  */
-export function cachedReasonAgg<T>(key: string, load: () => Promise<T>): Promise<T> {
+export function cachedReasonAgg<T>(
+  key: string,
+  load: () => Promise<T>,
+  shouldCache?: (data: T) => boolean,
+): Promise<T> {
   if (REASON_AGG_BYPASS) return load();
   const hit = reasonAggCache.get(key) as ReasonAggEntry<T> | undefined;
   const age = hit ? Date.now() - hit.ts : Number.POSITIVE_INFINITY;
@@ -117,11 +133,11 @@ export function cachedReasonAgg<T>(key: string, load: () => Promise<T>): Promise
   // Stale but within the ceiling — serve stale now, refresh in the background
   // (deduped). No request blocks; a failed refresh is swallowed and retried.
   if (hit && age < REASON_AGG_MAX_STALE_MS) {
-    void refreshReasonAgg(key, load).catch(() => {});
+    void refreshReasonAgg(key, load, shouldCache).catch(() => {});
     return Promise.resolve(hit.data);
   }
 
   // Cold or past the staleness ceiling — block on a fresh load. A failure
   // propagates to the caller and is not cached.
-  return refreshReasonAgg(key, load);
+  return refreshReasonAgg(key, load, shouldCache);
 }

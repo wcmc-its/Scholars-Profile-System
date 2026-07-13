@@ -73,4 +73,26 @@ describe("markPaste", () => {
   it("returns the paste intact when there are no concepts", () => {
     expect(markPaste("some text", [])).toEqual([{ text: "some text" }]);
   });
+
+  it("treats a concept term as a LITERAL, not a regex", () => {
+    // Terms are LLM output. "IL-6 (p<0.05)" compiled as a pattern would either match the wrong
+    // text or throw on the unbalanced bracket and take the panel down with it.
+    const segs = markPaste("we measured IL-6 (p<0.05) in serum", [concept("IL-6 (p<0.05)")]);
+    expect(marks(segs)).toEqual([["IL-6 (p<0.05)", "IL-6 (p<0.05)"]]);
+  });
+
+  it("does not scatter marks for a punctuation-only member", () => {
+    const segs = markPaste("a-b-c-d", [concept("asthma", ["-"])]);
+    expect(marks(segs)).toEqual([]);
+  });
+
+  it("keeps index and slice in the same string when lowercasing changes length", () => {
+    // "İ" (U+0130) lowercases to TWO code units. An implementation that took indices from
+    // `paste.toLowerCase()` and used them to slice `paste` would drift by one from here on and
+    // emit sliced-apart garbage. Every segment must still reassemble into the original paste.
+    const paste = "İstanbul asthma cohort";
+    const segs = markPaste(paste, [concept("asthma")]);
+    expect(segs.map((s) => s.text).join("")).toBe(paste);
+    expect(marks(segs)).toEqual([["asthma", "asthma"]]);
+  });
 });

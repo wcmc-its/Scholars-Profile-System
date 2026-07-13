@@ -64,6 +64,7 @@ import { sponsorAskFrom } from "@/lib/api/sponsor-match-contract";
 import {
   isSponsorMatchEnabled,
   isSponsorMatchSpineEnabled,
+  normalizeDescription,
   rankResearchersForDescription,
   type SponsorRankedScholar,
 } from "@/lib/api/sponsor-match";
@@ -77,13 +78,21 @@ const PATH = "/api/edit/sponsor-match";
 export const dynamic = "force-dynamic";
 
 /**
- * Cache key for a submission: `sponsor:<engine>:<sha256 of the paste>`.
+ * Cache key for a submission: `sponsor:<engine>:<sha256 of the engine's input>`.
  *
- * Hashed, not stored — see the module doc. Whitespace is collapsed so a re-paste that
- * differs only in wrapping still hits, but case is PRESERVED: the extractor is an LLM, and
- * "CF" and "cf" are not reliably the same token to it. Keying case-insensitively would risk
- * serving one paste's concepts for another's text, which is a correctness bug traded for a
- * rounding-error hit-rate gain.
+ * Hashed, not stored — see the module doc.
+ *
+ * THE KEY HASHES `normalizeDescription(description)`, NOT THE RAW PASTE, and that is load-
+ * bearing rather than tidy: `normalizeDescription` is what BOTH engines actually consume, and
+ * it truncates at MAX_DESCRIPTION_CHARS while preserving newlines. Hash anything else and the
+ * key stops being a function of the engine's input — two pastes that normalise to the same
+ * 3,000 characters but differ in their (discarded) tail would collide, and two pastes that
+ * differ only in line wrapping would produce DIFFERENT engine inputs (different content
+ * survives the truncation) under the SAME key. Keying on the exact string the engine reads
+ * makes "same key ⇒ same answer" true by construction instead of by argument.
+ *
+ * Case is preserved, because `normalizeDescription` preserves it and the extractor is an LLM:
+ * "CF" and "cf" are not reliably the same token to it.
  *
  * ponytail: reuses `cachedReasonAgg` — a bounded Map + TTL + inflight-dedup + FIFO eviction
  * that is generic in its value type; only its NAME is reason-agg specific (a rename would
@@ -94,15 +103,36 @@ export const dynamic = "force-dynamic";
  * stickiness, so the hit rate is ~1/N, not 1. It is never a loss (a miss is exactly today's
  * behaviour); make it shared only if the Bedrock spend ever justifies the infrastructure.
  */
-function sponsorCacheKey(description: string, engine: "spine" | "bespoke"): string {
-  const normalized = description.trim().replace(/\s+/g, " ");
-  const digest = createHash("sha256").update(normalized, "utf8").digest("hex");
+function sponsorCacheKey(engineInput: string, engine: "spine" | "bespoke"): string {
+  const digest = createHash("sha256").update(engineInput, "utf8").digest("hex");
   return `sponsor:${engine}:${digest}`;
 }
 
 /** What is safe to memoise: the expensive, derived half of the answer. NOT `preferences` —
  *  those carry verbatim paste quotes. See the module doc. */
 type SponsorEngineResult = { concepts: SponsorConcept[]; candidates: SponsorCandidate[] };
+
+/**
+ * NEVER CACHE AN EMPTY RESULT — the difference between a memo and a stuck failure.
+ *
+ * `extractSponsorConcepts` does not throw when Bedrock throttles, times out, or returns
+ * malformed JSON: it logs and returns `[]` (a deliberate fail-soft). The spine then falls back
+ * to the v1 dictionary extractor, which is documented to find nothing on real prose, and
+ * RESOLVES with `{ concepts: [], candidates: [] }`. A resolved value is a cacheable value — so
+ * a ten-second Bedrock blip would be frozen into the cache, and the officer's instinctive
+ * re-submit would be served that same empty answer instantly, without ever retrying Bedrock,
+ * until the entry aged out. The cache would have converted a transient, self-healing outage
+ * into a sticky one, and invisibly: an instant empty result is indistinguishable from "this
+ * paste genuinely matches nobody".
+ *
+ * A zero-candidate result is therefore treated as degraded and left uncached, so the next
+ * submit re-runs the engine — exactly the behaviour that existed before this cache did. The
+ * cost of being wrong (a genuinely unmatchable paste re-runs the engine) is one wasted call;
+ * the cost of the alternative is a matcher that stays broken after the outage has passed.
+ */
+function isCacheableResult(r: SponsorEngineResult): boolean {
+  return r.candidates.length > 0;
+}
 
 /** Bespoke engine → the wire contract. It has no concept decomposition, so
  *  `contributions` is empty (nothing to re-rank over client-side — see the module doc).
@@ -178,12 +208,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const engine = useSpine ? "spine" : "bespoke";
     const { concepts, candidates } = await cachedReasonAgg<SponsorEngineResult>(
-      sponsorCacheKey(description, engine),
+      sponsorCacheKey(normalizeDescription(description), engine),
       async () => {
         if (useSpine) return rankResearchersForDescriptionSpine(description);
         const researchers = await rankResearchersForDescription(description);
         return { concepts: [], candidates: researchers.map(bespokeToCandidate) };
       },
+      isCacheableResult,
     );
 
     // The search's handle, derived — not generated. See `sponsorAskFrom`.

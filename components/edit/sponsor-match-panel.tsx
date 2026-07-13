@@ -68,6 +68,7 @@ import {
   PREFERENCE_LAMBDA,
   rareTerms,
   rerankCandidates,
+  sponsorAskFrom,
   type SponsorCandidate,
   type SponsorConcept,
   type SponsorFitTier,
@@ -186,8 +187,6 @@ export function SponsorMatchPanel() {
   // would mark words that never produced these concepts (and, after a history replay, a
   // different paste entirely).
   const [matchedText, setMatchedText] = useState("");
-  // The search's handle, derived server-side from the concepts (`sponsorAskFrom`).
-  const [ask, setAsk] = useState<SponsorMatchResponse["ask"]>(undefined);
   const pending = status.kind === "loading";
 
   // SSR-safe history load: start empty, read localStorage in an effect (no
@@ -262,7 +261,6 @@ export function SponsorMatchPanel() {
         setCandidates(data.candidates ?? []);
         setConcepts(data.concepts ?? []);
         setMatchedText(text);
-        setAsk(data.ask);
         // #1654 — detected preferences arrive ACTIVE. The sponsor said it; the default is to
         // honour it. Deselecting is the officer's override, not their opt-in.
         const prefs = data.preferences ?? [];
@@ -334,6 +332,17 @@ export function SponsorMatchPanel() {
   // Rarity is judged across the WHOLE ask, not per panel — a method is scarce relative to
   // the other concepts the sponsor named, not just to the other methods.
   const rare = useMemo(() => rareTerms(concepts), [concepts]);
+
+  // The search's handle. DERIVED HERE, not taken from `response.ask`, for the same reason the
+  // ranking is: the officer can DESELECT a preference the extractor got wrong, and a title
+  // frozen at submit would go on asserting "· Early career" after they had said the sponsor
+  // never asked for that — the header contradicting the ranking directly beneath it. The
+  // server still ships `ask` (it is the canonical handle for a caller that does not re-rank),
+  // but the console owns what it displays, exactly as it owns the preference predicate.
+  const ask = useMemo(
+    () => sponsorAskFrom(concepts, preferences.filter((p) => activePrefs.has(p.label))),
+    [concepts, preferences, activePrefs],
+  );
 
   const deptFacet = useMemo(() => {
     const counts = new Map<string, number>();
@@ -899,7 +908,10 @@ function PasteReadback({ text, concepts }: { text: string; concepts: SponsorConc
         What we read from the description
       </summary>
       <div className="border-border mt-2 rounded-lg border p-3">
-        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+        {/* `break-words`: a sponsor email routinely carries an Outlook SafeLinks URL — 300+
+            characters with no break opportunity in it. `pre-wrap` alone honours existing break
+            points but introduces none, so such a token would run straight out of the column. */}
+        <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">
           {segments.map((s, i) =>
             s.term ? (
               <mark
@@ -917,7 +929,7 @@ function PasteReadback({ text, concepts }: { text: string; concepts: SponsorConc
         <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
           {`${marked} of ${concepts.length} ${
             concepts.length === 1 ? "concept is" : "concepts are"
-          } highlighted above. The rest were recognised but written in standard terms that do not appear verbatim in the description (an abbreviation expanded, a brand name resolved), so there is nothing here to point at — they were not ignored.`}
+          } highlighted above. A concept goes unhighlighted when it could not be pointed at a span — most often because the matcher wrote it in standard terms that do not appear verbatim here (an abbreviation expanded, a brand name resolved), and sometimes because a longer concept already claimed the same words. Unhighlighted never means ignored: every concept below was extracted and every one of them ranks.`}
         </p>
       </div>
     </details>

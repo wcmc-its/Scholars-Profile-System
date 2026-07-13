@@ -77,3 +77,48 @@ describe("reason-agg cache eviction", () => {
     expect(cachedLoad).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * `shouldCache` — the guard that separates a memo from a stuck failure.
+ *
+ * The sponsor matcher's loader DEGRADES INSTEAD OF THROWING: when Bedrock throttles or times
+ * out, the concept extractor logs and returns `[]`, and the engine RESOLVES with an empty
+ * result. A resolved value is a cacheable value, so without this gate a ten-second Bedrock
+ * blip would be frozen into the cache and the officer's re-submit — the very thing that would
+ * have healed it — would be served the cached empty instead of retrying.
+ */
+describe("reason-agg cache shouldCache gate", () => {
+  it("does not cache a result the caller calls degraded, so the next call retries", async () => {
+    const { cachedReasonAgg, reasonAggCacheSize } = await freshModule();
+    const nonEmpty = (r: string[]) => r.length > 0;
+
+    let calls = 0;
+    const load = async () => {
+      calls += 1;
+      return calls === 1 ? [] : ["recovered"]; // first call = the outage
+    };
+
+    expect(await cachedReasonAgg("k", load, nonEmpty)).toEqual([]);
+    expect(reasonAggCacheSize()).toBe(0); // the empty was NOT retained
+
+    // The retry actually re-runs the loader rather than being served the cached empty.
+    expect(await cachedReasonAgg("k", load, nonEmpty)).toEqual(["recovered"]);
+    expect(calls).toBe(2);
+    expect(reasonAggCacheSize()).toBe(1); // the good result IS retained
+  });
+
+  it("still caches every resolved value when no gate is supplied", async () => {
+    const { cachedReasonAgg, reasonAggCacheSize } = await freshModule();
+    let calls = 0;
+    await cachedReasonAgg("k", async () => {
+      calls += 1;
+      return [];
+    });
+    expect(reasonAggCacheSize()).toBe(1);
+    await cachedReasonAgg("k", async () => {
+      calls += 1;
+      return [];
+    });
+    expect(calls).toBe(1); // served from cache — the pre-existing behaviour, unchanged
+  });
+});
