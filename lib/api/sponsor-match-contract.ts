@@ -30,10 +30,12 @@
  * the formula, not its implementation — which is exactly what let the FINDING's fix land as
  * an engine-only change. It is no longer corpus IDF (that axis anti-correlated with topical
  * centrality and ranked a disease BELOW its own mechanisms; see
- * `docs/2026-07-12-FINDING-idf-inverts-concept-weighting.md`). It is now a bounded rarity
- * tiebreaker times a paste-relative kind prior, with centrality raised to γ and doing the
- * actual work. The route and the panel did not move. The decomposition is what is frozen
- * here, and the decomposition is right.
+ * `docs/2026-07-12-FINDING-idf-inverts-concept-weighting.md`). #1676 demoted rarity to a bounded
+ * tiebreaker; #1681 removed it from the weight ENTIRELY, having measured the band earning nothing.
+ * `weightFactor` is now the paste-relative kind prior alone, and centrality raised to γ does the
+ * actual work. Rarity survives as the display-only `corpusCoverage` — a claim about the LITERATURE,
+ * never about the RANKING. The route and the panel did not move across any of it. The decomposition
+ * is what is frozen here, and the decomposition is right.
  *
  * DERIVED, NOT WIRED: the matched-concept chips and the fit tier are deliberately NOT
  * response fields. Both are computed client-side (`matchedConcepts`, `fitTier`) so they
