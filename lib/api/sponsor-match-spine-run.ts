@@ -43,10 +43,13 @@ import {
   dampedIdf,
   mergeTermClusters,
   type ClusterTerm,
+  type ConceptKind,
+  type TermCluster,
 } from "@/lib/api/sponsor-match-axes";
-import type {
-  SponsorCandidate,
-  SponsorConcept,
+import {
+  conceptWeight,
+  type SponsorCandidate,
+  type SponsorConcept,
 } from "@/lib/api/sponsor-match-contract";
 import { searchPeople, type PeopleHit } from "@/lib/api/search";
 import { meshMatchTier } from "@/lib/search";
@@ -90,18 +93,73 @@ const UNIFORM_CENTRALITY = 1;
  *  scale the axes tests exercise. */
 const IDF_CAP = 10;
 
-/** Fallback idf FACTOR when a cluster's coverage signal is absent OR known-zero.
- *  Absent = no `mesh_descriptor` row / NULL (coverage not yet computed). Known-zero =
- *  the coverage ETL writes `COALESCE(n_pubs, 0) / total` for EVERY descriptor, so a
- *  root descriptor with no directly-tagged local pubs carries 0 — common for broad
- *  descriptors (MEDLINE indexes the most-specific term; the fraction counts only
- *  direct root-UI tags, not the descendant subtree the retrieval spans). Neither
- *  state is evidence the concept is rare, so treat the idf as neutral (1): the
- *  cluster neither up- nor down-weights relative to known concepts — NEVER the `cap`
- *  branch `dampedIdf` takes for a non-positive coverage number (unknown-or-zero ≠
- *  maximally rare; the cap would hand a zero-evidence concept the MAXIMUM fusion
- *  weight and let its lexical-only hits dominate the RRF). */
-const NEUTRAL_IDF = 1;
+/**
+ * Half-width of the rarity band (FINDING §8.1 + §8.5). `weightFactor` USED to be the raw
+ * damped corpus IDF, running [1, 10] — and pointing the wrong way. In a hierarchical
+ * biomedical domain a disease is corpus-COMMON while its own mechanisms are corpus-RARE, so
+ * IDF systematically handed the mechanisms the larger weight: Myofibroblasts 8.44 beat
+ * Fibrosis 8.00 beat Scleroderma 7.24, and the mechanism generalist out-ranked the disease
+ * specialist. It also SWAMPED centrality, whose live range was only [0.75, 1.0]: a 10x axis
+ * against a 1.3x axis decides the ranking by itself.
+ *
+ * Corpus rarity is not worthless — it is just not a TOPICALITY signal. It is a mild
+ * tiebreaker between concepts the funder cares about roughly equally. So it is compressed
+ * into a narrow multiplicative band around 1.0 and centrality (a real spread now, §8.2) is
+ * left to drive.
+ */
+const RARITY_BAND = 0.15;
+
+/**
+ * Paste-relative kind prior (FINDING §8.1, and the resolution of its §9 tension).
+ *
+ * §9's objection to a kind prior is real: a BLANKET "disease outranks method" rule would
+ * break every paste where the method IS the target (ml-in-medicine, single-cell-genomics —
+ * measured, not hypothetical). So this prior is not blanket. It is taken relative to what
+ * THIS paste is about, and the extractor already knows: the kind carrying the top centrality
+ * is the kind the funder is buying. That kind is boosted and the other is damped to
+ * supporting-detail status, so a disease paste promotes its diseases and a methods paste
+ * promotes its methods — from one rule, with no per-fixture special-casing.
+ */
+const KIND_ALIGNED = 1.25;
+const KIND_OFF_TARGET = 0.8;
+
+/**
+ * Corpus rarity as a BOUNDED tiebreaker in [1-RARITY_BAND, 1+RARITY_BAND] — never a driver.
+ *
+ * Absent OR known-zero coverage lands on the band CENTRE (1.0), and that is what dissolves
+ * the §6/§8.5 cliff. Under the old scheme a descriptor with no locally-tagged pubs took
+ * NEUTRAL_IDF = 1 while a descriptor with a SINGLE tagged pub took ~10 — a 10x discontinuity
+ * across a boundary that carries no topical meaning whatever, and 40% of descriptors sit on
+ * the zero side of it (measured: 12,358 of 31,110). Here those two land at 1.00 and 1.15.
+ * The rarity signal survives; the cliff does not.
+ */
+function rarityFactor(coverage: number): number {
+  if (!(coverage > 0)) return 1;
+  return 1 - RARITY_BAND + 2 * RARITY_BAND * (dampedIdf(coverage, IDF_CAP) / IDF_CAP);
+}
+
+/**
+ * The kind THIS paste is targeting: the kind of the highest-centrality cluster, ties broken
+ * by total centrality mass, and finally by "concept" (the extractor's own default, and the
+ * safe read of an all-methods-tied paste).
+ *
+ * This is the paste-awareness §9 requires, and it costs nothing to obtain — the extractor
+ * already scores a methods paste with its methods on top (`machine learning` 1.0) and a
+ * disease paste with its disease on top (`systemic sclerosis` 1.0). We only have to read it.
+ */
+function targetKindOf(clusters: readonly TermCluster[]): ConceptKind {
+  const stat = (k: ConceptKind) => {
+    const of = clusters.filter((c) => c.kind === k);
+    return {
+      max: of.reduce((m, c) => Math.max(m, c.centrality), 0),
+      mass: of.reduce((s, c) => s + c.centrality, 0),
+    };
+  };
+  const concept = stat("concept");
+  const method = stat("method");
+  if (method.max !== concept.max) return method.max > concept.max ? "method" : "concept";
+  return method.mass > concept.mass ? "method" : "concept";
+}
 
 /** Jaccard merge threshold for `mergeTermClusters`. Subsumption always merges; this
  *  gates partial overlap (same concept phrased differently). Moderate so near-identical
@@ -328,6 +386,8 @@ export async function rankResearchersForDescriptionSpine(
   const rankings: TermRanking[] = [];
   const concepts: SponsorConcept[] = [];
   const hitByCwid = new Map<string, PeopleHit>();
+  // Which kind this paste is buying — read once, applied per cluster below.
+  const targetKind = targetKindOf(clusters);
   for (const cluster of clusters) {
     // MAX member coverage ≈ the broadest merged synonym = a lower bound on the
     // cluster's true union corpus coverage (the exact union-coverage is an ETL
@@ -340,21 +400,24 @@ export async function rankResearchersForDescriptionSpine(
       .filter((c): c is number => typeof c === "number");
     const maxCoverage = coverages.length > 0 ? Math.max(...coverages) : 0;
 
-    // The fixed half of the fusion weight. Today it is the damped corpus IDF — UNCHANGED
-    // math, so this rework does not move the ranking. But the wire NAME is `weightFactor`,
-    // not `rarity`, because corpus IDF is the WRONG axis here and is on its way out: it
-    // anti-correlates with topical centrality in a hierarchical domain, so a disease's own
-    // mechanisms outweigh the disease (see
-    // `docs/2026-07-12-FINDING-idf-inverts-concept-weighting.md`). When that is fixed, the
-    // change is confined to this line and `DEFAULT_K` — the contract, route and panel do
-    // not move.
-    const weightFactor = maxCoverage > 0 ? dampedIdf(maxCoverage, IDF_CAP) : NEUTRAL_IDF;
+    // The FIXED half of the fusion weight (the slider owns the other half). This is the line
+    // the FINDING is about, and it is no longer the raw corpus IDF: rarity is compressed to a
+    // tiebreaker band and multiplied by the paste-relative kind prior. Centrality — squared,
+    // via the contract's shared `conceptWeight` — is what drives the ranking now.
+    //
+    // Note what is deliberately NOT in here: centrality. `weightFactor` must stay independent
+    // of it, because the client re-derives the weight on every slider drag; folding centrality
+    // in would bake the ORIGINAL value into the "fixed" half and make a dragged slider disagree
+    // with the server.
+    const weightFactor =
+      rarityFactor(maxCoverage) *
+      (cluster.kind === targetKind ? KIND_ALIGNED : KIND_OFF_TARGET);
 
     // The cluster's representative term: its first member. It is the concept's identity
     // on the wire and the join key `contributions[].term` points back to — so the SAME
     // string must key the ranking, the concept, and every contribution.
     const term = cluster.members[0];
-    concepts.push({
+    const concept: SponsorConcept = {
       term,
       kind: cluster.kind,
       members: cluster.members,
@@ -364,7 +427,8 @@ export async function rankResearchersForDescriptionSpine(
       // locally-tagged pubs for this descriptor" — which is 40% of descriptors and is not
       // evidence of rarity — so it must not reach the UI as a rarity claim. Absent ≠ zero.
       ...(maxCoverage > 0 ? { corpusCoverage: maxCoverage } : {}),
-    });
+    };
+    concepts.push(concept);
 
     // Representative resolution = the first member's (drives name/tier only).
     const rep = repByTerm.get(term) ?? null;
@@ -374,7 +438,11 @@ export async function rankResearchersForDescriptionSpine(
       rep,
     );
     for (const h of hits) if (!hitByCwid.has(h.cwid)) hitByCwid.set(h.cwid, h);
-    rankings.push({ term, weight: cluster.centrality * weightFactor, ranked });
+    // `conceptWeight`, not an inline `centrality * weightFactor` — the contract owns the ONE
+    // definition of the fusion weight and the client's slider re-rank calls the same function.
+    // Re-stating the formula here is exactly the drift #1674 removed; a γ added in one place
+    // and missed in the other would silently desync the sliders from the server's order.
+    rankings.push({ term, weight: conceptWeight(concept), ranked });
   }
 
   const allFused = rrfFuse(rankings);
