@@ -85,9 +85,37 @@ found in 4 seconds what 7,160 tests could not.
 
 ## 3. THE PROBE — the check that can fail
 
+> ### 🔴 END EVERY PROBE WITH `await db.$disconnect()`. THIS ONE DIDN'T, AND IT TOOK STAGING DOWN.
+>
+> The probe below, **as originally written and as run**, never disconnects. Importing anything from
+> `@/lib/db` (which `@/lib/api/search` does, transitively) opens a **15-connection Prisma pool** and
+> keeps the Node event loop alive **forever** — the task prints its results in ~4s and then sits in
+> `RUNNING` holding those 15 connections until someone kills it.
+>
+> **On 2026-07-13 three leaked probe tasks (2 mine + 1 from the prior session) stacked +45 connections
+> onto a 30-connection baseline. Staging Aurora Serverless v2 caps at ~90. The app then rolled a task,
+> hit 90/90, and a real user's sponsor-match search failed with "Couldn't rank researchers"** —
+> `pool timeout … (pool connections: active=0 idle=0 limit=15)`. Stopping the three tasks dropped
+> connections 90 → 15 and the app self-healed.
+>
+> - **The tell: a probe task still `RUNNING` after you have already read its output.** Always confirm
+>   it reaches `STOPPED`.
+> - Cleanup if it happens: `aws ecs list-tasks --cluster sps-cluster-staging --family sps-etl-staging
+>   --desired-status RUNNING` → `aws ecs stop-task` each one (these probes are READ-only, so it is
+>   data-safe) → watch `AWS/RDS DatabaseConnections` fall. The staging cluster is
+>   `sps-data-staging-auroraclusterfromsnapshot7b6a45d8-…`; a second cluster sits idle at 0, and
+>   querying that one will tell you everything is fine.
+>
+> See [[reference_staging_cd_aurora_conn_cap]] — this is the **second** recurrence of the same leak.
+
 Runs the real deployed `searchPeople` with the exact options the spine passes, against real
 staging OpenSearch. Bedrock is unreachable from the ETL role, so concepts are supplied directly
 — the retrieval path under test is identical.
+
+**Note what this does and does not prove:** it exercises the EMITTER (`searchPeople`), and it
+re-reads `evidenceLines?.[0] ?? h.evidence` inline — so it passes even if the shipped consumer reads
+the wrong field. To test the fix itself, drive `rankResearchersForDescriptionSpine` and count
+`candidates[].searchEvidence.evidence` (see §0).
 
 The script is in the session scratchpad; recreate it as `probe.sh`:
 
@@ -95,6 +123,7 @@ The script is in the session scratchpad; recreate it as `probe.sh`:
 cd /app && npx tsx -e '
 import { searchPeople } from "@/lib/api/search";
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
+import { db } from "@/lib/db";   // needed ONLY for the $disconnect at the end — see the warning above
 const CONCEPTS = ["systemic sclerosis","pulmonary fibrosis","myofibroblast",
   "interstitial lung disease","cardiac fibrosis","immunotherapy","cystic fibrosis",
   "multiple sclerosis"];
@@ -120,6 +149,9 @@ const CONCEPTS = ["systemic sclerosis","pulmonary fibrosis","myofibroblast",
   console.log("HITS=" + hits);
   console.log("HITS_WITH_EVIDENCE=" + withEvidence);
   console.log("SAMPLE=" + (sample || "(none)"));
+  // MANDATORY. Without this the Prisma pool keeps the event loop alive and the task holds 15
+  // Aurora connections until killed — three of these took staging to its 90-connection cap.
+  await db.$disconnect();
 })();
 '
 ```
