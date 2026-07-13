@@ -420,11 +420,11 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SPONSOR_MATCH",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SPONSOR_MATCH_SPINE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SELF_EDIT_RECITER_PENDING_HINT",

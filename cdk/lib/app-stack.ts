@@ -1272,14 +1272,29 @@ export class AppStack extends Stack {
         // The profile payload returns [] when off, so the seed can land first.
         AVAILABLE_TECHNOLOGIES_SECTION: env === "staging" ? "on" : "off",
         // SPONSOR_MATCH — the /edit/sponsor-match CTL surface (paste a sponsor's
-        // description → researchers ranked on topical fit alone). Staging-on for soak; prod-off.
-        SPONSOR_MATCH: env === "staging" ? "on" : "off",
-        // SPONSOR_MATCH_SPINE — sub-flag of SPONSOR_MATCH: swaps the route's
-        // engine from the bespoke BM25×Variant-B path to the compose-searchPeople
-        // per-term spine, for the same-deploy A/B bake-off. Inert unless SPONSOR_MATCH
-        // is also on. Staging-on so the bake-off can capture both engines (the body
-        // `engine` override works only while on); prod-off until the eval picks a winner.
-        SPONSOR_MATCH_SPINE: env === "staging" ? "on" : "off",
+        // description → researchers ranked on topical fit alone).
+        //
+        // ⚠ THESE TWO FLAGS MUST MOVE TOGETHER. `SPONSOR_MATCH=on` + `SPONSOR_MATCH_SPINE=off`
+        // is a SUPPORTED config, not an error: it serves the surface off the BESPOKE engine,
+        // which lost the bake-off decisively (nDCG@20 0.367 vs the spine's 0.594) and returned
+        // ZERO real scleroderma experts on the rare-disease fixture. The console would look
+        // perfectly healthy and hand CTL the wrong researchers. Never flip one without the other.
+        SPONSOR_MATCH: "on", // Prod flipped 2026-07-13 (eval picked the spine; see below).
+        // SPONSOR_MATCH_SPINE — sub-flag of SPONSOR_MATCH: swaps the route's engine from the
+        // bespoke BM25×Variant-B path to the compose-searchPeople per-term spine.
+        //
+        // The eval picked the winner, so this is no longer a bake-off switch. Spine 0.594 vs
+        // bespoke 0.367 on the neutral gold (13/15 fixtures), and the spine has since gone
+        // 0.515 → 0.636 mean nDCG@20 (#1676 fixed the corpus-rarity inversion; #1681 retuned K
+        // and γ and deleted rarity from the weight outright).
+        //
+        // The fan-out that gated this launch is MEASURED, not assumed: the worst-case 8-concept
+        // spine fan-out ran clean on staging (m6g.large ×1 — HALF prod's capacity), and 40
+        // heavier-than-spine queries fired at prod's OpenSearch in 6s moved its heap not at all
+        // (14→16%, zero circuit-breaker trips). Prod's own public search runs the nine facet
+        // aggs the spine skips (`skipFacetAggs: true`, #1671), so a spine query is strictly
+        // lighter than a query prod already serves ~15×/second.
+        SPONSOR_MATCH_SPINE: "on", // Prod flipped 2026-07-13, TOGETHER with SPONSOR_MATCH above.
         // SELF_EDIT_RECITER_PENDING_HINT — the self-only ReCiter "pending /
         // suggested" candidate-publications nudge on the publications + home
         // self-edit surfaces (so the scholar logs into Publication Manager to claim
