@@ -48,14 +48,25 @@
  * is gone: it was declared, never produced, never read, and every shipped facet is computed
  * client-side from the candidate list.
  *
- * WHAT IS STILL ABSENT: `evidence` and `caveat`. `evidence` is the live one — the BESPOKE
- * engine produces it and the panel renders it, but the SPINE does not, and the spine is the
- * default wherever `SPONSOR_MATCH_SPINE` is on (which is now prod). So the "Why this match —
- * top papers" block is empty in prod today. Closing that needs the match-explain aggregation
- * the spine deliberately skips (`skipFacetAggs`), i.e. a retrieval change, not a contract one.
- * These stay OPTIONAL so the route never has to fabricate a value to satisfy the type.
- * Absent ≠ zero.
+ * EVIDENCE — and a correction worth keeping, because the wrong diagnosis was written down here
+ * and believed. This doc used to say the spine could not produce evidence because it runs
+ * `skipFacetAggs`, and that the fix needed "the match-explain aggregation the spine deliberately
+ * skips". BOTH CLAIMS WERE FALSE. `skipFacetAggs` gates exactly one thing — the nine People-index
+ * FACET aggs — and appears nowhere in the reason-agg's eligibility predicate. The spine produced
+ * no evidence for the dullest possible reason: it never passed `matchExplain`, which defaults to
+ * false. It never asked.
+ *
+ * The cost of believing the comment was not zero: acting on it meant dropping `skipFacetAggs`,
+ * which would have re-armed the aggregation that tripped the OpenSearch breaker AND still
+ * produced no evidence. A doc-comment asserting a mechanism is a hypothesis; this one was wrong
+ * for weeks and cost a filed issue that named the wrong cause.
+ *
+ * The spine now asks (#1689), and carries the search's own `ResultEvidence` on
+ * `searchEvidence` — see `SponsorSearchEvidence`. `evidence` (the bespoke shape) remains for
+ * the bespoke engine. `caveat` is still absent. These stay OPTIONAL so the route never has to
+ * fabricate a value to satisfy the type. Absent ≠ zero.
  */
+import type { ResultEvidence } from "@/lib/api/result-evidence";
 import { careerStageBucket, type CareerStage } from "@/lib/career-stage";
 
 /**
@@ -244,10 +255,34 @@ export function sponsorMeasuresFrom(row: SponsorMeasuresRow, now: Date = new Dat
   };
 }
 
-/** Why this candidate ranked. Optional — the SPINE's fast headless `searchPeople` shape
- *  carries no per-topic pub counts or evidence pubs (it runs `skipFacetAggs`), and
- *  fabricating counts is forbidden, so it omits this entirely. The bespoke engine, which
- *  makes one scored BM25 round-trip, DOES populate it. */
+/**
+ * #1689 — the SAME evidence the public People card renders, carried straight through from the
+ * `searchPeople` hit that retrieved this candidate.
+ *
+ * Deliberately the search's own `ResultEvidence`, not a sponsor-shaped copy of it. The sponsor
+ * console and the public search answer the same question — *why did this scholar match?* — and
+ * two independent answers to one question is how they come to disagree. The panel renders it
+ * with the search's own `<EvidenceLine>`, so there is one renderer and one selection ladder.
+ *
+ * `keyPaper` carries what the LAZY representative-papers fetch needs (`/api/search/key-paper`),
+ * scoped to the concept this candidate actually ranked best under — so the papers a disclosure
+ * reveals are papers about THAT concept, not about the paste in general.
+ */
+export type SponsorSearchEvidence = {
+  evidence: ResultEvidence;
+  /** The scholar's total publication count — the `M` in "N of M publications". */
+  pubCount: number;
+  keyPaper: {
+    descriptorUis: string[];
+    contentQuery: string;
+    conceptLabel?: string;
+  };
+};
+
+/** Why this candidate ranked, in the BESPOKE engine's shape. Optional — the spine does not
+ *  produce it (it produces `searchEvidence` above instead, which is richer and shared with the
+ *  public search). Kept because the bespoke engine, which makes one scored BM25 round-trip,
+ *  DOES populate it and the panel still renders it on that path. */
 export type SponsorEvidence = {
   topics?: { label: string; pubCount: number }[];
   methods?: { label: string; pubCount: number }[];
@@ -278,6 +313,10 @@ export type SponsorCandidate = {
   technologyCount: number;
   measures?: SponsorMeasures;
   evidence?: SponsorEvidence;
+  /** #1689 — the search's own evidence for this candidate. Produced by the SPINE. Absent when
+   *  the retrieving concept resolved to no MeSH descriptor (nothing to count against), never
+   *  zeroed. */
+  searchEvidence?: SponsorSearchEvidence;
   /** Near-miss reason. Present ⇒ the card takes the demoted treatment + amber caveat. */
   caveat?: string;
 };

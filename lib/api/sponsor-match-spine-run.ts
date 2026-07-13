@@ -50,6 +50,8 @@ import {
   sponsorMeasuresFrom,
   type SponsorCandidate,
   type SponsorConcept,
+  type SponsorContribution,
+  type SponsorSearchEvidence,
 } from "@/lib/api/sponsor-match-contract";
 import { searchPeople, type PeopleHit } from "@/lib/api/search";
 import { meshMatchTier } from "@/lib/search";
@@ -208,6 +210,20 @@ export type SpineRankResult = {
   candidates: SponsorCandidate[];
 };
 
+/**
+ * Key for the per-(concept, cwid) evidence map (#1689).
+ *
+ * ONE definition, called by both the writer and the reader. A concept term is free text from an
+ * LLM and can contain anything at all, so the key is a JSON tuple rather than a
+ * delimiter-joined string — the same idiom `reasonAggKey` uses, and for the same reason: no
+ * separator can collide with the content. Building the key inline at two sites is how the
+ * halves drift apart and every lookup silently misses — which presents not as a bug but as
+ * "the engine produced no evidence", i.e. as the very symptom this change exists to fix.
+ */
+function evidenceKey(term: string, cwid: string): string {
+  return JSON.stringify([term, cwid]);
+}
+
 /** Retrieve up to `TERM_DEPTH` scholar cwids for one cluster, in `searchPeople` rank
  *  order, paging as needed. Topical-only: the expertise-independent employment priors
  *  (faculty + active-grant prominence) are OFF so ranking reflects fit alone. A
@@ -241,8 +257,27 @@ async function retrieveCluster(
       // this exact caller as the intended `false`).
       facultyProminence: false,
       grantProminence: false,
-      // Full active-scholar pool (directory baseline), fast headless shape (no
-      // match-explain / representative-pub aggregations).
+      // #1689 — ASK FOR THE EVIDENCE. This is the whole fix, and it is three options on a
+      // call this loop already makes.
+      //
+      // The console's "why this match" block was empty in prod because the SPINE never
+      // produced `evidence`, and two comments in this repo (this file's, and the contract's)
+      // blamed `skipFacetAggs`. THAT WAS WRONG, and it is worth being explicit about, because
+      // acting on it would have made things worse: `skipFacetAggs` is read at exactly one
+      // place (`...(opts.skipFacetAggs ? {} : { aggs })`) and gates only the nine People-index
+      // FACET aggs. It appears nowhere in `reasonAggEligible`. The real gate is `matchExplain`,
+      // which defaults to FALSE — the spine simply never asked. "Fixing" the stated cause by
+      // dropping `skipFacetAggs` would have re-added the size-200 `deptDivKey` agg to every
+      // fan-out call, re-tripped the breaker, and STILL produced no evidence.
+      //
+      // `reasonFromDoc` + `meshDescriptorUi` together select the CHEAP path: the tagged count
+      // is an O(1) read of the people-doc's own `meshSubtreeCounts[ui]`, so a resolved concept
+      // issues NO publications-index query at all. `rep` was already in hand for the
+      // attribution boost — the descriptor UI was sitting right there, unread.
+      matchExplain: true,
+      reasonFromDoc: true,
+      meshDescriptorUi: rep?.descriptorUi,
+      // Full active-scholar pool (directory baseline).
       filters: { includeIncomplete: undefined },
       // Fan-out breaker: this loop reads only hits/total/pageSize (facets are
       // discarded), so skip the nine People-index facet aggregations. Sending them on
@@ -363,6 +398,8 @@ export async function rankResearchersForDescriptionSpine(
   const rankings: TermRanking[] = [];
   const concepts: SponsorConcept[] = [];
   const hitByCwid = new Map<string, PeopleHit>();
+  // #1689 — per (concept, cwid). See `evidenceKey`.
+  const evidenceByTermCwid = new Map<string, SponsorSearchEvidence>();
   // Which kind this paste is buying — read once, applied per cluster below.
   const targetKind = targetKindOf(clusters);
   for (const cluster of clusters) {
@@ -416,6 +453,25 @@ export async function rankResearchersForDescriptionSpine(
       rep,
     );
     for (const h of hits) if (!hitByCwid.has(h.cwid)) hitByCwid.set(h.cwid, h);
+    // #1689 — evidence is CONCEPT-SCOPED, so it must be stored per (concept, cwid) and chosen
+    // later, once the fusion knows which concept the candidate actually ranked best under.
+    // `hitByCwid` above is first-wins, which is fine for display fields (a name is a name in
+    // any cluster) but WRONG for evidence: it would tell an officer that a candidate matched
+    // on whichever concept happened to be retrieved first, not on the one that carried them.
+    for (const h of hits) {
+      if (!h.evidence) continue;
+      evidenceByTermCwid.set(evidenceKey(term, h.cwid), {
+        evidence: h.evidence,
+        pubCount: h.pubCount,
+        // What the lazy key-paper fetch needs to find this candidate's papers FOR THIS
+        // CONCEPT — the same three inputs the public People card passes.
+        keyPaper: {
+          descriptorUis: cluster.descendantUis,
+          contentQuery: cluster.members.join(" "),
+          conceptLabel: rep?.name,
+        },
+      });
+    }
     // `conceptWeight`, not an inline `centrality * weightFactor` — the contract owns the ONE
     // definition of the fusion weight and the client's slider re-rank calls the same function.
     // Re-stating the formula here is exactly the drift #1674 removed; a γ added in one place
@@ -461,14 +517,25 @@ export async function rankResearchersForDescriptionSpine(
   // at DEFAULT weights; the UI buckets it into a tier relative to the top hit and never
   // renders the raw number. `contributions` is the hinge — it comes straight out of
   // `rrfFuse`, which already had every (concept, rank) pair and used to discard them.
-  // ponytail: `evidence` is still OMITTED, not zeroed. The fast headless `searchPeople`
-  // shape carries no per-topic pub count and no evidence pubs (it runs `skipFacetAggs`),
-  // and fabricating counts is forbidden — so the contract keeps it optional and absent
-  // means "not computed", never "none". The evidence upgrade needs the match-explain
-  // aggregation, which is a separate change. `measures` IS produced now (#1654), and stays
-  // absent for a cwid with no Scholar row rather than defaulting to a bucket.
+  // #1689 — `searchEvidence` is the SAME `ResultEvidence` object the public People card
+  // renders, taken straight off the hit. Not a sponsor-specific lookalike: the panel feeds it
+  // to the search's own `<EvidenceLine>`, so the two surfaces cannot drift into telling an
+  // officer two different stories about why one scholar matched.
+  //
+  // CHOSEN BY BEST RANK, not by which cluster happened to retrieve them first. A candidate the
+  // fusion lifted for their #2 finish on "cardiac fibrosis" must not be captioned with their
+  // #97 finish on a peripheral concept — the caption would be true and useless. `contributions`
+  // already carries every (concept, rank) pair, so the best one is a min, not a new query.
+  //
+  // `measures` stays absent for a cwid with no Scholar row rather than defaulting to a bucket;
+  // `searchEvidence` likewise stays ABSENT when no cluster produced evidence for the candidate
+  // (a cluster with no resolved MeSH descriptor cannot yield a tagged count). Absent ≠ none.
   const candidates: SponsorCandidate[] = fused.map((f) => {
     const hit = hitByCwid.get(f.cwid);
+    const best = f.contributions.reduce<SponsorContribution | null>(
+      (b, c) => (b == null || c.rank < b.rank ? c : b),
+      null,
+    );
     return {
       cwid: f.cwid,
       name: hit?.preferredName ?? f.cwid,
@@ -479,6 +546,9 @@ export async function rankResearchersForDescriptionSpine(
       contributions: f.contributions,
       technologyCount: techByCwid.get(f.cwid) ?? 0,
       measures: measuresByCwid.get(f.cwid),
+      searchEvidence: best
+        ? evidenceByTermCwid.get(evidenceKey(best.term, f.cwid))
+        : undefined,
     };
   });
   return { concepts, candidates };
