@@ -11,10 +11,12 @@
  *    an empty LLM result falls back to the dictionary `extractTerms` (both empty ⇒ []);
  *  - term source → per-term MeSH resolution → cluster dedup → per-cluster
  *    `searchPeople` → weighted RRF → top-N map;
- *  - the fusion weight is centrality × dampedIdf(coverage) — the idf actually
- *    reorders (a rare concept up-weights its cluster);
- *  - a KNOWN-ZERO coverage row gets the NEUTRAL idf, never dampedIdf's cap branch
- *    (zero root-tag coverage ≠ maximally rare);
+ *  - the fusion weight is centrality^γ × kindPrior — corpus coverage is NOT in it, and a
+ *    500x coverage spread must not reorder anything (rarity anti-correlates with topicality;
+ *    it was the bug, and #1676's ±15% band was found to earn nothing, so it is gone);
+ *  - rare / known-zero / absent coverage all yield the SAME weightFactor (no §8.5 cliff),
+ *    while `corpusCoverage` still carries the display signal and still distinguishes
+ *    "measured rare" from "unknown" (absent ≠ zero);
  *  - redundant phrasing collapses into ONE `searchPeople` call;
  *  - the vocab loads with a deterministic order (bake-off run-to-run comparability);
  *  - extracted terms are capped at MAX_TERMS (bounded per-request fan-out);
@@ -123,14 +125,15 @@ beforeEach(() => {
 });
 
 describe("rankResearchersForDescriptionSpine", () => {
-  it("fuses per-cluster searchPeople rankings and applies the dampedIdf weight", async () => {
+  it("fuses per-cluster searchPeople rankings — and corpus COVERAGE does not reorder them", async () => {
     mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
     mockSubtopicFindMany.mockResolvedValue([{ label: "munchausen syndrome" }]);
     // Disjoint descendant sets ⇒ two separate clusters.
     mockMatchQueryToTaxonomy.mockImplementation(async (q: string) =>
       q === "cancer" ? meshRes("D_CANCER", ["D_CANCER"]) : meshRes("D_MUNCH", ["D_MUNCH"]),
     );
-    // Cancer is common (coverage 0.5 ⇒ low idf); Munchausen is rare (0.001 ⇒ high idf).
+    // A 500x coverage spread: cancer is corpus-COMMON (0.5), Munchausen corpus-RARE (0.001).
+    // Under the old corpus-IDF weight this was the whole ballgame. It must now change nothing.
     mockMeshDescriptorFindMany.mockResolvedValue([
       { descriptorUi: "D_CANCER", localPubCoverage: 0.5 },
       { descriptorUi: "D_MUNCH", localPubCoverage: 0.001 },
@@ -140,13 +143,24 @@ describe("rankResearchersForDescriptionSpine", () => {
     );
     mockTechnologyGroupBy.mockResolvedValue([{ cwid: "y", _count: { _all: 2 } }]);
 
-    const { candidates: out } = await rankResearchersForDescriptionSpine("cancer and munchausen syndrome work");
+    const { concepts, candidates: out } = await rankResearchersForDescriptionSpine(
+      "cancer and munchausen syndrome work",
+    );
 
-    // Weights: cancer -ln(0.5)=0.693, munchausen -ln(0.001)=6.908. Fused:
-    //   y = .693/62 + 6.908/61 = .124 (both terms), z = 6.908/62 = .111, x = .693/61 = .011.
-    // Order [y,z,x] — z outranks x ONLY because the idf up-weighted the rare cluster;
-    // with uniform weights the order would be [y,x,z]. So this proves the weight applied.
-    expect(out.map((r) => r.cwid)).toEqual(["y", "z", "x"]);
+    // THE REGRESSION GUARD. Both clusters are the same kind, so both take the same kind prior
+    // and `weightFactor` is IDENTICAL despite a 500x coverage difference. Rarity is out of the
+    // fusion weight, not merely bounded (it was a ±15% band in #1676; the sweep found the band
+    // earned nothing). If someone re-derives weightFactor from coverage, this fails first.
+    const cancer = concepts.find((c) => c.term === "cancer")!;
+    const munch = concepts.find((c) => c.term === "munchausen syndrome")!;
+    expect(cancer.weightFactor).toBe(munch.weightFactor);
+
+    // So RANK decides, not rarity. Equal weights w, K=30:
+    //   y = w/32 + w/31 = .0635 (both terms) ; x = w/31 = .0323 ; z = w/32 = .0313
+    // Order [y,x,z]. Note x now beats z: x is rank-1 on the COMMON concept and z is rank-2 on
+    // the RARE one. Under the old idf z beat x purely for being rare — that inversion is the
+    // bug the FINDING is about, and this assertion is what pins it shut.
+    expect(out.map((r) => r.cwid)).toEqual(["y", "x", "z"]);
     expect(out[0].fusedScore).toBeGreaterThan(out[1].fusedScore);
     expect(out[1].fusedScore).toBeGreaterThan(out[2].fusedScore);
 
@@ -246,50 +260,53 @@ describe("rankResearchersForDescriptionSpine", () => {
     expect(weightOf(ml, "machine learning")).toBeGreaterThan(weightOf(ml, "disease progression"));
   });
 
-  it("treats KNOWN-ZERO coverage as neutral idf — never dampedIdf's cap branch", async () => {
-    mockTopicFindMany.mockResolvedValue([{ label: "rare" }, { label: "zerocov" }]);
-    // Disjoint descendant sets ⇒ two separate clusters.
+  it("coverage NEVER reaches the fusion weight — rare, zero and absent all weigh the same", async () => {
+    mockTopicFindMany.mockResolvedValue([
+      { label: "rare" },
+      { label: "zerocov" },
+      { label: "nocov" },
+    ]);
+    // Disjoint descendant sets ⇒ three separate clusters.
     mockMatchQueryToTaxonomy.mockImplementation(async (q: string) =>
-      q === "rare" ? meshRes("D_RARE", ["D_RARE"]) : meshRes("D_ZERO", ["D_ZERO"]),
+      q === "rare"
+        ? meshRes("D_RARE", ["D_RARE"])
+        : q === "zerocov"
+          ? meshRes("D_ZERO", ["D_ZERO"])
+          : meshRes("D_NONE", ["D_NONE"]),
     );
-    // `rare` is genuinely rare (0.001 ⇒ idf 6.908, near the cap). `zerocov` has a
-    // KNOWN-ZERO coverage row (the ETL writes COALESCE(n_pubs,0)/total for every
-    // descriptor) — zero root-tag coverage is NOT evidence of rarity, so it must get
-    // the neutral idf (1), not the cap (10) that would let it dominate the fusion.
+    // Three states that used to produce three very different weights:
+    //   rare    — genuinely rare (0.001), which the old idf drove to ~6.9 of a 10 cap
+    //   zerocov — a KNOWN-ZERO coverage row (the ETL writes COALESCE(n_pubs,0)/total)
+    //   nocov   — NO row at all (40% of descriptors have no usable coverage)
+    // The §8.5 cliff lived exactly here: "no row" took idf 1 while "one tagged paper" took ~10,
+    // a 10x jump across a boundary carrying no topical meaning. Rarity is now out of the weight
+    // entirely, so all three collapse to the same weightFactor and the cliff cannot exist.
     mockMeshDescriptorFindMany.mockResolvedValue([
       { descriptorUi: "D_RARE", localPubCoverage: 0.001 },
       { descriptorUi: "D_ZERO", localPubCoverage: 0 },
+      // D_NONE: deliberately absent.
     ]);
     mockSearchPeople.mockImplementation(async ({ q }: { q: string }) =>
-      q === "rare" ? people(["x"]) : people(["z"]),
+      q === "rare" ? people(["x"]) : q === "zerocov" ? people(["z"]) : people(["n"]),
     );
 
-    const { concepts, candidates: out } =
-      await rankResearchersForDescriptionSpine("rare and zerocov studies");
+    const { concepts } = await rankResearchersForDescriptionSpine("rare and zerocov and nocov studies");
 
-    // The genuinely-rare concept still outranks the zero-evidence one, and the zero-evidence
-    // one still cannot take the cap branch and dominate — that invariant is unchanged.
-    expect(out.map((r) => r.cwid)).toEqual(["x", "z"]);
-
-    const zerocov = concepts.find((c) => c.term === "zerocov")!;
     const rare = concepts.find((c) => c.term === "rare")!;
-    expect(rare.weightFactor).toBeGreaterThan(zerocov.weightFactor);
+    const zerocov = concepts.find((c) => c.term === "zerocov")!;
+    const nocov = concepts.find((c) => c.term === "nocov")!;
 
-    // …but the CLIFF is gone (FINDING §8.5), and that is the point of this fix. Zero coverage
-    // now lands on the rarity band's CENTRE rather than at a value 10x away from its
-    // nearest-neighbour descriptor. Both concepts sit inside a ±15% band, so the gap between
-    // "no coverage row" and "one tagged paper" is a few percent, not an order of magnitude —
-    // across a boundary that carries no topical meaning and that 40% of descriptors sit on.
-    // Both are kind-aligned here, so the shared 1.25 kind prior is the band's multiplier.
-    expect(zerocov.weightFactor).toBeCloseTo(1 * 1.25, 6); // band centre × aligned-kind prior
-    expect(rare.weightFactor / zerocov.weightFactor).toBeLessThan(1.2);
+    // All three the same kind ⇒ all three take the same kind prior ⇒ ONE weightFactor.
+    expect(rare.weightFactor).toBe(zerocov.weightFactor);
+    expect(zerocov.weightFactor).toBe(nocov.weightFactor);
+    expect(rare.weightFactor).toBeCloseTo(1.25, 6); // the aligned kind prior, and nothing else
 
-    // …and the zero-coverage concept ships NO `corpusCoverage` at all. It gets a band-centre
-    // weightFactor (a ranking decision), but the UI must not be handed a 0 it could render
-    // as "vanishingly rare" — a zero root-tag coverage is missing evidence, not rarity, and
-    // it is 40% of descriptors. Absent ≠ zero.
-    expect(zerocov.corpusCoverage).toBeUndefined();
+    // …while `corpusCoverage` still carries the honest DISPLAY signal, and still distinguishes
+    // "measured rare" from "we don't know". Absent ≠ zero: a zero root-tag coverage is missing
+    // evidence, not rarity, so the UI is never handed a 0 it could render as "vanishingly rare".
     expect(rare.corpusCoverage).toBe(0.001);
+    expect(zerocov.corpusCoverage).toBeUndefined();
+    expect(nocov.corpusCoverage).toBeUndefined();
   });
 
   it("loads the vocab with a deterministic order (label asc)", async () => {
@@ -553,8 +570,8 @@ describe("rankResearchersForDescriptionSpine", () => {
       q === "CAR-T" ? meshRes("D_CART", ["D_CART"]) : meshRes("D_CA", ["D_CA"]),
     );
     mockMeshDescriptorFindMany.mockResolvedValue([
-      { descriptorUi: "D_CA", localPubCoverage: 0.5 }, // -ln(0.5) = 0.693
-      { descriptorUi: "D_CART", localPubCoverage: 0.001 }, // -ln(0.001) = 6.908
+      { descriptorUi: "D_CA", localPubCoverage: 0.5 },
+      { descriptorUi: "D_CART", localPubCoverage: 0.001 },
     ]);
     mockSearchPeople.mockImplementation(async ({ q }: { q: string }) =>
       q === "CAR-T" ? people(["b"]) : people(["a"]),
@@ -564,15 +581,15 @@ describe("rankResearchersForDescriptionSpine", () => {
 
     // The paste's top centrality is a `concept` (0.9) so the target kind is "concept":
     // `cancer` takes the aligned 1.25 prior and the off-target `CAR-T` method takes 0.8.
-    //   cancer: rarityFactor(0.5)   = 0.85 + 0.3·(0.693/10) = 0.871 ; × 1.25 = 1.088
-    //   CAR-T : rarityFactor(0.001) = 0.85 + 0.3·(6.908/10) = 1.057 ; × 0.80 = 0.846
+    // `weightFactor` IS the prior now — coverage does not enter it, which is why the
+    // corpus-common cancer (0.5) still out-weighs the corpus-rare CAR-T (0.001).
     expect(concepts).toEqual([
       {
         term: "cancer",
         kind: "concept",
         members: ["cancer", "oncology"],
         centrality: 0.9, // max across the merged members, not oncology's 0.4
-        weightFactor: expect.closeTo(1.088, 2),
+        weightFactor: expect.closeTo(1.25, 6), // aligned kind prior, full stop
         corpusCoverage: 0.5, // the raw measured fraction, for the badge only
       },
       {
@@ -580,7 +597,7 @@ describe("rankResearchersForDescriptionSpine", () => {
         kind: "method",
         members: ["CAR-T"],
         centrality: 0.7,
-        weightFactor: expect.closeTo(0.846, 2),
+        weightFactor: expect.closeTo(0.8, 6), // off-target kind prior
         corpusCoverage: 0.001,
       },
     ]);

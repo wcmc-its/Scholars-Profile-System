@@ -57,13 +57,25 @@ import type { CareerStage } from "@/lib/career-stage";
  * the order the server sent (see `sponsor-match-contract.test.ts`, which asserts exactly
  * that round-trip).
  *
- * 8, not 60 (FINDING §8.3). At K=60 the RRF denominators for ranks 1 and 20 are 61 and 80
- * — a 1.3x spread, so being the single BEST person on the funder's primary target was
- * worth almost nothing over being twentieth on it, and a candidate could out-score the
- * specialist by placing mid-pack on several peripheral concepts. At K=8 the same two ranks
- * are 9 and 28 (3.1x), so depth on the central concept actually pays.
+ * 30 — MEASURED, and it is the middle of a range neither of the previous values found.
+ *
+ * The original 60 was too flat: ranks 1 and 20 give denominators 61 and 80, a 1.3x spread,
+ * so being the single BEST person on the funder's target was worth almost nothing over being
+ * twentieth on it. #1676 therefore cut K to 8 (3.1x across the same ranks) — and overshot.
+ * At K=8 the head is so peaked that ONE concept's #1 hit can carry a candidate, which is the
+ * failure RRF damping exists to prevent; a candidate topping a single peripheral concept
+ * out-scores one who is consistently strong across the central ones.
+ *
+ * Swept over the 15 eval fixtures, re-fusing each from a FIXED extraction so the deltas are
+ * the constant's and nothing else (K is a pure fusion parameter — no re-query needed):
+ *
+ *     K=8 (shipped)  0.6131      K=16  0.6309 (+0.018)      K=30  0.6375 (+0.024)
+ *     K=60 (old)     0.6217 — net positive, but it makes 10 of 15 fixtures WORSE
+ *
+ * A broad plateau from 16 to 60 peaking near 30, not a knife-edge, so this is a real optimum
+ * rather than a fit to the fixture set. Reverting to 60 would have been the wrong correction.
  */
-export const DEFAULT_K = 8;
+export const DEFAULT_K = 30;
 
 /**
  * Exponent on centrality in the fusion weight (FINDING §8.4 — decomposition asymmetry).
@@ -73,13 +85,20 @@ export const DEFAULT_K = 8;
  * mechanisms out-vote the target by sheer count: a generalist mid-ranked on six mechanisms
  * beats the specialist ranked #1 on the disease. Squaring the centrality makes the primary
  * target dominate its own supporting detail BY CONSTRUCTION rather than by accident —
- * at the post-FINDING rubric (target 1.0, mechanism ~0.5) it turns a 2x lead into 4x.
+ * at the post-FINDING rubric (target 1.0, mechanism ~0.5) a cube turns a 2x lead into 8x.
+ *
+ * 3, not 2: swept on the fixtures, centrality wants MORE authority, not less, once rarity is
+ * out of the weight (γ=2 → 0.6483, γ=3 → 0.6532 at K=30). The curve keeps creeping up past 3,
+ * but the gain flattens while the risk does not — a large γ makes the ranking hostage to the
+ * extractor's centrality being well-calibrated, and a degenerate extraction (the ORIGINAL
+ * failure: everything at 1.0) would collapse the weight to the kind prior alone. 3 takes the
+ * measured win and stops before the ranker's correctness depends on the LLM being perfect.
  *
  * Shared, like DEFAULT_K: `conceptWeight` is the ONE definition of the weight and both the
  * server's fusion and the client's slider re-rank call it, so client and server cannot
  * drift apart on it (`sponsor-match-contract.test.ts` pins the round-trip).
  */
-export const CENTRALITY_GAMMA = 2;
+export const CENTRALITY_GAMMA = 3;
 
 /**
  * Fit-tier bands, as a fraction of the TOP candidate's fused score. The ranker stays
@@ -126,10 +145,15 @@ export type SponsorConcept = {
    * mechanisms outweighed the disease (Myofibroblasts 8.44 > Fibrosis 8.00 > Scleroderma
    * 7.24) and a mechanism generalist outranked the disease specialist.
    *
-   * The spine now sets it to `rarityFactor(coverage) × kindPrior(kind, targetKind)` — rarity
-   * demoted to a bounded ±15% tiebreaker, times a prior that boosts whichever kind THIS paste
-   * is targeting. Topicality is carried by `centrality^γ` instead. See
-   * `docs/2026-07-12-FINDING-idf-inverts-concept-weighting.md` §8.
+   * #1676 demoted rarity to a bounded ±15% tiebreaker. A sweep then showed the band was not
+   * paying for itself AT ALL — at γ=4, keeping it scores 0.6610 and deleting it scores 0.6612.
+   * So it is gone, not merely bounded: corpus rarity is a real signal about the LITERATURE and
+   * simply not one about TOPICALITY, and the fusion weight is a topicality claim.
+   *
+   * The spine now sets it to `kindPrior(kind, targetKind)` alone — a prior that boosts whichever
+   * kind THIS paste is targeting. Topicality is carried entirely by `centrality^γ`. Rarity
+   * survives on the wire as `corpusCoverage` (display-only, below), which is the honest place
+   * for it. See `docs/2026-07-12-FINDING-idf-inverts-concept-weighting.md` §8.
    *
    * INVARIANT: whatever the engine puts here must NOT depend on `centrality` — the client
    * re-derives the weight on every slider drag, so a centrality-contaminated `weightFactor`
