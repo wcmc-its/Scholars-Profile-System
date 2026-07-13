@@ -337,7 +337,7 @@ describe("SponsorMatchPanel", () => {
       expect(parts).toHaveLength(1);
       const csv = parts[0];
       expect(csv.split("\r\n")[0]).toBe(
-        "Rank,CWID,Name,Title,Department,Fit,Matched concepts,CTL technologies,Profile URL",
+        "Rank,CWID,Name,Title,Department,Fit,Matched concepts,Career stage,Clinician,CTL technologies,Profile URL",
       );
       expect(csv).toContain("Alice Alpha");
       expect(csv).toContain("Strong fit");
@@ -350,12 +350,79 @@ describe("SponsorMatchPanel", () => {
     }
   });
 
-  it("renders no Career stage or Clinician facet, even when a candidate carries measures", async () => {
-    await renderAndSearch();
-    // The spine has no producer for these. Absent != zero: a filter that cannot filter, or a
-    // blank column that reads as "nobody here is a clinician", is worse than nothing at all.
-    expect(screen.queryByText(/Career stage/i)).toBeNull();
-    expect(screen.queryByText(/Clinician/i)).toBeNull();
+  // ── Career stage / Clinician facets (#1654) ────────────────────────────────
+  it("renders no Career stage or Clinician facet when no candidate carries the measure", async () => {
+    await renderAndSearch(); // THREE — no `measures`
+    // Absent != zero. A filter that cannot filter, or one that reads as "nobody here is a
+    // clinician" when the truth is "we don't know", is worse than no filter at all.
+    expect(screen.queryByText("Career stage")).toBeNull();
+    expect(screen.queryByText("Clinician")).toBeNull();
+  });
+
+  it("renders both facets once the measures are produced, and filters on them", async () => {
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          fusedScore: 0.9,
+          measures: { careerStage: "early", isClinician: true },
+        }),
+        candidate({
+          cwid: "b",
+          name: "Bob Beta",
+          fusedScore: 0.5,
+          measures: { careerStage: "senior", isClinician: false },
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    // Both groups appear, in career-ladder order (not count order).
+    expect(screen.getByText("Career stage")).toBeTruthy();
+    expect(screen.getByText("Clinician")).toBeTruthy();
+
+    // Filtering by stage keeps only the early-career candidate.
+    fireEvent.click(screen.getByRole("checkbox", { name: /Early career/ }));
+    expect(screen.getByText("Alice Alpha")).toBeTruthy();
+    expect(screen.queryByText("Bob Beta")).toBeNull();
+
+    // Clearing restores both; the clinician facet then narrows to the one clinician.
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByText("Bob Beta")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Practicing clinician/ }));
+    expect(screen.getByText("Alice Alpha")).toBeTruthy();
+    expect(screen.queryByText("Bob Beta")).toBeNull();
+  });
+
+  it("a candidate with NO measure is filtered OUT by a measure filter, never silently kept", async () => {
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          fusedScore: 0.9,
+          measures: { careerStage: "early", isClinician: true },
+        }),
+        // No `measures` at all — unknown stage, unknown clinician status.
+        candidate({ cwid: "u", name: "Unknown Ursula", fusedScore: 0.8 }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Unknown Ursula");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Early career/ }));
+    // Ursula might be early-career — but we have no evidence she is, so she cannot be
+    // shown as satisfying the filter.
+    expect(screen.queryByText("Unknown Ursula")).toBeNull();
+    expect(screen.getByText("Alice Alpha")).toBeTruthy();
   });
 
   // ── Rows ───────────────────────────────────────────────────────────────────

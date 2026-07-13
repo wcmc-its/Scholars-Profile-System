@@ -39,14 +39,14 @@
  * response fields. Both are computed client-side (`matchedConcepts`, `fitTier`) so they
  * stay live under the sliders instead of going stale the moment one moves.
  *
- * PRODUCER GAP: `measures`, `evidence`, `caveat`, `preferences`, `facets` and `ask` are
- * OPTIONAL because the spine has no producer for them yet — it sets `careerStage: null`,
- * leaves `topPapers`/`matchedTopics` empty on the fast headless `searchPeople` shape, and
- * runs `skipFacetAggs: true` (the fan-out breaker). They are typed here so the UI has a
- * compile-enforced target to build against, and optional so the route never has to
- * fabricate a value to satisfy the type. Absent ≠ zero.
+ * PRODUCER GAP (narrowed, #1654): `measures` NOW HAS A PRODUCER — both engines hydrate it
+ * via `sponsorMeasuresFrom` below, so career stage and clinician status are real. What is
+ * still absent: `evidence`, `caveat`, `preferences`, `facets` and `ask`. The spine leaves
+ * `topPapers`/`matchedTopics` empty on the fast headless `searchPeople` shape and runs
+ * `skipFacetAggs: true` (the fan-out breaker). Those stay OPTIONAL so the route never has
+ * to fabricate a value to satisfy the type. Absent ≠ zero.
  */
-import type { CareerStage } from "@/lib/career-stage";
+import { careerStageBucket, type CareerStage } from "@/lib/career-stage";
 
 /**
  * RRF damping (pivot handoff §4). The head is damped so one concept's #1 hit cannot
@@ -165,11 +165,44 @@ export type SponsorContribution = {
 };
 
 /** Non-topical candidate attributes the preference nudges and status tags read.
- *  Optional throughout — the spine has no producer yet (see PRODUCER GAP). */
+ *  Optional because a caller may omit the hydration read; when present, both fields are
+ *  real (#1654). */
 export type SponsorMeasures = {
   careerStage?: CareerStage | null;
   isClinician?: boolean;
 };
+
+/** The scholar columns `sponsorMeasuresFrom` needs. Both engines already read Scholar for
+ *  the candidate cwids, so this is extra COLUMNS on an existing query, not an extra query. */
+export type SponsorMeasuresRow = {
+  roleCategory: string | null;
+  primaryTitle: string | null;
+  hasClinicalProfile: boolean;
+  appointments: { startDate: Date | null }[];
+  educations: { year: number | null; degree: string | null }[];
+};
+
+/**
+ * #1654 — the measures producer. Career stage reuses `careerStageBucket`, the same
+ * derivation the grant matcher ranks on, so the two consoles cannot disagree about who is
+ * early-career. Clinician reads `hasClinicalProfile` (derived from LDAP personTypeCodes),
+ * which is the institution's own answer to "is this person a clinician" — not a guess from
+ * the title string.
+ */
+export function sponsorMeasuresFrom(row: SponsorMeasuresRow, now: Date = new Date()): SponsorMeasures {
+  return {
+    careerStage: careerStageBucket(
+      {
+        roleCategory: row.roleCategory,
+        title: row.primaryTitle,
+        appointments: row.appointments,
+        educations: row.educations,
+      },
+      now,
+    ),
+    isClinician: row.hasClinicalProfile,
+  };
+}
 
 /** Why this candidate ranked. Optional — the SPINE's fast headless `searchPeople` shape
  *  carries no per-topic pub counts or evidence pubs (it runs `skipFacetAggs`), and

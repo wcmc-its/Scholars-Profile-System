@@ -40,6 +40,11 @@ export type SponsorMatchCsvRow = {
   /** The concepts this person actually ranked under. */
   matchedConcepts: readonly string[];
   technologyCount: number;
+  /** #1654 — display label ("Early career"), or "" when the measure is absent. Empty means
+   *  UNKNOWN, never "no stage": a blank cell is the honest rendering of a missing signal. */
+  careerStage: string;
+  /** #1654 — "Yes" / "No" / "" (absent). Same rule: blank is unknown, not "not a clinician". */
+  clinician: string;
   /** Absolute profile URL, so the cell is clickable when pasted anywhere. */
   profileUrl: string;
 };
@@ -52,6 +57,8 @@ const HEADERS = [
   "Department",
   "Fit",
   "Matched concepts",
+  "Career stage",
+  "Clinician",
   "CTL technologies",
   "Profile URL",
 ] as const;
@@ -67,6 +74,8 @@ export function buildSponsorMatchCsv(rows: readonly SponsorMatchCsvRow[]): strin
       r.department ?? "",
       r.fit,
       r.matchedConcepts.join("; "),
+      r.careerStage,
+      r.clinician,
       r.technologyCount,
       r.profileUrl,
     ]),

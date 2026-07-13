@@ -94,6 +94,9 @@ export type SponsorMatchTopic = { topicId: string; label: string; pubCount: numb
 export type SponsorRankedScholar = RankedScholar & {
   topPapers: SponsorMatchPaper[];
   matchedTopics: SponsorMatchTopic[];
+  /** #1654 — the clinician half of `SponsorMeasures`; the career-stage half already rides
+   *  in on `RankedScholar`. Undefined ⇒ no Scholar row, never "not a clinician". */
+  isClinician?: boolean;
 };
 
 /** Trust-boundary normalization: strip control chars (tab/newline survive as
@@ -259,7 +262,15 @@ export async function rankResearchersForDescription(
     const [scholars, grouped, pubRows, topicRows] = await Promise.all([
       db.read.scholar.findMany({
         where: { cwid: { in: cwids } },
-        select: { cwid: true, primaryTitle: true, primaryDepartment: true },
+        // #1654 — `careerStage` already rides in on RankedScholar (the matcher computes it),
+        // so the only measure missing here is the clinician flag. One extra column on the
+        // read this engine already does for title/department.
+        select: {
+          cwid: true,
+          primaryTitle: true,
+          primaryDepartment: true,
+          hasClinicalProfile: true,
+        },
       }),
       db.read.scholarTechnology.groupBy({
         by: ["cwid"],
@@ -288,6 +299,9 @@ export async function rankResearchersForDescription(
       r.title = p?.primaryTitle ?? null;
       r.department = p?.primaryDepartment ?? null;
       r.technologyCount = techByCwid.get(r.cwid) ?? 0;
+      // #1654 — absent (not `false`) when the scholar row is missing: the contract's
+      // "absent ≠ none" rule, so a facet can't silently bucket someone as non-clinician.
+      r.isClinician = p?.hasClinicalProfile;
       r.topPapers = (topPapersByCwid.get(r.cwid) ?? []).flatMap((paper) => {
         const pub = pubByPmid.get(paper.pmid);
         return pub
