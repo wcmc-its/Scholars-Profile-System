@@ -519,6 +519,60 @@ describe("SponsorMatchPanel", () => {
     expect(screen.getByText(/1 of 3 concepts are highlighted/)).toBeTruthy();
   });
 
+
+  // ── Evidence, via the SEARCH's own renderer (#1689) ─────────────────────────
+  it("renders the spine's evidence with the public search's EvidenceLine", async () => {
+    // The console's "why this match" block was EMPTY in prod: the panel read `evidence`
+    // (bespoke-only) while the spine — the prod default — produced none. It now carries the
+    // search's own ResultEvidence, rendered by the search's own component, so the two surfaces
+    // cannot tell an officer two different stories about the same scholar.
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          fusedScore: 0.9,
+          searchEvidence: {
+            evidence: {
+              kind: "publications",
+              strength: "tagged",
+              text: "142 of 210 publications tagged",
+              term: "Immuno-oncology",
+              count: 142,
+            },
+            pubCount: 210,
+            keyPaper: {
+              descriptorUis: ["D000074322"],
+              contentQuery: "immuno-oncology",
+              conceptLabel: "Immunotherapy",
+            },
+          },
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    // The real reason line, with the real counts — not an empty disclosure. The count and the
+    // term are rendered as separate spans by the search's renderer (count-first emphasis), so
+    // assert on the assembled text of the line rather than on one node.
+    const line = screen
+      .getAllByText((_t, el) => /142 of 210 publications tagged/.test(el?.textContent ?? ""))
+      .pop();
+    expect(line).toBeTruthy();
+    expect(line!.textContent).toContain("Immuno-oncology");
+  });
+
+  it("renders no evidence line when the candidate carries none", async () => {
+    await renderAndSearch(); // THREE — no `searchEvidence`
+    // Absent is not zero: an empty disclosure reads as "this match has no evidence", which is
+    // a claim we never made. Render nothing instead.
+    expect(screen.queryByText(/publications tagged/)).toBeNull();
+  });
+
   // ── Sponsor preferences (#1654) ────────────────────────────────────────────
   it("drops a deselected preference from the ask header, so it cannot contradict the ranking", async () => {
     // The header is DERIVED from the ACTIVE preferences, not frozen at submit. An officer who

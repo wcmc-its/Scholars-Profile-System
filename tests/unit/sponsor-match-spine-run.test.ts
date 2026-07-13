@@ -665,3 +665,121 @@ describe("rankResearchersForDescriptionSpine", () => {
     ]);
   });
 });
+
+// ── Evidence (#1689) ────────────────────────────────────────────────────────
+/** A hit carrying the search's own evidence, as `searchPeople` emits it once asked. */
+function hitWithEvidence(cwid: string, term: string, count: number, pubCount: number) {
+  return {
+    ...hit(cwid),
+    pubCount,
+    evidence: {
+      kind: "publications" as const,
+      strength: "tagged" as const,
+      text: `${count} of ${pubCount} publications tagged`,
+      term,
+      count,
+    },
+  };
+}
+
+describe("rankResearchersForDescriptionSpine — evidence (#1689)", () => {
+  /**
+   * THE FIX ITSELF. The console's evidence block was empty in prod not because of
+   * `skipFacetAggs` (which two comments in the repo claimed, and which is why an issue was
+   * filed naming the wrong cause) but because the spine never passed `matchExplain`. This
+   * pins the three options that turn it on, and pins `skipFacetAggs` staying ON alongside
+   * them — because "fixing" the stated cause meant dropping it, which would have re-tripped
+   * the OpenSearch breaker AND still produced nothing.
+   */
+  it("ASKS for evidence — matchExplain + the CHEAP doc-sourced path — while still skipping the facet aggs", async () => {
+    mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+    mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER", "D_KID"]));
+    mockSearchPeople.mockResolvedValue(people(["a"]));
+
+    await rankResearchersForDescriptionSpine("cancer work");
+
+    expect(mockSearchPeople.mock.calls.length).toBeGreaterThan(0);
+    for (const [args] of mockSearchPeople.mock.calls) {
+      expect(args.matchExplain).toBe(true);
+      // reasonFromDoc + the descriptor UI select the O(1) `_source.meshSubtreeCounts` read,
+      // so a resolved concept issues NO publications-index query. Without the UI this silently
+      // falls back to the expensive per-call agg — the one that drove the ~10s hang.
+      expect(args.reasonFromDoc).toBe(true);
+      expect(args.meshDescriptorUi).toBe("D_CANCER");
+      // The breaker guard must survive the fix.
+      expect(args.skipFacetAggs).toBe(true);
+    }
+  });
+
+  it("carries the search's own evidence onto the candidate", async () => {
+    mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+    mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
+    mockSearchPeople.mockResolvedValue({
+      hits: [hitWithEvidence("a", "Cancer", 12, 40)],
+      total: 1,
+      pageSize: 20,
+    });
+
+    const { candidates } = await rankResearchersForDescriptionSpine("cancer work");
+
+    const a = candidates.find((c) => c.cwid === "a")!;
+    expect(a.searchEvidence?.evidence).toMatchObject({ kind: "publications", term: "Cancer" });
+    expect(a.searchEvidence?.pubCount).toBe(40);
+    // What the lazy `/api/search/key-paper` fetch needs, scoped to the matching concept.
+    expect(a.searchEvidence?.keyPaper).toEqual({
+      descriptorUis: ["D_CANCER"],
+      contentQuery: "cancer",
+      conceptLabel: "D_CANCER",
+    });
+  });
+
+  it("takes evidence from the concept the candidate ranked BEST under, not the first one retrieved", async () => {
+    // Two concepts. "cancer" is extracted first and retrieves `a` at rank 3; "munchausen
+    // syndrome" retrieves `a` at rank 1. First-wins would caption `a` with the cancer line —
+    // true, but not why the fusion lifted them. The caption must follow the best rank.
+    mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+    mockSubtopicFindMany.mockResolvedValue([{ label: "munchausen syndrome" }]);
+    mockMatchQueryToTaxonomy.mockImplementation(async (q: string) =>
+      q === "cancer" ? meshRes("D_CANCER", ["D_CANCER"]) : meshRes("D_MUNCH", ["D_MUNCH"]),
+    );
+    mockSearchPeople.mockImplementation(async ({ q }: { q: string }) =>
+      q === "cancer"
+        ? {
+            // `a` is 3rd here.
+            hits: [
+              hitWithEvidence("x", "Cancer", 9, 30),
+              hitWithEvidence("y", "Cancer", 8, 30),
+              hitWithEvidence("a", "Cancer", 1, 50),
+            ],
+            total: 3,
+            pageSize: 20,
+          }
+        : {
+            // `a` is 1st here — the concept that actually carried them.
+            hits: [hitWithEvidence("a", "Munchausen", 22, 50)],
+            total: 1,
+            pageSize: 20,
+          },
+    );
+
+    const { candidates } = await rankResearchersForDescriptionSpine(
+      "cancer and munchausen syndrome work",
+    );
+
+    const a = candidates.find((c) => c.cwid === "a")!;
+    expect(a.contributions.length).toBe(2); // ranked under both
+    expect(a.searchEvidence?.evidence).toMatchObject({ term: "Munchausen" });
+    expect(a.searchEvidence?.keyPaper.descriptorUis).toEqual(["D_MUNCH"]);
+  });
+
+  it("leaves evidence ABSENT when the hit carries none — never a zeroed count", async () => {
+    // A cluster that resolves to no MeSH descriptor cannot produce a tagged count. Absent
+    // means "not computed"; a `{ count: 0 }` would assert the scholar has no matching papers.
+    mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+    mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
+    mockSearchPeople.mockResolvedValue(people(["a"])); // plain hit — no `evidence`
+
+    const { candidates } = await rankResearchersForDescriptionSpine("cancer work");
+    expect(candidates[0].searchEvidence).toBeUndefined();
+  });
+});

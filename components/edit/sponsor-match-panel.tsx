@@ -64,6 +64,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download } from "lucide-react";
 
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
+import { EvidenceLine } from "@/components/search/evidence-line";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -1011,6 +1012,13 @@ function ResearcherRow({
   const tier = fitTier(candidate.fusedScore, topScore);
   const papers = candidate.evidence?.papers ?? [];
   const topics = candidate.evidence?.topics ?? [];
+  // #1689 — `EvidenceLine` de-dups representative papers across a card's lines through this
+  // shared set. The sponsor card renders ONE line, so it can never collide with a sibling; the
+  // Set exists because the component's contract requires it. Memoised with NO deps because the
+  // row is keyed by cwid and so remounts per candidate anyway — the point is only that a slider
+  // drag (which re-renders every row) must not hand the line a fresh set and make it re-fetch
+  // papers it has already claimed.
+  const claimedPmids = useMemo(() => new Set<string>(), []);
   return (
     <div className="border-t border-border flex gap-3 py-4 first:border-t-0">
       <div className="text-muted-foreground w-5 pt-1 text-right text-sm tabular-nums">{rank}</div>
@@ -1057,6 +1065,28 @@ function ResearcherRow({
               </span>
             ))}
           </div>
+        ) : null}
+        {/* #1689 — the SPINE's evidence, rendered by the PUBLIC SEARCH'S OWN component.
+            Not a lookalike built for this console: the same `<EvidenceLine>` the People card
+            uses, fed the same `ResultEvidence` the server selected. It brings the reason line
+            ("142 of 210 publications tagged Systemic Sclerosis") and, on expand, the lazy
+            representative-papers disclosure — which costs nothing for the ~700 candidates
+            nobody opens, because it fetches on click, not on render.
+            Two surfaces answering "why did this scholar match?" with one renderer is the point:
+            it is the only way they cannot come to disagree. */}
+        {candidate.searchEvidence ? (
+          <EvidenceLine
+            evidence={candidate.searchEvidence.evidence}
+            cwid={candidate.cwid}
+            slug={candidate.profileSlug}
+            pubCount={candidate.searchEvidence.pubCount}
+            q={candidate.searchEvidence.keyPaper.contentQuery}
+            keyPaperConfig={candidate.searchEvidence.keyPaper}
+            hasQuery
+            badged={false}
+            claimedPmids={claimedPmids}
+            stacked={false}
+          />
         ) : null}
         {topics.length > 0 ? (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
