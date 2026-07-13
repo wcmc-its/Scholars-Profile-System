@@ -569,6 +569,46 @@ export class SpsObservabilityStack extends Stack {
     );
     openSearchRedAlarm.addAlarmAction(snsAction);
 
+    // (8b) Parent circuit-breaker trips. There is no CloudWatch metric for
+    // these -- OpenSearch only surfaces them as a `circuit_breaking_exception`
+    // in the *app* log when a query is refused, and the app turns that into a
+    // 502. The JVM-pressure alarm above is blind to them: it needs 15 minutes
+    // sustained >85%, while a breaker trip is a ~2-minute burst (staging sat in
+    // OK through a 97% spike, 2026-07-12). This filter is the direct signal --
+    // one refused query is already a user-visible failure, so alarm on the
+    // first one.
+    new logs.MetricFilter(this, "OpenSearchBreakerMetricFilter", {
+      logGroup: appStack.appLogGroup,
+      filterName: `sps-opensearch-breaker-${env}`,
+      filterPattern: logs.FilterPattern.literal('"circuit_breaking_exception"'),
+      metricNamespace: "SPS/Search",
+      metricName: "OpenSearchCircuitBreaker",
+      metricValue: "1",
+      defaultValue: 0,
+    });
+
+    const openSearchBreakerAlarm = new cloudwatch.Alarm(
+      this,
+      "OpenSearchBreakerAlarm",
+      {
+        alarmName: `sps-opensearch-breaker-${env}`,
+        alarmDescription: `OpenSearch refused a query with circuit_breaking_exception (${env}) -- the parent breaker tripped at 95% of heap and the app returned 502. Next: check JVMMemoryPressure Maximum on the domain; the node is undersized or a query burst (e.g. the sponsor-match fan-out) is too heavy for the heap.`,
+        metric: new cloudwatch.Metric({
+          namespace: "SPS/Search",
+          metricName: "OpenSearchCircuitBreaker",
+          statistic: "Sum",
+          period: Duration.minutes(5),
+        }),
+        threshold: 0,
+        evaluationPeriods: 1,
+        datapointsToAlarm: 1,
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    openSearchBreakerAlarm.addAlarmAction(warnAction); // P2 -- degraded search, not down
+
     // ------------------------------------------------------------------
     // Edit authz-denied alarm (B02 #101)
     // ------------------------------------------------------------------

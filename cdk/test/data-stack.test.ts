@@ -568,9 +568,9 @@ describe("DataStack", () => {
       template.hasResourceProperties("AWS::OpenSearchService::Domain", {
         ClusterConfig: Match.objectLike({
           InstanceCount: 1,
-          // #626 — t3.medium (was t3.small): the t3.small couldn't complete a
-          // bulk rebuild (AWS throttled the credit-exhausted burstable node).
-          InstanceType: "t3.medium.search",
+          // Same node type as prod: the t3.medium's ~2 GB heap tripped the
+          // parent circuit breaker (95%) on bursty query loads.
+          InstanceType: "m6g.large.search",
           ZoneAwarenessEnabled: false,
         }),
       });

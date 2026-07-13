@@ -562,13 +562,15 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     auroraReaderCount: 0,
     auroraBackupRetentionDays: 14,
     opensearchDataNodes: 1,
-    // #626 — bumped from t3.small.search: the burstable t3.small (2 GB, ~1 GB
-    // heap) could not complete a full `search:index` bulk rebuild. With the
-    // write queue empty it still 429'd every chunk — AWS throttling the
-    // credit-exhausted burstable instance, not OpenSearch backpressure. t3.medium
-    // (4 GB, ~2 GB heap, more burst credits) gives the rebuild headroom, paired
-    // with the paced bulk writer (#627). Still single-node — staging is low-traffic.
-    opensearchDataNodeInstanceType: "t3.medium.search",
+    // #626 bumped t3.small → t3.medium (the burstable t3.small's ~1 GB heap
+    // could not finish a `search:index` bulk rebuild). t3.medium's ~2 GB heap
+    // then proved too small in turn: JVM pressure idled at ~50% and spiked to
+    // 91–97%, tripping the parent circuit breaker (95%, real-memory) on bursty
+    // query workloads — the sponsor-match fan-out is ~40–60 sequential
+    // searchPeople calls per request and 502'd on `circuit_breaking_exception`
+    // while refusing a 2 KB request. m6g.large (8 GB, ~4 GB heap) is also
+    // *prod's* node type, so a staging result now means something. +$40/mo.
+    opensearchDataNodeInstanceType: "m6g.large.search",
     // Single-node staging domain — no dedicated masters (#1509 is a prod HA fix).
     opensearchMasterNodes: 0,
     opensearchMasterNodeInstanceType: "m6g.large.search",
