@@ -18,19 +18,21 @@ const ROW: SponsorMatchCsvRow = {
   department: "Medicine",
   fit: "Strong fit",
   matchedConcepts: ["systemic sclerosis", "pulmonary fibrosis"],
+  careerStage: "Senior",
+  clinician: "Yes",
   technologyCount: 2,
   profileUrl: "https://example.org/alice-alpha",
 };
 
 const HEADER =
-  "Rank,CWID,Name,Title,Department,Fit,Matched concepts,CTL technologies,Profile URL";
+  "Rank,CWID,Name,Title,Department,Fit,Matched concepts,Career stage,Clinician,CTL technologies,Profile URL";
 
 describe("buildSponsorMatchCsv", () => {
   it("writes the header row and one row per researcher", () => {
     const lines = buildSponsorMatchCsv([ROW]).split("\r\n");
     expect(lines[0]).toBe(HEADER);
     expect(lines[1]).toBe(
-      '1,aaa1001,Alice Alpha,Professor of Medicine,Medicine,Strong fit,systemic sclerosis; pulmonary fibrosis,2,https://example.org/alice-alpha',
+      '1,aaa1001,Alice Alpha,Professor of Medicine,Medicine,Strong fit,systemic sclerosis; pulmonary fibrosis,Senior,Yes,2,https://example.org/alice-alpha',
     );
   });
 
@@ -43,7 +45,7 @@ describe("buildSponsorMatchCsv", () => {
     const csv = buildSponsorMatchCsv([{ ...ROW, title: null, department: null }]);
     expect(csv).not.toContain("null");
     expect(csv.split("\r\n")[1]).toBe(
-      '1,aaa1001,Alice Alpha,,,Strong fit,systemic sclerosis; pulmonary fibrosis,2,https://example.org/alice-alpha',
+      '1,aaa1001,Alice Alpha,,,Strong fit,systemic sclerosis; pulmonary fibrosis,Senior,Yes,2,https://example.org/alice-alpha',
     );
   });
 
@@ -70,9 +72,13 @@ describe("buildSponsorMatchCsv", () => {
     expect(csv).toContain("Strong fit");
   });
 
-  it("has no Career stage / Clinician column — no producer, and a blank column would lie", () => {
-    const header = buildSponsorMatchCsv([ROW]).split("\r\n")[0];
-    expect(header).not.toMatch(/career|stage|clinician|seniority/i);
+  it("leaves the measure cells BLANK when absent — a blank is unknown, not 'no' (#1654)", () => {
+    // The producer landed, but a candidate with no Scholar row still carries no measure.
+    // Writing "No" there would assert she is not a clinician; we simply do not know.
+    const unknown: SponsorMatchCsvRow = { ...ROW, careerStage: "", clinician: "" };
+    const cells = buildSponsorMatchCsv([unknown]).split("\r\n")[1];
+    expect(cells).toContain("systemic sclerosis; pulmonary fibrosis,,,2,");
+    expect(cells).not.toMatch(/,No,/);
   });
 
   it("returns just the header for an empty result set", () => {

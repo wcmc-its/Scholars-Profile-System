@@ -42,8 +42,11 @@
  *  - the rarity badge's NUMBER and the word "common" — `weightFactor` is a claim about the
  *    RANKING and must not be shown, and "common" is unsayable because absent ≠ zero for the 40%
  *    of descriptors with no coverage row.
- * Career stage, clinician status and preference hits are absent for a different reason: no
- * producer exists (`measures` is unset). They render nothing rather than fabricate.
+ * Career stage and clinician status now HAVE a producer (#1654) and render as the mockup's two
+ * remaining facet groups; each hides itself when no ranked row carries the measure, so an absent
+ * signal still shows nothing rather than a lie. Preference hits remain absent — extracting the
+ * sponsor's non-topical asks from the paste, and giving the formula's `prefBoost` term something
+ * to read, is the next slice.
  */
 import { useEffect, useMemo, useState } from "react";
 import { Download } from "lucide-react";
@@ -61,7 +64,9 @@ import {
   type SponsorFitTier,
   type SponsorMatchResponse,
 } from "@/lib/api/sponsor-match-contract";
+import type { CareerStage } from "@/lib/career-stage";
 import { buildSponsorMatchCsv } from "@/lib/edit/sponsor-match-export";
+import { careerStageLabel } from "@/lib/match-display";
 import { profilePath } from "@/lib/profile-url";
 import { initials } from "@/lib/utils";
 
@@ -108,13 +113,20 @@ const TIER_CLASS: Record<SponsorFitTier, string> = {
   weak: "border-border text-muted-foreground bg-transparent",
 };
 
-/** Sort is presentation only — it reorders the rows, it never changes a rank. `Seniority` (the
- *  mockup's third option) is impossible: it needs `measures.careerStage`, which has no producer. */
+/** Sort is presentation only — it reorders the rows, it never changes a rank. The mockup's
+ *  `Seniority` option is now producible (#1654) but deliberately not added here: the two
+ *  shipped sorts answer "who fits" and "find a name", and a seniority SORT would bury the
+ *  best match under the most senior one. Career stage is a FILTER instead — it narrows the
+ *  pool without reordering fit. */
 const SORT_TABS = [
   { key: "fit", label: "Fit" },
   { key: "name", label: "Name" },
 ] as const;
 type SortKey = (typeof SORT_TABS)[number]["key"];
+
+/** Facet order is the career ladder, not a count ranking — a stage list that reordered itself
+ *  per search would be unreadable. */
+const CAREER_STAGE_ORDER: readonly CareerStage[] = ["grad", "postdoc", "early", "mid", "senior"];
 
 function toggled(set: ReadonlySet<string>, value: string): Set<string> {
   const next = new Set(set);
@@ -143,6 +155,10 @@ export function SponsorMatchPanel() {
   const [deptSel, setDeptSel] = useState<ReadonlySet<string>>(new Set());
   const [conceptSel, setConceptSel] = useState<ReadonlySet<string>>(new Set());
   const [ctlOnly, setCtlOnly] = useState(false);
+  // #1654 — selection is keyed by the DISPLAY label (what FacetGroup renders and toggles),
+  // so the filter compares labels too. One vocabulary, no id↔label map to drift.
+  const [stageSel, setStageSel] = useState<ReadonlySet<string>>(new Set());
+  const [clinicianOnly, setClinicianOnly] = useState(false);
   const [sort, setSort] = useState<SortKey>("fit");
   // The two halves of the contract payload. `candidates` is fetched ONCE per search and
   // never refetched by a slider; `concepts` is the editable rail. Everything below is
@@ -197,6 +213,8 @@ export function SponsorMatchPanel() {
     setDeptSel(new Set());
     setConceptSel(new Set());
     setCtlOnly(false);
+    setStageSel(new Set());
+    setClinicianOnly(false);
   }
 
   /** The ONLY network call. A search — never a re-rank. */
@@ -291,7 +309,27 @@ export function SponsorMatchPanel() {
     [ranked],
   );
 
-  const hasFilters = deptSel.size > 0 || conceptSel.size > 0 || ctlOnly;
+  // #1654 — the mockup's two remaining groups, now that `measures` has a producer. Both
+  // count only rows that actually CARRY the measure: a candidate with no Scholar row is
+  // absent from the facet rather than silently counted as "not a clinician" / unstaged.
+  const stageFacet = useMemo(() => {
+    const counts = new Map<CareerStage, number>();
+    for (const c of ranked) {
+      const s = c.measures?.careerStage;
+      if (s) counts.set(s, (counts.get(s) ?? 0) + 1);
+    }
+    return CAREER_STAGE_ORDER.filter((s) => counts.has(s)).map(
+      (s) => [careerStageLabel(s), counts.get(s)!] as const,
+    );
+  }, [ranked]);
+
+  const clinicianCount = useMemo(
+    () => ranked.filter((c) => c.measures?.isClinician === true).length,
+    [ranked],
+  );
+
+  const hasFilters =
+    deptSel.size > 0 || conceptSel.size > 0 || ctlOnly || stageSel.size > 0 || clinicianOnly;
 
   // Live rank travels with the row, so a filtered view still reads "this person is #7 overall",
   // not "#1 of the filtered three". It re-derives as sliders move.
@@ -306,12 +344,18 @@ export function SponsorMatchPanel() {
         ({ c }) =>
           (deptSel.size === 0 || (c.department != null && deptSel.has(c.department))) &&
           (conceptSel.size === 0 || c.contributions.some((x) => conceptSel.has(x.term))) &&
-          (!ctlOnly || c.technologyCount > 0),
+          (!ctlOnly || c.technologyCount > 0) &&
+          // A row with no measure fails a measure filter — it cannot be shown to satisfy a
+          // constraint we have no evidence it meets.
+          (stageSel.size === 0 ||
+            (c.measures?.careerStage != null &&
+              stageSel.has(careerStageLabel(c.measures.careerStage)))) &&
+          (!clinicianOnly || c.measures?.isClinician === true),
       );
     return sort === "name"
       ? [...rows].sort((a, b) => a.c.name.localeCompare(b.c.name))
       : rows;
-  }, [ranked, deptSel, conceptSel, ctlOnly, sort]);
+  }, [ranked, deptSel, conceptSel, ctlOnly, stageSel, clinicianOnly, sort]);
 
   /** Exports exactly what is on screen — current sliders, current filters, current sort. A
    *  server route could not do this: it would re-run the match and emit the DEFAULT ranking,
@@ -326,6 +370,10 @@ export function SponsorMatchPanel() {
         department: c.department,
         fit: TIER_LABEL[fitTier(c.fusedScore, topScore)],
         matchedConcepts: matchedConcepts(c, concepts).map((m) => m.concept.term),
+        // Blank = the measure is absent, never "no stage" / "not a clinician" (#1654).
+        careerStage: c.measures?.careerStage ? careerStageLabel(c.measures.careerStage) : "",
+        clinician:
+          c.measures?.isClinician === undefined ? "" : c.measures.isClinician ? "Yes" : "No",
         technologyCount: c.technologyCount,
         profileUrl: new URL(
           profilePath(c.profileSlug),
@@ -457,9 +505,10 @@ export function SponsorMatchPanel() {
                   />
                 ) : null}
 
-                {/* THREE groups, and there can never be more. The mockup draws five — its
-                    `Career stage` and `Clinician` groups need `measures`, which the spine does
-                    not produce. A filter that cannot filter is worse than no filter. */}
+                {/* The mockup's five groups. `Career stage` and `Clinician` were held back until
+                    `measures` had a producer (#1654) — a filter that cannot filter is worse than
+                    no filter. Both now render only when at least one ranked row carries the
+                    measure, so they still disappear rather than lie. */}
                 <div
                   data-slot="sponsor-match-facets"
                   className="border-border rounded-lg border p-3"
@@ -485,6 +534,24 @@ export function SponsorMatchPanel() {
                       options={conceptFacet}
                       selected={conceptSel}
                       onToggle={(v) => setConceptSel(toggled(conceptSel, v))}
+                    />
+                  ) : null}
+                  {stageFacet.length > 0 ? (
+                    <FacetGroup
+                      label="Career stage"
+                      options={stageFacet}
+                      selected={stageSel}
+                      onToggle={(v) => setStageSel(toggled(stageSel, v))}
+                      title="Years since terminal degree, bucketed — the same derivation the funding matcher ranks on."
+                    />
+                  ) : null}
+                  {clinicianCount > 0 ? (
+                    <FacetGroup
+                      label="Clinician"
+                      options={[["Practicing clinician", clinicianCount]]}
+                      selected={clinicianOnly ? new Set(["Practicing clinician"]) : new Set()}
+                      onToggle={() => setClinicianOnly(!clinicianOnly)}
+                      title="Carries a clinical or NYP-credentialed signal in the Enterprise Directory."
                     />
                   ) : null}
                   <FacetGroup

@@ -34,6 +34,7 @@ const {
   mockSubtopicFindMany,
   mockMeshDescriptorFindMany,
   mockTechnologyGroupBy,
+  mockScholarFindMany,
   mockSearchPeople,
   mockMatchQueryToTaxonomy,
   mockExtractSponsorConcepts,
@@ -42,6 +43,7 @@ const {
   mockSubtopicFindMany: vi.fn(),
   mockMeshDescriptorFindMany: vi.fn(),
   mockTechnologyGroupBy: vi.fn(),
+  mockScholarFindMany: vi.fn(),
   mockSearchPeople: vi.fn(),
   mockMatchQueryToTaxonomy: vi.fn(),
   mockExtractSponsorConcepts: vi.fn(),
@@ -54,6 +56,8 @@ vi.mock("@/lib/db", () => ({
       subtopic: { findMany: mockSubtopicFindMany },
       meshDescriptor: { findMany: mockMeshDescriptorFindMany },
       scholarTechnology: { groupBy: mockTechnologyGroupBy },
+      // #1654 — the measures hydration read (career stage + clinician).
+      scholar: { findMany: mockScholarFindMany },
     },
   },
 }));
@@ -115,6 +119,9 @@ beforeEach(() => {
   mockSubtopicFindMany.mockResolvedValue([]);
   mockMeshDescriptorFindMany.mockResolvedValue([]);
   mockTechnologyGroupBy.mockResolvedValue([]);
+  // Default: no Scholar rows ⇒ candidates carry NO measures, which is the contract's
+  // "absent, not zero". Individual tests override to assert the produced values.
+  mockScholarFindMany.mockResolvedValue([]);
   mockMatchQueryToTaxonomy.mockResolvedValue({ state: "none", meshResolution: null });
   mockSearchPeople.mockResolvedValue(people([]));
   // Default: LLM extractor yields nothing → the spine falls back to the dictionary
@@ -338,6 +345,36 @@ describe("rankResearchersForDescriptionSpine", () => {
     for (const [args] of mockSearchPeople.mock.calls) {
       expect(args.skipFacetAggs).toBe(true);
     }
+  });
+
+  // ── Measures producer (#1654) ──────────────────────────────────────────────
+  it("hydrates career stage + clinician from Scholar; a cwid with no row carries NO measures", async () => {
+    // `searchPeople`'s headless shape has neither signal, so the spine reads them for the
+    // fused candidate list. A candidate with no Scholar row must come back with `measures`
+    // ABSENT — not `{ isClinician: false }`, which would assert something we never learned.
+    mockTopicFindMany.mockResolvedValue([{ label: "cancer" }]);
+    mockMatchQueryToTaxonomy.mockResolvedValue(meshRes("D_CANCER", ["D_CANCER"]));
+    mockSearchPeople.mockResolvedValue(people(["staffed", "ghost"]));
+    mockScholarFindMany.mockResolvedValue([
+      {
+        cwid: "staffed",
+        roleCategory: "full_time_faculty",
+        primaryTitle: "Assistant Professor of Medicine",
+        hasClinicalProfile: true,
+        appointments: [],
+        // A 2020 MD ⇒ inside the early-career window.
+        educations: [{ year: 2020, degree: "MD" }],
+      },
+    ]);
+
+    const { candidates } = await rankResearchersForDescriptionSpine("cancer");
+
+    const staffed = candidates.find((c) => c.cwid === "staffed");
+    expect(staffed?.measures).toEqual({ careerStage: "early", isClinician: true });
+
+    const ghost = candidates.find((c) => c.cwid === "ghost");
+    expect(ghost).toBeDefined();
+    expect(ghost?.measures).toBeUndefined();
   });
 
   it("pages by the reported result.pageSize, not a copied constant", async () => {

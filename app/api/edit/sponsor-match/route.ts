@@ -66,7 +66,7 @@ function bespokeToCandidate(r: SponsorRankedScholar): SponsorCandidate {
     fusedScore: r.defaultScore,
     contributions: [],
     technologyCount: r.technologyCount ?? 0,
-    measures: { careerStage: r.careerStage },
+    measures: { careerStage: r.careerStage, isClinician: r.isClinician },
     evidence: {
       topics: r.matchedTopics.map((t) => ({ label: t.label, pubCount: t.pubCount })),
       papers: r.topPapers.map((p) => ({

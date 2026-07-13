@@ -48,6 +48,7 @@ import {
 } from "@/lib/api/sponsor-match-axes";
 import {
   conceptWeight,
+  sponsorMeasuresFrom,
   type SponsorCandidate,
   type SponsorConcept,
 } from "@/lib/api/sponsor-match-contract";
@@ -453,23 +454,42 @@ export async function rankResearchersForDescriptionSpine(
   // Same inline groupBy the bespoke engine and `rankResearchersForOpportunity` use
   // (no shared helper on master — three intentional copies).
   const cwids = fused.map((f) => f.cwid);
-  const grouped = await db.read.scholarTechnology.groupBy({
-    by: ["cwid"],
-    where: { cwid: { in: cwids } },
-    _count: { _all: true },
-  });
+  // #1654 — the measures read. `searchPeople`'s fast headless shape carries no career
+  // stage and no clinician flag, so hydrate both from Scholar for the (bounded) fused
+  // candidate list, alongside the technology count this already fetched.
+  const [grouped, measureRows] = await Promise.all([
+    db.read.scholarTechnology.groupBy({
+      by: ["cwid"],
+      where: { cwid: { in: cwids } },
+      _count: { _all: true },
+    }),
+    db.read.scholar.findMany({
+      where: { cwid: { in: cwids } },
+      select: {
+        cwid: true,
+        roleCategory: true,
+        primaryTitle: true,
+        hasClinicalProfile: true,
+        appointments: { select: { startDate: true } },
+        educations: { select: { year: true, degree: true } },
+      },
+    }),
+  ]);
   const techByCwid = new Map(grouped.map((g) => [g.cwid, g._count._all]));
+  const now = new Date();
+  const measuresByCwid = new Map(measureRows.map((s) => [s.cwid, sponsorMeasuresFrom(s, now)]));
 
   // Map to the wire `SponsorCandidate`. Display fields (name/slug/title/department) ride
   // in from the `searchPeople` hits — no extra profile read. `fusedScore` is the RRF sum
   // at DEFAULT weights; the UI buckets it into a tier relative to the top hit and never
   // renders the raw number. `contributions` is the hinge — it comes straight out of
   // `rrfFuse`, which already had every (concept, rank) pair and used to discard them.
-  // ponytail: `measures` and `evidence` are OMITTED, not zeroed. The fast headless
-  // `searchPeople` shape carries no career stage, no per-topic pub count and no evidence
-  // pubs (it runs `skipFacetAggs`), and fabricating counts is forbidden — so the contract
-  // makes both optional and absent means "not computed", never "none". The evidence
-  // upgrade needs the match-explain aggregation, which is a separate change.
+  // ponytail: `evidence` is still OMITTED, not zeroed. The fast headless `searchPeople`
+  // shape carries no per-topic pub count and no evidence pubs (it runs `skipFacetAggs`),
+  // and fabricating counts is forbidden — so the contract keeps it optional and absent
+  // means "not computed", never "none". The evidence upgrade needs the match-explain
+  // aggregation, which is a separate change. `measures` IS produced now (#1654), and stays
+  // absent for a cwid with no Scholar row rather than defaulting to a bucket.
   const candidates: SponsorCandidate[] = fused.map((f) => {
     const hit = hitByCwid.get(f.cwid);
     return {
@@ -481,6 +501,7 @@ export async function rankResearchersForDescriptionSpine(
       fusedScore: f.score,
       contributions: f.contributions,
       technologyCount: techByCwid.get(f.cwid) ?? 0,
+      measures: measuresByCwid.get(f.cwid),
     };
   });
   return { concepts, candidates };
