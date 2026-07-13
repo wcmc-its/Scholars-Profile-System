@@ -118,6 +118,8 @@ type MatchingTopic = { topicId: string; label: string; score: number };
 type MatchView = {
   opportunityId: string;
   count: number;
+  /** True when the top matches fall below `GRANT_MATCHER_ABSTAIN_FLOOR`; always false when the floor is off. */
+  abstain: boolean;
   opportunity: OpportunityMeta | null;
   matchingOn: MatchingTopic[];
   topicLabels: Record<string, string>;
@@ -954,7 +956,7 @@ function Results({
     return <div className="text-muted-foreground py-8 text-sm">{status.message}</div>;
   }
 
-  const { opportunityId, opportunity, matchingOn, topicLabels, results } = status.view;
+  const { opportunityId, opportunity, matchingOn, topicLabels, results, abstain } = status.view;
   // 0–100 topic-fit scores are relative to the strongest match across the FULL set,
   // keyed by cwid so a score doesn't shift when the view is filtered.
   const fitArr = topicFitScores(results.map((r) => r.axes.topicFit));
@@ -1023,6 +1025,17 @@ function Results({
         opportunity={opportunity}
         matchingOn={matchingOn}
       />
+
+      {abstain ? (
+        <div
+          role="status"
+          className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200"
+        >
+          <span className="font-medium">No strong WCM match.</span> The best matches for this
+          opportunity are all weak, so the ranking below is unreliable. Treat it as a starting point
+          for manual review, not a recommendation.
+        </div>
+      ) : null}
 
       {results.length === 0 ? (
         <div className="text-muted-foreground py-8 text-sm">
