@@ -1,29 +1,45 @@
 # Sponsor-match evidence (#1689) — handoff
 
 Date: 2026-07-13
-Written mid-flight: **PR #1691 is OPEN and unmerged, and it is the thing that actually makes
-the feature work.** Read §1 before anything else.
 
-## 0. State in one paragraph
+## ✅ RESOLVED — #1691 merged (`fe31e65c`) and PROVEN on staging. Nothing here is open.
 
-The sponsor console's "why this match" evidence block was empty in prod. #1690 merged a fix
-(`3f4b1007`) that **did not work** — it read the wrong field and produced zero evidence in every
-deployed environment, while 7,160 tests passed. **#1691 is the real fix.** It is code-complete,
-tested, pushed, CI running at time of writing. Merge it, then **re-run the probe in §3** — the
-number to beat is `HITS_WITH_EVIDENCE=0`.
+This doc was written mid-flight, while #1691 was still an open PR. It is kept for the two lessons
+in §2 and the probe recipe in §3; the "merge it, then prove it" instruction below is **done**.
 
-## 1. THE OPEN ITEM — merge #1691, then PROVE it with the probe
+Verified on the post-merge image (ECR `latest` also carries the tag `fe31e65c…`), in-VPC against
+real staging OpenSearch:
+
+| check | before | after |
+|---|---|---|
+| shipped spine, driven end-to-end (`candidates[].searchEvidence.evidence`) | 0 | **324 / 324** |
+| emitter: hits carrying `evidenceLines` | 0 of 160 | **160 / 160** |
+| emitter: hits carrying legacy `evidence` | 0 of 160 | **0 / 160** (as diagnosed) |
+
+**Two traps found while running the probe itself — read these before reusing §3:**
+
+- **The §3 probe below re-implements the read (`evidenceLines?.[0] ?? h.evidence`) inline, so it
+  only tests the EMITTER, not the shipped consumer.** It would go green even if the spine still
+  read the wrong field. To actually test the fix, drive the real entry point
+  (`rankResearchersForDescriptionSpine`) and count `candidates[].searchEvidence.evidence`. A probe
+  that re-implements the read under test is just a mock you wrote in bash — the same trap as §2b,
+  one level out.
+- **A zero can mean "never ran".** In-VPC the ETL task role gets Bedrock **403**, so the spine falls
+  back to its dictionary extractor, which matches **only taxonomy labels** (`Topic.label` +
+  `Subtopic.label`). A hand-written sponsor paste extracts *nothing*, the spine short-circuits at
+  `extracted.length === 0`, and you get `CANDIDATES=0` — indistinguishable from a failed fix. Build
+  the probe's paste out of real vocab labels (query them first), and assert concepts > 0 before
+  trusting any downstream count.
+
+## 1. ~~THE OPEN ITEM~~ — DONE: merged #1691, then proved it with the probe
 
 **Do not close this out on a green suite.** That is exactly what went wrong once already today.
 
-1. `gh pr checks 1691` → both green → `gh pr merge 1691 --squash`
-2. Wait for the staging deploy (`gh run list --workflow=deploy.yml`) — staging deploys from
-   master automatically; the pipeline is `build → push → bootstrap → verify-grants → migrate →
-   roll → settle`.
-3. Run the probe in §3. **Expect `HITS_WITH_EVIDENCE` > 0** (it was 0 of 160).
-4. If it is still 0, the read is still wrong — go back to `lib/api/search.ts` and find where
-   `evidence` / `evidenceLines` are attached to the hit (search for `selectEvidenceLines`), and
-   check the actual flag values on the **app** task def (§4).
+1. ~~`gh pr checks 1691` → both green → `gh pr merge 1691 --squash`~~ — merged, `fe31e65c`.
+2. ~~Wait for the staging deploy~~ — run `29281087148`, success in 12m28s.
+3. ~~Run the probe in §3~~ — ran, with the two corrections above. **324/324 candidates carry
+   evidence; 160/160 hits carry `evidenceLines`, 0/160 carry `evidence`.**
+4. ~~If it is still 0…~~ — it is not.
 
 ## 2. What went wrong, twice — both worth internalising
 
