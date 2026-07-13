@@ -15,7 +15,10 @@ services:
       - node.name=scholars-node
       - discovery.type=single-node
       - bootstrap.memory_lock=true
-      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+      # 4g: the sponsor-match fan-out drives a 1g heap past the 95% parent
+      # circuit-breaker, which then refuses even 1KB requests with a 502. Same
+      # class of failure as the staging domain right-sized in #1675, one tier down.
+      - "OPENSEARCH_JAVA_OPTS=-Xms4g -Xmx4g"
       - "DISABLE_SECURITY_PLUGIN=true"
       - "DISABLE_INSTALL_DEMO_CONFIG=true"
     ulimits:
