@@ -307,8 +307,28 @@ describe("POST /api/edit/sponsor-match (route)", () => {
           },
         },
       ],
+      // "gene therapy" is a purely topical paste — no non-topical ask to extract (#1654).
+      preferences: [],
     });
     expect(mockRankForDescription).toHaveBeenCalledWith("gene therapy");
+  });
+
+  it("ships the non-topical asks it read out of the paste, on either engine (#1654)", async () => {
+    // The extractor is engine-independent — it reads the paste, not the ranking — and the
+    // ORDER is deliberately not pre-nudged here: the response carries the preferences and the
+    // console applies the boost, so the officer can uncheck one the extractor got wrong.
+    const resp = await POST(
+      postRequest(developerCtx, {
+        description: "We fund fibrosis work by early-career physician-scientists.",
+      }),
+    );
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.preferences.map((p: { label: string }) => p.label)).toEqual([
+      "Early-career",
+      "Physician-scientist",
+    ]);
+    expect(body.preferences[0]).toMatchObject({ measure: "careerStage", stages: ["early"] });
   });
 
   describe("engine selection (SPONSOR_MATCH_SPINE)", () => {
@@ -383,7 +403,10 @@ describe("POST /api/edit/sponsor-match (route)", () => {
       // The decomposed inputs must reach the client INTACT — both weight factors and
       // every per-concept rank. Anything the route drops here, the console cannot
       // re-rank over, and the sliders fall back to re-querying.
-      expect(await resp.json()).toEqual({ ok: true, concepts, candidates });
+      // `preferences: []` — the paste stated no non-topical ask. Empty, not absent: the
+      // route always answers the question, so a client can tell "no asks" from "this server
+      // does not extract asks" (#1654).
+      expect(await resp.json()).toEqual({ ok: true, concepts, candidates, preferences: [] });
     });
   });
 

@@ -45,6 +45,7 @@ import {
   type SponsorRankedScholar,
 } from "@/lib/api/sponsor-match";
 import { rankResearchersForDescriptionSpine } from "@/lib/api/sponsor-match-spine-run";
+import { extractSponsorPreferences } from "@/lib/api/sponsor-preferences";
 import { logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 
@@ -113,12 +114,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   try {
+    // #1654 — the sponsor's non-topical asks. Deterministic, engine-independent, and NOT
+    // applied to the order shipped here: the response carries the preferences and the
+    // `measures` they read, and the CONSOLE applies the boost live (contract invariant — the
+    // UI owns the predicate, and the officer can deselect a preference the extractor got
+    // wrong). Shipping a pre-nudged order would freeze that decision on the server.
+    const preferences = extractSponsorPreferences(description);
+
     if (useSpine) {
       const { concepts, candidates } = await rankResearchersForDescriptionSpine(description);
-      return editOk({ concepts, candidates });
+      return editOk({ concepts, candidates, preferences });
     }
     const researchers = await rankResearchersForDescription(description);
-    return editOk({ concepts: [], candidates: researchers.map(bespokeToCandidate) });
+    return editOk({
+      concepts: [],
+      candidates: researchers.map(bespokeToCandidate),
+      preferences,
+    });
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(502, "match_unavailable");
