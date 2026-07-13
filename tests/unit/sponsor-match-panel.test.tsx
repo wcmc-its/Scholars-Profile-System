@@ -254,9 +254,11 @@ describe("SponsorMatchPanel", () => {
   });
 
   // ── Facets ─────────────────────────────────────────────────────────────────
+  // The facets are a checkbox PANEL now (the mockup's shape), not a row of toggle chips —
+  // so they are queried by the `checkbox` role rather than `button`.
   it("department facet narrows rows and keeps the rank number from the full list", async () => {
     await renderAndSearch();
-    fireEvent.click(screen.getByRole("button", { name: /Surgery · 1/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Surgery/ }));
 
     expect(screen.queryByText("Alice Alpha")).toBeNull();
     expect(screen.queryByText("Bob Beta")).toBeNull();
@@ -267,7 +269,7 @@ describe("SponsorMatchPanel", () => {
 
   it("CTL-IP facet keeps only technology holders; Clear filters restores all", async () => {
     await renderAndSearch();
-    fireEvent.click(screen.getByRole("button", { name: /Holds CTL technology · 1/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Holds CTL technology/ }));
     expect(screen.queryByText("Alice Alpha")).toBeNull();
     expect(screen.getByText("Bob Beta")).toBeTruthy();
 
@@ -279,12 +281,81 @@ describe("SponsorMatchPanel", () => {
   it("concept facet matches rows that ranked under the selected concept", async () => {
     await renderAndSearch();
     // Facets count only concepts people actually MATCHED, so the CRISPR method — which no
-    // candidate ranked under — has no facet chip even though it IS in the rail.
-    expect(screen.queryByRole("button", { name: /CRISPR screening · / })).toBeNull();
+    // candidate ranked under — gets no facet row even though it IS in the rail (where it still
+    // has a slider, hence the `checkbox` role rather than a text query).
+    expect(screen.queryByRole("checkbox", { name: /CRISPR screening/ })).toBeNull();
+    expect(screen.getByLabelText("CRISPR screening centrality")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /Cancer Metabolism · 1/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Cancer Metabolism/ }));
     expect(screen.queryByText("Alice Alpha")).toBeNull();
     expect(screen.getByText("Cara Gamma")).toBeTruthy();
+  });
+
+  // ── Sort / export (the reskin) ─────────────────────────────────────────────
+  it("sorts by Name without renumbering — the rank stays the FIT rank", async () => {
+    await renderAndSearch();
+    expect(rowOrder()).toEqual(["Alice Alpha", "Bob Beta", "Cara Gamma"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Name" }));
+
+    // Cara is #3 by fit but sorts first by surname… no — by given name she is last. Assert the
+    // ranks travel with the people, which is the property that matters: a Name sort must not
+    // claim the alphabetically-first person is the best match.
+    const rows = screen.getAllByRole("listitem").filter((li) => li.textContent?.includes("fit"));
+    const rankOf = (name: string) =>
+      rows.find((r) => r.textContent?.includes(name))!.textContent!.match(/^\d+/)![0];
+    expect(rankOf("Alice Alpha")).toBe("1");
+    expect(rankOf("Bob Beta")).toBe("2");
+    expect(rankOf("Cara Gamma")).toBe("3");
+  });
+
+  it("Fit is the default sort", async () => {
+    await renderAndSearch();
+    expect(screen.getByRole("button", { name: "Fit" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Name" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("exports the VISIBLE rows as CSV — no raw fused score in the file", async () => {
+    // Capture at the Blob constructor: jsdom's Blob is a stub with no readable body, and the
+    // CSV text is the thing under test anyway.
+    const parts: string[] = [];
+    const OrigBlob = globalThis.Blob;
+    class CapturingBlob {
+      constructor(bits: BlobPart[]) {
+        parts.push(bits.map(String).join(""));
+      }
+    }
+    globalThis.Blob = CapturingBlob as unknown as typeof Blob;
+    const origCreate = URL.createObjectURL;
+    const origRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = (() => "blob:stub") as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL;
+    try {
+      await renderAndSearch();
+      fireEvent.click(screen.getByRole("button", { name: /Export \(3\)/ }));
+
+      expect(parts).toHaveLength(1);
+      const csv = parts[0];
+      expect(csv.split("\r\n")[0]).toBe(
+        "Rank,CWID,Name,Title,Department,Fit,Matched concepts,CTL technologies,Profile URL",
+      );
+      expect(csv).toContain("Alice Alpha");
+      expect(csv).toContain("Strong fit");
+      // The fused score is withheld from the DOM; it must not leak into a spreadsheet either.
+      expect(csv).not.toContain("0.91");
+    } finally {
+      globalThis.Blob = OrigBlob;
+      URL.createObjectURL = origCreate;
+      URL.revokeObjectURL = origRevoke;
+    }
+  });
+
+  it("renders no Career stage or Clinician facet, even when a candidate carries measures", async () => {
+    await renderAndSearch();
+    // The spine has no producer for these. Absent != zero: a filter that cannot filter, or a
+    // blank column that reads as "nobody here is a clinician", is worse than nothing at all.
+    expect(screen.queryByText(/Career stage/i)).toBeNull();
+    expect(screen.queryByText(/Clinician/i)).toBeNull();
   });
 
   // ── Rows ───────────────────────────────────────────────────────────────────

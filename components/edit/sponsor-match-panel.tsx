@@ -28,12 +28,28 @@
  *    server never persists them (route contract), so history lives in the officer's own
  *    browser and nowhere else.
  *
- * VISUAL: this is the working console's idiom, wired to the contract. The Scholars-skinned
- * reskin (`sponsor-match-scholars.html`) is a separate pass — the data seam is the fix here.
+ * VISUAL: skinned to `sponsor-match-scholars.html`, but to that mockup's INFORMATION design and
+ * token values only — not its chrome. The mockup is drawn as the PUBLIC Scholars site (Cornell-red
+ * header, serif title, a white card per candidate); this is an `/edit` console surface that sits
+ * next to `/edit/find-researchers` under the Apollo bar, so it keeps the console's h1, its list
+ * rows, and its two-column shell. The mockup's palette needed no translation: it was authored from
+ * this app's own tokens (its `--accent #2C4F6E` IS `--color-accent-slate`, its shadow IS
+ * `--apollo-shadow-card`), so the reskin adds no new CSS.
+ *
+ * TWO MOCKUP ELEMENTS ARE DELIBERATELY NOT BUILT, because the contract forbids them:
+ *  - the fit METER (a bar of `fusedScore / topScore`) — that is the raw fused score, drawn. The
+ *    score never reaches the DOM; the tier pill is the sanctioned abstraction for it.
+ *  - the rarity badge's NUMBER and the word "common" — `weightFactor` is a claim about the
+ *    RANKING and must not be shown, and "common" is unsayable because absent ≠ zero for the 40%
+ *    of descriptors with no coverage row.
+ * Career stage, clinician status and preference hits are absent for a different reason: no
+ * producer exists (`measures` is unset). They render nothing rather than fabricate.
  */
 import { useEffect, useMemo, useState } from "react";
+import { Download } from "lucide-react";
 
 import { PubJournal, PubTitle } from "@/components/publication/pub-html";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   fitTier,
@@ -43,7 +59,10 @@ import {
   type SponsorCandidate,
   type SponsorConcept,
   type SponsorFitTier,
+  type SponsorMatchResponse,
 } from "@/lib/api/sponsor-match-contract";
+import { buildSponsorMatchCsv } from "@/lib/edit/sponsor-match-export";
+import { profilePath } from "@/lib/profile-url";
 import { initials } from "@/lib/utils";
 
 type Status =
@@ -57,8 +76,12 @@ type HistoryEntry = { d: string; at: string };
 const HISTORY_KEY = "sponsor-match-history";
 const HISTORY_MAX = 20;
 
-/** Concept facet stays scannable: top-N by researcher coverage. */
+/** Facet groups stay scannable: top-N by researcher coverage. As a vertical checkbox panel
+ *  (rather than the old wrapping chip row) an uncapped department list runs to ~20 rows on a
+ *  broad paste and swamps the rail — and the tail is all count-1 departments, which are the
+ *  least useful thing to filter by. Both groups cap the same way. */
 const CONCEPT_FACET_MAX = 12;
+const DEPT_FACET_MAX = 12;
 
 /** Rows rendered from the re-ranked pool. The RESPONSE carries the whole fused pool so the
  *  sliders have something to re-rank over (see the `ranked` memo); this is only how much of
@@ -76,17 +99,41 @@ const TIER_LABEL: Record<SponsorFitTier, string> = {
   weak: "Weak fit",
 };
 
+/** Mockup's tier palette, which reads better than the old all-slate ramp: green / amber / grey.
+ *  Every hex already exists as a house token — nothing new is introduced. */
 const TIER_CLASS: Record<SponsorFitTier, string> = {
-  strong: "bg-[var(--color-accent-slate)] text-white",
-  good: "bg-[var(--color-accent-slate)]/25 text-[var(--color-accent-slate)]",
-  weak: "border-border text-muted-foreground border",
+  strong:
+    "border-[var(--apollo-green)]/25 bg-[var(--apollo-green)]/10 text-[var(--apollo-green)]",
+  good: "border-[var(--color-facet-position-count)]/25 bg-[var(--color-facet-position-fill)] text-[var(--color-facet-position-count)]",
+  weak: "border-border text-muted-foreground bg-transparent",
 };
+
+/** Sort is presentation only — it reorders the rows, it never changes a rank. `Seniority` (the
+ *  mockup's third option) is impossible: it needs `measures.careerStage`, which has no producer. */
+const SORT_TABS = [
+  { key: "fit", label: "Fit" },
+  { key: "name", label: "Name" },
+] as const;
+type SortKey = (typeof SORT_TABS)[number]["key"];
 
 function toggled(set: ReadonlySet<string>, value: string): Set<string> {
   const next = new Set(set);
   if (next.has(value)) next.delete(value);
   else next.add(value);
   return next;
+}
+
+/** Client-side download — the matcher is admin-only and the whole pool is already in the
+ *  browser, so a server hop would only be able to re-export the DEFAULT ranking, not the
+ *  re-ranked one the officer is actually looking at. Mirrors `find-researchers.tsx`. */
+function downloadCsv(filename: string, csv: string) {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export function SponsorMatchPanel() {
@@ -96,6 +143,7 @@ export function SponsorMatchPanel() {
   const [deptSel, setDeptSel] = useState<ReadonlySet<string>>(new Set());
   const [conceptSel, setConceptSel] = useState<ReadonlySet<string>>(new Set());
   const [ctlOnly, setCtlOnly] = useState(false);
+  const [sort, setSort] = useState<SortKey>("fit");
   // The two halves of the contract payload. `candidates` is fetched ONCE per search and
   // never refetched by a slider; `concepts` is the editable rail. Everything below is
   // derived from them.
@@ -163,10 +211,10 @@ export function SponsorMatchPanel() {
         body: JSON.stringify({ description: text }),
       });
       if (r.ok) {
-        const data = (await r.json()) as {
-          candidates?: SponsorCandidate[];
-          concepts?: SponsorConcept[];
-        };
+        // Typed as the CONTRACT's response, not an anonymous shape. The contract's headline
+        // promise is that a drift between ranker and panel is a compile error; an inline
+        // `{candidates?; concepts?}` opted the envelope out of exactly that.
+        const data = (await r.json()) as Partial<SponsorMatchResponse>;
         clearFilters(); // stale facet selections must not silently hide fresh results
         saveHistory(text.trim());
         setCandidates(data.candidates ?? []);
@@ -223,7 +271,7 @@ export function SponsorMatchPanel() {
     const counts = new Map<string, number>();
     for (const c of ranked)
       if (c.department) counts.set(c.department, (counts.get(c.department) ?? 0) + 1);
-    return [...counts].sort((a, b) => b[1] - a[1]);
+    return [...counts].sort((a, b) => b[1] - a[1]).slice(0, DEPT_FACET_MAX);
   }, [ranked]);
 
   // Facet over the concepts people actually MATCHED (their contributions), not the whole
@@ -244,17 +292,49 @@ export function SponsorMatchPanel() {
   );
 
   const hasFilters = deptSel.size > 0 || conceptSel.size > 0 || ctlOnly;
-  // Live rank travels with the row, so a filtered view still reads "this person is #7
-  // overall", not "#1 of the filtered three". It re-derives as sliders move.
-  const visible = ranked
-    .map((c, i) => ({ c, rank: i + 1 }))
-    .filter(
-      ({ c }) =>
-        (deptSel.size === 0 || (c.department != null && deptSel.has(c.department))) &&
-        (conceptSel.size === 0 ||
-          c.contributions.some((x) => conceptSel.has(x.term))) &&
-        (!ctlOnly || c.technologyCount > 0),
+
+  // Live rank travels with the row, so a filtered view still reads "this person is #7 overall",
+  // not "#1 of the filtered three". It re-derives as sliders move.
+  //
+  // The rank is stamped from the FIT order and then carried, never recomputed — so sorting by
+  // Name reorders the rows while each row keeps the rank it holds in the ranking. A sort that
+  // renumbered rows would be claiming Alice is the best match because her name comes first.
+  const visible = useMemo(() => {
+    const rows = ranked
+      .map((c, i) => ({ c, rank: i + 1 }))
+      .filter(
+        ({ c }) =>
+          (deptSel.size === 0 || (c.department != null && deptSel.has(c.department))) &&
+          (conceptSel.size === 0 || c.contributions.some((x) => conceptSel.has(x.term))) &&
+          (!ctlOnly || c.technologyCount > 0),
+      );
+    return sort === "name"
+      ? [...rows].sort((a, b) => a.c.name.localeCompare(b.c.name))
+      : rows;
+  }, [ranked, deptSel, conceptSel, ctlOnly, sort]);
+
+  /** Exports exactly what is on screen — current sliders, current filters, current sort. A
+   *  server route could not do this: it would re-run the match and emit the DEFAULT ranking,
+   *  not the one the officer re-weighted. */
+  function exportVisible() {
+    const csv = buildSponsorMatchCsv(
+      visible.map(({ c, rank }) => ({
+        rank,
+        cwid: c.cwid,
+        name: c.name,
+        title: c.title,
+        department: c.department,
+        fit: TIER_LABEL[fitTier(c.fusedScore, topScore)],
+        matchedConcepts: matchedConcepts(c, concepts).map((m) => m.concept.term),
+        technologyCount: c.technologyCount,
+        profileUrl: new URL(
+          profilePath(c.profileSlug),
+          window.location.origin,
+        ).toString(),
+      })),
     );
+    downloadCsv("sponsor-match-researchers.csv", csv);
+  }
 
   return (
     <div data-slot="sponsor-match-panel">
@@ -286,13 +366,15 @@ export function SponsorMatchPanel() {
           className="border-border w-full rounded-md border bg-background px-3 py-2 text-sm focus:border-[var(--color-accent-slate)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-slate)]"
           spellCheck={false}
         />
-        <button
+        {/* Slate, not `variant="apollo"` (maroon) — the whole matcher family (find-researchers,
+            opportunity intake, and the mockup) is slate. */}
+        <Button
           type="submit"
           disabled={pending || description.trim().length === 0}
-          className="mt-2 inline-flex h-9 items-center rounded-md bg-[var(--color-accent-slate)] px-4 text-sm font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-2 bg-[var(--color-accent-slate)] text-white hover:bg-[var(--color-accent-slate)]/90"
         >
           {pending ? "Ranking…" : "Rank researchers"}
-        </button>
+        </Button>
       </form>
 
       {history.length > 0 ? (
@@ -353,103 +435,142 @@ export function SponsorMatchPanel() {
               No researchers matched this description.
             </p>
           ) : (
-            <>
-              {conceptPanels.concept.length > 0 ? (
-                <ConceptRail
-                  title="Concepts"
-                  concepts={conceptPanels.concept}
-                  rare={rare}
-                  onCentralityChange={setCentrality}
-                />
-              ) : null}
-              {conceptPanels.method.length > 0 ? (
-                <ConceptRail
-                  title="Methods"
-                  concepts={conceptPanels.method}
-                  rare={rare}
-                  onCentralityChange={setCentrality}
-                />
-              ) : null}
+            /* Two-column shell, matching the mockup's rail + results split and
+               `/edit/find-researchers`'s idiom. lg:w-80 (not find-researchers' w-64) because
+               this rail carries sliders and member chips. */
+            <div className="flex flex-col gap-x-8 gap-y-6 lg:flex-row">
+              <aside className="w-full shrink-0 space-y-4 lg:w-80">
+                {conceptPanels.concept.length > 0 ? (
+                  <ConceptRail
+                    title="Concepts"
+                    concepts={conceptPanels.concept}
+                    rare={rare}
+                    onCentralityChange={setCentrality}
+                  />
+                ) : null}
+                {conceptPanels.method.length > 0 ? (
+                  <ConceptRail
+                    title="Methods"
+                    concepts={conceptPanels.method}
+                    rare={rare}
+                    onCentralityChange={setCentrality}
+                  />
+                ) : null}
 
-              <div
-                data-slot="sponsor-match-facets"
-                className="border-border mb-4 rounded-lg border p-3"
-              >
-                {deptFacet.length > 0 ? (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-muted-foreground mr-1 text-xs font-medium">
-                      Department
+                {/* THREE groups, and there can never be more. The mockup draws five — its
+                    `Career stage` and `Clinician` groups need `measures`, which the spine does
+                    not produce. A filter that cannot filter is worse than no filter. */}
+                <div
+                  data-slot="sponsor-match-facets"
+                  className="border-border rounded-lg border p-3"
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <h2 className="text-base font-semibold">Filter</h2>
+                    <span className="text-muted-foreground text-xs tabular-nums">
+                      {ranked.length} → {visible.length}
                     </span>
-                    {deptFacet.map(([dept, n]) => (
-                      <FacetChip
-                        key={dept}
-                        active={deptSel.has(dept)}
-                        onClick={() => setDeptSel(toggled(deptSel, dept))}
-                      >
-                        {dept} · {n}
-                      </FacetChip>
-                    ))}
                   </div>
-                ) : null}
-                {conceptFacet.length > 0 ? (
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <span className="text-muted-foreground mr-1 text-xs font-medium">
-                      Matched concept
-                    </span>
-                    {conceptFacet.map(([term, n]) => (
-                      <FacetChip
-                        key={term}
-                        active={conceptSel.has(term)}
-                        onClick={() => setConceptSel(toggled(conceptSel, term))}
-                      >
-                        {term} · {n}
-                      </FacetChip>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <FacetChip
-                    active={ctlOnly}
-                    onClick={() => setCtlOnly(!ctlOnly)}
+
+                  {deptFacet.length > 0 ? (
+                    <FacetGroup
+                      label="Department"
+                      options={deptFacet}
+                      selected={deptSel}
+                      onToggle={(v) => setDeptSel(toggled(deptSel, v))}
+                    />
+                  ) : null}
+                  {conceptFacet.length > 0 ? (
+                    <FacetGroup
+                      label="Matched concept"
+                      options={conceptFacet}
+                      selected={conceptSel}
+                      onToggle={(v) => setConceptSel(toggled(conceptSel, v))}
+                    />
+                  ) : null}
+                  <FacetGroup
+                    label="CTL portfolio"
+                    options={[["Holds CTL technology", ctlHolderCount]]}
+                    selected={ctlOnly ? new Set(["Holds CTL technology"]) : new Set()}
+                    onToggle={() => setCtlOnly(!ctlOnly)}
                     title="Only researchers who already hold licensable technology in the CTL portfolio."
-                  >
-                    ★ Holds CTL technology · {ctlHolderCount}
-                  </FacetChip>
+                  />
+
+                  <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
+                    Any within a group · all across groups. Filtering keeps each row&rsquo;s
+                    original rank.
+                  </p>
                   {hasFilters ? (
                     <button
                       type="button"
                       onClick={clearFilters}
-                      className="text-muted-foreground ml-1 text-xs underline-offset-4 hover:underline"
+                      className="text-muted-foreground mt-2 text-xs underline-offset-4 hover:underline"
                     >
                       Clear filters
                     </button>
                   ) : null}
                 </div>
-              </div>
+              </aside>
 
-              <h2 className="text-base font-semibold">
-                Researchers for this description (
-                {hasFilters ? `${visible.length} of ${ranked.length}` : ranked.length})
-              </h2>
-              {visible.length === 0 ? (
-                <p className="text-muted-foreground py-4 text-sm">
-                  No researchers match the selected filters.
-                </p>
-              ) : (
-                <ul className="mt-1">
-                  {visible.map(({ c, rank }) => (
-                    <li key={c.cwid}>
-                      <ResearcherRow
-                        candidate={c}
-                        rank={rank}
-                        concepts={concepts}
-                        topScore={topScore}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
+              <main className="min-w-0 flex-1">
+                <div className="mb-3 flex flex-wrap items-center gap-3">
+                  <h2 className="text-base font-semibold">
+                    {visible.length} of {ranked.length} researchers
+                  </h2>
+                  <div className="ml-auto flex items-center gap-2">
+                    <div
+                      role="group"
+                      aria-label="Sort researchers"
+                      className="flex items-center gap-1"
+                    >
+                      {SORT_TABS.map((t) => (
+                        <button
+                          key={t.key}
+                          type="button"
+                          aria-pressed={sort === t.key}
+                          onClick={() => setSort(t.key)}
+                          className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                            sort === t.key
+                              ? "border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
+                              : "border-border text-foreground/80 hover:border-[var(--color-accent-slate)]"
+                          }`}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={exportVisible}
+                      disabled={visible.length === 0}
+                    >
+                      <Download className="size-3.5" />
+                      Export ({visible.length})
+                    </Button>
+                  </div>
+                </div>
+
+                {visible.length === 0 ? (
+                  <p className="text-muted-foreground py-4 text-sm">
+                    No researchers match the selected filters.
+                  </p>
+                ) : (
+                  <ul>
+                    {visible.map(({ c, rank }) => (
+                      <li key={c.cwid}>
+                        <ResearcherRow
+                          candidate={c}
+                          rank={rank}
+                          concepts={concepts}
+                          topScore={topScore}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </main>
+            </div>
           )}
         </>
       ) : null}
@@ -484,11 +605,16 @@ function ConceptRail({
   onCentralityChange: (term: string, centrality: number) => void;
 }) {
   return (
-    <div data-slot="sponsor-match-concepts" className="border-border mb-4 rounded-lg border p-3">
-      <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-base font-semibold">{title}</h2>
-        <span className="text-muted-foreground text-xs">drag to reweight — updates live</span>
-      </div>
+    <div data-slot="sponsor-match-concepts" className="border-border rounded-lg border p-3">
+      <h2 className="text-base font-semibold">{title}</h2>
+      {/* The mockup's caption here read "Rarity (fixed) rewards experts in areas few at WCM
+          cover." That is now FALSE and must not ship: rarity is a bounded ±15% tiebreaker, and
+          centrality is what drives the ranking (see the IDF-inversion finding). Describing the
+          slider is also more useful than describing a multiplicand nobody can edit. */}
+      <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
+        How central each concept is to the ask. Drag to reweight — the ranking updates live, with
+        no new search.
+      </p>
       <ul className="mt-3 space-y-3">
         {concepts.map((c) => (
           <li key={c.term} className="flex flex-col gap-1">
@@ -504,7 +630,7 @@ function ConceptRail({
                     title={`Scarce at Weill Cornell relative to the other concepts in this ask — ${oneInN(
                       c.corpusCoverage,
                     )}.`}
-                    className="text-muted-foreground ml-1.5 text-xs"
+                    className="ml-1.5 rounded-full bg-[var(--color-facet-method-fill)] px-1.5 py-0.5 text-xs text-[var(--color-facet-method-count)]"
                   >
                     ·rare
                   </span>
@@ -545,31 +671,56 @@ function ConceptRail({
   );
 }
 
-function FacetChip({
-  active,
-  onClick,
+/**
+ * One checkbox facet group — the mockup's `.facet` shape.
+ *
+ * Local to this file rather than reusing `RosterFacet` (center-roster / data-quality) on purpose:
+ * that component hardcodes the PUBLIC Cornell-red accent, and re-theming it to slate would bleed
+ * into the two surfaces that already depend on it. `find-researchers` sets the same precedent of
+ * keeping its facet UI local.
+ *
+ * Counts are over the currently-ranked rows, so a count is exactly how many rows selecting it
+ * will leave you with — not a number from a pool you cannot see. They move as sliders move,
+ * which is correct: the ranking moved.
+ */
+function FacetGroup({
+  label,
+  options,
+  selected,
+  onToggle,
   title,
-  children,
 }: {
-  active: boolean;
-  onClick: () => void;
+  label: string;
+  options: readonly (readonly [string, number])[];
+  selected: ReadonlySet<string>;
+  onToggle: (value: string) => void;
   title?: string;
-  children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      aria-pressed={active}
-      title={title}
-      onClick={onClick}
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
-        active
-          ? "border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
-          : "border-border bg-background text-foreground/80 hover:border-[var(--color-accent-slate)]"
-      }`}
-    >
-      {children}
-    </button>
+    <div className="mt-3">
+      <h3 className="text-muted-foreground text-[11px] font-semibold tracking-[0.08em] uppercase">
+        {label}
+      </h3>
+      <ul className="mt-1.5 space-y-1">
+        {options.map(([value, n]) => (
+          <li key={value}>
+            <label
+              title={title}
+              className="flex cursor-pointer items-center gap-2 text-sm"
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(value)}
+                onChange={() => onToggle(value)}
+                className="size-3.5 shrink-0 accent-[var(--color-accent-slate)]"
+              />
+              <span className="min-w-0 flex-1 truncate">{value}</span>
+              <span className="text-muted-foreground shrink-0 text-xs tabular-nums">{n}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -602,8 +753,10 @@ function ResearcherRow({
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
+          {/* `profilePath`, not a hand-built path — the CSV export builds its URL column from
+              the same helper, so the link and the export cannot drift apart. */}
           <a
-            href={`/${encodeURIComponent(candidate.profileSlug)}`}
+            href={profilePath(encodeURIComponent(candidate.profileSlug))}
             className="text-base font-semibold leading-snug text-foreground underline-offset-4 hover:underline"
           >
             {name}
@@ -611,8 +764,11 @@ function ResearcherRow({
           {candidate.title ? (
             <span className="text-muted-foreground text-sm">{candidate.title}</span>
           ) : null}
+          {/* The tier, and ONLY the tier. The mockup also draws a `.meter` bar whose width is
+              fusedScore/topScore — that is the raw score rendered as a length, and the contract
+              keeps that number out of the DOM. */}
           <span
-            className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-xs ${TIER_CLASS[tier]}`}
+            className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ${TIER_CLASS[tier]}`}
           >
             {TIER_LABEL[tier]}
           </span>
@@ -679,10 +835,12 @@ function ResearcherRow({
             </ul>
           </details>
         ) : null}
+        {/* Teal, per the mockup — CTL-IP gets its own hue so it does not read as another
+            concept chip. Both hexes already ship in globals.css on `.entity-badge--institute`. */}
         {candidate.technologyCount > 0 ? (
           <span
             title="Licensable technologies this researcher already holds in the CTL portfolio."
-            className="mt-1.5 inline-flex rounded-full bg-[var(--color-accent-slate)]/15 px-2 py-0.5 text-xs text-[var(--color-accent-slate)]"
+            className="mt-1.5 inline-flex rounded-full bg-[#e0eded] px-2 py-0.5 text-xs font-medium text-[#2c5862]"
           >
             {candidate.technologyCount} CTL technolog
             {candidate.technologyCount === 1 ? "y" : "ies"}
