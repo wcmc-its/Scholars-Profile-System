@@ -74,6 +74,54 @@ const SENIOR_STAGES: CareerStage[] = ["senior"];
  */
 const DETECTED_IMPORTANCE = 1;
 
+/**
+ * INCLUSION, NOT PREFERENCE — the false positive this guard exists for.
+ *
+ * Caught against the real eval gold set: the `cardiovascular-broad` sponsor paste says
+ *
+ *     "We welcome basic, translational, and clinical investigators alike…"
+ *
+ * which names a group my phrase list matches while saying the exact OPPOSITE of a
+ * preference: everyone is welcome. Read as a preference, it boosted clinicians by up to λ on
+ * a paste that had deliberately declined to prefer them — an inversion of the sponsor's own
+ * words, which is worse than not reading the sentence at all.
+ *
+ * A sponsor expressing a preference SINGLES OUT a group. A sponsor being inclusive
+ * ENUMERATES groups and waves them all through. These are the markers of the second, checked
+ * against the SENTENCE the phrase sits in (a marker three sentences away says nothing about
+ * this clause).
+ *
+ * ponytail: sentence-scoped marker list, not a parser. It kills the observed family —
+ * "…and X alike", "X as well as Y", "at any career stage", "regardless of stage". If a real
+ * paste slips through, add the marker; the officer can always uncheck the chip meanwhile.
+ */
+const INCLUSION_MARKERS = [
+  "alike",
+  "as well as",
+  "regardless of",
+  "any career stage",
+  "any stage",
+  "all career stages",
+  "all stages",
+  "at every stage",
+  "of any kind",
+  "whether ",
+];
+
+/** The sentence containing `at`. Sentence-scoped so a marker elsewhere in the email can't
+ *  suppress a genuine ask (and vice versa). */
+function sentenceAround(hay: string, at: number): string {
+  const start = Math.max(0, hay.lastIndexOf(".", at) + 1);
+  const dot = hay.indexOf(".", at);
+  return hay.slice(start, dot === -1 ? hay.length : dot);
+}
+
+/** True when the matched phrase is the sponsor being INCLUSIVE, not stating a preference. */
+function isInclusion(hay: string, at: number): boolean {
+  const sentence = sentenceAround(hay, at);
+  return INCLUSION_MARKERS.some((m) => sentence.includes(m));
+}
+
 /** The matched phrase in context, as the "from paste: …" provenance line. Trimmed to a
  *  readable window so the chip's tooltip shows the sentence, not the whole email. */
 function quote(paste: string, at: number, phraseLen: number): string {
@@ -83,13 +131,25 @@ function quote(paste: string, at: number, phraseLen: number): string {
   return `${start > 0 ? "…" : ""}${snippet}${end < paste.length ? "…" : ""}`;
 }
 
-/** First hit among `phrases`, or null. Case-insensitive over a lowercased haystack. */
+/**
+ * First hit among `phrases` that is an actual PREFERENCE, or null. A hit inside an inclusive
+ * clause is skipped and the search continues — a paste can welcome everyone in one sentence
+ * and still state a real preference in another.
+ */
 function findPhrase(haystack: string, phrases: readonly string[]): { at: number; len: number } | null {
+  let best: { at: number; len: number } | null = null;
   for (const p of phrases) {
-    const at = haystack.indexOf(p);
-    if (at !== -1) return { at, len: p.length };
+    let from = 0;
+    for (;;) {
+      const at = haystack.indexOf(p, from);
+      if (at === -1) break;
+      if (!isInclusion(haystack, at) && (best === null || at < best.at)) {
+        best = { at, len: p.length };
+      }
+      from = at + p.length;
+    }
   }
-  return null;
+  return best;
 }
 
 /**

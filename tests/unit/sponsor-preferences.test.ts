@@ -72,6 +72,34 @@ describe("extractSponsorPreferences", () => {
     const prefs = extractSponsorPreferences("We seek established investigators with a track record.");
     expect(prefs[0]).toMatchObject({ measure: "careerStage", stages: ["senior"] });
   });
+
+  // ── Inclusion is not preference ────────────────────────────────────────────
+  // Regression, caught against the real eval gold set (`cardiovascular-broad`). The first
+  // version of this extractor read the sentence below as "prefers clinicians" and boosted
+  // them by up to λ — on a paste whose whole point was that it does NOT prefer them.
+  it("does NOT fire on inclusive language — the sponsor welcoming everyone is not a preference", () => {
+    const real =
+      "We welcome basic, translational, and clinical investigators alike, including those " +
+      "advancing imaging, biomarkers, device and surgical innovation. Bold ideas are welcome " +
+      "at any career stage.";
+    expect(extractSponsorPreferences(real)).toEqual([]);
+  });
+
+  it("suppresses the inclusive clause but still reads a genuine ask elsewhere in the paste", () => {
+    // A paste may welcome all comers in one sentence and still state a real preference in
+    // another. Suppressing the whole paste on one marker would throw away the real ask.
+    const mixed =
+      "We welcome basic and clinical investigators alike. That said, this award is reserved " +
+      "for early-career applicants.";
+    const prefs = extractSponsorPreferences(mixed);
+    expect(prefs.map((p) => p.label)).toEqual(["Early-career"]);
+  });
+
+  it("'at any career stage' does not read as a stage preference", () => {
+    expect(
+      extractSponsorPreferences("Applications are encouraged at any career stage."),
+    ).toEqual([]);
+  });
 });
 
 describe("preferenceBoost", () => {
