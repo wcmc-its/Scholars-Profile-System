@@ -89,4 +89,26 @@ describe("buildAuthorshipRows (#1052)", () => {
     expect(mentorRow.isLast).toBe(true);
     expect(mentorRow.totalAuthors).toBe(2);
   });
+
+  it("#101 — re-keys an external synthetic pmid to its stable article_id; PubMed passes through", () => {
+    const EXT_PMID = -3; // reciterdb synthetic NEGATIVE pmid for an external pub
+    const ARTICLE_ID = "SCOPUS:105037533819";
+    const extRows = [
+      { personIdentifier: MENTOR, pmid: EXT_PMID, authorPosition: "first", authors: "" },
+      { personIdentifier: STUDENT, pmid: PMID, authorPosition: "last", authors: "Grant B" },
+    ];
+    const keyForPmid = (pmid: number) => (pmid === EXT_PMID ? ARTICLE_ID : String(pmid));
+
+    const rows = buildAuthorshipRows(
+      extRows,
+      new Set([MENTOR, STUDENT]),
+      new Map(),
+      new Map(),
+      keyForPmid,
+    );
+    // External authorship keyed on the stable article_id so it matches Publication.pmid.
+    expect(rows.find((r) => r.cwid === MENTOR)!.pmid).toBe(ARTICLE_ID);
+    // Real PubMed pmid unchanged.
+    expect(rows.find((r) => r.cwid === STUDENT)!.pmid).toBe(String(PMID));
+  });
 });

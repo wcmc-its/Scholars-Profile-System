@@ -70,6 +70,9 @@ type ArticleRow = {
   volume: string | null;
   issue: string | null;
   pages: string | null;
+  // #101 downstream: source-prefixed stable id (e.g. "SCOPUS:105037533819") for
+  // manually-added external pubs; NULL for PubMed rows.
+  article_id: string | null;
 };
 
 type AuthorListRow = {
@@ -227,6 +230,10 @@ export function buildAuthorshipRows(
   ourCwidSet: Set<string>,
   rankByPmidCwid: Map<string, number>,
   totalAuthorsByPmidFromList: Map<number, number>,
+  // Re-keys an external pmid to its stable article_id so PublicationAuthor.pmid
+  // matches Publication.pmid. Defaults to identity (String) — the rank/total
+  // lookups below still use the raw synthetic pmid they were built with.
+  keyForPmid: (pmid: number) => string = String,
 ): AuthorshipRow[] {
   const authorshipRows: AuthorshipRow[] = [];
 
@@ -251,7 +258,7 @@ export function buildAuthorshipRows(
       rank !== undefined ? total >= 2 && rank === total - 1 : flags.isPenultimate;
 
     authorshipRows.push({
-      pmid: String(r.pmid),
+      pmid: keyForPmid(Number(r.pmid)),
       cwid,
       position,
       totalAuthors: total,
@@ -314,7 +321,7 @@ async function main() {
           `SELECT pmid, articleTitle, journalTitleVerbose, articleYear,
                   publicationTypeCanonical, citationCountScopus,
                   datePublicationAddedToEntrez, doi, pmcid,
-                  volume, issue, pages
+                  volume, issue, pages, article_id
            FROM analysis_summary_article
            WHERE pmid IN (?)`,
           [batch],
@@ -323,6 +330,28 @@ async function main() {
       });
     }
     console.log(`Got ${articleByPmid.size} article rows.`);
+
+    // External-source pubs (ReCiterDB #101) arrive with a synthetic NEGATIVE pmid
+    // that reciterdb recomputes every nightly rebuild and shifts whenever the
+    // curated external set changes. Key them on the stable, source-prefixed
+    // article_id instead (e.g. "SCOPUS:105037533819") so an external pub's SPS
+    // identity and detail URL don't churn. PubMed rows keep their real pmid.
+    // ponytail: article_id assumed <=32 chars (every Scopus/OpenAlex/WOS id is);
+    // if a source ever exceeds it, widen publication.pmid to VarChar(96).
+    const articleIdByPmid = new Map<number, string>();
+    for (const a of articleByPmid.values()) {
+      if (a.article_id == null) continue;
+      if (a.article_id.length <= 32) {
+        articleIdByPmid.set(Number(a.pmid), a.article_id);
+      } else {
+        console.warn(
+          `External article_id > 32 chars; keeping synthetic pmid ${a.pmid}: ${a.article_id}`,
+        );
+      }
+    }
+    // Re-key an external pmid to its stable article_id; PubMed pmids pass through.
+    const pubKey = (pmid: number): string =>
+      articleIdByPmid.get(pmid) ?? String(pmid);
 
     // ReciterDB's analysis_summary_* tables are themselves rebuilt nightly; a
     // read overlapping that rebuild (or an auth-scope change) succeeds with a
@@ -587,7 +616,7 @@ async function main() {
       const authorsString = authorsStringByPmid.get(Number(a.pmid)) ?? null;
       const nih = nihByPmid.get(Number(a.pmid));
       return {
-        pmid: String(a.pmid),
+        pmid: pubKey(Number(a.pmid)),
         title: a.articleTitle ?? `(untitled, pmid ${a.pmid})`,
         authorsString,
         fullAuthorsString: fullAuthorsByPmid.get(Number(a.pmid)) ?? null,
@@ -607,7 +636,9 @@ async function main() {
         issue: a.issue,
         pages: a.pages,
         journalAbbrev: journalAbbrevByPmid.get(Number(a.pmid)) ?? null,
-        pubmedUrl: `https://pubmed.ncbi.nlm.nih.gov/${a.pmid}/`,
+        // No PubMed record for external-source pubs — leave the URL null so the
+        // render never builds a dead pubmed.ncbi link for a non-PubMed pmid.
+        pubmedUrl: a.article_id != null ? null : `https://pubmed.ncbi.nlm.nih.gov/${a.pmid}/`,
         // #1567 — eCommons handle URL (null when this pmid is not in the repo,
         // or when the crosswalk read failed for its batch above).
         ecommonsLink: ecommonsLinkByPmid.get(Number(a.pmid)) ?? null,
@@ -712,6 +743,7 @@ async function main() {
       ourCwidSet,
       rankByPmidCwid,
       totalAuthorsByPmidFromList,
+      pubKey,
     );
     const incomingByPmid = new Map<string, IncomingAuthorship[]>();
     for (const r of authorshipRows) {
