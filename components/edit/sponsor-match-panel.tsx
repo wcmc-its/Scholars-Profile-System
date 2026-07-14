@@ -1167,7 +1167,8 @@ const COVERAGE_TITLE: Record<ConceptCoverage["state"], string> = {
  */
 function CoverageStrip({ coverage }: { coverage: ConceptCoverage[] }) {
   if (coverage.length === 0) return null;
-  const covered = coverage.filter((c) => c.state !== "none");
+  const withEvidence = coverage.filter((c) => c.state === "evidence");
+  const rankedOnly = coverage.filter((c) => c.state === "ranked");
   const gaps = coverage.filter((c) => c.state === "none");
   return (
     <div className="mt-2" data-slot="sponsor-match-coverage">
@@ -1183,8 +1184,18 @@ function CoverageStrip({ coverage }: { coverage: ConceptCoverage[] }) {
           />
         ))}
       </div>
+      {/* Three states, three clauses — and they must ADD UP to the number of concepts asked.
+          The first version of this line said "Covers 8 of 8 concepts asked" over a card that also
+          said "ranked, no evidence shown" twice, because `covered` counted every concept the person
+          ranked under while the blocks below could only ever show MAX_EVIDENCE_CONCEPTS (3) of
+          them. Both statements were true and together they read as a contradiction. Say which
+          concepts we can SHOW evidence for, which ones they also ranked under, and which ones they
+          have nothing for. */}
       <p className="text-muted-foreground mt-1.5 text-xs">
-        Covers {covered.length} of {coverage.length} concepts asked
+        Evidence for {withEvidence.length} of {coverage.length} concepts asked
+        {rankedOnly.length > 0 ? (
+          <> · also ranked under {rankedOnly.map((c) => c.concept.term).join(", ")}</>
+        ) : null}
         {gaps.length > 0 ? (
           <> · no evidence for {gaps.map((g) => g.concept.term).join(", ")}</>
         ) : null}
@@ -1210,9 +1221,8 @@ function ResearcherRow({
   const name = candidate.name;
   // Chips + tier are DERIVED, never wired — so both stay live under the sliders. The raw
   // fused score is never rendered: it is an RRF sum and means nothing on its own.
-  const matched = matchedConcepts(candidate, concepts);
   // The whole ask, not just the part this person answered — the only thing on the card that can
-  // say what they DON'T have. Derived from the same props as the chips, so it moves with them.
+  // say what they DON'T have. Live under the sliders, like everything else derived here.
   const coverage = conceptCoverage(candidate, concepts);
   const tier = fitTier(candidate.fusedScore, topScore);
   const papers = candidate.evidence?.papers ?? [];
@@ -1282,14 +1292,6 @@ function ResearcherRow({
   const [resolvedCount, setResolvedCount] = useState(0);
   useEffect(() => setResolvedCount(0), [runId, blockTerms]);
 
-  // The concepts this candidate RANKED under but for which the server shipped no evidence block —
-  // `coverage`'s middle state, named. They have a chip and a strip segment and nothing else, and
-  // without a line here the officer is left to infer their absence from a gap in a bar.
-  //
-  // What this row does NOT do is cite a paper. The mockup's compact row reads "1 pub · Cancer Cell
-  // 2022, middle author"; we have no paper for these concepts precisely BECAUSE no block shipped,
-  // so any citation here would be invented. It says what is true instead.
-  const rankedNoBlock = coverage.filter((c) => c.state === "ranked");
   return (
     <div ref={rowRef} className="border-t border-border flex gap-3 py-4 first:border-t-0">
       <div className="text-muted-foreground w-5 pt-1 text-right text-sm tabular-nums">{rank}</div>
@@ -1331,19 +1333,10 @@ function ResearcherRow({
           <div className="text-muted-foreground text-sm">{candidate.department}</div>
         ) : null}
         <CoverageStrip coverage={coverage} />
-        {matched.length > 0 ? (
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {matched.map(({ concept }) => (
-              <span
-                key={concept.term}
-                title={`Ranked under "${concept.term}" for this description.`}
-                className="border-border text-muted-foreground rounded-full border px-2 py-0.5 text-xs"
-              >
-                {concept.term}
-              </span>
-            ))}
-          </div>
-        ) : null}
+        {/* The matched-concept CHIPS used to live here. Deleted: every concept they named is now
+            named by something that also says something — the strip (with its weight), the block
+            captions (with their evidence), and the coverage line (with the gaps). A row of pills
+            repeating those names was the third listing of the same set. */}
         {/* #1689 — the SPINE's evidence, rendered by the PUBLIC SEARCH'S OWN component.
             Not a lookalike built for this console: the same `<EvidenceLine>` the People card
             uses, fed the same `ResultEvidence` the server selected. It brings the reason line
@@ -1404,25 +1397,9 @@ function ResearcherRow({
             ))}
           </div>
         ) : null}
-        {rankedNoBlock.length > 0 ? (
-          <div
-            className="border-border mt-2 space-y-1 border-t pt-2"
-            data-slot="sponsor-match-ranked-no-block"
-          >
-            {rankedNoBlock.map(({ concept }) => (
-              <div
-                key={concept.term}
-                className="text-muted-foreground flex items-baseline justify-between gap-2 text-xs"
-              >
-                <span>
-                  {concept.term}{" "}
-                  <span className="tabular-nums">{concept.centrality.toFixed(2)}</span>
-                </span>
-                <span className="shrink-0">ranked, no evidence shown</span>
-              </div>
-            ))}
-          </div>
-        ) : null}
+        {/* The "ranked, no evidence shown" rows used to live here, one per concept. Deleted: they
+            said the same thing the coverage line's "also ranked under …" clause now says once, and
+            said it in a way that read as a contradiction of the count beside it. */}
         {topics.length > 0 ? (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {topics.map((t) => (

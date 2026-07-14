@@ -1016,9 +1016,13 @@ describe("SponsorMatchPanel", () => {
     // The caption carries what the SPONSOR asked for this concept — the slider's own value.
     expect(evidenceAsks()).toEqual(["ask 0.90"]);
 
-    // The count is still said, beneath the paper rather than standing in for it — and it keeps the
-    // word "tagged", which is what separates a real MeSH tag from a literal text mention.
-    expect(evidenceBlocks()[0][1]).toContain("142 of 210 publications tagged");
+    // The COUNT IS NOT ON THE FACE. That was the design objection: a card answering "why did this
+    // person match?" with a statistic instead of a paper. It is not deleted — it moves into the
+    // disclosure, where the spec puts it, and it keeps the word "tagged" (a real MeSH tag, not a
+    // literal text mention). And there is no "Concept ·" kind word anywhere: the caption above
+    // already named the concept.
+    expect(evidenceBlocks()[0][1]).not.toContain("142 of 210 publications tagged");
+    expect(evidenceBlocks()[0][1]).not.toContain("Concept");
 
     // "+ 2 more pubs (2023, 2021)" — the years of the papers it can ACTUALLY show. It must not
     // offer "+140 more" off the tagged count: the response holds three papers, and a click that
@@ -1029,12 +1033,108 @@ describe("SponsorMatchPanel", () => {
     fireEvent.click(more);
     expect(screen.getByText("Second paper")).toBeTruthy();
     expect(screen.getByText("Third paper")).toBeTruthy();
+    // …and NOW the count is said, in the disclosure.
+    expect(evidenceBlocks()[0][1]).toContain("142 of 210 publications tagged");
   });
 
-  it("names the concepts that RANKED but shipped no evidence — without inventing a citation", async () => {
-    // The spine caps evidence at MAX_EVIDENCE_CONCEPTS. A concept can therefore be a real reason
-    // this person ranked and still have no block. The mockup's compact row cites a paper for these
-    // ("1 pub · Cancer Cell 2022"); we have none, BECAUSE no block shipped. Say that instead.
+  it("falls back to the count when NOTHING resolves — a block is never silently empty", async () => {
+    // The one case that makes the count line non-optional. If the key-paper fetch returns nothing
+    // (all its papers claimed by a sibling, or the index is having a bad day), a card that only
+    // knows how to render artifacts renders an empty block — and a scholar with 142 tagged
+    // publications reads as a scholar with nothing to say.
+    stubFetch({
+      concepts: CONCEPTS,
+      candidates: [
+        candidate({
+          cwid: "a",
+          name: "Alice Alpha",
+          fusedScore: 0.9,
+          contributions: [{ term: "Immuno-oncology", rank: 1 }],
+          searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+        }),
+      ],
+    });
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    await waitFor(() =>
+      expect(evidenceBlocks()[0][1]).toContain("142 of 210 publications tagged"),
+    );
+  });
+
+  it("lists concept-matched GRANTS, and leads with them", async () => {
+    // A funded award is the strongest thing a sponsor can be told, and the only artifact carrying a
+    // FORWARD date — a paper says what someone did; an active R01 says what they are doing.
+    const fetchMock = vi.fn(async (url: string, init?: { method?: string }) => {
+      const u = String(url);
+      if (u.startsWith("/api/scholar/") && u.includes("/grants")) {
+        return {
+          ok: true,
+          json: async () => ({
+            grants: [
+              {
+                projectId: "R01 CA-2xxxxx",
+                title: "Resistance mechanisms in HER2-low disease",
+                sponsor: "NCI",
+                startYear: 2023,
+                endYear: 2028,
+                isActive: true,
+              },
+            ],
+            total: 1,
+          }),
+        };
+      }
+      if (u.startsWith("/api/search/key-paper"))
+        return {
+          ok: true,
+          json: async () => ({ pubs: [{ pmid: "111", title: "CAR T persistence", year: 2024 }] }),
+        };
+      if ((init?.method ?? "GET") === "GET")
+        return { ok: true, json: async () => ({ ok: true, submissions: [] }) };
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          concepts: CONCEPTS,
+          candidates: [
+            candidate({
+              cwid: "a",
+              name: "Alice Alpha",
+              fusedScore: 0.9,
+              contributions: [{ term: "Immuno-oncology", rank: 1 }],
+              searchEvidence: [searchEvidence("Immuno-oncology", 142)],
+            }),
+          ],
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<SponsorMatchPanel />);
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "CAR T" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
+    await screen.findByText("Alice Alpha");
+
+    await screen.findByText("Resistance mechanisms in HER2-low disease");
+    expect(screen.getByText("GRANT")).toBeTruthy();
+    expect(screen.getByText(/active to 2028/)).toBeTruthy();
+
+    // The grant leads: it renders BEFORE the paper in the block.
+    const block = evidenceBlocks()[0][1];
+    expect(block.indexOf("Resistance mechanisms")).toBeLessThan(block.indexOf("CAR T persistence"));
+  });
+
+  it("the coverage line ADDS UP — evidence, also-ranked, and gaps account for every concept", async () => {
+    // THE CONTRADICTION THIS REPLACES. The line used to read "Covers 2 of 3 concepts asked" while
+    // the card below also said "ranked, no evidence shown" — both true, and together nonsense:
+    // `covered` counted every concept the person RANKED under, but the server ships evidence blocks
+    // for at most MAX_EVIDENCE_CONCEPTS of them. Anyone matching more concepts than that hit it.
+    //
+    // Three clauses now, and they must partition the ask: evidence for / also ranked under / no
+    // evidence for. Alice ranks under 2 of the 3 concepts and has a block for only ONE.
     stubFetch({
       concepts: CONCEPTS,
       candidates: [
@@ -1055,11 +1155,14 @@ describe("SponsorMatchPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rank researchers" }));
     await screen.findByText("Alice Alpha");
 
-    const row = document.querySelector('[data-slot="sponsor-match-ranked-no-block"]')!;
-    expect(row.textContent).toContain("Cancer Metabolism");
-    expect(row.textContent).toContain("ranked, no evidence shown");
-    // And it is NOT reported as a gap — she genuinely ranked under it.
-    expect(screen.queryByText(/no evidence for Cancer Metabolism/)).toBeNull();
+    const line = document.querySelector('[data-slot="sponsor-match-coverage"] p')!.textContent!;
+    expect(line).toContain("Evidence for 1 of 3 concepts asked");
+    // Ranked, but capped out of an evidence block — NOT a gap, and no longer claimed as "covered".
+    expect(line).toContain("also ranked under Cancer Metabolism");
+    // A genuine gap: she never ranked under it at all.
+    expect(line).toContain("no evidence for CRISPR screening");
+    // 1 + 1 + 1 = the 3 concepts asked. The old line could not make that claim.
+    expect(screen.queryByText(/ranked, no evidence shown/)).toBeNull();
   });
 
   // ── Sponsor preferences (#1654) ────────────────────────────────────────────
