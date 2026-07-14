@@ -4,12 +4,6 @@ import { TechnologyOverview } from "@/components/profile/technology-overview";
 
 type Technology = ProfilePayload["technologies"][number];
 
-/** Enterprise Innovation's shared licensing inbox. Named officers live on each
- *  technology's own page — we link there rather than mirroring a person's contact
- *  details, which would go stale the moment the docket is reassigned. */
-const CTL_INQUIRIES = "enterpriseinnovation@med.cornell.edu";
-const EI_ABOUT = "https://innovation.weill.cornell.edu/about-us";
-
 /** Most rows fit above the fold; the rest collapse into a native <details>. 96%
  *  of scholars hold ≤5 technologies, so the expander appears on a handful. */
 const ROW_CAP = 5;
@@ -151,26 +145,6 @@ export function TechnologiesSection({ technologies }: { technologies: Technology
           </ul>
         </details>
       ) : null}
-
-      <p className="text-muted-foreground border-border mt-6 border-t pt-4 text-sm">
-        Technologies available for licensing from{" "}
-        <a
-          href={EI_ABOUT}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[var(--color-accent-slate)] underline underline-offset-4"
-        >
-          Enterprise Innovation
-        </a>
-        . Please contact{" "}
-        <a
-          href={`mailto:${CTL_INQUIRIES}`}
-          className="text-[var(--color-accent-slate)] underline underline-offset-4"
-        >
-          {CTL_INQUIRIES}
-        </a>{" "}
-        to learn more.
-      </p>
     </>
   );
 }
